@@ -12,7 +12,7 @@ import { installMockedVercelIssuer } from "#internal/testing/mock-vercel-oidc-is
 
 import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
 import { stampDevelopmentClientAddress } from "#internal/nitro/dev-client-address.js";
-import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/workflow/development-world-protocol.js";
+import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/application/dev-transport.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { EveAuthFn, EveAuthResult } from "#public/channels/eve.js";
 import { withVercelOidcProjectResolver } from "#channel/auth/vercel-oidc-project.js";
@@ -39,6 +39,7 @@ import {
   verifyHttpBasic,
   verifyJwtEcdsa,
   verifyJwtHmac,
+  verifyOidc,
   verifyVercelOidc,
   withAuthChallenges,
 } from "#public/channels/auth.js";
@@ -359,9 +360,6 @@ describe("none", () => {
 });
 
 describe("localDev", () => {
-  // `localDev()` keys off the deployment (an `eve dev` or `vercel dev`
-  // process). A spoofable request header such as `Host` must not be able to
-  // authenticate the local-dev principal; browser headers can only refuse it.
   function requestFor(url: string): Request {
     return new Request(url, { method: "POST" });
   }
@@ -422,7 +420,6 @@ describe("localDev", () => {
     ["refuses", "2001:db8::20", null],
     ["accepts", "127.0.0.1", "local-dev"],
     ["accepts", "::ffff:127.0.0.1", "local-dev"],
-    // `eve dev --host 192.168.1.5`: the developer's own TUI connects from the LAN address.
     ["accepts", "192.168.1.5", "local-dev"],
     ["accepts", "::ffff:192.168.1.5", "local-dev"],
   ])("%s an `eve dev` caller whose socket address is %s", async (_verb, address, principalType) => {
@@ -451,9 +448,6 @@ describe("localDev", () => {
   });
 
   it("rejects a `Host: localhost` request on a production deployment", () => {
-    // On a self-hosted Node server the request URL host comes from the `Host`
-    // header. Neither dev flag is set on a production deployment, so a localhost
-    // host must not authenticate.
     vi.stubEnv("EVE_DEV", "");
     vi.stubEnv("VERCEL", "");
     vi.stubEnv("VERCEL_ENV", "");
@@ -499,7 +493,7 @@ describe("routeAuth", () => {
     const result = await routeAuth(makeRequest(), [accept, never]);
 
     expect(result).toEqual(SAMPLE_CONTEXT);
-    expect(calls).toEqual(["accept"]); // walk halted before the second fn
+    expect(calls).toEqual(["accept"]);
   });
 
   it("skips entries that return null or undefined and tries the next", async () => {
@@ -620,12 +614,6 @@ describe("routeAuth", () => {
 
     expect(result).toEqual(SAMPLE_CONTEXT);
   });
-
-  // ---------------------------------------------------------------------------
-  // Declared challenges (vercel/eve#909): the 401 `www-authenticate` header
-  // must reflect the auth strategies actually configured on the route,
-  // rather than always defaulting to `Bearer`.
-  // ---------------------------------------------------------------------------
 
   it("advertises a Basic challenge when the route is protected only by httpBasic", async () => {
     const request = makeRequest();
@@ -794,9 +782,6 @@ describe("routeAuth", () => {
     expect(result).toBeInstanceOf(Response);
     if (result instanceof Response) {
       expect(result.status).toBe(401);
-      // The thrown error's own response wins outright: `UnauthenticatedError`
-      // declares no challenges of its own, so it carries no Basic challenge
-      // from the strategy that never ran (nor any www-authenticate header).
       expect(result.headers.has("www-authenticate")).toBe(false);
       await expect(result.json()).resolves.toMatchObject({ error: "custom rejection" });
     }
@@ -885,9 +870,6 @@ describe("verifyVercelOidc", () => {
   });
 
   it("rejects tokens whose issuer is not on the Vercel OIDC prefix", async () => {
-    // The token decodes successfully but its `iss` claim points at an
-    // attacker-controlled host, which the prefix check rejects before
-    // any JWKS lookup happens.
     const { privateKey } = await generateKeyPair("RS256");
     const token = await new SignJWT({})
       .setProtectedHeader({ alg: "RS256" })
@@ -915,17 +897,10 @@ describe("verifyVercelOidc", () => {
   });
 
   it("emits debug logs on the auth.vercel-oidc namespace for rejection paths", async () => {
-    // The framework writes debug rejection logs through `console.log` so
-    // operators tailing function logs can correlate failed auth attempts
-    // back to a specific reason. Debug is opt-in (default level is `info`),
-    // so an operator turns it on with EVE_LOG_LEVEL=debug.
     vi.stubEnv("EVE_LOG_LEVEL", "debug");
     const debugSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
     try {
-      // A missing token is the expected unauthenticated case (loopback dev,
-      // anonymous probes) so it rejects silently; only malformed bearer
-      // tokens — which signal a real misconfiguration — are logged.
       await verifyVercelOidc(null);
       await verifyVercelOidc("not.a.real.jwt");
 
@@ -938,18 +913,6 @@ describe("verifyVercelOidc", () => {
       vi.unstubAllEnvs();
     }
   });
-
-  // ---------------------------------------------------------------------------
-  // Default current-project bind (security fix)
-  // ---------------------------------------------------------------------------
-  //
-  // These tests prove that `verifyVercelOidc()` (no args) only authenticates
-  // tokens minted for the current Vercel project. The verifier fetches the
-  // OIDC discovery document and JWKS to validate the JWT signature, so the
-  // tests mock `globalThis.fetch` rather than rely on a live network. JWKS
-  // caching inside jose is keyed on the discovery URL, so each test uses a
-  // unique team slug (and therefore a unique issuer URL) to avoid bleeding
-  // state across cases.
 
   it("authenticates a Vercel-issued token whose project_id matches VERCEL_PROJECT_ID", async () => {
     vi.stubEnv("VERCEL_PROJECT_ID", "prj_current");
@@ -973,7 +936,6 @@ describe("verifyVercelOidc", () => {
         expect(result.sessionAuth).toMatchObject({
           authenticator: "oidc",
           issuer: issuer.issuer,
-          // Project + environment match → tagged as runtime caller.
           principalType: "runtime",
           subject: "owner:acme:project:weather-agent:environment:production",
         });
@@ -1134,10 +1096,6 @@ describe("verifyVercelOidc", () => {
   });
 
   it("rejects a Vercel-issued token whose project_id does not match VERCEL_PROJECT_ID", async () => {
-    // Demonstrates the security fix: a token minted for an unrelated
-    // Vercel project (with a fully valid signature, audience, and issuer
-    // prefix) cannot authenticate against this deployment when no
-    // `subjects` are configured.
     vi.stubEnv("VERCEL_PROJECT_ID", "prj_current");
     vi.stubEnv("VERCEL_TARGET_ENV", "production");
 
@@ -1148,7 +1106,6 @@ describe("verifyVercelOidc", () => {
         owner: "stranger",
         owner_id: "team_stranger",
         project: "stranger-agent",
-        // Different project ID than the deployed eve app.
         project_id: "prj_other",
         sub: "owner:stranger:project:stranger-agent:environment:production",
       });
@@ -1160,9 +1117,6 @@ describe("verifyVercelOidc", () => {
   });
 
   it("rejects a Vercel-issued token that omits the project_id claim", async () => {
-    // Defense in depth: a token without a `project_id` claim cannot
-    // satisfy the always-on current-project bypass and there are no
-    // author-supplied `subjects` to fall back on, so it must reject.
     vi.stubEnv("VERCEL_PROJECT_ID", "prj_current");
     vi.stubEnv("VERCEL_TARGET_ENV", "production");
 
@@ -1172,7 +1126,6 @@ describe("verifyVercelOidc", () => {
         environment: "production",
         owner: "ghost",
         sub: "owner:ghost:project:ghost-agent:environment:production",
-        // No `project_id` claim.
       });
 
       await expect(verifyVercelOidc(token)).resolves.toEqual({ ok: false });
@@ -1331,11 +1284,6 @@ describe("verifyVercelOidc", () => {
   });
 
   it("rejects a Vercel external subject token when VERCEL_PROJECT_ID is unset", async () => {
-    // Fail-closed: an external-subject ("user") token must not authenticate on
-    // a deployment that has not pinned VERCEL_PROJECT_ID, even though the token
-    // signature, issuer, and environment are otherwise valid. Before the fix
-    // the unset project id was treated as "no constraint" and let any
-    // Vercel-issued external-subject token through.
     vi.stubEnv("VERCEL_PROJECT_ID", "");
     vi.stubEnv("VERCEL_TARGET_ENV", "");
     vi.stubEnv("VERCEL_ENV", "preview");
@@ -1360,9 +1308,6 @@ describe("verifyVercelOidc", () => {
   });
 
   it("rejects a Vercel external subject token when the deployment environment is unset", async () => {
-    // Fail-closed: a "user" token must not authenticate when neither
-    // VERCEL_TARGET_ENV nor VERCEL_ENV resolves a deployment environment, even
-    // when the project id matches.
     vi.stubEnv("VERCEL_PROJECT_ID", "prj_current");
     vi.stubEnv("VERCEL_TARGET_ENV", "");
     vi.stubEnv("VERCEL_ENV", "");
@@ -1387,10 +1332,6 @@ describe("verifyVercelOidc", () => {
   });
 
   it("rejects a Vercel-issued token whose audience is a foreign federation target", async () => {
-    // Cross-audience replay: a token minted for the current project but for an
-    // external federation audience (e.g. AWS STS) must not authenticate to the
-    // agent, even though its signature, issuer, and project_id are valid. The
-    // audience binding requires a Vercel (`https://vercel.com/...`) audience.
     vi.stubEnv("VERCEL_PROJECT_ID", "prj_current");
     vi.stubEnv("VERCEL_TARGET_ENV", "production");
 
@@ -1408,6 +1349,50 @@ describe("verifyVercelOidc", () => {
       );
 
       await expect(verifyVercelOidc(token)).resolves.toEqual({ ok: false });
+    } finally {
+      issuer.restore();
+    }
+  });
+});
+
+describe("verifyOidc", () => {
+  it("authenticates a token from its issuer through discovery", async () => {
+    const issuer = await installMockedVercelIssuer("same-issuer");
+    try {
+      const result = await verifyOidc(
+        await issuer.signToken({}, { audience: "agent-framework-bench" }),
+        { audiences: ["agent-framework-bench"], issuer: issuer.issuer },
+      );
+      expect(result.ok).toBe(true);
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        `${issuer.issuer}/.well-known/openid-configuration`,
+        expect.anything(),
+      );
+    } finally {
+      issuer.restore();
+    }
+  });
+
+  it.each([
+    [
+      "another issuer's token",
+      (sign: (claims: Record<string, unknown>) => Promise<string>) => sign({}),
+    ],
+    ["a malformed token", async () => "not-a-jwt"],
+    [
+      "a token with no issuer",
+      () => new SignJWT({}).setProtectedHeader({ alg: "HS256" }).sign(new Uint8Array(32)),
+    ],
+  ])("refuses %s without fetching this issuer's keys", async (_, createToken) => {
+    const issuer = await installMockedVercelIssuer("another-issuer");
+    try {
+      await expect(
+        verifyOidc(await createToken(issuer.signToken), {
+          audiences: ["agent-framework-bench"],
+          issuer: "https://token.actions.githubusercontent.com",
+        }),
+      ).resolves.toEqual({ ok: false });
+      expect(globalThis.fetch).not.toHaveBeenCalled();
     } finally {
       issuer.restore();
     }
@@ -1432,9 +1417,6 @@ describe("vercelSubject", () => {
   });
 
   it("supports project names with underscores per the Vercel sub format", () => {
-    // Vercel's documented `sub` format embeds the project NAME (e.g.
-    // `acme_website`), not the stable `prj_…` ID. Underscores are
-    // valid in project names and must round-trip through the helper.
     expect(vercelSubject({ teamSlug: "acme", projectName: "acme_website" })).toBe(
       "owner:acme:project:acme_website:environment:production",
     );

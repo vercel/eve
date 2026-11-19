@@ -58,10 +58,9 @@ export {
   pruneDockerSandboxTemplates,
 } from "#execution/sandbox/bindings/docker-templates.js";
 
-/**
- * Stable provider name used for prepared-artifact storage and provider identity.
- */
 export const DOCKER_PROVIDER_NAME = "docker";
+
+const templatePreparations = new Map<string, Promise<void>>();
 
 type DockerSandboxPreparedArtifact = {
   readonly imageReference: string;
@@ -71,22 +70,8 @@ type DockerSandboxSessionState = {
   readonly version: 2;
 };
 
-/** Environment options the provider receives: eve runs `prepare` itself. */
 export type DockerSandboxProviderOptions = Omit<DockerSandboxEnvironmentOptions, "prepare">;
 
-/**
- * Creates the Docker sandbox provider.
- *
- * Two-phase lifecycle mapped onto Docker primitives:
- *
- * - `prepare` runs the base image, applies base setup, lets eve seed the
- *   workspace and skills and run the authored preparation, then
- *   `docker commit`s the container into a reusable template image.
- * - `start` starts (or restarts) one long-lived container per session
- *   from the template image. The container's filesystem carries session
- *   state across reconnects, so stopping only stops the container and the
- *   next `start` or `resume` restarts it with state intact.
- */
 export function createDockerSandboxProvider(
   createOptions: DockerSandboxProviderOptions,
   dockerCli?: DockerCli,
@@ -119,8 +104,6 @@ export function createDockerSandboxProvider(
     ]);
     if (inspect.exitCode === 0) return inspect.stdout.trim() === "true";
     if (/no such (?:container|object)/iu.test(inspect.stderr)) return undefined;
-    // Any other failure, such as a daemon that stopped after the cached check, must not
-    // read as a missing container: resume would discard the session's sandbox.
     daemonCheck = undefined;
     expectDockerSuccess(inspect, `inspect sandbox session container "${containerName}"`);
     return undefined;
@@ -165,8 +148,6 @@ export function createDockerSandboxProvider(
         });
         running = true;
       } catch (error) {
-        // Session container names derive from the session, so another
-        // process can win the create race. Accept only that exact loss.
         running = /is already in use/u.test(toErrorMessage(error))
           ? await inspectContainerRunning(containerName)
           : undefined;
@@ -194,6 +175,14 @@ export function createDockerSandboxProvider(
         expectDockerSuccess(removed, `delete sandbox session container "${containerName}"`);
       }
     },
+    async onSessionIdle(context, state, { signal }) {
+      await ensureDaemon();
+      const containerName = state?.containerName ?? dockerSessionName(context);
+      const stopped = await cli.run(["stop", "-t", "0", containerName], { signal });
+      if (stopped.exitCode !== 0 && !/no such container/iu.test(stopped.stderr)) {
+        expectDockerSuccess(stopped, `stop idle sandbox session container "${containerName}"`);
+      }
+    },
     async prepare(context) {
       context.log("checking Docker daemon");
       await ensureDaemon();
@@ -211,77 +200,86 @@ export function createDockerSandboxProvider(
         templateReferenceInput,
       );
 
-      context.log(`checking cached template image "${imageReference}"`);
-      if (await dockerImageExists(cli, imageReference)) {
-        context.log("reusing cached template image");
+      const existingPreparation = templatePreparations.get(imageReference);
+      if (existingPreparation !== undefined) {
+        await existingPreparation;
         await touchDockerTemplateMarker(markerPath, imageReference);
         return { imageReference };
       }
 
-      const resourcesPath = await context.resourcesDirectory();
-      let baseImage = options.image;
-      if (dockerfile === undefined) {
-        context.log(`checking base image "${options.image}"`);
-        await ensureDockerBaseImage(cli, options);
-      } else {
-        baseImage = dockerfileImageReference({
-          dockerfile,
-          templateKey,
-        });
-        context.log(`building sandbox Dockerfile "${dockerfile.path}"`);
-        await buildSandboxDockerfile({
-          cli,
-          dockerfile,
-          imageReference: baseImage,
-        });
-      }
+      const preparation = (async () => {
+        context.log(`checking cached template image "${imageReference}"`);
+        if (await dockerImageExists(cli, imageReference)) {
+          context.log("reusing cached template image");
+          return;
+        }
 
-      const buildContainerName = `${templateKey}-build-${randomUUID().slice(0, 8)}`;
-      context.log("starting template build container");
-      await startDockerContainer({
-        cli,
-        containerName: buildContainerName,
-        image: baseImage,
-        initialNetworkPolicy: "allow-all",
-        options,
-        resourcesPath,
-        role: "template-build",
+        const resourcesPath = await context.resourcesDirectory();
+        let baseImage = options.image;
+        if (dockerfile === undefined) {
+          context.log(`checking base image "${options.image}"`);
+          await ensureDockerBaseImage(cli, options);
+        } else {
+          baseImage = dockerfileImageReference({
+            dockerfile,
+            templateKey,
+          });
+          context.log(`building sandbox Dockerfile "${dockerfile.path}"`);
+          await buildSandboxDockerfile({
+            cli,
+            dockerfile,
+            imageReference: baseImage,
+          });
+        }
+
+        const buildContainerName = `${templateKey}-build-${randomUUID().slice(0, 8)}`;
+        context.log("starting template build container");
+        await startDockerContainer({
+          cli,
+          containerName: buildContainerName,
+          image: baseImage,
+          initialNetworkPolicy: "allow-all",
+          options,
+          resourcesPath,
+          role: "template-build",
+        });
+
+        try {
+          const buildContainerIdentity = await resolveDockerHandleIdentity(cli, buildContainerName);
+          context.log("preparing base runtime inside container");
+          await runDockerBaseSetup(cli, buildContainerIdentity);
+          await context.populate(
+            createDockerConnection({ cli, containerIdentity: buildContainerIdentity }),
+            resourcesPath === undefined ? undefined : { mountedAt: DOCKER_RESOURCES_MOUNT_PATH },
+          );
+
+          context.log("stopping template build container");
+          expectDockerSuccess(
+            await cli.run(["stop", "-t", "0", buildContainerIdentity]),
+            `stop template build container "${buildContainerName}"`,
+          );
+          context.log(`committing template image "${imageReference}"`);
+          const commit = await commitDockerTemplateImage({
+            cli,
+            containerIdentity: buildContainerIdentity,
+            imageReference,
+            templateKey,
+          });
+          if (commit === "reused") {
+            context.log("reusing concurrently published template image");
+          }
+        } finally {
+          await cli.run(["rm", "-f", buildContainerName]).catch(() => {});
+          if (dockerfile !== undefined) {
+            await cli.run(["rmi", baseImage]).catch(() => {});
+          }
+        }
+      })().finally(() => {
+        templatePreparations.delete(imageReference);
       });
-
-      try {
-        const buildContainerIdentity = await resolveDockerHandleIdentity(cli, buildContainerName);
-        context.log("preparing base runtime inside container");
-        await runDockerBaseSetup(cli, buildContainerIdentity);
-        await context.populate(
-          createDockerConnection({ cli, containerIdentity: buildContainerIdentity }),
-          resourcesPath === undefined ? undefined : { mountedAt: DOCKER_RESOURCES_MOUNT_PATH },
-        );
-
-        // Quiesce before commit so the captured filesystem is stable.
-        context.log("stopping template build container");
-        expectDockerSuccess(
-          await cli.run(["stop", "-t", "0", buildContainerIdentity]),
-          `stop template build container "${buildContainerName}"`,
-        );
-        context.log(`committing template image "${imageReference}"`);
-        const commit = await commitDockerTemplateImage({
-          cli,
-          containerIdentity: buildContainerIdentity,
-          imageReference,
-          templateKey,
-        });
-        if (commit === "reused") {
-          context.log("reusing concurrently published template image");
-        }
-        await touchDockerTemplateMarker(markerPath, imageReference);
-      } finally {
-        await cli.run(["rm", "-f", buildContainerName]).catch(() => {});
-        // The Dockerfile image only seeds this build; the committed
-        // template keeps its layers, and pruning the template frees them.
-        if (dockerfile !== undefined) {
-          await cli.run(["rmi", baseImage]).catch(() => {});
-        }
-      }
+      templatePreparations.set(imageReference, preparation);
+      await preparation;
+      await touchDockerTemplateMarker(markerPath, imageReference);
 
       return { imageReference };
     },
@@ -290,7 +288,6 @@ export function createDockerSandboxProvider(
       return await openDockerSession(context, undefined, artifactValue, state.containerName, false);
     },
     async start(context, openOptions, artifactValue) {
-      // Callers that widen the option type, such as DefaultSandbox, reach here unchecked.
       if (openOptions?.networkPolicy !== undefined) {
         assertDockerNetworkPolicy(openOptions.networkPolicy);
       }
@@ -309,12 +306,6 @@ export function createDockerSandboxProvider(
   };
 }
 
-/**
- * The session's container name. One Docker daemon serves every app on the
- * host, so the app's storage path namespaces the session id. The template
- * and open options apply only when the container is created, so a session
- * keeps its container across rebuilds.
- */
 function dockerSessionName(context: SandboxSessionContext): string {
   return `eve-sbx-${createSandboxProviderIdentity({
     namespace: context.storagePath,

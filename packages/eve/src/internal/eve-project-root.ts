@@ -22,7 +22,6 @@ async function packageDeclaresEve(
   return isJsonObject(dependencies) && typeof dependencies.eve === "string";
 }
 
-/** Find the nearest package boundary and return it only when it owns an eve project. */
 export async function findEveProjectRoot(
   startPath: string,
   options: { readonly source?: ProjectSource } = {},

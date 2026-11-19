@@ -25,17 +25,19 @@
     "fmt": "oxfmt",
     "guard:fixtures": "node ./scripts/guard-test-fixtures.mjs",
     "guard:invariants": "node ./scripts/guard-invariants.mjs",
+    "guard:docs-budget": "node ./scripts/check-docs-budget.mjs",
     "lint": "oxlint --fix",
     "prepare": "node ./scripts/install-git-hooks.mjs",
-    "release": "pnpm build && node ./scripts/assert-changeset-publish-packages.mjs && node ./scripts/publish-packages.mjs",
+    "release": "pnpm build && node ./scripts/assert-changeset-publish-packages.mjs && changeset publish",
     "sandbox-image:tag": "node ./scripts/sandbox-image-tag.mjs",
     "sync:template-files": "node ./scripts/sync-template-files.mjs",
     "test": "pnpm test:unit && pnpm test:integration",
+    "test:build": "turbo run test:build --filter=eve",
     "test:e2e": "turbo run test:e2e --concurrency=1",
     "test:webchat": "turbo run test:webchat --filter=eve",
     "test:eval-benchmark": "node --test scripts/eval-metrics/*.test.mjs scripts/eval-benchmark/*.test.mjs",
-    "test:framework-fixtures": "turbo run test:framework-fixtures --filter=eve",
     "test:integration": "turbo run test:integration",
+    "test:public-types": "turbo run test:public-types --filter=eve",
     "test:scenario": "turbo run test:scenario",
     "test:tui": "turbo run test:tui --filter=eve",
     "test:unit": "turbo run test:unit",
@@ -45,18 +47,18 @@
   "devDependencies": {
     "@changesets/cli": "3.0.3",
     "@manypkg/get-packages": "3.1.0",
-    "@microsoft/api-extractor": "7.59.4",
+    "@microsoft/api-extractor": "7.60.1",
     "@types/node": "catalog:",
-    "@vercel/blob": "2.8.2",
+    "@vercel/blob": "2.9.0",
     "js-yaml": "5.5.0",
-    "oxfmt": "0.74.0",
-    "oxlint": "1.89.0",
+    "oxfmt": "0.78.0",
+    "oxlint": "1.93.0",
     "syncpack": "15.3.3",
-    "turbo": "2.11.10",
+    "turbo": "2.11.11",
     "typescript": "catalog:"
   },
   "engines": {
     "node": ">=24"
   },
-  "packageManager": "pnpm@12.17.0"
+  "packageManager": "pnpm@12.21.0"
 }

@@ -11,15 +11,15 @@
     "typecheck": "nuxt typecheck"
   },
   "dependencies": {
-    "@tailwindcss/vite": "^4.0.0",
+    "@tailwindcss/vite": "^4.3.5",
     "eve": "workspace:*",
-    "nuxt": "^4.0.0",
-    "vue": "^3.5.0",
+    "nuxt": "^4.6.4",
+    "vue": "^3.5.45",
     "zod": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",
     "typescript": "6.0.3",
-    "vue-tsc": "3.3.6"
+    "vue-tsc": "3.3.14"
   }
 }

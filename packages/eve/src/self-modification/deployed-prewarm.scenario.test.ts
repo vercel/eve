@@ -53,8 +53,6 @@ describe("deployed self-modification prewarm", () => {
           "src/internal/authored-module-map-loader.ts",
         ),
       }),
-      // The root agent's default sandbox would build a local Docker image here;
-      // only the remote child's Vercel preparation is under test.
       dispatch: async ({ context, provider }) => {
         if (provider.providerName !== "vercel") return {};
         const artifact = await provider.implementation.prepare(context);

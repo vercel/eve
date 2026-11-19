@@ -55,25 +55,6 @@ function build(fetchMock: typeof fetch, config?: { excludedFiles?: readonly stri
   });
 }
 
-/**
- * SHA pinning for webhook-driven PR turns.
- *
- * Dispatch copies `state.headSha` and `state.baseSha` from the webhook into
- * {@link buildGitHubPullRequestContext} so injected diffs and sandbox checkout
- * refer to the same commit.
- *
- * Timing gap this covers (single delivery):
- *   T0  Webhook arrives for commit ABC → state.headSha = ABC
- *   T1  Contributor pushes commit XYZ before context is built
- *   T2  GET /pulls/N returns live head XYZ
- *   Without pinning: /pulls/N/files would load XYZ's diff while checkout still uses ABC.
- *   With pinning: compare base...ABC loads ABC's diff; metadata shows head_sha: ABC.
- *
- * Out of scope for these unit tests:
- *   - Two overlapping synchronize deliveries (separate webhooks)
- *   - Head moving after context is built but before the turn completes
- *   - Title/body from GET /pulls/N while SHAs stay pinned
- */
 describe("SHA pinning", () => {
   it("keeps webhook ABC when live PR head is XYZ at context build time", async () => {
     const webhookHead = "abc111fromwebhook";

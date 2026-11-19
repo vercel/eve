@@ -13,11 +13,6 @@ export interface CodexTransportOptions {
   readonly fetch?: Fetch;
 }
 
-/**
- * Routes OpenAI Responses requests through the Codex backend. Authentication is
- * resolved through Codex app-server when available, with eve-owned credentials
- * used only when the Codex binary is not installed.
- */
 export function createCodexFetch(options: CodexTransportOptions = {}): Fetch {
   const httpFetch = options.fetch ?? fetch;
   const resolveToken = async (rejectedToken?: string, signal?: AbortSignal | null) => {
@@ -63,8 +58,6 @@ function prepareCodexBody(init: RequestInit | undefined): CodexRequest {
     typeof body.prompt_cache_key === "string" ? body.prompt_cache_key : undefined;
   if (!Array.isArray(body.input)) return { init, promptCacheKey };
 
-  // Only response item IDs are forbidden; tool call IDs and IDs inside tool
-  // inputs or outputs belong to the conversation and must survive replay.
   let changed = false;
   for (const item of body.input) {
     if (isObject(item) && "id" in item) {
@@ -91,8 +84,6 @@ function authenticatedInit(
   const headers = cloneHeaders(
     init?.headers ?? (input instanceof Request ? input.headers : undefined),
   );
-  // The Codex backend routes prompt-cache affinity on `session-id`, not on the body's
-  // `prompt_cache_key`; the Codex CLI sends the same value in both.
   if (promptCacheKey !== undefined && !headers.has("session-id")) {
     headers.set("session-id", promptCacheKey);
   }

@@ -3,6 +3,7 @@ import type { RuntimeSandboxSession, SandboxSession } from "#shared/sandbox-sess
 import type { SessionAuth, SessionParent, SessionPredecessor, SessionTurn } from "#context/keys.js";
 
 import type { SessionSchedule } from "#context/session-schedule.js";
+import type { ConversationContext } from "#shared/conversation-context.js";
 export type { SessionAuth, SessionParent, SessionPredecessor, SessionSchedule, SessionTurn };
 
 /**
@@ -31,6 +32,14 @@ export interface SessionContext {
      */
     readonly predecessor?: SessionPredecessor;
   };
+
+  /**
+   * Where the session's conversation happens: the channel that created it,
+   * its audience, and, when the channel reports one, its `space`, such as the
+   * Slack channel a thread is in. Absent on sessions persisted before eve
+   * recorded it.
+   */
+  readonly conversation?: ConversationContext;
 
   /**
    * Resolves the session's sandbox. Throws when no sandbox is available

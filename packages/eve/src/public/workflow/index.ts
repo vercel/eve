@@ -1,9 +1,3 @@
-/**
- * Durable primitives for functions marked with `"use workflow"`.
- *
- * Each export is the vendored Workflow SDK value under an eve-owned declaration, so the runtime
- * identity stays single while the SDK's wider types stay out of eve's public API.
- */
 import * as sdk from "#internal/workflow/index.js";
 import type { JsonValue } from "#shared/json.js";
 
@@ -66,7 +60,6 @@ export interface RetryableError extends Error {
 }
 
 /** Creates a durable hook that a route or step resumes with `resumeHook`. */
-// The SDK types metadata as its wider serializable union with mutable arrays; JSON is a subset.
 export const createHook = sdk.createHook as <T = unknown>(
   options?: WorkflowHookOptions,
 ) => WorkflowHook<T>;
@@ -80,7 +73,6 @@ export const createWebhook: {
 } = sdk.createWebhook;
 
 /** Suspends the workflow for a duration such as `"1h"`, a number of milliseconds, or until a date. */
-// The SDK declares one overload per input kind, which a union argument cannot call.
 export const sleep = sdk.sleep as (duration: string | number | Date) => Promise<void>;
 
 /** Returns metadata for the current workflow run. */

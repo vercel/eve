@@ -68,7 +68,6 @@ function withState(
 
 function stubAccessor() {
   const accessor = { get: () => undefined, set: () => {} } as any;
-  // A step enters its projection before it publishes.
   enterSessionProjection(accessor, undefined);
   return accessor;
 }
@@ -81,7 +80,6 @@ function createAlsContext(sandbox?: MockSandbox): ContextContainer {
     turn: { id: "test-turn", sequence: 0 },
   });
   if (sandbox !== undefined) ctx.setVirtualContext(SandboxKey, sandbox.access);
-  // Handlers read the session's tables as of the event they observe.
   enterSessionProjection(ctx, undefined);
   return ctx;
 }
@@ -130,7 +128,6 @@ function signedRequestWithoutGitHubHeaders(payload: Record<string, unknown>): Re
   });
 }
 
-/** Builds a webhook request carrying a deliberately invalid HMAC signature. */
 function badlySignedRequest(event: string, payload: Record<string, unknown>): Request {
   const body = JSON.stringify(payload);
   return new Request("https://example.com/eve/v1/github", {
@@ -995,7 +992,6 @@ describe("githubChannel", () => {
     );
   });
 
-  // https://github.com/vercel/eve/issues/1554
   it("turn.started checks out the head a later delivery brings", async () => {
     const oldHead = "a".repeat(40);
     const newHead = "b".repeat(40);
@@ -1033,7 +1029,6 @@ describe("githubChannel", () => {
     );
     const ctx = buildAdapterContext(adapter, stubAccessor());
 
-    // A `synchronize` delivery to the existing PR session carries the pushed head.
     const payload = {
       message: "synchronize",
       state: { ...state, checkoutPath: null, headSha: newHead },
@@ -1052,7 +1047,6 @@ describe("githubChannel", () => {
     );
   });
 
-  // https://github.com/vercel/eve/issues/1554
   it("a comment delivered after a push checks out the new head and reacts to that comment", async () => {
     const oldHead = "a".repeat(40);
     const newHead = "b".repeat(40);
@@ -1106,7 +1100,6 @@ describe("githubChannel", () => {
     );
     const ctx = buildAdapterContext(adapter, stubAccessor());
 
-    // An `issue_comment` delivery names no head: the PR was pushed to since the last checkout.
     await (adapter.deliver ?? defaultDeliverResult)(
       {
         message: "@bot review",

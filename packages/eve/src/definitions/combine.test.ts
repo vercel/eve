@@ -32,7 +32,6 @@ describe("draftOf", () => {
       "instructions",
       "workspace",
     ]);
-    // Each part is made once, however often an arrangement reads it.
     expect(made).toEqual(["instructions", "workspace"]);
   });
 

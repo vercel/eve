@@ -1,34 +1,22 @@
-import { allOf, anyOf, messageMatches, nameIs, typeIs, type SemanticErrorRule } from "../rule.js";
+import {
+  allOf,
+  anyOf,
+  codeIs,
+  messageIs,
+  messageMatches,
+  nameIs,
+  typeIs,
+  type SemanticErrorRule,
+} from "../rule.js";
 
-/** The summary `name` shared by the gateway-auth rule variants. */
 const GATEWAY_AUTH_FAILURE_SUMMARY_NAME = "AI Gateway authentication failed";
 
-/**
- * The upstream `GatewayAuthenticationError` builds one of exactly three
- * contextual messages depending on which credential was offered — verbatim
- * in the vendored `@ai-sdk/gateway` source: "AI Gateway authentication
- * failed: Invalid API key." / ": Invalid OIDC token." / ": No
- * authentication provided.". Each variant gets its own rule so the
- * remediation matches the credential that actually failed — collapsing all
- * three into a single "set AI_GATEWAY_API_KEY" hint misleads users whose
- * shell already exports a stale `AI_GATEWAY_API_KEY` that shadows the OIDC
- * fallback.
- */
 const gatewayAuthenticationFailure = anyOf(
   nameIs("GatewayAuthenticationError"),
   typeIs("authentication_error"),
   messageMatches(/AI Gateway authentication/i),
 );
 
-/**
- * Error class names and body `type` discriminators are verified against
- * the vendored `@ai-sdk/gateway` source: the `Gateway*Error` classes and
- * the body types `authentication_error`, `invalid_request_error`,
- * `model_not_found`, `rate_limit_exceeded`, `timeout_error`,
- * `internal_server_error` all appear there verbatim. `overloaded_error`
- * is not gateway vocabulary — it is the Anthropic upstream error type the
- * gateway relays on provider overload.
- */
 export const GATEWAY_RULES: readonly SemanticErrorRule[] = [
   {
     id: "gateway-billing-required",
@@ -39,8 +27,6 @@ export const GATEWAY_RULES: readonly SemanticErrorRule[] = [
     hint: "Add a valid credit card or credits in the Vercel dashboard, then retry.",
   },
   {
-    // AI Gateway answers a throttled balance check with the same 402 `insufficient_funds` as
-    // an empty balance; only the message tells them apart, so this must precede the next rule.
     id: "gateway-credit-check-throttled",
     name: "AI Gateway credit check throttled",
     tags: ["gateway", "transient"],
@@ -133,5 +119,23 @@ export const GATEWAY_RULES: readonly SemanticErrorRule[] = [
     when: anyOf(nameIs("GatewayTimeoutError"), typeIs("timeout_error", "overloaded_error")),
     message: "The model provider is overloaded or timing out upstream of AI Gateway.",
     hint: "This is transient — retry shortly, or switch models with `/model` in `eve dev`.",
+  },
+  {
+    id: "gateway-stream-timeout",
+    name: "AI Gateway stream timed out",
+    tags: ["gateway", "transient"],
+    when: codeIs("gateway_stream_timeout"),
+    message: "AI Gateway ended the model stream before the response finished.",
+    hint: "eve already retried the request. Split the task into smaller turns, or switch models with `/model` in `eve dev`.",
+  },
+  {
+    id: "gateway-stream-terminated",
+    name: "AI Gateway stream terminated",
+    tags: ["gateway", "transient"],
+    when: anyOf(
+      codeIs("gateway_stream_terminated"),
+      messageIs("Upstream stream ended before terminal chunk"),
+    ),
+    message: "AI Gateway's stream from the model provider ended before the response finished.",
   },
 ];

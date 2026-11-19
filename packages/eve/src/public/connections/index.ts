@@ -1,7 +1,3 @@
-/**
- * Connection authoring helpers for `agent/connections/*.ts` files.
- */
-
 export type {
   AuthorizationCallback,
   AuthorizationDefinition,

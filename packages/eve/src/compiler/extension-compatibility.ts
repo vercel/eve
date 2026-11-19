@@ -9,20 +9,14 @@ export const EXTENSION_COMPATIBILITY_MANIFEST_KIND = "eve-extension";
 export const EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION = 3;
 export const EXTENSION_COMPATIBILITY_MANIFEST_FILENAME = "_manifest.json";
 
-/** A legacy distribution must be rebuilt before its contents can be mounted. */
 export class UnsupportedExtensionManifestVersionError extends Error {}
 
-// Generation 0 started with this manifest format. An incompatible distribution
-// contract change advances the producer generation and explicitly chooses
-// which older generations consumers still load.
 export const EXTENSION_DISTRIBUTION_CONTRACT_MAJOR = 0;
 export const SUPPORTED_EXTENSION_DISTRIBUTION_CONTRACT_MAJORS: readonly number[] = [0];
 
-/** Metadata at the root of a built extension distribution. */
 export interface ExtensionCompatibilityManifest {
   readonly kind: typeof EXTENSION_COMPATIBILITY_MANIFEST_KIND;
   readonly formatVersion: typeof EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION;
-  /** Minimum compatible eve release: the version used to build the extension. */
   readonly builtWithEve: string;
   readonly contractMajor: number;
   readonly build?: { readonly externalDependencies: readonly string[] };
@@ -32,7 +26,6 @@ export type ExtensionVersionIncompatibility =
   | { readonly kind: "newer-eve"; readonly minimumVersion: string }
   | { readonly kind: "unsupported-contract"; readonly contractMajor: number };
 
-/** Checks the distribution before loading authored extension code. */
 export function checkExtensionVersionCompatibility(
   manifest: ExtensionCompatibilityManifest,
   consumerVersion: string,

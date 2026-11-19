@@ -3,9 +3,10 @@ import { dirname, join, resolve, sep } from "node:path";
 
 import type { Plugin } from "rolldown";
 
+import { escapeRegex } from "#internal/bundler/filters.js";
+
 const MOUNT_QUERY = "?eve-mount=";
 
-/** Directory beside an extension distribution's source root that holds its shared chunks. */
 export const EXTENSION_CHUNK_DIRECTORY = "_chunks";
 
 interface Mount {
@@ -29,19 +30,15 @@ function within(path: string, root: string): boolean {
   return path === root || path.startsWith(`${root}${sep}`);
 }
 
-/** Whether `path` is the extension's own code: its source, or a chunk shared by that source. */
 export function isExtensionModule(path: string, root: string): boolean {
   return within(path, root) || within(path, join(dirname(root), EXTENSION_CHUNK_DIRECTORY));
 }
 
-/** Isolates extension-owned source modules, but leaves ordinary dependencies shared. */
 export function createExtensionMountPlugin(
   mounts: readonly Mount[],
   overridePaths: ReadonlyMap<string, string> = new Map(),
 ): Plugin | null {
   if (mounts.length === 0) return null;
-  // Every import in the bundle resolves through this plugin, and each JS
-  // realpath walks the whole path. One plugin instance serves one build.
   const canonicalPaths = new Map<string, string>();
   const canonical = (path: string): string => {
     let canonicalPath = canonicalPaths.get(path);
@@ -52,9 +49,6 @@ export function createExtensionMountPlugin(
     return canonicalPath;
   };
   const roots = mounts.map((mount) => ({ ...mount, root: canonical(mount.sourceRoot) }));
-  // A mount file inside an extension subagent declares one mount per enclosing mount. Extension
-  // subagents live at `<mountId>/subagents/<id>`, so a nested mount id extends its enclosing
-  // mount ids; the trailing `/` keeps `a` from enclosing `ab/...`.
   const declarationPaths = new Map<string, (typeof roots)[number][]>();
   for (const mount of roots) {
     if (mount.mountSourcePath === undefined) continue;
@@ -89,8 +83,6 @@ export function createExtensionMountPlugin(
               (candidate) =>
                 inherited !== undefined && candidate.mountId.startsWith(`${inherited}/`),
             );
-      // A nested mount file is loaded as its enclosing extension's source, but the extension it
-      // mounts must bind that mount's own instance.
       const declaredSource =
         declarationMount !== undefined &&
         (cleanSource === declarationMount.specifier ||
@@ -109,8 +101,6 @@ export function createExtensionMountPlugin(
       if (mountId !== undefined && mount === undefined)
         throw new Error(`Unknown extension mount "${mountId}".`);
 
-      // An override has mount context for its imports, but remains application-owned:
-      // its own state and all of its other dependencies keep their ordinary identity.
       const override =
         mount !== undefined &&
         importerPath !== undefined &&
@@ -121,7 +111,6 @@ export function createExtensionMountPlugin(
         (cleanSource === mount.specifier || cleanSource === mount.programmaticImport?.specifier)
           ? mount
           : undefined;
-      // Use ESM conditions for authored exports; programmatic mounts supply their entry.
       const resolved = await this.resolve(
         sourceMount?.programmaticImport?.entryPath ?? cleanSource,
         cleanImporter,
@@ -137,7 +126,6 @@ export function createExtensionMountPlugin(
           `Extension export "${cleanSource}" for mount "${mountId}" was externalized; it must be bundled to isolate its configuration.`,
         );
       }
-      // Assets have no mutable module state. Preserve their loader's query and identity.
       if (!/\.(?:[cm]?[jt]sx?|json)$/.test(resolved.id)) return resolved;
       const path = canonical(resolved.id);
       if (
@@ -152,9 +140,6 @@ export function createExtensionMountPlugin(
       }
       const owners = roots.filter((root) => isExtensionModule(path, root.root));
       if (mount !== undefined) {
-        // Source owned by another extension keeps that extension's mount identity, so a mount
-        // declared inside an extension reads the configuration its enclosing mount bound. When
-        // the extension is mounted more than once, the enclosing mount disambiguates.
         const owner =
           owners
             .filter((candidate) => mount.mountId.startsWith(`${candidate.mountId}/`))
@@ -173,23 +158,26 @@ export function createExtensionMountPlugin(
         ? { id: `${resolved.id}${MOUNT_QUERY}${encodeURIComponent(owners[0]!.mountId)}` }
         : undefined;
     },
-    load(id: string) {
-      const query = id.indexOf(MOUNT_QUERY);
-      if (query < 0) return undefined;
-      const path = id.slice(0, query);
-      if (!/\.(?:[cm]?[jt]sx?|json)$/.test(path)) return undefined;
-      const extension = path.slice(path.lastIndexOf(".") + 1);
-      const moduleType =
-        extension === "json"
-          ? "json"
-          : extension === "tsx"
-            ? "tsx"
-            : extension === "jsx"
-              ? "jsx"
-              : ["ts", "mts", "cts"].includes(extension)
-                ? "ts"
-                : "js";
-      return { code: readFileSync(path, "utf8"), moduleType };
+    load: {
+      filter: { id: new RegExp(escapeRegex(MOUNT_QUERY)) },
+      handler(id: string) {
+        const query = id.indexOf(MOUNT_QUERY);
+        if (query < 0) return undefined;
+        const path = id.slice(0, query);
+        if (!/\.(?:[cm]?[jt]sx?|json)$/.test(path)) return undefined;
+        const extension = path.slice(path.lastIndexOf(".") + 1);
+        const moduleType =
+          extension === "json"
+            ? "json"
+            : extension === "tsx"
+              ? "tsx"
+              : extension === "jsx"
+                ? "jsx"
+                : ["ts", "mts", "cts"].includes(extension)
+                  ? "ts"
+                  : "js";
+        return { code: readFileSync(path, "utf8"), moduleType };
+      },
     },
   };
 }

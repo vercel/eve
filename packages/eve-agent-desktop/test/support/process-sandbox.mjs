@@ -1,13 +1,3 @@
-// A sandbox backed by real processes on this machine, shaped like eve's sandbox
-// session so the same tool code runs against it. Two details matter for the
-// abort behaviour under test, and both come from eve and the sandbox SDK:
-//
-// - eve binds the tool call's signal onto every session method before the tool
-//   sees the session (`bindSandboxAbortSignal`), so `spawn` always receives it.
-//   `bindCallAbort` below does the same.
-// - the SDK's process handle kills the command when that signal aborts, its
-//   `wait()` rejects with the abort reason instead of the exit code, and its
-//   `kill()` resolves once the process is gone.
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
@@ -81,7 +71,6 @@ export function createProcessSandbox() {
   };
 }
 
-/** What eve does to a session before a tool sees it: it composes the call's signal into every method. */
 export function bindCallAbort(sandbox, signal) {
   const compose = (inner) => (inner === undefined ? signal : AbortSignal.any([signal, inner]));
   const bound = { ...sandbox };

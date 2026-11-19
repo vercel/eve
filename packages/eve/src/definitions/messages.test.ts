@@ -20,7 +20,6 @@ function said(content: string): HarnessModelMessage {
 
 const texts = (messages: readonly HarnessModelMessage[]) => messages.map(({ content }) => content);
 
-/** One model call's messages: announcements join the record, recall sits ahead of its turn. */
 function call(
   history: readonly HarnessModelMessage[],
   turn: readonly UserModelMessage[],
@@ -131,7 +130,6 @@ describe("a call's messages", () => {
     const skills = { skills: { render: () => "skills changed", value: "v2" } };
     const baseline = { announcements: { skills: "v1" } };
 
-    // The request still ends on the local result, and the old baseline stays for the next one.
     const waiting = announce({ historyState: baseline, record: history }, new Set(), skills);
     expect(waiting.record).toEqual(history);
     expect(waiting.historyState).toEqual(baseline);
@@ -159,7 +157,6 @@ describe("a call's messages", () => {
       new Set([question]),
       announcements,
     );
-    // A rewrite that keeps the brief's message, as capping tool results does, and drops the catalog's.
     const history = first.record.filter(({ content }) => content !== "You have more tools.");
     const again = announce(
       { historyState: keptAnnouncements(first.historyState, history), record: history },

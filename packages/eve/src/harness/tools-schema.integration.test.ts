@@ -102,7 +102,6 @@ describe("tool schemas at the model provider boundary", () => {
         parameters: inputSchema,
       }),
     ]);
-    // eve runs the call; the AI SDK parses its input against the same schema.
     expect(result.toolCalls.map((call) => call.input)).toEqual([{ query: "sandbox error" }]);
 
     const validation = asSchema(tools.linear__list_issues!.inputSchema).validate!;

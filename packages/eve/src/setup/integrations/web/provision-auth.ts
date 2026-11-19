@@ -65,7 +65,6 @@ function assertMatchingApp(app: App, project: VercelProjectReference, configured
   }
 }
 
-/** Provisions team-only browser sign-in without rotating existing project credentials. */
 export async function provisionWebChatAuth(
   project: VercelProjectReference,
   signal?: AbortSignal,
@@ -167,7 +166,6 @@ export async function provisionWebChatAuth(
     } catch (error) {
       if (!(error instanceof AppApiError)) throw error;
       signal?.throwIfAborted();
-      // Another attempt may have created the app before this failure.
       app = await getApp(slug).catch(() => {
         signal?.throwIfAborted();
         throw error;
@@ -199,7 +197,6 @@ export async function provisionWebChatAuth(
     const results = await Promise.allSettled(
       created.map((env) => request(`${projectPath}/env/${encodeURIComponent(env.id)}`, "DELETE")),
     );
-    // Do not revoke a credential that may still be saved in the project.
     const secretStillSaved = results.some(
       (result, index) => result.status === "rejected" && created[index]?.key === KEYS[1],
     );
@@ -219,7 +216,6 @@ export async function provisionWebChatAuth(
       );
     }
   };
-  // No upsert: concurrent setup must never replace a working credential.
   const result = z
     .object({
       created: z.array(EnvSchema),
@@ -237,8 +233,6 @@ export async function provisionWebChatAuth(
           visibility: key === KEYS[0] ? "config" : "secret",
         })),
       ).catch(async (error: unknown) => {
-        // Validation and permission rejections did not commit env writes.
-        // Timeouts and server failures can happen after a write committed.
         if (
           error instanceof AppApiError &&
           error.status >= 400 &&
@@ -253,8 +247,6 @@ export async function provisionWebChatAuth(
     );
   if (result.failed.length === 0) return;
 
-  // Only roll back writes acknowledged by this attempt. An ambiguous network
-  // failure may have committed the secret, so it must remain usable on retry.
   await rollback(result.created);
   throw new Error(
     "Could not save Web Chat auth environment variables. Retry `eve add channel/web --skip-install`.",

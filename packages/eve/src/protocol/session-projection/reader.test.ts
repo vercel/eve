@@ -379,7 +379,6 @@ describe("activity", () => {
     ]);
     expect(activity(requested)).toEqual({ kind: "thinking" });
 
-    // The run stays open while the call it made runs in its step.
     const running = viewOf(
       started,
       [turn("turn_0"), run("run_0", "turn_0"), call("c_1", "run_0")],

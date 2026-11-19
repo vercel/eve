@@ -1,32 +1,22 @@
 import { WORKFLOW_CANCELLATION_SETTLE_MS } from "#execution/tools/workflow/cancellation-policy.js";
 import type { WorkflowToolRunControlMessage } from "#execution/tools/workflow/messages.js";
 import type { WorkflowToolRunAddress } from "#execution/tools/workflow/types.js";
-import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
+import { isRunTargetGone } from "#shared/run-errors.js";
 import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 import { runtimeWait, storedProjection, turnPosition } from "#harness/session-machine/view.js";
 import type { SessionStateMap } from "#harness/types.js";
-import { cancelRun, getRun, getWorld, resumeHook } from "#internal/workflow/runtime.js";
+import { cancelRoutedRun, resumeRoutedHook, routedRunLive } from "#execution/hosts.js";
 import { createLogger, logError } from "#internal/logging.js";
 
 const log = createLogger("execution.stop-runs");
 
-/** How a run is told to stop: `end` also finishes a `serve` task's run, which a cancel keeps. */
 export type RunStop = Extract<WorkflowToolRunControlMessage, { readonly kind: "cancel" | "end" }>;
 
-/** One run to stop. */
 export interface RunStopTarget {
   readonly run: WorkflowToolRunAddress;
-  /**
-   * Whether the stop ends the run. A resumable task's cancel stops only its current stretch of
-   * work, and its run stays parked for later calls, so nothing waits for it to end.
-   */
   readonly ends: boolean;
 }
 
-/**
- * The workflow tool runs the session's turn waits on; each run is one call, which a cancel ends.
- * A cancel still commits when they can't be read, so it stops none of them.
- */
 export function waitedCallRuns(session: {
   readonly sessionId: string;
   readonly state?: SessionStateMap;
@@ -47,14 +37,6 @@ export function waitedCallRuns(session: {
   }
 }
 
-/**
- * Stops runs, the same way whoever stops them: each is told to stop, and a run that couldn't be
- * told, such as one that hasn't registered its control hook yet, is cancelled outright. By default
- * a run the stop ends gets until the deadline to finish cleaning up, and one still running then is
- * cancelled outright too. With `waitForEnd: false` nothing waits: a told run that never finishes
- * is not cancelled here, and keeps running until it ends on its own or its session ends.
- * Returns the runs cancelled outright, which never report how they ended.
- */
 export async function stopRuns(
   targets: readonly RunStopTarget[],
   stop: RunStop,
@@ -81,11 +63,10 @@ export async function stopRuns(
 
 async function tell(run: WorkflowToolRunAddress, stop: RunStop): Promise<boolean> {
   try {
-    await resumeHook(run.hookToken, stop);
+    await resumeRoutedHook(run.hookToken, stop);
     return true;
   } catch (error) {
-    // A fresh run may not have registered its control hook yet.
-    if (!isTaskWorkflowTargetGone(error)) {
+    if (!isRunTargetGone(error)) {
       logError(log, "failed to tell a run to stop; cancelling it outright", error, {
         runId: run.runId,
       });
@@ -94,13 +75,12 @@ async function tell(run: WorkflowToolRunAddress, stop: RunStop): Promise<boolean
   }
 }
 
-/** Waits until every run finishes or the deadline passes, and returns the ones still running. */
 async function runsStillRunning(runIds: readonly string[]): Promise<readonly string[]> {
   let running = runIds;
   const deadline = Date.now() + WORKFLOW_CANCELLATION_SETTLE_MS;
   while (running.length > 0 && Date.now() < deadline) {
     const statuses = await Promise.all(
-      running.map(async (runId) => ({ runId, live: await isRunLive(runId) })),
+      running.map(async (runId) => ({ runId, live: await routedRunLive(runId) })),
     );
     running = statuses.filter(({ live }) => live).map(({ runId }) => runId);
     if (running.length > 0) await new Promise((resolve) => setTimeout(resolve, 250));
@@ -108,23 +88,11 @@ async function runsStillRunning(runIds: readonly string[]): Promise<readonly str
   return running;
 }
 
-/** A run whose status can't be read counts as live, so the deadline still stops it. */
-async function isRunLive(runId: string): Promise<boolean> {
-  try {
-    const status = await getRun(runId).status;
-    return status === "pending" || status === "running";
-  } catch (error) {
-    return !isTaskWorkflowTargetGone(error);
-  }
-}
-
-/** True when the run was still live and is now cancelled. */
 async function cancelOutright(runId: string, reason: string): Promise<boolean> {
   try {
-    await cancelRun(await getWorld(), runId, { cancelReason: reason });
-    return true;
+    return await cancelRoutedRun(runId, reason);
   } catch (error) {
-    if (!isTaskWorkflowTargetGone(error)) {
+    if (!isRunTargetGone(error)) {
       logError(log, "failed to cancel a run; it may run to completion", error, { runId });
     }
     return false;

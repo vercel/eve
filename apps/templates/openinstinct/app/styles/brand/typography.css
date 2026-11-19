@@ -1,0 +1,384 @@
+/* Vendored from @merit-systems/brand typography.css. Fonts are Mona Sans
+   derivatives (SIL OFL 1.1); see public/fonts/OFL.txt. */
+
+@font-face {
+  font-family: "Vault";
+  src: url("/fonts/vault-variable.woff2") format("woff2");
+  font-weight: 300 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Vault Sans";
+  src: url("/fonts/vault-sans-variable.woff2") format("woff2");
+  font-weight: 300 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Vault Mono";
+  src: url("/fonts/vault-mono-variable.woff2") format("woff2");
+  font-weight: 300 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --merit-family-text:
+    "Vault", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --merit-family-display:
+    "Vault Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --merit-family-mono:
+    "Vault Mono", ui-monospace, "SFMono-Regular", "Consolas", monospace;
+  --merit-weight-body: 375;
+  --merit-weight-ui: 450;
+  --merit-weight-signal: 375;
+  --merit-weight-emphasis: 575;
+  --merit-weight-mono: 375;
+  --merit-tracking-text: 0rem;
+  --merit-tracking-display: -0.022rem;
+  --merit-tracking-tight: -0.015rem;
+  --merit-tracking-mono: 0rem;
+  --merit-size-product-title: 2.25rem;
+  --merit-size-page-title: 1.875rem;
+  --merit-size-section-title: 1.125rem;
+  --merit-size-card-title: 1rem;
+  --merit-size-banner-metric: 1.5rem;
+  --merit-size-body: 1rem;
+  --merit-size-supporting: 0.875rem;
+  --merit-size-caption: 0.75rem;
+  --merit-size-micro: 0.6875rem;
+  --merit-leading-product-title: 1;
+  --merit-leading-title: 1.2;
+  --merit-leading-ui: 1.35;
+  --merit-leading-body: 1.5;
+  --merit-leading-signal: 0.95;
+  --merit-leading-caption: 1.35;
+  --merit-leading-micro: 1.25;
+  font-synthesis: none;
+}
+
+:root {
+  --merit-foundation-body-font-family: var(--merit-family-text);
+  --merit-foundation-body-font-weight: var(--merit-weight-body);
+  --merit-foundation-body-letter-spacing: var(--merit-tracking-text);
+  --merit-foundation-mono-font-family: var(--merit-family-mono);
+  --merit-foundation-mono-font-weight: var(--merit-weight-mono);
+  --merit-foundation-mono-letter-spacing: var(--merit-tracking-mono);
+  --merit-foundation-signal-font-family: var(--merit-family-display);
+  --merit-foundation-signal-font-weight: var(--merit-weight-signal);
+  --merit-foundation-signal-letter-spacing: var(--merit-tracking-display);
+  --merit-foundation-ui-font-family: var(--merit-family-text);
+  --merit-foundation-ui-font-weight: var(--merit-weight-ui);
+  --merit-foundation-ui-letter-spacing: var(--merit-tracking-text);
+  --merit-recipe-banner-metric-font-family: var(--merit-family-text);
+  --merit-recipe-banner-metric-font-size: var(--merit-size-banner-metric);
+  --merit-recipe-banner-metric-font-weight: var(--merit-weight-emphasis);
+  --merit-recipe-banner-metric-letter-spacing: var(--merit-tracking-text);
+  --merit-recipe-banner-metric-line-height: var(--merit-leading-product-title);
+  --merit-recipe-caption-font-family: var(--merit-family-text);
+  --merit-recipe-caption-font-size: var(--merit-size-caption);
+  --merit-recipe-caption-font-weight: var(--merit-weight-body);
+  --merit-recipe-caption-letter-spacing: var(--merit-tracking-text);
+  --merit-recipe-caption-line-height: var(--merit-leading-caption);
+  --merit-recipe-card-title-font-family: var(--merit-family-text);
+  --merit-recipe-card-title-font-size: var(--merit-size-card-title);
+  --merit-recipe-card-title-font-weight: var(--merit-weight-ui);
+  --merit-recipe-card-title-letter-spacing: var(--merit-tracking-text);
+  --merit-recipe-card-title-line-height: var(--merit-leading-ui);
+  --merit-recipe-code-font-family: var(--merit-family-mono);
+  --merit-recipe-code-font-size: var(--merit-size-supporting);
+  --merit-recipe-code-font-weight: var(--merit-weight-mono);
+  --merit-recipe-code-letter-spacing: var(--merit-tracking-mono);
+  --merit-recipe-code-line-height: var(--merit-leading-body);
+  --merit-recipe-compact-code-font-family: var(--merit-family-mono);
+  --merit-recipe-compact-code-font-size: var(--merit-size-caption);
+  --merit-recipe-compact-code-font-weight: var(--merit-weight-mono);
+  --merit-recipe-compact-code-letter-spacing: var(--merit-tracking-mono);
+  --merit-recipe-compact-code-line-height: var(--merit-leading-caption);
+  --merit-recipe-input-font-family: var(--merit-family-text);
+  --merit-recipe-input-font-size: var(--merit-size-body);
+  --merit-recipe-input-font-weight: var(--merit-weight-body);
+  --merit-recipe-input-letter-spacing: var(--merit-tracking-text);
+  --merit-recipe-input-line-height: var(--merit-leading-body);
+  --merit-recipe-label-font-family: var(--merit-family-text);
+  --merit-recipe-label-font-size: var(--merit-size-supporting);
+  --merit-recipe-label-font-weight: var(--merit-weight-ui);
+  --merit-recipe-label-letter-spacing: var(--merit-tracking-text);
+  --merit-recipe-label-line-height: var(--merit-leading-ui);
+  --merit-recipe-micro-font-family: var(--merit-family-text);
+  --merit-recipe-micro-font-size: var(--merit-size-micro);
+  --merit-recipe-micro-font-weight: var(--merit-weight-ui);
+  --merit-recipe-micro-letter-spacing: var(--merit-tracking-text);
+  --merit-recipe-micro-line-height: var(--merit-leading-micro);
+  --merit-recipe-page-title-font-family: var(--merit-family-text);
+  --merit-recipe-page-title-font-size: var(--merit-size-page-title);
+  --merit-recipe-page-title-font-weight: var(--merit-weight-ui);
+  --merit-recipe-page-title-letter-spacing: var(--merit-tracking-tight);
+  --merit-recipe-page-title-line-height: var(--merit-leading-title);
+  --merit-recipe-product-title-font-family: var(--merit-family-text);
+  --merit-recipe-product-title-font-size: var(--merit-size-product-title);
+  --merit-recipe-product-title-font-weight: var(--merit-weight-ui);
+  --merit-recipe-product-title-letter-spacing: var(--merit-tracking-tight);
+  --merit-recipe-product-title-line-height: var(--merit-leading-product-title);
+  --merit-recipe-section-title-font-family: var(--merit-family-text);
+  --merit-recipe-section-title-font-size: var(--merit-size-section-title);
+  --merit-recipe-section-title-font-weight: var(--merit-weight-ui);
+  --merit-recipe-section-title-letter-spacing: var(--merit-tracking-text);
+  --merit-recipe-section-title-line-height: var(--merit-leading-ui);
+  --merit-recipe-supporting-body-font-family: var(--merit-family-text);
+  --merit-recipe-supporting-body-font-size: var(--merit-size-supporting);
+  --merit-recipe-supporting-body-font-weight: var(--merit-weight-body);
+  --merit-recipe-supporting-body-letter-spacing: var(--merit-tracking-text);
+  --merit-recipe-supporting-body-line-height: var(--merit-leading-body);
+  --merit-scale-body-font-size: var(--merit-size-body);
+  --merit-scale-body-line-height: var(--merit-leading-body);
+  --merit-scale-caption-font-size: var(--merit-size-caption);
+  --merit-scale-caption-line-height: var(--merit-leading-caption);
+  --merit-scale-display-font-size: var(--merit-size-product-title);
+  --merit-scale-display-line-height: var(--merit-leading-signal);
+  --merit-scale-micro-font-size: var(--merit-size-micro);
+  --merit-scale-micro-line-height: var(--merit-leading-micro);
+  --merit-scale-supporting-font-size: var(--merit-size-supporting);
+  --merit-scale-supporting-line-height: var(--merit-leading-body);
+}
+
+@media (width >= 48rem) {
+  :root {
+    --merit-recipe-input-font-size: var(--merit-size-supporting);
+  }
+}
+
+@theme inline {
+  --font-sans: var(--merit-family-text);
+  --font-display: var(--merit-family-display);
+  --font-mono: var(--merit-family-mono);
+  --font-weight-merit-body: var(--merit-weight-body);
+  --font-weight-merit-ui: var(--merit-weight-ui);
+  --font-weight-merit-signal: var(--merit-weight-signal);
+  --font-weight-merit-emphasis: var(--merit-weight-emphasis);
+  --font-weight-merit-mono: var(--merit-weight-mono);
+  --font-weight-normal: var(--merit-weight-body);
+  --font-weight-medium: var(--merit-weight-ui);
+  --font-weight-semibold: var(--merit-weight-emphasis);
+  --font-weight-bold: var(--merit-weight-emphasis);
+  --tracking-merit-text: var(--merit-tracking-text);
+  --tracking-merit-display: var(--merit-tracking-display);
+  --tracking-merit-mono: var(--merit-tracking-mono);
+  --leading-merit-ui: var(--merit-leading-ui);
+  --leading-merit-body: var(--merit-leading-body);
+  --leading-merit-signal: var(--merit-leading-signal);
+  --leading-merit-mono: var(--merit-leading-body);
+}
+
+@layer base {
+  html {
+    font-family: var(--merit-family-text);
+    font-size: var(--merit-size-body);
+    font-weight: var(--merit-weight-body);
+    letter-spacing: var(--merit-tracking-text);
+    line-height: var(--merit-leading-body);
+    font-kerning: normal;
+    font-synthesis: none;
+  }
+
+  :where(strong, b, em) {
+    font-style: normal;
+    font-weight: var(--merit-weight-emphasis);
+  }
+
+  :where(code, kbd, samp, pre) {
+    font-family: var(--merit-family-mono);
+    font-weight: var(--merit-weight-mono);
+    letter-spacing: var(--merit-tracking-mono);
+    font-variant-ligatures: none;
+  }
+}
+
+@layer utilities {
+  .type-body {
+    font-family: var(--merit-foundation-body-font-family);
+    font-weight: var(--merit-foundation-body-font-weight);
+    letter-spacing: var(--merit-foundation-body-letter-spacing);
+  }
+
+  .type-mono {
+    font-family: var(--merit-foundation-mono-font-family);
+    font-weight: var(--merit-foundation-mono-font-weight);
+    letter-spacing: var(--merit-foundation-mono-letter-spacing);
+    font-variant-ligatures: none;
+  }
+
+  .type-signal {
+    font-family: var(--merit-foundation-signal-font-family);
+    font-weight: var(--merit-foundation-signal-font-weight);
+    letter-spacing: var(--merit-foundation-signal-letter-spacing);
+    font-kerning: normal;
+    text-wrap: balance;
+  }
+
+  .type-ui {
+    font-family: var(--merit-foundation-ui-font-family);
+    font-weight: var(--merit-foundation-ui-font-weight);
+    letter-spacing: var(--merit-foundation-ui-letter-spacing);
+  }
+
+  .type-banner-metric {
+    font-family: var(--merit-recipe-banner-metric-font-family);
+    font-size: var(--merit-recipe-banner-metric-font-size);
+    font-weight: var(--merit-recipe-banner-metric-font-weight);
+    letter-spacing: var(--merit-recipe-banner-metric-letter-spacing);
+    line-height: var(--merit-recipe-banner-metric-line-height);
+    font-variant-numeric: lining-nums tabular-nums;
+  }
+
+  .type-caption {
+    font-family: var(--merit-recipe-caption-font-family);
+    font-size: var(--merit-recipe-caption-font-size);
+    font-weight: var(--merit-recipe-caption-font-weight);
+    letter-spacing: var(--merit-recipe-caption-letter-spacing);
+    line-height: var(--merit-recipe-caption-line-height);
+  }
+
+  .type-card-title {
+    font-family: var(--merit-recipe-card-title-font-family);
+    font-size: var(--merit-recipe-card-title-font-size);
+    font-weight: var(--merit-recipe-card-title-font-weight);
+    letter-spacing: var(--merit-recipe-card-title-letter-spacing);
+    line-height: var(--merit-recipe-card-title-line-height);
+  }
+
+  .type-code {
+    font-family: var(--merit-recipe-code-font-family);
+    font-size: var(--merit-recipe-code-font-size);
+    font-weight: var(--merit-recipe-code-font-weight);
+    letter-spacing: var(--merit-recipe-code-letter-spacing);
+    line-height: var(--merit-recipe-code-line-height);
+    font-variant-ligatures: none;
+  }
+
+  .type-compact-code {
+    font-family: var(--merit-recipe-compact-code-font-family);
+    font-size: var(--merit-recipe-compact-code-font-size);
+    font-weight: var(--merit-recipe-compact-code-font-weight);
+    letter-spacing: var(--merit-recipe-compact-code-letter-spacing);
+    line-height: var(--merit-recipe-compact-code-line-height);
+    font-variant-ligatures: none;
+  }
+
+  .type-input {
+    font-family: var(--merit-recipe-input-font-family);
+    font-size: var(--merit-recipe-input-font-size);
+    font-weight: var(--merit-recipe-input-font-weight);
+    letter-spacing: var(--merit-recipe-input-letter-spacing);
+    line-height: var(--merit-recipe-input-line-height);
+  }
+
+  .type-label {
+    font-family: var(--merit-recipe-label-font-family);
+    font-size: var(--merit-recipe-label-font-size);
+    font-weight: var(--merit-recipe-label-font-weight);
+    letter-spacing: var(--merit-recipe-label-letter-spacing);
+    line-height: var(--merit-recipe-label-line-height);
+  }
+
+  .type-micro {
+    font-family: var(--merit-recipe-micro-font-family);
+    font-size: var(--merit-recipe-micro-font-size);
+    font-weight: var(--merit-recipe-micro-font-weight);
+    letter-spacing: var(--merit-recipe-micro-letter-spacing);
+    line-height: var(--merit-recipe-micro-line-height);
+  }
+
+  .type-page-title {
+    font-family: var(--merit-recipe-page-title-font-family);
+    font-size: var(--merit-recipe-page-title-font-size);
+    font-weight: var(--merit-recipe-page-title-font-weight);
+    letter-spacing: var(--merit-recipe-page-title-letter-spacing);
+    line-height: var(--merit-recipe-page-title-line-height);
+    text-wrap: balance;
+  }
+
+  .type-product-title {
+    font-family: var(--merit-recipe-product-title-font-family);
+    font-size: var(--merit-recipe-product-title-font-size);
+    font-weight: var(--merit-recipe-product-title-font-weight);
+    letter-spacing: var(--merit-recipe-product-title-letter-spacing);
+    line-height: var(--merit-recipe-product-title-line-height);
+  }
+
+  .type-section-title {
+    font-family: var(--merit-recipe-section-title-font-family);
+    font-size: var(--merit-recipe-section-title-font-size);
+    font-weight: var(--merit-recipe-section-title-font-weight);
+    letter-spacing: var(--merit-recipe-section-title-letter-spacing);
+    line-height: var(--merit-recipe-section-title-line-height);
+  }
+
+  .type-supporting-body {
+    font-family: var(--merit-recipe-supporting-body-font-family);
+    font-size: var(--merit-recipe-supporting-body-font-size);
+    font-weight: var(--merit-recipe-supporting-body-font-weight);
+    letter-spacing: var(--merit-recipe-supporting-body-letter-spacing);
+    line-height: var(--merit-recipe-supporting-body-line-height);
+  }
+
+  .type-scale-body {
+    font-size: var(--merit-scale-body-font-size);
+    line-height: var(--merit-scale-body-line-height);
+  }
+
+  .type-scale-caption {
+    font-size: var(--merit-scale-caption-font-size);
+    line-height: var(--merit-scale-caption-line-height);
+  }
+
+  .type-scale-display {
+    font-size: var(--merit-scale-display-font-size);
+    line-height: var(--merit-scale-display-line-height);
+  }
+
+  .type-scale-micro {
+    font-size: var(--merit-scale-micro-font-size);
+    line-height: var(--merit-scale-micro-line-height);
+  }
+
+  .type-scale-supporting {
+    font-size: var(--merit-scale-supporting-font-size);
+    line-height: var(--merit-scale-supporting-line-height);
+  }
+
+  .type-emphasis {
+    font-weight: var(--merit-weight-emphasis);
+  }
+
+  .type-numeric {
+    font-variant-numeric: lining-nums tabular-nums;
+  }
+}
+
+@utility type-caption {
+  font-family: var(--merit-recipe-caption-font-family);
+  font-size: var(--merit-recipe-caption-font-size);
+  font-weight: var(--merit-recipe-caption-font-weight);
+  letter-spacing: var(--merit-recipe-caption-letter-spacing);
+  line-height: var(--merit-recipe-caption-line-height);
+}
+
+@utility type-card-title {
+  font-family: var(--merit-recipe-card-title-font-family);
+  font-size: var(--merit-recipe-card-title-font-size);
+  font-weight: var(--merit-recipe-card-title-font-weight);
+  letter-spacing: var(--merit-recipe-card-title-letter-spacing);
+  line-height: var(--merit-recipe-card-title-line-height);
+}
+
+@utility type-label {
+  font-family: var(--merit-recipe-label-font-family);
+  font-size: var(--merit-recipe-label-font-size);
+  font-weight: var(--merit-recipe-label-font-weight);
+  letter-spacing: var(--merit-recipe-label-letter-spacing);
+  line-height: var(--merit-recipe-label-line-height);
+}

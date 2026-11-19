@@ -4,8 +4,6 @@ import { loadDeclaration } from "./_shared.mjs";
 
 const declaration = await loadDeclaration("shadcn-registry.d.ts");
 
-// Rolldown miscompiles tsconfig-paths' CommonJS JSON5 namespace import after minification.
-// Parse tsconfig's JSONC syntax through an explicit ESM module instead.
 const json5ShimPlugin = {
   name: "eve-json5-shim",
   resolveId(source) {
@@ -43,8 +41,6 @@ export default {
     },
   ],
   bundling: "standalone",
-  // @shadcn/registry requires Zod 3, a separate major whose schemas stay
-  // inside the registry bundle and never meet eve's shared Zod 4.
   privateCopies: ["zod"],
   plugins: [json5ShimPlugin],
   banner: `/* oxlint-disable */

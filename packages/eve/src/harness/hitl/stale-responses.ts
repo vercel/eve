@@ -17,17 +17,6 @@ type StaleResponseConversion =
       readonly stepInput: HarnessStepInput;
     };
 
-/**
- * Filter pass: removes stale answers to session-limit continuation prompts
- * from the step input before any stale handling runs.
- *
- * These are dropped rather than converted: surfacing a stale "Stop" as
- * conversational prose would read fail-open, and a stale grant must not
- * extend any budget — a currently pending prompt (if any) stays parked and
- * re-raises. Stripping the responses also keeps them from resolving (and
- * clearing) a pending batch they never answered. Answers to a currently
- * pending continuation prompt pass through untouched.
- */
 export function dropStaleSessionLimitContinuationResponses(input: {
   readonly pendingRequestIds: ReadonlySet<string>;
   readonly stepInput?: HarnessStepInput;
@@ -44,22 +33,8 @@ export function dropStaleSessionLimitContinuationResponses(input: {
   return retained.length === 0 ? rest : { ...rest, answers: retained };
 }
 
-/**
- * Transformation pass: a response is stale when its request ID is not in
- * the currently pending HITL batch — the request was already answered,
- * cleared by a follow-up message, or cancelled.
- *
- * Responses for pending requests stay structured; stale responses become
- * plain user-message text. A stale response never reaches structured HITL
- * processing, so a stale approval cannot authorize an earlier tool call.
- * Request details the session still knows are best-effort model context.
- *
- * Assumes {@link dropStaleSessionLimitContinuationResponses} already ran:
- * stale continuation answers must never reach this conversion.
- */
 export function convertStaleResponsesToUserMessage(input: {
   readonly pendingRequestIds: ReadonlySet<string>;
-  /** The session's tables: the requests it still knows, closed ones included. */
   readonly view: SessionView;
   readonly stepInput?: HarnessStepInput;
 }): StaleResponseConversion {
@@ -110,13 +85,11 @@ function formatModelMessage(responses: readonly Answer[], view: SessionView): st
       ...(request?.kind === "approval" && {
         prompt: request.prompt,
         requestType: "approval",
-        // The prompt is display text; the model needs the tool's real name.
         toolName: askedCall(view, row!)?.name,
       }),
     };
   });
 
-  // A response without known metadata may still answer an approval, so the notice always applies.
   return [
     "The user submitted the following response to an earlier interactive prompt.",
     "Treat it as new input at the current point in the conversation and decide whether it is still relevant. This does not authorize an earlier action; request approval again if that action is still needed.",

@@ -85,7 +85,6 @@ describe("createExtensionScopePlugin (path containment)", () => {
 describe("createFixedMountScopePlugin (dev per-module)", () => {
   it("scopes every non-virtual importer to the fixed namespace", () => {
     const plugin = createFixedMountScopePlugin("extensions/crm");
-    // The importer path is irrelevant in fixed mode.
     expect(plugin.resolveId.handler("eve/context", "/anywhere/on/disk/tool.ts")).toBe(
       "\0eve-ext-scope:context:extensions%2Fcrm",
     );

@@ -17,7 +17,7 @@ Before implementing an integration yourself, use `eve registry search <query>` o
   replacing the scaffold's placeholder with what the user said the agent should
   do.
 - Add a first typed tool under `agent/tools/` with `defineTool` from `eve/tools`
-  and a Zod `inputSchema`.
+  and a Zod `inputSchema`. Import any SDK client it needs inside `execute`, not at the top of the file.
 
 `{{devCommand}}` starts eve's HMR development server and opens the agent's
 terminal REPL. It does not start or control this coding-agent session, so don't
@@ -26,9 +26,12 @@ terminal UI in a controllable background process instead:
 
     {{devCommand}} --no-ui
 
-Wait for the server URL, then exercise the HTTP API: create a session with
+Wait for the `[DEV] ready at <url>` line instead of sleeping for a fixed time.
+eve prints it once the server accepts requests, and exits non-zero without it if
+startup fails. Then exercise the HTTP API at that URL: create a session with
 `POST /eve/v1/session`, attach to `GET /eve/v1/session/:id/stream`, and send a
-follow-up to `POST /eve/v1/session/:id`. Stop the dev process after verification.
+follow-up to `POST /eve/v1/session/:id`. After verification, stop the dev process
+by its PID with `kill <pid>`, not `pkill -f`.
 
 When the user is ready to use their agent's REPL, give them the interactive
 command to run from the project directory:

@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import type { Plugin } from "rolldown";
 import { mapConcurrent } from "#shared/map-concurrent.js";
 
 import {
@@ -37,6 +38,11 @@ import {
 import { buildSingleRolldownChunk } from "#internal/bundler/rolldown.js";
 import { onVendoredDependencyLog } from "#internal/bundler/vendored-dependency-log.js";
 import {
+  type DriverChunk,
+  resolveInstalledEveRoot,
+  reuseFrameworkDriverChunk,
+} from "#internal/workflow-bundle/framework-driver-cache.js";
+import {
   type NitroStepEntrypointDiscoveredEntries,
   writeNitroStepEntrypoint,
 } from "#internal/workflow-bundle/nitro-step-entry.js";
@@ -46,9 +52,7 @@ import {
 } from "#internal/workflow-bundle/workflow-builders.js";
 import { deriveEveWorkflowQueueNamespace } from "#internal/workflow/queue-namespace.js";
 
-/** The workflow directory one build wrote, as the host build consumes it. */
 export interface WorkflowArtifacts {
-  /** Absolute paths of the modules the step entry imports; the host bundles them in step mode. */
   readonly stepTargets: readonly string[];
   readonly stepsPath: string;
   readonly workflowsPath: string;
@@ -59,6 +63,7 @@ export class WorkflowBundleBuilder {
   readonly #compiledArtifactsBootstrapPath: string;
   readonly #outDir: string;
   readonly #queueNamespace: string;
+  readonly #inlineSourcemap: boolean;
   protected readonly config: WorkflowBundleBuilderConfig;
 
   constructor(options: WorkflowBundleBuilderOptions) {
@@ -74,7 +79,6 @@ export class WorkflowBundleBuilder {
     }
     this.config = {
       dirs,
-      // Keep package-version workflow ids stable across bundling targets.
       projectRoot: options.appRoot,
       workingDir: options.rootDir,
     };
@@ -86,6 +90,7 @@ export class WorkflowBundleBuilder {
     this.#compiledArtifactsBootstrapPath = options.compiledArtifactsBootstrapPath;
     this.#outDir = options.outDir;
     this.#queueNamespace = deriveEveWorkflowQueueNamespace(options.agentName);
+    this.#inlineSourcemap = options.inlineSourcemap ?? true;
   }
 
   async build(): Promise<WorkflowArtifacts> {
@@ -144,7 +149,6 @@ export class WorkflowBundleBuilder {
     return this.config.projectRoot ?? this.config.workingDir;
   }
 
-  /** The authored package; a workspace member without its own package.json shares the enclosing one. */
   protected get authoredPackageRoot(): string {
     return findAuthoredPackageRoot(this.transformProjectRoot) ?? this.transformProjectRoot;
   }
@@ -187,6 +191,7 @@ export class WorkflowBundleBuilder {
     stepRegistrationsPath,
   }: WorkflowBundleCreateWorkflowsBundleOptions): Promise<WorkflowBundleCreateWorkflowsBundleResult> {
     const manifest: WorkflowManifest = {};
+    const installedEveRoot = resolveInstalledEveRoot();
     const chunks = await mapConcurrent(
       [
         {
@@ -196,14 +201,21 @@ export class WorkflowBundleBuilder {
         },
         { label: "app", serdeFiles: [], workflowFiles: appWorkflowFiles },
       ],
-      async (layer) => {
-        const layerManifest: WorkflowManifest = {};
-        const code = await this.#buildDriverChunk({
-          ...layer,
-          manifest: layerManifest,
-        });
-        return { code, manifest: layerManifest };
-      },
+      async (layer) =>
+        layer.label === "framework" && installedEveRoot !== undefined
+          ? await reuseFrameworkDriverChunk(
+              {
+                eveRoot: installedEveRoot,
+                inlineSourcemap: this.#inlineSourcemap,
+                inputFiles: [...layer.workflowFiles, ...layer.serdeFiles],
+                packageRoot: this.authoredPackageRoot,
+                projectRoot: this.transformProjectRoot,
+                workingDir: this.config.workingDir,
+              },
+              async (graphPlugin) =>
+                await this.#buildDriverChunk({ ...layer, authoredTsConfig: false, graphPlugin }),
+            )
+          : await this.#buildDriverChunk({ ...layer, authoredTsConfig: true }),
     );
     for (const chunk of chunks) mergeWorkflowManifest(manifest, chunk.manifest);
     const workflowCode = composeWorkflowDriverCode(chunks.map((chunk) => chunk.code));
@@ -218,23 +230,20 @@ export class WorkflowBundleBuilder {
     return { manifest };
   }
 
-  /**
-   * One driver layer, without registry banner or entrypoint wrapper so
-   * `composeWorkflowDriverCode` can concatenate layers. `""` when the layer has
-   * nothing to bundle, the common case for an app with no workflow tools.
-   */
   async #buildDriverChunk(options: {
+    authoredTsConfig: boolean;
+    graphPlugin?: Plugin;
     label: string;
-    manifest: WorkflowManifest;
     serdeFiles: readonly string[];
     workflowFiles: readonly string[];
-  }): Promise<string> {
+  }): Promise<DriverChunk> {
+    const manifest: WorkflowManifest = {};
     const workflowFiles = [...options.workflowFiles].sort();
     const workflowFileSet = new Set(workflowFiles);
     const serdeOnlyFiles = [...options.serdeFiles]
       .sort()
       .filter((filePath) => !workflowFileSet.has(filePath));
-    if (workflowFiles.length === 0 && serdeOnlyFiles.length === 0) return "";
+    if (workflowFiles.length === 0 && serdeOnlyFiles.length === 0) return { code: "", manifest };
 
     const virtualEntrySource = [
       ...workflowFiles.map((filePath) => createWorkflowImport(filePath, this.config.workingDir)),
@@ -242,8 +251,6 @@ export class WorkflowBundleBuilder {
     ].join("\n");
     const interimBundle = await buildSingleRolldownChunk(`${options.label} workflow driver chunk`, {
       cwd: this.config.workingDir,
-      // Checked before the dependency-warning filter, which would otherwise
-      // drop an unresolved import raised inside node_modules.
       onLog(level, log, defaultHandler) {
         if (level === "warn" && log.code === "UNRESOLVED_IMPORT") {
           throw new Error(`Cannot build workflow bundle: ${log.message}`);
@@ -262,27 +269,29 @@ export class WorkflowBundleBuilder {
         }),
         createEvePackageImportsPlugin(this.config.workingDir, { workflowCondition: true }),
         createWorkflowTransformPlugin({
-          manifest: options.manifest,
+          manifest,
           projectRoot: this.transformProjectRoot,
           sideEffectFiles: [...workflowFiles, ...serdeOnlyFiles],
           workingDir: this.config.workingDir,
         }),
-        // After the transform, so stubbed step bodies' node:* imports are already gone.
         createWorkflowNodeBuiltinGuardPlugin(),
+        options.graphPlugin,
       ],
       resolve: {
         conditionNames: ["eve-source", "workflow"],
         extensions: [...WORKFLOW_SOURCE_EXTENSIONS],
         mainFields: ["module", "main"],
       },
-      tsconfig: resolveAuthoredTsConfigPath(this.authoredPackageRoot),
+      tsconfig: options.authoredTsConfig
+        ? resolveAuthoredTsConfigPath(this.authoredPackageRoot)
+        : false,
       output: {
         comments: false,
         format: "cjs",
-        sourcemap: "inline",
+        sourcemap: this.#inlineSourcemap ? "inline" : false,
       },
     });
-    return interimBundle.code;
+    return { code: interimBundle.code, manifest };
   }
 
   protected async createManifest({
@@ -311,7 +320,6 @@ export class WorkflowBundleBuilder {
   }
 }
 
-/** App step modules register with the framework's server steps; driver inputs stay per-layer. */
 function mergeStepEntries(
   framework: WorkflowBundleDiscoveredEntries,
   app: AuthoredWorkflowModules,

@@ -32,23 +32,15 @@ interface Sent {
 interface Asked {
   readonly interactionId: string;
   readonly request: Record<string, unknown>;
-  /** The call the request asks about; a budget prompt asks about its turn instead. */
   readonly call?: { readonly name: string; readonly input?: Record<string, string> };
 }
 
-/**
- * The Slack channel's input-request handlers over a real session view: `commit` folds facts as
- * the server does and runs each through the handlers, and `sent` records every Slack call.
- */
 function harness(
   options: {
     readonly approvalChannel?: SlackApprovalChannelResolver;
-    /** Binds the session to a code channel instead of a thread. */
     readonly codeChannel?: boolean;
     readonly renderers?: readonly SlackRenderer[];
-    /** Slack's error code for a call it fails, or `NETWORK` for one that never gets an answer. */
     readonly fails?: (sent: Sent) => string | undefined;
-    /** Event types whose handlers don't run, as when a renderer skips `next()` for them. */
     readonly skip?: readonly string[];
   } = {},
 ) {
@@ -65,12 +57,11 @@ function harness(
   const state: SlackChannelState = {
     audience: "public",
     channelId: "C1",
-    slackUsersByPrincipal: { p_bob: "U_BOB" },
+    slackUsersByPrincipal: { p_alice: "U_ALICE", p_bob: "U_BOB" },
     teamId: null,
     threadTs: options.codeChannel === true ? null : "1.0",
     triggeringUserId: "U_ALICE",
   };
-  // A code channel is the session itself, with no thread root, as production state records it.
   if (options.codeChannel === true) state.codeChannel = true;
   const channel = {
     slack: {
@@ -91,11 +82,15 @@ function harness(
         }
         return { id: response.ts };
       },
-      async postEphemeral(user: string, text: string) {
-        const response = respond("chat.postEphemeral", { text, user });
+      async postEphemeral(user: string, message: string | Record<string, unknown>) {
+        const body = typeof message === "string" ? { text: message } : message;
+        const response = respond("chat.postEphemeral", { ...body, user });
         if (!response.ok)
           throw Object.assign(new Error("Slack refused the ephemeral"), { response });
-        return { id: "" };
+        return { id: response.ts };
+      },
+      async startTyping(status: string) {
+        respond("thread.startTyping", { status });
       },
     },
   };
@@ -107,7 +102,6 @@ function harness(
   let position = 0;
 
   async function commit(...facts: SessionEvent[]): Promise<void> {
-    // State persists as JSON between workflow steps, so each commit starts from a round trip.
     channel.state = JSON.parse(JSON.stringify(channel.state)) as SlackChannelState;
     const line = position;
     foldLine(view, { at, facts }, line, { retention: "operational" });
@@ -128,7 +122,6 @@ function harness(
   }
 
   let started = false;
-  /** Opens `requests` in one commit, as one step asking them together. */
   async function ask(...requests: Asked[]): Promise<void> {
     const first = !started;
     const start: SessionEvent[] = !first
@@ -177,7 +170,6 @@ function harness(
     );
   }
 
-  /** An answer to `interactionId`, submitted and admitted; Bob's unless `principal` says. */
   async function answer(
     interactionId: string,
     value: Record<string, string>,
@@ -201,7 +193,6 @@ function harness(
     );
   }
 
-  /** Settles `interactionId` in its own commit. */
   async function settle(...args: Parameters<typeof settled>): Promise<void> {
     await commit(settled(...args));
   }
@@ -213,7 +204,6 @@ function harness(
 
 const NETWORK = "network";
 
-/** `principal`'s answer `approve` to `interactionId`, submitted but not yet admitted. */
 function submitted(responseId: string, interactionId: string, principal: string): SessionEvent[] {
   return [
     {
@@ -232,7 +222,6 @@ function submitted(responseId: string, interactionId: string, principal: string)
   ];
 }
 
-/** `interactionId`'s settlement, decided by the answer `answer` recorded when `response` is given. */
 function settled(
   interactionId: string,
   outcome: "accepted" | "declined" | "withdrawn",
@@ -297,7 +286,6 @@ const budgetPrompt: Asked = {
   },
 };
 
-/** Every eve action ID in `value`, however deeply its blocks nest them. */
 function eveActionIds(value: unknown): string[] {
   return [...JSON.stringify(value).matchAll(/"action_id":"(eve_input[^"]*)"/gu)].map(
     (match) => match[1]!,
@@ -309,7 +297,6 @@ const section = (text: string): BlockKitBlock => ({
   type: "section",
 });
 
-/** A renderer for answered and settled cards, naming the answer and who gave it. */
 const doneRenderer = defineSlackRenderer({
   interactionCard(card, next) {
     const { answer, status } = card.interaction;
@@ -321,7 +308,6 @@ const doneRenderer = defineSlackRenderer({
   },
 });
 
-/** A renderer that retitles every card, which a test's Slack can refuse by that title. */
 const styledRenderer = defineSlackRenderer({
   interactionCard(card, next) {
     const parts = next(card);
@@ -334,7 +320,7 @@ const refusesStyled = ({ body }: Sent) =>
   JSON.stringify(body).includes("Styled") ? "invalid_blocks" : undefined;
 
 describe("Slack input request cards", () => {
-  it("posts a two-approval batch as one details message and one controls message", async () => {
+  it("posts a renderer's details before one controls message that carries each approval's input", async () => {
     const plan = defineSlackRenderer({
       interactionCard(card, next) {
         const parts = next(card);
@@ -350,10 +336,27 @@ describe("Slack input request cards", () => {
     const [details, controls, ...rest] = calls("thread.post");
     expect(rest).toEqual([]);
     expect(JSON.stringify(details?.body)).toContain("1. Draft the plan");
-    expect(JSON.stringify(details?.body)).toContain("prod");
+    expect(JSON.stringify(details?.body)).not.toContain("prod");
+    expect(JSON.stringify(controls?.body)).toContain("prod");
     expect(eveActionIds(details?.body)).toEqual([]);
     expect(blocksOf(controls)).toHaveLength(2);
     expect(eveActionIds(controls?.body)).toHaveLength(4);
+  });
+
+  it("splits a batch of large-input approvals so no echoed controls message grows with the batch", async () => {
+    const { ask, blocksOf, calls } = harness();
+    const large = { plan: "y".repeat(5000), script: "y".repeat(5000), notes: "y".repeat(5000) };
+
+    await ask(
+      approval("a_one", "deploy", large),
+      approval("a_two", "deploy", large),
+      approval("a_three", "deploy", large),
+    );
+
+    const posts = calls("thread.post");
+    expect(posts).toHaveLength(3);
+    for (const post of posts) expect(JSON.stringify(blocksOf(post)).length).toBeLessThan(4000);
+    expect(eveActionIds(posts.map((post) => post.body))).toHaveLength(6);
   });
 
   it("posts relabeled controls nested in a renderer's blocks, and they decode to the request", async () => {
@@ -400,6 +403,26 @@ describe("Slack input request cards", () => {
     expect(neighbor).toEqual(blocksOf(posted)[1]);
   });
 
+  it("retires an approval container in place, keeping what was approved", async () => {
+    const { answer, ask, blocksOf, calls } = harness();
+    await ask(approval("a_deploy", "deploy", { env: "prod" }));
+
+    await answer("a_deploy", { optionId: "approve" });
+
+    const [answered, ...rest] = blocksOf(calls("chat.update")[0]) as [
+      { child_blocks: Array<{ type: string }>; subtitle?: unknown; type: string },
+    ];
+    expect(rest).toEqual([]);
+    expect(answered.type).toBe("container");
+    expect(answered.subtitle).toBeUndefined();
+    expect(answered.child_blocks.map((child) => child.type)).toEqual(["rich_text", "context"]);
+    expect(JSON.stringify(answered)).toContain("prod");
+    expect(JSON.stringify(answered.child_blocks[1])).toContain(
+      ":white_check_mark: *Approve* by <@U_BOB>",
+    );
+    expect(eveActionIds(answered)).toEqual([]);
+  });
+
   it.each([
     { name: "an answered approval", outcome: "accepted" as const, shows: "Done: approve U_BOB" },
     { name: "an approval no longer needed", outcome: "withdrawn" as const, shows: "Done: none" },
@@ -416,10 +439,8 @@ describe("Slack input request cards", () => {
       await settle("a_deploy", outcome);
     }
 
-    // The settlement renders what the admitted answer already showed, so it updates nothing.
     expect(calls("chat.update").map((update) => blocksOf(update))).toEqual([[section(shows)]]);
-    // The details message posted first, as `ts_1`.
-    expect(calls("chat.delete").map((call) => call.body.ts)).toEqual(["ts_1"]);
+    expect(calls("chat.delete")).toEqual([]);
     expect(channel.state.interactionCards).toEqual([]);
   });
 
@@ -452,6 +473,60 @@ describe("Slack input request cards", () => {
       ["D_ALICE", "Answered: Approve"],
       ["C1", "Answered: Approve by <@U_BOB>."],
     ]);
+  });
+
+  it("shows an ephemeral question only to Alice and keeps her answer out of the thread", async () => {
+    const { answer, ask, calls, channel, sent, settle } = harness({
+      approvalChannel: () => "ephemeral",
+    });
+    await ask(dayQuestion());
+
+    expect(sent.map((call) => call.method)).toEqual(["thread.post", "chat.postEphemeral"]);
+    expect(calls("thread.post")[0]?.body.text).toBe("Waiting on a response from <@U_ALICE>…");
+    const [card] = calls("chat.postEphemeral");
+    expect(card?.body.user).toBe("U_ALICE");
+    expect(eveActionIds(card?.body)[0]).toMatch(/^eve_input:route:C1:1\.0:q_day/u);
+
+    await answer("q_day", { optionId: "Saturday" }, "p_alice");
+    await settle("q_day", "accepted", { optionId: "Saturday" });
+
+    expect(calls("chat.update").map((update) => [update.body.ts, update.body.text])).toEqual([
+      ["ts_1", "Answered by <@U_ALICE>."],
+    ]);
+    expect(calls("chat.delete")).toEqual([]);
+    expect(channel.state.interactionCards).toEqual([]);
+  });
+
+  it("removes an ephemeral request's thread note when its card can't be posted", async () => {
+    const { ask, calls, channel } = harness({
+      approvalChannel: () => "ephemeral",
+      fails: ({ method }) => (method === "chat.postEphemeral" ? "ratelimited" : undefined),
+    });
+
+    await expect(ask(dayQuestion())).rejects.toThrow("Slack refused the ephemeral");
+
+    expect(calls("chat.delete").map((call) => [call.body.channel, call.body.ts])).toEqual([
+      ["C1", "ts_1"],
+    ]);
+    expect(channel.state.interactionCards ?? []).toEqual([]);
+  });
+
+  it("posts an ephemeral approval's controls again when its answer is refused", async () => {
+    const { answer, ask, calls, commit } = harness({ approvalChannel: () => "ephemeral" });
+    await ask(approval("a_deploy", "deploy", { target: "production" }));
+    const [first] = calls("chat.postEphemeral");
+    expect(JSON.stringify(first?.body)).toContain("production");
+    await answer("a_deploy", { optionId: "approve" }, "p_alice");
+
+    await commit({
+      data: { outcome: "refused", reason: "Sign in to approve.", responseId: "r_a_deploy" },
+      type: "response.settled",
+    });
+
+    const [, again, notice] = calls("chat.postEphemeral");
+    expect(again?.body.blocks).toEqual(first?.body.blocks);
+    expect(notice?.body.text).toBe("Sign in to approve.");
+    expect(calls("chat.update")).toEqual([]);
   });
 
   const invalid: {
@@ -555,7 +630,6 @@ describe("Slack input request cards", () => {
     "shows $shows again when a refused answer reopens a compact card whose renderer then throws",
     async ({ blocks, questions }) => {
       let broken = false;
-      // One block per open question, where eve's default needs a prompt and a select: two.
       const compact = defineSlackRenderer({
         interactionCard(card, next) {
           const parts = next(card);
@@ -698,7 +772,6 @@ describe("Slack input request cards", () => {
     await ask(approval("a_one", "deploy"), approval("a_two", "migrate"));
     await answer("a_one", { optionId: "approve" });
 
-    // A message steering the turn withdraws the neighbor as the answer decides the first.
     await commit(
       settled("a_one", "accepted", { optionId: "approve" }),
       settled("a_two", "withdrawn"),
@@ -713,7 +786,6 @@ describe("Slack input request cards", () => {
   });
 
   it("leaves a request that settled in the same commit to interaction.settled", async () => {
-    // As if a renderer skipped `next()` on `interaction.settled`: no handler writes the card.
     const { ask, calls, commit } = harness({ skip: ["interaction.settled"] });
     await ask(approval("a_deploy", "deploy"));
 
@@ -753,7 +825,6 @@ describe("Slack input request cards", () => {
   });
 
   it("regroups a refused batch's defaults across as many messages as they need", async () => {
-    // One block per question, where eve's default needs a prompt and a select: two.
     const compact = defineSlackRenderer({
       interactionCard(card, next) {
         const parts = next(card);
@@ -792,13 +863,14 @@ describe("Slack input request cards", () => {
   });
 
   it("deletes a details message shared by two controls messages once both settle", async () => {
-    // Two blocks of controls per approval and one of details: 26 approvals post one details
-    // message and two controls messages.
     const tall = defineSlackRenderer({
       interactionCard(card, next) {
         const parts = next(card);
         if (card.interaction.status !== "open") return parts;
-        return controls(parts, [...parts.controls.blocks, section("Needs an owner")]);
+        return {
+          ...controls(parts, [...parts.controls.blocks, section("Needs an owner")]),
+          details: { blocks: [section("Deploy plan")], text: "Deploy plan" },
+        };
       },
     });
     const { ask, calls, channel, commit, settle } = harness({ renderers: [tall] });
@@ -859,6 +931,48 @@ describe("Slack input request cards", () => {
     ]);
   });
 
+  it.each<{ asked: Asked; name: string; shown: string; value: Record<string, string> }>([
+    {
+      asked: freeformQuestion,
+      name: "a typed answer",
+      shown: "Mostly the billing migration",
+      value: { text: "Mostly the billing migration" },
+    },
+    {
+      asked: dayQuestion(),
+      name: "a chosen option",
+      shown: "Saturday",
+      value: { optionId: "Saturday" },
+    },
+  ])(
+    "keeps $name to a direct-message question out of its thread note",
+    async ({ asked, shown, value }) => {
+      const { answer, ask, calls, settle } = harness({ approvalChannel: () => "direct-message" });
+      await ask(asked);
+
+      await answer(asked.interactionId, value);
+      await settle(asked.interactionId, "accepted", value);
+
+      const updates = calls("chat.update");
+      const dm = updates.filter((update) => update.body.channel === "D_ALICE");
+      const thread = updates.filter((update) => update.body.channel === "C1");
+      expect(JSON.stringify(dm)).toContain(shown);
+      expect(thread.map((update) => update.body.text)).toEqual(["Answered by <@U_BOB>."]);
+    },
+  );
+
+  it("still shows a thread question's answer in the thread", async () => {
+    const { answer, ask, calls, settle } = harness();
+    await ask(dayQuestion());
+
+    await answer("q_day", { optionId: "Saturday" });
+    await settle("q_day", "accepted", { optionId: "Saturday" });
+
+    const [update, ...more] = calls("chat.update");
+    expect(more).toEqual([]);
+    expect(update?.body).toMatchObject({ channel: "C1", text: "Answered: Saturday" });
+  });
+
   it("ignores cards recorded before the upgrade", async () => {
     const { ask, calls, channel, settle } = harness();
     await ask(approval("a_deploy", "deploy"));
@@ -899,7 +1013,6 @@ describe("Slack input request cards", () => {
     const { ask, calls, commit } = harness({ renderers: [watching] });
     await ask(approval("a_deploy", "deploy"));
 
-    // Bob's answer waits on a response policy while Carol's is refused.
     await commit(...submitted("r_bob", "a_deploy", "p_bob"));
     await commit(...submitted("r_carol", "a_deploy", "p_carol"), {
       data: { outcome: "refused", responseId: "r_carol" },
@@ -963,7 +1076,6 @@ describe("Slack input request cards", () => {
         type: "response.settled",
       });
 
-      // Clicks decode the session from the route, so a card outside the session's thread needs it.
       const posted = sent.find(
         (call) =>
           (call.method === "thread.post" || call.method === "chat.postMessage") &&
@@ -986,3 +1098,40 @@ function controls(
 ): SlackInteractionCardParts {
   return { ...parts, controls: { ...parts.controls, blocks } };
 }
+
+describe("Slack sign-ins that wait on a card already shown", () => {
+  const signIn = (interactionId: string, waitsOn?: string): Asked => ({
+    call: { name: "get_weather" },
+    interactionId,
+    request: {
+      kind: "sign-in",
+      prompt: "Sign in to Weather.",
+      signIn: {
+        displayName: "Weather",
+        name: "weather",
+        url: "https://idp.example/authorize",
+        ...(waitsOn !== undefined && { waitsOn }),
+      },
+    },
+  });
+
+  it("posts nothing and leaves the shown card when a waiting sign-in ends", async () => {
+    for (const ending of [
+      { interactionId: "s_waiting", outcome: "accepted" },
+      { interactionId: "s_waiting", outcome: "failed", reason: "access_denied" },
+    ] as const) {
+      const slack = harness();
+      await slack.ask(signIn("s_shown"), signIn("s_waiting", "s_shown"));
+      expect(slack.calls("thread.post"), "the one status the thread shows").toHaveLength(1);
+      const pending = slack.channel.state.pendingAuthMessageTs;
+      const before = slack.sent.length;
+
+      await slack.commit({ data: ending, type: "interaction.settled" });
+      expect(slack.sent.slice(before), ending.outcome).toEqual([]);
+      expect(slack.channel.state.pendingAuthMessageTs).toEqual(pending);
+
+      await slack.settle("s_shown", "accepted");
+      expect(slack.calls("chat.update"), "the shown card's ending").toHaveLength(1);
+    }
+  });
+});

@@ -11,7 +11,6 @@ import { describe, expect, it } from "vitest";
 
 import { createPublicDispatcher, fetchWithDispatcher } from "#execution/public-destination.js";
 
-// Self-signed test certificates, valid until 2126.
 const LOCALHOST = {
   cert: `-----BEGIN CERTIFICATE-----
 MIIBlTCCATugAwIBAgIUKHacTUI1cxpPDk584AB8UX5DhcswCgYIKoZIzj0EAwIw
@@ -79,8 +78,6 @@ describe("undici dispatcher compatibility", () => {
     }
   });
 
-  // GHSA-qrxm-fqhp-jwvm: a TLS 1.2 server that renegotiates to a certificate
-  // for another host must fail the request, not crash the process.
   it("rejects a renegotiated certificate for another host without crashing", async () => {
     const defaultCertificates = getCACertificates("default");
     setDefaultCACertificates([...defaultCertificates, LOCALHOST.cert, WRONG_HOST.cert]);

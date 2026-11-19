@@ -6,17 +6,14 @@ import type { JsonObject } from "#shared/json.js";
 
 type DevDiagnosticSource = "stderr" | "stdout" | "sandbox" | "workflow" | "tool" | "log";
 
-/** Captured output or a failure summary attributed to one capture point. */
 export interface DevDiagnosticOutputEntry {
   readonly source: Exclude<DevDiagnosticSource, "log">;
   readonly level?: LogLevel;
   readonly summary?: string;
   readonly detail: string;
-  /** Structured remediation carried by cataloged failures. */
   readonly hint?: string;
 }
 
-/** One structured record from eve's own logger. */
 export interface DevDiagnosticLogRecordEntry {
   readonly source: "log";
   readonly level: LogLevel;
@@ -29,11 +26,6 @@ export type DevDiagnosticEntry = DevDiagnosticOutputEntry | DevDiagnosticLogReco
 
 export interface DevDiagnosticSink {
   readonly path: string;
-  /**
-   * Project-relative reference with forward slashes on every platform:
-   * it is a display and correlation token (transcript pointers,
-   * `eve logs <ref>` input), not a filesystem path.
-   */
   readonly displayPath: string;
   append(entry: DevDiagnosticEntry): void;
   close(): Promise<void>;
@@ -44,7 +36,6 @@ interface CreateDevDiagnosticSinkOptions {
   readonly pid?: number;
 }
 
-/** Creates the local, process-owned diagnostics file used by `eve dev`. */
 export async function createDevDiagnosticSink(
   appRoot: string,
   options: CreateDevDiagnosticSinkOptions = {},
@@ -80,7 +71,6 @@ function createOpenSink(
       queue = queue
         .then(() => handle.appendFile(record, "utf8"))
         .catch(() => {
-          // Never report through stderr: the TUI captures it and would recurse.
           failed = true;
         });
     },
@@ -93,12 +83,6 @@ function createOpenSink(
   };
 }
 
-/**
- * JSON Lines: each record is one JSON object per line, `at` and `source`
- * first. Multi-line details (stack traces, inspector dumps) are escaped by
- * the JSON encoding, so the line-per-record invariant holds and the whole
- * file parses with any JSONL reader (`jq -c 'select(.source=="tool")'`).
- */
 function formatDiagnosticEntry(entry: DevDiagnosticEntry, at: Date): string {
   return `${JSON.stringify({ at: at.toISOString(), ...entry })}\n`;
 }

@@ -13,9 +13,8 @@ import { shellQuote } from "./shell.ts";
 type ComputerUseSandbox = Pick<SandboxSession, "resolvePath" | "run" | "writeTextFile">;
 
 const DRIVER_VERSION = "0.12.5";
-const DESKTOP_INSTALL_VERSION = "2026-09-17.1";
+const DESKTOP_INSTALL_VERSION = "2026-11-03.1";
 
-/** Include this in the consumer sandbox revalidation key so cached templates rebuild when computer use changes. */
 export const COMPUTER_USE_REVALIDATION_KEY = `computer-use:${DRIVER_VERSION}:${DESKTOP_INSTALL_VERSION}`;
 
 /** Install the desktop packages and embedded driver required by computer use. */
@@ -70,13 +69,6 @@ export async function startComputerUse(
   }
 }
 
-/**
- * Restart the desktop when a resumed sandbox lost its processes.
- *
- * Sandbox resume does not rerun consumer startup, so the display and driver
- * started there are gone after a stop. The check is one cheap command when
- * everything is already live.
- */
 export async function ensureComputerUse(
   sandbox: Pick<SandboxSession, "resolvePath" | "run">,
   abortSignal?: AbortSignal,
@@ -121,18 +113,13 @@ printf '%s\\n' \\
   > /etc/apt/preferences.d/mozilla
 
 apt-get update
-FIREFOX_ESR_VERSION="$(apt-cache madison firefox-esr | awk '$3 ~ /^140\\./ { print $3; exit }')"
-if [[ -z "\${FIREFOX_ESR_VERSION}" ]]; then
-  echo "Mozilla's repository does not offer the Firefox ESR 140 line" >&2
-  exit 1
-fi
-
 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \\
   at-spi2-core \\
   ca-certificates \\
   curl \\
   dbus-x11 \\
   ffmpeg \\
+  firefox-esr \\
   fontconfig \\
   gnome-themes-extra \\
   gtk2-engines-murrine \\
@@ -146,9 +133,6 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \\
   xterm \\
   xvfb \\
   xz-utils
-apt-get clean
-DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \\
-  "firefox-esr=\${FIREFOX_ESR_VERSION}"
 apt-get clean
 
 GEIST_MONO_VERSION=3.4.0

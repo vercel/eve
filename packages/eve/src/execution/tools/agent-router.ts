@@ -5,6 +5,7 @@ export { runAgentRouterTask } from "#execution/tools/agent-router-workflow.js";
 export const AGENT_ROUTER_TOOL_DESCRIPTION =
   "Route a task to the best available subagent based on each subagent's declared description.";
 
+/** Input to the agent router tool: the complete task to send to the selected subagent. */
 export interface AgentRouterInput {
   readonly message: string;
 }

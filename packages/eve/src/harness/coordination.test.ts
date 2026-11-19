@@ -132,6 +132,28 @@ describe("createRuntimeActionRequestFromToolCall", () => {
     });
   });
 
+  it("marks a call hidden when its tool sets label: false", () => {
+    const action = createPresentedRuntimeActionRequestFromToolCall({
+      toolCall: { input: {}, toolCallId: "call-react", toolName: "react", type: "tool-call" },
+      tools: new Map([
+        [
+          "react",
+          {
+            label: false,
+            description: "React.",
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "react",
+          },
+        ],
+      ]),
+    });
+
+    expect(action).toEqual({
+      action: { callId: "call-react", input: {}, kind: "tool-call", toolName: "react" },
+      hidden: true,
+    });
+  });
+
   it("does not let the label start callback callback mutate the action input", () => {
     const result = createPresentedRuntimeActionRequestFromToolCall({
       toolCall: {

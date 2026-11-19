@@ -7,14 +7,8 @@ type AgentInfoRouteResponse = () => Promise<Response>;
 interface HomeRouteMetadata {
   readonly agentName: string;
 }
-/**
- * Creates one session from a route handler. `continuationToken` is
- * channel-local (the dispatcher prepends the channel name), so ownership
- * established here is visible to `resolveSession` on the same channel.
- */
 export type RouteSessionCreator = (
   input: Omit<RunInput, "adapter" | "channelName" | "requestId"> & {
-    /** Stable initial receipt for an idempotent HTTP creation operation. */
     readonly deliveryId?: string;
   },
 ) => Promise<RunHandle & { readonly deliveryId?: string }>;
@@ -116,7 +110,6 @@ export function readRemoteAgentStreamHeadersResolver(
   return routeArgs[remoteAgentStreamHeadersResolverKey];
 }
 
-/** The agent's skill files behind `readSkill`, for channels that serve files they already listed. */
 export function attachSkillFileSource<TArgs extends RouteHandlerArgs>(
   args: TArgs,
   files: SkillFileSource,

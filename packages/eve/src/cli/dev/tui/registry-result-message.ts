@@ -4,7 +4,6 @@ import type {
   RegistrySessionResult,
 } from "#setup/flows/registry-session.js";
 
-/** Builds the shared transient progress update for `/add` and initial onboarding. */
 export function registryItemProgress(renderer: {
   replaceContent?(content?: {
     headline: string;
@@ -22,9 +21,7 @@ export function registryItemProgress(renderer: {
 
 interface RegistryCommandOutcome {
   failed: boolean;
-  /** Replaces the echoed `/add` once it settles. */
   summary: string;
-  /** Detail hung under the summary; empty when the summary says it all. */
   message: string;
 }
 
@@ -52,7 +49,6 @@ function outcomeDetails(outcome: RegistrySessionOutcome): string[] {
   }
 }
 
-/** The one-line record of an `/add` item left in place of its invocation. */
 function registryOutcomeSummary(outcome: RegistrySessionOutcome): string {
   switch (outcome.kind) {
     case "installed":
@@ -70,10 +66,6 @@ function hasFailedOutcome(outcomes: readonly RegistrySessionOutcome[]): boolean 
   return outcomes.some((outcome) => outcome.kind === "failed");
 }
 
-/**
- * Summarizes an `/add` session in place of its echoed command. One item folds
- * into the summary itself; several items list one marked row each.
- */
 export function registryCommandOutcome(
   result: RegistrySessionResult,
   notes: readonly string[] = [],

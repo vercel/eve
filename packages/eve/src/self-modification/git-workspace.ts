@@ -28,7 +28,6 @@ export interface PreparedSelfModificationWorkspace {
 
 type CheckoutSandbox = Pick<NetworkPolicySandboxSession, "run" | "setNetworkPolicy">;
 
-/** Prepares a token-free remote and immutable target-branch checkout for one child session. */
 export async function prepareSelfModificationWorkspace(input: {
   readonly directory: string;
   readonly repository: GitHubRepository;
@@ -67,7 +66,6 @@ export async function prepareSelfModificationWorkspace(input: {
   };
 }
 
-/** Reconstructs trusted workspace metadata after the session checkout preflight. */
 export async function readPreparedSelfModificationWorkspace(input: {
   readonly directory: string;
   readonly repository: GitHubRepository;

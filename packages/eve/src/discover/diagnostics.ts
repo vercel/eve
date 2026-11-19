@@ -1,47 +1,20 @@
 import { z } from "#compiled/zod/index.js";
 
-/**
- * Zod schema for structured discovery diagnostic severities.
- */
 const discoverDiagnosticSeveritySchema = z.union([z.literal("error"), z.literal("warning")]);
 
-/**
- * Structured discovery diagnostic emitted while classifying authored sources.
- */
 export type DiscoverDiagnostic = z.infer<typeof discoverDiagnosticSchema>;
 
-/**
- * Zod schema for one structured discovery diagnostic.
- */
 export const discoverDiagnosticSchema = z
   .object({
-    /**
-     * Stable machine-readable diagnostic code.
-     */
     code: z.string(),
-    /**
-     * Human-readable diagnostic message.
-     */
     message: z.string(),
-    /**
-     * Discovery severity.
-     */
     severity: discoverDiagnosticSeveritySchema,
-    /**
-     * Absolute source path associated with the diagnostic.
-     */
     sourcePath: z.string(),
   })
   .strict();
 
-/**
- * Summary counts emitted alongside discovery manifests and CLI output.
- */
 export type DiscoverDiagnosticsSummary = z.infer<typeof discoverDiagnosticsSummarySchema>;
 
-/**
- * Zod schema for discovery diagnostic summary counts.
- */
 export const discoverDiagnosticsSummarySchema = z
   .object({
     errors: z.number().finite(),
@@ -49,14 +22,8 @@ export const discoverDiagnosticsSummarySchema = z
   })
   .strict();
 
-/**
- * Root-resolution error code emitted when discovery cannot locate an eve agent.
- */
 export const DISCOVER_PROJECT_NOT_FOUND = "discover/project-not-found";
 
-/**
- * Creates an error-level discovery diagnostic.
- */
 export function createDiscoverErrorDiagnostic(
   input: Omit<DiscoverDiagnostic, "severity">,
 ): DiscoverDiagnostic {
@@ -66,9 +33,6 @@ export function createDiscoverErrorDiagnostic(
   };
 }
 
-/**
- * Creates a warning-level discovery diagnostic.
- */
 export function createDiscoverWarningDiagnostic(
   input: Omit<DiscoverDiagnostic, "severity">,
 ): DiscoverDiagnostic {
@@ -78,9 +42,6 @@ export function createDiscoverWarningDiagnostic(
   };
 }
 
-/**
- * Summarizes discovery diagnostics into error and warning counts.
- */
 export function summarizeDiscoverDiagnostics(
   diagnostics: readonly DiscoverDiagnostic[],
 ): DiscoverDiagnosticsSummary {

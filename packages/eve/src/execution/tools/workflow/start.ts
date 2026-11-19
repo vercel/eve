@@ -15,41 +15,25 @@ import type {
   WorkflowToolRunInput,
 } from "#execution/tools/workflow/types.js";
 import type { WorkflowToolRunOwner } from "#execution/tools/workflow/messages.js";
-import {
-  startWorkflowOnCurrentDeployment,
-  workflowToolRunWorkflowReference,
-} from "#execution/workflow-runtime.js";
 
 const log = createLogger("execution.workflow-tool-run");
 
-/** Starts a new run for each dispatch attempt. Call from a `"use step"` body. */
-export async function startWorkflowToolRun(
+export type StartWorkflowToolRun = (
   input: Omit<WorkflowToolRunInput, "hookToken">,
-): Promise<WorkflowToolRunAddress> {
-  const hookToken =
-    input.entry.entryPoint === "execute"
-      ? crypto.randomUUID()
-      : taskRunHookToken(input.session.id, input.entry.taskId);
-  const run = await startWorkflowOnCurrentDeployment(workflowToolRunWorkflowReference, [
-    { ...input, hookToken },
-  ]);
-  return { hookToken, runId: run.runId };
+) => Promise<WorkflowToolRunAddress>;
+
+export function workflowToolRunHookToken(input: Omit<WorkflowToolRunInput, "hookToken">): string {
+  return input.entry.entryPoint === "execute"
+    ? crypto.randomUUID()
+    : taskRunHookToken(input.session.id, input.entry.taskId);
 }
 
-/**
- * A task's run takes the session's commands, including later calls to a
- * `serve` task, on a hook named for the task: at most one run can hold it, so
- * a retried start can never leave a second run taking the task's calls.
- */
 function taskRunHookToken(sessionId: string, taskId: string): string {
   return `eve:task:${sessionId}:${taskId}`;
 }
 
-/** Everything the session knows when it starts one workflow tool call's run. */
 export interface StartWorkflowTaskInput {
-  /** Captured for this call, as the context of the sessions opened for it. */
   readonly agentContext: AgentSessionContext;
-  /** The caller's auth the session admits the call with. */
   readonly auth: SessionAuth;
   readonly batchEvent: {
     readonly sequence: number;
@@ -58,22 +42,17 @@ export interface StartWorkflowTaskInput {
   };
   readonly owner: WorkflowToolRunOwner;
   readonly parentSession: SessionParent | undefined;
-  /**
-   * The call's run, when its batch already started it alongside the others.
-   * The dispatch records it in place of starting one.
-   */
   readonly prestarted?: PrestartedWorkflowToolRun;
   readonly session: HarnessSessionBase;
+  readonly startRun: StartWorkflowToolRun;
   readonly task: RuntimeWorkflowTaskRequest;
 }
 
-/** A call's run its batch started early, and the entry it was started with. */
 export interface PrestartedWorkflowToolRun {
   readonly entry: WorkflowToolRunEntry;
   readonly run: Promise<WorkflowToolRunAddress>;
 }
 
-/** Starts the run for one call, which invokes `entry`. */
 export async function startWorkflowToolCallRun(
   input: StartWorkflowTaskInput,
   entry: WorkflowToolRunEntry,
@@ -86,7 +65,7 @@ export async function startWorkflowToolCallRun(
     return await prestarted.run;
   }
   const { task, batchEvent, session } = input;
-  return await startWorkflowToolRun({
+  return await input.startRun({
     agentContext: input.agentContext,
     callId: task.callId,
     entry,
@@ -111,7 +90,6 @@ function isSameRunEntry(a: WorkflowToolRunEntry, b: WorkflowToolRunEntry): boole
   return a.entryPoint === b.entryPoint && a.taskId === b.taskId;
 }
 
-/** Starts the run of an `execute` call the turn waits on and records it on the owning session. */
 export async function startWorkflowTask(input: StartWorkflowTaskInput): Promise<{
   readonly result?: RuntimeToolResultActionResult;
   readonly session: HarnessSessionBase;
@@ -136,7 +114,6 @@ export async function startWorkflowTask(input: StartWorkflowTaskInput): Promise<
   }
 }
 
-/** The call's tool result when its run could not start. */
 export function startFailureResult(
   task: RuntimeWorkflowTaskRequest,
   error: unknown,

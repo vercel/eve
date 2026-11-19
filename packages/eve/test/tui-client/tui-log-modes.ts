@@ -9,13 +9,6 @@ import {
 
 import { theme } from "./lib/theme.ts";
 
-/**
- * End-to-end proof of the `--logs` modes. With capture forced on, unclassified
- * stdout, stderr, and sandbox lines are emitted while the TUI sits at its
- * prompt. They appear only at `all`; `error` and `none` keep them hidden.
- *
- * Needs no agent server and no model credentials.
- */
 const UNREACHABLE_HOST = "http://127.0.0.1:49216";
 const STDOUT_MARK = "STDOUT_LOG_MARK_7b3";
 const STDERR_MARK = "STDERR_LOG_MARK_9c1";
@@ -44,8 +37,6 @@ async function snapshotForMode(mode: "all" | "error" | "none"): Promise<string> 
 
   await screen.waitForIdlePrompt(5_000);
 
-  // Foreign writes are captured synchronously, so the snapshot reflects
-  // them immediately.
   process.stdout.write(`${STDOUT_MARK}\n`);
   process.stderr.write(`${STDERR_MARK}\n`);
   process.stdout.write(`eve: sandbox ${SANDBOX_MARK}\n`);

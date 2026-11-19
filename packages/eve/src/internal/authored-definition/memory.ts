@@ -3,7 +3,6 @@ import type { ModuleSourceRef } from "#shared/source-ref.js";
 import { expectObjectRecord, expectOnlyKnownKeys } from "#internal/authored-module.js";
 import { isMemoryDefinition } from "#shared/memory-definition.js";
 
-/** What a module that doesn't export a `defineMemory()` value reads. */
 export function memoryMismatch(source: Pick<ModuleSourceRef, "exportName" | "logicalPath">) {
   return `Expected the memory export "${source.exportName ?? "default"}" from "${source.logicalPath}" to be created with defineMemory().`;
 }

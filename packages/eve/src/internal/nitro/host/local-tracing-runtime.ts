@@ -4,7 +4,6 @@ import { installLocalInstrumentationRuntime } from "#tracing/local/instrumentati
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { DEVELOPMENT_WORKER_APP_ROOT_ENV } from "#internal/workflow/development-world-protocol.js";
 
-/** Captures a dev worker's traces locally when the agent has no authored instrumentation. */
 export function installLocalTracing(nitroApp: {
   readonly hooks: { hook(name: "close", handler: () => Promise<void>): unknown };
 }): void {

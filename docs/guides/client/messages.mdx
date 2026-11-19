@@ -44,8 +44,8 @@ A failed request returns `status: "failed"` with `error`; inspect `error.code` a
 An `awaiting-input` result is complete. Answering the prompt sends a new request with its own result.
 Results don't include an event log; capture `delivery.stream()` when you need one.
 
-`session.send()` retries `409 session_not_ready` with backoff for up to 20 seconds while the
-session starts. The caller's abort signal cancels the wait. Other errors, `session.respond()`,
+`session.send()` retries `409 session_not_ready` with backoff for up to 20 seconds. The caller's
+abort signal cancels the wait. Other errors, `session.respond()`,
 control methods, and raw HTTP requests are not retried.
 
 | Error                        | When                                                                                                                                |

@@ -26,7 +26,6 @@ function parseSearchLimit(value: string): number {
   return limit;
 }
 
-/** Registers registry installation, configuration, and discovery commands. */
 export function registerRegistryCommands(input: {
   program: Command;
   logger: RegistryCommandLogger;

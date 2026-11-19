@@ -6,26 +6,18 @@ const INDEX_DIRECTORY = "index/v1";
 const CONVERSATIONS_DIRECTORY = `${INDEX_DIRECTORY}/conversations`;
 const INDEXED_MARKER = `${INDEX_DIRECTORY}/indexed`;
 
-/** A path-safe, non-reversible key for one recorded conversation identifier. */
 function localTraceConversationIndexKey(conversationId: string): string {
   return createHash("sha256").update(conversationId).digest("hex");
 }
 
-/** Marker path relative to one trace directory. */
 export function localTraceConversationMarker(conversationId: string): string {
   return `${CONVERSATIONS_DIRECTORY}/${localTraceConversationIndexKey(conversationId)}`;
 }
 
-/** Marker proving that a trace was written by an index-aware writer. */
 export function localTraceIndexedMarker(): string {
   return INDEXED_MARKER;
 }
 
-/**
- * Records conversation membership without rewriting shared state. Empty marker
- * creation is idempotent, so overlapping dev workers cannot lose each other's
- * conversation entries.
- */
 export async function indexLocalTraceConversation(input: {
   readonly conversationId: string;
   readonly traceDirectory: string;

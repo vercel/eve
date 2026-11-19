@@ -1,6 +1,7 @@
 import type { Attributes } from "./types.js";
 import type { ContentSerializer } from "./types.js";
 
+/** MCP request details to record on the active span, such as the connection, method, session, and response status. */
 export interface McpUpdate {
   readonly connectionName?: string;
   readonly method?: string;
@@ -11,6 +12,7 @@ export interface McpUpdate {
   readonly statusCode?: string | number;
 }
 
+/** Records an MCP request's metadata, arguments, result, and error on its span, honoring the capture decision. */
 export interface McpLifecycle {
   update(input: McpUpdate): void;
   error(error?: unknown, type?: string): void;
@@ -18,6 +20,7 @@ export interface McpLifecycle {
   result(value: unknown): void;
 }
 
+/** Creates an {@link McpLifecycle} that writes MCP and GenAI attributes through `write`, recording arguments and results only when the capture allows inputs or outputs. */
 export function mcpLifecycle(input: {
   readonly write: (attributes: Attributes) => void;
   readonly error: (error?: unknown, type?: string) => void;

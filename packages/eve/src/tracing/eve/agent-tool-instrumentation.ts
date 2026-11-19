@@ -20,6 +20,7 @@ import type {
   AgentTraceStateStore,
 } from "#tracing/eve/agent-trace-state.js";
 import { withChannelAudience } from "#tracing/eve/channel-audience-context.js";
+import { connectionAuthorizationAttributes } from "#tracing/eve/connection-authorization.js";
 import { eveTurnIdentity } from "#tracing/eve/operation-input.js";
 import type {
   AgentRun,
@@ -36,7 +37,6 @@ export interface AgentToolContext {
 
 type ToolExecution = Extract<InstrumentationExecutionOperation, { type: "tool.call" }>;
 
-/** What the SDK reported about one tool run, kept until the dispatch or the step settles it. */
 interface Execution {
   readonly attemptId: string;
   readonly idempotencyKey: string;
@@ -52,7 +52,6 @@ interface Execution {
 
 const OPEN_EXECUTIONS = 10000;
 
-/** Finds an open tool call in its turn's trace tree, in this or a later process. */
 export async function resumeTool(
   tracing: AgentRun,
   state: AgentActionTraceState,
@@ -64,12 +63,6 @@ export async function resumeTool(
   return turn?.findTool(state.callId);
 }
 
-/**
- * One `execute_tool` span per call. eve's tool loop reports the durable
- * dispatch through `tool.call.*` events; the SDK reports the run through the
- * execution context. Both name the same call ID, so they share one span. A run
- * without a dispatch closes under its step when the step ends.
- */
 export function createAgentToolInstrumentation(input: {
   readonly tracing: AgentRun;
   readonly attemptFor: (scope: InstrumentationScope) => Promise<AttemptOperation | undefined>;
@@ -93,7 +86,6 @@ export function createAgentToolInstrumentation(input: {
     )?.[1];
   }
 
-  /** Reports the call again through its parent, so a later report refines the same span. */
   async function reenter(state: AgentActionTraceState, report: ToolInput) {
     const turn = await input.tracing.resume({
       identity: eveTurnIdentity(state),
@@ -104,7 +96,6 @@ export function createAgentToolInstrumentation(input: {
     return parent === undefined ? turn.findTool(state.callId) : parent.tool(report);
   }
 
-  /** A dispatched call takes the run's timing and failure; its own terminal ends the span. */
   async function settleExecution(execution: Execution, dispatched: AgentActionTraceState) {
     const terminal = execution.terminal;
     if (terminal === undefined) return;
@@ -167,7 +158,6 @@ export function createAgentToolInstrumentation(input: {
       const tool = await resumeTool(input.tracing, state);
       const failed = event.outcome !== "completed";
       await tool?.complete({
-        // Trace schema 4 still calls an interrupted call cancelled.
         outcome: event.outcome === "interrupted" ? "cancelled" : event.outcome,
         failed,
         errorType: failed ? event.errorCode : undefined,
@@ -235,13 +225,11 @@ export function createAgentToolInstrumentation(input: {
         for (const [key, state] of await input.stateStore.entries(kind))
           if (state.sessionId === sessionId) await input.stateStore.delete(kind, key);
     },
-    // A failed attempt closes its calls in the trace tree; only the locators remain.
     async forgetAttempt(scope: InstrumentationScope) {
       for (const [key, state] of await input.stateStore.entries("action"))
         if (state.attemptId === attemptIdempotencyKey(scope))
           await input.stateStore.delete("action", key);
     },
-    /** Closes SDK runs that no dispatch claimed before their step ended. */
     async drain(attemptId: string, failure?: { readonly error: unknown }) {
       for (const [key, execution] of executions) {
         if (execution.attemptId !== attemptId) continue;
@@ -262,7 +250,6 @@ export function createAgentToolInstrumentation(input: {
         });
       }
     },
-    /** Runs the SDK's tool call inside its span, or calls `fallback` when it has none. */
     async runInContext<T>(
       operation: ToolExecution,
       execute: () => PromiseLike<T>,
@@ -288,6 +275,8 @@ export function createAgentToolInstrumentation(input: {
         });
         return result;
       } catch (error) {
+        const authorization = connectionAuthorizationAttributes(error);
+        if (authorization !== undefined) execution.tool.attributes(authorization);
         await finishExecution(execution, {
           completedAtMs: Date.now(),
           failed: true,

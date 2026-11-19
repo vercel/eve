@@ -19,11 +19,18 @@ export const ASK_QUESTION_TOOL_DESCRIPTION = [
   '- If the status is "unavailable", no one can answer in this session; continue with your best judgment and state the assumption you made.',
 ].join("\n");
 
+/**
+ * Input to the `ask_question` tool: the question and, for a decision, the options to choose from.
+ */
 export interface AskQuestionInput {
   options?: { description: string; label: string }[];
   question: string;
 }
 
+/**
+ * Result of the `ask_question` tool: the answer, an interruption when a new message arrived first,
+ * or `unavailable` when no one can answer in the session.
+ */
 export type AskQuestionOutput =
   | { answer: string; status: "answered" }
   | InterruptedOutput
@@ -69,7 +76,6 @@ export const ASK_QUESTION_INPUT_SCHEMA = defineJsonSchema<AskQuestionInput>(
     required: ["question"],
     additionalProperties: false,
   },
-  // Labels double as option ids, so duplicates would make answers ambiguous.
   (input) =>
     input.options !== undefined &&
     new Set(input.options.map((option) => option.label)).size !== input.options.length

@@ -23,7 +23,6 @@ import { inProjectSetupState, prompterSink } from "./in-project.js";
 import { runInstallVercelCliFlow } from "./install-vercel-cli.js";
 import { runLoginFlow } from "./login.js";
 
-/** Injected for tests; defaults to the real detection and box effects. */
 export interface DeployFlowDeps {
   detectDeployment: typeof detectDeployment;
   inspectApplication: typeof inspectApplication;
@@ -38,23 +37,17 @@ export type DeployFlowResult =
   | { kind: "deployed"; productionUrl?: string }
   | { kind: "cancelled" }
   | { kind: "local-model" }
-  /** Unlinked directory in a non-interactive run: refused before any effect. */
   | { kind: "needs-link" };
 
 function productionUrlOf(project: ProjectResolution): string | undefined {
   return project.kind === "deployed" ? project.productionUrl : undefined;
 }
 
-/**
- * Interactive deployment prepares CLI access before linking or deploying.
- * Noninteractive deployment never installs tools or starts browser login.
- */
 export async function runDeployFlow(input: {
   appRoot: string;
   prompter: Prompter;
   signal?: AbortSignal;
   traceSampling?: boolean;
-  /** False when no TTY: an unlinked directory refuses instead of prompting. */
   interactive: boolean;
   deps?: Partial<DeployFlowDeps>;
 }): Promise<DeployFlowResult> {
@@ -73,9 +66,7 @@ export async function runDeployFlow(input: {
     if (isChatGptModelRouting(routing)) {
       return { kind: "local-model" };
     }
-  } catch {
-    // Existing deploy behavior remains authoritative when the app has not compiled yet.
-  }
+  } catch {}
 
   const project = await withSpinner(prompter, "Checking the current Vercel link...", async () => {
     const deployment = await deps.detectDeployment(appRoot, { signal });

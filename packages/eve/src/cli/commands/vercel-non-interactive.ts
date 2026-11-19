@@ -36,11 +36,6 @@ export function isNonInteractiveProjectCommand(options: VercelProjectCliOptions)
   return options.nonInteractive === true;
 }
 
-/**
- * Links a named Vercel project and refreshes its local environment without a
- * prompt. Callers validate `appRoot` first, since a workspace root is not an
- * eve project by itself.
- */
 export async function runNonInteractiveLink(input: {
   logger: VercelNonInteractiveLogger;
   appRoot: string;
@@ -65,9 +60,7 @@ export async function runNonInteractiveLink(input: {
           await dependencies.resolveTeam(appRoot, options.team),
           options.project,
         )) !== null;
-    } catch {
-      // An uncertain project identity must not turn on billable sampling.
-    }
+    } catch {}
   }
   const args = [
     "link",

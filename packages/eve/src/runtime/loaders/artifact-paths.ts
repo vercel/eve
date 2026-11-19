@@ -1,6 +1,3 @@
-/**
- * Runtime-owned compiled artifact paths for one application root.
- */
 interface RuntimeCompilerArtifactPaths {
   readonly appRoot: string;
   readonly compiledManifestPath: string;
@@ -14,10 +11,6 @@ interface RuntimeCompilerArtifactPaths {
   readonly sandboxPreparedArtifactsPath: string;
 }
 
-/**
- * Resolves the stable eve artifact paths for one application root without
- * depending on Node path helpers.
- */
 export function resolveRuntimeCompilerArtifactPaths(appRoot: string): RuntimeCompilerArtifactPaths {
   const normalizedAppRoot = normalizeFilesystemPath(appRoot);
   const discoveryDirectoryPath = `${normalizedAppRoot}/.eve/discovery`;

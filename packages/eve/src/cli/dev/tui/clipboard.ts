@@ -1,14 +1,5 @@
-/**
- * Best-effort clipboard writes for the dev TUI: an OSC 52 escape sequence
- * (which reaches the user's terminal even over SSH, with tmux/screen
- * passthrough) plus the platform's native clipboard command as a fallback
- * for terminals that reject OSC 52. Both paths fail silently — copying is
- * a convenience, never a hard dependency.
- */
-
 import { spawn } from "node:child_process";
 
-/** The OSC 52 sequence for `text`, wrapped for tmux/screen when present. */
 export function clipboardSequence(
   text: string,
   env: Readonly<Record<string, string | undefined>> = process.env,
@@ -18,7 +9,6 @@ export function clipboardSequence(
   return multiplexed ? `\x1bPtmux;\x1b${sequence}\x1b\\` : sequence;
 }
 
-/** The native clipboard command for a platform, or `undefined` when unknown. */
 export function clipboardCommand(
   platform: NodeJS.Platform,
   env: Readonly<Record<string, string | undefined>> = process.env,
@@ -31,11 +21,6 @@ export function clipboardCommand(
   return undefined;
 }
 
-/**
- * Copies `text` to the clipboard: emits OSC 52 through `writeTerminal`
- * (the same raw write the alt screen paints with) and pipes the text into
- * the platform clipboard command in the background.
- */
 export function copyTextToClipboard(text: string, writeTerminal: (chunk: string) => void): void {
   writeTerminal(clipboardSequence(text));
   const command = clipboardCommand(process.platform);
@@ -48,7 +33,5 @@ export function copyTextToClipboard(text: string, writeTerminal: (chunk: string)
     child.on("error", () => {});
     child.stdin?.on("error", () => {});
     child.stdin?.end(text);
-  } catch {
-    // Native clipboard is a fallback; OSC 52 already went out.
-  }
+  } catch {}
 }

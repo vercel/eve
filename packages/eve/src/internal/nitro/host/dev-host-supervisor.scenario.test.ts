@@ -1,5 +1,6 @@
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
+import { request as httpRequest } from "node:http";
 import { connect } from "node:net";
 import { join } from "node:path";
 
@@ -15,16 +16,12 @@ import { type DevHost, DevHostSupervisor } from "#internal/nitro/host/dev-host-s
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { createDevelopmentWorkflowWorld } from "#internal/workflow/development-world-client.js";
 import { createParentDevelopmentWorkflowWorld } from "#internal/workflow/development-world-server.js";
-import {
-  DEVELOPMENT_WORKER_APP_ROOT_ENV,
-  DEVELOPMENT_WORKFLOW_SECRET_ENV,
-} from "#internal/workflow/development-world-protocol.js";
+import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/application/dev-transport.js";
+import { DEVELOPMENT_WORKER_APP_ROOT_ENV } from "#internal/workflow/development-world-protocol.js";
 
 const ADDRESS = DEVELOPMENT_CLIENT_ADDRESS_HEADER;
 const SIGNATURE = DEVELOPMENT_CLIENT_ADDRESS_SIGNATURE_HEADER;
 
-// A worker entry in the shape Nitro's dev build emits. `workerData` picks the
-// behavior per host; file gates let a test step a worker without timers.
 const WORKER_SOURCE = `
 import { existsSync } from "node:fs";
 import { appendFile } from "node:fs/promises";
@@ -61,6 +58,11 @@ export default {
         return new Response("crashing");
       case "/fail-stream":
         return new Response(heldStream(gate, true));
+      case "/event-stream":
+        // The MCP SDK sends this header on its SSE responses.
+        return new Response("data: ok\\n\\n", {
+          headers: { connection: "keep-alive", "content-type": "text/event-stream" },
+        });
       case "/headers":
         return Response.json({
           address: request.headers.get(${JSON.stringify(ADDRESS)}),
@@ -124,7 +126,6 @@ async function startSupervisor() {
     }),
     listener,
     logs,
-    /** A file path whose creation releases whatever waits on it. */
     path: (name: string) => join(root, name),
     supervisor,
     url,
@@ -146,6 +147,21 @@ async function readToEnd(reader: ReadableStreamDefaultReader<Uint8Array>): Promi
   }
 }
 
+async function postClosingConnection(target: URL): Promise<number> {
+  const { promise, reject, resolve } = Promise.withResolvers<number>();
+  const request = httpRequest(
+    target,
+    { agent: false, headers: { connection: "close" }, method: "POST" },
+    (response) => {
+      response.resume();
+      response.once("end", () => resolve(response.statusCode ?? 0));
+    },
+  );
+  request.once("error", reject);
+  request.end("{}");
+  return await promise;
+}
+
 describe("dev host supervisor", () => {
   it("swaps only to a ready worker and keeps the previous one serving when a candidate fails", async () => {
     const { host, supervisor, whoami } = await startSupervisor();
@@ -157,14 +173,12 @@ describe("dev host supervisor", () => {
       "candidate failed to boot",
     );
 
-    // The candidate's host never served, so its workspace is gone already.
     expect(disposeFailed).toHaveBeenCalledOnce();
     await expect(whoami()).resolves.toEqual(before);
   });
 
   it("holds a request that arrives before any worker until one is active", async () => {
     const { host, supervisor, url } = await startSupervisor();
-    // Control routes run just before a request waits for a worker.
     const admitted = Promise.withResolvers<void>();
     supervisor.setControlHandler(async () => {
       admitted.resolve();
@@ -304,7 +318,6 @@ describe("dev host supervisor", () => {
     supervisor.prepareSpare();
     await supervisor.recycle();
     expect((await whoami()).id).not.toBe(recycled.id);
-    // The recycle took the spare instead of booting a worker of its own.
     await expect(boots()).resolves.toBe(3);
     expect(disposeFirst).not.toHaveBeenCalled();
 
@@ -326,7 +339,6 @@ describe("dev host supervisor", () => {
     supervisor.prepareSpare();
     await vi.waitFor(async () => expect(await lines(bootLog)).toHaveLength(2));
 
-    // A new host retires the active worker and discards the old host's spare.
     await supervisor.swapTo(host());
     const booted = await lines(bootLog);
     await vi.waitFor(async () => expect((await lines(closeMarker)).sort()).toEqual(booted.sort()));
@@ -343,8 +355,6 @@ describe("dev host supervisor", () => {
     await vi.waitFor(() => expect(logs).toContain("[eve:dev] dev worker exited; restarting."));
     await open(bootGate);
     await second;
-    // Queued behind the restart, so the restart has run once this settles; a
-    // restart that swapped retired code back in would recycle to it.
     await supervisor.recycle();
 
     await expect(whoami()).resolves.toMatchObject({ label: "second" });
@@ -369,12 +379,10 @@ describe("dev host supervisor", () => {
     const bootGate = context.path("boot-gate");
     await open(bootGate);
     await context.supervisor.swapTo(context.host({ bootGate }));
-    // Workers booted from here on wait forever.
     await rm(bootGate);
 
     const pending = begin(context);
     pending.catch(() => undefined);
-    // Let the swap start waiting on its booting worker.
     await new Promise((resolve) => setImmediate(resolve));
     const startedAt = performance.now();
     await context.supervisor.close();
@@ -406,9 +414,19 @@ describe("dev host supervisor", () => {
     await reader.read();
 
     await open(failGate);
-    // A truncated stream must reach the client as a failure, never as a
-    // cleanly terminated response.
     await expect(readToEnd(reader)).rejects.toThrow();
+  });
+
+  it("serves every request from a client that closes its connection, even when the worker answers keep-alive", async () => {
+    const { host, supervisor, url } = await startSupervisor();
+    await supervisor.swapTo(host());
+
+    const statuses: number[] = [];
+    for (let attempt = 0; attempt < 4; attempt++) {
+      statuses.push(await postClosingConnection(url("/event-stream")));
+    }
+
+    expect(statuses).toEqual([200, 200, 200, 200]);
   });
 
   it("stamps a signed client address on requests and strips forged copies", async () => {

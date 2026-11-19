@@ -8,7 +8,6 @@ import { buildDevelopmentHostCandidate } from "#internal/nitro/host/dev-host-can
 import { prepareDevelopmentApplicationHost } from "#internal/nitro/host/prepare-application-host.js";
 import type { PreparedDevelopmentApplicationHost } from "#internal/nitro/host/types.js";
 
-/** Compiles the agent and stages a candidate generation in its own host workspace. */
 export async function prepareDevelopmentBuild(
   input: DevelopmentPrepareInput,
 ): Promise<PreparedDevelopmentApplicationHost> {
@@ -20,7 +19,6 @@ export async function prepareDevelopmentBuild(
   });
 }
 
-/** Builds the Nitro host for a prepared candidate and returns its worker entry. */
 export async function buildDevelopmentHost(
   host: PreparedDevelopmentApplicationHost,
 ): Promise<DevelopmentHostBuild> {

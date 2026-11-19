@@ -5,7 +5,6 @@ import {
 import { resolveInstalledPackageInfo, resolvePackageRoot } from "#internal/application/package.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 
-/** The small descriptor used for extensions shipped inside eve. */
 export interface BundledExtensionDescriptor {
   readonly entryPath: string;
   readonly importSpecifier: string;
@@ -26,7 +25,6 @@ export interface BundledExtensionMount {
   readonly specifier: string;
 }
 
-/** Adapts one bundled descriptor to the virtual extension mount consumed by discovery. */
 export function createBundledExtensionMount(
   descriptor: BundledExtensionDescriptor,
 ): BundledExtensionMount {

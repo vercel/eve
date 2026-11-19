@@ -12,15 +12,9 @@ import { SESSION_PROJECTION_STATE_KEY } from "#harness/session-machine/view.js";
 import { turnPosition, type TurnPosition } from "#harness/session-machine/view.js";
 import { initialSessionProjection, type SessionProjection } from "#protocol/session-projection.js";
 
-/**
- * Stands in for the publish sink in tests that drive the harness with their own `handleEvent`:
- * folds each event, or each publication as one line as the sink does, into the session projection,
- * which survives the fresh context each step gets.
- */
 export function createProjectionRecorder(initial = initialSessionProjection()) {
   let projection: SessionProjection = initial;
   const recorder = {
-    /** Call from the harness's `handleEvent`. */
     record(publication: SessionEvent | readonly SessionEvent[]): void {
       const ctx = contextStorage.getStore();
       const published = (
@@ -33,10 +27,6 @@ export function createProjectionRecorder(initial = initialSessionProjection()) {
         if (ctx !== undefined) recordPublishedLine(ctx, line, nextLinePosition(ctx), events);
       }
     },
-    /**
-     * Admits the deliveries a step's input names, as the session's inbox does before the step
-     * runs. Returns the input, to wrap a step call.
-     */
     admit<T>(input: T): T {
       const ids = new Set<string>();
       const walk = (value: unknown): void => {
@@ -57,7 +47,6 @@ export function createProjectionRecorder(initial = initialSessionProjection()) {
         );
       return input;
     },
-    /** Seeds a step's context with the projection so far. */
     enter(ctx: ContextContainer): ContextContainer {
       enterSessionProjection(ctx, { [SESSION_PROJECTION_STATE_KEY]: projection });
       return ctx;

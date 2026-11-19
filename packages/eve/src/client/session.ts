@@ -12,7 +12,15 @@ import { ClientError, createClientError } from "#client/client-error.js";
 import { messageForRequest } from "#client/file-parts.js";
 import { StreamDelivery, type ClientSendReceipt, type Delivery } from "#client/delivery.js";
 import { SessionNotActiveError } from "#channel/session-not-active-error.js";
-import { followStreamIterable, sleep, type FollowedEvent } from "#client/open-stream.js";
+import {
+  DEFAULT_STREAM_RECONNECT_POLICY,
+  followStreamIterable,
+  openStreamBody,
+  sleep,
+  type FollowedEvent,
+  type OpenedStream,
+  type PendingStream,
+} from "#client/open-stream.js";
 import { prewarmClientSession, sendClientControl } from "#client/session-controls.js";
 import type { PrewarmSessionResult } from "#protocol/prewarm-session.js";
 import { serializeOutputSchema } from "#tools/schema.js";
@@ -34,9 +42,12 @@ const SESSION_SEND_RETRY_BASE_DELAY_MS = 250;
 const SESSION_SEND_RETRY_MAX_DELAY_MS = 2_000;
 const SESSION_SEND_READY_TIMEOUT_MS = 20_000;
 const followSession = Symbol("followClientSession");
+const sendFollowed = Symbol("sendFollowedClientSession");
+const SEND_STREAM_HOLD_MS = 10_000;
 
 interface FollowSessionOptions extends SessionStreamOptions {
   readonly headers?: Readonly<Record<string, string>>;
+  readonly opened?: PendingStream;
   readonly onCaughtUp?: () => void;
   readonly resolveReconnectPolicy?: () => SessionStreamOptions["reconnect"];
   readonly resolveHeaders?: () => Readonly<Record<string, string>> | undefined;
@@ -76,7 +87,14 @@ export class ClientSession {
     const receipt = { deliveryId, startedAt, notReadyMs: 0, acceptedAt };
 
     return {
-      delivery: session.#messageResponse<TOutput>(response, input, 0, deliveryId, receipt),
+      delivery: session.#messageResponse<TOutput>(
+        response,
+        input,
+        0,
+        deliveryId,
+        receipt,
+        NO_EARLY_STREAM,
+      ),
       session,
     };
   }
@@ -125,7 +143,7 @@ export class ClientSession {
     message: SendTurnInput<TOutput>["message"],
     options: SendTurnOptions<TOutput> = {},
   ): Promise<Delivery<TOutput>> {
-    return await this.#send({ ...options, message }, true);
+    return await this.#send({ ...options, message }, true, true);
   }
 
   /** Answers pending input requests on this exact session ID. */
@@ -136,40 +154,81 @@ export class ClientSession {
     if (answers.length === 0) {
       throw new Error("ClientSession.respond() requires at least one answer.");
     }
-    return await this.#send({ ...options, answers }, false);
+    return await this.#send({ ...options, answers }, false, true);
+  }
+
+  async [sendFollowed]<TOutput = unknown>(
+    input: SendTurnPayload<TOutput>,
+  ): Promise<Delivery<TOutput>> {
+    if (input.answers !== undefined && input.answers.length === 0) {
+      throw new Error("ClientSession.respond() requires at least one answer.");
+    }
+    return await this.#send(input, input.answers === undefined, false);
   }
 
   async #send<TOutput = unknown>(
     input: SendTurnPayload<TOutput>,
     retrySessionNotReady: boolean,
+    opensStream: boolean,
   ): Promise<Delivery<TOutput>> {
     const initialStreamIndex = this.#state.streamIndex;
     const path = createEveSessionRoutePath(this.#state.sessionId);
-    const { response, timing } = await postSessionSend(
-      this.#context,
-      path,
+    let early: EarlyStream = NO_EARLY_STREAM;
+    let response: Response;
+    let timing: Omit<ClientSendReceipt, "deliveryId">;
+    let deliveryId: string | undefined;
+    try {
+      ({ response, timing } = await postSessionSend(
+        this.#context,
+        path,
+        input,
+        retrySessionNotReady,
+        this.#state.inbox,
+        opensStream
+          ? () => {
+              early.release();
+              early = this.#openEarlyStream(initialStreamIndex, input);
+            }
+          : undefined,
+      ));
+      const accepted = await readAcceptedMessage(response, this.#state.sessionId);
+      if (accepted.sessionId !== this.#state.sessionId) {
+        throw new Error("Message route returned a different session id.");
+      }
+      this.#state = { ...this.#state, inbox: accepted.inbox };
+      deliveryId = accepted.deliveryId;
+      if (deliveryId === undefined) {
+        throw new Error(
+          "Message route did not return a delivery id. Update the server before sending with this client.",
+        );
+      }
+    } catch (error) {
+      early.release();
+      throw error;
+    }
+    early.releaseAfter(SEND_STREAM_HOLD_MS);
+    return this.#messageResponse<TOutput>(
+      response,
       input,
-      retrySessionNotReady,
-      this.#state.inbox,
+      initialStreamIndex,
+      deliveryId,
+      { ...timing, deliveryId },
+      early,
     );
-    const {
-      sessionId: responseSessionId,
-      deliveryId,
-      inbox,
-    } = await readAcceptedMessage(response, this.#state.sessionId);
-    if (responseSessionId !== this.#state.sessionId) {
-      throw new Error("Message route returned a different session id.");
-    }
-    this.#state = { ...this.#state, inbox };
-    if (deliveryId === undefined) {
-      throw new Error(
-        "Message route did not return a delivery id. Update the server before sending with this client.",
-      );
-    }
-    return this.#messageResponse<TOutput>(response, input, initialStreamIndex, deliveryId, {
-      ...timing,
-      deliveryId,
-    });
+  }
+
+  #openEarlyStream(startIndex: number, input: SendTurnOptions): EarlyStream {
+    return earlyStream((signal) =>
+      openStreamBody({
+        baseUrl: this.#context.baseUrl,
+        path: createEveSessionStreamRoutePath(this.#state.sessionId),
+        redirect: this.#context.redirect,
+        resolveHeaders: () => this.#context.resolveHeaders(input.headers),
+        retryPolicy: { ...DEFAULT_STREAM_RECONNECT_POLICY, maxAttempts: 1 },
+        signal,
+        startIndex,
+      }),
+    );
   }
 
   /** Requests preparation of an existing idle session; never starts a model turn. */
@@ -259,12 +318,19 @@ export class ClientSession {
     initialStreamIndex: number,
     deliveryId: string | undefined,
     receipt: ClientSendReceipt,
+    early: EarlyStream,
   ): Delivery<TOutput> {
     response.body?.cancel().catch(() => {});
     if (deliveryId === undefined) throw new Error("Message route did not return a delivery id.");
     return new StreamDelivery<TOutput>({
       createStream: (read) =>
-        this.#createEventStream(initialStreamIndex, { ...input, signal: read?.signal }, deliveryId),
+        this.#createEventStream(
+          initialStreamIndex,
+          { ...input, signal: read?.signal },
+          deliveryId,
+          true,
+          early.take(),
+        ),
       deliveryId,
       receipt,
       sessionId: this.#state.sessionId,
@@ -276,11 +342,13 @@ export class ClientSession {
     input: SendTurnOptions,
     deliveryId: string,
     follow = true,
+    opened?: PendingStream,
   ): AsyncGenerator<SessionStreamEvent> {
     return deliveryEvents(
       this.#streamAndAdvance({
         follow,
         headers: input.headers,
+        opened,
         signal: input.signal,
         startIndex: initialStreamIndex,
         reconnect: input.reconnect,
@@ -295,6 +363,7 @@ export class ClientSession {
     for await (const { cursor, event } of this.#readStream({
       follow: options?.follow,
       headers: options?.headers,
+      opened: options?.opened,
       onCaughtUp: options?.onCaughtUp,
       resolveHeaders: options?.resolveHeaders,
       resolveReconnectPolicy: options?.resolveReconnectPolicy,
@@ -316,6 +385,7 @@ export class ClientSession {
 
   #readStream(input: {
     readonly onCaughtUp?: () => void;
+    readonly opened?: PendingStream;
     readonly resolveReconnectPolicy?: () => SessionStreamOptions["reconnect"];
     readonly follow?: boolean;
     readonly headers?: Readonly<Record<string, string>>;
@@ -326,6 +396,7 @@ export class ClientSession {
   }): AsyncIterable<FollowedEvent> {
     return followStreamIterable({
       onCaughtUp: input.onCaughtUp,
+      opened: input.opened,
       follow: input.follow,
       baseUrl: this.#context.baseUrl,
       resolveHeaders: () => this.#context.resolveHeaders(input.resolveHeaders?.() ?? input.headers),
@@ -339,7 +410,14 @@ export class ClientSession {
   }
 }
 
-/** @internal Follow continuously while the frontend owns the session. */
+export function sendFollowedClientSession<TOutput = unknown>(
+  session: ClientSession,
+  input: SendTurnPayload<TOutput>,
+): Promise<Delivery<TOutput>> {
+  return session[sendFollowed](input);
+}
+
+/** @internal */
 export function followClientSession(
   session: ClientSession,
   options: FollowSessionOptions,
@@ -353,6 +431,7 @@ async function postSessionSend(
   input: SendTurnPayload,
   retrySessionNotReady: boolean,
   inbox?: string,
+  onSent?: () => void,
 ): Promise<{
   readonly response: Response;
   readonly timing: Omit<ClientSendReceipt, "deliveryId">;
@@ -363,7 +442,8 @@ async function postSessionSend(
   for (;;) {
     const attemptAt = Date.now();
     try {
-      const response = await postTurn(context, path, input, false, undefined, inbox);
+      const response = await postTurn(context, path, input, false, undefined, inbox, onSent);
+      onSent = undefined;
       const timing = { startedAt, notReadyMs: attemptAt - startedAt, acceptedAt: Date.now() };
       return { response, timing };
     } catch (error) {
@@ -410,6 +490,7 @@ async function postTurn(
   requireMessage: boolean,
   stubs?: CreateSessionOptions["stubs"],
   inbox?: string,
+  onSent?: () => void,
 ): Promise<Response> {
   const body = createMessageBody(input, requireMessage);
   if (body === null) {
@@ -424,13 +505,15 @@ async function postTurn(
 
   const headers = await context.resolveHeaders(input.headers);
   headers.set("content-type", "application/json");
-  const response = await fetch(createClientUrl(context.baseUrl, path), {
+  const sent = fetch(createClientUrl(context.baseUrl, path), {
     body: JSON.stringify(body),
     headers,
     method: "POST",
     redirect: context.redirect,
     signal: input.signal ?? null,
   });
+  onSent?.();
+  const response = await sent;
   if (!response.ok) {
     const responseBody = await response.text();
     throw createClientError(response.status, responseBody, response.headers);
@@ -481,4 +564,41 @@ function createMessageBody(
   if (requireMessage && body.message === undefined) return null;
   if (body.message === undefined && body.answers === undefined) return null;
   return body;
+}
+
+interface EarlyStream {
+  take(): PendingStream | undefined;
+  release(): void;
+  releaseAfter(ms: number): void;
+}
+
+const NO_EARLY_STREAM: EarlyStream = { take: () => undefined, release() {}, releaseAfter() {} };
+
+function earlyStream(open: (signal: AbortSignal) => Promise<OpenedStream>): EarlyStream {
+  const controller = new AbortController();
+  const opened = open(controller.signal).catch(() => undefined);
+  let pending: PendingStream | undefined = {
+    opened,
+    cancel() {
+      controller.abort();
+      void opened.then((unused) => unused?.close());
+    },
+  };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const take = () => {
+    const taken = pending;
+    pending = undefined;
+    clearTimeout(timer);
+    return taken;
+  };
+  const release = () => take()?.cancel();
+  return {
+    take,
+    release,
+    releaseAfter(ms) {
+      if (pending === undefined) return;
+      timer = setTimeout(release, ms);
+      (timer as { unref?: () => void }).unref?.();
+    },
+  };
 }

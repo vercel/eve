@@ -43,11 +43,8 @@ export interface SelfModificationSetupOperations {
   detectChannelNames(): Promise<readonly string[]>;
   detectGitRepository(): Promise<DetectedGitRepository>;
   findOrCreateConnector(name: string, project: VercelProjectReference): Promise<string>;
-  /** Reads the deployed mount at {@link DEPLOYED_SELF_MODIFICATION_CONFIG_PATH}. */
   readConfig(): Promise<string | undefined>;
-  /** Reads the local mount at {@link SELF_MODIFICATION_CONFIG_PATH}. */
   readLocalConfig(): Promise<string | undefined>;
-  /** Writes the deployed mount at {@link DEPLOYED_SELF_MODIFICATION_CONFIG_PATH}. */
   writeConfig(source: string): Promise<void>;
 }
 
@@ -134,7 +131,6 @@ ${switchCases}      default:
   return `${GENERATED_MARKER} digest:${createHash("sha256").update(body).digest("hex")}\n${body}`;
 }
 
-/** Distinguishes resumable generated source from authored source without evaluating it. */
 export function classifySelfModificationConfig(
   source: string | undefined,
 ): "missing" | "local" | "generated" | "authored" {

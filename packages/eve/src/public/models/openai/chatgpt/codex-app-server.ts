@@ -63,7 +63,6 @@ export interface CodexAppServerOptions {
   readonly spawnProcess?: SpawnCodexAppServer;
 }
 
-/** Raised only when the `codex` executable cannot be found. */
 export class CodexBinaryNotFoundError extends Error {
   constructor(cause?: unknown) {
     super("The `codex` CLI was not found.", { cause });
@@ -71,7 +70,6 @@ export class CodexBinaryNotFoundError extends Error {
   }
 }
 
-/** Minimal authenticated subset of Codex's JSONL app-server protocol. */
 export class CodexAppServerClient implements CodexAppServer {
   readonly #command: string;
   readonly #env: NodeJS.ProcessEnv | undefined;

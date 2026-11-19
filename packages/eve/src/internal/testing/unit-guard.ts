@@ -1,9 +1,5 @@
 import { vi } from "vitest";
 
-/**
- * Vitest setup that makes unit-tier boundary violations fail loudly.
- */
-
 const INTEGRATION_GUIDANCE =
   "Move this test to `src/**/*.integration.test.ts` or `test/scenarios/*.scenario.test.ts`.";
 
@@ -22,11 +18,6 @@ function createThrowingFn(operation: string): (...args: unknown[]) => never {
 function createAsyncThrowingFn(operation: string): (...args: unknown[]) => Promise<never> {
   return () => Promise.reject(createUnitGuardError(operation));
 }
-
-// ---------------------------------------------------------------------------
-// Filesystem writes — intercept via vi.mock so the module namespace replacement
-// applies to every file that imports these modules in this worker.
-// ---------------------------------------------------------------------------
 
 const FORBIDDEN_FS_PROMISES_OPERATIONS = [
   "appendFile",
@@ -79,10 +70,6 @@ vi.mock("node:fs", async (importOriginal) => {
   return patched;
 });
 
-// ---------------------------------------------------------------------------
-// Subprocesses
-// ---------------------------------------------------------------------------
-
 const FORBIDDEN_CHILD_PROCESS_OPERATIONS = [
   "exec",
   "execFile",
@@ -104,23 +91,10 @@ vi.mock("node:child_process", async (importOriginal) => {
   return patched;
 });
 
-// ---------------------------------------------------------------------------
-// process.chdir
-// ---------------------------------------------------------------------------
-
 process.chdir = ((..._args: unknown[]): void => {
   throw createUnitGuardError("process.chdir");
 }) as typeof process.chdir;
 
-// ---------------------------------------------------------------------------
-// Real network `fetch`
-// ---------------------------------------------------------------------------
-
-/**
- * Rejects any `fetch` call that reaches the guard. Downstream setup files
- * such as `test/setup/mock-ai-gateway.ts` may install their own wrapper that
- * intercepts specific URLs before falling through to this guard.
- */
 globalThis.fetch = ((input: Parameters<typeof fetch>[0]) => {
   const url = resolveFetchUrl(input);
 

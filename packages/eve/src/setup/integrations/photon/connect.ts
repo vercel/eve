@@ -13,27 +13,22 @@ const PHOTON_CONNECT_SERVICE = "photon";
 const PHOTON_CONNECTOR_TYPE = "photon";
 const PHOTON_TRIGGER_PATH = "/eve/v1/photon";
 
-/** Photon project credentials collected separately from their Connect storage encoding. */
 interface PhotonProjectCredentials {
   projectId: string;
   projectSecret: string;
 }
 
-/** Identity of a native Photon connector created through Vercel Connect. */
 interface PhotonConnectorRef {
   id: string;
   uid: string;
-  /** Direct project URL used until Photon is available as a managed trigger connector. */
   webhookUrl?: string;
 }
 
-/** Effects used to provision a Photon connector. */
 interface ProvisionPhotonConnectorDeps {
   runVercel: typeof runVercel;
   runVercelCaptureStdout: typeof runVercelCaptureStdout;
 }
 
-/** Input for provisioning one Photon connector and its eve webhook destination. */
 interface ProvisionPhotonConnectorOptions {
   credentials: PhotonProjectCredentials;
   log: ChannelSetupLog;
@@ -50,7 +45,6 @@ const PhotonConnectorRefSchema = z.object({
   supportedSubjectTypes: z.array(z.string()).refine((types) => types.includes("app")),
 });
 
-/** Parses `vercel connect create -F json` output for a Photon connector. */
 export function parseCreatedPhotonConnector(stdout: string): PhotonConnectorRef | undefined {
   try {
     const parsed = PhotonConnectorRefSchema.safeParse(JSON.parse(stdout));
@@ -83,10 +77,6 @@ function requireCreatedConnector(result: RunVercelCaptureResult): PhotonConnecto
   return connector;
 }
 
-/**
- * Creates a native Photon connector and attaches its verified webhook trigger
- * to the linked project. Secrets travel over stdin, never argv.
- */
 export async function provisionPhotonConnector(
   options: ProvisionPhotonConnectorOptions,
 ): Promise<PhotonConnectorRef> {
@@ -122,8 +112,6 @@ export async function provisionPhotonConnector(
   options.signal?.throwIfAborted();
   const connector = requireCreatedConnector(result);
 
-  // Creation can auto-attach the cwd's linked project with a pathless default
-  // destination. Replace it so Connect has exactly one routed destination.
   const attachment = await withPhase(options.log, "Connecting Photon credentials...", () =>
     replaceConnectTrigger({
       connectorUid: connector.uid,

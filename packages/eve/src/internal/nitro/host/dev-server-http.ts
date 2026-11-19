@@ -3,11 +3,26 @@ import { Readable } from "node:stream";
 
 import { toErrorMessage } from "#shared/errors.js";
 
+const HOP_BY_HOP_HEADERS = new Set([
+  "connection",
+  "keep-alive",
+  "proxy-connection",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+]);
+
 export function createPublicRequest(request: IncomingMessage, signal: AbortSignal): Request {
   const authority = request.headers.host ?? "localhost";
   const url = new URL(request.url ?? "/", `http://${authority}`);
+  const hopByHop = new Set(HOP_BY_HOP_HEADERS);
+  for (const token of request.headers.connection?.split(",") ?? []) {
+    hopByHop.add(token.trim().toLowerCase());
+  }
   const headers = new Headers();
   for (const [name, value] of Object.entries(request.headers)) {
+    if (hopByHop.has(name)) continue;
     if (Array.isArray(value)) {
       for (const item of value) {
         headers.append(name, item);
@@ -59,9 +74,6 @@ export async function writeResponse(
     return;
   }
 
-  // Flush the headers now so the client can obtain / cancel the response body
-  // avoiding, the accumulation of listeners if the stream has a long delay
-  // before first byte
   response.flushHeaders();
   const body = Readable.fromWeb(webResponse.body as import("node:stream/web").ReadableStream);
   const cancelBody = () => body.destroy(signal.reason as Error | undefined);
@@ -89,9 +101,6 @@ export async function writeResponse(
 
 export function writeRequestError(response: ServerResponse, error: unknown): void {
   if (response.headersSent) {
-    // The status line is already on the wire; ending now would frame the
-    // truncated body as a complete response. Destroying the socket is the
-    // only way to surface the failure to the client mid-stream.
     response.destroy();
     return;
   }

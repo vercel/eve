@@ -7,14 +7,12 @@ export interface InstrumentationContentContext {
   readonly environment: ConversationEnvironment;
 }
 
-/** Content is public evidence, or local debugging evidence in development. */
 export function shouldCaptureInstrumentationContent(
   context: InstrumentationContentContext,
 ): boolean {
   return context.audience === "public" || context.environment === "development";
 }
 
-/** An explicit policy overrides defaults only for the audience it evaluated. */
 export function applyAudienceCeiling(
   decision: InstrumentationDecision,
   context: InstrumentationContentContext,

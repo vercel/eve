@@ -1,6 +1,6 @@
 {
   "name": "@eve/agent-browser",
-  "version": "0.1.0-rc.0",
+  "version": "0.2.1",
   "description": "eve extension that gives agents browser automation tools backed by agent-browser",
   "keywords": [
     "agent-browser",
@@ -58,7 +58,7 @@
     "typescript": "catalog:"
   },
   "peerDependencies": {
-    "eve": ">=1.0.0-rc.1"
+    "eve": ">=1.0.0"
   },
   "engines": {
     "node": ">=24.0.0"

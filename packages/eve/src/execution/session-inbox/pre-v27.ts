@@ -1,14 +1,7 @@
-// Compatibility with session owners from before v27, which run on their own deployment until an
-// idle session moves to v27 (busy ones and eve 0.68 and earlier never move). They read a delivery's answers from `inputResponses`, keyed by
-// `requestId`, which v27 renamed to `answers` keyed by `interactionId`; a v26 request id is the
-// interaction id. Every delivery carries both, so a pressed answer reaches an old owner too.
-// Delete once no pre-v27 deployment owns a session.
-
 import type { DeliverPayload } from "#channel/types.js";
 
 const PRE_V27_ANSWERS_KEY = "inputResponses";
 
-/** The command with each payload's answers also under the name a pre-v27 owner reads. */
 export function withPreV27Answers<T>(command: T): T {
   const value = command as { readonly kind?: unknown; payload?: unknown; payloads?: unknown };
   if (value.kind === "send" && isPayload(value.payload)) {
@@ -20,7 +13,6 @@ export function withPreV27Answers<T>(command: T): T {
   return command;
 }
 
-/** The payload without the pre-v27 alias, which v27 code never reads. */
 export function withoutPreV27Answers(payload: DeliverPayload): DeliverPayload {
   if (!(PRE_V27_ANSWERS_KEY in payload)) return payload;
   const { [PRE_V27_ANSWERS_KEY]: _alias, ...rest } = payload;

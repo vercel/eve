@@ -30,7 +30,6 @@ describe("conversation import", () => {
       sandboxState: session.sandboxState,
       state: { "app.color": "blue" },
     });
-    // What the driver counted the session spent is what its view records.
     expect(sessionUsage(result.snapshot.session)).toMatchObject({ inputTokens: 42 });
     expect(result.snapshot.session.state).not.toHaveProperty("eve.harness.turnUsage");
     expect(result.snapshot.session.state).not.toHaveProperty(
@@ -39,7 +38,6 @@ describe("conversation import", () => {
     expect(result.snapshot.session.state).not.toHaveProperty("eve.agent.handles");
     const projection = storedProjection(result.snapshot.session.state);
     expect(turnPosition(projection).sequence).toBe(9);
-    // The legacy driver kept the index its next step takes.
     expect(projection.view.turns["turn_8"]?.runs).toBe(3);
     expect(result.snapshot.session).not.toHaveProperty("history");
     expect(history[0]).toMatchObject({

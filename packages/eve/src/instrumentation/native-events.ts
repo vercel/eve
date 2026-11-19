@@ -1,5 +1,5 @@
 import type { DeliverHookPayload } from "#channel/types.js";
-import { instrumentationScope } from "#instrumentation/scope.js";
+import { instrumentationScope, turnScope } from "#instrumentation/scope.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { contextStorage } from "#context/container.js";
 import { deliveryEvent } from "#instrumentation/channel-delivery.js";
@@ -33,6 +33,7 @@ import { isTurnCancellation } from "#harness/turn-cancellation.js";
 import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
 import type { ConversationEnvironment } from "#shared/conversation-context.js";
 import { shouldCaptureInstrumentationContent } from "#shared/instrumentation-content.js";
+import { authorizationReasonCode } from "#tracing/eve/connection-authorization.js";
 
 export interface CreateInstrumentationHandleEventInput {
   readonly deliveryInput?: DeliverHookPayload;
@@ -42,7 +43,6 @@ export interface CreateInstrumentationHandleEventInput {
   readonly agentName?: string;
   readonly channelKind?: string;
   readonly channelAudience?: ChannelAudience;
-  /** With `channelAudience`, whether principal ids may be recorded; absent counts as production. */
   readonly environment?: ConversationEnvironment;
   readonly handleEvent?: HandleEventFn;
   readonly hooks?: InstrumentationHooks;
@@ -52,9 +52,9 @@ export interface CreateInstrumentationHandleEventInput {
   readonly scheduleId?: string;
   readonly sessionId: string;
   readonly title?: string;
+  readonly relayed?: boolean;
 }
 
-/** Where an attempt is in its session: its turn, its step, and which try at the step it is. */
 export interface AttemptPlace {
   readonly runId: string;
   readonly turnId?: string;
@@ -62,7 +62,6 @@ export interface AttemptPlace {
   readonly attempt: number;
 }
 
-/** An attempt's scope: the session it runs in, and its place. */
 export function attemptScopeOf(
   session: Pick<
     CreateInstrumentationHandleEventInput,
@@ -85,23 +84,17 @@ export function attemptScopeOf(
   );
 }
 
-/** What one committed line means to instrumentation, besides the line itself. */
 interface Line {
   readonly attemptScope: (place: AttemptPlace) => InstrumentationScope;
+  readonly turnScope: (turnId: string) => InstrumentationScope;
   readonly capturesInputs: boolean;
   readonly capturesOutputs: boolean;
-  /** Principal ids follow the turn principal's rule: content both ways, and a public or dev audience. */
   readonly capturesPrincipalIds: boolean;
   readonly settledAtMs?: Readonly<Record<string, number>>;
   readonly startedAtMs: number;
   readonly view?: SessionView;
 }
 
-/**
- * Publishes each committed fact's instrumentation events once the publication folds it. The
- * events are a function of the fact and the tables after it: a call's or a request's attempt is
- * its run's current one, the attempt that produced it.
- */
 export function createInstrumentationHandleEvent(
   input: CreateInstrumentationHandleEventInput,
 ): HandleEventFn | undefined {
@@ -116,7 +109,6 @@ export function createInstrumentationHandleEvent(
     try {
       await handleEvent(publication, messages);
     } catch (error) {
-      // Turn hooks cancel after the publication commits; its instrumentation must still settle.
       if (
         !isTurnCancellation(error) ||
         before === undefined ||
@@ -126,7 +118,6 @@ export function createInstrumentationHandleEvent(
         throw error;
       cancellation = { error };
     }
-    // Operational state may already have retired a summary run when its context change settled.
     const published = eventsOf(publication);
     const committed =
       before !== undefined && published.some((event) => isTerminalType(event.type))
@@ -140,6 +131,15 @@ export function createInstrumentationHandleEvent(
     const capturesOutputs = hooks.capturesOutputs ?? hooks.capturesContent ?? false;
     const line: Line = {
       attemptScope: (place) => attemptScopeOf(input, place),
+      turnScope: (turnId) =>
+        turnScope({
+          channelAudience: input.channelAudience,
+          functionId: input.functionId,
+          rootSessionId: input.rootSessionId,
+          sessionId: input.sessionId,
+          traceSessionId: input.traceSessionId,
+          turnId,
+        }),
       capturesInputs,
       capturesOutputs,
       capturesPrincipalIds:
@@ -154,6 +154,7 @@ export function createInstrumentationHandleEvent(
       view: view ?? (ctx === undefined ? undefined : currentView(ctx)),
     };
     for (const event of committed) {
+      if (input.relayed === true && !event.type.startsWith("interaction.")) continue;
       const delivery = deliveryEvent(event, ctx, input);
       if (delivery !== undefined) await hooks.publish(Object.freeze(delivery));
       for (const derived of instrumentationEventsOf(event, line, input)) {
@@ -164,7 +165,6 @@ export function createInstrumentationHandleEvent(
   };
 }
 
-/** The instrumentation events one fact produces. */
 function instrumentationEventsOf(
   event: SessionEvent,
   line: Line,
@@ -191,7 +191,6 @@ function instrumentationEventsOf(
         },
       ];
     case "session.ended": {
-      // The turn that failed it, when one did; otherwise the session's latest turn.
       const { cause } = event.data;
       const turnId =
         cause !== undefined && "turnId" in cause ? cause.turnId : latestTurnId(line.view);
@@ -257,7 +256,6 @@ function instrumentationEventsOf(
       if (scope === undefined) return [];
       const { error, outcome } = event.data;
       const idempotencyKey = attemptIdempotencyKey(scope);
-      // A cancelled turn stops its run on purpose: the attempt is cancelled, not failed.
       const cancelled =
         outcome === "interrupted" &&
         scope.turnId !== undefined &&
@@ -281,7 +279,6 @@ function instrumentationEventsOf(
       return [
         {
           callId,
-          // A skill load runs eve's skill loader; any other call is eve's when its tool is.
           frameworkTool: capability.kind === "skill" || input.isFrameworkTool?.(name) === true,
           idempotencyKey: actionIdempotencyKey(sessionId, scope.turnId, callId),
           input: line.capturesInputs ? event.data.input : undefined,
@@ -328,7 +325,8 @@ function instrumentationEventsOf(
     case "interaction.opened": {
       const row = line.view?.interactions[event.data.interactionId];
       const scope = row === undefined ? undefined : interactionAttempt(line, row);
-      if (row === undefined || scope === undefined) return [];
+      if (row === undefined || scope === undefined || askedByChildSession(line.view!, row))
+        return [];
       const { request } = row;
       const call = askedCall(line.view!, row);
       return [
@@ -347,6 +345,7 @@ function instrumentationEventsOf(
               }
             : undefined,
           scope,
+          signIn: request.signIn === undefined ? undefined : { name: request.signIn.name },
           type: "interaction.opened",
         },
       ];
@@ -354,7 +353,8 @@ function instrumentationEventsOf(
     case "interaction.settled": {
       const row = line.view?.interactions[event.data.interactionId];
       const scope = row === undefined ? undefined : interactionAttempt(line, row);
-      if (row === undefined || scope === undefined) return [];
+      if (row === undefined || scope === undefined || askedByChildSession(line.view!, row))
+        return [];
       const answer = decidingAnswer(row);
       return [
         {
@@ -366,6 +366,7 @@ function instrumentationEventsOf(
           interactionId: row.interactionId,
           kind: row.request.kind,
           outcome: event.data.outcome,
+          reason: authorizationReasonCode(event.data.reason),
           responder: responderSummary(line.view!, event.data.cause, line.capturesPrincipalIds),
           scope,
           type: "interaction.settled",
@@ -377,7 +378,6 @@ function instrumentationEventsOf(
   }
 }
 
-/** Who decided a request: the principal of the delivery that carried the deciding response. */
 function responderSummary(view: SessionView, cause: Cause | undefined, keepsId: boolean) {
   if (cause === undefined || !("responseId" in cause)) return undefined;
   const principal = responderOf(view, cause.responseId);
@@ -386,7 +386,6 @@ function responderSummary(view: SessionView, cause: Cause | undefined, keepsId: 
     : instrumentationPrincipal(principal.type, keepsId ? principal.id : undefined);
 }
 
-/** A turn's run's current attempt; a context change's run is no step of a turn. */
 function runAttempt(line: Line, runId: string | undefined): InstrumentationScope | undefined {
   const run = runId === undefined ? undefined : line.view?.runs[runId];
   if (run?.attempt === undefined) return undefined;
@@ -394,13 +393,15 @@ function runAttempt(line: Line, runId: string | undefined): InstrumentationScope
   return line.attemptScope({ runId: run.runId, attempt: run.attempt, stepIndex: run.step, turnId });
 }
 
-/**
- * The attempt a person's request came from: its call's, or for a request about the turn or a
- * task, the turn's latest. Sign-ins are connection work, not input.
- */
+function askedByChildSession(view: SessionView, row: InteractionRow): boolean {
+  const { origin, subject } = row;
+  if (origin === undefined) return false;
+  const delegating = "callId" in subject ? view.calls[subject.callId] : undefined;
+  return delegating?.capability.kind === "agent" || origin.sessionId in view.children;
+}
+
 function interactionAttempt(line: Line, row: InteractionRow): InstrumentationScope | undefined {
   const view = line.view!;
-  if (row.request.kind === "sign-in") return undefined;
   const { subject } = row;
   if ("callId" in subject) {
     const call = view.calls[subject.callId];
@@ -415,7 +416,7 @@ function interactionAttempt(line: Line, row: InteractionRow): InstrumentationSco
   const runs = Object.values(view.runs).filter(
     (run) => run.attempt !== undefined && runTurn(view, run.runId) === subject.turnId,
   );
-  return runAttempt(line, runs.at(-1)?.runId);
+  return runs.length === 0 ? line.turnScope(subject.turnId) : runAttempt(line, runs.at(-1)?.runId);
 }
 
 function latestTurnId(view: SessionView | undefined): string | undefined {

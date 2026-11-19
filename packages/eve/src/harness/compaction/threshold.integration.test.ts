@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { createChannelAddress } from "#channel/channel-address.js";
 import type { Runtime } from "#channel/types.js";
 import { defineDynamic } from "#dynamic/definition.js";
-import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
+import { createTestInProcessRuntime } from "#internal/testing/in-process-runtime.js";
 import { markMockModel } from "#internal/mock-model-identity.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { textStreamResult } from "#internal/testing/approval-resume.js";
@@ -20,10 +20,8 @@ async function eventTypes(runtime: Runtime, sessionId: string): Promise<string[]
   return types;
 }
 
-// About 140k tokens: over the threshold of a 150k window, well under a 1M one's.
 const NOTES = "Alice's notes on the quarterly release. ".repeat(14_000);
 
-/** How many compactions Alice's two turns start, for an agent whose model has `window`. */
 async function compactions(input: { readonly dynamic: boolean; readonly window: number }) {
   const model = markMockModel(
     new MockLanguageModelV4({
@@ -43,19 +41,23 @@ async function compactions(input: { readonly dynamic: boolean; readonly window: 
     },
   });
   return await test.run(async () => {
-    const runtime = createWorkflowRuntime({
+    const runtime = createTestInProcessRuntime({
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
     });
-    const alice = createChannelAddress({
-      adapter: { kind: "http" },
-      channelName: "http",
-      continuationToken: `alice-threshold-${Math.random()}`,
-      runtime,
-    });
-    const first = await (await alice.send(NOTES, { auth: null })).result();
-    await (await alice.send("And the second part?", { auth: null })).result();
-    const types = await eventTypes(runtime, first.sessionId);
-    return types.filter((type) => type === "context.started").length;
+    try {
+      const alice = createChannelAddress({
+        adapter: { kind: "http" },
+        channelName: "http",
+        continuationToken: `alice-threshold-${Math.random()}`,
+        runtime,
+      });
+      const first = await (await alice.send(NOTES, { auth: null })).result();
+      await (await alice.send("And the second part?", { auth: null })).result();
+      const types = await eventTypes(runtime, first.sessionId);
+      return types.filter((type) => type === "context.started").length;
+    } finally {
+      await runtime.dispose();
+    }
   });
 }
 

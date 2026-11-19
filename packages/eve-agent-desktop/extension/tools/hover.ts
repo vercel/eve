@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { desktopTool, point, pointArgs } from "../lib/tool";
 
+/** Lets the agent move the pointer over an element or to screen coordinates. Requires the extension to run `headed`. */
 export default desktopTool({
   description:
     "Move the pointer over an element or to screen coordinates. Requires the extension to run headed.",

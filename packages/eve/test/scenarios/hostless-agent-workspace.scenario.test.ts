@@ -41,6 +41,7 @@ describe("hostless agent workspace", () => {
     await runPnpmCommand({
       args: ["exec", "vercel", "build", "--yes"],
       cwd: app.appRoot,
+      env: { ...process.env, VERCEL_TELEMETRY_DISABLED: "1" },
     });
 
     const outputRoot = join(app.appRoot, ".vercel", "output");

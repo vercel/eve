@@ -8,31 +8,30 @@ import {
   isNodeModulesPath,
   isPathImport,
 } from "#internal/authored-package-boundary.js";
+import { type FilterExpression, resolveIdFilter } from "#internal/bundler/filters.js";
 
 const PATH_IMPORT_FILTER = /^(?:\.|\/|[A-Za-z]:[\\/])/;
 
-/**
- * Resolves extensionless path imports before Rolldown's default resolver.
- */
 export function createAuthoredRelativeExtensionResolverPlugin(input: {
-  /** Leaves imports from installed dependencies to the bundler. */
   readonly authoredSourceOnly?: boolean;
   readonly extensions: readonly string[];
+  readonly handlesInstalledModule?: (path: string) => boolean;
+  readonly importerFilter?: FilterExpression;
 }): Plugin {
   const isFile = createCachedFileProbe();
 
   return {
     name: "eve-authored-relative-extension-resolver",
     resolveId: {
-      filter: {
-        id: PATH_IMPORT_FILTER,
-      },
+      filter: resolveIdFilter(PATH_IMPORT_FILTER, input.importerFilter),
       handler(source: string, importer: string | undefined) {
         if (
           importer === undefined ||
           importer.startsWith("\0") ||
           !isPathImport(source) ||
-          (input.authoredSourceOnly === true && !isAuthoredSourcePath(importer))
+          (input.authoredSourceOnly === true &&
+            !isAuthoredSourcePath(importer) &&
+            input.handlesInstalledModule?.(importer) !== true)
         ) {
           return undefined;
         }
@@ -44,18 +43,7 @@ export function createAuthoredRelativeExtensionResolverPlugin(input: {
           return undefined;
         }
 
-        // Standard resolvers realpath resolved modules, so a module reached
-        // through a node_modules symlink resolves its own dependencies from its
-        // real location — with pnpm's store layout they are store siblings that
-        // only exist there. Path imports probed here (the compiled module map
-        // reaches store-installed extension source through the consumer's
-        // node_modules symlink) must get the same treatment, and it keeps one
-        // canonical module identity per real file.
         const id = isNodeModulesPath(resolvedPath) ? toRealModulePath(resolvedPath) : resolvedPath;
-        // Rolldown applies package metadata such as `sideEffects: false` only
-        // to ids tied to their package.json. Without it, a module reached both
-        // here and through a package specifier would be tree-shaken or kept
-        // depending on which import resolved first.
         const packageJsonPath = findPackageJsonPath(id, isFile);
         return packageJsonPath === undefined ? { id } : { id, packageJsonPath };
       },
@@ -91,9 +79,7 @@ function createCachedFileProbe(): (path: string) => boolean {
 
     try {
       result = statSync(path).isFile();
-    } catch {
-      // Missing and inaccessible paths both remain unresolved, as before.
-    }
+    } catch {}
 
     cache.set(path, result);
     return result;

@@ -9,11 +9,6 @@ function assertDevelopmentServerProtocol(url: URL, value: string): void {
   }
 }
 
-/**
- * Reject http for remote hosts. The verified-remote client only sends
- * credentials to an https origin, so an http remote would never authenticate.
- * Loopback stays http for local dev.
- */
 function assertSecureRemoteProtocol(url: URL, value: string): void {
   if (url.protocol === "http:" && !isLocalEveServerUrl(url)) {
     throw new InvalidArgumentError(
@@ -22,9 +17,6 @@ function assertSecureRemoteProtocol(url: URL, value: string): void {
   }
 }
 
-/**
- * Parse and normalize an eve server URL for the development REPL.
- */
 export function parseDevelopmentServerUrl(value: string): string {
   const normalizedValue = value.trim();
 

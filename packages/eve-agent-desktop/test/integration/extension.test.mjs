@@ -2,8 +2,6 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import test from "node:test";
 
-// The eve runtime sets this ambient scope while it loads an extension's modules so
-// `defineExtension` can bind config; emulate it before importing the built dist.
 globalThis[Symbol.for("eve.ext-config-scope")] = "@eve/agent-desktop.test";
 
 const { default: extension } = await import("@eve/agent-desktop");
@@ -22,7 +20,6 @@ function streamOf(text) {
   });
 }
 
-/** A sandbox process that has already produced `result` and exits immediately. */
 function fakeProcess({ stdout = "", stderr = "", exitCode = 0 } = {}) {
   return {
     stdout: streamOf(stdout),
@@ -34,11 +31,6 @@ function fakeProcess({ stdout = "", stderr = "", exitCode = 0 } = {}) {
   };
 }
 
-/**
- * A sandbox where agent-desktop is installed, the desktop is up, and every
- * command succeeds. `respond` may override the result of a command;
- * `intercept` may replace the process for one, which the abort tests use.
- */
 function fakeSandbox({
   respond,
   version = AGENT_DESKTOP_VERSION,
@@ -71,7 +63,6 @@ const ctx = (sandbox) => ({
 });
 const tick = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** The argv after the binary in the last agent-desktop command. */
 function lastArgv(sandbox) {
   const command = sandbox.commands.at(-1);
   const invocation = command.slice(command.lastIndexOf("; ") + 2);
@@ -118,7 +109,15 @@ test("instructions name only tools the extension ships", () => {
   const text = readFileSync(new URL("../../extension/instructions.md", import.meta.url), "utf8");
   for (const [, name] of text.matchAll(/`([a-z_]+)`/g)) {
     if (
-      ["eve__search", "root", "skeleton", "return", "mouse_"].includes(name) ||
+      [
+        "eve__search",
+        "root",
+        "skeleton",
+        "return",
+        "mouse_",
+        "identity_not_unique",
+        "saved_ref_ambiguous",
+      ].includes(name) ||
       name.endsWith("_")
     )
       continue;
@@ -307,6 +306,32 @@ test("structured errors keep the code, suggestion and retry disposition", async 
   );
 });
 
+test("a non-retryable refusal names its kind and warns that the same call fails again", async () => {
+  resetConfig();
+  const error = {
+    code: "AMBIGUOUS_TARGET",
+    message: "@s1:e7 was not unique when captured",
+    details: { kind: "identity_not_unique", retryable: false },
+    disposition: { delivery: "not_delivered", retry: "safe" },
+  };
+  const sandbox = fakeSandbox({
+    respond: () => ({
+      exitCode: 1,
+      stdout: JSON.stringify({ version: "2.6", ok: false, command: "click", error }),
+    }),
+  });
+  await assert.rejects(
+    () => tools.click.execute({ ref: "@s1:e7" }, ctx(sandbox)),
+    (err) => {
+      assert.match(err.message, /AMBIGUOUS_TARGET: @s1:e7 was not unique when captured/);
+      assert.match(err.message, /Kind: identity_not_unique\./);
+      assert.match(err.message, /Repeating the same call returns the same refusal/);
+      assert.match(err.message, /retry: safe\.$/);
+      return true;
+    },
+  );
+});
+
 test("an unsafe failure warns against repeating the action", async () => {
   resetConfig();
   const error = {
@@ -391,7 +416,6 @@ test("screenshot readback shares the call signal and its cleanup is inside the d
   sandbox.readFile = async ({ signal }) => {
     readSignal = signal;
     reading.resolve();
-    // A stream that never produces data and ignores cancellation.
     return new ReadableStream({
       pull: () => new Promise(() => {}),
       cancel: () => new Promise(() => {}),
@@ -433,7 +457,6 @@ test("manageDesktop false keeps the image's own session environment", async () =
   resetConfig();
 });
 
-/** A sandbox whose version probe answers from `versions` in order (undefined: missing). */
 function versionSandbox(versions, options) {
   const sandbox = fakeSandbox(options);
   const spawn = sandbox.spawn;
@@ -574,7 +597,7 @@ test("an endless capture stops reading at the inline limit and is cancelled", as
         },
         cancel() {
           state.cancelled++;
-          return new Promise(() => {}); // a sandbox that never acknowledges the cancel
+          return new Promise(() => {});
         },
       },
       { highWaterMark: 0 },

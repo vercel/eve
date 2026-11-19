@@ -1,6 +1,3 @@
-// Private fold tables: one per family, holding what the facts introduced and settled,
-// with each row's status and the position of the line that introduced it.
-
 import type {
   CallOutcome,
   Capability,
@@ -58,9 +55,7 @@ export interface SessionRow extends Ended {
   readonly outcome?: SessionOutcome;
   readonly cause?: Cause;
   readonly error?: ErrorInfo;
-  /** Turns started so far; the next turn is `turn_${turnCount}`. */
   readonly turnCount: number;
-  /** The newest turn, which outlives retention. */
   readonly latestTurnId?: string;
 }
 
@@ -82,14 +77,11 @@ export interface TurnRow extends Introduced, Ended {
   readonly turnId: string;
   readonly cause: Cause;
   readonly follows: string | null;
-  /** Whether it waits, and on what, is derived: see `waiting` in the selectors. */
   readonly status: "running" | "settled";
-  /** Model runs the turn requested so far: its steps. */
   readonly runs?: number;
   readonly reply?: readonly string[];
   readonly outcome?: TurnOutcome;
   readonly error?: ErrorInfo;
-  /** What ended it, such as the delivery or hook that cancelled it. */
   readonly endedBy?: Cause;
 }
 
@@ -97,10 +89,8 @@ export interface RunRow extends Introduced, Ended {
   readonly runId: string;
   readonly owner: ModelOwner;
   readonly status: "requested" | "running" | "settled";
-  /** A turn's run's step: 0 for the turn's first run. A context change's run has none. */
   readonly step?: number;
   readonly modelId?: string;
-  /** The current attempt, from the latest `model.started`. */
   readonly attempt?: number;
   readonly outcome?: ModelOutcome;
   readonly finishReason?: string;
@@ -111,9 +101,7 @@ export interface RunRow extends Introduced, Ended {
 
 export interface PartRow extends Introduced {
   readonly partId: string;
-  /** The run that wrote it; absent when its turn wrote it. */
   readonly runId?: string;
-  /** For a part no run wrote, the turn that did: the one its `content.completed` scope names. */
   readonly turnId?: string;
   readonly kind: ContentKind;
   readonly phase: ContentPhase;
@@ -141,9 +129,7 @@ export interface CallRow extends Introduced, Ended {
   readonly error?: ErrorInfo;
   readonly reason?: string;
   readonly cause?: Cause;
-  /** The call's label once it settled, from the tool; `capability.label` labels it before. */
   readonly label?: string;
-  /** What the call delegated, such as a child session's model use. */
   readonly usage?: Usage;
 }
 
@@ -182,7 +168,6 @@ export interface ResponseRow extends Introduced, Ended {
 }
 
 export interface ChildRow extends Introduced, ChildOpenedData {
-  /** Deliveries the child accepted for this session's calls, oldest first, from `child.sent`. */
   readonly deliveries?: readonly { readonly deliveryId: string; readonly callId: string }[];
 }
 
@@ -198,7 +183,6 @@ export interface ChangeRow extends Introduced, Ended {
   readonly error?: ErrorInfo;
 }
 
-/** Usage folded into totals, so it never pins the rows that spent it. */
 export interface UsageTotals {
   readonly total: Usage;
   readonly byKind: { readonly [kind: string]: Usage };
@@ -206,12 +190,7 @@ export interface UsageTotals {
 
 type Table<TRow> = { readonly [id: string]: TRow };
 
-/**
- * Private projection state as of one position. Rows are replaced, never edited, when their entity
- * changes; a missing row means "not retained here", not "never existed".
- */
 export interface SessionView {
-  /** The number of lines folded: the position of the next line. */
   readonly position: number;
   readonly session: SessionRow;
   readonly deliveries: Table<DeliveryRow>;
@@ -225,14 +204,9 @@ export interface SessionView {
   readonly children: Table<ChildRow>;
   readonly changes: Table<ChangeRow>;
   readonly usage: UsageTotals;
-  /**
-   * The conversation's selected turn, when a context change chose one: `null` after a clear.
-   * Absent means the newest turn.
-   */
   readonly selection?: null | { readonly turnId: string };
 }
 
-/** What streamed for entities their facts haven't completed yet. Never part of the tables. */
 export interface SessionPreviews {
   readonly parts: Table<PartPreview>;
   readonly calls: Table<CallPreview>;
@@ -249,11 +223,8 @@ export interface CallPreview {
   readonly callId: string;
   readonly runId?: string;
   readonly name: string;
-  /** What the call invokes, as announced; the call's row names its capability. */
   readonly kind?: CapabilityKind;
   readonly input: string;
-  /** The latest output snapshot, while the call runs. */
   readonly output?: JsonValue;
-  /** The call's label for that output, from the tool. */
   readonly label?: string;
 }

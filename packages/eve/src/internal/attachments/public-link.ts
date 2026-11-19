@@ -3,14 +3,11 @@ import { requestPublicUrl } from "#execution/web-fetch/request.js";
 import { EveAttachmentError } from "#internal/attachments/errors.js";
 
 const DOWNLOAD_TIMEOUT_MS = 30_000;
-/** Links eve downloads for one message. Each buffers up to the upload cap, so they run one at a time. */
 const MAX_DOWNLOADS_PER_MESSAGE = 10;
 const GENERIC_MEDIA_TYPES = new Set(["application/octet-stream", "binary/octet-stream"]);
 
-/** Downloads one message's unclaimed links: at most {@link MAX_DOWNLOADS_PER_MESSAGE}, one at a time. */
 export type PublicDownloads = (url: URL, adapterKind: string) => Promise<FetchFileResult>;
 
-/** Starts the download budget for one message's attachments, each capped at `maxBytes`. */
 export function createPublicDownloads(maxBytes: number): PublicDownloads {
   let started = 0;
   let previous: Promise<unknown> = Promise.resolve();
@@ -27,12 +24,6 @@ export function createPublicDownloads(maxBytes: number): PublicDownloads {
   };
 }
 
-/**
- * Downloads an attachment link that no channel resolver claimed, so a
- * provider never fetches it and an unreachable link fails as a note instead
- * of on every later model call. Only public `https:` destinations qualify;
- * private and reserved addresses are refused.
- */
 async function fetchPublicAttachment(
   url: URL,
   adapterKind: string,
@@ -55,7 +46,6 @@ async function fetchPublicAttachment(
     throw refusal(adapterKind, `The link returned HTTP ${response.status}.`);
   }
   const mediaType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
-  // A private document's link usually answers with a sign-in page.
   if (mediaType === "text/html") {
     throw refusal(adapterKind, "The link returned a web page instead of a file.");
   }

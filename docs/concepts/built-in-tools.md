@@ -43,7 +43,7 @@ export { default } from "eve/tools/bash";
 - `stdout`, `stderr`, and `truncated`: the output so far
 - `message`: instructions for the model
 
-The model reads the result as plain text: `stdout`, then any `stderr` after a `[stderr]` line, or `(no output)` when the command printed nothing. Each stream keeps its last 2,000 lines or 50 KB. A longer stream starts with a note, which names a file in the sandbox holding the full output when the sandbox runs `bash` with its job files (`just-bash` does not). A command that exits non-zero ends with `[exit code: N]` and reaches the model as an error result. For a running command, `message` follows the output instead. Channels and hooks get the fields above on `call.settled`.
+The model reads the result as plain text: `stdout`, then any `stderr` after a `[stderr]` line, or `(no output)` when the command printed nothing. Each stream keeps its last 2,000 lines or 50 KB. A line longer than 2,000 characters keeps its start and ends with `[truncated]`. A stream with lines left out starts with a note, which names a file in the sandbox holding the full output when the sandbox runs `bash` with its job files (`just-bash` does not). A command that exits non-zero ends with `[exit code: N]` and reaches the model as an error result. For a running command, `message` follows the output instead. Channels and hooks get the fields above on `call.settled`.
 
 The command writes to `stdout` and `stderr` files in `outputDirectory`, and its exit code to an `exit` file when it finishes. The model checks on or stops it with shell commands in later `bash` calls, so the tool's approval policy applies to them:
 
@@ -53,7 +53,7 @@ cat /tmp/.eve/jobs/3f9a1c2e/exit      # exit code, once the command has finished
 kill -- -4312                         # stop the command's whole process group
 ```
 
-The command runs across turns until it exits, the model stops it, or the sandbox stops, and its output files last until the sandbox stops. Cancelling a turn stops a command that hasn't yet returned `running`. A message that arrives while `bash` waits reaches the model after the call returns, so a longer `timeout` can delay it. The `just-bash` provider has no background processes, so it runs every command to completion.
+The command runs across turns until it exits, the model stops it, or the sandbox stops, and its output files last until the sandbox stops. A running command doesn't keep the session busy, so it ends when eve [stops the idle sandbox](../sandbox#stop-an-idle-sandbox), and a later check finds no `exit` file. Cancelling a turn stops a command that hasn't yet returned `running`. A message that arrives while `bash` waits reaches the model after the call returns, so a longer `timeout` can delay it. The `just-bash` provider has no background processes, so it runs every command to completion.
 
 Override its description, approval policy, or executor by wrapping the exported definition:
 
@@ -242,7 +242,7 @@ export default disableTool();
 
 ### `web_search`
 
-`web_search` uses provider-managed web search and appears only for supported model providers. AI Gateway models use Exa unless you set `provider`; direct provider models use their native search.
+`web_search` uses provider-managed web search and appears only for supported model providers. AI Gateway models use Parallel unless you set `provider`; direct provider models use their native search.
 
 ```sh
 eve add tool/web_search
@@ -251,7 +251,7 @@ eve add tool/web_search
 ```ts title="agent/tools/web_search.ts"
 import { webSearch } from "eve/tools/web_search";
 
-export default webSearch({ provider: "exa" });
+export default webSearch({ provider: "parallel" });
 ```
 
 Choose another AI Gateway search provider:
@@ -259,7 +259,7 @@ Choose another AI Gateway search provider:
 ```ts title="agent/tools/web_search.ts"
 import { webSearch } from "eve/tools/web_search";
 
-export default webSearch({ provider: "parallel" });
+export default webSearch({ provider: "exa" });
 ```
 
 Select Browserbase Search in the same slot:
@@ -363,25 +363,38 @@ eve add tool/agent
 export { default } from "eve/tools/agent";
 ```
 
-To let the model choose an AI Gateway model for each root-copy task, export `agentWithModel` from the same slot:
+To let the model run a root-copy task on another model, call `agent({ models })` and list the models it may choose:
 
 ```ts title="agent/tools/agent.ts"
-export { agentWithModel as default } from "eve/tools/agent";
+import { agent } from "eve/tools/agent";
+import { anthropic } from "@ai-sdk/anthropic";
+
+export default agent({
+  models: {
+    "openai/gpt-6-sol": "Difficult reasoning and engineering tasks",
+    "openai/gpt-6-luna": "Routine tasks where fast completion matters",
+    haiku: {
+      model: anthropic("claude-haiku-5"),
+      description: "Cheap lookups and short summaries",
+      reasoning: "low",
+    },
+  },
+});
 ```
 
-`agentWithModel` is a separate workflow tool that calls `ctx.agent("agent", { model })`; the default `agent` tool has no `model` parameter. It accepts:
+`models` takes the same entries as [`auto()`](../guides/decide#choose-from-gateway-models). A string entry is the description, and its key is the AI Gateway model ID. An object entry holds the model, an AI Gateway model ID or an AI SDK model, with its description and optional `reasoning`, `modelContextWindowTokens`, and `modelOptions`. The tool then accepts:
 
 ```ts
 {
   message: string;
-  model: string; // AI Gateway model id for the child session
+  model?: "openai/gpt-6-sol" | "openai/gpt-6-luna" | "haiku"; // one of the keys
   taskId?: string;
 }
 ```
 
-It otherwise behaves like the default tool, and `taskId` continues the same root-copy session. The selected model applies to every turn in that session, so a continuation must repeat the original model; start a new task to use another. Because the parent model picks the value, use this tool only when it may choose any model your AI Gateway credentials and policies allow.
+The model sees each key with its description and can choose only those keys. A call without `model` runs on the root agent's model, the same as the default tool; with a dynamic model such as `auto()`, the copy chooses again. `agent()` with no `models` is the default tool, with no `model` input. The selected model applies to every turn of the task's session. A continuation can omit `model` or repeat the original one; start a new task to use another. Copies and declared subagents never get this tool.
 
-An authored `agent/tools/agent.ts` replaces the framework tool. Re-export the default definition, export `agentWithModel`, export another tool such as `agentRouter()`, or disable the slot. `agentRouter()` runs each call as a [task](/docs/tools/workflows#run-calls-as-tasks-task), which adds `eve__task_wait` and `eve__task_cancel`:
+An authored `agent/tools/agent.ts` replaces the framework tool. Re-export the default definition, export `agent({ models })`, export another tool such as `agentRouter()`, or disable the slot. `agentRouter()` runs each call as a [task](/docs/tools/workflows#run-calls-as-tasks-task), which adds `eve__task_wait` and `eve__task_cancel`:
 
 ```ts title="agent/tools/agent.ts"
 import { disableTool } from "eve/tools";
@@ -541,7 +554,7 @@ import { noReply } from "eve/tools/no_reply";
 export default noReply;
 ```
 
-`no_reply` is a `defineTool` tool with [`endsTurn: true`](/docs/tools#end-the-turn-after-a-tool-call), so the turn ends only when no other tool runs in the same step. Only root sessions receive it. Slack clears the thread status when the turn completes.
+`no_reply` is a `defineTool` tool with [`endsTurn: true`](/docs/tools#end-the-turn-after-a-tool-call), so the turn ends once it succeeds, after any other tool calls in the same step settle. Only root sessions receive it. Slack clears the thread status when the turn completes.
 
 Without `no_reply`, a root session also accepts an empty model reply with `finishReason: "stop"` and completes the turn without a final message. Use `no_reply` to record an explicit choice to stay quiet, with a reason. Delegated sessions retry an empty reply once and report a failure if it stays empty, so the caller can act on it.
 

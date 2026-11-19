@@ -76,8 +76,6 @@ describe("batchSpanProcessor", () => {
     expect(batchIndexes(exporter.batches)).toStrictEqual([[1, 2], [3]]);
   });
 
-  // An exporter that has stopped draining is already losing telemetry; taking
-  // the agent's memory with it would turn that into an outage.
   it("drops spans past the queue limit rather than growing without bound", async () => {
     const exporter = recordingExporter();
     const processor = batchSpanProcessor(exporter, {

@@ -37,7 +37,6 @@ interface ScriptedRead {
 type MockInbox = SessionInbox &
   Pick<SessionInboxHandle, "awaitingHandover" | "whenHandoverSettled">;
 
-/** Scripted inbox: serves reads in order. */
 function createMockInbox(reads: readonly ScriptedRead[]): MockInbox {
   const remaining = [...reads];
 
@@ -45,6 +44,7 @@ function createMockInbox(reads: readonly ScriptedRead[]): MockInbox {
     awaitingHandover: false,
     async whenHandoverSettled() {},
     claimedTokens: [],
+    ownerRunId: () => "owner-1",
     takeLeading: () => [],
     async claimSessionHook() {},
     async claimSessionHooks() {},
@@ -152,7 +152,6 @@ describe("nextTurnDelivery", () => {
 
   it("holds a continuation behind input an awaited handover still holds back", async () => {
     vi.mocked(pendingContinuation).mockReturnValue(continuation);
-    // Alice's message arrived before the handover, and reads once it settles.
     let settled = false;
     const reads = [messageRead("Alice asks for the appendix.")];
     const inbox = {
@@ -295,7 +294,6 @@ describe("nextTurnDelivery", () => {
       fromCall("other", "call-2"),
     ]);
 
-    // The turn answers the latest message's reply address.
     await expect(nextTurnDelivery(input)).resolves.toMatchObject({
       delivery: {
         caller: { callId: "call-1", replyTo: { token: "correction-reply" } },

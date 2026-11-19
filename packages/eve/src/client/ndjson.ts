@@ -1,10 +1,6 @@
 import { throwIfAborted } from "#client/abort-signal.js";
 import { classifyRecord, type ReadRecord } from "#protocol/session-events/envelope.js";
 
-/**
- * Returns true when an error looks like a stream socket disconnection that
- * can be recovered via reconnection.
- */
 export function isStreamDisconnectError(error: unknown): boolean {
   if (error instanceof DOMException) {
     return error.name === "AbortError";
@@ -20,7 +16,6 @@ export function isStreamDisconnectError(error: unknown): boolean {
     error.name === "AbortError" ||
     error.message === "terminated" ||
     errorCode === "UND_ERR_SOCKET" ||
-    // fetch() network errors from Chrome, Node, WebKit, and Firefox.
     (error instanceof TypeError &&
       /^(?:failed to fetch|fetch failed|load failed|networkerror when attempting to fetch resource\.)$/i.test(
         error.message,
@@ -29,14 +24,6 @@ export function isStreamDisconnectError(error: unknown): boolean {
   );
 }
 
-/**
- * Reads the records of one stream response: stored lines (commits and progress records),
- * transport records (`$eve`), and lines this version can't read, each classified by key. Blank
- * lines are skipped. Handles partial lines across chunks via an internal buffer.
- *
- * All read errors — including socket disconnections — propagate to the caller.
- * Use {@link isStreamDisconnectError} to classify them.
- */
 export async function* readNdjsonStream(
   body: ReadableStream<Uint8Array>,
   options: {
@@ -61,7 +48,6 @@ export async function* readNdjsonStream(
 
       if (result.done) {
         reachedEof = true;
-        // Flush any remaining bytes in the decoder.
         buffer += decoder.decode();
         break;
       }
@@ -70,7 +56,6 @@ export async function* readNdjsonStream(
         buffer += decoder.decode(result.value, { stream: true });
       }
 
-      // Yield every complete line currently in the buffer.
       let newlineIndex = buffer.indexOf("\n");
       while (newlineIndex !== -1) {
         const line = buffer.slice(0, newlineIndex).trim();
@@ -80,14 +65,11 @@ export async function* readNdjsonStream(
       }
     }
 
-    // Yield any trailing content without a final newline.
     const trailing = buffer.trim();
     if (trailing.length > 0) yield parseRecord(trailing);
   } finally {
     options.signal?.removeEventListener("abort", abort);
     if (!reachedEof) {
-      // A cloned response waits for both branches to cancel. Let the caller
-      // abort the fetch instead of blocking cleanup on a tracing reader.
       void reader.cancel().catch(() => {});
     }
     reader.releaseLock();
@@ -121,7 +103,6 @@ async function readWithIdleTimeout(
       }),
     ]);
   } catch (error) {
-    // Browsers use vendor-specific TypeError messages for response-body transport failures.
     if (error instanceof TypeError) {
       throw new Error("Session stream disconnected.", { cause: error });
     }

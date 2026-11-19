@@ -12,7 +12,7 @@ It is modeled on [`@agent-browser/eve`](https://github.com/vercel-labs/agent-bro
 npm install @eve/agent-desktop
 ```
 
-`eve` (1.0.0-rc.1 or later) is a peer dependency; the extension runs on the eve installed in your app.
+`eve` (1.0 or later) is a peer dependency; the extension runs on the eve installed in your app.
 
 ## Prepare
 

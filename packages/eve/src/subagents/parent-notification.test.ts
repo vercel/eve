@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { installWorkflowHost } from "#execution/workflow-host/host.js";
 
 import { ContextContainer } from "#context/container.js";
 import { serializeContext } from "#context/serialize.js";
 import { SessionCallbackKey, SessionIdKey } from "#context/keys.js";
-import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import { fromCompiledBundle } from "#definitions/compiled-agent.js";
+import { ChannelKey, SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import {
   bindTurnCallerContext,
@@ -24,6 +26,8 @@ vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   resumeHook: vi.fn(),
 }));
 
+installWorkflowHost();
+
 const resumeHookMock = vi.mocked(resumeHook);
 const fetchMock = vi.fn();
 
@@ -43,7 +47,7 @@ function createSerializedContext(
   vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(bundle);
 
   const ctx = new ContextContainer();
-  ctx.set(BundleKey, bundle);
+  ctx.set(SessionAgentKey, fromCompiledBundle(bundle));
   ctx.set(SessionIdKey, "child-session");
   ctx.set(ChannelKey, {
     ...SUBAGENT_ADAPTER,
@@ -353,7 +357,6 @@ describe("turn caller notification", () => {
     });
 
     it("leaves the session alive when the caller already took the result or stopped waiting", async () => {
-      // A delivery whose 202 was lost: the caller applied it, so its repeat finds nothing pending.
       fetchMock.mockImplementation(async () => notPending());
       const notified = notify();
       await vi.runAllTimersAsync();

@@ -1,9 +1,4 @@
 import { readConnectionEventsBackend } from "#shared/connection-events.js";
-/**
- * Structural validation for authored connection auth definitions. Returns
- * `undefined` on success or a context-free error fragment for the caller to
- * prefix.
- */
 
 import type {
   AuthorizationDefinition,
@@ -12,13 +7,6 @@ import type {
 } from "#shared/connection-types.js";
 import { extractVercelConnectMetadata } from "#shared/vercel-connect-metadata.js";
 
-/**
- * Validates that authored `auth` conforms to the connection auth contract.
- *
- * Returns `undefined` on success; otherwise a descriptive message
- * fragment starting with `The "<fieldName>"...` that the caller is expected
- * to prefix with its own context.
- */
 export function validateAuthorizationSpec(
   authorization: unknown,
   fieldName = "auth",
@@ -72,12 +60,6 @@ export function validateAuthorizationSpec(
   return undefined;
 }
 
-/**
- * Validates and normalizes an authored auth definition into the runtime shape.
- *
- * `getToken`-only auth defaults to `principalType: "app"` so static tokens and
- * custom bearer-token fetchers do not need extra boilerplate.
- */
 export function normalizeAuthorizationSpec(
   authorization: unknown,
   prefix: string,
@@ -126,4 +108,16 @@ export function normalizeAuthorizationSpec(
   if (displayName !== undefined) nonInteractive = { ...nonInteractive, displayName };
   if (evict !== undefined) nonInteractive = { ...nonInteractive, evict };
   return nonInteractive;
+}
+
+export function assertAuthKey(authKey: string, label: string): string {
+  if (!/^[A-Za-z0-9_.:-]+$/u.test(authKey)) {
+    throw new Error(`${label} must contain only letters, digits, "_", "-", ".", or ":".`);
+  }
+  return authKey;
+}
+
+export function sanitizeScopeSegment(value: string): string {
+  const sanitized = value.replace(/[^A-Za-z0-9_.:-]+/gu, "_").replace(/^_+|_+$/gu, "");
+  return sanitized.length > 0 ? sanitized : "provider";
 }

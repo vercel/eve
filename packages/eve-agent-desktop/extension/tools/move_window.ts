@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { app, desktopTool, flag, windowId } from "../lib/tool";
 
+/** Lets the agent move an app window to a screen position. */
 export default desktopTool({
   description: "Move an app window to a screen position.",
   inputSchema: z.object({ app, windowId, x: z.number(), y: z.number() }),

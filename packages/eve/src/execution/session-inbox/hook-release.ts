@@ -2,14 +2,8 @@ import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { findSessionHookHolder } from "#execution/session-inbox/owner.js";
 import { requireSessionId } from "#execution/session-inbox/resume.js";
 
-/** Longest ingress waits for a session hook to change hands. */
 export const SESSION_HOOK_HANDOVER_TIMEOUT_MS = 30_000;
 
-/**
- * Waits until no run serving `session` holds any of the logical addresses. A
- * handoff successor serves the same session, so only the session's end (or
- * an unrelated run claiming the address afterwards) satisfies the wait.
- */
 export async function waitForSessionHooksRelease(
   logicalTokens: Iterable<string>,
   session: { readonly ownerRunId: string; readonly sessionId: string },
@@ -47,8 +41,6 @@ async function servesSession(
   try {
     if (holder.hook !== undefined)
       return requireSessionId(await holder.hook.metadata) === session.sessionId;
-  } catch {
-    // Unreadable metadata says nothing about the holder; fall through to its id.
-  }
+  } catch {}
   return holder.runId === session.ownerRunId;
 }

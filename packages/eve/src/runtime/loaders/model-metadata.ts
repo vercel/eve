@@ -5,7 +5,6 @@ import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts
 import { resolveRuntimeCompilerArtifactPaths } from "#runtime/loaders/artifact-paths.js";
 import { readBundledCompiledArtifacts } from "#runtime/loaders/bundled-artifacts.js";
 
-/** Loads the model metadata snapshot the build baked into its compiled artifacts. */
 export async function loadModelMetadata(
   source: RuntimeCompiledArtifactsSource,
 ): Promise<ModelMetadata> {

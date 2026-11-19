@@ -1,18 +1,3 @@
-/**
- * Single rolldown invocation that emits every `src/**\/*.ts` to its
- * matching `dist/src/**\/*.js` location, minified and comment-stripped.
- *
- * Replaces TypeScript JS emit and the secondary cli/evals bundler.
- * `tsc` continues to emit `.d.ts` files only; this script owns every
- * shipped `.js` byte.
- *
- * Topology: `preserveModules: true` keeps the 1:1 source-to-output
- * mapping the runtime expects (workflow builder per-file discovery,
- * `imports#*.js` runtime resolution, `bin/eve.js` -> `dist/src/cli/run.js`,
- * etc.). The `eve-source` resolver condition makes `#*.js` follow
- * `./src/*.ts` so sibling imports become part of the graph.
- * `#compiled/*` and peer/runtime packages stay external.
- */
 import { readdir } from "node:fs/promises";
 import { isBuiltin } from "node:module";
 import { join, parse, relative } from "node:path";
@@ -21,15 +6,6 @@ import { buildWithRolldown } from "./rolldown.mjs";
 import vendoredZod from "./vendor-compiled/zod.mjs";
 import { onVendoredDependencyLog } from "../src/internal/bundler/vendored-dependency-log.ts";
 
-/**
- * Names of the CJS-interop helpers that rolldown injects into its
- * virtual runtime file. We strip the side-effect import of that file
- * from emitted chunks that never reference one of these — otherwise
- * every eve dist module imports `node:module` transitively, and any
- * downstream bundler (notably the workflow bundle) that ingests the
- * dist tree under a non-Node platform warns about an unresolved
- * builtin on every input file.
- */
 const ROLLDOWN_RUNTIME_HELPER_NAMES = [
   "__commonJS",
   "__commonJSMin",
@@ -81,12 +57,6 @@ function createStripUnusedRolldownRuntimeImportPlugin() {
   };
 }
 
-/**
- * Applies the same `defineDynamic` execute-hoisting transform that the
- * agent's Nitro build applies to authored `agent/tools/*.ts` files. This
- * lets framework dynamic tools ship pre-transformed so they replay
- * across workflow step boundaries identically to authored tools.
- */
 function createDynamicToolTransformPlugin() {
   let transformFn;
   return {
@@ -104,11 +74,6 @@ function createDynamicToolTransformPlugin() {
   };
 }
 
-/**
- * Keeps framework workflow bodies available to the downstream driver builder
- * while stamping the same callback metadata that application modules receive
- * from their client transform.
- */
 function createWorkflowMetadataTransformPlugin() {
   let transformPromise;
   return {
@@ -134,32 +99,15 @@ const EXCLUDED_FILE_PATTERNS = [
   /\.integration\.test\.ts$/,
   /\.scenario\.test\.ts$/,
   /\.e2e\.test\.ts$/,
-  // On-demand web-template generator, not shipped runtime. Mirrors the
-  // src/setup/build.ts entry in tsconfig.build.json's exclude.
   /\/setup\/build\.ts$/,
+  /\/execution\/workflow-host\/step-boundary\.ts$/,
 ];
 
-// Subtrees of `src/` that are pure test infrastructure. Mirrors the
-// `exclude` list in `tsconfig.build.json` so the dist tree contains
-// exactly the same set of compilation units the declaration emit covers.
-const EXCLUDED_DIRECTORIES = new Set([join("internal", "testing")]);
+const EXCLUDED_DIRECTORIES = new Set([
+  join("internal", "testing"),
+  join("execution", "in-process"),
+]);
 
-/**
- * Packages externalized at bundle time so rolldown never inlines them
- * into eve's dist tree. Three categories:
- *
- *   - Peer dependencies (`ai`, `next`, `react`, `@opentelemetry/api`,
- *     `braintrust`) — consumers provide the install.
- *   - Runtime dependencies (`nitro`, `rolldown`, `undici`) — resolved
- *     at runtime against the eve installation.
- *   - Optional peer dependency (`just-bash`) — the opt-in local sandbox
- *     engine; resolved lazily against the consumer's install and never
- *     bundled with eve.
- *
- * `#compiled/*` is also external (handled separately) so the vendored
- * dependency tree under `dist/src/compiled/**` resolves at runtime via
- * the package `imports` map.
- */
 const EXTERNAL_PACKAGES = new Set([
   "@nuxt/kit",
   "@sveltejs/kit",
@@ -177,19 +125,10 @@ const EXTERNAL_PACKAGES = new Set([
 ]);
 
 function isExternalPackageSpecifier(source) {
-  // Public self-imports must remain bare in the published package. Resolving
-  // them during a clean build would target output that does not exist yet;
-  // resolving them during an incremental build could consume stale output.
   if (source === "eve" || source.startsWith("eve/")) {
     return true;
   }
 
-  // All `#*` subpath imports stay external so the published dist keeps
-  // the bare-specifier shape the runtime resolves at load time. Source
-  // files routinely depend on a 1:1 mapping (workflow
-  // builder, instrumentation, etc.) and the workflow bundler needs the
-  // `eve-source` condition to follow these specifiers back to the
-  // matching `.ts` source rather than into the published `.js` tree.
   if (source.startsWith("#")) {
     return true;
   }
@@ -214,11 +153,6 @@ const VENDORED_ZOD_IMPORTS = new Map(
   ]),
 );
 
-/**
- * eve ships one Zod. Every Zod import that reaches the build, from eve's
- * sources or a bundled dependency, resolves to the vendored copy instead of
- * copying Zod's sources into `dist/src/node_modules`.
- */
 function createVendoredZodPlugin() {
   return {
     name: "eve:vendored-zod",
@@ -236,12 +170,6 @@ function createVendoredZodPlugin() {
   };
 }
 
-/**
- * The code extension imports `@vercel/connect`, whose `@vercel/oidc` tree is
- * CommonJS. Resolve it to the standalone vendored bundle instead of inlining
- * that CommonJS into `dist/src/node_modules`, where `polyfillRequire: false`
- * would leave its `require` calls undefined.
- */
 function createVendoredConnectPlugin() {
   return {
     name: "eve:vendored-connect",
@@ -308,10 +236,6 @@ if (sourceFiles.length === 0) {
   throw new Error(`No TypeScript sources found under ${SRC_ROOT}.`);
 }
 
-// `input` is a map of "src-relative path without extension" -> absolute
-// source. `preserveModules` writes each entry to
-// `${output.dir}/${entryName}.js`, which (with `preserveModulesRoot:
-// "src"` and `output.dir: "dist/src"`) lands at `dist/src/<rel>.js`.
 const input = Object.fromEntries(
   sourceFiles.map((sourcePath) => {
     const relativeFromSrc = relative(SRC_ROOT, sourcePath);
@@ -334,9 +258,6 @@ await buildWithRolldown({
     createWorkflowMetadataTransformPlugin(),
   ],
   resolve: {
-    // `eve-source` makes `#*.js` resolve to `./src/*.ts` at build time so
-    // sibling source files become part of the graph instead of bare
-    // imports rolldown would refuse to follow.
     conditionNames: ["eve-source"],
     mainFields: ["module", "main"],
   },
@@ -347,40 +268,21 @@ await buildWithRolldown({
     entryFileNames: "[name].js",
     format: "esm",
     minify: {
+      compress: { joinVars: false },
       mangle: {
         keepNames: { class: true, function: true },
-        // Disable top-level renaming so the workflow bundler's scope-
-        // blind identifier-reference walk (`stripUnusedValueImports`)
-        // can correctly tell that single-letter import bindings are
-        // unused after step bodies get stubbed. Without this rolldown
-        // mangles imports to `e`, `t`, `n`, … which collide with the
-        // many short locals minify introduces inside function bodies.
         toplevel: false,
       },
     },
-    // Skip rolldown's CJS-interop `__require` polyfill so the virtual
-    // runtime helper file doesn't import `node:module`. Without this
-    // every dist file would carry an `import "../_virtual/_rolldown/runtime.js"`
-    // side-effect import, and the workflow bundler (which runs under
-    // `platform: "neutral"`) would warn about the unresolved Node
-    // builtin every time it pulled an eve file into its graph. Dependencies
-    // with CommonJS code are vendored under `#compiled/*` instead.
     polyfillRequire: false,
     preserveModules: true,
     preserveModulesRoot: SRC_ROOT,
     sourcemap: false,
-    // Keep `let`/`const` at the top level so module-evaluation cycles
-    // surface as a loud TDZ `ReferenceError` at module load rather than
-    // silent `undefined` reads deep inside the runtime.
     topLevelVar: false,
   },
   onLog: onVendoredDependencyLog,
 });
 
-// Vue integration — separate build that resolves `#` subpath imports so the
-// output is self-contained and consumable by Vite/bundlers that don't
-// understand Node.js package `imports`. Without minification so Vite's SSR
-// transform doesn't choke on minified export-alias / local-variable collisions.
 const vueSourceFiles = await collectSourceFiles(join(SRC_ROOT, "vue"));
 
 if (vueSourceFiles.length > 0) {
@@ -435,9 +337,6 @@ if (vueSourceFiles.length > 0) {
   });
 }
 
-// Svelte integration — separate build that resolves `#` subpath imports so the
-// output is self-contained and consumable by Vite/bundlers that don't
-// understand Node.js package `imports`.
 const svelteSourceFiles = await collectSourceFiles(join(SRC_ROOT, "svelte"));
 
 if (svelteSourceFiles.length > 0) {

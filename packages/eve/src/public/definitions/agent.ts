@@ -96,7 +96,6 @@ export function defineAgent(definition: AgentDefinition): DefinedAgent {
   return definition as DefinedAgent;
 }
 
-/** Whether `value` came from {@link defineAgent}. */
 export function isDefinedAgent(value: unknown): value is DefinedAgent {
   return typeof value === "object" && value !== null && Reflect.get(value, DEFINED_AGENT) === true;
 }

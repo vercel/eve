@@ -2,10 +2,8 @@ import type { SandboxSession } from "eve/sandbox";
 
 import { commandFailureDetail } from "./command-failure.ts";
 
-/** One file per directory, like pi: AGENTS.md wins, CLAUDE.md is the fallback. */
 const FILE_NAMES = ["AGENTS.md", "CLAUDE.md"] as const;
 
-/** Repository content reaches the prompt, so its size is bounded. */
 const MAX_BYTES = 64_000;
 
 export interface ProjectInstructionsFile {
@@ -13,11 +11,6 @@ export interface ProjectInstructionsFile {
   readonly content: string;
 }
 
-/**
- * Reads the workspace root's `AGENTS.md`, or `CLAUDE.md` when it has none, in
- * one sandbox command: the first non-empty file's path, then at most one byte
- * past the cap so truncation is detectable.
- */
 export async function readProjectInstructions(
   sandbox: Pick<SandboxSession, "resolvePath" | "run">,
 ): Promise<ProjectInstructionsFile | null> {
@@ -43,7 +36,6 @@ export async function readProjectInstructions(
   };
 }
 
-/** pi's project context format, so models see repository guidance the way coding harnesses show it. */
 export function formatProjectInstructions(file: ProjectInstructionsFile): string {
   return [
     "Project-specific instructions and guidelines:",

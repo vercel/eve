@@ -1,13 +1,3 @@
-/**
- * Copies the private extension packages into eve's `src/`
- * so eve compiles and ships them as built-in extensions: `@eve/code` becomes
- * `eve/extensions/code`, `@eve/git` becomes `eve/extensions/git`, `@eve/board` becomes
- * `eve/extensions/board`, and
- * `@eve/computer-use` becomes `eve/extensions/computer-use`. The
- * packages stay the source of truth; the copies are gitignored. eve cannot
- * depend on them (they depend on eve), so the sibling workspace paths are read
- * directly and declared as turbo inputs in `turbo.json`.
- */
 import { cp, mkdir, readFile, readdir, rm } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -33,14 +23,17 @@ export const builtInExtensions = [
     target: join(packageRoot, "src", "extensions", "board", "extension"),
   },
   {
+    name: "custom-skills",
+    source: join(packageRoot, "..", "eve-custom-skills", "extension"),
+    target: join(packageRoot, "src", "extensions", "custom-skills", "extension"),
+  },
+  {
     name: "computer-use",
     source: join(packageRoot, "..", "eve-computer-use", "extension"),
     target: join(packageRoot, "src", "computer-use", "extension"),
   },
 ];
 
-// Turbo runs several eve tasks at once and each one syncs; rewriting an
-// identical tree would delete files a peer task is already compiling or testing.
 export async function syncExtensions() {
   for (const extension of builtInExtensions) await syncExtension(extension);
 }

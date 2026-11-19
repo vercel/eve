@@ -2,27 +2,25 @@ import { describe, expect, it } from "vitest";
 
 import type { Interaction } from "#protocol/session-projection/reader.js";
 import {
+  answerLabelOf,
   buildAnsweredBlocks,
   buildFreeformModalView,
   decodeFreeformHitlActionId,
   decodeHitlActionId,
-  formatInteractionFallbackText,
   HITL_FREEFORM_ACTION_PREFIX,
   HITL_FREEFORM_MODAL_ACTION_ID,
   HITL_FREEFORM_MODAL_BLOCK_ID,
   HITL_FREEFORM_MODAL_CALLBACK_ID,
   isFreeformAction,
   isHitlAction,
+  renderInteractionPostParts,
 } from "#public/channels/slack/hitl.js";
 import {
   answerFromSlackAction,
   ANSWER_ACTION_PREFIX,
   renderInteractionBlocks,
 } from "#public/channels/slack/index.js";
-import {
-  SLACK_CARD_BODY_TEXT_MAX_LENGTH,
-  SLACK_SECTION_TEXT_MAX_LENGTH,
-} from "#public/channels/slack/limits.js";
+import { SLACK_SECTION_TEXT_MAX_LENGTH } from "#public/channels/slack/limits.js";
 
 function makeRequest(
   overrides: Partial<Interaction["request"]> &
@@ -71,7 +69,6 @@ describe("private HITL routes", () => {
     });
   });
 
-  // A code channel's session has no thread, so its route says so instead of leaving it empty.
   it("round-trips a code channel route and rejects an empty thread", () => {
     const route = { channelId: "C123", codeChannel: true } as const;
     const blocks = renderInteractionBlocks(
@@ -101,10 +98,6 @@ describe("answerFromSlackAction", () => {
   });
 
   it("decodes a button click with a requestId that contains underscores", () => {
-    // `requestId` is the AI SDK `action.callId`, which always starts
-    // with `call_…` and contains underscores. The old encoding
-    // split the action id on `_`, silently producing `requestId =
-    // "call"`. The suffix-based encoding survives any requestId shape.
     const response = answerFromSlackAction({
       actionId: `${ANSWER_ACTION_PREFIX}call_abc123:button:0`,
       value: "approve",
@@ -209,7 +202,7 @@ describe("renderInteractionBlocks", () => {
     });
   });
 
-  it("shows tool input for confirmation approval requests in a collapsible container", () => {
+  it("renders an approval with tool input as one container: prompt, input, then buttons", () => {
     const request = makeRequest({
       call: {
         callId: "call_mongo",
@@ -232,61 +225,64 @@ describe("renderInteractionBlocks", () => {
 
     const blocks = renderInteractionBlocks(request);
 
-    expect(blocks).toHaveLength(2);
-    const card = blocks[0] as {
-      actions: Array<Record<string, unknown>>;
-      body: { text: string; type: string };
-      type: string;
-    };
-    expect(card).toMatchObject({
-      type: "card",
-      body: { type: "mrkdwn", text: "*Approve tool call: mongodb-mutate*" },
-      subtext: { type: "mrkdwn", text: "I've paused until someone approves or denies." },
-    });
-    expect(card.actions).toMatchObject([
+    expect(blocks).toEqual([
       {
-        action_id: `${ANSWER_ACTION_PREFIX}tool-approval:approval_1:button:0`,
-        text: { text: "Deny" },
-        value: "deny",
-      },
-      {
-        action_id: `${ANSWER_ACTION_PREFIX}tool-approval:approval_1:button:1`,
-        style: "primary",
-        text: { text: "Approve" },
-        value: "approve",
+        type: "container",
+        title: { type: "plain_text", text: "Approve tool call: mongodb-mutate" },
+        subtitle: { type: "mrkdwn", text: "I've paused until someone approves or denies." },
+        has_header_divider: true,
+        child_blocks: [
+          {
+            type: "rich_text",
+            elements: [
+              {
+                type: "rich_text_section",
+                elements: [
+                  { type: "text", text: "operation", style: { bold: true } },
+                  { type: "text", text: "  " },
+                  { type: "text", text: "deleteOne" },
+                  { type: "text", text: "\n" },
+                  { type: "text", text: "collection", style: { bold: true } },
+                  { type: "text", text: "  " },
+                  { type: "text", text: "org_members" },
+                  { type: "text", text: "\n" },
+                  { type: "text", text: "filter", style: { bold: true } },
+                  { type: "text", text: "  " },
+                  { type: "text", text: '{"_id":"qudw7ekkzulpgw3j"}', style: { code: true } },
+                ],
+              },
+            ],
+          },
+          {
+            type: "actions",
+            elements: [
+              {
+                type: "button",
+                action_id: `${ANSWER_ACTION_PREFIX}tool-approval:approval_1:button:1`,
+                style: "primary",
+                text: { type: "plain_text", text: "Approve", emoji: false },
+                value: "approve",
+              },
+              {
+                type: "button",
+                action_id: `${ANSWER_ACTION_PREFIX}tool-approval:approval_1:button:0`,
+                text: { type: "plain_text", text: "Deny", emoji: false },
+                value: "deny",
+              },
+            ],
+          },
+        ],
       },
     ]);
-
-    const details = blocks[1] as {
-      child_blocks: Array<{ text?: { text?: string }; type: string }>;
-      default_collapsed: boolean;
-      is_collapsible: boolean;
-      title: { text: string; type: string };
-      type: string;
-    };
-    expect(details).toMatchObject({
-      type: "container",
-      title: { type: "plain_text", text: "Tool input" },
-      is_collapsible: true,
-      default_collapsed: true,
-    });
-    expect(details.child_blocks).toHaveLength(1);
-    expect(details.child_blocks[0]).toMatchObject({ type: "section", text: { type: "mrkdwn" } });
-    expect(details.child_blocks[0]?.text?.text).toContain('"collection": "org_members"');
-    expect(details.child_blocks[0]?.text?.text).toContain('"_id": "qudw7ekkzulpgw3j"');
   });
 
-  it("renders a custom approval prompt in the card while keeping tool input collapsed", () => {
-    const blocks = renderInteractionBlocks(
+  it("titles an approval with a blank prompt by its tool name, since Slack refuses an empty title", () => {
+    const [container] = renderInteractionBlocks(
       makeRequest({
-        call: {
-          callId: "call_payment",
-          name: "send_payment",
-          input: { amount: 125, recipient: "Ada" },
-        },
+        call: { callId: "call_deploy", name: "deploy", input: { env: "prod" } },
         display: "confirmation",
         kind: "approval",
-        prompt: "Send $125 to Ada?",
+        prompt: " \n ",
         options: [
           { id: "approve", label: "Approve" },
           { id: "deny", label: "Deny" },
@@ -294,47 +290,68 @@ describe("renderInteractionBlocks", () => {
       }),
     );
 
-    expect(blocks[0]).toMatchObject({
+    expect(container).toMatchObject({ title: { type: "plain_text", text: "deploy" } });
+  });
+
+  it("keeps an approval without tool input as a compact card", () => {
+    const [card, ...rest] = renderInteractionBlocks(
+      makeRequest({
+        call: { callId: "call_ping", name: "ping", input: {} },
+        display: "confirmation",
+        kind: "approval",
+        prompt: "Ping the service?",
+        options: [
+          { id: "approve", label: "Approve" },
+          { id: "deny", label: "Deny" },
+        ],
+      }),
+    );
+
+    expect(rest).toEqual([]);
+    expect(card).toMatchObject({
       type: "card",
-      body: { type: "mrkdwn", text: "*Send $125 to Ada?*" },
-    });
-    expect(blocks[1]).toMatchObject({
-      type: "container",
-      default_collapsed: true,
-      title: { type: "plain_text", text: "Tool input" },
+      body: { type: "mrkdwn", text: "*Ping the service?*" },
+      subtext: { type: "mrkdwn", text: "I've paused until someone approves or denies." },
     });
   });
 
-  it("keeps long approval input details within the collapsible container section limit", () => {
-    const blocks = renderInteractionBlocks(
-      makeRequest({
-        call: {
-          callId: "call_long",
-          name: "dangerous_tool",
-          input: { value: "x".repeat(SLACK_SECTION_TEXT_MAX_LENGTH + 500) },
-        },
-        display: "confirmation",
-        kind: "approval",
-        options: [
-          { id: "approve", label: "Approve" },
-          { id: "deny", label: "Deny" },
-        ],
-      }),
+  it("bounds the input preview however large the tool input is", () => {
+    const preview = (input: Record<string, string>) => {
+      const [container] = renderInteractionBlocks(
+        makeRequest({
+          call: { callId: "call_long", name: "dangerous_tool", input },
+          display: "confirmation",
+          kind: "approval",
+          prompt: "x".repeat(400),
+          options: [
+            { id: "approve", label: "Approve" },
+            { id: "deny", label: "Deny" },
+          ],
+        }),
+      ) as [{ child_blocks: unknown[]; title: { text: string } }];
+      return container;
+    };
+    const fields = Object.fromEntries(
+      Array.from({ length: 40 }, (_, index) => [`field_${index}`, "y".repeat(5000)]),
     );
 
-    const card = blocks[0] as { body: { text: string } };
-    expect(card.body.text.length).toBeLessThanOrEqual(SLACK_CARD_BODY_TEXT_MAX_LENGTH);
-    expect(card.body.text).toBe("*Pick one*");
+    const small = JSON.stringify(preview({ value: "y".repeat(5000) }));
+    const large = preview(fields);
+    const many = JSON.stringify(
+      preview(Object.fromEntries(Array.from({ length: 2000 }, (_, index) => [`${index}`, "y"]))),
+    );
 
-    const details = blocks[1] as { child_blocks: Array<{ text?: { text?: string } }> };
-    const text = details.child_blocks[0]?.text?.text;
-    expect(text?.length).toBeLessThanOrEqual(SLACK_SECTION_TEXT_MAX_LENGTH);
-    expect(text?.endsWith("...\n```")).toBe(true);
+    expect(large.title.text).toHaveLength(150);
+    expect(small).toContain("y...");
+    expect(JSON.stringify(large)).toMatch(/\+\d+ more fields/u);
+    expect(JSON.stringify(large).length).toBeLessThan(3000);
+    expect(many).toContain("+1990 more fields");
+    expect(many.length).toBeLessThan(3000);
   });
 
-  it("escapes Slack control sequences in model-supplied prompts and tool input", () => {
+  it("renders model-supplied prompts and tool input literally", () => {
     const request = makeRequest({
-      call: { callId: "call_post", name: "post", input: { text: "<!here>" } },
+      call: { callId: "call_post", name: "post", input: { text: "<!here> *bold*" } },
       display: "confirmation",
       kind: "approval",
       prompt: "<!channel> open <https://evil.example|https://trusted.example> & approve",
@@ -346,15 +363,14 @@ describe("renderInteractionBlocks", () => {
     const prompt =
       "&lt;!channel&gt; open &lt;https://evil.example|https://trusted.example&gt; &amp; approve";
 
-    const [card, details] = renderInteractionBlocks(request) as [
-      { body: { text: string } },
-      { child_blocks: Array<{ text: { text: string } }> },
+    const [container] = renderInteractionBlocks(request) as [
+      { child_blocks: unknown[]; title: { text: string; type: string } },
     ];
-    expect(card.body.text).toBe(`*${prompt}*`);
-    expect(details.child_blocks[0]?.text.text).toContain('"text": "&lt;!here&gt;"');
-    const fallback = formatInteractionFallbackText(request);
-    expect(fallback.startsWith(`${prompt}\n`)).toBe(true);
-    expect(fallback).toContain('"text": "&lt;!here&gt;"');
+    expect(container.title).toEqual({ type: "plain_text", text: request.request.prompt });
+    expect(JSON.stringify(container.child_blocks[0])).toContain(
+      '{"type":"text","text":"<!here> *bold*"}',
+    );
+    expect(renderInteractionPostParts(request).controls.text).toBe(prompt);
 
     const [section] = renderInteractionBlocks({
       ...request,
@@ -419,6 +435,35 @@ describe("renderInteractionBlocks", () => {
     expect(widget.options).toHaveLength(8);
   });
 
+  it.each([
+    ["radio_buttons", 2],
+    ["static_select", 8],
+  ])("preselects initialOptionId on %s and adds a button that submits it", (type, count) => {
+    const options = Array.from({ length: count }, (_, i) => ({
+      id: `team_${i}`,
+      label: `Team ${i}`,
+    }));
+    const blocks = renderInteractionBlocks(
+      makeRequest({ display: "select", options, initialOptionId: "team_1" }),
+    );
+
+    const actions = blocks[1] as {
+      block_id: string;
+      elements: [
+        { type: string; initial_option: unknown; options: unknown[] },
+        { action_id: string; style: string; text: { text: string }; value: string },
+      ];
+    };
+    const [widget, button] = actions.elements;
+    expect(widget.type).toBe(type);
+    expect(widget.initial_option).toEqual(widget.options[1]);
+    expect(button).toMatchObject({ style: "primary", text: { text: "Use Team 1" } });
+    expect(answerFromSlackAction({ actionId: button.action_id, value: button.value })).toEqual({
+      response: { interactionId: "call_abc123", optionId: "team_1" },
+    });
+    expect(answerLabelOf({ blockId: actions.block_id, label: button.text.text })).toBe("Team 1");
+  });
+
   it("renders a 'Type your answer' freeform button when the request has no options", () => {
     const blocks = renderInteractionBlocks(makeRequest({ prompt: "What's the date range?" }));
 
@@ -443,9 +488,6 @@ describe("renderInteractionBlocks", () => {
         options: [{ id: "yes", label: "Approve" }],
       }),
     );
-    // current behavior: options take precedence; freeform button is the
-    // fallback when no options are supplied. This documents the
-    // option-only path; freeform-with-options is left as future work.
     expect(blocks).toHaveLength(1);
     const card = blocks[0] as { actions: Array<{ action_id: string }> };
     const ids = card.actions.map((e) => e.action_id);
@@ -520,39 +562,6 @@ describe("renderInteractionBlocks", () => {
         optionId: "weekly_report",
       },
     });
-  });
-});
-
-describe("formatInteractionFallbackText", () => {
-  it("includes approval tool input in Slack fallback text", () => {
-    const text = formatInteractionFallbackText(
-      makeRequest({
-        call: {
-          callId: "call_mongo",
-          name: "mongodb-mutate",
-          input: {
-            operation: "deleteOne",
-            collection: "orgs",
-            filter: { _id: "48gtnni64rxqtaoh" },
-          },
-        },
-        display: "confirmation",
-        kind: "approval",
-        prompt: "Approve tool call: mongodb-mutate",
-        options: [
-          { id: "approve", label: "Approve" },
-          { id: "deny", label: "Deny" },
-        ],
-      }),
-    );
-
-    expect(text).toContain("Approve tool call: mongodb-mutate");
-    expect(text).toContain('"collection": "orgs"');
-    expect(text).toContain('"_id": "48gtnni64rxqtaoh"');
-  });
-
-  it("leaves non-approval fallback text unchanged", () => {
-    expect(formatInteractionFallbackText(makeRequest({ prompt: "Pick one" }))).toBe("Pick one");
   });
 });
 

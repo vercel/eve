@@ -36,7 +36,6 @@ import {
 import { withSpinner } from "../with-spinner.js";
 import type { VercelTeamRequirement } from "../vercel-project-api.js";
 
-/** Injected for tests; defaults to the real Vercel project and fs helpers. */
 export interface ResolveProvisioningDeps {
   requireAuth: typeof requireAuth;
   isVercelAuthenticated: typeof isVercelAuthenticated;
@@ -52,60 +51,24 @@ export interface ResolveProvisioningDeps {
 }
 
 export interface ResolveProvisioningOptions {
-  /** Resolves the provisioning-tree questions; the composed stack decides how. */
   asker: Asker;
-  /**
-   * Still drives the Vercel reads that validate a decision (team/project
-   * pickers, auth, name availability) and carries the spinner/progress log. The
-   * deploy-tree questions themselves now travel the asker.
-   */
   prompter: Prompter;
-  /** Parent directory the project folder is created inside. Defaults to cwd. */
   targetDirectory?: string;
-  /** Headless flags vs interactive prompts. The args are read only when headless. */
   mode: ProvisioningMode;
-  /**
-   * Whether a detected on-disk link short-circuits the interview. Defaults to
-   * true — an in-place setup adopts the link it finds. False skips adoption so
-   * the team/project pickers always run: the re-link path's whole point is
-   * choosing a different project, so re-adopting the current link would be a
-   * dead end.
-   */
   adoptExistingLink?: boolean;
-  /**
-   * Which project choices this interactive composition permits. Onboarding
-   * defaults to creating or linking; an explicit link flow goes directly from
-   * team selection to the existing-project picker.
-   */
   projectSelection?: "create-or-link" | "existing-only";
   teamSelectMessage?: (currentTeam: string) => string;
   teamRequirement?: VercelTeamRequirement;
   deps?: ResolveProvisioningDeps;
 }
 
-/** Both provisioning plans plus the model wiring they imply. Input and payload. */
 interface ResolvedProvisioning {
   vercelProject: ResolvedVercelProject;
   aiGateway: ResolvedAiGateway;
   modelWiring: WiringMode;
-  /**
-   * The detected on-disk link when the target directory is already linked to
-   * a Vercel project. Adopted instead of planning a project: the link is the
-   * source of truth, so the project plan stays `none` (nothing to create or
-   * link) and this resolution seeds `state.project`, exactly as in-project
-   * setup models the same fact.
-   */
   project?: ProjectResolution;
 }
 
-/**
- * Selections from earlier in the interview that only work on Vercel: Slack
- * needs a public production URL, and Connect-backed connections authenticate
- * through a Vercel project. The single detection source for both faces of the
- * box — the interactive path resolves the where-to-run question to Vercel
- * with a note, and the headless path refuses contradicting `--skip-vercel`
- * flags.
- */
 interface VercelDemands {
   connectSlugs: string[];
 }
@@ -118,13 +81,11 @@ function vercelDemands(state: Readonly<SetupState>): VercelDemands {
   };
 }
 
-/** "linear authenticates …" / "linear, notion authenticate …". */
 function connectClause(connectSlugs: readonly string[]): string {
   const verb = connectSlugs.length === 1 ? "authenticates" : "authenticate";
   return `${connectSlugs.join(", ")} ${verb} through Vercel Connect`;
 }
 
-/** The reasons behind a forced Vercel resolution; empty when free to choose. */
 function vercelRequirements(demands: VercelDemands): string[] {
   const reasons: string[] = [];
   if (demands.connectSlugs.length > 0) {
@@ -133,13 +94,6 @@ function vercelRequirements(demands: VercelDemands): string[] {
   return reasons;
 }
 
-/**
- * THE PROVISIONING BOX: the last interview decision — where the agent runs —
- * made after the agent itself is described (name, model, channels,
- * connections) and before any filesystem writes or `vercel link` side
- * effects. Gather owns every decision (and the Vercel reads validating it);
- * `perform` passes the plan through untouched so `apply` can record it.
- */
 export function resolveProvisioning(
   options: ResolveProvisioningOptions,
 ): SetupBox<SetupState, ResolvedProvisioning, ResolvedProvisioning> {
@@ -158,16 +112,6 @@ export function resolveProvisioning(
   };
   const parent = (): string => resolve(options.targetDirectory ?? process.cwd());
 
-  /**
-   * The on-disk link to adopt, when there is one. An in-place target can
-   * already be linked to a Vercel project; with a logged-in CLI, the runtime
-   * mints an AI Gateway token through `@vercel/oidc` from that link alone, so
-   * there is nothing to ask: no where-to-run, no team, no project. Both facts
-   * are required — a link without a login cannot mint a token, so that run
-   * falls back to the question tree (whose Vercel branch enforces login).
-   * The network reaches (production-alias read, `whoami`) run behind a
-   * spinner, gated on the link file so the common unlinked case stays silent.
-   */
   async function detectAdoptableLink(
     state: Readonly<SetupState>,
     signal?: AbortSignal,
@@ -184,7 +128,6 @@ export function resolveProvisioning(
     });
   }
 
-  /** Maps the headless flags directly to plans, without prompting. */
   async function plansFromFlags(
     agentName: string,
     projectArgs: ArgsHeadlessProject,
@@ -231,16 +174,12 @@ export function resolveProvisioning(
     return { vercelProject, aiGateway, modelWiring: "gateway" };
   }
 
-  /** The "Where should your agent run?" gate and its branches. */
   async function promptPlans(
     state: Readonly<SetupState>,
     signal?: AbortSignal,
   ): Promise<ResolvedProvisioning> {
     const prompter = options.prompter;
     const agentName = state.agentName;
-    // A directory that is already linked answers every provisioning question
-    // at once: the project exists and the AI Gateway authenticates through
-    // the Vercel login, so the whole tree collapses into a note.
     const adopted =
       options.adoptExistingLink === false ? undefined : await detectAdoptableLink(state, signal);
     if (adopted !== undefined) {
@@ -255,10 +194,6 @@ export function resolveProvisioning(
         project: adopted,
       };
     }
-    // Earlier selections can leave only one honest answer; then the question
-    // is replaced by a note saying why. Otherwise it is asked, and a headless
-    // run with no flag cannot guess it, so it is required and refuses the run
-    // with InteractionRequired.
     const requirements = vercelRequirements(vercelDemands(state));
     let deployVercel = true;
     if (requirements.length > 0) {
@@ -351,8 +286,6 @@ export function resolveProvisioning(
           modelWiring: "gateway",
         };
       }
-      // Creating would name the project after the agent, so linking suggests
-      // the existing project already carrying that name.
       const pickedProject = await deps.pickProject(prompter, parent(), team, {
         allowCreateWhenEmpty: options.projectSelection !== "existing-only",
         suggestedName: agentName,
@@ -365,8 +298,6 @@ export function resolveProvisioning(
       };
     }
 
-    // No Vercel project: the agent still needs a credential for the model it
-    // picked earlier, so the provider hint is derived from that model.
     const credential = await options.asker.ask(
       select<"api-key" | "local">({
         key: "credential",
@@ -390,9 +321,6 @@ export function resolveProvisioning(
       }),
     );
     if (credential === "api-key") {
-      // Sensitive text: the interactive base renders it through the password
-      // prompt (masked), every other rung coerces it as plain text. The
-      // question's validate runs in both bases.
       const apiGatewayKey = await options.asker.ask(
         text({
           key: "gateway-api-key",
@@ -409,8 +337,6 @@ export function resolveProvisioning(
         modelWiring: "gateway",
       };
     }
-    // "Use my own provider API key": no managed credential. The scaffold writes
-    // an inline provider `byok` block and the model prompt is skipped.
     return {
       vercelProject: { kind: "none" },
       aiGateway: { kind: "byop" },
@@ -422,11 +348,6 @@ export function resolveProvisioning(
     id: "resolve-provisioning",
 
     async gather({ state, signal }): Promise<ResolvedProvisioning> {
-      // A headless run maps flags to plans without ever asking; the headless mode
-      // is the same composition-time fact that picked the asker base. An
-      // interactive run asks the deploy tree through the asker. Keeping the
-      // branch here preserves the dual-face split exactly: headless requires
-      // mode.headless and reads the flags, interactive prompts every decision.
       if (options.mode.headless) {
         const plans = await plansFromFlags(
           state.agentName,
@@ -434,10 +355,6 @@ export function resolveProvisioning(
           options.mode.aiGateway,
           signal,
         );
-        // Flag-driven runs can contradict themselves (--skip-vercel with a
-        // selection that needs a project); refuse here, before any filesystem
-        // write. Interactive runs cannot reach this state: the prompt tree
-        // resolves to Vercel for those selections.
         if (plans.vercelProject.kind === "none") {
           const demands = vercelDemands(state);
           if (demands.connectSlugs.length > 0) {

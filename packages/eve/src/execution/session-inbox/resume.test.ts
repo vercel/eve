@@ -6,7 +6,10 @@ import {
   sessionInboxHookToken,
 } from "#execution/session-inbox/address.js";
 import { StrandedSessionOwnerError } from "#execution/session-inbox/owner.js";
-import { resumeSessionInbox, SessionHandoffPendingError } from "#execution/session-inbox/resume.js";
+import {
+  AcceptedSessionIdentityError,
+  resumeSessionInbox,
+} from "#execution/session-inbox/resume.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { DevelopmentRunUnavailableError } from "#internal/workflow/development-run-unavailable-error.js";
 
@@ -20,10 +23,8 @@ vi.mock("#internal/workflow/runtime.js", () => ({
   resumeHook: (...args: unknown[]) => resumeHookMock(...args),
 }));
 
-/** Vercel-shaped: owners run on their own deployment, so ingress resumes by token without a lookup. */
 const vercelWorld = { capabilities: { deploymentAffinity: true } };
 
-/** A World without deployment affinity; owner runs record `ownerEveVersion`. */
 function singleDeploymentWorld(ownerEveVersion: string | undefined) {
   return {
     runs: {
@@ -156,6 +157,53 @@ describe("session inbox resume", () => {
     expect(resumeHookMock).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    ["reports an owner whose deployment was deleted as stranded", "Deployment not found.", true],
+    ["keeps any other key failure an accepted command", "Project not found.", false],
+  ])("%s", async (_name, reason, stranded) => {
+    getWorldMock.mockResolvedValue({
+      ...vercelWorld,
+      runs: { get: vi.fn(async (runId: string) => ({ attributes: {}, runId })) },
+    });
+    const keyFailure = runKeyFailure(reason);
+    resumeHookMock.mockResolvedValue({
+      runId: "owner-2",
+      get metadata() {
+        return Promise.reject(keyFailure);
+      },
+    });
+
+    const receipt = await resumeSessionInbox("channel:alias", {
+      kind: "send",
+      payload: { message: "Alice asks about the release." },
+    });
+    const failure = await receipt.sessionId.catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(
+      stranded ? StrandedSessionOwnerError : AcceptedSessionIdentityError,
+    );
+    if (stranded) expect(failure).toMatchObject({ ownerRunId: "owner-2" });
+    expect(resumeHookMock).toHaveBeenCalledOnce();
+  });
+
+  it("delivers to the live replacement of an owner whose deployment was deleted", async () => {
+    resumeHookMock
+      .mockRejectedValueOnce(runKeyFailure("Deployment not found."))
+      .mockResolvedValueOnce(sessionHook("replacement", "channel:alias", { sessionId: "fresh" }));
+    getHookByTokenMock.mockResolvedValue(
+      sessionHook("replacement", "channel:alias", { sessionId: "fresh" }),
+    );
+
+    const receipt = await resumeSessionInbox("channel:alias", {
+      kind: "send",
+      payload: { message: "Alice adds the rollout date." },
+    });
+
+    expect(receipt.ownerRunId).toBe("replacement");
+    await expect(receipt.sessionId).resolves.toBe("fresh");
+    expect(resumeHookMock).toHaveBeenCalledTimes(2);
+  });
+
   it("refuses a retired owner before committing the command", async () => {
     getWorldMock.mockResolvedValue(singleDeploymentWorld("0.0.1"));
 
@@ -192,7 +240,6 @@ describe("session inbox resume", () => {
     getWorldMock.mockResolvedValue(
       singleDeploymentWorld(ownerEveVersion ?? resolveInstalledPackageInfo().version),
     );
-    // The `eve dev` World refuses every hook lookup for a dormant run, including the resume's own.
     const dormant = async (token: string) => {
       if (!token.startsWith(sessionInboxHookToken(""))) throw new HookNotFoundError(token);
       throw new DevelopmentRunUnavailableError({ availability: "dormant", runId: "owner-1" });
@@ -205,31 +252,122 @@ describe("session inbox resume", () => {
       { kind: "send", payload: { message: "Bob checks in." } },
     ).catch((error: unknown) => error);
 
-    // A same-version dormant run may resume with `eve dev --resume`, so it is never ended.
     expect(refusal).toBeInstanceOf(
       stranded ? StrandedSessionOwnerError : DevelopmentRunUnavailableError,
     );
     if (stranded) expect(resumeHookMock).not.toHaveBeenCalled();
   });
+});
 
-  it("does not report a handoff that outlives the retry window as an unowned address", async () => {
-    vi.useFakeTimers();
-    try {
-      resumeHookMock.mockRejectedValue(new HookNotFoundError("inbox"));
-      getHookByTokenMock.mockImplementation(async (token: string) =>
-        sessionHook("releasing-owner", token, {}),
+function runKeyFailure(reason: string) {
+  return Object.assign(
+    new Error(
+      `Failed to fetch run key for owner-2 (deployment dpl_old): HTTP 404 Not Found — {"error":{"code":"not_found","message":"${reason}"}}`,
+    ),
+    { name: "RunKeyFetchError", status: 404 },
+  );
+}
+
+describe("remembering a continuation's owner", () => {
+  const guardedWorld = { capabilities: { deploymentAffinity: true, resolvedHookResume: true } };
+  function routableHook(runId: string, token: string, sessionId: string) {
+    return {
+      createdAt: new Date("2026-11-01T00:00:00Z"),
+      environment: "preview",
+      hookId: `hook-${runId}`,
+      metadata: Promise.resolve({ sessionId }),
+      ownerId: "team_test",
+      projectId: "prj_test",
+      resumeContext: {
+        deploymentId: "dpl_test",
+        encryptionPublicKey: "public-key",
+        workflowName: "session",
+      },
+      runId,
+      token,
+    };
+  }
+  const send = { kind: "send", payload: { message: "Alice follows up in the thread." } } as const;
+
+  it("resumes the owner it resolved before without a lookup", async () => {
+    getWorldMock.mockResolvedValue(guardedWorld);
+    const token = sessionInboxHookToken("slack:remembered");
+    const { metadata: _metadata, ...descriptor } = routableHook("owner-1", token, "session-1");
+    resumeHookMock
+      .mockResolvedValueOnce(routableHook("owner-1", token, "session-1"))
+      .mockResolvedValueOnce({ ...descriptor, metadata: Promise.resolve(undefined) });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await expect((await resumeSessionInbox("slack:remembered", send)).sessionId).resolves.toBe(
+        "session-1",
       );
-
-      const delivery = resumeSessionInbox("channel:alias", {
-        kind: "send",
-        payload: { message: "Alice asks about the release." },
-      }).catch((error: unknown) => error);
-      await vi.advanceTimersByTimeAsync(6_000);
-
-      await expect(delivery).resolves.toBeInstanceOf(SessionHandoffPendingError);
-    } finally {
-      vi.useRealTimers();
     }
+    expect(resumeHookMock.mock.calls.map(([target]) => target)).toEqual([token, descriptor]);
+  });
+
+  it("reports a remembered owner whose deployment was deleted as stranded", async () => {
+    getWorldMock.mockResolvedValue({
+      ...guardedWorld,
+      getEncryptionKeyForRun: vi.fn().mockRejectedValue(runKeyFailure("Deployment not found.")),
+      runs: { get: vi.fn(async (runId: string) => ({ attributes: {}, runId })) },
+    });
+    const token = sessionInboxHookToken("slack:deleted");
+    const { metadata: _metadata, ...descriptor } = routableHook("owner-1", token, "session-1");
+    resumeHookMock
+      .mockResolvedValueOnce(routableHook("owner-1", token, "session-1"))
+      .mockResolvedValueOnce({ ...descriptor, metadata: Promise.resolve(undefined) });
+    await expect((await resumeSessionInbox("slack:deleted", send)).sessionId).resolves.toBe(
+      "session-1",
+    );
+    const receipt = await resumeSessionInbox("slack:deleted", send);
+    await expect(receipt.sessionId).rejects.toBeInstanceOf(StrandedSessionOwnerError);
+    expect(resumeHookMock.mock.calls[1]?.[0]).toEqual(descriptor);
+  });
+
+  it("resolves the owner again after the remembered one refuses", async () => {
+    getWorldMock.mockResolvedValue(guardedWorld);
+    const token = sessionInboxHookToken("slack:moved");
+    const { metadata: _metadata, ...first } = routableHook("owner-1", token, "session-1");
+    const { metadata: _successorMetadata, ...successor } = routableHook(
+      "owner-2",
+      token,
+      "session-2",
+    );
+    resumeHookMock
+      .mockResolvedValueOnce(routableHook("owner-1", token, "session-1"))
+      .mockRejectedValueOnce(new HookNotFoundError(token))
+      .mockResolvedValue(routableHook("owner-2", token, "session-2"));
+    for (const expected of ["session-1", "session-2", "session-2"]) {
+      await expect((await resumeSessionInbox("slack:moved", send)).sessionId).resolves.toBe(
+        expected,
+      );
+    }
+    expect(resumeHookMock.mock.calls.map(([target]) => target)).toEqual([
+      token,
+      first,
+      token,
+      successor,
+    ]);
+  });
+
+  it("forgets a refused owner even when no caller reads the session", async () => {
+    getWorldMock.mockResolvedValue(guardedWorld);
+    const token = sessionInboxHookToken("slack:handed-off");
+    const { metadata: _metadata, ...first } = routableHook("owner-1", token, "session-1");
+    resumeHookMock
+      .mockResolvedValueOnce(routableHook("owner-1", token, "session-1"))
+      .mockRejectedValueOnce(new HookNotFoundError(token))
+      .mockResolvedValue(routableHook("owner-2", token, "session-2"));
+    await (
+      await resumeSessionInbox("slack:handed-off", send)
+    ).sessionId;
+    await resumeSessionInbox("slack:handed-off", send);
+    await resumeSessionInbox("slack:handed-off", send);
+    expect(resumeHookMock.mock.calls.map(([target]) => target)).toEqual([
+      token,
+      first,
+      token,
+      token,
+    ]);
   });
 });
 

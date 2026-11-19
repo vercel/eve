@@ -12,10 +12,15 @@ const MAX_SLEEP_SECONDS = Math.floor(Number.MAX_SAFE_INTEGER / 1_000);
 const SLEEP_TOOL_DESCRIPTION =
   "Wait for a specified amount of time before continuing. Use this when a process or condition needs time to change before it is useful to check its progress or status again.";
 
+/** Input to the `sleep` tool: how many seconds to wait. */
 export interface SleepToolInput {
   seconds: number;
 }
 
+/**
+ * Result of the `sleep` tool: the seconds waited, or an interruption when a new message ended the
+ * wait early.
+ */
 export type SleepToolOutput = { waitedSeconds: number } | InterruptedOutput;
 
 export const SLEEP_INPUT_SCHEMA = defineJsonSchema<SleepToolInput>({

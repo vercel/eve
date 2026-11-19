@@ -1,13 +1,6 @@
-/**
- * Races reads across several hooks. A read that lands while no race is waiting
- * is kept until one claims it: the owner awaits steps between races, and a
- * resume arriving then must not be dropped or re-issued. Claims follow array
- * order because separate hooks carry no order between them.
- */
 export interface ChannelReader<C extends string, T> {
   readonly channel: C;
   readonly iterator: AsyncIterator<T>;
-  /** Reads that have landed and not yet been claimed, oldest first. */
   readonly landed: IteratorResult<T>[];
   failure?: { readonly error: unknown };
   pending?: Promise<void>;
@@ -29,10 +22,6 @@ type ChannelRead<R extends readonly ChannelReader<string, unknown>[]> = ChannelR
   R[number]
 >;
 
-/**
- * Channel reads wake the loop with `undefined` after buffering their result;
- * a cancel wins the race outright.
- */
 export function raceChannelReads<const R extends readonly ChannelReader<string, unknown>[]>(
   readers: R,
 ): Promise<ChannelRead<R>>;

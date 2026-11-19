@@ -56,15 +56,15 @@ describe("resolvePackageManager", () => {
 
 describe("packageManagerFromUserAgent", () => {
   it.each([
-    ["pnpm/10.4.0 npm/? node/v24.0.0 darwin arm64", "pnpm"],
-    ["npm/11.0.0 node/v24.0.0 darwin arm64 workspaces/false", "npm"],
-    ["yarn/1.22.22 npm/? node/v24.0.0 darwin arm64", "yarn"],
-    ["bun/1.2.0 npm/? node/v24.0.0 darwin arm64", "bun"],
+    ["pnpm/10.4.0 npm/? node/v26.0.0 darwin arm64", "pnpm"],
+    ["npm/11.0.0 node/v26.0.0 darwin arm64 workspaces/false", "npm"],
+    ["yarn/1.22.22 npm/? node/v26.0.0 darwin arm64", "yarn"],
+    ["bun/1.2.0 npm/? node/v26.0.0 darwin arm64", "bun"],
   ] as const)("identifies %j as %s", (userAgent, kind) => {
     expect(packageManagerFromUserAgent(userAgent)).toBe(kind);
   });
 
-  it.each([undefined, "", "vlt/1.0.0 node/v24.0.0 darwin arm64"])(
+  it.each([undefined, "", "vlt/1.0.0 node/v26.0.0 darwin arm64"])(
     "yields undefined for absent or unknown user agent %j",
     (userAgent) => {
       expect(packageManagerFromUserAgent(userAgent)).toBeUndefined();
@@ -78,7 +78,7 @@ describe("detectInvokingPackageManager", () => {
   });
 
   it("reads the launching manager from npm_config_user_agent", () => {
-    vi.stubEnv("npm_config_user_agent", "yarn/1.22.22 npm/? node/v24.0.0 darwin arm64");
+    vi.stubEnv("npm_config_user_agent", "yarn/1.22.22 npm/? node/v26.0.0 darwin arm64");
     expect(detectInvokingPackageManager()).toBe("yarn");
   });
 

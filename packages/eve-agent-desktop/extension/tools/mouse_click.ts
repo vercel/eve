@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { desktopTool, flag, xy } from "../lib/tool";
 
+/** Lets the agent click at absolute screen coordinates. Requires the extension to run `headed`. */
 export default desktopTool({
   description:
     "Click at absolute screen coordinates. Requires the extension to run headed. Prefer click on a ref.",

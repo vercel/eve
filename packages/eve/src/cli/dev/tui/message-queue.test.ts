@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { MESSAGE_QUEUE_LIMIT, MessageQueue, renderMessageQueueRows } from "./message-queue.js";
+import {
+  coalesceQueuedMessages,
+  MESSAGE_QUEUE_LIMIT,
+  MessageQueue,
+  renderMessageQueueRows,
+} from "./message-queue.js";
 import { createTheme } from "./theme.js";
 
 const theme = createTheme({ color: false, unicode: true });
@@ -19,8 +24,8 @@ describe("MessageQueue", () => {
     const queue = new MessageQueue();
     queue.enqueue("first");
     queue.enqueue("second");
-    expect(queue.takePrompt()).toBe("first\n\nsecond");
-    expect(queue.takePrompt()).toBeUndefined();
+    expect(coalesceQueuedMessages(queue.take())).toBe("first\n\nsecond");
+    expect(coalesceQueuedMessages(queue.take())).toBeUndefined();
   });
 });
 

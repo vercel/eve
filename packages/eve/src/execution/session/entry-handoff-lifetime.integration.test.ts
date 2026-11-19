@@ -5,13 +5,13 @@ import {
   sessionCommandHookToken,
   sessionInboxHookToken,
 } from "#execution/session-inbox/address.js";
-import { createWorkflowRuntime, waitForCommandHookOwner } from "#execution/workflow-runtime.js";
+import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { buildSerializedContext, handoffFollowUp } from "#internal/testing/entry-test-helpers.js";
 import { captureTurnEvents } from "#internal/testing/events.js";
 import { captureConsoleOutput, workflowSdkNotice } from "#internal/testing/log-records.js";
 import { waitForParkedTurnStep } from "#internal/testing/session-test-helpers.js";
-import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
+import { startSessionOwner, waitForHookOwner } from "#internal/testing/workflow-test-helpers.js";
 import { getWorld } from "#internal/workflow/runtime.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 
@@ -27,7 +27,6 @@ it("restarts the idle window across a compaction handoff", async () => {
     vi.spyOn(world.events, "create").mockImplementation(async (...args) => {
       if (delayFirstStart && args[1].eventType === "run_started") {
         delayFirstStart = false;
-        // Separate the optimistic start time from the persisted replay timestamp.
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
       return createEvent(...args);
@@ -58,9 +57,9 @@ it("restarts the idle window across a compaction handoff", async () => {
       });
       await stream.nextUntil((event) => event.type === "context.settled");
       const inboxToken = sessionInboxHookToken(sessionCommandHookToken(anchor.runId));
-      let successor: Awaited<ReturnType<typeof waitForCommandHookOwner>> | undefined;
+      let successor: Awaited<ReturnType<typeof waitForHookOwner>> | undefined;
       await vi.waitFor(async () => {
-        successor = await waitForCommandHookOwner(inboxToken);
+        successor = await waitForHookOwner(inboxToken);
         expect(successor.runId).not.toBe(anchor.runId);
       });
       expect((await readSessionTimer(successor!.runId)).deadline.getTime()).toBeGreaterThan(

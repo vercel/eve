@@ -9,7 +9,6 @@ const VercelProjectLinkSchema = z.object({
   projectName: z.string().min(1).optional(),
 });
 
-/** Validated Vercel owner and project identifiers from Vercel link metadata. */
 export type VercelProjectLink = z.infer<typeof VercelProjectLinkSchema>;
 
 const VercelRepoProjectSchema = z.object({
@@ -88,7 +87,6 @@ async function readRepoProjectLink(projectPath: string): Promise<VercelProjectLi
   }
 }
 
-/** Reads a validated Vercel project link without mutating local project state. */
 export async function readVercelProjectLink(
   projectPath: string,
 ): Promise<VercelProjectLink | undefined> {

@@ -4,7 +4,6 @@ import git from "../../extension/extension.ts";
 
 const broker = async () => {};
 
-// Typechecked by `pnpm typecheck`: what `authorize` receives depends on `principalType`.
 test("authorize receives owner only for app tokens", () => {
   git({
     github: {

@@ -34,7 +34,6 @@ function testBinding(
   };
 }
 
-/** A stream whose one line ends the session. */
 function endedStream(): Response {
   return new Response(
     encodeLine({

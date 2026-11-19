@@ -1,12 +1,20 @@
-// Hand-authored declaration for the vendored slice of `js-yaml` v4, which
-// ships no types. Only `load` is vendored.
+declare const tagDefinition: unique symbol;
 
-export interface LoadOptions {
-  /** File name used in error messages. */
-  filename?: string;
-  /** Allows duplicate mapping keys, keeping the last value. Defaults to `false`. */
-  json?: boolean;
+export interface TagDefinition {
+  readonly [tagDefinition]: true;
 }
 
-/** Parses one YAML document with the default (data-only) schema. */
-export function load(source: string, options?: LoadOptions): unknown;
+export interface Schema {
+  withTags(...tags: TagDefinition[]): Schema;
+}
+
+export interface LoadOptions {
+  filename?: string;
+  schema?: Schema;
+}
+
+export const CORE_SCHEMA: Schema;
+
+export const mergeTag: TagDefinition;
+
+export function loadAll(source: string, options?: LoadOptions): unknown[];

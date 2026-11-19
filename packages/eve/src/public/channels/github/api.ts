@@ -1,10 +1,3 @@
-/**
- * Minimal GitHub REST/GraphQL wrapper used by the GitHub channel.
- *
- * eve exposes channel-owned helper types and functions instead of leaking a
- * third-party SDK through public channel APIs.
- */
-
 import {
   resolveGitHubInstallationToken,
   type GitHubAuthApiOptions,
@@ -26,7 +19,6 @@ export type GitHubApiMethod = "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
  */
 export interface GitHubApiOptions extends GitHubAuthApiOptions {}
 
-/** Options for {@link GitHubHandle.request}. */
 interface GitHubRequestOptions {
   readonly auth?: boolean;
   readonly headers?: Readonly<Record<string, string>>;
@@ -65,7 +57,6 @@ export class GitHubApiError extends Error {
   }
 }
 
-/** Body accepted by GitHub comment-writing helpers. */
 interface GitHubCommentBody {
   readonly body: string;
 }
@@ -101,10 +92,6 @@ interface GitHubResourceInput {
   readonly repo: string;
 }
 
-/**
- * Calls a GitHub REST API path with installation-token auth by default. Pass
- * `options.auth: false` for unauthenticated reads.
- */
 export async function callGitHubApi<T = unknown>(input: {
   readonly api?: GitHubApiOptions;
   readonly body?: GitHubJsonObject;
@@ -153,7 +140,6 @@ export async function callGitHubApi<T = unknown>(input: {
   return { body, ok: response.ok, status: response.status };
 }
 
-/** Creates an issue or PR timeline comment. */
 export async function createGitHubIssueComment(
   input: GitHubResourceInput & {
     readonly body: string | GitHubCommentBody;
@@ -173,7 +159,6 @@ export async function createGitHubIssueComment(
   return toPostedComment(response.body);
 }
 
-/** Replies to an inline pull-request review comment thread. */
 export async function createGitHubReviewCommentReply(
   input: GitHubResourceInput & {
     readonly body: string | GitHubCommentBody;
@@ -194,7 +179,6 @@ export async function createGitHubReviewCommentReply(
   return toPostedComment(response.body);
 }
 
-/** Minimal pull-request metadata returned by {@link getGitHubPullRequest}. */
 export interface GitHubPullRequestDetails {
   readonly additions: number | undefined;
   readonly author: GitHubPullRequestUser | undefined;
@@ -213,21 +197,18 @@ export interface GitHubPullRequestDetails {
   readonly title: string;
 }
 
-/** Minimal pull-request author metadata. */
 export interface GitHubPullRequestUser {
   readonly id: number;
   readonly login: string;
   readonly type: string;
 }
 
-/** Minimal pull-request branch metadata. */
 export interface GitHubPullRequestRefDetails {
   readonly ref: string | undefined;
   readonly repoFullName: string | undefined;
   readonly sha: string | undefined;
 }
 
-/** Fetches pull-request metadata for context injection and checkout resolution. */
 export async function getGitHubPullRequest(
   input: GitHubResourceInput & {
     readonly pullRequestNumber: number;
@@ -245,7 +226,6 @@ export async function getGitHubPullRequest(
   return toPullRequestDetails(response.body);
 }
 
-/** Minimal pull-request file metadata returned by {@link listGitHubPullRequestFiles}. */
 export interface GitHubPullRequestFile {
   readonly additions: number | undefined;
   readonly changes: number | undefined;
@@ -255,7 +235,6 @@ export interface GitHubPullRequestFile {
   readonly status: string | undefined;
 }
 
-/** Lists files changed by a pull request. */
 export async function listGitHubPullRequestFiles(
   input: GitHubResourceInput & {
     readonly perPage?: number;
@@ -275,7 +254,6 @@ export async function listGitHubPullRequestFiles(
   return response.body.map(toPullRequestFile);
 }
 
-/** Lists files changed between two commits (three-dot compare). */
 export async function listGitHubCompareFiles(
   input: GitHubResourceInput & {
     readonly baseSha: string;
@@ -292,7 +270,6 @@ export async function listGitHubCompareFiles(
   return (response.body.files ?? []).map(toPullRequestFile);
 }
 
-/** Creates a reaction on a GitHub issue or review comment. */
 export function createGitHubReaction(
   input: GitHubResourceInput & {
     readonly commentId: number;
@@ -316,7 +293,6 @@ export function createGitHubReaction(
   });
 }
 
-/** Fetches repository metadata, primarily to resolve `repository.id` for receive(). */
 export async function getGitHubRepository(
   input: GitHubResourceInput & { readonly auth?: boolean },
 ): Promise<{ readonly id: number; readonly defaultBranch: string | undefined }> {

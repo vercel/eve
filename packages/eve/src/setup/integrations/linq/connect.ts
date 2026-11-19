@@ -24,7 +24,6 @@ interface ProvisionLinqConnectorDeps {
   runVercelCaptureStdout: typeof runVercelCaptureStdout;
 }
 
-/** Credentials for a connector backed by an existing Linq account. */
 export interface LinqExistingAccountCredentials {
   apiToken: string;
   phoneNumbers: string[];
@@ -37,7 +36,6 @@ const ConnectorSchema = z.object({
   data: z.object({ phoneNumbers: z.array(z.string().min(1)).optional() }).optional(),
 });
 
-/** Parses Vercel Connect JSON for an app-scoped Linq connector. */
 export function parseCreatedLinqConnector(stdout: string): LinqConnectorRef | undefined {
   try {
     const result = ConnectorSchema.safeParse(JSON.parse(stdout));
@@ -65,9 +63,7 @@ function requireCreatedConnector(result: RunVercelCaptureResult): LinqConnectorR
   return connector;
 }
 
-/** Creates a managed Linq connector and routes verified events to eve. */
 export async function provisionLinqConnector(input: {
-  /** When omitted, Connect opens Linq's managed browser flow to provision a line. */
   existingAccount?: LinqExistingAccountCredentials;
   log: ChannelSetupLog;
   project: VercelProjectReference;
@@ -79,8 +75,6 @@ export async function provisionLinqConnector(input: {
   const deps = input.deps ?? { runVercel, runVercelCaptureStdout };
   const commandOutput = createPromptCommandOutput(input.log);
   const onOutput: ProcessOutputHandler = (line) => {
-    // The headless-browser shim captures this URL separately. Keeping it out
-    // of the setup renderer prevents terminal wrapping from making it unusable.
     if (URL.parse(line.text) !== null) return;
     commandOutput(line);
   };
@@ -140,7 +134,6 @@ export async function provisionLinqConnector(input: {
   return connector;
 }
 
-/** Reads managed connector data after browser creation so setup can show its line. */
 async function readLinqConnector(input: {
   connector: LinqConnectorRef;
   projectRoot: string;

@@ -4,7 +4,6 @@ import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { isObject } from "#shared/guards.js";
 import { parseJsonValue, type JsonValue } from "#shared/json.js";
 
-/** Resolves and merges application-provided arguments, with application values winning. */
 export async function resolveProvidedArguments(input: {
   readonly args: unknown;
   readonly callId: string;
@@ -48,7 +47,6 @@ export async function resolveProvidedArguments(input: {
   return { ...input.args, ...provided };
 }
 
-/** Removes application-provided top-level properties from a remote tool schema. */
 export function omitProvidedArgumentsFromSchema<TSchema extends Record<string, unknown>>(
   schema: TSchema,
   names: readonly string[],

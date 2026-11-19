@@ -6,7 +6,6 @@ import { captureVercel, runVercel, runVercelCaptureStdout } from "#setup/primiti
 
 export type ConnectPrincipalType = "app" | "user";
 
-/** Controls connector selection while adding a Connect-backed connection. */
 export interface SetupConnectionConnectorOptions {
   log: ChannelSetupLog;
   prompter: Prompter;
@@ -21,7 +20,6 @@ export interface SetupConnectionConnectorOptions {
   signal?: AbortSignal;
 }
 
-/** Connector identity returned by the Vercel CLI. */
 interface ConnectConnectorRef {
   uid: string;
   id: string;
@@ -66,7 +64,6 @@ function parseConnectorRef(value: unknown): ConnectConnectorRef | undefined {
   return connector;
 }
 
-/** Parses a created connector that can issue credentials for the requested principal type. */
 export function parseCreatedConnector(
   stdout: string,
   principalType: ConnectPrincipalType = "user",
@@ -196,12 +193,10 @@ function nextConnectorName(slug: string, names: ReadonlySet<string>): string {
   return `${slug}-${suffix}`;
 }
 
-/** Removes a connector created by this setup attempt. */
 export async function cleanupCreatedConnectionConnector(input: {
   log: ChannelSetupLog;
   projectRoot: string;
   connectorId: string;
-  /** The linked Vercel owner; inferred from the project link when omitted. */
   orgId?: string;
 }): Promise<void> {
   const orgId = input.orgId ?? (await readProjectLink(input.projectRoot))?.orgId;
@@ -342,7 +337,6 @@ async function resolveFallbackConnector(
   }
 }
 
-/** Attaches the canonical connector by name first, then offers explicit Find/Create fallbacks. */
 export async function setupConnectionConnector(
   options: SetupConnectionConnectorOptions,
 ): Promise<SetupConnectionConnectorResult> {

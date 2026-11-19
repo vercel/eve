@@ -4,18 +4,10 @@ import { stripTerminalControls } from "#cli/ui/terminal-text.js";
 import { agentDisplayName, presentTool } from "./tool-presentation.js";
 import { agentTaskSummary, labelContext, type TaskRecord } from "./transcript-parts.js";
 
-/**
- * The transcript's task records, one for each stretch of a task's work. A call that reaches a
- * task while one of its calls still works joins that task's record, as a model steering a working
- * agent does; a call that reaches it after it settled starts a new stretch with its own lines.
- */
 export class TaskRecords {
-  /** Records by the call that started them, in start order. */
   readonly #started = new Map<string, TaskRecord>();
-  /** Records by every call they answer. */
   readonly #byCall = new Map<string, TaskRecord>();
 
-  /** Records in start order. */
   values(): IterableIterator<TaskRecord> {
     return this.#started.values();
   }
@@ -29,7 +21,6 @@ export class TaskRecords {
     this.#byCall.clear();
   }
 
-  /** The record a task call belongs to, joining its task's working record or starting one. */
   record(
     part: EveToolPart,
     task: TaskRow,
@@ -81,7 +72,6 @@ export class TaskRecords {
     return undefined;
   }
 
-  /** Parallel tasks of one tool read `research`, `research:2`, …; a name is never renamed. */
   #uniqueName(baseName: string): string {
     const taken = new Set(
       [...this.#started.values()].filter((record) => !record.ended).map((record) => record.name),

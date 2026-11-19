@@ -3,24 +3,16 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 
 import { parseExtensionPackageRoots } from "#shared/extension-package-contract.js";
 
-/** Resolved producer inputs for an extension package. */
 export interface ExtensionBuildConfig {
-  /** Absolute authoring root from `eve.extension.source`. */
   readonly sourceRoot: string;
-  /** Absolute agent-shaped distribution root from `eve.extension.dist`. */
   readonly distRoot: string;
-  /** Directory containing the dist root and generated package entrypoints. */
   readonly outDir: string;
   readonly packageName: string;
-  /** Short package name used for the generated named mount export. */
   readonly shortName: string;
-  /** Packages allowed to remain as imports in the published distribution. */
   readonly runtimeDependencies: readonly string[];
-  /** Runtime packages the consuming application must preserve outside generated bundles. */
   readonly externalDependencies: readonly string[];
 }
 
-/** Reads and validates the extension producer contract from `package.json`. */
 export async function tryReadExtensionBuildConfig(
   rootDir: string,
 ): Promise<ExtensionBuildConfig | null> {
@@ -94,7 +86,6 @@ export async function tryReadExtensionBuildConfig(
   };
 }
 
-/** Ensures package exports point at the build output's generated entrypoints. */
 export async function ensureExtensionExports(appRoot: string, outDir: string): Promise<void> {
   const pkgPath = join(appRoot, "package.json");
   const raw = await readFile(pkgPath, "utf8");

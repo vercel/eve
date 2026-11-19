@@ -1,47 +1,5 @@
-/**
- * Shared library powering `scripts/vendor-compiled.mjs` and the per-package
- * configs in this directory. The pieces are written so other packages in
- * the monorepo can adopt the same vendoring pipeline without eve-specific
- * coupling — `runVendor` and `createDeclarationCopier` are the two public
- * entry points other consumers should reach for.
- *
- * Module config schema (each per-package file `export default`s one of these):
- *
- * ```
- * {
- *   packageName: string,           // npm package to resolve via require
- *   packageJsonName?: string,      // original npm name when packageName is an alias
- *   compiledPath: string,          // subdir under compiledRoot to write into
- *
- *   // Declaration emission (pick one)
- *   declaration?: string,          // inline .d.ts content
- *   copyDeclarations?: (ctx) => Promise<void>,  // dynamic .d.ts writer
- *
- *   // JS bundling
- *   entry?: string,                // package-relative entry path
- *   entries?: Array<{              // multi-entry packages
- *     entry?: string,
- *     input?: string,
- *     outputPath: string,
- *     declaration?: string,
- *   }>,
- *   external?: string[] | (source: string) => boolean,
- *   plugins?: Plugin[],
- *   loader?: Record<string, string>,
- *   platform?: "node" | "neutral",
- *   resolve?: ResolveOptions,
- *   bundling?: "shared" | "standalone",  // default "shared"
- *   banner?: string,               // standalone bundle prelude
- *   chunkGroup?: string,                  // default "node"
- *   typeOnly?: boolean,                   // skips JS bundling entirely
- *   sharedSpecifiers?: Record<string, string>, // specifier → entry outputPath other bundles import instead of bundling their own copy
- *   privateCopies?: string[],             // shared packages this bundle may still bundle privately (a different major)
- *   fingerprintFiles?: string[],          // package-relative files included in the stamp
- * }
- * ```
- */
 import { createHash } from "node:crypto";
-import { realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { createRequire, isBuiltin } from "node:module";
 import { dirname, isAbsolute, join, parse, posix, relative } from "node:path";
@@ -54,62 +12,10 @@ const declarationsDir = fileURLToPath(new URL("./declarations/", import.meta.url
 const require = createRequire(import.meta.url);
 const ts = createRequire(require.resolve("@microsoft/api-extractor/package.json"))("typescript");
 
-// ───────────────────────────────────────────────────────────────────────────
-// Per-package authoring API
-// ───────────────────────────────────────────────────────────────────────────
-
-/**
- * Reads a `.d.ts` file from `scripts/vendor-compiled/declarations/` and
- * returns its contents. Per-package configs use this to keep declaration
- * strings as real `.d.ts` files (with editor syntax highlighting and lint
- * support) instead of inline template literals.
- *
- * @param {string} relativePath path relative to `declarations/`
- * @returns {Promise<string>}
- */
 export async function loadDeclaration(relativePath) {
   return readFile(join(declarationsDir, relativePath), "utf8");
 }
 
-/**
- * Builds a `copyDeclarations` callback that copies a package's `.d.ts`
- * files straight from the installed dependency into the vendored output,
- * applying per-module rewrite rules so external imports resolve.
- *
- * Use this when a package's surface is part of eve's public type contract
- * (e.g. `chat`, where `ctx.thread.refresh()` is reached by user code) —
- * hand-written stubs silently drift on every version bump.
- *
- * Rewrite rules name the external modules the upstream `.d.ts` imports
- * from. Three kinds are supported:
- *
- *   `external` — leaves the import untouched. Use this for packages that are
- *     already part of eve's public dependency surface, such as `ai`.
- *   `vendored` — rewrites `from '<moduleName>'` to a `#compiled/<...>`
- *     specifier so the dependency resolves against eve's own vendored copy.
- *     This works even when one vendored package's `.d.ts` references another
- *     (e.g. `@workflow/core` → `@workflow/world` → `zod`) because vendored
- *     directories intentionally carry no `package.json` to shadow eve's
- *     `#compiled/*` imports map (see `prepareCompiledModule`).
- *   `stub` — emits a tiny local stub `.d.ts` next to the copied file and
- *     rewrites the import to point at it. The `build` callback receives
- *     the set of names imported from `moduleName` so it can emit just the
- *     declarations the upstream actually references.
- *
- * Any external the upstream references but no rule covers is a hard error:
- * the script refuses to silently fall back so the next version bump can't
- * sneak a new dependency past us.
- *
- * `files` can override the default `dist/index.d.ts` copy. Use it for
- * packages whose entrypoint declaration imports sibling declaration files,
- * or for multi-entry packages that need their upstream declaration tree.
- * `declarationRoot` changes the package-relative source directory when
- * declarations live outside `dist`.
- *
- * Relative declaration imports are followed recursively, including hashed chunks,
- * and receive the same external rewrite rules as the entry declarations.
- * `discoverExtraFiles` can additionally copy non-declaration assets verbatim.
- */
 export function createDeclarationCopier({
   declarationRoot = "dist",
   rewrites = {},
@@ -138,12 +44,12 @@ export function createDeclarationCopier({
       for (const specifier of collectRelativeDeclarationReferences(sourceText)) {
         const candidates = /\.d\.[cm]?ts$/u.test(specifier)
           ? [specifier]
-          : /\.[cm]?js$/u.test(specifier)
+          : /\.[cm]?[jt]s$/u.test(specifier)
             ? [
                 specifier
-                  .replace(/\.js$/u, ".d.ts")
-                  .replace(/\.mjs$/u, ".d.mts")
-                  .replace(/\.cjs$/u, ".d.cts"),
+                  .replace(/\.[jt]s$/u, ".d.ts")
+                  .replace(/\.m[jt]s$/u, ".d.mts")
+                  .replace(/\.c[jt]s$/u, ".d.cts"),
               ]
             : [`${specifier}.d.ts`, `${specifier}/index.d.ts`];
         let resolved;
@@ -297,22 +203,6 @@ function relativeDeclarationSpecifier(fromOutputPath, targetFileName) {
   return specifier.startsWith(".") ? specifier : `./${specifier}`;
 }
 
-/**
- * Returns `Map<externalModuleName, Set<importedName>>` for every
- * `import { ... } from '<external>'`, `export { ... } from '<external>'`,
- * `import * as <alias> from '<external>'`, and side-effect
- * `import '<external>'` in a TypeScript declaration source. Local relative
- * paths and `#compiled/*` specifiers are skipped — only bare module
- * specifiers appear in the map.
- *
- * `as`-renames are flattened to the original left-side name so the stub
- * exports the symbol the upstream actually references.
- *
- * For `import * as <alias> from '<external>'`, the source is scanned for
- * `<alias>.<Name>` accesses and each `<Name>` is added to the module's
- * name set. This lets a `stub` rewrite rule emit declarations only for
- * the namespace members the upstream `.d.ts` actually reaches into.
- */
 export function collectExternalDeclarationImports(source) {
   const namedPattern = /^(?:import|export)\s+(?:type\s+)?\{([^}]+)\}\s+from\s+['"]([^'"]+)['"];/gm;
   const namespacePattern =
@@ -365,8 +255,6 @@ export function collectExternalDeclarationImports(source) {
     if (!isExternal(moduleName)) {
       continue;
     }
-    // Register the module even if no members are reached so unknown
-    // namespace imports surface as a missing rewrite rule.
     addName(moduleName);
     const memberPattern = new RegExp(`\\b${alias}\\.([A-Za-z_$][\\w$]*)`, "g");
     for (const memberMatch of source.matchAll(memberPattern)) {
@@ -396,12 +284,6 @@ export function collectExternalDeclarationImports(source) {
   return result;
 }
 
-/**
- * Rewrites every `from '<moduleName>'` and side-effect
- * `import '<moduleName>'` (including their `"`-quoted variants) in a
- * declaration source. Used to redirect copied `.d.ts` imports at
- * locally-vendored stubs or `#compiled/*` re-vendoring.
- */
 export function rewriteImportSource(source, moduleName, replacement) {
   const escaped = moduleName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return source
@@ -415,12 +297,6 @@ export function rewriteImportSource(source, moduleName, replacement) {
     );
 }
 
-/**
- * Generic stub builder: emits `export declare const <name>: unique symbol;`
- * for every name in `names`. Use as the `build` callback of a `stub`
- * rewrite rule for upstream modules that only export unique symbols
- * (e.g. `@workflow/serde`).
- */
 export function buildUniqueSymbolStub(names, moduleName) {
   const lines = [
     `// Auto-generated stub for \`${moduleName}\` symbols referenced by a vendored .d.ts.`,
@@ -433,13 +309,6 @@ export function buildUniqueSymbolStub(names, moduleName) {
   return `${lines.join("\n")}\n`;
 }
 
-/**
- * Generic stub builder: emits `export type <name> = unknown;` for every
- * name in `names`. Use as the `build` callback of a `stub` rewrite rule
- * for upstream modules whose types we deliberately opaque-out so consumers
- * don't have to install the @types package just to typecheck against eve
- * (e.g. `mdast`).
- */
 export function buildOpaqueTypesStub(names, moduleName) {
   const lines = [
     `// Auto-generated stub for \`${moduleName}\` types referenced by a vendored .d.ts.`,
@@ -456,13 +325,6 @@ export function buildOpaqueTypesStub(names, moduleName) {
   return `${lines.join("\n")}\n`;
 }
 
-/**
- * rolldown plugin factory: short-circuits resolution of optional native
- * dependencies that aren't shipped in the vendored bundle. The stub
- * throws if anything ever imports it at runtime — vendored consumers
- * never hit that path, so this just keeps the bundler from trying to
- * inline a native dependency it can't resolve.
- */
 export function createOptionalNativeStubPlugin(packageNames) {
   const packageNameSet = new Set(packageNames);
 
@@ -489,30 +351,6 @@ export function createOptionalNativeStubPlugin(packageNames) {
   };
 }
 
-// ───────────────────────────────────────────────────────────────────────────
-// Orchestrator
-// ───────────────────────────────────────────────────────────────────────────
-
-/**
- * Top-level vendor runner. Other packages in the monorepo can call this
- * with their own `modules` and roots to vendor their own deps without
- * duplicating any of this pipeline.
- *
- * @param {object} options
- * @param {string} options.packageRoot
- *   Root of the calling package (used to resolve `node_modules`).
- * @param {string} options.compiledRoot
- *   Where vendored output is written. Typically `.generated/compiled/`.
- * @param {Array<object>} options.modules
- *   Module configs. `typeOnly: true` entries skip JS bundling.
- * @param {string[]} options.scriptFiles
- *   Files whose content contributes to the stamp fingerprint. When any of
- *   these files changes the cached stamp is invalidated and vendoring re-runs.
- *   Pass everything that influences the output: the orchestrator entry script,
- *   the `_shared.mjs` library, per-package configs, and `.d.ts` declarations.
- * @param {Record<string, string>} [options.toolVersions]
- *   Resolved versions of build tools whose output contributes to vendored files.
- */
 export async function runVendor({
   packageRoot,
   compiledRoot,
@@ -537,7 +375,6 @@ export async function runVendor({
 
   await acquireLock(lockPath);
   try {
-    // A peer process may have completed while we waited for the lock.
     if (
       stampMatches(desiredStamp, await readExistingStamp(stampPath)) &&
       (await compiledModuleEntrypointsExist({ compiledRoot, modules }))
@@ -546,9 +383,6 @@ export async function runVendor({
       return;
     }
 
-    // A matching stamp must not survive a repair attempt. Otherwise another
-    // process could accept directories created by an incomplete build as a
-    // valid cache hit while this process is writing, or after it fails.
     await rm(stampPath, { force: true });
 
     const bundledModules = modules.filter((module) => module.typeOnly !== true);
@@ -587,12 +421,6 @@ async function compiledModuleEntrypointsExist({ compiledRoot, modules }) {
   return entries.every(Boolean);
 }
 
-/**
- * Removes top-level entries under `compiledRoot` that no configured module
- * claims, so output for vendored packages that were since removed (for
- * example `just-bash`) does not linger on incremental dev machines and get
- * copied into `dist/`.
- */
 async function pruneStaleCompiledEntries({ compiledRoot, modules }) {
   const expected = new Set(["_chunks", ".vendor-stamp.json", ".vendor-lock"]);
   for (const module of modules) {
@@ -613,11 +441,6 @@ async function pruneStaleCompiledEntries({ compiledRoot, modules }) {
   }
 }
 
-/**
- * Walks `dir` recursively and returns absolute paths for every file
- * matching one of `extensions` (e.g. `[".mjs", ".d.ts"]`). Used by
- * orchestrators to build a `scriptFiles` list for `runVendor`.
- */
 export async function collectFilesRecursively(dir, extensions) {
   const out = [];
   const visit = async (current) => {
@@ -634,10 +457,6 @@ export async function collectFilesRecursively(dir, extensions) {
   await visit(dir);
   return out;
 }
-
-// ───────────────────────────────────────────────────────────────────────────
-// Internals
-// ───────────────────────────────────────────────────────────────────────────
 
 async function pathExists(path) {
   try {
@@ -711,16 +530,6 @@ async function prepareCompiledModule({ module, compiledRoot, packageRoot }) {
   await rm(destinationRoot, { recursive: true, force: true });
   await mkdir(destinationRoot, { recursive: true });
 
-  // Deliberately no per-package `package.json`. Each vendored directory lives
-  // under eve (which is `"type": "module"`), so the bundled ESM `.js` inherits
-  // the right module type without one. More importantly, writing a package.json
-  // here would create a package scope that shadows eve's `#compiled/*` imports
-  // map: a `#compiled/<pkg>` specifier in one vendored `.d.ts` that references
-  // another (e.g. `@workflow/core` → `@workflow/world`) would then fail to
-  // resolve and silently degrade to `any` under `skipLibCheck`. Without the
-  // shadowing file, resolution falls through to eve's root imports map and the
-  // real upstream types flow across the vendored tree. The upstream LICENSE is
-  // still copied below for attribution.
   await copyLicense(packageInfo.packageRoot, destinationRoot);
 
   return { destinationRoot, packageInfo };
@@ -784,7 +593,11 @@ async function bundleStandaloneModule({
     external: module.external ?? [],
     moduleTypes: module.loader ?? {},
     platform,
-    plugins: [...(module.plugins ?? []), createSharedSpecifierPlugin(sharedSpecifiers, [module])],
+    plugins: [
+      ...(module.plugins ?? []),
+      createSharedSpecifierPlugin(sharedSpecifiers, [module]),
+      createRuntimeDependencyPlugin(packageRoot),
+    ],
     resolve: module.resolve ?? getDefaultResolve(),
     treeshake: true,
     output: {
@@ -834,6 +647,7 @@ async function bundleModuleGroup({
       sharedSpecifiers,
       preparedModules.map(({ module }) => module),
     ),
+    createRuntimeDependencyPlugin(packageRoot),
   ];
 
   await buildWithRolldown({
@@ -852,7 +666,7 @@ async function bundleModuleGroup({
       dir: compiledRoot,
       entryFileNames: "[name].js",
       format: "esm",
-      minify: true,
+      minify: chunkGroup === "client" ? { compress: { joinVars: false } } : true,
       sourcemap: false,
     },
     onLog: onVendoredDependencyLog,
@@ -895,8 +709,6 @@ async function bundleModules({ modules, packageRoot, compiledRoot }) {
     }),
   );
 
-  // Inline declaration strings go first so copyDeclarations callbacks can
-  // overwrite them with the real package contents if both are present.
   await Promise.all(
     preparedModules.flatMap(({ destinationRoot, module, packageInfo }) =>
       getModuleEntries(module, packageInfo)
@@ -913,16 +725,6 @@ async function bundleModules({ modules, packageRoot, compiledRoot }) {
   }
 }
 
-/**
- * A vendored package that declares `sharedSpecifiers` ships exactly once.
- * Every other vendored bundle imports those specifiers from the owner's
- * `#compiled/*` entries instead of bundling its own copy. eve's imports map
- * resolves them within the same tree (`.generated` under `eve-source`,
- * `dist` otherwise), just like eve's own `#compiled/*` imports.
- *
- * Zod needs this: its schema objects only work with the copy that built
- * them, so eve must not carry several copies that could exchange schemas.
- */
 function collectSharedSpecifiers(preparedModules) {
   const shared = new Map();
   for (const { module, packageInfo } of preparedModules) {
@@ -937,6 +739,53 @@ function collectSharedSpecifiers(preparedModules) {
   return shared;
 }
 
+function createRuntimeDependencyPlugin(packageRoot) {
+  const installs = resolveInstalls(runtimeDependencyNames(packageRoot), packageRoot);
+  return {
+    name: "eve:vendored-runtime-dependencies",
+    async resolveId(source, importer, options) {
+      const install = installs.get(source);
+      if (install === undefined || options.kind === "require-call") return null;
+      const resolved = await this.resolve(source, importer, { ...options, skipSelf: true });
+      if (resolved === null || resolved.external || !isInsideDirectory(resolved.id, install)) {
+        return null;
+      }
+      return { id: source, external: true };
+    },
+  };
+}
+
+function runtimeDependencyNames(packageRoot) {
+  const manifestPath = join(packageRoot, "package.json");
+  return existsSync(manifestPath)
+    ? Object.keys(JSON.parse(readFileSync(manifestPath, "utf8")).dependencies ?? {})
+    : [];
+}
+
+function resolveInstalls(names, fromDir) {
+  const resolveFrom = createRequire(join(fromDir, "package.json"));
+  const installs = new Map();
+  for (const name of names) {
+    let dir;
+    try {
+      dir = dirname(resolveFrom.resolve(name));
+    } catch {
+      continue;
+    }
+    for (; dir !== parse(dir).root; dir = dirname(dir)) {
+      const manifestPath = join(dir, "package.json");
+      if (
+        existsSync(manifestPath) &&
+        JSON.parse(readFileSync(manifestPath, "utf8")).name === name
+      ) {
+        installs.set(name, realpathSync(dir));
+        break;
+      }
+    }
+  }
+  return installs;
+}
+
 const SHARED_FACADE_PREFIX = "\0eve-shared-facade:";
 
 function createSharedSpecifierPlugin(sharedSpecifiers, bundledModules) {
@@ -949,7 +798,6 @@ function createSharedSpecifierPlugin(sharedSpecifiers, bundledModules) {
     async resolveId(source, importer, options) {
       if (importer?.startsWith(SHARED_FACADE_PREFIX)) return { id: source, external: true };
       const owner = owners.get(packageNameOf(source));
-      // Modules bundled together already share one copy through chunking.
       if (
         owner === undefined ||
         bundledModules.includes(owner.module) ||
@@ -979,9 +827,6 @@ function createSharedSpecifierPlugin(sharedSpecifiers, bundledModules) {
             `sharedSpecifiers so eve keeps a single copy of "${owner.module.packageName}".`,
         );
       }
-      // A CommonJS `require()` of an external stays a runtime `require()`
-      // that app bundlers cannot follow, so route it through an ESM facade
-      // that keeps a static import.
       if (options.kind === "require-call")
         return `${SHARED_FACADE_PREFIX}${target.importSpecifier}`;
       return { id: target.importSpecifier, external: true };
@@ -1033,17 +878,8 @@ async function writeTypeOnlyModule({ module, compiledRoot, packageRoot }) {
   await writeFile(join(destinationRoot, "index.d.ts"), module.declaration, "utf8");
 }
 
-/**
- * Stable fingerprint of every input that drives the vendored output:
- * resolved package versions plus the content of every file in `scriptFiles`.
- * When the fingerprint matches the previously recorded stamp the work is
- * a no-op, which makes `build:compiled` safe to invoke concurrently from
- * sibling Turbo tasks without racing on shared destination directories.
- */
 async function computeStamp({ scriptFiles, modules, packageRoot, toolVersions }) {
   const scriptHash = createHash("sha256");
-  // Hash file contents in a deterministic order so identical inputs always
-  // produce identical stamps.
   for (const file of [...scriptFiles].sort()) {
     const content = await readFile(file, "utf8");
     scriptHash.update(file);
@@ -1051,6 +887,10 @@ async function computeStamp({ scriptFiles, modules, packageRoot, toolVersions })
     scriptHash.update(content);
     scriptHash.update("\0");
   }
+
+  const runtimeDependencies = runtimeDependencyNames(packageRoot);
+  const eveInstalls = resolveInstalls(runtimeDependencies, packageRoot);
+  const unsharedRuntimeDependencies = [];
 
   const moduleFingerprints = {};
   const moduleVersions = {};
@@ -1061,6 +901,12 @@ async function computeStamp({ scriptFiles, modules, packageRoot, toolVersions })
       module.packageJsonName,
     );
     moduleVersions[module.packageName] = packageInfo.packageJson.version ?? "0.0.0";
+    const moduleInstalls = resolveInstalls(runtimeDependencies, packageInfo.packageRoot);
+    for (const [name, install] of eveInstalls) {
+      if (moduleInstalls.get(name) !== install) {
+        unsharedRuntimeDependencies.push(`${module.packageName}>${name}`);
+      }
+    }
 
     if (module.fingerprintFiles !== undefined) {
       const moduleHash = createHash("sha256");
@@ -1082,6 +928,7 @@ async function computeStamp({ scriptFiles, modules, packageRoot, toolVersions })
     toolVersions: Object.fromEntries(
       Object.entries(toolVersions).sort(([a], [b]) => a.localeCompare(b)),
     ),
+    unsharedRuntimeDependencies,
   };
 }
 
@@ -1098,13 +945,6 @@ function stampMatches(a, b) {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-/**
- * Acquires an exclusive filesystem lock by atomically creating a sentinel
- * directory. `mkdir` is atomic on every supported platform, so two
- * concurrent invocations cannot both succeed. A timestamp inside the lock
- * directory lets us recover from stale locks left behind by crashed
- * processes.
- */
 export async function acquireLock(lockPath, timeoutMs = 120_000) {
   const start = Date.now();
 

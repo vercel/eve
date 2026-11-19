@@ -1,5 +1,3 @@
-// Internal fold and table selectors. Public immutable snapshots and queries live in public-view.ts.
-
 export * from "./fold.js";
 export type { RequestStatus } from "./request-status.js";
 export {

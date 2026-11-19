@@ -24,7 +24,6 @@ type AgentModelSettingsEdit =
     }
   | { readonly kind: "bail"; readonly reason: string; readonly line: number };
 
-/** Applies every model-setting change in memory; callers own the atomic write. */
 export async function applyAgentModelSettingsToSource(
   sourceText: string,
   patch: AgentModelSettingsPatch,

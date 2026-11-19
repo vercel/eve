@@ -143,9 +143,6 @@ describe("isSandboxRefUrl", () => {
   });
 
   it("returns false for strings (even valid eve-sandbox: strings)", () => {
-    // Matches the existing refs.ts convention: only URL instances are
-    // considered refs. The staging layer checks `data instanceof URL`
-    // before dispatching.
     expect(isSandboxRefUrl("eve-sandbox:?path=/a&size=1&type=text/plain")).toBe(false);
   });
 

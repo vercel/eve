@@ -16,7 +16,6 @@ function spent(inputTokens: number, costUsd?: number): SessionEvent {
   } as SessionEvent;
 }
 
-/** `events` as one handle read them, from line `firstLine`, one line each. */
 function handle(
   firstLine: number,
   events: readonly SessionEvent[],
@@ -71,7 +70,6 @@ describe("combineDerivedFacts", () => {
   });
 
   it("keeps a recaptured session's latest usage by time, not by capture order", () => {
-    // The second capture is an earlier snapshot of the same session.
     const fuller = handle(0, [spent(10, 0.25), spent(20, 0.5)], {
       at: "2026-10-10T00:00:02.000Z",
     });
@@ -90,7 +88,6 @@ describe("combineDerivedFacts", () => {
     const priced = handle(0, [spent(5, 0.5)], { sessionId: "priced" });
     const unpriced = handle(0, [spent(7)], { sessionId: "unpriced" });
 
-    // 0.5 would read as the eval's cost while one session's spend is unknown.
     const usage = combineDerivedFacts([priced, unpriced]).usage;
     expect(usage).toEqual({
       cacheReadTokens: 0,

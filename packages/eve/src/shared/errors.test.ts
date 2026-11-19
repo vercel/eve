@@ -16,9 +16,6 @@ describe("toErrorMessage", () => {
   });
 
   it("prefers the .message field on Error-shaped plain objects", () => {
-    // Structured-clone across a workflow step boundary strips the Error
-    // prototype but preserves fields — we must surface the original
-    // message instead of collapsing to `"[object Object]"`.
     expect(toErrorMessage({ message: "upstream 429", name: "APICallError" })).toBe("upstream 429");
   });
 
@@ -33,8 +30,6 @@ describe("toErrorMessage", () => {
   });
 
   it("never emits the useless '[object Object]' default", () => {
-    // Guards the regression where `new Error(String(partError))`
-    // surfaced `"[object Object]"` to users.
     expect(toErrorMessage({ upstream: { status: 500 } })).not.toBe("[object Object]");
   });
 
@@ -85,7 +80,6 @@ describe("toError", () => {
   });
 
   it("produces a readable message for plain objects without .message", () => {
-    // Regression guard for the `[object Object]` user-visible surface.
     const error = toError({ statusCode: 500, body: "upstream exploded" });
 
     expect(error.message).toBe('{"statusCode":500,"body":"upstream exploded"}');

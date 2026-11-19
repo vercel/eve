@@ -7,7 +7,6 @@ import {
 import { getDevelopmentExtensionSourceRegistry } from "#compiler/development-extensions.js";
 import { frameworkAgentSourceRegistry } from "#framework/sources/registry.js";
 
-/** Loads framework and development-extension programmatic modules for local dev maps. */
 export async function loadFrameworkProgrammaticModule(
   backing: Extract<AgentModuleBacking, { readonly kind: "programmatic" }>,
 ): Promise<ProgrammaticModuleNamespace> {

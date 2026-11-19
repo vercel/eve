@@ -9,10 +9,6 @@ import {
   SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS,
 } from "#discover/filesystem.js";
 
-/**
- * Emits declarations for an extension source tree using the extension's own
- * TypeScript installation and authored tsconfig when available.
- */
 export async function emitExtensionDeclarations(input: {
   readonly appRoot: string;
   readonly declarationsRoot: string;

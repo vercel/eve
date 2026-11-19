@@ -16,15 +16,10 @@ function importNitroModule(specifier: "nitro" | "nitro/h3"): string {
   return stringifyEsmImportSpecifier(resolvePackageDependencyPath(specifier));
 }
 
-/** The Nitro virtual id of the artifacts config every route module shares. */
 export const ROUTE_CONFIG_ID = "#eve/route-config";
 
 const importRouteConfig = `import config from ${JSON.stringify(ROUTE_CONFIG_ID)};`;
 
-/**
- * The `#eve/route-config` module. The config reaches the bundle through a
- * `text:` import so Nitro's `replace` cannot rewrite paths inside it.
- */
 export function renderRouteConfigModule(input: { readonly configPath: string }): string {
   return [
     `import data from ${stringifyNitroDataImportSpecifier("text", input.configPath)};`,
@@ -32,7 +27,6 @@ export function renderRouteConfigModule(input: { readonly configPath: string }):
   ].join("\n");
 }
 
-/** Statements that run first in the GET handler of a path with no HEAD route. */
 function headGuard(allow: readonly string[] | undefined): {
   readonly imports: readonly string[];
   readonly statements: readonly string[];
@@ -46,11 +40,6 @@ function headGuard(allow: readonly string[] | undefined): {
   };
 }
 
-/**
- * A channel HTTP route: optional CORS and HEAD guard, then channel dispatch.
- * With `websocketRouteKey`, the same GET handler also answers WebSocket
- * upgrades on its path, since an upgrade arrives as a GET.
- */
 export function renderChannelHandler(input: {
   readonly allow?: readonly string[];
   readonly cors?: NormalizedChannelCorsOptions;
@@ -59,7 +48,6 @@ export function renderChannelHandler(input: {
 }): string {
   const guard = headGuard(input.allow);
   const dispatch = `dispatchChannelRequest(event, ${JSON.stringify(input.routeKey)}, config)`;
-  // CORS runs first so a cross-origin caller can read the guard's 405.
   const body = [
     ...(input.cors === undefined
       ? []
@@ -96,7 +84,6 @@ export function renderChannelHandler(input: {
   ].join("\n");
 }
 
-/** The preflight answer for a CORS-enabled channel path. */
 export function renderChannelPreflightHandler(input: {
   readonly cors: NormalizedChannelCorsOptions;
 }): string {
@@ -111,7 +98,6 @@ export function renderChannelPreflightHandler(input: {
   ].join("\n");
 }
 
-/** A WebSocket-only channel path, with the HEAD guard when its path has no HEAD route. */
 export function renderChannelWebSocketHandler(input: {
   readonly allow?: readonly string[];
   readonly routeKey: string;
@@ -131,11 +117,6 @@ export function renderChannelWebSocketHandler(input: {
   ].join("\n");
 }
 
-/**
- * A framework route. The handler receives the shared artifacts config, plus
- * any build-time `context` fields alongside it, and the request, so it can
- * still authenticate per request.
- */
 export function renderHostHandler(input: {
   readonly context?: Readonly<Record<string, string>>;
   readonly handlerExport: string;
@@ -152,32 +133,22 @@ export function renderHostHandler(input: {
   ].join("\n");
 }
 
-/**
- * Nitro task modules default-export an object with `run`. Importing
- * `defineTask` from `"nitro/task"` would fail on Vercel, where `nitro` is a
- * build-only dependency outside the function trace.
- */
-export function renderScheduleTaskModule(input: { readonly description: string }): string {
+export function renderScheduleTaskModule(input: {
+  readonly description: string;
+  readonly taskName: string;
+}): string {
   return [
     `import { dispatchScheduleTask } from ${importSourceModule("src/internal/nitro/routes/schedule-task.ts")};`,
     importRouteConfig,
     `export default {`,
     `  meta: { description: ${JSON.stringify(input.description)} },`,
     `  async run(event) {`,
-    `    return { result: await dispatchScheduleTask(event.name, config) };`,
+    `    return { result: await dispatchScheduleTask(${JSON.stringify(input.taskName)}, config) };`,
     `  },`,
     `};`,
   ].join("\n");
 }
 
-/**
- * The physical handler beside the workflow bundle. It re-exports the bundle's
- * `POST` as the route handler and, for a direct queue, registers that `POST`
- * on the workflow world at module load so the first queue dispatch on this
- * worker skips the HTTP loopback. It stays a file, not a virtual module:
- * Nitro virtuals default to `moduleSideEffects: false`, which would drop that
- * registration.
- */
 export function renderWorkflowFileHandler(input: {
   readonly direct?: {
     readonly queuePrefix: string;

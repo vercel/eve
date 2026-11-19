@@ -1,32 +1,13 @@
-/**
- * ULID-compatible generation, vendored rather than taken from npm: the
- * `ulid` package's Node build hard-imports `node:crypto`, and this module is
- * bundled into browser clients, the Nitro server, and the workflow step
- * sandbox. `ulid.test.ts` pins the encoding against the reference
- * implementation's golden vectors.
- */
-
-// Crockford base32: omits I, L, O, and U, and sorts in raw-bit order.
 const ENCODING = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const TIME_CHARS = 10;
 const TIME_MAX = 2 ** 48 - 1;
 const RANDOM_BYTES = 10;
 const RANDOM_CHARS = 16;
 
-/** Character count of a ULID: a 10-char timestamp then a 16-char random tail. */
 export const ULID_LENGTH = TIME_CHARS + RANDOM_CHARS;
 
-/** Mints one ULID. See {@link createUlidFactory}. */
 type UlidFactory = () => string;
 
-/**
- * Creates an independent ULID generator with its own monotonic state.
- *
- * Prefer {@link createUlid} unless a caller needs a sequence that unrelated
- * code cannot perturb. Ids sort in the order one generator produced them:
- * those minted within a millisecond increment the random tail, and a
- * backwards clock pins to the last millisecond observed.
- */
 export function createUlidFactory(): UlidFactory {
   let lastTimeMs = -1;
   const lastRandom = new Uint8Array(RANDOM_BYTES);
@@ -41,7 +22,6 @@ export function createUlidFactory(): UlidFactory {
       lastTimeMs = now;
       randomFill(lastRandom);
     } else if (!incrementRandom(lastRandom)) {
-      // 2^80 ids in one millisecond: advance the logical clock rather than block.
       if (lastTimeMs === TIME_MAX) {
         throw new Error(
           "Cannot mint a ULID: random component overflowed at the maximum timestamp.",
@@ -55,17 +35,6 @@ export function createUlidFactory(): UlidFactory {
   };
 }
 
-/**
- * Mints a ULID from the process-wide generator: a 48-bit millisecond
- * timestamp then 80 bits of randomness, in Crockford base32.
- *
- * Ids lead with their timestamp, so they are broadly time-ordered. Ordering
- * holds within one process only — separate processes have independent clocks
- * and random tails — so a ULID is not a lossless pagination cursor.
- *
- * Throws when the clock is outside the 48-bit timestamp range or Web Crypto
- * is unavailable rather than weakening the randomness.
- */
 export const createUlid: UlidFactory = createUlidFactory();
 
 function randomFill(target: Uint8Array<ArrayBuffer>): void {
@@ -86,7 +55,6 @@ function encodeTime(timeMs: number): string {
   return encoded;
 }
 
-/** Encodes 80 bits as 16 five-bit groups — an exact fit, so no padding. */
 function encodeRandom(bytes: Uint8Array): string {
   let buffer = 0;
   let bufferedBits = 0;
@@ -105,7 +73,6 @@ function encodeRandom(bytes: Uint8Array): string {
   return encoded;
 }
 
-/** Adds one to a big-endian counter in place. Returns false on overflow. */
 function incrementRandom(bytes: Uint8Array): boolean {
   for (let index = bytes.length - 1; index >= 0; index -= 1) {
     const byte = bytes[index] ?? 0;

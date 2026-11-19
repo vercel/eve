@@ -1,18 +1,10 @@
-/**
- * Inbound Microsoft Teams activity parsing and prompt shaping.
- *
- * The channel owns small, documented data shapes instead of exposing the
- * full Bot Framework SDK Activity model as the primary public API.
- */
-
-import TurndownService from "#compiled/turndown/index.js";
-
 import type {
   TeamsAttachment,
   TeamsChannelAccount,
   TeamsMention,
 } from "#public/channels/teams/api.js";
 import { isNonEmptyString, isObject } from "#shared/guards.js";
+import { convertHtmlToMarkdown } from "#shared/html-to-markdown.js";
 import { parseJsonObject } from "#shared/json.js";
 
 /**
@@ -92,7 +84,6 @@ const HTML_ENTITY_MAP: Record<string, string> = {
   "&#x27;": "'",
 };
 const HTML_ENTITY_PATTERN = new RegExp(Object.keys(HTML_ENTITY_MAP).join("|"), "gi");
-let turndownService: TurndownService | null = null;
 
 /** Inbound context rendered into the model-visible `<teams_context>` block. */
 export interface TeamsInboundContext {
@@ -109,7 +100,6 @@ export interface TeamsInboundContext {
   readonly userName?: string;
 }
 
-/** Parses one JSON-decoded Teams activity payload. */
 export function parseTeamsActivity(value: unknown): TeamsActivity | null {
   if (!isObject(value)) return null;
   if (value.type === "message") return parseMessageActivity(value);
@@ -118,12 +108,10 @@ export function parseTeamsActivity(value: unknown): TeamsActivity | null {
   return null;
 }
 
-/** Returns true when the message's inferred scope is `personal` (a one-on-one chat with the bot). */
 export function isTeamsPersonalMessage(activity: TeamsMessageActivity): boolean {
   return activity.scope === "personal";
 }
 
-/** Returns the root activity id that should anchor a Teams thread, when any. */
 export function teamsThreadRootActivityId(
   activity: TeamsMessageActivity | TeamsInvokeActivity,
 ): string | null {
@@ -131,11 +119,6 @@ export function teamsThreadRootActivityId(
   return activity.replyToId ?? activity.id;
 }
 
-/**
- * Renders one {@link TeamsInboundContext} as a `<teams_context>` block of
- * `key: value` lines for the model. Optional fields (user name, conversation
- * type, tenant, team, channel) are omitted when absent; field order is stable.
- */
 export function formatTeamsContextBlock(context: TeamsInboundContext): string {
   const lines = [
     "<teams_context>",
@@ -307,10 +290,7 @@ function normalizeTeamsText(text: string): string {
   const value = text.trim();
   if (!looksLikeHtml(value)) return decodeHtmlEntities(value);
 
-  return getTurndownService()
-    .turndown(value.replace(/<at>(.*?)<\/at>/gi, "@$1"))
-    .replace(/ {2}\n/g, "\n")
-    .trim();
+  return convertHtmlToMarkdown(value.replace(/<at>(.*?)<\/at>/gi, "@$1"));
 }
 
 function readNestedString(
@@ -334,15 +314,4 @@ function decodeHtmlEntities(value: string): string {
     HTML_ENTITY_PATTERN,
     (match) => HTML_ENTITY_MAP[match.toLowerCase()] ?? match,
   );
-}
-
-function getTurndownService(): TurndownService {
-  turndownService ??= new TurndownService({
-    bulletListMarker: "-",
-    codeBlockStyle: "fenced",
-    emDelimiter: "*",
-    headingStyle: "atx",
-    hr: "---",
-  });
-  return turndownService;
 }

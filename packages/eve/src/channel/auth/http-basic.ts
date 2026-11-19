@@ -5,9 +5,6 @@ import type {
   RouteStrategyAuthenticationResult,
 } from "#channel/auth/types.js";
 
-/**
- * Verifies one HTTP Basic credential against a resolved eve strategy.
- */
 export function authenticateHttpBasicStrategy(input: {
   readonly authorization: string;
   readonly strategy: ResolvedHttpBasicAuthStrategy;
@@ -20,8 +17,6 @@ export function authenticateHttpBasicStrategy(input: {
     };
   }
 
-  // Compare both fields every time so response timing does not reveal
-  // whether the username matched.
   const usernameMatches = timingSafeStringEquals(
     normalizeCredential(credentials.username),
     normalizeCredential(input.strategy.username),

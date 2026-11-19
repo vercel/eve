@@ -1,5 +1,3 @@
-/** TypeScript signatures for catalog entries, rendered from the schemas each call sees. */
-
 import { connectionToolName } from "#connections/ownership.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
@@ -11,10 +9,6 @@ import {
 } from "#tools/schema.js";
 import { renderToolSignature } from "#tools/signature.js";
 
-/**
- * An agent entry's signature, from the schemas the model would see for it.
- * A caller that already converted the input schema passes it in.
- */
 export function entrySignature(
   definition: HarnessToolDefinition,
   inputSchema = serializeInputSchema(definition.inputSchema as ToolSchemaSource),
@@ -26,7 +20,6 @@ export function entrySignature(
   });
 }
 
-/** A connection tool's signature under its full name. */
 export function connectionToolSignature(
   connection: ResolvedConnectionDefinition,
   tool: ConnectionToolMetadata,

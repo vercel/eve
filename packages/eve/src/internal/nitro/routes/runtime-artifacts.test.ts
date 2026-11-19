@@ -5,12 +5,6 @@ import { installBundledCompiledArtifacts } from "#runtime/loaders/bundled-artifa
 import { createRuntimeSession, withRuntimeSession } from "#runtime/sessions/runtime-session.js";
 import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runtime-artifacts.js";
 
-/**
- * Installs an empty compiled-artifact snapshot on the currently active runtime
- * session. Callers are expected to drive this inside a `withRuntimeSession`
- * scope so the install targets the scoped session rather than the
- * process-default singleton.
- */
 async function installEmptyBundledArtifacts(): Promise<void> {
   const { manifest, moduleMap } = await compileFromMemory({
     model: "openai/gpt-5.4",
@@ -23,16 +17,6 @@ async function installEmptyBundledArtifacts(): Promise<void> {
   });
 }
 
-/**
- * Runs `fn` inside a freshly-created, test-scoped `RuntimeSession`.
- *
- * Each test body gets its own session so installed compiled artifacts do
- * not leak across test boundaries or to the process-default session. This
- * replaces the earlier pattern of mutating the singleton via
- * `installBundledCompiledArtifacts` + `resetBundledCompiledArtifacts()` in
- * an `afterEach` hook, which guard rule 19 discourages: runtime state
- * should be scoped through `AlsContext` / `RuntimeSession`, not global.
- */
 async function withScopedRuntimeSession<T>(fn: () => T | Promise<T>): Promise<T> {
   return await withRuntimeSession(createRuntimeSession("runtime-artifacts-test"), fn);
 }

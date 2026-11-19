@@ -6,11 +6,8 @@ const log = createLogger("discord.gateway");
 
 const MAX_PENDING = 500;
 const MAX_ATTEMPTS = 5;
-// Generous so a cold start answers before the relay gives up; a timed-out request is not retried.
 const REQUEST_TIMEOUT_MS = 30_000;
-// Only a rate limit proves eve turned the request away; a 5xx can come after a turn started.
 const RATE_LIMITED = 429;
-// Failures that happen before the request reaches eve, so retrying cannot start a second turn.
 const UNSENT_ERROR_CODES = new Set([
   "ECONNREFUSED",
   "ENOTFOUND",
@@ -20,14 +17,9 @@ const UNSENT_ERROR_CODES = new Set([
 
 export interface Forwarder {
   enqueue(dispatch: DiscordGatewayDispatch): void;
-  /** Resolves once the backlog is delivered or `timeoutMs` elapses. */
   drain(timeoutMs: number): Promise<void>;
 }
 
-/**
- * Delivers dispatches to eve one at a time, in Gateway order. A bounded
- * backlog keeps a long eve outage from growing the relay's memory without limit.
- */
 export function createForwarder(options: {
   readonly url: URL;
   readonly headers: () => Promise<Readonly<Record<string, string>>>;
@@ -78,7 +70,6 @@ export function createForwarder(options: {
 
         const detail = (await response.text()).slice(0, 200);
         if (response.status >= 500) {
-          // A gateway timeout or crash after dispatch would answer the message twice on retry.
           log.error("Gave up forwarding a Discord dispatch that eve may have received", {
             ...fields,
             detail,
@@ -106,7 +97,6 @@ export function createForwarder(options: {
         });
       } catch (error) {
         if (!UNSENT_ERROR_CODES.has(errorCode(error))) {
-          // eve may have started the turn already; a retry could answer twice.
           log.error("Gave up forwarding a Discord dispatch that eve may have received", {
             ...fields,
             error,

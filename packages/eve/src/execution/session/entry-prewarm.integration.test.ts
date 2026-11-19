@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AnyEventRequest } from "@workflow/world";
 import { hydrateStepReturnValue, hydrateWorkflowArguments } from "@workflow/core/serialization";
-import { startSessionOwner, waitForHook } from "#internal/testing/workflow-test-helpers.js";
+import {
+  startSessionOwner,
+  waitForHook,
+  waitForHookOwner,
+} from "#internal/testing/workflow-test-helpers.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { captureTurnEvents } from "#internal/testing/events.js";
 import { buildSerializedContext, handoffFollowUp } from "#internal/testing/entry-test-helpers.js";
@@ -15,7 +19,7 @@ import {
   sessionCommandHookToken,
   sessionInboxHookToken,
 } from "#execution/session-inbox/address.js";
-import { createWorkflowRuntime, waitForCommandHookOwner } from "#execution/workflow-runtime.js";
+import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { captureConsoleOutput, workflowSdkNotice } from "#internal/testing/log-records.js";
 import { defineHook } from "#public/definitions/hook.js";
@@ -47,6 +51,12 @@ async function waitForPrewarmStep(runId: string): Promise<void> {
       const steps = await world.steps.list({ runId });
       const step = steps.data.find((entry) => entry.stepName.endsWith("//prewarmSessionStep"));
       expect(step?.status).toBe("completed");
+      const events = await world.events.listByCorrelationId({
+        correlationId: step!.stepId,
+        resolveData: "none",
+        runId,
+      });
+      expect(events.data.map((event) => event.eventType)).toContain("step_completed");
     },
     { timeout: 10_000 },
   );
@@ -68,10 +78,13 @@ function sandboxHook() {
 }
 
 describe("session prewarmers", () => {
-  it("starts a prewarmed session's sandbox before its first message, which the turn resumes", async () => {
+  it.each([
+    { usage: "uses", modules: [sandboxHook()], expected: ["resume"] },
+    { usage: "never uses", modules: [], expected: [] },
+  ])("prewarms the sandbox before a turn that $usage it", async ({ modules, expected }) => {
     const runtime = await createTestRuntime({
       agent: { name: "prewarm-sandbox" },
-      modules: [sandboxHook()],
+      modules,
     });
     await runtime.run(async () => {
       const run = await startSessionOwner(workflowEntry, [
@@ -94,9 +107,11 @@ describe("session prewarmers", () => {
           handoffFollowUp("dpl_inline", "Alice opens the project notes.", "prewarm-first"),
         );
         await stream.nextTurn();
-        expect(runtime.sandboxEvents).toEqual([...prewarmed, `resume:${run.runId}`]);
+        const afterTurn = [...prewarmed, ...expected.map((event) => `${event}:${run.runId}`)];
+        expect(runtime.sandboxEvents).toEqual(afterTurn);
         await resumeHook(token, { deliveryId: "reset-delivery", kind: "reset" });
         await expect(run.returnValue).resolves.toEqual({ output: "" });
+        expect(runtime.sandboxEvents).toEqual([...afterTurn, `end:${run.runId}`]);
         expect(runtime.sandboxCleanups).toEqual([run.runId]);
       } finally {
         stream.dispose();
@@ -136,7 +151,6 @@ describe("session prewarmers", () => {
         expect(runtime.sandboxEvents).toEqual([`definition:${run.runId}`]);
 
         await resumeHook(token, { deliveryId: "reset-delivery", kind: "reset" });
-        // Cleanup that did not wait for the prewarm step would run while start is held.
         await vi
           .waitFor(() => expect(runtime.sandboxEvents).toContain(`end:${run.runId}`), {
             timeout: 2_000,
@@ -144,7 +158,6 @@ describe("session prewarmers", () => {
           .catch(() => undefined);
         started.resolve();
         await expect(run.returnValue).resolves.toEqual({ output: "" });
-        // Session end waited for the prewarm step, so its cleanup removed the started sandbox.
         expect(runtime.sandboxEvents).toEqual([
           `definition:${run.runId}`,
           `start:${run.runId}`,
@@ -190,10 +203,9 @@ describe("prewarm handoff while the prewarm step runs", () => {
           expectedOwnerRunId: run.runId,
           targetDeploymentId: "dpl_b",
         });
-        // Without the hold, the session moves within a few hundred milliseconds.
         const until = Date.now() + 2_000;
         while (Date.now() < until) {
-          expect((await waitForCommandHookOwner(token)).runId).toBe(run.runId);
+          expect((await waitForHookOwner(token)).runId).toBe(run.runId);
           await new Promise((resolve) => setTimeout(resolve, 100));
         }
 
@@ -258,8 +270,7 @@ describe("idle session prewarm handoff", () => {
         return await createEvent(...args);
       });
       try {
-        await waitForCommandHookOwner(token);
-        // A session moves only once its prewarm step has started the sandbox.
+        await waitForHookOwner(token);
         await waitForPrewarmStep(anchor.runId);
         await resumeHook(token, {
           kind: "session-prewarm",
@@ -284,7 +295,7 @@ describe("idle session prewarm handoff", () => {
             data: expect.objectContaining({ value: expect.stringContaining("Alice writes") }),
           }),
         );
-        expect((await waitForCommandHookOwner(token)).runId).not.toBe(anchor.runId);
+        expect((await waitForHookOwner(token)).runId).not.toBe(anchor.runId);
         await workflowRuntime.dispatchSession({
           sessionId: anchor.runId,
           command: { deliveryId: "reset-delivery", kind: "reset" },
@@ -325,7 +336,7 @@ describe("idle session prewarm handoff", () => {
         const token = sessionInboxHookToken(sessionCommandHookToken(anchor.runId));
         let successorId: string | undefined;
         try {
-          await waitForCommandHookOwner(token);
+          await waitForHookOwner(token);
           if (conversation) {
             await stream.nextTurn();
             await waitForParkedTurnStep(anchor.runId);
@@ -344,14 +355,13 @@ describe("idle session prewarm handoff", () => {
           });
           await vi.waitFor(
             async () => {
-              successorId = (await waitForCommandHookOwner(token)).runId;
+              successorId = (await waitForHookOwner(token)).runId;
               expect(successorId).not.toBe(anchor.runId);
             },
             { timeout: 10_000 },
           );
           const preparedDeadline = await deadline(successorId!);
           if (conversation) {
-            // Completed turns extend the idle window; preparation itself must not renew it.
             expect(preparedDeadline.getTime()).toBeGreaterThanOrEqual(originalDeadline.getTime());
             const successor = await world.runs.get(successorId!);
             expect(preparedDeadline.getTime()).toBeLessThan(successor.createdAt.getTime() + 60_000);
@@ -371,7 +381,6 @@ describe("idle session prewarm handoff", () => {
               command: { kind: "clear", deliveryId: "before-first-message" },
             });
           }
-          // A retry inspected before handoff must not move the successor backwards.
           await resumeHook(token, {
             kind: "session-prewarm",
             expectedOwnerRunId: anchor.runId,
@@ -395,7 +404,6 @@ describe("idle session prewarm handoff", () => {
               data: expect.objectContaining({ value: expect.stringContaining("Alice confirms") }),
             }),
           );
-          // Publication and hook takeover precede the successor's durable turn commit.
           await waitForParkedTurnStep(successorId!);
           const states = await readTurnStepStates(successorId!);
           const userHistory = states
@@ -408,7 +416,7 @@ describe("idle session prewarm handoff", () => {
               : []),
             expect.stringContaining("Alice confirms the research milestone."),
           ]);
-          expect((await waitForCommandHookOwner(token)).runId).toBe(successorId);
+          expect((await waitForHookOwner(token)).runId).toBe(successorId);
           expect(await deadline(successorId!)).toEqual(preparedDeadline);
           await workflowRuntime.dispatchSession({
             sessionId: anchor.runId,
@@ -430,7 +438,7 @@ describe("first turn abort hooks", () => {
     { firstMessage: undefined, start: "a prewarmed session" },
     { firstMessage: "Say hello.", start: "a session started with a message" },
   ])(
-    "registers each turn's abort hooks before its message for $start",
+    "registers the abort hooks before the first message and reuses them for $start",
     async ({ firstMessage }) => {
       const runtime = await createTestRuntime({ agent: { name: "workflow-entry-turn-prewarm" } });
 
@@ -457,9 +465,7 @@ describe("first turn abort hooks", () => {
           for (const message of ["Say hello.", "Say hello again."].slice(turns)) {
             await vi.waitFor(async () => {
               const hooks = (await world.hooks.list({ runId: run.runId })).data;
-              expect(hooks.filter((hook) => hook.token.startsWith("abrt_"))).toHaveLength(
-                2 * (turns + 1),
-              );
+              expect(hooks.filter((hook) => hook.token.startsWith("abrt_"))).toHaveLength(2);
             });
             await resumeHook(
               inboxToken,
@@ -489,8 +495,8 @@ describe("first turn abort hooks", () => {
               abortHooksBeforeEachTurn.push(abortHooks);
             }
           }
-          // Each turn uses the pair registered before its message; none starts its own.
-          expect(abortHooksBeforeEachTurn).toEqual([2, 4]);
+          expect(abortHooksBeforeEachTurn).toEqual([2, 2]);
+          expect(abortHooks).toBe(2);
         } finally {
           stream.dispose();
           await run.cancel();
@@ -518,10 +524,8 @@ describe("controls before a prewarmed session's first message", () => {
       const inboxToken = sessionInboxHookToken(sessionCommandHookToken(run.runId));
       try {
         await waitForHook({ runId: run.runId }, { token: inboxToken });
-        // Alice cancels, clears, and compacts before she has said anything.
         const controls = ["cancel", "clear", "compact"] as const;
         for (const kind of controls) await resumeHook(inboxToken, { deliveryId: kind, kind });
-        // A command from a newer eve fails, also only once the session has started.
         await resumeHook(inboxToken, { deliveryId: "unknown", kind: "from-the-future" });
         await resumeHook(inboxToken, handoffFollowUp("dpl_inline", "Say hello.", "first-message"));
         const settled = new Set<string>();
@@ -545,7 +549,6 @@ describe("controls before a prewarmed session's first message", () => {
             data: expect.objectContaining({ deliveryId: "unknown", outcome: "failed" }),
           }),
         );
-        // The early clear and compaction leave Alice's first turn alone.
         expect(events.some((event) => event.type === "context.started")).toBe(false);
       } finally {
         stream.dispose();

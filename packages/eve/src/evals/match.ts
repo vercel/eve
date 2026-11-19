@@ -105,10 +105,6 @@ export type EveEvalEventMatch<
     }
   : never;
 
-/**
- * Returns true when the observed value satisfies a matcher (literal, RegExp,
- * or function — see {@link EveEvalValueMatcher}).
- */
 export function matchesValue(matcher: unknown, value: unknown): boolean {
   if (matcher instanceof RegExp) {
     return testRegExpAgainst(matcher, value);
@@ -131,11 +127,6 @@ export function matchesValue(matcher: unknown, value: unknown): boolean {
   return Object.is(matcher, value);
 }
 
-/**
- * Returns true when one derived tool call or skill load satisfies the
- * `input`/`output`/lifecycle constraints (the `count` option is the caller's
- * concern).
- */
 export function toolCallMatches(
   call: Pick<EveEvalToolCall, "output" | "status"> & { readonly input?: JsonObject },
   options: EveEvalToolCallMatchOptions,
@@ -148,10 +139,6 @@ export function toolCallMatches(
   return true;
 }
 
-/**
- * Returns true when one derived subagent call satisfies the `callId`, `childSessionId`, and
- * `output` constraints.
- */
 export function subagentCallMatches(
   call: EveEvalSubagentCall,
   options: EveEvalSubagentCallMatchOptions,
@@ -172,7 +159,6 @@ export function subagentCallMatches(
   return true;
 }
 
-/** Returns true when one HITL request satisfies every supplied constraint. */
 export function interactionMatches(
   request: Interaction,
   options: EveEvalInteractionMatchOptions,
@@ -199,7 +185,6 @@ export function interactionMatches(
   return true;
 }
 
-/** Returns true when one stream event satisfies a typed event matcher. */
 export function eventMatches(event: SessionStreamEvent, matcher: EveEvalEventMatch): boolean {
   return (
     event.type === matcher.type &&
@@ -209,10 +194,6 @@ export function eventMatches(event: SessionStreamEvent, matcher: EveEvalEventMat
   );
 }
 
-/**
- * Strict structural equality used by scoped `outputEquals`: unlike matcher
- * comparison, objects must carry exactly the same keys on both sides.
- */
 export function deepEquals(a: unknown, b: unknown): boolean {
   if (Object.is(a, b)) return true;
 
@@ -238,11 +219,6 @@ function testRegExpAgainst(pattern: RegExp, value: unknown): boolean {
   return serialized !== undefined && testRegExp(pattern, serialized);
 }
 
-/**
- * Tests a RegExp without carrying `lastIndex` state between calls. Matcher
- * patterns are reused across tool calls and across every case in an eval, so
- * a `g`/`y`-flagged pattern would otherwise return order-dependent results.
- */
 export function testRegExp(pattern: RegExp, text: string): boolean {
   if (pattern.global || pattern.sticky) pattern.lastIndex = 0;
   return pattern.test(text);

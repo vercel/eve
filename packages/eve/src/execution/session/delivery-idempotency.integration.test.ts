@@ -68,7 +68,6 @@ describe("delivery idempotency", () => {
           initial.map((receipt) => receipt.result({ signal: AbortSignal.timeout(5_000) })),
         );
         expect(firstResults.map((result) => result.outcome).sort()).toEqual(["handled", "ignored"]);
-        // Each hook resume replays the owner from its recorded history.
         expect((await (await send()).result({ signal: AbortSignal.timeout(5_000) })).outcome).toBe(
           "ignored",
         );
@@ -96,6 +95,97 @@ describe("delivery idempotency", () => {
         if (!completed && ["pending", "running"].includes(await getRun(session.sessionId).status)) {
           await getRun(session.sessionId).cancel();
         }
+      }
+    });
+  }, 60_000);
+
+  it("gives both of two racing first sends to an address the session that takes them", async () => {
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", await (await getWorld()).getDeploymentId());
+    let turns = 0;
+    const app = await createTestRuntime({
+      agent: { name: "racing-first-sends", limits: { sessionTimeoutMs: false } },
+      modules: [
+        {
+          logicalPath: "hooks/record.ts",
+          loadNamespace: async () => ({
+            default: defineHook({
+              events: {
+                "turn.started"() {
+                  turns += 1;
+                },
+              },
+            }),
+          }),
+        },
+      ],
+    });
+    await app.run(async () => {
+      const runtime = createWorkflowRuntime({
+        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      });
+      const address = createChannelOperations({
+        adapter: { kind: "http" },
+        channelName: "test",
+        runtime,
+      }).from(crypto.randomUUID());
+      const [alice, bob] = await Promise.all([
+        address.send("Alice asks for the report.", { auth: null, turnPolicy: "queue" }),
+        address.send("Bob asks for the summary.", { auth: null, turnPolicy: "queue" }),
+      ]);
+      let completed = false;
+      try {
+        expect(bob.sessionId).toBe(alice.sessionId);
+        const outcomes = await Promise.all(
+          [alice, bob].map(
+            async (receipt) =>
+              (await receipt.result({ signal: AbortSignal.timeout(10_000) })).outcome,
+          ),
+        );
+        expect(outcomes).toEqual(["handled", "handled"]);
+        await waitForParkedTurnStep(alice.sessionId, 2);
+        expect(turns).toBe(2);
+        await createSession(alice.sessionId, runtime).end();
+        completed = true;
+      } finally {
+        for (const sessionId of new Set([alice.sessionId, bob.sessionId])) {
+          if (!completed && ["pending", "running"].includes(await getRun(sessionId).status)) {
+            await getRun(sessionId).cancel();
+          }
+        }
+      }
+    });
+  }, 60_000);
+
+  it("delivers a cancel sent as soon as a session is created", async () => {
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", await (await getWorld()).getDeploymentId());
+    const app = await createTestRuntime({
+      agent: { name: "cancel-on-create", limits: { sessionTimeoutMs: false } },
+    });
+    await app.run(async () => {
+      const runtime = createWorkflowRuntime({
+        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      });
+      const started = await runtime.createSession({
+        adapter: { kind: "http" },
+        auth: null,
+        input: { message: "Alice asks for a long report." },
+      });
+      const stream = captureTurnEvents(getRun(started.sessionId));
+      try {
+        await expect(
+          runtime.dispatchSession({
+            command: { deliveryId: "alice-stop", kind: "cancel" },
+            sessionId: started.sessionId,
+          }),
+        ).resolves.toMatchObject({ sessionId: started.sessionId, status: "accepted" });
+        await stream.nextUntil(
+          (event) =>
+            event.type === "delivery.admitted" &&
+            (event.data as { deliveryId?: string }).deliveryId === "alice-stop",
+        );
+      } finally {
+        stream.dispose();
+        await getRun(started.sessionId).cancel();
       }
     });
   }, 60_000);
@@ -136,7 +226,6 @@ describe("delivery idempotency", () => {
       try {
         await stream.nextTurn();
         await waitForParkedTurnStep(started.sessionId);
-        // A parent's retried continue step: the same key, so the route names the same delivery.
         const idempotencyKey = "agent-session:run_0:step_3:child:send";
         const deliveryId = await deliveryIdForIdempotencyKey(idempotencyKey);
         const fixed = createSession(started.sessionId, runtime);
@@ -159,7 +248,6 @@ describe("delivery idempotency", () => {
               (await receipt.result({ signal: AbortSignal.timeout(5_000) })).outcome,
           ),
         );
-        // One delivery, read once: both receipts are it, and neither is a duplicate's.
         expect(outcomes).toEqual(["handled", "handled"]);
         await fixed.end();
         completed = true;
@@ -219,15 +307,12 @@ describe("delivery idempotency", () => {
         const { graph } = await getCompiledRuntimeAgentBundle({ compiledArtifactsSource });
         const to = createCrossChannelToFn(runtime, toCrossChannelTargets(graph.root.channels));
         const slack = graph.root.channels.find((channel) => channel.name === "slack")!.definition!;
-        // A webhook handler retrying after a timeout sends the same provider event again.
         const send = () =>
           to(slack, { channelId: "C_OPS" }).send("Alice opened incident 42.", {
             auth: null,
             idempotencyKey: `pagerduty:incident-42:${timing}`,
           });
 
-        // A timeout retry can arrive before the first send has posted to Slack, or after the
-        // session has posted and moved to its thread's address.
         const racing = timing === "racing" ? await Promise.all([send(), send()]) : undefined;
         const first = racing?.[0] ?? (await send());
         const stream = captureTurnEvents(getRun(first.sessionId));
@@ -243,8 +328,6 @@ describe("delivery idempotency", () => {
             ),
           );
           expect(outcomes.sort()).toEqual(["handled", "ignored"]);
-          // The session reads its inbox in order, so a redelivered message would start a turn
-          // before this one.
           await createSession(first.sessionId, runtime).send("Bob is on it.", {
             auth: null,
             turnPolicy: "queue",
@@ -333,6 +416,7 @@ describe("delivery idempotency", () => {
                 principal: { type: "user", authenticator: "test", principalId: "alice" },
               },
             }),
+            schedule: { disable: async () => {}, delete: async () => {} },
           })
         ).sessions[0]!;
 
@@ -342,7 +426,6 @@ describe("delivery idempotency", () => {
       try {
         await stream.nextTurn();
         await waitForParkedTurnStep(first.sessionId);
-        // The provider redelivers the occurrence after the first attempt timed out.
         const retry = await trigger("weekly");
         expect(retry.sessionId).toBe(first.sessionId);
         expect(other.sessionId).not.toBe(first.sessionId);

@@ -1,6 +1,5 @@
 import { z } from "#compiled/zod/index.js";
 
-/** Successful response returned by the standard session-reset route. */
 export type ResetResponse =
   | {
       readonly ok: true;
@@ -12,7 +11,6 @@ export type ResetResponse =
       readonly status: "no_active_session";
     };
 
-/** Validates successful responses from the standard session-reset route. */
 export const ResetResponseSchema: z.ZodType<ResetResponse> = z.discriminatedUnion("status", [
   z.object({
     ok: z.literal(true),

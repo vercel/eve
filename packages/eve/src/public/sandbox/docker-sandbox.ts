@@ -1,3 +1,4 @@
+import type { SandboxIdleTimeoutOption } from "#sandbox/provider.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 import type {
   SandboxNetworkOptions,
@@ -17,7 +18,7 @@ export interface DockerSandboxSession extends SandboxSession {
 }
 
 /** Options shared by every sandbox created from one Docker environment. */
-export interface DockerSandboxEnvironmentOptions {
+export interface DockerSandboxEnvironmentOptions extends SandboxIdleTimeoutOption {
   /** Base container image. Defaults to eve's published sandbox image. */
   readonly image?: string;
   /** Environment variables baked into template builds and live containers. */

@@ -2,13 +2,11 @@ import type { Theme } from "./theme.js";
 import { sliceVisible, visibleLength } from "#cli/ui/terminal-text.js";
 import { renderFlowPanel, type FlowPanelState } from "./setup-panel.js";
 
-/** Temporary setup content enclosed by a drawer and its navigation controls. */
 interface FlowDrawer {
   readonly rows: string[];
   readonly controls: string[];
 }
 
-/** Frames an active setup flow above the terminal footer. */
 export function renderFlowDrawer(state: FlowPanelState, theme: Theme, width: number): FlowDrawer {
   const body = renderFlowPanel({ ...state, title: "" }, theme, width);
   const footerStart = state.content.kind === "question" ? body.lastIndexOf("") : -1;
@@ -18,10 +16,6 @@ export function renderFlowDrawer(state: FlowPanelState, theme: Theme, width: num
   return { rows: frameDrawer(drawerBody, theme, width), controls };
 }
 
-/**
- * Frames a transient command panel with the same rules as a setup flow. A `corner` label sits at
- * the right end of the top rule.
- */
 export function renderTransientDrawer(
   body: readonly string[],
   controls: readonly string[],
@@ -55,10 +49,8 @@ function frameDrawer(
   ];
 }
 
-/** Ends the label two cells from the edge, mirroring the body's two-space indent. */
 function labeledRule(label: string, theme: Theme, width: number, side: "left" | "right"): string {
   const dash = theme.glyph.dash;
-  // Two dashes lead, two trail, and a space pads each side of the label.
   const room = width - 6;
   if (room < 1) return theme.colors.dim(dash.repeat(Math.max(1, width)));
   const text =

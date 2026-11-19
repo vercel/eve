@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { desktopTool, flag } from "../lib/tool";
 
+/** Lets the agent list an app's accessibility surfaces: windows, open menus, sheets, and alerts. */
 export default desktopTool({
   description: "List an app's accessibility surfaces: windows, open menus, sheets, and alerts.",
   inputSchema: z.object({ app: z.string().optional() }),

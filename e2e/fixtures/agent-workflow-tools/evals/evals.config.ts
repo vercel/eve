@@ -1,8 +1,9 @@
 import { defineEvalConfig } from "eve/evals";
 
 export default defineEvalConfig({
-  // Workflow tools dispatch durable runs; serialize so the runs are never
-  // starved past the per-eval timeout.
-  maxConcurrency: 1,
+  // Each eval dispatches its own durable runs on one eval server. The 120 s
+  // timeout leaves ample room for four concurrent evals, which take about 5 s
+  // each run alone.
+  maxConcurrency: 4,
   timeoutMs: 120_000,
 });

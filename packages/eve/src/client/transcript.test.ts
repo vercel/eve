@@ -53,7 +53,6 @@ function cleared(): SessionEvent {
 
 const stranded = { code: "session_stranded", message: "ended" };
 
-/** What eve writes when a reset ends a stranded session: the admitted control, then the end. */
 function strandedReset(): SessionEvent[] {
   return [
     { data: { deliveryId: "reset_0", source: { control: "reset" } }, type: "delivery.admitted" },
@@ -71,7 +70,6 @@ function strandedByMessage(): SessionEvent {
   };
 }
 
-/** Events written together: one line, as a commit is. */
 function line(at: number, events: readonly SessionEvent[]) {
   return events.map((event, index) => ({
     ...event,
@@ -114,7 +112,6 @@ describe("transcriptOf", () => {
         content("Compare capacity.", { kind: "reasoning" }),
         content("Checking the venues.", { phase: "narration" }),
         content("The second venue seats everyone."),
-        // Output a cancel stopped is partial and never part of the transcript.
         content("Booking it", { interrupted: true }),
       ]).messages,
     ).toEqual([
@@ -206,12 +203,10 @@ describe("transcriptOf", () => {
     });
     const original = [...exchange("t1", null, "Q1", "A1"), ...exchange("t2", "t1", "Q2", "A2")];
 
-    // A change that selects an earlier turn leaves the turns after it out.
     expect(reduce([...original, selecting("t1")]).messages).toEqual([
       { role: "user", text: "Q1" },
       { role: "assistant", text: "A1" },
     ]);
-    // The next turn continues from the selected one.
     expect(
       reduce([...original, selecting("t1"), ...exchange("t3", "t1", "Q2 again", "A3")]).messages,
     ).toEqual([
@@ -220,14 +215,12 @@ describe("transcriptOf", () => {
       { role: "user", text: "Q2 again" },
       { role: "assistant", text: "A3" },
     ]);
-    // A turn that follows an earlier one says so on its own.
     expect(reduce([...original, ...exchange("t3", "t1", "Q2 again", "A3")]).messages).toEqual([
       { role: "user", text: "Q1" },
       { role: "assistant", text: "A1" },
       { role: "user", text: "Q2 again" },
       { role: "assistant", text: "A3" },
     ]);
-    // A change that didn't complete selects nothing.
     expect(
       reduce([
         ...original,

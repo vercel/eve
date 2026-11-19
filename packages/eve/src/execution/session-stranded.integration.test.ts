@@ -2,11 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createChannelAddress } from "#channel/channel-address.js";
 import { createSession } from "#channel/session.js";
+import { handleConnectionCallbackRequest } from "#execution/connections/callback-route.js";
 import { SessionStrandedError } from "#channel/session-stranded-error.js";
 import { createSessionStreamResponse } from "#eve-channel/request.js";
 import type { Runtime } from "#channel/types.js";
 import {
   EVE_SESSION_ATTRIBUTE,
+  EVE_TYPE_ATTRIBUTE,
   EVE_VERSION_ATTRIBUTE,
 } from "#execution/eve-workflow-attributes.js";
 import { signalSessionTimeoutStep } from "#execution/session/timeout-steps.js";
@@ -14,7 +16,6 @@ import {
   sessionCommandHookToken,
   sessionInboxHookToken,
 } from "#execution/session-inbox/address.js";
-import { handleSessionCallbackRequest } from "#subagents/callback-route.js";
 import { readSessionEventStream, streamSessionEvents } from "#execution/session-event-stream.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { encodeLine } from "#protocol/session-events/envelope.js";
@@ -35,15 +36,10 @@ import { sessions } from "#public/server/index.js";
 import { defineDynamic, defineInstructions } from "#public/definitions/instructions.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 
-/** eve version recorded by the owner an earlier build left parked on the local World. */
 const PREVIOUS_EVE_VERSION = "0.0.1";
 
 type ParkedRun = Awaited<ReturnType<typeof start>>;
 
-/**
- * Parks a session owner the way an earlier eve build left it: its run records
- * that build's version, which the running build cannot replay.
- */
 async function parkStrandedOwner(
   continuationToken: string,
   attributes: Readonly<Record<string, string>> = {},
@@ -56,7 +52,6 @@ async function parkStrandedOwner(
   return run;
 }
 
-/** Parks a stranded handoff successor that owns the session of a separate anchor run. */
 async function parkStrandedSuccessor(continuationToken: string) {
   const anchor = await start(parkedAnchorWorkflow, [{ token: `${continuationToken}:anchor` }]);
   await waitForHook(anchor, { token: `${continuationToken}:anchor` });
@@ -75,6 +70,28 @@ async function parkStrandedSuccessor(continuationToken: string) {
   return { anchor, owner };
 }
 
+async function deleteOwnerDeployment(runId: string): Promise<() => void> {
+  const world = await getWorld();
+  const original = world.getEncryptionKeyForRun;
+  const getKey = async (run: string | { readonly runId: string }, context?: object) => {
+    if ((typeof run === "string" ? run : run.runId) === runId) {
+      const error = new Error(
+        `Failed to fetch run key for ${runId} (deployment dpl_deleted): HTTP 404 Not Found — {"error":{"code":"not_found","message":"Deployment not found."}}`,
+      );
+      error.name = "RunKeyFetchError";
+      throw Object.assign(error, { status: 404 });
+    }
+    return await (
+      original as ((...args: unknown[]) => Promise<Uint8Array | undefined>) | undefined
+    )?.call(world, run, context);
+  };
+  world.getEncryptionKeyForRun = getKey as NonNullable<typeof original>;
+  return () => {
+    if (original === undefined) delete world.getEncryptionKeyForRun;
+    else world.getEncryptionKeyForRun = original;
+  };
+}
+
 async function listEventIds(runId: string): Promise<string[]> {
   const world = await getWorld();
   const events = await world.events.list({ runId, pagination: { limit: 1000 } });
@@ -88,7 +105,6 @@ async function cancelIfActive(...runs: readonly ParkedRun[]): Promise<void> {
   }
 }
 
-/** Reads a session's public stream until every expected user message has been received. */
 async function waitForReceivedMessages(sessionId: string, expected: readonly string[]) {
   const reader = readSessionEventStream(sessionId).getReader();
   const pending = new Set(expected);
@@ -109,7 +125,6 @@ async function waitForReceivedMessages(sessionId: string, expected: readonly str
   return [...pending];
 }
 
-/** The `session.started` event a session publishes before its first turn. */
 async function readSessionStarted(sessionId: string) {
   const reader = readSessionEventStream(sessionId).getReader();
   try {
@@ -123,7 +138,6 @@ async function readSessionStarted(sessionId: string) {
   }
 }
 
-/** Appends v26 events to a parked session's stream, one per line, as its earlier build recorded them. */
 async function recordHistory(
   sessionId: string,
   events: readonly Record<string, unknown>[],
@@ -141,7 +155,6 @@ async function recordHistory(
 
 const TURN = { sequence: 0, turnId: "turn_0" };
 
-/** A short conversation the stranded session recorded before the upgrade, in v26 events. */
 const OFFSITE_HISTORY: readonly Record<string, unknown>[] = [
   { data: {}, type: "session.started" },
   {
@@ -159,7 +172,6 @@ const OFFSITE_HISTORY: readonly Record<string, unknown>[] = [
   },
 ];
 
-/** A fresh session claims its address after `createSession` returns. */
 async function waitForAliasOwner(runtime: Runtime, continuationToken: string): Promise<string> {
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
@@ -192,7 +204,6 @@ async function resetSession(runtime: Runtime, sessionId: string | undefined): Pr
     command: { deliveryId: "reset-delivery", kind: "reset" },
     sessionId,
   });
-  // Keep the World through shutdown without reading result data, which may already have expired.
   await vi.waitFor(async () => {
     expect(["completed", "cancelled", "failed"]).toContain(await getRun(sessionId).status);
   });
@@ -216,7 +227,6 @@ describe("stranded sessions", () => {
         );
         freshSessionId = fresh.sessionId;
 
-        // A stream that never recorded its start starts in the commit that ends it.
         await expect(waiting).resolves.toMatchObject({
           done: false,
           value: { type: "session.started" },
@@ -234,7 +244,6 @@ describe("stranded sessions", () => {
         });
         await expect(reader.read()).resolves.toMatchObject({ done: true });
         expect(fresh.sessionId).not.toBe(anchor.runId);
-        // The runtime started the successor itself; the channel started nothing.
         expect(runtime.createSession).not.toHaveBeenCalled();
         await expect(owner.status).resolves.toBe("cancelled");
         await expect(anchor.status).resolves.toBe("cancelled");
@@ -248,33 +257,16 @@ describe("stranded sessions", () => {
         await expect(
           waitForReceivedMessages(fresh.sessionId, ["Alice asks for the weekly summary"]),
         ).resolves.toEqual([]);
-        // The successor names the session it replaced.
         const started = await readSessionStarted(fresh.sessionId);
         expect(started.data.predecessor).toEqual({ sessionId: anchor.runId });
-        // A remote job can finish after replacement. Its fixed parent inbox
-        // must not route the result into the new conversation.
-        const callback = await handleSessionCallbackRequest(
-          new Request("https://eve.test/callback", {
-            method: "POST",
-            body: JSON.stringify({
-              kind: "turn.completed",
-              callId: "old-call",
-              subagentName: "research",
-              outcome: {
-                kind: "parked",
-                result: { kind: "succeeded", output: "Alice's report" },
-                usageDelta: {
-                  inputTokens: 0,
-                  outputTokens: 0,
-                  cacheReadTokens: 0,
-                  cacheWriteTokens: 0,
-                },
-              },
-              output: "Alice's report",
-            }),
-          }),
+        const callback = await handleConnectionCallbackRequest(
+          new Request("https://eve.test/callback?code=late"),
           {
-            params: { token: sessionInboxHookToken(sessionCommandHookToken(anchor.runId)) },
+            params: {
+              attemptId: "old-attempt",
+              name: "linear",
+              token: sessionInboxHookToken(sessionCommandHookToken(anchor.runId)),
+            },
             requestIp: null,
             waitUntil() {},
           },
@@ -381,7 +373,6 @@ describe("stranded sessions", () => {
         );
         expect(response.status).toBe(409);
         await expect(response.json()).resolves.toMatchObject({ code: "session_stranded" });
-        // Recorded history stays readable without resetting the session first.
         const history = await createSessionStreamResponse(
           new Request(`https://eve.test/eve/v1/session/${stranded.runId}/stream?follow=false`),
           createSession(stranded.runId, runtime),
@@ -405,7 +396,6 @@ describe("stranded sessions", () => {
       const stranded = await parkStrandedOwner(continuationToken);
       const runtime = channelRuntime();
       try {
-        // Clear keeps the session, which cannot run, so the caller must choose reset.
         await expect(
           runtime.dispatchSession({
             command: { deliveryId: "clear-delivery", kind: "clear" },
@@ -422,7 +412,6 @@ describe("stranded sessions", () => {
             sessionId: stranded.runId,
           }),
         ).resolves.toEqual({ previousSessionId: stranded.runId, status: "reset" });
-        // A stream that never recorded its start starts in the commit that ends it.
         await expect(started).resolves.toMatchObject({ value: { type: "session.started" } });
         await expect(reader.read()).resolves.toMatchObject({
           value: {
@@ -555,7 +544,6 @@ describe("stranded sessions", () => {
       const history = [{ role: "user" as const, text: "Alice asks for the venue list." }];
       let createdSessionId: string | undefined;
       try {
-        // A stranded owner cannot run, so `created: false` would hand back a dead session.
         await expect(address.create({ auth: null, history })).rejects.toThrow(
           "Call end() on the address, then create() again",
         );
@@ -624,6 +612,52 @@ describe("stranded sessions", () => {
     });
   });
 
+  it("replaces a session whose deployment was deleted on a channel delivery", async () => {
+    const test = await createTestRuntime({ agent: { name: "stranded-session-deleted" } });
+    await test.run(async () => {
+      const continuationToken = "http:stranded-session-deleted";
+      const owner = await start(sessionCommandInboxWorkflow, [{ token: continuationToken }], {
+        allowReservedAttributes: true,
+        attributes: {
+          [EVE_TYPE_ATTRIBUTE]: "session",
+          [EVE_VERSION_ATTRIBUTE]: resolveInstalledPackageInfo().version,
+        },
+      });
+      await waitForHook(owner, { token: sessionInboxHookToken(continuationToken) });
+      const restoreWorld = await deleteOwnerDeployment(owner.runId);
+      const runtime = channelRuntime();
+      let freshSessionId: string | undefined;
+      try {
+        await expect(runtime.resolveContinuation(continuationToken)).resolves.toEqual({
+          sessionId: owner.runId,
+        });
+        await expect(
+          runtime.resolveContinuation(continuationToken, { runnable: true }),
+        ).rejects.toBeInstanceOf(SessionStrandedError);
+
+        const fresh = await httpAddress(runtime, "stranded-session-deleted").send(
+          "Alice asks for the deploy checklist again.",
+          { auth: null },
+        );
+        freshSessionId = fresh.sessionId;
+
+        expect(fresh.sessionId).not.toBe(owner.runId);
+        expect(runtime.createSession).not.toHaveBeenCalled();
+        await expect(owner.status).resolves.toBe("cancelled");
+        await expect(
+          waitForReceivedMessages(fresh.sessionId, ["Alice asks for the deploy checklist again."]),
+        ).resolves.toEqual([]);
+        await expect(readSessionStarted(fresh.sessionId)).resolves.toMatchObject({
+          data: { predecessor: { sessionId: owner.runId } },
+        });
+      } finally {
+        restoreWorld();
+        await cancelIfActive(owner);
+        await resetSession(runtime, freshSessionId);
+      }
+    });
+  });
+
   it("ends a retired session when its session timeout elapses", async () => {
     const test = await createTestRuntime({ agent: { name: "stranded-session-timeout" } });
     await test.run(async () => {
@@ -685,10 +719,6 @@ describe("stranded sessions", () => {
 
 type TranscriptRead = TranscriptData & { readonly predecessor: SessionPredecessor };
 
-/**
- * An app whose `session.started` instruction reads the replaced session's
- * conversation the way the predecessor docs show.
- */
 async function transcriptReadingRuntime(name: string) {
   const recorded: TranscriptRead[] = [];
   const test = await createTestRuntime({
@@ -700,7 +730,6 @@ async function transcriptReadingRuntime(name: string) {
           default: defineDynamic(async (ctx) => {
             const predecessor = ctx.session.predecessor;
             if (predecessor === undefined) return null;
-            // The predecessor's transcript is read once, and joins the conversation once.
             const messages = await ctx.memo(predecessor.sessionId, async () => {
               const events = [];
               for await (const event of sessions.attach(predecessor.sessionId).stream({

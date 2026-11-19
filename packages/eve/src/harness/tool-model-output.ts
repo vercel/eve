@@ -7,12 +7,6 @@ import type { ToolModelOutputPart } from "#tools/definition.js";
 import { formatValidationError } from "#runtime/validation.js";
 import { withToolOutputSerializationError } from "#harness/tool-output-serialization.js";
 
-/**
- * A validated {@link ToolModelOutput} in the AI SDK's expected shape:
- * `json` values are proven JSON-serializable, `content` arrays are
- * mutable, and file URLs are parsed `URL`s so the value is assignable to
- * the SDK's `ToolResultOutput`.
- */
 export type ToolModelOutputValue =
   | { readonly type: "json"; readonly value: JSONValue }
   | { readonly type: "text"; readonly value: string }
@@ -32,15 +26,8 @@ type ToolModelOutputValuePart =
 
 const log = createLogger("harness.tool-model-output");
 
-/**
- * Content-part file payloads above this decoded size warn. Matches the
- * attachment pipeline's inline-image hydration cap: unlike sandbox-ref
- * attachments, a content part is baked into persisted history and
- * re-sent on every subsequent model call, so large payloads compound.
- */
 const CONTENT_FILE_WARN_BYTES = 3 * 1024 * 1024;
 
-/** File-data tags the AI SDK accepts but eve does not support yet. */
 const UNSUPPORTED_FILE_DATA_TAGS = new Set(["reference", "text"]);
 
 const toolModelOutputPartSchema = z.discriminatedUnion("type", [
@@ -63,11 +50,6 @@ const toolModelOutputSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("content"), value: z.array(toolModelOutputPartSchema).min(1) }),
 ]);
 
-/**
- * Validates a tool output as JSON at one of the serialization boundaries,
- * normalizing top-level `undefined` to `null`. Throws
- * `ToolOutputSerializationError` on non-JSON-serializable values.
- */
 export function normalizeToolJsonOutput(input: {
   readonly boundary: "execute" | "toModelOutput";
   readonly output: unknown;
@@ -82,12 +64,6 @@ export function normalizeToolJsonOutput(input: {
   });
 }
 
-/**
- * Single funnel for authored `toModelOutput` results. Validates the
- * eve-owned {@link ToolModelOutput} union and returns it in the AI SDK's
- * expected shape; every rejection throws `ToolOutputSerializationError`
- * at the `toModelOutput` boundary.
- */
 export function normalizeToolModelOutput(input: {
   readonly output: unknown;
   readonly toolCallId?: string;
@@ -142,11 +118,6 @@ function normalizeContentPart(
   return { ...part, data: { type: "url", url: parseFileUrl(part.data.url) } };
 }
 
-/**
- * Only `https:` URLs are accepted: the provider fetches them, and eve's
- * own attachment refs use internal schemes that must never be authored.
- * The error names only the scheme, since presigned URLs carry credentials.
- */
 function parseFileUrl(value: string): URL {
   const url = URL.canParse(value) ? new URL(value) : undefined;
   if (url?.protocol !== "https:") {
@@ -158,15 +129,6 @@ function parseFileUrl(value: string): URL {
   return url;
 }
 
-/**
- * Asserts every file part's `data` is the supported form, covering the two
- * author mistakes the schema cannot explain well: raw bytes (which
- * `JSON.stringify` would corrupt silently at the durable boundary — the
- * #497 failure class), and AI SDK `FileData` tags eve does not support
- * yet. On a `Uint8Array` the schema would report a missing `data.type`
- * key; the real fix is to base64-encode. Everything structural is left to
- * the schema.
- */
 function assertSupportedFilePartData(output: unknown): void {
   if (output === null || typeof output !== "object") return;
   const candidate = output as { readonly type?: unknown; readonly value?: unknown };

@@ -483,9 +483,6 @@ describe("createMockAuthoredRuntimeModel", () => {
     ]);
   });
 
-  // Regression: the [Tasks] note is user-role scaffolding injected at a step
-  // boundary. Treating it as a turn boundary masked the tool result, and the
-  // adapter re-issued the same deterministic tool call.
   it("replies to a tool result behind a framework [Tasks] note instead of re-calling", async () => {
     const result = await generateWithPrompt(
       [

@@ -11,17 +11,6 @@ import {
 
 import { theme } from "./lib/theme.ts";
 
-/**
- * End-to-end proof that the dev server's rebuild log lines cycle through a
- * single in-place status row instead of stacking. Lines come from the
- * watcher's real formatter, so this exercises the producer/parser contract:
- *
- *   - repeated change→updated cycles show only the latest state
- *   - changed paths shrink to their last two components
- *   - the raw `[eve:dev] change detected …` lines never reach the transcript
- *
- * Needs no agent server and no model credentials.
- */
 const UNREACHABLE_HOST = "http://127.0.0.1:49217";
 const APP_ROOT = "/tmp/rebuild-status-app";
 process.env.EVE_TUI_UNICODE = "1";
@@ -49,8 +38,6 @@ void (async () => {
   try {
     await screen.waitForIdlePrompt(5_000);
 
-    // Two full rebuild cycles, producer-authentic lines. Foreign writes are
-    // captured synchronously, so snapshots reflect them immediately.
     process.stdout.write(
       `${formatChangeDetectedLogLine(APP_ROOT, [
         { event: "change", path: `${APP_ROOT}/agent/agent.ts` },

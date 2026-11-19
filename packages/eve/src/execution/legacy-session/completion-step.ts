@@ -4,7 +4,6 @@ import type { HarnessModelMessage } from "#harness/messages.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
 
-/** The old driver owns final notifications for the dispatch that became this session. */
 export async function completeLegacyDriverStep(input: {
   readonly completionToken: string;
   readonly history: HarnessModelMessage[];

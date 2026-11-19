@@ -7,13 +7,6 @@ import type {
   SingleSelectOptions,
 } from "#setup/prompter.js";
 
-/**
- * Handlers a test supplies to answer prompts. Each receives the prompt options
- * and returns the answer; an omitted handler makes that prompt type fail, which
- * is the right default for tests that assert a given prompt never runs. `single`
- * answers a single-select (`select`) and `multiple` answers a checklist
- * (`select({ multiple: true })`).
- */
 interface FakePrompterConfig {
   text?: (opts: Parameters<Prompter["text"]>[0]) => string;
   password?: (opts: { message: string }) => string;
@@ -25,15 +18,9 @@ interface FakePrompterConfig {
 
 interface FakePrompter {
   prompter: Prompter;
-  /** Every `select` message in call order, for asserting which prompts ran. */
   selectMessages: string[];
 }
 
-/**
- * Builds a {@link Prompter} test double that satisfies the overloaded `select`
- * once, so individual tests only describe how to answer. `note`/`intro`/`outro`
- * and the log are `vi.fn()` spies. Prompts without a configured handler throw.
- */
 export function createFakePrompter(config: FakePrompterConfig = {}): FakePrompter {
   const selectMessages: string[] = [];
   const fail = (message: string): never => {

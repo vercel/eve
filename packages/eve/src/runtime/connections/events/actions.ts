@@ -1,3 +1,4 @@
+import { installedDurableHost } from "#execution/hosts.js";
 import { createMcpTraceFetch } from "#runtime/connections/mcp-tracing.js";
 import { createMcpTracing } from "#tracing/eve/mcp.js";
 import { withConnectionEventSpan } from "#tracing/eve/connection-events.js";
@@ -11,7 +12,7 @@ import {
 } from "#compiled/@ai-sdk/mcp/index.js";
 import { contextStorage } from "#context/container.js";
 import { AuthKey, SessionIdKey, SessionTraceSeedKey } from "#context/keys.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { requireCompiledBundle, SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedConnectionDefinition, ResolvedConnectionEvents } from "#runtime/types.js";
 import type {
   ConnectionToolExecuteOptions,
@@ -32,7 +33,6 @@ const GET = "events_get_subscription";
 const STOP = "events_unsubscribe";
 const PREFIX = "events_subscribe_";
 const MIN_TTL_MS = 120_000;
-/** The longest finite watch Connect accepts, in milliseconds. */
 const MAX_TTL_MS = 31_536_000_000;
 type EventCatalog = Pick<MCPEvents, "list">;
 const SUBSCRIBE_INPUT_SCHEMA = defineJsonSchema<
@@ -63,7 +63,7 @@ export class ConnectionEventActions {
   private scope() {
     const ctx = contextStorage.getStore();
     if (ctx === undefined) throw new Error("Event subscriptions require an active eve session.");
-    if (ctx.get(BundleKey)?.nodeId !== undefined)
+    if (ctx.get(SessionAgentKey)?.nodeId !== undefined)
       throw new Error(
         "Experimental event subscriptions currently require a root-agent connection.",
       );
@@ -97,7 +97,6 @@ export class ConnectionEventActions {
 
   private async withClient<T>(run: (events: EventCatalog) => Promise<T>): Promise<T> {
     this.scope();
-    // A fresh authenticated transport keeps catalogs isolated between people sharing a session.
     let client: Awaited<ReturnType<typeof createMCPClient>> | undefined;
     const config = {
       transport: {
@@ -164,7 +163,6 @@ export class ConnectionEventActions {
     });
   }
 
-  /** Existing watches must remain stoppable when upstream discovery fails. */
   recoveryMetadata(): ConnectionToolMetadata[] {
     this.scope();
     return managementMetadata().map((tool) => ({
@@ -180,18 +178,19 @@ export class ConnectionEventActions {
   ): Promise<unknown> {
     const args = parseJsonObject(input);
     const { ctx, principal, backend, sessionId, owner, executionPrincipal, caller } = this.scope();
-    // Discovery also runs in the harness. Load the workflow runtime only when executing an action.
-    const { findConnectionEventOwner, startConnectionEventOwner, retireConnectionEventOwner } =
-      await import("#runtime/connections/events/owner.js");
+    const owners = installedDurableHost()?.connectionEvents;
+    if (owners === undefined)
+      throw new Error(
+        "This host keeps no connection event subscriptions: watch events from a deployed agent.",
+      );
     if (name === GET || name === STOP) {
       if (typeof args.id !== "string") throw new Error("id must be a subscription id.");
       const bindingId = args.id;
-      const handler = await findConnectionEventOwner(bindingId);
+      const handler = await owners.find(bindingId);
       if (handler === undefined || !sameEventOwner(handler.owner, caller))
         throw new Error("Unknown subscription for this caller and account.");
-      // The watch's run unsubscribes, and repeats it until Connect finishes cleaning up.
       if (name === STOP) {
-        if (!(await retireConnectionEventOwner(bindingId)))
+        if (!(await owners.retire(bindingId)))
           throw new Error("Unknown subscription for this caller and account.");
         return { id: bindingId, status: "stopping" as const };
       }
@@ -220,8 +219,6 @@ export class ConnectionEventActions {
       );
       if (definition === undefined)
         throw new Error("Unknown event subscription action for this account.");
-      // Unsupported provider schemas can pass through validation. Keep eve's input checks
-      // independent, and validate provider arguments with their original local $ref root.
       const inputResult = await SUBSCRIBE_INPUT_SCHEMA["~standard"].validate(args);
       if (inputResult.issues !== undefined)
         throw new Error(
@@ -238,8 +235,6 @@ export class ConnectionEventActions {
       if (valid.issues !== undefined)
         throw new Error("Event arguments do not match the authorized catalog schema.");
       const eventArguments = parseJsonObject(valid.value);
-      // The id names what is watched, not the tool call, so asking again after a
-      // cancelled or timed-out call reaches the same watch and its subscription.
       const id = createHash("sha256")
         .update(
           canonicalJson([
@@ -266,10 +261,9 @@ export class ConnectionEventActions {
           context: { eve: { version: 1, sessionId, bindingId: id } },
         },
       };
-      // A watch already running under this id answers instead of a new one.
-      const subscription = await startConnectionEventOwner(
+      const subscription = await owners.start(
         binding,
-        ctx.require(BundleKey),
+        requireCompiledBundle(ctx),
         options.abortSignal,
       );
       return subscription === undefined
@@ -298,18 +292,15 @@ function subscribeInputSchema(
   };
 }
 
-/** Model-facing ids are eve's binding ids: they locate the handler that owns the watch. */
 function subscriptionResult(bindingId: string, subscription: ManagedEventSubscription) {
   return { ...subscription, id: bindingId, subscriptionId: subscription.id };
 }
 
-/** A watch whose subscribe is still in flight: its id already works with get and stop. */
 function pendingResult(binding: EventBinding) {
   const { name, arguments: eventArguments } = binding.request;
   return { id: binding.id, name, arguments: eventArguments, status: "pending" as const };
 }
 
-/** JSON with object keys sorted, so equal arguments hash equally. */
 function canonicalJson(value: unknown): string {
   return JSON.stringify(value, (_key, entry: unknown) =>
     entry !== null && typeof entry === "object" && !Array.isArray(entry)

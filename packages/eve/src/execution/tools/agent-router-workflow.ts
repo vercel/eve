@@ -1,9 +1,8 @@
-import { decide } from "#ai/decide.js";
+import { decideFor } from "#ai/decide.js";
 import type { JsonValue } from "#shared/json.js";
 import type { WorkflowToolContext } from "#tools/workflow-definition.js";
 import type { AgentRouterInput } from "#execution/tools/agent-router.js";
 
-/** Routes one task through the complete workflow agent metadata snapshot. */
 export async function runAgentRouterTask(
   input: AgentRouterInput,
   ctx: WorkflowToolContext,
@@ -32,7 +31,7 @@ async function chooseTarget(
   }
   if (names.length === 1) return names[0]!;
 
-  const result = await decide({
+  const result = await decideFor("agent-routing", {
     signal: abortSignal,
     state: { message },
     questions: {

@@ -1,6 +1,5 @@
 const PUBLISHING = `Load the pr skill before publishing. Create one pull request per request unless the requester asks otherwise.`;
 
-/** Agents without `github` config reach GitHub with their own shell credentials. */
 const SHELL_INSTRUCTIONS = `# GitHub
 
 Use the \`gh\` and \`git\` CLIs in \`bash\` for GitHub operations: cloning, fetching, pushing, issues, pull requests, reviews, and CI. They authenticate with the credentials already configured in the shell. Never put credentials in URLs or commands. If access is denied, report it plainly and stop.
@@ -21,7 +20,6 @@ const TOKEN_SCOPE = {
   },
 } as const;
 
-/** Holds only when the Connect-brokered `gh` tool can authenticate, which requires `github` config. */
 const connectInstructions = (scope: (typeof TOKEN_SCOPE)[keyof typeof TOKEN_SCOPE]) => `# GitHub
 
 GitHub credentials are not available to ordinary \`bash\`. Use the \`gh\` tool for every authenticated GitHub operation: \`gh\`, \`git\`, and \`gh-signed-commit\` commands. The full \`gh\` and \`git\` CLI surface is available. ${scope.repository} The agent's access policy decides whether each command runs. Authenticated commands run without an approval prompt; describe the intended GitHub-side result accurately in \`description\`. ${scope.token} The sandbox process receives only a placeholder \`GH_TOKEN\`, and the firewall exchanges it on matching GitHub requests. Never put credentials in URLs or commands. If access is denied, report it plainly and stop.
@@ -37,7 +35,6 @@ Use GitHub CLI commands through the \`gh\` tool for issues, pull requests, revie
 Repositories that require verified signatures reject ordinary sandbox commits. Stage the intended changes explicitly, run \`gh-signed-commit --repo owner/name --branch <branch> -m <headline>\` through the \`gh\` tool, then create the draft pull request through the same tool.
 `;
 
-/** `callerScoped` describes user tokens (`principalType: "user"`) instead of repository-scoped app tokens. */
 export function githubInstructions(github: boolean, callerScoped = false): string {
   const guidance = github
     ? connectInstructions(TOKEN_SCOPE[callerScoped ? "caller" : "repository"])
@@ -45,7 +42,6 @@ export function githubInstructions(github: boolean, callerScoped = false): strin
   return `${guidance}\n${PUBLISHING}\n`;
 }
 
-/** `gh-signed-commit` authenticates through the `gh` tool's credential lease. */
 const SIGNED_COMMIT = `Stage only the intended changes. Repositories that require verified commits must use:
 
 \`\`\`sh

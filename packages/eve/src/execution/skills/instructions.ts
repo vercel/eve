@@ -6,26 +6,12 @@ import { MODEL_SKILL_ROOT } from "#shared/skill-paths.js";
 export interface AvailableSkillDescription {
   readonly description: string;
   readonly name: string;
-  /** False when the skill has no sandbox files; its path is omitted. */
   readonly hasFiles?: boolean;
 }
 
 const ANNOUNCEMENT_KEY = "skills";
 const NO_SKILLS = "Available skills: none";
 
-/**
- * Formats the "Available skills" section: every skill that isn't deferred,
- * with the instruction to load it. Deferred skills stay out of context until
- * search finds them.
- *
- * A loaded skill's instructions are never injected into the system prompt;
- * the model has them from the result of loading it. The formatter uses the
- * canonical symbolic skill root so supporting files remain discoverable
- * without provisioning a sandbox.
- *
- * eve's default prompt renders it for the agent's static skills on every model
- * call (`definitions/skills.ts`). Dynamic skills reuse it for their announcement.
- */
 export function formatAvailableSkillsSection(
   skills: readonly AvailableSkillDescription[],
 ): string | null {
@@ -48,10 +34,6 @@ export function formatAvailableSkillsSection(
   return lines.join("\n");
 }
 
-/**
- * Announces the dynamic skills that aren't deferred, in full whenever they
- * change. Nothing is announced until the first one resolves.
- */
 export function dynamicSkillAnnouncements(
   dynamic: readonly CatalogSkill[],
 ): Readonly<Record<string, Announcement>> {
@@ -74,7 +56,6 @@ function formatAvailableSkillLine(skill: AvailableSkillDescription): string {
   return `${prefix} (path: ${skillFilePath(skill.name)})`;
 }
 
-/** Where a skill's `SKILL.md` lives under the model's skill root. */
 export function skillFilePath(name: string): string {
   return `${MODEL_SKILL_ROOT}/${name}/SKILL.md`;
 }

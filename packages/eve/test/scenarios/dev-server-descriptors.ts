@@ -1,13 +1,6 @@
 import type { ScenarioAppDescriptor } from "../../src/internal/testing/scenario-app.js";
 import { WEATHER_AGENT_DESCRIPTOR } from "../../src/internal/testing/scenario-apps/weather-agent.js";
 
-/**
- * Scenario app descriptors and authored-source factories shared by the
- * `dev-server-*` scenario files. Each file boots real `eve dev` processes, so
- * the suite is split by theme to keep individual files short under parallel
- * scenario workers.
- */
-
 export const DEV_SERVER_SCENARIO_TIMEOUT_MS = 360_000;
 
 export const DEV_SERVER_AGENT_DESCRIPTOR: ScenarioAppDescriptor = {

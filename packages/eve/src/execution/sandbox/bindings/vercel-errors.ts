@@ -4,10 +4,6 @@ export function isVercelSnapshotUnavailableError(error: unknown): boolean {
   return errorChainContainsStatus(error, 410);
 }
 
-/**
- * A resume that found the sandbox's snapshot expired or deleted: 410 with the
- * `snapshot_not_found` code, rather than any other 410.
- */
 export function isVercelSnapshotNotFoundError(error: unknown): boolean {
   for (const candidate of walkErrorChain(error)) {
     if (readErrorStatus(candidate) !== 410 || !isObject(candidate)) continue;
@@ -18,11 +14,6 @@ export function isVercelSnapshotNotFoundError(error: unknown): boolean {
   return false;
 }
 
-/**
- * A create that lost the race for a sandbox name. The Sandbox API answers a
- * taken name with 400 `bad_request` "A sandbox with the name '…' already
- * exists"; 409 is accepted too in case it moves to a proper Conflict.
- */
 export function isVercelSandboxNameConflictError(error: unknown): boolean {
   for (const candidate of walkErrorChain(error)) {
     const status = readErrorStatus(candidate);
@@ -37,7 +28,6 @@ export function isVercelSandboxNameConflictError(error: unknown): boolean {
   return false;
 }
 
-// The API error's message, falling back to its parsed JSON body.
 function readErrorText(value: unknown): string {
   if (!isObject(value)) return "";
   const parts: string[] = [];

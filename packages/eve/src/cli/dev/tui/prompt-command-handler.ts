@@ -12,6 +12,7 @@ import type {
   PromptCommandOutcome,
 } from "./runner.js";
 import { isPromptCommandAvailableFor, type PromptCommand } from "./prompt-commands.js";
+import { runSetupFlowCommand } from "./run-setup-flow-command.js";
 import type { TuiSetupCommandInput, TuiSetupFlows } from "./setup-commands.js";
 import type { DevelopmentTuiTarget } from "./target.js";
 
@@ -19,11 +20,8 @@ type ExtensionCommand = Extract<PromptCommand, { type: "extension" }>;
 
 interface PromptCommandHandlerOptions {
   readonly target: DevelopmentTuiTarget;
-  /** Test seam; defaults to the model flow's shared source-change apply. */
   readonly applyModel?: (input: { appRoot: string; slug: string }) => Promise<ApplyModelOutcome>;
-  /** Test seam; defaults to the model flow's external-provider refusal check. */
   readonly modelChangeRefusal?: (appRoot: string) => Promise<string | null>;
-  /** Test seam; forwarded to runTuiSetupCommand's injectable flows. */
   readonly flows?: Partial<TuiSetupFlows>;
 }
 
@@ -36,17 +34,12 @@ export function createPromptCommandHandler(
       context: PromptCommandHandlerContext,
     ): Promise<PromptCommandOutcome> {
       const { target } = options;
-      // Local-only commands invoked on a remote target are rejected here; the
-      // allowlist is derived from each command's `targets` so dispatch can't
-      // drift from discovery.
       if (target.kind === "remote" && !isPromptCommandAvailableFor(command.name, "remote")) {
         return {
           message: `/${command.name} needs eve dev running the local server (it is not available when connected to a remote agent).`,
         };
       }
 
-      // Model selection is owned by the inline command drawer. Once the
-      // drawer submits, this is the command's single apply path.
       if (command.name === "model") {
         if (command.argument.length === 0) {
           return { message: "Choose a model from the inline /model suggestions." };
@@ -61,7 +54,6 @@ export function createPromptCommandHandler(
         const usage = modelFailure(
           "Use `/model provider/model [default|none|minimal|low|medium|high|xhigh]`.",
         );
-        // Package-loading failures are command outcomes at this CLI boundary.
         try {
           const { modelChangeRefusalForUneditableModel } = await import("#setup/flows/model.js");
           const { changeAgentModel, changeAgentModelSettings } =
@@ -74,8 +66,6 @@ export function createPromptCommandHandler(
           ) {
             return usage;
           }
-          // A source-backed model (an SDK model call) isn't a string literal eve
-          // can rewrite; refuse with a clear reason rather than silently no-op.
           const checkRefusal = options.modelChangeRefusal ?? modelChangeRefusalForUneditableModel;
           const refusal = await checkRefusal(appRoot);
           if (refusal !== null) return modelFailure(refusal);
@@ -131,41 +121,23 @@ export function createPromptCommandHandler(
         return { message: `/${command.name} is not supported by this renderer.` };
       }
 
-      let setupCommands: typeof import("./setup-commands.js");
-      try {
-        setupCommands = await import("./setup-commands.js");
-      } catch (error) {
-        return { message: `/${command.name} failed: ${toErrorMessage(error)}` };
+      const commandInput: Omit<TuiSetupCommandInput, "renderer"> = {
+        command: command.name,
+        appRoot: target.workspaceRoot,
+        withExclusiveTerminal: context.withExclusiveTerminal,
+        chatGptAccountLabel: context.chatGptAccountLabel,
+      };
+      if (target.agentRoot !== undefined) commandInput.agentRoot = target.agentRoot;
+      if (context.initialModelStep !== undefined) {
+        commandInput.initialModelStep = context.initialModelStep;
       }
-      const { runTuiSetupCommand } = setupCommands;
-      flow.begin("");
-      let preserveFlowDiagnostics = true;
-      try {
-        const commandInput: TuiSetupCommandInput = {
-          command: command.name,
-          appRoot: target.workspaceRoot,
-          renderer: flow,
-          withExclusiveTerminal: context.withExclusiveTerminal,
-          chatGptAccountLabel: context.chatGptAccountLabel,
-        };
-        if (target.agentRoot !== undefined) commandInput.agentRoot = target.agentRoot;
-        if (context.initialModelStep !== undefined) {
-          commandInput.initialModelStep = context.initialModelStep;
-        }
-        if (context.onOnboardingScreen !== undefined) {
-          commandInput.onOnboardingScreen = context.onOnboardingScreen;
-        }
-        if (command.name === "add") commandInput.initialRegistryAddress = command.argument;
-        if (loginConnection !== undefined) commandInput.initialLoginConnection = loginConnection;
-        if (options.flows !== undefined) commandInput.flows = options.flows;
-        const result = await runTuiSetupCommand(commandInput);
-        preserveFlowDiagnostics = result.preserveFlowDiagnostics;
-        const { preserveFlowDiagnostics: _preserve, partial: _partial, ...outcome } = result;
-        if (context.settleOutcome !== undefined) return await context.settleOutcome(outcome);
-        return outcome;
-      } finally {
-        flow.end({ preserveDiagnostics: preserveFlowDiagnostics });
+      if (context.onOnboardingScreen !== undefined) {
+        commandInput.onOnboardingScreen = context.onOnboardingScreen;
       }
+      if (command.name === "add") commandInput.initialRegistryAddress = command.argument;
+      if (loginConnection !== undefined) commandInput.initialLoginConnection = loginConnection;
+      if (options.flows !== undefined) commandInput.flows = options.flows;
+      return await runSetupFlowCommand(flow, commandInput, context.settleOutcome);
     },
   };
 }

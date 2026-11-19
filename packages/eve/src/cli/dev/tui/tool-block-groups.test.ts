@@ -44,8 +44,6 @@ describe("groupToolBlocksForDisplay", () => {
   });
 
   it("accumulates a live run into one group with items listed newest first", () => {
-    // The renderer's cohort liveness keeps every member of an in-flight batch
-    // live, settled or not — mirrored here so mixed statuses share one run.
     const settled = fetchBlock("one", "https://one.example", "done", undefined, { live: true });
     const running = fetchBlock("two", "https://two.example", "running");
     const newest = fetchBlock("three", "https://three.example", "running");
@@ -94,7 +92,6 @@ describe("groupToolBlocksForDisplay", () => {
 
     expect(groups).toHaveLength(2);
     expect(groups[0]?.members).toEqual([failedFirst, failedSecond]);
-    // Failures keep their itemized rail, newest call first.
     expect(groups[0]?.display).toMatchObject({
       title: "Fetch 2 URLs",
       status: "error",
@@ -151,9 +148,6 @@ describe("groupToolBlocksForDisplay", () => {
 
     expect(groups).toHaveLength(1);
     expect(groups[0]?.members).toHaveLength(2);
-    // The merged section shows only the newest write — every stored
-    // diagnostic points at the log file, so on-screen history is redundant
-    // — and stays live while any write still is.
     expect(groups[0]?.display).toMatchObject({
       kind: "log",
       title: "stderr",
@@ -183,8 +177,6 @@ describe("groupToolBlocksForDisplay", () => {
 
     const groups = groupToolBlocksForDisplay([concise, raw, conciseTwo, rawTwo]);
 
-    // The concise/raw diagnostic twins each merge with their own kind — a
-    // mixed section would double the content under one log filter.
     expect(groups).toHaveLength(2);
     expect(groups[0]?.display).toMatchObject({
       body: "concise two",
@@ -216,9 +208,6 @@ describe("groupToolBlocksForDisplay", () => {
 
     const groups = groupToolBlocksForDisplay([lone, status, write]);
 
-    // A lone write is never windowed, and the rebuild status row must not
-    // absorb (or be absorbed by) neighboring writes. Single-member buckets
-    // sit at their own positions.
     expect(groups.map((group) => group.display)).toEqual([lone, status, write]);
   });
 
@@ -227,13 +216,10 @@ describe("groupToolBlocksForDisplay", () => {
     const notice: Block = { kind: "notice", body: "boundary", live: false };
     const blocks = [write("early failure"), notice, write("late failure")];
 
-    // Window mode: one stream section anchored at the newest write, so
-    // everything that happened after the last error displays after it.
     const windowed = groupToolBlocksForDisplay(blocks);
     expect(windowed.map((group) => group.display.kind)).toEqual(["notice", "log"]);
     expect(windowed[1]?.display).toMatchObject({ body: "late failure", elided: 1 });
 
-    // Runs mode (transcript rebuilds): committed positions stay put.
     const runs = groupToolBlocksForDisplay(blocks, { logCoalescing: "runs" });
     expect(runs.map((group) => group.display.kind)).toEqual(["log", "notice", "log"]);
   });

@@ -11,7 +11,6 @@ export interface CliApplicationContext {
 
 type CliApplicationRootRequirement = (command: Command) => boolean;
 
-/** Adds application-root resolution to a project-scoped CLI command. */
 export function applicationCommand(
   command: Command,
   applicationContext: CliApplicationContext,

@@ -336,8 +336,6 @@ describe("fileMemory", () => {
 });
 
 describe("fileMemory tool schemas", () => {
-  // Tool schemas reach the app's AI SDK, which would run a Zod schema through
-  // the app's own Zod copy, so these must be plain JSON Schema.
   it("advertises plain JSON Schema and validates input against it", async () => {
     const tools = await fileMemory({ backend: inMemory() }).tools?.(toolsContext());
     const save = tools?.save_memory?.inputSchema as ToolSchema<{ text: string }>;

@@ -13,7 +13,6 @@ const finished: BashToolOutput = {
 const RUNNING_NOTE = "The command is still running after 60 seconds as process group 42.";
 
 describe("bash model output", () => {
-  // `output` is `unknown` so a row can carry a value a wrapper's own `execute` returns.
   it.each<{ name: string; output: unknown; expected: unknown }>([
     {
       name: "a failed command's streams, then its exit code, as an error",

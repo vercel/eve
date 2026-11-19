@@ -48,7 +48,6 @@ describe("AltScreen", () => {
     expect(writes).toHaveLength(0);
     screen.enter();
     screen.paint(["one", "two", "three"], 2);
-    // Per-row CUP: no reliance on autowrap-pending behavior for full-width rows.
     expect(writes[1]).toBe("\x1b[?2026h\x1b[H\x1b[0J\x1b[1Hone\x1b[2Htwo\x1b[?2026l");
   });
 });

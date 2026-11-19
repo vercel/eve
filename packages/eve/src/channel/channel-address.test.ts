@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createChannelAddress } from "#channel/channel-address.js";
+import { createChannelAddress, startsNewAddress } from "#channel/channel-address.js";
 import { createSession } from "#channel/session.js";
 import type { Runtime } from "#channel/types.js";
 
@@ -72,7 +72,6 @@ describe("createChannelAddress", () => {
         turnPolicy: "steer",
       },
       continuationToken: "slack:C1:T1",
-      // Fresh creation inputs, used only if the owner's deployment was retired.
       successor: expect.objectContaining({
         adapter: { kind: "slack", state: {} },
         channelName: "slack",
@@ -201,19 +200,64 @@ describe("createChannelAddress", () => {
     });
   });
 
+  it("starts a session at once for a send marked as opening a new address", async () => {
+    const runtime = createRuntime();
+    vi.mocked(runtime.createSession).mockResolvedValue({
+      events: new ReadableStream(),
+      sessionId: "sess_started",
+    });
+    const address = createChannelAddress({
+      adapter: { kind: "slack" },
+      channelName: "slack",
+      continuationToken: "C1:T1",
+      runtime,
+    });
+
+    const delivery = await address.send("hello", { auth: null, [startsNewAddress]: true });
+
+    expect(delivery.sessionId).toBe("sess_started");
+    expect(runtime.dispatchContinuation).not.toHaveBeenCalled();
+    expect(runtime.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        continuationConflictCommand: expect.objectContaining({ kind: "send" }),
+        continuationToken: "slack:C1:T1",
+      }),
+    );
+  });
+
+  it("delivers answers marked as opening a new address to the session that asked", async () => {
+    const runtime = createRuntime();
+    const address = createChannelAddress({
+      adapter: { kind: "slack" },
+      channelName: "slack",
+      continuationToken: "C1:T1",
+      runtime,
+    });
+
+    const delivery = await address.deliver(
+      { answers: [{ optionId: "yes", interactionId: "input-1" }] },
+      { auth: null, [startsNewAddress]: true },
+    );
+
+    expect(delivery.sessionId).toBe("sess_1");
+    expect(runtime.dispatchContinuation).toHaveBeenCalledOnce();
+    expect(runtime.createSession).not.toHaveBeenCalled();
+  });
+
   it("reports whether create() started the session that owns the address", async () => {
     const history = [{ text: "Earlier", role: "user" as const }];
-    const create = async (owners: readonly (string | undefined)[]) => {
+    const create = async (
+      owner: string | undefined,
+      started: { readonly claimedContinuation: boolean; readonly sessionId: string },
+    ) => {
       const runtime = createRuntime();
       vi.mocked(runtime.createSession).mockResolvedValue({
         events: new ReadableStream(),
-        sessionId: "sess_started",
+        ...started,
       });
-      for (const owner of owners) {
-        vi.mocked(runtime.resolveContinuation).mockResolvedValueOnce(
-          owner === undefined ? undefined : { sessionId: owner },
-        );
-      }
+      vi.mocked(runtime.resolveContinuation).mockResolvedValueOnce(
+        owner === undefined ? undefined : { sessionId: owner },
+      );
       const address = createChannelAddress({
         adapter: { kind: "http" },
         channelName: "app",
@@ -224,19 +268,17 @@ describe("createChannelAddress", () => {
       return { created: result.created, runtime, sessionId: result.session.id };
     };
 
-    const won = await create([undefined, "sess_started"]);
+    const won = await create(undefined, { claimedContinuation: true, sessionId: "sess_started" });
     expect(won).toMatchObject({ created: true, sessionId: "sess_started" });
     expect(won.runtime.createSession).toHaveBeenCalledWith(
       expect.objectContaining({ continuationToken: "app:conversation:1", input: { history } }),
     );
 
-    // A concurrent send() or create() claimed the address first; this run's history never landed.
-    await expect(create([undefined, "sess_other"])).resolves.toMatchObject({
-      created: false,
-      sessionId: "sess_other",
-    });
+    await expect(
+      create(undefined, { claimedContinuation: false, sessionId: "sess_other" }),
+    ).resolves.toMatchObject({ created: false, sessionId: "sess_other" });
 
-    const owned = await create(["sess_owner"]);
+    const owned = await create("sess_owner", { claimedContinuation: true, sessionId: "unused" });
     expect(owned).toMatchObject({ created: false, sessionId: "sess_owner" });
     expect(owned.runtime.createSession).not.toHaveBeenCalled();
   });

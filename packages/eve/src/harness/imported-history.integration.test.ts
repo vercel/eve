@@ -35,7 +35,6 @@ const model = () =>
     }),
   });
 
-/** A delivery the session admitted, carrying a message and the history it brought. */
 function delivered(
   session: HarnessSession,
   deliveryId: string,

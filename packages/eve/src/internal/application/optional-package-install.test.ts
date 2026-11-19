@@ -113,8 +113,6 @@ function mockProcessPlatform(platform: NodeJS.Platform): () => void {
   };
 }
 
-// Installs report progress on the console for the `eve dev` user; capture it
-// so the assertions below can check what that user sees.
 let consoleInfo: MockInstance<typeof console.info>;
 
 beforeEach(() => {

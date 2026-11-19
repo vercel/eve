@@ -7,9 +7,6 @@ import type {
 
 const BASE64_CHUNK_SIZE = 0x8000;
 
-/**
- * Creates a `MessageFilePart` whose data is an inline `data:` URL.
- */
 export function createDataUrlFilePart(input: {
   readonly bytes: Uint8Array;
   readonly filename?: string;
@@ -25,9 +22,6 @@ export function createDataUrlFilePart(input: {
     : { ...part, filename: input.filename };
 }
 
-/**
- * Builds one user turn containing text plus an inline file attachment.
- */
 export function createTextWithFileContent(input: {
   readonly bytes: Uint8Array;
   readonly filename?: string;
@@ -39,10 +33,6 @@ export function createTextWithFileContent(input: {
   return [textPart, filePart];
 }
 
-/**
- * A message as a request body carries it: a file part's bytes become a `data:` URL, since JSON
- * can't carry a `Uint8Array` or `ArrayBuffer`. A `URL` serializes as its string already.
- */
 export function messageForRequest(message: MessageContent): MessageContent {
   if (typeof message === "string") return message;
   return message.map((part) => {

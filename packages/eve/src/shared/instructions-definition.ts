@@ -15,10 +15,6 @@ export interface PublicInstructionsDefinition {
 
 export type InstructionsRole = "system" | "user";
 
-/**
- * Internal definition for an instructions prompt authored in markdown or
- * TypeScript.
- */
 export interface InternalInstructionsDefinition {
   readonly content: string;
   readonly name: string;

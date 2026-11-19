@@ -34,14 +34,6 @@ function resolveMiddlewareFunctionDirectory(
   return functionDirectory;
 }
 
-/**
- * Copies host middleware functions into a generated service Build Output.
- *
- * Vercel validates generated-service routes against each service builder's
- * function map. The host remains the runtime owner of these functions; this
- * copy makes that same opaque Build Output function available while Vercel
- * collects the generated service.
- */
 export async function copyHostMiddlewareFunctions(input: {
   readonly hostOutputDirectory: string;
   readonly serviceOutputDirectory: string;
@@ -50,12 +42,6 @@ export async function copyHostMiddlewareFunctions(input: {
   try {
     configContents = await readFile(join(input.hostOutputDirectory, "config.json"), "utf8");
   } catch (error) {
-    // The host Build Output config need not exist when a generated service
-    // builds. A host that writes its config only at the end of its own build
-    // (e.g. the Nuxt web service, whose Nitro Vercel preset emits config.json
-    // last) may not have produced it when Vercel builds the generated service
-    // independently. There is no host middleware to preserve in that case, so
-    // skip the copy rather than failing the service build.
     if (error instanceof Error && "code" in error && error.code === "ENOENT") {
       return;
     }
@@ -79,8 +65,6 @@ export async function copyHostMiddlewareFunctions(input: {
     }
   }
 
-  // Local `vercel build` emits the Next middleware function before it adds the
-  // corresponding route to config.json. Remote builds have both by this point.
   const nextMiddlewareDirectory = resolveMiddlewareFunctionDirectory(
     input.hostOutputDirectory,
     NEXT_MIDDLEWARE_PATH,

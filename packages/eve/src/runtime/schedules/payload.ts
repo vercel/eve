@@ -68,7 +68,6 @@ export function parseSchedulePayload<TPayload = unknown>(
   return parsed.data as ScheduleCollectionPayload<TPayload>;
 }
 
-/** Shared validation for client writes and delivered occurrences. */
 export async function validateSchedulePayload<T>(
   schema: { readonly "~standard": { validate(value: unknown): unknown } },
   value: unknown,

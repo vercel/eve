@@ -9,7 +9,6 @@ import type { JsonValue } from "#shared/json.js";
 const turnId = "turn_0";
 const scope = { runId: "run_0", turnId };
 
-/** Folds each commit as the server does, with operational retention, so cards read what it keeps. */
 function serverView(commits: readonly (readonly SessionEvent[])[]): SessionView {
   const view = emptySessionView();
   commits.forEach((facts, position) =>
@@ -80,7 +79,6 @@ describe("task cards read from the server's tables", () => {
     expect(card?.audience).toBe("private");
     expect(workingTaskNames(working, turnId)).toEqual(["researcher"]);
 
-    // The turn settles while its task works; the card keeps its rows until the task ends.
     const finished = serverView([
       ...opening,
       [requested("plan", "plan"), requested("research", "researcher", "agent")],
@@ -111,7 +109,6 @@ describe("task cards read from the server's tables", () => {
       [5, "working"],
     ]);
     expect(cards[0]?.calls.map((row) => row.callId)).toEqual(["first"]);
-    // `watch` was still working when the next card began, so it moved there.
     expect(cards[1]?.calls.map((row) => row.callId)).toEqual(["watch", "second"]);
   });
 

@@ -29,7 +29,6 @@ describe("compiled resource root materialization", () => {
 
     const trees = await materializeWorkspaceDirectory(resourceRoot);
 
-    // Each tree is ordered by locale-aware relative path, not raw bytes.
     expect(trees).toEqual({
       skills: [
         { content: Buffer.from("sources"), relativePath: "research/refs/sources.md" },

@@ -75,7 +75,6 @@ describe("defineExtension", () => {
     });
     ext({ apiKey: "k" });
 
-    // Compile-time assertions (checked by `tsc`).
     const apiKey: string = ext.config.apiKey;
     const tier: string = ext.config.tier;
     // @ts-expect-error apiKey is a string, not a number

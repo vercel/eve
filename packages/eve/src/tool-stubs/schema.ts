@@ -12,9 +12,6 @@ const strings = { type: "array", uniqueItems: true, items: propertyName };
 const nonnegativeInteger = { type: "integer", minimum: 0 };
 const jsonType = { enum: ["array", "boolean", "integer", "null", "number", "object", "string"] };
 
-// The library validates data, but does not validate the schema itself:
-// { minimun: 10 } is ignored and { minimum: "10" } is not rejected.
-// Validate our supported, reference-free subset before using it to match inputs.
 const constraintSchema = new Validator(
   {
     anyOf: [
@@ -59,7 +56,6 @@ const constraintSchema = new Validator(
           oneOf: schemaList,
           not: schema,
           if: schema,
-          // JSON Schema uses `then` as a keyword.
           // oxlint-disable-next-line unicorn/no-thenable
           then: schema,
           else: schema,

@@ -14,8 +14,6 @@ const CHANNEL_START_HOOK = Symbol.for("eve.channel.startHook");
 const CHANNEL_INSTRUMENTATION_KIND = Symbol.for("eve.channel.instrumentationKind");
 const CHANNEL_INSTRUMENTATION_KINDS = Symbol.for("eve.channel.instrumentationKinds");
 
-// Nitro dev can evaluate a channel once for its route and again for a resolver
-// import, so separately created channel objects need a process-wide identity.
 type ChannelInstrumentationKindGlobal = typeof globalThis & {
   [CHANNEL_INSTRUMENTATION_KINDS]?: Map<string, string>;
 };
@@ -78,8 +76,6 @@ export function setChannelBuildMetadata(
   factory: ChannelBuildMetadataFactory,
 ): void {
   if (!isCompiledChannel(channel)) throw new TypeError("Expected a compiled channel.");
-  // Enumerable so `{ ...channel, routes }` keeps build metadata when an app
-  // wraps a channel's routes.
   Object.defineProperty(channel, CHANNEL_BUILD_METADATA, {
     configurable: true,
     enumerable: true,

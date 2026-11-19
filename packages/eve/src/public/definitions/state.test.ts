@@ -15,9 +15,6 @@ describe("defineState", () => {
   });
 
   it("rejects names using the reserved eve. prefix", () => {
-    // Authoring `defineState("eve.channel", ...)` would otherwise register a
-    // codec-less key over the framework's codec-carrying internal key and
-    // silently corrupt context serialization.
     expect(() => defineState("eve.channel", () => null)).toThrow(/reserved/);
     expect(() => defineState("eve.budget", () => ({ count: 0 }))).toThrow(/reserved/);
     expect(() => defineState("eve:mount.v1:extensions%2Fcrm:requests", () => 0)).toThrow(

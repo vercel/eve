@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { desktopTool, flag } from "../lib/tool";
 
+/** Lets the agent quit an application gracefully, or terminate it with `force`. */
 export default desktopTool({
   description: "Quit an application gracefully, or terminate it with force.",
   inputSchema: z.object({

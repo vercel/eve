@@ -32,7 +32,6 @@ function dependencyRecord(specifiers: readonly string[]): Record<string, string>
   );
 }
 
-/** The `channel/web-tanstack` item as `eve add channel/web` installs it, in Vercel services hosting. */
 async function createChannelTanStackDescriptor(): Promise<ScenarioAppDescriptor> {
   const registry = JSON.parse(await readFile(join(REGISTRY_ROOT, "registry.json"), "utf8")) as {
     readonly items: readonly RegistryItem[];
@@ -43,7 +42,6 @@ async function createChannelTanStackDescriptor(): Promise<ScenarioAppDescriptor>
   }
 
   const files: Record<string, string> = {
-    // Written by `eve integration setup web`, not the registry item.
     [`${WEB_ROOT}/app/eve-agent.ts`]:
       "export const WEB_CHAT_AGENT: string | undefined = undefined;\n",
     "pnpm-workspace.yaml": "minimumReleaseAge: 0\n",
@@ -77,21 +75,16 @@ describe("registry channel/web-tanstack", () => {
   it("builds and typechecks the installed TanStack Start Web Chat app", async () => {
     const app = await scenarioApp(await createChannelTanStackDescriptor());
 
-    // The item's `build:web` script. `NITRO_PRESET` keeps the output under
-    // `.output/` even when CI or Vercel provider detection would pick another preset.
     await runPnpmCommand({
       args: ["exec", "vite", "build", WEB_ROOT],
       cwd: app.appRoot,
       env: { ...process.env, NITRO_PRESET: "node-server" },
     });
-    // Runs after the build, which generates `app/routeTree.gen.ts`.
     await runPnpmCommand({
       args: ["exec", "tsc", "-p", WEB_ROOT],
       cwd: app.appRoot,
     });
 
-    // Font utilities must read the variables so `fonts.css` can swap in the
-    // Fontsource families; inlined theme values would hardcode "Geist Mono".
     const css = await readBuiltCss(app.appRoot);
     expect(css).toContain(".font-sans{font-family:var(--font-sans)}");
     expect(css).toContain(".font-mono{font-family:var(--font-mono)}");

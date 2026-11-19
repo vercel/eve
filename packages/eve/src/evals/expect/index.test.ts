@@ -116,7 +116,6 @@ describe("expect builders", () => {
     expect(hard.severity).toBe("gate");
     expect(hard.threshold).toBe(0.8);
 
-    // original is unchanged
     expect(base.severity).toBe("gate");
   });
 });

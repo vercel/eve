@@ -1,21 +1,13 @@
 import { nameIs, type SemanticErrorRule } from "../rule.js";
 
-/**
- * Error class names verified against the vendored `@workflow/errors` and
- * `@workflow/world-local` source: every class assigns `this.name`
- * explicitly in its constructor (`this.name = 'ReplayDivergenceError'`,
- * `'DataDirVersionError'`, …), so the discriminator is stable and
- * survives structured clone across workflow step boundaries.
- */
 export const WORKFLOW_RULES: readonly SemanticErrorRule[] = [
   {
     id: "workflow-store-version-mismatch",
     name: "Local session store incompatible",
     tags: ["workflow"],
-    when: nameIs("DataDirVersionError"),
-    message:
-      "The local workflow store (`.eve/.workflow-data`) was created by an incompatible version.",
-    hint: "Remove that directory to reset local sessions, then retry.",
+    when: nameIs("NewerSchemaError"),
+    message: "The local workflow store (`.eve/.workflow-data`) was written by a newer eve version.",
+    hint: "Upgrade eve, or remove that directory to reset local sessions, then retry.",
   },
   {
     id: "workflow-store-inaccessible",

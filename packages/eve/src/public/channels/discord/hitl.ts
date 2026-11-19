@@ -1,10 +1,3 @@
-/**
- * Discord HITL component rendering + decode helpers.
- *
- * Discord components carry a `custom_id` with a 100-character cap. eve
- * encodes only the request id and, for buttons, the selected option id.
- */
-
 import {
   DISCORD_INTERACTION_RESPONSE_TYPE,
   type DiscordComponentInteraction,
@@ -15,7 +8,6 @@ import type { InteractionOption } from "#protocol/session-events/families/intera
 import type { Interaction } from "#channel/interaction-prompts.js";
 import { chunk, truncate } from "#public/channels/text.js";
 
-/** Maps Discord component kinds (ACTION_ROW, BUTTON, STRING_SELECT, TEXT_INPUT) to their wire `type` integers used in component payloads. */
 export const DISCORD_COMPONENT_TYPE = {
   ACTION_ROW: 1,
   BUTTON: 2,
@@ -23,13 +15,10 @@ export const DISCORD_COMPONENT_TYPE = {
   TEXT_INPUT: 4,
 } as const;
 
-/** Custom id prefix for selectable HITL controls. */
 export const DISCORD_HITL_CUSTOM_ID_PREFIX = "eve_input:";
 
-/** Custom id prefix for the button/modal freeform flow. */
 export const DISCORD_HITL_FREEFORM_CUSTOM_ID_PREFIX = "eve_input_freeform:";
 
-/** Text-input id inside the freeform modal. */
 export const DISCORD_HITL_FREEFORM_TEXT_INPUT_ID = "eve_freeform_text";
 
 const DISCORD_CUSTOM_ID_MAX_LENGTH = 100;
@@ -44,12 +33,6 @@ interface HitlCustomIdPayload {
   readonly requestId: string;
 }
 
-/**
- * Renders an input request into Discord action-row components: a string-select
- * for `display: "select"` with options, else option buttons chunked into rows,
- * else a freeform-answer button when freeform is accepted. Empty array when no
- * control applies.
- */
 export function renderInteractionComponents(
   request: Interaction,
 ): readonly Readonly<Record<string, unknown>>[] {
@@ -58,14 +41,16 @@ export function renderInteractionComponents(
     request.request.allowFreeform === true || !options || options.length === 0;
 
   if (options && options.length > 0 && request.request.display === "select") {
-    return [
+    const shown = options.slice(0, DISCORD_SELECT_OPTION_LIMIT);
+    const initial = shown.find((option) => option.id === request.request.initialOptionId);
+    const rows: Record<string, unknown>[] = [
       {
         components: [
           {
             custom_id: encodeHitlCustomId(DISCORD_HITL_CUSTOM_ID_PREFIX, {
               requestId: request.interactionId,
             }),
-            options: options.slice(0, DISCORD_SELECT_OPTION_LIMIT).map((option) => {
+            options: shown.map((option) => {
               const result: Record<string, unknown> = {
                 label: truncate(option.label, DISCORD_SELECT_OPTION_TEXT_MAX_LENGTH),
                 value: selectOptionValue(option.id),
@@ -76,6 +61,7 @@ export function renderInteractionComponents(
                   DISCORD_SELECT_OPTION_TEXT_MAX_LENGTH,
                 );
               }
+              if (option === initial) result.default = true;
               return result;
             }),
             placeholder: "Choose an option",
@@ -85,6 +71,31 @@ export function renderInteractionComponents(
         type: DISCORD_COMPONENT_TYPE.ACTION_ROW,
       },
     ];
+    const useId =
+      initial === undefined
+        ? undefined
+        : hitlCustomId(DISCORD_HITL_CUSTOM_ID_PREFIX, {
+            optionId: initial.id,
+            requestId: request.interactionId,
+          });
+    if (
+      initial !== undefined &&
+      useId !== undefined &&
+      useId.length <= DISCORD_CUSTOM_ID_MAX_LENGTH
+    ) {
+      rows.push({
+        components: [
+          {
+            custom_id: useId,
+            label: truncate(`Use ${initial.label}`, DISCORD_LABEL_MAX_LENGTH),
+            style: toDiscordButtonStyle("primary"),
+            type: DISCORD_COMPONENT_TYPE.BUTTON,
+          },
+        ],
+        type: DISCORD_COMPONENT_TYPE.ACTION_ROW,
+      });
+    }
+    return rows;
   }
 
   if (options && options.length > 0) {
@@ -125,7 +136,6 @@ export function renderInteractionComponents(
   return [];
 }
 
-/** Builds a Discord modal response for one freeform HITL request. */
 export function buildFreeformModalResponse(input: {
   readonly customId: string;
   readonly prompt: string | undefined;
@@ -163,16 +173,10 @@ export function buildFreeformModalResponse(input: {
   };
 }
 
-/** Returns true when a component custom id starts the freeform modal flow. */
 export function isDiscordFreeformComponent(customId: string): boolean {
   return decodeHitlCustomId(customId, DISCORD_HITL_FREEFORM_CUSTOM_ID_PREFIX) !== null;
 }
 
-/**
- * Decodes an eve HITL component interaction into input responses. Empty array
- * if the custom id is not an eve HITL id; otherwise one response from the
- * encoded option id (buttons) or the first selected value (selects).
- */
 export function deriveComponentAnswers(
   interaction: DiscordComponentInteraction,
 ): readonly ValidatedAnswer[] {
@@ -191,11 +195,6 @@ export function deriveComponentAnswers(
   return [];
 }
 
-/**
- * Decodes an eve freeform modal submission into a single text input response.
- * Empty array unless the custom id matches the freeform prefix and the freeform
- * text field is present.
- */
 export function deriveModalAnswers(
   interaction: DiscordModalSubmitInteraction,
 ): readonly ValidatedAnswer[] {
@@ -205,18 +204,18 @@ export function deriveModalAnswers(
   return [parseAnswer({ interactionId: payload.requestId, text })];
 }
 
-/**
- * Encodes the payload as a raw JSON array, which leaves room for long request
- * ids such as a session-limit prompt's `<sessionId>:<turn>:limit:input:<tokens>`.
- */
 function encodeHitlCustomId(prefix: string, payload: HitlCustomIdPayload): string {
-  const fields =
-    payload.optionId === undefined ? [payload.requestId] : [payload.requestId, payload.optionId];
-  const customId = `${prefix}${JSON.stringify(fields)}`;
+  const customId = hitlCustomId(prefix, payload);
   if (customId.length > DISCORD_CUSTOM_ID_MAX_LENGTH) {
     throw new Error("discordChannel: HITL custom_id exceeded Discord's 100-character limit.");
   }
   return customId;
+}
+
+function hitlCustomId(prefix: string, payload: HitlCustomIdPayload): string {
+  const fields =
+    payload.optionId === undefined ? [payload.requestId] : [payload.requestId, payload.optionId];
+  return `${prefix}${JSON.stringify(fields)}`;
 }
 
 function decodeHitlCustomId(customId: string, prefix: string): HitlCustomIdPayload | null {
@@ -234,10 +233,6 @@ function decodeHitlCustomId(customId: string, prefix: string): HitlCustomIdPaylo
   return typeof optionId === "string" ? { optionId, requestId } : null;
 }
 
-/**
- * Discord echoes a select option's `value` as the answer, so it must be the exact option id.
- * A truncated id would come back as an id the request never offered.
- */
 function selectOptionValue(optionId: string): string {
   if (optionId.length > DISCORD_SELECT_OPTION_TEXT_MAX_LENGTH) {
     throw new Error(

@@ -6,13 +6,6 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-// Run against two separately built package directories, sequentially, on the same machine.
-// Each process is fresh. Run 1 starts from an empty project (cold); later runs
-// retain its caches and build output (warm).
-// Per run: `eve dev` to /eve/v1/info, then a first turn through `eve/client`
-// (accepted, then completed), `eve build --profile`, then `eve start` on that
-// build to /eve/v1/health. One JSON result per line. The agent's model is a
-// mock, so the first turn makes no model calls.
 const packageRoot = resolve(process.argv[2] ?? "packages/eve");
 const runs = Number(process.argv[3] ?? 5);
 const toolCount = Number(process.argv[4] ?? 0);
@@ -28,8 +21,6 @@ await writeFile(
   JSON.stringify({ private: true, type: "module", dependencies: { eve: "*" } }),
 );
 await writeFile(join(root, "agent", "instructions.md"), "You are a helpful assistant.\n");
-// A mock model has no catalog context window, and older releases (0.61.0, for
-// one) refuse to compile an agent without it. Release backfills run this agent.
 await writeFile(
   join(root, "agent", "agent.ts"),
   'import { defineAgent } from "eve";\nimport { mockModel } from "eve/evals";\nexport default defineAgent({ model: mockModel("ready"), modelContextWindowTokens: 1_000_000 });\n',
@@ -55,7 +46,6 @@ const env = {
 delete env.VERCEL;
 delete env.PORT;
 delete env.EVE_DEV;
-// The client of the package under test, through the project's own `eve` link.
 const { Client } = await import(
   pathToFileURL(createRequire(join(root, "package.json")).resolve("eve/client")).href
 );
@@ -71,33 +61,47 @@ console.log(
   }),
 );
 
-// Readiness probes overlap: a new one starts every interval without waiting
-// for the last. An early request can be accepted and never answered (the port
-// opens before the server serves), and waiting on it would be measured as
-// startup time. The deadline only bounds how many stay in flight.
 const PROBE_TIMEOUT_MS = 5000;
 const PROBE_INTERVAL_MS = 20;
 
+const ptyAvailable = process.platform === "linux" || process.platform === "darwin";
+const PROMPT_GLYPH = "❯";
+
 for (let run = 1; run <= runs; run++) {
-  // `start` serves the output `build` just wrote, so it runs after it.
-  for (const mode of ["dev", "build", "start"]) {
+  for (const mode of ["dev", "dev-tui", "build", "start"]) {
+    if (mode === "dev-tui" && !ptyAvailable) continue;
     const port = await availablePort();
     const profilePath = join(root, `build-${run}.json`);
     const args =
       mode === "dev"
         ? ["dev", "--no-ui", "--host", "127.0.0.1", "--port", String(port)]
-        : mode === "start"
-          ? ["start", "--host", "127.0.0.1", "--port", String(port)]
-          : ["build", "--profile", profilePath];
+        : mode === "dev-tui"
+          ? ["dev", "--host", "127.0.0.1", "--port", String(port)]
+          : mode === "start"
+            ? ["start", "--host", "127.0.0.1", "--port", String(port)]
+            : ["build", "--profile", profilePath];
     let log = "";
-    const start = performance.now();
-    const child = spawn(process.execPath, [join(packageRoot, "bin", "eve.js"), ...args], {
-      cwd: root,
-      env,
-      stdio: ["ignore", "pipe", "pipe"],
+    let promptVisibleMs;
+    let promptSeen;
+    const promptVisible = new Promise((resolvePrompt) => {
+      promptSeen = resolvePrompt;
     });
+    const start = performance.now();
+    const eveArgv = [process.execPath, join(packageRoot, "bin", "eve.js"), ...args];
+    const child =
+      mode === "dev-tui"
+        ? spawnInTerminal(eveArgv, { cwd: root, env: { ...env, TERM: "xterm-256color" } })
+        : spawn(eveArgv[0], eveArgv.slice(1), {
+            cwd: root,
+            env,
+            stdio: ["ignore", "pipe", "pipe"],
+          });
     child.stdout.on("data", (data) => {
       log += data;
+      if (mode === "dev-tui" && promptVisibleMs === undefined && log.includes(PROMPT_GLYPH)) {
+        promptVisibleMs = Math.round(performance.now() - start);
+        promptSeen();
+      }
     });
     child.stderr.on("data", (data) => {
       log += data;
@@ -112,9 +116,6 @@ for (let run = 1; run <= runs; run++) {
         const probes = await waitReady(child, port, "/eve/v1/info", start, () => log);
         const wallMs = Math.round(performance.now() - start);
         const baseUrl = `http://127.0.0.1:${port}`;
-        // eve 0.84.0 renamed the client's `host` to `baseUrl`, `response` to
-        // `delivery`, and the turn's `message` to `reply`. Release backfills
-        // run this script against older clients, so it accepts both shapes.
         const client = new Client({ baseUrl, host: baseUrl });
         const signal = AbortSignal.timeout(30000);
         const created = await client.sessions.create({ message: "Hello", signal });
@@ -125,6 +126,13 @@ for (let run = 1; run <= runs; run++) {
         if (reply !== "ready")
           throw new Error(`First turn ended without the mock reply: ${JSON.stringify(reply)}`);
         results.push({ run, mode, wallMs, sessionAcceptedMs, firstTurnMs, probes });
+      } else if (mode === "dev-tui") {
+        const probes = await waitReady(child, port, "/eve/v1/info", start, () => log);
+        const wallMs = Math.round(performance.now() - start);
+        await Promise.race([promptVisible, exited]);
+        if (promptVisibleMs === undefined)
+          throw new Error(`The terminal UI never showed its prompt; see dev-tui-${run}.log.`);
+        results.push({ run, mode, wallMs, promptVisibleMs, probes });
       } else if (mode === "start") {
         const probes = await waitReady(child, port, "/eve/v1/health", start, () => log);
         results.push({ run, mode, wallMs: Math.round(performance.now() - start), probes });
@@ -139,9 +147,15 @@ for (let run = 1; run <= runs; run++) {
         });
       }
       console.log(JSON.stringify(results.at(-1)));
+    } catch (error) {
+      if (mode !== "dev-tui") throw error;
+      console.error(`dev-tui run ${run} failed: ${error?.message ?? error}`);
     } finally {
       clearTimeout(timeout);
-      if (child.exitCode === null && child.signalCode === null) child.kill("SIGINT");
+      if (child.exitCode === null && child.signalCode === null) {
+        if (mode === "dev-tui") child.stdin.write("\x03\x03");
+        else child.kill("SIGINT");
+      }
       const killer = setTimeout(() => child.kill("SIGKILL"), 10000);
       await exited;
       clearTimeout(killer);
@@ -150,11 +164,12 @@ for (let run = 1; run <= runs; run++) {
   }
 }
 await writeFile(join(root, "results.json"), JSON.stringify(results, null, 2));
-for (const mode of ["dev", "build", "start"]) {
+for (const mode of ["dev", "dev-tui", "build", "start"]) {
   const times = results
     .filter((result) => result.mode === mode)
     .map((result) => result.wallMs)
     .sort((a, b) => a - b);
+  if (times.length === 0) continue;
   console.log(
     JSON.stringify({
       mode,
@@ -165,12 +180,6 @@ for (const mode of ["dev", "build", "start"]) {
   );
 }
 
-/**
- * Resolves when any probe of `path` first answers 200 with JSON. Returns how
- * the probes went: `attempts` requests in all, `timedOut` that hit the
- * per-request deadline (accepted but unanswered), and `refused` that failed
- * to connect.
- */
 function waitReady(child, port, path, start, readLog) {
   const probes = { attempts: 0, timedOut: 0, refused: 0 };
   const outstanding = new AbortController();
@@ -208,6 +217,16 @@ function waitReady(child, port, path, start, readLog) {
     timer = setInterval(probe, PROBE_INTERVAL_MS);
     void probe();
   });
+}
+
+function spawnInTerminal(argv, options) {
+  const quote = (value) => `'${String(value).replaceAll("'", `'\\''`)}'`;
+  const command = `stty cols 120 rows 40; exec ${argv.map(quote).join(" ")}`;
+  const scriptArgs =
+    process.platform === "darwin"
+      ? ["-q", "/dev/null", "sh", "-c", command]
+      : ["-qfec", `sh -c ${quote(command)}`, "/dev/null"];
+  return spawn("script", scriptArgs, { ...options, stdio: ["pipe", "pipe", "pipe"] });
 }
 
 async function availablePort() {

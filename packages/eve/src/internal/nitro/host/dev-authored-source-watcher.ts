@@ -40,9 +40,6 @@ const WATCHER_IGNORED_DIRECTORY_NAMES = new Set([
   "dist",
   "node_modules",
 ]);
-/**
- * Handle for the authored-source development watcher.
- */
 export interface AuthoredSourceWatcherHandle {
   close(): Promise<void>;
   flush(): Promise<void>;
@@ -51,12 +48,6 @@ export interface AuthoredSourceWatcherHandle {
   resume(leaseId: string, options?: { silent?: boolean }): Promise<void>;
 }
 
-/**
- * Starts the authored-source watcher used by `eve dev`.
- *
- * The watcher recompiles authored artifacts, refreshes runtime caches, and
- * triggers Nitro rebuild reloads only when structural runtime wiring changes.
- */
 export async function startAuthoredSourceWatcher(input: {
   coordinator: DevelopmentAuthoredRebuildCoordinator;
   preparedHost: PreparedDevelopmentApplicationHost;

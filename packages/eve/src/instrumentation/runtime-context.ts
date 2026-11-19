@@ -37,7 +37,7 @@ export interface BuildTelemetryRuntimeContextInput {
   readonly emissionState: TurnPosition;
   readonly environment: string;
   readonly modelInput: {
-    readonly instructions: string | SystemModelMessage | undefined;
+    readonly instructions: string | SystemModelMessage | readonly SystemModelMessage[] | undefined;
     readonly messages: readonly ModelMessage[];
   };
   readonly providerResolvers?: readonly RuntimeContextResolver[];
@@ -70,12 +70,6 @@ export function snapshotInstrumentationRuntimeContext(
   };
 }
 
-/**
- * Builds per-model-call runtime context for AI SDK telemetry spans.
- *
- * Runtime context is parsed defensively. Invalid results, reserved `eve.*`
- * keys, and callback failures are warning-only.
- */
 export function buildTelemetryRuntimeContext(
   input: BuildTelemetryRuntimeContextInput,
 ): Record<string, unknown> | undefined {
@@ -130,11 +124,6 @@ function buildInstrumentationModelStartedInput(
   };
 }
 
-/**
- * Coerces a resolved authored runtime-context record into the public
- * {@link InstrumentationRuntimeContext} shape, dropping reserved `eve.*` keys
- * (warning-only). Returns `undefined` when nothing survives the filter.
- */
 function filterAuthoredRuntimeContext(
   value: JsonObject,
   source: string,
@@ -151,12 +140,6 @@ function filterAuthoredRuntimeContext(
   return Object.keys(runtimeContext).length > 0 ? runtimeContext : undefined;
 }
 
-/**
- * Collects `runtimeContext` contributions from every provider resolver,
- * invoking each with a snapshot of the model attempt. Failures are warning-only
- * so one destination cannot break the turn. Later destinations override earlier
- * ones on key collision.
- */
 function resolveProviderRuntimeContext(
   input: BuildTelemetryRuntimeContextInput,
 ): InstrumentationRuntimeContext | undefined {
@@ -201,16 +184,6 @@ function projectSessionAuth(context: InstrumentationRuntimeContextSnapshot): {
   };
 }
 
-/**
- * Returns a JSON-isolated deep copy of a live runtime value for handoff
- * to an authored instrumentation callback.
- *
- * The copy shares no references with runtime state, so a callback that
- * mutates it cannot reach back into the turn — isolation, not freezing,
- * is what this snapshot guarantees. Values that are not JSON-serializable
- * are dropped (warning-only) rather than thrown, keeping instrumentation
- * off the turn's critical path.
- */
 function snapshotForInstrumentation<T>(value: T, source: string): T | undefined {
   if (value === undefined) {
     return undefined;

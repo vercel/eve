@@ -13,6 +13,7 @@ Your app and the agent share an origin. The browser calls the agent at `/eve/v1/
 - [Nuxt](/docs/guides/frontend/nuxt)
 - [SvelteKit](/docs/guides/frontend/sveltekit)
 - [TanStack Start](/docs/guides/frontend/tanstack)
+- [Other Vite apps](/docs/guides/frontend/vite)
 
 To generate a working chat app, run `eve add channel/web`. For scripts and server code that don't render UI, use the [Client SDK](/docs/guides/client).
 
@@ -292,18 +293,9 @@ const currentActivity = activity(agent.view);
 const blocked = turn === undefined ? undefined : waiting(agent.view, turn.turnId);
 ```
 
-See [Use eve's answers](/docs/guides/frontend/use-eve-agent#use-eves-answers) for which query answers each common question, from a request's result to call timing and usage.
+See [Session views & selectors](/docs/concepts/session-views-and-selectors) for which selector answers each common session-state question, including call counts, timing, and usage. For one request's result, see [Use eve's answers](/docs/guides/frontend/use-eve-agent#use-eves-answers).
 
-For something `view` doesn't cover, read the raw `events`:
-
-```tsx
-import { useMemo } from "react";
-
-const toolCalls = useMemo(
-  () => agent.events.filter((event) => event.type === "call.requested").length,
-  [agent.events],
-);
-```
+Read raw `events` when you need event-level information that `view` doesn't cover, such as individual progress deltas or exact event ordering.
 
 ## Custom hosts and headers
 
@@ -332,6 +324,7 @@ const support = useEveAgent({ agent: "support" });
 | Nuxt           | [`eve/nuxt` module](/docs/guides/frontend/nuxt)          | [`useEveAgent` (Vue)](/docs/guides/frontend/use-eve-agent-vue)       |
 | SvelteKit      | [`eveSvelteKit` plugin](/docs/guides/frontend/sveltekit) | [`useEveAgent` (Svelte)](/docs/guides/frontend/use-eve-agent-svelte) |
 | TanStack Start | [`eveTanStack` plugin](/docs/guides/frontend/tanstack)   | [`useEveAgent` (React)](#build-a-basic-chat)                         |
+| Other Vite     | [`eveVite` plugin](/docs/guides/frontend/vite)           | [`useEveAgent` (React)](#build-a-basic-chat)                         |
 | Any React      | same-origin or `baseUrl`                                 | [`useEveAgent` (React)](#build-a-basic-chat)                         |
 
 ## What to read next

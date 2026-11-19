@@ -40,7 +40,6 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** An append-only agent stream, independent of when its POST acknowledgements arrive. */
 function agent(onPost?: (deliveryId: string, path: string) => Promise<void> | void) {
   const log: string[] = [];
   const open = new Set<ReadableStreamDefaultController<Uint8Array>>();
@@ -152,7 +151,6 @@ const personWait: SessionEvent[] = [
     data: { deliveryId: "asked", outcome: "awaiting-input", turnId: "turn_0" },
   },
 ];
-/** Turn 0 asks a person and its delivery settles, leaving no machine work. */
 function appendPersonWait(server: ReturnType<typeof agent>) {
   server.append(testTurnFacts(0, "Later.", ["asked"]).slice(0, 4));
   server.append(personWait, true);
@@ -203,7 +201,6 @@ describe("SessionStore acceptance and observation", () => {
     const before = current.snapshot.session;
     expect(before?.inbox).toBe("inbox_0");
 
-    // No stream facts arrive: the POST receipt must publish the refreshed state.
     await current.send({ message: "Alice starts the conversation." });
     expect(current.snapshot.session).toEqual({ ...initialSession, inbox: "inbox_1" });
     expect(changed).toHaveBeenLastCalledWith(current.snapshot.session);
@@ -375,6 +372,18 @@ describe("SessionStore acceptance and observation", () => {
     expect(attachmentError).toBeUndefined();
   });
 
+  it("sends end() issued during session creation to the created session", async () => {
+    const created = Promise.withResolvers<void>();
+    const server = agent((id) => (id === "d_0" ? created.promise : undefined));
+    const current = store();
+    const sending = current.send({ message: "Alice asks for a report." });
+    const ending = current.end();
+    created.resolve();
+    await sending;
+    expect(await ending).toMatchObject({ sessionId: "session_1" });
+    expect(server.posts).toEqual(["/eve/v1/session", "/eve/v1/session/session_1/end"]);
+  });
+
   it("does not replay historical errors into a new pending send", async () => {
     const receipt = Promise.withResolvers<void>();
     const server = agent(() => receipt.promise);
@@ -464,6 +473,56 @@ describe("SessionStore acceptance and observation", () => {
     await current.resume();
     expect(current.snapshot.events).toHaveLength(8);
     expect(server.reads).toHaveLength(1);
+  });
+
+  it.each([false, true])(
+    "publishes a live stream's catch-up once instead of once per historical line (followAgents: %s)",
+    async (followAgents) => {
+      const server = agent();
+      for (let index = 0; index < 8; index += 1)
+        server.append(testTurnFacts(index, `Earlier ${index}.`, [`earlier_${index}`]));
+      const backlog = server.log.length;
+      const current = store({ initialSession, followAgents });
+      const onEvent = vi.fn();
+      const onSessionChange = vi.fn();
+      current.setCallbacks({ onEvent, onSessionChange });
+      const published: number[] = [];
+      current.subscribe(() => published.push(current.snapshot.events.length));
+
+      await current.send({ message: "later." });
+      await vi.waitFor(() => expect(current.snapshot.events).toHaveLength(backlog));
+
+      expect(onEvent).toHaveBeenCalledTimes(backlog);
+      expect(onSessionChange.mock.calls.length).toBeGreaterThanOrEqual(backlog);
+      expect(published.filter((count) => count > 0 && count < backlog)).toEqual([]);
+
+      const live = testTurnFacts(8, "Later.", ["d_0"]);
+      for (const event of live) server.append([event]);
+      await vi.waitFor(() => expect(current.snapshot.status).toBe("idle"));
+      expect(published).toContain(backlog + 1);
+      expect(current.snapshot.events).toHaveLength(backlog + live.length);
+    },
+  );
+
+  it("keeps a stopped catch-up's events in the snapshot after observation restarts", async () => {
+    const server = agent();
+    for (let index = 0; index < 8; index += 1)
+      server.append(testTurnFacts(index, `Earlier ${index}.`, [`earlier_${index}`]));
+    const current = store({ initialSession, followWhile: () => false });
+    const detached = Promise.withResolvers<void>();
+    let seen = 0;
+    current.setCallbacks({
+      onEvent: () => {
+        seen += 1;
+        if (seen !== 20) return;
+        detachSessionStore(current);
+        detached.resolve();
+      },
+    });
+    void current.send({ message: "later." }).catch(() => {});
+    await detached.promise;
+    attachSessionStore(current);
+    expect(current.snapshot.events).toHaveLength(20);
   });
 
   it.each([2, 4])(
@@ -704,7 +763,6 @@ describe("SessionStore acceptance and observation", () => {
     expect(current.snapshot.messages[0]?.metadata?.status).toBe("failed");
   });
 
-  // Browsers expose `crypto.randomUUID` only in secure contexts (#5415).
   it("sends where crypto.randomUUID is not exposed, as on a plain-HTTP origin", async () => {
     const server = agent();
     const webCrypto = globalThis.crypto;
@@ -1242,7 +1300,6 @@ describe("SessionStore with a follow predicate", () => {
     await current.resume();
     server.append(testTurnFacts(1, "Arrived while closed.", ["d_1"]));
     for await (const _event of session.stream({ follow: false, startIndex: 0 })) {
-      /* bounded independent read */
     }
     expect(session.state.streamIndex).toBe(server.log.length);
     expect(current.snapshot.status).toBe("idle");
@@ -1260,7 +1317,7 @@ describe("SessionStore with a follow predicate", () => {
       true,
     );
     await receipt.result();
-    expect(texts(current)).toContain("assistant: Arrived while closed.");
+    await vi.waitFor(() => expect(texts(current)).toContain("assistant: Arrived while closed."));
   });
 
   it("keeps a paused turn's stream attached through unrelated delivery settlements", async () => {

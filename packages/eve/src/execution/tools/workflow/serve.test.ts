@@ -1,3 +1,4 @@
+import { workflowRunHost } from "#execution/tools/workflow/workflow-run-host.js";
 import { expect, it, vi } from "vitest";
 
 import type { SessionAuth, SessionContext, SessionTurn } from "#context/session-context.js";
@@ -22,7 +23,6 @@ import type {
 } from "#tools/workflow-definition.js";
 
 const mocks = vi.hoisted(() => ({
-  /** Commands the session sends the run's control hook. */
   commands: [] as WorkflowBodyCommand[],
   deliver: vi.fn<(inbox: string, message: WorkflowToolRunMessage) => Promise<void>>(),
   openAgent:
@@ -44,6 +44,9 @@ vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({
   resumeHookStep: mocks.deliver,
 }));
 vi.mock("#execution/agent-sessions/steps.js", () => ({
+  cancelAgentSessionTurnStep: async () => {},
+  endAgentSessionsStep: async () => {},
+  stopLateAgentSessionStep: async () => {},
   openAgentSessionStep: mocks.openAgent,
   sendAgentSessionMessageStep: mocks.sendAgent,
 }));
@@ -60,15 +63,14 @@ vi.mock("#compiled/@workflow/core/index.js", () => ({
           })(),
           { getConflict: async () => null },
         )
-      : // Agent turns never report; only what the run sends matters here.
-        {
+      : {
           [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }),
           token: "agent-turn",
         },
+  getWorkflowMetadata: () => ({ workflowRunId: "run-1" }),
   sleep: mocks.sleep,
 }));
 
-/** Alice, with the claims she has when she makes a call. */
 function alice(role: string): SessionAuth {
   return {
     current: {
@@ -82,10 +84,8 @@ function alice(role: string): SessionAuth {
 }
 
 const reviewer = { description: "Review the plan." };
-/** A dynamic agent the turn of a later call selected. */
 const releaseCaptain = { description: "Coordinate the release." };
 
-/** The context the session captured for a call, which sessions opened for it inherit. */
 function agentContext(
   callId: string,
   turn: SessionTurn,
@@ -95,11 +95,13 @@ function agentContext(
     agents,
     capabilities: { requestInput: true },
     parent: { callId, rootSessionId: "session", sessionId: "session", turn },
+    remoteAgents: [] as readonly string[],
   } as AgentSessionContext;
 }
 
 const input: WorkflowBodyInput = {
   agentContext: agentContext("call-1", { id: "turn", sequence: 1 }, { reviewer }),
+  host: workflowRunHost,
   callId: "call-1",
   entry: { entryPoint: "serve", taskId: "plan-7k2m9q" },
   input: { request: "Draft the plan." },
@@ -116,7 +118,6 @@ const input: WorkflowBodyInput = {
   workflowId: "workflow//test//plan",
 };
 
-/** A later call, made in its own turn, by Alice with the claims she has by then. */
 function call(callId: string, request: string): WorkflowBodyCommand {
   const turn = { id: `turn-${callId}`, sequence: 2 };
   return {
@@ -137,7 +138,6 @@ function aborted(signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => signal.addEventListener("abort", () => resolve()));
 }
 
-/** The messages of one kind the run sent its inbox, oldest first. */
 function sent<K extends WorkflowToolRunMessage["kind"]>(kind: K) {
   return mocks.deliver.mock.calls.flatMap(([, message]) =>
     message.kind === kind ? [message as Extract<WorkflowToolRunMessage, { readonly kind: K }>] : [],
@@ -222,7 +222,6 @@ it("serves every call to its task, one stretch of work at a time, until the sess
         ]
       : [],
   );
-  // One reply settles both calls it answers, together.
   expect(replies).toEqual([
     {
       callIds: ["call-1", "call-2"],
@@ -231,7 +230,6 @@ it("serves every call to its task, one stretch of work at a time, until the sess
       turnId: "turn-call-2",
     },
   ]);
-  // Each delivery a session accepted is recorded for the call served when it was sent.
   expect(
     mocks.deliver.mock.calls.flatMap(([, message]) =>
       message.kind === "agent-sent"
@@ -263,16 +261,11 @@ it("serves every call to its task, one stretch of work at a time, until the sess
     "call-1",
     "call-2",
   ]);
-  // Questions, sign-ins, `ctx.session`, and `ctx.agents`
-  // while serving a later call describe that call, not the call that started
-  // the task.
   expect(servingSecond).toMatchObject({
     agents: { "release-captain": releaseCaptain, reviewer },
     ref: { callId: "call-2", taskId: "plan-7k2m9q", turnId: "turn-call-2" },
     session: { auth: alice("reviewer"), turn: { id: "turn-call-2", sequence: 2 } },
   });
-  // A session is the child of the call served when it opened, and each
-  // message to it carries the auth of the call served when it was sent.
   const firstCall = { callId: "call-1", turn: { id: "turn", sequence: 1 } };
   expect(mocks.openAgent.mock.calls.map(([opened]) => opened)).toMatchObject([
     { auth: alice("editor"), context: { parent: firstCall }, name: "reviewer" },
@@ -291,8 +284,6 @@ it("serves every call to its task, one stretch of work at a time, until the sess
     },
   ]);
   const [first, second, third, fourth] = received.map((served) => served.abortSignal);
-  // A call that arrives while the task works joins its stretch; a cancel ends
-  // only that stretch, and the next call starts a new one.
   expect(second).toBe(first);
   expect(third).not.toBe(first);
   expect(third?.aborted).toBe(true);
@@ -336,12 +327,10 @@ it("announces a replacement child once, before linking concurrent sends to it, i
   );
   const started = startServeBody(input);
   await vi.waitFor(() => expect(mocks.sendAgent).toHaveBeenCalledTimes(1));
-  // Bob's message waits until Alice's, sent first, is accepted, so the child admits them in order.
   await new Promise((resolve) => setTimeout(resolve, 20));
   expect(mocks.sendAgent).toHaveBeenCalledTimes(1);
   accept.resolve();
   await vi.waitFor(() => expect(sent("agent-started")).toHaveLength(2));
-  // No delivery links to the replacement, and none is sent to it, before it is announced.
   expect(sent("agent-sent")).toHaveLength(1);
   expect(mocks.sendAgent).toHaveBeenCalledTimes(1);
   announced.resolve();
@@ -391,14 +380,12 @@ it("withdraws a question once its call has a reply, without aborting the stretch
 
   await vi.waitFor(() => expect(sent("request")).toHaveLength(1));
   const requestId = sent("request")[0]?.replyTo ?? "";
-  // Alice's second call arrives before the reply, so it joins the stretch and the reply leaves it working.
   started.control.apply(call("call-2", "Add a rollback step."));
   replyNow.resolve();
   await vi.waitFor(() => expect(sent("withdraw")).toHaveLength(1));
 
   expect(sent("withdraw")).toMatchObject([{ from: { callId: "call-1" }, replyTo: requestId }]);
   expect(stretch?.aborted).toBe(false);
-  // Cancelling the second call aborts the stretch, and the question's withdrawal was already asked for.
   started.control.apply({ kind: "cancel", reason: "The task was cancelled." });
   expect(stretch?.aborted).toBe(true);
   started.asks.settle({ kind: "withdrawn", requestId });

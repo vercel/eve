@@ -6,17 +6,10 @@ import { readBundledCompiledArtifacts } from "#runtime/loaders/bundled-artifacts
 
 const BUNDLED_MODULE_MAP_SOURCE = "bundled compiled module map";
 
-/**
- * Input for loading the compiled module map from disk or the bundled runtime
- * alias.
- */
 interface LoadCompiledModuleMapInput {
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
 }
 
-/**
- * Error raised when the compiled module map cannot be loaded or validated.
- */
 export class LoadCompiledModuleMapError extends Error {
   readonly moduleMapPath?: string;
 
@@ -30,9 +23,6 @@ export class LoadCompiledModuleMapError extends Error {
   }
 }
 
-/**
- * Loads and validates the compiler-owned module map.
- */
 export async function loadCompiledModuleMap(
   input: LoadCompiledModuleMapInput,
 ): Promise<CompiledModuleMap> {

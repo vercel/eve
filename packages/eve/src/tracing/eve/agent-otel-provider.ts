@@ -24,6 +24,7 @@ import type {
   InstrumentationSessionStartedEvent,
   InstrumentationTraceSeed,
   InstrumentationSessionEndedEvent,
+  InstrumentationTraceContext,
   InstrumentationTurnStartedEvent,
 } from "#instrumentation/lifecycle.js";
 import { resolveInstrumentationEnvironment } from "#internal/application/dev-environment.js";
@@ -35,6 +36,7 @@ import {
   readGatewayCostData,
 } from "#tracing/eve/gateway.js";
 import type {
+  AgentRun,
   AgentSpanIdGenerator,
   AgentTelemetry,
   AttemptOperation,
@@ -44,20 +46,16 @@ import { isUserMessageKind } from "#harness/messages.js";
 import { isObject } from "#shared/guards.js";
 
 export interface AgentOtelInstrumentationInput {
-  /** Span output for eve's agent spans; its `ids` make turns durable across workers. */
   readonly telemetry: AgentTelemetry;
   readonly idGenerator: AgentSpanIdGenerator;
   readonly environment?: ConversationEnvironment;
-  /** Whether any destination records model and tool inputs. */
   readonly recordInputs?: boolean;
-  /** Whether any destination records model and tool outputs. */
   readonly recordOutputs?: boolean;
   readonly frameworkVersion: string;
   readonly stateStore: AgentTraceStateStore;
   readonly tracePolicy?: TraceCapturePolicy;
 }
 
-/** OTel event definition and its trusted framework context runner. */
 interface AgentOtelInstrumentation {
   readonly hook: InstrumentationProviderDefinition;
   readonly prepareSessionTrace: (
@@ -66,10 +64,14 @@ interface AgentOtelInstrumentation {
   readonly prepareTurnTrace: (
     event: InstrumentationTurnStartedEvent,
   ) => Promise<InstrumentationTraceSeed>;
+  readonly readTurnTraceContext: (
+    sessionId: string,
+    turnId: string,
+  ) => Promise<InstrumentationTraceContext | undefined>;
+  readonly decision: AgentRun["decision"];
   readonly runInContext: InstrumentationContextRunner;
 }
 
-/** Creates OTel instrumentation for eve's structural and GenAI spans. */
 export function createAgentOtelInstrumentation(
   input: AgentOtelInstrumentationInput,
 ): AgentOtelInstrumentation {
@@ -83,13 +85,11 @@ export function createAgentOtelInstrumentation(
     recordInputs,
     recordOutputs,
   });
-  // Attempts run in one process; a lost serverless worker retries the whole step.
   const steps = new Map<string, AttemptOperation>();
   const modelSpans = new Map<string, Map<string, ModelOperation>>();
   const sessionTracing = createEveSessionTracing({ ...input, environment, tracing, capturePolicy });
   const { prepareSessionTrace, prepareTurnTrace } = sessionTracing;
 
-  /** The attempt in its turn's tree, hydrating it when another process started it. */
   async function attemptFor(scope: InstrumentationScope) {
     const known = steps.get(attemptIdempotencyKey(scope));
     if (known !== undefined) return known;
@@ -115,6 +115,7 @@ export function createAgentOtelInstrumentation(
   const approvals = createAgentApprovalInstrumentation({
     tracing,
     actionStateFor: tools.stateFor,
+    turnFor: (sessionId, turnId) => sessionTracing.turnFor(sessionId, turnId),
   });
   const memory = createAgentMemoryInstrumentation({ ...input, environment, tracing });
 
@@ -164,7 +165,6 @@ export function createAgentOtelInstrumentation(
       steps.get(attemptIdempotencyKey(event.scope)) ?? (await attemptFor(event.scope));
     steps.delete(attemptIdempotencyKey(event.scope));
     if (failure !== undefined) {
-      // A failed attempt also fails the tool calls it dispatched.
       await attempt?.fail(failure.error);
       await tools.forgetAttempt(event.scope);
     } else await attempt?.complete();
@@ -176,10 +176,22 @@ export function createAgentOtelInstrumentation(
     await input.stateStore.delete("session", event.sessionId);
   };
 
+  async function openTurnOf(scope: InstrumentationScope) {
+    if (scope.turnId === undefined || traceStepIndex(scope) !== undefined) return undefined;
+    const turn = await turnState({ sessionId: scope.sessionId, turnId: scope.turnId });
+    if (turn === undefined || !isSampledTrace(turn.context)) return undefined;
+    const operation = await sessionTracing.turnFor(
+      scope.sessionId,
+      scope.turnId,
+      withChannelAudience(ROOT_CONTEXT, scope.channelAudience),
+    );
+    return operation?.finished === false ? operation : undefined;
+  }
+
   const onModelCallStarted = async (event: InstrumentationModelCallStartedEvent): Promise<void> => {
-    const attempt = steps.get(attemptIdempotencyKey(event.scope));
-    if (attempt === undefined) return;
-    const operation = await attempt.modelCall(
+    const parent = steps.get(attemptIdempotencyKey(event.scope)) ?? (await openTurnOf(event.scope));
+    if (parent === undefined) return;
+    const operation = await parent.modelCall(
       {
         provider: event.model.provider,
         modelId: event.model.modelId,
@@ -205,18 +217,16 @@ export function createAgentOtelInstrumentation(
   const onModelCallTerminal = async (
     event: InstrumentationModelCallTerminalEvent,
   ): Promise<void> => {
-    const attempt = steps.get(attemptIdempotencyKey(event.scope));
-    if (event.outcome === "completed" && attempt !== undefined) {
-      // Vercel AI Gateway reports per-call cost and session affinity routing in providerMetadata.gateway;
-      // attributes exist only when it was actually the gateway serving the call.
-      const cost = readGatewayCostData(event.providerMetadata);
-      if (cost !== undefined) attempt.attributes(gatewayCostAttributes(cost));
-      const routing = gatewayRoutingAttributes(event.providerMetadata);
-      if (routing !== undefined) attempt.attributes(routing);
-    }
     const models = modelSpans.get(attemptIdempotencyKey(event.scope));
     const operation = models?.get(event.idempotencyKey);
     models?.delete(event.idempotencyKey);
+    const target = steps.get(attemptIdempotencyKey(event.scope)) ?? operation;
+    if (event.outcome === "completed" && target !== undefined) {
+      const cost = readGatewayCostData(event.providerMetadata);
+      if (cost !== undefined) target.attributes(gatewayCostAttributes(cost));
+      const routing = gatewayRoutingAttributes(event.providerMetadata);
+      if (routing !== undefined) target.attributes(routing);
+    }
     if (operation === undefined) return;
     if (event.outcome === "failed") await operation.fail(event.error);
     else
@@ -251,10 +261,13 @@ export function createAgentOtelInstrumentation(
       },
       name: "eve.otel",
       projectEvent: capturePolicy.projectEvent,
+      receivesTurnScopes: true,
       tracePolicy: () => ({ emit: true, recordInputs, recordOutputs }),
     },
     prepareSessionTrace,
     prepareTurnTrace,
+    readTurnTraceContext: sessionTracing.readTurnTraceContext,
+    decision: tracing.decision,
     async runInContext(operation, execute) {
       if (operation.type === "memory.operation") return memory.runInContext(operation, execute);
       const ceiling = { emit: true, ...(await capturePolicy.forOperation(operation.scope)) };
@@ -266,7 +279,6 @@ export function createAgentOtelInstrumentation(
           withChannelAudience(ROOT_CONTEXT, operation.scope.channelAudience),
         );
         if (turn !== undefined && !turn.finished) return turn.run(execute, ceiling);
-        // Third-party spans, such as MCP calls, must not record a dropped turn's work.
         const { sessionId, turnId } = operation.scope;
         return input.telemetry.suppressed !== undefined &&
           (await sessionTracing.dropped(sessionId, turnId))
@@ -295,7 +307,6 @@ export function createAgentOtelInstrumentation(
   }
 }
 
-/** A retry or an unfinished run fails its attempt; a cancelled turn stopped it on purpose. */
 function attemptFailed(event: InstrumentationModelTerminalEvent): boolean {
   return (
     event.type === "model.retried" ||

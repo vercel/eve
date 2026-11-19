@@ -73,9 +73,7 @@ export async function readOrCreateEveTelemetryIdentity(): Promise<EveCliTelemetr
     telemetry = EveConfigSchema.safeParse(
       JSON.parse(await readFile(eveConfigPath(), "utf8")) as unknown,
     ).data?.telemetry;
-  } catch {
-    // An absent or malformed config starts with a fresh telemetry identity.
-  }
+  } catch {}
 
   const identity =
     telemetry?.installationId && telemetry.projectSalt
@@ -98,9 +96,7 @@ async function updateEveTelemetryPreference(
   try {
     const parsed = JSON.parse(await readFile(path, "utf8")) as unknown;
     if (typeof parsed === "object" && parsed !== null) existing = parsed as Record<string, unknown>;
-  } catch {
-    // An absent or malformed config starts with the telemetry preference.
-  }
+  } catch {}
 
   const telemetry =
     typeof existing.telemetry === "object" && existing.telemetry !== null ? existing.telemetry : {};

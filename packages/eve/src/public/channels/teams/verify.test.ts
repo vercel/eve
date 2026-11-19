@@ -101,7 +101,6 @@ async function createJwtFixture(input: {
   readonly serviceUrl?: string;
 }): Promise<{ readonly fetch: typeof fetch; readonly token: string }> {
   const { privateKey, publicKey } = await generateKeyPair("RS256", { extractable: true });
-  // Bot Connector JWKS entries carry no `alg`, so the key does not pin one either.
   const key = { ...(await exportJWK(publicKey)), kid: "kid-1", use: "sig" };
   const token = await new SignJWT(
     input.serviceUrl === undefined ? {} : { serviceurl: input.serviceUrl },

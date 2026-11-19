@@ -1,4 +1,4 @@
-import { type CompiledAgentManifest, compiledAgentManifestSchema } from "#compiler/manifest.js";
+import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import { validateCompiledAgentManifest } from "#compiler/validate-artifact.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { formatValidationError } from "#runtime/validation.js";
@@ -7,17 +7,10 @@ import { readBundledCompiledArtifacts } from "#runtime/loaders/bundled-artifacts
 
 const BUNDLED_MANIFEST_SOURCE = "bundled compiled manifest";
 
-/**
- * Input for loading the compiled source manifest from disk or the bundled
- * runtime alias.
- */
 interface LoadCompiledManifestInput {
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
 }
 
-/**
- * Error raised when the compiled manifest cannot be loaded or validated.
- */
 export class LoadCompiledManifestError extends Error {
   readonly manifestPath?: string;
 
@@ -31,9 +24,6 @@ export class LoadCompiledManifestError extends Error {
   }
 }
 
-/**
- * Loads and validates the compiler-owned source manifest.
- */
 export async function loadCompiledManifest(
   input: LoadCompiledManifestInput,
 ): Promise<CompiledAgentManifest> {
@@ -53,13 +43,16 @@ export async function loadCompiledManifest(
       throw new LoadCompiledManifestError(formatLoadErrorMessage(error), manifestPath);
     }
 
-    return parseCompiledManifest(manifestJson, manifestPath);
+    return checkCompiledManifest(
+      await parseCompiledManifest(manifestJson, manifestPath),
+      manifestPath,
+    );
   }
 
   const bundledArtifacts = readBundledCompiledArtifacts();
 
   if (bundledArtifacts !== null) {
-    return parseCompiledManifest(bundledArtifacts.manifest, BUNDLED_MANIFEST_SOURCE);
+    return checkCompiledManifest(bundledArtifacts.manifest, BUNDLED_MANIFEST_SOURCE);
   }
 
   throw new LoadCompiledManifestError(
@@ -68,7 +61,11 @@ export async function loadCompiledManifest(
   );
 }
 
-function parseCompiledManifest(value: unknown, manifestPath: string): CompiledAgentManifest {
+async function parseCompiledManifest(
+  value: unknown,
+  manifestPath: string,
+): Promise<CompiledAgentManifest> {
+  const { compiledAgentManifestSchema } = await import("#compiler/manifest-schema.js");
   const parsed = compiledAgentManifestSchema.safeParse(value);
 
   if (!parsed.success) {
@@ -77,16 +74,22 @@ function parseCompiledManifest(value: unknown, manifestPath: string): CompiledAg
       manifestPath,
     );
   }
+  return parsed.data;
+}
 
+function checkCompiledManifest(
+  manifest: CompiledAgentManifest,
+  manifestPath: string,
+): CompiledAgentManifest {
   try {
-    validateCompiledAgentManifest(parsed.data);
+    validateCompiledAgentManifest(manifest);
   } catch (error) {
     throw new LoadCompiledManifestError(
       `Expected "${manifestPath}" to contain a semantically valid compiled eve agent manifest. ${formatLoadErrorMessage(error)}`,
       manifestPath,
     );
   }
-  return parsed.data;
+  return manifest;
 }
 
 function formatLoadErrorMessage(error: unknown): string {

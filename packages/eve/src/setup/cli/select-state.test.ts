@@ -81,7 +81,6 @@ describe("filterOptions", () => {
       { value: "openai/gpt", label: "GPT" },
       { value: "google/gemini", label: "Gemini" },
     ];
-    // featured shapes the searchable viewport, not which rows the cursor can reach.
     expect(filterOptions(options, "")).toHaveLength(3);
     expect(filterOptions(options, "g").map((o) => o.value)).toEqual([
       "openai/gpt",
@@ -196,11 +195,8 @@ describe("reduceSelect", () => {
 
   it("includes the Submit row in the navigation cycle when enabled", () => {
     const ctx = context({ submitRow: true });
-    // Down from the last option lands on the Submit row (one past the options).
     expect(reduceSelect({ ...initial, cursor: 2 }, { type: "down" }, ctx).cursor).toBe(3);
-    // Down from the Submit row wraps back to the first option.
     expect(reduceSelect({ ...initial, cursor: 3 }, { type: "down" }, ctx).cursor).toBe(0);
-    // Up from the first option wraps onto the Submit row.
     expect(reduceSelect({ ...initial, cursor: 0 }, { type: "up" }, ctx).cursor).toBe(3);
   });
 
@@ -212,7 +208,6 @@ describe("reduceSelect", () => {
 
   it("re-homes onto the Submit row when a filter hides every option", () => {
     const next = reduceSelect(initial, { type: "char", char: "z" }, context({ submitRow: true }));
-    // No visible options, so the Submit row index is 0.
     expect(next.cursor).toBe(0);
     expect(selectValueAtCursor(filterOptions(OPTIONS, next.filter), next.cursor)).toBeUndefined();
   });

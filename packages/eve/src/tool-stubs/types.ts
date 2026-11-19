@@ -28,7 +28,6 @@ export type ToolStub = {
 );
 
 export interface StubCall {
-  /** Combines the session, turn, and tool call IDs. */
   readonly callId: string;
   readonly tool: string;
   readonly input: unknown;
@@ -45,7 +44,6 @@ export type StubResult =
       readonly outcome: ToolStubOutcome;
     };
 
-/** Rules and workflow routing set by the server after it authorizes tool stubs. */
 export interface StubScope {
   readonly token: string;
   readonly rules: readonly ToolStub[];

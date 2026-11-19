@@ -10,7 +10,6 @@ const turnId = "turn_0";
 const runId = "run_0";
 const scope = { runId, turnId };
 
-/** A fake eve session: each send or respond streams its next turn's facts. */
 class FakeClientSession {
   readonly cancel = vi.fn(async () => ({ sessionId: "session_test", status: "accepted" }));
   readonly end = vi.fn(async () => ({ status: "reset" }));
@@ -142,7 +141,6 @@ describe("EveAcpAdapter", () => {
       ["agent_thought_chunk", undefined],
       ["agent_message_chunk", undefined],
       ["tool_call", "pending"],
-      // Pending until it starts, as ACP has it, then running.
       ["tool_call_update", "in_progress"],
       ["tool_call_update", "completed"],
     ]);

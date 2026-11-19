@@ -14,6 +14,7 @@ import {
   stampToolDefinition,
   type PublicToolDefinition,
   type ToolContext,
+  type ToolDefinition,
   type ToolQuestion,
   type ToolAskOptions,
   type ToolAnswer,
@@ -26,6 +27,7 @@ import {
 
 export type { WorkflowToolEntryPoint };
 
+/** What a workflow tool knows about an agent it can call through `ctx.agent`: its description. */
 export interface WorkflowAgentMetadata {
   readonly description: string;
 }
@@ -225,6 +227,11 @@ export interface WorkflowExecuteToolDefinition<
   TOutput = unknown,
 > extends WorkflowToolDefinitionBase<TInput, TOutput> {
   execute(input: TInput, ctx: WorkflowToolContext): Promise<TOutput> | AsyncIterable<TOutput>;
+  /**
+   * Ends the turn after this call succeeds, without another model call or a reply, as
+   * `defineTool()`'s `endsTurn` does.
+   */
+  endsTurn?: ToolDefinition<unknown, TOutput>["endsTurn"];
   task?: never;
   serve?: never;
 }
@@ -264,8 +271,8 @@ export interface WorkflowServeToolDefinition<
 }
 
 /**
- * A static tool whose entry point runs as a durable workflow and must start
- * with "use workflow". It defines exactly one entry point.
+ * A tool whose entry point runs as a durable workflow and must start with
+ * "use workflow". It defines exactly one entry point.
  */
 export type WorkflowToolDefinition<TInput = unknown, TOutput = unknown> =
   | WorkflowExecuteToolDefinition<TInput, TOutput>
@@ -273,7 +280,12 @@ export type WorkflowToolDefinition<TInput = unknown, TOutput = unknown> =
   | WorkflowServeToolDefinition<TInput, TOutput>;
 
 type Unbranded<T> = T extends unknown ? Omit<T, typeof WORKFLOW_TOOL_BRAND> : never;
-type WorkflowReturn<T> = T extends AsyncIterable<infer Output> ? Output : Awaited<T>;
+type WorkflowReturn<T> =
+  T extends AsyncGenerator<infer Yield, infer Return>
+    ? Yield | Exclude<Return, null | undefined | void>
+    : T extends AsyncIterable<infer Output>
+      ? Output
+      : Awaited<T>;
 type Schema = StandardSchemaV1<unknown, unknown> | StandardJSONSchemaV1<unknown, unknown>;
 type EntryPointReturn<TOutput> = Promise<TOutput> | AsyncIterable<TOutput>;
 type InferOutput<TSchema extends StandardJSONSchemaV1<unknown, unknown>> =
@@ -284,18 +296,23 @@ type DefinitionFields<TInput, TOutput> = Omit<
   WorkflowToolDefinitionBase<TInput, TOutput>,
   typeof WORKFLOW_TOOL_BRAND
 >;
-type ExecuteDefinition<TInput, TReturn> = DefinitionFields<TInput, WorkflowReturn<TReturn>> & {
+type ExecuteDefinition<TInput, TReturn, TOutput = WorkflowReturn<TReturn>> = DefinitionFields<
+  TInput,
+  TOutput
+> & {
+  endsTurn?: ToolDefinition<unknown, TOutput>["endsTurn"];
   execute(input: TInput, ctx: WorkflowToolContext): TReturn;
   task?: never;
   serve?: never;
 };
-type TaskDefinition<TInput, TReturn> = DefinitionFields<TInput, WorkflowReturn<TReturn>> & {
+type TaskDefinition<TInput, TReturn, TOutput = WorkflowReturn<TReturn>> = DefinitionFields<
+  TInput,
+  TOutput
+> & {
   task(input: TInput, ctx: WorkflowToolContext): TReturn;
   execute?: never;
   serve?: never;
 };
-// `ctx.reply()` needs the output type before the body is checked, so a serve
-// tool's output comes from its `outputSchema`, not from what `serve` returns.
 type ServeDefinition<TInput, TOutput> = DefinitionFields<TInput, TOutput> & {
   serve(
     receive: WorkflowServeReceive<TInput>,
@@ -315,17 +332,18 @@ type WithInputSchema<TDefinition, TSchema> = Omit<TDefinition, "inputSchema"> & 
   inputSchema: TSchema;
 };
 
-// One overload per entry point and schema form. A single overload per form
-// can't tell which entry point a definition uses: TypeScript neither infers it
-// from the method a definition defines nor contextually types `toModelOutput`
-// through a union of the three shapes.
+/**
+ * Defines a tool whose entry point runs as a durable workflow and must start with
+ * `"use workflow"`. Provide exactly one of `execute`, `task`, or `serve`; see
+ * {@link WorkflowToolDefinition}.
+ */
 export function defineWorkflowTool<
   TInputSchema extends Schema,
   TOutputSchema extends StandardJSONSchemaV1<unknown, unknown>,
   TReturn extends EntryPointReturn<InferOutput<TOutputSchema>>,
 >(
   definition: WithSchemas<
-    ExecuteDefinition<InferInput<TInputSchema>, TReturn>,
+    ExecuteDefinition<InferInput<TInputSchema>, TReturn, InferOutput<TOutputSchema>>,
     TInputSchema,
     TOutputSchema
   >,
@@ -336,7 +354,7 @@ export function defineWorkflowTool<
   TReturn extends EntryPointReturn<InferOutput<TOutputSchema>>,
 >(
   definition: WithSchemas<
-    TaskDefinition<InferInput<TInputSchema>, TReturn>,
+    TaskDefinition<InferInput<TInputSchema>, TReturn, InferOutput<TOutputSchema>>,
     TInputSchema,
     TOutputSchema
   >,
@@ -403,19 +421,19 @@ export function isWorkflowToolDefinition(value: unknown): boolean {
   );
 }
 
-/** The entry points a definition defines; a workflow tool defines exactly one. */
 export function readWorkflowToolEntryPoints(definition: object): WorkflowToolEntryPoint[] {
   return WORKFLOW_TOOL_ENTRY_POINTS.filter(
     (entryPoint) => Reflect.get(definition, entryPoint) !== undefined,
   );
 }
 
-const ENTRY_POINT_LIST = new Intl.ListFormat("en", { type: "conjunction" });
-
 function assertOneEntryPoint(definition: object): void {
   const defined = readWorkflowToolEntryPoints(definition);
   if (defined.length === 1) return;
-  const found = defined.length === 0 ? "none" : ENTRY_POINT_LIST.format(defined);
+  const found =
+    defined.length === 0
+      ? "none"
+      : new Intl.ListFormat("en", { type: "conjunction" }).format(defined);
   throw new Error(
     `Define exactly one of execute(input, ctx), task(input, ctx), or serve(receive, ctx); this tool defines ${found}.`,
   );

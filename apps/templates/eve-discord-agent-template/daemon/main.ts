@@ -1,8 +1,10 @@
 import { connectDiscordCredentials } from "@vercel/connect/eve";
-import { experimental_runDiscordGatewayRelay } from "eve/channels/discord/gateway";
+import { runDiscordGatewayRelay } from "eve/experimental/channels/discord/gateway";
 
-await experimental_runDiscordGatewayRelay({
-  credentials: connectDiscordCredentials("discord/eve-discord-agent-template"),
+await runDiscordGatewayRelay({
+  credentials: connectDiscordCredentials(
+    process.env.DISCORD_CONNECTOR ?? "discord/eve-discord-agent-template",
+  ),
   // Lets thread follow-ups that don't mention the bot arrive with their text. Needs
   // Message Content Intent under Bot in the Discord Developer Portal, or Discord refuses the relay.
   messageContent: true,

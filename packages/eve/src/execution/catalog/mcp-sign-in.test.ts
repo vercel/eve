@@ -22,30 +22,19 @@ import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { type ConnectionClient, defineInteractiveAuthorization } from "#shared/connection-types.js";
 
 import { catalogBundle, nativeCatalog } from "#internal/testing/catalog-fixtures.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { fromCompiledBundle } from "#definitions/compiled-agent.js";
+import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 
 const URL = "https://kennel.example.com/mcp";
 const TOKEN = "signed-in-token";
 
-/** How the fake server treats requests that carry no bearer. */
-type ServerMode =
-  /** `initialize`/`tools/list` are public; a protected `tools/call` answers HTTP 401. */
-  | "public-list-401"
-  /** `initialize`/`tools/list` are public; a protected `tools/call` returns an `mcp/www_authenticate` error. */
-  | "public-list-meta"
-  /** Every request without a bearer answers HTTP 401. */
-  | "token-everywhere";
+type ServerMode = "public-list-401" | "public-list-meta" | "token-everywhere";
 
 interface SeenRequest {
   readonly authorization: string | null;
   readonly method: string;
 }
 
-/**
- * Alice's session with one MCP connection, `kennel`, served by a stubbed
- * `fetch` and reached through the real MCP client, `search`, and `execute`,
- * with the connection's `approval` policy when one is given.
- */
 async function setup(mode: ServerMode, approval?: ApprovalPolicy) {
   const seen: SeenRequest[] = [];
   vi.stubGlobal("fetch", async (input: string | globalThis.URL | Request, init?: RequestInit) => {
@@ -155,7 +144,7 @@ async function setup(mode: ServerMode, approval?: ApprovalPolicy) {
   ctx.set(SessionIdKey, "mcp-sign-in");
   ctx.set(CallbackBaseUrlKey, "https://agent.example.com");
   ctx.set(ConnectionRegistryKey, registry);
-  ctx.set(BundleKey, catalogBundle({ connections: [connection] }));
+  ctx.set(SessionAgentKey, fromCompiledBundle(catalogBundle({ connections: [connection] })));
   const catalog = await nativeCatalog({ agentTools: new Map(), ctx, endsTurn: true, session: {} });
   const options = { messages: [], toolCallId: "call-1" };
   const resolve = (tool: string, input: object) => {
@@ -167,7 +156,6 @@ async function setup(mode: ServerMode, approval?: ApprovalPolicy) {
   return {
     seen,
     startAuthorization,
-    /** Resolves `kennel` to another instance from here on, as a changed connection does. */
     switchInstance: (id: string) => {
       instanceId = id;
     },
@@ -175,10 +163,6 @@ async function setup(mode: ServerMode, approval?: ApprovalPolicy) {
       contextStorage.run(ctx, () =>
         catalog.advertised.get(SEARCH_TOOL_NAME)!.execute!({ query }, options),
       ),
-    /**
-     * Decides the call's approval the way the harness does: once when the model
-     * makes it, and as a recheck before a call that stopped runs again.
-     */
     approve: (tool: string, { recheck = false } = {}) => {
       const { definition } = resolve(tool, {});
       const context: ApprovalContext = {
@@ -193,14 +177,12 @@ async function setup(mode: ServerMode, approval?: ApprovalPolicy) {
         evaluateApproval(resolveApprovalPolicy(definition.approval!), context, { recheck }),
       );
     },
-    /** Runs `eve__tool({ name, input })` the way the harness runs a resolved call. */
     execute: (tool: string, input: object = {}) => {
       const resolved = resolve(tool, input);
       return contextStorage.run(ctx, () =>
         resolved.definition.execute!(resolved.call.input, options),
       );
     },
-    /** Delivers the finished sign-in, as the turn step does when its callback arrives. */
     finishSignIn: () =>
       ctx.set(PendingAuthorizationResultKey, [
         {
@@ -263,7 +245,6 @@ describe("MCP connections sign in only when the server asks", () => {
   it("reconnects with the token after sign-in, even when a public call reopened an anonymous connection", async () => {
     const kennel = await setup("public-list-401");
     await kennel.execute("kennel__pet_invoice");
-    // While the sign-in is pending, a public call connects anonymously again.
     expect(await kennel.execute("kennel__find_pet")).toBe("find_pet ok");
 
     kennel.finishSignIn();
@@ -279,7 +260,6 @@ describe("MCP connections sign in only when the server asks", () => {
   it("finds a server that rejects anonymous listing as its sign-in result, which signs in", async () => {
     const kennel = await setup("token-everywhere");
 
-    // Until sign-in, the search counts the sign-in entry, not the tools behind it.
     expect(await kennel.search("kennel__")).toEqual({
       remaining: 0,
       results: [
@@ -305,7 +285,6 @@ describe("MCP connections sign in only when the server asks", () => {
   });
 });
 
-// #5564: the harness rechecks a call's approval before it runs again after the sign-in it stopped for.
 describe("a connection call with an approval policy runs after the sign-in it stopped for", () => {
   it("when the policy approved it without asking a person", async () => {
     const kennel = await setup("public-list-401", () => "approved");

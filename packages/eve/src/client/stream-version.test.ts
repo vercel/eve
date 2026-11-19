@@ -18,7 +18,6 @@ describe("readMessageStreamVersion", () => {
     );
   });
 
-  // Sessions don't cross v27, so an earlier stream is a deployment this client can't read.
   it.each(["26", "28"] as const)("rejects stream version %s", (version) => {
     expect(() =>
       readMessageStreamVersion(new Headers({ [EVE_STREAM_VERSION_HEADER]: version })),

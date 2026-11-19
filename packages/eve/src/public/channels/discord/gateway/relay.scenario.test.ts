@@ -17,17 +17,11 @@ interface GatewayConnection {
   readonly received: Record<string, any>[];
   send(payload: unknown): void;
   close(code: number): void;
-  /** Stops answering, like a peer whose TCP connection silently died. */
   goSilent(): void;
 }
 
-/**
- * Fake Discord, plus the eve route the relay forwards to, on one port. The
- * WebSocket side speaks just enough RFC 6455 for the relay's text frames.
- */
 async function startFakeDiscord(
   onConnection: (connection: GatewayConnection) => void,
-  /** eve's answers to successive forwarded dispatches; 202 once they run out. */
   eveStatuses: number[] = [],
 ): Promise<{
   readonly url: string;
@@ -147,7 +141,6 @@ const servers: Server[] = [];
 const sockets: Duplex[] = [];
 
 afterEach(async () => {
-  // Upgraded sockets leave the HTTP server's bookkeeping, and a silent one never closes.
   for (const socket of sockets.splice(0)) socket.destroy();
   await Promise.all(
     servers.splice(0).map(
@@ -272,7 +265,6 @@ describe("runDiscordGatewayRelay", () => {
     gateway!.send(messageCreate(1, "M1"));
     await waitFor(() => discord.forwarded.length === 2);
     shutdown.abort();
-    // Shutdown drains the backlog, so a retry of the 502 would land before this resolves.
     await relay;
 
     expect(discord.forwarded.map(({ body }) => body)).toEqual([

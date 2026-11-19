@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { desktopTool, flag, xy } from "../lib/tool";
 
+/** Lets the agent scroll the mouse wheel at screen coordinates. Requires the extension to run `headed`. */
 export default desktopTool({
   description:
     "Scroll the mouse wheel at screen coordinates. Positive dy scrolls up. Requires the extension to run headed.",

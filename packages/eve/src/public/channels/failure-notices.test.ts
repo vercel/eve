@@ -3,9 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 import { failureNotice } from "#public/channels/reply.js";
 import { defaultEvents } from "#public/channels/slack/defaults.js";
 
-// What a person reads when their request fails: the one place a channel tells them what went
-// wrong and what to do next.
-
 const keyRejected = {
   code: "MODEL_AUTH_FAILED",
   hint: "Set AI_GATEWAY_API_KEY, or run `vercel env pull`.",

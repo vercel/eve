@@ -71,7 +71,6 @@ describe("SessionStateCursor", () => {
     let returned: unknown;
 
     await cursor.advanceWithHistory(async ({ history, serializedContext, sessionState }) => {
-      // The workflow hands the step a deserialized copy and the body a deserialized result.
       const input = structuredClone({ history, serializedContext, sessionState });
       const result = await withSessionStateDelta(input, async (values) => {
         const channel = values.serializedContext["eve.channel"] as {
@@ -192,7 +191,6 @@ describe("SessionStateCursor", () => {
       step.resolve();
       await running;
       expect(cursor.sessionState.hasProxyInputRequests).toBe(adopted);
-      // Only the owner's own steps claim addresses.
       if (meanwhile === "nothing") expect(claimSessionHooks).not.toHaveBeenCalled();
     },
   );

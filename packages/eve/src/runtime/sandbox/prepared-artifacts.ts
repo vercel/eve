@@ -34,7 +34,6 @@ export async function writeSandboxPreparedArtifactsManifest(input: {
       temporaryPath,
       `${JSON.stringify(createSandboxPreparedArtifactsManifest([...entries.values()]), null, 2)}\n`,
     );
-    // Dev workers may read while another worker publishes the prepared generation.
     await rename(temporaryPath, path);
   } finally {
     await rm(temporaryPath, { force: true });

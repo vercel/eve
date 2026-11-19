@@ -5,7 +5,6 @@ import type { RemoteAuthCompletion, RemoteConnectionController } from "./remote-
 import type { SetupFlowRenderer } from "./setup-flow.js";
 import { createTuiPrompter } from "./tui-prompter.js";
 
-/** Offers consented deployment access repair after a remote startup challenge. */
 export async function prepareRemoteTuiAccess(input: {
   connection: RemoteConnectionController;
   renderer: SetupFlowRenderer;
@@ -27,7 +26,6 @@ export async function prepareRemoteTuiAccess(input: {
     ? AbortSignal.any([input.signal, controller.signal])
     : controller.signal;
   renderer.begin("Deployment access");
-  // Install the idle trap before the flow opens a question and takes ownership of input.
   const interrupt = renderer.waitForInterrupt();
   try {
     const execution = connection.authenticate(async (signal) => {

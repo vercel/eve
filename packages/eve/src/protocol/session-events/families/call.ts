@@ -35,6 +35,11 @@ export interface Capability {
   readonly label?: string;
   /** An `agent` another deployment serves: a remote agent, not a subagent of this one. */
   readonly remote?: true;
+  /**
+   * Its tool set `label: false`: readers showing activity leave the call out, as they do `control`
+   * calls.
+   */
+  readonly hidden?: true;
 }
 
 /** A preview of a call's input as the model writes it. The first record announces the call. */
@@ -46,6 +51,7 @@ export interface CallInputData {
   readonly delta: string;
 }
 
+/** The payload of `call.requested`: a call is introduced, with what asked for it, what it invokes, and its input. */
 export interface CallRequestedData {
   readonly callId: string;
   readonly owner: CallOwner;
@@ -59,6 +65,7 @@ export interface CallRequestedData {
 /** What cleared a call to run. Absent when it needed no approval. */
 export type ClearedBy = { readonly policy: string } | { readonly interactionId: string };
 
+/** The payload of `call.started`: a call cleared to run begins. */
 export interface CallStartedData {
   readonly callId: string;
   readonly clearedBy?: ClearedBy;
@@ -74,8 +81,10 @@ export interface CallProgressData {
   readonly label?: string;
 }
 
+/** How a call ended, as recorded on `call.settled`. */
 export type CallOutcome = "completed" | "failed" | "rejected" | "interrupted" | "abandoned";
 
+/** The payload of `call.settled`: a call ends, with its outcome and output or error. */
 export interface CallSettledData {
   readonly callId: string;
   readonly outcome: CallOutcome;
@@ -92,12 +101,19 @@ export interface CallSettledData {
   readonly label?: string;
 }
 
+/** A progress record previewing a call's input as the model writes it. */
 export type CallInput = Envelope<"call.input", CallInputData>;
+/** The fact that introduces a call. */
 export type CallRequested = Envelope<"call.requested", CallRequestedData>;
+/** The fact recording that a call started running. */
 export type CallStarted = Envelope<"call.started", CallStartedData>;
+/** A progress record with a snapshot of a call's output so far. */
 export type CallProgress = Envelope<"call.progress", CallProgressData>;
+/** The terminal fact of a call. */
 export type CallSettled = Envelope<"call.settled", CallSettledData>;
+/** Any fact in the `call` family. */
 export type CallFact = CallRequested | CallStarted | CallSettled;
+/** Any progress record in the `call` family. */
 export type CallProgressRecord = CallInput | CallProgress;
 
 const owner = conforming<CallOwner>()(
@@ -119,6 +135,7 @@ export const callSchemas = {
           name: z.string(),
           remote: z.literal(true).optional(),
           label: z.string().optional(),
+          hidden: z.literal(true).optional(),
         }),
         input: jsonValue.optional(),
         inputError: errorInfo.optional(),

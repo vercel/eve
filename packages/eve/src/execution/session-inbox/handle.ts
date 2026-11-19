@@ -5,10 +5,8 @@ import type { Hook } from "#internal/workflow/runtime.js";
 const DOMAIN = "eve:inbox:v1:";
 const MAX_HANDLE_LENGTH = 8_192;
 
-type InboxHook = Omit<Hook, "metadata">;
+export type InboxHook = Omit<Hook, "metadata">;
 
-// Match resumeHook's descriptor validation without reading lazy user metadata
-// or retaining capabilities that only a fresh backend lookup can attest.
 const InboxHookSchema = HookSchema.omit({ metadata: true, resumeCapabilities: true });
 
 function parseInboxHook(value: unknown): InboxHook | undefined {
@@ -16,7 +14,6 @@ function parseInboxHook(value: unknown): InboxHook | undefined {
   return result.success ? result.data : undefined;
 }
 
-/** A shared server-only key authenticates hints carried by an untrusted client. */
 function signingKey(): string | undefined {
   const key = process.env.EVE_INBOX_HANDLE_SECRET;
   return key !== undefined && key.length >= 32 ? key : undefined;
@@ -26,13 +23,11 @@ function signature(body: string, key: string): Buffer {
   return createHmac("sha256", key).update(DOMAIN).update(body).digest();
 }
 
-/** Opaque transport state; never includes user metadata or transient capabilities. */
 export function issueInboxHandle(hook: unknown): string | undefined {
   const key = signingKey();
   if (key === undefined) return undefined;
   const parsed = parseInboxHook(hook);
   if (parsed?.resumeContext?.encryptionPublicKey === undefined) return undefined;
-  // OTel carriers can include private server baggage. Signing does not hide it.
   const descriptor = {
     ...parsed,
     resumeContext: { ...parsed.resumeContext, traceCarrier: undefined },
@@ -42,7 +37,6 @@ export function issueInboxHandle(hook: unknown): string | undefined {
   return handle.length <= MAX_HANDLE_LENGTH ? handle : undefined;
 }
 
-/** Verify the complete descriptor before using its routing or encryption fields. */
 export function readInboxHandle(handle: string): InboxHook | undefined {
   const key = signingKey();
   if (key === undefined || handle.length > MAX_HANDLE_LENGTH) return undefined;
@@ -57,4 +51,31 @@ export function readInboxHandle(handle: string): InboxHook | undefined {
   } catch {
     return undefined;
   }
+}
+
+export interface RememberedInboxOwner {
+  readonly hook: InboxHook;
+  readonly sessionId: string;
+}
+
+const rememberedOwners = new Map<string, RememberedInboxOwner>();
+const REMEMBERED_OWNERS_LIMIT = 10_000;
+
+export function rememberInboxOwner(hook: unknown, sessionId: string): void {
+  const parsed = parseInboxHook(hook);
+  if (parsed?.resumeContext?.encryptionPublicKey === undefined) return;
+  rememberedOwners.delete(parsed.token);
+  if (rememberedOwners.size >= REMEMBERED_OWNERS_LIMIT) {
+    const oldest = rememberedOwners.keys().next();
+    if (oldest.done !== true) rememberedOwners.delete(oldest.value);
+  }
+  rememberedOwners.set(parsed.token, { hook: parsed, sessionId });
+}
+
+export function recallInboxOwner(token: string): RememberedInboxOwner | undefined {
+  return rememberedOwners.get(token);
+}
+
+export function forgetInboxOwner(token: string): void {
+  rememberedOwners.delete(token);
 }

@@ -90,7 +90,6 @@ describe("createSessionTimeoutControl", () => {
     expect(startSessionTimeoutStep).toHaveBeenLastCalledWith(
       expect.objectContaining({ deadline: new Date(BOOT.getTime() + 40_000 + TIMEOUT_MS) }),
     );
-    // The elapsed timer already ended; only its replacement is cancelled.
     await control.dispose();
     expect(cancelSessionTimeoutStep).toHaveBeenCalledOnce();
     expect(cancelSessionTimeoutStep).toHaveBeenCalledWith({ runId: "timer-2" });

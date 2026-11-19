@@ -14,27 +14,23 @@ import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { buildSerializedContext, handoffFollowUp } from "#internal/testing/entry-test-helpers.js";
 import { waitForParkedTurnStep } from "#internal/testing/session-test-helpers.js";
 import {
-  releasingSessionOwnerWorkflow,
+  parkedTaskRunWorkflow,
   sessionCommandInboxWorkflow,
 } from "#internal/testing/session-inbox-workflow.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
-import { getRun, resumeHook, start } from "#internal/workflow/runtime.js";
+import { getRun, start } from "#internal/workflow/runtime.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 
 const FOLLOW_UP = "Bob asks for the weekend forecast.";
 
-it.each([
-  ["an eve 0.79 owner, which releases its addresses first", handOffReleased],
-  ["an eve 0.83 owner, whose addresses the successor takes over", handOffForced],
-])("continues an idle session from %s on the same stream", async (_name, handOff) => {
+it("continues an idle session from an eve 0.83 owner on the same stream", async () => {
   const runtime = await createTestRuntime({ agent: { name: "pre-v27-handoff" } });
   await runtime.run(async () => {
     const turnCount = turnsIn(KITCHEN_SINK);
-    const { owner, sessionId, successor } = await handOff(KITCHEN_SINK, turnCount);
+    const { owner, sessionId, successor } = await handOffForced(KITCHEN_SINK, turnCount);
     try {
       const followUp = await readTurn(sessionId, KITCHEN_SINK.length);
-      // The successor's first line follows the v26 lines: it compacts the earlier conversation.
       expect(followUp[0]?.meta.position.line).toBe(KITCHEN_SINK.length);
       const types = followUp.map((event) => event.type);
       expect(types.indexOf("context.settled")).toBeLessThan(types.indexOf("turn.started"));
@@ -44,7 +40,6 @@ it.each([
           data: expect.objectContaining({ kind: "compaction", outcome: "completed" }),
         }),
       );
-      // The follow-up turn takes the next number and follows the earlier owner's last turn.
       expect(followUp).toContainEqual(
         expect.objectContaining({
           type: "turn.started",
@@ -60,8 +55,6 @@ it.each([
           data: expect.objectContaining({ value: expect.stringContaining(FOLLOW_UP) }),
         }),
       );
-      // The import already started a fresh run, so its compaction moves the session nowhere: once
-      // the follow-up parks, the successor itself runs the next message.
       await waitForParkedTurnStep(successor.runId, 2);
       const nextLine = (followUp.at(-1)?.meta.position.line ?? 0) + 1;
       await createWorkflowRuntime({
@@ -73,7 +66,6 @@ it.each([
       await readTurn(sessionId, nextLine);
       const commandToken = sessionInboxHookToken(sessionCommandHookToken(sessionId));
       expect((await findSessionHookHolder(commandToken))?.runId).toBe(successor.runId);
-      // A reader of the whole stream sees the v26 conversation and the new turns as one session.
       const history: SessionStreamEvent[] = [];
       for await (const event of streamSessionEvents(sessionId, { follow: false })) {
         history.push(event);
@@ -90,73 +82,96 @@ it.each([
   });
 });
 
-it("tells an owner that still runs a task to try again on a later delivery", async () => {
+it("starts the next turn without waiting out the ended source's watch interval", async () => {
+  const runtime = await createTestRuntime({ agent: { name: "pre-v27-handoff-ended" } });
+  await runtime.run(async () => {
+    const turnCount = turnsIn(KITCHEN_SINK);
+    const { owner, sessionId, successor } = await handOffForced(KITCHEN_SINK, turnCount);
+    try {
+      const followUp = await readTurn(sessionId, KITCHEN_SINK.length);
+      await waitForParkedTurnStep(successor.runId, 2);
+      const nextLine = (followUp.at(-1)?.meta.position.line ?? 0) + 1;
+      const sentAt = Date.now();
+      await createWorkflowRuntime({
+        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      }).dispatchSession({
+        command: handoffFollowUp("dpl_b", "Bob asks about Sunday.", "delivery-next"),
+        sessionId,
+      });
+      await readTurn(sessionId, nextLine);
+      expect(Date.now() - sentAt).toBeLessThan(5_000);
+    } finally {
+      await successor.cancel().catch(() => {});
+      await owner.cancel().catch(() => {});
+    }
+  });
+});
+
+it("moves a session past an idle subagent and ends the subagent's run on the earlier build", async () => {
+  const runtime = await createTestRuntime({ agent: { name: "pre-v27-handoff-idle-task" } });
+  await runtime.run(async () => {
+    const hookToken = `helper-control:${crypto.randomUUID()}`;
+    const helper = await start(parkedTaskRunWorkflow, [{ token: hookToken }]);
+    await waitForHook(helper, { token: hookToken });
+    const task = {
+      calls: [],
+      id: "helper-1",
+      kind: "agent",
+      name: "helper",
+      resumable: true,
+      results: [],
+      run: { hookToken, runId: helper.runId, started: true },
+    };
+    const { owner, sessionId, successor } = await startForcedHandoff(
+      KITCHEN_SINK,
+      turnsIn(KITCHEN_SINK),
+      { "eve.taskTable": { tasks: [task], version: 1 } },
+    );
+    try {
+      await owner.returnValue;
+      await readTurn(sessionId, KITCHEN_SINK.length);
+      const commandToken = sessionInboxHookToken(sessionCommandHookToken(sessionId));
+      expect((await findSessionHookHolder(commandToken))?.runId).toBe(successor.runId);
+      await expect(helper.returnValue).resolves.toMatchObject({ kind: "end" });
+    } finally {
+      await successor.cancel().catch(() => {});
+      await owner.cancel().catch(() => {});
+      await helper.cancel().catch(() => {});
+    }
+  });
+});
+
+it("leaves a session whose owner still runs a task with that owner", async () => {
   const runtime = await createTestRuntime({ agent: { name: "pre-v27-handoff-busy" } });
   await runtime.run(async () => {
     const task = { calls: [], id: "t", results: [], run: { hookToken: "h", runId: "r" } };
-    const { activation, owner, sessionId } = await handOffReleasedWith(KITCHEN_SINK, {
-      "eve.taskTable": { tasks: [task], version: 1 },
-    });
+    const { owner, sessionId, successor } = await startForcedHandoff(
+      KITCHEN_SINK,
+      turnsIn(KITCHEN_SINK),
+      { "eve.taskTable": { tasks: [task], version: 1 } },
+    );
     try {
-      // Not `incompatible`, which the owner would remember for this deployment.
-      expect(activation).toMatchObject({ kind: "failed" });
-      const readable = getRun(sessionId).getReadable();
-      try {
-        expect(await readable.getTailIndex()).toBe(KITCHEN_SINK.length - 1);
-      } finally {
-        await readable.cancel().catch(() => {});
-      }
+      await successor.returnValue;
+      const commandToken = sessionInboxHookToken(sessionCommandHookToken(sessionId));
+      expect((await findSessionHookHolder(commandToken))?.runId).toBe(owner.runId);
+      expect(await readTailIndex(sessionId)).toBe(KITCHEN_SINK.length - 1);
     } finally {
       await owner.cancel().catch(() => {});
     }
   });
 });
 
-/**
- * An eve 0.69–0.82 owner (handoff version 2), whose session stream holds `records`, hands its
- * session to this build: it releases its addresses and waits for the successor's verdict.
- */
-async function handOffReleased(records: readonly unknown[], turnCount: number) {
-  const { activation, ...handoff } = await handOffReleasedWith(records, {}, turnCount);
-  expect(activation).toEqual({ kind: "active" });
+async function handOffForced(records: readonly unknown[], turnCount: number) {
+  const handoff = await startForcedHandoff(records, turnCount);
+  await handoff.owner.returnValue;
   return handoff;
 }
 
-async function handOffReleasedWith(
+async function startForcedHandoff(
   records: readonly unknown[],
-  state: Record<string, unknown>,
-  turnCount = turnsIn(records),
+  turnCount: number,
+  state: Record<string, unknown> = {},
 ) {
-  const release = `pre-v27-release-${crypto.randomUUID()}`;
-  const owner = await start(releasingSessionOwnerWorkflow, [{ aliases: [], release }]);
-  const sessionId = owner.runId;
-  const commandToken = sessionInboxHookToken(sessionCommandHookToken(sessionId));
-  await waitForHook(owner, { token: commandToken });
-  await waitForHook(owner, { token: release });
-  await recordLines(sessionId, records);
-  await resumeHook(release, undefined);
-  await vi.waitFor(async () => expect(await findSessionHookHolder(commandToken)).toBeUndefined());
-  const successor = await start(workflowEntry, [
-    {
-      activationToken: `${sessionId}:handoff`,
-      checkpoint: savedCheckpoint(14, sessionId, turnCount, state),
-      delivery: followUpDelivery(),
-      handoffVersion: 2,
-      kind: "handoff",
-      ownerDeploymentId: "dpl_b",
-      sessionId,
-      sessionWritable: getRun(sessionId).getWritable<Uint8Array>(),
-    },
-  ]);
-  const { activation } = (await owner.returnValue) as { readonly activation: unknown };
-  return { activation, owner, sessionId, successor };
-}
-
-/**
- * An eve 0.83 owner (handoff version 3), whose session stream holds `records`, keeps its addresses
- * while the successor starts; the successor takes them over and the owner exits.
- */
-async function handOffForced(records: readonly unknown[], turnCount: number) {
   const alias = `http:pre-v27:${crypto.randomUUID()}`;
   const owner = await start(sessionCommandInboxWorkflow, [{ token: alias }]);
   const sessionId = owner.runId;
@@ -165,22 +180,32 @@ async function handOffForced(records: readonly unknown[], turnCount: number) {
   await waitForHook(owner, { token: sessionInboxHookToken(alias) });
   await recordLines(sessionId, records);
   const successor = await start(workflowEntry, [
-    {
-      activationToken: `${sessionId}:handoff:0`,
-      attemptKey: `${sessionId}:0`,
-      checkpoint: savedCheckpoint(17, sessionId, turnCount),
-      delivery: followUpDelivery(),
-      handoffVersion: 3,
-      hookTokens: [commandToken, alias],
-      kind: "handoff",
-      ownerDeploymentId: "dpl_b",
-      sessionId,
-      sessionWritable: getRun(sessionId).getWritable<Uint8Array>(),
-      sourceRunId: sessionId,
-    },
+    successorArguments({ alias, commandToken, sessionId, state, turnCount }),
   ]);
-  await owner.returnValue;
   return { owner, sessionId, successor };
+}
+
+function successorArguments(input: {
+  readonly alias: string;
+  readonly commandToken: string;
+  readonly sessionId: string;
+  readonly state: Record<string, unknown>;
+  readonly turnCount: number;
+}) {
+  const { alias, commandToken, sessionId, state, turnCount } = input;
+  return {
+    activationToken: `${sessionId}:handoff:0`,
+    attemptKey: `${sessionId}:0`,
+    checkpoint: savedCheckpoint(sessionId, turnCount, state),
+    delivery: followUpDelivery(),
+    handoffVersion: 3,
+    hookTokens: [commandToken, alias],
+    kind: "handoff",
+    ownerDeploymentId: "dpl_b",
+    sessionId,
+    sessionWritable: getRun(sessionId).getWritable<Uint8Array>(),
+    sourceRunId: sessionId,
+  } as const;
 }
 
 async function recordLines(sessionId: string, records: readonly unknown[]): Promise<void> {
@@ -192,9 +217,20 @@ async function recordLines(sessionId: string, records: readonly unknown[]): Prom
   } finally {
     writer.releaseLock();
   }
+  await vi.waitFor(async () => expect(await readTailIndex(sessionId)).toBe(records.length - 1), {
+    timeout: 10_000,
+  });
 }
 
-/** The events of the first turn written from `startIndex`, through its settlement. */
+async function readTailIndex(sessionId: string): Promise<number> {
+  const readable = getRun(sessionId).getReadable();
+  try {
+    return await readable.getTailIndex();
+  } finally {
+    await readable.cancel().catch(() => {});
+  }
+}
+
 async function readTurn(sessionId: string, startIndex: number): Promise<SessionStreamEvent[]> {
   const reader = readSessionEventStream(sessionId, startIndex).getReader();
   const events: SessionStreamEvent[] = [];
@@ -236,18 +272,9 @@ function followUpDelivery(): DeliverHookPayload {
   };
 }
 
-/**
- * The checkpoint an idle owner before v27 hands off after `turnCount` turns: eve 0.79 writes
- * version 14, which predates the admitted delivery keys eve 0.83's version 17 carries.
- */
-function savedCheckpoint(
-  version: 14 | 17,
-  sessionId: string,
-  turnCount: number,
-  state: Record<string, unknown> = {},
-) {
+function savedCheckpoint(sessionId: string, turnCount: number, state: Record<string, unknown>) {
   return {
-    ...(version === 17 && { admittedDeliveryKeys: [] }),
+    admittedDeliveryKeys: [],
     history: [
       { content: "hello there", kind: "user", role: "user" },
       { content: [{ text: "Echo: hello there", type: "text" }], role: "assistant" },
@@ -274,6 +301,6 @@ function savedCheckpoint(
       version: 2,
     },
     sessionTimeoutMs: 60_000,
-    version,
+    version: 17,
   } as never;
 }

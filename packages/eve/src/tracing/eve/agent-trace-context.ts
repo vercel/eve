@@ -1,8 +1,6 @@
 import { createContextKey, type Context } from "#compiled/@opentelemetry/api/index.js";
 import { activeTraceOperation } from "#compiled/@vercel/agent-runs/otel.js";
 
-// OTel context keys use Symbol.for(description), so this marker survives duplicate
-// module evaluations while remaining local to the process and async context.
 const AGENT_TRACE_KEY = createContextKey("eve.agent.trace");
 
 export function isAgentTraceContext(context: unknown): boolean {

@@ -14,7 +14,6 @@ import type { SandboxSession } from "eve/sandbox";
 
 export type DesktopToolContext = Pick<ToolContext, "abortSignal" | "session" | "getSandbox">;
 
-/** agent-desktop's JSON envelope: one per command on stdout. */
 interface Envelope {
   readonly ok: boolean;
   readonly data?: unknown;
@@ -23,6 +22,7 @@ interface Envelope {
     readonly message: string;
     readonly suggestion?: string;
     readonly disposition?: { readonly delivery?: string; readonly retry?: string };
+    readonly details?: { readonly kind?: string; readonly retryable?: boolean };
   };
 }
 
@@ -42,11 +42,6 @@ const pendingSetups = new Map<string, Promise<void>>();
 
 const PREPARE_DOCS = "https://github.com/vercel/eve/tree/main/packages/eve-agent-desktop#prepare";
 
-/**
- * Check the sandbox for one tool call and hand the caller its scope: the
- * targeted agent-desktop is installed, the desktop is running, the deadline
- * signal has started, and every command goes through it.
- */
 export async function withDesktopCall<T>(
   ctx: DesktopToolContext,
   work: (call: DesktopCall) => Promise<T>,
@@ -64,11 +59,6 @@ export async function withDesktopCall<T>(
   return await untilSettled(work(call), signal);
 }
 
-/**
- * Run one agent-desktop command and return the `data` of its envelope. A
- * structured error becomes a thrown Error that keeps the code, suggestion and
- * retry disposition, so the model can decide whether a retry is safe.
- */
 async function runAgentDesktop<TData = unknown>(
   sandbox: DesktopSandbox,
   args: readonly string[],
@@ -97,10 +87,15 @@ function parseEnvelope<TData>(stdout: string, stderr: string, name: string): TDa
   if (error === undefined) throw new Error(`agent-desktop ${name} failed without an error.`);
   const retry = error.disposition?.retry ?? "unknown";
   const delivery = error.disposition?.delivery ?? "unknown";
+  const kind = typeof error.details?.kind === "string" ? error.details.kind : undefined;
   throw new Error(
     [
       `agent-desktop ${name} failed: ${error.code}: ${error.message}`,
+      kind ? `Kind: ${kind}.` : undefined,
       error.suggestion ? `Suggestion: ${error.suggestion}` : undefined,
+      error.details?.retryable === false
+        ? "Repeating the same call returns the same refusal; change the target or take a new snapshot first."
+        : undefined,
       `Delivery: ${delivery}; retry: ${retry}.${retry === "safe" ? "" : " Do not repeat this action blindly: read the live state first."}`,
     ]
       .filter(Boolean)
@@ -130,10 +125,6 @@ async function prepareSandbox(
   await untilSettled(pending, signal);
 }
 
-/**
- * Installation belongs in the sandbox environment's `prepare`, so sessions
- * start from a template that already has it. The tools only check for it.
- */
 async function ensureInstalled(sandbox: DesktopSandbox, signal: AbortSignal): Promise<void> {
   const installed = await probeVersion(sandbox, signal);
   if (installed !== undefined && matchesPackageMinor(installed)) return;
@@ -142,13 +133,11 @@ async function ensureInstalled(sandbox: DesktopSandbox, signal: AbortSignal): Pr
 
 async function ensureDesktop(sandbox: DesktopSandbox, signal: AbortSignal): Promise<void> {
   const display = extension.config.display;
-  // One cheap check when the desktop is live; a resumed sandbox loses its processes and starts them again here.
   const ready = await runCommand(sandbox, desktopReadyCommand(display), signal);
   if ((ready.exitCode ?? 0) === 0) return;
   await startDesktop(sandbox, { signal, display });
 }
 
-/** The installed CLI version, or undefined when the binary is missing. */
 async function probeVersion(
   sandbox: DesktopSandbox,
   signal: AbortSignal,
@@ -162,7 +151,6 @@ async function probeVersion(
   return (probe.stdout ?? "").trim().split(/\s+/).at(-1) ?? "";
 }
 
-/** These tools describe one agent-desktop minor; another minor may take different flags. */
 function matchesPackageMinor(version: string): boolean {
   const minor = (v: string) => v.split(".").slice(0, 2).join(".");
   return minor(version) === minor(AGENT_DESKTOP_VERSION);

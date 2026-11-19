@@ -1,7 +1,3 @@
-// Public interaction and response facts from the runtime's private request records. They say
-// what a person is asked and what decided it; call actions, credentials, and answer routes stay
-// private.
-
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import { defined, fact } from "#harness/facts.js";
 import type { Cause } from "#protocol/session-events/envelope.js";
@@ -21,10 +17,6 @@ import type {
 import type { ApprovalAsk } from "#harness/session-machine/view.js";
 import type { ConnectionPrincipal } from "#shared/connection-types.js";
 
-/**
- * A question, approval, or budget prompt opens. An approval is about its call, a budget prompt
- * about its turn; a relayed request names the serving call or task it arrived through.
- */
 export function interactionOpened(input: {
   readonly interactionId: string;
   readonly request: InteractionRequest;
@@ -36,7 +28,6 @@ export function interactionOpened(input: {
   return fact("interaction.opened", { audience, interactionId, origin, request, subject });
 }
 
-/** An approval opens about its call. */
 export function approvalOpened(ask: ApprovalAsk): FactOf<"interaction.opened"> {
   return interactionOpened({
     interactionId: ask.interactionId,
@@ -45,14 +36,12 @@ export function approvalOpened(ask: ApprovalAsk): FactOf<"interaction.opened"> {
   });
 }
 
-/** The interaction a sign-in attempt is: its attempt id, or its connection name without one. */
 export function signInInteractionId(
   challenge: Pick<AuthorizationChallenge, "attemptId" | "name">,
 ): string {
   return challenge.attemptId ?? challenge.name;
 }
 
-/** A sign-in's public challenge. Provider callback payloads and credential resolvers stay private. */
 export function signInOpened(
   challenge: AuthorizationChallenge,
   input: {
@@ -64,7 +53,6 @@ export function signInOpened(
   return fact("interaction.opened", signInRequest(challenge, input));
 }
 
-/** What `interaction.opened` carries for a sign-in, as its fact or a relay payload's event. */
 export function signInRequest(
   challenge: AuthorizationChallenge,
   input: {
@@ -78,7 +66,6 @@ export function signInRequest(
     callbackUrl: challenge.hookUrl,
     displayName: details.displayName,
     expiresAt: details.expiresAt,
-    // Who and what it grants, so a later call can tell it asks for the same sign-in.
     grant: challenge.grant,
     instructions: details.instructions,
     name: challenge.name,
@@ -102,7 +89,6 @@ export function signInRequest(
   });
 }
 
-/** The principal's identity: its attributes stay out of the stream, which every client reads. */
 function signInPrincipal(principal: ConnectionPrincipal | undefined): SignInChallenge["principal"] {
   if (principal === undefined) return undefined;
   if (principal.type === "app") return { type: "app" };
@@ -111,7 +97,6 @@ function signInPrincipal(principal: ConnectionPrincipal | undefined): SignInChal
     : { id: principal.id, issuer: principal.issuer, type: "user" };
 }
 
-/** An interaction ends. `cause` names the response that decided it, or what else settled it. */
 export function interactionSettled(
   interactionId: string,
   outcome: InteractionOutcome,

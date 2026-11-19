@@ -29,7 +29,7 @@ export default defineEval({
 - `session.nextTurn()` reads and records the session's next turn. Its events feed both the session's assertions and the run-level assertions. Each read continues where the last one stopped.
 - `session.watch()` starts reading right away and returns a [live turn](./cases#in-flight-turns) with `waitForEvent(...)`, `cancel()`, and `result()`. Pass `{ until }` to stop at a matching event instead of the end of a turn, such as `context.settled` for a context change between turns.
 
-Attached sessions are full `EveEvalSession`s. Send them messages and assert on them directly, as in `session.succeeded()` or `session.calledTool(...)`. Assertions on `t` cover the whole run, including every attached session.
+Attached sessions are full `EveEvalSession`s. Send them messages and assert on them directly, as in `session.succeeded()` or `session.calledTool(...)`. Query `session.view` or a returned turn's `.view` with [selectors](./assertions#assert-on-session-state-with-selectors) for custom state checks. A later `startIndex` can omit earlier facts from those views; read from `0` when your check needs the full recorded prefix. Assertions on `t` cover the whole run, including every attached session.
 
 To create sessions and send messages, use the [drive API](./cases#the-drive-api).
 

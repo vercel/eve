@@ -2,7 +2,6 @@ import type { SessionAuthContext } from "#channel/types.js";
 
 type IdentityKey = keyof SessionAuthContext;
 
-// `satisfies` fails to compile when SessionAuthContext gains or loses a field.
 const IDENTITY_KEYS = Object.keys({
   attributes: true,
   authenticator: true,
@@ -12,7 +11,6 @@ const IDENTITY_KEYS = Object.keys({
   subject: true,
 } satisfies Record<IdentityKey, true>) as IdentityKey[];
 
-/** Persist and forward identity only, never a channel's request-local permission extensions. */
 export function sessionAuthFromResult(result: SessionAuthContext): SessionAuthContext {
   const identity: Partial<Record<IdentityKey, unknown>> = {};
   for (const key of IDENTITY_KEYS) {

@@ -26,8 +26,6 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// The terminal fact commits before channel delivery in v27. Fail the following stream close,
-// after the channel has handled completion, rather than failing an uncommitted fact's write.
 it("does not report an expired session as failed when its terminal stream close fails", async () => {
   const runtime = await createTestRuntime({
     agent: { name: "terminal-session-write-failure" },

@@ -15,24 +15,32 @@ import type {
   AgentInvocationMutationResult,
   AgentInvocationStatus,
 } from "#internal/invocation/agent-invocation.js";
+import { invocationOwnerKey } from "#internal/invocation/metadata.js";
 import {
-  INVOCATION_OWNER_ATTRIBUTE,
-  INVOCATION_TOKEN_ATTRIBUTE,
-  invocationOwnerKey,
-} from "#internal/invocation/metadata.js";
+  invocationContinuationToken,
+  readOwnedInvocationRun,
+} from "#internal/invocation/owned-run.js";
 import type { RouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
-import { getWorld } from "#internal/workflow/runtime.js";
-import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
+import {
+  emptyPreviews,
+  emptySessionView,
+  foldReceivedEvent,
+} from "#protocol/session-projection/fold.js";
 import { openRequests, openSignIns, interaction } from "#protocol/session-projection/reader.js";
 import {
-  type Activity,
   activity,
   failure,
   interactionBatches,
   reply,
   replyText,
 } from "#protocol/session-projection/selectors.js";
-import type { InteractionRow, SessionView } from "#protocol/session-projection/tables.js";
+import type {
+  InteractionRow,
+  SessionPreviews,
+  SessionView,
+} from "#protocol/session-projection/tables.js";
+import { reasoningStatus } from "#channel/reasoning-status.js";
+import { truncate } from "#public/channels/text.js";
 import { type Answer, parseAnswers } from "#shared/input.js";
 import type { Interaction } from "#protocol/session-projection/reader.js";
 import type { JsonValue } from "#shared/json.js";
@@ -62,7 +70,7 @@ export class WorkflowAgentInvocationExecution {
       input: { message: input.message },
     });
 
-    const run = await this.#readInvocationRun(handle.sessionId, input.auth);
+    const run = await readOwnedInvocationRun(handle.sessionId, input.auth);
     if (run === undefined) {
       throw new Error("Invocation run was unavailable after durable creation.");
     }
@@ -90,8 +98,6 @@ export class WorkflowAgentInvocationExecution {
     const { invocation, stream, token } = current;
     const pendingBatch = stream?.pending;
     if (invocation.status !== "awaiting-input" || pendingBatch === undefined) {
-      // A retry after a lost response is the common case here: the answer
-      // already landed, so acknowledge it instead of demanding a new one.
       if (stream !== undefined && replaysSettledBatch(stream, input.responses)) {
         return { invocation, type: "success" };
       }
@@ -154,7 +160,7 @@ export class WorkflowAgentInvocationExecution {
       }
     | undefined
   > {
-    const run = await this.#readInvocationRun(input.invocationId, input.auth);
+    const run = await readOwnedInvocationRun(input.invocationId, input.auth);
     if (run === undefined) return undefined;
     const base = {
       createdAt: run.createdAt.toISOString(),
@@ -167,29 +173,11 @@ export class WorkflowAgentInvocationExecution {
     return {
       invocation: projectInvocation(base, run.status, stream),
       stream,
-      token: run.attributes[INVOCATION_TOKEN_ATTRIBUTE],
+      token: invocationContinuationToken(run),
     };
-  }
-
-  async #readInvocationRun(invocationId: string, auth: SessionAuthContext | null) {
-    const world = await getWorld();
-    try {
-      const run = await world.runs.get(invocationId);
-      if (run.attributes[INVOCATION_TOKEN_ATTRIBUTE] === undefined) return undefined;
-      return run.attributes[INVOCATION_OWNER_ATTRIBUTE] === invocationOwnerKey(auth)
-        ? run
-        : undefined;
-    } catch (error) {
-      if (WorkflowRunNotFoundError.is(error) || RunExpiredError.is(error)) return undefined;
-      throw error;
-    }
   }
 }
 
-/**
- * The requests one commit opened, by `interactionId`. An id belongs to one interaction for the
- * session's life, so an answer naming one outside the pending batch can't reach a later one.
- */
 type InputBatch = ReadonlyMap<string, Interaction>;
 
 interface InvocationFailure {
@@ -197,34 +185,28 @@ interface InvocationFailure {
   readonly terminal: boolean;
 }
 
-/** The session's shared tables, plus what an invocation shows that they don't keep. */
 interface InvocationStream {
   readonly view: SessionView;
-  /** The batches in the order they were requested, each holding the requests it introduced. */
+  readonly previews: SessionPreviews;
   readonly batches: readonly InputBatch[];
-  /** The latest batch with requests still open, narrowed to them. */
   readonly pending: InputBatch | undefined;
-  /** Each sign-in still open, in the order they opened. */
   readonly signIns: readonly InteractionRow[];
-  /** The latest turn's final message. */
   readonly result: JsonValue | undefined;
-  /** How the latest turn ended; reset when a turn starts or a park resumes. */
   readonly settled: "completed" | "cancelled" | InvocationFailure | undefined;
 }
 
 async function readInvocationStream(invocationId: string): Promise<InvocationStream> {
   const view = emptySessionView();
+  const previews = emptyPreviews();
   const reader = createEventReader();
   for await (const { line, position, record } of streamSessionLines(invocationId, {
     follow: false,
   })) {
     if (line === undefined) {
-      // v27 can't read the turns or requests of an invocation an earlier eve started; without
-      // this, it would read as working forever.
       if (position === 0 && isV26Line(record)) return startedOnEarlierEve(view);
       continue;
     }
-    for (const event of reader.read(line, position)) foldReceivedEvent(view, event);
+    for (const event of reader.read(line, position)) foldReceivedEvent(view, event, previews);
   }
   const batches = interactionBatches(view).map(
     (batch): InputBatch =>
@@ -242,6 +224,7 @@ async function readInvocationStream(invocationId: string): Promise<InvocationStr
   return {
     batches,
     pending,
+    previews,
     result: latestResult(view),
     settled: howItSettled(view),
     signIns: openSignIns(view),
@@ -259,6 +242,7 @@ function startedOnEarlierEve(view: SessionView): InvocationStream {
   return {
     batches: [],
     pending: undefined,
+    previews: emptyPreviews(),
     result: undefined,
     settled: { error, terminal: true },
     signIns: [],
@@ -266,10 +250,6 @@ function startedOnEarlierEve(view: SessionView): InvocationStream {
   };
 }
 
-/**
- * How the latest turn ended, unless an answer it waited on has settled since; a failed session
- * ends the invocation for good.
- */
 function howItSettled(view: SessionView): InvocationStream["settled"] {
   const { session } = view;
   const ended = session.outcome === "failed" ? failure(view) : undefined;
@@ -287,7 +267,6 @@ function howItSettled(view: SessionView): InvocationStream["settled"] {
   return session.status === "ended" ? "completed" : undefined;
 }
 
-/** What the latest turn replied once it settled: its structured result, or else its text. */
 function latestResult(view: SessionView): JsonValue | undefined {
   const turnId = view.session.latestTurnId;
   if (turnId === undefined || view.turns[turnId]?.status !== "settled") return undefined;
@@ -303,7 +282,6 @@ function invocationInteractions(
   return shown;
 }
 
-/** True when `responses` exactly repeats the answers eve accepted for the latest batch. */
 function replaysSettledBatch(stream: InvocationStream, responses: readonly Answer[]): boolean {
   const batch = stream.batches.at(-1);
   if (batch === undefined || responses.length !== batch.size) return false;
@@ -321,12 +299,6 @@ function replaysSettledBatch(stream: InvocationStream, responses: readonly Answe
   return true;
 }
 
-/**
- * Projects the invocation from its session. The session parks after the
- * turn settles, so `turn.settled` or a failure — not the run
- * status — is what completes the invocation. An open sign-in or input
- * request outranks how the turn ended.
- */
 function projectInvocation(
   base: { readonly createdAt: string; readonly expiresAt?: string; readonly invocationId: string },
   runStatus: string,
@@ -344,7 +316,6 @@ function projectInvocation(
     error: publicInvocationFailure(base.invocationId, failure?.error),
     status: "failed",
   });
-  // A pending batch can outlive its session (timeout, failure); nobody can answer it then.
   if (runStatus === "failed" || failure?.terminal === true) return failed();
   if (info.sessionEnded) {
     if (failure !== undefined) return failed();
@@ -367,21 +338,58 @@ function projectInvocation(
     pollAfterMs: 1_000,
     result,
     status: "working",
-    statusMessage: statusMessage(activity(stream.view)),
+    statusMessage: statusMessage(stream.view, stream.previews),
   };
 }
 
-/** The latest running call or task, plus how many others are still running. */
-function statusMessage(current: Activity): string | undefined {
-  const names =
-    current.kind === "calling"
-      ? current.names
-      : current.kind === "waiting-on-tasks"
-        ? current.tasks.map((task) => task.name)
-        : [];
+const WRITING_REPLY_MIN_CHARS = 280;
+const STATUS_MESSAGE_MAX_LENGTH = 200;
+
+function statusMessage(view: SessionView, previews: SessionPreviews): string | undefined {
+  const current = activity(view);
+  if (current.kind === "calling") return latestOf(current.names);
+  if (current.kind === "waiting-on-tasks") return latestOf(current.tasks.map((task) => task.name));
+  if (current.kind !== "thinking") return undefined;
+  const turnId = view.session.latestTurnId;
+  const streaming = Object.values(previews.parts).filter((part) => partTurn(view, part) === turnId);
+  const replyChars = streaming
+    .filter((part) => part.kind === "text")
+    .reduce((total, part) => total + part.text.length, 0);
+  const turn = turnId === undefined ? undefined : view.turns[turnId];
+  const replied = (turn?.reply ?? []).some((partId) => {
+    const runId = view.parts[partId]?.runId;
+    return runId !== undefined && view.runs[runId]?.step === (turn?.runs ?? 0) - 1;
+  });
+  if (replied || replyChars >= WRITING_REPLY_MIN_CHARS) return "Writing a reply...";
+  const live = streaming.findLast((part) => part.kind === "reasoning");
+  const done = Object.values(view.parts).findLast(
+    (part) =>
+      part.kind === "reasoning" &&
+      typeof part.value === "string" &&
+      partTurn(view, part) === turnId,
+  );
+  const maxLength = STATUS_MESSAGE_MAX_LENGTH;
+  const reasoning =
+    (live === undefined ? undefined : reasoningStatus(live.text, { maxLength })) ??
+    (typeof done?.value === "string"
+      ? reasoningStatus(done.value, { complete: true, maxLength })
+      : undefined);
+  return reasoning === undefined ? "Thinking..." : truncate(reasoning, STATUS_MESSAGE_MAX_LENGTH);
+}
+
+function latestOf(names: readonly string[]): string | undefined {
   const latest = names.at(-1);
   if (latest === undefined) return undefined;
   return names.length === 1 ? latest : `${latest} (+${String(names.length - 1)} more)`;
+}
+
+function partTurn(
+  view: SessionView,
+  part: { readonly runId?: string; readonly turnId?: string },
+): string | undefined {
+  if (part.turnId !== undefined) return part.turnId;
+  const owner = part.runId === undefined ? undefined : view.runs[part.runId]?.owner;
+  return owner !== undefined && "turnId" in owner ? owner.turnId : undefined;
 }
 
 function workingInvocation(

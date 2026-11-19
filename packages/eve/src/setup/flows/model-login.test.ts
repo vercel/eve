@@ -97,7 +97,6 @@ beforeEach(() => {
   mocks.readSecret.mockResolvedValue("stored-key");
   mocks.models.mockResolvedValue({
     data: [{ id: "gpt-5.6-luna-fast" }, { id: "gpt-6-luna-fast" }, { id: "claude-sonnet-5" }],
-    // The Codex catalog lists base slugs only; Fast mode is a service tier.
     models: [{ slug: "gpt-5.6-luna" }, { slug: "gpt-6-luna" }],
   });
   mocks.gateway.mockResolvedValue({ kind: "valid" });

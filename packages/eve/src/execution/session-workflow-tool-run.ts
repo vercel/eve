@@ -1,5 +1,5 @@
 import { deliverWorkflowRelay } from "#execution/tools/workflow/owner.js";
-import type { AppliedRunMessage } from "#execution/tools/workflow/apply-run-messages-step.js";
+import type { AppliedRunMessage } from "#execution/tools/workflow/apply-run-messages.js";
 import {
   isAgentSessionMessage,
   runMessageBatchBudget,
@@ -39,10 +39,6 @@ export function isAppliedRunMessage(message: WorkflowToolRunMessage): message is
   return isAgentSessionMessage(message) || message.kind === "report" || isTaskRunMessage(message);
 }
 
-/**
- * Removes the applied run messages at the front of the inbox, in arrival
- * order, while `admits` takes them. One batch's caller passes its budget on.
- */
 export function takeLeadingAppliedRunMessages(
   inbox: SessionInboxReader,
   admits = runMessageBatchBudget(),
@@ -53,16 +49,11 @@ export function takeLeadingAppliedRunMessages(
   );
 }
 
-/**
- * Handles a run message the session does not apply as it reads it: a
- * question, its withdrawal, or an `execute` run's outcome.
- */
 export async function handleWorkflowToolRunMessage(
   input: HandlerInput<Exclude<WorkflowToolRunMessage, AppliedRunMessage>>,
 ): Promise<RuntimeActionResult | undefined> {
   const { message } = input;
   switch (message.kind) {
-    // Only task runs report started, reply, or usage, and the session applies those as it reads them.
     case "started":
     case "reply":
     case "usage":
@@ -78,12 +69,6 @@ export async function handleWorkflowToolRunMessage(
   }
 }
 
-/**
- * Settles a workflow tool run outcome against the turn's recorded runs and
- * returns the runtime action result the turn should accept, or `undefined`
- * when the outcome does not bind to a run this turn owns. Requests the run
- * relayed are withdrawn first, since nobody can answer them anymore.
- */
 async function handleWorkflowToolRunOutcome(
   input: HandlerInput<WorkflowToolRunOutcomeMessage>,
 ): Promise<RuntimeActionResult | undefined> {
@@ -133,11 +118,6 @@ async function handleWorkflowToolRunRequest(
   );
 }
 
-/**
- * A run asks to withdraw a `ctx.ask()` question. The session decides: it
- * withdraws the question unless it already accepted an answer or stopped
- * offering it, and tells the run either way.
- */
 async function handleWorkflowToolRunWithdraw(
   input: HandlerInput<WorkflowToolRunWithdrawMessage>,
 ): Promise<void> {

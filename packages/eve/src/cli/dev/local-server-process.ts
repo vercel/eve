@@ -1,26 +1,3 @@
-/**
- * The `eve dev` server child: forked `detached` (its own process group) and
- * bound to the CLI's lifetime through the IPC channel, never through the OS.
- *
- * Why the child is not bound to the parent at the OS level (shared process
- * group, inherited terminal signals):
- *
- * - The TUI puts stdin in raw mode, which disables ISIG: Ctrl+C never becomes
- *   a terminal-generated SIGINT, so same-group signal delivery does nothing in
- *   the mode where Ctrl+C matters most.
- * - In headless mode, same-group delivery would signal parent and child
- *   simultaneously, racing the parent's graceful IPC shutdown against the
- *   child's own signal handler.
- * - macOS has no parent-death signal. IPC `disconnect` is the portable
- *   equivalent: the child self-stops whenever this process exits, for any
- *   reason including SIGKILL (see local-server-child.ts).
- *
- * `detached` makes the child a process-group leader, so close() can escalate
- * to a group-wide SIGTERM/SIGKILL that reaps the entire server tree. Sandbox
- * resources leaked by a crash are reconciled by the cleanup-intent janitor on
- * the next run (see local-server-cleanup.ts).
- */
-
 import { createConsoleOutputForwarder } from "./console-records.js";
 import { fork, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -43,17 +20,10 @@ type ChildMessage =
 
 const childPath = fileURLToPath(new URL("./local-server-child.js", import.meta.url));
 
-// close() escalation stages. Their sum is DEV_SERVER_CLOSE_BUDGET_MS.
 const IPC_SHUTDOWN_GRACE_MS = 550;
 const SIGTERM_GRACE_MS = 150;
 const SIGKILL_REAP_MS = 100;
 
-/**
- * Worst-case close() duration. Must stay below the forced-exit backstop the
- * dev command arms on its lifecycle (FORCED_EXIT_BACKSTOP_MS in
- * `#cli/shutdown.js`), so a graceful close always beats the backstop and
- * `eve dev` exits 0 after Ctrl+C. Enforced by local-server-process.test.ts.
- */
 export const DEV_SERVER_CLOSE_BUDGET_MS =
   IPC_SHUTDOWN_GRACE_MS + SIGTERM_GRACE_MS + SIGKILL_REAP_MS;
 
@@ -61,7 +31,6 @@ export interface DevelopmentServerProcess extends DevelopmentServer {
   wait(): Promise<void>;
 }
 
-/** Runs the CLI-owned local server outside the foreground TUI process. */
 export function createDevelopmentServer(
   appRoot: string,
   options: DevelopmentServerOptions = {},
@@ -112,6 +81,8 @@ export function createDevelopmentServer(
         stdio: ["ignore", "pipe", "pipe", "ipc"],
         execArgv: [
           ...process.execArgv,
+          "--import",
+          new URL("../../internal/package-imports-hook.js", import.meta.url).href,
           "--import",
           new URL("./console-records-preload.js", import.meta.url).href,
         ],

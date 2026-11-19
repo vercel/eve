@@ -15,10 +15,6 @@ vi.mock("braintrust", () => ({
   init: braintrustMocks.init,
 }));
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 function makeTarget(kind: "local" | "remote" = "local"): EveEvalTarget {
   const url = kind === "local" ? "http://127.0.0.1:3000" : "https://test.vercel.app";
   return {
@@ -95,10 +91,6 @@ function makeEval(): EveEval {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 describe("braintrustReporter", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -112,14 +104,12 @@ describe("braintrustReporter", () => {
   it("onEvalComplete is a no-op when experiment is not initialized", () => {
     const reporter = braintrustReporter(makeConfig());
 
-    // Should not throw when called before onRunStart
     reporter.onEvalComplete(makeEvalResult());
   });
 
   it("onRunComplete is a no-op when experiment is not initialized", async () => {
     const reporter = braintrustReporter(makeConfig());
 
-    // Should not throw when called before onRunStart
     await reporter.onRunComplete({
       target: makeTarget(),
       results: [],
@@ -235,7 +225,6 @@ describe("braintrustReporter", () => {
       result: { ...result.result, reply: "Not the structured output.", data: null },
     });
 
-    // Braintrust rejects a null or undefined output with "output must be specified".
     expect(braintrustMocks.log).toHaveBeenCalledWith(expect.objectContaining({ output: "" }));
   });
 

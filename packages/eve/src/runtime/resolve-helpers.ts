@@ -7,10 +7,6 @@ import {
 } from "#internal/authored-module.js";
 import type { ResolvedModuleSourceRef } from "#runtime/types.js";
 
-/**
- * Error raised when compiled artifacts cannot be hydrated into a runtime-owned
- * authored agent model.
- */
 export class ResolveAgentError extends Error {
   readonly logicalPath?: string;
   readonly sourceId?: string;
@@ -35,10 +31,6 @@ export class ResolveAgentError extends Error {
   }
 }
 
-/**
- * Builds the resolved source ref block shared by every per-primitive
- * resolver that targets a `module` source.
- */
 export function createResolvedModuleSourceRef(sourceRef: {
   readonly exportName?: string;
   readonly logicalPath: string;
@@ -52,16 +44,6 @@ export function createResolvedModuleSourceRef(sourceRef: {
   };
 }
 
-/**
- * Looks up a compiled module namespace for one resolved agent node and
- * returns the materialized exported value referenced by the given
- * compiled definition.
- *
- * Throws {@link ResolveAgentError} when the module map does not contain
- * the expected source — every per-primitive resolver shares this
- * lookup, so the helper centralizes the error message and avoids
- * duplicating ~25 lines of boilerplate per resolver.
- */
 export async function loadResolvedModuleExport(input: {
   readonly definition: {
     readonly exportName?: string;

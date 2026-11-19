@@ -1,5 +1,3 @@
-// The unions of every fact and progress type. Types only.
-
 import type { CallFact, CallProgressRecord } from "./families/call.js";
 import type { ChildFact } from "./families/child.js";
 import type { ContentFact, ContentProgress } from "./families/content.js";

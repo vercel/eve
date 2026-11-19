@@ -23,7 +23,6 @@ import { emptySessionView, foldReceivedEvent } from "#protocol/session-projectio
 import { idle, waiting } from "#protocol/session-projection/selectors.js";
 import { sessionTables } from "#protocol/session-projection/session-view.js";
 
-/** What a v27 reader reads from stored v26 records, with the checker's verdict on every line. */
 function read(records: readonly unknown[]) {
   const history = createV26HistoryReader();
   const checker = createStreamChecker();
@@ -39,7 +38,6 @@ function read(records: readonly unknown[]) {
   return { events: read, violations };
 }
 
-/** A message as a person sees it: who wrote it, the text, and each call with its outcome. */
 function shown(message: EveMessage): string {
   const parts = message.parts.flatMap((part) => {
     switch (part.type) {
@@ -60,11 +58,9 @@ function shown(message: EveMessage): string {
 }
 
 describe("createV26HistoryReader", () => {
-  // The expected messages are what v27 shows for the same conversation recorded by v27.
   it("reads a v26 conversation as v27 records it, without breaking a lifecycle rule", () => {
     const { events, violations } = read(KITCHEN_SINK);
     expect(violations).toEqual([]);
-    // A clear hides what came before it, so the turns before it read from the stream up to it.
     const clear = events.findIndex(
       (event) => event.type === "context.settled" && event.data.selects === null,
     );
@@ -100,7 +96,6 @@ describe("createV26HistoryReader", () => {
       "assistant: Echo: hello after compact",
     ]);
     expect(idle(sessionTables(state.view))).toBe(true);
-    // A transcript starts over at the clear, as v27's does.
     expect(transcriptOf(events).messages.map(({ text }) => text)).toEqual([
       "hello after clear",
       "Echo: hello after clear",
@@ -164,7 +159,6 @@ describe("createV26HistoryReader", () => {
   });
 
   it("reads the end a v27 deployment appends to a stranded v26 session as it was written", () => {
-    // What a v27 deployment writes when Alice resets the session Bob left waiting on an approval.
     const recorded = emptySessionView();
     for (const event of read(PENDING_APPROVAL).events) foldReceivedEvent(recorded, event);
     const ended: SessionEvent = {
@@ -184,6 +178,211 @@ describe("createV26HistoryReader", () => {
     expect(Object.values(tables.interactions).map((row) => row.status)).toEqual(["settled"]);
   });
 
+  it("keeps the trace context each v26 turn recorded, and drops a malformed one", () => {
+    const at = "2026-10-01T00:00:00.000Z";
+    const trace = { spanId: "b7ad6b7169203331", traceFlags: 1, traceId: "0af7651916cd43dd" };
+    const turn = (sequence: number, extra: object) => [
+      {
+        data: { sequence, turnId: `turn_${String(sequence)}`, ...extra },
+        meta: { at },
+        type: "turn.started",
+      },
+      {
+        data: { message: "Bob asks.", sequence, turnId: `turn_${String(sequence)}` },
+        meta: { at },
+        type: "message.received",
+      },
+      {
+        data: { sequence, turnId: `turn_${String(sequence)}` },
+        meta: { at },
+        type: "turn.completed",
+      },
+    ];
+    const { events, violations } = read([
+      { data: {}, meta: { at }, type: "session.started" },
+      ...turn(0, { trace }),
+      ...turn(1, {}),
+      ...turn(2, { trace: { spanId: 7, traceId: "x" } }),
+    ]);
+    expect(violations).toEqual([]);
+    const started = events.filter((event) => event.type === "turn.started");
+    expect(started.map((event) => event.data.trace)).toEqual([trace, undefined, undefined]);
+  });
+
+  describe("a question an agent task's child asks", () => {
+    const at = "2026-10-01T00:00:00.000Z";
+    const child = "wrun_child";
+    const asked = {
+      callId: "child-ask",
+      input: { question: "Which color?" },
+      name: "ask_question",
+    };
+    const step = (turn: number, extra: object) => ({
+      sequence: turn,
+      stepIndex: 0,
+      turnId: `turn_${String(turn)}`,
+      ...extra,
+    });
+    const delegate = (turn: number, callId: string, opensChild: boolean) => [
+      { data: step(turn, {}), meta: { at }, type: "turn.started" },
+      {
+        data: step(turn, { message: "Delegate to the helper." }),
+        meta: { at },
+        type: "message.received",
+      },
+      { data: step(turn, { modelId: "m" }), meta: { at }, type: "step.started" },
+      {
+        data: step(turn, {
+          actions: [{ callId, input: { message: "Help." }, kind: "subagent-call", name: "helper" }],
+        }),
+        meta: { at },
+        type: "actions.requested",
+      },
+      { data: step(turn, { finishReason: "tool-calls" }), meta: { at }, type: "step.completed" },
+      {
+        data: {
+          callId,
+          kind: "agent",
+          name: "helper",
+          taskId: "helper-1",
+          turnId: `turn_${String(turn)}`,
+        },
+        meta: { at },
+        type: "task.started",
+      },
+      ...(opensChild
+        ? [
+            {
+              data: {
+                callId,
+                name: "helper",
+                sessionId: child,
+                taskId: "helper-1",
+                turnId: `turn_${String(turn)}`,
+              },
+              meta: { at },
+              type: "agent.started",
+            },
+          ]
+        : []),
+    ];
+    const question = (turn: number, names: { callId?: string; taskId?: string }) => ({
+      data: {
+        ...names,
+        requests: [
+          {
+            action: {
+              callId: asked.callId,
+              input: asked.input,
+              kind: "tool-call",
+              toolName: asked.name,
+            },
+            kind: "question",
+            prompt: "Which color?",
+            requestId: `${child}-ask-${String(turn)}`,
+          },
+        ],
+        turnId: `turn_${String(turn)}`,
+      },
+      meta: { at },
+      type: "input.requested",
+    });
+    const finish = (turn: number) => ({
+      data: { sequence: turn, turnId: `turn_${String(turn)}` },
+      meta: { at },
+      type: "turn.completed",
+    });
+    const opened = (records: readonly unknown[]) => {
+      const { events, violations } = read([
+        { data: {}, meta: { at }, type: "session.started" },
+        ...records,
+      ]);
+      expect(violations).toEqual([]);
+      return events.flatMap((event) => (event.type === "interaction.opened" ? [event.data] : []));
+    };
+    const origin = (turn: number) => ({
+      call: asked,
+      interactionId: `${child}-ask-${String(turn)}`,
+      sessionId: child,
+    });
+
+    it("is about the task, and names the child's call it asks about", () => {
+      expect(opened([...delegate(0, "call-1", true), question(0, { taskId: "helper-1" })])).toEqual(
+        [expect.objectContaining({ origin: origin(0), subject: { taskId: "helper-1" } })],
+      );
+    });
+
+    it("keeps the serving call as the subject of a relayed question, with the same origin", () => {
+      expect(
+        opened([
+          ...delegate(0, "call-1", true),
+          question(0, { callId: "call-1", taskId: "helper-1" }),
+        ]),
+      ).toEqual([expect.objectContaining({ origin: origin(0), subject: { callId: "call-1" } })]);
+    });
+
+    it("names the child of a task a later turn continued through a new call", () => {
+      const earlier = [...delegate(0, "call-1", true), finish(0)];
+      expect(
+        opened([...earlier, ...delegate(1, "call-2", false), question(1, { taskId: "helper-1" })]),
+      ).toEqual([expect.objectContaining({ origin: origin(1), subject: { taskId: "helper-1" } })]);
+      expect(
+        opened([...earlier, ...delegate(1, "call-2", false), question(1, { callId: "call-2" })]),
+      ).toEqual([expect.objectContaining({ origin: origin(1), subject: { callId: "call-2" } })]);
+    });
+
+    it("does not clear a subagent call with the approval its child relayed", () => {
+      const subagentCall = delegate(0, "call-1", true).filter(
+        (record) => record.type !== "task.started",
+      );
+      const approval = {
+        action: { callId: "child-gate", input: {}, kind: "tool-call", toolName: "gate" },
+        kind: "tool-approval",
+        options: [{ id: "approve", label: "Approve" }],
+        prompt: "Approve Gate?",
+        requestId: "child-approval",
+      };
+      const { events, violations } = read([
+        { data: {}, meta: { at }, type: "session.started" },
+        ...subagentCall,
+        {
+          data: step(0, { callId: "call-1", requests: [approval] }),
+          meta: { at },
+          type: "input.requested",
+        },
+        {
+          data: step(0, {
+            resolutions: [{ outcome: "approved", requestId: "child-approval", response: {} }],
+          }),
+          meta: { at },
+          type: "input.resolved",
+        },
+        {
+          data: step(0, {
+            result: { callId: "call-1", kind: "tool-result", output: "Done.", toolName: "helper" },
+            status: "completed",
+          }),
+          meta: { at },
+          type: "action.result",
+        },
+      ]);
+      expect(violations).toEqual([]);
+      const started = events.find(
+        (event) => event.type === "call.started" && event.data.callId === "call-1",
+      );
+      expect(started?.data).not.toHaveProperty("clearedBy");
+    });
+
+    it("writes no origin for the agent's own question", () => {
+      const [own] = opened([
+        ...delegate(0, "call-1", true),
+        { ...question(0, {}), data: { ...question(0, {}).data, callId: asked.callId } },
+      ]);
+      expect(own).toMatchObject({ subject: { turnId: "turn_0" } });
+      expect(own).not.toHaveProperty("origin");
+    });
+  });
+
   it("reads nothing from a record that isn't a line", () => {
     expect(createV26HistoryReader().read("not a record", 0)).toBeUndefined();
   });
@@ -199,9 +398,7 @@ describe("v26LineStream", () => {
     });
     const out: unknown[] = [];
     for await (const value of v26LineStream(records, 5)) out.push(value);
-    // One output per stored record from the cursor on, so positions keep counting stored lines.
     expect(out).toHaveLength(KITCHEN_SINK.length - 5);
-    // The first session.waiting reads as no line: the turn before it already settled.
     expect(out[8 - 5]).toEqual({ $eve: "position", next: 9 });
   });
 });
@@ -224,7 +421,6 @@ describe("convertLegacyEvents", () => {
   });
 
   it("leaves events saved mid-turn unfinished, at the positions they were stored", () => {
-    // Saved while the second turn streamed its reply: the last event is a delta.
     const delta = {
       data: { messageDelta: "It is", sequence: 1, stepIndex: 0, turnId: "turn_1" },
       meta: { at: "2026-10-01T00:00:00.000Z" },
@@ -233,7 +429,6 @@ describe("convertLegacyEvents", () => {
     const saved = [...KITCHEN_SINK.slice(0, 13), delta];
     const events = convertLegacyEvents(saved);
     const lines = events.map((event) => event.meta.position.line);
-    // Each event keeps its stored line; the trailing delta reads as none, so the last is earlier.
     expect(lines).toEqual(lines.toSorted((a, b) => a - b));
     expect(lines.at(-1)).toBe(12);
     expect(events.at(-1)?.meta.next).toBe(saved.length);

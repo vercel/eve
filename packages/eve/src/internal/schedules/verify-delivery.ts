@@ -15,7 +15,6 @@ const queueMessageSchema = z.looseObject({
       collection: referenceSchema,
       version: z.literal(1),
     }),
-    // The common occurrence dispatcher owns validation of the inner eve envelope.
     payload: z.unknown(),
   }),
   scheduleId: referenceSchema,

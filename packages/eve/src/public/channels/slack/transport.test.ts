@@ -51,7 +51,6 @@ describe("the fetch resolveSlackTransportOptions returns", () => {
     vi.unstubAllGlobals();
   });
 
-  /** Records which transport a URL travelled on. */
   function transports(api: Parameters<typeof resolveSlackTransportOptions>[0]) {
     const seen: string[] = [];
     const supplied = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
@@ -74,8 +73,6 @@ describe("the fetch resolveSlackTransportOptions returns", () => {
 
   it("leaves a host the stand-in names on the global fetch", async () => {
     const { seen, fetch: confined } = transports({ apiBaseUrl: "https://sim.example/api" });
-    // The `upload_url` from `files.getUploadURLExternal` and a `url_private` download
-    // are addressed by data, so a credential-attaching wrapper must not see them.
     await confined?.("https://files.slack.com/upload/abc");
     await confined?.(new Request("https://attacker.example/steal"));
     expect(seen).toEqual([
@@ -96,8 +93,6 @@ describe("the fetch resolveSlackTransportOptions returns", () => {
   it("leaves Slack's own host alone when only a file base is configured", async () => {
     const { seen, fetch: confined } = transports({ fileBaseUrl: "https://sim.example/files" });
     await confined?.("https://sim.example/files/F01/cat.png");
-    // apiBaseUrl was never configured, so slack.com is not a host the wrapper
-    // was given a credential for.
     await confined?.("https://slack.com/api/chat.postMessage");
     expect(seen).toEqual([
       "supplied https://sim.example/files/F01/cat.png",

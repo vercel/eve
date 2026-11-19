@@ -15,7 +15,6 @@ export function parseConnectPrincipalType(value: string): ConnectPrincipalType {
   throw new InvalidArgumentError('Expected principal type "app" or "user".');
 }
 
-/** Registers built-in integration setup commands used by trusted registry items. */
 export function registerIntegrationCommands(input: {
   program: Command;
   logger: IntegrationCommandLogger;

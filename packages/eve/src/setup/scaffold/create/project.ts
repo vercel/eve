@@ -26,16 +26,8 @@ export { DEFAULT_CONNECT_PACKAGE_VERSION } from "../version-tokens.js";
 export const DEFAULT_ZOD_PACKAGE_VERSION = "__ZOD_VERSION__";
 const DEFAULT_TYPESCRIPT_PACKAGE_VERSION = "__TYPESCRIPT_VERSION__";
 
-/**
- * The eve package metadata that generated projects consume together. Keeping
- * the dependency version and Node.js requirement in one value prevents a
- * scaffold from installing one eve release while declaring another release's
- * runtime contract.
- */
 export interface EvePackageContract {
-  /** eve dependency version or npm specifier written to the generated package. */
   version: string;
-  /** The matching eve release's authored `package.json` `engines.node` value. */
   nodeEngine: string;
 }
 
@@ -44,7 +36,6 @@ export const DEFAULT_EVE_PACKAGE_CONTRACT: EvePackageContract = {
   nodeEngine: "__NODE_ENGINE__",
 };
 
-/** Resolves a stamped or explicitly supplied eve package contract. */
 export function resolveEvePackageContract(
   contract: EvePackageContract = DEFAULT_EVE_PACKAGE_CONTRACT,
 ): EvePackageContract {
@@ -67,25 +58,11 @@ interface TemplateContext {
   nodeEngine: string;
 }
 
-/**
- * Provider slug a gateway model id routes through: the segment before the
- * first "/" (e.g. `anthropic/claude-sonnet-5` → `anthropic`). The slug is
- * injected into generated source, so characters outside the catalog's slug
- * alphabet are dropped; an id without a usable prefix falls back to
- * `anthropic`.
- */
 export function modelProviderSlug(modelId: string): string {
   const provider = (modelId.split("/")[0] ?? "").replaceAll(/[^A-Za-z0-9._-]/gu, "");
   return provider.length > 0 ? provider : "anthropic";
 }
 
-/**
- * Env var the byok scaffold reads the provider API key from, derived from the
- * model's provider slug (e.g. `anthropic/...` → `ANTHROPIC_API_KEY`). The name
- * is the scaffold's convention: the key is passed to the gateway `byok` block
- * explicitly, so users can rename it freely. Non-alphanumerics fold to `_`
- * and a leading digit is prefixed, keeping `process.env.<name>` valid source.
- */
 export function byokProviderEnvVar(modelId: string): string {
   const name = modelProviderSlug(modelId)
     .toUpperCase()
@@ -93,11 +70,6 @@ export function byokProviderEnvVar(modelId: string): string {
   return `${/^[0-9]/.test(name) ? "_" : ""}${name}_API_KEY`;
 }
 
-/**
- * The files that define the agent itself, rendered for `model`. This is the
- * subset `eve init` writes when adding an agent to an existing project, where
- * everything outside `agent/` belongs to the host app.
- */
 export function agentTemplateFiles(
   model: string,
   reasoning?: AgentReasoningDefinition,
@@ -161,12 +133,6 @@ export default defineAgent({
 __EVE_INIT_REASONING__});
 `;
 
-// The agent reaches the model through a provider key the user supplies via the
-// gateway `byok` block, not the managed Vercel AI Gateway. The provider and
-// env var are derived from the chosen model's provider prefix; the key is
-// quoted because provider slugs (e.g. hyphenated ones) need not be valid
-// identifiers. The `process.env` access is typed by `@types/node`, which every
-// scaffold ships (see `packageJsonTemplate`).
 const BYOK_AGENT_TEMPLATE = `import { defineAgent } from "eve";
 
 export default defineAgent({
@@ -215,7 +181,6 @@ function packageJsonTemplate(includeRootOnlyFields: boolean): string {
 `;
 }
 
-/** Trailing fields only written when the scaffold is not a workspace member. */
 export const ROOT_ONLY_PACKAGE_JSON_TEMPLATE_SUFFIX = `,
   "engines": {
     "node": "__EVE_INIT_NODE_ENGINE__"
@@ -285,8 +250,6 @@ dist
 .DS_Store
 *.tsbuildinfo
 `,
-  // Vercel's CLI ignores .env.local and .env.*.local by default, but NOT a
-  // bare .env — without the explicit pattern a source deploy uploads it.
   ".vercelignore": `node_modules
 .env*
 .eve
@@ -316,6 +279,8 @@ Use a bounded authoring loop:
 3. Run one narrow verification. Expand investigation only when it fails or the request needs project-specific details.
 
 Follow links or inspect public types only when the routed page leaves the task unanswered. Do not recursively glob \`node_modules\`, enumerate the entire docs tree, or read unrelated scaffold files when the direct path is known. Package-manager links can hide files from recursive glob tools even though direct reads work.
+
+Keep the bundle small: import SDK clients inside the functions that use them, and keep one version of each dependency. See \`docs/guides/deployment/index.md#keep-the-bundle-small\`.
 
 ## Prefer an existing integration
 
@@ -389,11 +354,6 @@ export interface ScaffoldBaseProjectOptions {
   projectName: string;
   model: string;
   reasoning?: AgentReasoningDefinition;
-  /**
-   * The manager that owns command execution and manager-specific generated
-   * project files for this scaffold.
-   * Defaults to pnpm.
-   */
   packageManager?: PackageManagerKind;
   targetDirectory?: string;
   overwriteExisting?: boolean;
@@ -403,18 +363,8 @@ export interface ScaffoldBaseProjectOptions {
   connectPackageVersion?: string;
   zodPackageVersion?: string;
   typescriptPackageVersion?: string;
-  /**
-   * Final project path used to discover ancestor workspaces. This differs from
-   * the write target only when the CLI stages a scaffold before moving it into
-   * place.
-   */
   workspaceProbeDirectory?: string;
   onWorkspaceRootMutation?: (mutation: WorkspaceRootMutation) => void | Promise<void>;
-  /**
-   * Scaffold an inline provider `byok` block in `agent.ts` that reads the
-   * provider key from `process.env` instead of relying on the managed Vercel
-   * AI Gateway. `process` is typed by the `@types/node` every scaffold ships.
-   */
   byokProvider?: boolean;
 }
 
@@ -444,9 +394,6 @@ export async function scaffoldBaseProject(options: ScaffoldBaseProjectOptions): 
       "aiPackageVersion",
       options.aiPackageVersion ?? DEFAULT_AI_PACKAGE_VERSION,
     ),
-    // Channels and connections scaffolded later (`eve add channel/slack`,
-    // possibly while `eve dev` is running) import `@vercel/connect`; shipping
-    // it from init means adding them never introduces a missing dependency.
     connectPackageVersion: resolveVersionToken(
       "connectPackageVersion",
       options.connectPackageVersion ?? DEFAULT_CONNECT_PACKAGE_VERSION,
@@ -501,9 +448,7 @@ export async function isEveProject(projectRoot: string): Promise<boolean> {
     try {
       await stat(join(projectRoot, "agent", `agent${extension}`));
       return true;
-    } catch {
-      // Continue trying the other authored module extensions.
-    }
+    } catch {}
   }
   return false;
 }

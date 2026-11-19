@@ -14,8 +14,8 @@ export interface DevelopmentCliOptions {
   header?: DevelopmentRequestHeaders;
   host?: string;
   input?: string;
-  /** Internal fresh-agent handoff from `eve init`. */
   onboard?: boolean;
+  onboarded?: boolean;
   logs?: LogDisplayMode;
   name?: string;
   port?: number;
@@ -32,3 +32,7 @@ export interface ProductionCliOptions {
   port?: number;
   schedules?: boolean;
 }
+
+export const EVE_INIT_INPUT_ENV = "EVE_INIT_INPUT";
+
+export const EVE_INIT_QUEUED_INPUT_ENV = "EVE_INIT_QUEUED_INPUT";

@@ -9,6 +9,7 @@ import type { SessionEvent } from "#protocol/session-event.js";
 import { parseSlackWebhookBody } from "#compiled/@chat-adapter/slack/webhook.js";
 
 import type { MessageContent } from "#shared/message-content.js";
+import { startsNewAddress, type StartsNewAddressOption } from "#channel/channel-address.js";
 import { toSessionSendOptions, type SessionSendOptions } from "#channel/session.js";
 import type { GenericReceiveInput } from "#shared/channel-definition.js";
 import type {
@@ -31,7 +32,6 @@ import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
 import { maxBytesOf } from "#internal/attachments/limited-read.js";
 import { createLogger, logError } from "#internal/logging.js";
-import { attachInputText } from "#internal/input-text.js";
 import type { Answer, StrictAnswers, ValidatedAnswer } from "#shared/input.js";
 import type { Interaction } from "#channel/interaction-prompts.js";
 import {
@@ -104,7 +104,10 @@ import {
   formatSlackThreadContext,
   slackThreadSessionHistory,
 } from "#public/channels/slack/model-context.js";
-import { isPrivateSlackConversation } from "#public/channels/slack/privacy.js";
+import {
+  readSlackConversationKind,
+  type SlackConversationKind,
+} from "#public/channels/slack/privacy.js";
 import {
   createSlackUserResolver,
   resolveSlackUsers,
@@ -138,6 +141,12 @@ import {
 } from "#public/channels/undelivered-reply.js";
 import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
 import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
+import type {
+  ConversationSpaceType,
+  ConversationSpaceVisibility,
+} from "#shared/conversation-context.js";
+import { slackConversationSpace } from "#public/channels/slack/space.js";
+import { sessionTables } from "#protocol/session-projection/session-view.js";
 import { markEventHandled } from "./utils.js";
 
 export type {
@@ -239,11 +248,12 @@ export interface SlackInteractionCardRequest {
 export interface SlackInteractionCardRecord {
   /** The message's conversation: the session's channel, or the reviewer's DM. */
   readonly channelId: string;
+  /** The message's `ts`. An ephemeral's identifies it but can't be edited. */
   readonly ts: string;
   readonly destination: SlackApprovalChannel;
-  /** The session a card's controls answer back to: a direct message's thread, or a code channel. */
+  /** The session a card's controls answer back to: a private request's thread, or a code channel. */
   readonly route?: SlackHitlRoute;
-  /** Thread post announcing a direct-message request; updated with the outcome. */
+  /** Thread post announcing a private request; updated with the outcome. */
   readonly announcementTs?: string;
   readonly requests: readonly SlackInteractionCardRequest[];
 }
@@ -258,6 +268,10 @@ export interface SlackChannelState extends UndeliveredReplyState {
   audience?: ChannelAudience;
   /** Slack channel id seeded by the inbound mention. */
   channelId: string | null;
+  /** The conversation's space type, read from the inbound event's `channel_type`. */
+  spaceType?: ConversationSpaceType;
+  /** Whether the conversation is public or private, when Slack said. */
+  spaceVisibility?: ConversationSpaceVisibility;
   /** Slack thread root ts; `null` in a code channel, which is one session across its threads. */
   threadTs: string | null;
   /** Whether this session serves a Slack code channel. */
@@ -328,6 +342,13 @@ export interface SlackChannelState extends UndeliveredReplyState {
    * @internal
    */
   pendingAuthMessageTs?: Record<string, string>;
+  /**
+   * Sign-in interaction id to the prompt the default sign-in `interaction.opened` handler sent as
+   * a direct message, because the session had no thread to hold a public status. The matching
+   * sign-in `interaction.settled` handler edits it in place to surface the resolution outcome.
+   * @internal
+   */
+  pendingAuthDirectMessages?: Record<string, { readonly channelId: string; readonly ts: string }>;
   /**
    * @internal The messages holding open or recently answered approvals, questions, and budget prompts.
    * Each is updated as its requests change and forgotten once all of them settle. eve ignores
@@ -615,6 +636,10 @@ export interface SlackAnswerContext extends SlackContext {
   readonly defaultAuth: SessionAuthContext;
 }
 
+/**
+ * One action from a Slack interactive payload, such as a button click or select choice, passed to
+ * `onInteraction`.
+ */
 export interface SlackInteractionAction {
   readonly actionId: string;
   readonly value?: string;
@@ -643,6 +668,13 @@ export interface SlackInteractionAction {
    * "answered" card without re-fetching the original request.
    */
   readonly label?: string;
+  /**
+   * Slack `response_url` of the click. POST to it to replace or delete the
+   * message hosting the component, for example `{ delete_original: true }`.
+   * It is the only way to change an ephemeral message, which `chat.update`
+   * and `chat.delete` can't reach.
+   */
+  readonly responseUrl?: string;
   /**
    * Slack actor who triggered the interaction, letting `onInteraction`
    * handlers attribute resolutions back to the clicker without re-parsing
@@ -770,14 +802,6 @@ export type SlackMentionResult = {
  */
 export type SlackInboundResult = SlackMentionResult;
 
-/** {@link SlackInboundResult}, or a promise resolving to one. */
-
-/**
- * eve's full-context Slack event handlers: the innermost link of every
- * channel's renderer chain. The default sign-in `interaction.opened` handler keeps
- * the full {@link SlackEventContext} because it owns the public link-free
- * status, which authored renderers, limited to private delivery, can't post.
- */
 export type SlackChannelInternalEvents = {
   readonly [T in SlackRenderedEvent]?: SlackEventHandler<T>;
 } & {
@@ -787,7 +811,11 @@ export type SlackChannelInternalEvents = {
   ) => void | Promise<void>;
 };
 
-export type SlackApprovalChannel = "direct-message" | "thread";
+/**
+ * Where an input request appears: the shared `"thread"`, or only for the Slack user who
+ * triggered the turn, in their `"direct-message"` or as an `"ephemeral"` message in the thread.
+ */
+export type SlackApprovalChannel = "direct-message" | "ephemeral" | "thread";
 
 /** Input request passed to a {@link SlackApprovalChannelResolver}. */
 export type SlackApprovalRequest = Interaction;
@@ -798,6 +826,10 @@ export type SlackApprovalChannelResolver = (
   ctx: SessionContext,
 ) => SlackApprovalChannel | Promise<SlackApprovalChannel>;
 
+/**
+ * Options for {@link slackChannel}: credentials, routing, message and interaction hooks, and
+ * rendering overrides.
+ */
 export interface SlackChannelConfig {
   /** Slack API transport overrides: base URLs and a custom fetch. */
   readonly api?: SlackTransportOptions;
@@ -805,9 +837,9 @@ export interface SlackChannelConfig {
   readonly botName?: string;
 
   /**
-   * Chooses where each input request is delivered. Direct-message requests go to the
-   * Slack user who triggered the active turn; the session thread names that reviewer
-   * without exposing the request. Defaults to `"thread"` when omitted.
+   * Chooses where each input request is delivered. Direct-message and ephemeral requests
+   * go only to the Slack user who triggered the active turn; the session thread names that
+   * reviewer without exposing the request. Defaults to `"thread"` when omitted.
    */
   readonly approvalChannel?: SlackApprovalChannelResolver;
 
@@ -1051,7 +1083,6 @@ function rebuildSlackContext(
     channelId: state.channelId ?? "",
     threadTs: state.threadTs ?? "",
     codeChannel: state.codeChannel === true,
-    // Read at post time: `deliver` may move replies to a new thread after the context is built.
     replyThreadTs: () => state.replyThreadTs ?? undefined,
     installationTeamId: state.installationTeamId ?? undefined,
     teamId: state.teamId ?? undefined,
@@ -1122,7 +1153,6 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
         if (triggeringUserId !== undefined) {
           channel.state.triggeringUserId = triggeringUserId;
         }
-        // A message folded into a running turn doesn't move that turn's replies.
         if (channel.state.pendingReplyThreadTs !== undefined) {
           channel.state.replyThreadTs = channel.state.pendingReplyThreadTs;
           channel.state.pendingReplyThreadTs = undefined;
@@ -1132,8 +1162,10 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
         await renderTurnStarted?.(event, ctx);
       },
       async "call.settled"(event, ctx) {
-        // A quiet turn shows its work once a tool call finishes; `no_reply` ends it first.
-        ctx.channel.state.quietStatus = null;
+        const settled = sessionTables(ctx.view).calls[event.data.callId];
+        if (settled === undefined || settled.capability.hidden !== true) {
+          ctx.channel.state.quietStatus = null;
+        }
         await renderCallSettled?.(event, ctx);
       },
       async "turn.settled"(event, ctx) {
@@ -1145,8 +1177,6 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     rendering.taskCard,
   );
 
-  // Set of events we've already handled on this process.
-  // Light weight dedup mechanism - not reliable across multiple invocations.
   const handledEvents = new Set<string>();
 
   const channel = defineChannel<
@@ -1176,21 +1206,18 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
         teamId: state.teamId,
         threadTs: state.threadTs,
         triggeringUserId: state.triggeringUserId ?? null,
-        // Unlisted in SlackInstrumentationMetadata, so not public API: openCodeChannel() locates
-        // the conversation with these whatever auth the session runs as.
         installationTeamId: state.installationTeamId ?? null,
         triggeringMessageTs: state.triggeringMessageTs ?? null,
         ...(state.codeChannel === true && { codeChannel: true }),
       };
     },
     audience: ({ state }) => state.audience ?? "unknown",
+    space: ({ state }) => slackConversationSpace(state),
 
     context(state, session) {
       return rebuildSlackContext(state, session, api, config.credentials);
     },
 
-    // The runtime hands `deliver` the full adapter context; `session.auth.current`
-    // is the caller of this delivery.
     deliver(
       payload,
       channel: SlackChannelContext & { readonly session: ChannelContext["session"] },
@@ -1266,23 +1293,15 @@ function defaultOnAnswers(ctx: SlackAnswerContext): SlackAnswerResult {
   return { auth: ctx.defaultAuth };
 }
 
-/**
- * Shared proactive Slack receive path used by both the channel's public
- * `receive` hook and the pre-bound `send` function exposed to `onEvent`.
- */
 async function receiveOnSlack(
   input: GenericReceiveInput<SlackReceiveTarget>,
   deps: {
     readonly from: ChannelFrom<SlackChannelState>;
     readonly api: SlackTransportOptions | undefined;
-    /** Whether `slackChannel({ codeChannels: true })` enabled code channels. */
     readonly codeChannels: boolean;
     readonly credentials: SlackChannelCredentials | undefined;
-    /** Installation workspace inherited from an inbound trigger. */
     readonly installationTeamId?: string;
-    /** Slack team id seeded into session state, when the trigger carried one. */
     readonly teamId?: string;
-    /** Slack user id seeded into session state, when the trigger carried one. */
     readonly triggeringUserId?: string;
   },
 ): Promise<Delivery> {
@@ -1332,7 +1351,6 @@ async function receiveOnSlack(
       installationTeamId,
       teamId: deps.teamId,
     });
-    // Upload-only posts return a file ID, not a message ts; always anchor the root first.
     const { files, ...rootMessage } = initialMessage;
     const posted = await thread.post(rootMessage);
     threadTs = posted.id;
@@ -1345,9 +1363,6 @@ async function receiveOnSlack(
     }
   }
 
-  // Threadless proactive runs need distinct identities until their first
-  // Slack post supplies the real thread timestamp and aliases the session.
-  // A keyed send derives its identity from the key, so a retry finds its session.
   const continuationThreadTs =
     threadTs ||
     (send.idempotencyKey === undefined
@@ -1384,7 +1399,6 @@ function threadlessIdentityFromKey(idempotencyKey: string): string {
   return `key-${createHash("sha256").update(idempotencyKey).digest("hex").slice(0, 32)}`;
 }
 
-/** Opens a code channel from the origin message and starts its one session. */
 async function receiveInNewCodeChannel(
   input: Parameters<typeof receiveOnSlack>[0],
   deps: Parameters<typeof receiveOnSlack>[1],
@@ -1411,19 +1425,12 @@ async function receiveInNewCodeChannel(
     teamId: deps.teamId,
     triggeringUserId: deps.triggeringUserId ?? slackUserIdFromAuthContext(input.auth),
   });
-  // A session someone already started in the channel gets the history too, so
-  // a repeated call delivers it twice rather than an early message losing it.
   const { message, target: _target, ...send } = input;
   return await deps
     .from(opened.address)
     .send(message, { ...send, auth: opened.auth, state: opened.state });
 }
 
-/**
- * Opens a Slack code channel from a message and returns what its one session
- * needs: the address, the state, and the auth moved into the channel. Both
- * `target.codeChannel` and `ctx.openCodeChannel()` open through it.
- */
 async function openSlackCodeChannel(input: {
   readonly auth: SessionAuthContext | null;
   readonly installationTeamId: string | undefined;
@@ -1451,7 +1458,6 @@ async function openSlackCodeChannel(input: {
     auth: codeChannelAuth(input.auth, channelId),
     channelId,
     state: {
-      // The channel has the origin's privacy, which eve checked before copying anything.
       audience: isPrivate ? "private" : "public",
       channelId,
       codeChannel: true,
@@ -1464,13 +1470,11 @@ async function openSlackCodeChannel(input: {
   };
 }
 
-/** The origin's Slack auth, moved to the code channel, so the session knows where it runs. */
 function codeChannelAuth(
   auth: SessionAuthContext | null,
   codeChannelId: string,
 ): SessionAuthContext | null {
   if (auth?.authenticator !== "slack-webhook") return auth;
-  // A code channel session has no thread of its own.
   const { thread_ts: _threadTs, ...attributes } = auth.attributes;
   return {
     ...auth,
@@ -1483,12 +1487,6 @@ function shouldDropSlackHttpTimeoutRetry(headers: Headers): boolean {
   return retryNum >= 1 && headers.get("x-slack-retry-reason") === "http_timeout";
 }
 
-/**
- * Handles an inbound non-interactivity Slack POST: parses the JSON envelope,
- * answers URL verification, selects one authored specific handler, generic
- * fallback, or built-in message default, and schedules it under `waitUntil`.
- * Returns `200 OK` in every case because Slack only requires an immediate ACK.
- */
 async function handleEventPost(input: {
   readonly api: SlackTransportOptions | undefined;
   readonly body: string;
@@ -1526,8 +1524,6 @@ async function handleEventPost(input: {
   const receivingBotUserId = slackEventReceivingBotUserId(envelope);
   const installationTeamId = slackEventInstallationTeamId(envelope);
 
-  // Slack requires an agent to stop when a person stops a code channel session.
-  // The stop names the channel, or a thread in it; both are the channel's one session.
   const stopped = envelope.event;
   const stoppedChannelId = stopped.channel;
   if (
@@ -1535,7 +1531,6 @@ async function handleEventPost(input: {
     stopped.type === "agent_session_stopped" &&
     typeof stoppedChannelId === "string"
   ) {
-    // A redelivered stop must not cancel a turn that started after the first one.
     if (isDuplicateEvent(envelope, payload.retry, input.handledEvents)) {
       return new Response("ok");
     }
@@ -1548,7 +1543,6 @@ async function handleEventPost(input: {
     const onEvent = config.onEvent;
     input.waitUntil(
       (async () => {
-        // A threaded stop needs the code channel lookup, which must not hold Slack's ack.
         if (
           stopped.thread_ts !== undefined &&
           !(await isSlackCodeChannel(stoppedChannelId, workspaceRequest))
@@ -1566,8 +1560,6 @@ async function handleEventPost(input: {
           });
           return;
         }
-        // A turn that died without ending leaves the status at `processing`, which
-        // never times out, so stop must still reset it.
         if (!(await cancelledARunningTurn(input.from, stoppedChannelId))) {
           await setSlackCodeChannelStatus(workspaceRequest, stoppedChannelId, "active");
         }
@@ -1580,11 +1572,6 @@ async function handleEventPost(input: {
     return new Response("ok");
   }
 
-  // Handler precedence, in fall-through order:
-  // 1) an authored mention/DM/edit handler for its own event kind,
-  // 2) an authored generic `onEvent` fallback,
-  // 3) the built-in mention/DM defaults, and the default edit hook, which runs the message hook
-  //    a new message of the same kind would reach.
   let dispatch: (() => Promise<void>) | null = null;
   let builtinDefault: (() => Promise<void>) | null = null;
 
@@ -1602,8 +1589,6 @@ async function handleEventPost(input: {
     kind,
     message,
     received: input.received,
-    // A typed reply would bypass a custom `onAnswers` and could answer
-    // a request `approvalChannel` sent privately, so either one disables it.
     resolvesTypedInput: config.onAnswers === undefined && config.approvalChannel === undefined,
     threadContext: config.threadContext,
     uploadPolicy: input.uploadPolicy,
@@ -1646,8 +1631,6 @@ async function handleEventPost(input: {
   if (dispatch === null && onMessage !== undefined) {
     const message = parseMessageEvent(envelope);
     if (message !== null && !isSelfAuthoredSlackMessage({ appId, botUserId }, message)) {
-      // Slack also emits message.channels for an app mention. The app_mention
-      // callback owns that user action so the generic message is not duplicated.
       if (botUserId === undefined || !message.text.includes(`<@${botUserId}`)) {
         dispatch = dispatchMessage("channel_message", message, onMessage);
       }
@@ -1670,9 +1653,6 @@ async function handleEventPost(input: {
             installationTeamId,
           });
 
-  // Slack asks agents to answer in a code channel without a mention. Every message
-  // there is addressed to the agent, so an authored mention handler gates it. Only the
-  // lookup tells a code channel apart, so a message elsewhere falls back to `onEvent`.
   if (dispatch === null && builtinDefault === null && config.codeChannels === true) {
     const message = parseMessageEvent(envelope);
     if (
@@ -1693,8 +1673,6 @@ async function handleEventPost(input: {
     }
   }
 
-  // Specialized handlers retain their bot/subtype filters. onMessage receives
-  // newly posted messages except this app's own; onEvent is the raw fallback.
   dispatch ??= dispatchOnEvent ?? builtinDefault;
   if (dispatch === null) return new Response("ok");
 
@@ -1704,7 +1682,6 @@ async function handleEventPost(input: {
   return new Response("ok");
 }
 
-/** Whether this process already handled the event; marks it handled otherwise. */
 function isDuplicateEvent(
   envelope: SlackEventEnvelope,
   retry: { readonly num?: unknown; readonly reason?: unknown } | undefined,
@@ -1733,17 +1710,11 @@ function isSelfAuthoredSlackMessage(
     return true;
   }
 
-  // App-authored message events can omit `user`, so match Slack's app identity
-  // as a fallback. Other bots keep flowing to authored onMessage handlers.
   return identity.appId !== undefined && message.raw.app_id === identity.appId;
 }
 
 type SlackMessageKind = "app_mention" | "channel_message" | "direct_message";
 
-/**
- * Slack sends no `app_mention` for an edit, so an edit counts as one when the message mentions the
- * bot before or after it: an edit that removes the mention tells the agent it isn't wanted.
- */
 function slackEditKind(edit: SlackMessageEdit, botUserId: string | undefined): SlackMessageKind {
   if (edit.message.raw.channel_type === "im") return "direct_message";
   if (mentionsBot(edit.message.text, botUserId) || mentionsBot(edit.previousText, botUserId)) {
@@ -1756,7 +1727,6 @@ function mentionsBot(text: string | undefined, botUserId: string | undefined): b
   return botUserId !== undefined && text !== undefined && text.includes(`<@${botUserId}`);
 }
 
-/** Limits a message hook to code channels; `otherwise` serves a message posted elsewhere. */
 interface SlackCodeChannelOnly {
   readonly otherwise?: () => Promise<void>;
 }
@@ -1765,7 +1735,6 @@ async function dispatchSlackMessage(input: {
   readonly api: SlackTransportOptions | undefined;
   readonly appId: string | undefined;
   readonly botUserId: string | undefined;
-  /** Serves the message only when it was posted in a code channel. */
   readonly codeChannelOnly: SlackCodeChannelOnly | undefined;
   readonly detectCodeChannels: boolean;
   readonly receivingBotUserId: string | undefined;
@@ -1776,7 +1745,6 @@ async function dispatchSlackMessage(input: {
   readonly installationTeamId: string | undefined;
   readonly kind: SlackMessageKind;
   readonly message: SlackMessage;
-  /** Set when `message` is an edited message rather than a new one. */
   readonly edit?: SlackMessageEdit;
   readonly received: SlackRenderChain["received"];
   readonly resolvesTypedInput: boolean;
@@ -1801,13 +1769,9 @@ async function dispatchSlackMessage(input: {
       input.userResolver === undefined
         ? Promise.resolve(input.message)
         : withSlackUserInfo(input.message, input.userResolver, userLookup));
-  // Mentions and DMs are addressed to the agent, so their hooks see the looked-up author.
-  // Other channel messages are mostly dropped, so they are looked up only at delivery. Edits are
-  // looked up once their thread proves to have a session.
   const message =
     input.kind === "channel_message" || edit !== undefined ? input.message : await resolveMessage();
   const author = message.author;
-  // Code channel detection and the privacy check read the same conversation.
   let conversationInfo: ReturnType<typeof request> | undefined;
   const conversationRequest: typeof request = (operation, body) =>
     operation === "conversations.info"
@@ -1821,7 +1785,6 @@ async function dispatchSlackMessage(input: {
     await input.codeChannelOnly.otherwise?.();
     return;
   }
-  // A code channel is one session: every message in it, threaded or not, shares its address.
   const threadTs = codeChannel ? "" : input.message.threadTs;
   const isThreadReply = input.message.threadTs !== input.message.ts;
   const replyThreadTs = codeChannel && isThreadReply ? input.message.threadTs : null;
@@ -1872,13 +1835,14 @@ async function dispatchSlackMessage(input: {
     resolveSession: input.resolveSession,
     state: channelState,
   });
-  let privateConversation: Promise<boolean> | undefined;
-  const isDMOrPrivateChannel = () =>
-    (privateConversation ??= isPrivateSlackConversation({
+  let conversationKind: Promise<SlackConversationKind> | undefined;
+  const readConversationKind = () =>
+    (conversationKind ??= readSlackConversationKind({
       channelId: input.message.channelId,
       raw: input.message.raw,
       request: conversationRequest,
     }));
+  const isDMOrPrivateChannel = async () => (await readConversationKind()).isPrivate;
   const openCodeChannel = async (options: SlackOpenCodeChannelOptions = {}) => {
     if (!input.detectCodeChannels) {
       throw new Error(
@@ -1894,20 +1858,15 @@ async function dispatchSlackMessage(input: {
       installationTeamId: input.installationTeamId,
       message: input.message,
       name: options.name,
-      // Not `conversationRequest`: its cached origin lookup would answer the
-      // privacy check on the new channel.
       request,
       resolveSession: input.resolveSession,
     });
   };
-  // The model reads whether the message mentions the bot now; a hook deciding on an edit also
-  // sees a mention the edit removed.
   const isMentionedNow =
     (input.kind === "app_mention" && edit === undefined) ||
     mentionsBot(input.message.text, input.botUserId);
   const isBotMentioned = isMentionedNow || mentionsBot(edit?.previousText, input.botUserId);
 
-  // An edit only reaches a thread the agent already serves, and shows no acknowledgement.
   if (edit !== undefined && (await sessionOperations.resolveSession()) === undefined) return;
   const hookMessage = edit === undefined ? message : await resolveMessage();
   const ctx: SlackInboundMessageContext = {
@@ -1921,10 +1880,6 @@ async function dispatchSlackMessage(input: {
     thread,
   };
 
-  // A mention or DM is addressed to the agent, so it is acknowledged while the
-  // hook decides. Other channel messages are mostly dropped, so they are
-  // acknowledged only once the hook dispatches. A code channel's status belongs
-  // to its one session, so a dropped message must not clear it mid-turn.
   const acknowledgeFirst = input.kind !== "channel_message" && !codeChannel && edit === undefined;
   const acknowledged = acknowledgeFirst
     ? acknowledgeMessage(input.received, input.message, { slack, thread })
@@ -1944,17 +1899,26 @@ async function dispatchSlackMessage(input: {
     }
     return;
   }
-  // An edit is always quiet; a deferred message shows nothing until its turn calls a tool.
   if (edit === undefined && result.status === "deferred") channelState.quiet = true;
-  if (acknowledged !== undefined) await acknowledged;
-  else if (channelState.quiet !== true) {
+  if (acknowledged === undefined && channelState.quiet !== true) {
     await acknowledgeMessage(input.received, input.message, { slack, thread });
   }
 
-  const isPrivateConversation = await isDMOrPrivateChannel();
+  const {
+    isPrivate: isPrivateConversation,
+    spaceType,
+    visibility: spaceVisibility,
+  } = await readConversationKind();
   channelState.audience =
     input.kind === "direct_message" || isPrivateConversation ? "private" : "public";
+  if (spaceType !== undefined) channelState.spaceType = spaceType;
+  if (spaceVisibility !== undefined) channelState.spaceVisibility = spaceVisibility;
   await deliverSlackMessage({
+    startsThread:
+      !codeChannel &&
+      !isThreadReply &&
+      edit === undefined &&
+      (input.kind === "app_mention" || input.kind === "direct_message"),
     botUserId: input.receivingBotUserId,
     credentials: input.credentials,
     kind: input.kind,
@@ -1970,9 +1934,9 @@ async function dispatchSlackMessage(input: {
     uploadPolicy: input.uploadPolicy,
     users: input.userResolver && { resolver: input.userResolver, ...userLookup },
   });
+  await acknowledged;
 }
 
-/** Opens a code channel from an inbound message and binds operations to its one session. */
 async function openCodeChannelFromMessage(input: {
   readonly defaultAuth: SessionAuthContext | null;
   readonly from: ChannelFrom<SlackChannelState>;
@@ -1999,10 +1963,7 @@ async function openCodeChannelFromMessage(input: {
     resolveSession: input.resolveSession,
     state: opened.state,
   });
-  // Slack auth a hook passes names the origin thread; the session runs in the channel.
-  const moved = <T extends { readonly auth?: SessionAuthContext | null }>(
-    options: T | undefined,
-  ) =>
+  const moved = <T extends { readonly auth?: SessionAuthContext | null }>(options: T | undefined) =>
     options?.auth ? { ...options, auth: codeChannelAuth(options.auth, opened.channelId) } : options;
   return {
     ...operations,
@@ -2012,7 +1973,6 @@ async function openCodeChannelFromMessage(input: {
   };
 }
 
-/** Runs the renderer chain's `received`; an acknowledgement that fails never fails dispatch. */
 async function acknowledgeMessage(
   received: SlackRenderChain["received"],
   message: SlackMessage,
@@ -2025,7 +1985,6 @@ async function acknowledgeMessage(
   }
 }
 
-/** Runs a generic Events API handler with an imperative Slack operation surface. */
 async function dispatchSlackEvent(input: {
   readonly api: SlackTransportOptions | undefined;
   readonly from: ChannelFrom<SlackChannelState>;
@@ -2098,11 +2057,6 @@ async function dispatchSlackEvent(input: {
   await Promise.allSettled(waitUntilTasks);
 }
 
-/**
- * Verifies the inbound Slack request and returns its raw body, or
- * `null` when verification fails. Failures are logged so misconfigured
- * deployments are visible — the route returns 401 to Slack.
- */
 async function verifyInbound(
   req: Request,
   credentials: SlackChannelCredentials | undefined,
@@ -2126,16 +2080,15 @@ async function deliverSlackMessage(input: {
   readonly credentials: SlackChannelCredentials | undefined;
   readonly isPrivateConversation: boolean;
   readonly isMentioned: boolean;
+  readonly startsThread: boolean;
   readonly kind: string;
   readonly message: SlackMessage;
-  /** Set when `message` is an edited message, which only joins a session that already exists. */
   readonly edit: SlackMessageEdit | undefined;
   readonly resolvesTypedInput: boolean;
   readonly result: Exclude<SlackInboundResult, null>;
   readonly thread: SlackThread;
   readonly threadContext: LoadThreadContextMessagesOptions | undefined;
   readonly uploadPolicy: UploadPolicy;
-  /** Looks up thread-reply senders; `undefined` when `messageContext.users` is off. */
   readonly users:
     | {
         readonly resolver: SlackUserResolver;
@@ -2145,21 +2098,15 @@ async function deliverSlackMessage(input: {
     | undefined;
 }): Promise<void> {
   const { edit, message, thread } = input;
-  // This runs in the webhook's `waitUntil` task; an unguarded throw would
-  // reject silently into the dispatch `allSettled` ("no response, no logs").
   try {
-    // The session already saw the thread and the message's files when it was first sent.
     const priorMessages =
       input.threadContext === undefined || edit !== undefined
         ? []
         : await loadThreadContextMessages(thread, message, input.threadContext);
-    // A message that starts the thread's session carries the replies as history; a started
-    // session gets them as a transcript, as before. Authored history keeps the transcript.
     const seedsHistory =
       priorMessages.length > 0 &&
       input.result.history === undefined &&
       (await input.sessionOperations.resolveSession()) === undefined;
-    // Thread replies are only model-visible, so their senders are looked up here.
     const users =
       input.users === undefined
         ? undefined
@@ -2178,7 +2125,6 @@ async function deliverSlackMessage(input: {
         : await collectInboundFileParts({
             botUserId: input.botUserId,
             fetchThreadWindow: (latest, size) => fetchSlackThreadWindow(thread, latest, size),
-            // A DM can mention the app too, but every DM message brings its own files.
             isMentioned: input.kind === "app_mention",
             mention: message,
             thread,
@@ -2220,25 +2166,21 @@ async function deliverSlackMessage(input: {
     const title = input.isPrivateConversation
       ? PRIVATE_SLACK_RUN_TITLE
       : (input.result.title ?? message.markdown);
-    // The envelope stays model-visible; pending input matches what the person typed.
-    // With typed answers off, empty text keeps the envelope itself from answering, as it
-    // does for an edit, which corrects a message rather than answering a request.
     const typedText =
       input.resolvesTypedInput && edit === undefined
         ? slackTypedText(message.text, input.botUserId)
         : "";
-    const sendOptions: SlackSendOptions = attachInputText(
-      {
-        auth: input.result.auth,
-        ...(channelContext.length > 0 && { context: channelContext }),
-        // An edit follows the channel's `turnPolicy`: steered, it joins the running turn; queued,
-        // it stays behind the message it edits instead of overtaking it into an earlier turn.
-        ...(edit === undefined && { title, ...(history !== undefined && { history }) }),
-      },
-      fileParts.length === 0 ? typedText : undefined,
-    );
+    const sendOptions: SlackSendOptions = {
+      auth: input.result.auth,
+      ...(channelContext.length > 0 && { context: channelContext }),
+      ...(edit === undefined && { title, ...(history !== undefined && { history }) }),
+      ...(fileParts.length === 0 && { answerText: typedText }),
+    };
 
-    await input.sessionOperations.send(turnMessage, sendOptions);
+    const startsSession: SlackSendOptions & StartsNewAddressOption = input.startsThread
+      ? { ...sendOptions, [startsNewAddress]: true }
+      : sendOptions;
+    await input.sessionOperations.send(turnMessage, startsSession);
   } catch (error) {
     logError(log, `${input.kind} delivery failed`, error, { channelId: message.channelId });
   }
@@ -2249,7 +2191,6 @@ function slackTypedText(text: string, botUserId: string | undefined): string {
   return text.replace(new RegExp(`<@${botUserId}(?:\\|[^>]*)?>`, "gu"), "").trim();
 }
 
-/** Whether a stop for a code channel cancelled a turn; an idle session settles the cancel `ignored`. */
 async function cancelledARunningTurn(
   from: ChannelFrom<SlackChannelState>,
   channelId: string,
@@ -2264,18 +2205,12 @@ async function cancelledARunningTurn(
   }
 }
 
-/** In a code channel, the next turn replies in the thread of the latest message delivered. */
 function followReplyThread(state: SlackChannelState, payload: ChannelDelivery<unknown>): void {
   if (payload.message === undefined || state.codeChannel !== true) return;
   const stamped = payload.state as Partial<SlackChannelState> | undefined;
   state.pendingReplyThreadTs = stamped?.replyThreadTs ?? null;
 }
 
-/**
- * A turn starts quiet when every message delivered since the last one ended was quiet. The
- * runtime calls `deliver` in the step that admits the message, so one that isn't quiet and joins
- * a running quiet turn shows its status from then on.
- */
 function followQuietTurn(state: SlackChannelState, payload: ChannelDelivery<unknown>): void {
   if (payload.message === undefined) return;
   const quiet = (payload.state as Partial<SlackChannelState> | undefined)?.quiet === true;
@@ -2283,7 +2218,6 @@ function followQuietTurn(state: SlackChannelState, payload: ChannelDelivery<unkn
   if (!quiet) state.quietStatus = null;
 }
 
-/** The latest message delivered is the one the next turn answers. */
 function followTriggeringMessage(
   state: SlackChannelState,
   payload: ChannelDelivery<unknown>,
@@ -2293,11 +2227,6 @@ function followTriggeringMessage(
   if (typeof stamped === "string") state.triggeringMessageTs = stamped;
 }
 
-/**
- * Records the Slack user behind a delivery's principal. Slack-authenticated
- * callers carry their user id; custom auth relies on the message author or
- * clicking user stamped on the payload.
- */
 function recordSlackPrincipal(
   state: SlackChannelState,
   caller: SessionAuthContext | null,

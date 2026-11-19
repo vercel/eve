@@ -17,8 +17,9 @@ import {
 const MODEL_CATALOG_CACHE_KIND = "eve-model-catalog-cache";
 const MODEL_CATALOG_CACHE_VERSION = 2;
 const MODEL_CATALOG_CACHE_TTL_MS = 5 * 60 * 1000;
-// A network that drops packets must not hang a build that may not need the catalog at all.
 const MODEL_CATALOG_FETCH_TIMEOUT_MS = 15_000;
+const MODEL_CATALOG_RETRY_DELAYS_MS = [250, 500];
+const MODEL_CATALOG_RETRY_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
 
 const modelCatalogCacheSchema = z
   .object({
@@ -32,33 +33,19 @@ const modelCatalogCacheSchema = z
 
 type ModelCatalogCache = z.infer<typeof modelCatalogCacheSchema>;
 
-/**
- * Build-time reader of the AI Gateway model catalog. A build reads the catalog through a
- * short-lived disk cache, resolves its static models from it, and bakes the snapshot that
- * runtime model selections use into the compiled artifacts.
- */
 export interface CompiledRuntimeModelCatalogLoader {
   getModelLimits(modelId: string): Promise<ModelCatalogEntry | null>;
   getByProviderModelId(
     provider: string,
     providerModelId: string,
   ): Promise<ModelCatalogEntry | null>;
-  /** The snapshot this build ships; empty, with `fetchedAt: null`, when the catalog is unavailable. */
   loadModelMetadata(): Promise<ModelMetadata>;
 }
 
-/**
- * Resolves the app-local cache path used for AI Gateway model metadata during
- * compilation.
- */
 export function resolveCompiledRuntimeModelCatalogCachePath(appRoot: string): string {
   return join(appRoot, ".eve", "cache", "model-catalog.json");
 }
 
-/**
- * Creates a per-build loader that caches the AI Gateway model catalog in
- * memory and on disk, with stale-on-error fallback.
- */
 export function createCompiledRuntimeModelCatalogLoader(
   appRoot: string,
 ): CompiledRuntimeModelCatalogLoader {
@@ -112,7 +99,6 @@ export function createCompiledRuntimeModelCatalogLoader(
     }
   };
 
-  // A fresh cache can predate a newly published model, so a miss reads the catalog once more.
   const lookup = async (
     find: (catalog: ModelCatalog) => ModelCatalogEntry | null,
   ): Promise<ModelCatalogEntry | null> =>
@@ -138,18 +124,35 @@ export function createCompiledRuntimeModelCatalogLoader(
   };
 }
 
-async function fetchAndPersistModelCatalog(appRoot: string): Promise<ModelCatalogCache> {
-  const response = await vercelGatewayFetch(AI_GATEWAY_MODELS_CATALOG_URL, {
-    signal: AbortSignal.timeout(MODEL_CATALOG_FETCH_TIMEOUT_MS),
-  });
-
-  if (!response.ok) {
-    throw new Error(
-      `AI Gateway model catalog request failed with HTTP ${response.status} ${response.statusText}.`,
-    );
+async function fetchModelCatalog(): Promise<unknown> {
+  const signal = AbortSignal.timeout(MODEL_CATALOG_FETCH_TIMEOUT_MS);
+  let retriedError: unknown;
+  for (let attempt = 0; ; attempt++) {
+    let retryableStatus = false;
+    try {
+      const response = await vercelGatewayFetch(AI_GATEWAY_MODELS_CATALOG_URL, { signal });
+      if (response.ok) return await response.json();
+      retryableStatus = MODEL_CATALOG_RETRY_STATUSES.has(response.status);
+      await response.body?.cancel().catch(() => {});
+      throw new Error(
+        `AI Gateway model catalog request failed with HTTP ${response.status} ${response.statusText}.`,
+      );
+    } catch (error) {
+      if (signal.aborted) throw retriedError ?? error;
+      const delayMs = MODEL_CATALOG_RETRY_DELAYS_MS[attempt];
+      const transient =
+        retryableStatus ||
+        (error instanceof TypeError &&
+          (error.message === "fetch failed" || error.message === "terminated"));
+      if (delayMs === undefined || !transient) throw error;
+      retriedError = error;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
   }
+}
 
-  const parsed = modelCatalogResponseSchema.safeParse(await response.json());
+async function fetchAndPersistModelCatalog(appRoot: string): Promise<ModelCatalogCache> {
+  const parsed = modelCatalogResponseSchema.safeParse(await fetchModelCatalog());
 
   if (!parsed.success) {
     throw new Error("AI Gateway model catalog response did not match the expected schema.");
@@ -167,9 +170,7 @@ async function fetchAndPersistModelCatalog(appRoot: string): Promise<ModelCatalo
     const cachePath = resolveCompiledRuntimeModelCatalogCachePath(appRoot);
     await mkdir(join(appRoot, ".eve", "cache"), { recursive: true });
     await writeFile(cachePath, `${JSON.stringify(cacheArtifact, null, 2)}\n`, "utf8");
-  } catch {
-    // Cache persistence is best-effort; the fetched data is still usable.
-  }
+  } catch {}
 
   return cacheArtifact;
 }

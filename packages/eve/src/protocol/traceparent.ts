@@ -13,7 +13,6 @@ const EVE_DISPATCH_PARENT_PATTERN = /^([0-9a-f]{16})$/u;
 const MAX_TRACESTATE_ENTRIES = 32;
 const MAX_TRACESTATE_LENGTH = 512;
 
-/** Formats a W3C version-00 traceparent, or omits an invalid context. */
 export function formatTraceparent(context: TraceparentContext | undefined): string | undefined {
   if (
     context === undefined ||
@@ -28,7 +27,6 @@ export function formatTraceparent(context: TraceparentContext | undefined): stri
   return `00-${context.traceId.toLowerCase()}-${context.spanId.toLowerCase()}-${context.traceFlags.toString(16).padStart(2, "0")}`;
 }
 
-/** Parses a W3C version-00 traceparent without rejecting the containing request. */
 export function parseTraceparent(value: string | null): TraceparentContext | undefined {
   if (value === null) return undefined;
   const match = TRACEPARENT_PATTERN.exec(value.trim());
@@ -44,13 +42,6 @@ export function parseTraceparent(value: string | null): TraceparentContext | und
   };
 }
 
-/**
- * Restores the eve caller span preserved in W3C `tracestate`.
- *
- * `traceparent` remains the immediate HTTP parent, so its trace identity and
- * flags stay authoritative while eve's vendor entry supplies the earlier
- * semantic caller span ID.
- */
 export function readAgentDispatchTraceContext(
   value: string | null,
   transport: TraceparentContext | undefined,
@@ -62,10 +53,6 @@ export function readAgentDispatchTraceContext(
   return spanId === undefined || !validId(spanId, 16) ? undefined : { ...transport, spanId };
 }
 
-/**
- * Writes eve's prior-parent vendor entry while preserving other valid
- * `tracestate` members and W3C size limits.
- */
 export function writeAgentDispatchTracestate(
   value: string | undefined,
   context: TraceparentContext | undefined,

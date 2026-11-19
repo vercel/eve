@@ -1,7 +1,8 @@
 import { posix, relative, win32 } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
+  resolvePackageCompiledFilePath,
   resolvePackageRoot,
   resolveWorkflowModulePath,
   WORKFLOW_MODULE_SPECIFIERS,
@@ -11,37 +12,35 @@ import { createExtensionMountPlugin } from "#internal/bundler/extension-mount-pl
 import { createExtensionScopePlugin } from "#internal/bundler/extension-scope-plugin.js";
 import { createPseudoPackagePlugin } from "#internal/bundler/pseudo-packages.js";
 import type { CompiledExtensionMount } from "#compiler/manifest.js";
-import { exactRegex, pathsRegex } from "#internal/bundler/filters.js";
+import { escapeRegex, exactRegex, pathsRegex } from "#internal/bundler/filters.js";
+import { isPathInsideOrEqual } from "#shared/path-inside.js";
 import type { ExternalsPolicy } from "#internal/nitro/host/externals-policy.js";
 import { createHostedGraphPlugin } from "#internal/nitro/host/hosted-graph-plugin.js";
 import { workflowHandlerPath } from "#internal/nitro/host/host-routes.js";
-import { createNodeEsmCompatBannerPlugin } from "#internal/node-esm-compat-banner.js";
 import type { WorkflowArtifacts } from "#internal/workflow-bundle/builder.js";
 import type { NitroBuildPlugin } from "nitro/types";
 import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-builders.js";
 
 export interface HostPluginsInput {
   readonly appRoot: string;
-  /** Package root authored assets may not escape. */
+  readonly loadVendoredDependenciesNatively?: boolean;
   readonly authoredPackageRoot: string;
   readonly externals: ExternalsPolicy;
   readonly extensionMounts: readonly CompiledExtensionMount[];
   readonly extensionOverridePaths: ReadonlyMap<string, string>;
   readonly instrumentationEntryPlugin?: NitroBuildPlugin;
   readonly instrumentationSourcePaths?: readonly string[];
-  /** Generated modules eve's runtime plugin imports only for their side effects. */
+  readonly hostBundledPackageRoots?: readonly string[];
   readonly runtimeModules: readonly string[];
   readonly workflowArtifacts: WorkflowArtifacts;
 }
 
-/**
- * eve's host build plugins in the order they must run, all ahead of Nitro's
- * own. Step transforms and side-effect resolution come first so
- * extension-mount resolution never claims a workflow module.
- */
 export function createHostPlugins(input: HostPluginsInput): NitroBuildPlugin[] {
   const { stepTargets, stepsPath, workflowsPath } = input.workflowArtifacts;
   const plugins: (NitroBuildPlugin | null)[] = [
+    input.loadVendoredDependenciesNatively === true
+      ? createDevelopmentCompiledExternalsPlugin()
+      : null,
     stepTargets.length === 0 ? null : createStepTransformPlugin(input.appRoot, stepTargets),
     createSideEffectModulesPlugin(input.appRoot, [
       ...stepTargets,
@@ -52,9 +51,6 @@ export function createHostPlugins(input: HostPluginsInput): NitroBuildPlugin[] {
       ...input.runtimeModules,
     ]),
     input.instrumentationEntryPlugin ?? null,
-    createNodeEsmCompatBannerPlugin(),
-    // Before Nitro's externals and tracing, so a pseudo-package never reaches
-    // the output as a live import.
     createPseudoPackagePlugin(),
     createHostedGraphPlugin({ appRoot: input.appRoot, externals: input.externals }),
     createExtensionMountPlugin(input.extensionMounts, input.extensionOverridePaths),
@@ -64,12 +60,39 @@ export function createHostPlugins(input: HostPluginsInput): NitroBuildPlugin[] {
         sourceRoot: mount.sourceRoot,
       })),
     ),
-    // Workflow step modules reach Nitro as authored source, not prebundled.
-    ...createAuthoredPlugins({ authoredSourceOnly: true, packageRoot: input.authoredPackageRoot }),
+    ...createAuthoredPlugins({
+      authoredSourceOnly: true,
+      hostBundledPackageRoots: input.hostBundledPackageRoots,
+      packageRoot: input.authoredPackageRoot,
+    }),
   ];
   return plugins
     .filter((plugin) => plugin !== null)
     .map((plugin) => ({ ...plugin, enforce: "pre" as const }));
+}
+
+function createDevelopmentCompiledExternalsPlugin(): NitroBuildPlugin {
+  const packageRoot = resolvePackageRoot();
+  return {
+    name: "eve:development-compiled-externals",
+    resolveId: {
+      filter: { id: /^#compiled\// },
+      handler(source, importer) {
+        const path = importer?.replace(/\?.*$/su, "");
+        if (
+          path === undefined ||
+          !isPathInsideOrEqual(path, packageRoot) ||
+          relative(packageRoot, path).split(/[\\/]/u).includes("node_modules")
+        ) {
+          return null;
+        }
+        return {
+          external: true,
+          id: pathToFileURL(resolvePackageCompiledFilePath(`src/${source.slice(1)}`)).href,
+        };
+      },
+    },
+  };
 }
 
 function normalizePath(path: string): string {
@@ -86,20 +109,9 @@ function stripPathQueryAndHash(path: string): string {
 }
 
 export interface ModulePathMatcher {
-  /**
-   * Matches a module specifier or id against the paths as the platform's
-   * filesystem does: specifiers resolve against their importer, drive-less
-   * absolute paths take the current drive on Windows, separators are compared
-   * as `/`, and Windows compares case-insensitively. Returns the matched path
-   * with `/` separators, or null.
-   */
   readonly match: (specifier: string, importer?: string) => string | null;
-  /**
-   * A Rolldown id filter that admits every path `match` accepts, as given or
-   * as `match` resolves it. A plugin that resolves a path to that form hands
-   * later hooks the resolved id.
-   */
   readonly idFilter: RegExp;
+  readonly specifierFilter: RegExp[];
 }
 
 export function createModulePathMatcher(
@@ -138,7 +150,20 @@ export function createModulePathMatcher(
     }
     return keys.has(toKey(resolved)) ? resolved : null;
   };
-  return { idFilter: pathsRegex([...new Set([...paths, ...targets])], platform), match };
+  const basenames = new Set(targets.map((target) => target.slice(target.lastIndexOf("/") + 1)));
+  const pathSpecifier = new RegExp(
+    `^(?=\\.|[\\\\/]|[A-Za-z]:[\\\\/])(?:[^?#]*[\\\\/])?(?:${[...basenames].map(escapeRegex).join("|")}|\\.{0,2})(?:[?#].*)?$`,
+    windows ? "i" : undefined,
+  );
+  return {
+    idFilter: pathsRegex([...new Set([...paths, ...targets])], platform),
+    match,
+    specifierFilter: [
+      pathSpecifier,
+      /^file:\/\//,
+      ...WORKFLOW_MODULE_SPECIFIERS.map((specifier) => exactRegex(specifier)),
+    ],
+  };
 }
 
 function createRelativeTransformFilename(workingDir: string, path: string): string {
@@ -198,23 +223,12 @@ function createPackageRelativeTransformFilename(path: string): string | undefine
   return undefined;
 }
 
-// The specifiers createModulePathMatcher resolves; anything else cannot name a side-effect module.
-const SIDE_EFFECT_SPECIFIER_FILTER = [
-  /^(?:\.|\/|\\|[A-Za-z]:[\\/]|file:\/\/)/,
-  ...WORKFLOW_MODULE_SPECIFIERS.map((specifier) => exactRegex(specifier)),
-];
-
-/**
- * Keeps modules evaluated for their side effects: the workflow bundle and its
- * handler, step modules that register durable steps, and instrumentation
- * modules the generated instrumentation plugin imports eagerly.
- */
 function createSideEffectModulesPlugin(rootDir: string, paths: readonly string[]) {
-  const { match } = createModulePathMatcher(rootDir, paths);
+  const { match, specifierFilter } = createModulePathMatcher(rootDir, paths);
   return {
     name: "eve:side-effect-modules",
     resolveId: {
-      filter: { id: SIDE_EFFECT_SPECIFIER_FILTER },
+      filter: { id: specifierFilter },
       handler(source: string, importer: string | undefined) {
         const id = match(source, importer);
         return id === null ? null : { id, moduleSideEffects: "no-treeshake" as const };
@@ -223,14 +237,7 @@ function createSideEffectModulesPlugin(rootDir: string, paths: readonly string[]
   };
 }
 
-/**
- * Transforms package-owned execution sources in step mode so the generated
- * `steps.mjs` entry can import raw source files while still registering
- * durable step handlers with the Workflow runtime.
- */
 function createStepTransformPlugin(rootDir: string, stepTargets: readonly string[]) {
-  // Step targets are also side-effect modules, so a transform sees the id
-  // the side-effect plugin resolved them to.
   const { idFilter, match } = createModulePathMatcher(rootDir, stepTargets);
   return {
     name: "eve:workflow-step-transform",

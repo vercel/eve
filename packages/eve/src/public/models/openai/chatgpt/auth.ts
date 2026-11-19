@@ -21,7 +21,6 @@ export function extractCodexAccountIdFromToken(token: string | undefined): strin
   );
 }
 
-/** Human-readable account label from Codex's JWT, without retaining the token. */
 export function extractCodexAccountLabelFromToken(token: string | undefined): string | undefined {
   const claims = parseCodexJwtClaims(token);
   if (claims === undefined) return undefined;

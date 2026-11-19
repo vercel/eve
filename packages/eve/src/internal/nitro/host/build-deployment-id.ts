@@ -10,7 +10,6 @@ export interface BuildDeploymentFile {
   readonly bytes: Uint8Array;
 }
 
-/** Hashes files in path order while holding at most `READ_AHEAD` files in memory. */
 export async function computeBuildDeploymentId(
   relativePaths: readonly string[],
   readBytes: (relativePath: string) => Promise<Uint8Array>,
@@ -22,7 +21,6 @@ export async function computeBuildDeploymentId(
     hash.update(bytes);
   };
   hash.update("eve-build-v1\0");
-  // Nitro writes a build timestamp to the root nitro.json; nothing reads it at runtime.
   const paths = relativePaths
     .filter((path) => path !== "nitro.json")
     .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
@@ -30,7 +28,6 @@ export async function computeBuildDeploymentId(
   const startRead = (index: number) => {
     if (index >= paths.length) return;
     const read = readBytes(paths[index]!);
-    // Reads ahead may reject after an earlier read already failed the hash.
     read.catch(() => undefined);
     reads[index] = read;
   };

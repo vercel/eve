@@ -23,17 +23,11 @@ interface OutputPublicationInput {
   readonly appRoot: string;
   readonly finalOutputDir: string;
   readonly finalSummaryPath: string;
-  /** Invocation-owned directory containing the staged paths; recovery removes it. */
   readonly scratchDir: string;
   readonly stagedOutputDir: string;
   readonly stagedSummaryPath: string;
 }
 
-/**
- * A publication failure that retained the lock journal on disk. The staged
- * artifacts (and the scratch directory containing them) must outlive this
- * invocation so a later build can finish the interrupted publication.
- */
 export class RecoverablePublicationError extends AggregateError {
   constructor(errors: readonly unknown[], message: string, options?: ErrorOptions) {
     super(errors, message, options);
@@ -53,13 +47,6 @@ const DEFAULT_OBSERVER: OutputPublicationObserver = {
   async onContention() {},
 };
 
-/**
- * Atomically installs a build's staged output and summary as the app's
- * published artifacts: backs up the previous publication, renames the staged
- * paths into place, and rolls back to the backup on failure. A journaled,
- * cross-process lock serializes publishers and lets the next build finish an
- * interrupted publication.
- */
 export async function publishApplicationBuildArtifacts(
   input: OutputPublicationInput,
 ): Promise<void> {
@@ -94,10 +81,6 @@ export async function publishApplicationBuildArtifactsWithObserver(
     committedJournalWritten = true;
     await removeOutputPublicationBackups(journal);
   } catch (error) {
-    // Only a durably recorded commit counts: if the journal write itself
-    // failed, the on-disk phase still says "backed-up" and a later recovery
-    // would roll the new output back out — so roll back now and report the
-    // publication as failed.
     if (committedJournalWritten) {
       await throwRecoverablePublicationError({
         errors: [error],

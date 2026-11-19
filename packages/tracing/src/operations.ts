@@ -14,6 +14,10 @@ import type {
 } from "./core/types.js";
 
 type Completion = ScopeTerminal & { errorType?: string; result?: ModelResult };
+/**
+ * A handle to one traced operation, such as a turn, attempt, model call, or tool call.
+ * Use it to run work inside the operation's span, add attributes, and complete or fail it.
+ */
 export interface Operation {
   readonly type: ScopeData["type"];
   readonly reference: TraceReference;
@@ -36,6 +40,7 @@ export interface WrappedOperation<I, H extends Operation> {
   ): Promise<T>;
 }
 type MemoryInput = Extract<ScopeData, { type: "memory" }>["options"];
+/** Identifies one attempt of a turn's step by step index and attempt number, with optional runtime context, channel, and links. */
 export interface AttemptInput {
   readonly stepIndex: number;
   readonly attempt: number;
@@ -43,6 +48,7 @@ export interface AttemptInput {
   readonly channel?: StepOptions["channel"];
   readonly links?: readonly TraceLink[];
 }
+/** A traced agent turn. Start attempts, memory calls, and turn-level approvals under it. */
 export interface TurnOperation extends Operation {
   attempt: WrappedOperation<AttemptInput, AttemptOperation>;
   /** Returns an open attempt without starting one. Durable turns only. */
@@ -52,6 +58,19 @@ export interface TurnOperation extends Operation {
   /** Replaces the turn's links before its deferred span is exported. */
   links(links: readonly TraceLink[]): void;
   memory: WrappedOperation<MemoryInput, MemoryOperation>;
+  /** A wait on a person that no tool call owns, such as a budget prompt or a sign-in. */
+  approval: WrappedOperation<ApprovalInput, ApprovalOperation>;
+  /** Returns an open turn-level approval without starting one. Durable turns only. */
+  findApproval(requestId: string): ApprovalOperation | undefined;
+  /** A model call no step makes, such as a context compaction's summary request. */
+  modelCall(input: ModelOptions, key?: string): Promise<ModelOperation>;
+}
+/** What a person is asked. `kind` defaults to `tool-approval`. */
+export interface ApprovalInput {
+  readonly requestId: string;
+  readonly request?: unknown;
+  readonly kind?: string;
+  readonly connectionName?: string;
 }
 /**
  * One tool call. In a durable turn, calling `tool` again with the same `callId`
@@ -61,6 +80,7 @@ export interface TurnOperation extends Operation {
 export interface ToolInput extends ToolOptions {
   readonly startTimeMs?: number;
 }
+/** A traced attempt of one turn step. Start model calls, model streams, tool calls, agent delegations, and memory calls under it. */
 export interface AttemptOperation extends Operation {
   tool: WrappedOperation<ToolInput, ToolOperation>;
   callSubAgent: WrappedOperation<{ callId: string; agentName: string }, ToolOperation>;
@@ -76,20 +96,28 @@ export interface AttemptOperation extends Operation {
   ): Promise<T>;
   memory: WrappedOperation<MemoryInput, MemoryOperation>;
 }
+/** A traced tool call. Start approvals, nested tool calls, and memory calls under it. */
 export interface ToolOperation extends Operation {
-  approval: WrappedOperation<{ requestId: string; request?: unknown }, ApprovalOperation>;
+  approval: WrappedOperation<ApprovalInput, ApprovalOperation>;
   /** Returns an open approval without starting one. Durable turns only. */
   findApproval(requestId: string): ApprovalOperation | undefined;
   /** A tool call made while this tool runs, such as a connector's nested call. */
   tool: WrappedOperation<ToolInput, ToolOperation>;
   memory: WrappedOperation<MemoryInput, MemoryOperation>;
 }
+/** A traced model call, as returned by `AttemptOperation.modelCall` without a callback. */
 export type ModelOperation = Operation;
+/** A traced wait on a person, such as a tool approval or a sign-in. */
 export type ApprovalOperation = Operation;
+/** A traced memory search or write. */
 export type MemoryOperation = Operation;
+/** A traced call to a decision model, such as choosing a model for a turn. */
+export type DecisionOperation = Operation;
+/** What a `modelCall` callback returns: the call's `result` with its finish reason, usage, and optional response metadata and content. */
 export interface ModelCallReturn<T> extends ModelResult {
   readonly result: T;
 }
+/** What a `modelStream` callback returns: the stream as `result`, returned unchanged, and a `completion` promise that settles with the model result when the stream ends. */
 export interface ModelStreamReturn<T> {
   readonly result: T;
   readonly completion: PromiseLike<ModelResult>;
@@ -200,11 +228,23 @@ export function operationHandle(
     undefined,
     onError,
   );
+  const approvals = (call?: { callId: string; toolName: string }) => ({
+    findApproval: (requestId: string) =>
+      found<ApprovalOperation>(runtime.find({ type: "approval", options: { requestId, ...call } })),
+    approval: wrappedOperation(
+      async (input: ApprovalInput) => child({ type: "approval", options: { ...input, ...call } }),
+      { outcome: "ignored" },
+      onError,
+    ),
+  });
   if (data.type === "activation")
     return live({
       ...common,
       memory,
+      ...approvals(),
       links: (links: readonly TraceLink[]) => runtime.update({ links }),
+      modelCall: (input: ModelOptions, key?: string) =>
+        child({ type: "model", options: input }, key),
       findAttempt: (input: { stepIndex: number; attempt: number }) =>
         found<AttemptOperation>(
           runtime.find({
@@ -309,27 +349,11 @@ export function operationHandle(
       ...common,
       memory,
       tool,
-      findApproval: (requestId: string) =>
-        found<ApprovalOperation>(
-          runtime.find({
-            type: "approval",
-            options: { requestId, callId: data.options.callId, toolName: data.options.name },
-          }),
-        ),
-      approval: wrappedOperation(
-        async (input: { requestId: string; request?: unknown }) =>
-          child({
-            type: "approval",
-            options: { ...input, callId: data.options.callId, toolName: data.options.name },
-          }),
-        { outcome: "ignored" },
-        onError,
-      ),
+      ...approvals({ callId: data.options.callId, toolName: data.options.name }),
     } as ToolOperation);
   return common;
 }
 
-/** Tool calls can nest, so a call ID is searched through every open call of the turn. */
 function findTool(parent: LiveOperation, callId: string): LiveOperation | undefined {
   for (const next of parent.children) {
     if (next.type === "tool" && next.callId === callId) return next;

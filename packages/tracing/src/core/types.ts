@@ -5,6 +5,7 @@ export type AttributeValue =
   | (string | null | undefined)[]
   | (number | null | undefined)[]
   | (boolean | null | undefined)[];
+/** Span attributes keyed by name. Entries with an `undefined` value are not recorded. */
 export type Attributes = Readonly<Record<string, AttributeValue | undefined>>;
 export type TraceJson =
   | null
@@ -14,6 +15,7 @@ export type TraceJson =
   | readonly TraceJson[]
   | { readonly [key: string]: TraceJson };
 declare const traceSnapshotBrand: unique symbol;
+/** A JSON snapshot of an operation's trace state, as stored by a {@link TraceCheckpointer}. */
 export type TraceSnapshot = TraceJson & { readonly [traceSnapshotBrand]: true };
 export type SpanType =
   | "activation"
@@ -22,6 +24,7 @@ export type SpanType =
   | "tool"
   | "approval"
   | "memory"
+  | "decision"
   | "channelRequest"
   | "mcp";
 export type SpanKind = "INTERNAL" | "CLIENT" | "SERVER" | "PRODUCER" | "CONSUMER";
@@ -29,6 +32,7 @@ export type SpanKind = "INTERNAL" | "CLIENT" | "SERVER" | "PRODUCER" | "CONSUMER
 /** Host-owned process-local context. Never stored in a checkpoint. */
 export type ExecutionContext = object;
 
+/** Identifies a span: its trace ID, span ID, trace flags, and optional trace state, as in W3C trace context. */
 export interface TraceReference {
   readonly traceId: string;
   readonly spanId: string;
@@ -37,24 +41,29 @@ export interface TraceReference {
   readonly tracestate?: string;
 }
 
+/** Whether an operation emits spans and whether it records input and output content. Child operations cannot exceed their parent's decision. */
 export interface CaptureDecision {
   readonly emit: boolean;
   readonly recordInputs: boolean;
   readonly recordOutputs: boolean;
 }
 
+/** Where a tracing failure happened: the phase, and the operation type and span when known. */
 export interface TraceErrorContext {
   readonly phase: "start" | "serialize" | "complete" | "context" | "restore" | "checkpoint";
   readonly operation?: SpanType;
   readonly reference?: TraceReference;
 }
+/** Receives tracing failures with their context. Tracing errors are reported here instead of being thrown into the traced work. */
 export type TraceErrorHandler = (error: unknown, context: TraceErrorContext) => void;
 
+/** A link from a span to another span, with the relationship it records. */
 export interface TraceLink {
   readonly context: TraceReference;
   readonly relationship: string;
 }
 
+/** A span ready for an {@link AgentTelemetry} backend to start: its name, kind, attributes, parent, links, and start time. */
 export interface PreparedSpan {
   readonly type: SpanType;
   readonly operationId: string;
@@ -67,6 +76,7 @@ export interface PreparedSpan {
   readonly links?: readonly TraceLink[];
 }
 
+/** A started span that an {@link AgentTelemetry} backend returns for recording attributes, events, errors, and status before it ends. */
 export interface SpanWriter {
   readonly reference: TraceReference;
   setAttribute(key: string, value: AttributeValue): void;
@@ -85,6 +95,11 @@ export interface AgentTelemetry {
   ): SpanWriter;
   /** Returns the operation active in the current execution context. */
   active(): ActiveOperation | undefined;
+  /**
+   * Returns the span active in `context`, or the current execution context, including spans
+   * the host started itself. Lets a decision nest under the host's span inside an operation.
+   */
+  activeSpan?(context?: ExecutionContext): TraceReference | undefined;
   /** Runs `execute` with `operation` as the active trace context. */
   run<T>(operation: ActiveOperation, execute: () => T, context?: ExecutionContext): T;
   /** Runs `execute` without creating spans. */
@@ -107,18 +122,22 @@ export interface TraceCheckpointer {
   delete(key: string): void | PromiseLike<void>;
 }
 
+/** The agent tracing operation active in an execution context, with its span reference, capture decision, and optional MCP and memory recorders. */
 export interface ActiveOperation {
   readonly type: SpanType;
   readonly reference: TraceReference;
   readonly capture: CaptureDecision;
   readonly mcp?: import("./mcp.js").McpLifecycle;
+  readonly memory?: import("./memory.js").MemoryToolLifecycle;
 }
 
+/** The operation an {@link OutputMapping} is mapping attributes for. */
 export interface MappingContext {
   readonly type: SpanType;
   readonly operationId: string;
 }
 
+/** Rewrites span attributes and link attributes before they are written, for example to add backend-specific attributes. */
 export interface OutputMapping {
   attributes(span: MappingContext, attributes: Attributes): Attributes;
   link(span: MappingContext, link: TraceLink): Attributes;
@@ -135,6 +154,7 @@ export interface FrameworkIdentity {
   readonly version?: string;
 }
 
+/** Cost and token usage of a model call or operation. */
 export interface Usage {
   readonly costUsd?: number;
   readonly inputTokens?: number;
@@ -152,6 +172,7 @@ export interface InputMessagesContent {
   readonly json: string;
   readonly omitted: number;
 }
+/** Serializes captured payloads such as messages, instructions, tool definitions, and tool results into span attribute strings, returning `undefined` to omit one. */
 export interface ContentSerializer {
   json(value: unknown): string | undefined;
   text(value: string): string | undefined;
@@ -196,26 +217,39 @@ export interface ModelOptions {
   readonly tools?: unknown;
   readonly runtimeContext?: Readonly<Record<string, unknown>>;
 }
+export interface DecisionOptions {
+  readonly provider?: string;
+  readonly modelId: string;
+  /** What the decision is for, such as `model-selection` or `tool-approval`. */
+  readonly purpose?: string;
+}
 export interface ToolOptions {
   readonly callId: string;
   readonly name: string;
   readonly kind?: ToolKind;
   readonly arguments?: unknown;
 }
+/**
+ * A wait on a person. Under a tool call it names that call; under a turn it has no call, such
+ * as a budget prompt or a sign-in the turn needs before it can run.
+ */
+export interface ApprovalOptions {
+  readonly requestId: string;
+  readonly request?: unknown;
+  /** What the person is asked, recorded as `agent.approval.kind`. Defaults to `tool-approval`. */
+  readonly kind?: string;
+  /** The connection a sign-in is for, recorded as `agent.connection.name`. */
+  readonly connectionName?: string;
+  readonly callId?: string;
+  readonly toolName?: string;
+}
 export type ScopeData =
   | { readonly type: "activation"; readonly options: TurnMetadata }
   | { readonly type: "step"; readonly options: StepOptions }
   | { readonly type: "model"; readonly options: ModelOptions }
   | { readonly type: "tool"; readonly options: ToolOptions }
-  | {
-      readonly type: "approval";
-      readonly options: {
-        requestId: string;
-        request?: unknown;
-        callId: string;
-        toolName: string;
-      };
-    }
+  | { readonly type: "approval"; readonly options: ApprovalOptions }
+  | { readonly type: "decision"; readonly options: DecisionOptions }
   | {
       readonly type: "memory";
       readonly options: {
@@ -243,7 +277,6 @@ export interface ScopeTerminal {
 export interface ScopeRecord {
   readonly version?: 1;
   readonly finished?: boolean;
-  /** Write token used to detect a checkpoint changed by another process. */
   readonly revision?: string;
   readonly key: string;
   readonly identity: ScopeIdentity;
@@ -279,6 +312,7 @@ export interface Operation {
   modelCall(input: ModelOptions, key?: string): Promise<Operation>;
 }
 
+/** One part of model output: text, reasoning, or a tool call, result, or error. */
 export type ContentPart =
   | { readonly type: "text"; readonly text: string }
   | { readonly type: "reasoning"; readonly text: string }

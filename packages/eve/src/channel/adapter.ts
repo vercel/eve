@@ -16,79 +16,36 @@ import type {
   FetchFileFunction,
 } from "#shared/channel-definition.js";
 import type { ChannelAudienceProjector } from "#channel/audience.js";
+import type { ChannelSpaceProjector } from "#channel/space.js";
 
 const log = createLogger("channel.adapter");
 
-// ---------------------------------------------------------------------------
-// Adapter context
-// ---------------------------------------------------------------------------
-
-/**
- * Context available to every adapter handler (`deliver` and event handlers).
- *
- * `state` is a mutable reference to the adapter's durable state. The runtime
- * auto-snapshots it at step boundaries — no manual `serialize()` needed.
- *
- * `ctx` provides read/write access to durable context keys (the same
- * {@link ContextAccessor} that tools and providers use).
- *
- * `session` supplies live identity/auth; `continuation` owns channel routing (such as
- * Slack's auto-anchor on first post). Neither grants session command authority.
- */
 export interface ChannelAdapterContext<TState = Record<string, unknown>> extends ChannelContext {
-  /**
-   * Mutable adapter state. Auto-serialized at step boundaries via
-   * JSON snapshot. The adapter reads and writes this directly.
-   */
   state: TState;
 
-  /**
-   * Read/write access to durable context keys. Seed keys here for tools
-   * to read during the turn.
-   */
   readonly ctx: ContextAccessor;
 
-  /** @internal Independent source of a relayed child input batch. */
+  /** @internal */
   readonly inputSource?: string;
 
-  /** Where the event a handler observes sits on the stream: its line, and its index there. */
   readonly position?: FactPosition;
-  /** The event's owners: its turn, task, model run, or context change. */
   readonly scope?: Scope;
-  /** The immutable snapshot of the event's line, supplied by its publisher. */
   readonly view?: SessionView;
+  /** @internal */
+  readonly waitUntil?: (task: Promise<unknown>) => void;
 }
 
-/**
- * Extracts the state type from a {@link ChannelAdapterContext} generic.
- * Used internally so adapter-level types can declare their state shape
- * once (via `TCtx`) and have helpers narrow consistently.
- */
 type StateOf<TCtx> = TCtx extends ChannelAdapterContext<infer S> ? S : Record<string, unknown>;
 
-// ---------------------------------------------------------------------------
-// Event handler types
-// ---------------------------------------------------------------------------
-
-/**
- * A single outbound event handler. Receives the written event and the adapter context. Void
- * return: side effects only.
- */
 type EventHandler<
   T extends SessionEvent["type"],
   TCtx extends ChannelAdapterContext<any> = ChannelAdapterContext,
 > = (event: Extract<SessionEvent, { type: T }>, ctx: TCtx) => void | Promise<void>;
 
-/**
- * Map of outbound event handlers keyed by event type. The adapter declares
- * handlers for the event types it cares about. For undeclared types, the
- * framework's default handlers run.
- */
 export type ChannelEventHandlers<TCtx extends ChannelAdapterContext<any> = ChannelAdapterContext> =
   {
     [K in SessionEvent["type"]]?: EventHandler<K, TCtx>;
   } & {
-    /** Runs once per committed line, after the line's event handlers. */
     committed?: (line: CommittedLine, ctx: TCtx) => void | Promise<void>;
   };
 
@@ -98,19 +55,6 @@ export interface CommittedLine {
   readonly position: number;
 }
 
-// ---------------------------------------------------------------------------
-// File fetch
-// ---------------------------------------------------------------------------
-
-/**
- * Enriched return shape from a channel's {@link ChannelAdapter.fetchFile}
- * function. Return a bare {@link Buffer} when only bytes are known, or
- * this record when the fetch discovers a more accurate `mediaType` or
- * `filename` (e.g. from an HTTP `Content-Type` header).
- *
- * When fields are provided, staging prefers them over the values the
- * channel populated at ingestion time.
- */
 export type { FetchFileContext, FetchFileResult };
 
 export type ChannelInstrumentationMetadata = Readonly<Record<string, unknown>>;
@@ -119,98 +63,27 @@ export type ChannelInstrumentationMetadataProjector = (
   state: Record<string, unknown> | undefined,
 ) => ChannelInstrumentationMetadata;
 
-// ---------------------------------------------------------------------------
-// Channel adapter
-// ---------------------------------------------------------------------------
-
-/**
- * Plain-object channel adapter with durable state, an optional inbound
- * delivery hook, event handlers, and optional attachment resolution.
- */
 export type ChannelAdapter<TCtx extends ChannelAdapterContext<any> = ChannelAdapterContext> = {
-  /**
-   * Stable durable identifier for serialization across step boundaries.
-   * Must be unique across all adapters visible to one runtime bundle.
-   *
-   * Defaults to {@link HTTP_ADAPTER_KIND} (`"http"`) for the canonical
-   * session channel and every behaviorless authored channel, or is derived
-   * from the route file path as `channel:<name>` once
-   * `runtime/resolve-channel.ts` rewrites authored adapters that carry
-   * behavior.
-   */
   readonly kind: string;
 
-  /**
-   * Initial state shape. Auto-serialized at step boundaries. On rehydration,
-   * the runtime restores top-level seed fields missing from the serialized
-   * state (see {@link seedChannelState}) and re-attaches the adapter's
-   * behavior functions from the registry.
-   */
   readonly state?: Record<string, unknown>;
 
-  /**
-   * Inbound hook: fires once per delivery before the harness starts.
-   *
-   * Return a {@link StepInput} to override the input the harness sees, or
-   * return void to use the default payload projection.
-   */
   deliver?(payload: DeliverPayload, ctx: TCtx): StepInput | void | Promise<StepInput | void>;
 
-  /**
-   * Optional factory that builds the adapter context for this adapter.
-   *
-   * @internal
-   */
+  /** @internal */
   createAdapterContext?(base: ChannelAdapterContext<StateOf<TCtx>>): TCtx;
 
-  /**
-   * Fetches bytes for a URL encountered in `FilePart.data`.
-   *
-   * Called by the staging pipeline when it encounters a link on a
-   * `FilePart`. Return bytes or {@link FetchFileResult} to stage the file
-   * to the sandbox. Return `null` when the link is not this channel's: eve
-   * then downloads a public `https:` link itself, and any other link
-   * reaches the model as a note.
-   *
-   * Credentials should be captured in the closure at channel
-   * construction time.
-   */
   readonly fetchFile?: FetchFileFunction;
 
-  /**
-   * Upload policy staging applies to every inbound attachment, on its final
-   * bytes and verified media type, including links eve downloads itself.
-   * Without one, staging checks nothing and eve's own downloads stop at the
-   * framework default size.
-   */
   readonly uploadPolicy?: UploadPolicy;
 
-  /**
-   * Framework-owned observability projection for the active channel.
-   *
-   * Channel implementations decide which state fields are safe and
-   * meaningful to expose to instrumentation callbacks. The harness reads
-   * the resulting projection through a seed context key rather than
-   * inspecting adapter state directly.
-   */
   readonly instrumentation?: {
     readonly metadata?: ChannelInstrumentationMetadataProjector;
     readonly audience?: ChannelAudienceProjector;
+    readonly space?: ChannelSpaceProjector;
   };
 } & ChannelEventHandlers<TCtx>;
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Produces the default {@link StepInput} when no custom adapter `deliver`
- * hook is defined.
- *
- * Passes through both `message` and `answers` from the delivery
- * payload so tool-approval responses (and other HITL replies) reach the
- * harness even when the channel has no bespoke deliver logic.
- */
 export function defaultDeliverResult(
   payload: Pick<ChannelDelivery, "message" | "answers" | "context" | "outputSchema">,
 ): StepInput | undefined {
@@ -257,20 +130,10 @@ export function defaultDeliverResult(
   return undefined;
 }
 
-/**
- * Returns the durable kind for an adapter.
- */
 export function getAdapterKind(adapter: ChannelAdapter): string {
   return adapter.kind;
 }
 
-/**
- * Builds `channel.state` from an adapter's seed and the session's own state,
- * at creation and at every step boundary. Keys present in `state` win, even
- * when `undefined`; keys absent from it take a fresh copy of the seed value,
- * so mutating a nested default never reaches the shared seed. Seeds must be
- * plain JSON-like data (`structuredClone`).
- */
 export function seedChannelState(
   seed: Record<string, unknown> | undefined,
   state: Record<string, unknown> | undefined,
@@ -278,17 +141,6 @@ export function seedChannelState(
   return { ...structuredClone(seed), ...state };
 }
 
-/**
- * Calls an adapter's event handler for a given event. Adapters perform side
- * effects rather than transforming events.
- *
- * Throwing handlers are logged and swallowed so a downstream delivery
- * failure does not corrupt the event stream write path.
- */
-/**
- * Runs the channel adapter's handler for one written event. Handlers observe; they never shape
- * what is written, because the write already happened.
- */
 export async function callAdapterEventHandler(
   adapter: ChannelAdapter,
   event: SessionEvent | CommittedLine,

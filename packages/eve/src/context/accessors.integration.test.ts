@@ -8,15 +8,6 @@ import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import type { RuntimeSandboxSession, SandboxSession } from "#public/definitions/sandbox.js";
 import { VercelSandbox } from "#public/sandbox/vercel.js";
 
-/**
- * Integration coverage for {@link buildCallbackContext} — the single
- * factory that builds the `ctx` object every authored callback receives.
- *
- * Each case runs in-memory through the AppHarness.
- * `runtime.runAsSession(init, fn)` binds the authored context and
- * invokes `fn`.
- */
-
 describe("buildCallbackContext – session", () => {
   it("throws when no authored runtime session is active", () => {
     expect(() => buildCallbackContext()).toThrow("No active eve context");

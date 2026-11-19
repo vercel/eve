@@ -7,9 +7,9 @@
 FROM ubuntu:26.04@sha256:c098726dd9b9733f3e885f8de0ef375206a311b0a317eadc40d347b1115fb944
 
 ARG DEBIAN_FRONTEND=noninteractive
-ARG NODE_VERSION=24.22.1
-ARG NODE_SHA256_X64=6c172a9ab6718f7b801fb5a7bd486af2ee5e32758086a04b84fcce2aa77095e6
-ARG NODE_SHA256_ARM64=dbabf7a1cbf947e6059ffad2c27b80041db97dea1e553b62afdee7f13fca336e
+ARG NODE_VERSION=26.13.1
+ARG NODE_SHA256_X64=5c063e46bab0fbc1c17cc445d7ff129cbdcd0471be6ed83b6ab864f8143bc864
+ARG NODE_SHA256_ARM64=89e1853138db51e8b82d3e98ba9c0d3f2956a28e5e55ea1b7e12d25aae92d5dd
 
 LABEL org.opencontainers.image.description="Sandbox base image for eve agents."
 LABEL org.opencontainers.image.source="https://github.com/vercel/eve"
@@ -34,6 +34,7 @@ RUN set -eux; \
     gpgv \
     git \
     jq \
+    libatomic1 \
     python-is-python3 \
     python3 \
     ripgrep \

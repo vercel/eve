@@ -131,7 +131,6 @@ export function linqChannel(config: LinqChannelConfig): LinqChannel {
   const adapterConfig: LinqAdapterConfig = normalizeCredentials(config.credentials);
   if (config.baseURL !== undefined) adapterConfig.baseURL = config.baseURL;
   const linq = createLinqAdapter(adapterConfig);
-  // The channel downloads attachments in the step, after the message's own fetchData is gone.
   linq.rehydrateAttachment = rehydrateLinqAttachment;
   const bridge = chatSdkChannel({
     adapters: { linq },
@@ -179,8 +178,6 @@ function normalizeCredentials(
   return config;
 }
 
-// The Linq adapter rejects only a strict `false`, but eve verifiers such as
-// vercelOidc() reject with `null`, which the adapter would otherwise accept.
 function rejectFalsyResults(verifier: LinqWebhookVerifier): LinqWebhookVerifier {
   return async (request: Request, rawBody: Uint8Array) =>
     (await verifier(request, rawBody)) || false;
@@ -234,7 +231,6 @@ async function dispatchMessage(
   if (result === null) return;
   const adapter = bridge.bot.getAdapter("linq");
   const content = linqInboundContent(message);
-  // The quote lookup can take seconds, so it runs alongside the read receipt.
   const [, quoted] = await Promise.all([
     markReadBestEffort(adapter, thread, message),
     content === undefined ? undefined : linqQuotedMessage(adapter, message),
@@ -259,7 +255,5 @@ async function markReadBestEffort(
 ): Promise<void> {
   try {
     await adapter.markRead(thread.id, message.id);
-  } catch {
-    // A read receipt should never prevent the user's message from reaching eve.
-  }
+  } catch {}
 }

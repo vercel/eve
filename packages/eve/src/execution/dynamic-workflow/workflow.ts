@@ -17,11 +17,9 @@ import type { JsonValue } from "#shared/json.js";
 import type { WorkflowToolContext } from "#tools/workflow-definition.js";
 
 export interface JsProgramOptions {
-  /** Maximum child-agent calls, from 1 to 128. Defaults to 100. */
   readonly maxSubagents?: number;
 }
 
-/** Runs a model-generated JavaScript function body inside an isolated workflow sandbox. */
 export async function runJsProgram(
   js: string,
   ctx: WorkflowToolContext,
@@ -70,7 +68,6 @@ export async function runJsProgram(
   return outcome.output;
 }
 
-/** Sends one program agent call to a new session and returns that turn's reply. */
 async function callProgramAgent(
   ctx: WorkflowToolContext,
   call: WorkflowProgramAgentCall,
@@ -84,7 +81,6 @@ async function callProgramAgent(
     throw new Error(`Agent "${call.target}" failed to handle the message: ${result.error.message}`);
   }
   const output = outputSchema !== undefined ? (result.data ?? null) : (result.reply ?? null);
-  // Checked here so the program can catch an oversized reply; run would fail the whole workflow.
   const bytes = new TextEncoder().encode(JSON.stringify(output)).byteLength;
   if (bytes > WORKFLOW_PROGRAM_MAX_AGENT_OUTPUT_BYTES) {
     throw new Error(

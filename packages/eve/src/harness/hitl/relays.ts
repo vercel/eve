@@ -3,30 +3,26 @@ import type { RelayRoute } from "#channel/types.js";
 import { isSessionInboxAddress } from "#execution/session-inbox/address.js";
 import type { RemoteAgentBinding } from "#eve-channel/support.js";
 
-/**
- * Marks a request as a workflow tool run's `ctx.ask()` question, rather than a
- * child session's. Its answer goes to the run's control hook, which carries
- * every decision the session makes for the run, in order.
- */
 export interface WorkflowAskRoute {
   readonly control: string;
 }
 
-/**
- * Where answers to one relayed request go. What the request asks, and how it stands, is its
- * interaction row; this is only the way back to the asker.
- */
 export interface Relay extends RelayRoute {
   readonly workflowAsk?: WorkflowAskRoute;
-  /**
-   * The workflow tool run that relayed the request: its own `ctx.ask()`
-   * question, or a request from a session it opened with `ctx.agent`. Nobody
-   * can answer the request once that run ends.
-   */
   readonly runId?: string;
+  readonly receipts?: Readonly<Record<string, string>>;
 }
 
-/** Reads one stored route, or `undefined` when it is malformed. */
+const FORWARDED_SHARE = /^(.+)_forwarded_\d+$/;
+
+export function forwardedShareId(deliveryId: string, share: number): string {
+  return share === 0 ? deliveryId : `${deliveryId}_forwarded_${share}`;
+}
+
+export function forwardedFrom(deliveryId: string): string {
+  return FORWARDED_SHARE.exec(deliveryId)?.[1] ?? deliveryId;
+}
+
 export function parseRelay(value: unknown): Relay | undefined {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
   const token = Reflect.get(value, "childContinuationToken");
@@ -61,6 +57,9 @@ export function parseRelay(value: unknown): Relay | undefined {
     if (typeof runId !== "string" || runId.length === 0) return undefined;
     relay.runId = runId;
   }
+  const receipts = Reflect.get(value, "receipts");
+  if (isRecord(receipts) && Object.values(receipts).every((id) => typeof id === "string"))
+    relay.receipts = receipts as Record<string, string>;
   return relay;
 }
 
@@ -73,7 +72,6 @@ function parseRemoteAgentBinding(
   const resolverId = Reflect.get(value, "resolverId");
   const forwardPrincipal = Reflect.get(value, "forwardPrincipal");
   const sessionId = Reflect.get(value, "sessionId");
-  // The parent's own step wrote it: the record its credentials render from.
   const dynamicBinding = Reflect.get(value, "dynamicBinding") as JsonValue | undefined;
   const earlierProtocol = Reflect.get(value, "earlierProtocol");
   if (

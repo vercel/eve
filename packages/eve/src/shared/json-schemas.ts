@@ -5,9 +5,6 @@ import { parseJsonObject, parseJsonValue, type JsonObject, type JsonValue } from
 const JSON_VALUE_ERROR_MESSAGE = "Expected a JSON-serializable value.";
 const JSON_OBJECT_ERROR_MESSAGE = "Expected a JSON-serializable object.";
 
-/**
- * Zod schema for JSON-serializable values.
- */
 export const jsonValueSchema: z.ZodType<JsonValue> = z
   .unknown()
   .transform((value, ctx): JsonValue | typeof z.NEVER => {
@@ -22,9 +19,6 @@ export const jsonValueSchema: z.ZodType<JsonValue> = z
     }
   });
 
-/**
- * Zod schema for JSON-serializable object values.
- */
 export const jsonObjectSchema: z.ZodType<JsonObject> = z
   .unknown()
   .transform((value, ctx): JsonObject | typeof z.NEVER => {

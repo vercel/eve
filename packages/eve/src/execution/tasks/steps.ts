@@ -28,6 +28,7 @@ import { usageSince } from "#shared/token-usage-math.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type {
   PublishedSessionEvents,
+  SessionStepInput,
   SessionStepState,
 } from "#execution/publish-session-events.js";
 import { commitSessionStep } from "#execution/publish-session-events.js";
@@ -45,10 +46,9 @@ import { endTask, finishRun, settleTask } from "#harness/session-machine/transit
 import { lateTaskSpend, taskSpend } from "#harness/session-machine/runs.js";
 import { storedProjection, type SessionView } from "#harness/session-machine/view.js";
 import { stopRuns, waitedCallRuns, type RunStopTarget } from "#execution/stop-runs.js";
-import { resumeHook } from "#internal/workflow/runtime.js";
+import { resumeRoutedHook } from "#execution/hosts.js";
 import type { TaskCancelReason } from "#execution/tasks/table.js";
 
-/** The messages a task's run sends that change its record. */
 export type TaskRunMessage = Extract<
   WorkflowToolRunMessage,
   { readonly kind: "outcome" | "reply" | "started" | "usage" }
@@ -57,10 +57,6 @@ export type TaskRunMessage = Extract<
 const TASK_CANCEL_REASON = "The task was cancelled.";
 const TURN_CANCEL_REASON = "The turn that called the tool was cancelled.";
 
-/**
- * Applies one message from a task's run: started, a reply, usage no reply
- * carried, or the run's outcome. Call from a step and adopt the result.
- */
 export async function applyTaskRunMessage(
   input: SessionStepState & { readonly message: TaskRunMessage },
 ): Promise<PublishedSessionEvents> {
@@ -74,7 +70,6 @@ export async function applyTaskRunMessage(
   const cancelled = isCancelledTaskRun(table, taskId, message.from.runId);
   const ended = storedProjection(session.state).view?.tasks[taskId]?.status === "ended";
   if (cancelled && (message.kind === "usage" || message.kind === "outcome")) {
-    // The task already ended, so later spend counts without naming it again.
     const counted = countTaskRunUsage(table, taskId, message);
     table =
       message.kind === "outcome"
@@ -87,10 +82,8 @@ export async function applyTaskRunMessage(
     );
   }
   if (cancelled && message.kind === "started") {
-    // The run may not have existed when cancellation tried to stop it. Started follows
-    // registration of its control hook; keep its address until the outcome arrives.
     await ignoreGoneTarget(
-      resumeHook(findTask(table, taskId)!.run!.hookToken, {
+      resumeRoutedHook(findTask(table, taskId)!.run!.hookToken, {
         kind: "end",
         reason: TASK_CANCEL_REASON,
       }),
@@ -129,12 +122,9 @@ export async function applyTaskRunMessage(
       const record = findTask(table, taskId);
       const settled = settleRemainingTaskCalls(table, taskId, outcome);
       settles.push(...taskSettled(record, settled.settled, outcome));
-      // The run's final spend lands while its task is still open, before `task.ended`.
       if (spend !== undefined)
         settles.push(spent([...settles], message.from.callId, spend, taskId));
       spend = undefined;
-      // Nobody can answer what a finished run relayed, so channels stop offering it. The
-      // withdrawals commit first, so the task's own end leaves them alone.
       const requestIds = runRequestIds(session, message.from.runId);
       withdraws.push((view) => finishRun(view, { requestIds, taskId }));
       settles.push((view) => endTask(view, { outcome, taskId }));
@@ -151,18 +141,8 @@ export async function applyTaskRunMessage(
   });
 }
 
-/**
- * Cancels tasks, and the calls the turn waits on when `turnCalls` is set. The tasks' calls
- * settle as cancelled and the session publishes that first. A cancelled agent or `task()` task
- * ends now, without waiting for its run to finish cleanup. A resumable tool's run only stops its
- * current stretch.
- *
- * A `task()` run's cancel settles every request it relayed, so the session withdraws them in
- * the same step and accepts no answer after it. A `serve()` run withdraws its stretch's
- * questions itself, and the session decides each one.
- */
 export async function cancelTasksStep(
-  input: SessionStepState & TaskCancellationInput,
+  input: SessionStepInput & TaskCancellationInput,
 ): Promise<SessionStateTransition> {
   "use step";
   return await withSessionStateDelta(input, cancelTasks);
@@ -171,7 +151,6 @@ export async function cancelTasksStep(
 interface TaskCancellationInput {
   readonly reason: TaskCancelReason;
   readonly taskIds: readonly string[];
-  /** Also stop the workflow tool runs the turn waits on. */
   readonly turnCalls?: boolean;
 }
 
@@ -193,7 +172,6 @@ async function cancelTasks(
     if (record?.resumable === false || record?.kind === "agent")
       settles.push((view) => endTask(view, { outcome, taskId }));
     if (cancelled.send === undefined) continue;
-    // A `task()` run's cancel settles what it relayed; a `serve()` run withdraws its own.
     if (record?.resumable === false || record?.kind === "agent") {
       const requestIds = runRequestIds(session, cancelled.send.run.runId);
       withdraws.push((view) => finishRun(view, { requestIds, taskId }));
@@ -232,13 +210,8 @@ async function cancelTasks(
   return { ...committed, sessionState: saveTable(committed.sessionState, current, finished) };
 }
 
-/** A transition a task step decides against the session it commits to. */
 type Decision = (view: SessionView) => Transition;
 
-/**
- * Commits a task step's decisions to the session with its saved table: the requests it
- * withdraws, which this session relayed, and then its own `task.settled` events.
- */
 async function commitTaskDecisions(
   input: SessionStepState,
   sessionState: DurableSessionState,
@@ -256,7 +229,6 @@ async function commitTaskDecisions(
   );
 }
 
-/** The spend a task run's message reports, as a fact after the calls `settles` settle. */
 function spent(
   settles: readonly Decision[],
   sourceCallId: string | undefined,
@@ -272,7 +244,6 @@ function spent(
     });
 }
 
-/** Settles a task's settled calls; calls only settle on a known task. */
 function taskSettled(
   record: TaskRecord | undefined,
   calls: readonly TaskCall[],
@@ -282,13 +253,9 @@ function taskSettled(
   return [(view) => settleTask(view, { calls, outcome })];
 }
 
-/**
- * Sends commands to a task's run, in order. A run that already finished takes
- * none; its outcome settles any call still waiting.
- */
 export async function sendTaskRunCommands(commands: TaskRunCommands): Promise<void> {
   for (const command of commands.commands) {
-    await ignoreGoneTarget(resumeHook(commands.run.hookToken, toControlMessage(command)));
+    await ignoreGoneTarget(resumeRoutedHook(commands.run.hookToken, toControlMessage(command)));
   }
 }
 
@@ -320,12 +287,6 @@ function failureMessage(message: WorkflowToolRunOutcomeMessage): string {
   return typeof described === "string" ? described : JSON.stringify(output);
 }
 
-/**
- * The new spend the cumulative total a reply, usage report, or outcome carries adds to what was
- * recorded from its run, which the caller records as a fact; the task remembers the total. Only
- * while that run is the task's run: a redelivered outcome arrives after the run finished, and
- * adds nothing.
- */
 function countTaskRunUsage(
   table: TaskTable,
   taskId: string,
@@ -346,7 +307,6 @@ function countTaskRunUsage(
   };
 }
 
-/** The requests a run relayed: its own questions and those of the sessions it opened. */
 function runRequestIds(session: DurableSession, runId: string): readonly string[] {
   return [...readHitlState(session.state).relays]
     .filter(([, route]) => route.runId === runId)

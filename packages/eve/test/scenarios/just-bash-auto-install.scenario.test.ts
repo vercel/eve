@@ -5,7 +5,11 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
-import { readDevelopmentRevision, startEveDev, waitForCondition } from "./dev-server-harness.js";
+import {
+  readDevelopmentRevision,
+  startEveDev,
+  waitForCondition,
+} from "#internal/testing/dev-server-harness.js";
 import { sendDevelopmentMessage } from "../dev-client-harness/send-message.js";
 import { createDevelopmentSessionState } from "../dev-client-harness/session.js";
 

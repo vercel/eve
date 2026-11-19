@@ -1,0 +1,75 @@
+name: "Install dependencies"
+description: >-
+  Install the workspace packages this job's commands read, and cache this job's
+  pnpm store under a key of its own so that one job's smaller store never
+  replaces another job's. Every run restores the caches; only runs on main save
+  them, which keeps pull requests from filling the repository's cache budget.
+
+inputs:
+  cache-key:
+    description: >-
+      Suffix that names this job's package set. Jobs that install different
+      packages must pass different suffixes: a shared key lets whichever job
+      saves first hand its smaller store to every other job, which then
+      downloads the rest.
+    required: true
+  filters:
+    description: >-
+      Newline-separated pnpm --filter selectors. Empty installs the whole
+      workspace.
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Resolve the pnpm store
+      id: store
+      shell: bash
+      run: echo "path=$(pnpm store path --silent)" >>"$GITHUB_OUTPUT"
+
+    - name: Restore this job's pnpm store
+      id: store-cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.store.outputs.path }}
+        key: pnpm-store-${{ runner.os }}-${{ inputs.cache-key }}-${{ hashFiles('pnpm-lock.yaml') }}
+        restore-keys: pnpm-store-${{ runner.os }}-${{ inputs.cache-key }}-
+
+    # pnpm verifies the lockfile against the supply-chain policies on every
+    # install. Its verdict log is keyed by the lockfile hash, so caching it keeps
+    # the check and skips the re-check.
+    - name: Restore the lockfile verification verdict
+      id: verdict-cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/pnpm-cache/lockfile-verified.jsonl
+        key: pnpm-lock-verdict-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml') }}
+
+    - name: Install dependencies
+      shell: bash
+      env:
+        FILTERS: ${{ inputs.filters }}
+      run: |
+        set -euo pipefail
+        selectors=()
+        while IFS= read -r selector; do
+          if [[ -n "$selector" ]]; then selectors+=(--filter "$selector"); fi
+        done <<<"$FILTERS"
+        pnpm install --frozen-lockfile --config.cache-dir="${{ runner.temp }}/pnpm-cache" "${selectors[@]}"
+
+    # Saved right after the install, so each job's store holds the packages it
+    # installed and nothing else.
+    - name: Save this job's pnpm store
+      if: github.ref == 'refs/heads/main' && steps.store-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.store.outputs.path }}
+        key: ${{ steps.store-cache.outputs.cache-primary-key }}
+
+    - name: Save the lockfile verification verdict
+      if: github.ref == 'refs/heads/main' && steps.verdict-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/pnpm-cache/lockfile-verified.jsonl
+        key: ${{ steps.verdict-cache.outputs.cache-primary-key }}

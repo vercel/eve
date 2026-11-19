@@ -1,7 +1,3 @@
-/**
- * Skill authoring helpers.
- */
-
 export {
   defineSkill,
   type NamedSkillDefinition,

@@ -23,16 +23,17 @@ import { writeDefinitionsState } from "#definitions/state.js";
 import { evaluateStepValues } from "#definitions/step.js";
 import { enterSessionProjection } from "#harness/session-machine/current.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { fromCompiledBundle } from "#definitions/compiled-agent.js";
+import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import { serializeInputSchema, type ToolSchemaSource } from "#tools/schema.js";
 
 import type { StepCatalog } from "./step-catalog.js";
+import { labelCallbacks } from "#internal/testing/tool-labels.js";
 
 const CHILD = { rootSessionId: "root-session" };
 
 const names = (tools: ReadonlyMap<string, HarnessToolDefinition>) => [...tools.keys()];
 
-/** Validates `input` against a catalog tool's schema, which every call passes before it runs. */
 function validate(catalog: StepCatalog, tool: string, input: unknown) {
   const schema = catalog.advertised.get(tool)!.inputSchema as StandardSchemaV1;
   return schema["~standard"].validate(input);
@@ -42,7 +43,6 @@ const validateTool = (catalog: StepCatalog, input: unknown) =>
 const validateSkill = (catalog: StepCatalog, input: unknown) =>
   validate(catalog, SKILL_TOOL_NAME, input);
 
-/** A catalog tool's description and input fields, as the model reads them. */
 function shape(catalog: StepCatalog, tool: string) {
   const definition = catalog.advertised.get(tool)!;
   const schema = serializeInputSchema(definition.inputSchema as ToolSchemaSource) as {
@@ -172,7 +172,6 @@ describe("buildStepCatalog", () => {
       ["a deferred agent", { tools: [subagentTool("researcher", { deferred: true })] }],
       ["a connection", { connections: [fakeConnection({ name: "linear", tools: [] })] }],
     ])("gives an agent with %s search and eve__tool", async (_, declared) => {
-      // A subagent also brings the task tools; the catalog tools come last.
       expect(names((await catalogContext(declared)).catalog.advertised).slice(-2)).toEqual([
         SEARCH_TOOL_NAME,
         CALL_TOOL_NAME,
@@ -182,13 +181,16 @@ describe("buildStepCatalog", () => {
     it("gives an agent no catalog tools for dynamic resolvers that returned nothing they reach", async () => {
       const bundle = catalogBundle({ dynamicSubagents: ["helper"] });
       const ctx = new ContextContainer();
-      ctx.set(BundleKey, {
-        ...bundle,
-        resolvedAgent: {
-          ...bundle.resolvedAgent,
-          definitions: [{ kind: "connection" }, { kind: "skill" }, { kind: "tool" }],
-        } as never,
-      });
+      ctx.set(
+        SessionAgentKey,
+        fromCompiledBundle({
+          ...bundle,
+          resolvedAgent: {
+            ...bundle.resolvedAgent,
+            definitions: [{ kind: "connection" }, { kind: "skill" }, { kind: "tool" }],
+          } as never,
+        }),
+      );
       const catalog = await nativeCatalog({
         agentTools: toolMap(inlineTool("add")),
         ctx,
@@ -196,7 +198,6 @@ describe("buildStepCatalog", () => {
         session: {},
       });
 
-      // A dynamic subagent resolver still brings the task tools.
       expect(names(catalog.advertised)).toEqual([
         "add",
         TASK_WAIT_TOOL_NAME,
@@ -220,7 +221,7 @@ describe("buildStepCatalog", () => {
         },
         { conversation: [] },
       );
-      ctx.set(BundleKey, catalogBundle({}));
+      ctx.set(SessionAgentKey, fromCompiledBundle(catalogBundle({})));
       ctx.delete(ConnectionRegistryKey);
       const later = await nativeCatalog({
         agentTools: toolMap(inlineTool("add")),
@@ -276,7 +277,6 @@ describe("buildStepCatalog", () => {
       CALL_TOOL_NAME,
     ]);
     expect(names(child.deferred)).toEqual(["researcher"]);
-    // A hidden entry can't be reached through eve__tool either.
     expect(await validateTool(child, { name: "archive" })).toEqual({
       issues: [
         { message: 'No tool named "archive". Find tools with eve__search.', path: ["name"] },
@@ -346,7 +346,7 @@ describe("buildStepCatalog", () => {
       const resolved = catalog.resolve({ input: { name: "pdf-forms" }, toolName: SKILL_TOOL_NAME });
 
       expect(resolved?.call).toEqual({ input: { name: "pdf-forms" }, toolName: "eve:load-skill" });
-      const label = resolved?.definition.label;
+      const label = labelCallbacks(resolved?.definition.label);
       expect(label?.start?.(resolved?.call.input)).toBe("Load skill pdf-forms");
       expect(label?.complete?.(resolved?.call.input, "# PDF forms")).toBe("Loaded skill pdf-forms");
       expect(
@@ -390,7 +390,6 @@ describe("buildStepCatalog", () => {
           inlineTool("refund_payment", { deferred: true }),
           inlineTool("stripe_list_disputes", { deferred: true }),
           workflowTool("research", "task"),
-          // eve's built-in tools and static agents are marked as framework tools.
           inlineTool("bash", { frameworkTool: true }),
           subagentTool("billing_specialist", { frameworkTool: true }),
           {
@@ -549,7 +548,7 @@ describe("buildStepCatalog", () => {
       ).toEqual({ value: validated });
       const resolved = catalog.resolve({ input: validated, toolName: CALL_TOOL_NAME });
       expect(resolved?.call.toolName).toBe("linear__list_issues");
-      expect(resolved?.definition.label?.start?.({})).toBe("Linear: List issues");
+      expect(labelCallbacks(resolved?.definition.label)?.start?.({})).toBe("Linear: List issues");
       await run(() =>
         resolved?.definition.execute?.(resolved.call.input, { messages: [], toolCallId: "call-1" }),
       );
@@ -620,7 +619,6 @@ describe("buildStepCatalog", () => {
       }
     });
 
-    // #4977: a server that lists its tools but never answers a call held the turn.
     it.each([
       {
         case: "fails and cancels a call the connection doesn't answer within 5 minutes",
@@ -638,7 +636,6 @@ describe("buildStepCatalog", () => {
       try {
         const { catalog, linear, run } = await linearCatalog();
         let request: AbortSignal | undefined;
-        // Like an MCP client: the request settles only when its signal aborts.
         vi.spyOn(linear.client, "executeTool").mockImplementationOnce(
           async (_tool, _args, { abortSignal }) =>
             await new Promise((_, reject) => {
@@ -660,16 +657,13 @@ describe("buildStepCatalog", () => {
           }),
         );
 
-        // Observe the outcome before advancing: the call rejects while the timers run.
         const outcome = Promise.resolve(calling).then(
           () => "resolved",
           (error: unknown) => (error instanceof Error ? error.message : String(error)),
         );
         await vi.advanceTimersByTimeAsync(60_000);
-        // A cancelled turn settles the call at once, without waiting out the deadline.
         if (cancelTurn) turn.abort();
         await vi.advanceTimersByTimeAsync(cancelTurn ? 0 : 4 * 60_000);
-        // Racing a settled value reports a call that is still pending instead of hanging the test.
         expect(await Promise.race([outcome, "still waiting"])).toBe(error);
         expect(request?.aborted).toBe(true);
       } finally {
@@ -699,7 +693,6 @@ describe("buildStepCatalog", () => {
     });
 
     it("accepts a key the connection provides when the model sends it anyway, since the provided value replaces it", async () => {
-      // Listed without `env`, as connection clients omit provided keys from the schemas they list.
       const nova = fakeConnection({
         name: "nova",
         toolCall: { providedArguments: { env: "prod" } },
@@ -782,7 +775,6 @@ describe("buildStepCatalog", () => {
           context.run(() =>
             signIn.definition.execute!(signIn.call.input, { messages: [], toolCallId: "connect" }),
           ),
-        /** Delivers the finished sign-in, as the turn step does when its callback arrives. */
         finishSignIn: () =>
           context.ctx.set(PendingAuthorizationResultKey, [
             {
@@ -798,7 +790,7 @@ describe("buildStepCatalog", () => {
       const { catalog, connect, finishSignIn, notion, run, signIn } = await notionCatalog();
 
       expect(signIn.call.toolName).toBe("notion");
-      expect(signIn.definition.label?.start?.({})).toBe("Sign in to Notion");
+      expect(labelCallbacks(signIn.definition.label)?.start?.({})).toBe("Sign in to Notion");
       expect(signIn.definition.approval).toBeUndefined();
       const parked = await connect();
       expect(isAuthorizationSignal(parked)).toBe(true);

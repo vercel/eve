@@ -1,6 +1,5 @@
 export const ACP_MAX_LINE_BYTES = 10 * 1024 * 1024;
 
-/** Rejects an ACP stdio line before the SDK's line buffer can grow without bound. */
 export function limitAcpLineBytes(
   maximumBytes: number = ACP_MAX_LINE_BYTES,
 ): TransformStream<Uint8Array, Uint8Array> {

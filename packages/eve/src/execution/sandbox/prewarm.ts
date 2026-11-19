@@ -6,6 +6,7 @@ import { createLoggingSandboxSession } from "#execution/sandbox/logging-session.
 import { createSandboxProviderIdentity } from "#execution/sandbox/provider-identity.js";
 import { createConnectionSession } from "#execution/sandbox/session.js";
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
+import type { AuthoredModuleGraph } from "#internal/authored-module-graph.js";
 import { loadCompiledModuleMapFromAuthoredSource } from "#internal/authored-module-map-loader.js";
 import { createAuthoredSourceRuntimeCompiledArtifactsSource } from "#internal/application/runtime-compiled-artifacts-source.js";
 import type {
@@ -71,13 +72,6 @@ interface NodeSandbox extends RuntimeRegisteredSandbox {
   readonly nodeId: string;
 }
 
-/**
- * Optional dispatch override that intercepts every provider `prepare()`
- * call. Production code never supplies this; the orchestrator dispatches
- * directly to the provider. Tests inject a recorder to verify which
- * templates the orchestrator emits and what preparation calls flow through
- * them.
- */
 type SandboxProviderPrepareDispatch = (input: {
   readonly context: SandboxPrepareContext;
   readonly provider: SandboxProviderRuntime;
@@ -93,13 +87,6 @@ interface PrewarmSandboxesInput {
   readonly preparedArtifactStore?: SandboxPreparedArtifactStore;
 }
 
-/**
- * Prepares every provider sandbox template required by one compiled
- * runtime graph.
- *
- * Iterates every registered sandbox and invokes `provider.prepare(...)`
- * for each provider template.
- */
 async function prewarmSandboxes(input: PrewarmSandboxesInput): Promise<void> {
   const targets = await collectPrewarmTargets(input);
 
@@ -144,7 +131,6 @@ async function prewarmSandboxes(input: PrewarmSandboxesInput): Promise<void> {
       }
     }),
   );
-  // A failed provider must not release the preparation lock while others still write templates.
   const failure = results.find((result) => result.status === "rejected");
   if (failure?.status === "rejected") throw failure.reason;
   const entries = results.flatMap((result) =>
@@ -162,24 +148,17 @@ async function prewarmSandboxes(input: PrewarmSandboxesInput): Promise<void> {
   input.log?.(`eve: initialized ${formatSandboxTemplateCount(targets.length)}.`);
 }
 
-/**
- * Loads the compiled runtime graph for one authored app root and
- * prepares every provider sandbox template required by that graph.
- *
- * Hydrates the module map directly from authored source so callers
- * don't need a pre-existing `module-map.mjs` import in Node's cache.
- * Shared entrypoint for `eve dev` startup, the dev watcher, and the
- * Vercel build hook.
- */
 export async function prewarmAppSandboxes(input: {
   readonly appRoot: string;
   readonly compiledArtifactsSource?: RuntimeCompiledArtifactsSource;
   readonly loadAgentGraph?: (
     input: Readonly<{
       compiledArtifactsSource: RuntimeDiskCompiledArtifactsSource;
+      moduleGraph?: AuthoredModuleGraph;
     }>,
   ) => Promise<ResolvedAgentGraphBundle>;
   readonly log?: (message: string) => void;
+  readonly moduleGraph?: AuthoredModuleGraph;
   readonly dispatch?: SandboxProviderPrepareDispatch;
   readonly preparedArtifactStore?: SandboxPreparedArtifactStore;
 }): Promise<void> {
@@ -191,6 +170,7 @@ export async function prewarmAppSandboxes(input: {
   }
   const graph = await (input.loadAgentGraph ?? loadGraphFromArtifacts)({
     compiledArtifactsSource,
+    moduleGraph: input.moduleGraph,
   });
 
   await prewarmSandboxes({
@@ -236,15 +216,9 @@ async function collectPrewarmTargets(input: {
     }),
   );
 
-  // Each graph node owns one manifest entry, so no deduplication is needed.
   return targets.sort((left, right) => left.label.localeCompare(right.label));
 }
 
-/**
- * Reads the node's compiled workspace resource root under `.eve/compile/`
- * into the resource trees handed to the provider. A root without content has
- * no resources.
- */
 async function loadSandboxProviderResources(input: {
   readonly compileDirectoryPath: string;
   readonly workspaceResourceRoot: CompiledWorkspaceResourceRoot;
@@ -255,17 +229,13 @@ async function loadSandboxProviderResources(input: {
   return { key: contentHash, path, ...(await materializeWorkspaceDirectory(path)) };
 }
 
-/** The compiled workspace and skill files one sandbox template seeds. */
 export interface SandboxTemplateResources {
-  /** The compiled resource tree's content hash; absent when the agent has none. */
   readonly key?: string;
-  /** The compiled resource directory on the host, holding `workspace/` and `skills/`. */
   readonly path?: string;
   readonly skills?: readonly SandboxProviderResourceFile[];
   readonly workspace?: readonly SandboxProviderResourceFile[];
 }
 
-/** The context eve passes to a provider's `prepare()` for one template. */
 export function createSandboxPrepareContext(input: {
   readonly appRoot: string;
   readonly files: SandboxProviderFiles;
@@ -286,7 +256,6 @@ export function createSandboxPrepareContext(input: {
     log,
     async populate(connection, options) {
       const session = createConnectionSession(connection);
-      // Without a resource directory there is nothing mounted to copy from.
       if (options?.mountedAt !== undefined && resourcesPath !== undefined) {
         log("copying workspace and skills from mounted resources");
         await copyMountedResources(session, shellQuote(options.mountedAt));
@@ -296,7 +265,6 @@ export function createSandboxPrepareContext(input: {
           typeof file.content === "string" ? Buffer.from(file.content) : file.content;
         await session.writeFiles({
           files: [
-            // A workspace file named like `$HOME/...` still lands under the workspace root.
             ...workspace.map((file) => ({
               content: bytes(file),
               path: session.resolvePath(file.relativePath),
@@ -347,7 +315,6 @@ export function createSandboxPrepareContext(input: {
   };
 }
 
-/** `quotedRoot` is interpolated into the shell script, so callers pass it shell-quoted. */
 async function copyMountedResources(session: SandboxSession, quotedRoot: string): Promise<void> {
   const workspace = shellQuote(session.resolvePath("."));
   const result = await session.run({
@@ -367,10 +334,6 @@ async function copyMountedResources(session: SandboxSession, quotedRoot: string)
   }
 }
 
-/**
- * Rejects what the template-key hasher cannot tell apart, such as a `Date` or
- * `Map` that would hash as `{}`, and circular values, before hashing.
- */
 function assertSandboxIdentity(value: unknown, path: string, seen: WeakSet<object>): void {
   if (value === null || value === undefined || typeof value === "function") return;
   if (typeof value === "string" || typeof value === "boolean") return;
@@ -400,6 +363,7 @@ function describeIdentityValue(value: unknown): string {
 
 async function loadGraphFromArtifacts(input: {
   readonly compiledArtifactsSource: RuntimeDiskCompiledArtifactsSource;
+  readonly moduleGraph?: AuthoredModuleGraph;
 }): Promise<ResolvedAgentGraphBundle> {
   const [manifest, moduleMap] = await Promise.all([
     loadCompiledManifest({
@@ -407,6 +371,7 @@ async function loadGraphFromArtifacts(input: {
     }),
     loadCompiledModuleMapFromAuthoredSource({
       compiledArtifactsSource: input.compiledArtifactsSource,
+      moduleGraph: input.moduleGraph ?? "shared",
     }),
   ]);
 

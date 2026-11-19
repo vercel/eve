@@ -5,7 +5,7 @@ description: "Publish an eve agent as an MCP server with auth support."
 
 The MCP channel publishes your agent as an MCP server, so clients such as Claude Code can hand it long-running work. It lives in `agent/channels/mcp.ts`. Clients start and follow that work with four tools: `agent_start`, `agent_get`, `agent_update`, and `agent_cancel`. The channel can also [publish the agent's tools](#publish-the-agents-tools) for clients to call directly, and [its skills](#publish-the-agents-skills) for clients to read.
 
-Use an [MCP connection](../connections/mcp) instead when your eve agent needs to call someone else's MCP server.
+Use an [MCP connection](../connections/mcp) instead when your eve agent needs to call someone else's MCP server. To let agents that speak the Agent2Agent protocol delegate work instead, use the [A2A channel](./a2a).
 
 ## Configure the channel
 
@@ -53,14 +53,14 @@ MCP clients receive four tools:
 
 The invocation's `status` is one of:
 
-| `status`                 | What to do                                                                                                                                                                                  |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `working`                | Keep polling. The optional `statusMessage` says what the agent is doing, such as a running tool's [activity label](/docs/tools#label-tool-activity) or its name.                            |
-| `input_required`         | Show each entry in `interactions`, keyed by `interactionId`. Send all the answers in one `agent_update`, one `{ interactionId, optionId?, text? }` per entry. It returns the current state. |
-| `authorization_required` | Show each sign-in in `interactions`: its `signIn` URL, user code, or instructions. The invocation resumes on its own after the sign-in; keep polling.                                       |
-| `completed`              | Read the optional `result`, the final assistant message. The turn and any [tasks](/docs/tools/workflows#run-calls-as-tasks-task) it started have finished.                                  |
-| `failed`                 | Read the structured `error`.                                                                                                                                                                |
-| `cancelled`              | The work stopped.                                                                                                                                                                           |
+| `status`                 | What to do                                                                                                                                                                                                                                                                                                                                             |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `working`                | Keep polling. The optional `statusMessage` says what the agent is doing: a running tool's [activity label](/docs/tools#label-tool-activity) or name, the latest heading or sentence of the model's reasoning, `Thinking...`, or `Writing a reply...`. Reasoning appears as the model wrote it, so show it only to people who can see the agent's work. |
+| `input_required`         | Show each entry in `interactions`, keyed by `interactionId`. Send all the answers in one `agent_update`, one `{ interactionId, optionId?, text? }` per entry. It returns the current state.                                                                                                                                                            |
+| `authorization_required` | Show each sign-in in `interactions`: its `signIn` URL, user code, or instructions. The invocation resumes on its own after the sign-in; keep polling.                                                                                                                                                                                                  |
+| `completed`              | Read the optional `result`, the final assistant message. The turn and any [tasks](/docs/tools/workflows#run-calls-as-tasks-task) it started have finished.                                                                                                                                                                                             |
+| `failed`                 | Read the structured `error`.                                                                                                                                                                                                                                                                                                                           |
+| `cancelled`              | The work stopped.                                                                                                                                                                                                                                                                                                                                      |
 
 A tool result with `isError: true` means eve rejected the call, so fix the call. A `failed` status means the call succeeded and the work failed, so report it. Rejected calls carry `structuredContent.error` with a stable `code`, a short `message`, and `retryable`:
 
@@ -72,6 +72,8 @@ A tool result with `isError: true` means eve rejected the call, so fix the call.
 | `internal`      | eve failed; `errorId` correlates with server logs. No details are exposed.   | `false`     |
 
 Limits: the MCP request body is 1 MiB, `message` 64 KiB, each response `text` 16 KiB (both in UTF-8 bytes), and one `agent_update` 64 responses. Oversized bodies get a JSON-RPC `413`, and oversized fields fail input validation before any work starts.
+
+Tool arguments may contain at most 10,000 array elements and object members in total, including nested collections. Larger inputs return `isError: true` before the tool runs.
 
 ### Durability guarantees
 
@@ -96,6 +98,7 @@ With `none()`, every caller is the same anonymous user, so the random invocation
 | `tools`             | `false`                       | Also [publishes the agent's tools](#publish-the-agents-tools).                      |
 | `skills`            | `false`                       | Also [publishes the agent's skills](#publish-the-agents-skills).                    |
 | `trustedForwarders` | Refuses the header with `403` | Lets a [router name the user](#forwarded-principals) that a published tool runs as. |
+| `plainHttp`         | `"loopback"`                  | When a plain HTTP request is accepted; see [HTTP security](#http-security).         |
 
 ## Interactive OAuth
 
@@ -211,9 +214,19 @@ Anyone can then invoke the agent. See [Invocation ownership](#invocation-ownersh
 
 The MCP endpoint checks each request before authentication:
 
-- Remote endpoints require HTTPS. HTTP is accepted only on loopback.
+- Remote endpoints require HTTPS. By default, HTTP is accepted only on loopback.
 - `Host` must match the request URL.
 - Browser protocol requests must have an exact same-origin `Origin`.
+
+When eve runs behind a proxy, or serves callers on a private network, `plainHttp` accepts plain HTTP from more places:
+
+| `plainHttp`         | Accepts plain HTTP                                                             |
+| ------------------- | ------------------------------------------------------------------------------ |
+| `"loopback"`        | Only from a loopback host, such as a local `eve dev`.                          |
+| `"forwarded-https"` | Also when `X-Forwarded-Proto` is `https`, from a proxy that terminates TLS.    |
+| `"allow"`           | From any host, for a network kept private some other way, such as one cluster. |
+
+Any client can send `X-Forwarded-Proto`, so use `"forwarded-https"` only when every request passes through a proxy that sets it. eve reads the header's first value as the client's, so the outermost proxy must overwrite `X-Forwarded-Proto` and `X-Forwarded-Port`, not append to them. Under it, the OAuth metadata and challenges advertise the `https` URL the client used, on the port `X-Forwarded-Port` names when the proxy sends it. The `Host` and `Origin` checks apply under every setting.
 
 Only the metadata endpoint allows cross-origin requests. For a browser application, put a same-origin backend or authenticated server-side proxy in front of the MCP endpoint.
 

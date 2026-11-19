@@ -17,7 +17,6 @@ type DeliveryObserver<TState> = (
   input: ObservedChannelDelivery<TState>,
 ) => unknown;
 
-/** Creates a channel receive context backed by a test-owned delivery observer. */
 export function mockChannelContext<TState = undefined>(
   observeDelivery: DeliveryObserver<TState>,
 ): ChannelReceiveContext<TState> {

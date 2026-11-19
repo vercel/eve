@@ -6,7 +6,6 @@ import {
   ConnectionAuthorizationRequiredError,
 } from "#connections/errors.js";
 import { defineDynamic } from "#dynamic/definition.js";
-import { workflowEntry } from "#execution/session/entry.js";
 import {
   sessionCommandHookToken,
   sessionInboxHookToken,
@@ -16,14 +15,13 @@ import { textStreamResult, toolCallStreamResult } from "#internal/testing/approv
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { buildSerializedContext, captureEvents } from "#internal/testing/entry-test-helpers.js";
 import { filterEventsByType } from "#internal/testing/events.js";
-import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
-import { resumeHook } from "#internal/workflow/runtime.js";
+import { startTestSession } from "#internal/testing/test-session-hosts.js";
+import { resumeRoutedHook } from "#execution/hosts.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { AuthorizationDefinition } from "#shared/connection-types.js";
 import { defineTool } from "#tools/definition.js";
 
-// Calls list_issues, then create_issue, then replies; a second turn calls create_issue again.
 const script: readonly ({ readonly tool: string } | { readonly text: string })[] = [
   { tool: "list_issues" },
   { tool: "create_issue" },
@@ -56,12 +54,10 @@ const scriptedModel = markMockModel(
 );
 
 describe("workflowEntry sign-in failure", () => {
-  // #4943: after a terminal sign-in failure, create_issue gets that failure, not a fresh sign-in.
   it("does not prompt again for a grant whose sign-in failed with retryable: false", async () => {
     scriptIndex = 0;
     let starts = 0;
     let completes = 0;
-    // One Vercel Connect connector shared by two tools; the exchange never yields a token.
     const issuesAuth: AuthorizationDefinition<{ nonce: string }> = {
       principalType: "user",
       vercelConnect: { connector: "oauth/issues" },
@@ -111,18 +107,16 @@ describe("workflowEntry sign-in failure", () => {
     });
 
     await runtime.run(async () => {
-      const run = await startSessionOwner(workflowEntry, [
-        {
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          input: { message: "List my issues, then create one." },
-          serializedContext: buildSerializedContext({
-            auth: alice,
-            channelKind: "http",
-            continuationToken: "http:workflow-entry-sign-in-failure",
-          }),
-        },
-      ]);
+      const run = await startTestSession("in-process", {
+        kind: "initial",
+        ownerDeploymentId: "dpl_inline",
+        input: { message: "List my issues, then create one." },
+        serializedContext: buildSerializedContext({
+          auth: alice,
+          channelKind: "http",
+          continuationToken: "http:workflow-entry-sign-in-failure",
+        }),
+      });
       const stream = captureEvents(run);
 
       try {
@@ -132,7 +126,7 @@ describe("workflowEntry sign-in failure", () => {
         )!.data;
         await stream.nextUntil("sign-in hold", (event) => event.type === "turn.paused");
 
-        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+        await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
           kind: "authorization-callback",
           payloads: [
             {
@@ -145,8 +139,6 @@ describe("workflowEntry sign-in failure", () => {
           ],
         });
 
-        // The exchange failed terminally: create_issue, on the same grant, gets that failure
-        // instead of a fresh sign-in, and the turn ends.
         const resumed = await stream.nextUntil(
           "turn after the failed sign-in",
           (event) => event.type === "turn.settled" || isSignInOpened(event),
@@ -155,7 +147,6 @@ describe("workflowEntry sign-in failure", () => {
         expect(resumed.filter(isSignInOpened)).toEqual([]);
         expect(starts).toBe(1);
         expect(resumed.at(-1)?.type).toBe("turn.settled");
-        // The failed sign-in says it is terminal, and the model reads why create_issue didn't run.
         expect(filterEventsByType(resumed, "interaction.settled")).toContainEqual(
           expect.objectContaining({
             data: expect.objectContaining({
@@ -174,8 +165,7 @@ describe("workflowEntry sign-in failure", () => {
         expect(refused?.data.outcome).toBe("failed");
         expect(JSON.stringify(refused?.data)).toContain("already failed in this turn");
 
-        // The refusal lasts the turn: the next one asks for the sign-in again.
-        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+        await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
           auth: alice,
           kind: "send",
           delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),

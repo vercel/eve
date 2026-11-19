@@ -1,5 +1,5 @@
 import { attemptIdempotencyKey } from "#instrumentation/lifecycle.js";
-import { instrumentationScope, traceStepIndex } from "#instrumentation/scope.js";
+import { copyScopeMarks, isTurnScope } from "#instrumentation/scope.js";
 import {
   abandonInstrumentationState,
   instrumentationStateSlot,
@@ -14,6 +14,8 @@ import {
   withoutInstrumentationContent,
 } from "#instrumentation/content.js";
 import { createLogger, formatError } from "#internal/logging.js";
+import { traceContentCeilingToDecision } from "#shared/forwarded-trace-policy.js";
+import { intersectInstrumentationDecisions } from "#shared/instrumentation-decision.js";
 import { resolveTracePolicy } from "#shared/trace-policy.js";
 import type { TraceCaptureContext } from "#shared/trace-policy.js";
 
@@ -25,6 +27,7 @@ import type {
   InstrumentationHooks,
   InstrumentationHooksInput,
   InstrumentationProviderDefinition,
+  InstrumentationTraceBindingOptions,
 } from "#instrumentation/lifecycle.js";
 
 const log = createLogger("harness.instrumentation-dispatch");
@@ -39,20 +42,28 @@ export function createInstrumentationDispatcher(
   const providers = [...groups.serialBefore, ...groups.parallel, ...groups.serialAfter];
   const warnedPolicyFailures = new Set<InstrumentationProviderDefinition>();
 
-  function forTrace(trace: TraceCaptureContext): InstrumentationHooks {
+  function forTrace(
+    trace: TraceCaptureContext,
+    options?: InstrumentationTraceBindingOptions,
+  ): InstrumentationHooks {
     const snapshots = new WeakMap<object, unknown>();
+    const ceiling =
+      options?.ceiling === undefined ? undefined : traceContentCeilingToDecision(options.ceiling);
     const decisions = new Map(
-      providers.map((provider) => [
-        provider,
-        resolveTracePolicy(provider.tracePolicy, trace, (error) => {
+      providers.map((provider) => {
+        const decision = resolveTracePolicy(provider.tracePolicy, trace, (error) => {
           if (warnedPolicyFailures.has(provider)) return;
           warnedPolicyFailures.add(provider);
           log.warn("instrumentation provider trace policy failed", {
             error: formatError(error),
             provider: provider.name,
           });
-        }),
-      ]),
+        });
+        return [
+          provider,
+          ceiling === undefined ? decision : intersectInstrumentationDecisions(decision, ceiling),
+        ] as const;
+      }),
     );
     const capturesInputs = [...decisions.values()].some(
       (decision) => decision.action === "record" && decision.recordInputs,
@@ -61,6 +72,13 @@ export function createInstrumentationDispatcher(
       (decision) => decision.action === "record" && decision.recordOutputs,
     );
     const capturesContent = capturesInputs || capturesOutputs;
+    const authored = groups.parallel.map((provider) => decisions.get(provider));
+    const authoredCapturesInputs = authored.some(
+      (decision) => decision?.action === "record" && decision.recordInputs,
+    );
+    const authoredCapturesOutputs = authored.some(
+      (decision) => decision?.action === "record" && decision.recordOutputs,
+    );
 
     const publish = async (event: InstrumentationEvent): Promise<void> => {
       const snapshot = snapshotInstrumentationEvent(
@@ -132,6 +150,8 @@ export function createInstrumentationDispatcher(
     };
 
     return {
+      authoredCapturesInputs,
+      authoredCapturesOutputs,
       capturesContent,
       capturesInputs,
       capturesOutputs,
@@ -164,7 +184,7 @@ function snapshotInstrumentationEvent(
   if (existing !== undefined) return existing as InstrumentationEvent;
   const snapshot = snapshotPlainValue(event, snapshots) as InstrumentationEvent;
   if ("scope" in source && "scope" in snapshot) {
-    instrumentationScope(snapshot.scope, traceStepIndex(source.scope));
+    copyScopeMarks(source.scope, snapshot.scope);
   }
   snapshots.set(source, snapshot);
   return snapshot;
@@ -232,6 +252,7 @@ async function dispatchToProvider(
     event.type === "delivery.consumed" ||
     event.type === "call.requested" ||
     event.type === "interaction.opened";
+  if ("scope" in event && isTurnScope(event.scope) && provider.receivesTurnScopes !== true) return;
   const owner = stateOwner(event);
   const providerName = provider.name;
   const stateNamespace = provider.stateNamespace ?? providerName;
@@ -297,7 +318,6 @@ async function withTimeout(
   }
 }
 
-/** Model calls are attempt-scoped; tool calls and input waits can outlive an attempt. */
 function stateOwner(event: InstrumentationEvent): InstrumentationStateOwner {
   if (
     event.type === "delivery.consumed" ||

@@ -103,23 +103,16 @@ describe("Codex model", () => {
 
     expect(requests).toHaveLength(1);
     const body = JSON.parse(requests[0]?.body ?? "{}");
-    // The Codex backend requires instructions at the top level and rejects a
-    // `developer`/`system` role in the input array.
     expect(body.instructions).toBe("You are a helpful assistant.");
     expect(body.input).toEqual([
       { role: "user", content: [{ type: "input_text", text: "hello" }] },
     ]);
-    // The system prompt is hoisted, not duplicated into the input array.
     expect(body.input).not.toContainEqual(expect.objectContaining({ role: "system" }));
     expect(body.input).not.toContainEqual(expect.objectContaining({ role: "developer" }));
-    // The Codex backend rejects response storage and `max_output_tokens`, and
-    // never accepts sampling parameters for reasoning models.
     expect(body.store).toBe(false);
     expect(body.max_output_tokens).toBeUndefined();
     expect(body.temperature).toBeUndefined();
     expect(body.top_p).toBeUndefined();
-    // Stateless reasoning requires the encrypted reasoning payload to be
-    // echoed back, so `include` must carry it whenever reasoning is set.
     expect(body.include).toContain("reasoning.encrypted_content");
   });
 
@@ -138,8 +131,6 @@ describe("Codex model", () => {
       providerOptions: { openai: { serviceTier: "fast" } },
     });
 
-    // OpenAI documents `fast` as an alias of `priority`, but the Codex backend
-    // rejects `fast` with `400 Unsupported service_tier: fast`.
     expect(JSON.parse(requests[0]?.body ?? "{}").service_tier).toBe("priority");
   });
 
@@ -169,7 +160,6 @@ describe("Codex model", () => {
       prompt: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
     });
 
-    // Codex rejects `gpt-6-luna-fast` with a ChatGPT account.
     const body = JSON.parse(requests[0]?.body ?? "{}");
     expect(body.model).toBe("gpt-6-luna");
     expect(body.service_tier).toBe("priority");

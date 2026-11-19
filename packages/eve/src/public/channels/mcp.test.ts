@@ -213,6 +213,32 @@ describe("mcpChannel", () => {
     expect(authenticate).not.toHaveBeenCalled();
   });
 
+  it("refuses plain HTTP off loopback unless plainHttp accepts it", async () => {
+    const authenticate = vi.fn(() => principal);
+    const plain = (headers: Record<string, string> = {}) =>
+      requestWithHost("http://agent.internal/mcp", {
+        body: JSON.stringify({ id: 1, jsonrpc: "2.0", method: "tools/list" }),
+        headers: {
+          accept: "application/json, text/event-stream",
+          "content-type": "application/json",
+          ...headers,
+        },
+        method: "POST",
+      });
+    const handler = (plainHttp?: "loopback" | "forwarded-https" | "allow") => {
+      const route = mcpChannel({ auth: authenticate, plainHttp }).routes[1]!;
+      if (route.transport === "websocket") throw new Error("expected HTTP route");
+      return route.handler;
+    };
+
+    expect((await handler()(plain(), routeArgs())).status).toBe(403);
+    expect(authenticate).not.toHaveBeenCalled();
+    expect((await handler("forwarded-https")(plain(), routeArgs())).status).toBe(403);
+    const forwarded = plain({ "x-forwarded-proto": "https" });
+    expect((await handler("forwarded-https")(forwarded, routeArgs())).status).toBe(200);
+    expect((await handler("allow")(plain(), routeArgs())).status).toBe(200);
+  });
+
   it("rejects oversized UTF-8 messages and input responses before starting work", async () => {
     const createSession = vi.fn();
     const channel = mcpChannel({ auth: none() });
@@ -225,7 +251,6 @@ describe("mcpChannel", () => {
         jsonrpc: "2.0",
         method: "tools/call",
         params: {
-          // 3 bytes per char: well under 64 Ki characters, over 64 KiB.
           arguments: { message: "日".repeat(24 * 1_024) },
           name: "agent_start",
         },
@@ -595,8 +620,6 @@ describe("mcpChannel tools", () => {
     ]);
     expect(describe).toHaveBeenCalledTimes(2);
 
-    // Without the route's skill files the channel cannot serve skills; a
-    // tools-only channel never needs them and never touches skill storage.
     const bare = routeArgs(vi.fn(), { describe });
     const response = await post.handler(
       mcpRequest({ id: 1, jsonrpc: "2.0", method: "tools/list" }),
@@ -623,7 +646,6 @@ describe("mcpChannel tools", () => {
     const rpc = serve({ agent: false, tools: true }, invokeTool, [count]);
     const called = (await rpc("tools/call", { arguments: {}, name: "count" })).result!;
     expect(called.isError).toBeUndefined();
-    // The SDK wraps a non-object as `{ result }` on 2025-era connections.
     expect(called.structuredContent).toEqual({ result: 42 });
   });
 
@@ -658,8 +680,6 @@ describe("mcpChannel tools", () => {
         { outcome: "failed", error: { code: "INVALID_INPUT", message: "Bad id." } },
         { code: "invalid_input" },
       ],
-      // The reason reaches the client verbatim, so an anonymous caller denied a
-      // tool session key learns why from `invokeTool`'s own message.
       [
         "note",
         { outcome: "rejected", reason: "Not today.", cause: { policy: "approval" } },
@@ -719,7 +739,6 @@ describe("mcpChannel tools", () => {
     const json = JSON.stringify({ current: alice });
     const valid = encode(json);
     const withInitiator = encode(JSON.stringify({ current: alice, initiator: bob }));
-    // Unpadded base64url of 12,288 bytes is exactly the 16 KiB cap; JSON whitespace pads it.
     const sized = (bytes: number) => encode(json + " ".repeat(bytes - Buffer.byteLength(json)));
     const trusted = {
       trustedForwarders: (forwarder: SessionAuthContext) =>
@@ -754,7 +773,6 @@ describe("mcpChannel tools", () => {
         args,
       );
     }
-    // [label, header, channel options, expected status or the [current, initiator] the tool runs as, error]
     type Ran = readonly [object, object];
     const rows: Array<[string, string?, Partial<McpChannelConfig>?, (number | Ran)?, string?]> = [
       ["no header", undefined, trusted, [principal, principal]],
@@ -795,7 +813,6 @@ describe("mcpChannel tools", () => {
       }
       expect(response.status, label).toBe(200);
       const [auth, initiator] = expected as Ran;
-      // An accepted header records the verified route principal as the forwarder.
       expect(invokeTool.mock.calls[0]![2], label).toEqual({
         auth,
         initiator,
@@ -860,7 +877,6 @@ describe("mcpChannel tools", () => {
     const discovered = (await jsonRpcResponse(
       await post.handler(modern("server/discover", {}, {}), args),
     )) as { result: { capabilities: Record<string, unknown> } };
-    // Tool sessions and skills both advertise under `extensions`; neither replaces the other.
     expect(discovered.result.capabilities.extensions).toEqual({
       "dev.eve/tool-sessions": {},
       "io.modelcontextprotocol/skills": { directoryRead: true },
@@ -917,7 +933,6 @@ describe("mcpChannel tools", () => {
       invokeTool,
     });
     const alice: SessionAuthContext = {
-      // The asserted user claims router-b; only the route principal counts.
       attributes: { "eve:forwarded-by": "router-b" },
       authenticator: "oidc",
       principalId: "alice",

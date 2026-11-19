@@ -168,7 +168,6 @@ export function createCliProgram(
   program
     .command("init [target]")
     .description("Create a new eve agent, or add one to an existing project directory.")
-    // Superseded by `eve add channel/web`; still accepted, but no longer advertised.
     .addOption(
       new Option("--channel-web-nextjs", "Add the Web Chat application (Next.js)").hideHelp(),
     )
@@ -220,6 +219,7 @@ export function createCliProgram(
           (step, result, failureCode) => {
             telemetry.trackSetupTerminal({ flow: "init", step, result, failureCode });
           },
+          telemetry,
         );
       },
     );
@@ -276,7 +276,6 @@ export function createCliProgram(
         }),
       );
 
-      // The server inherits this process environment, including loaded env files.
       if (options.schedules === false || areSchedulesDisabled()) {
         logger.log(
           renderCliTaggedLine(theme, {
@@ -398,7 +397,6 @@ export function createCliProgram(
   return program;
 }
 
-/** Runs the eve CLI entrypoint. */
 export async function runCli(
   argv: string[] = process.argv.slice(2),
   logger: CliLogger = console,
@@ -448,7 +446,6 @@ export async function runCli(
 
     telemetry.trackOutcome(error instanceof CommanderError ? "usage_error" : "error");
     if (error instanceof CommanderError) {
-      // Commander can reject `eve init` before its action detects the coding agent.
       const detectCodingAgentLaunch = runtime.isCodingAgentLaunch ?? isCodingAgentLaunch;
       const agentLaunched = await detectCodingAgentLaunch();
       if (input[0] === "init" && agentLaunched) {

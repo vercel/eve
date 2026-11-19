@@ -14,12 +14,6 @@ import {
 import type { ConnectionEventPayload } from "#runtime/connections/events/delivery.js";
 import { withConnectionEventSpan } from "#tracing/eve/connection-events.js";
 
-/**
- * Subscribes from inside the watch run, after its hook is registered, so a
- * delivery that beats the subscribe response finds the binding it runs under.
- * The key is the run's own: a retried step reuses it, and a later run for the
- * same watch, after this one ended, subscribes afresh.
- */
 export async function openConnectionEventStep(input: {
   readonly serializedContext: Record<string, unknown>;
   readonly binding: EventBinding;
@@ -37,12 +31,6 @@ export async function openConnectionEventStep(input: {
   return outcome;
 }
 
-/**
- * Connect's definitive refusals reach the model, and the run then ends
- * without a watch. Anything else, such as a timeout after Connect may have
- * created the subscription, throws so the step retries with the same
- * idempotency key.
- */
 export async function subscribeConnectionEvent(
   serializedContext: Record<string, unknown>,
   binding: EventBinding,
@@ -70,7 +58,6 @@ export async function subscribeConnectionEvent(
         });
       },
     );
-    // Snapshot the SDK's readonly JSON into the run's owned state.
     return { subscription: structuredClone(subscription) };
   } catch (error) {
     const status = readHttpStatus(error);
@@ -79,14 +66,6 @@ export async function subscribeConnectionEvent(
   }
 }
 
-/**
- * One unsubscribe attempt for a stopped watch. "done" only once Connect has
- * finished cleanup or no longer has the subscription. Anything else, whether
- * Connect still cleaning up, an outage, refused credentials or a connection a
- * redeploy removed, is "pending": the watch keeps its hook and repeats the
- * attempt with its own durable backoff, so Workflow's step retries never
- * decide when cleanup gives up.
- */
 export async function unsubscribeConnectionEventStep(input: {
   readonly serializedContext: Record<string, unknown>;
   readonly binding: EventBinding;
@@ -118,7 +97,6 @@ export async function unsubscribeConnectionEventStep(input: {
   }
 }
 
-/** Starts a delivery the watch's run took because it arrived before the subscribe response. */
 export async function startConnectionEventDeliveryStep(input: {
   readonly binding: EventBinding;
   readonly serializedContext: Record<string, unknown>;
@@ -140,14 +118,10 @@ function createAdapter({
   });
 }
 
-/** A 4xx other than a timeout or rate limit: retrying the same request can't succeed. */
 function isRefusal(status: number): boolean {
   return status >= 400 && status < 500 && status !== 408 && status !== 429;
 }
 
-/**
- * Publishes, for a duplicate run's caller, the run that owns the watch.
- */
 export async function publishConnectionEventOutcomeStep(
   outcome: ConnectionEventSubscribeOutcome,
 ): Promise<void> {

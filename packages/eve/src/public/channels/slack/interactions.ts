@@ -1,9 +1,3 @@
-/**
- * Slack interactivity wire handling. It decodes and authorizes framework HITL
- * responses, opens freeform modals inline before Slack's trigger expires, and
- * forwards user-owned actions, shortcuts, and slash commands to their authored hooks.
- */
-
 import {
   parseSlackWebhookBody,
   type SlackBlockActionsPayload,
@@ -28,6 +22,7 @@ import { buildSlackAuthContext } from "#public/channels/slack/auth.js";
 import { isSlackCodeChannel } from "#public/channels/slack/code-channel.js";
 import { dispatchSignInCancel } from "#public/channels/slack/sign-in-cancel.js";
 import {
+  answerLabelOf,
   buildFreeformModalView,
   decodeFreeformHitlActionId,
   decodeHitlResponse,
@@ -66,29 +61,16 @@ import { parseAnswer } from "#shared/input.js";
 
 const log = createLogger("slack.interactions");
 
-/**
- * Decoded view of a Slack `block_actions` payload. Returned by
- * {@link parseBlockActionsPayload} and read by the handler.
- */
 interface ParsedBlockActionsPayload {
   readonly actions: SlackInteractionAction[];
   readonly channelId: string;
   readonly installationTeamId: string | undefined;
   readonly threadTs: string;
   readonly teamId: string | undefined;
-  /**
-   * The full block list off the clicked message. Preserved on the
-   * answered-card update so the original prompt stays visible after the
-   * interactive controls are stripped.
-   */
   readonly messageBlocks: readonly unknown[];
+  readonly ephemeral: boolean;
 }
 
-/**
- * Decodes a Slack `block_actions` payload into a {@link ParsedBlockActionsPayload}.
- * Returns `null` for payloads that don't carry the channel/thread
- * metadata the handler needs.
- */
 export function parseBlockActionsPayload(
   body: Record<string, unknown> | SlackBlockActionsPayload,
 ): ParsedBlockActionsPayload | null {
@@ -100,8 +82,6 @@ export function parseBlockActionsPayload(
   const actions = rawBody.actions;
   if (!Array.isArray(actions)) return null;
 
-  // `channel` and `message` are Optional on block_actions payloads — only
-  // present when the action was triggered from a message in a channel.
   const channel = (rawBody.channel as { id: string } | undefined)?.id;
   const message = rawBody.message as
     | { ts: string; thread_ts?: string; blocks?: unknown[] }
@@ -109,8 +89,6 @@ export function parseBlockActionsPayload(
   const threadTs = message?.thread_ts ?? message?.ts;
   if (!channel || !threadTs) return null;
 
-  // `team` is Required but can be `null` for org-installed apps.
-  // `user` is Required and always carries `id`.
   const team = rawBody.team as { id: string } | null;
   const userBlock = rawBody.user as {
     id: string;
@@ -136,14 +114,20 @@ export function parseBlockActionsPayload(
       messageTs: message?.ts,
       triggerId: typeof rawBody.trigger_id === "string" ? rawBody.trigger_id : undefined,
       label: extractActionLabel(a),
+      responseUrl: typeof rawBody.response_url === "string" ? rawBody.response_url : undefined,
       user,
     })),
     channelId: channel,
+    ephemeral: isEphemeralClick(rawBody),
     installationTeamId: readInstallationTeamId(rawBody),
     threadTs,
     teamId,
     messageBlocks,
   };
+}
+
+function isEphemeralClick(raw: Record<string, unknown>): boolean {
+  return isObjectRecord(raw.container) && raw.container.is_ephemeral === true;
 }
 
 function isSharedBlockActionsPayload(
@@ -166,6 +150,7 @@ function parseSharedBlockActionsPayload(
       messageTs: body.messageTs,
       triggerId: body.triggerId,
       label: action.label,
+      responseUrl: body.responseUrl,
       user: {
         id: action.user?.id ?? body.userId,
         username: action.user?.username,
@@ -173,6 +158,7 @@ function parseSharedBlockActionsPayload(
       },
     })),
     channelId: body.channelId,
+    ephemeral: isEphemeralClick(body.raw),
     installationTeamId: readInstallationTeamId(body.raw),
     threadTs: body.threadTs,
     teamId: body.user?.teamId ?? body.teamId,
@@ -226,8 +212,6 @@ function readInstallationTeamId(value: unknown): string | undefined {
   const view = isObjectRecord(value.view) ? value.view : undefined;
   const team = isObjectRecord(value.team) ? value.team : undefined;
   const user = isObjectRecord(value.user) ? value.user : undefined;
-  // Slack Connect modal submissions put the installation workspace on the
-  // nested view, so it must win over the workspace that submitted the view.
   const candidates = [
     view?.app_installed_team_id,
     value.app_installed_team_id,
@@ -240,21 +224,12 @@ function readInstallationTeamId(value: unknown): string | undefined {
   );
 }
 
-/** Channel-supplied dependencies for {@link handleInteractionPost}. */
 export interface InteractionHandlerDeps {
   readonly api: SlackTransportOptions | undefined;
   readonly config: SlackChannelConfig;
   readonly onAnswers: NonNullable<SlackChannelConfig["onAnswers"]>;
 }
 
-/**
- * Entry point for Slack's form-encoded interactivity endpoint. Routes
- * `view_submission` payloads to the freeform-answer flow, intercepts
- * "Type your answer" button clicks to open a modal, resolves
- * framework HITL clicks through `onAnswers` to the parked session,
- * forwards other block actions to `config.onInteraction`, shortcuts to
- * `config.onShortcut`, and slash commands to `config.onSlashCommand`.
- */
 export async function handleInteractionPost(
   rawBody: string,
   ctx: {
@@ -340,7 +315,6 @@ export async function handleInteractionPost(
   if (onInteraction) {
     const customActions = interaction.actions.filter((a) => !isHitlAction(a.actionId));
     if (customActions.length > 0) {
-      // The code channel lookup can call Slack, so it runs after the ack.
       ctx.waitUntil(
         dispatchCustomInteractions({ ctx, customActions, deps, interaction, onInteraction }).catch(
           (error: unknown) => {
@@ -354,7 +328,6 @@ export async function handleInteractionPost(
   return ack;
 }
 
-/** Runs `onInteraction` for each custom action, in a code channel's session when it is one. */
 async function dispatchCustomInteractions(input: {
   readonly ctx: Parameters<typeof handleInteractionPost>[1];
   readonly customActions: readonly SlackInteractionAction[];
@@ -375,7 +348,6 @@ async function dispatchCustomInteractions(input: {
         teamId: interaction.teamId,
       }).request,
     ));
-  // A code channel is one session; a card in a thread there still replies in its thread.
   const threadTs = codeChannel ? "" : interaction.threadTs;
   const replyThreadTs =
     codeChannel && interaction.threadTs !== customActions[0]!.messageTs
@@ -429,7 +401,6 @@ async function dispatchCustomInteractions(input: {
   );
 }
 
-/** Normalizes Slack's two shortcut payload variants. */
 export function parseShortcutPayload(raw: unknown): SlackShortcut | null {
   if (!isObjectRecord(raw)) return null;
   const type = raw.type;
@@ -557,6 +528,13 @@ async function dispatchBlockAnswers(input: {
     },
     log,
   );
+  if (response.outcome === "delivered" && input.interaction.ephemeral) {
+    const [action] = input.submission.actions;
+    const label = (action && answerLabelOf(action)) ?? "Answered";
+    await settleHitlCard(input.interaction, input.deps, { label, text: label }).catch(
+      (error: unknown) => log.warn("failed to show the answer on an ephemeral card", { error }),
+    );
+  }
   if (response.outcome === "inactive") {
     await Promise.all([
       response.retirement,
@@ -572,7 +550,6 @@ async function dispatchBlockAnswers(input: {
   }
 }
 
-/** Tells only `userId` that the card they answered is no longer active. */
 async function postEphemeralNotice(input: {
   readonly channelId: string;
   readonly deps: InteractionHandlerDeps;
@@ -634,8 +611,13 @@ async function openFreeformModal(input: {
     continuationToken: slackSessionToken(target),
     installationTeamId: input.interaction.installationTeamId,
     messageChannelId: input.interaction.channelId,
+    messageThreadTs: input.interaction.threadTs,
     messageTs,
     requestId,
+    ...(input.interaction.ephemeral &&
+      input.freeformAction.responseUrl !== undefined && {
+        responseUrl: input.freeformAction.responseUrl,
+      }),
   };
 
   const promptText = readPromptTextFromBlocks(input.interaction.messageBlocks);
@@ -644,10 +626,6 @@ async function openFreeformModal(input: {
     teamId: input.interaction.installationTeamId,
   });
 
-  // Slack retries a click whose acknowledgement is not a 2xx, so a modal
-  // that fails to open is logged and the click still acknowledged; a call
-  // that never reached Slack is rethrown and fails the request. The token
-  // above resolves outside the try so a throwing resolver joins that case.
   try {
     await callSlackApi({
       api: input.deps.api,
@@ -669,7 +647,6 @@ async function handleViewSubmission(
   },
   deps: InteractionHandlerDeps,
 ): Promise<Response> {
-  // Slack view submissions require an empty 200 body to close the modal.
   const ack = new Response(null, { status: 200 });
   if (payload.callbackId !== HITL_FREEFORM_MODAL_CALLBACK_ID) return ack;
 
@@ -698,8 +675,6 @@ async function handleViewSubmission(
     )?.value ?? "";
   if (text.length === 0) return ack;
 
-  // `user` is Required on view_submission payloads; `team_id` is on the
-  // user object in modern payloads but not guaranteed in all examples.
   const user = payload.user;
   const triggeringUserId = payload.userId;
   const teamId = user?.teamId ?? payload.teamId ?? null;
@@ -750,24 +725,31 @@ async function dispatchViewAnswer(input: {
   if (result === null) return;
 
   const cardChannelId = input.metadata.messageChannelId ?? channelId;
+  const settleCard = (label: string) =>
+    settleFreeformCard({
+      card: { label, text: label },
+      channelId: cardChannelId,
+      deps: input.deps,
+      installationTeamId: input.installationTeamId,
+      messageTs: input.metadata.messageTs,
+      responseUrl: input.metadata.responseUrl,
+      threadTs: input.metadata.messageThreadTs,
+    });
   const response = await respondOrRetireInactivePrompt(
     () =>
       input.ctx.from(input.metadata.continuationToken).respond(input.submission.answers, {
         auth: result.auth,
         state: withSlackResponder(undefined, input.submission.user.id),
       }),
-    {
-      retirePrompt: (label) =>
-        settleFreeformCard({
-          card: { label, text: label },
-          channelId: cardChannelId,
-          deps: input.deps,
-          installationTeamId: input.installationTeamId,
-          messageTs: input.metadata.messageTs,
-        }),
-    },
+    { retirePrompt: settleCard },
     log,
   );
+  if (response.outcome === "delivered" && input.metadata.responseUrl !== undefined) {
+    const text = input.submission.answers[0]?.text ?? "Answered";
+    await settleCard(text).catch((error: unknown) =>
+      log.warn("failed to show the answer on an ephemeral card", { error }),
+    );
+  }
   if (response.outcome === "inactive") {
     await Promise.all([
       response.retirement,
@@ -776,7 +758,6 @@ async function dispatchViewAnswer(input: {
         deps: input.deps,
         installationTeamId: input.installationTeamId,
         teamId: input.teamId ?? undefined,
-        // A card routed to another conversation only records the thread it answers.
         threadTs: cardChannelId === channelId ? (threadTs ?? "") : "",
         userId: input.submission.user.id,
       }),

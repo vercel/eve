@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { InternalSession as Session } from "#channel/session.js";
 import { SessionStrandedError } from "#channel/session-stranded-error.js";
-import { createSessionStreamResponse } from "#eve-channel/request.js";
+import { createSessionStreamResponse, rememberCurrentSession } from "#eve-channel/request.js";
 import { EVE_STREAM_TAIL_INDEX_HEADER } from "#protocol/session-http.js";
 
 afterEach(() => vi.useRealTimers());
@@ -13,13 +13,19 @@ const line = (deliveryId: string) => ({
   facts: [{ data: { deliveryId }, type: "delivery.admitted" }],
 });
 
-/** A session whose stored lines are `lines`; `open` keeps the source open after them. */
-function sessionOf(lines: readonly unknown[], options: { readonly open?: boolean } = {}) {
+let sessionCount = 0;
+
+function sessionOf(
+  lines: readonly unknown[],
+  options: { readonly id?: string; readonly open?: boolean } = {},
+) {
   const starts: number[] = [];
+  const cancels: number[] = [];
   const follows: (boolean | undefined)[] = [];
   let tailLookups = 0;
+  sessionCount += 1;
   const session = {
-    id: "session_1",
+    id: options.id ?? `session_${sessionCount}`,
     async getLineStream({
       follow,
       startIndex,
@@ -34,6 +40,7 @@ function sessionOf(lines: readonly unknown[], options: { readonly open?: boolean
           for (const stored of lines.slice(startIndex)) controller.enqueue(stored);
           if (options.open !== true) controller.close();
         },
+        cancel: () => void cancels.push(startIndex),
       });
     },
     async getStreamTailIndex() {
@@ -42,6 +49,7 @@ function sessionOf(lines: readonly unknown[], options: { readonly open?: boolean
     },
   };
   return {
+    cancels,
     follows,
     session: session as Session,
     starts,
@@ -64,7 +72,6 @@ describe("createSessionStreamResponse", () => {
       session,
     );
     expect(response.headers.get(EVE_STREAM_TAIL_INDEX_HEADER)).toBe("1");
-    // The second read is the bounded check of the first line's version.
     expect(follows).toEqual([false, false]);
     expect(await records(response)).toEqual([{ $eve: "heartbeat" }, line("a"), line("b")]);
   });
@@ -104,7 +111,6 @@ describe("createSessionStreamResponse", () => {
       session,
     );
     expect(response.status).toBe(200);
-    // Each v26 line reads in light of those before it, so the read starts at the first.
     expect(starts.at(-1)).toBe(0);
     expect(await records(response)).toEqual([
       { $eve: "heartbeat" },
@@ -122,7 +128,6 @@ describe("createSessionStreamResponse", () => {
           },
         ],
       },
-      // A streamed delta reads as no line; the marker keeps the reader's cursor on stored lines.
       { $eve: "position", next: 4 },
     ]);
   });
@@ -130,7 +135,6 @@ describe("createSessionStreamResponse", () => {
   it("ends a follow of an earlier eve's session at the tail once nothing owns it", async () => {
     const v26 = { data: {}, meta: { at }, type: "session.started" };
     const followed = async (hasRunnableOwner: boolean) => {
-      // A source read without following closes at the tail; a followed one stays open.
       const { follows, session } = sessionOf([v26], { open: hasRunnableOwner });
       const response = await createSessionStreamResponse(
         new Request("https://eve.test/eve/v1/session/session_1/stream"),
@@ -140,7 +144,6 @@ describe("createSessionStreamResponse", () => {
     };
 
     const ended = await followed(false);
-    // Read without following, so the source closes at the tail and readers stop.
     expect(ended.follows.at(-1)).toBe(false);
     expect((await records(ended.response)).at(-1)).toEqual({ $eve: "stream.ended" });
 
@@ -149,8 +152,74 @@ describe("createSessionStreamResponse", () => {
     await live.response.body?.cancel();
   });
 
-  // #5782: a followed v26 session reconnects every lease, so re-reading its history from the
-  // first line on each reconnect costs CPU that grows with the session.
+  it.each([0, 6_000])(
+    "stops a version check of an empty stream at its timeout, opened after %ims",
+    async (openDelayMs) => {
+      vi.useFakeTimers();
+      const { cancels, session } = sessionOf([], { open: true });
+      const slow = {
+        ...session,
+        getLineStream: async (options: {
+          readonly follow?: boolean;
+          readonly startIndex: number;
+        }) => {
+          if (options.startIndex === 0)
+            await new Promise((resolve) => setTimeout(resolve, openDelayMs));
+          return await session.getLineStream(options);
+        },
+      } as Session;
+      const response = createSessionStreamResponse(
+        new Request("https://eve.test/eve/v1/session/session_1/stream?startIndex=1"),
+        slow,
+      );
+      await vi.advanceTimersByTimeAsync(6_001);
+      await (await response).body?.cancel();
+      expect(cancels).toEqual(expect.arrayContaining([0, 1]));
+    },
+  );
+
+  it("checks the version of a stranded earlier eve's session resumed past its first line", async () => {
+    const v26 = { data: {}, meta: { at }, type: "session.started" };
+    const { session } = sessionOf([v26, v26, v26]);
+    const stranded = {
+      ...session,
+      getLineStream: (options: { readonly follow?: boolean; readonly startIndex: number }) =>
+        options.follow === false
+          ? session.getLineStream(options)
+          : Promise.reject(new SessionStrandedError({ eveVersion: "0.0.1" }, "Reset it.")),
+      hasRunnableOwner: async () => false,
+    } as Session;
+    const response = await createSessionStreamResponse(
+      new Request("https://eve.test/eve/v1/session/session_1/stream?startIndex=2"),
+      stranded,
+    );
+    expect(response.status).toBe(200);
+    expect((await records(response)).at(-1)).toEqual({ $eve: "stream.ended" });
+  });
+
+  it("answers a missing session resumed past its first line without a bounded version check", async () => {
+    const { follows, session } = sessionOf([]);
+    const missing = Object.assign(new Error("Run not found."), {
+      name: "WorkflowRunNotFoundError",
+    });
+    const gone = {
+      ...session,
+      getLineStream: async (options: {
+        readonly follow?: boolean;
+        readonly startIndex: number;
+      }) => {
+        await session.getLineStream(options);
+        throw missing;
+      },
+    } as Session;
+    const response = await createSessionStreamResponse(
+      new Request("https://eve.test/eve/v1/session/session_1/stream?startIndex=2"),
+      gone,
+    );
+    expect(response.status).toBe(404);
+    expect(follows).toEqual([true, true]);
+  });
+
   it.fails("reconnects a followed earlier eve's session without reading its history again", async () => {
     vi.useFakeTimers();
     const v26 = (type: string, data: object) => ({
@@ -179,7 +248,6 @@ describe("createSessionStreamResponse", () => {
     stored.push(v26("turn.completed", {}));
     const reconnected = await followedLease(3);
 
-    // The same line as a read of the whole history converts it.
     const full = sessionOf(stored);
     const [, completed] = await records(
       await createSessionStreamResponse(
@@ -190,8 +258,36 @@ describe("createSessionStreamResponse", () => {
       ),
     );
     expect(reconnected).toEqual([completed, { $eve: "stream.lease-ended" }]);
-    // The reconnect reads only the line its reader has not seen.
     expect(starts.at(-1)).toBe(3);
+  });
+
+  it("checks a session's version once, after reading a current first line", async () => {
+    const { follows, session, starts } = sessionOf([line("a"), line("b")]);
+    const read = async (startIndex: number) =>
+      await records(
+        await createSessionStreamResponse(
+          new Request(`https://eve.test/eve/v1/session/s/stream?startIndex=${startIndex}`),
+          session,
+        ),
+      );
+
+    expect(await read(1)).toEqual([{ $eve: "heartbeat" }, line("b"), { $eve: "stream.ended" }]);
+    expect(starts).toEqual([1, 0]);
+    expect(follows).toEqual([true, true]);
+    expect(await read(1)).toEqual([{ $eve: "heartbeat" }, line("b"), { $eve: "stream.ended" }]);
+    expect(starts).toEqual([1, 0, 1]);
+  });
+
+  it("checks no version for a session this eve created", async () => {
+    const { session, starts } = sessionOf([line("a")]);
+    rememberCurrentSession(session.id);
+    await records(
+      await createSessionStreamResponse(
+        new Request("https://eve.test/eve/v1/session/s/stream?startIndex=0"),
+        session,
+      ),
+    );
+    expect(starts).toEqual([0]);
   });
 
   it("serves a fresh stream with no lines yet without a version check failing it", async () => {
@@ -218,8 +314,6 @@ describe("createSessionStreamResponse", () => {
     ]);
   });
 
-  // On the local world the tail lookup opens every chunk file, so a follow
-  // read that does not report the tail must not pay for it.
   it("follows a session without resolving a tail it does not report", async () => {
     const { session, tailLookups } = sessionOf([line("a")]);
     const response = await createSessionStreamResponse(
@@ -245,7 +339,6 @@ describe("createSessionStreamResponse", () => {
     );
     expect(response.headers.get(EVE_STREAM_TAIL_INDEX_HEADER)).toBe("2");
     expect(starts).toEqual([0, 1]);
-    // The bound ends the response after the tail line, without stream.ended.
     expect(await records(response)).toEqual([{ $eve: "heartbeat" }, line("b"), line("c")]);
   });
 

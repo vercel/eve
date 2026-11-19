@@ -37,7 +37,6 @@ const captured = (value: unknown): VercelCaptureResult => ({
 
 const LINK = { orgId: "team_demo", projectId: "prj_demo", projectName: "demo" };
 
-/** True when `captureVercel` received a project-framework PATCH to `framework`. */
 function patchedFrameworkTo(framework: string): boolean {
   return mockedCaptureVercel.mock.calls.some(
     ([args]) =>
@@ -53,7 +52,6 @@ const failed = (message: string): VercelCaptureResult => ({
   failure: { stdout: "", stderr: message, message },
 });
 
-/** Answer the framework GET with `current`; succeed any PATCH. */
 function stubCurrentFramework(current: string | undefined): void {
   mockedCaptureVercel.mockImplementation(async (args) => {
     if (Array.isArray(args) && args.includes("--method")) return captured("{}");

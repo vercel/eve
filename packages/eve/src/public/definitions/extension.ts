@@ -39,11 +39,6 @@ export interface NoConfigExtensionHandle {
   readonly schema: undefined;
 }
 
-/**
- * Validates consumer config through the extension's Standard Schema, applying
- * defaults. Binding runs while the mount module evaluates, so async validation
- * is rejected.
- */
 function validateConfig(
   schema: StandardSchemaV1 | undefined,
   values: unknown,

@@ -32,7 +32,6 @@ import { emitVercelAgentSummary } from "#internal/nitro/host/build-vercel-agent-
 import { emitConnectManifest } from "#internal/external-resources.js";
 import { tryReadExtensionBuildConfig } from "#internal/nitro/host/build-extension.js";
 import { copyHostMiddlewareFunctions } from "#internal/nitro/host/copy-host-middleware.js";
-import { normalizeVercelServiceCrons } from "#internal/nitro/host/normalize-vercel-service-crons.js";
 import {
   prepareProductionApplicationHost,
   refreshProductionCompiledArtifacts,
@@ -210,9 +209,6 @@ async function buildNitroOutput(
   return outputDirectory;
 }
 
-/**
- * Builds the production Nitro output for an eve application.
- */
 export async function buildApplication(
   rootDir: string,
   options: ApplicationBuildOptions,
@@ -221,8 +217,6 @@ export async function buildApplication(
     options.profileOutputPath === undefined ? undefined : resolve(options.profileOutputPath);
   const profiler = profileOutputPath === undefined ? undefined : new ApplicationBuildProfiler();
 
-  // Extension packages use `eve extension build`. Keep agent `eve build` agent-only
-  // so a mistaken run fails with a clear redirect instead of a half-Nitro path.
   const extensionBuild = await measureBuildPhase(profiler, "extension.check", () =>
     tryReadExtensionBuildConfig(rootDir),
   );
@@ -242,9 +236,6 @@ export async function buildApplication(
     ),
   );
 
-  // A recoverable publication failure leaves the lock journal pointing at
-  // staged artifacts inside this workspace; the next build's recovery
-  // consumes and then removes it. Deleting it now would strand the journal.
   let preserveWorkspaceForRecovery = false;
   let built: BuiltApplicationOutput;
   try {
@@ -295,8 +286,6 @@ async function buildApplicationInWorkspace(
         ),
       )
     : undefined;
-  // A service routed at the protocol path has no additional public mount.
-  // Keep servicePrefix intact for function-output routing below.
   const normalizedServicePrefix = normalizePublicRoutePrefix(servicePrefix);
   const inferredPublicRoutePrefix =
     normalizedServicePrefix === EVE_ROUTE_PREFIX ? undefined : normalizedServicePrefix;
@@ -317,6 +306,7 @@ async function buildApplicationInWorkspace(
       kind: "production",
       preset: isVercelBuild ? "vercel" : undefined,
       publicRoutePrefix,
+      vercelService: servicePrefix !== undefined || options.vercelServiceOutput !== undefined,
       workspaceMember: options.workspaceMember,
     },
     { buildDir: workspace.nitro.buildDir, outputDir: workspace.publication.output.stagedDir },
@@ -324,8 +314,6 @@ async function buildApplicationInWorkspace(
   const nitro = await measureBuildPhase(profiler, "nitro.create", () => createHostNitro(spec));
 
   try {
-    // Complete sandbox preparation before bundling so runtime never needs to
-    // mutate or repair the prepared artifacts embedded in production output.
     if (!options.skipSandboxPrewarm) {
       const prewarmInput = {
         appRoot: preparedHost.appRoot,
@@ -342,6 +330,7 @@ async function buildApplicationInWorkspace(
         log(message: string) {
           console.log(message);
         },
+        moduleGraph: preparedHost.moduleGraph,
       };
       await measureBuildPhase(profiler, "sandbox.prewarm", async () => {
         if (isVercelBuild) {
@@ -360,12 +349,6 @@ async function buildApplicationInWorkspace(
     }
     const vercelServiceOutput = options.vercelServiceOutput;
     if (vercelServiceOutput !== undefined) {
-      await measureBuildPhase(profiler, "vercel.service-crons.normalize", () =>
-        normalizeVercelServiceCrons({
-          publicRoutePrefix,
-          serviceOutputDirectory: workspace.publication.output.stagedDir,
-        }),
-      );
       await measureBuildPhase(profiler, "vercel.host-middleware.copy", () =>
         copyHostMiddlewareFunctions({
           hostOutputDirectory: vercelServiceOutput.hostOutputDirectory,

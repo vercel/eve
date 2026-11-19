@@ -22,7 +22,6 @@ describe("truncateTail", () => {
     const result = truncateTail(lines.join("\n"));
     expect(result.truncated).toBe(true);
     expect(result.outputLines).toBe(MAX_OUTPUT_LINES);
-    // The output should contain the last lines, not the first
     expect(result.output).toContain(`line ${MAX_OUTPUT_LINES + 500}`);
     expect(result.output).not.toContain("line 1\n");
   });
@@ -31,7 +30,6 @@ describe("truncateTail", () => {
     const lines = Array.from({ length: 200 }, (_, i) => `${i}: ${"x".repeat(490)}`);
     const result = truncateTail(lines.join("\n"));
     expect(result.truncated).toBe(true);
-    // The output should contain the last line
     expect(result.output).toContain("199:");
     expect(Buffer.byteLength(result.output, "utf8")).toBeLessThanOrEqual(MAX_OUTPUT_BYTES);
   });
@@ -67,7 +65,6 @@ describe("truncateHead", () => {
     const result = truncateHead(lines.join("\n"));
     expect(result.truncated).toBe(true);
     expect(result.outputLines).toBe(MAX_OUTPUT_LINES);
-    // The output should contain the first lines, not the last
     expect(result.output).toContain("line 1\n");
     expect(result.output).not.toContain(`line ${MAX_OUTPUT_LINES + 500}`);
   });

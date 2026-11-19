@@ -1,8 +1,3 @@
-// What a conversation reader shows, derived from the shared tables: turns, requests, sign-ins,
-// tasks, and where each call stands. Clients, evals, adapters, and channels read these instead
-// of folding a lifecycle of their own. Like the fold, this reads only the protocol, so clients
-// and workflow bodies import it.
-
 import type {
   InteractionOutcome,
   InteractionRequest,
@@ -21,11 +16,6 @@ import type { InteractionRow, SessionView } from "#protocol/session-projection/t
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
-// ---------------------------------------------------------------------------
-// Turns and steps
-// ---------------------------------------------------------------------------
-
-/** Where a model run's output goes: its turn, and its step, the run's place among its turn's. */
 export interface RunPlace {
   readonly turnId: string;
   readonly stepIndex: number;
@@ -37,7 +27,6 @@ export function runPlace(view: SessionView, runId: string | undefined): RunPlace
   return { stepIndex: row.step, turnId: row.owner.turnId };
 }
 
-/** Where a part goes: its run's place, or its turn's latest step for a part no run wrote. */
 export function partPlace(
   view: SessionView,
   row: { readonly runId?: string; readonly turnId?: string; readonly introducedAt?: number },
@@ -48,7 +37,6 @@ export function partPlace(
     : { stepIndex: turnStepAt(view, row.turnId, row.introducedAt), turnId: row.turnId };
 }
 
-/** A turn's latest step as of a position: the place of its last run introduced by then. */
 export function turnStepAt(view: SessionView, turnId: string, position = Infinity): number {
   let step = 0;
   for (const row of Object.values(view.runs)) {
@@ -58,7 +46,6 @@ export function turnStepAt(view: SessionView, turnId: string, position = Infinit
   return step;
 }
 
-/** Where a call belongs: its run's place, or its turn's latest step when no run of a turn made it. */
 export function callPlace(view: SessionView, callId: string): RunPlace | undefined {
   const row = view.calls[callId];
   if (row === undefined) return undefined;
@@ -70,19 +57,6 @@ export function callPlace(view: SessionView, callId: string): RunPlace | undefin
     : { stepIndex: turnStepAt(view, turnId, row.introducedAt), turnId };
 }
 
-// ---------------------------------------------------------------------------
-// Calls
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Tasks
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Requests
-// ---------------------------------------------------------------------------
-
-/** Why a request nobody answered closed when a message steered its turn instead. */
 export const SUPERSEDED_BY_MESSAGE = "superseded-by-message";
 
 /** The call an interaction asks about. */
@@ -92,13 +66,7 @@ export interface AskedCall {
   readonly input?: JsonValue;
 }
 
-/**
- * The call an interaction asks about, such as the tool an approval would run: a relayed
- * request's asker's call, which lives in the child's session, or else the subject's call here.
- */
 export function askedCall(view: SessionView, row: InteractionRow): AskedCall | undefined {
-  // A relayed request's subject is the call that serves its asker here; what it asks about is
-  // only what its origin names, which is nothing for a budget prompt.
   if (row.origin !== undefined) return row.origin.call;
   if (!("callId" in row.subject)) return undefined;
   const call = view.calls[row.subject.callId];
@@ -108,7 +76,6 @@ export function askedCall(view: SessionView, row: InteractionRow): AskedCall | u
     : { callId: call.callId, input: call.input, name: call.capability.name };
 }
 
-/** Where an interaction opened: the turn it holds, its step then, and the task whose run asks. */
 type InteractionPlace = Pick<Interaction, "turnId" | "stepIndex" | "taskId">;
 
 export function interactionPlace(view: SessionView, row: InteractionRow): InteractionPlace {
@@ -169,7 +136,6 @@ export function interaction(view: SessionView, interactionId: string): Interacti
   return shown;
 }
 
-/** The answer that decided a settled interaction, as it was given. */
 export function decidingAnswer(row: InteractionRow): Answer | undefined {
   const value = row.response;
   if (value === undefined) return undefined;
@@ -181,23 +147,16 @@ export function decidingAnswer(row: InteractionRow): Answer | undefined {
   return answer.optionId === undefined && answer.text === undefined ? undefined : answer;
 }
 
-/** Who gave an answer: the principal of the delivery it arrived in. */
 export function responderOf(view: SessionView, responseId: string): Principal | undefined {
   const response = view.responses[responseId];
   return response === undefined ? undefined : view.deliveries[response.deliveryId]?.principal;
 }
 
-/**
- * The approvals, questions, and budget prompts the session still waits on an answer to, oldest
- * first: the server's one source for whether a request is open. A sign-in completes by its
- * callback, not an answer (`openSignIns`).
- */
 export function openRequests(view: SessionView | undefined): readonly InteractionRow[] {
   if (view === undefined) return [];
   return openInteractions(view).filter((row) => row.request.kind !== "sign-in");
 }
 
-/** Sign-ins the session still waits on, in the order they opened. */
 export function openSignIns(view: SessionView | undefined): readonly InteractionRow[] {
   return view === undefined ? [] : openInteractions(view, { kind: "sign-in" });
 }
@@ -221,7 +180,6 @@ export function signInEnding(
   }
 }
 
-/** The prompt a text-only channel displays: budget first, then the oldest unanswered request. */
 export function promptQueueHead(
   view: SessionView,
   answered: (interactionId: string) => boolean = () => false,

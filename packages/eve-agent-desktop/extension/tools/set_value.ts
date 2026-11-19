@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { desktopTool, flag, ref, timeoutMs } from "../lib/tool";
 
+/** Lets the agent replace an element's value directly through its accessibility value, such as a field, slider, or spin button. */
 export default desktopTool({
   description:
     "Replace an element's value directly through its accessibility value, such as a field, slider, or spin button.",

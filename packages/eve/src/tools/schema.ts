@@ -35,56 +35,26 @@ export { serializeOutputSchema } from "#tools/schema-emission.js";
 export type ToolSchema<Input = unknown, Output = Input> = StandardSchemaV1<Input, Output> &
   StandardJSONSchemaV1<Input, Output>;
 
-/**
- * Any value accepted at a schema boundary: a live {@link ToolSchema}, a Zod 3
- * Standard Schema, a JSON-Schema-capable Standard Schema, or plain JSON Schema
- * data. Plain data is runtime-validated by {@link parseJsonObject} during
- * conversion.
- */
 export type ToolSchemaSource = StandardJSONSchemaV1 | StandardSchemaV1 | Record<string, unknown>;
 
-/**
- * Resolves a source into a live input {@link ToolSchema}. Live schemas pass
- * through unchanged; plain JSON Schema data becomes a {@link defineJsonSchema}
- * schema. `null` and `undefined` pass through untouched.
- */
 export function toInputSchema<T extends ToolSchemaSource | null | undefined>(
   source: T,
 ): SchemaResult<T, ToolSchema> {
   return toSchema(source, "input") as SchemaResult<T, ToolSchema>;
 }
 
-/**
- * Resolves a source into a live output {@link ToolSchema}. Live schemas pass
- * through unchanged; plain JSON Schema data becomes a {@link defineJsonSchema}
- * schema. `null` and `undefined` pass through untouched.
- */
 export function toOutputSchema<T extends ToolSchemaSource | null | undefined>(
   source: T,
 ): SchemaResult<T, ToolSchema> {
   return toSchema(source, "output") as SchemaResult<T, ToolSchema>;
 }
 
-/**
- * Serializes an input schema source into canonical JSON Schema data (no
- * `$schema` key) for compiled artifacts, durable state, and protocol
- * responses. `null` and `undefined` pass through untouched.
- */
 export function serializeInputSchema<T extends ToolSchemaSource | null | undefined>(
   source: T,
 ): SchemaResult<T, JsonObject> {
   return serializeSchema(source, "input") as SchemaResult<T, JsonObject>;
 }
 
-/**
- * Serializes an input schema into the JSON Schema eve sends a model for it.
- * A schema from a validation library such as Zod, Valibot, or ArkType gets
- * `additionalProperties: false` on every object that allows no other keys, as
- * the AI SDK applies to library schemas. Plain JSON Schema is sent exactly as
- * written. `null` and `undefined` pass through untouched.
- *
- * Providers can transform the schema further before the model reads it.
- */
 export function serializeModelInputSchema<T extends ToolSchemaSource | null | undefined>(
   source: T,
 ): SchemaResult<T, JsonObject> {
@@ -94,10 +64,6 @@ export function serializeModelInputSchema<T extends ToolSchemaSource | null | un
   ) as SchemaResult<T, JsonObject>;
 }
 
-/**
- * Returns whether a value implements the full {@link ToolSchema} contract:
- * Standard Schema validation plus JSON Schema emission.
- */
 export function isToolSchema(value: unknown): value is ToolSchema {
   const properties = getStandardSchemaProperties(value);
   if (properties === undefined) return false;
@@ -147,13 +113,8 @@ export function defineJsonSchema<T = unknown>(
   return toolSchema;
 }
 
-/** Schemas built by {@link defineJsonSchema}, which reach the model exactly as written. */
 const plainJsonSchemas = new WeakSet<object>();
 
-/**
- * A JSON Schema advertised exactly as written whose accepted values `refine`
- * then checks further, rejecting them or returning the value to use.
- */
 export function refineJsonSchema(
   schema: JsonObject,
   refine: (value: unknown) => Promise<StandardSchemaV1.Result<unknown>>,
@@ -191,18 +152,11 @@ export function prepareJsonSchema<T = unknown>(
   return prepared;
 }
 
-/** An optional string property added to an input schema. */
 export interface OptionalStringProperty {
   readonly description: string;
   readonly name: string;
 }
 
-/**
- * Extends an object input schema with an optional string property that the
- * schema itself never sees: validation splits the property off, validates the
- * rest with `schema`, and returns the property alongside the result. A plain
- * JSON Schema stays advertised as written.
- */
 export function withOptionalStringProperty(
   schema: ToolSchema,
   property: OptionalStringProperty,
@@ -251,26 +205,8 @@ async function validateWithProperty(
   return { value: { ...result.value, [name]: propertyValue } };
 }
 
-/**
- * Permissive schema lowered onto model-visible tools whose definitions
- * declare no input schema. Accepts any input — an absent schema declares no
- * contract, so rejecting stray properties would only force needless retries.
- */
 export const UNSPECIFIED_INPUT_SCHEMA: ToolSchema = defineJsonSchema({});
 
-/**
- * Lowers a harness tool schema onto the AI SDK boundary.
- *
- * Every Standard Schema is wrapped in an AI SDK `jsonSchema()` schema whose
- * JSON Schema and validation both come from the schema's own library. The
- * AI SDK treats an existing `Schema` as final, so it never reaches for the
- * app's `zod` copy to convert or parse a schema built by another copy — a
- * mismatch that crashes JSON Schema conversion across Zod minor versions.
- * AI SDK-native schemas (already wrapped, or lazy) pass through.
- *
- * Library schemas get the object closing the AI SDK applies to them itself;
- * plain JSON Schema from {@link defineJsonSchema} is advertised as written.
- */
 export function toModelSchema(schema: FlexibleSchema, direction: SchemaDirection): FlexibleSchema;
 export function toModelSchema(
   schema: FlexibleSchema | undefined,
@@ -299,11 +235,6 @@ function toModelJsonSchema(source: StandardSchemaV1, direction: SchemaDirection)
   return plainJsonSchemas.has(source) ? json : (closeObjectSchemas(json) as JsonObject);
 }
 
-/**
- * Mirrors the AI SDK's `addAdditionalPropertiesToJsonSchema`: every object
- * schema without a subschema for extra keys gets `additionalProperties: false`.
- * Returns a copy; library emitters may cache the schemas they return.
- */
 function closeObjectSchemas(schema: unknown): unknown {
   if (!isObject(schema)) return schema;
   const node: Record<string, unknown> = { ...schema };
@@ -351,8 +282,6 @@ function serializeSchema(
 
 function toJsonObject(source: ToolSchemaSource, direction: SchemaDirection): JsonObject {
   if (direction === "input" && isLegacyZodSchema(source)) {
-    // Zod 3 and early Zod 4 releases predate Standard JSON Schema. The schema
-    // comes from the author's own Zod, which the author's AI SDK also uses.
     const schema = asSchema(source as Parameters<typeof asSchema>[0]);
     const { $schema: _schemaVersion, ...canonical } = parseJsonObject(schema.jsonSchema);
     return canonical;
@@ -369,18 +298,12 @@ function isLegacyZodSchema(source: ToolSchemaSource): boolean {
   );
 }
 
-// ---------------------------------------------------------------------------
-// JSON Schema validation
-// ---------------------------------------------------------------------------
-
 type ValidateFn = (value: unknown) => StandardSchemaV1.Result<unknown>;
 
 function createJsonSchemaValidator(
   schema: JsonObject,
   check: ((value: unknown) => string | undefined) | undefined,
 ): ValidateFn {
-  // Built on first use: most advertised schemas never validate a value in a
-  // given process, and building one walks the whole schema.
   let validator: Validator | null | undefined;
   let warned = false;
   const passThrough = (value: unknown, reason: string) => {
@@ -419,14 +342,6 @@ function createJsonSchemaValidator(
   };
 }
 
-/**
- * Fills omitted object properties from their `default` values through
- * `properties`, array `items`, and local `$ref`s. It runs after validation, so
- * a default is used as declared even when its own schema rejects it, as with
- * Pydantic's `{ "type": "string", "default": null }` for `x: str = None`.
- * Branches of `allOf`, `anyOf`, and `oneOf` are skipped because which branch
- * governs a value is ambiguous. The input is not mutated.
- */
 function applyDefaults(root: JsonObject, schema: unknown, value: unknown): unknown {
   let result = value;
   for (const node of followRefs(root, schema)) {
@@ -466,7 +381,6 @@ function findDefault(root: JsonObject, schema: unknown): unknown {
   return undefined;
 }
 
-/** Yields a subschema, then each local `$ref` target it chains through. */
 export function* followRefs(root: JsonObject, schema: unknown): Generator<Record<string, unknown>> {
   const seen = new Set<object>();
   let node = schema;
@@ -489,13 +403,10 @@ function resolveLocalRef(root: JsonObject, ref: unknown): unknown {
   return node;
 }
 
-/** Returns a validator, or the reason the schema cannot be evaluated faithfully. */
 function buildValidator(schema: JsonObject): Validator | string {
   try {
-    // The validator annotates the schema objects it walks, so it gets a copy.
     const copy = structuredClone(schema) as Record<string, unknown>;
     const problem = prepareForValidation(copy);
-    // Collect every failure, not just the first, so one retry can fix them all.
     return problem ?? new Validator(copy, "2020-12", false);
   } catch (error) {
     return toErrorMessage(error);
@@ -529,11 +440,6 @@ const SUBSCHEMA_MAP_KEYWORDS = [
   "properties",
 ] as const;
 
-/**
- * Walks every subschema of a private schema copy, removing `format` (an
- * annotation in JSON Schema 2020-12) and returning the first construct the
- * validator would misjudge instead of rejecting every value.
- */
 function prepareForValidation(schema: unknown): string | undefined {
   if (typeof schema === "boolean") return undefined;
   if (typeof schema !== "object" || schema === null || Array.isArray(schema)) {
@@ -541,7 +447,6 @@ function prepareForValidation(schema: unknown): string | undefined {
   }
   const node = schema as Record<string, unknown>;
   delete node.format;
-  // Draft-04 and OpenAPI 3.0 write exclusive bounds as booleans beside `minimum`/`maximum`.
   for (const [flag, bound] of EXCLUSIVE_BOUNDS) {
     if (typeof node[flag] !== "boolean") continue;
     if (node[flag] && typeof node[bound] === "number") {
@@ -597,7 +502,6 @@ function prepareForValidation(schema: unknown): string | undefined {
       if (keyword === "patternProperties" && !isRegExpSource(key)) {
         return `invalid pattern ${JSON.stringify(key)}`;
       }
-      // Draft-07 `dependencies` mixes subschemas with lists of required property names.
       if (keyword === "dependencies" && Array.isArray(subschema)) continue;
       const problem = prepareForValidation(subschema);
       if (problem !== undefined) return problem;
@@ -626,21 +530,9 @@ interface Failure {
   readonly keyword: string;
   readonly location: string;
   readonly message: string;
-  /** Location of the closed object that rejected this key. */
   readonly object?: string;
 }
 
-/**
- * The validator reports each failure as a chain from the root to the failing
- * keyword. Only the deepest unit of each chain carries information the model
- * can act on; the rest restate its location, as a `$ref` unit does for the
- * failure it wraps.
- *
- * A closed object reports an extra key as a parent unit plus a bare "False
- * boolean schema." child, so that pair becomes one "Unrecognized key" issue.
- * Without short-circuiting, the validator also reports declared keys that
- * failed their own schema that way; those repeats are dropped.
- */
 function toIssues(errors: readonly OutputUnit[]): StandardSchemaV1.Issue[] {
   const failures: Failure[] = [];
   for (let index = 0; index < errors.length; index++) {
@@ -687,7 +579,6 @@ function toIssues(errors: readonly OutputUnit[]): StandardSchemaV1.Issue[] {
     });
 }
 
-/** Decodes a `#/a/0/b` JSON Pointer fragment into its path segments. */
 function decodePointer(location: string): string[] {
   return location
     .split("/")
@@ -696,9 +587,7 @@ function decodePointer(location: string): string[] {
       let decoded = segment;
       try {
         decoded = decodeURIComponent(segment);
-      } catch {
-        // Keep the raw segment; it still identifies the location.
-      }
+      } catch {}
       return decoded.replaceAll("~1", "/").replaceAll("~0", "~");
     });
 }

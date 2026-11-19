@@ -1,6 +1,3 @@
-// What a person sends: eve's own shape, so the input contract doesn't follow the AI SDK's types.
-// It's the subset of the AI SDK's user content eve accepts, so its text and file parts pass as is.
-
 export const MAX_MESSAGE_PARTS = 64;
 
 /** Text a person sends. */
@@ -22,6 +19,7 @@ export interface MessageFilePart<
   readonly data: TData;
 }
 
+/** One part of a message a person sends: a {@link MessageTextPart} or a {@link MessageFilePart}. */
 export type MessagePart<TData extends MessageFilePart["data"] = MessageFilePart["data"]> =
   | MessageTextPart
   | MessageFilePart<TData>;

@@ -31,7 +31,6 @@ interface BaggageMember {
 type ForwardedTraceBaggage = "absent" | "malformed" | ForwardedTraceAssertion;
 type ForwardedParentSessionBaggage = "absent" | "malformed" | SessionParent;
 
-/** Reads remote parent lineage without trusting the caller that supplied it. */
 export function readForwardedParentSessionBaggage(
   value: string | null,
 ): ForwardedParentSessionBaggage {
@@ -70,7 +69,6 @@ export function readForwardedParentSessionBaggage(
   };
 }
 
-/** Replaces Eve's remote parent lineage while preserving unrelated baggage. */
 export function writeForwardedParentSessionBaggage(
   value: string | undefined,
   parent: SessionParent | undefined,
@@ -82,7 +80,6 @@ export function writeForwardedParentSessionBaggage(
   );
 }
 
-/** Reads eve's audience member without interpreting unrelated baggage. */
 export function readForwardedAudienceBaggage(value: string | null): ForwardedTraceBaggage {
   const member = readBaggageMember(value, EVE_AUDIENCE_KEY);
   if (typeof member === "string") return member;
@@ -96,7 +93,6 @@ export function readForwardedAudienceBaggage(value: string | null): ForwardedTra
   return ceiling === undefined ? "malformed" : { ceiling, originAudience };
 }
 
-/** Replaces any authored eve audience member while preserving unrelated baggage entries. */
 export function writeForwardedAudienceBaggage(
   value: string | undefined,
   assertion: ForwardedTraceAssertion | undefined,
@@ -123,7 +119,6 @@ export function stripEveTraceBaggage(carrier: Record<string, string>): void {
   }
 }
 
-/** Recognized members are singular; malformed or oversized input fails closed. */
 export function readBaggageMember(
   value: string | null,
   key: string,
@@ -147,7 +142,6 @@ export function readBaggageMember(
   return { value: pair.value, properties };
 }
 
-/** Replaces a member with an encoded value and optional properties; undefined removes it. */
 export function replaceBaggageMember(
   value: string | undefined,
   key: string,

@@ -45,7 +45,6 @@ it("describes only the tools invokeTool can run, sorted by name", () => {
     ],
   };
 
-  // Skills carry their name and description only; files come from `listSkillFiles`.
   expect(describeCompiledAgent(manifest as never)).toEqual({
     description: "Runs the kennel.",
     name: "kennel",
@@ -98,7 +97,6 @@ describe("loadDescribedAgent", () => {
     const compiled = await compile("kennel", ["handbook"]);
     await withBundledCompiledArtifacts(compiled, async () => {
       const { args } = createAgentDescriptionRouteArgs(() => source);
-      // A bundled build without `eve build`'s skill assets has no skill storage.
       await expect(args.describe()).resolves.toMatchObject({
         name: "kennel",
         skills: [{ description: "About handbook.", name: "handbook" }],
@@ -127,7 +125,6 @@ describe("loadDescribedAgent", () => {
       });
       expect(await loadDescribedAgent(source)).toBe(described);
 
-      // Replace the snapshot inside this scoped session, as a redeploy would.
       setRuntimeSessionCompiledArtifacts(getActiveRuntimeSession(), third);
       expect((await loadDescribedAgent(source)).description.name).toBe("third");
     });

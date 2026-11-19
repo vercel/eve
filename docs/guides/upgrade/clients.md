@@ -81,7 +81,7 @@ if (SessionNotActiveError.is(error) && error.code === "session_not_active") { //
 
 `SessionNotActiveError` has one of two codes:
 
-- `session_not_ready`, with `retryable: true`, while the session is still starting. Retry the request.
+- `session_not_ready`, with `retryable: true`, when the server asks the client to try again. Retry the request.
 - `session_not_active` once the session can't take requests. Start a new session.
 
 `ClientError.code` is `http_error` when the server's response had no code.

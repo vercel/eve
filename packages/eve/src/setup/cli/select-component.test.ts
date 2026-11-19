@@ -9,7 +9,6 @@ const OPTIONS: PromptOption<string>[] = [
   { value: "slack", label: "Slack" },
 ];
 
-/** Exposes the protected enter hook so its routing can be asserted directly. */
 class TestSelect extends SelectComponent {
   shouldSubmit(): boolean {
     return this._shouldSubmit();
@@ -55,7 +54,6 @@ describe("SelectComponent enter routing", () => {
     expect(select.shouldSubmit()).toBe(false);
     expect([...select.selectedSet]).toEqual(["web"]);
 
-    // A second enter on the same row untoggles; the prompt still does not resolve.
     expect(select.shouldSubmit()).toBe(false);
     expect(select.selectedSet.size).toBe(0);
   });
@@ -109,10 +107,8 @@ describe("SelectComponent enter routing", () => {
   });
 
   test("required checklists and locked-only selections label the row honestly", () => {
-    // Required: an empty confirm cannot resolve, so the row never says Skip.
     expect(makeSelect({ multiple: true, required: true }).submitLabel()).toBe("Submit");
 
-    // A locked row is mandatory, not a pick: with nothing else marked, it is a skip.
     const withLocked = makeSelect({
       multiple: true,
       options: [
@@ -130,7 +126,6 @@ describe("SelectComponent enter routing", () => {
     select.optionCursor = OPTIONS.length;
     expect(select.onSubmitRow()).toBe(true);
     expect(select.shouldSubmit()).toBe(true);
-    // Submitting from the Submit row never toggles anything.
     expect(select.selectedSet.size).toBe(0);
   });
 });

@@ -1,23 +1,15 @@
-// Where a remote child session runs, and which credential resolver reaches it. The binding is
-// private: it rides a side stream on the parent session's anchor run, written before the parent's
-// `child.opened`, and only the parent's stream proxy reads it.
-
 import { getRun } from "#internal/workflow/runtime.js";
 import { isObject } from "#shared/guards.js";
 import type { JsonValue } from "#shared/json.js";
 
-/** What the parent's proxy route needs to reach one remote child's stream. */
 export interface RemoteChildBinding {
   readonly callId: string;
   readonly childSessionId: string;
   readonly name: string;
-  /** The proxy route the parent's `child.opened` names. */
   readonly streamPath: string;
   readonly url: string;
   readonly resolverId?: string;
-  /** A dynamic remote agent's binding, which the child's credentials are built from again. */
   readonly dynamicBinding?: JsonValue;
-  /** The child's remote agent protocol, when it speaks an earlier one: the proxy can't follow it. */
   readonly earlierProtocol?: number;
 }
 
@@ -25,7 +17,6 @@ function namespaceOf(childSessionId: string): string {
   return `eve.child.${childSessionId}`;
 }
 
-/** Records a remote child's binding on the parent session's stream, before its `child.opened`. */
 export async function recordRemoteChildBinding(
   parentSessionId: string,
   binding: RemoteChildBinding,
@@ -40,7 +31,6 @@ export async function recordRemoteChildBinding(
   }
 }
 
-/** Reads a remote child's binding from its parent session, or `undefined` when none was recorded. */
 export async function readRemoteChildBinding(
   parentSessionId: string,
   childSessionId: string,
@@ -77,7 +67,6 @@ function parseBinding(value: unknown, childSessionId: string): RemoteChildBindin
     url,
   };
   if (typeof resolverId === "string") binding.resolverId = resolverId;
-  // The parent wrote it, as the JSON its step returned.
   if (dynamicBinding !== undefined) binding.dynamicBinding = dynamicBinding as JsonValue;
   if (typeof earlierProtocol === "number") binding.earlierProtocol = earlierProtocol;
   return binding;

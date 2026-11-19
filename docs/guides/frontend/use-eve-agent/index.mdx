@@ -119,7 +119,7 @@ You don't need to pass `"steer"`; omit `turnPolicy` unless you want to queue.
 
 Steering timing depends on what the turn is doing:
 
-- Before answer output or local tool execution starts, eve interrupts model generation and continues the same turn with the correction.
+- Until answer output or a local tool call's input starts streaming, eve interrupts model generation and continues the same turn with the correction.
 - Running tools finish and save their results first.
 - After the reply starts streaming, a steering message waits until the current step is saved.
 - Reasoning and search progress don't count as answer output.
@@ -201,10 +201,11 @@ Prewarming creates the session before the first message so the first reply start
 
 - It starts the workflow and its inbox, then waits before session hooks or dynamic definitions run.
 - It starts the agent's [sandbox](/docs/sandbox) in the background. The first turn doesn't wait for it; only a tool or hook that uses the sandbox does. If startup fails, the first turn that needs the sandbox starts it.
+- A prewarmed sandbox that no message uses stops like any idle sandbox. See [Stop an idle sandbox](/docs/sandbox#stop-an-idle-sandbox).
 - The first message passes through the channel's `onMessage` hook and supplies identity and context for initialization and the first turn.
 - The session timeout starts at creation, so an unused prewarmed session can expire. eve deletes its sandbox when it ends.
 - `prewarm()` resolves when the server accepts creation, without waiting for initialization. The composer stays `"idle"`, and `prepareSend` doesn't run.
-- A concurrent `send()` waits for creation to be accepted. While the inbox starts, the client retries `409 session_not_ready` with backoff for up to 20 seconds, and your abort signal cancels the wait.
+- A concurrent `send()` waits for creation to be accepted, and your abort signal cancels the wait.
 
 ### Existing sessions on Vercel
 
@@ -232,7 +233,7 @@ For an existing idle session, `prewarm()` can move it to the deployment that acc
 | `newSession()` | Clears the local conversation and reuses the hook. The old session keeps running on the server |
 | `end()`        | Retires the server-side session and returns its delivery                                       |
 
-After `end()`, call `newSession()` to clear the retired conversation. With `prewarm` on, that prepares the next session; otherwise the next send creates it. A `session` you passed in stays yours: prewarming and `newSession()` never replace it.
+After `end()`, call `newSession()` to clear the retired conversation. With `prewarm` on, that prepares the next session; otherwise the next send creates it. While a send or `prewarm()` is still creating the session, `end()`, `clear()`, and `compact()` wait for it and then act on that session. A `session` you passed in stays yours: prewarming and `newSession()` never replace it.
 
 ## Resume a saved session
 
@@ -291,21 +292,11 @@ Show "Approved" or "Denied" only for `accepted` and `declined`. For any other ou
 
 ## Use eve's answers
 
-Read session state from `view` with functions from `eve/events`, instead of scanning `events` or keeping your own copy:
+Read session state from `view` with selectors from `eve/events`, instead of scanning `events` or keeping your own copy. [Session views & selectors](/docs/concepts/session-views-and-selectors) maps common questions to the right selector.
 
-| Question                                        | Ask eve                                                                                                   |
-| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| How did my request end, and what did it reply?  | `delivery.result()`: `status`, `outcome`, `reply`, `interactions`, and `error` for that delivery          |
-| Is a turn open?                                 | `activeTurn(view)`                                                                                        |
-| What is the turn waiting on?                    | `waiting(view, turnId)` or `activity(view)`                                                               |
-| How did a turn end, and why did it fail?        | `turn(view, turnId)` and `failure(view, turnId)`, which also covers a session failure that ended the turn |
-| What is a call doing, and how long did it take? | `call(view, callId)`: `state`, `outcome`, `startedAt`, and `endedAt`                                      |
-| What did a turn's model runs cost?              | `runs(view, { turnId })` and `usage(view)`                                                                |
-| What did a turn reply?                          | `reply(view, turnId)`                                                                                     |
-| Where should a saved chat resume?               | The hook's `session`, `position(view)`, or `session.snapshot()`. Never an event count                     |
-| Did a person approve?                           | `interaction(view, id).outcome`. See [Interactions](#interactions)                                        |
+For one request's `status`, `outcome`, `reply`, `interactions`, and `error`, use `delivery.result()`. It is scoped to one delivery. Scanning the events in a delivery's interval isn't: a queued message's interval starts while the earlier turn still runs, so it includes that turn's `turn.settled`.
 
-`delivery.result()` is scoped to one delivery. Scanning the events in a delivery's interval isn't: a queued message's interval starts while the earlier turn still runs, so it includes that turn's `turn.settled`.
+To resume a saved chat, use the hook's `session`, `position(view)`, or `session.snapshot()`, never an event count. See [Resume a saved session](#resume-a-saved-session) for the client cursor contract.
 
 Outside the store:
 

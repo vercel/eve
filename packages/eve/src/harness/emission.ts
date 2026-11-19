@@ -29,7 +29,10 @@ import {
   isInvalidToolCall,
   resolveProviderToolCallRequest,
 } from "#harness/tool-call-input-errors.js";
-import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
+import type {
+  RuntimeToolCallActionRequest,
+  RuntimeToolResultActionResult,
+} from "#shared/action-types.js";
 import {
   createPresentedRuntimeActionRequestFromToolCall,
   type RuntimeActionRequestProjection,
@@ -43,7 +46,6 @@ import type { TurnPosition } from "#harness/session-machine/view.js";
 import type { HarnessEmitFn, HarnessToolLookup } from "#harness/types.js";
 import { normalizeAssistantStepFinishReason } from "#harness/finish-reason.js";
 
-/** The calls of one step's `fullStream` whose input was invalid, and their results. */
 interface EmittedStreamContent {
   readonly invalidInputToolCallIds: ReadonlySet<string>;
   readonly trailingInlineToolResultParts: readonly InlineToolResultPart[];
@@ -51,28 +53,13 @@ interface EmittedStreamContent {
 
 interface StreamActionEmissionOptions {
   readonly excludedActionToolNames: ReadonlySet<string>;
-  /**
-   * The turn holds while its tasks work and its caller reads only the final reply, so a text step
-   * can't end it: its text narrates, and only the reply after the tasks report is the turn's.
-   */
   readonly held?: boolean;
-  /** A child or schedule's caller reads only the final reply, including at an explicit task wait. */
   readonly finalReplyOnly?: boolean;
-  /** The session's call with this id, as its view holds it now. */
   readonly sessionCall: (callId: string) => CallRow | undefined;
   readonly tools: HarnessToolLookup;
-  /** A deliberate turn cancel or steering interrupt, not a provider failure/retry. */
   readonly interruptSignal?: AbortSignal;
 }
 
-/**
- * Consumes the AI SDK `fullStream` and emits real-time text and reasoning
- * events.
- *
- * Emits local tool events in source order. Provider calls that arrive in one
- * stream batch into one request event before their first result. A result
- * without a streamed call resumes a call from an earlier step.
- */
 export async function emitStreamContent(
   emitFn: HarnessEmitFn,
   state: TurnPosition,
@@ -101,18 +88,12 @@ export async function emitStreamContent(
   }
 }
 
-/**
- * Whether the run's last text replies. Text the turn continues after narrates: text before calls,
- * and a held turn's text in a session whose caller reads only the final reply. A person reads a
- * held turn's text as a reply.
- */
 function finalPhase(finishReason: AssistantStepFinishReason, held: boolean) {
   if (finishReason === "tool-calls") return "narration";
   if (held && finishReason === "stop") return "narration";
   return "reply";
 }
 
-/** A root session's text before `eve__task_wait` is a reply the person reads while the turn waits. */
 function textPhaseBefore(toolName: string, finalReplyOnly: boolean): "narration" | "reply" {
   return toolName === TASK_WAIT_TOOL_NAME && !finalReplyOnly ? "reply" : "narration";
 }
@@ -203,7 +184,14 @@ async function consumeStreamContent(
 
     emittedActionCallIds.add(action.callId);
     actionInputs.set(action.callId, action.input);
-    await emitFn(requestCall({ action, owner: { runId }, label: projection.presentationLabel }));
+    await emitFn(
+      requestCall({
+        action,
+        owner: { runId },
+        label: projection.presentationLabel,
+        hidden: projection.hidden,
+      }),
+    );
   };
 
   const collectProviderToolCall = async (toolCall: {
@@ -241,11 +229,6 @@ async function consumeStreamContent(
     providerActionBatch.observe(resolved.request);
   };
 
-  /**
-   * Settles a provider call with its result or error. A provider can answer a call an earlier run
-   * introduced at the start of a later response: that call isn't introduced again, and once an
-   * abandoned attempt settled it, the retry's copy of the answer publishes nothing.
-   */
   const settleProviderCall = async (
     toolCall: Parameters<typeof collectProviderToolCall>[0],
     result: RuntimeToolResultActionResult,
@@ -257,9 +240,8 @@ async function consumeStreamContent(
     await emitActionResult(result);
   };
 
-  /** A call whose input didn't validate is introduced with its error, and fails at once. */
   const emitInvalidCall = async (
-    action: Parameters<typeof requestCall>[0]["action"],
+    action: RuntimeToolCallActionRequest,
     result: RuntimeToolResultActionResult,
   ): Promise<void> => {
     emittedActionCallIds.add(action.callId);
@@ -268,6 +250,7 @@ async function consumeStreamContent(
     await emitFn(
       requestCall({
         action,
+        hidden: options?.tools.get(action.toolName)?.label === false,
         inputError: { code: "INVALID_TOOL_INPUT", message },
         owner: { runId },
       }),
@@ -356,7 +339,6 @@ async function consumeStreamContent(
         }
         case "text-delta": {
           await providerActionBatch.flush();
-          // Flush accumulated reasoning before text begins.
           await flushCurrentReasoning();
           currentMessage += part.text;
           const announces = messagePartId === undefined;
@@ -376,9 +358,9 @@ async function consumeStreamContent(
           if (
             options === undefined ||
             part.providerExecuted === true ||
-            // AI Gateway streams a provider tool's input unflagged, under an id its call never uses.
             options.tools.get(part.toolName)?.behavior?.handling?.kind === "provider-tool" ||
-            options.excludedActionToolNames.has(part.toolName)
+            options.excludedActionToolNames.has(part.toolName) ||
+            options.tools.get(part.toolName)?.label === false
           ) {
             streamingActionInputs.delete(part.id);
             break;
@@ -414,8 +396,6 @@ async function consumeStreamContent(
           }
           break;
         }
-        // eve runs local calls after the stream, so only the provider's own results and errors
-        // arrive here.
         case "tool-result": {
           const providerResult = part as TypedToolResult<ToolSet>;
           if (providerResult.providerExecuted !== true || providerResult.preliminary === true)
@@ -441,23 +421,15 @@ async function consumeStreamContent(
           await providerActionBatch.flush();
           break;
         case "error":
-          // `part.error` is typed as `unknown` — AI SDK providers emit
-          // whatever the upstream service threw. Coerce through `toError`
-          // so plain-object shapes (structured-clone survivors, typed
-          // gateway payloads) keep their `message`, `name`, `stack`, and
-          // `cause` instead of degrading to `new Error("[object Object]")`.
           streamError = normalizeModelStreamError(part.error);
           break;
         case "abort":
-          // The SDK does not resolve step results for aborted in-flight steps.
           throw new DOMException(part.reason ?? "The model stream was aborted.", "AbortError");
         default:
           break;
       }
     }
   } catch (error) {
-    // Interrupted text stands; a failed/retried attempt instead leaves its incomplete previews
-    // behind. Complete the streamed prefixes as one content transition before the run closes.
     if (options?.interruptSignal?.aborted === true) {
       const completed: FactOf<"content.completed">["data"][] = [];
       if (reasoningPartId !== undefined && currentReasoning.length > 0)
@@ -491,7 +463,6 @@ async function consumeStreamContent(
 
   await flushCurrentReasoning();
 
-  // Text a content filter cut off never completes: its preview goes with the run.
   if (
     finishReason !== "content-filter" &&
     currentMessage.trim().length > 0 &&

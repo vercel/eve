@@ -16,13 +16,11 @@ import type {
   GitHubRepositoryRef,
 } from "#public/channels/github/inbound.js";
 
-/** Minimal config needed to rebuild GitHub API handles. */
 interface GitHubBindingConfig {
   readonly api?: GitHubApiOptions;
   readonly credentials?: GitHubChannelCredentials;
 }
 
-/** Serializable state fields needed to rebuild GitHub API handles. */
 interface GitHubBindingState {
   readonly conversationKind: GitHubConversationKind;
   readonly installationId: number | null;
@@ -68,7 +66,6 @@ export interface GitHubThread {
   react(content: GitHubReactionContent): Promise<void>;
 }
 
-/** Rebuilds GitHub API and thread handles from durable channel state. */
 export function buildGitHubBinding(input: {
   readonly config: GitHubBindingConfig;
   readonly state: GitHubBindingState;

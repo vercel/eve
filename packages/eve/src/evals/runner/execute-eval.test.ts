@@ -55,8 +55,6 @@ function createEval(overrides: Partial<EveEval> = {}): EveEval {
   } as EveEval;
 }
 
-// `executeTask` is mocked in these tests, so the client never reaches the
-// network. We pass a real `Client` instance to satisfy the type.
 const unusedClient = new Client({ baseUrl: "http://localhost" });
 
 const localTarget = createEvalTargetHandle({

@@ -6,6 +6,7 @@ import type { Cause, Envelope, ErrorInfo } from "../envelope.js";
 /** A context change's kind. Open: `compaction` and `clear` today. */
 export type ContextKind = "compaction" | "clear" | (string & {});
 
+/** The payload of `context.started`: a context change, such as a compaction or clear, begins. */
 export interface ContextStartedData {
   readonly changeId: string;
   readonly kind: ContextKind;
@@ -17,8 +18,10 @@ export interface ContextStartedData {
   readonly trigger?: { readonly inputTokens: number };
 }
 
+/** How a context change ended, as recorded on `context.settled`. */
 export type ContextOutcome = "completed" | "failed" | "cancelled" | "interrupted";
 
+/** The payload of `context.settled`: a context change ends, with its outcome and its effect on the conversation. */
 export interface ContextSettledData {
   readonly changeId: string;
   readonly kind: ContextKind;
@@ -31,8 +34,11 @@ export interface ContextSettledData {
   readonly error?: ErrorInfo;
 }
 
+/** The fact that introduces a context change. */
 export type ContextStarted = Envelope<"context.started", ContextStartedData>;
+/** The terminal fact of a context change. */
 export type ContextSettled = Envelope<"context.settled", ContextSettledData>;
+/** Any fact in the `context` family. */
 export type ContextFact = ContextStarted | ContextSettled;
 
 export const contextSchemas = {

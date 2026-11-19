@@ -5,7 +5,7 @@ import { estimateTokens } from "#harness/token-estimate.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { AuthKey } from "#context/keys.js";
 import { changeHistory } from "#harness/session-machine/history.js";
-import { type CompactionConfig, type StepResult } from "#harness/types.js";
+import { type CompactionConfig, type CompactionStage, type StepResult } from "#harness/types.js";
 import {
   type HarnessModelMessage,
   isUserModelMessage,
@@ -13,16 +13,19 @@ import {
 } from "#harness/messages.js";
 import { type Step, stepReference } from "#harness/step/context.js";
 import { agentSettings } from "#execution/effective-agent-config.js";
-import { compactionConfig } from "#harness/compaction/config.js";
+import { againstWindow, compactionConfig } from "#harness/compaction/config.js";
 import { activeTurnId } from "#harness/session-machine/view.js";
 import {
   buildGatewayAttributionHeaders,
   resolveEffectiveRuntimeModel,
   withGatewayTraceContext,
 } from "#harness/model-call/model.js";
+import { type CredentialedModel, credentialedModel } from "#harness/model-call/credential.js";
+import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import {
   compactMessages,
   type CompactionSummarizer,
+  estimateRatio,
   getInputTokenCount,
   shouldCompact,
 } from "#harness/compaction/engine.js";
@@ -30,7 +33,7 @@ import { takeBlockingFailure } from "#definitions/kernel.js";
 import { isDeepStrictEqual } from "node:util";
 import type { Usage } from "#protocol/session-events/envelope.js";
 import { nextChangeId, nextRunId } from "#protocol/session-projection.js";
-import { normalizeModelStreamError } from "#harness/model-call/errors.js";
+import { normalizeModelStreamError, rejectsCredential } from "#harness/model-call/errors.js";
 import { runModelCallWithRetries } from "#harness/model-call/retry.js";
 import {
   extractGatewayCostUsd,
@@ -51,12 +54,9 @@ import {
 } from "#harness/session-machine/context-changes.js";
 import { admitControl, settleDelivery } from "#harness/session-machine/deliveries.js";
 import { resolveCallProviderOptions } from "#harness/provider-safety.js";
+import { throwIfSessionStreamDead } from "#harness/session-stream-write-error.js";
 
 const log = createLogger("harness.tool-loop");
-/**
- * Throws when the fixed part of the request (instructions, tools, memory)
- * leaves no room for any history: compacting the history cannot help then.
- */
 export function assertFixedPartFits(input: {
   readonly protectedTokens: number;
   readonly requestEnvelopeTokens: number;
@@ -65,15 +65,11 @@ export function assertFixedPartFits(input: {
   const fixed = input.requestEnvelopeTokens + input.protectedTokens;
   if (fixed >= input.threshold) {
     throw new CompactionOverLimitError(
-      `The agent's system prompt, tools, memory and context take ~${Math.round(fixed)} tokens, over this model's ~${input.threshold}-token compaction limit. Shorten the instructions, remove tools or trim memory.`,
+      `The agent's system prompt, tools, memory and context take ~${Math.round(fixed)} tokens, over this model's ~${input.threshold}-token compaction limit. Shorten the instructions, remove tools or trim memory, or raise \`compaction.threshold\`.`,
     );
   }
 }
 
-/**
- * `session.compact()`: summarizes the history, then the session waits. The control is a delivery:
- * it's admitted first, and applied once the history is decided.
- */
 export async function compactHistory(step: Step): Promise<StepResult> {
   const { config } = step;
   const delivery = controlDeliveryFor(step.view(), config.controlDelivery);
@@ -95,14 +91,16 @@ export async function compactHistory(step: Step): Promise<StepResult> {
   try {
     const resolvedModel = await resolveEffectiveRuntimeModel(step);
     step.model = resolvedModel.choice;
+    const compaction = compactionConfig(step);
     await summarizeHistory(step, {
+      compaction,
       betweenTurns: true,
       change,
       compact: true,
       messages,
-      model: resolvedModel.model,
+      turnModel: () => credentialedModel(resolvedModel.model),
       promptMessages: messages,
-      requestEnvelopeTokens: step.session.compaction.requestEnvelopeTokens,
+      requestEnvelopeTokens: compaction.requestEnvelopeTokens,
     });
   } catch (error) {
     outcome = "failed";
@@ -110,33 +108,65 @@ export async function compactHistory(step: Step): Promise<StepResult> {
       sessionId: step.session.sessionId,
     });
   }
-  // Applied, not only published: the step's applied session is the compacted one.
   const reason = outcome === "failed" ? "compaction-failed" : undefined;
   await step.apply(settleDelivery(deliveryId, outcome, reason));
   return { next: null, session: step.session };
 }
 
-/**
- * The history the next model call reads, committed: summarized when the call would pass the
- * threshold, a share of the model's window (`agent.ts`'s `compaction.threshold`), counting the
- * summary prompt's own overhead. Returns the messages the call reads, or `undefined` when the
- * history stays. A failure is rethrown, after settling any change it opened; `step.session`
- * counts the summary calls that finished.
- */
+interface HistoryBeforeCallInput {
+  readonly messages: readonly HarnessModelMessage[];
+  readonly promptMessages: readonly HarnessModelMessage[];
+  readonly model: LanguageModel;
+  readonly renew?: (rejection: unknown) => Promise<void>;
+  readonly requestEnvelopeTokens: number;
+}
+
 export async function historyBeforeCall(
   step: Step,
-  input: {
-    /** The durable messages the history becomes. */
-    readonly messages: readonly HarnessModelMessage[];
-    /** The prompt as the model reads it, which the call's size measures. */
-    readonly promptMessages: readonly HarnessModelMessage[];
-    readonly model: LanguageModel;
-    readonly requestEnvelopeTokens: number;
-  },
+  input: HistoryBeforeCallInput,
 ): Promise<HarnessModelMessage[] | undefined> {
   const prompt = validateHarnessModelMessages(input.promptMessages);
-  const previousEnvelope = step.session.compaction.requestEnvelopeTokens;
-  const config = compactionConfig(step);
+  const config = compactionConfig(step, {
+    messages: prompt,
+    requestEnvelopeTokens: input.requestEnvelopeTokens,
+  });
+  try {
+    return await compactUnder(step, input, prompt, config);
+  } catch (error) {
+    if (!(error instanceof CompactionOverLimitError)) throw error;
+    const window = config.contextWindowTokens;
+    const scope = { sessionId: step.session.sessionId, turnId: step.position().turnId };
+    if (window === undefined) {
+      log.warn(
+        `${error.message} eve doesn't know this model's context window, so it sends the request as it is. Set \`modelContextWindowTokens\` in \`agent.ts\` to compact against it.`,
+        scope,
+      );
+      return undefined;
+    }
+    if (window > config.threshold) {
+      log.warn(
+        `${error.message} eve compacts against the model's ~${window}-token context window instead.`,
+        scope,
+      );
+      try {
+        return await compactUnder(step, input, prompt, againstWindow(config, window));
+      } catch (overWindow) {
+        if (!(overWindow instanceof CompactionOverLimitError)) throw overWindow;
+      }
+    }
+    throw new CompactionOverLimitError(
+      `The agent's system prompt, tools, memory and context leave no room for the conversation in this model's ~${window}-token context window. Shorten the instructions, remove tools or trim memory.`,
+    );
+  }
+}
+
+async function compactUnder(
+  step: Step,
+  input: HistoryBeforeCallInput,
+  prompt: HarnessModelMessage[],
+  config: CompactionConfig,
+): Promise<HarnessModelMessage[] | undefined> {
+  const previousEnvelope = config.requestEnvelopeTokens;
   if (!shouldCompact(prompt, config, input.requestEnvelopeTokens, previousEnvelope)) {
     return undefined;
   }
@@ -151,15 +181,15 @@ export async function historyBeforeCall(
   });
   return await summarizeHistory(step, {
     change,
+    compaction: config,
     messages: input.messages,
-    model: input.model,
+    turnModel: async () => ({ model: input.model, renew: input.renew }),
     promptMessages: prompt,
     requestEnvelopeTokens: input.requestEnvelopeTokens,
     telemetryTurnId: activeTurnId(step.position()),
   });
 }
 
-/** A compaction change that opens the first time something needs it: a summary or a rewrite. */
 interface LazyChange {
   readonly changeId: string;
   readonly runId: string;
@@ -187,28 +217,21 @@ function lazyChange(
       if (opened) return;
       opened = true;
       await step.publish(startChange({ changeId: input.changeId, ...input.started }), input.prompt);
-      // What blocks a compaction, such as a memory capture, ran in the commit that started it.
-      // When it failed, the compaction fails before it rewrites the history.
       const captureFailure = takeBlockingFailure(step.ctx);
       if (captureFailure !== undefined) throw captureFailure;
     },
   };
 }
 
-/**
- * Compacts the history and commits it. The change opens with the first summary call or rewrite,
- * so a history with nothing to compact records none.
- */
 async function summarizeHistory(
   step: Step,
   input: {
-    /** Between turns, no turn's usage reports the summary calls. */
     readonly betweenTurns?: true;
     readonly change: LazyChange;
     readonly compact?: true;
+    readonly compaction: CompactionConfig;
     readonly messages: readonly HarnessModelMessage[];
-    /** The turn's model, which writes summaries unless the agent names a compaction model. */
-    readonly model: LanguageModel;
+    readonly turnModel: () => Promise<CredentialedModel>;
     readonly promptMessages: readonly HarnessModelMessage[];
     readonly requestEnvelopeTokens: number | undefined;
     readonly telemetryTurnId?: string;
@@ -216,7 +239,7 @@ async function summarizeHistory(
 ): Promise<HarnessModelMessage[] | undefined> {
   const { change } = input;
   const before = validateHarnessModelMessages(input.messages);
-  const compaction = compactionConfig(step);
+  const { compaction } = input;
   const summaryUsage: (TokenUsageDelta | undefined)[] = [];
   let executor: Awaited<ReturnType<typeof summaryExecutor>> | undefined;
   let runOpen = false;
@@ -244,19 +267,20 @@ async function summarizeHistory(
   };
 
   let messages: HarnessModelMessage[];
+  let stage: CompactionStage;
   try {
-    const rewrite = historyContext(compaction, { ...input, threshold: compaction.threshold });
-    messages = (await compactMessages(
+    const compacted = await compactMessages(
       before,
-      rewrite.config,
+      historyConfig(compaction, input),
       summarize,
       input.compact === true,
-      rewrite.historyTokens,
       input.betweenTurns !== true,
-    )) as HarnessModelMessage[];
-    // Capping old tool output alone rewrites the history without a summary call.
+    );
+    messages = compacted.messages as HarnessModelMessage[];
+    stage = compacted.stage;
     if (!isDeepStrictEqual(messages, before)) await change.open();
   } catch (error) {
+    throwIfSessionStreamDead(error);
     const usage = summaryUsageOf(summaryUsage);
     countSummaryUsage(step, input.betweenTurns, usage);
     if (change.opened) {
@@ -275,11 +299,11 @@ async function summarizeHistory(
     await settleChange(step, { ...input, runOpen, summaryUsage }, unchanged ? before : messages);
   }
   if (unchanged) return undefined;
-  step.session = changeHistory(step.session, { rewrite: messages });
+  const rewritten = changeHistory(step.session, { rewrite: messages });
+  step.session = { ...rewritten, compaction: { ...rewritten.compaction, lastStage: stage } };
   return messages;
 }
 
-/** Settles an open change and its summary run; what the summary calls spent belongs to the run. */
 async function settleChange(
   step: Step,
   input: {
@@ -298,7 +322,6 @@ async function settleChange(
       changeId: change.changeId,
       runId: change.runId,
       runOpen: input.runOpen,
-      // Every summary call that returned left an entry, even without usage.
       summarized: input.summaryUsage.length > 0,
       usage,
     }),
@@ -306,62 +329,42 @@ async function settleChange(
   );
 }
 
-/**
- * The history's share of the threshold and of the last measurement. Whatever the model sees
- * besides the history (instructions, tools, memory, client context) is kept whole, so it takes
- * room like the envelope.
- */
-function historyContext(
+function historyConfig(
   compaction: CompactionConfig,
   input: {
     readonly messages: readonly HarnessModelMessage[];
     readonly promptMessages: readonly HarnessModelMessage[];
     readonly requestEnvelopeTokens: number | undefined;
-    /** The call's input tokens to aim under. */
-    readonly threshold: number;
   },
-): { readonly config: CompactionConfig; readonly historyTokens?: number } {
+): CompactionConfig {
   const requestEnvelopeTokens = input.requestEnvelopeTokens ?? 0;
   const protectedTokens = Math.max(
     0,
     estimateTokens(input.promptMessages) - estimateTokens(input.messages),
   );
-  assertFixedPartFits({ protectedTokens, requestEnvelopeTokens, threshold: input.threshold });
-  const config: CompactionConfig = {
-    ...compaction,
-    threshold: Math.max(1, input.threshold - requestEnvelopeTokens - protectedTokens),
-    lastKnownInputTokens:
-      compaction.lastKnownInputTokens === undefined
-        ? undefined
-        : Math.max(
-            0,
-            compaction.lastKnownInputTokens -
-              Math.min(compaction.requestEnvelopeTokens ?? 0, requestEnvelopeTokens),
-          ),
-  };
-  const promptTokens =
-    input.requestEnvelopeTokens === undefined
-      ? undefined
-      : getInputTokenCount(
-          input.promptMessages,
-          compaction,
-          requestEnvelopeTokens,
-          compaction.requestEnvelopeTokens,
-        );
+  const { threshold } = compaction;
+  assertFixedPartFits({ protectedTokens, requestEnvelopeTokens, threshold });
+  const fixedTokens = requestEnvelopeTokens + protectedTokens;
   return {
-    config,
-    ...(promptTokens !== undefined && {
-      historyTokens: Math.max(0, promptTokens - requestEnvelopeTokens - protectedTokens),
-    }),
+    ...compaction,
+    target: Math.max(1, Math.floor(compaction.target - fixedTokens * estimateRatio(compaction))),
+    threshold: Math.max(1, threshold - fixedTokens),
   };
 }
 
-/** The compaction model, called the way a step calls its model: streamed, and retried. */
+async function compactionModel(
+  step: Step,
+  reference: RuntimeModelReference,
+): Promise<CredentialedModel> {
+  const resolved = await step.config.resolveModel(reference);
+  return await credentialedModel(resolved);
+}
+
 async function summaryExecutor(
   step: Step,
   input: {
     readonly change: { readonly runId: string };
-    readonly model: LanguageModel;
+    readonly turnModel: () => Promise<CredentialedModel>;
     readonly telemetryTurnId?: string;
   },
 ): Promise<{
@@ -371,7 +374,8 @@ async function summaryExecutor(
   const { config, session } = step;
   const turnReference = stepReference(step);
   const reference = agentSettings(step).compactionModel ?? turnReference;
-  const model = reference === turnReference ? input.model : await config.resolveModel(reference);
+  const { model, renew } =
+    reference === turnReference ? await input.turnModel() : await compactionModel(step, reference);
   const profile = resolveModelProfile(model);
   const call = {
     abortSignal: config.abortSignal,
@@ -390,40 +394,44 @@ async function summaryExecutor(
     telemetry: step.instrumentation?.prepareAttempt({
       attempt: 0,
       runId: input.change.runId,
+      runtimeContext: { "eve.compaction.request": "summary" },
       ...(input.telemetryTurnId !== undefined && { turnId: input.telemetryTurnId }),
     }).telemetry,
   };
   const retryScope = { sessionId: session.sessionId, turnId: step.position().turnId };
+  const summarize = (prompt: CompactionSummaryPrompt) =>
+    runModelCallWithRetries(
+      () => streamCompactionSummary({ ...call, ...prompt }),
+      retryScope,
+      config.abortSignal,
+    );
   return {
     modelId: gatewayModelId(model) ?? "unknown",
-    summarize: (prompt) =>
-      runModelCallWithRetries(
-        () => streamCompactionSummary({ ...call, ...prompt }),
-        retryScope,
-        config.abortSignal,
-      ),
+    async summarize(prompt) {
+      for (;;) {
+        try {
+          return await summarize(prompt);
+        } catch (error) {
+          if (renew === undefined || !rejectsCredential(error)) throw error;
+          await renew(error);
+        }
+      }
+    },
   };
 }
 
-/** Spent between turns, no turn's report to a parent claims the summary calls. */
 function countSummaryUsage(step: Step, betweenTurns: true | undefined, usage: Usage | undefined) {
   if (usage !== undefined && betweenTurns === true) {
     step.session = markUsageReported(step.session, usage);
   }
 }
 
-/** What a compaction's summary calls spent, together, as the summary run records it. */
 function summaryUsageOf(deltas: readonly (TokenUsageDelta | undefined)[]): Usage | undefined {
   const spent = deltas.filter((delta) => delta !== undefined);
   if (spent.length === 0) return undefined;
   return spent.reduce<Usage>((total, delta) => addTokenUsage(total, usageOf(delta)), NO_USAGE);
 }
 
-/**
- * Where a compaction during a turn leaves the turn's input: its latest user message, or that
- * message's replay. What the framework adds for the turn goes before it, as on the turn's first
- * step.
- */
 export function compactedTurnInput<Message extends ModelMessage>(
   messages: readonly Message[],
 ): Message | undefined {
@@ -432,10 +440,6 @@ export function compactedTurnInput<Message extends ModelMessage>(
 
 type CompactionSummaryPrompt = Parameters<CompactionSummarizer>[0];
 
-/**
- * Calls the compaction model the way a step calls its model: streamed, with stream errors
- * thrown in the same shape, so the caller's retries classify them alike.
- */
 async function streamCompactionSummary(
   input: CompactionSummaryPrompt &
     Pick<
@@ -447,7 +451,6 @@ async function streamCompactionSummary(
   readonly text: string;
   readonly usage: TokenUsageDelta | undefined;
 }> {
-  // The stream's error part is rethrown below; the default handler would also log it.
   const result = streamText({ ...input, onError: () => {} });
   for await (const part of result.fullStream) {
     if (part.type === "error") throw normalizeModelStreamError(part.error);

@@ -10,9 +10,6 @@ import { serializeInputSchema } from "#tools/schema.js";
 import { SUBAGENT_TOOL_INPUT_SCHEMA } from "#tools/framework/agent-contract.js";
 import type { AgentToolExposure } from "#shared/agent-definition.js";
 
-/**
- * One runtime-owned subagent tracked by the prepared registry.
- */
 interface RuntimeRegisteredSubagent {
   readonly definition: ResolvedRuntimeDelegationNode;
   readonly prepared?: PreparedRuntimeDelegationTool;
@@ -25,10 +22,6 @@ export interface ResolvedDynamicSubagentResolver extends ResolvedDynamicSubagent
   readonly tool?: AgentToolExposure;
 }
 
-/**
- * Runtime-owned registry that keeps all resolved subagents addressable while
- * preparing only their selected model-tool projections.
- */
 export interface RuntimeSubagentRegistry {
   readonly dynamicNodeIds: ReadonlySet<string>;
   readonly dynamicResolvers: readonly ResolvedDynamicSubagentResolver[];
@@ -37,16 +30,8 @@ export interface RuntimeSubagentRegistry {
   readonly subagentsByNodeId: ReadonlyMap<string, RuntimeRegisteredSubagent>;
 }
 
-/**
- * Stable input schema lowered onto every subagent tool. Subagents always
- * accept one free-form `message` string from the parent agent.
- */
 const SUBAGENT_TOOL_INPUT_JSON_SCHEMA = serializeInputSchema(SUBAGENT_TOOL_INPUT_SCHEMA);
 
-/**
- * Builds the runtime-owned registry for the resolved subagents owned by one
- * runtime agent node.
- */
 export function createRuntimeSubagentRegistry(input: {
   readonly disabledToolNames?: readonly string[];
   readonly reservedToolNames?: readonly string[];
@@ -177,7 +162,6 @@ function duplicateSubagentMessage(name: string): string {
   return `Found multiple subagents named "${name}". Subagent names must be unique at runtime.`;
 }
 
-/** Dynamic subagents resolve later, so their names are checked here, against every subagent. */
 function assertUniqueDynamicSubagentNames(
   dynamicResolvers: readonly ResolvedDynamicSubagentResolver[],
   subagentsByName: ReadonlyMap<string, unknown>,

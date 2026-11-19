@@ -14,10 +14,9 @@ import {
   type TraceCapturePolicy,
 } from "#tracing/eve/otel-declaration.js";
 
-/** Zero-config local tracing admits every session in the development worker. @internal */
+/** @internal */
 export const localTracePolicy: TraceCapturePolicy = () => true;
 
-/** Installs the zero-config local OTel runtime once in an `eve dev` worker. */
 export function installLocalInstrumentationRuntime(input: {
   readonly appRoot: string;
   readonly frameworkVersion: string;

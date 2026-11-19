@@ -166,10 +166,6 @@ export function photonIMessageChannel(config: PhotonIMessageChannelConfig): Phot
   return channel;
 }
 
-/**
- * The Photon adapter's `addReaction` accepts only the six standard tapbacks,
- * but the spectrum message it returns from `fetchMessage` can react with any emoji.
- */
 async function sendPhotonEmojiTapback(
   adapter: Adapter,
   threadId: string,
@@ -239,7 +235,5 @@ async function markReadBestEffort(
 ): Promise<void> {
   try {
     await adapter.markRead(thread.id, message.id);
-  } catch {
-    // A read receipt should never prevent the user's message from reaching eve.
-  }
+  } catch {}
 }

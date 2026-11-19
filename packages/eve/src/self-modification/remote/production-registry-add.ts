@@ -35,7 +35,6 @@ export function assertOfficialRegistryAddress(address: string): void {
     );
 }
 
-/** Installs only official items and rolls back this invocation's tree on terminal failure. */
 export async function installProductionRegistryItem(input: {
   readonly address: string;
   readonly answers?: Readonly<Record<string, unknown>>;

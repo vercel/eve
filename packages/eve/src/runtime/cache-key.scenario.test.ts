@@ -3,7 +3,7 @@ import { dirname } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { COMPILE_METADATA_KIND, COMPILE_METADATA_VERSION } from "#compiler/artifacts.js";
+import { COMPILE_METADATA_KIND, COMPILE_METADATA_VERSION } from "#compiler/artifact-contract.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";
 import {
@@ -37,6 +37,28 @@ describe("resolveRuntimeCompiledArtifactsVersionedCacheKey", () => {
     expect(keyBefore).toContain("stable-source-graph-hash");
     expect(keyAfter).toContain("stable-source-graph-hash");
     expect(keyAfter).not.toEqual(keyBefore);
+  });
+
+  it("reads metadata again after a partial write at the same mtime", async () => {
+    const appRoot = await createScratchDirectory("eve-cache-key-");
+    const source = createDiskRuntimeCompiledArtifactsSource(appRoot);
+    const metadataPath = await writeCompileMetadata({
+      appRoot,
+      sourceGraphHash: "complete-source-graph-hash",
+    });
+    await writeFile(metadataPath, "{", "utf8");
+    await utimes(metadataPath, new Date(4_000), new Date(4_000));
+
+    await expect(resolveRuntimeCompiledArtifactsVersionedCacheKey(source)).resolves.not.toContain(
+      "complete-source-graph-hash",
+    );
+
+    await writeCompileMetadata({ appRoot, sourceGraphHash: "complete-source-graph-hash" });
+    await utimes(metadataPath, new Date(4_000), new Date(4_000));
+
+    await expect(resolveRuntimeCompiledArtifactsVersionedCacheKey(source)).resolves.toContain(
+      "complete-source-graph-hash",
+    );
   });
 
   it("falls back to mtime-only invalidation when sourceGraphHash is empty", async () => {

@@ -5,19 +5,14 @@ import { isNonEmptyString, isObject } from "#shared/guards.js";
 const log = createLogger("discord.gateway");
 
 const MAX_RECONNECT_DELAY_MS = 60_000;
-// Discord ends the session on 1000 and 1001; any 4xxx close we send keeps it resumable.
 const RESUMABLE_CLOSE = 4000;
-// Bad token, bad shard, sharding required, bad API version, bad or disallowed intents.
 const FATAL_CLOSE_CODES = new Set([4004, 4010, 4011, 4012, 4013, 4014]);
-// A dead peer never answers a close frame, so the socket would sit in CLOSING.
 const CLOSE_HANDSHAKE_TIMEOUT_MS = 3_000;
-// Invalid sequence and session timed out: reconnect, but identify from scratch.
 const SESSION_RESET_CLOSE_CODES = new Set([4007, 4009]);
 
 /** Raised when Discord refuses the bot outright, so reconnecting cannot help. */
 export class DiscordGatewayFatalError extends Error {}
 
-/** A Gateway dispatch (op 0) as Discord sends it. */
 export interface DiscordGatewayDispatch {
   readonly op: 0;
   readonly t: string;
@@ -48,10 +43,6 @@ interface GatewaySession {
 
 type GatewayUrlResult = { readonly url: string } | { readonly fatal: string };
 
-/**
- * Holds one Discord Gateway session until `signal` aborts, resuming across
- * reconnects so dispatches are not lost while the process lives.
- */
 export async function runGatewayConnection(options: GatewayConnectionOptions): Promise<void> {
   let session: GatewaySession | undefined;
   let sequence: number | null = null;
@@ -251,7 +242,6 @@ function backoff(failures: number): number {
   return Math.min(MAX_RECONNECT_DELAY_MS, 1_000 * 2 ** failures) * (0.5 + Math.random() / 2);
 }
 
-/** Resolves after `ms`, or as soon as `signal` aborts. */
 export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     const timer = setTimeout(done, ms);

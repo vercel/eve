@@ -1,11 +1,10 @@
 import type { ResolvedAgentGraphBundle } from "#runtime/graph.js";
 import { declared } from "#runtime/types.js";
-import { scheduleCollectionToolPrefix } from "#shared/schedule-collection-tools.js";
+import { scheduleCollectionToolSlot } from "#shared/schedule-collection-tools.js";
 import type { ToolStub } from "#tool-stubs/types.js";
 
 export class InvalidToolStubTargetError extends Error {}
 
-/** Check compiled tools without running dynamic resolvers or contacting connections. */
 export function validateToolStubTargets(
   rules: readonly ToolStub[],
   graph: ResolvedAgentGraphBundle,
@@ -39,7 +38,7 @@ function hasToolPath(graph: ResolvedAgentGraphBundle, path: readonly string[]): 
         declared(node.agent, "schedules").some(
           (collection) =>
             collection.offersTools === true &&
-            name.startsWith(`${scheduleCollectionToolPrefix(collection.name)}__`),
+            name.startsWith(`${scheduleCollectionToolSlot(collection)}__`),
         ) ||
         (name.includes("__") &&
           (declared(node.agent, "connection").length > 0 ||

@@ -76,10 +76,6 @@ async function writeRuntimeLoaderFixture(agentRoot: string): Promise<void> {
   await writeFile(
     join(agentRoot, "channels", "slack.mjs"),
     [
-      // Inline CompiledChannel shape — equivalent to what
-      // `defineChannel` would produce — so the fixture does not need
-      // to depend on `eve` resolving from the temp
-      // package root.
       "export default {",
       '  __kind: "eve:channel",',
       '  adapter: { kind: "channel" },',
@@ -427,7 +423,6 @@ describe("runtime compiled artifact loaders", () => {
     expect(resolvedChannel.urlPath).toBe("/slack");
     expect(typeof resolvedChannel.fetch).toBe("function");
     expect(resolvedAgent.channels.filter((channel) => channel.name === "slack")).toHaveLength(1);
-    // A static prompt schedule runs through Cron, without its module at runtime.
     const rootModuleIds = Object.keys(moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules ?? {});
     expect(rootModuleIds.filter((moduleId) => !moduleId.startsWith("eve:"))).toEqual([
       "channels/slack.mjs",
@@ -574,8 +569,6 @@ describe("runtime compiled artifact loaders", () => {
       logicalPath: "sandbox/sandbox.mjs",
       sourceId: "sandbox/sandbox.mjs",
     });
-    // Authored sandboxes no longer auto-generate model tools — the tool list
-    // contains only framework tools and authored tool files.
     expect(
       (researcherNode?.turnAgent.tools ?? []).some(
         (tool) =>

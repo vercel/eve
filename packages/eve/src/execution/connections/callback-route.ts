@@ -1,34 +1,12 @@
-import { resumeAuthorizationCallback } from "#execution/legacy-session/authorization.js";
-/**
- * Framework-shipped callback route used by in-turn interactive
- * connection authorization.
- *
- * The connection callback route is the
- * redirect target the workflow body hands to the IdP via
- * `startAuthorization`. When the IdP redirects the user's browser back
- * with the OAuth `code`/`state` (or whatever payload the protocol
- * carries), this handler:
- *
- * 1. Parses the inbound request into a JSON-serializable
- *    {@link AuthorizationCallback} (params only — never request headers).
- * 2. Calls `resumeHook(token, payload)` to wake the suspended workflow.
- * 3. Renders a static landing page so the user sees a friendly UI
- *    instead of an empty `202 Accepted`: "Authorization complete", or
- *    "Authorization not completed" when the IdP returned an OAuth `error`.
- *
- * Owning this route in the framework - instead of routing the IdP at the
- * workflow runtime's raw `/.well-known/workflow/v1/webhook/:token` -
- * keeps the public surface namespaced under eve and lets the framework
- * decide delivery policy (auth, throttling, logging) for connection
- * callbacks without leaking generic workflow primitives to the public
- * internet.
- */
+import { isSignInCallbackToken } from "#execution/callback-hook-tokens.js";
+import { deliverToHostedHook } from "#execution/hosts.js";
+import type { AuthorizationCallbackPayload } from "#execution/session-inbox/inbox.js";
+import { resumeRunnableHook } from "#execution/session-inbox/owner.js";
 
 import type { RouteContext } from "#public/definitions/channel.js";
 import { buildAuthorizationCompletePage } from "#runtime/connections/authorization-complete-page.js";
 import type { AuthorizationCallback } from "#shared/connection-types.js";
 
-/** Resumes the exact authorization attempt through the session inbox. */
 export async function handleConnectionCallbackRequest(
   request: Request,
   ctx: RouteContext,
@@ -49,34 +27,29 @@ export async function handleConnectionCallbackRequest(
     );
   }
 
+  if (!isSignInCallbackToken(token)) return callbackNotPending();
+
   const callback = await projectAuthorizationCallback(request);
 
+  const payload: AuthorizationCallbackPayload = {
+    kind: "authorization-callback",
+    payloads: [{ authorizationCallback: { attemptId, callback, connectionName: name } }],
+  };
   try {
-    const authorizationCallback = { attemptId, callback, connectionName: name };
-    await resumeAuthorizationCallback(token, {
-      kind: "authorization-callback" as const,
-      payloads: [{ authorizationCallback }],
-    });
+    if (!(await deliverToHostedHook(token, payload))) await resumeRunnableHook(token, payload);
   } catch {
-    return Response.json({ error: "Connection callback not pending.", ok: false }, { status: 404 });
+    return callbackNotPending();
   }
 
-  // RFC 6749 section 4.1.2.1: the IdP reports denied consent and other failures with `error`.
   return buildAuthorizationCompletePage(
     callback.params.error === undefined ? "authorized" : "failed",
   );
 }
 
-/**
- * Parses the live callback `Request` into the JSON-serializable
- * {@link AuthorizationCallback} handed to `completeAuthorization`.
- *
- * Only the IdP-returned params (query string, plus a form-encoded body
- * for `form_post` response modes) and the method are captured. Request
- * headers — including any inbound `Cookie`/`Authorization` — are
- * deliberately dropped so they never cross a step boundary; no shipped
- * strategy reads them.
- */
+function callbackNotPending(): Response {
+  return Response.json({ error: "Connection callback not pending.", ok: false }, { status: 404 });
+}
+
 async function projectAuthorizationCallback(request: Request): Promise<AuthorizationCallback> {
   const params: Record<string, string> = {};
   for (const [key, value] of new URL(request.url).searchParams) {

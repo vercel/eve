@@ -8,6 +8,7 @@ import {
   findAuthoredPackageRoot,
   isAuthoredSourcePath,
 } from "#internal/authored-package-boundary.js";
+import { type FilterExpression, resolveIdFilter } from "#internal/bundler/filters.js";
 import { isPathInsideOrEqual } from "#shared/path-inside.js";
 
 const AUTHORED_ASSET_CODE_EXTENSIONS = [
@@ -22,28 +23,15 @@ const AUTHORED_ASSET_CODE_EXTENSIONS = [
   ".json",
 ] as const;
 
-// Supersets of isPotentialAuthoredAssetImport, so most imports skip the JS hook.
 const RESOLVE_FILTER = /^(?:\.|\/|[A-Za-z]:[\\/])/;
 
-/**
- * Creates the Rollup-compatible plugin that gives authored modules a small
- * asset-module surface for non-code relative imports. An asset may sit outside
- * the agent directory, but not outside the authored package or the package
- * that owns the importing module, such as a workspace package bundled from
- * source.
- */
 export function createAuthoredAssetImportPlugin(input: {
   readonly packageRoot: string;
-  /**
-   * Handles only importers and assets outside `node_modules`: authored source
-   * and workspace packages bundled from source. Set it for bundles that also
-   * bundle dependencies, such as the Nitro server and the workflow driver, so
-   * installed dependency imports stay with the host bundler.
-   */
   readonly authoredSourceOnly?: boolean;
+  readonly handlesInstalledModule?: (path: string) => boolean;
+  readonly importerFilter?: FilterExpression;
 }): Plugin {
   const packageRoot = toCanonicalPath(input.packageRoot);
-  // Built here rather than at module scope: runtime modules import this file.
   const loadFilter = [
     /\?raw$/,
     new RegExp(
@@ -51,11 +39,14 @@ export function createAuthoredAssetImportPlugin(input: {
     ),
   ];
   const handles = (path: string): boolean =>
-    input.authoredSourceOnly !== true || isAuthoredSourcePath(path);
+    input.authoredSourceOnly !== true ||
+    isAuthoredSourcePath(path) ||
+    input.handlesInstalledModule?.(path) === true;
+  const resolvedAssetIds = new Set<string>();
   return {
     name: "eve-authored-asset-import",
     resolveId: {
-      filter: { id: RESOLVE_FILTER },
+      filter: resolveIdFilter(RESOLVE_FILTER, input.importerFilter),
       handler(source: string, importer: string | undefined) {
         if (
           !isPotentialAuthoredAssetImport(source) ||
@@ -67,7 +58,6 @@ export function createAuthoredAssetImportPlugin(input: {
 
         const { path, suffix } = splitImportSuffix(source);
         const resolvedPath = isAbsolute(path) ? path : resolve(dirname(importer), path);
-        // A dotted code import, such as `./schema.v1` or a `./helpers.v2/` index, is no asset.
         if (!isFile(resolvedPath)) {
           return undefined;
         }
@@ -83,7 +73,9 @@ export function createAuthoredAssetImportPlugin(input: {
           );
         }
 
-        return `${canonicalPath}${suffix}`;
+        const id = `${canonicalPath}${suffix}`;
+        resolvedAssetIds.add(id);
+        return id;
       },
     },
     load: {
@@ -91,7 +83,7 @@ export function createAuthoredAssetImportPlugin(input: {
       async handler(id: string) {
         const { path, suffix } = splitImportSuffix(id);
 
-        if (!isPotentialAuthoredAssetImport(id) || !handles(path)) {
+        if (!isPotentialAuthoredAssetImport(id) || !(resolvedAssetIds.has(id) || handles(path))) {
           return undefined;
         }
 
@@ -123,7 +115,6 @@ export function createAuthoredAssetImportPlugin(input: {
   };
 }
 
-/** Unreadable paths, such as one that is too long, fall through to the next resolver. */
 function isFile(path: string): boolean {
   try {
     return statSync(path).isFile();
@@ -169,7 +160,6 @@ function isPotentialAuthoredAssetImport(source: string): boolean {
     return false;
   }
 
-  // As in Vite, `?raw` imports any file as text, including code files and files without an extension.
   if (suffix === "?raw") {
     return true;
   }

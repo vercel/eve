@@ -15,13 +15,22 @@ export type SelfModificationAuthorization = (
   context: SelfModificationAuthorizationContext,
 ) => boolean | Promise<boolean>;
 
+/** A GitHub repository identified by its owner and name. */
 export interface GitHubRepository {
   readonly owner: string;
   readonly repo: string;
 }
 
+/**
+ * What a requested GitHub credential is for: `checkout` to clone the source repository into the
+ * sandbox, or `publish` to publish the change as a draft pull request.
+ */
 export type GitHubCredentialCapability = "checkout" | "publish";
 
+/**
+ * What eve passes to {@link GitHubCredentialProvider.resolve}: the repository and the
+ * capability the token must grant.
+ */
 export interface GitHubCredentialRequest {
   readonly capability: GitHubCredentialCapability;
   readonly repository: GitHubRepository;

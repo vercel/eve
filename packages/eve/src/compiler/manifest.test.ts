@@ -7,9 +7,9 @@ import { compiledRemoteAgentNodeSchema } from "#compiler/remote-agent-node.js";
 import { compileFromMemory } from "#internal/testing/compile-from-memory.js";
 import {
   COMPILED_AGENT_MANIFEST_VERSION,
-  compiledAgentManifestSchema,
   createCompiledAgentNodeManifest,
 } from "#compiler/manifest.js";
+import { compiledAgentManifestSchema } from "#compiler/manifest-schema.js";
 import {
   validateCompiledAgentManifest,
   validateCompiledModuleMap,
@@ -33,11 +33,8 @@ describe("compiled agent manifest v50", () => {
     const parsed = compiledAgentManifestSchema.parse(JSON.parse(JSON.stringify(manifest)));
     expect(parsed.version).toBe(COMPILED_AGENT_MANIFEST_VERSION);
     expect(parsed.config.experimental?.workflow?.modelCallsPerStep).toBe(4);
-    // `0` is falsy: a truthiness-based copy anywhere on the manifest path drops it.
     expect(parsed.config.experimental?.workflow?.retention).toBe(0);
     expect(parsed.config.limits?.sessionTimeoutMs).toBe(86_400_000);
-    // The manifest is JSON: a `sessionUsage` function compiles to a marker, and the
-    // runtime loads the function from the agent module.
     expect(parsed.config.limits?.sessionUsage).toBe(true);
     expect(() => validateCompiledAgentManifest(parsed)).not.toThrow();
   });

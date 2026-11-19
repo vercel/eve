@@ -136,7 +136,7 @@ Per-request headers override client-level headers with the same name. For exampl
 
 ## Faster sends with `inbox`
 
-`session.state` can include an opaque `inbox` value from the server, so save the complete state and pass it back unchanged. Later messages that carry it skip a server-side session lookup. Don't inspect, edit, or construct it, because its contents can change in any release. A missing, stale, or rejected value only costs a slower lookup.
+`session.state` can include an opaque `inbox` value from the server, so save the complete state and pass it back unchanged. Later messages that carry it skip a server-side session lookup. Don't inspect, edit, or construct it, because its contents can change in any release. A missing, stale, or rejected value only costs a slower lookup. Each server instance also remembers the sessions it looked up recently, so a send without a handle skips the lookup when it reaches the same instance.
 
 Set `EVE_INBOX_HANDLE_SECRET` to the same server-only random secret, at least 32 characters, on every deployment that shares sessions. Omit it to disable handles. The server verifies a handle's signature before using it. After a secret rotation, the server ignores old handles and looks the session up as usual.
 

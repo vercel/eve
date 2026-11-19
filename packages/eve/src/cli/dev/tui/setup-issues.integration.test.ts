@@ -114,4 +114,84 @@ describe("BOOT_DETECTIONS against a real directory", () => {
     expect(readInput).toHaveBeenCalledOnce();
     expect(order).toEqual(["login", "prompt"]);
   });
+
+  it("settles onboarding that already ran on the startup screen instead of opening login again", async () => {
+    const appRoot = await linkedAppRoot();
+    const client = new Client({ baseUrl: "http://localhost:3000" });
+    vi.spyOn(client, "info").mockRejectedValue(new Error("inspection unavailable"));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ revision: "snapshot-a" })),
+    );
+    const handle = vi.fn(async () => ({ message: "" }));
+    const readInput = vi.fn(async () => undefined);
+    const onOnboardingStep = vi.fn();
+    const onOnboardingTerminal = vi.fn();
+    const runner = new EveTUIRunner({
+      onOnboardingStep,
+      onOnboardingTerminal,
+      appRoot,
+      client,
+      detectProjectIdentity: vi.fn(async () => undefined),
+      getVercelAuthStatus: vi.fn(async (): Promise<"authenticated"> => "authenticated"),
+      promptCommandHandler: { handle },
+      renderer: { readInput, setupFlow: createFakeSetupFlowRenderer() },
+      serverUrl: "http://localhost:3000",
+      onboard: true,
+      startupOnboarding: { outcome: { message: "", summary: "Connected" } },
+    });
+
+    await runner.run();
+
+    expect(handle).not.toHaveBeenCalled();
+    expect(readInput).toHaveBeenCalledOnce();
+    expect(onOnboardingStep.mock.calls).toEqual([
+      [{ flow: "onboarding", step: "connection_ready" }],
+    ]);
+    expect(onOnboardingTerminal).toHaveBeenCalledExactlyOnceWith({
+      flow: "onboarding",
+      step: "model_provider",
+      result: "completed",
+    });
+  });
+
+  it.each([
+    ["points an unconnected model at /login", DISCONNECTED_GATEWAY_INFO, true],
+    ["stays quiet about a connected model", BASE_GATEWAY_INFO, false],
+  ] as const)("%s after onboarding that eve init ran", async (_name, info, warned) => {
+    const appRoot = await linkedAppRoot();
+    const client = new Client({ baseUrl: "http://localhost:3000" });
+    vi.spyOn(client, "info").mockResolvedValue(info);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ revision: "snapshot-a" })),
+    );
+    const handle = vi.fn(async () => ({ message: "" }));
+    const renderSetupWarning = vi.fn();
+    const runner = new EveTUIRunner({
+      appRoot,
+      client,
+      detectProjectIdentity: vi.fn(async () => undefined),
+      getVercelAuthStatus: vi.fn(async (): Promise<"authenticated"> => "authenticated"),
+      promptCommandHandler: { handle },
+      renderer: {
+        readInput: vi.fn(async () => undefined),
+        renderSetupWarning,
+        clearSetupWarning: vi.fn(),
+        setupFlow: createFakeSetupFlowRenderer(),
+      },
+      serverUrl: "http://localhost:3000",
+      onboard: true,
+      startupOnboarding: { outcome: undefined, reported: true },
+    });
+
+    await runner.run();
+
+    expect(handle).not.toHaveBeenCalled();
+    if (warned) {
+      expect(renderSetupWarning).toHaveBeenCalledWith(expect.stringContaining("/login"));
+    } else {
+      expect(renderSetupWarning).not.toHaveBeenCalled();
+    }
+  });
 });

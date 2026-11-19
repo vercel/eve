@@ -8,6 +8,7 @@ import { isDynamicSentinel } from "#dynamic/definition.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import { classifyModelRouting } from "#internal/classify-model-routing.js";
 import { isMockModel } from "#internal/mock-model-identity.js";
+import { isDefinedModel } from "#models/definition.js";
 import { isChatGptModelRouting } from "#shared/chatgpt-model.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
@@ -17,7 +18,7 @@ import {
   type AgentPromptCacheDefinition,
   type AgentToolExposure,
   type ModelRouting,
-  type PublicAgentStaticModelDefinition,
+  type PublicAgentTurnModelDefinition,
 } from "#shared/agent-definition.js";
 import type { CompiledAgentDefinition, CompiledRuntimeModelReference } from "#compiler/manifest.js";
 import {
@@ -30,10 +31,6 @@ import { isPathInsideOrEqual } from "#shared/path-inside.js";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
-/**
- * Compiles the agent-level configuration (model, compaction, build,
- * workspace) for one authored agent node.
- */
 export async function compileAgentConfig(
   manifest: AgentSourceManifest,
   context: ManifestCompileContext,
@@ -58,7 +55,6 @@ export async function compileAgentConfig(
         }),
         source: configModule,
       });
-  // A defineDynamic() export gets normalizeAgentDefinition's more specific error.
   if (!isDefinedAgent(authored) && !isDynamicSentinel(authored)) {
     throw new Error(`Export defineAgent({...}) from "${configModulePath}".`);
   }
@@ -79,7 +75,7 @@ export async function compileAgentConfig(
           providerOptions: definition.modelOptions?.providerOptions,
           source: configModule,
           sourcePath: configModulePath,
-          value: definition.model as PublicAgentStaticModelDefinition,
+          value: definition.model as PublicAgentTurnModelDefinition,
         })
       : undefined;
   const compaction: {
@@ -116,7 +112,6 @@ export async function compileAgentConfig(
     compiledConfig.description = definition.description;
   }
 
-  // A function can't enter the manifest; the runtime loads it from the agent config module.
   if (definition.approval !== undefined) {
     compiledConfig.approval = true;
   }
@@ -220,19 +215,18 @@ async function normalizeAuthoredModelReference(input: {
   readonly source?: ModuleSourceRef;
   readonly sourceField?: CompiledRuntimeModelReference["sourceField"];
   readonly sourcePath?: string;
-  readonly value: PublicAgentStaticModelDefinition;
+  readonly value: PublicAgentTurnModelDefinition;
 }): Promise<CompiledRuntimeModelReference> {
   if (typeof input.value === "string") {
     const routing = classifyModelRouting(input.value, input.providerOptions);
     rejectGatewayPromptCache(input, routing);
-    return await withCompiledRuntimeModelLimits(
-      {
-        id: formatLanguageModelGatewayId(input.value),
-        providerOptions: parseProviderOptionsRecord(input.providerOptions),
-        routing,
-      },
-      input,
-    );
+    const reference: CompiledRuntimeModelReference = {
+      id: formatLanguageModelGatewayId(input.value),
+      providerOptions: parseProviderOptionsRecord(input.providerOptions),
+      routing,
+    };
+    if (input.promptCache !== undefined) reference.promptCache = input.promptCache;
+    return await withCompiledRuntimeModelLimits(reference, input);
   }
 
   const source = input.source;
@@ -243,7 +237,25 @@ async function normalizeAuthoredModelReference(input: {
     );
   }
 
-  // While in TypeScript `input.value` is safe to use, we still validate below against runtime input.
+  const sourceRef = {
+    exportName: source.exportName,
+    sourceKind: "module" as const,
+    logicalPath: source.logicalPath,
+    sourceId: source.sourceId,
+  };
+
+  if (isDefinedModel(input.value)) {
+    const reference: CompiledRuntimeModelReference = {
+      id: input.value.id,
+      source: sourceRef,
+      providerOptions: parseProviderOptionsRecord(input.providerOptions),
+      routing: classifyModelRouting(input.value, input.providerOptions),
+    };
+    if (input.sourceField !== undefined) reference.sourceField = input.sourceField;
+    if (input.promptCache !== undefined) reference.promptCache = input.promptCache;
+    return await withCompiledRuntimeModelLimits(reference, input);
+  }
+
   const languageModel = input.value;
   const specificationVersion = languageModel.specificationVersion;
 
@@ -272,12 +284,7 @@ async function normalizeAuthoredModelReference(input: {
   rejectGatewayPromptCache(input, routing);
   const sourceBackedModel: CompiledRuntimeModelReference = {
     id: formatLanguageModelGatewayId(languageModel),
-    source: {
-      exportName: source.exportName,
-      sourceKind: "module" as const,
-      logicalPath: source.logicalPath,
-      sourceId: source.sourceId,
-    },
+    source: sourceRef,
     providerOptions: parseProviderOptionsRecord(input.providerOptions),
     routing,
   };
@@ -285,7 +292,6 @@ async function normalizeAuthoredModelReference(input: {
   if (input.promptCache !== undefined) sourceBackedModel.promptCache = input.promptCache;
 
   if (input.contextWindowTokens === undefined) {
-    // Codex models have no Gateway catalog entry, so use eve's known context limit.
     if (isChatGptModelRouting(sourceBackedModel.routing)) {
       return {
         ...sourceBackedModel,
@@ -293,7 +299,6 @@ async function normalizeAuthoredModelReference(input: {
       };
     }
 
-    // Mock models have no catalog entry or real limit; a large window keeps compaction opt-in.
     if (isMockModel(languageModel)) {
       return {
         ...sourceBackedModel,
@@ -314,9 +319,7 @@ async function normalizeAuthoredModelReference(input: {
           contextWindowTokens: providerResult.contextWindowTokens,
         };
       }
-    } catch {
-      // The slug lookup below resurfaces the catalog error.
-    }
+    } catch {}
   }
 
   return await withCompiledRuntimeModelLimits(sourceBackedModel, input);
@@ -326,13 +329,14 @@ function rejectGatewayPromptCache(
   input: {
     readonly promptCache?: AgentPromptCacheDefinition;
     readonly sourcePath?: string;
-    readonly value: PublicAgentStaticModelDefinition;
+    readonly value: PublicAgentTurnModelDefinition;
   },
   routing: ModelRouting,
 ): void {
   if (input.promptCache === undefined || routing.kind !== "gateway") return;
+  if (routing.target === "anthropic") return;
   throw new Error(
-    `${input.sourcePath ?? "agent.ts"}: modelOptions.promptCache applies only to models eve calls directly, but "${formatLanguageModelGatewayId(input.value)}" routes through AI Gateway, which manages its own prompt caching. Remove promptCache, or configure Gateway caching with providerOptions.gateway.caching.`,
+    `${input.sourcePath ?? "agent.ts"}: modelOptions.promptCache applies to Anthropic models and to models eve calls directly, but "${formatLanguageModelGatewayId(input.value)}" routes through AI Gateway, which manages its own prompt caching. Remove promptCache, or configure Gateway caching with providerOptions.gateway.caching.`,
   );
 }
 
@@ -378,6 +382,7 @@ async function withCompiledRuntimeModelLimits(
   const limits = await input.modelCatalog.getModelLimits(model.id).catch((error: unknown) => {
     throw new Error(
       `Failed to load AI Gateway model metadata for ${input.purpose} "${model.id}". ${toErrorMessage(error)}`,
+      { cause: error },
     );
   });
 

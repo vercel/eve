@@ -20,7 +20,11 @@ import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
 import { createNodeHarnessTools } from "#execution/node-step.js";
 import { serializeInputSchema, serializeOutputSchema } from "#tools/schema.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
-import { defineSandboxProvider } from "#sandbox/provider.js";
+import {
+  defineSandboxProvider,
+  type SandboxSessionContext,
+  type SandboxSessionIdleOptions,
+} from "#sandbox/provider.js";
 import {
   buildActiveSessionContext,
   type ActiveSessionInit,
@@ -28,132 +32,57 @@ import {
 } from "#internal/testing/active-session-context.js";
 import { mockSandbox, type MockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 
-/**
- * Declarative, in-memory eve app stand-in used by integration tests.
- */
-
-/**
- * Declarative description of a test app.
- *
- * Every field is optional — omitting everything produces an agent named
- * `"test-agent"` that uses the framework default runtime model and declares
- * no tools, skills, or subagents. The harness installs an in-memory sandbox
- * backend so runtime tests never depend on a host container or VM service.
- */
 interface TestAppDescriptor {
   readonly agent?: {
-    /** Full agent definition; overrides `model` and `limits`. */
     readonly definition?: import("#public/definitions/agent.js").AgentDefinition;
     readonly limits?: import("#shared/agent-definition.js").AgentLimitsDefinition;
     readonly model?: string;
     readonly name?: string;
   };
-  /**
-   * Authored tools projected into the compiled manifest and available to
-   * `runAsSession` for tool dispatch.
-   */
   readonly tools?: readonly ResolvedToolDefinition[];
-  /** Additional authored modules compiled into the synthetic application. */
   readonly modules?: readonly ProgrammaticAgentModule[];
-  /** Awaited before the in-memory sandbox provider starts a session's sandbox. */
   readonly beforeSandboxStart?: (sessionId: string) => Promise<void>;
+  readonly sandboxIdle?: {
+    readonly idleTimeoutMs?: number | false;
+    readonly onSessionIdle?: (sessionId: string, signal: AbortSignal | undefined) => Promise<void>;
+  };
 }
 
-/**
- * Seed for {@link TestRuntime.runAsSession}: describes the authored-context
- * values the runtime should inject before calling the test body.
- */
 export interface RunAsSessionInit {
   readonly sessionId?: string;
   readonly turn?: SessionTurn;
   readonly parent?: SessionParent;
-  /**
-   * Pre-built {@link MockSandbox} — the harness attaches its
-   * {@link MockSandbox.access} to `SandboxKey`.
-   */
   readonly sandbox?: MockSandbox;
-  /**
-   * Explicit `SandboxAccess` override. Use this when you want to bypass
-   * {@link MockSandbox} entirely (e.g. to use a real backend).
-   */
   readonly sandboxAccess?: SandboxAccess;
-  /**
-   * Channel adapter bound on {@link ChannelKey} for the run. Used by
-   * staging / delivery tests that exercise adapter-owned behavior
-   * (e.g. attachment resolvers) without spinning up the full runtime.
-   */
   readonly channel?: ChannelAdapter<any>;
 }
 
-/**
- * A materialized in-memory test app with a pre-built scoped runtime session.
- */
 export interface TestRuntime {
-  /** The scoped `RuntimeSession` owned by this test app. */
   readonly session: RuntimeSession;
-  /** The synthetic compiled-agent manifest installed in the session. */
   readonly manifest: CompiledAgentManifest;
-  /** The synthetic compiled module map installed in the session. */
   readonly moduleMap: CompiledModuleMap;
-  /** Descriptor-declared tools. Exposed for test-side registry wiring. */
   readonly tools: readonly ResolvedToolDefinition[];
-  /**
-   * Runs `fn` with this app's runtime session active. Compiled-artifact
-   * reads and bundle-cache writes during `fn` target this scoped session,
-   * so they cannot leak into the process-default session used by other
-   * tests.
-   */
   run<T>(fn: () => Promise<T> | T): Promise<T>;
-  /**
-   * Runs `fn` with the runtime session active **and** an authored context
-   * container bound to the current async scope.
-   */
   runAsSession<T>(init: RunAsSessionInit | undefined, fn: () => Promise<T> | T): Promise<T>;
-  /**
-   * Runs a single authored tool through the runtime tool registry and
-   * returns whatever its `execute` function produced.
-   */
   executeTool(
     tool: string | Pick<ResolvedToolDefinition, "name">,
     input: unknown,
   ): Promise<unknown>;
-  /** Session ids whose sandbox cleanup ran when the session ended, in order. */
   readonly sandboxCleanups: readonly string[];
-  /**
-   * What happened to the sessions' sandboxes, in order, as `<event>:<session id>`:
-   * `definition` when `sandbox.ts` runs, then `start`, `resume`, `delete`, or
-   * `end` when session-end cleanup runs.
-   */
   readonly sandboxEvents: readonly string[];
-  /**
-   * Clears the compiled-artifact snapshot, bundle cache, and sessions' sandboxes.
-   * Tests that re-use a runtime across multiple assertions can call this to
-   * return the session to its initial state.
-   */
   reset(): void;
 }
 
 const DEFAULT_AGENT_NAME = "test-agent";
 
-/**
- * Builds an in-memory {@link TestRuntime} for the given descriptor.
- *
- * The returned runtime already has its synthetic compiled artifacts
- * installed on its scoped session. Callers invoke `runtime.run(fn)` or
- * `runtime.runAsSession(init, fn)` to execute code under the active
- * session (and, in the latter case, under a seeded authored context).
- */
 export const TEST_DEFAULT_MODEL_ID = "openai/gpt-5.4";
 
 const TEST_SANDBOX_PROVIDER_NAME = "eve-test-memory";
 
-/**
- * An in-memory sandbox provider that keeps each session's sandbox, so a step
- * that resumes it sees what earlier steps wrote, as with a real provider. A
- * staged attachment, say, is read back on the next model call. `start` is an
- * upsert on the session id, and session-end cleanup deletes by it.
- */
-function createTestSandboxProvider(beforeStart?: (sessionId: string) => Promise<void>) {
+function createTestSandboxProvider(
+  beforeStart?: (sessionId: string) => Promise<void>,
+  idle?: TestAppDescriptor["sandboxIdle"],
+) {
   const sessionSandboxes = new Map<string, MockSandbox>();
   const endedSessionIds: string[] = [];
   const events: string[] = [];
@@ -190,6 +119,16 @@ function createTestSandboxProvider(beforeStart?: (sessionId: string) => Promise<
         events.push(`resume:${context.session.id}`);
         return connect(context.session.id);
       },
+      ...(idle !== undefined && {
+        async onSessionIdle(
+          context: SandboxSessionContext,
+          _state: unknown,
+          options: SandboxSessionIdleOptions,
+        ) {
+          events.push(`idle:${context.session.id}`);
+          await idle.onSessionIdle?.(context.session.id, options.signal);
+        },
+      }),
     }),
   });
   return {
@@ -205,7 +144,10 @@ function createTestSandboxProvider(beforeStart?: (sessionId: string) => Promise<
 }
 
 export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Promise<TestRuntime> {
-  const sandboxes = createTestSandboxProvider(descriptor.beforeSandboxStart);
+  const sandboxes = createTestSandboxProvider(
+    descriptor.beforeSandboxStart,
+    descriptor.sandboxIdle,
+  );
   const compileInput: CompileFromMemoryInput = {
     name: descriptor.agent?.name ?? DEFAULT_AGENT_NAME,
     model: descriptor.agent?.model ?? TEST_DEFAULT_MODEL_ID,
@@ -214,7 +156,11 @@ export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Pro
     modules: [
       {
         loadNamespace: async () => {
-          const environment = sandboxes.provider.environment();
+          const environment = sandboxes.provider.environment(
+            descriptor.sandboxIdle?.idleTimeoutMs === undefined
+              ? undefined
+              : { idleTimeoutMs: descriptor.sandboxIdle.idleTimeoutMs },
+          );
           return {
             environment,
             default: defineSandbox(({ session }) => {
@@ -233,7 +179,12 @@ export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Pro
     Object.assign(compileInput, {
       tools: descriptor.tools.map((tool) => ({
         name: tool.name,
-        label: tool.label?.start === undefined ? undefined : { start: tool.label.start },
+        label:
+          tool.label === false
+            ? false
+            : tool.label?.start === undefined
+              ? undefined
+              : { start: tool.label.start },
         description: tool.description,
         execute: tool.execute,
         inputSchema: serializeInputSchema(tool.inputSchema),
@@ -254,8 +205,6 @@ export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Pro
       manifest,
       modelMetadata,
       moduleMap,
-      // What `eve build` would record for the root sandbox, so a session that opens it (to
-      // stage an attachment, say) finds a provisioned template.
       sandboxPreparedArtifacts: createSandboxPreparedArtifactsManifest([
         { artifact: null, nodeId: "__root__", providerName: TEST_SANDBOX_PROVIDER_NAME },
       ]),
@@ -281,12 +230,6 @@ export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Pro
   }
 
   function reset(): void {
-    // Mutate the scoped session directly. The `resetBundledCompiledArtifacts`
-    // and `clearCompiledRuntimeAgentBundleCache` helpers both resolve their
-    // target via `getActiveRuntimeSession()`, which would require wrapping the
-    // work in an async `withRuntimeSession` scope and produce an unhandled
-    // rejection if anything inside threw. Operating on the session we already
-    // own makes the reset synchronous and exception-safe.
     session.compiledArtifacts = null;
     session.bundleCache.clear();
     session.bundleCacheKeyBySourceKey.clear();
@@ -322,7 +265,6 @@ export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Pro
   };
 }
 
-// Exported for the internal active-session-context helper.
 export { buildActiveSessionContext };
 
 function buildActiveSessionContextInit(init: RunAsSessionInit | undefined): ActiveSessionInit {

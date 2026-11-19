@@ -35,10 +35,6 @@ describe("reconcileSessionContinuationToken", () => {
   });
 
   it("re-stamps the session's continuation token when a handler called continuation.alias", () => {
-    // The session handle's `continuation.alias(...)` writes through
-    // to ContinuationTokenKey during the step. After the step,
-    // reconcile picks the new token up and stamps it onto the
-    // HarnessSession the workflow body reads back.
     const ctx = new ContextContainer();
     ctx.set(ContinuationTokenKey, "slack:C123:1800000000.123456");
     const session = makeSession("slack:C123:");
@@ -47,7 +43,6 @@ describe("reconcileSessionContinuationToken", () => {
 
     expect(next).not.toBe(session);
     expect(next.continuationToken).toBe("slack:C123:1800000000.123456");
-    // Every other field is preserved.
     expect(next.sessionId).toBe(session.sessionId);
     expect(next.compaction).toBe(session.compaction);
     expect(next.history).toBe(session.history);

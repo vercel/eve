@@ -23,81 +23,37 @@ import {
 } from "./quit-guard.js";
 import { WizardCancelledError } from "./step.js";
 
-/**
- * Clack constrains option values to readonly primitives. Our scaffold flow
- * only ever uses string-valued options (`ChannelKind`, `SetupMode`,
- * `ProviderConnection`, model id), so the tightened bound matches usage.
- */
 export type PrompterValue = string | number | boolean;
 
 export interface SelectOption<T extends PrompterValue> {
   value: T;
   label: string;
-  /** Additional searchable text that is never rendered in the menu. */
   keywords?: readonly string[];
-  /** Completion action kept after searchable results instead of being filtered. */
   trailingAction?: boolean;
   hint?: string;
-  /** Short inline annotation shown dimmed only while the cursor is on this row. */
   focusHint?: string;
-  /**
-   * Longer, display-only explanation shown dimmed alongside the option while it
-   * is highlighted during navigation. Hidden once a choice is submitted.
-   */
   description?: string;
-  /** Cursor-pointer/active-label accent; "warning" turns them yellow for an attention row. */
   accent?: "warning";
   disabled?: boolean;
-  /** Parenthetical shown after a disabled option's label explaining why. */
   disabledReason?: string;
-  /**
-   * "warning" renders the disabled reason in yellow with a dimmed (not struck)
-   * label: the row is unavailable here but actionable elsewhere (e.g. a channel
-   * that needs a Vercel account points at /model), unlike the default disabled
-   * styling, which marks a hard conflict.
-   */
   disabledReasonTone?: "warning";
-  /**
-   * Completed work: renders with a check and remains cursor-addressable for
-   * contextual feedback, but cannot be selected or toggled.
-   */
   completed?: boolean;
-  /**
-   * Marks a mandatory row that is always selected and cannot be toggled off; the
-   * cursor skips it and it renders a dimmed check. Mutually exclusive with
-   * `disabled`.
-   */
   locked?: boolean;
-  /** Parenthetical shown after a locked option's label, e.g. "always available". */
   lockedReason?: string;
-  /**
-   * A leading run of featured options forms a searchable picker's default
-   * viewport: with no filter typed, only they are in view, and scrolling or
-   * filtering reaches the rest of the list. Featured options must be sorted
-   * to the front. Meaningless without `search`.
-   */
   featured?: boolean;
-  /** Marks the currently-active value: renders a green check beside the row. */
   checked?: boolean;
 }
 
-/**
- * An outcome line from an earlier lap of a looping menu, shown with the
- * repainted question: the TUI panel renders it beneath the options, the CLI
- * prints it to scrollback before the prompt.
- */
 export interface SelectNotice {
   tone: "success" | "info" | "warning" | "error";
   text: string;
 }
 
-/** One labeled fact rendered between a select question's description and options. */
 export interface SelectMetadata {
   label: string;
   value: string;
 }
 
-/** Directional transition requested from a batch-planner step. */
 export class PlannerNavigationError extends Error {
   readonly direction: "back" | "forward";
   readonly values: readonly PrompterValue[];
@@ -110,87 +66,48 @@ export class PlannerNavigationError extends Error {
   }
 }
 
-/** Progress rail and directional controls for a multi-step picker. */
 export interface PlannerNavigation {
   kind: "planner";
   activeStep: number;
-  /** Earliest step reachable with Left Arrow; defaults to the first step. */
   firstNavigableStep?: number;
   steps: readonly { label: string; count?: number; complete?: boolean }[];
 }
 
-/** Options common to every {@link Prompter.select} call. */
 export interface SelectCommonOptions<T extends PrompterValue> {
   message: string;
-  /** Inert context rendered beneath the question heading and above its options. */
   description?: string;
-  /** Shared guidance rendered below the options and above keyboard hints. */
   helpText?: string;
-  /** Labeled facts rendered beneath the description and above the options. */
   metadata?: readonly SelectMetadata[];
   options: SelectOption<T>[];
-  /**
-   * Add a type-ahead filter line. The filter is a case-insensitive substring
-   * match against each option's label, value, hints, and keywords.
-   */
   search?: boolean;
-  /** Placeholder shown in the filter line while it is empty (with `search`). */
   placeholder?: string;
-  /**
-   * Require a selection before enter can confirm. For multi-select this blocks
-   * an empty submission; single-select always resolves to the highlighted row,
-   * so it is inherently satisfied.
-   */
   required?: boolean;
-  /**
-   * How option hints are laid out in the dev TUI panel (the CLI prompter ignores
-   * it and keeps its default inline, unnumbered rendering). "stacked" renders
-   * each hint on its own line below the label with a blank line between options;
-   * it works for both action menus and checklists. "inline" keeps hints on the
-   * label row, suppresses numeric shortcuts, and separates a trailing completion
-   * action.
-   */
   hintLayout?: "stacked" | "inline";
-  /** Outcome lines from earlier laps of a looping menu. */
   notices?: readonly SelectNotice[];
-  /** Optional batch-planner navigation grammar. */
   navigation?: PlannerNavigation;
 }
 
-/** A selectable action appended after local matches for a non-empty query. */
 export interface SearchAction<T extends PrompterValue> {
   label(query: string): string;
   value(query: string): T;
-  /**
-   * Loads replacement rows without closing a repainting picker. Plain CLI
-   * prompts still return {@link value}; the TUI keeps the search input open
-   * and shows the wait beside it.
-   */
   load?(query: string): Promise<readonly SelectOption<T>[]>;
 }
 
-/** Single-select form: navigate, then enter picks the highlighted option. */
 export interface SingleSelectOptions<T extends PrompterValue> extends SelectCommonOptions<T> {
   multiple?: false;
-  /** Pre-position the cursor on the option whose value matches. */
   initialValue?: T;
-  /** Appended after local matches for each non-empty query. Requires `search: true`. */
   searchAction?: SearchAction<T>;
 }
 
-/** Multi-select form: space or enter toggles rows; enter on the trailing Submit row confirms the marked set. */
 export interface MultiSelectOptions<T extends PrompterValue> extends SelectCommonOptions<T> {
   multiple: true;
-  /** Pre-mark these values as selected. */
   initialValues?: T[];
 }
 
-/** Result of a single-select whose one row can be edited inline. */
 export type EditableSelectResult<T extends PrompterValue> =
   | { kind: "selected"; value: T }
   | { kind: "edited"; value: T; text: string };
 
-/** Inline-edit behavior for one row in an otherwise ordinary single-select. */
 export interface EditableSelectOptions<T extends PrompterValue> extends SingleSelectOptions<T> {
   editable: {
     value: T;
@@ -200,10 +117,8 @@ export interface EditableSelectOptions<T extends PrompterValue> extends SingleSe
   };
 }
 
-/** Color intent for {@link Prompter.note}: red warning (default) or green success. */
 export type NoteTone = "warning" | "success";
 
-/** Input for {@link Prompter.acknowledge}: a heading plus optional body lines. */
 export interface AcknowledgeOptions {
   message: string;
   lines?: readonly string[];
@@ -215,12 +130,6 @@ export interface Prompter {
     placeholder?: string;
     defaultValue?: string;
     validate?: (value: string) => string | undefined;
-    /**
-     * Context lines shown with the question (e.g. why it is being re-asked).
-     * They live and die with the question: the TUI paints them inside the
-     * question panel so they vanish on submit, the CLI prints them to
-     * scrollback above the prompt.
-     */
     notices?: readonly SelectNotice[];
   }): Promise<string>;
 
@@ -229,64 +138,29 @@ export interface Prompter {
     validate?: (value: string) => string | undefined;
   }): Promise<string>;
 
-  /**
-   * Unified picker. Defaults to single-select (enter picks the highlighted row);
-   * pass `multiple: true` for a checklist (space or enter toggles, enter on
-   * the trailing Submit row confirms). Add
-   * `search: true` for a type-ahead filter. `required` gates an empty
-   * multi-select submission.
-   */
   select<T extends PrompterValue>(opts: SingleSelectOptions<T>): Promise<T>;
   select<T extends PrompterValue>(opts: MultiSelectOptions<T>): Promise<T[]>;
-  /**
-   * TUI enhancement for a select row whose secondary value becomes an inline
-   * editor while focused. Typing and editing keys update it directly. Optional
-   * so non-repainting prompt implementations can keep the ordinary
-   * select-then-text fallback.
-   */
   selectEditable?<T extends PrompterValue>(
     opts: EditableSelectOptions<T>,
   ): Promise<EditableSelectResult<T>>;
 
-  /**
-   * Static instructions the user dismisses before the flow moves on. The TUI
-   * renders them in the question slot of the flow panel (the text takes the
-   * place of option rows) until enter; the CLI prints them to scrollback and
-   * resolves immediately, since printed text persists there. Optional so
-   * lightweight test fakes can omit it — flows fall back to {@link note}.
-   */
   acknowledge?(opts: AcknowledgeOptions): Promise<void>;
 
-  /**
-   * Presents actions while a setup operation continues in the background.
-   * The TUI implements it; plain and headless prompters omit it, so callers
-   * fall back to waiting without concurrent controls.
-   */
   awaitChoice?: ChannelSetupAwaitChoice;
 
-  /**
-   * Rail-attached notice, no bullet — reads as a follow-up to the previous
-   * step. Red by default (warnings, collisions); pass `tone: "success"` for a
-   * green closing note like the one-shot next steps.
-   */
   note(message: string, title?: string, options?: { tone?: NoteTone }): void;
 
-  /** Prints the Vercel ▲ logo + title + subtitle banner. */
   intro(title: string, subtitle?: string): void;
 
-  /** Prints a final green ● end-cap with the message. */
   outro(message: string): void;
 
-  /** Replaces transient setup output with one compact current-item summary. */
   replaceContent?(content?: {
     headline: string;
     facts: readonly { label: string; value: string }[];
   }): void;
 
-  /** Temporarily hands terminal ownership to a command that inherits stdio. */
   withInheritedStdio?<T>(task: () => Promise<T>): Promise<T>;
 
-  /** Gives a setup subprocess exclusive terminal and development-host ownership. */
   withExclusiveTerminal?<T>(task: () => Promise<T>): Promise<T>;
 
   log: {
@@ -297,11 +171,6 @@ export interface Prompter {
     error(text: string): void;
     commandOutput(text: string): void;
     section?(title: string, lines: readonly string[]): void;
-    /**
-     * Starts a section-like braille spinner for a network or other async wait,
-     * returning a handle whose `stop()` clears it. Present on the real prompter;
-     * optional so lightweight test fakes can omit it.
-     */
     spinner?(message: string): RailSpinner;
   };
 }
@@ -318,34 +187,16 @@ function guardCancel<T>(value: T | symbol): T {
 
 let escapeCancelDisabled = false;
 
-/**
- * Removes clack's built-in `escape → cancel` alias so a lone Escape no longer
- * quits on its own; {@link attachQuitGuard} then drives a two-press
- * confirmation. Ctrl-C keeps its own alias and still cancels on the first press.
- * Idempotent and process-global, which is safe because every setup prompt
- * is built here and routes through {@link attachQuitGuard}.
- */
 function disableEscapeCancel(): void {
   if (escapeCancelDisabled) return;
   settings.aliases.delete("escape");
   escapeCancelDisabled = true;
 }
 
-/** A prompt's live quit-guard view, read during render to show the quit hint. */
 interface QuitGuard {
-  /** Corner-line status note while armed, otherwise `undefined`. */
   note(): string | undefined;
 }
 
-/**
- * Wires two-stage Escape-to-quit onto a clack prompt. The first Escape arms a
- * quit hint (surfaced via {@link QuitGuard.note} during render); the second
- * flips the prompt into clack's `cancel` state, which clack's own keypress tail
- * then finalizes, renders, and closes. Any other key disarms.
- *
- * Depends on {@link disableEscapeCancel} having removed the escape alias, so the
- * first Escape reaches this handler instead of cancelling the prompt outright.
- */
 function attachQuitGuard<T>(prompt: Prompt<T>): QuitGuard {
   let state: QuitGuardState = initialQuitGuardState;
   prompt.on("key", (_char, info) => {
@@ -362,7 +213,7 @@ function attachQuitGuard<T>(prompt: Prompt<T>): QuitGuard {
 }
 
 function toPromptState(state: State): PromptState {
-  return state;
+  return state === "validating" ? "active" : state;
 }
 
 function railForState(state: State): string {
@@ -373,11 +224,6 @@ function cornerForState(state: State): string {
   return cornerFor(toPromptState(state), pc);
 }
 
-/**
- * Builds the shared two-line prompt header (leader rail + bullet + message).
- * The leader rail is white above the very first prompt (matching the logo
- * column) and green thereafter (matching the previous submitted step).
- */
 function header(state: State, message: string, resolvedCount: number): string {
   return formatPromptHeader(toPromptState(state), message, {
     colors: pc,
@@ -442,26 +288,15 @@ function textPrompt(
   return prompt.prompt();
 }
 
-/** Tucks the quit hint onto an inline corner line, mirroring the error layout. */
 function cornerNote(note: string | undefined): string {
   return note ? `  ${note}` : "";
 }
 
-/**
- * Builds a prompter with Vercel-branded styling — white-then-green vertical
- * rails, open/filled triangle bullets per step, and a colored corner
- * below the active prompt. Built on `@clack/core` so we own every glyph.
- *
- * The resolved-prompt count is scoped to the returned prompter so the
- * first prompt's leader rail is white and subsequent ones are green.
- */
 export function createPrompter(): Prompter {
   disableEscapeCancel();
   let resolvedCount = 0;
   const log = createRailLog({ colors: pc, output: process.stdout });
 
-  // Printed text persists in CLI scrollback, so question notices land there
-  // (a repainting loop re-prints its question anyway).
   function printNotices(notices: readonly SelectNotice[] | undefined): void {
     for (const notice of notices ?? []) {
       if (notice.tone === "success") log.success(notice.text);
@@ -525,8 +360,6 @@ export function createPrompter(): Prompter {
     },
 
     async acknowledge(opts) {
-      // Printed text persists in CLI scrollback, so there is nothing to hold
-      // open — render and resolve.
       log.settle();
       process.stdout.write(formatRailLine(pc.bold(opts.message), pc, process.stdout));
       for (const line of opts.lines ?? []) {

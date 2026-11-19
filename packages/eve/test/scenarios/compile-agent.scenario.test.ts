@@ -10,6 +10,8 @@ import { describe, expect, it } from "vitest";
 import {
   COMPILE_METADATA_KIND,
   COMPILE_METADATA_VERSION,
+} from "../../src/compiler/artifact-contract.js";
+import {
   createCompileMetadata,
   resolveCompilerArtifactPaths,
   writeCompilerArtifacts,
@@ -536,8 +538,6 @@ describe("compiler artifacts", () => {
 
     const normalizedModuleMapText = normalizeArtifactValue(moduleMapText.trimEnd(), appRoot);
 
-    // The manifest retains the total binding graph, while the runtime map
-    // contains only executable entries.
     expect(normalizedModuleMapText).not.toContain('from "../../agent/agent.mjs";');
     expect(normalizedModuleMapText).not.toContain('from "../../agent/instructions.mjs";');
     expect(normalizedModuleMapText).toContain('from "../../agent/tools/get_weather.mjs";');
@@ -775,9 +775,6 @@ describe("compileAgent", () => {
         .sort(),
     ).toEqual(["tools/agent.ts", "tools/web_fetch.ts", "tools/web_search.ts"]);
 
-    // Both the wrapped bash and the replacement write_file land in `tools` as
-    // ordinary CompiledToolDefinitions. Disabled slots are absent from the
-    // effective tool graph and retained only as composition diagnostics.
     const toolsByName = new Map(
       applicationOwnedEntries(result.manifest, result.manifest.tools).map((tool) => [
         tool.name,
@@ -1250,7 +1247,6 @@ describe("compileAgent", () => {
         sourceId: "subagents/weather.ts",
       },
     ]);
-    // A function `url` is resolved at runtime, so nothing is baked here.
     expect(result.manifest.remoteAgents[0]).not.toHaveProperty("url");
     expect(result.manifest.subagents).toHaveLength(1);
     expect(result.manifest.subagents[0]?.agent.remoteAgents).toMatchObject([
@@ -1347,8 +1343,6 @@ describe("compileAgent", () => {
       join(agentRoot, "agent.mjs"),
       'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
     );
-    // No instructions.md or instructions.ts authored — discovery should fail
-    // with DISCOVER_REQUIRED_INSTRUCTIONS_MISSING.
 
     let thrownError: unknown;
 

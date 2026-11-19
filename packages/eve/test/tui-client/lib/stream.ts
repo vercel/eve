@@ -12,16 +12,6 @@ const state: PrintState = {
   message: { open: false },
 };
 
-/**
- * Renders one stream event to stdout in a way that's pleasant to watch
- * live. Mirrors the visual language of the eve CLI REPL:
- *
- * - Reasoning streams as blue inline text.
- * - Assistant replies stream as default terminal text after a muted
- *   `agent>` prefix.
- * - Secondary scaffolding (turn/tool/session lifecycle) is dim gray.
- * - Failures (failed model runs, turns, and sessions) are red.
- */
 export function printStreamEvent(event: SessionStreamEvent): void {
   switch (event.type) {
     case "session.started":
@@ -130,9 +120,6 @@ function closeOpenStreams(): void {
   }
 }
 
-/** Prints one outgoing user message or HITL response in the same speaker-line
- * style as agent replies, see {@link printStreamEvent} for the `agent>`
- * counterpart. */
 export function printUserLine(input: {
   message: string;
   tone?: "approve" | "deny" | "text";
@@ -147,12 +134,6 @@ export function printUserLine(input: {
   process.stdout.write(`${prefix} ${body}\n`);
 }
 
-/**
- * Walks the `cause` chain of a thrown value and prints `responseBody` /
- * `data` at each level. Mirrors the manual debug pattern that surfaced the
- * gateway 400 on multimodal turns, gateway errors wrap an inner
- * `APICallError` whose `responseBody` carries the real validation reason.
- */
 export function printErrorChain(error: unknown): void {
   let current: unknown = error;
   let depth = 0;

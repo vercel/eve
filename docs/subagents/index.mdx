@@ -188,7 +188,7 @@ The root session gets an `agent` tool by default. It starts a copy of the root a
 
 A copy uses the root's instructions, connections, auth, tools (except `agent`), and sandbox, so the root sees its file writes immediately. It starts with an empty conversation and state. Several copies can run at once, so give parallel copies separate files to write.
 
-Only the root session has `agent`: copies and declared subagents can't call it. To run a copy on another model, call it from a workflow with [`ctx.agent("agent", { model })`](./tools/workflows#delegate-work-ctxagent), or offer the [`agentWithModel` tool](./concepts/built-in-tools#agent), which adds a `model` input.
+Only the root session has `agent`: copies and declared subagents can't call it. To run a copy on another model, call it from a workflow with [`ctx.agent("agent", { model })`](./tools/workflows#delegate-work-ctxagent), or export [`agent({ models })`](./concepts/built-in-tools#agent) from `agent/tools/agent.ts`, which lets the model choose one of the models you list.
 
 To turn the tool off, set `tool: false` on the root agent:
 

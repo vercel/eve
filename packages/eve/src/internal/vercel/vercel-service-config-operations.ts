@@ -72,7 +72,6 @@ function resolveServiceCollection(
   );
 }
 
-/** Resolve the mounted prefix for the eve service matching an application root. */
 export function resolveEveServicePrefixByRoot(input: {
   readonly appRoots: readonly string[];
   readonly config: VercelServicesConfig;
@@ -94,7 +93,7 @@ export function resolveEveServicePrefixByRoot(input: {
 
 export function findConfiguredEveServiceEntry(
   services: Record<string, VercelServiceConfig>,
-  agent: EveVercelAgentTarget,
+  agent: Pick<EveVercelAgentTarget, "name">,
 ): { readonly name: string; readonly service: VercelServiceConfig } | undefined {
   if (agent.name !== undefined) {
     const name = createEveServiceName(agent.name);

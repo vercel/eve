@@ -21,10 +21,6 @@ const turn = { turnId: "turn_0" };
 const scope = (runId: string) => ({ runId, turnId: "turn_0" });
 const overloaded = { code: "MODEL_CALL_FAILED", message: "Overloaded" };
 
-/**
- * Publishes each commit as the writer does, closing what its owners' ends hold, and collects what
- * instrumentation hears.
- */
 function session(
   options: {
     readonly audience?: ChannelAudience;
@@ -138,7 +134,6 @@ describe("step attempts from the stream", () => {
     ]);
   });
 
-  // A cancel stops the model call on purpose, so its attempt is cancelled, not failed (#5025).
   it("hears what a turn's end closes with it, as the writer commits it", async () => {
     const { commit, heard } = session();
     await commit(...opening);
@@ -394,7 +389,6 @@ describe("calls", () => {
       expect(completed).toMatchObject({
         output: capturesContent ? { temperature: 4 } : undefined,
       });
-      // The failure's code reaches every provider; its message is content.
       expect(failed).toMatchObject({ errorCode: "TOOL_FAILED", outcome: "failed" });
       if (capturesContent) expect(failed).toHaveProperty("error.name", "QuotaError");
       expect(failed && "error" in failed ? failed.error : undefined).toEqual(
@@ -406,7 +400,6 @@ describe("calls", () => {
   });
 
   it("settles a retried attempt's calls under that attempt, before its replacement run's", async () => {
-    // An attempt that announced calls gives its run up; eve can't tell whether they ran.
     const { commit, heard } = session();
     await commit(...opening);
     await commit(started("run_0", 0));
@@ -539,7 +532,7 @@ describe("interactions", () => {
     },
   );
 
-  it("places a request about the turn on its latest run, and keeps sign-ins out", async () => {
+  it("places a request about the turn on its latest run, and names a sign-in's connection only", async () => {
     const { commit, heard } = session();
     await commit(...opening);
     await commit(started("run_0", 0));
@@ -566,16 +559,29 @@ describe("interactions", () => {
     await commit({
       data: {
         interactionId: "i_sign_in",
-        request: { kind: "sign-in", prompt: "Sign in to Calendar" },
+        request: {
+          kind: "sign-in",
+          prompt: "Sign in to Calendar",
+          signIn: { name: "calendar", url: "https://example.com/oauth", userCode: "ABCD" },
+        },
         subject: { turnId: "turn_0" },
       },
       scope: turn,
       type: "interaction.opened",
     } as SessionEvent);
 
-    expect(of(heard, "interaction.")).toMatchObject([
+    const events = of(heard, "interaction.");
+    expect(events).toMatchObject([
       { interactionId: "i_budget", request: undefined, scope: { runId: "run_1" } },
+      {
+        interactionId: "i_sign_in",
+        kind: "sign-in",
+        request: undefined,
+        scope: { runId: "run_1" },
+        signIn: { name: "calendar" },
+      },
     ]);
+    expect(JSON.stringify(events)).not.toMatch(/oauth|ABCD/u);
   });
 
   it("hears a withdrawn approval's end when its turn is cancelled, with no answer", async () => {

@@ -48,10 +48,18 @@ describe("applyWorkflowTransform", () => {
       transformed.code.replace(/^import[^;]+;\n/gm, "").replace(/^export /gm, ""),
     );
     const registered = new Map<string, Function>();
-    new Function("registerStepFunction", "withWorkflowStepAuthorization", executable)(
+    let installs = 0;
+    new Function(
+      "registerStepFunction",
+      "withWorkflowStepAuthorization",
+      "installWorkflowHost",
+      executable,
+    )(
       (id: string, execute: Function) => registered.set(id, execute),
       withWorkflowStepAuthorization,
+      () => installs++,
     );
+    expect(installs).toBe(1);
 
     await expect(
       registered.get("__builtin_response_json")!.call(Response.json({ ok: true })),
@@ -65,6 +73,7 @@ describe("applyWorkflowTransform", () => {
 
     const workflow = await applyWorkflowTransform(filename, source, "workflow");
     expect(workflow.code).not.toContain("workflowToolStep");
+    expect(workflow.code).not.toContain("installWorkflowHost");
     for (const name of registered.keys()) {
       expect(workflow.code).toContain(
         `globalThis[Symbol.for("WORKFLOW_USE_STEP")](${JSON.stringify(name)})`,
@@ -192,7 +201,10 @@ describe("applyWorkflowTransform", () => {
       },
     });
     expect(transformed.code).toContain(
-      'import { withWorkflowStepAuthorization } from "#execution/tools/workflow/step-execution.js";',
+      'import { withWorkflowStepAuthorization, withWorkflowStepScope } from "#execution/tools/workflow/step-execution.js";',
+    );
+    expect(transformed.code).toContain(
+      'registerStepFunction("step//./src/internal/testing/ping//ping", withWorkflowStepScope(ping));',
     );
     expect(transformed.code).toContain(
       'registerStepFunction("step//./src/internal/testing/ping//ping:eve-authorization", withWorkflowStepAuthorization(ping));',
@@ -321,10 +333,6 @@ describe("applyWorkflowTransform", () => {
   });
 
   it("strips the @<version> stamp for stable workflow names but not for steps", async () => {
-    // Stable workflow ids must match across deployments so an explicit
-    // deployment target lands on the same registry key. Step ids stay
-    // version-stamped because they are per-deployment internal
-    // identifiers, not cross-deployment routing keys.
     const transformed = await transformWorkflowDirectives({
       filename: "src/execution/workflow-entry.ts",
       mode: "workflow",
@@ -424,7 +432,6 @@ describe("applyWorkflowTransform for authored application modules", () => {
         },
       },
     });
-    // The driver bundle resolves eve source aliases even when the app has no eve dependency.
     expect(transformed.code).toContain(
       'import { workflowToolStep } from "#execution/tools/workflow/step.js";',
     );
@@ -471,9 +478,11 @@ describe("applyWorkflowTransform for authored application modules", () => {
       appRoot,
     );
 
-    // Step registrations are bundled by the app, which resolves eve's package export.
     expect(transformed.code).toContain(
-      'import { withWorkflowStepAuthorization } from "eve/internal/workflow-step-execution";',
+      'import { withWorkflowStepAuthorization, withWorkflowStepScope } from "eve/internal/workflow-step-execution";',
+    );
+    expect(transformed.code).toContain(
+      'registerStepFunction("step//./agent/tools/deploy//planDeploy", withWorkflowStepScope(planDeploy));',
     );
     expect(transformed.code).toContain(
       'registerStepFunction("step//./agent/tools/deploy//planDeploy:eve-authorization", withWorkflowStepAuthorization(planDeploy));',

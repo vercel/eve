@@ -9,6 +9,7 @@ export type UsageOwner =
   | { readonly callId: string }
   | { readonly changeId: string };
 
+/** The payload of `usage.recorded`: tokens and cost spent, and what spent them. */
 export interface UsageRecordedData {
   readonly owner?: UsageOwner;
   /** Open: `model` today. */
@@ -16,7 +17,9 @@ export interface UsageRecordedData {
   readonly usage: Usage;
 }
 
+/** The fact recording usage, such as a model run's tokens. */
 export type UsageRecorded = Envelope<"usage.recorded", UsageRecordedData>;
+/** Any fact in the `usage` family. */
 export type UsageFact = UsageRecorded;
 
 export const usageSchemas = {

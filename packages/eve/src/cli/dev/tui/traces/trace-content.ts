@@ -1,34 +1,13 @@
-/**
- * Formats span attribute values for the `/traces` detail panel. Payload
- * attributes render as readable structure — prompt messages as a chat-like
- * transcript with role-prefixed blocks and hanging indents, JSON as
- * pretty-printed blocks — instead of one wrapped blob.
- *
- * Every returned line fits the given width; wrapped continuations keep a
- * two-space hanging indent so they read as part of their block.
- */
-
 import { stripTerminalControls, visibleLength, wrapVisibleLine } from "#cli/ui/terminal-text.js";
 
-/** Indent applied to continuation lines within a block. */
 const CONTINUATION = "  ";
 
-/**
- * Formats one attribute's value into display lines, each at most `width`
- * columns. A single scalar stays on one line so the panel can keep it beside
- * its key; multi-line content comes back unindented for the caller to nest
- * under the key. `dim` styles de-emphasized parts (role prefixes, the
- * truncation notice), so callers pass their surface's dim style.
- */
 export function formatAttributeContent(
   key: string,
   value: unknown,
   dim: (text: string) => string,
   width: number,
 ): string[] {
-  // Non-string OTLP values include arrays whose elements can carry raw
-  // escape sequences; JSON-encode them (which escapes control characters)
-  // rather than String() them into the frame.
   if (typeof value !== "string") {
     if (Array.isArray(value)) return prettyJson(value, width);
     return [stripTerminalControls(shortJson(value))];
@@ -40,17 +19,12 @@ export function formatAttributeContent(
   return formatPayloadContent(value, width);
 }
 
-/**
- * Wraps text to `width`, splitting on embedded newlines so a multi-line payload
- * keeps its shape, and stripping control bytes the frame must not carry.
- */
 export function wrapPlainText(text: string, width: number): string[] {
   return splitEmbeddedNewlines([stripTerminalControls(text)]).flatMap((line) =>
     wrapVisibleLine(line, width),
   );
 }
 
-/** Formats a payload: JSON structure pretty-prints, anything else stays text. */
 export function formatPayloadContent(text: string, width: number): string[] {
   const parsed = parseJson(text);
   if (parsed !== undefined && (Array.isArray(parsed) || isRecord(parsed))) {
@@ -73,7 +47,6 @@ function genAiMessageTranscript(
     const parts = genAiMessageParts(message.parts, toolNames);
     const role =
       message.role === "tool" ? toolRoleLabel(parts) : stripTerminalControls(String(message.role));
-    // The first part sits beside the role prefix; the rest hang underneath.
     parts.forEach((part, index) => {
       const prefix = index === 0 ? `${dim(`${role}:`)} ` : CONTINUATION;
       lines.push(...wrapPrefixed(prefix, part.text, part.dim ? dim : undefined, width));
@@ -82,7 +55,6 @@ function genAiMessageTranscript(
   return lines;
 }
 
-/** Tool-role messages are about one tool; name it in the role label. */
 function toolRoleLabel(parts: readonly MessageContentPart[]): string {
   const named = parts.find((part) => part.name !== undefined);
   return named?.name === undefined ? "tool" : `tool ${named.name}`;
@@ -127,18 +99,12 @@ function toolResponseText(response: unknown): string {
   return typeof response === "string" ? stripTerminalControls(response) : shortJson(response);
 }
 
-/** Pretty-prints a JSON value with two-space indents, wrapped to `width`. */
 function prettyJson(value: unknown, width: number): string[] {
   return JSON.stringify(value, null, 2)
     .split("\n")
     .flatMap((line) => wrapHanging(line, width, width));
 }
 
-/**
- * Wraps `text` at `width` with `prefix` (possibly ANSI-styled) on the first
- * line and the hanging continuation indent on the rest. `dim` styles content
- * only, keeping wrap points independent of ANSI sequences.
- */
 function wrapPrefixed(
   prefix: string,
   text: string,
@@ -158,22 +124,13 @@ function wrapPrefixed(
   return lines;
 }
 
-/** Word-wraps to `width` where the first line may be tighter (`firstWidth`). */
 function wrapHanging(text: string, width: number, firstWidth: number): string[] {
   const chunks = wrapVisibleLine(text, Math.max(8, width - CONTINUATION.length));
   if (visibleLength(chunks[0] ?? "") <= firstWidth) return chunks;
-  // The first line shares its row with a prefix: re-wrap just that chunk at
-  // the tighter width and fold the overflow ahead of the remaining chunks.
   const [head, ...rest] = wrapVisibleLine(chunks[0] ?? "", Math.max(8, firstWidth));
   return [head ?? "", ...rest, ...chunks.slice(1)];
 }
 
-/**
- * Payload text can carry real newlines (tool results frequently end with one).
- * Left raw, they split a composed frame row and inject phantom lines into the
- * frame. Split them into real display lines; a trailing newline's empty tail
- * is dropped.
- */
 function splitEmbeddedNewlines(lines: readonly string[]): string[] {
   const split = lines.flatMap((line) => line.split(/\r\n|\r|\n/));
   while (split.length > 1 && split[split.length - 1] === "") split.pop();

@@ -91,14 +91,12 @@ describe("resolveWebSearchBackend", () => {
   });
 
   it.each<[string, WebSearchSelection | undefined, string | null]>([
-    ["openai/gpt-5.4", undefined, "exa"],
-    ["openai/gpt-5.4", { provider: "parallel" }, "parallel"],
-    ["anthropic/claude-opus-4.6", undefined, "exa"],
+    ["openai/gpt-5.4", undefined, "parallel"],
+    ["openai/gpt-5.4", { provider: "exa" }, "exa"],
+    ["anthropic/claude-opus-4.6", undefined, "parallel"],
     ["openai/gpt-5.4", { provider: "native" }, "openai"],
     ["anthropic/claude-opus-4.6", { provider: "native" }, "anthropic"],
     ["google/gemini-3-flash", { provider: "native" }, "google"],
-    // Native search would drop a pre-Gemini 3 model's other tools; models without one use the
-    // fallback, if any.
     ["google/gemini-2.5-flash", { provider: "native" }, null],
     ["xai/grok-4", { provider: "native" }, null],
     ["xai/grok-4", { fallback: "parallel", provider: "native" }, "parallel"],

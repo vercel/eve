@@ -27,7 +27,6 @@ describe("createWorkflowWorldPluginSource", () => {
     expect(source.indexOf('installWorkflowDeploymentId("')).toBeLessThan(
       source.indexOf("await createWorldFromModule("),
     );
-    // Worlds read the spec version when they are constructed.
     expect(source.indexOf("applyWorkflowSpecVersionDefault();")).toBeGreaterThan(-1);
     expect(source.indexOf("applyWorkflowSpecVersionDefault();")).toBeLessThan(
       source.indexOf("await createWorldFromModule("),
@@ -44,8 +43,11 @@ describe("createWorkflowWorldPluginSource", () => {
     expect(source).toContain("/compiled/@workflow/world-local/index.js");
     expect(source).toContain("resolveLocalWorkflowWorldDataDirectory(process.cwd())");
     expect(source).toContain("applyLocalWorkflowWorldDeliveryTimeoutDefaults");
-    expect(source).toContain("authenticateLocalWorkflowDeliveries(");
-    expect(source).toContain("recoverActiveRuns: false");
+    expect(source).toContain("recoverActiveRuns: true");
+    expect(source).toContain("assertLocalWorkflowQueueAuthEnforced();");
+    expect(source.indexOf("assertLocalWorkflowQueueAuthEnforced();")).toBeLessThan(
+      source.indexOf("workflowWorldModule.createWorld"),
+    );
     expect(source.indexOf("applyLocalWorkflowWorldDeliveryTimeoutDefaults();")).toBeLessThan(
       source.indexOf("workflowWorldModule.createWorld"),
     );
@@ -65,14 +67,10 @@ describe("createWorkflowWorldPluginSource", () => {
 
     expect(source).toContain("/compiled/@workflow/world-vercel/index.js");
     expect(source).toMatch(/headers: \{ "User-Agent": "eve\/.+" \}/);
-    expect(source).toContain("applyVercelWorkflowWorldDefaults(workflowWorld);");
     expect(source).not.toContain("authenticateLocalWorkflowDeliveries");
     expect(source.indexOf('installWorkflowDeploymentId("')).toBeGreaterThan(-1);
     expect(source.indexOf('installWorkflowDeploymentId("')).toBeLessThan(
       source.indexOf("await workflowWorldModule.createWorld("),
-    );
-    expect(source.indexOf("applyVercelWorkflowWorldDefaults(workflowWorld);")).toBeLessThan(
-      source.indexOf("await installWorkflowWorld("),
     );
   });
 });

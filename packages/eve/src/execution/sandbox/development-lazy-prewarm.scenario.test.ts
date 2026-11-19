@@ -62,9 +62,6 @@ describe("lazy development preparation", () => {
     expect(prewarmAppSandboxes).toHaveBeenCalledTimes(1);
   });
 
-  // The stale-owner interval is 15s; these tests backdate the lease journal
-  // instead of waiting it out, and their 10s timeout ensures the backdate, not
-  // wall-clock expiry, is what the contender observes.
   it("keeps a live preparation lease beyond the stale-owner interval", async () => {
     const app = await fixture();
     const journalPath = join(leasePathFor(app), "owner.json");
@@ -92,7 +89,6 @@ describe("lazy development preparation", () => {
     );
 
     const contender = ensureDevelopmentSandboxesPrepared(app.input);
-    // Let the contender poll the held lease (every 250ms) before the owner finishes.
     await new Promise((resolve) => setTimeout(resolve, 600));
     releaseOwner.resolve();
     await Promise.all([owner, contender]);

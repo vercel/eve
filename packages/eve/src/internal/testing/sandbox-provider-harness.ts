@@ -17,15 +17,10 @@ import {
   getSandboxEnvironmentRuntime,
   type SandboxEnvironmentIdentity,
 } from "#shared/sandbox-environment.js";
+import { resolveRecordedSandboxProvider } from "#sandbox/state.js";
 import type { SandboxProviderResourceFile } from "#shared/sandbox-provider.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 
-/**
- * Drives the lifecycle an environment's provider implements the way core
- * does, with eve's prepare context and derived session, without a runtime.
- * The type parameters name what the provider returns, which the environment
- * erases.
- */
 export function createSandboxEnvironmentHarness<
   Options extends object | undefined = object | undefined,
   Artifact extends SandboxJson = SandboxJson,
@@ -90,6 +85,23 @@ export function createSandboxEnvironmentHarness<
         },
       );
     },
+    async idleSession(input: {
+      readonly appRoot: string;
+      readonly sandboxName: string;
+      readonly signal?: AbortSignal;
+      readonly state: State | null;
+    }): Promise<void> {
+      const recorded = await resolveRecordedSandboxProvider(
+        runtime,
+        input.state,
+        async () => preparedArtifact,
+      );
+      await recorded?.implementation.onSessionIdle?.(
+        sessionContext(input.appRoot, input.sandboxName),
+        recorded.state,
+        { signal: input.signal },
+      );
+    },
     async prepare(input: {
       readonly appRoot: string;
       readonly log?: (message: string) => void;
@@ -120,7 +132,6 @@ export function createSandboxEnvironmentHarness<
       preparedArtifact = artifact;
       return artifact;
     },
-    /** Resumes `existing` when given, or else starts the session's sandbox. */
     async openSession(input: {
       readonly appRoot: string;
       readonly existing?: State;
@@ -150,10 +161,6 @@ export function createSandboxEnvironmentHarness<
   return harness;
 }
 
-/**
- * Runs `ctx.populate()` against an in-memory sandbox whose home is
- * `/home/agent`, and returns the paths it wrote in order.
- */
 export async function populatedPaths(context: SandboxPrepareContext): Promise<string[]> {
   const sandbox = mockSandbox({
     commands: { [`printf '%s\\n' "$HOME"`]: { exitCode: 0, stderr: "", stdout: "/home/agent\n" } },

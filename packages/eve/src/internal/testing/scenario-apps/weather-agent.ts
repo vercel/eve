@@ -167,14 +167,6 @@ const WEATHER_TSCONFIG_SOURCE = `${JSON.stringify(
   2,
 )}\n`;
 
-/**
- * Scenario-tier descriptor for the shared weather-agent app used by the
- * `eve dev` HMR, port-retry, CLI, and public-API portability tests.
- *
- * The weather agent exposes a single `get_weather` tool whose authored
- * dependency (`agent/lib/weather/client.ts`) drives HMR assertions, plus a
- * Authored channel route used to exercise channel routing.
- */
 export const WEATHER_AGENT_DESCRIPTOR: ScenarioAppDescriptor = {
   dependencies: {
     zod: "^4.3.6",

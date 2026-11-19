@@ -1,14 +1,8 @@
 import { type H3Event, HTTPError } from "nitro";
 
-/**
- * Rejects HEAD on a path that declares GET but no HEAD route, before the route
- * does any work, with the same 405 Nitro sends for an undeclared method.
- */
 export function rejectHeadRequest(event: H3Event, allow: string): void {
   const method = event.req.method;
   if (method !== "HEAD") return;
-  // Carry headers staged for error responses, such as CORS, on the error
-  // itself: Nitro's error handler builds its response from `error.headers`.
   const headers = new Headers(event.res.errHeaders);
   headers.set("allow", allow);
   throw new HTTPError({

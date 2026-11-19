@@ -207,10 +207,6 @@ export function defineHook<const T extends HookDefinition>(
   return definition as HookDefinition<DefinedHookEventKeys<T>>;
 }
 
-/**
- * Throws unless `value` is a hook: an object with an `events` map and nothing else. The definer,
- * the compiler, and the runtime loader all use it.
- */
 export function assertHookForm(value: unknown, subject: string): void {
   if (typeof value !== "object" || value === null) {
     throw new Error(`${subject} takes an object with events handlers.`);

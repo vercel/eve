@@ -32,22 +32,16 @@ import type { JsonObject } from "#shared/json.js";
 import { taskCancelTool } from "#tools/provided/task-cancel.js";
 import { taskWaitTool } from "#tools/provided/task-wait.js";
 
-// What the model step does for tasks: it offers the task tools, commits a
-// record for each call that starts a task, delivers settled results, keeps the
-// `[Tasks]` note current, and tells the turn rule which tasks still work.
-
 export function isTaskTool(definition: HarnessToolDefinition | undefined): boolean {
   return (
     definition?.frameworkAction === "task-wait" || definition?.frameworkAction === "task-cancel"
   );
 }
 
-/** Workflow tools, and the task tools that control them, run after the model step. */
 export function isWorkflowTool(definition: HarnessToolDefinition | undefined): boolean {
   return definition?.workflowId !== undefined || isTaskTool(definition);
 }
 
-/** Adds `eve__task_wait` and `eve__task_cancel` to the tools of a session that offers tasks. */
 export function withTaskTools(tools: HarnessToolMap): HarnessToolMap {
   return new Map([
     ...tools,
@@ -56,39 +50,26 @@ export function withTaskTools(tools: HarnessToolMap): HarnessToolMap {
   ]);
 }
 
-/**
- * The task block, when the session offers tasks. `finalReplyOnly` is set for a child or schedule
- * session, whose caller reads only the final reply, so a reply before a result reaches no one.
- */
 export function taskSystemMessages(offers: boolean, finalReplyOnly: boolean): SystemModelMessage[] {
   if (!offers) return [];
   const content = finalReplyOnly ? FINAL_REPLY_TASK_SYSTEM_BLOCK : TASK_SYSTEM_BLOCK;
   return [{ content, role: "system" }];
 }
 
-/** A workflow tool call as the model made it, before the session knows what it enters. */
 export interface WorkflowCall {
   readonly callId: string;
   readonly definition: HarnessToolDefinition | undefined;
-  /** The call's model input. */
   readonly input: JsonObject;
   readonly toolName: string;
   readonly turnId: string;
 }
 
-/** How a workflow tool call enters its workflow, with the tool's own input. */
 export interface CommittedCallEntry {
   readonly entry: WorkflowToolCallEntry;
   readonly input: JsonObject;
   readonly session: HarnessSession;
 }
 
-/**
- * How a workflow tool call enters its workflow. A call that starts a task commits
- * the task's record alongside the call, so the run starts with its id; a
- * `serve` tool's call with `taskId` goes to that task's `receive()`, which the
- * session checks when it sends the call.
- */
 export function commitCallEntry(session: HarnessSession, call: WorkflowCall): CommittedCallEntry {
   const entryPoint = entryPointOf(call.definition);
   switch (entryPoint) {
@@ -128,13 +109,6 @@ export function workingTaskIds(session: HarnessSession): readonly string[] {
   return workingTasks(readTaskTable(session.state)).map((record) => record.id);
 }
 
-/**
- * The messages a model step appends for tasks, before any new input: one
- * `task.result` message with every settled result, then the
- * `[Tasks]` note when the listing changed. The results are marked delivered
- * in the same step. The message lives only in the model's history: clients
- * read outcomes from `call.settled`.
- */
 export async function appendTaskContext(input: {
   readonly messages: readonly HarnessModelMessage[];
   readonly session: HarnessSession;
@@ -156,10 +130,6 @@ export async function appendTaskContext(input: {
   return { messages: appended, session: delivery.session };
 }
 
-/**
- * Takes every settled result for one `task.result` message and
- * marks them delivered in the same step that appends the message.
- */
 async function deliverTaskResults(input: {
   readonly session: HarnessSession;
   readonly tools: HarnessToolLookup;
@@ -199,15 +169,10 @@ async function projectOutput(
     tool,
     result.calls ?? [],
     async () => renderModelOutputText(await definition.toModelOutput!(result.output)),
-    // A projection that throws must not wedge every later model step.
     () => renderModelOutputText(result.output),
   );
 }
 
-/**
- * The `[Tasks]` note to append when the listing differs from the
- * latest one in history. Compaction drops old notes, so the listing returns.
- */
 function resolveTasksNote(input: {
   readonly messages: readonly ModelMessage[];
   readonly session: HarnessSession;

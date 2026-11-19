@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { snapshotOf } from "#protocol/session-projection/session-view.js";
-import { firstOpenRequest } from "#channel/interaction-prompts.js";
 import { promptQueue } from "#channel/prompt-queue.js";
+import { nextPrompt } from "#protocol/session-projection/public-view.js";
 import type { StoredLine } from "#protocol/session-events/envelope.js";
 import { emptySessionView, foldLines } from "#protocol/session-projection/fold.js";
 import type { Interaction } from "#protocol/session-projection/reader.js";
@@ -12,7 +12,6 @@ const turnId = "turn_0";
 const runId = "run_0";
 const scope = { runId, turnId };
 
-/** A paused turn asking two approvals in one batch, and then `answers`' lines. */
 function viewWith(answers: readonly StoredLine[] = []) {
   const call = (callId: string) => ({
     data: { callId, capability: { kind: "tool", name: callId }, owner: { runId } },
@@ -80,8 +79,8 @@ const answerA: StoredLine[] = [
 
 describe("showing one request at a time", () => {
   it("shows the first open request, then the next once its answer waits for the batch", () => {
-    expect(firstOpenRequest(viewWith())?.interactionId).toBe("approval-a");
-    expect(firstOpenRequest(viewWith(answerA))?.interactionId).toBe("approval-b");
+    expect(nextPrompt(snapshotOf(viewWith()))?.interactionId).toBe("approval-a");
+    expect(nextPrompt(snapshotOf(viewWith(answerA)))?.interactionId).toBe("approval-b");
   });
 
   it("moves a channel's shown request on when an answer is admitted, once per change", async () => {

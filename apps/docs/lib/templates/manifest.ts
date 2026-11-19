@@ -28,15 +28,22 @@ export const templateManifest: TemplateManifestEntry[] = [
     integrations: ["Web chat", "Slack"],
   },
   {
+    slug: "slack-company-brain-template",
+    title: "Company Brain",
+    sourceHref:
+      "https://github.com/vercel/eve/tree/main/apps/templates/slack-company-brain-template",
+    integrations: ["Slack", "GitHub", "Notion", "Linear"],
+  },
+  {
     slug: "eve-voice-template",
     title: "Voice Agent",
     sourceHref: "https://github.com/vercel/eve/tree/main/apps/templates/eve-voice-template",
     integrations: ["Voice", "Web chat"],
   },
   {
-    slug: "eve-company-brain-template",
-    title: "Company Brain",
-    sourceHref: "https://github.com/vercel/eve/tree/main/apps/templates/eve-company-brain-template",
+    slug: "eve-data-agent-template",
+    title: "Data Agent",
+    sourceHref: "https://github.com/vercel/eve/tree/main/apps/templates/eve-data-agent-template",
     integrations: ["Slack", "dbt", "MotherDuck"],
   },
   {

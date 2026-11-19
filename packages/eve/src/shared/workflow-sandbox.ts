@@ -15,11 +15,6 @@ export function installWorkflowSandboxModule(module: WorkflowSandboxModule): voi
   (globalThis as WorkflowSandboxGlobal)[WORKFLOW_SANDBOX_MODULE_KEY] = module;
 }
 
-/**
- * Returns the vendored `run` runtime that executes generated workflow
- * programs. eve's host installs it for agents with a generated-program tool,
- * so hosts without one never bundle it.
- */
 export async function loadWorkflowSandboxModule(): Promise<WorkflowSandboxModule> {
   const installed = (globalThis as WorkflowSandboxGlobal)[WORKFLOW_SANDBOX_MODULE_KEY];
   if (installed === undefined) {

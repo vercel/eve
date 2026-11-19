@@ -33,7 +33,6 @@ export function createGatewayTraceContextHeaders(): Record<string, string> | und
   return Object.keys(headers).length === 0 ? undefined : headers;
 }
 
-/** Converts Gateway response metadata to cost data. */
 export function gatewayCostAttributes(input: {
   cost?: number;
   gatewayCost?: number;
@@ -68,10 +67,6 @@ export function readGatewayCostData(
   };
 }
 
-/**
- * Converts Gateway session affinity metadata to span attributes, so a step can
- * be matched to its session in the Gateway logs Sessions view.
- */
 export function gatewayRoutingAttributes(
   providerMetadata: Readonly<Record<string, unknown>> | undefined,
 ): Attributes | undefined {

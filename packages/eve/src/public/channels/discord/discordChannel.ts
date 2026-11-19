@@ -69,7 +69,12 @@ import {
 import { verifyDiscordInbound } from "#public/channels/discord/verifyInbound.js";
 import { readNonEmptyString } from "#shared/guards.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
-import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
+import {
+  defineChannel,
+  POST,
+  type Channel,
+  type ChannelDelivery,
+} from "#public/definitions/channel.js";
 import {
   createDiscordFetchFile,
   discordCommandContent,
@@ -77,7 +82,11 @@ import {
 import type { ValidatedAnswer } from "#shared/input.js";
 import type { InteractionOption } from "#protocol/session-events/families/interaction.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
-import { discordAudience, discordInstrumentationMetadata } from "./audience.js";
+import {
+  discordAudience,
+  discordConversationSpace,
+  discordInstrumentationMetadata,
+} from "./audience.js";
 
 const log = createLogger("discord.channel");
 
@@ -121,6 +130,10 @@ export interface DiscordChannelState {
   hitlPrompts?: Record<string, DiscordHitlPrompt>;
   /** @internal The sign-ins the default flow posted for, by connection name. */
   pendingSignIns?: Record<string, string>;
+  /** @internal The Discord user who sent a delivery's message, command, or answer. */
+  triggeringUserId?: string;
+  /** @internal The Discord user behind each principal that sent or answered, so an answered prompt can name them. */
+  usersByPrincipal?: Record<string, string>;
 }
 
 /** What a posted prompt needs so its message can be edited once eve resolves it. */
@@ -292,10 +305,18 @@ export function discordChannel(config: DiscordChannelConfig = {}): DiscordChanne
     state: initialDiscordState(),
     metadata: discordInstrumentationMetadata,
     audience: ({ state }) => state.audience ?? "unknown",
+    space: ({ state }) => discordConversationSpace(state),
     fetchFile: createDiscordFetchFile(config.api?.fetch),
 
     context(state, session) {
       return rebuildDiscordContext(state, session, config);
+    },
+
+    deliver(
+      payload,
+      channel: DiscordChannelContext & { readonly session: ChannelContext["session"] },
+    ) {
+      recordDiscordUser(channel.state, channel.session.auth.current, payload);
     },
 
     routes: [
@@ -413,11 +434,6 @@ function buildDiscordHandle(input: {
   const state = input.state;
   const credentials = mergeCredentials(input.config.credentials, state);
 
-  /**
-   * The first posted message anchors the conversation. Every posted message
-   * is aliased too: a press finds its session by the id of the message it is
-   * on, and a Gateway reply by the id of the message it replies to.
-   */
   function anchor(posted: DiscordPostedMessage): void {
     if (!posted.id) return;
     if (!state.hasMessageAnchor) {
@@ -638,12 +654,6 @@ async function handleCommandInteraction(input: {
   return discordDeferredJson(result.ephemeral === true);
 }
 
-/**
- * Answers a sign-in button press with an ephemeral message, identifying the
- * presser the same way a HITL press does. Finding the sign-in reads the
- * session's stream, so the press is acknowledged first, as an ephemeral
- * deferred response, to stay inside Discord's 3-second deadline.
- */
 function revealAuthorization(input: {
   readonly config: DiscordChannelConfig;
   readonly interaction: DiscordComponentInteraction;
@@ -682,7 +692,6 @@ async function answerRevealedAuthorization(input: {
   }
   const body = await answerDiscordAuthorizationReveal({
     auth,
-    // The sign-in message is one of the session's addresses, as every bot post is.
     resolveSession: () =>
       input.resolveSession(
         discordContinuationToken({
@@ -693,7 +702,6 @@ async function answerRevealedAuthorization(input: {
     reveal: input.reveal,
   });
   try {
-    // Fills in the ephemeral deferred response, so only the presser sees it.
     await discord.editOriginalResponse(body);
   } catch (error) {
     log.error("Discord sign-in reply failed", { error });
@@ -789,7 +797,7 @@ async function dispatchCommand(input: {
         auth: input.result.auth,
         context: [contextBlock, ...channelContext],
         history: input.result.history,
-        state: input.state,
+        state: { ...input.state, triggeringUserId: input.interaction.user.id },
         title: input.result.title,
       });
   } catch (error) {
@@ -807,7 +815,6 @@ async function dispatchAnswers(input: {
 }): Promise<void> {
   const state = stateFromInteraction(input.interaction, {
     conversationId: input.conversationId,
-    // A modal opened outside a message falls back to the interaction id, which is no message.
     hasMessageAnchor: input.conversationId !== input.interaction.id,
     initialResponseSent: true,
   });
@@ -834,11 +841,12 @@ async function dispatchAnswers(input: {
     }),
   );
   const response = await respondOrRetireInactivePrompt(
-    () => source.respond(input.answers, { auth }),
+    () =>
+      source.respond(input.answers, {
+        auth,
+        state: { triggeringUserId: input.interaction.user.id },
+      }),
     {
-      // The session's record of the prompt is gone, so its text comes from the
-      // pressed message. A modal submitted outside a message has neither, and
-      // editing without the prompt would erase it.
       retirePrompt: async (label) => {
         const messageId = input.interaction.messageId;
         const content = readMessageContent(input.interaction.raw);
@@ -852,7 +860,6 @@ async function dispatchAnswers(input: {
   await Promise.all([response.retirement, sendInactiveNotice(discord)]);
 }
 
-/** Tells only the presser that the prompt they answered is no longer active. */
 async function sendInactiveNotice(discord: DiscordHandle): Promise<void> {
   try {
     await discord.followup({
@@ -868,10 +875,6 @@ function acceptAsPresser(ctx: DiscordAnswerContext): DiscordAnswerResult {
   return { auth: ctx.defaultAuth };
 }
 
-/**
- * A custom `onCommand` may map users to its own principals or keep some out.
- * The default Discord auth would match neither, so answers fail closed.
- */
 function dropUnmappedAnswer(): null {
   log.warn(
     "dropped a Discord input response: onCommand is customized but onAnswers is not; set onAnswers to accept button presses and modal submissions",
@@ -898,6 +901,17 @@ function stateFromInteraction(
     initialResponseSent: options.initialResponseSent,
     interactionToken: interaction.token,
   };
+}
+
+function recordDiscordUser(
+  state: DiscordChannelState,
+  caller: SessionAuthContext | null,
+  payload: ChannelDelivery<DiscordChannelState>,
+): void {
+  const userId = payload.state?.triggeringUserId;
+  if (caller === null || typeof userId !== "string") return;
+  if (state.usersByPrincipal?.[caller.principalId] === userId) return;
+  state.usersByPrincipal = { ...state.usersByPrincipal, [caller.principalId]: userId };
 }
 
 function initialDiscordState(): DiscordChannelState {

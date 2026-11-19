@@ -104,6 +104,7 @@ const nonStreamingCatalogSlugs = new Set([
   "chat-sdk-sendblue",
   "chat-sdk-whatsapp",
   "chat-sdk-x",
+  "chat-sdk-zernio",
 ]);
 
 const docsRoot = join(import.meta.dirname, "..");

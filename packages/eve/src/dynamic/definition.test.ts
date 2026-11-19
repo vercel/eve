@@ -18,7 +18,6 @@ describe("defineDynamic", () => {
 
     expect(isDynamicSentinel(dynamic)).toBe(true);
     expect(dynamicEvaluate(dynamic)).toBe(fn);
-    // Opaque: no public members for authors to read or imitate.
     expect(Object.keys(dynamic)).toEqual([]);
   });
 

@@ -8,3 +8,4 @@ export type {
   DockerSandboxPullPolicy,
   DockerSandboxSession,
 } from "#public/sandbox/docker-sandbox.js";
+export { DEFAULT_EVE_GIT_SANDBOX_IMAGE } from "#execution/sandbox/bindings/eve-image.js";

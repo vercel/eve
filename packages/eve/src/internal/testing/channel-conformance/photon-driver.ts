@@ -23,19 +23,11 @@ interface ContentBuilder {
   build(): Promise<SpectrumContent>;
 }
 
-/**
- * Drives the real Photon iMessage adapter through a signed Spectrum webhook in
- * a direct chat. spectrum-ts sends over gRPC rather than `fetch`, so the driver
- * replaces the adapter's Space lookup with a fake Space that records each
- * send; everything above it (webhook verification, parsing, outbound
- * rendering, read receipts) is Photon's own code.
- */
 export function photonDriver(): ChannelDriver {
   nextChat += 1;
   const chatGuid = `iMessage;-;${PERSON}${nextChat}`;
   let sequence = 0;
   let restore: (() => void) | undefined;
-  /** Files a person sent, by the attachment id the webhook lists each under. */
   const uploads = new Map<string, SentFile>();
 
   function webhook(text: string, files: readonly SentFile[] = []): Request {
@@ -44,7 +36,6 @@ export function photonDriver(): ChannelDriver {
       files.length === 0
         ? { text, type: "text" }
         : {
-            // A message with files arrives as a group: its text, then one attachment per file.
             items: [
               { content: { text, type: "text" } },
               ...files.map((file, index) => {
@@ -104,20 +95,21 @@ export function photonDriver(): ChannelDriver {
 
   return {
     name: "photon",
+    space: { id: `imessage:${chatGuid}`, type: "direct", visibility: "private" },
     personId: PERSON,
     capabilities: ["attachments", "text-replies"],
     surface: "private",
     createChannel(record) {
-      async function recordSend(method: string, builder: ContentBuilder) {
+      async function recordSend(method: string, builder: ContentBuilder, edited?: string) {
         sequence += 1;
-        const id = `photon-posted-${sequence}`;
+        const id = edited ?? `photon-posted-${sequence}`;
         record({ body: await builder.build(), method, response: { id } });
         return message(id);
       }
       function message(id: string) {
         return {
           id,
-          edit: (builder: ContentBuilder) => recordSend("edit", builder),
+          edit: (builder: ContentBuilder) => recordSend("edit", builder, id),
           read: async () => {},
         };
       }
@@ -128,8 +120,6 @@ export function photonDriver(): ChannelDriver {
         startTyping: async () => {},
         stopTyping: async () => {},
       };
-      // The webhook never carries a file's bytes; eve fetches each by id through
-      // iMessage's `getAttachment`, which this app's iMessage runtime serves.
       const app = {
         __internal: {
           platforms: new Map([
@@ -145,8 +135,6 @@ export function photonDriver(): ChannelDriver {
           ]),
         },
       };
-      // The channel builds its adapter internally, so patch the prototype's
-      // private seams to spectrum-ts: building the app and looking up a Space.
       const fakes = {
         async ensureApp(this: { app: unknown }) {
           this.app = app;
@@ -183,6 +171,16 @@ export function photonDriver(): ChannelDriver {
       throw new Error("iMessage has no pressable HITL controls.");
     },
     postedText,
+    shownMessage(call) {
+      const text = postedText(call);
+      if (text === undefined) return undefined;
+      return {
+        id: (call.response as { readonly id: string }).id,
+        onlyPerson: false,
+        options: [],
+        text,
+      };
+    },
   };
 }
 

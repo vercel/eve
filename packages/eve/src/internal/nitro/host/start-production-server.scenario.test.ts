@@ -60,8 +60,6 @@ describe("production server output", () => {
     const { port } = occupant.address() as AddressInfo;
     const { appRoot } = await createApp("eve-production-port-taken-", {
       files: {
-        // Like srvx: a failed bind is logged and sets exitCode, while other
-        // work keeps the process alive.
         ".output/server/index.mjs": [
           'import { createServer } from "node:http";',
           "createServer()",

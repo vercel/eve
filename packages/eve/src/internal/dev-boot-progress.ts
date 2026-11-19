@@ -14,7 +14,6 @@ export type DevBootProgressEvent =
 
 export type DevBootProgressReporter = (event: DevBootProgressEvent) => void;
 
-/** Runs one measured boot phase and reports it to this invocation's observer. */
 export async function devBootPhase<T>(
   phase: string,
   run: () => Promise<T>,

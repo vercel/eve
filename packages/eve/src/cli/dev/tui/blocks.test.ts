@@ -178,7 +178,6 @@ describe("renderBlockLines", () => {
       colored,
       ctx,
     );
-    // The verb closes bold before its argument begins; the argument is dim.
     expect(header).toContain("\x1b[1mRan\x1b[22m\x1b[2m find /workspace -maxdepth 3\x1b[22m");
   });
 
@@ -326,7 +325,6 @@ describe("renderBlockLines", () => {
     const queued = render({ kind: "user", body: "later then", promptOrigin: "queue" });
     expect(queued).toEqual(["│ later then"]);
 
-    // An ordinary typed prompt keeps its bare bar.
     expect(render({ kind: "user", body: "hello" })).toEqual(["│ hello"]);
   });
 
@@ -509,7 +507,6 @@ describe("renderBlockLines", () => {
       body: "boom",
       detail: ["Error: boom", ...frames].join("\n"),
     });
-    // Headline + body + 12 detail rows + the "+N more" marker.
     expect(lines).toHaveLength(2 + 12 + 1);
     expect(lines.at(-1)).toBe("  … +9 more lines");
     for (const line of lines) {
@@ -534,7 +531,6 @@ describe("error block coloring", () => {
     );
     const docsRow = rows.find((row) => row.includes("workflow-sdk.dev"));
     expect(docsRow).toBeDefined();
-    // The cyan SGR (36) wraps the URL; the surrounding text stays red (31).
     expect(docsRow).toContain("\x1b[36m");
     expect(docsRow).toContain("\x1b[31m");
   });

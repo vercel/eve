@@ -12,7 +12,6 @@ afterEach(() => vi.restoreAllMocks());
 const turnId = "turn_0";
 const runId = "run_0";
 
-/** A turn that calls `lookup` twice: the first call fails, the second completes. */
 function lookupTurn(): SessionEvent[] {
   const [admitted, started, consumed, requested, ...rest] = testTurnFacts(0, "Done.", ["d_1"]);
   const scope = { runId, turnId };
@@ -260,7 +259,6 @@ describe("eval session clock", () => {
     ]);
     const [sent] = clock!.sends;
     expect(sent!.acceptedAt).toBeGreaterThan(sent!.startedAt);
-    // One arrival time per snapshot event, in snapshot order, all after the send was accepted.
     expect(events.length).toBeGreaterThan(0);
     expect(clock?.receivedAt).toHaveLength(events.length);
     expect(clock!.receivedAt[0]).toBeGreaterThan(sent!.acceptedAt);

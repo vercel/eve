@@ -4,13 +4,11 @@ export type LocalTraceSortBy = "duration" | "failures" | "inputTokens" | "latest
 
 interface LocalTraceQueryFilter {
   readonly agentName?: string;
-  /** Selects traces containing error spans, not necessarily failed activations. */
   readonly failedOnly?: boolean;
   readonly sessionId?: string;
   readonly toolName?: string;
 }
 
-/** Filters whole traces without restricting their totals to matching spans. */
 export function queryLocalTraceSummaries(
   summaries: readonly LocalTraceSummary[],
   options: LocalTraceQueryFilter & { readonly limit: number; readonly sortBy: LocalTraceSortBy },

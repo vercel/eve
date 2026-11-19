@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { app, desktopTool, flag, windowId } from "../lib/tool";
 
+/** Lets the agent bring a window to the front and confirm it has focus. */
 export default desktopTool({
   description: "Bring a window to the front and confirm it has focus.",
   inputSchema: z.object({

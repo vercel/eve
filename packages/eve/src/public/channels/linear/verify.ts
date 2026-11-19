@@ -22,13 +22,11 @@ const log = createLogger("linear.verify");
 export type LinearWebhookVerifier = (request: Request, body: string) => unknown | Promise<unknown>;
 
 export interface LinearVerifyOptions {
-  /** Max allowed webhook timestamp skew in milliseconds. Defaults to 60s. */
   readonly maxSkewMs?: number;
   readonly webhookSecret?: LinearWebhookSecret;
   readonly webhookVerifier?: LinearWebhookVerifier;
 }
 
-/** Verifies a Linear webhook request and returns its raw body. */
 export async function verifyLinearRequest(
   request: Request,
   options: LinearVerifyOptions,
@@ -58,7 +56,6 @@ export async function verifyLinearRequest(
   return body;
 }
 
-/** Signs a raw Linear webhook body for tests and local fixtures. */
 export function signLinearWebhookBody(body: string, secret: string): string {
   return createHmac("sha256", secret).update(body).digest("hex");
 }

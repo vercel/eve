@@ -1,6 +1,5 @@
 import { z } from "zod";
 
-/** An `owner` or `owner/name` GitHub target. */
 export const GITHUB_TARGET = /^([A-Za-z0-9][A-Za-z0-9-]*)(?:\/([A-Za-z0-9._-]+))?$/u;
 
 export const githubShellInputSchema = z.object({

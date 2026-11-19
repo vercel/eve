@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { app, desktopTool, flag, surface, windowId } from "../lib/tool";
 
+/** Lets the agent find elements by role, name, value, or text without taking a full snapshot, returning matches with fresh refs. */
 export default desktopTool({
   description:
     "Find elements by role, name, value, or text without a full snapshot. Returns matches with fresh refs. Use when you know what the element is called.",

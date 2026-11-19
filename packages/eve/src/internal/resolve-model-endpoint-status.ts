@@ -2,53 +2,33 @@ import type { ModelRouting } from "#shared/agent-definition.js";
 import { isChatGptModelRouting } from "#shared/chatgpt-model.js";
 import type { ChatGptEndpointState, ModelEndpointStatus } from "#shared/model-endpoint-status.js";
 
-/**
- * Presence of the two gateway credentials, read from wherever the caller can
- * observe them: the running server's `process.env` (runtime-authoritative) or
- * an app's `.env` files (dev/setup-time). Only meaningful for gateway routing.
- */
 export interface GatewayCredentialPresence {
-  /** `AI_GATEWAY_API_KEY` is set. */
   readonly apiKey: boolean;
-  /** A Vercel OIDC token is available (`VERCEL_OIDC_TOKEN` or a linked project). */
   readonly oidc: boolean;
   readonly account?: boolean;
   readonly team?: string;
 }
 
-/** True when an environment value is present and non-blank. */
 export function hasEnvValue(value: string | undefined): boolean {
   return value !== undefined && value.trim().length > 0;
 }
 
-/** Where a winning gateway API key was observed. */
 export type GatewayCredentialSource = { kind: "env-file"; path: string } | { kind: "shell" };
 
-/**
- * Everywhere the two gateway credentials can be observed. Callers fill in
- * whatever their vantage point can see — env files on disk, the process
- * environment, an SDK token lookup — and the resolver ranks it.
- */
 interface GatewayCredentialEvidence {
-  /** `AI_GATEWAY_API_KEY` found in an app env file (the file's name). */
   readonly apiKeyFile?: string;
-  /** `AI_GATEWAY_API_KEY` present in the process environment. */
   readonly apiKeyInEnv?: boolean;
-  /** `VERCEL_OIDC_TOKEN` found in an app env file (the file's name). */
   readonly oidcFile?: string;
-  /** An OIDC token is otherwise available (env or linked-project lookup). */
   readonly oidcAvailable?: boolean;
 }
 
 export type GatewayCredentialResolution =
   | {
       credential: "api-key";
-      /** Where the winning key lives; a shell export is not eve's to remove. */
       source: GatewayCredentialSource;
     }
   | { credential: "oidc"; file?: string };
 
-/** Ranks Gateway credentials using runtime precedence. */
 export function resolveGatewayCredential(
   evidence: GatewayCredentialEvidence,
 ): GatewayCredentialResolution | undefined {
@@ -71,13 +51,6 @@ export function resolveGatewayCredential(
   return undefined;
 }
 
-/**
- * Composes the build-time {@link ModelRouting} with runtime credential presence
- * into the consumer-facing {@link ModelEndpointStatus}.
- *
- * Credentials matter only for gateway routing; an external endpoint makes no
- * connectedness claim. Ranking delegates to {@link resolveGatewayCredential}.
- */
 export function resolveModelEndpointStatus(
   routing: ModelRouting,
   credentials: GatewayCredentialPresence,

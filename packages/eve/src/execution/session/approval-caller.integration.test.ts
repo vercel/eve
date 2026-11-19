@@ -1,5 +1,5 @@
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
-import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
+import { startTestSession } from "#internal/testing/test-session-hosts.js";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
 import { markMockModel } from "#internal/mock-model-identity.js";
@@ -12,7 +12,6 @@ import { defineAgent } from "#public/definitions/agent.js";
 import { defineHook } from "#public/definitions/hook.js";
 import { defineDynamic } from "#public/definitions/model.js";
 import type { Approval, ApprovalResponsePolicy } from "#approval/definition.js";
-import { workflowEntry } from "#execution/session/entry.js";
 import {
   sessionCommandHookToken,
   sessionInboxHookToken,
@@ -20,18 +19,19 @@ import {
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { buildSerializedContext, withTimeout } from "#internal/testing/entry-test-helpers.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
-import { resumeHook } from "#internal/workflow/runtime.js";
+import { resumeRoutedHook } from "#execution/hosts.js";
 import { always } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
 import {
   type WorkflowExecuteToolDefinition,
   defineWorkflowTool,
 } from "#tools/workflow-definition.js";
-import { reportCallerWorkflow } from "#internal/testing/workflow-tool-fixtures.js";
+import {
+  reportCallerBody,
+  reportCallerWorkflow,
+} from "#internal/testing/workflow-tool-fixtures.js";
 import { STUB_CONTEXT_KEY, type ToolStub } from "#tool-stubs/types.js";
 
-// Scripted model: calls each tool the first message names, in the order it
-// names them, once each, then replies. "in parallel" calls them all in one step.
 const scriptedModel = markMockModel(
   new MockLanguageModelV4({
     doStream: async ({ prompt, tools }) => {
@@ -78,14 +78,8 @@ function testUser(principalId: string) {
 const ALICE = testUser("alice");
 const BOB = testUser("bob");
 
-// Without a response policy only the requester may respond, and these tests
-// need Bob to approve Alice's calls.
 const anyoneResponds: ApprovalResponsePolicy = () => ({ status: "allowed" });
 
-/**
- * Records `ctx.session.auth.current` for every tool that runs, and in `approvedBy` who
- * approved each call that ran after an approval.
- */
 function recordingTool(
   name: string,
   seen: Array<{ tool: string; caller: string | null }>,
@@ -100,7 +94,6 @@ function recordingTool(
         description: `Run ${name}.`,
         execute: async (_input, ctx) => {
           log.push(`start ${name}`);
-          // Yield so calls running in parallel interleave before reading the caller.
           await new Promise((resolve) => setTimeout(resolve, 20));
           seen.push({ tool: name, caller: ctx.session.auth.current?.principalId ?? null });
           if (ctx.approval !== undefined) {
@@ -120,21 +113,12 @@ type User = ReturnType<typeof testUser>;
 type Stage = Awaited<ReturnType<ReturnType<typeof captureTurnEvents>["nextTurn"]>>;
 
 interface ChainRun {
-  /**
-   * Approves the pending request for `toolName`, or the first one, and reads to the turn's next
-   * boundary, or to the answer's `response.settled` for one the session refuses.
-   */
   readonly approve: (
     approver: User | null,
     toolName?: string,
     until?: "response.settled",
   ) => Promise<Stage>;
-  /** Reads the session's next turn segment. */
   readonly next: (label: string) => Promise<Stage>;
-  /**
-   * Sends `payload` as one delivery on the session's command inbox, and reads to the turn's
-   * next boundary, or to the `response.settled` of an answer the session refuses.
-   */
   readonly deliver: (
     auth: User,
     payload: Record<string, unknown>,
@@ -144,10 +128,6 @@ interface ChainRun {
   readonly stages: Stage[];
 }
 
-/**
- * Starts a session where Alice asks for deploy_change, read_notes, then
- * publish_change, the first and last gated, and hands `body` the run.
- */
 async function withChainRun(
   name: string,
   body: (run: ChainRun) => Promise<void>,
@@ -197,7 +177,8 @@ async function withChainRun(
   const stages: Stage[] = [];
 
   await runtime.run(async () => {
-    const run = await startSessionOwner(workflowEntry, [
+    const run = await startTestSession(
+      "in-process",
       {
         kind: "initial",
         ownerDeploymentId: "dpl_inline",
@@ -212,7 +193,8 @@ async function withChainRun(
             : { [STUB_CONTEXT_KEY]: { token: `${name}-stubs`, rules: options.stubs } }),
         },
       },
-    ]);
+      { workflows: [reportCallerBody()] },
+    );
     const commandInbox = sessionInboxHookToken(sessionCommandHookToken(run.runId));
     const stream = captureTurnEvents(run);
     const next = async (label: string) => {
@@ -230,7 +212,7 @@ async function withChainRun(
             .filter((entry) => toolName === undefined || entry.toolName === toolName)
             .at(toolName === undefined ? -1 : 0);
           expect(request).toBeDefined();
-          await resumeHook(commandInbox, {
+          await resumeRoutedHook(commandInbox, {
             auth: approver,
             kind: "send",
             delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
@@ -238,7 +220,6 @@ async function withChainRun(
               answers: [{ interactionId: request!.interactionId, optionId: "approve" }],
             },
           });
-          // A refused answer changes nothing the turn waits on, so it announces no pause.
           if (until === "response.settled") {
             const stage = await withTimeout(
               stream.nextUntil((event) => event.type === "response.settled"),
@@ -250,7 +231,7 @@ async function withChainRun(
           return await next("approved");
         },
         async deliver(auth, payload, until) {
-          await resumeHook(commandInbox, {
+          await resumeRoutedHook(commandInbox, {
             auth,
             kind: "send",
             delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
@@ -267,7 +248,7 @@ async function withChainRun(
           return await next("delivered");
         },
         async send(auth, message) {
-          await resumeHook(sessionInboxHookToken(continuationToken), {
+          await resumeRoutedHook(sessionInboxHookToken(continuationToken), {
             auth,
             kind: "send",
             delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
@@ -290,7 +271,6 @@ function turnBoundaries(stage: Stage) {
     .map((event) => `${event.type} ${(event.data as { turnId: string }).turnId}`);
 }
 
-/** The approvals the stages opened, oldest first, with the tool each asks to call. */
 function approvalsIn(stages: readonly Stage[]) {
   const events = stages.flat();
   const toolOf = new Map(
@@ -310,7 +290,6 @@ function approvalsIn(stages: readonly Stage[]) {
     });
 }
 
-/** The output each settlement of `callId` carries, in order. */
 function outputsOf(stages: readonly Stage[], callId: string) {
   return stages
     .flat()
@@ -343,7 +322,6 @@ describe("approval caller", () => {
         },
       );
 
-      // Bob's approval resumes Alice's turn; it does not start his own.
       expect(stages.map(turnBoundaries)).toEqual([
         ["turn.started turn_0"],
         [],
@@ -355,7 +333,6 @@ describe("approval caller", () => {
         { tool: "publish_change", caller: "alice" },
       ]);
       expect(secondRequesters).toEqual(["alice"]);
-      // Each approved call reads who approved it; the call that needed no approval reads nobody.
       expect(approvedBy).toEqual([
         { tool: "deploy_change", responder: "bob" },
         { tool: "publish_change", responder: "alice" },
@@ -367,7 +344,6 @@ describe("approval caller", () => {
   it("lets the requester steer the turn after someone else approves a call", async () => {
     const { seen, stages } = await withChainRun("approval-caller-steer", async (run) => {
       await run.approve(BOB);
-      // The turn is still Alice's, so her message steers past publish_change.
       const steered = await run.send(ALICE, "Never mind, skip publishing.");
       expect(
         filterEventsByType(steered, "interaction.settled").map((event) => event.data.outcome),
@@ -393,8 +369,6 @@ describe("approval caller", () => {
           (entry) => entry.toolName === "publish_change",
         );
         expect(approvalsIn(run.stages)).toHaveLength(2);
-        // publish_change waits for its response policy; deploy_change has none. The message
-        // queues behind the policy's answer and must still steer past deploy_change.
         await run.deliver(ALICE, {
           answers: [{ interactionId: publish!.interactionId, optionId: "approve" }],
           message: "Never mind, skip the deploy.",
@@ -454,7 +428,6 @@ describe("approval caller", () => {
           message: "Bob here: also delete the staging database.",
         });
         await run.approve(ALICE);
-        // Bob's message waited for Alice's turn to end, then started his own.
         await run.next("Bob's turn");
       },
     );
@@ -465,7 +438,6 @@ describe("approval caller", () => {
       { tool: "publish_change", caller: "alice" },
     ]);
     expect(secondRequesters).toEqual(["alice"]);
-    // An answer-only delivery is consumed with no parts; only the messages carry any.
     const received = stages
       .flatMap((stage) => filterEventsByType(stage, "delivery.consumed"))
       .filter((event) => event.data.parts.length > 0);
@@ -477,7 +449,6 @@ describe("approval caller", () => {
       "approval-caller-press-state",
       async (run) => {
         const request = approvalsIn(run.stages)[0]!;
-        // A channel's press carries its own state beside the answer, such as who pressed.
         await run.deliver(BOB, {
           answers: [{ interactionId: request.interactionId, optionId: "approve" }],
           state: { triggeringUserId: "bob" },
@@ -500,7 +471,6 @@ describe("approval caller", () => {
       "approval-caller-stale-mixed",
       async (run) => {
         const request = approvalsIn(run.stages)[0]!;
-        // Requester-only: Bob's answer can't settle Alice's call, even beside a stale one.
         const refused = await run.deliver(
           BOB,
           {
@@ -549,9 +519,7 @@ describe("approval caller", () => {
       "turn.settled turn_0",
     ]);
     expect(seen.map((entry) => entry.caller)).toEqual(["alice", "alice", "alice"]);
-    // Bob's delivery never made him the turn's caller, not even while it was refused.
     expect(new Set(turnAuth)).toEqual(new Set(["alice"]));
-    // Bob's stale answer never reached Alice's turn as text.
     expect(JSON.stringify(stages)).not.toContain("staging db");
   }, 60_000);
 
@@ -559,8 +527,6 @@ describe("approval caller", () => {
     const { secondRequesters, seen, stages } = await withChainRun(
       "approval-caller-null-auth",
       async (run) => {
-        // The call has a requester, so an unauthenticated answer settles nothing, with or
-        // without a response policy; the requester's own answer still decides it.
         const refusedDirect = await run.approve(null, "deploy_change", "response.settled");
         expect(filterEventsByType(refusedDirect, "interaction.settled")).toEqual([]);
         await run.approve(ALICE, "deploy_change");
@@ -573,7 +539,6 @@ describe("approval caller", () => {
 
     expect(seen.map((entry) => entry.caller)).toEqual(["alice", "alice", "alice"]);
     expect(secondRequesters).toEqual(["alice"]);
-    // Each approval settles on Alice's answer, the only one a responder sent.
     const events = stages.flat();
     for (const toolName of ["deploy_change", "publish_change"]) {
       const approval = approvalsIn(stages).find((entry) => entry.toolName === toolName);
@@ -605,7 +570,6 @@ describe("approval caller", () => {
       { message: "Call in parallel: deploy_change, publish_change." },
     );
 
-    // Both calls were running at once.
     expect(log.slice(0, 2).every((entry) => entry.startsWith("start "))).toBe(true);
     expect(new Map(seen.map((entry) => [entry.tool, entry.caller]))).toEqual(
       new Map([
@@ -616,8 +580,6 @@ describe("approval caller", () => {
   }, 60_000);
 
   it("keeps requester identity when a later call repeats an approved call id", async () => {
-    // Some providers repeat call ids. Turn 1's report_caller is gated and Bob
-    // approves it; turn 2 calls it again ungated, with the same id.
     const model = markMockModel(
       new MockLanguageModelV4({
         doStream: async ({ prompt }) => {
@@ -663,7 +625,6 @@ describe("approval caller", () => {
       },
     );
 
-    // The repeat gets its own id, so turn 1's call keeps its row and both run as Alice.
     expect(outputsOf(stages, "call-repeated")).toEqual([{ caller: "alice" }]);
     expect(outputsOf(stages, "call-repeated_2")).toEqual([{ caller: "alice" }]);
   }, 60_000);

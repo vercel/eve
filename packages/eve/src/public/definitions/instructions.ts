@@ -8,6 +8,9 @@ import {
   type PublicInstructionsDefinition,
 } from "#shared/instructions-definition.js";
 
+/**
+ * Instructions definition passed to {@link defineInstructions}: `content` and an optional `role`.
+ */
 export type InstructionsDefinition = Readonly<PublicInstructionsDefinition>;
 
 /**
@@ -27,6 +30,10 @@ export function defineInstructions<TInstructions extends InstructionsDefinition>
   return definition;
 }
 
+/**
+ * Value a `defineDynamic` resolver in `agent/instructions/` returns: a {@link defineInstructions}
+ * result, or `null` to contribute no instructions.
+ */
 export type DynamicInstructionsResult = InstructionsDefinition | null;
 
 /** `defineDynamic()` for `agent/instructions/`: returns `defineInstructions()` or `null`. */

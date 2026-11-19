@@ -32,12 +32,12 @@ function workflow(
   };
 }
 
-/** A harness whose model calls `tool` once, then replies; its events fold into one projection. */
 function setup(
   tool: HarnessToolDefinition,
   options: {
     readonly tools?: readonly HarnessToolDefinition[];
     readonly calls?: readonly Parameters<typeof toolCallsStreamResult>[0][];
+    readonly finishReason?: Parameters<typeof toolCallsStreamResult>[1];
   } = {},
 ) {
   const events: SessionEvent[] = [];
@@ -46,7 +46,9 @@ function setup(
   const model = new MockLanguageModelV4({
     doStream: vi.fn().mockImplementation(async () => {
       const batch = calls[index++];
-      return batch === undefined ? textStreamResult("Finished.") : toolCallsStreamResult(batch);
+      return batch === undefined
+        ? textStreamResult("Finished.")
+        : toolCallsStreamResult(batch, options.finishReason);
     }),
     modelId: "approval-model",
     provider: "eve-integration-mock",
@@ -55,7 +57,6 @@ function setup(
   const config: TestKernelConfig = {
     agent: { model: { id: "approval-model" } },
     capabilities: { requestInput: true },
-    // Each publication commits as one line, as the session's sink writes it.
     handleEvent: async (publication) => {
       recorder.record(eventsOf(publication));
       events.push(...eventsOf(publication));
@@ -149,7 +150,6 @@ describe("approved call recheck (real AI SDK)", () => {
           execute,
           approval: async (context) => {
             if (context.callId !== "first" || policy === "once") return perTool(context);
-            // A policy that consults once() but returns another branch's prompt offers no grant.
             if (policy === "consulted") await perTool(context);
             return ask(context);
           },
@@ -306,15 +306,84 @@ describe("approved call recheck (real AI SDK)", () => {
     ).toMatchObject([{ output: { type: "text", value: "deployed" } }]);
   });
 
-  it("preserves explicit policy clearance when a workflow call leaves the harness", async () => {
-    const fixture = setup(
-      workflow("deploy", () => ({ type: "approved", reason: "Release window checked." })),
-    );
+  it.each([
+    [undefined, undefined],
+    [() => ({ type: "approved" as const }), { policy: "approval" as const }],
+  ])("admits a workflow call after evaluating its policy (%s)", async (policy, clearedBy) => {
+    const fixture = setup(workflow("deploy", policy));
     const result = await fixture.step(fixture.session, { message: "Deploy Alice's release." });
     expect(runtimeWait(result.session.state)).toMatchObject({
-      tasks: [{ callId: "call-0", clearedBy: { policy: "approval" } }],
+      tasks: [
+        {
+          admission: { callId: "call-0", fingerprint: expect.any(String) },
+          callId: "call-0",
+        },
+      ],
+    });
+    expect(runtimeWait(result.session.state)?.tasks[0]?.clearedBy).toEqual(clearedBy);
+  });
+
+  it("admits a human-approved workflow call only after rechecking it", async () => {
+    const fixture = setup(workflow("deploy", always()));
+    const initial = await fixture.step(fixture.session, { message: "Deploy Alice's release." });
+    expect(runtimeWait(initial.session.state)).toBeUndefined();
+    const request = fixture.events.find((event) => event.type === "interaction.opened");
+    if (request?.type !== "interaction.opened") throw new Error("Expected approval request");
+
+    const approved = await fixture.step(initial.session, {
+      answers: [
+        {
+          deliveryId: "approve-deploy",
+          interactionId: request.data.interactionId,
+          optionId: "approve",
+          responseId: "answer-deploy",
+        },
+      ],
+    });
+    expect(runtimeWait(approved.session.state)).toMatchObject({
+      tasks: [
+        {
+          admission: { callId: "call-0", fingerprint: expect.any(String) },
+          clearedBy: { interactionId: request.data.interactionId },
+        },
+      ],
     });
   });
+  it.each([
+    ["length", "a denying policy"],
+    ["length", "always()"],
+    ["other", "a denying policy"],
+    ["other", "always()"],
+  ] as const)(
+    "starts no workflow call from a response that ended early (%s) under %s",
+    async (finishReason, policyName) => {
+      const policy = vi.fn(
+        policyName === "always()"
+          ? always()
+          : () => ({ type: "denied" as const, reason: "Deploys are frozen." }),
+      );
+      const fixture = setup(workflow("deploy", policy), { finishReason });
+
+      const result = await fixture.step(fixture.session, { message: "Deploy Alice's release." });
+
+      expect(runtimeWait(result.session.state)).toBeUndefined();
+      expect(policy).not.toHaveBeenCalled();
+      expect(fixture.events.some((event) => event.type === "interaction.opened")).toBe(false);
+      expect(
+        result.session.history.flatMap((message) =>
+          message.role === "tool" ? message.content : [],
+        ),
+      ).toMatchObject([
+        {
+          output: {
+            type: "error-text",
+            value: expect.stringContaining(`finish reason: ${finishReason}`),
+          },
+          toolCallId: "call-0",
+        },
+      ]);
+    },
+  );
   it.each(["local", "workflow", "agent"])(
     "rechecks an approved %s call before execution",
     async (kind) => {
@@ -335,7 +404,6 @@ describe("approved call recheck (real AI SDK)", () => {
       const request = fixture.events.find((event) => event.type === "interaction.opened");
       expect(request?.type === "interaction.opened" && request.data.request.kind).toBe("approval");
 
-      // A freeze begins for the requester after she asked, before anyone approves.
       frozen = true;
       const start = fixture.events.length;
       const approved = await fixture.step(initial.session, {
@@ -349,7 +417,6 @@ describe("approved call recheck (real AI SDK)", () => {
         ],
       });
 
-      // The recheck runs as the requester, and its denial means execution never starts.
       expect(execute).not.toHaveBeenCalled();
       expect(runtimeWait(approved.session.state)).toBeUndefined();
       expect(policy.mock.calls.at(-1)?.[0].session.auth.current?.principalId).toBe("user-1");
@@ -389,7 +456,6 @@ describe("approved call recheck (real AI SDK)", () => {
       const initial = await fixture.step(fixture.session, { message: "Deploy Alice's release." });
       const request = fixture.events.find((event) => event.type === "interaction.opened");
 
-      // Bob changes the release target while Alice's approval waits.
       (tool as { version: string }).version = "changed";
       const start = fixture.events.length;
       const approved = await fixture.step(initial.session, {

@@ -1,7 +1,6 @@
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import type { AgentModuleBinding } from "#compiler/source-graph.js";
 
-/** Mount association is independent of ownership: overrides stay application-owned. */
 export function bindingMountId(binding: AgentModuleBinding): string | undefined {
   return binding.backing.mountId;
 }

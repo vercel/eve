@@ -32,7 +32,7 @@ export default defineTool({
 
 ## Integration dependencies
 
-Install the packages for each integration entry you import. They are optional peers of eve, so other entries don't need them.
+Install the packages for each integration entry you import. Most are optional peers of eve, so other entries don't need them. `@vercel/connect` isn't a peer of eve, so your package manager won't flag an unsupported version. Install the version in the table below; `eve init` and eve's connection and channel setup add a supported one for you.
 
 | Entry                                                         | Required integration packages                         |
 | ------------------------------------------------------------- | ----------------------------------------------------- |
@@ -143,7 +143,7 @@ Tool definitions accept these options:
 - `availableInSubagents: false` restricts the tool to top-level root sessions.
 - `deferred: true` keeps the tool out of the model's tool list. The model finds it with `eve__search` and calls it with `eve__tool`; see [Tools](../tools#keep-a-tool-out-of-the-tool-list).
 
-`defineTool` definitions accept `endsTurn: true`, or a function that receives the `execute` output, to end the turn without a reply after a successful call; see [Tools](../tools#end-the-turn-after-a-tool-call).
+`defineTool` definitions accept `endsTurn: true`, or a function that receives the `execute` output, to end the turn without a reply after a successful call; see [Tools](../tools#end-the-turn-after-a-tool-call). `defineWorkflowTool` definitions accept the same option on an `execute` entry point, not on `task` or `serve`; see [Workflows as tools](../tools/workflows#end-the-turn-after-the-call).
 
 Authored workflow bodies also receive `ctx.agents`, a map that describes the agents the workflow can call. It stays the same across workflow replays. `ctx.agent(name)` returns an `AgentSession` whose `send(message, options?)` resolves to a response with `result()`. The `agent` entry is a copy of the root agent, and its description is empty when the root omits `description`. See [Workflows as tools](../tools/workflows#delegate-work-ctxagent) for the workflow-only context.
 
@@ -186,7 +186,7 @@ Type the context in a `"use step"` helper as `WorkflowStepToolContext`, which ex
 | `eve/instrumentation`                                                             | `defineInstrumentation`, `disableInstrumentation`, `InstrumentationEvent<K>`, lifecycle provider types            |
 | `eve/instrumentation/otel`                                                        | `otel`, `otelIntegration`, `localTraces`, `agentRuns`, OpenTelemetry policy, span processor, and exporter types   |
 | `eve/local-dev`                                                                   | `getLocalDevCapability`, `LocalDevCapability`                                                                     |
-| [`eve/models`](../guides/decide)                                                  | Automatic model selection with `auto`, `EveLanguageModel`                                                         |
+| [`eve/models`](../guides/decide)                                                  | `auto`, `defineModel`, `DefinedModel`, `ModelDefinition`, `EveLanguageModel`                                      |
 | `eve/models/openai`                                                               | `openai`, `chatgpt`                                                                                               |
 | `eve/models/anthropic`                                                            | `anthropic`                                                                                                       |
 | [`eve/ai`](../guides/decide#decide-inside-a-tool)                                 | Standalone `decide`                                                                                               |
@@ -198,7 +198,7 @@ Type the context in a `"use step"` helper as `WorkflowStepToolContext`, which ex
 | `eve/next`, `eve/nuxt`, `eve/sveltekit`, `eve/tanstack`                           | framework bundler plugins                                                                                         |
 | [`eve/client`](/docs/guides/client)                                               | `Client`, `ClientSession`, health and agent-info schemas, `EveError` and the typed client errors                  |
 | [`eve/sessions`](../guides/client/messages#reusable-delivery-reads)               | `Delivery`, `DeliveryResult`, read options, `SessionReader`, `Session`, `EveError`, and `SessionNotActiveError`   |
-| [`eve/events`](../concepts/sessions-runs-and-streaming#query-session-state)       | Event types, opaque `SessionView`, immutable observations, and query/fold functions                               |
+| [`eve/events`](/docs/concepts/session-views-and-selectors)                        | Event types, opaque `SessionView`, immutable observations, and query/fold functions                               |
 | [`eve/server`](../concepts/sessions-runs-and-streaming#read-a-session-in-process) | `sessions`, for reading session streams in process                                                                |
 
 Exported types ship from the entry point that owns them, such as `ToolDefinition` and `ToolContext` from `eve/tools`. Import event and view types from `eve/events`, `SessionContext` and `HistoryMessage` from `eve/context`, and assertion types and `ToolStub` from `eve/evals`. Frontend hook entries also export the types their hooks return.
@@ -215,7 +215,7 @@ The `exports` field in eve's `package.json` lists every entry point. `eve/experi
 
 Event union types name today's values. A release can add event types, outcomes, and request kinds under the [stream evolution rules](../concepts/sessions-runs-and-streaming#what-a-later-release-can-add) without a breaking change, so keep a default branch when you switch on them.
 
-Values eve passes into code you implement can also gain members in a minor release. Examples are a sandbox provider's `onSessionEnd()` `reason`, the provider context's `kind`, and `SandboxNetworkRule` variants. Handle unknown values with a default branch instead of switching exhaustively.
+Values eve passes into code you implement can also gain members in a minor release. Examples are a sandbox provider's `onSessionEnd()` `reason`, the provider context's `kind`, and `SandboxNetworkRule` variants. Handle unknown values with a default branch instead of switching exhaustively. Context objects eve passes to your handlers, such as `ChannelEventContext`, can gain required members the same way, so a test fixture that builds one by hand may need to add them.
 
 `eve/channels/chat-sdk`, `eve/channels/linq`, and `eve/channels/photon` expose types from the `chat` package (Chat SDK v4) as part of their contract. A future breaking `chat` major can require a matching eve major release.
 

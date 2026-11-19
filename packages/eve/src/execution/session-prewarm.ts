@@ -8,7 +8,6 @@ import {
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import type { PrewarmSessionResult } from "#protocol/prewarm-session.js";
 
-/** Internal hint, scoped to the owner inspected by ingress to avoid stale transfers. */
 export interface SessionPrewarmPayload {
   readonly kind: "session-prewarm";
   readonly expectedOwnerRunId: string;
@@ -26,7 +25,6 @@ export async function prewarmWorkflowSession(
   )
     return { status: "unsupported" };
   const world = await getWorld();
-  // Single-build Worlds cannot proactively migrate an owner to another build.
   if (world.capabilities?.deploymentAffinity !== true) return { status: "unsupported" };
   let hook;
   try {
@@ -39,7 +37,6 @@ export async function prewarmWorkflowSession(
   if (owner.status !== "running" && owner.status !== "pending")
     return { status: "no_active_session" };
   if (owner.deploymentId === targetDeploymentId) return { status: "ready" };
-  // Never wake an older owner with an inbox payload it cannot decode.
   if (owner.attributes[EVE_PREWARM_ATTRIBUTE] !== "1") return { status: "unsupported" };
   await resumeSessionInbox(
     { sessionId },

@@ -8,7 +8,6 @@ export function rememberModelTeamSlug(teamId: string, slug: string): void {
   knownTeam = { teamId, slug };
 }
 
-/** Resolves display metadata without changing credentials or linking a project. */
 export async function resolveModelTeamSlug(signal?: AbortSignal): Promise<string | undefined> {
   const selected = process.env.EVE_MODEL_CONNECTION;
   if (selected !== "vercel" && selected !== "vercel-cli") return undefined;

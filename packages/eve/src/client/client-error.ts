@@ -84,7 +84,6 @@ export class ClientSessionStrandedError extends ClientError {
   }
 }
 
-/** Builds the most specific client error for a failed eve session request. */
 export function createClientError(
   status: number,
   body: string,

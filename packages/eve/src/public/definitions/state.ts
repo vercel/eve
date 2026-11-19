@@ -1,5 +1,6 @@
 import { ContextKey } from "#context/key.js";
-import { loadContext } from "#context/container.js";
+import { type AlsContext, loadContext } from "#context/container.js";
+import { isInWorkflowStep } from "#context/workflow-step.js";
 
 /**
  * Typed handle returned by {@link defineState}. Reads and updates a
@@ -26,7 +27,8 @@ const RESERVED_STATE_NAME_PREFIXES = ["eve.", "eve:mount."] as const;
  *
  * All operations require an active eve context. Calling `get()` or
  * `update()` outside of tools, hooks, or other framework-managed code
- * throws.
+ * throws. They also throw inside a workflow tool's `"use step"` function:
+ * return the value from the workflow tool and update state in a `call.settled` hook.
  *
  * State is durable: values survive across workflow step boundaries.
  * To reset per-turn, call `update(() => freshValue)` in a lifecycle
@@ -50,7 +52,6 @@ export function defineState<T>(name: string, initial: () => T): StateHandle<T> {
   return createStateHandle(name, initial);
 }
 
-/** Internal registration of generated, mount-owned keys. */
 export function defineMountedState<T>(
   mountId: string,
   name: string,
@@ -59,7 +60,6 @@ export function defineMountedState<T>(
   return createStateHandle(mountedStateKeyName(mountId, name), initial);
 }
 
-/** Durable context key name of one mount's state slot. */
 export function mountedStateKeyName(mountId: string, name: string): string {
   return `eve:mount.v1:${encodeURIComponent(mountId)}:${encodeURIComponent(name)}`;
 }
@@ -69,13 +69,27 @@ function createStateHandle<T>(name: string, initial: () => T): StateHandle<T> {
 
   return {
     get(): T {
-      return loadContext().ensure(key, initial);
+      return loadStateContext().ensure(key, initial);
     },
 
     update(fn: (current: T) => T): void {
-      const ctx = loadContext();
+      const ctx = loadStateContext();
       const current = ctx.ensure(key, initial);
       ctx.set(key, fn(current));
     },
   };
+}
+
+function loadStateContext(): AlsContext {
+  if (isInWorkflowStep()) {
+    throw Object.assign(
+      new Error(
+        'defineState() get() and update() are unavailable inside a "use step" function. ' +
+          "State belongs to the calling session, and the step runs in the workflow tool's own run, so eve can't read or save it there. " +
+          'Return the value from the tool, then update state in a "call.settled" hook that reads the output from call(ctx.view, event.data.callId).',
+      ),
+      { fatal: true },
+    );
+  }
+  return loadContext();
 }

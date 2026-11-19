@@ -41,7 +41,6 @@ interface McpToolCache {
   readonly tools: ToolSet;
 }
 
-/** Carries the failing request's auth state through SDK error wrappers. */
 class McpUnauthorizedError extends Error {
   readonly statusCode = 401;
   readonly anonymous: boolean;
@@ -63,18 +62,6 @@ async function checkAuthorizationResponse(
   return response;
 }
 
-/**
- * Wraps one `MCPClient` from `@ai-sdk/mcp` for a single connection.
- *
- * Created lazily per connection per step. Caches tool metadata after
- * the first `getToolMetadata()` call.
- *
- * When the connection declares `authorization` but no token is available
- * yet (`getToken` throws {@link ConnectionAuthorizationRequiredError}), the
- * client connects anonymously instead of failing. Sign-in is only requested
- * once the server asks for it: an HTTP `401` on any request, or a tool
- * result that carries an `mcp/www_authenticate` challenge.
- */
 export class McpConnectionClient implements ConnectionClient {
   #clientPromise: Promise<MCPClient> | undefined;
   #client: MCPClient | undefined;
@@ -113,13 +100,6 @@ export class McpConnectionClient implements ConnectionClient {
     }
   }
 
-  /**
-   * Connects to the MCP server, trying Streamable HTTP first and
-   * falling back to SSE for transport-compatibility failures.
-   *
-   * Concurrent callers share the same connection promise to avoid
-   * duplicate connections.
-   */
   async connect(): Promise<MCPClient> {
     if (this.#client !== undefined) {
       return this.#client;
@@ -166,7 +146,6 @@ export class McpConnectionClient implements ConnectionClient {
     }
   }
 
-  /** Keep eve's token provider on the request path instead of capturing one bearer forever. */
   #authorizedFetch(connectionHeaderNames: readonly string[]): typeof fetch {
     const fetcher = this.#forwardingFetch() ?? globalThis.fetch;
     return async (request, init) => {
@@ -190,7 +169,6 @@ export class McpConnectionClient implements ConnectionClient {
         return await checkAuthorizationResponse(response, resolved.anonymous);
       }
 
-      // A rejected access token need not mean the refresh grant needs consent.
       await this.#evictCachedToken();
       const refreshed = await resolve();
       if (refreshed.anonymous) {
@@ -201,11 +179,6 @@ export class McpConnectionClient implements ConnectionClient {
     };
   }
 
-  /**
-   * With `forwardPrincipal`, adds `eve-forwarded-principal` to every request,
-   * read per request: one client can serve turns from different people in a
-   * shared session.
-   */
   #forwardingFetch(): typeof fetch | undefined {
     if (this.#connection.forwardPrincipal !== true) return undefined;
     const connectionName = this.#connection.connectionName;
@@ -217,36 +190,14 @@ export class McpConnectionClient implements ConnectionClient {
         FORWARDED_PRINCIPAL_HEADER,
         encodeForwardedPrincipalHeader(principals, connectionName),
       );
-      // Fetch keeps custom headers across a cross-origin redirect, unlike
-      // `Authorization`, so following one would hand the user's identity to
-      // another host.
       return await globalThis.fetch(request, { ...init, headers, redirect: "error" });
     };
   }
 
-  /**
-   * Returns cached tool metadata for all tools this connection exposes. The
-   * catalog applies the connection's tool filter to the listing.
-   *
-   * The first call fetches tools from the server via `listTools()` and
-   * creates the AI SDK tool set in parallel. Subsequent calls return
-   * the cached result. Concurrent callers share the same in-flight
-   * promise.
-   */
   async getToolMetadata(): Promise<readonly ConnectionToolMetadata[]> {
     return (await this.#ensureTools()).metadata;
   }
 
-  /**
-   * Executes a named tool through the AI SDK's tool executor, which
-   * handles the JSON-RPC `tools/call` internally.
-   *
-   * A `401`/`invalid_token` from the remote server is translated into
-   * {@link ConnectionAuthorizationRequiredError} via {@link #rethrowClassified}
-   * so callers re-enter the authorization flow instead of surfacing an
-   * opaque transport error. A tool error result carrying an
-   * `_meta["mcp/www_authenticate"]` challenge is treated the same way.
-   */
   async executeTool(
     toolName: string,
     args: unknown,
@@ -323,10 +274,6 @@ export class McpConnectionClient implements ConnectionClient {
       protocolVersion: client.initializeResult?.protocolVersion,
     });
 
-    // `toolsFromDefinitions` returns `McpToolSet<"automatic">`, whose
-    // elements are `Tool<unknown, CallToolResult>`. The AI SDK's
-    // `ToolSet` constraint only admits `Tool<any | never, any | never>`,
-    // so a single-hop cast is required — the runtime shape is identical.
     const providedArgumentNames = Object.keys(this.#connection.toolCall?.providedArguments ?? {});
     const projectedTools = listResult.tools.map((tool) => ({
       ...tool,
@@ -359,12 +306,6 @@ export class McpConnectionClient implements ConnectionClient {
     this.#tools = undefined;
   }
 
-  /**
-   * Always rethrows — this only classifies the error first. A non-auth
-   * error (timeout, `5xx`, `403`, "tool not found", network failure) is
-   * rethrown unchanged. Only a `401` is translated, via
-   * {@link #requireAuthorization}.
-   */
   async #rethrowClassified(error: unknown): Promise<never> {
     if (!isMcpAuthRequiredError(error)) {
       throw error;
@@ -385,13 +326,6 @@ export class McpConnectionClient implements ConnectionClient {
     );
   }
 
-  /**
-   * Evicts the stale cached token (when the request carried one), tears
-   * down the connection so the retry reconnects with a fresh bearer and
-   * reloads the tool list, and throws
-   * {@link ConnectionAuthorizationRequiredError} so the authorization flow
-   * takes over.
-   */
   async #requireAuthorization(reason: string, anonymous?: boolean): Promise<never> {
     anonymous ??= (
       await resolveConnectionHeaders(this.#connection, { anonymousWhenAuthorizationRequired: true })
@@ -405,14 +339,6 @@ export class McpConnectionClient implements ConnectionClient {
     });
   }
 
-  /**
-   * Best-effort removal of the rejected bearer for this connection's
-   * resolved principal, across both eve's per-step cache and the
-   * strategy's own cache (e.g. `@vercel/connect`). Delegates to the
-   * shared {@link evictScopedToken} so MCP connections and authored
-   * tools invalidate identically. No-op outside a runtime scope or when
-   * the connection declares no authorization.
-   */
   async #evictCachedToken(): Promise<void> {
     const authorization = await resolveConnectionAuthorization(this.#connection);
     if (authorization === undefined) return;
@@ -425,28 +351,12 @@ export class McpConnectionClient implements ConnectionClient {
   }
 }
 
-/**
- * Returns `true` when an error from the MCP transport indicates the
- * bearer was rejected by the remote server — an HTTP `401`. Per
- * RFC 6750 a `401` means the access token is missing, expired, or
- * revoked, all of which are recoverable by re-authorizing. (A `403`
- * is an insufficient-scope / permission problem and is intentionally
- * left to propagate, since re-running the same grant would not help.)
- */
 export function isMcpAuthRequiredError(error: unknown): boolean {
   return readHttpStatus(error) === 401;
 }
 
-/** `_meta` key a tool result uses to ask for sign-in (OpenAI Apps SDK convention). */
 export const MCP_WWW_AUTHENTICATE_META_KEY = "mcp/www_authenticate";
 
-/**
- * Returns `true` for a `tools/call` error result that asks the client to
- * sign in: `isError: true` plus a non-empty `_meta["mcp/www_authenticate"]`
- * (a `WWW-Authenticate` challenge string or list of them). Servers that
- * accept anonymous `initialize`/`tools/list` use this to protect individual
- * tools without failing the whole HTTP request.
- */
 export function isMcpAuthChallengeResult(result: unknown): boolean {
   if (!isObject(result) || result.isError !== true || !isObject(result._meta)) {
     return false;
@@ -456,19 +366,6 @@ export function isMcpAuthChallengeResult(result: unknown): boolean {
   return Array.isArray(challenge) && challenge.length > 0;
 }
 
-/**
- * Decides whether an error thrown while creating a streamable HTTP MCP
- * client should trigger a fallback attempt against the legacy SSE
- * transport.
- *
- * Per the MCP backwards-compatibility rules, clients should fall back
- * to SSE when the streamable HTTP probe returns `400 Bad Request`,
- * `404 Not Found`, or `405 Method Not Allowed`. All other failures
- * (auth errors, network errors, server errors) should propagate so the
- * caller sees the real problem instead of a misleading SSE failure.
- *
- * See: https://modelcontextprotocol.io/specification/2025-11-25/basic/transports#backwards-compatibility
- */
 function isMcpHttpFallbackRetryableError(error: unknown): boolean {
   const status = readHttpStatus(error);
   return status === 400 || status === 404 || status === 405;
@@ -529,12 +426,6 @@ function* walkErrorChain(error: unknown): Generator<unknown> {
   }
 }
 
-/**
- * Returns `true` when a tool passes the configured filter. A tool may be known
- * by more than one name, such as an OpenAPI tool's name and the `operationId`
- * it was derived from; `allow` admits it when any name is listed, and `block`
- * hides it when any name is listed.
- */
 export function passesToolFilter(
   names: readonly string[],
   filter: Readonly<ToolFilterDefinition> | undefined,
@@ -548,16 +439,6 @@ export function passesToolFilter(
   return !names.some((name) => filter.block.includes(name));
 }
 
-/**
- * Merges `authorization` (Bearer token) and `headers` into one
- * flat `Record<string, string>` for the transport layer.
- *
- * Resolves dynamic `auth` and `headers` callbacks with the active
- * session context, then resolves the {@link ConnectionPrincipal}
- * and invokes `authorization.getToken({ principal })` to produce the bearer.
- * `getToken` may throw {@link ConnectionAuthorizationRequiredError};
- * callers catch it and it propagates as-is from here.
- */
 export async function resolveHeaders(
   connection: ResolvedConnectionDefinition,
 ): Promise<Record<string, string>> {
@@ -568,17 +449,10 @@ export async function resolveHeaders(
 }
 
 interface ResolvedConnectionHeaders {
-  /** `true` when `authorization` is declared but no token was available, so no bearer was set. */
   readonly anonymous: boolean;
   readonly headers: Record<string, string>;
 }
 
-/**
- * {@link resolveHeaders}, optionally tolerating a missing token: with
- * `anonymousWhenAuthorizationRequired`, a {@link ConnectionAuthorizationRequiredError}
- * from `getToken` leaves the `Authorization` header unset and reports
- * `anonymous: true` instead of throwing. Every other error still propagates.
- */
 async function resolveConnectionHeaders(
   connection: ResolvedConnectionDefinition,
   options: { readonly anonymousWhenAuthorizationRequired: boolean },
@@ -621,11 +495,6 @@ async function resolveConnectionHeaders(
   return { anonymous, headers: merged };
 }
 
-/**
- * Resolves a connection's bearer token via the shared scoped-token path,
- * keyed by the resolved connection instance. See
- * {@link resolveScopedToken} for the cache and principal semantics.
- */
 async function resolveToken(
   connection: ResolvedConnectionDefinition,
   authorization: Readonly<AuthorizationDefinition>,

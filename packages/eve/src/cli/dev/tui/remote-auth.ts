@@ -22,7 +22,6 @@ import {
 import { toErrorMessage } from "#shared/errors.js";
 import pc from "#compiled/picocolors/index.js";
 
-/** Injectable entry point for the remote authentication flow. */
 export type RemoteAuthFlow = typeof runRemoteAuthFlow;
 
 export interface RemoteAuthFlowDeps {
@@ -99,14 +98,6 @@ async function selectVercelDeploymentScope(
   });
 }
 
-/**
- * Authenticates an interactive client for a remote Vercel deployment.
- *
- * Resolves the deployment's owning project, optionally configures Trusted
- * Sources after user approval, and returns a renewable project-scoped OIDC
- * credential. Callers must pass a TTY-backed {@link Prompter}; cancelled and
- * failed flows are returned as results rather than thrown.
- */
 export async function runRemoteAuthFlow(input: {
   readonly workspaceRoot: string;
   readonly serverUrl: string;
@@ -122,8 +113,6 @@ export async function runRemoteAuthFlow(input: {
   let mutationStarted = false;
 
   try {
-    // Authenticate first so the resolve runs under real credentials. When the
-    // user is already logged in this is a no-op and shows no dialogue.
     const login = await deps.runLoginFlow({
       appRoot: workspaceRoot,
       prompter,
@@ -134,8 +123,6 @@ export async function runRemoteAuthFlow(input: {
     if (loginOutcome !== undefined) return loginOutcome;
     if (login.kind === "logged-in") completedMutations.push({ kind: "vercel-login" });
 
-    // Prefer direct host resolution. If the active Vercel scope cannot see the
-    // deployment, the picker supplies an explicit team scope.
     let resolution = await deps.resolveVercelDeployment({ workspaceRoot, host, signal });
     if (resolution.kind === "not-found") {
       try {

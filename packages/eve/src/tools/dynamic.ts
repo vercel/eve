@@ -5,9 +5,10 @@ import {
 import type { ToolDefinition } from "#tools/definition.js";
 
 /**
- * One tool a dynamic resolver returns, created with `defineTool()`. A single returned entry is
- * named after the file; entries of a returned map are named by their keys, prefixed with the
- * mount namespace for an extension's resolver.
+ * One tool a dynamic resolver returns, created with `defineTool()`, or a `defineWorkflowTool()`
+ * that a top-level `const` holds. A single returned entry is named after the file; entries of a
+ * returned map are named by their keys, prefixed with the mount namespace for an extension's
+ * resolver.
  */
 export type DynamicToolEntry = Pick<ToolDefinition, "description" | "inputSchema">;
 
@@ -20,14 +21,8 @@ export type DynamicToolResult = DynamicToolEntry | DynamicToolSet | null;
 /** `defineDynamic()` for `agent/tools/`: returns one tool, a map of them, or `null`. */
 export const defineDynamic = defineDynamicDefinition as DefineDynamic<DynamicToolResult>;
 
-/**
- * Symbol-based brand stamped by `defineTool` on every entry. Invisible
- * in IntelliSense, checked at runtime to enforce the wrapper and to
- * distinguish a single entry from a map of entries.
- */
 export const TOOL_BRAND = Symbol.for("eve:tool-brand");
 
-/** True when `value` carries the `defineTool` brand. */
 export function isBrandedToolEntry(value: unknown): boolean {
   return (
     typeof value === "object" &&

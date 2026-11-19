@@ -1,5 +1,5 @@
-import { firstOpenRequest } from "#channel/interaction-prompts.js";
-import { sessionTables, type SessionView } from "#protocol/session-projection/session-view.js";
+import { nextPrompt } from "#protocol/session-projection/public-view.js";
+import type { SessionView } from "#protocol/session-projection/session-view.js";
 import type { Interaction } from "#channel/interaction-prompts.js";
 
 /**
@@ -12,12 +12,6 @@ export interface PromptQueueState {
   shownPromptId?: string;
 }
 
-/**
- * A `committed` handler that calls `show` with the request a typed reply answers now, each time
- * that request changes. It reads which requests are open from the tables as of the commit, so a
- * request that closed never shows, and one the channel failed to show is tried again at the next
- * commit. `show` returns `false` when it could not show the request.
- */
 export function promptQueue<TChannel extends { state: PromptQueueState }>(
   show: (channel: TChannel, request: Interaction) => Promise<boolean | void>,
 ) {
@@ -25,7 +19,7 @@ export function promptQueue<TChannel extends { state: PromptQueueState }>(
     _line: unknown,
     { channel, view }: { readonly channel: TChannel; readonly view: SessionView },
   ): Promise<void> => {
-    const first = firstOpenRequest(sessionTables(view));
+    const first = nextPrompt(view);
     if (first === undefined) {
       delete channel.state.shownPromptId;
       return;

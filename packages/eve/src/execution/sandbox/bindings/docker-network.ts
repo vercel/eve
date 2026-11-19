@@ -2,10 +2,6 @@ import type { DockerCli } from "#execution/sandbox/bindings/docker-cli.js";
 import { expectDockerSuccess } from "#execution/sandbox/bindings/docker-utils.js";
 import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
 
-/**
- * Rejects a policy Docker cannot enforce, so a restrictive one never runs
- * with open egress instead.
- */
 export function assertDockerNetworkPolicy(
   policy: SandboxNetworkPolicy,
 ): asserts policy is "allow-all" | "deny-all" {
@@ -18,11 +14,6 @@ export function assertDockerNetworkPolicy(
   }
 }
 
-/**
- * Applies a coarse-grained run-time network policy by attaching or
- * detaching the container's networks. Domain-level policies and
- * credential brokering require the firewall on the Vercel provider.
- */
 export async function setDockerNetworkPolicy(
   cli: DockerCli,
   containerName: string,
@@ -55,11 +46,6 @@ export async function setDockerNetworkPolicy(
   }
 
   if (!networks.includes("bridge")) {
-    // A container created with `--network none` sits on the special
-    // "none" network, which Docker refuses to combine with any other
-    // network ("container cannot be connected to multiple networks
-    // with one of the networks in private (none) mode") — detach it
-    // before attaching the bridge.
     if (networks.includes("none")) {
       expectDockerSuccess(
         await cli.run(["network", "disconnect", "--force", "none", containerName]),

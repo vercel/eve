@@ -5,7 +5,13 @@ import { createScopes, type LiveOperation } from "./core/scopes.js";
 import { currentAgentHandoff } from "./core/delegation.js";
 import { intersectCapture } from "./core/activation.js";
 import { traceSnapshot } from "./core/snapshot.js";
-import { operationHandle, wrappedOperation, type TurnOperation } from "./operations.js";
+import {
+  operationHandle,
+  wrappedOperation,
+  type DecisionOperation,
+  type TurnOperation,
+  type WrappedOperation,
+} from "./operations.js";
 import type {
   AgentTelemetry,
   Attributes,
@@ -21,6 +27,7 @@ import type {
   TraceReference,
 } from "./core/types.js";
 
+/** Options for {@link createAgentRun}. */
 export interface AgentRunOptions {
   /** Span output and context propagation. Defaults to the global OpenTelemetry provider. */
   readonly telemetry?: AgentTelemetry;
@@ -33,13 +40,16 @@ export interface AgentRunOptions {
   readonly checkpointer?: TraceCheckpointer;
   /** Defaults to the AI SDK content serializer. */
   readonly serializer?: ContentSerializer;
+  /** Receives tracing failures, which never reach the traced work. See {@link TraceErrorHandler}. */
   readonly onError?: TraceErrorHandler;
 }
 
+/** Describes one agent turn for `AgentRun.turn`: its run identity, sequence, and optional capture, lineage, and trace placement. */
 export interface TurnInput {
   readonly identity: RunIdentity;
   /** Names the invocation span. Omit for an anonymous agent. */
   readonly agentName?: string;
+  /** Position of this turn within the run. */
   readonly sequence: number;
   readonly framework?: FrameworkIdentity;
   readonly capture?: CaptureDecision;
@@ -67,6 +77,7 @@ export interface TurnInput {
   readonly context?: ExecutionContext;
 }
 
+/** Identifies a saved durable turn for `AgentRun.resume`. */
 export interface ResumeInput {
   readonly identity: RunIdentity;
   readonly context?: ExecutionContext;
@@ -87,40 +98,62 @@ interface MemoryInput<T> {
   };
 }
 
+/** One call to a decision model, such as choosing a model for a turn or reviewing an action. */
+export interface DecisionInput {
+  readonly modelId: string;
+  readonly provider?: string;
+  /** What the decision is for, such as `model-selection` or `tool-approval`. */
+  readonly purpose?: string;
+  /** Omit for a decision made outside any run. */
+  readonly identity?: RunIdentity;
+  readonly agentName?: string;
+  /** Defaults to the active operation's capture, or metadata only. */
+  readonly capture?: CaptureDecision;
+  /**
+   * Parent used when no operation is active, such as a turn's reserved span while its model is
+   * chosen. The active span is the parent instead when it belongs to the same trace.
+   */
+  readonly parent?: TraceReference;
+  readonly context?: ExecutionContext;
+}
+
+/**
+ * Traces agent execution: start turns, resume saved durable turns, record memory and decision calls,
+ * and flush or shut down the telemetry. Create one with {@link createAgentRun}.
+ */
 export interface AgentRun {
-  turn: import("./operations.js").WrappedOperation<TurnInput, TurnOperation>;
+  turn: WrappedOperation<TurnInput, TurnOperation>;
   /** Returns a saved durable turn, without starting one. */
   resume(input: ResumeInput): Promise<TurnOperation | undefined>;
   memory: AgentMemoryTracing;
+  decision: WrappedOperation<DecisionInput, DecisionOperation>;
   forceFlush(): Promise<void>;
   shutdown(): Promise<void>;
 }
+/** Records a memory search or write as one memory span around `execute`, under the active operation unless `parent` is given. */
 export interface AgentMemoryTracing {
   search<T>(data: MemoryInput<T>, execute: () => T | PromiseLike<T>): Promise<T>;
   write<T>(data: MemoryInput<T>, execute: () => T | PromiseLike<T>): Promise<T>;
 }
 
 const METADATA_ONLY: CaptureDecision = { emit: true, recordInputs: false, recordOutputs: false };
+const NOT_SAMPLED: CaptureDecision = { emit: false, recordInputs: false, recordOutputs: false };
 const LIVE_TURNS = 1000;
 
 interface LiveTurn {
   readonly root: LiveOperation;
-  /** Token of the last checkpoint this process wrote. */
   revision: string | undefined;
-  /**
-   * Every checkpoint token this tree wrote. A checkpoint store scoped to an
-   * execution context (eve keeps it in the serialized workflow context) can
-   * hand a concurrent hook an older checkpoint of this same tree; that is not
-   * another process's write and must not fork the tree.
-   */
   readonly revisions: Set<string>;
-  /** Replaced by another process's checkpoint: the tree still records spans but no longer persists. */
   retired: boolean;
   writes: number;
 }
 
 const REVISIONS_PER_TURN = 10000;
 
+/**
+ * Creates an {@link AgentRun} that records agent turns, attempts, model calls, and tool calls as spans.
+ * Pass a `checkpointer` to make turns durable across processes.
+ */
 export function createAgentRun(input: AgentRunOptions): AgentRun {
   const telemetry = input.telemetry ?? otelTelemetry();
   const checkpointer = input.checkpointer;
@@ -139,8 +172,6 @@ export function createAgentRun(input: AgentRunOptions): AgentRun {
     durable: checkpointer !== undefined,
     onError: input.onError,
   });
-  // Turns hydrated in this process, so concurrent hooks share one tree. The
-  // checkpoint stays authoritative: another process's write replaces the entry.
   const live = new Map<string, Promise<LiveTurn | undefined>>();
 
   function turnKey(identity: RunIdentity): string {
@@ -148,7 +179,6 @@ export function createAgentRun(input: AgentRunOptions): AgentRun {
     return ["turn", identity.runId, identity.turnId].map(encodeURIComponent).join(":");
   }
 
-  /** Writes are serialized so a slow store never persists an older tree last. */
   function persistence(key: string, entry: () => LiveTurn | undefined) {
     let queue = Promise.resolve();
     return () => {
@@ -203,13 +233,9 @@ export function createAgentRun(input: AgentRunOptions): AgentRun {
         (savedRevision !== undefined && cached.revisions.has(savedRevision)))
     ) {
       if (context !== undefined) cached.root.useContext(context);
-      // A re-entry may decline content the cached turn was allowed to record.
       if (capture !== undefined) cached.root.narrow(capture);
       return cached;
     }
-    // Another process wrote this checkpoint, so it replaces the cached tree.
-    // Callers may still hold the cached tree's operations; keep them from
-    // persisting their older view over the newer checkpoint.
     if (cached !== undefined) cached.retired = true;
     let entry: LiveTurn | undefined;
     const onChange = persistence(key, () => entry);
@@ -353,8 +379,32 @@ export function createAgentRun(input: AgentRunOptions): AgentRun {
     return value;
   }
 
+  async function decision(data: DecisionInput): Promise<DecisionOperation> {
+    const active = telemetry.active();
+    const owner = active?.reference ?? data.parent;
+    const span = telemetry.activeSpan?.(data.context);
+    const parent = owner === undefined || span?.traceId === owner.traceId ? span : owner;
+    const sampled = parent === undefined || (parent.traceFlags & 1) !== 0;
+    const live = await scopes.start({
+      identity: {
+        ...(data.identity ?? { conversationId: "", runId: "", turnId: "" }),
+        agentName: data.agentName,
+      },
+      key: `decision:${randomUUID()}`,
+      capture: sampled ? (data.capture ?? active?.capture ?? METADATA_ONLY) : NOT_SAMPLED,
+      parent,
+      context: data.context,
+      data: {
+        type: "decision",
+        options: { modelId: data.modelId, provider: data.provider, purpose: data.purpose },
+      },
+    });
+    return operationHandle(live, live.record().data, input.onError);
+  }
+
   return {
     turn: wrappedOperation(turnOperation, undefined, input.onError),
+    decision: wrappedOperation(decision, undefined, input.onError),
     resume,
     memory: {
       search: (data, execute) => memory("search_memory", data, execute),

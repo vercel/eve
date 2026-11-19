@@ -1,4 +1,3 @@
-import type { LanguageModel } from "ai";
 import { handleStepResult } from "#harness/step/after-model.js";
 
 import { HistoryStateKey } from "#context/keys.js";
@@ -7,6 +6,9 @@ import { stepCatalog } from "#definitions/step.js";
 import type { GenerationSteering } from "#harness/generation-steering.js";
 import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
 import { enforceBudget, humanInputContext } from "#harness/hitl/index.js";
+import { failModelCredential, pauseForModelSignIn } from "./credential-failure.js";
+import { isScopedAuthorizationRequiredError } from "#runtime/connections/scoped-authorization.js";
+import { changeHistory } from "#harness/session-machine/history.js";
 import {
   requestRun as requestRunFact,
   startRun as startRunFact,
@@ -29,36 +31,26 @@ import {
 } from "#harness/step/prompt.js";
 import type { HarnessStepResult } from "#harness/step-hooks.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
+import { throwIfSessionStreamDead } from "#harness/session-stream-write-error.js";
 import type { StepResult } from "#harness/types.js";
 import { stepReference } from "#harness/step/context.js";
 import { ModelCaller } from "./call.js";
+import { type CredentialedModel, credentialedModel } from "./credential.js";
+import { credentialErrorIn, ModelCredentialFailure, refusesCredential } from "./errors.js";
 import { type EndsTurnTools, endsTurnTools, frameworkToolNames } from "./tools.js";
 import { reportModelCallFailure } from "./failure.js";
 import { resolveEffectiveRuntimeModel } from "./model.js";
 import { recordModelUsage } from "./usage.js";
 
-/** A model step's response, for the session to act on. */
 export interface ModelResponse {
-  /** The step's catalog, which decides what each of the response's calls runs. */
   readonly catalog: StepCatalog;
-  /** How many prompt messages the model read, when no client context was spliced in. */
   readonly durableModelPromptMessageCount?: number;
-  /** Tools that can end the turn in this step, with their `endsTurn` option. */
   readonly endsTurnTools: EndsTurnTools;
   readonly promptMessages: readonly HarnessModelMessage[];
   readonly requestEnvelopeTokens?: number;
   readonly result: HarnessStepResult;
 }
 
-/**
- * One model step of the open turn: the prompt it reads, the model that serves it, and the call
- * with its retries and recoveries. The response handler applies what it returned.
- *
- * The session's dynamic values are evaluated first, with the conversation the call reads, which
- * fixes its model, tools, and context. Then the turn's input joins history, so a call that fails
- * keeps it, and the budget gate passes. Then the turn requests a model run, and the run starts as
- * its provider call begins.
- */
 export async function runModelStep(
   step: Step,
   input: {
@@ -67,18 +59,18 @@ export async function runModelStep(
   },
 ): Promise<StepResult> {
   const { generation } = input;
-  const failed = await prepareModelCall(step, previewPrompt(step, input.turn));
+  const prepared = await previewPrompt(step, input.turn);
+  const failed = await prepareModelCall(step, prepared);
   if (failed !== undefined) return failed;
-  const prompt = await commitTurnInput(step, input.turn);
-  // Over budget, the model doesn't run: the step's messages park with the prompt.
+  const prompt = commitTurnInput(step, prepared);
   const overBudget = await enforceBudget(step, prompt.messages);
   if (overBudget !== undefined) return overBudget;
 
-  const run = await requestRun(step, prompt);
-  if ("failed" in run) return run.failed;
+  const resolved = await resolveModel(step);
+  if ("failed" in resolved) return resolved.failed;
+  const requested = await requestRun(step, prompt);
+  if (requested !== undefined) return requested;
   const projectedMessages = projectPrompt(prompt);
-  // Dynamic tools and subagents were evaluated before the run was requested, so the step's calls
-  // resolve once, against this catalog.
   const catalog = await stepCatalog(step);
   step.frameworkToolNames = frameworkToolNames(catalog);
   const { approvalMemory } = humanInputContext(step);
@@ -86,10 +78,11 @@ export async function runModelStep(
     approvalMemory,
     catalog,
     generation,
-    model: run.model,
+    model: resolved.model,
+    renewCredential: resolved.renew,
     newRun: async () => {
       const next = await requestRun(step, prompt);
-      if ("failed" in next) throw new Error("The model run's replacement found no model.");
+      if (next !== undefined) throw new Error("eve couldn't request the replacement model run.");
     },
     startRun: async (attempt) => await startRun(step, attempt),
     projectedMessages,
@@ -100,22 +93,38 @@ export async function runModelStep(
   try {
     result = await caller.call();
   } catch (error) {
+    throwIfSessionStreamDead(error);
     throwIfTurnAborted(step.config.abortSignal);
+    const credentialError = credentialErrorIn(error);
+    if (credentialError !== undefined) {
+      if (generation.interrupted) return caller.steered();
+      if (credentialError instanceof ModelCredentialFailure)
+        return await failModelCredential(
+          step,
+          credentialError.code,
+          credentialError.cause,
+          credentialError.scoped,
+        );
+      return await pauseForModelSignIn(step, credentialError, async () => {
+        const messages = await caller.abandon();
+        step.session = changeHistory(step.session, { extend: messages });
+      });
+    }
     const compactionFailed = await caller.failIfCompactionFailed();
     if (compactionFailed !== undefined) return compactionFailed;
     if (generation.interrupted) return caller.steered();
-    return reportModelCallFailure(step, error);
+    if (resolved.scoped !== undefined && refusesCredential(error))
+      return await failModelCredential(step, "MODEL_AUTHORIZATION_FAILED", error, resolved.scoped);
+    return reportModelCallFailure(step, error, caller.takeUnkeptUsage());
   }
 
-  await recordModelUsage(step, { model: run.model, tools: catalog.advertised.size });
-  caller.clearInterruptedUsage();
+  await recordModelUsage(step, { model: resolved.model, tools: catalog.advertised.size });
 
   let stepResult: StepResult;
   try {
     generation.check();
     stepResult = await handleStepResult(step, {
       catalog,
-      // Usage measures what the model read only when no client context was spliced in.
       durableModelPromptMessageCount:
         prompt.clientContext === undefined || prompt.clientContext.messages.length === 0
           ? caller.modelMessages.length
@@ -126,44 +135,57 @@ export async function runModelStep(
       result,
     });
   } catch (error) {
+    throwIfSessionStreamDead(error);
     throwIfTurnAborted(step.config.abortSignal);
     if (generation.interrupted) return caller.steered();
     throw error;
   }
-  // The returned session now owns these messages; persist their baseline with it.
   step.ctx.set(HistoryStateKey, caller.request.historyState);
   return stepResult;
 }
 
-/**
- * The turn requests a model run, which the dynamic model evaluated for it serves, or the agent's
- * model. No model fails the session.
- */
-async function requestRun(
+async function resolveModel(
   step: Step,
-  prompt: Prompt,
-): Promise<{ readonly model: LanguageModel } | { readonly failed: StepResult }> {
+): Promise<CredentialedModel | { readonly failed: StepResult }> {
+  let resolved: Awaited<ReturnType<typeof resolveEffectiveRuntimeModel>>;
+  try {
+    resolved = await resolveEffectiveRuntimeModel(step);
+  } catch (error) {
+    return { failed: await failModelSelection(step, error) };
+  }
+  step.model = resolved.choice;
+  try {
+    return await credentialedModel(resolved.model);
+  } catch (error) {
+    const credentialError = credentialErrorIn(error);
+    if (credentialError === undefined) throw error;
+    return { failed: await failOrAsk(step, credentialError) };
+  }
+}
+
+async function requestRun(step: Step, prompt: Prompt): Promise<StepResult | undefined> {
   try {
     await step.apply(
       requestRunFact({ turnId: activeTurnId(step.position()) }, nextRunId(step.view().projection)),
       validateHarnessModelMessages(withClientContext(prompt)),
     );
   } catch (error) {
-    return { failed: await failBoundaryEvent(step, error) };
+    return await failBoundaryEvent(step, error);
   }
-  try {
-    const resolved = await resolveEffectiveRuntimeModel(step);
-    step.model = resolved.choice;
-    return { model: resolved.model };
-  } catch (error) {
-    return { failed: await failModelSelection(step, error) };
-  }
+  return undefined;
 }
 
-/** The run's model is chosen and its provider call begins. */
 async function startRun(step: Step, attempt: number): Promise<void> {
   const runId = step.position().runId;
   if (runId === undefined) return;
   const modelId = stepReference(step).id;
   await step.apply(startRunFact({ attempt, modelId, runId }));
+}
+
+async function failOrAsk(
+  step: Step,
+  error: NonNullable<ReturnType<typeof credentialErrorIn>>,
+): Promise<StepResult> {
+  if (isScopedAuthorizationRequiredError(error)) return await pauseForModelSignIn(step, error);
+  return await failModelCredential(step, error.code, error.cause, error.scoped);
 }

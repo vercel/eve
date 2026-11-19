@@ -29,7 +29,6 @@ import type { EvalReporter } from "#evals/runner/reporters/types.js";
 import { resolveEvalTargetHandle } from "#evals/target.js";
 import type { EveEval, EveEvalTargetHandle } from "#evals/types.js";
 
-/** Parsed Commander options accepted by {@link runEvalCommand}. */
 export interface EvalCliOptions {
   url?: string;
   timeout?: string;
@@ -48,15 +47,6 @@ export interface EvalCliOptions {
 
 type EvalCliLogger = { log(message: string): void; error(message: string): void };
 
-/**
- * Runs the `eve eval` command with already-parsed Commander options.
- *
- * Exit codes: `0` when every executed eval passed its gate assertions (and
- * soft thresholds under `--strict`), `1` when any eval failed, `2` for runner
- * or configuration errors (no evals discovered, no evals matching `--tag`).
- * When `--exclude-tag` removes every matching eval the run succeeds with
- * nothing executed.
- */
 export async function runEvalCommand(
   evalIds: readonly string[],
   options: EvalCliOptions,
@@ -97,17 +87,12 @@ export async function runEvalCommand(
 
   const evaluations = filterEvalsByTags({ evaluations: included, includeTags: [], excludeTags });
 
-  // List mode reports the post-exclusion set — even when it is empty — so
-  // suite runners can probe "does anything run here?" with `--list --json`.
   if (options.list === true) {
     printEvalList(evaluations, options.json === true, logger);
     return;
   }
 
   if (evaluations.length === 0) {
-    // Every matching eval was excluded. Unlike an include filter with no
-    // matches, this is a legitimate "nothing applies to this run" outcome
-    // (e.g. a world suite excluding real-model evals), so it succeeds.
     logger.log(
       `All ${included.length} matching evals are excluded by tags (${excludeTags.join(", ")}); nothing to run.`,
     );
@@ -136,7 +121,6 @@ export async function runEvalCommand(
     return;
   }
 
-  // Resolve target
   let devServer: DevelopmentServer | undefined;
   let devStateDirectory: string | undefined;
   let target: EveEvalTargetHandle;
@@ -163,14 +147,9 @@ export async function runEvalCommand(
         url: options.url,
       });
     } else {
-      // Set before the server boots, because a provider's `setup` reads it
-      // once at startup and never again.
       const evaluationRunId = randomUUID();
       process.env[EVE_EVALUATION_ENV_FLAG] = "1";
       process.env[EVE_EVALUATION_RUN_ID_ENV] = evaluationRunId;
-      // The eval server owns its runtime generations, Workflow data, and
-      // server record, so it runs beside an `eve dev` session for the same
-      // agent instead of refusing to start or swapping that session's state.
       devStateDirectory = await createEvalStateDirectory(appRoot, evaluationRunId);
       process.env[EVE_DEV_STATE_DIR_ENV] = devStateDirectory;
       devServer = createDevelopmentServer(appRoot, {
@@ -215,9 +194,6 @@ export async function runEvalCommand(
       logger.log(JSON.stringify(summary, null, 2));
     }
 
-    // Check failures (which include execution errors) always fail the exit
-    // code. Low scores are soft data unless --strict turns threshold misses
-    // into failures.
     const hasFailures = summary.failed > 0;
     const hasStrictMisses = options.strict === true && summary.scored > 0;
     if (hasFailures || hasStrictMisses) {
@@ -276,11 +252,6 @@ async function flushStream(stream: NodeJS.WriteStream): Promise<void> {
   });
 }
 
-// ---------------------------------------------------------------------------
-// Option parsing
-// ---------------------------------------------------------------------------
-
-/** Parses an integer CLI option that must be >= 1 (e.g. `--max-concurrency`, `--repeat`). */
 function parsePositiveInteger(value: string | undefined, flag: string): number | undefined {
   if (value === undefined) return undefined;
   const parsed = Number(value);
@@ -290,7 +261,6 @@ function parsePositiveInteger(value: string | undefined, flag: string): number |
   return parsed;
 }
 
-/** Parses an integer CLI option that must be >= 0 (e.g. `--timeout`). */
 function parseNonNegativeInteger(value: string | undefined, flag: string): number | undefined {
   if (value === undefined) return undefined;
   const parsed = Number(value);
@@ -299,10 +269,6 @@ function parseNonNegativeInteger(value: string | undefined, flag: string): numbe
   }
   return parsed;
 }
-
-// ---------------------------------------------------------------------------
-// --list
-// ---------------------------------------------------------------------------
 
 function printEvalList(
   evaluations: readonly EveEval[],

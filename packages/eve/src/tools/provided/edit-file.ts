@@ -5,20 +5,27 @@ import { defineJsonSchema, prepareJsonSchema } from "#tools/schema.js";
 import { frameworkTool } from "./framework-tool.js";
 import { refreshReadFileStamp } from "./write-file.js";
 
-// Ported from pi's `edit` tool (packages/coding-agent/src/core/tools/edit.ts and
-// edit-diff.ts in badlogic/pi-mono v1.5.0): the same input, matching, errors,
-// and model text, running against the agent's sandbox.
+/*!
+ * Ported from pi's `edit` tool (packages/coding-agent/src/core/tools/edit.ts and
+ * edit-diff.ts in badlogic/pi-mono v1.5.0) under the MIT License.
+ */
 
+/**
+ * One targeted replacement in an `edit_file` call: exact text in the original file and its
+ * replacement.
+ */
 export interface EditFileToolEdit {
   newText: string;
   oldText: string;
 }
 
+/** Input to the provided `edit_file` tool: the file to edit and the replacements to apply. */
 export interface EditFileToolInput {
   edits: EditFileToolEdit[];
   path: string;
 }
 
+/** Result of the provided `edit_file` tool: the edited path and how many replacements were made. */
 export interface EditFileToolOutput {
   /** The path as the model gave it. */
   path: string;
@@ -30,8 +37,6 @@ const GUIDELINES = [
   "Each edits[].oldText must exactly and uniquely match the original file. Keep matches short and non-overlapping; merge nearby changes without including large unchanged regions.",
 ];
 
-// Before validation, repairs the shapes models send instead: `edits` as a JSON
-// string or a single object, and a top-level `oldText`/`newText` pair.
 const EDIT_FILE_INPUT_SCHEMA = prepareJsonSchema<EditFileToolInput>(
   {
     type: "object",
@@ -109,7 +114,6 @@ export const editFile: ToolDefinition<EditFileToolInput, EditFileToolOutput> = f
           throw new Error(`Could not edit file: ${path}. Error code: ENOENT.`);
         }
 
-        // The model will not include an invisible BOM in oldText.
         const { bom, text: content } = splitBom(decodeUtf8(buffer, path));
         const originalEnding = detectLineEnding(content);
         const newContent = applyEditsToNormalizedContent(normalizeToLF(content), edits, path);
@@ -120,7 +124,6 @@ export const editFile: ToolDefinition<EditFileToolInput, EditFileToolOutput> = f
         if (mode !== undefined && mode !== DEFAULT_FILE_MODE) {
           await restoreFileMode(sandbox, absolutePath, mode);
         }
-        // readTextFile drops the BOM, so write_file compares against the text without it.
         refreshReadFileStamp(absolutePath, content, written);
         return { path, replacements: edits.length };
       });
@@ -132,13 +135,10 @@ export const editFile: ToolDefinition<EditFileToolInput, EditFileToolOutput> = f
 
 export default editFile;
 
-// Some sandboxes, such as Vercel's, give every written file this mode, so an
-// edit restores any other mode the file had, like an executable bit.
 const DEFAULT_FILE_MODE = "644";
 
 async function readFileMode(sandbox: SandboxSession, path: string): Promise<string | undefined> {
   try {
-    // -L reads the target's mode: chmod follows a symlink, so a link's own 777 must not reach it.
     const result = await sandbox.run({ command: `stat -L -c %a -- ${quoteShell(path)}` });
     const mode = result.stdout.trim();
     return result.exitCode === 0 && /^[0-7]{3,4}$/u.test(mode) ? mode : undefined;
@@ -147,23 +147,18 @@ async function readFileMode(sandbox: SandboxSession, path: string): Promise<stri
   }
 }
 
-// Best effort: the edit already landed, so a failed chmod must not report it as failed.
 async function restoreFileMode(sandbox: SandboxSession, path: string, mode: string): Promise<void> {
   try {
     await sandbox.run({ command: `chmod ${mode} -- ${quoteShell(path)}` });
-  } catch {
-    // The file keeps the sandbox's default mode.
-  }
+  } catch {}
 }
 
 function quoteShell(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
-// Keeps a leading BOM as U+FEFF so it can be split off and written back.
 const UTF8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 
-/** Rejects non-UTF-8 files, which decoding and writing back would corrupt. */
 function decodeUtf8(buffer: Uint8Array, path: string): string {
   try {
     return UTF8.decode(buffer);
@@ -176,8 +171,6 @@ function prepareEditArguments(input: unknown): unknown {
   if (!isRecord(input)) return input;
   const args: Record<string, unknown> = { ...input };
 
-  // Some models send edits as a JSON string instead of an array, others a
-  // single edit object instead of a one-element array.
   if (typeof args.edits === "string") {
     try {
       const parsed: unknown = JSON.parse(args.edits);
@@ -207,10 +200,6 @@ const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
 
 const HOME_PREFIX = /^(?:~|\$HOME)(?=\/|$)/u;
 
-/**
- * Resolves like pi: Unicode spaces, a leading `@`, `~`, and `file://` URLs,
- * then from the workspace root. `$HOME` also works, as in eve's other file tools.
- */
 async function resolveEditPath(sandbox: SandboxSession, path: string): Promise<string> {
   let normalized = path.replace(UNICODE_SPACES, " ");
   if (normalized.startsWith("@")) normalized = normalized.slice(1);
@@ -228,7 +217,6 @@ async function resolveEditPath(sandbox: SandboxSession, path: string): Promise<s
 
 const fileMutationQueues = new Map<string, Promise<void>>();
 
-/** Serializes edits to one file; edits to different files still run in parallel. */
 async function withFileMutationQueue<T>(key: string, run: () => Promise<T>): Promise<T> {
   const previous = fileMutationQueues.get(key) ?? Promise.resolve();
   let release!: () => void;
@@ -268,23 +256,16 @@ function restoreLineEndings(text: string, ending: "\r\n" | "\n"): string {
   return ending === "\r\n" ? text.replace(/\n/g, "\r\n") : text;
 }
 
-/**
- * Normalizes text for fuzzy matching: strips trailing whitespace from each
- * line and maps smart quotes, Unicode dashes, and special spaces to ASCII.
- */
 function normalizeForFuzzyMatch(text: string): string {
-  return (
-    text
-      .normalize("NFKC")
-      .split("\n")
-      .map((line) => line.trimEnd())
-      .join("\n")
-      .replace(/[\u2018\u2019\u201A\u201B]/g, "'")
-      .replace(/[\u201C\u201D\u201E\u201F]/g, '"')
-      // U+2010 hyphen through U+2015 horizontal bar, and U+2212 minus.
-      .replace(/[\u2010\u2011\u2012\u2013\u2014\u2015\u2212]/g, "-")
-      .replace(/[\u00A0\u2002-\u200A\u202F\u205F\u3000]/g, " ")
-  );
+  return text
+    .normalize("NFKC")
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .join("\n")
+    .replace(/[\u2018\u2019\u201A\u201B]/g, "'")
+    .replace(/[\u201C\u201D\u201E\u201F]/g, '"')
+    .replace(/[\u2010\u2011\u2012\u2013\u2014\u2015\u2212]/g, "-")
+    .replace(/[\u00A0\u2002-\u200A\u202F\u205F\u3000]/g, " ");
 }
 
 interface LineSpan {
@@ -349,11 +330,6 @@ function applyReplacements(content: string, replacements: TextReplacement[], off
   return result;
 }
 
-/**
- * Applies replacements matched against a fuzzy-normalized `baseContent` to
- * `originalContent`: only the lines a replacement touches are rewritten from
- * the normalized base, and every other line keeps its original bytes.
- */
 function applyReplacementsPreservingUnchangedLines(
   originalContent: string,
   baseContent: string,
@@ -406,7 +382,6 @@ interface FuzzyMatchResult {
   usedFuzzyMatch: boolean;
 }
 
-/** Finds oldText exactly, then in fuzzy-normalized space, where offsets refer to normalized content. */
 function fuzzyFindText(content: string, oldText: string): FuzzyMatchResult {
   const exactIndex = content.indexOf(oldText);
   if (exactIndex !== -1) {
@@ -470,12 +445,6 @@ function getNoChangeError(path: string, totalEdits: number): Error {
   return new Error(`No changes made to ${path}. The replacements produced identical content.`);
 }
 
-/**
- * Applies exact-text replacements to LF-normalized content. Every edit is
- * matched against the same original content. When any edit needs fuzzy
- * matching, all of them are matched in fuzzy-normalized space and the touched
- * lines are overlaid onto the original, so unchanged lines keep their bytes.
- */
 function applyEditsToNormalizedContent(
   normalizedContent: string,
   edits: readonly EditFileToolEdit[],

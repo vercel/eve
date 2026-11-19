@@ -1,20 +1,10 @@
-/**
- * The dev watcher's rebuild log line grammar. This module owns both sides of
- * the contract: the formatting used by `dev-authored-source-watcher.ts` to
- * print rebuild lifecycle lines, and the parsing the dev TUI uses to condense
- * those lines into one in-place status row. Keeping format and parse in one
- * file is what stops the two from drifting apart.
- */
-
 import { isAbsolute, relative, sep } from "node:path";
 
-/** One filesystem event reported by the authored-source watcher. */
 export interface WatcherChangeEvent {
   readonly event: string;
   readonly path: string;
 }
 
-/** A rebuild lifecycle update parsed back out of one dev-server log line. */
 export type DevRebuildLogUpdate =
   | { kind: "rebuilding"; events: WatcherChangeEvent[]; more: number }
   | { kind: "failed"; message: string }
@@ -28,12 +18,6 @@ export const AUTHORED_ARTIFACTS_UPDATED_LOG_LINE = "[eve:dev] authored artifacts
 export const STRUCTURAL_RELOAD_LOG_LINE =
   "[eve:dev] structural change detected, reloading Nitro worker...";
 
-/**
- * Formats the watcher's "change detected" line, e.g.
- * `[eve:dev] change detected (1 event: change agent/agent.ts), rebuilding
- * authored artifacts...`. Paths inside the app root display relative to it;
- * paths outside it stay absolute.
- */
 export function formatChangeDetectedLogLine(
   appRoot: string,
   events: readonly WatcherChangeEvent[],
@@ -46,11 +30,6 @@ const CHANGE_DETECTED_PATTERN =
 const MORE_EVENTS_PATTERN = /^\+(\d+) more$/u;
 const REBUILD_FAILED_PATTERN = /^\[eve:dev\] rebuild (?:failed|queue error): (.+)$/u;
 
-/**
- * Recognizes one rebuild lifecycle line and returns its structured form, or
- * `undefined` for every other log line. The inverse of
- * {@link formatChangeDetectedLogLine} and the two line constants above.
- */
 export function parseDevRebuildLogLine(line: string): DevRebuildLogUpdate | undefined {
   if (line === AUTHORED_ARTIFACTS_UPDATED_LOG_LINE) return { kind: "rebuilt" };
   if (line === STRUCTURAL_RELOAD_LOG_LINE) return { kind: "reloading" };

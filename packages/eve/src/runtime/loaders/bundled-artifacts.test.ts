@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { createCompileMetadata, resolveCompilerArtifactPaths } from "#compiler/artifacts.js";
+import { fromCompiledBundle } from "#definitions/compiled-agent.js";
+import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { compileFromMemory } from "#internal/testing/compile-from-memory.js";
 import {
   readBundledCompiledArtifacts,
@@ -149,6 +151,32 @@ describe("withBundledCompiledArtifacts", () => {
       await expect(
         getCompiledRuntimeAgentBundle({ compiledArtifactsSource: source }),
       ).resolves.not.toBe(firstBundle);
+    });
+  });
+
+  it("reuses a node's session agent until the installed snapshot changes", async () => {
+    const compiled = await compileFromMemory({
+      agentRoot: "/tmp/app/agent",
+      appRoot: "/tmp/app",
+      model: "openai/gpt-5.4",
+      name: "test-agent",
+    });
+    const lookup = { compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource() };
+    const node = { ...lookup, nodeId: ROOT_RUNTIME_AGENT_NODE_ID };
+    const session = createRuntimeSession("node-bundles");
+
+    await withRuntimeSession(session, async () => {
+      setRuntimeSessionCompiledArtifacts(session, compiled);
+      const agent = fromCompiledBundle(await getCompiledRuntimeAgentBundle(node));
+
+      expect(fromCompiledBundle(await getCompiledRuntimeAgentBundle(node))).toBe(agent);
+      expect(fromCompiledBundle(await getCompiledRuntimeAgentBundle(lookup))).not.toBe(agent);
+
+      setRuntimeSessionCompiledArtifacts(session, {
+        manifest: { ...compiled.manifest },
+        moduleMap: { ...compiled.moduleMap },
+      });
+      expect(fromCompiledBundle(await getCompiledRuntimeAgentBundle(node))).not.toBe(agent);
     });
   });
 });

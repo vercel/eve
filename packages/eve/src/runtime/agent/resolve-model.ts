@@ -21,13 +21,16 @@ import {
   shouldMockAuthoredRuntimeModels,
 } from "#runtime/agent/mock-model-adapter.js";
 import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
+import { type DefinedModel, isDefinedModel } from "#models/definition.js";
+import { selectionModel } from "#models/options.js";
+import { readAgentToolModels } from "#tools/agent-models.js";
 import {
   isDynamicModelDefinition,
   type AgentModelOptionsDefinition,
   type PublicAgentDynamicModelDefinition,
   type PublicAgentDynamicModelResult,
   type PublicAgentModelSelectionDefinition,
-  type PublicAgentStaticModelDefinition,
+  type PublicAgentTurnModelDefinition,
 } from "#shared/agent-definition.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import {
@@ -39,7 +42,6 @@ import {
 
 export { shouldMockAuthoredRuntimeModels };
 
-/** A deterministic authoring or selection error that retrying cannot repair. */
 export class InvalidRuntimeModelSelectionError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
@@ -47,25 +49,22 @@ export class InvalidRuntimeModelSelectionError extends Error {
   }
 }
 
-/** Loaded compiled-module scope used to resolve source-backed runtime models. */
 export interface RuntimeModelResolutionScope {
   readonly moduleMap: CompiledModuleMap;
   readonly nodeId: string | undefined;
 }
 
+export type RuntimeModel = LanguageModel | DefinedModel;
+
 export interface ResolvedRuntimeModelSelection {
-  /** Live provider instance; absent for string selections, which resolve through the reference so mock/bootstrap adapters keep precedence. */
-  readonly model?: LanguageModel;
+  readonly model?: RuntimeModel;
   readonly reference: RuntimeModelReference;
 }
 
-/**
- * Resolves one runtime model reference into the active language model.
- */
 export async function resolveRuntimeModelReference(
   reference: RuntimeModelReference,
   scope?: RuntimeModelResolutionScope,
-): Promise<LanguageModel> {
+): Promise<RuntimeModel> {
   const bootstrapModel = resolveBootstrapRuntimeModel(reference);
 
   if (bootstrapModel !== null) {
@@ -82,6 +81,12 @@ export async function resolveRuntimeModelReference(
     return await loadSourceBackedRuntimeModelReference(reference, scope);
   }
 
+  if (reference.credentialed === true) {
+    throw new Error(
+      `The dynamic model function failed, and the "${reference.id}" model needs it to run on the caller's credential.`,
+    );
+  }
+
   return localGatewayModel(reference.id) ?? reference.id;
 }
 
@@ -90,7 +95,7 @@ async function loadSourceBackedRuntimeModelReference(
     readonly source: NonNullable<RuntimeModelReference["source"]>;
   },
   scope: RuntimeModelResolutionScope | undefined,
-): Promise<LanguageModel> {
+): Promise<RuntimeModel> {
   if (scope === undefined) {
     throw new Error(
       `Expected a compiled module-map scope to resolve the authored runtime model "${reference.id}".`,
@@ -103,6 +108,9 @@ async function loadSourceBackedRuntimeModelReference(
     moduleMap: scope.moduleMap,
     nodeId: scope.nodeId,
   });
+  if (reference.sourceModelOption !== undefined) {
+    return agentToolOptionModel(definition, reference.sourceModelOption, reference.source);
+  }
   const normalizedDefinition = normalizeAgentDefinition(
     definition,
     `Expected the authored agent config export "${reference.source.exportName ?? "default"}" from "${reference.source.logicalPath}" to match the public eve shape.`,
@@ -124,7 +132,27 @@ async function loadSourceBackedRuntimeModelReference(
     );
   }
 
-  return toAiSdkLanguageModel(model);
+  return isDefinedModel(model) ? model : toAiSdkLanguageModel(model);
+}
+
+function agentToolOptionModel(
+  definition: unknown,
+  key: string,
+  source: NonNullable<RuntimeModelReference["source"]>,
+): RuntimeModel {
+  const option = readAgentToolModels(definition)?.get(key);
+  if (option === undefined) {
+    throw new Error(
+      `The model option "${key}" this session chose is no longer one of the agent({ models }) options in "${source.logicalPath}".`,
+    );
+  }
+  const model = selectionModel(option.selection);
+  if (typeof model === "string") {
+    throw new Error(
+      `Expected the agent({ models }) option "${key}" in "${source.logicalPath}" to hold a provider model.`,
+    );
+  }
+  return isDefinedModel(model) ? model : toAiSdkLanguageModel(model);
 }
 
 function isSourceBackedRuntimeModelReference(
@@ -162,7 +190,6 @@ export async function loadDynamicRuntimeModelDefinition(input: {
 
 export async function resolveRuntimeModelSelection(input: {
   readonly durability: "durable" | "live";
-  /** The build's model metadata snapshot, read only when the selection omits its context window. */
   readonly modelMetadata: () => Promise<ModelMetadata>;
   readonly selection: PublicAgentDynamicModelResult;
 }): Promise<ResolvedRuntimeModelSelection> {
@@ -172,7 +199,7 @@ export async function resolveRuntimeModelSelection(input: {
     );
   }
 
-  let selection: PublicAgentModelSelectionDefinition;
+  let selection: PublicAgentModelSelectionDefinition<PublicAgentTurnModelDefinition>;
   let providerOptions: Record<string, JsonObject> | undefined;
   let promptCache: ReturnType<typeof normalizeAgentPromptCache> | undefined;
   try {
@@ -196,7 +223,7 @@ export async function resolveRuntimeModelSelection(input: {
   const selectedModel = selection.model;
   if (typeof selectedModel === "string") {
     const id = formatLanguageModelGatewayId(selectedModel);
-    if (promptCache !== undefined) throw gatewayPromptCacheError(id);
+    if (promptCache !== undefined && !isAnthropicGatewayId(id)) throw gatewayPromptCacheError(id);
     const contextWindowTokens =
       selection.modelContextWindowTokens ??
       (
@@ -208,25 +235,50 @@ export async function resolveRuntimeModelSelection(input: {
       reference: {
         id,
         contextWindowTokens,
+        promptCache,
         providerOptions,
         reasoning: selection.reasoning,
       },
     };
   }
 
-  validateRuntimeLanguageModel(selectedModel);
+  if (!isDefinedModel(selectedModel)) validateRuntimeLanguageModel(selectedModel);
   if (input.durability === "durable") {
     throw new InvalidRuntimeModelSelectionError(
-      'Dynamic model selection returned a provider object, but durable model selections must be serializable. Return a model id string, or use a "beforeModel" model resolver.',
+      "Dynamic model selection returned a model object, but durable model selections must be serializable. Return a model id string.",
     );
+  }
+
+  if (isDefinedModel(selectedModel)) {
+    const contextWindowTokens =
+      selection.modelContextWindowTokens ??
+      (
+        await lookupModelMetadata(input.modelMetadata, selectedModel.id, (metadata) =>
+          lookupCatalogModelBySlug(metadata, selectedModel.id),
+        )
+      ).contextWindowTokens;
+    return {
+      model: selectedModel,
+      reference: {
+        id: selectedModel.id,
+        contextWindowTokens,
+        credentialed: true,
+        promptCache,
+        providerOptions,
+        reasoning: selection.reasoning,
+      },
+    };
   }
 
   const formattedId = formatLanguageModelGatewayId(selectedModel);
   const routesThroughGateway = selectedModel.provider.split(".")[0] === "gateway";
-  if (promptCache !== undefined && routesThroughGateway) {
+  if (
+    promptCache !== undefined &&
+    routesThroughGateway &&
+    !isAnthropicGatewayId(selectedModel.modelId)
+  ) {
     throw gatewayPromptCacheError(formattedId);
   }
-  // A Gateway instance carries its Gateway model id, as a string selection does.
   let id = routesThroughGateway ? selectedModel.modelId : formattedId;
   let contextWindowTokens = selection.modelContextWindowTokens;
   if (contextWindowTokens === undefined) {
@@ -239,7 +291,6 @@ export async function resolveRuntimeModelSelection(input: {
             selectedModel.modelId,
           ),
     );
-    // A direct provider model takes its Gateway slug, as the compiler names a static one.
     if (!routesThroughGateway) id = entry.slug;
     contextWindowTokens = entry.contextWindowTokens;
   }
@@ -264,9 +315,13 @@ function invalidSelectionError(error: unknown): InvalidRuntimeModelSelectionErro
   );
 }
 
+function isAnthropicGatewayId(modelId: string): boolean {
+  return modelId.split("/")[0] === "anthropic";
+}
+
 function gatewayPromptCacheError(modelId: string): Error {
   return new InvalidRuntimeModelSelectionError(
-    `Dynamic model resolver returned modelOptions.promptCache for "${modelId}", which routes through AI Gateway. promptCache applies only to models eve calls directly; Gateway manages its own prompt caching through providerOptions.gateway.caching.`,
+    `Dynamic model resolver returned modelOptions.promptCache for "${modelId}", which routes through AI Gateway. promptCache applies to Anthropic models and to models eve calls directly; Gateway manages its own prompt caching for other models through providerOptions.gateway.caching.`,
   );
 }
 
@@ -292,7 +347,9 @@ const DYNAMIC_MODEL_SELECTION_KEYS = new Set([
   "reasoning",
 ]);
 
-function validateDynamicModelSelection(selection: PublicAgentModelSelectionDefinition): void {
+function validateDynamicModelSelection(
+  selection: PublicAgentModelSelectionDefinition<PublicAgentTurnModelDefinition>,
+): void {
   const unknownKeys = Object.keys(selection).filter(
     (key) => !DYNAMIC_MODEL_SELECTION_KEYS.has(key),
   );
@@ -325,15 +382,17 @@ function validateDynamicModelSelection(selection: PublicAgentModelSelectionDefin
 
 function normalizeDynamicModelSelection(
   result: NonNullable<PublicAgentDynamicModelResult>,
-): PublicAgentModelSelectionDefinition {
+): PublicAgentModelSelectionDefinition<PublicAgentTurnModelDefinition> {
   if (isModelSelectionDefinition(result)) {
     return result;
   }
 
-  return { model: result as PublicAgentStaticModelDefinition };
+  return { model: result as PublicAgentTurnModelDefinition };
 }
 
-function isModelSelectionDefinition(value: unknown): value is PublicAgentModelSelectionDefinition {
+function isModelSelectionDefinition(
+  value: unknown,
+): value is PublicAgentModelSelectionDefinition<PublicAgentTurnModelDefinition> {
   return (
     typeof value === "object" &&
     value !== null &&
@@ -345,7 +404,7 @@ function isModelSelectionDefinition(value: unknown): value is PublicAgentModelSe
 function validateRuntimeLanguageModel(model: unknown): asserts model is LanguageModel {
   if (!isRuntimeLanguageModel(model)) {
     throw new InvalidRuntimeModelSelectionError(
-      "Dynamic model resolver returned an invalid model. Return an AI Gateway model id string, an AI SDK language model, or { model, modelContextWindowTokens?, modelOptions? }.",
+      "Dynamic model resolver returned an invalid model. Return an AI Gateway model id string, an AI SDK language model, a defineModel value, or { model, modelContextWindowTokens?, modelOptions? }.",
     );
   }
 }

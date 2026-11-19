@@ -19,7 +19,6 @@ export interface DeployCommandDependencies {
   createPrompter?: () => Prompter;
   hasInteractiveTerminal(): boolean;
   isEveProject?: typeof isEveProject;
-  /** Test seam into the flow's detection and box effects. */
   flowDeps?: Partial<DeployFlowDeps>;
   nonInteractiveLinkDeps?: NonInteractiveLinkDependencies;
 }
@@ -29,13 +28,6 @@ const defaultDependencies: DeployCommandDependencies = {
   isEveProject,
 };
 
-/**
- * `eve deploy`: deploy the agent to Vercel production. An already-linked
- * project deploys straight away (interactively or not); an unlinked interactive
- * run walks the same team/project pickers as onboarding. A non-interactive
- * caller can name a project to link before deployment. The flow itself is
- * {@link runDeployFlow}, shared with the dev TUI's `/deploy`.
- */
 export async function runDeployCommand(
   logger: DeployCliLogger,
   appRoot: string,

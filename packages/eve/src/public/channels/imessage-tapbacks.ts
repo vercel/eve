@@ -84,7 +84,6 @@ type TapbackHook = (
   tapback: IMessageTapback,
 ) => IMessageTapbackResult | Promise<IMessageTapbackResult>;
 
-/** Sends an emoji tapback (not one of the six standard ones) through the channel's adapter. */
 export type SendEmojiTapback = (
   adapter: Adapter,
   threadId: string,
@@ -101,7 +100,6 @@ const TAPBACK_BY_EMOJI_NAME: Readonly<Record<string, IMessageTapbackType>> = {
   thumbs_up: "like",
 };
 
-// The emoji iMessage shows for each standard tapback, so the model can pass either.
 const TAPBACK_BY_GLYPH: Readonly<Record<string, IMessageTapbackType>> = {
   "❓": "question",
   "❤": "love",
@@ -116,7 +114,6 @@ const TAPBACK_BY_GLYPH: Readonly<Record<string, IMessageTapbackType>> = {
 const EMOJI = /\p{Extended_Pictographic}|\p{Regional_Indicator}/u;
 const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
-// iMessage's own wording when it shows a tapback as text.
 const ADDED_VERB: Readonly<Record<IMessageTapbackType, string>> = {
   dislike: "Disliked",
   emphasize: "Emphasized",
@@ -128,7 +125,6 @@ const ADDED_VERB: Readonly<Record<IMessageTapbackType, string>> = {
 
 const MAX_QUOTED_CHARS = 200;
 
-/** Normalizes a Chat SDK reaction event from an iMessage adapter. */
 export function toIMessageTapback(event: ReactionEvent): IMessageTapback {
   return {
     added: event.added,
@@ -140,7 +136,6 @@ export function toIMessageTapback(event: ReactionEvent): IMessageTapback {
   };
 }
 
-/** Model-visible text for a tapback, in the form iMessage uses for tapbacks shown as text. */
 export function iMessageTapbackText(tapback: IMessageTapback): string {
   const text = tapback.message?.text.trim();
   const target = text
@@ -155,7 +150,6 @@ export function iMessageTapbackText(tapback: IMessageTapback): string {
     : `Tapback: Reacted ${tapback.tapback} to ${target}`;
 }
 
-/** Sends tapbacks people add or remove to eve when `onTapback` accepts them. */
 export function dispatchIMessageTapbacks<TAdapters extends Record<string, Adapter>>(
   bridge: ChatSdkChannelBridge<TAdapters>,
   onTapback: TapbackHook,
@@ -164,7 +158,6 @@ export function dispatchIMessageTapbacks<TAdapters extends Record<string, Adapte
     if (event.user.isMe) return;
     const tapback = toIMessageTapback({
       ...event,
-      // Photon and Linq leave the reacted message out of the event, but both can fetch it by id.
       message:
         event.message ??
         (await fetchMessageBestEffort(event.adapter, event.threadId, event.messageId)) ??
@@ -185,16 +178,11 @@ export function dispatchIMessageTapbacks<TAdapters extends Record<string, Adapte
   });
 }
 
-/**
- * Builds a tool that reacts to the latest message in the session's iMessage
- * conversation. It acts only in sessions that came through `channel`.
- */
 export function iMessageTapbackTool(options: {
   readonly adapterName: string;
   readonly bot: Chat;
   readonly channel: ChatSdkChannel;
   readonly channelLabel: string;
-  /** Defaults to the adapter's `addReaction`. */
   readonly sendEmoji?: SendEmojiTapback;
 }): ToolDefinition<IMessageTapbackToolInput, string> {
   const { adapterName, bot, channel, channelLabel } = options;
@@ -235,7 +223,6 @@ export function iMessageTapbackTool(options: {
       if (!threadId || !messageId) {
         throw new Error("There is no message in this conversation to react to yet.");
       }
-      // The step may run where the webhook didn't, so the adapter may not be initialized yet.
       await bot.initialize();
       const chatAdapter = bot.getAdapter(adapterName);
       if (isStandardTapback(tapback)) {
@@ -248,7 +235,6 @@ export function iMessageTapbackTool(options: {
   });
 }
 
-/** A standard tapback name for a standard name or its emoji, the emoji itself for any other single emoji. */
 function normalizeOutgoingTapback(value: string): string | undefined {
   const trimmed = value.trim();
   const lower = trimmed.toLowerCase();

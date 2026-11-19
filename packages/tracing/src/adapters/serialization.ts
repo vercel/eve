@@ -7,7 +7,7 @@
  */
 
 /** Content attributes are capped so a giant payload cannot bloat a span segment. */
-export const CONTENT_ATTRIBUTE_LIMIT = 32 * 1024;
+export const CONTENT_ATTRIBUTE_LIMIT = 250 * 1024;
 import type { ContentSerializer, InputMessagesContent } from "../core/types.js";
 
 export const aiSdkContentSerializer: ContentSerializer = {
@@ -27,10 +27,12 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const MARKER = "... [truncated]";
 
+/** Returns the UTF-8 byte length of `text`. */
 export function telemetryByteLength(text: string): number {
   return encoder.encode(text).length;
 }
 
+/** Truncates `text` to at most `maxBytes` UTF-8 bytes without splitting a character, ending it with a `... [truncated]` marker when it is cut. */
 export function truncateTelemetryText(text: string, maxBytes: number): string {
   const prefix = text.slice(0, maxBytes + 1);
   const bytes = encoder.encode(prefix);
@@ -41,6 +43,7 @@ export function truncateTelemetryText(text: string, maxBytes: number): string {
   return decoder.decode(bytes.subarray(0, end)) + marker;
 }
 
+/** Returns `value` when it is a non-empty string of at most 1024 characters and 1024 UTF-8 bytes, and `undefined` otherwise, so an identifier is safe to record on a span. */
 export function boundedPrincipalId(value: unknown): string | undefined {
   return typeof value === "string" &&
     value.length > 0 &&
@@ -70,7 +73,6 @@ export function contentAttribute(value: unknown): string | undefined {
   return textContentAttribute(json);
 }
 
-/** Serializes model messages using the OpenTelemetry GenAI message schema. */
 export function genAiInputMessagesAttribute(
   messages: unknown,
   messageKind?: (value: unknown) => string | undefined,
@@ -87,23 +89,28 @@ export function genAiInputMessagesAttribute(
       kind === undefined ? { parts, role: message.role } : { kind, parts, role: message.role },
     ];
   });
-  for (let start = 0; start < formatted.length; start += 1) {
-    const json = semanticJsonAttribute(formatted.slice(start));
-    if (json !== undefined) return { json, omitted: start };
+  let low = 0;
+  let high = formatted.length;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (semanticJsonAttribute(formatted.slice(middle)) !== undefined) high = middle;
+    else low = middle + 1;
+  }
+  if (low < formatted.length) {
+    const json = semanticJsonAttribute(formatted.slice(low));
+    if (json !== undefined) return { json, omitted: low };
   }
   const newest = truncateSingleSemanticMessage(formatted);
   if (newest !== undefined) return { json: newest, omitted: formatted.length - 1 };
   return { json: "[]", omitted: formatted.length };
 }
 
-/** Serializes the system prompt using the OpenTelemetry GenAI instruction schema. */
 export function genAiSystemInstructionsAttribute(instructions: unknown): string | undefined {
   const text = systemPromptText(instructions);
   if (text === undefined) return undefined;
   return fitSemanticText(text, (content) => [{ content, type: "text" }]);
 }
 
-/** Serializes one model response using the OpenTelemetry GenAI message schema. */
 export function genAiOutputMessagesAttribute(
   content: readonly unknown[],
   finishReason: string,
@@ -113,7 +120,6 @@ export function genAiOutputMessagesAttribute(
   const message = (messageParts: unknown) => [
     { finish_reason: reason, parts: messageParts, role: "assistant" },
   ];
-  // An oversized response keeps a truncated text form, as an oversized prompt does.
   return (
     semanticJsonAttribute(message(parts)) ??
     fitSemanticText(
@@ -124,17 +130,10 @@ export function genAiOutputMessagesAttribute(
   );
 }
 
-/** Serializes memory records using the OpenTelemetry GenAI memory-records schema. */
 export function genAiMemoryRecordsAttribute(records: readonly unknown[]): string | undefined {
   return semanticJsonAttribute(records);
 }
 
-/**
- * Serializes provider-executed tool results, keeping the attribute valid
- * JSON under the cap: when the full payload is too big, each entry's input
- * and output collapse to capped text at progressively smaller budgets
- * instead of cutting the JSON mid-string.
- */
 export function toolResultsContentAttribute(
   results: readonly Record<string, unknown>[],
 ): string | undefined {
@@ -159,7 +158,6 @@ function cappedToolResult(entry: Record<string, unknown>, cap: number): Record<s
   return out;
 }
 
-/** Serializes tool definitions, dropping trailing entries to keep the JSON whole. */
 export function genAiToolDefinitionsAttribute(tools: unknown): string | undefined {
   if (!Array.isArray(tools)) return undefined;
   const definitions = tools.flatMap((tool): Record<string, unknown>[] => {
@@ -184,7 +182,6 @@ export function genAiToolDefinitionsAttribute(tools: unknown): string | undefine
   return `[${serialized.join(",")}]`;
 }
 
-/** Normalizes the AI SDK's `instructions` prompt to plain text. */
 function systemPromptText(instructions: unknown): string | undefined {
   if (typeof instructions === "string") return instructions.length === 0 ? undefined : instructions;
   if (!isRecord(instructions) && !Array.isArray(instructions)) return undefined;
@@ -202,7 +199,6 @@ function systemPromptText(instructions: unknown): string | undefined {
   return joined.length === 0 ? undefined : joined;
 }
 
-/** Caps plain text, marking the cut. */
 export function textContentAttribute(text: string): string | undefined {
   if (text.length === 0) return undefined;
   return text.length <= CONTENT_ATTRIBUTE_LIMIT
@@ -249,10 +245,22 @@ function fitSemanticText(
     const full = semanticJsonAttribute(wrap(text));
     if (full !== undefined) return full;
   }
-  for (let length = Math.min(text.length, CONTENT_ATTRIBUTE_LIMIT); length > 0; length -= 256) {
-    const json = semanticJsonAttribute(wrap(`${text.slice(0, length)}… [truncated]`));
-    if (json !== undefined) return json;
+  const candidate = (length: number): string | undefined =>
+    semanticJsonAttribute(wrap(`${text.slice(0, length)}… [truncated]`));
+  let best: string | undefined;
+  let low = 1;
+  let high = Math.min(text.length, CONTENT_ATTRIBUTE_LIMIT);
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const probe = candidate(middle);
+    if (probe !== undefined) {
+      best = probe;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
   }
+  if (best !== undefined) return best;
   return semanticJsonAttribute(wrap("… [truncated]"));
 }
 

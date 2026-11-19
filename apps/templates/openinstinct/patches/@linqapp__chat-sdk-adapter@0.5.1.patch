@@ -1,0 +1,44 @@
+diff --git a/dist/adapter.d.ts b/dist/adapter.d.ts
+index d873547cafef18a8b91c9056ca84f2a44de8d7b3..68e239d42656f9249f498192bcdfd2d7dc3485ef 100644
+--- a/dist/adapter.d.ts
++++ b/dist/adapter.d.ts
+@@ -32,6 +32,10 @@ export interface LinqSendOptions {
+      * to have any effect — a per-call value dedupes nothing. Max 255 chars.
+      */
+     readonly idempotencyKey?: string;
++    /**
++     * Sends the message as a native threaded reply to this Linq message ID.
++     */
++    readonly replyToMessageId?: string;
+ }
+ type LinqThreadId = {
+     chatId: string;
+diff --git a/dist/adapter.js b/dist/adapter.js
+index 67ea72ec358e21962c60f203a666bde807f96997..b4cfeed6f7160d928f4549a99cc4b09900862559 100644
+--- a/dist/adapter.js
++++ b/dist/adapter.js
+@@ -169,13 +169,14 @@ class LinqAdapter {
+         }
+         const client = await this.getApiClient();
+         const idempotency = options.idempotencyKey ? { idempotency_key: options.idempotencyKey } : {};
++        const reply = options.replyToMessageId ? { reply_to: { message_id: options.replyToMessageId } } : {};
+         // A pending thread has no chat yet. `messages.create` lets Linq pick the
+         // sending line and reuses an existing chat with the same recipients, so a
+         // repeated first post lands in one conversation rather than forking it.
+         if (pendingHandle) {
+             const created = await client.messages.create({
+                 to: [pendingHandle],
+-                message: { parts, ...idempotency },
++                message: { parts, ...idempotency, ...reply },
+             });
+             return {
+                 id: created.message.id,
+@@ -184,7 +185,7 @@ class LinqAdapter {
+             };
+         }
+         const response = await client.chats.messages.send(chatId, {
+-            message: { parts, ...idempotency },
++            message: { parts, ...idempotency, ...reply },
+         });
+         return {
+             id: response.message.id,

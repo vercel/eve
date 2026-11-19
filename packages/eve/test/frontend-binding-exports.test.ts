@@ -5,7 +5,6 @@ import { describe, expect, it } from "vitest";
 const EXPORT_FROM = /export\s+(?:type\s+)?\{([^}]*)\}\s+from\s+"([^"]+)"/g;
 const BINDING_MODULE = /^#(?:react|vue|svelte)\//;
 
-/** Names a binding entry point re-exports from shared modules, excluding its own hook module. */
 function sharedExports(binding: "react" | "vue" | "svelte"): string[] {
   const source = readFileSync(new URL(`../src/${binding}/index.ts`, import.meta.url), "utf8");
   const names: string[] = [];

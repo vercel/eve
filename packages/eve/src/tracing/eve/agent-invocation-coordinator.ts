@@ -18,11 +18,6 @@ export interface AgentChildTraceDispatch {
   readonly parentTraceContext?: SessionTraceSeed;
 }
 
-/**
- * The trace dispatch for sessions opened with `ctx.agent` while a run serves
- * one workflow tool call: the call's tool span in the calling turn, read from
- * the calling session when it admits the call.
- */
 export function resolveToolCallAgentTrace(input: {
   readonly callId: string;
   readonly conversation?: ConversationContext;

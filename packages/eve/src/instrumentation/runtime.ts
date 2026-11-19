@@ -2,8 +2,6 @@ import type { DeliverHookPayload } from "#channel/types.js";
 import type { Telemetry, TelemetryOptions } from "ai";
 import { context as otelContext, trace } from "#compiled/@opentelemetry/api/index.js";
 
-import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
-import { shouldCaptureInstrumentationContent } from "#shared/instrumentation-content.js";
 import type {
   InstrumentationScope,
   InstrumentationContextRunner,
@@ -19,6 +17,7 @@ import {
   type BuildTelemetryRuntimeContextInput,
 } from "#instrumentation/runtime-context.js";
 import {
+  aiSdkCapture,
   ensureOtelIntegration,
   getRegisteredTelemetryIntegrations,
 } from "#instrumentation/ai-sdk-telemetry.js";
@@ -44,18 +43,16 @@ import {
   type MemoryInstrumentation,
 } from "#instrumentation/memory.js";
 import { ConversationIdKey, ParentSessionKey } from "#context/keys.js";
-import type { ConversationContext } from "#shared/conversation-context.js";
 import { withCapture } from "#compiled/@vercel/agent-runs/otel.js";
+import type { AgentRun } from "#compiled/@vercel/agent-runs/index.js";
 import type { SamplingOperation as AgentSamplingOperation } from "#tracing/eve/otel-registration.js";
-import {
-  isSampledTrace,
-  resolveTracePolicy,
-  resolveTracePolicyDecision,
-} from "#shared/trace-policy.js";
 import { readInstrumentationSessionContext } from "#instrumentation/session-context.js";
 import { readSessionTraceDecision } from "#tracing/eve/agent-trace-context-store.js";
-import { readInstrumentationDecision } from "#shared/instrumentation-decision.js";
-import { applyLiveDeliveryAudienceCeiling } from "#shared/forwarded-trace-policy.js";
+import { resolveInstrumentationTraceDecision } from "#instrumentation/trace-decision.js";
+import {
+  applyLiveDeliveryAudienceCeiling,
+  defaultContentCapture,
+} from "#shared/forwarded-trace-policy.js";
 import { readConversationId } from "#shared/conversation-identity.js";
 import { resolveTraceRootSessionId } from "#shared/trace-root.js";
 import {
@@ -69,7 +66,6 @@ import { createGatewayTraceContextHeaders } from "#tracing/eve/gateway.js";
 export { getInstrumentationRuntime, registerInstrumentationRuntime };
 export { initializeSessionInstrumentation };
 const TURN_TRACE_STATE_KEY = "eve.harness.turnTrace";
-import type { SessionTraceSeed } from "#context/keys.js";
 
 interface InstrumentedStepSession {
   readonly sessionId: string;
@@ -92,7 +88,6 @@ export interface InstrumentationStepScope<TSession> {
       | "sessionId"
     >,
   ) => HandleEventFn | undefined;
-  /** The AI SDK telemetry for one attempt; the attempt's start and end come from its facts. */
   readonly prepareAttempt: (
     input: AttemptPlace & {
       readonly isFrameworkTool?: (name: string) => boolean;
@@ -127,7 +122,6 @@ export interface BoundInstrumentationSession {
   readonly sessionId: string;
 }
 
-/** Process-wide runtime consumed by every harness execution surface. */
 export interface InstrumentationRuntime {
   readonly forceFlush: () => Promise<void>;
   readonly hooks: InstrumentationHooks;
@@ -140,15 +134,18 @@ export interface InstrumentationRuntime {
   readonly prepareTurnTrace?: (
     event: InstrumentationTurnStartedEvent,
   ) => Promise<InstrumentationTraceSeed>;
+  readonly readTurnTraceContext?: (
+    sessionId: string,
+    turnId: string,
+  ) => Promise<InstrumentationTraceContext | undefined>;
+  readonly decision?: AgentRun["decision"];
   otelSettings: OtelHarnessSettings | undefined;
   readonly runtimeContextResolvers?: readonly RuntimeContextResolver[];
   readonly runInContext: InstrumentationContextRunner;
-  /** Whether the installed OTel sampler would record a trace with this id. */
   readonly samplesTrace?: (traceId: string, operation?: AgentSamplingOperation) => boolean;
   readonly shutdown: () => Promise<void>;
 }
 
-/** Worker-bound instrumentation operations consumed by one session execution. */
 export interface SessionInstrumentation {
   readonly installAiSdkWarningLogger: () => void;
   readonly runStep: <TSession extends InstrumentedStepSession, TResult>(
@@ -166,6 +163,7 @@ export interface ExecutionInstrumentation {
   readonly prepareDelivery: (delivery: DeliverHookPayload) => void;
   readonly createHandleEvent: (input: {
     readonly handleEvent?: HandleEventFn;
+    readonly relayed?: boolean;
   }) => HandleEventFn | undefined;
   readonly flush: () => Promise<void>;
   readonly memory?: MemoryInstrumentation;
@@ -202,10 +200,10 @@ export function bindInstrumentationRuntime(
   };
   const bindHooks = (sessionContext: ReturnType<typeof readSessionContext>) => {
     return (
-      baseHooks.forTrace?.({
-        agentName: boundSession.agentName,
-        ...sessionContext.conversation,
-      }) ?? baseHooks
+      baseHooks.forTrace?.(
+        { agentName: boundSession.agentName, ...sessionContext.conversation },
+        { ceiling: sessionContext.forwardedTracePolicy?.ceiling },
+      ) ?? baseHooks
     );
   };
   const captureExecutionRuntime = () => {
@@ -230,7 +228,6 @@ export function bindInstrumentationRuntime(
       session: {
         agentName: boundSession.agentName,
         channelAudience: sessionContext.conversation.audience,
-        // OTel stores the normalized conversation kind; `$eve.trigger` retains the raw adapter kind.
         channelKind: sessionContext.conversation.channel.kind,
         channelType: sessionContext.instrumentation?.channelType,
         parentLineage: sessionContext.parentLineage,
@@ -267,7 +264,7 @@ export function bindInstrumentationRuntime(
         const policyContext = readSessionContext();
         const hooks = bindHooks(policyContext);
         const settings = executionRuntime.otelSettings;
-        const decision = resolveStepInstrumentationDecision(
+        const decision = resolveInstrumentationTraceDecision(
           settings,
           boundSession.agentName,
           policyContext.conversation,
@@ -324,7 +321,10 @@ export function bindInstrumentationRuntime(
         );
         const conversation = sessionContext.conversation;
         const audience = conversation.audience;
-        const capturesContent = shouldCaptureInstrumentationContent(conversation);
+        const defaultContent = defaultContentCapture(
+          conversation,
+          sessionContext.forwardedTracePolicy?.ceiling,
+        );
         const effectiveDecision =
           decision === undefined
             ? decision
@@ -336,7 +336,7 @@ export function bindInstrumentationRuntime(
               );
         const capturesRuntimeContextInput =
           effectiveDecision === undefined
-            ? capturesContent
+            ? defaultContent.recordInputs
             : effectiveDecision.action === "record" && effectiveDecision.recordInputs;
         const dropsTrace = decision?.action === "drop";
         const content = {
@@ -344,15 +344,17 @@ export function bindInstrumentationRuntime(
             !dropsTrace &&
             (effectiveDecision?.action === "record"
               ? effectiveDecision.recordInputs
-              : capturesContent) &&
-            (settings?.recordInputs ?? false),
+              : defaultContent.recordInputs),
           recordOutputs:
             !dropsTrace &&
             (effectiveDecision?.action === "record"
               ? effectiveDecision.recordOutputs
-              : capturesContent) &&
-            (settings?.recordOutputs ?? false),
+              : defaultContent.recordOutputs),
         };
+        const aiSdkContent =
+          settings !== undefined && !executionRuntime.ownsAgentSpans
+            ? content
+            : aiSdkCapture(content, hooks);
         const telemetry = (telemetryInput: {
           readonly bridgeIntegration?: Telemetry;
           readonly runtimeContext?: Readonly<Record<string, unknown>>;
@@ -383,8 +385,8 @@ export function bindInstrumentationRuntime(
                   : undefined
                 : [telemetryInput.bridgeIntegration, ...integrations()],
             isEnabled: true,
-            recordInputs: content.recordInputs,
-            recordOutputs: content.recordOutputs,
+            recordInputs: aiSdkContent.recordInputs,
+            recordOutputs: aiSdkContent.recordOutputs,
           };
         };
         const attemptSession = {
@@ -483,6 +485,7 @@ export function bindInstrumentationRuntime(
         handleEvent: input.handleEvent,
         deliveryInput,
         hooks: bindHooks(sessionContext),
+        relayed: input.relayed,
         rootSessionId: sessionContext.rootSessionId,
         traceSessionId: sessionContext.traceSessionId,
         parentLineage: sessionContext.parentLineage,
@@ -512,25 +515,6 @@ export function bindSessionInstrumentation(input: {
     sessionId: input.sessionId,
   };
   return bindInstrumentationRuntime(getInstrumentationRuntime(), input.ctx, session);
-}
-
-function resolveStepInstrumentationDecision(
-  settings: OtelHarnessSettings | undefined,
-  agentName: string,
-  conversation: ConversationContext,
-  traceSeed: SessionTraceSeed | undefined,
-  persisted: InstrumentationDecision | undefined,
-): InstrumentationDecision | undefined {
-  if (settings === undefined) return undefined;
-  if (traceSeed?.decision !== undefined) return readInstrumentationDecision(traceSeed.decision);
-  if (persisted !== undefined) return persisted;
-  if (traceSeed !== undefined) {
-    return resolveTracePolicyDecision(isSampledTrace(traceSeed), conversation);
-  }
-  return resolveTracePolicy(settings.tracePolicy, {
-    agentName,
-    ...conversation,
-  });
 }
 
 function isValidSpanContext(spanContext: {

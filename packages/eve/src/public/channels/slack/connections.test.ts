@@ -71,6 +71,15 @@ describe("buildAuthCompletedText", () => {
       }),
     ).toBe("Linear sign-in cancelled");
   });
+
+  it.each(["withdrawn", "interrupted", "abandoned"] as const)(
+    "reports a %s sign-in as cancelled, without the runtime's reason code",
+    (outcome) => {
+      expect(
+        buildAuthCompletedText({ displayName: "GitHub", outcome, reason: "turn-cancelled" }),
+      ).toBe("GitHub sign-in cancelled");
+    },
+  );
 });
 
 describe("buildAuthEphemeralBlocks", () => {
@@ -85,7 +94,7 @@ describe("buildAuthEphemeralBlocks", () => {
         type: "section",
         text: {
           type: "mrkdwn",
-          text: "*Connect Linear*\nTo continue, I need access to your Linear account. Only you can see this message.",
+          text: "*Connect Linear*\nTo continue, I need access to your Linear account.",
         },
       },
       {
@@ -102,22 +111,32 @@ describe("buildAuthEphemeralBlocks", () => {
     ]);
   });
 
-  it("says the turn is paused and offers Cancel when the sign-in holds a turn", () => {
+  it("offers Cancel under the bare heading when the sign-in holds a turn", () => {
     const target = { channelId: "C01", threadTs: "1700000000.000001", turnId: "turn_0" };
     const blocks = buildAuthEphemeralBlocks({
       cancel: target,
       displayName: "Linear",
       url: "https://connect.example.com/authorize/sca_abc",
     });
-    expect((blocks[0] as { text: { text: string } }).text.text).toBe(
-      "*Connect Linear*\nI've paused until you connect your Linear account or cancel. Only you can see this message.",
-    );
+    expect((blocks[0] as { text: { text: string } }).text.text).toBe("*Connect Linear*");
     const cancel = (blocks[1] as { elements: Array<Record<string, unknown>> }).elements[1];
     expect(cancel).toMatchObject({
       action_id: SIGN_IN_CANCEL_ACTION_ID,
       text: { text: "Cancel", type: "plain_text" },
     });
     expect(parseSignInCancelTarget(cancel?.value)).toEqual(target);
+  });
+
+  it("keeps naming the request channel under the bare heading when a DM holds a turn", () => {
+    const blocks = buildAuthEphemeralBlocks({
+      cancel: { channelId: "D01", threadTs: "1700000000.000001", turnId: "turn_0" },
+      displayName: "Linear",
+      requestedInChannelId: "C01",
+      url: "https://connect.example.com/authorize/sca_abc",
+    });
+    expect((blocks[0] as { text: { text: string } }).text.text).toBe(
+      "*Connect Linear*\nThis is for your request in <#C01>.",
+    );
   });
 
   it("round-trips a code channel's Cancel target", () => {

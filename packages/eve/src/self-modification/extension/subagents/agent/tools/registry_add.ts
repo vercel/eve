@@ -12,11 +12,6 @@ import {
   type CatalogEntry,
 } from "./search_registry.js";
 
-/**
- * Local installation mutates the developer's project through `eve dev`. It may
- * hand setup-bearing items to the TUI or terminal, supports the configured
- * registry, and reports any local files that could not be restored on failure.
- */
 const localInputSchema = {
   type: "object",
   additionalProperties: false,
@@ -65,10 +60,8 @@ interface RegistryAddDependencies {
   readonly spawn?: SpawnLike;
 }
 
-/** What local registry installation reports back. Mirrors {@link localOutputSchema}. */
 export interface LocalRegistryAddResult {
   readonly address: string;
-  /** `failed` carries an explicit mutation outcome instead of implying nothing changed. */
   readonly status: "installed" | "needs-terminal" | "failed";
   readonly message: string;
   readonly title?: string;
@@ -78,13 +71,6 @@ export interface LocalRegistryAddResult {
   readonly changed?: readonly string[];
 }
 
-/**
- * Names the item's declared environment variables that are not set.
- *
- * Naming a required variable is not a secret, and an installed item can still
- * be non-functional through unset variables, so this is the difference between
- * reporting outstanding work and reporting bare success. Values are never read.
- */
 export function unsetEnvVars(
   entry: CatalogEntry,
   environment: Readonly<Record<string, string | undefined>> = process.env,
@@ -95,14 +81,6 @@ export function unsetEnvVars(
   });
 }
 
-/**
- * Builds the handoff a `needs-terminal` item carries.
- *
- * The interactive TUI consumes `status` and `address` to open the existing
- * address-specific setup flow itself, so its model-facing result deliberately
- * carries no command for the model to repeat. Headless `eve dev` has no TUI to
- * dispatch into, so the shell command is the only honest answer there.
- */
 export function handoffMessage(input: {
   readonly address: string;
   readonly interactiveClient: boolean;
@@ -110,8 +88,6 @@ export function handoffMessage(input: {
   readonly title: string;
 }): { readonly message: string; readonly nextCommand?: string } {
   if (input.interactiveClient) {
-    // The panel opens only after this turn ends, so nothing has happened yet.
-    // The model must not report the item as added, connected, or opened.
     return {
       message: `${input.title} has not been installed yet. ${input.reason} Its setup panel opens after this reply, asks for anything setup needs, and reports whether setup succeeded; tell the developer to complete it there, and do not describe ${input.title} as added, connected, or set up. Do not ask the developer to run another command.`,
     };
@@ -123,7 +99,6 @@ export function handoffMessage(input: {
   };
 }
 
-/** Exported for tests; the tool's `execute` delegates here. */
 export async function addLocalRegistryItem(
   address: string,
   options: RegistryAddDependencies & { readonly signal?: AbortSignal } = {},
@@ -135,8 +110,6 @@ export async function addLocalRegistryItem(
     );
   }
 
-  // Shares the catalog fetch and its five-minute cache with
-  // `search_registry`, rather than reading the registry index twice.
   const entries = await loadRegistryIndex({
     nowMs: Date.now(),
     signal: options.signal,

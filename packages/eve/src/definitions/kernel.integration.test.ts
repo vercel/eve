@@ -7,21 +7,19 @@ import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
 
 import { defineDynamic } from "#dynamic/definition.js";
 import { defineDynamic as defineDynamicModel } from "#public/definitions/model.js";
-import { workflowEntry } from "#execution/session/entry.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
+import { attachClientContext } from "#internal/client-context.js";
 import { markMockModel } from "#internal/mock-model-identity.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { textStreamResult, toolCallStreamResult } from "#internal/testing/approval-resume.js";
 import { buildSerializedContext } from "#internal/testing/entry-test-helpers.js";
-import { resumeHook, start } from "#internal/workflow/runtime.js";
+import { resumeRoutedHook } from "#execution/hosts.js";
+import { startTestSession } from "#internal/testing/test-session-hosts.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineHook } from "#public/definitions/hook.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
 import { defineMemory } from "#public/memory/index.js";
 import { defineTool } from "#tools/definition.js";
-
-// What each surface contributes, and when its memos and hooks run, read from what the model
-// receives and what the definitions log, so the pins hold while the stream changes underneath.
 
 const ALICE = {
   attributes: {},
@@ -52,7 +50,6 @@ function lastUserText(prompt: LanguageModelV4Prompt): string {
   return "";
 }
 
-/** Each turn calls `lookup` once and then replies; a compaction gets a summary. */
 function scriptedModel(log: string[], prompts: LanguageModelV4Prompt[]) {
   const summary = () => {
     log.push("call:summary");
@@ -108,7 +105,6 @@ describe("reactions", () => {
     const runtime = await createTestRuntime({
       agent: {
         definition: defineAgent({
-          // The memo chooses once per session; the provider object is built from its answer.
           model: defineDynamicModel(async (ctx) => {
             await ctx.memo(ctx.session.id, () => {
               log.push("memo:model");
@@ -157,7 +153,6 @@ describe("reactions", () => {
               return {
                 lookup: defineTool({
                   description: "Look something up.",
-                  // Code a closure captures needs no durable descriptor.
                   execute: async () => ({ found: log.length > 0 }),
                   inputSchema: {},
                 }),
@@ -206,31 +201,29 @@ describe("reactions", () => {
     const continuationToken = "http:reactions";
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
-        {
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          input: { message: "Look up the first thing." },
-          serializedContext: buildSerializedContext({
-            auth: ALICE,
-            channelKind: "http",
-            continuationToken,
-          }),
-        },
-      ]);
+      const run = await startTestSession("in-process", {
+        kind: "initial",
+        ownerDeploymentId: "dpl_inline",
+        input: { message: "Look up the first thing." },
+        serializedContext: buildSerializedContext({
+          auth: ALICE,
+          channelKind: "http",
+          continuationToken,
+        }),
+      });
       const inbox = sessionInboxHookToken(continuationToken);
       try {
         await until(log, "capture:turn", 1);
-        await resumeHook(inbox, { kind: "compact", deliveryId: "compact-second-turn" });
+        await resumeRoutedHook(inbox, { kind: "compact", deliveryId: "compact-second-turn" });
         await until(log, "context:compaction:completed", 1);
-        await resumeHook(inbox, {
+        await resumeRoutedHook(inbox, {
           auth: ALICE,
           delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
           kind: "send",
           payload: { message: "Look up the second thing." },
         });
         await until(log, "capture:turn", 2);
-        await resumeHook(inbox, {
+        await resumeRoutedHook(inbox, {
           auth: ALICE,
           delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
           kind: "send",
@@ -243,27 +236,19 @@ describe("reactions", () => {
       }
     });
 
-    // The model's memo runs once for the session, however many processes and model calls read it.
     expect(log.filter((entry) => entry === "memo:model")).toHaveLength(1);
-    // Every model call evaluates the values again: two turns of two calls each. The third turn's
-    // hook cancels it before it reaches one.
     expect(log.filter((entry) => entry === "evaluate:instructions").length).toBeGreaterThanOrEqual(
       4,
     );
     expect(log.filter((entry) => entry === "evaluate:tools").length).toBeGreaterThanOrEqual(4);
     expect(log.indexOf("evaluate:tools")).toBeLessThan(log.indexOf("call:turn"));
-    // Recall runs before each turn's first model call, and every call reads it with the
-    // instructions.
     expect(log.filter((entry) => entry === "resolve:recall")).toHaveLength(2);
-    // Recall and capture both see the turn's own input.
     expect(log).toContain(`recall:input:${JSON.stringify(["Look up the first thing."])}`);
     expect(log).toContain(`capture:input:${JSON.stringify(["Look up the first thing."])}`);
     for (const prompt of prompts) {
       expect(JSON.stringify(prompt)).toContain(RECALLED);
       expect(JSON.stringify(prompt)).toContain(POLICY);
     }
-    // Each turn's recall sits just ahead of its input, so a continuation extends the call before
-    // it. A recall with the same id replaces the earlier turn's.
     const texts = (prompt: LanguageModelV4Prompt) =>
       prompt.flatMap((message) =>
         message.role === "user"
@@ -280,22 +265,18 @@ describe("reactions", () => {
       "Look up the second thing.",
     ]);
     expect(JSON.stringify(prompts[2])).not.toContain("(turn 1)");
-    // The tool the reaction returned ran, and the model read its result.
     expect(JSON.stringify(prompts[1])).toContain('"found":true');
 
-    // An explicit session compaction ran once before the second turn's first model call.
     const secondTurn = log.slice(log.indexOf("capture:turn") + 1, log.lastIndexOf("capture:turn"));
     expect(log.filter((entry) => entry === "call:summary")).toHaveLength(1);
     expect(secondTurn.indexOf("call:summary")).toBeLessThan(secondTurn.indexOf("call:turn"));
 
-    // Capture before compaction read the history the summary rewrote, before the summary ran.
     expect(log.filter((entry) => entry === "capture:compaction")).toHaveLength(1);
     expect(log.indexOf("capture:compaction")).toBeLessThan(log.indexOf("call:summary"));
     expect(log).toContain("capture:compaction:model:eve-test/scripted-model");
     const captured = log.find((entry) => entry.startsWith("capture:compaction:history:"))!;
     expect(captured).toContain("Look up the first thing.");
 
-    // The third turn's hook cancelled it before its model call.
     expect(prompts.map(lastUserText).some((text) => text.includes("[cancel]"))).toBe(false);
   }, 90_000);
 
@@ -358,29 +339,26 @@ describe("reactions", () => {
     const continuationToken = "http:capture-fails";
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
-        {
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          input: { message: "Look up the first thing." },
-          serializedContext: buildSerializedContext({
-            auth: ALICE,
-            channelKind: "http",
-            continuationToken,
-          }),
-        },
-      ]);
+      const run = await startTestSession("in-process", {
+        kind: "initial",
+        ownerDeploymentId: "dpl_inline",
+        input: { message: "Look up the first thing." },
+        serializedContext: buildSerializedContext({
+          auth: ALICE,
+          channelKind: "http",
+          continuationToken,
+        }),
+      });
       const inbox = sessionInboxHookToken(continuationToken);
       try {
         await until(log, "turn:completed", 1);
-        await resumeHook(inbox, { kind: "compact", deliveryId: "compact-fails" });
+        await resumeRoutedHook(inbox, { kind: "compact", deliveryId: "compact-fails" });
         await until(log, "context:compaction:failed", 1);
       } finally {
         await run.cancel().catch(() => {});
       }
     });
 
-    // The capture threw before the summary, so no summary ran and the compaction failed.
     expect(log.filter((entry) => entry === "capture:compaction")).toHaveLength(1);
     expect(log).not.toContain("call:summary");
     expect(log).not.toContain("context:compaction:completed");
@@ -452,25 +430,22 @@ describe("reactions", () => {
     const continuationToken = "http:cancel-during-compaction";
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
-        {
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          input: { message: "Look up the first thing." },
-          serializedContext: buildSerializedContext({
-            auth: ALICE,
-            channelKind: "http",
-            continuationToken,
-          }),
-        },
-      ]);
+      const run = await startTestSession("in-process", {
+        kind: "initial",
+        ownerDeploymentId: "dpl_inline",
+        input: { message: "Look up the first thing." },
+        serializedContext: buildSerializedContext({
+          auth: ALICE,
+          channelKind: "http",
+          continuationToken,
+        }),
+      });
       const inbox = sessionInboxHookToken(continuationToken);
       try {
         await until(log, "turn:completed", 1);
-        await resumeHook(inbox, { kind: "compact", deliveryId: "compact" });
+        await resumeRoutedHook(inbox, { kind: "compact", deliveryId: "compact" });
         await until(log, "capture:compaction", 1);
-        // Alice cancels while the compaction is still capturing memory.
-        await resumeHook(inbox, { kind: "cancel", deliveryId: "cancel" });
+        await resumeRoutedHook(inbox, { kind: "cancel", deliveryId: "cancel" });
         await new Promise((resolve) => setTimeout(resolve, 200));
         release();
         await until(log, "settled:cancel:ignored", 1);
@@ -488,7 +463,6 @@ describe("reactions", () => {
     const log: string[] = [];
     const prompts: LanguageModelV4Prompt[] = [];
     const model = scriptedModel(log, prompts);
-    // Alice moves to another thread between turns; a scope that follows the thread changes too.
     let thread = "thread-1";
     const runtime = await createTestRuntime({
       agent: {
@@ -539,23 +513,21 @@ describe("reactions", () => {
     const continuationToken = "http:memory-scope";
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
-        {
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          input: { message: "Look up the first thing." },
-          serializedContext: buildSerializedContext({
-            auth: ALICE,
-            channelKind: "http",
-            continuationToken,
-          }),
-        },
-      ]);
+      const run = await startTestSession("in-process", {
+        kind: "initial",
+        ownerDeploymentId: "dpl_inline",
+        input: { message: "Look up the first thing." },
+        serializedContext: buildSerializedContext({
+          auth: ALICE,
+          channelKind: "http",
+          continuationToken,
+        }),
+      });
       const inbox = sessionInboxHookToken(continuationToken);
       try {
         await until(log, "turn:settled", 1);
         thread = "thread-2";
-        await resumeHook(inbox, {
+        await resumeRoutedHook(inbox, {
           auth: ALICE,
           delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
           kind: "send",
@@ -567,7 +539,6 @@ describe("reactions", () => {
       }
     });
 
-    // Each turn's tools use the scope that turn's recall used.
     const turns = [
       log.slice(0, log.indexOf("turn:settled")),
       log.slice(log.indexOf("turn:settled")),
@@ -618,23 +589,21 @@ describe("reactions", () => {
     });
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
-        {
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          input: { message: "Alice asks Bob's researcher for a summary." },
-          serializedContext: {
-            ...buildSerializedContext({
-              auth: ALICE,
-              channelKind: "http",
-              continuationToken: "http:overridden",
-            }),
-            "eve.agentSessionRuntimeOverrides": {
-              model: { contextWindowTokens: 200_000, id: "openai/gpt-6.1-sol" },
-            },
+      const run = await startTestSession("in-process", {
+        kind: "initial",
+        ownerDeploymentId: "dpl_inline",
+        input: { message: "Alice asks Bob's researcher for a summary." },
+        serializedContext: {
+          ...buildSerializedContext({
+            auth: ALICE,
+            channelKind: "http",
+            continuationToken: "http:overridden",
+          }),
+          "eve.agentSessionRuntimeOverrides": {
+            model: { contextWindowTokens: 200_000, id: "openai/gpt-6.1-sol" },
           },
         },
-      ]);
+      });
       try {
         await until(log, "turn:settled", 1);
       } finally {
@@ -687,18 +656,16 @@ describe("reactions", () => {
 
     try {
       await runtime.run(async () => {
-        const run = await start(workflowEntry, [
-          {
-            kind: "initial",
-            ownerDeploymentId: "dpl_inline",
-            input: { message: "Alice asks for a short status update." },
-            serializedContext: buildSerializedContext({
-              auth: ALICE,
-              channelKind: "http",
-              continuationToken: "http:build-metadata",
-            }),
-          },
-        ]);
+        const run = await startTestSession("in-process", {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: "Alice asks for a short status update." },
+          serializedContext: buildSerializedContext({
+            auth: ALICE,
+            channelKind: "http",
+            continuationToken: "http:build-metadata",
+          }),
+        });
         try {
           await until(log, "turn:settled", 1);
         } finally {
@@ -743,7 +710,6 @@ describe("reactions", () => {
       },
       modules: [
         {
-          // Stands in for `git clone`: the repository's guidelines land in the sandbox.
           loadNamespace: async () => ({
             default: defineTool({
               description: "Check out the repository.",
@@ -791,21 +757,19 @@ describe("reactions", () => {
     const continuationToken = "http:repo-guidelines";
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
-        {
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          input: { message: "Check out the repository." },
-          serializedContext: buildSerializedContext({
-            auth: ALICE,
-            channelKind: "http",
-            continuationToken,
-          }),
-        },
-      ]);
+      const run = await startTestSession("in-process", {
+        kind: "initial",
+        ownerDeploymentId: "dpl_inline",
+        input: { message: "Check out the repository." },
+        serializedContext: buildSerializedContext({
+          auth: ALICE,
+          channelKind: "http",
+          continuationToken,
+        }),
+      });
       try {
         await until(log, "turn:settled", 1);
-        await resumeHook(sessionInboxHookToken(continuationToken), {
+        await resumeRoutedHook(sessionInboxHookToken(continuationToken), {
           auth: ALICE,
           delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
           kind: "send",
@@ -817,12 +781,80 @@ describe("reactions", () => {
       }
     });
 
-    // The second turn's model call reads the same checkout, so it reuses the memo's result.
     expect(prompts).toHaveLength(3);
     expect(JSON.stringify(prompts[0])).not.toContain("Run pnpm test.");
     expect(JSON.stringify(prompts[1])).toContain("Run pnpm test.");
     expect(JSON.stringify(prompts[2])).toContain("Run pnpm test.");
     expect(log.filter((entry) => entry === "read:AGENTS.md")).toEqual(["read:AGENTS.md"]);
+  }, 60_000);
+
+  it("places a turn's client context after the user-role instruction that turn announces", async () => {
+    const log: string[] = [];
+    const prompts: LanguageModelV4Prompt[] = [];
+    const model = markMockModel(
+      new MockLanguageModelV4({
+        doStream: async ({ prompt }) => {
+          prompts.push(prompt);
+          return textStreamResult("Done.");
+        },
+        modelId: "scripted-model",
+        provider: "eve-test",
+      }),
+    );
+    const runtime = await createTestRuntime({
+      agent: {
+        definition: defineAgent({
+          model: defineDynamicModel(() => ({ model, modelContextWindowTokens: 200_000 })),
+        }),
+        name: "client-context-order",
+      },
+      modules: [
+        {
+          loadNamespace: async () => ({
+            default: defineInstructions({ content: POLICY, role: "user" }),
+          }),
+          logicalPath: "instructions/policy.ts",
+        },
+        {
+          loadNamespace: async () => ({
+            default: defineHook({
+              events: {
+                "turn.settled": () => {
+                  log.push("turn:settled");
+                },
+              },
+            }),
+          }),
+          logicalPath: "hooks/observe.ts",
+        },
+      ],
+    });
+
+    await runtime.run(async () => {
+      const run = await startTestSession("in-process", {
+        kind: "initial",
+        ownerDeploymentId: "dpl_inline",
+        input: attachClientContext({ message: "Hello." }, ["Client page: /settings"]),
+        serializedContext: buildSerializedContext({
+          auth: ALICE,
+          channelKind: "http",
+          continuationToken: "http:client-context-order",
+        }),
+      });
+      try {
+        await until(log, "turn:settled", 1);
+      } finally {
+        await run.cancel().catch(() => {});
+      }
+    });
+
+    expect(prompts).toHaveLength(1);
+    const users = prompts[0]!.filter((message) => message.role === "user").map(textOf);
+    expect(users.slice(-3)).toEqual([
+      expect.stringContaining(POLICY),
+      expect.stringContaining("Client page: /settings"),
+      "Hello.",
+    ]);
   }, 60_000);
 
   describe("across deployments", () => {
@@ -882,24 +914,21 @@ describe("reactions", () => {
       const continuationToken = "http:deployments";
 
       await runtime.run(async () => {
-        const run = await start(workflowEntry, [
-          {
-            kind: "initial",
-            ownerDeploymentId: "dpl_inline",
-            input: { message: "Look up the first thing." },
-            serializedContext: buildSerializedContext({
-              auth: ALICE,
-              channelKind: "http",
-              continuationToken,
-            }),
-          },
-        ]);
+        const run = await startTestSession("in-process", {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: "Look up the first thing." },
+          serializedContext: buildSerializedContext({
+            auth: ALICE,
+            channelKind: "http",
+            continuationToken,
+          }),
+        });
         const inbox = sessionInboxHookToken(continuationToken);
         try {
           await until(log, "turn:settled", 1);
-          // The idle session's next step runs on another deployment.
           vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_second");
-          await resumeHook(inbox, {
+          await resumeRoutedHook(inbox, {
             auth: ALICE,
             delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
             kind: "send",
@@ -911,7 +940,6 @@ describe("reactions", () => {
         }
       });
 
-      // The session-keyed memo runs once per deployment, and every call still reads it.
       expect(log.filter((entry) => entry.startsWith("memo:policy:"))).toEqual([
         "memo:policy:dpl_first",
         "memo:policy:dpl_second",

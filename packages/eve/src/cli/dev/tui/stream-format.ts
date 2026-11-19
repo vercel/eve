@@ -1,16 +1,9 @@
-/**
- * Pure helpers shared by the terminal renderer: key parsing and status-text
- * formatting. Kept apart from the renderer so the presentation class stays
- * focused on painting.
- */
-
 import type { AssistantResponseStatsMode } from "./types.js";
 
 export type TerminalKey =
   | {
       type: "text";
       value: string;
-      /** Terminal framing, not proof that the text came from a physical keypress. */
       framing: "unframed" | "bracketed-paste";
     }
   | { type: "newline" }
@@ -28,9 +21,7 @@ export type TerminalKey =
   | {
       type: "mouse";
       action: "press" | "release";
-      /** SGR button code (0 = left). */
       button: number;
-      /** 1-based terminal cell coordinates. */
       x: number;
       y: number;
     }
@@ -53,37 +44,22 @@ export type TerminalKey =
   | { type: "ctrl-r" }
   | { type: "ctrl-c" }
   | {
-      /**
-       * An OSC sequence from the terminal (`ESC ] … BEL`/`ST`) — a reply to a
-       * query such as the OSC 11 background-color probe, never a keypress.
-       * `value` is the payload between the opener and the terminator.
-       */
       type: "osc";
       value: string;
     }
   | { type: "ignore" };
 
-/** One decoded key plus the UTF-16 code units it consumed from the input buffer. */
 interface KeyToken {
   key?: TerminalKey;
   consumed: number;
-  /** The buffer ends mid-sequence; wait for more bytes before decoding. */
   incomplete?: boolean;
 }
 
-// Final byte of a CSI escape sequence (`ESC [ … <final>`), range 0x40–0x7e.
 const CSI_FINAL = /[\u0040-\u007e]/u;
 
-// Bracketed paste markers (DEC private mode 2004). The terminal wraps pasted
-// text in these so an embedded newline inserts literally instead of submitting.
 const PASTE_START = "\x1B[200~";
 const PASTE_END = "\x1B[201~";
 
-/**
- * Preserves newlines and tabs, normalizes CR to LF, and drops C0, DEL, and C1
- * controls. The first end marker closes the frame. This prevents escape
- * injection, not display spoofing by bidi or zero-width characters.
- */
 export function sanitizePastedText(text: string): string {
   let printable = "";
   for (const character of text.replace(/\r\n?/gu, "\n")) {
@@ -99,31 +75,18 @@ export function sanitizePastedText(text: string): string {
   return printable;
 }
 
-/**
- * True when `buffer` is a bracketed paste whose closing marker hasn't arrived.
- * {@link nextKey} reports such a buffer as `incomplete` indefinitely, so the
- * caller needs this to recover if the end marker never comes (a process that
- * emits a bare start marker and dies, a malformed terminal).
- */
 export function isIncompletePaste(buffer: string): boolean {
   return buffer.startsWith(PASTE_START) && !buffer.includes(PASTE_END, PASTE_START.length);
 }
 
-/** Drops a leading bracketed-paste start marker, leaving the buffered payload. */
 export function stripPasteStart(buffer: string): string {
   return buffer.startsWith(PASTE_START) ? buffer.slice(PASTE_START.length) : buffer;
 }
 
-/**
- * True when `buffer` opens an OSC sequence whose terminator hasn't arrived.
- * {@link nextKey} reports such a buffer as `incomplete` indefinitely, so the
- * caller needs this to recover if the terminator never comes.
- */
 export function isIncompleteOsc(buffer: string): boolean {
   return buffer.startsWith("\x1b]") && !buffer.includes("\x07", 2) && !buffer.includes("\x1b\\", 2);
 }
 
-/** Removes C0 control characters and DEL from text intended for the prompt. */
 export function stripPromptControlCharacters(text: string): string {
   let printable = "";
   for (const character of text) {
@@ -134,13 +97,6 @@ export function stripPromptControlCharacters(text: string): string {
   return printable;
 }
 
-/**
- * Decodes the next key from a raw input buffer, returning how many characters
- * it consumed so a caller can reassemble escape sequences that arrive split
- * across reads (common with PTYs and under load). Returns `incomplete` when the
- * buffer holds only a prefix of a longer sequence (a lone `ESC`, or a CSI/SS3
- * without its final byte) so the caller can wait for the rest.
- */
 export function nextKey(buffer: string): KeyToken {
   const first = buffer[0];
   if (first === undefined) return { consumed: 0, incomplete: true };
@@ -149,14 +105,10 @@ export function nextKey(buffer: string): KeyToken {
     if (buffer.length === 1) return { consumed: 0, incomplete: true };
     const second = buffer[1];
     if (second === "O") {
-      // SS3: `ESC O <final>` — needs exactly one more byte.
       if (buffer.length < 3) return { consumed: 0, incomplete: true };
       return { key: parseKey(Buffer.from(buffer.slice(0, 3))), consumed: 3 };
     }
     if (second === "[") {
-      // Bracketed paste: capture everything between the start and end markers as
-      // one chunk so embedded newlines insert literally instead of each one
-      // submitting the line. Wait for the closing marker if it hasn't arrived.
       if (buffer.startsWith(PASTE_START)) {
         const end = buffer.indexOf(PASTE_END, PASTE_START.length);
         if (end === -1) return { consumed: 0, incomplete: true };
@@ -177,9 +129,6 @@ export function nextKey(buffer: string): KeyToken {
       return { consumed: 0, incomplete: true };
     }
     if (second === "]") {
-      // OSC (`ESC ] … BEL` or `ESC ] … ESC \`): a terminal's reply to a query
-      // (e.g. the OSC 11 background-color probe). Tokenized whole so a reply
-      // never garbles the key stream; the payload excludes the terminator.
       const bel = buffer.indexOf("\x07", 2);
       const st = buffer.indexOf("\x1b\\", 2);
       if (bel === -1 && st === -1) return { consumed: 0, incomplete: true };
@@ -189,8 +138,6 @@ export function nextKey(buffer: string): KeyToken {
         consumed: end + (end === bel ? 1 : 2),
       };
     }
-    // Alt/Meta letter chords arrive as ESC followed by the letter. Decode the
-    // readline word-movement chords together instead of surfacing Escape first.
     if (second === "b" || second === "B") {
       return { key: { type: "alt-b" }, consumed: 2 };
     }
@@ -203,17 +150,13 @@ export function nextKey(buffer: string): KeyToken {
     if (second === "\x7f" || second === "\b") {
       return { key: { type: "alt-backspace" }, consumed: 2 };
     }
-    // Other `ESC` + byte chords surface Escape and then re-tokenize the byte.
     return { key: { type: "escape" }, consumed: 1 };
   }
 
-  // A control character is always its own key.
   if (first < " " || first === "\x7F") {
     return { key: parseKey(Buffer.from(first)), consumed: 1 };
   }
 
-  // Otherwise consume the maximal printable run (a typed char or a paste) up to
-  // the next control byte or escape.
   let end = 1;
   while (end < buffer.length) {
     const char = buffer[end]!;
@@ -223,9 +166,6 @@ export function nextKey(buffer: string): KeyToken {
   return { key: parseKey(Buffer.from(buffer.slice(0, end))), consumed: end };
 }
 
-// SGR mouse reporting (1006): `ESC [ < Cb ; Cx ; Cy M` press, lowercase
-// `m` release. Only decoded while mouse reporting is enabled (the trace
-// viewer's alt screen).
 const SGR_MOUSE = new RegExp(`^${String.fromCharCode(27)}\\[<(\\d+);(\\d+);(\\d+)([Mm])$`, "u");
 
 export function parseKey(chunk: Buffer): TerminalKey {
@@ -273,9 +213,6 @@ export function parseKey(chunk: Buffer): TerminalKey {
       return { type: "ctrl-c" };
     case "\r":
       return { type: "enter" };
-    // Shift+Enter inserts a newline instead of submitting. Terminals report it
-    // as xterm modifyOtherKeys (`CSI 27 ; 2 ; 13 ~`), the kitty/CSI-u form, or
-    // LF (Warp). Raw-mode Enter is CR, so LF is otherwise only Ctrl+J.
     case "\n":
     case "\x1b[27;2;13~":
     case "\x1b[13;2u":
@@ -313,8 +250,6 @@ export function parseKey(chunk: Buffer): TerminalKey {
       return { type: "end" };
     case "\x1B[3~":
       return { type: "delete" };
-    // Alt+Backspace commonly arrives as Meta+Backspace, kitty CSI-u, or
-    // xterm's modifyOtherKeys form.
     case "\x1B[127;3u":
     case "\x1B[8;3u":
     case "\x1B[27;3;127~":
@@ -325,8 +260,6 @@ export function parseKey(chunk: Buffer): TerminalKey {
     case "\x1B":
       return { type: "escape" };
     default: {
-      // Strip C0 control characters and DEL from an unframed printable run.
-      // Bracketed paste and control keys were tokenized above.
       const printable = stripPromptControlCharacters(value);
       return printable.length > 0
         ? { type: "text", value: printable, framing: "unframed" }
@@ -353,26 +286,16 @@ export async function* takeUntil<T>(
   try {
     while (true) {
       const next = iterator.next();
-      // When `stop` wins the race, this in-flight pull settles later — e.g.
-      // rejecting once the caller aborts the underlying stream. Absorb that
-      // so it cannot surface as an unhandled rejection after we stopped.
       void next.catch(() => {});
       const nextValue = await Promise.race([next, stopped]);
       if (nextValue.done) break;
       yield nextValue.value;
     }
   } finally {
-    // Release the source iterator on every exit path (stop, consumer break,
-    // error) so abandoned generators run their cleanup — e.g. the client
-    // event stream advancing its session cursor. For generator sources this
-    // resolves only once the pending pull settles, so callers that stop
-    // mid-pull must also abort the underlying stream (a lifecycle interrupt
-    // path fires `result.abort()` for exactly this reason).
     void iterator.return?.()?.catch(() => {});
   }
 }
 
-/** `394.4K`-style compact count: plain below 1000, then K/M with one trimmed decimal. */
 export function formatCompactTokenCount(count: number): string {
   if (count < 1000) return `${count}`;
   const scaled = count < 1_000_000 ? count / 1000 : count / 1_000_000;
@@ -380,11 +303,6 @@ export function formatCompactTokenCount(count: number): string {
   return `${scaled.toFixed(1).replace(/\.0$/, "")}${suffix}`;
 }
 
-/**
- * Formats a turn's wall-clock duration for the end-of-turn stats line:
- * `42s`, `3min 24s`, `1h 12min`. Sub-second turns round up to `1s` — a
- * `0s` coda would read as a measurement error.
- */
 export function formatTurnDuration(elapsedMs: number): string {
   const totalSeconds = Math.max(1, Math.round(elapsedMs / 1000));
   const seconds = totalSeconds % 60;
@@ -396,11 +314,6 @@ export function formatTurnDuration(elapsedMs: number): string {
   return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}min`;
 }
 
-/**
- * The turn bar and coda's token-flow segment: `↑ 394.4K ↓ 4.3K`, input
- * (prompt) tokens up, output tokens down. A known `--context-size` appends
- * the context-fill percentage of the input side.
- */
 export function formatTokenFlow(
   flow: { inputTokens: number; outputTokens: number; contextSize?: number },
   glyph: { arrowUp: string; arrowDown: string },
@@ -429,8 +342,6 @@ export function formatAssistantResponseStats(
   if (mode === "tokensPerSecond") {
     return formatTokensPerSecond(stats.tokensPerSecond);
   }
-  // Label output tokens explicitly — the persistent status line below this
-  // row already shows the total token count.
   if (stats.outputTokens == null) return undefined;
   return `${stats.outputTokens.toLocaleString()} output tokens`;
 }

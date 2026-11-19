@@ -13,8 +13,10 @@
     "teams",
     "twilio",
     "board",
+    "recall",
     "chat-sdk",
     "mcp",
+    "a2a",
     "custom"
   ]
 }

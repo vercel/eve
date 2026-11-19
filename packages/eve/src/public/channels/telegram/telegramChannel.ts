@@ -69,6 +69,7 @@ import {
   stateFromTelegramCallbackQuery,
   stateFromTelegramMessage,
   telegramContinuationTokenFromState,
+  telegramUserName,
 } from "#public/channels/telegram/state.js";
 import { verifyTelegramRequest } from "#public/channels/telegram/verify.js";
 import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
@@ -104,6 +105,10 @@ export interface TelegramChannelState extends TelegramHitlState {
   messageThreadId: number | null;
   /** Telegram user id that triggered the current session/turn. */
   triggeringUserId?: string | null;
+  /** @internal The name of the Telegram user who sent a delivery's message or press. */
+  triggeringUserName?: string | null;
+  /** @internal The name of the person behind each principal that sent or answered, so an answered prompt can name them. */
+  namesByPrincipal?: Record<string, string>;
   /**
    * Bot message id that the triggering message replied to. The deliver hook
    * reads it from delivery state to answer a pending ForceReply prompt.
@@ -612,21 +617,17 @@ async function dispatchCallbackQuery(input: {
   }
 
   if (input.query.data?.startsWith(TELEGRAM_HITL_CALLBACK_PREFIX) === true) {
-    // Telegram takes one answer per callback, so it waits for delivery: a press
-    // no session can take is answered with the inactive notice instead.
-    // The prompt's edit starts before the answer and finishes after it.
     const message = input.query.message;
     const data = input.query.data;
     const answer =
       message && state.chatId
         ? await respondOrRetireInactivePrompt(
-            // The presser acts as themselves, so a press that starts a turn lets
-            // their next message steer it.
             () =>
               input
                 .from(telegramContinuationTokenFromState(state))
                 .respond([telegramCallbackAnswer(data)], {
                   auth: defaultTelegramAuth({ ...message, from: input.query.from }),
+                  state: { triggeringUserName: telegramUserName(input.query.from) },
                 }),
             { retirePrompt: (label) => retireInactivePrompt(telegram, message, label) },
             log,
@@ -663,11 +664,6 @@ async function dispatchCallbackQuery(input: {
   }
 }
 
-/**
- * Edits a prompt no session holds the way `input.resolved` edits a resolved
- * one. The session's record of the prompt is gone, so its text comes from the
- * pressed message.
- */
 async function retireInactivePrompt(
   telegram: TelegramContext,
   message: TelegramMessageReference,
@@ -690,6 +686,7 @@ function attachTelegramDeliver(channel: TelegramChannel): void {
   const adapter = channel.adapter;
   adapter.deliver = (payload: DeliverPayload, ctx: ChannelAdapterContext<TelegramChannelState>) => {
     const state = payload.state as Partial<TelegramChannelState> | undefined;
+    recordTelegramName(ctx.state, ctx.session.auth.current, state?.triggeringUserName);
     const responses = [
       ...(payload.answers ?? []),
       ...telegramReplyAnswers(state?.replyToBotMessageId, payload.message),
@@ -706,6 +703,16 @@ function attachTelegramDeliver(channel: TelegramChannel): void {
     }
     return defaultDeliverResult(payload);
   };
+}
+
+function recordTelegramName(
+  state: TelegramChannelState,
+  caller: SessionAuthContext | null,
+  name: string | null | undefined,
+): void {
+  if (caller === null || typeof name !== "string" || name === "") return;
+  if (state.namesByPrincipal?.[caller.principalId] === name) return;
+  state.namesByPrincipal = { ...state.namesByPrincipal, [caller.principalId]: name };
 }
 
 function readChatId(value: unknown): string | undefined {

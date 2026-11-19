@@ -1,4 +1,5 @@
 import * as workflowRuntime from "#execution/workflow-runtime.js";
+import { installWorkflowHost } from "#execution/workflow-host/host.js";
 import { eventTracing } from "#internal/testing/event-tracing.js";
 import { trace } from "@opentelemetry/api";
 import { connectionEntry } from "#execution/catalog/connection-entry.js";
@@ -11,7 +12,8 @@ import { afterEach, beforeEach, expect, it, vi, onTestFinished } from "vitest";
 import { ContextContainer, contextStorage, loadContext } from "#context/container.js";
 import { AuthKey, SessionIdKey, SessionTraceSeedKey } from "#context/keys.js";
 import { serializeContext } from "#context/serialize.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { fromCompiledBundle } from "#definitions/compiled-agent.js";
+import { requireCompiledBundle, SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { ConnectionEventActions } from "#runtime/connections/events/actions.js";
 import { startConnectionEventOwner } from "#runtime/connections/events/owner.js";
@@ -36,8 +38,6 @@ const { createClient, loadBundle, handlers, retired, workflowRunId } = vi.hoiste
   createClient: vi.fn(),
   workflowRunId: { current: "wrun_1" },
   loadBundle: vi.fn(),
-  // Stands in for live handler runs: what each run holds in its own input and state.
-  // A subscription is undefined while its watch's subscribe is still in flight.
   handlers: new Map<
     string,
     { binding: EventBinding; subscription: ManagedEventSubscription | undefined }
@@ -51,9 +51,7 @@ vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
 }));
 vi.mock("#compiled/@ai-sdk/mcp/index.js", () => ({ createMCPClient: createClient }));
 vi.mock("#runtime/connections/events/owner.js", () => ({
-  // Subscribes the way the handler run's first step does.
   startConnectionEventOwner: vi.fn(async (binding: EventBinding, bundle: unknown) => {
-    // A second run for the same binding conflicts on its hook and reads the first.
     const existing = handlers.get(binding.id);
     if (existing !== undefined) return existing.subscription;
     const { subscribeConnectionEvent } =
@@ -61,7 +59,6 @@ vi.mock("#runtime/connections/events/owner.js", () => ({
     const { subscriptionFromOutcome } = await vi.importActual<
       typeof import("#runtime/connections/events/owner.js")
     >("#runtime/connections/events/owner.js");
-    // The binding id stands in for the run's own idempotency key.
     const subscription = subscriptionFromOutcome(
       await subscribeConnectionEvent(handlerContext(binding, bundle), binding, binding.id),
     );
@@ -72,7 +69,6 @@ vi.mock("#runtime/connections/events/owner.js", () => ({
     const handler = handlers.get(bindingId);
     return handler && { owner: handler.binding, subscription: handler.subscription };
   }),
-  // The run unsubscribes and ends on its own; this records that it was asked to.
   retireConnectionEventOwner: vi.fn(async (bindingId: string) => {
     if (!handlers.has(bindingId)) return false;
     retired.add(bindingId);
@@ -85,6 +81,8 @@ vi.mock("#runtime/sessions/compiled-agent-cache.js", () => ({
 vi.mock("#execution/terminal-session-completion-step.js", () => ({
   emitTerminalSessionCompletionStep: vi.fn(),
 }));
+installWorkflowHost();
+
 let ctx: ContextContainer;
 let actions: ConnectionEventActions;
 let connection: ResolvedConnectionDefinition;
@@ -203,7 +201,7 @@ beforeEach(async () => {
     },
   }));
   ctx = new ContextContainer();
-  ctx.set(BundleKey, bundle);
+  ctx.set(SessionAgentKey, fromCompiledBundle(bundle));
   ctx.set(SessionIdKey, "session-1");
   setUser("alice");
   actions = new ConnectionEventActions(connection, connection.experimental_events!, async () => ({
@@ -237,6 +235,13 @@ it.each([3_600_000, null])(
       const request = JSON.parse(String(init.body));
       methods.push(request.method);
       if (request.id === undefined) return new Response(null, { status: 202 });
+      if (request.method === "server/discover") {
+        return Response.json({
+          jsonrpc: "2.0",
+          id: request.id,
+          error: { code: -32601, message: "Method not found" },
+        });
+      }
       let result;
       if (request.method === "initialize") {
         result = {
@@ -496,15 +501,13 @@ async function watch(callId = "watch-1", ttlMs: number | null = TTL_MS) {
         { callId },
       )) as ManagedEventSubscription & { subscriptionId: string };
     } finally {
-      // Deliveries run under the binding the watch's hook carries, not session state.
       initial = { ...initial, binding: [...handlers.values()].at(-1)?.binding };
     }
   });
 }
-/** The context a handler run starts with: its creator, never the current caller. */
 function handlerContext(binding: EventBinding, bundle: unknown): Record<string, unknown> {
   const handler = new ContextContainer();
-  handler.set(BundleKey, bundle as CompiledRuntimeAgentBundle);
+  handler.set(SessionAgentKey, fromCompiledBundle(bundle as CompiledRuntimeAgentBundle));
   handler.set(AuthKey, binding.auth);
   handler.set(SessionIdKey, binding.sessionId);
   return serializeContext(handler);
@@ -554,8 +557,7 @@ it.each(["user", "app"] as const)(
       authorization,
       experimental_events: { ...connection.experimental_events!, authorization },
     };
-    // The handler re-checks its binding against the deployed connection.
-    (ctx.require(BundleKey).resolvedAgent.connections as ResolvedConnectionDefinition[])[0] =
+    (requireCompiledBundle(ctx).resolvedAgent.connections as ResolvedConnectionDefinition[])[0] =
       connection;
     actions = new ConnectionEventActions(connection, connection.experimental_events!, async () => ({
       account: ctx.require(AuthKey)!.principalId,
@@ -601,9 +603,8 @@ it("keeps a 401 from subscribe classifiable as a sign-in request", async () => {
 it("throws when a subscribe response is lost, so the step retries with the same key", async () => {
   await watch();
   const binding: EventBinding = { ...initial.binding!, id: "lost" };
-  const context = handlerContext(binding, ctx.require(BundleKey));
+  const context = handlerContext(binding, requireCompiledBundle(ctx));
   const subscribe = subscriber.getMockImplementation()!;
-  // Connect creates the subscription, but its response never arrives.
   subscriber.mockImplementationOnce(async (input) => {
     await subscribe(input);
     throw new Error("The operation timed out.");
@@ -618,7 +619,6 @@ it("fails the subscribe action with Connect's error, and a retry reuses its idem
   subscriber.mockRejectedValueOnce(new Error("MCP Events provider request failed."));
   await expect(watch()).rejects.toThrow("MCP Events provider request failed.");
   expect(handlers.size).toBe(0);
-  // A retry of the same tool call subscribes again with the same idempotency key.
   await watch();
   const [failed, retried] = subscriber.mock.calls.map(([input]) => input);
   expect(failed?.idempotencyKey).toBe(retried?.idempotencyKey);
@@ -642,7 +642,6 @@ it("does not run a delivery whose connection or event name differs from its bind
   await watch();
   initial = { ...initial, serializedContext: serializeContext(ctx) };
   const message = payload();
-  // The binding id only finds the watch; the delivery must still match what it watches.
   for (const candidate of [
     { ...message, connectionName: "other" },
     {
@@ -672,7 +671,6 @@ it("returns the same watch when the same event and arguments are watched again",
         { callId },
       )) as { id: string };
     });
-  // A cancelled call's id is never seen; asking again with a new call reaches its watch.
   const first = await ask("cancelled", { project: "ABC", team: "core" });
   const again = await ask("retry", { team: "core", project: "ABC" });
   expect(again.id).toBe(first.id);
@@ -686,7 +684,7 @@ it("keys Connect's subscribe by watch and run, so a step retry reuses it and a l
   const binding = initial.binding!;
   const open = () =>
     openConnectionEventStep({
-      serializedContext: handlerContext(binding, ctx.require(BundleKey)),
+      serializedContext: handlerContext(binding, requireCompiledBundle(ctx)),
       binding,
     });
   workflowRunId.current = "wrun_1";
@@ -702,7 +700,6 @@ it("keys Connect's subscribe by watch and run, so a step retry reuses it and a l
 });
 
 it("returns a subscribe that outlasts the wait as pending under its id, which get later resolves", async () => {
-  // The watch run keeps subscribing after the tool stops waiting for it.
   vi.mocked(startConnectionEventOwner).mockImplementationOnce(async (binding) => {
     handlers.set(binding.id, { binding, subscription: undefined });
     return undefined;
@@ -726,7 +723,6 @@ it("returns a subscribe that outlasts the wait as pending under its id, which ge
       await actions.execute("events_get_subscription", { id }, { callId: "get-again" }),
     ).toMatchObject({ id, subscriptionId: "sub_late", status: "active" });
   });
-  // The model's next call reuses the id it was given: Connect saw one subscribe.
   expect(adapter.getSubscription).toHaveBeenCalledWith(expect.objectContaining({ id: "sub_late" }));
 });
 
@@ -786,7 +782,6 @@ it("lets the creator stop a watch from a later session by its id", async () => {
       status: "stopping",
     });
   });
-  // The action only asks the watch's run to stop; the run unsubscribes.
   expect(adapter.unsubscribe).not.toHaveBeenCalled();
   expect(retired.has(id)).toBe(true);
 });
@@ -805,7 +800,6 @@ it("reports a stopped watch until its run finishes Connect's cleanup", async () 
       await actions.execute("events_get_subscription", { id }, { callId: "get" }),
     ).toMatchObject({ id, cleanupStatus: "pending" });
   });
-  // Once the run has ended, its hook is gone and the id is unknown.
   handlers.delete(id);
   await contextStorage.run(ctx, async () => {
     await expect(
@@ -822,7 +816,6 @@ it.each([
   ["complete", { cleanupStatus: "complete" as const }, "done"],
   ["already removed", Object.assign(new Error("Not found"), { status: 404 }), "done"],
   ["gone", Object.assign(new Error("Gone"), { status: 410 }), "done"],
-  // Cleanup that has not happened keeps the watch, so a later attempt can finish it.
   ["unauthorized", Object.assign(new Error("Unauthorized"), { status: 401 }), "pending"],
   ["forbidden", Object.assign(new Error("Forbidden"), { status: 403 }), "pending"],
   ["unavailable", Object.assign(new Error("Connect unavailable"), { status: 503 }), "pending"],
@@ -837,7 +830,7 @@ it.each([
     const binding = initial.binding!;
     expect(
       await unsubscribeConnectionEventStep({
-        serializedContext: handlerContext(binding, ctx.require(BundleKey)),
+        serializedContext: handlerContext(binding, requireCompiledBundle(ctx)),
         binding,
         subscriptionId: subscription.id,
       }),
@@ -961,7 +954,7 @@ it("links callback sends to the callback span through durable channel delivery m
   await watch();
   initial = { ...initial, serializedContext: serializeContext(ctx) };
   const runtime = workflowRuntime.createWorkflowRuntime({
-    compiledArtifactsSource: ctx.require(BundleKey).compiledArtifactsSource,
+    compiledArtifactsSource: requireCompiledBundle(ctx).compiledArtifactsSource,
   });
   const send = vi.fn().mockResolvedValue({ status: "accepted" });
   vi.spyOn(workflowRuntime, "createWorkflowRuntime").mockReturnValue({

@@ -10,17 +10,13 @@ interface SlackAppManifestBuildDefinition {
 
 export function defineSlackAppManifest(input: {
   readonly botName?: string;
-  /** Adds the scopes, events, and feature flag Slack code channels need. */
   readonly codeChannels?: boolean;
-  /** Adds the `users:read` scope `messageContext.users` needs for names. */
   readonly users?: boolean;
-  /** Adds the `users:read.email` scope `messageContext.users.email` needs. */
   readonly userEmails?: boolean;
 }): SlackAppManifestBuildDefinition {
   return {
     build(channelName) {
       const name = (input.botName ?? channelName).slice(0, 35);
-      // Slack sends message edits only through the message events, which need the history scopes.
       const botScopes = [
         "app_mentions:read" as const,
         "channels:history" as const,
@@ -65,7 +61,6 @@ export function defineSlackAppManifest(input: {
   };
 }
 
-// @slack/web-api's manifest types predate code channels.
 function withCodeChannels(manifest: {
   readonly features: object;
   readonly oauth_config: { readonly scopes: { readonly bot: readonly string[] } };

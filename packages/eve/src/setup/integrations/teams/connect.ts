@@ -29,7 +29,6 @@ export function parseCreatedTeamsConnector(stdout: string): TeamsConnectorRef | 
   }
 }
 
-/** Creates and installs a Teams app through the Vercel Connect CLI. */
 export async function provisionTeamsConnector(input: {
   name: string;
   log: ChannelSetupLog;

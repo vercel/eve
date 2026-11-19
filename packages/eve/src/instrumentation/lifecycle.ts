@@ -16,6 +16,7 @@ import type * as memory from "#instrumentation/memory.js";
 import type { InstrumentationStateSlot } from "#instrumentation/state.js";
 import type { TraceContext } from "#protocol/session-events/families/session.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
+import type { TraceContentCeiling } from "#shared/forwarded-trace-policy.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import type { TraceCaptureContext, TraceCapturePolicy } from "#shared/trace-policy.js";
 
@@ -93,15 +94,6 @@ export type InstrumentationContentPart =
       readonly toolName: string;
     };
 
-/**
- * Every event carries an `idempotencyKey` naming the operation it is about: a
- * start and its terminal share one, and two operations never collide.
- *
- * Every part is identity eve reconstructs on replay — session and turn ids,
- * run id and retry attempt, AI SDK step number,
- * and durable runtime-action call ids. A provider writing rows can use the key
- * as its row id and be idempotent by construction.
- */
 export function sessionIdempotencyKey(sessionId: string): string {
   return `session:${sessionId}`;
 }
@@ -114,7 +106,6 @@ export function attemptIdempotencyKey(scope: InstrumentationScope): string {
   return `model-run:${scope.sessionId}:${scope.runId}:${scope.attempt}`;
 }
 
-/** Identifies one provider call, including retries, within an AI SDK step. */
 export function modelCallIdempotencyKey(
   scope: InstrumentationScope,
   stepNumber: number,
@@ -184,7 +175,7 @@ export interface InstrumentationDeliverySettledEvent extends DeliverySettledData
   readonly sessionId: string;
 }
 
-/** What a person is asked for: an approval, a question, or the budget prompt (never a sign-in). */
+/** What a person is asked for: an approval, a question, the budget prompt, or a sign-in. */
 export type InstrumentationInteractionKind = InteractionRequest["kind"];
 
 export type InstrumentationInteractionOption = InteractionOption;
@@ -201,14 +192,19 @@ export type InstrumentationAnswer = ResponseValue;
 /** How the request settled, as its `interaction.settled` says. */
 export type InstrumentationInteractionOutcome = InteractionOutcome;
 
-/** A person was asked: the session's `interaction.opened`, never a sign-in. */
+/** A person was asked: the session's `interaction.opened`. */
 export interface InstrumentationInteractionOpenedEvent {
   readonly type: "interaction.opened";
-  /** The call the request is about: the call an approval gates, or the call that asked. */
+  /**
+   * The call the request is about: the call an approval gates, the call that asked, or the call
+   * that needs a sign-in. Absent for a budget prompt or a sign-in the turn needs before it runs.
+   */
   readonly call?: {
     readonly callId: string;
     readonly name: string;
   };
+  /** For a sign-in, the connection or tool that needs it. Never its URL, code, or credential. */
+  readonly signIn?: { readonly name: string };
   readonly idempotencyKey: string;
   readonly interactionId: string;
   readonly kind: InstrumentationInteractionKind;
@@ -225,6 +221,11 @@ export interface InstrumentationInteractionSettledEvent {
   readonly kind: InstrumentationInteractionKind;
   readonly interactionId: string;
   readonly outcome: InstrumentationInteractionOutcome;
+  /**
+   * Why it ended, as a machine-readable code such as a failed sign-in's `access_denied`. Absent
+   * when `interaction.settled` gave none or gave free text, which can carry an error's message.
+   */
+  readonly reason?: string;
   /** Content. Absent unless this provider's trace policy records this direction. */
   readonly answer?: InstrumentationAnswer;
   /**
@@ -235,7 +236,6 @@ export interface InstrumentationInteractionSettledEvent {
   readonly scope: InstrumentationScope;
 }
 
-/** Runtime action call IDs are durable and unique within one session. */
 export function actionIdempotencyKey(
   sessionId: string,
   turnId: string | undefined,
@@ -463,42 +463,29 @@ export interface InstrumentationCallSettledEvent {
   readonly scope: InstrumentationScope;
 }
 
-/** The second argument to every handler. */
 export interface InstrumentationHandlerContext {
-  /** Durable state scoped to this provider and this operation. */
   readonly state: InstrumentationStateSlot;
 }
 
-/**
- * The AI SDK can omit a model terminal when an incomplete stream closes. A
- * handler can use `ctx.state` for durable correlation when a terminal arrives,
- * but providers must scope live resources to the attempt and release anything
- * still open when the step attempt terminates.
- */
 export type InstrumentationEventHandler<TEvent> = (
   event: TEvent,
   ctx: InstrumentationHandlerContext,
 ) => void | PromiseLike<void>;
 
-/** Internal normalized provider shape consumed by the instrumentation bus. */
 export interface InstrumentationProviderDefinition {
   readonly name: string;
-  /** Durable state identity, separate from the human-readable log name. */
   readonly stateNamespace?: string;
-  /** Internal provider-specific projection applied after capture filtering. */
   readonly projectEvent?: (
     event: InstrumentationEvent,
   ) => InstrumentationEvent | PromiseLike<InstrumentationEvent>;
-  /** Provider-specific event admission and directional content policy. */
   readonly tracePolicy?: TraceCapturePolicy;
+  readonly receivesTurnScopes?: boolean;
   readonly events?: {
     readonly [K in InstrumentationEvent["type"]]?: InstrumentationEventHandler<
       InstrumentationEvent<K>
     >;
   };
-  /** Drains anything buffered. Driven by the runtime, not by the bus. */
   readonly flush?: () => void | PromiseLike<void>;
-  /** Releases resources when the process is going away. */
   readonly shutdown?: () => void | PromiseLike<void>;
 }
 
@@ -538,16 +525,17 @@ export type InstrumentationPointEvent =
   | InstrumentationTurnSettledEvent;
 
 type LifecycleEvent = InstrumentationCorrelatedEvent | InstrumentationPointEvent;
+/**
+ * A lifecycle event instrumentation providers can handle, optionally narrowed to one event `type`.
+ */
 export type InstrumentationEvent<K extends LifecycleEvent["type"] = LifecycleEvent["type"]> =
   Extract<LifecycleEvent, { readonly type: K }>;
 
-/** Trusted framework operation for activating context around AI SDK execution. */
 export type InstrumentationContextRunner = <T>(
   operation: InstrumentationExecutionOperation,
   execute: () => PromiseLike<T>,
 ) => PromiseLike<T>;
 
-/** Stable identity supplied only to a trusted framework context runner. */
 export type InstrumentationExecutionOperation =
   | {
       readonly idempotencyKey: string;
@@ -568,29 +556,27 @@ export type InstrumentationExecutionOperation =
     }
   | memory.InstrumentationMemoryExecutionOperation;
 
-/** Provider-neutral hook operations consumed by the AI SDK bridge. */
 export interface InstrumentationHooks {
-  /**
-   * Whether any provider admitted by this bound trace requests content.
-   *
-   * False means nothing downstream can read what was said, so the publisher
-   * should not serialize it in the first place. This is the only way the
-   * projection is skipped rather than merely withheld.
-   */
   readonly capturesContent: boolean;
-  /** Input-content demand for publishers that can project directions separately. */
   readonly capturesInputs?: boolean;
-  /** Output-content demand for publishers that can project directions separately. */
   readonly capturesOutputs?: boolean;
-  readonly forTrace?: (trace: TraceCaptureContext) => InstrumentationHooks;
+  readonly authoredCapturesInputs?: boolean;
+  readonly authoredCapturesOutputs?: boolean;
+  readonly forTrace?: (
+    trace: TraceCaptureContext,
+    options?: InstrumentationTraceBindingOptions,
+  ) => InstrumentationHooks;
   publish(event: InstrumentationEvent): Promise<void>;
+}
+
+export interface InstrumentationTraceBindingOptions {
+  readonly ceiling?: TraceContentCeiling;
 }
 
 export interface CreateInstrumentationHooksOptions {
   readonly handlerTimeoutMs?: number;
 }
 
-/** Creates failure-isolated hooks backed by normalized dispatch groups. */
 export function createInstrumentationHooks(
   input: InstrumentationHooksInput,
   options: CreateInstrumentationHooksOptions = {},

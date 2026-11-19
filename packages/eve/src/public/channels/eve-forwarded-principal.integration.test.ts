@@ -1,15 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { REMOTE_AGENT_PROTOCOL_VERSION } from "#protocol/remote-agent-protocol.js";
 
-/**
- * Integration coverage for forwarded principal across the create route and the
- * runtime: an accepted `forwardedPrincipal` body becomes the run's session
- * principal (`AuthKey` / `InitiatorAuthKey`, projected as
- * `session.auth.current` / `.initiator`) and reaches
- * `resolveConnectionPrincipal` as a `user` principal — the seam per-user
- * Vercel Connect requires on the receiving deployment.
- */
-
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import type { RunInput, SessionAuthContext } from "#channel/types.js";
 import { contextStorage } from "#context/container.js";
@@ -28,6 +19,7 @@ import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operati
 import { isConnectionAuthorizationFailedError } from "#public/connections/errors.js";
 import { principalKey, resolveConnectionPrincipal } from "#runtime/connections/principal.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
+import { fromCompiledBundle } from "#definitions/compiled-agent.js";
 import { eveChannel, type EveChannelConfig } from "#public/channels/eve.js";
 import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
@@ -75,7 +67,7 @@ function createEmptySkillBundle(): CompiledBundle {
   };
 }
 
-const EMPTY_SKILL_BUNDLE = createEmptySkillBundle();
+const EMPTY_SKILL_AGENT = fromCompiledBundle(createEmptySkillBundle());
 
 function createEveCreateHandler(input: EveChannelConfig) {
   const channel = eveChannel(input);
@@ -160,7 +152,7 @@ describe("eveChannel forwarded principal → runtime principal", () => {
       channelName: "eve",
       ...options,
     };
-    const ctx = buildRunContext({ bundle: EMPTY_SKILL_BUNDLE, run });
+    const ctx = buildRunContext({ agent: EMPTY_SKILL_AGENT, run });
 
     const current = ctx.get(AuthKey);
     const initiator = ctx.get(InitiatorAuthKey);
@@ -227,7 +219,6 @@ describe("eveChannel forwarded principal → runtime principal", () => {
       issuer: "slack",
       type: "user",
     });
-    // The audit attribute never enters Connect token-cache keying.
     expect(principalKey(principal)).toBe('["user","slack","slack:U123"]');
     expect(trustedForwarders).toHaveBeenCalledTimes(1);
     expect(logs.records).toContainEqual(
@@ -271,7 +262,7 @@ describe("eveChannel forwarded principal → runtime principal", () => {
         "adapter" | "channelName" | "requestId"
       >;
       const ctx = buildRunContext({
-        bundle: EMPTY_SKILL_BUNDLE,
+        agent: EMPTY_SKILL_AGENT,
         run: {
           adapter: { kind: "eve" },
           channelName: "eve",
@@ -365,7 +356,7 @@ describe("eveChannel forwarded principal → runtime principal", () => {
       "adapter" | "channelName" | "requestId"
     >;
     const ctx = buildRunContext({
-      bundle: EMPTY_SKILL_BUNDLE,
+      agent: EMPTY_SKILL_AGENT,
       run: {
         adapter: { kind: "eve" },
         channelName: "eve",
@@ -400,7 +391,7 @@ describe("eveChannel forwarded principal → runtime principal", () => {
       "adapter" | "channelName" | "requestId"
     >;
     const ctx = buildRunContext({
-      bundle: EMPTY_SKILL_BUNDLE,
+      agent: EMPTY_SKILL_AGENT,
       run: {
         adapter: { kind: "eve" },
         channelName: "eve",

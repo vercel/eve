@@ -11,10 +11,6 @@ import { serializeCompiledManifestForFingerprint } from "#internal/compiled-mani
 const MATERIALIZED_MODULES_DIRECTORY = "authored-modules";
 const MATERIALIZED_MODULES_INDEX = "authored-modules.json";
 
-/**
- * The materialized instrumentation modules, mirroring the layout they were
- * authored in. Paths are relative to `.eve/compile`.
- */
 export interface MaterializedInstrumentation {
   readonly kind: "directory";
   readonly modulePathsBySlot: Readonly<Record<string, string>>;

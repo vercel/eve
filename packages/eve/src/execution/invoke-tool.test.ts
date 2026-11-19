@@ -56,7 +56,6 @@ function tool(
   };
 }
 
-/** A connection over an in-memory sandbox; `stop` and `close` are spies. */
 function connect(sandbox: ReturnType<typeof mockSandbox>, stop = vi.fn(async () => {})) {
   const { session } = sandbox;
   return {
@@ -92,7 +91,6 @@ function registryFor(
   };
 }
 
-/** A provider that keeps each call's sandbox under its session id; `deleted` records cleanup by id. */
 function sandboxes(
   options: { readonly closeError?: Error; readonly startGate?: Promise<void> } = {},
 ) {
@@ -120,13 +118,6 @@ function sandboxes(
   return { closed, deleted, registry: registryFor(environment), shutdown, started };
 }
 
-/**
- * A provider whose `start` is an upsert on the session id and that sets
- * `toolSessions`, as Vercel Sandbox and just-bash do. Each open hands out its
- * own connection over the shared sandbox, as just-bash runs one interpreter
- * per connection; `released` records which connections a call closed, and
- * `stopped` any stop through the sandbox API or at server shutdown.
- */
 function keyedSandboxes(options: { readonly failSelector?: () => boolean } = {}) {
   const live = new Map<string, ReturnType<typeof mockSandbox>>();
   const starts: string[] = [];
@@ -174,7 +165,6 @@ function keyedSandboxes(options: { readonly failSelector?: () => boolean } = {})
   };
 }
 
-/** A tool that appends to a note in its sandbox and returns the note, after `gate` opens. */
 function noteTool(gate: Promise<void> = Promise.resolve()) {
   return tool("note", async (input: { text: string }, ctx) => {
     const sandbox = await ctx.getSandbox();
@@ -341,7 +331,6 @@ describe("invokeTool", () => {
       outcome: "rejected",
       reason: "Deploys are blocked.",
     });
-    // The agent's "approved" can't loosen the tool's own ask.
     expect(await invokeTool(governed, "release", {}, { auth: alice })).toMatchObject({
       outcome: "rejected",
       reason: "approval-required",
@@ -429,14 +418,12 @@ describe("invokeTool", () => {
     );
     const reasons = () => deleted.mock.calls.map(([, reason]) => reason);
 
-    // Session end closes what this process holds for the call's connection.
     expect(await invokeTool(runtime, "open", {}, { auth: alice })).toMatchObject({
       outcome: "completed",
     });
     expect(closed).toHaveBeenCalledTimes(1);
     expect(reasons()).toEqual(["completed"]);
 
-    // A call that stopped and then ended its sandbox leaves nothing for shutdown to stop.
     expect(await invokeTool(runtime, "pause", {}, { auth: alice })).toMatchObject({
       outcome: "completed",
     });
@@ -472,8 +459,6 @@ describe("invokeTool", () => {
     const { deleted, registry, shutdown, started } = sandboxes({ startGate });
     let gaveUp = false;
     const racing = tool("racing", async (_input: unknown, ctx) => {
-      // The call gives up while the provider is still starting, as a lost
-      // race against cancellation would.
       void ctx.getSandbox().catch(() => {});
       await vi.waitFor(() => expect(started).toHaveLength(1));
       gaveUp = true;
@@ -486,7 +471,6 @@ describe("invokeTool", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(deleted).not.toHaveBeenCalled();
     finishStart();
-    // Let a start that outlived the call settle before checking what it left behind.
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(await result).toMatchObject({ outcome: "failed" });
@@ -501,14 +485,12 @@ describe("invokeTool", () => {
     const note = (text: string, auth: SessionAuthContext, key: string) =>
       invokeTool(runtime, "note", { text }, { auth, key });
 
-    // Concurrent first calls converge on one sandbox; later calls reuse it.
     const first = await Promise.all([note("a", alice, "desk"), note("b", alice, "desk")]);
     expect(first.map((result) => result.outcome)).toEqual(["completed", "completed"]);
     expect(starts).toHaveLength(1);
     expect(await note("c", alice, "desk")).toMatchObject({
       output: expect.stringMatching(/^[ab]{1,2}c$/u),
     });
-    // Another key, or another caller with the same key, gets its own sandbox.
     expect(await note("x", alice, "lobby")).toMatchObject({ output: "x" });
     expect(await note("y", bob, "desk")).toMatchObject({ output: "y" });
     expect(starts).toHaveLength(3);
@@ -524,8 +506,6 @@ describe("invokeTool", () => {
       principalType: "service",
     });
     const [routerA, routerB] = [router("router-a"), router("router-b")];
-    // A forwarded user's attributes are asserted by the forwarder, so the
-    // session must not depend on them: both routers stamp the same ones.
     const forwarded = (principalId: string): SessionAuthContext => ({
       ...alice,
       attributes: { "eve:forwarded-by": "router" },
@@ -535,11 +515,8 @@ describe("invokeTool", () => {
       invokeTool(runtime, "note", { text }, { auth, forwardedBy, key: "desk" });
 
     expect(await note("a", forwarded("alice"), routerA)).toMatchObject({ output: "a" });
-    // Another user through the same router, with the same key.
     expect(await note("b", forwarded("bob"), routerA)).toMatchObject({ output: "b" });
-    // The same user and key through another router.
     expect(await note("c", forwarded("alice"), routerB)).toMatchObject({ output: "c" });
-    // Neither is the user's direct session, and the first one is still there.
     const direct = await invokeTool(runtime, "note", { text: "d" }, { auth: alice, key: "desk" });
     expect(direct).toMatchObject({ output: "d" });
     expect(await note("e", forwarded("alice"), routerA)).toMatchObject({ output: "ae" });
@@ -564,19 +541,15 @@ describe("invokeTool", () => {
 
     const holding = call("note", "a", held);
     await vi.waitFor(() => expect(handles).toHaveLength(1));
-    // An overlapping call reopens the same sandbox through its own handle and
-    // releases only that one when it ends; the first call's handle stays open.
     expect(await call("note", "b")).toMatchObject({ outcome: "completed" });
     expect(released).toEqual([handles[1]]);
     openGate();
     expect(await holding).toMatchObject({ outcome: "completed" });
     expect(released).toEqual([handles[1], handles[0]]);
-    // A call that fails after opening its sandbox still lets go of its handle.
     expect(await call("failing", "")).toMatchObject({ outcome: "failed" });
     expect(handles).toHaveLength(3);
     expect(released).toEqual([handles[1], handles[0], handles[2]]);
 
-    // No call's connection is left for server shutdown, and the sandbox itself stays.
     await shutdownActiveSandboxConnections();
     expect(stopped).not.toHaveBeenCalled();
     expect(new Set(kinds)).toEqual(new Set(["tool-session"]));
@@ -601,7 +574,6 @@ describe("invokeTool", () => {
     });
     expect(execute).not.toHaveBeenCalled();
     expect(starts).toHaveLength(0);
-    // Without a key the anonymous caller still gets a one-off call.
     expect(await invokeTool(runtime, "note", {}, { auth: anonymous })).toMatchObject({
       output: "ran",
       outcome: "completed",
@@ -636,7 +608,6 @@ describe("invokeTool", () => {
     const holding = invokeTool(runtime, "note", { text: "a" }, { auth: alice, key: "desk" });
     await vi.waitFor(() => expect(live.size).toBe(1));
 
-    // The second call's `start` finds the first call's sandbox, then its selector fails.
     failSelector = true;
     expect(
       await invokeTool(runtime, "note", { text: "b" }, { auth: alice, key: "desk" }),
