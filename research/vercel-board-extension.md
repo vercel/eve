@@ -66,7 +66,9 @@ unwatch tool ── lock ─ remove w-7k3p ─ register ─ release ── label
   subtree, then `*`) on every delivered message and claimed task, not only when a watch is created.
 - **Claiming.** A claim watch claims one ready task per task event, or acks without a turn when none is
   ready. The session holds the claim in channel state, never in metadata, and renews it while turns
-  run. A task tool names the settlement and the channel performs it when a call from a settle tool
+  run: at turn and call boundaries, and every 30 seconds from one timer per claim while the
+  session's in-process tool calls run. Subagent and workflow calls run outside the step, so they
+  aren't covered. A task tool names the settlement and the channel performs it when a call from a settle tool
   settles, keeping the claim only when the board is briefly unavailable. A reply or the agent's
   own check-in in a held task's thread goes to that task's session. The claiming watch labels the task
   `eve-claim-watch=<id>`, so when two of the agent's claim watches cover a thread, only the one that

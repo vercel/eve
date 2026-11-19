@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { mock, test } from "node:test";
 
 import type { ChannelFrom } from "eve/channels";
 import { emptySessionView, foldEvents } from "eve/events";
 
 import {
   createBoardChannel,
+  endRenewal,
   heldClaimOf,
   keepBoardClaim,
+  renewDuringCall,
   settleAfterCall,
   type BoardChannelState,
 } from "../extension/lib/board-channel.ts";
@@ -214,4 +216,64 @@ test("a claim near the end of its lease is renewed", async () => {
   await keepBoardClaim(client(), state);
 
   assert.ok(state.task !== null && Date.parse(state.task.until) > Date.parse(soon));
+});
+
+function fakeIntervals(t: { after(fn: () => void): void }) {
+  mock.timers.enable({ apis: ["setInterval"] });
+  t.after(() => mock.timers.reset());
+  return async () => {
+    mock.timers.tick(30_000);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  };
+}
+
+const renewalsOf = (calls: readonly string[], task: string) =>
+  calls.filter((call) => call === `POST /tasks/${task}/renew`).length;
+
+test("a running call renews its claim every 30 seconds, with one timer for parallel calls", async (t) => {
+  const { as, calls } = await startBoard();
+  const { state, task } = await claimedTask(as);
+  const tick = fakeIntervals(t);
+  const leased = state.task!.until;
+
+  renewDuringCall(client, state, "c-1");
+  renewDuringCall(client, state, "c-2");
+  await tick();
+  assert.equal(renewalsOf(calls, task.id), 1);
+  endRenewal(state, "c-1");
+  assert.ok(Date.parse(state.task!.until) > Date.parse(leased));
+  await tick();
+  assert.equal(renewalsOf(calls, task.id), 2);
+  endRenewal(state, "c-2");
+  await tick();
+  assert.equal(renewalsOf(calls, task.id), 2);
+});
+
+test("a lost claim stops renewing and clears the session's claim when the call settles", async (t) => {
+  const { as, calls } = await startBoard();
+  const { state, task } = await claimedTask(as);
+  const tick = fakeIntervals(t);
+  const claim = state.task!;
+  await client()
+    .held({ epoch: claim.epoch, taskId: claim.id, token: claim.token, until: claim.until })
+    .release();
+
+  renewDuringCall(client, state, "c-1");
+  await tick();
+  await tick();
+  assert.equal(renewalsOf(calls, task.id), 1);
+  endRenewal(state, "c-1");
+  assert.equal(state.task, null);
+});
+
+test("the end of a turn stops renewing even with a call still open", async (t) => {
+  const { as, calls } = await startBoard();
+  const { state, task } = await claimedTask(as);
+  const tick = fakeIntervals(t);
+
+  renewDuringCall(client, state, "c-1");
+  endRenewal(state);
+  await tick();
+  assert.equal(renewalsOf(calls, task.id), 0);
+  assert.notEqual(state.task, null);
 });

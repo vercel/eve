@@ -282,8 +282,18 @@ export function createBoardChannel(
         const status = capability.hidden === true ? undefined : capability.label;
         await bestEffort("typing", () => ctx.channel.board.typing(status));
       },
+      async "call.started"(event, ctx) {
+        if (event.data.taskId === undefined) {
+          renewDuringCall(deployment, ctx.channel.state, event.data.callId);
+        }
+      },
       async "call.settled"(event, ctx) {
+        endRenewal(ctx.channel.state, event.data.callId);
         await settleAfterCall(deployment(), ctx.channel, ctx.view, event.data);
+      },
+      async "turn.settled"(event, ctx) {
+        endRenewal(ctx.channel.state);
+        await surface["turn.settled"](event, ctx);
       },
     },
   });
@@ -583,6 +593,60 @@ async function renewClaim(
     logError("board task renewal failed", error, { task: claim.id });
     return claim;
   }
+}
+
+const RENEW_EVERY_MS = 30_000;
+
+interface ClaimRenewal {
+  readonly calls: Set<string>;
+  claim: BoardHeldClaim | null;
+  renewing: boolean;
+  timer?: ReturnType<typeof setInterval>;
+}
+
+const renewals = new Map<string, ClaimRenewal>();
+
+const renewalKey = (claim: BoardHeldClaim) => `${claim.id}:${claim.epoch}`;
+
+export function renewDuringCall(
+  client: () => BoardClient,
+  state: BoardChannelState,
+  callId: string,
+  everyMs = RENEW_EVERY_MS,
+): void {
+  const claim = state.task;
+  if (claim == null) return;
+  const running = renewals.get(renewalKey(claim));
+  if (running !== undefined) {
+    running.calls.add(callId);
+    return;
+  }
+  const renewal: ClaimRenewal = { calls: new Set([callId]), claim, renewing: false };
+  renewal.timer = setInterval(async () => {
+    if (renewal.renewing || renewal.claim === null) return;
+    renewal.renewing = true;
+    try {
+      renewal.claim = await renewClaim(client(), renewal.claim);
+    } finally {
+      renewal.renewing = false;
+    }
+    if (renewal.claim === null) clearInterval(renewal.timer);
+  }, everyMs);
+  renewal.timer.unref?.();
+  renewals.set(renewalKey(claim), renewal);
+}
+
+export function endRenewal(state: BoardChannelState, callId?: string): void {
+  const claim = state.task;
+  if (claim == null) return;
+  const key = renewalKey(claim);
+  const renewal = renewals.get(key);
+  if (renewal === undefined) return;
+  if (callId !== undefined) renewal.calls.delete(callId);
+  state.task = renewal.claim === null ? null : { ...claim, until: renewal.claim.until };
+  if (callId !== undefined && renewal.calls.size > 0 && renewal.claim !== null) return;
+  clearInterval(renewal.timer);
+  renewals.delete(key);
 }
 
 export interface BoardSettlement {
