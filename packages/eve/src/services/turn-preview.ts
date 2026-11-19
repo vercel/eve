@@ -242,7 +242,7 @@ const PRINCIPAL_SYNTAX =
   "local-dev | schedule | anonymous | user[:groups=a,b][:authenticator=name][:id=name]";
 
 export function parsePreviewPrincipal(value: string): PreviewPrincipal {
-  const [kind, ...fields] = value.trim().split(":");
+  const [kind, ...fields] = value.trim().split(/:(?=(?:groups|authenticator|id)=)/);
   if ((kind === "schedule" || kind === "anonymous" || kind === "local-dev") && fields.length === 0)
     return { kind };
   if (kind !== "user") {

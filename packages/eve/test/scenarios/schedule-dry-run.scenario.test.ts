@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
@@ -62,8 +63,21 @@ export default defineDynamicSchedules({
   },
 });
 `,
+    "agent/tools/schedule_report.ts": `import { defineDynamic } from "eve";
+import { defineTool } from "eve/tools";
+export default defineDynamic((ctx) =>
+  ctx.session.schedule?.definition === "weekly-summary"
+    ? defineTool({
+        description: "File the weekly report.",
+        inputSchema: { type: "object", properties: {} },
+        execute: async () => "filed",
+      })
+    : null,
+);
+`,
     "agent/schedules/weekly-summary.ts": `import { defineSchedule } from "eve/schedules";
 import digest from "../channels/digest";
+void fetch(process.env.WAREHOUSE_URL + "/v1/boot").catch(() => undefined);
 export default defineSchedule({
   cron: "0 9 * * 1",
   async run({ to, appAuth, waitUntil }) {
@@ -93,6 +107,7 @@ describe("eve schedule run --dry-run and eve send --dry-run", () => {
     });
     await new Promise<void>((resolve) => warehouse.listen(0, "127.0.0.1", resolve));
     warehouseUrl = `http://127.0.0.1:${(warehouse.address() as AddressInfo).port}`;
+    await writeFile(join(app.appRoot, ".env.local"), `WAREHOUSE_URL=${warehouseUrl}\n`);
   }, SCENARIO_TIMEOUT_MS);
 
   afterAll(async () => {
@@ -106,7 +121,7 @@ describe("eve schedule run --dry-run and eve send --dry-run", () => {
       [join(app.appRoot, "node_modules", "eve", "bin", "eve.js"), ...args],
       {
         cwd: app.appRoot,
-        env: { ...process.env, WAREHOUSE_URL: warehouseUrl },
+        env: { ...process.env, WAREHOUSE_URL: undefined },
         timeout: SCENARIO_TIMEOUT_MS,
       },
     );
@@ -127,7 +142,7 @@ describe("eve schedule run --dry-run and eve send --dry-run", () => {
         target: { channelId: "C0ATLAS01" },
       });
       const toolNames = delivery.turn.tools.map((tool: { name: string }) => tool.name);
-      expect(toolNames).toContain("lookup_account");
+      expect(toolNames).toEqual(expect.arrayContaining(["lookup_account", "schedule_report"]));
       expect(toolNames).not.toContain("revenue_forecast");
       expect(delivery.turn.hiddenTools).toContainEqual({
         name: "revenue_forecast",
@@ -136,9 +151,12 @@ describe("eve schedule run --dry-run and eve send --dry-run", () => {
       });
       expect(delivery.turn.instructions.system.join("\n")).toContain("weekly revenue summary");
 
-      expect(result.fetches).toEqual([
-        { method: "GET", url: `${warehouseUrl}/v1/accounts?active=true` },
-      ]);
+      expect(result.fetches).toEqual(
+        expect.arrayContaining([
+          { method: "GET", url: `${warehouseUrl}/v1/boot` },
+          { method: "GET", url: `${warehouseUrl}/v1/accounts?active=true` },
+        ]),
+      );
       expect(warehouseRequests).toEqual([]);
     },
     SCENARIO_TIMEOUT_MS,
@@ -155,14 +173,14 @@ describe("eve schedule run --dry-run and eve send --dry-run", () => {
         "--payload",
         JSON.stringify({ task: "Summarize Q3" }),
         "--as",
-        "user:id=alice:authenticator=sso",
+        "user:id=sso:alice:authenticator=sso",
         "--json",
       ]);
       const result = JSON.parse(stdout);
       const resolved = {
         attributes: { team: "revenue" },
         authenticator: "sso",
-        principalId: "alice",
+        principalId: "sso:alice",
         principalType: "user",
       };
 
@@ -179,7 +197,10 @@ describe("eve schedule run --dry-run and eve send --dry-run", () => {
           reason: "defineDynamic returned undefined for principalType user",
         }),
       );
-      expect(result.fetches).toEqual([{ method: "GET", url: `${warehouseUrl}/v1/members/alice` }]);
+      expect(result.fetches).toContainEqual({
+        method: "GET",
+        url: `${warehouseUrl}/v1/members/sso:alice`,
+      });
 
       const denied = await eve([
         "schedule",
@@ -220,11 +241,13 @@ describe("eve schedule run --dry-run and eve send --dry-run", () => {
       expect(finance.turn.tools.map((tool: { name: string }) => tool.name)).toEqual(
         expect.arrayContaining(["lookup_account", "revenue_forecast"]),
       );
-      expect(finance.turn.hiddenTools).toEqual([]);
-      expect(anonymous.turn.auth).toBeNull();
-      expect(anonymous.turn.hiddenTools.map((tool: { name: string }) => tool.name)).toEqual([
-        "revenue_forecast",
+      expect(finance.turn.hiddenTools.map((tool: { name: string }) => tool.name)).toEqual([
+        "schedule_report",
       ]);
+      expect(anonymous.turn.auth).toBeNull();
+      expect(anonymous.turn.hiddenTools.map((tool: { name: string }) => tool.name)).toContain(
+        "revenue_forecast",
+      );
     },
     SCENARIO_TIMEOUT_MS,
   );

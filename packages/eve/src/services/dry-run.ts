@@ -1,5 +1,6 @@
 import { compileAgent } from "#compiler/compile-agent.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
+import { AI_GATEWAY_MODELS_CATALOG_URL } from "#internal/gateway.js";
 import { createAuthoredSourceRuntimeCompiledArtifactsSource } from "#internal/application/runtime-compiled-artifacts-source.js";
 import type { RuntimeDiskCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import {
@@ -30,25 +31,32 @@ export interface DryRunApp {
   readonly compiledArtifactsSource: RuntimeDiskCompiledArtifactsSource;
 }
 
-export async function loadDryRunApp(appRoot: string): Promise<DryRunApp> {
-  const compiled = await compileAgent({ startPath: appRoot });
-  const compiledArtifactsSource = createAuthoredSourceRuntimeCompiledArtifactsSource(
-    compiled.project.appRoot,
-  );
-  return {
-    manifest: compiled.manifest,
-    bundle: await getCompiledRuntimeAgentBundle({ compiledArtifactsSource }),
-    compiledArtifactsSource,
-  };
+export async function dryRunApp<T>(
+  appRoot: string,
+  fn: (app: DryRunApp, fetches: readonly DryRunFetch[]) => Promise<T>,
+): Promise<T> {
+  const fetches: DryRunFetch[] = [];
+  return await withRecordedFetch(fetches, async () => {
+    const compiled = await compileAgent({ startPath: appRoot });
+    const compiledArtifactsSource = createAuthoredSourceRuntimeCompiledArtifactsSource(
+      compiled.project.appRoot,
+    );
+    return await fn(
+      {
+        bundle: await getCompiledRuntimeAgentBundle({ compiledArtifactsSource }),
+        compiledArtifactsSource,
+        manifest: compiled.manifest,
+      },
+      fetches,
+    );
+  });
 }
 
-export async function withRecordedFetch<T>(
-  fetches: DryRunFetch[],
-  fn: () => Promise<T>,
-): Promise<T> {
+async function withRecordedFetch<T>(fetches: DryRunFetch[], fn: () => Promise<T>): Promise<T> {
   const original = globalThis.fetch;
   globalThis.fetch = async (resource, init) => {
     const request = new Request(resource, init);
+    if (request.url === AI_GATEWAY_MODELS_CATALOG_URL) return await original(resource, init);
     fetches.push({ method: request.method, url: request.url });
     return Response.json({});
   };
@@ -64,10 +72,9 @@ export async function dryRunSend(input: {
   readonly message: string;
   readonly principal: PreviewPrincipal;
 }): Promise<SendDryRun> {
-  const { bundle } = await loadDryRunApp(input.appRoot);
-  const fetches: DryRunFetch[] = [];
-  const turn = await withRecordedFetch(fetches, () =>
-    previewTurn({ bundle, run: previewRunFor(input.principal, input.message) }),
-  );
-  return { fetches, message: input.message, turn };
+  return await dryRunApp(input.appRoot, async ({ bundle }, fetches) => ({
+    fetches,
+    message: input.message,
+    turn: await previewTurn({ bundle, run: previewRunFor(input.principal, input.message) }),
+  }));
 }

@@ -37,7 +37,11 @@ export async function runScheduleRunCommand(
   startHost?: StartHost,
 ): Promise<void> {
   if (options.dryRun === true) {
-    const { parsePreviewPrincipal } = await import("#services/turn-preview.js");
+    const [{ parsePreviewPrincipal }, { loadDevelopmentEnvironmentFiles }] = await Promise.all([
+      import("#services/turn-preview.js"),
+      import("#cli/dev/environment.js"),
+    ]);
+    await loadDevelopmentEnvironmentFiles(appRoot);
     const result = await dryRunSchedule({
       appRoot,
       payload: options.payload === undefined ? undefined : parsePayload(options.payload),

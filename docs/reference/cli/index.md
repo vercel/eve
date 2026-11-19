@@ -214,7 +214,7 @@ eve send <message> [--dry-run] [--as <principal>] [--json]
 
 Sends one message to the agent on the app's running `eve dev` server, prints the final reply, and exits. With no dev server running, it starts one for the message. The session calls the model and runs tools as any session does. A session that ends waiting for input or approval exits with code 1.
 
-`--dry-run` compiles the app and evaluates the first turn the message would start for `--as`, as eve would before that turn's first model call. It prints the tools, instructions, and connections the turn would see. A dynamic tool file that offers nothing is listed under hidden tools with the reason, such as `defineDynamic returned undefined for principalType user`. A file that throws is listed there too; in a real session, the error fails the turn. Dynamic code runs for real, except that every `fetch` call is recorded and answered with an empty JSON object (`{}`) instead of being sent. Network calls that don't use `fetch` still go out.
+`--dry-run` compiles the app and evaluates the first turn the message would start for `--as`, as eve would before that turn's first model call. It prints the tools, instructions, and connections the turn would see. A dynamic tool file that offers nothing is listed under hidden tools with the reason, such as `defineDynamic returned undefined for principalType user`. A file that throws is listed there too; in a real session, the error fails the turn. Authored code runs for real, with the app's `.env` files loaded as `eve dev` loads them. From compiling onward, every `fetch` call, including one at a module's top level, is recorded and answered with an empty JSON object (`{}`) instead of being sent. eve's own AI Gateway model catalog request still goes out, and so do network calls that don't use `fetch`.
 
 A real send authenticates like any other caller of the dev server, so `--as` requires `--dry-run`.
 
@@ -236,12 +236,12 @@ Without `--dry-run`, `--json` prints `{ reply, sessionId, url }`.
 
 `--as` names a kind of caller:
 
-| Principal                                    | Caller                                                                                                                                             |
-| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `local-dev`                                  | The principal `localDev()` gives requests to `eve dev`, as a real `eve send` gets                                                                  |
-| `schedule`                                   | The app principal schedules pass as `appAuth` (`principalType: "runtime"`), with no one to ask                                                     |
-| `user[:groups=a,b][:authenticator=x][:id=y]` | A user on the HTTP session route. `groups` sets `auth.attributes.groups`; `authenticator` defaults to `eve-preview` and `id` to `eve-preview:user` |
-| `anonymous`                                  | A caller with no credentials (`auth.current` is `null`)                                                                                            |
+| Principal                                    | Caller                                                                                                                                                                                            |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `local-dev`                                  | The principal `localDev()` gives requests to `eve dev`, as a real `eve send` gets                                                                                                                 |
+| `schedule`                                   | The app principal schedules pass as `appAuth` (`principalType: "runtime"`), with no one to ask                                                                                                    |
+| `user[:groups=a,b][:authenticator=x][:id=y]` | A user on the HTTP session route. `groups` sets `auth.attributes.groups`; `authenticator` defaults to `eve-preview` and `id` to `eve-preview:user`. Values can contain `:`, as in `id=slack:U123` |
+| `anonymous`                                  | A caller with no credentials (`auth.current` is `null`)                                                                                                                                           |
 
 ## `eve schedule run`
 
@@ -258,10 +258,10 @@ eve schedule run <name> [--dry-run] [--payload <json>] [--as <principal>] [--jso
 
 Runs one schedule by name, such as `billing/sweep` for `agent/schedules/billing/sweep.ts`. Without `--dry-run`, it fires the schedule on the app's running `eve dev` server through the [dispatch route](/docs/schedules#dispatch-route) and prints the started session IDs. With no dev server running, it starts one, and stops it once each started session finishes its turn. The sessions call the model and send to their channels. A [dynamic schedule](/docs/experimental/dynamic-schedules) fires only from a schedule someone created, so it supports only `--dry-run`.
 
-`--dry-run` compiles the app and runs the schedule as it would fire, with these differences:
+`--dry-run` compiles the app, loads its `.env` files, and runs the schedule as it would fire. Each session it would start sees the schedule in `ctx.session.schedule`. Unlike a real run:
 
 - `to(channel, target).send(...)` runs the channel's `receive` hook, then records the session it would start instead of starting it.
-- Every `fetch` call is recorded and answered with an empty JSON object (`{}`) instead of being sent. Network calls that don't use `fetch` still go out.
+- `fetch` calls are recorded and answered with `{}`, as for [`eve send --dry-run`](#eve-send).
 - No model is called.
 
 For each recorded delivery, eve prints the channel, target, auth, and message, and then the tools, instructions, and connections the session's first turn would see, as [`eve send --dry-run`](#eve-send) does.

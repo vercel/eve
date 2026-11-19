@@ -6,6 +6,9 @@ import type {
   SessionCommand,
   SessionCommandResult,
 } from "#channel/types.js";
+import { contextStorage } from "#context/container.js";
+import { OccurrenceIdKey, ScheduleIdKey, ScheduleInstanceKey } from "#context/keys.js";
+import type { SessionSchedule } from "#context/session-schedule.js";
 import { levenshteinSimilarity } from "#evals/expect/levenshtein.js";
 import type { ScheduleRunHandler } from "#public/definitions/schedule.js";
 import type {
@@ -20,7 +23,7 @@ import {
 import { declared } from "#runtime/types.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type { MessageContent } from "#shared/message-content.js";
-import { loadDryRunApp, withRecordedFetch, type DryRunFetch } from "#services/dry-run.js";
+import { dryRunApp, type DryRunApp, type DryRunFetch } from "#services/dry-run.js";
 import {
   principalAuth,
   previewTurn,
@@ -78,7 +81,16 @@ export async function dryRunSchedule(input: {
   readonly payload?: unknown;
   readonly principal?: PreviewPrincipal;
 }): Promise<ScheduleDryRun> {
-  const { bundle, compiledArtifactsSource, manifest } = await loadDryRunApp(input.appRoot);
+  return await dryRunApp(input.appRoot, async (app, fetches) =>
+    dryRunLoadedSchedule({ ...input, ...app, fetches }),
+  );
+}
+
+async function dryRunLoadedSchedule(
+  input: Parameters<typeof dryRunSchedule>[0] &
+    DryRunApp & { readonly fetches: readonly DryRunFetch[] },
+): Promise<ScheduleDryRun> {
+  const { bundle, compiledArtifactsSource, fetches, manifest } = input;
   const schedules = await loadResolvedCompiledSchedules({ compiledArtifactsSource });
   const collections = declared(bundle.resolvedAgent, "schedules");
   const schedule = schedules.find((candidate) => candidate.name === input.schedule);
@@ -90,7 +102,6 @@ export async function dryRunSchedule(input: {
     ]);
   }
 
-  const fetches: DryRunFetch[] = [];
   const runs = new Map<string, RunInput>();
   const targets = new Map<string, unknown>();
   const controls: ("disable" | "delete")[] = [];
@@ -156,34 +167,32 @@ export async function dryRunSchedule(input: {
       });
   }
 
-  return await withRecordedFetch(fetches, async () => {
-    let error: string | null = null;
-    try {
-      const result = await dispatch();
-      await Promise.all(result.waitUntilTasks);
-    } catch (thrown) {
-      error = toErrorMessage(thrown);
-    }
-    const deliveries: ScheduleDryRunDelivery[] = [];
-    for (const [sessionId, started] of runs) {
-      deliveries.push({
-        auth: started.auth,
-        channel: started.channelName ?? started.adapter.kind,
-        message: started.input.message ?? null,
-        target: targets.get(sessionId) ?? null,
-        turn: await previewTurn({ bundle, run: started }),
-      });
-    }
-    return {
-      controls,
-      creator,
-      deliveries,
-      error,
-      fetches,
-      kind: schedule === undefined ? "dynamic" : "static",
-      schedule: input.schedule,
-    };
-  });
+  let error: string | null = null;
+  try {
+    const result = await dispatch();
+    await Promise.all(result.waitUntilTasks);
+  } catch (thrown) {
+    error = toErrorMessage(thrown);
+  }
+  const deliveries: ScheduleDryRunDelivery[] = [];
+  for (const [sessionId, started] of runs) {
+    deliveries.push({
+      auth: started.auth,
+      channel: started.channelName ?? started.adapter.kind,
+      message: started.input.message ?? null,
+      target: targets.get(sessionId) ?? null,
+      turn: await previewTurn({ bundle, run: started }),
+    });
+  }
+  return {
+    controls,
+    creator,
+    deliveries,
+    error,
+    fetches,
+    kind: schedule === undefined ? "dynamic" : "static",
+    schedule: input.schedule,
+  };
 }
 
 function creatorReference(principal: PreviewPrincipal): SchedulePrincipalReference {
@@ -247,11 +256,22 @@ function recordTo<T extends (channel: any, target: any) => SendHandle>(
   }) as T;
 }
 
+function scheduleInScope(): SessionSchedule | undefined {
+  const scope = contextStorage.getStore();
+  const definition = scope?.get(ScheduleIdKey);
+  if (definition === undefined) return undefined;
+  return {
+    definition,
+    instance: scope?.get(ScheduleInstanceKey),
+    occurrenceId: scope?.get(OccurrenceIdKey),
+  };
+}
+
 function recordingRuntime(runs: Map<string, RunInput>): Runtime {
   return {
     async createSession(run) {
       const sessionId = `dry-run-session-${runs.size + 1}`;
-      runs.set(sessionId, run);
+      runs.set(sessionId, { ...run, schedule: run.schedule ?? scheduleInScope() });
       return {
         ...(run.continuationToken !== undefined && { claimedContinuation: true }),
         events: new ReadableStream(),

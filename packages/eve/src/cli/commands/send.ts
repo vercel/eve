@@ -33,6 +33,8 @@ export async function runSendCommand(
   startHost?: StartHost,
 ): Promise<void> {
   if (message.trim() === "") throw new Error("eve send needs a message.");
+  const { loadDevelopmentEnvironmentFiles } = await import("#cli/dev/environment.js");
+  await loadDevelopmentEnvironmentFiles(appRoot);
   if (options.dryRun === true) {
     const [{ dryRunSend }, { parsePreviewPrincipal }] = await Promise.all([
       import("#services/dry-run.js"),
@@ -75,13 +77,10 @@ export async function runSendCommand(
     );
   }
 
-  const [{ loadDevelopmentEnvironmentFiles }, { runRemotePrint }, { findEveProjectContext }] =
-    await Promise.all([
-      import("#cli/dev/environment.js"),
-      import("#cli/dev/remote-print.js"),
-      import("#internal/project-context.js"),
-    ]);
-  await loadDevelopmentEnvironmentFiles(appRoot);
+  const [{ runRemotePrint }, { findEveProjectContext }] = await Promise.all([
+    import("#cli/dev/remote-print.js"),
+    import("#internal/project-context.js"),
+  ]);
   const create =
     startHost ?? (await import("#cli/dev/local-server-process.js")).createDevelopmentServer;
   const server = create(appRoot, { existing: "attach-if-unconfigured", output: "stderr" });
