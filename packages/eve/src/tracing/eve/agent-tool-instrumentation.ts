@@ -230,14 +230,22 @@ export function createAgentToolInstrumentation(input: {
         if (state.attemptId === attemptIdempotencyKey(scope))
           await input.stateStore.delete("action", key);
     },
-    async drain(attemptId: string, failure?: { readonly error: unknown }) {
+    async drain(
+      attemptId: string,
+      failure?: { readonly error: unknown; readonly errorCode?: string },
+    ) {
       for (const [key, execution] of executions) {
         if (execution.attemptId !== attemptId) continue;
         executions.delete(key);
         if ((await input.stateStore.get("action", key)) !== undefined) continue;
         const terminal = execution.terminal;
         if (failure !== undefined) {
-          await execution.tool.fail(failure.error);
+          await execution.tool.complete({
+            outcome: "failed",
+            failed: true,
+            error: failure.error,
+            errorType: failure.errorCode,
+          });
           continue;
         }
         if (terminal?.durationMs !== undefined && !terminal.failed)

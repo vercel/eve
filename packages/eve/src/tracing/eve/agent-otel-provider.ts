@@ -303,7 +303,13 @@ export function createAgentOtelInstrumentation(
 
   async function drainOpenSpans(event: InstrumentationModelTerminalEvent): Promise<void> {
     for (const operation of modelSpans.get(attemptIdempotencyKey(event.scope))?.values() ?? []) {
-      if (attemptFailed(event)) await operation.fail(event.error);
+      if (attemptFailed(event))
+        await operation.complete({
+          outcome: "failed",
+          failed: true,
+          error: event.error,
+          errorType: event.errorCode,
+        });
       else
         await operation.complete({
           outcome: "completed",

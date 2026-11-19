@@ -259,14 +259,14 @@ function instrumentationEventsOf(
       if (scope === undefined) return [];
       const { error, outcome } = event.data;
       const idempotencyKey = attemptIdempotencyKey(scope);
-      const turn = scope.turnId === undefined ? undefined : line.view?.turns[scope.turnId];
-      const cancelled = outcome === "interrupted" && turn?.outcome === "cancelled";
-      const cutByFailedTurn =
-        outcome === "interrupted" && turn?.outcome === "failed" ? turn.error : undefined;
+      const cancelled =
+        outcome === "interrupted" &&
+        scope.turnId !== undefined &&
+        line.view?.turns[scope.turnId]?.outcome === "cancelled";
       return [
         {
           error: error === undefined ? undefined : new Error(error.message),
-          errorCode: (error ?? cutByFailedTurn)?.code,
+          errorCode: error?.code ?? failedTurnCode(line, scope.turnId, outcome),
           idempotencyKey,
           scope,
           outcome: cancelled ? "cancelled" : outcome,
@@ -315,7 +315,7 @@ function instrumentationEventsOf(
           acceptedAtMs: line.settledAtMs?.[callId],
           cause: event.data.cause,
           error: line.capturesOutputs ? error : undefined,
-          errorCode: event.data.error?.code,
+          errorCode: event.data.error?.code ?? failedTurnCode(line, scope.turnId, outcome),
           idempotencyKey,
           outcome,
           reason: event.data.reason,
@@ -431,4 +431,14 @@ function latestTurnId(view: SessionView | undefined): string | undefined {
 function turnSequence(turnId: string): number {
   const match = /^turn_(\d+)$/.exec(turnId);
   return match === null ? 0 : Number(match[1]);
+}
+
+function failedTurnCode(
+  line: { readonly view?: SessionView },
+  turnId: string | undefined,
+  outcome: string,
+): string | undefined {
+  if (outcome !== "interrupted" || turnId === undefined) return undefined;
+  const turn = line.view?.turns[turnId];
+  return turn?.outcome === "failed" ? turn.error?.code : undefined;
 }
