@@ -6,17 +6,26 @@ import {
   PASSWORD_SESSION_MAX_AGE,
   verifyAppPassword,
 } from "../../../../lib/password-auth";
-import { enforceRateLimit, RateLimitError } from "../../../../lib/rate-limit";
+import { CHALLENGE_BITS, createChallenge, verifyChallenge } from "../../../../lib/challenge";
+import {
+  countInWindow,
+  enforceRateLimit,
+  RateLimitError,
+  readWindow,
+} from "../../../../lib/rate-limit";
 import { getAuthMode } from "../../../../lib/setup";
 import { isSameOrigin } from "../../../../lib/origin";
 
-/**
- * Sign-in attempts each caller may make in a window. There's no shared cap across callers, which
- * anyone could use up to lock out the right password; the password's minimum length, and a
- * Vercel Firewall rule if you add one, bound guessing from many addresses.
- */
+/** Sign-in attempts each caller may make in a window. */
 const ATTEMPTS_PER_CALLER = 10;
 const CALLER_WINDOW_SECONDS = 15 * 60;
+/**
+ * Failed sign-ins across the deployment in an hour, past which every attempt first needs a
+ * solved challenge (lib/challenge.ts). A hard cap here would let anyone lock out the right
+ * password; the challenge instead makes guessing from many addresses cost work per guess.
+ */
+const FAILURES_BEFORE_CHALLENGE = 300;
+const FAILURES = { key: "all", prefix: "login-failures", windowSeconds: 60 * 60 } as const;
 
 /**
  * The caller's address as Vercel's proxy, or `vercel dev`, reports it; both overwrite any value
@@ -49,10 +58,31 @@ export async function POST(request: Request) {
     );
   }
 
-  const body = (await request.json().catch(() => null)) as { password?: unknown } | null;
+  const body = (await request.json().catch(() => null)) as {
+    password?: unknown;
+    challenge?: unknown;
+    solution?: unknown;
+  } | null;
+  if ((await readWindow(FAILURES)) >= FAILURES_BEFORE_CHALLENGE) {
+    const solved =
+      typeof body?.challenge === "string" &&
+      typeof body.solution === "string" &&
+      (await verifyChallenge(body.challenge, body.solution));
+    if (!solved)
+      return NextResponse.json(
+        {
+          error: "Solve the challenge to sign in.",
+          challenge: createChallenge(),
+          bits: CHALLENGE_BITS,
+        },
+        { status: 401 },
+      );
+  }
   const password = typeof body?.password === "string" ? body.password : "";
-  if (!verifyAppPassword(password))
+  if (!verifyAppPassword(password)) {
+    await countInWindow(FAILURES);
     return NextResponse.json({ error: "Incorrect password." }, { status: 401 });
+  }
 
   const response = NextResponse.json({ ok: true });
   response.cookies.set(PASSWORD_SESSION_COOKIE_NAME, createPasswordSessionToken(), {

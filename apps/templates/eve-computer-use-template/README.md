@@ -74,7 +74,7 @@ pnpm exec eve deploy
 
 ### Access
 
-A deployment lets people in with one shared password, `EVE_COMPUTER_USE_PASSWORD`, of at least 16 characters. Without it, or with a shorter one, the deployment lets no one in and says why. Sign-in allows 10 attempts per address every 15 minutes; to also cap guessing from many addresses, add a [Vercel Firewall rate limit](https://vercel.com/docs/vercel-firewall/vercel-waf/rate-limiting) on `/api/password-auth/login`. `pnpm dev:all` on your machine needs no password. The same sign-in covers the chat, the live view, and Auto: `agent/channels/eve.ts` accepts it through `passwordEveAuth`, and the app's own routes check it before they do anything (`apps/web/lib/`).
+A deployment lets people in with one shared password, `EVE_COMPUTER_USE_PASSWORD`, of at least 16 characters. Without it, or with a shorter one, the deployment lets no one in and says why. Sign-in allows 10 attempts per address every 15 minutes. Once the deployment sees 300 failed sign-ins in an hour, every attempt first solves a short proof-of-work in the browser, a second or two, so guessing from many addresses costs work per guess while the right password still gets in. `pnpm dev:all` on your machine needs no password. The same sign-in covers the chat, the live view, and Auto: `agent/channels/eve.ts` accepts it through `passwordEveAuth`, and the app's own routes check it before they do anything (`apps/web/lib/`).
 
 Everyone with the password shares the agent: they can read each other's chats and watch and drive their sandboxes. For per-user accounts, the [chat template](../eve-chat-template) upgrades the same pattern to Sign in with Vercel with Better Auth and a database.
 

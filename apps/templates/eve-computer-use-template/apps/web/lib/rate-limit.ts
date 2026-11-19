@@ -59,28 +59,41 @@ function countLocally(key: string): number {
   return count;
 }
 
-export async function enforceRateLimit(options: LimitOptions) {
-  const client = getRedis();
-  const now = Math.floor(Date.now() / 1000);
+type WindowOptions = Omit<LimitOptions, "limit">;
+
+function windowKey(options: WindowOptions, now: number) {
   const windowId = Math.floor(now / options.windowSeconds);
-  const redisKey = `rate:${options.prefix}:${options.key}:${windowId}`;
-  let count: number;
+  return { windowId, key: `rate:${options.prefix}:${options.key}:${windowId}` };
+}
 
+/** Adds one to a window's counter and returns the new count. */
+export async function countInWindow(options: WindowOptions): Promise<number> {
+  const client = getRedis();
+  const { windowId, key } = windowKey(options, Math.floor(Date.now() / 1000));
   if (client) {
-    count = await client.incr(redisKey);
-    if (count === 1) {
-      await client.expire(redisKey, options.windowSeconds);
-    }
-  } else {
-    for (const key of local.keys()) {
-      if (key.startsWith(`rate:${options.prefix}:`) && !key.endsWith(`:${windowId}`))
-        local.delete(key);
-    }
-    count = countLocally(redisKey);
+    const count = await client.incr(key);
+    if (count === 1) await client.expire(key, options.windowSeconds);
+    return count;
   }
+  for (const existing of local.keys()) {
+    if (existing.startsWith(`rate:${options.prefix}:`) && !existing.endsWith(`:${windowId}`))
+      local.delete(existing);
+  }
+  return countLocally(key);
+}
 
+/** A window's counter, without adding to it. */
+export async function readWindow(options: WindowOptions): Promise<number> {
+  const client = getRedis();
+  const { key } = windowKey(options, Math.floor(Date.now() / 1000));
+  if (client) return Number((await client.get<number>(key)) ?? 0);
+  return local.get(key) ?? 0;
+}
+
+export async function enforceRateLimit(options: LimitOptions) {
+  const count = await countInWindow(options);
   if (count > options.limit) {
-    const retryAfter = options.windowSeconds - (now % options.windowSeconds);
-    throw new RateLimitError(retryAfter);
+    const now = Math.floor(Date.now() / 1000);
+    throw new RateLimitError(options.windowSeconds - (now % options.windowSeconds));
   }
 }

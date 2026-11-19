@@ -4,6 +4,36 @@ import { Button } from "@ui-sdk/react/button";
 import { Input } from "@ui-sdk/react/input";
 import { type FormEvent, useState } from "react";
 
+interface LoginReply {
+  readonly error?: string;
+  readonly challenge?: string;
+  readonly bits?: number;
+}
+
+/** The number whose SHA-256 with the challenge starts with `bits` zero bits; see lib/challenge.ts. */
+async function solveChallenge(challenge: string, bits: number): Promise<string> {
+  const encoder = new TextEncoder();
+  const batch = 2048;
+  for (let start = 0; ; start += batch) {
+    const hashes = await Promise.all(
+      Array.from({ length: batch }, (_, offset) =>
+        crypto.subtle.digest("SHA-256", encoder.encode(`${challenge}:${start + offset}`)),
+      ),
+    );
+    const found = hashes.findIndex((hash) => zeroBits(new Uint8Array(hash)) >= bits);
+    if (found !== -1) return String(start + found);
+  }
+}
+
+function zeroBits(bytes: Uint8Array): number {
+  let count = 0;
+  for (const byte of bytes) {
+    if (byte !== 0) return count + Math.clz32(byte) - 24;
+    count += 8;
+  }
+  return count;
+}
+
 function Gate({ children }: { readonly children: React.ReactNode }) {
   return (
     <main className="gate">
@@ -24,19 +54,30 @@ export function SignIn() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (password.length === 0 || pending) return;
     setError(null);
     setPending(true);
-    const response = await fetch("/api/password-auth/login", {
-      body: JSON.stringify({ password }),
-      headers: { "content-type": "application/json" },
-      method: "POST",
-    }).catch(() => null);
+    const login = (extra: Record<string, string> = {}) =>
+      fetch("/api/password-auth/login", {
+        body: JSON.stringify({ password, ...extra }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }).catch(() => null);
+    let response = await login();
+    let body = (await response?.json().catch(() => null)) as LoginReply | null;
+    // While the app sees many failed sign-ins, it asks for a proof of work first.
+    if (body?.challenge !== undefined && body.bits !== undefined) {
+      setStatus("Checking this browser");
+      const solution = await solveChallenge(body.challenge, body.bits);
+      response = await login({ challenge: body.challenge, solution });
+      body = (await response?.json().catch(() => null)) as LoginReply | null;
+      setStatus(null);
+    }
     if (response?.ok) return window.location.reload();
-    const body = (await response?.json().catch(() => null)) as { error?: string } | null;
     setError(body?.error ?? "Unable to sign in.");
     setPending(false);
   };
@@ -61,7 +102,7 @@ export function SignIn() {
           disabled={pending || password.length === 0}
           type="submit"
         >
-          {pending ? "Signing in" : "Sign in"}
+          {status ?? (pending ? "Signing in" : "Sign in")}
         </Button>
       </form>
       {error ? <p className="gate-error">{error}</p> : null}
