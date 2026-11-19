@@ -31,8 +31,7 @@ to change either palette.
 - **Shopper data:** `lib/shoppers/` owns profile and model operations shared by
   the setup app and the agent. Use `lib/auth/next.ts` to authorize a Next.js
   request. Agent entry points resolve the shopper from eve's authenticated caller.
-- **Browser fallback:** `agent/subagents/browser-agent/` owns Kernel execution.
-  `lib/browser/` stores session and image references; it does not drive Kernel.
+- **Browser fallback:** `agent/subagents/browser-agent/` reads anonymous public pages and uses an offline Kernel browser for static previews. It does not load merchant pages into that browser, sign in, or submit checkout. `lib/browser/` parses public responses and stores private image references.
 
 Keep Next.js request handling out of modules the agent imports. Keep database
 access out of client components. The setup app and the agent call domain

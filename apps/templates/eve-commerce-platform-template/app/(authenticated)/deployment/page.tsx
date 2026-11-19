@@ -51,8 +51,8 @@ export default async function Page() {
           configured={Boolean(env.KERNEL_API_KEY)}
         >
           Attach Kernel through Vercel Marketplace or set <code>KERNEL_API_KEY</code> from your{" "}
-          <a href="https://kernel.sh">Kernel account</a>. This key is optional and only enables
-          browser shopping. The key is not verified here.
+          <a href="https://kernel.sh">Kernel account</a>. This key enables read-only public page
+          research and static previews, not browser checkout.
         </ServiceTile>
         <ServiceTile
           title="Memory and images"

@@ -19,12 +19,12 @@
     "deploy": "eve deploy",
     "eval": "node --env-file-if-exists=.env.local scripts/eval.ts",
     "eval:list": "eve eval --list",
-    "test:watches": "node --test lib/watches/*.test.ts"
+    "test:watches": "node --test lib/watches/*.test.ts",
+    "test:smoke": "node --test lib/watches/*.test.ts lib/browser/public-preview.test.ts"
   },
   "dependencies": {
     "@agent-cards/commerce-sdk": "0.23.2",
     "@linqapp/sdk": "0.47.1",
-    "@onkernel/browser-loop": "0.12.1",
     "@onkernel/sdk": "^0.96.0",
     "@opentelemetry/api": "^1.9.1",
     "@t3-oss/env-nextjs": "0.13.11",

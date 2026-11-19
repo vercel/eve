@@ -5,7 +5,7 @@ import { env } from "@/lib/environment/env";
 
 const run_browser = defineWorkflowTool({
   description:
-    "Execute one bounded browser assignment and return a verified result with optional private image artifacts. Pass taskId to continue an idle worker with its browser state and context. The completion schema is supplied automatically.",
+    "Research a known public page read-only and return a result with optional private image artifacts. Cannot sign in, interact, or check out. Pass taskId to continue with prior research context.",
   inputSchema: z.object({
     message: z.string().min(1),
   }),

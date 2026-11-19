@@ -1,7 +1,6 @@
-import { lookup } from "node:dns";
-import { get } from "node:https";
 import { parse, type DefaultTreeAdapterMap } from "parse5";
-import { isPublicAddress, productUrl } from "./product-url.ts";
+import { productUrl } from "./product-url.ts";
+import { getPublicResource } from "./public-resource.ts";
 
 const maxPageBytes = 1024 * 1024;
 const timeoutMs = 12_000;
@@ -16,73 +15,18 @@ export async function readProductOffer(url: string): Promise<ProductOffer | unde
   const options = offerOptions(page);
   const signal = AbortSignal.timeout(timeoutMs);
   for (let redirects = 0; redirects <= 2; redirects++) {
-    const response = await getPage(page, signal);
-    if ("html" in response) return parseProductOffer(response.html, page);
+    const response = await getPublicResource(page, {
+      accept: "text/html",
+      contentType: /^text\/html\b/i,
+      maxBytes: maxPageBytes,
+      signal,
+    });
+    if ("bytes" in response) return parseProductOffer(response.bytes.toString("utf8"), page);
     const next = productUrl(new URL(response.redirect, page).href);
     if (next.origin !== page.origin || !hasSameOptions(next, options)) return undefined;
     page = next;
   }
   return undefined;
-}
-
-function getPage(url: URL, signal: AbortSignal): Promise<{ html: string } | { redirect: string }> {
-  return new Promise((resolve, reject) => {
-    const request = get(
-      url,
-      {
-        agent: false,
-        family: 4,
-        signal,
-        headers: { Accept: "text/html", "User-Agent": "evey-product-watch/1.0" },
-        lookup(host, _options, callback) {
-          lookup(host, { family: 4, all: true }, (error, addresses) => {
-            if (error) return callback(error, "", 4);
-            const [first] = addresses;
-            if (!first || addresses.some(({ address }) => !isPublicAddress(address))) {
-              return callback(
-                new Error("Product URL did not resolve to public IPv4 addresses."),
-                "",
-                4,
-              );
-            }
-            callback(null, first.address, 4);
-          });
-        },
-      },
-      async (response) => {
-        try {
-          const status = response.statusCode ?? 0;
-          if ([301, 302, 303, 307, 308].includes(status) && response.headers.location) {
-            response.destroy();
-            resolve({ redirect: response.headers.location });
-            return;
-          }
-          if (
-            status !== 200 ||
-            !/^text\/html\b/i.test(response.headers["content-type"] ?? "") ||
-            Number(response.headers["content-length"]) > maxPageBytes
-          ) {
-            response.destroy();
-            throw new Error("Product page did not return a readable HTML document.");
-          }
-          const chunks: Buffer[] = [];
-          let bytes = 0;
-          for await (const chunk of response) {
-            bytes += chunk.length;
-            if (bytes > maxPageBytes) {
-              response.destroy();
-              throw new Error("Product page exceeded the read limit.");
-            }
-            chunks.push(chunk);
-          }
-          resolve({ html: Buffer.concat(chunks).toString("utf8") });
-        } catch (error) {
-          reject(error);
-        }
-      },
-    );
-    request.on("error", reject);
-  });
 }
 
 export function parseProductOffer(html: string, page: URL): ProductOffer | undefined {

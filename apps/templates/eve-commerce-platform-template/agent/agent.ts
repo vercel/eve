@@ -3,7 +3,6 @@ import { getGatewayModel } from "@/lib/shoppers/model";
 import { scopeFromPrincipal } from "@/agent/lib/principal-scope";
 
 export default defineAgent({
-  build: { externalDependencies: ["@onkernel/browser-loop"] },
   defaultTools: false,
   model: defineDynamic(async (ctx) => {
     const { current, initiator } = ctx.session.auth;

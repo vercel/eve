@@ -60,7 +60,6 @@ CREATE TABLE "browser_images" (
 	"shopper_id" text NOT NULL,
 	"root_session_id" text NOT NULL,
 	"worker_session_id" text NOT NULL,
-	"browser_session_id" text NOT NULL,
 	"status" text NOT NULL,
 	"label" text NOT NULL,
 	"filename" text,
@@ -74,13 +73,6 @@ CREATE TABLE "browser_images" (
 	CONSTRAINT "browser_images_status_check" CHECK ("browser_images"."status" IN ('pending', 'ready')),
 	CONSTRAINT "browser_images_source_kind_check" CHECK ("browser_images"."source_kind" IN ('element', 'full_page', 'image_resource', 'viewport')),
 	CONSTRAINT "browser_images_ready_fields_check" CHECK ("browser_images"."status" = 'pending' OR ("browser_images"."filename" IS NOT NULL AND "browser_images"."media_type" IS NOT NULL AND "browser_images"."byte_size" IS NOT NULL AND "browser_images"."byte_size" > 0 AND "browser_images"."content_hash" IS NOT NULL))
-);
---> statement-breakpoint
-CREATE TABLE "browser_sessions" (
-	"session_id" text PRIMARY KEY NOT NULL,
-	"shopper_id" text NOT NULL,
-	"created_at" timestamp (3) with time zone DEFAULT now() NOT NULL,
-	"worker_session_id" text
 );
 --> statement-breakpoint
 CREATE TABLE "linq_thread_owners" (
@@ -161,7 +153,6 @@ CREATE TABLE "workstreams" (
 ALTER TABLE "auth_account" ADD CONSTRAINT "auth_account_userId_auth_user_id_fk" FOREIGN KEY ("userId") REFERENCES "public"."auth_user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "auth_session" ADD CONSTRAINT "auth_session_userId_auth_user_id_fk" FOREIGN KEY ("userId") REFERENCES "public"."auth_user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "browser_images" ADD CONSTRAINT "browser_images_shopper_id_shoppers_id_fk" FOREIGN KEY ("shopper_id") REFERENCES "public"."shoppers"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "browser_sessions" ADD CONSTRAINT "browser_sessions_shopper_id_shoppers_id_fk" FOREIGN KEY ("shopper_id") REFERENCES "public"."shoppers"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "agentcard_orders" ADD CONSTRAINT "agentcard_orders_shopper_id_shoppers_id_fk" FOREIGN KEY ("shopper_id") REFERENCES "public"."shoppers"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "shopping_watches" ADD CONSTRAINT "shopping_watches_shopper_id_shoppers_id_fk" FOREIGN KEY ("shopper_id") REFERENCES "public"."shoppers"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "agent_sessions" ADD CONSTRAINT "agent_sessions_shopper_id_shoppers_id_fk" FOREIGN KEY ("shopper_id") REFERENCES "public"."shoppers"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -170,7 +161,6 @@ CREATE INDEX "auth_account_user_idx" ON "auth_account" USING btree ("userId");--
 CREATE INDEX "auth_session_user_idx" ON "auth_session" USING btree ("userId");--> statement-breakpoint
 CREATE INDEX "auth_verification_identifier_idx" ON "auth_verification" USING btree ("identifier");--> statement-breakpoint
 CREATE UNIQUE INDEX "browser_images_shopper_operation_idx" ON "browser_images" USING btree ("shopper_id","idempotency_key");--> statement-breakpoint
-CREATE INDEX "browser_sessions_shopper_idx" ON "browser_sessions" USING btree ("shopper_id","created_at" DESC NULLS FIRST);--> statement-breakpoint
 CREATE INDEX "shopping_watches_shopper_idx" ON "shopping_watches" USING btree ("shopper_id","created_at" DESC NULLS LAST);--> statement-breakpoint
 CREATE INDEX "shopping_watches_due_idx" ON "shopping_watches" USING btree ("next_check_at") WHERE "shopping_watches"."status" IN ('active', 'ready_to_notify');--> statement-breakpoint
 CREATE INDEX "agent_sessions_shopper_idx" ON "agent_sessions" USING btree ("shopper_id");--> statement-breakpoint

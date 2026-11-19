@@ -1,5 +1,5 @@
 {
-  "id": "3bf86900-4a0f-4cc6-b44e-b169a49cda5f",
+  "id": "e192553c-ec56-49f1-9c43-260e15d63188",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -424,12 +424,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "browser_session_id": {
-          "name": "browser_session_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
         "status": {
           "name": "status",
           "type": "text",
@@ -543,76 +537,6 @@
           "value": "\"browser_images\".\"status\" = 'pending' OR (\"browser_images\".\"filename\" IS NOT NULL AND \"browser_images\".\"media_type\" IS NOT NULL AND \"browser_images\".\"byte_size\" IS NOT NULL AND \"browser_images\".\"byte_size\" > 0 AND \"browser_images\".\"content_hash\" IS NOT NULL)"
         }
       },
-      "isRLSEnabled": false
-    },
-    "public.browser_sessions": {
-      "name": "browser_sessions",
-      "schema": "",
-      "columns": {
-        "session_id": {
-          "name": "session_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "shopper_id": {
-          "name": "shopper_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp (3) with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "worker_session_id": {
-          "name": "worker_session_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "browser_sessions_shopper_idx": {
-          "name": "browser_sessions_shopper_idx",
-          "columns": [
-            {
-              "expression": "shopper_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": false,
-              "nulls": "first"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "browser_sessions_shopper_id_shoppers_id_fk": {
-          "name": "browser_sessions_shopper_id_shoppers_id_fk",
-          "tableFrom": "browser_sessions",
-          "tableTo": "shoppers",
-          "columnsFrom": ["shopper_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.linq_thread_owners": {

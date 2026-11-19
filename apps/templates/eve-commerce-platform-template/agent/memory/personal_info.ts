@@ -30,7 +30,7 @@ export default defineMemory({
     recall: { "turn.started": () => null },
     async tools(context): Promise<MemoryToolSet | null> {
       const scope = resolvePersonalInfoAccessScope(context);
-      if (!scope) return null;
+      if (!scope || context.session.parent) return null;
 
       const read = defineTool({
         description:
@@ -44,8 +44,6 @@ export default defineMemory({
           return result;
         },
       });
-      if (context.session.parent) return { read };
-
       return {
         read,
         update: defineTool({

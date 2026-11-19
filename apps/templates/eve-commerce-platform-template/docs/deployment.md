@@ -4,7 +4,7 @@
 
 The template is designed for a Vercel project with Vercel Connect (Linq), a
 PostgreSQL database, and private Vercel Blob. Agentcard enables purchases; Kernel
-is optional and enables explicit browser shopping. The five-minute shopping
+is optional and enables read-only research and static previews of public pages. The five-minute shopping
 watch schedule requires a Vercel Pro team.
 
 - Expose [Vercel system environment variables](https://vercel.com/docs/environment-variables/system-environment-variables)

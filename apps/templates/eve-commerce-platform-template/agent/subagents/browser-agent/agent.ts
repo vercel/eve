@@ -2,8 +2,9 @@ import { defineAgent } from "eve";
 
 export default defineAgent({
   tool: false,
+  defaultTools: false,
   description:
-    "Execute one bounded browser assignment for the shopping coordinator, including checkout preparation, optional durable browser images, human-takeover handoff for sign-in or payment entry, cleanup, and a concise verified result.",
+    "Research public product pages and optionally return a product image or a safe static preview. No sign-in, cart changes, or checkout.",
   model: "meta/muse-spark-1.3",
   reasoning: "low",
   compaction: { threshold: 0.7 },

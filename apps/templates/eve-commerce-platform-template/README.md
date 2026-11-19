@@ -2,7 +2,7 @@
 
 A multi-tenant commerce platform built with [eve](https://eve.dev), deployable to your own Vercel project. A single deployment serves multiple shoppers on a shared iMessage line. Each shopper signs in with a verified phone number and has a separate profile, agent preferences, and private conversations. This template is standalone; copy this directory out of the eve repository to run it locally.
 
-Text evey what you need. It finds products, builds a cart with [Agentcard](https://opencommerce.sh), and texts you an approval link with the final total. You approve before Agentcard places the order; evey never handles your card number. If [Kernel](https://kernel.sh) is configured, you can explicitly ask evey to shop in a browser.
+Text evey what you need. It finds products, builds a cart with [Agentcard](https://opencommerce.sh), and texts you an approval link with the final total. You approve before Agentcard places the order; evey never handles your card number. With [Kernel](https://kernel.sh) configured, evey can research public product pages and return an image or a static preview. This fallback is read-only; for checkout outside Agentcard, shoppers follow the merchant link and complete the purchase themselves.
 
 [![Deploy with Vercel](https://vercel.com/button)][deploy-with-vercel]
 
@@ -34,7 +34,7 @@ Run `pnpm dev:agent` in another terminal to chat without iMessage. Set `KERNEL_A
 ## Make it yours
 
 - Edit [agent instructions](agent/instructions/content/) to change behavior and voice.
-- Review the [browser worker's rules](agent/subagents/browser-agent/instructions.md) before letting others use it. Browser checkout relies on those instructions, not Agentcard's approval page.
+- Review the [browser worker's rules](agent/subagents/browser-agent/instructions.md). It cannot access signed-in sessions or check out.
 - Read the [project layout](docs/architecture.md) before changing shared code.
 - Run `pnpm typecheck`, `pnpm test:watches`, and `pnpm eval:list` to check types, test watch parsing, and discover agent evals.
 

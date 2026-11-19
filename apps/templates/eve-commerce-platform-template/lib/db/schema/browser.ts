@@ -1,39 +1,8 @@
 import { sql } from "drizzle-orm";
-import {
-  check,
-  index,
-  integer,
-  pgTable,
-  text,
-  timestamp,
-  uniqueIndex,
-  uuid,
-} from "drizzle-orm/pg-core";
+import { check, integer, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { browserImageSourceKinds } from "@/lib/browser/artifact";
 import { shoppers } from "./shoppers";
 
-export const browserSessions = pgTable(
-  "browser_sessions",
-  {
-    sessionId: text("session_id").primaryKey(),
-    shopperId: text("shopper_id")
-      .notNull()
-      .references(() => shoppers.id, { onDelete: "cascade" }),
-    createdAt: timestamp("created_at", {
-      mode: "date",
-      precision: 3,
-      withTimezone: true,
-    })
-      .defaultNow()
-      .notNull(),
-    workerSessionId: text("worker_session_id"),
-  },
-  (table) => [
-    index("browser_sessions_shopper_idx").on(table.shopperId, table.createdAt.desc().nullsFirst()),
-  ],
-);
-
-// An image can outlive its Kernel session; the browser ID is provenance.
 export const browserImages = pgTable(
   "browser_images",
   {
@@ -43,7 +12,6 @@ export const browserImages = pgTable(
       .references(() => shoppers.id, { onDelete: "cascade" }),
     rootSessionId: text("root_session_id").notNull(),
     workerSessionId: text("worker_session_id").notNull(),
-    browserSessionId: text("browser_session_id").notNull(),
     status: text("status", { enum: ["pending", "ready"] }).notNull(),
     label: text("label").notNull(),
     filename: text("filename"),
