@@ -1,5 +1,4 @@
-import { callAdapterEventHandler } from "#channel/adapter-event-handler.js";
-import type { ChannelAdapter } from "#channel/adapter.js";
+import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
 import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-channel.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";

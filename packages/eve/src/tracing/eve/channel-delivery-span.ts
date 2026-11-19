@@ -5,7 +5,6 @@ import { ContextKey } from "#context/key.js";
 import { SessionIdKey } from "#context/keys.js";
 import { getInstrumentationRuntime } from "#instrumentation/runtime-global.js";
 import { createLogger } from "#internal/logging.js";
-import { connectionEventTraceContext, sideSpanHost } from "#tracing/eve/connection-events.js";
 import { eveOutputMapping } from "#tracing/eve/profile.js";
 
 interface DeliveryAttempt {
@@ -59,6 +58,8 @@ async function recordDelivery(
     input.turnId === undefined
       ? undefined
       : await getInstrumentationRuntime()?.readTurnTraceContext?.(sessionId, input.turnId);
+  const { connectionEventTraceContext, sideSpanHost } =
+    await import("#tracing/eve/connection-events.js");
   const host = sideSpanHost(ctx, connectionEventTraceContext(turnTrace));
   if (host === undefined) return;
   const name = "agent.channel.deliver";

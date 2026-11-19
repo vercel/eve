@@ -9,7 +9,7 @@ import type { HookEvent } from "eve/hooks";
 import { beforeEach, expect, it, vi } from "vitest";
 
 // Exercise eve's actual swallowing dispatcher, renderer chain, and native cards.
-import { callAdapterEventHandler } from "../../../../node_modules/eve/dist/src/channel/adapter-event-handler.js";
+import { callAdapterEventHandler } from "../../../../node_modules/eve/dist/src/channel/adapter.js";
 import { defaultInteractionEvents } from "../../../../node_modules/eve/dist/src/public/channels/slack/defaults.js";
 import {
   composeInteractionCards,

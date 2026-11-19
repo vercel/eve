@@ -2,8 +2,11 @@ import type { SessionEvent } from "#protocol/session-event.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
-import { callAdapterEventHandler } from "#channel/adapter-event-handler.js";
-import { defaultDeliverResult, type ChannelAdapter } from "#channel/adapter.js";
+import {
+  callAdapterEventHandler,
+  defaultDeliverResult,
+  type ChannelAdapter,
+} from "#channel/adapter.js";
 import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-channel.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
