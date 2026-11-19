@@ -22,6 +22,8 @@ const UNSUPPORTED_PROVIDER_TOOL_MATCHERS: readonly ((text: string) => string | u
   (text) => (/web search is not supported for this request/i.test(text) ? "web_search" : undefined),
 ];
 
+const PROVIDER_HISTORY_BLOCK_REJECTION = /Invalid encrypted_content in \w+ block/i;
+
 export interface UpstreamRejectionSummary {
   readonly name: string;
   readonly message: string;
@@ -81,19 +83,54 @@ export function extractUnsupportedProviderToolTypes(error: unknown): readonly st
   const found = new Set<string>();
 
   for (const candidate of walkCauseChain(error)) {
-    collectUnsupportedToolTypesFromValue(readObjectField(candidate, "data"), found);
-
-    const responseBody = readStringField(candidate, "responseBody");
-    if (responseBody !== undefined) {
-      try {
-        collectUnsupportedToolTypesFromValue(JSON.parse(responseBody), found);
-      } catch {
-        collectUnsupportedToolTypes(responseBody, found);
-      }
+    for (const body of readResponseBodies(candidate)) {
+      collectUnsupportedToolTypesFromValue(body, found);
     }
   }
 
   return [...found];
+}
+
+function readResponseBodies(candidate: unknown): readonly unknown[] {
+  const bodies: unknown[] = [readObjectField(candidate, "data")];
+  const responseBody = readStringField(candidate, "responseBody");
+  if (responseBody !== undefined) {
+    try {
+      bodies.push(JSON.parse(responseBody));
+    } catch {
+      bodies.push(responseBody);
+    }
+  }
+  return bodies;
+}
+
+function rejectedByFallbacksWhileProviderUnavailable(error: unknown): boolean {
+  const attempts = [...walkCauseChain(error)].flatMap((candidate) =>
+    readResponseBodies(candidate).flatMap(readProviderAttempts),
+  );
+  return (
+    attempts.some((attempt) => isTransientHttpStatus(readStatusCode(attempt))) &&
+    attempts.some((attempt) => rejectsProviderSpecificRequest(attempt.error))
+  );
+}
+
+function readProviderAttempts(value: unknown): readonly Record<string, unknown>[] {
+  if (Array.isArray(value)) return value.flatMap(readProviderAttempts);
+  if (!isObject(value)) return [];
+  return Object.entries(value).flatMap(([key, entry]) =>
+    key === "providerAttempts" && Array.isArray(entry)
+      ? entry.filter(isObject)
+      : readProviderAttempts(entry),
+  );
+}
+
+function rejectsProviderSpecificRequest(error: unknown): boolean {
+  const message = typeof error === "string" ? error : readStringField(error, "message");
+  return (
+    message !== undefined &&
+    (PROVIDER_HISTORY_BLOCK_REJECTION.test(message) ||
+      UNSUPPORTED_PROVIDER_TOOL_MATCHERS.some((match) => match(message) !== undefined))
+  );
 }
 
 function collectUnsupportedToolTypes(text: string, out: Set<string>): void {
@@ -292,7 +329,10 @@ export function classifyModelCallError(error: unknown): "retry" | "recoverable" 
     return "recoverable";
   }
 
-  if (isRetryableGatewayType(signals.upstreamType)) {
+  if (
+    isRetryableGatewayType(signals.upstreamType) ||
+    rejectedByFallbacksWhileProviderUnavailable(error)
+  ) {
     return "retry";
   }
   if (
