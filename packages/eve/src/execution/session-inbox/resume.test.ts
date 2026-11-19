@@ -233,7 +233,7 @@ describe("session inbox resume", () => {
     expect(resumeHookMock).not.toHaveBeenCalled();
   });
 
-  it.fails("refuses a pre-1.0 owner reached through its legacy inbox address", async () => {
+  it("refuses a pre-1.0 owner reached through its legacy inbox address", async () => {
     getWorldMock.mockResolvedValue(singleDeploymentWorld("0.50.0"));
     getHookByTokenMock.mockImplementation(async (token: string) => {
       if (token.startsWith(sessionInboxHookToken(""))) throw new HookNotFoundError(token);

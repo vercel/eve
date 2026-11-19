@@ -9,7 +9,11 @@ import {
   sessionCommandHookToken,
   sessionInboxHookToken,
 } from "#execution/session-inbox/address.js";
-import { lookupSessionOwnerHook, resumeRunnableHook } from "#execution/session-inbox/owner.js";
+import {
+  assertRunnableSessionOwner,
+  lookupSessionOwnerHook,
+  resumeRunnableHook,
+} from "#execution/session-inbox/owner.js";
 import { getHookByToken } from "#internal/workflow/runtime.js";
 import { isObject } from "#shared/guards.js";
 
@@ -50,6 +54,7 @@ export async function resumeLegacyInbox(token: string, command: Command) {
   const target = await resolveLegacyInbox(token);
   let payload: unknown = command;
   if (!target.current) {
+    await assertRunnableSessionOwner({ runId: target.hook.runId, hook: target.hook });
     const metadata = await target.hook.metadata;
     payload = encodeLegacyCommand(
       command,
