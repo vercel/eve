@@ -168,9 +168,9 @@ export interface UseEveAgentOptions extends SessionStoreCallbacks {
  * Returns accessors for the conversation (`messages`, `agents`, `view`) and for `error`,
  * `events`, `session`, and `status`, plus `prewarm`, `send`, `respond`, `resume`, `cancel`,
  * `newSession`, and `end`. Call it inside a component or `createRoot()`; it throws without a
- * reactive owner. Configuration is read once; remount to change it. In the browser,
- * the binding connects once the component settles and disconnects when its owner is disposed.
- * During server rendering the accessors return the initial state and nothing connects.
+ * reactive owner. Configuration is read once; remount to change it. In the browser, the binding
+ * connects once the component settles and disconnects when its owner is disposed. During server
+ * rendering the accessors return the initial state and nothing connects.
  */
 export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentReturn {
   if (options.resume && options.initialSession === undefined && options.session === undefined) {
@@ -202,20 +202,19 @@ export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentReturn
     prepareSend: options.prepareSend,
   });
 
-  const [snapshot, setSnapshot] = createSignal(store.snapshot, { equals: false });
+  const [snapshot, setSnapshot] = createSignal(store.snapshot);
 
-  if ("window" in globalThis)
-    onSettled(() => {
-      const unsubscribe = store.subscribe(() => setSnapshot(store.snapshot));
-      setSnapshot(store.snapshot);
-      attachSessionStore(store);
-      if (options.resume) void store.resume().catch(() => {});
+  onSettled(() => {
+    const unsubscribe = store.subscribe(() => setSnapshot(store.snapshot));
+    setSnapshot(store.snapshot);
+    attachSessionStore(store);
+    if (options.resume) void store.resume().catch(() => {});
 
-      return () => {
-        unsubscribe();
-        detachSessionStore(store);
-      };
-    });
+    return () => {
+      unsubscribe();
+      detachSessionStore(store);
+    };
+  });
 
   return {
     cancel: () => store.cancel(),

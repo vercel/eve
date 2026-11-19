@@ -1,3 +1,6 @@
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
+
 import { createElement } from "react";
 import { act, create as createRenderer } from "react-test-renderer";
 import { createEffect, createRoot, flush } from "solid-js";
@@ -22,6 +25,10 @@ import { useEveAgent as useSolidAgent } from "#solid/use-eve-agent.js";
 import { useEveAgent as useSvelteAgent } from "#svelte/use-eve-agent.js";
 import { useEveAgent as useVueAgent } from "#vue/use-eve-agent.js";
 
+const SOLID_SERVER_BUILD = join(
+  dirname(createRequire(import.meta.url).resolve("solid-js/package.json")),
+  "dist/server.js",
+);
 const mounts: Array<() => void> = [];
 vi.mock("svelte", () => ({
   onMount: (callback: () => () => void) => void mounts.push(callback()),
@@ -125,7 +132,6 @@ const bindings: Record<string, () => Mounted> = {
     };
   },
   solid() {
-    vi.stubGlobal("window", {});
     const finished = vi.fn();
     let rendered: Pick<ConversationState, "messages"> = { messages: [] };
     const { binding, dispose } = createRoot((dispose) => {
@@ -317,21 +323,16 @@ describe("the React binding", () => {
 });
 
 describe("the Solid binding", () => {
-  function mountResumed() {
-    return createRoot((dispose) => ({
-      binding: useSolidAgent({
+  it("resumes an attached session once mounted, and stops when disposed", async () => {
+    const server = agent();
+    const { dispose } = createRoot((dispose) => {
+      useSolidAgent({
         baseUrl: "https://eve.test",
         initialSession: { sessionId: "session_1", streamIndex: 0 },
         resume: true,
-      }),
-      dispose,
-    }));
-  }
-
-  it("resumes an attached session once mounted in the browser, and stops when disposed", async () => {
-    vi.stubGlobal("window", {});
-    const server = agent();
-    const { dispose } = mountResumed();
+      });
+      return { dispose };
+    });
 
     await vi.waitFor(() => expect(server.reading).toBe(1));
     dispose();
@@ -339,7 +340,6 @@ describe("the Solid binding", () => {
   });
 
   it("shows a message sent before the component settles", () => {
-    vi.stubGlobal("window", {});
     agent();
     let rendered: readonly string[] = [];
     const { dispose } = createRoot((dispose) => {
@@ -356,22 +356,34 @@ describe("the Solid binding", () => {
     dispose();
   });
 
-  it("throws a precise error without a reactive owner, in the browser and on the server", () => {
-    const message =
-      "useEveAgent() must run inside a component or createRoot(). To share one conversation, create it inside createRoot() or a context provider.";
-    expect(() => useSolidAgent()).toThrow(message);
-    vi.stubGlobal("window", {});
-    expect(() => useSolidAgent()).toThrow(message);
+  it("throws a precise error without a reactive owner", () => {
+    expect(() => useSolidAgent()).toThrow(
+      "useEveAgent() must run inside a component or createRoot(). To share one conversation, create it inside createRoot() or a context provider.",
+    );
   });
 
-  it("does not connect without a window", async () => {
-    agent();
-    const { binding, dispose } = mountResumed();
+  it("claims the same hydration ids when server-rendered as in the browser", async () => {
+    async function nextIdAfterBinding(build: "server" | "browser") {
+      vi.resetModules();
+      if (build === "server") vi.doMock("solid-js", () => import(SOLID_SERVER_BUILD));
+      else vi.stubGlobal("window", {});
+      const solid = await import("solid-js");
+      expect("createDeepProxy" in solid).toBe(build === "server");
+      const { useEveAgent } = await import("#solid/use-eve-agent.js");
+      vi.doUnmock("solid-js");
+      const id = solid.createRoot(
+        (dispose) => {
+          useEveAgent({ baseUrl: "https://eve.test" });
+          const id = solid.getNextChildId(solid.getOwner()!);
+          dispose();
+          return id;
+        },
+        { id: "app" },
+      );
+      vi.unstubAllGlobals();
+      return id;
+    }
 
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(fetch).not.toHaveBeenCalled();
-    expect(binding.session()?.sessionId).toBe("session_1");
-    expect(binding.status()).toBe("idle");
-    dispose();
+    expect(await nextIdAfterBinding("server")).toBe(await nextIdAfterBinding("browser"));
   });
 });
