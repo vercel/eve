@@ -59,6 +59,8 @@ export interface BoardMessage {
   readonly attachments: readonly BoardAttachment[];
   readonly createdAt: string;
   readonly deleted: boolean;
+  /** Kept on the board: it never reached synced Slack, GitHub, or Linear threads. */
+  readonly noSync: boolean;
   /** Set when a schedule posted it. */
   readonly schedule?: { readonly id: string; readonly n: number };
   /** Set on a root that is a task. */
@@ -527,6 +529,7 @@ function messageOf(view: MessageView): BoardMessage {
     deleted: view.deleted,
     id: view.id,
     labels: { ...view.labels },
+    noSync: view.noSync === true,
     re: view.re,
     text: view.text,
     thread: view.thread,

@@ -57,10 +57,15 @@ unwatch tool ── lock ─ remove w-7k3p ─ register ─ release ── label
 - **Handling a match.** A missing, duplicated, or foreign record acks the match with a
   configuration error; a retired one is skipped. The agent's own posts are skipped unless a schedule
   posted them. The match ID is the idempotency key, and the match is acked once eve accepts it.
-- **Claiming.** A claim watch claims one ready task per match, or acks without a turn when none is
+- **Scope.** `can` is checked with the board's own precedence (exact channel, then the longest
+  subtree, then `*`) on every delivered message and claimed task, not only when a watch is created.
+- **Claiming.** A claim watch claims one ready task per task event, or acks without a turn when none is
   ready. The session holds the claim in channel state, never in metadata, and renews it while turns
-  run. A task tool names the settlement and the channel performs it when the call settles; a claim
-  whose hand-off fails is released, and an unsettled claim lapses back to the queue.
+  run. A task tool names the settlement and the channel performs it when a call from a settle tool
+  settles, keeping the claim when the board refuses for a retryable reason. A reply or the agent's
+  own check-in in a held task's thread goes to that task's session. A claim whose hand-off fails is
+  released, and an unsettled claim lapses back to the queue. A turn answering a board-only message
+  keeps its automatic replies board-only.
 
 ## Known gaps
 

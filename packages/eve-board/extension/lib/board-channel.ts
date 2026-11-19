@@ -13,7 +13,7 @@ import {
   type TurnPolicy,
   type UploadPolicyInput,
 } from "eve/channels";
-import type { Interaction } from "eve/events";
+import { call as callOf, type Interaction } from "eve/events";
 import {
   createLogger,
   postedIn,
@@ -47,6 +47,7 @@ import {
   fetchBoardAttachment,
   formatBoardContext,
   formatTaskContext,
+  formatTaskFollowUpContext,
   formatWatchContext,
 } from "./inbound.ts";
 import {
@@ -67,6 +68,15 @@ const MAX_PULLS_PER_WAKE = 20;
 const MATCHES_PER_PULL = 10;
 const DEFAULT_MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 const SETTLEMENTS = new Set(["completed", "failed", "blocked"]);
+const CLAIM_EVENTS = new Set([
+  "task.assigned",
+  "task.created",
+  "task.expired",
+  "task.ready",
+  "task.released",
+  "task.reopened",
+  "task.unblocked",
+]);
 
 /** JSON-serializable state for one board thread's session. */
 export interface BoardChannelState extends PromptQueueState {
@@ -79,6 +89,8 @@ export interface BoardChannelState extends PromptQueueState {
   messageId: string | null;
   /** The task this session claimed, renewed while it works; `null` once it's settled or lost. */
   task?: BoardHeldClaim | null;
+  /** Whether the current turn answers a board-only message, so its automatic replies stay off synced platforms. */
+  noSync?: boolean;
   pendingSignIns?: Record<string, string>;
 }
 
@@ -220,6 +232,7 @@ export function createBoardChannel(
     deliver(payload, ctx) {
       if (payload.state?.messageId != null) ctx.state.messageId = payload.state.messageId;
       if (payload.state?.task !== undefined) ctx.state.task = payload.state.task;
+      if (payload.state?.noSync !== undefined) ctx.state.noSync = payload.state.noSync;
     },
 
     routes: [
@@ -257,7 +270,7 @@ export function createBoardChannel(
       }
       return await sendRecovering(from(boardSessionAddress(board.profile, root)), message, {
         ...send,
-        state: { channel: root.channel, messageId: root.id, threadId: root.id },
+        state: { channel: root.channel, messageId: root.id, noSync: false, threadId: root.id },
       });
     },
 
@@ -281,16 +294,17 @@ export function createBoardChannel(
       async "call.settled"(event, ctx) {
         const { state } = ctx.channel;
         const claim = state.task;
+        const call = ctx.view === undefined ? undefined : callOf(ctx.view, event.data.callId);
         const settlement =
-          claim != null && event.data.outcome === "completed"
-            ? settlementOf(event.data.output, claim.id)
+          claim != null && event.data.outcome === "completed" && call !== undefined
+            ? settlementOf(event.data.output, claim.id, call)
             : undefined;
         if (claim == null || settlement === undefined) {
           await keepClaim(state);
           return;
         }
-        state.task = null;
-        const problem = await settleClaim(deployment(), claim, settlement);
+        const { problem, retry } = await settleClaim(deployment(), claim, settlement);
+        if (!retry) state.task = null;
         if (problem !== undefined)
           await bestEffort(
             "note",
@@ -343,7 +357,7 @@ export async function drainMatches(input: DrainInput): Promise<number> {
 async function handleMatch(
   input: DrainInput & {
     readonly match: BoardMatch;
-    readonly self: { readonly principal: string };
+    readonly self: { readonly principal: string; readonly actor: string };
     recordOf(id: string): Promise<BoardWatchRecord>;
   },
 ): Promise<boolean> {
@@ -387,7 +401,7 @@ async function dispatch(
   input: DrainInput & {
     readonly match: BoardMatch;
     readonly record: BoardWatchRecord;
-    readonly self: { readonly principal: string };
+    readonly self: { readonly principal: string; readonly actor: string };
   },
 ): Promise<boolean> {
   const { client, match, record } = input;
@@ -395,11 +409,15 @@ async function dispatch(
   const watch = { name: input.name, watch: record.id };
 
   if (record.action.type === "claim") {
+    if (match.event.type === "message.posted") {
+      return message === undefined ? false : await followUp({ ...input, message });
+    }
+    if (!CLAIM_EVENTS.has(match.event.type)) return false;
     const { queue } = record.action;
     const claim = await client.claimReady({ ...queue, lease: CLAIM_LEASE_SECONDS });
     if (claim === null) return false;
     const { task } = claim;
-    if (!allows(input.can, task.channel, "read")) {
+    if (!allows(input.can, task.channel, "read") || !allows(input.can, task.channel, "label")) {
       await client.held(claim).release();
       log.warn("board watch claimed a task outside the agent's read scope; released it", {
         task: task.id,
@@ -418,6 +436,7 @@ async function dispatch(
           state: {
             channel: task.channel,
             messageId: task.id,
+            noSync: task.noSync,
             task: heldClaimOf(claim),
             threadId: task.id,
             watch: record.id,
@@ -461,7 +480,41 @@ async function dispatch(
       state: {
         channel: message.channel,
         messageId: message.id,
+        noSync: message.noSync,
         threadId: boardThreadId(message),
+        watch: record.id,
+      },
+    },
+  );
+  return true;
+}
+
+async function followUp(
+  input: DrainInput & {
+    readonly match: BoardMatch;
+    readonly message: BoardMessage;
+    readonly record: BoardWatchRecord;
+    readonly self: { readonly principal: string; readonly actor: string };
+  },
+): Promise<boolean> {
+  const { client, match, message, record } = input;
+  if (message.re === null || message.deleted || postedBySelf(message, input)) return false;
+  const root = (await client.thread(message.re)).message;
+  const claim = root.task?.claim;
+  if (claim?.actor !== input.self.actor || Date.parse(claim.until) <= Date.now()) return false;
+  if (!allows(input.can, message.channel, "read")) return false;
+  await sendRecovering(
+    input.from(boardSessionAddress(record.id, root)),
+    boardMessageContent(message),
+    {
+      auth: defaultBoardAuth(message, { name: input.name, watch: record.id }),
+      context: [formatWatchContext(record), formatTaskFollowUpContext(message)],
+      idempotencyKey: `board:${match.id}`,
+      state: {
+        channel: message.channel,
+        messageId: message.id,
+        noSync: message.noSync,
+        threadId: root.id,
         watch: record.id,
       },
     },
@@ -542,7 +595,14 @@ export interface BoardSettlement {
   readonly kind?: string;
 }
 
-function settlementOf(output: unknown, taskId: string): BoardSettlement | undefined {
+const SETTLE_TOOL = /^(?:.+__)?(?:complete|fail|block)_task$/u;
+
+export function settlementOf(
+  output: unknown,
+  taskId: string,
+  capability: { readonly kind: string; readonly name: string },
+): BoardSettlement | undefined {
+  if (capability.kind !== "tool" || !SETTLE_TOOL.test(capability.name)) return undefined;
   if (typeof output !== "object" || output === null) return undefined;
   const settlement = output as Partial<BoardSettlement>;
   if (settlement.task !== taskId || !SETTLEMENTS.has(settlement.settled ?? "")) return undefined;
@@ -553,30 +613,40 @@ export async function settleClaim(
   client: BoardClient,
   claim: BoardHeldClaim,
   settlement: BoardSettlement,
-): Promise<string | undefined> {
+): Promise<{ readonly problem?: string; readonly retry: boolean }> {
   const held = client.held(boardClaimOf(claim));
   try {
     if (settlement.settled === "completed") await held.complete(settlement.result);
     else if (settlement.settled === "failed") await held.fail(settlement.reason ?? "Failed.");
     else await held.block(settlement.reason ?? "Needs a person.", { kind: settlement.kind });
-    return undefined;
+    return { retry: false };
   } catch (error) {
     if (boardErrorCode(error) === "claim_lost") {
-      return `eve couldn't mark task #${claim.id} ${settlement.settled}: its claim ended before the agent settled it.`;
+      return {
+        problem: `eve couldn't mark task #${claim.id} ${settlement.settled}: its claim ended before the agent settled it.`,
+        retry: false,
+      };
     }
     logError("board task settlement failed", error, { task: claim.id });
-    return `eve couldn't mark task #${claim.id} ${settlement.settled}. Try again, or settle it by hand.`;
+    return {
+      problem: `eve couldn't mark task #${claim.id} ${settlement.settled} on the board. Call the task tool again to retry.`,
+      retry: true,
+    };
   }
 }
 
 function threadHandle(
   client: BoardClient,
   threadId: string,
-  state: { readonly messageId: string | null },
+  state: { readonly messageId: string | null; readonly noSync?: boolean },
 ): BoardThreadHandle {
   return {
     threadId,
-    reply: (post) => client.reply(threadId, typeof post === "string" ? { text: post } : post),
+    reply: (post) =>
+      client.reply(
+        threadId,
+        typeof post === "string" ? { noSync: state.noSync === true, text: post } : post,
+      ),
     async react(emoji, options = {}) {
       const target = options.messageId ?? state.messageId ?? threadId;
       await client.react(target, emoji, { remove: options.remove });

@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 
+import { compileAccess, type Can } from "@vercel/board/access";
+
 import {
   BOARD_MAX_LEASE_SECONDS,
   boardErrorCode,
@@ -185,11 +187,9 @@ function overlaps(a: string, b: string): boolean {
 
 export function allows(can: BoardCan | undefined, channel: string, permission: string): boolean {
   if (can === undefined || can === "all") return true;
-  if (Array.isArray(can)) return can.includes(permission as never);
-  return Object.entries(can as Record<string, "all" | readonly string[]>).some(
-    ([pattern, grant]) =>
-      covers(pattern, channel) && (grant === "all" || grant.includes(permission)),
-  );
+  const access = compileAccess(can as Can);
+  const name = permission as Parameters<typeof access.can>[0];
+  return channel.endsWith("/") ? access.at(name, channel) : access.can(name, channel);
 }
 
 export function modelCan(can: BoardCan | undefined, watchChannel: string): BoardCan {

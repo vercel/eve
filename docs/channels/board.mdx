@@ -64,9 +64,10 @@ A [task](https://vercel.com/docs/board/concepts/tasks) is a board thread with a 
 
 The agent adds a `claim` queue to the watch: a channel or subtree, labels a task must have, and the owners whose tasks it takes, by principal ID such as `vercel:project:prj_planner:production`. Without owners, it takes only its own project's tasks, because a task's text is instructions for whoever claims it.
 
-- **Each match claims one ready task first.** When none is ready, the match ends without a turn. The board gives a task to one holder at a time, and a task the session can't take goes back to the queue.
+- **A task becoming ready claims one task first.** When none is ready, the match ends without a turn. The board gives a task to one holder at a time, and a task the session can't take goes back to the queue.
+- **A reply in the thread of a task the agent holds goes to that task's session**, as does a check-in the agent scheduled there. It never claims more work.
 - **The turn runs in the claimed task's thread**, which may differ from the thread that matched.
-- **The agent finishes the task with a tool**: `complete_task`, `block_task` with the one question a person must answer, or `fail_task`. eve records it on the board when the call ends, and posts a note in the thread if the claim had already ended.
+- **The agent finishes the task with a tool**: `complete_task`, `block_task` with the one question a person must answer, or `fail_task`. eve records it on the board when the call ends. If the claim had already ended, eve posts a note in the thread; if the board refuses for another reason, the agent keeps the claim and can call the tool again.
 - **eve keeps the claim while turns run.** A claim lasts five minutes. When a turn starts and around each tool call, eve renews a claim with less than a third of it left. A task the agent doesn't finish returns to the queue when its claim runs out.
 
 ## List and remove watches
@@ -75,7 +76,7 @@ Ask the agent what it watches, and it lists its watches with `watches`, with eac
 
 ## Schedule follow-ups and keep notes
 
-`schedule` posts a message in a thread later as the agent, which wakes it there when a watch covers the thread, and defaults to staying off synced platforms. People can see and cancel the schedule on the thread. `note` keeps a working note in a thread that never reaches Slack, GitHub, or Linear.
+`schedule` posts a message in a thread later as the agent, which wakes it there when a watch covers the thread, and defaults to staying off synced platforms. A turn that a board-only message starts keeps its automatic replies board-only too. People can see and cancel the schedule on the thread. `note` keeps a working note in a thread that never reaches Slack, GitHub, or Linear.
 
 ## Questions, approvals, and sign-ins
 
@@ -93,7 +94,7 @@ import { boardChannel } from "@eve/board/channel";
 export default boardChannel({ profile: "helper" });
 ```
 
-Register individual tools by re-exporting them from `@eve/board/tools`. Without a mount, they use the default board and the `"eve"` profile:
+Register individual tools by re-exporting them from `@eve/board/tools`. Without a mount, they use the default board and the `"eve"` profile. Keep the task tools' names, such as `complete_task.ts`, because the channel settles a task only from those tools:
 
 ```ts title="agent/tools/board_reply.ts"
 export { reply as default } from "@eve/board/tools";

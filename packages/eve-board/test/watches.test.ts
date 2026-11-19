@@ -6,6 +6,7 @@ import type { ChannelFrom, ChannelSendOptions } from "eve/channels";
 import {
   drainMatches,
   settleClaim,
+  settlementOf,
   type BoardChannelState,
 } from "../extension/lib/board-channel.ts";
 import { createBoardClient, resolveBoardTarget } from "../extension/lib/client.ts";
@@ -64,6 +65,10 @@ async function wake(from: ChannelFrom<BoardChannelState>, expect: "some" | "none
     wait: expect === "some" ? 25 : 0,
     watchChannel: () => DEFAULT_WATCH_CHANNEL,
   });
+}
+
+async function wakeUntil(from: ChannelFrom<BoardChannelState>, done: () => boolean) {
+  for (let pull = 0; pull < 6 && !done(); pull += 1) await wake(from, "some");
 }
 
 const registers = (calls: readonly string[]) =>
@@ -128,6 +133,7 @@ test("a watch the agent creates wakes one turn with its stored instructions, and
   assert.deepEqual(delivery!.options.state, {
     channel: "incidents",
     messageId: posted.id,
+    noSync: false,
     threadId: posted.id,
     watch: first.id,
   });
@@ -177,7 +183,7 @@ test("a claiming watch claims a ready task and dispatches to the task's thread",
   const task = (await as("alice", "/tasks", { channel: "work/a", text: "Fix the flaky test." }))
     .task;
 
-  await wake(from, "some");
+  await wakeUntil(from, () => deliveries.length > 0);
 
   assert.equal(deliveries.length, 1);
   const [delivery] = deliveries;
@@ -380,13 +386,14 @@ test("the channel settles the claim a task tool named, and says when the claim a
     until: claim.until,
   };
 
-  assert.equal(
+  assert.deepEqual(
     await settleClaim(board, held, { result: "Done.", settled: "completed", task: task.id }),
-    undefined,
+    { retry: false },
   );
   assert.equal((await board.thread(task.id)).message.task?.state, "completed");
   assert.match(
-    (await settleClaim(board, held, { reason: "Late.", settled: "failed", task: task.id })) ?? "",
+    (await settleClaim(board, held, { reason: "Late.", settled: "failed", task: task.id }))
+      .problem ?? "",
     /its claim ended/u,
   );
 });
@@ -420,7 +427,7 @@ test("a claiming watch takes a task the agent created itself", async () => {
     { callId: "c2" },
   );
 
-  await wake(from, "some");
+  await wakeUntil(from, () => deliveries.length > 0);
 
   assert.deepEqual(
     deliveries.map((entry) => entry.address),
@@ -488,4 +495,117 @@ test("a watch delivers nothing from channels a narrower `can` no longer lets the
   });
 
   assert.deepEqual(deliveries, []);
+});
+
+test("a reply in a task the agent holds reaches that task's session instead of claiming more work", async () => {
+  const { as } = await startBoard();
+  const created = await runTool(
+    defineBoardWatchTool(settings),
+    {
+      claim: { channel: "work/", from: ["vercel:user:alice"] },
+      instructions: "Do the task.",
+      tail: "work/",
+    },
+    { callId: "c1" },
+  );
+  const { deliveries, from } = recorder();
+  const held = (await as("alice", "/tasks", { channel: "work/a", text: "Fix the build." })).task;
+  await wakeUntil(from, () => deliveries.length > 0);
+  const other = (await as("alice", "/tasks", { channel: "work/b", text: "Second task." })).task;
+  await wakeUntil(from, () => deliveries.length > 1);
+  await as("alice", "/messages", { re: held.id, text: "Use the staging database." });
+
+  await wakeUntil(from, () => deliveries.length > 2);
+
+  const address = `${created.id}:thread:${held.thread}`;
+  assert.deepEqual(
+    deliveries.map((entry) => [entry.address, entry.message]),
+    [
+      [address, "Fix the build."],
+      [`${created.id}:thread:${other.thread}`, "Second task."],
+      [address, "Use the staging database."],
+    ],
+  );
+  assert.equal(deliveries[2]!.options.state?.task, undefined);
+  assert.match(deliveries[2]!.options.idempotencyKey!, /^board:/u);
+});
+
+test("only a settle tool's result settles the claimed task", () => {
+  const output = { result: "Done.", settled: "completed", task: "42" };
+  assert.deepEqual(
+    settlementOf(output, "42", { kind: "tool", name: "board__complete_task" }),
+    output,
+  );
+  assert.deepEqual(settlementOf(output, "42", { kind: "tool", name: "complete_task" }), output);
+  assert.equal(
+    settlementOf(output, "42", { kind: "tool", name: "linear__update_issue" }),
+    undefined,
+  );
+  assert.equal(settlementOf(output, "42", { kind: "skill", name: "complete_task" }), undefined);
+  assert.equal(
+    settlementOf(output, "7", { kind: "tool", name: "board__complete_task" }),
+    undefined,
+  );
+});
+
+test("a nested exclusion in `can` wins over a broader read grant", async () => {
+  const { as } = await startBoard();
+  const created = await runTool(
+    defineBoardWatchTool(settings),
+    { instructions: "Summarize it.", tail: "team/" },
+    { callId: "c1" },
+  );
+  await assert.rejects(
+    runTool(
+      defineBoardWatchTool(() => ({
+        can: { "*": ["read"], "team/": [] } as const,
+        profile: "helper",
+      })),
+      { instructions: "Summarize it.", tail: "team/" },
+      { callId: "c2" },
+    ),
+    /may not read "team\/"/u,
+  );
+  const { deliveries, from } = recorder();
+  await as("alice", "/messages", { channel: "team/hr", text: "Salary bands." });
+  const eng = (await as("alice", "/messages", { channel: "team/eng", text: "Deploy is green." }))
+    .message;
+  const can = { "team/": ["read"], "team/hr": [] } as const;
+  for (let pull = 0; pull < 6 && deliveries.length < 1; pull += 1) {
+    await drainMatches({
+      can,
+      client: client(),
+      from,
+      name: undefined,
+      wait: 25,
+      watchChannel: () => DEFAULT_WATCH_CHANNEL,
+    });
+  }
+  await drainMatches({
+    can,
+    client: client(),
+    from,
+    name: undefined,
+    watchChannel: () => DEFAULT_WATCH_CHANNEL,
+  });
+
+  assert.deepEqual(
+    deliveries.map((entry) => entry.address),
+    [`${created.id}:thread:${eng.thread}`],
+  );
+});
+
+test("a board-only message keeps the turn's automatic replies board-only", async () => {
+  const { as } = await startBoard();
+  await runTool(
+    defineBoardWatchTool(settings),
+    { instructions: "Check CI.", tail: "builds" },
+    { callId: "c1" },
+  );
+  const { deliveries, from } = recorder();
+  await as("alice", "/messages", { channel: "builds", noSync: true, text: "Check CI again." });
+
+  await wakeUntil(from, () => deliveries.length > 0);
+
+  assert.equal(deliveries[0]!.options.state?.noSync, true);
 });
