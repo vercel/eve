@@ -55,15 +55,15 @@ defineTool({
 });
 ```
 
-- `ToolDefinition.toModelOutput` (`tools/definition.ts:313`) becomes `(output: TOutput, ctx: ToolModelOutputContext) => ToolModelOutput | Promise<ToolModelOutput>`. `ctx` carries `getSandbox`, `callId`, `toolName` and `defaultModelOutput`. `getSandbox()` resolves `undefined` when the agent has no sandbox, and `defaultModelOutput(output)` is the projection eve applies when a tool sets no `toModelOutput`, which is `connectionToolModelOutput` for a connection tool. Existing one-argument functions keep working.
+- `ToolDefinition.toModelOutput` (`tools/definition.ts:313`) becomes `toModelOutput?(output: TOutput, ctx?: ToolModelOutputContext)`. The second argument is optional in the type so code that calls `tool.toModelOutput!(output)` directly still compiles, and `defineTool` types it as always present. eve always passes it. `ctx` carries `getSandbox`, `callId`, `toolName` and `defaultModelOutput`. `getSandbox()` resolves `undefined` when the agent has no sandbox, and `defaultModelOutput(output)` is the projection eve applies when a tool sets no `toModelOutput`, which is `connectionToolModelOutput` for a connection tool. Existing one-argument functions keep working.
 - `ConnectionToolCallDefinition` (`public/definitions/connections/tool-call.ts:27-30`) gains the same `toModelOutput`, so `defineMcpClientConnection` and `defineOpenAPIConnection` both get it. It receives the connection tool's raw result.
-- `offloadContent({ maxBytes?, ifNotSaved?, toModelOutput? })` returns a `toModelOutput` function. `maxBytes` defaults to 20,000 (about 5,000 tokens). The optional inner `toModelOutput` is applied first, and the limit is checked on its result in UTF-8 bytes. Left out, the raw value goes to the model under the limit. For `web_fetch`, `gh`, `grep` and `glob` that is the right result, because over the limit their cut is replaced by the file. For a connection, `ctx.defaultModelOutput` is eve's own `connectionToolModelOutput`.
+- `offloadContent({ maxBytes?, fallback?, toModelOutput? })` returns a `toModelOutput` function. `maxBytes` defaults to 20,000 (about 5,000 tokens). The optional inner `toModelOutput` is applied first, and the limit is checked on its result in UTF-8 bytes. Left out, the raw value goes to the model under the limit. For `web_fetch`, `gh`, `grep` and `glob` that is the right result, because over the limit their cut is replaced by the file. For a connection, `ctx.defaultModelOutput` is eve's own `connectionToolModelOutput`.
 - Built-in and extension tools are overridden by spreading the exported definition into `defineTool` (`docs/concepts/built-in-tools.md:58-72`), so they need no new option.
 
 ### Past the limit, with or without a sandbox
 
 - With a sandbox: eve writes the file described below and the model gets the note.
-- Without a sandbox, or when opening it or writing the file fails: `ifNotSaved` decides, and eve logs one warning per session. `"full"` (the default) returns the inner projection unchanged. `"description"` returns only the size, shape and first lines. eve never cuts a result to fit unless the author picks `"description"`.
+- Without a sandbox, or when opening it or writing the file fails: `fallback` decides, and eve logs one warning per session. `"inline"` (the default) returns the inner projection unchanged. `"summary"` returns only the size, shape and first lines. eve never cuts a result to fit unless the author picks `"summary"`.
 - Where the result is kept is the helper's choice. A Blob helper can come later with the same shape; it also needs a way for the model to read the result back, so it is out of scope.
 
 ### Built-in and extension tools that cut inside `execute`
@@ -78,7 +78,7 @@ After the move, `call.settled` carries the full result for these tools. Unchange
 
 ### What gets written
 
-- The file holds the tool's raw output, before `toModelOutput`, so jq sees the real data. JSON values are written as `.json`, compact as received. A string result is written as `.txt`.
+- The file holds the projected output, the same value the model would have seen without offloading, so an inner `toModelOutput` that redacts a field also keeps it out of the file. With no inner `toModelOutput` that is the tool's output itself, so jq sees the real data. JSON values are written as `.json`, compact. A text result, or a content result whose parts are all text, is written as `.txt`.
 - Results with image, audio or binary blocks keep today's path. jq can't read them, and the file-part rules already bound their size.
 - Path: `/tmp/.eve/tool-results/<tool name>-<toolCallId>.<ext>`, beside `bash`'s job directory.
 - Errors stay inline and are never saved.
@@ -86,15 +86,12 @@ After the move, `call.settled` carries the full result for these tools. Unchange
 ### The note the model sees
 
 ```text
-The result of github__list_issues was saved to
-/tmp/.eve/tool-results/github__list_issues-call_abc.json
-(680,088 bytes, about 170,000 tokens).
-It is a JSON array of 100 objects with the keys: url, number,
-title, user, labels, state, ... (34 keys).
-Read parts of it with jq, head or read_file.
+Output of github__list_issues (680,088 bytes) was saved to /tmp/.eve/tool-results/github__list_issues-call_abc.json.
+JSON array of 100 objects with keys: url, number, title, user, labels, state, ... (34 total).
+Inspect it with bash (for example jq) or read_file instead of loading the entire file.
 ```
 
-The shape line is computed, not a raw preview: the top-level type, the array length or object keys, and the keys of the first item, capped at about 400 characters. For text, the note includes the first 20 lines instead.
+The shape line is computed, not a raw preview: the top-level type, the array length or object keys, the keys of the first item, and for each array inside an object its length and item keys, capped at about 400 characters. For text, the note gives the line count and the first 20 lines, each cut at 200 characters and held to a quarter of `maxBytes`.
 
 ### Where the code changes
 

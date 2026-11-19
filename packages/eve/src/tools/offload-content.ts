@@ -1,10 +1,18 @@
 import { isObject } from "#shared/guards.js";
-import type { ToolModelOutput, ToolModelOutputContext } from "#tools/model-output.js";
+import {
+  defaultToolModelOutput,
+  WARN_ONCE,
+  type ToolModelOutput,
+  type ToolModelOutputContext,
+  type WarnOnceContext,
+} from "#tools/model-output.js";
 
 const RESULTS_DIRECTORY = "/tmp/.eve/tool-results";
 const SHAPE_LIMIT = 400;
 const TEXT_PREVIEW_LINES = 20;
 const TEXT_PREVIEW_LINE_LIMIT = 200;
+const NESTED_KEYS_LIMIT = 120;
+const FILE_STEM_PART_LIMIT = 64;
 
 const DEFAULT_MAX_BYTES = 20_000;
 
@@ -22,12 +30,12 @@ export interface OffloadContentOptions<TOutput> {
    * sandbox or writing the file fails. eve logs one warning per session either
    * way.
    *
-   * - `"full"` sends the whole result, so nothing is lost and the context may
+   * - `"inline"` sends the projected result, so nothing is lost and the context may
    *   grow. This is the default.
-   * - `"description"` sends only its size, shape and first lines, so the context
+   * - `"summary"` sends only its size, shape and first lines, so the context
    *   stays small and the rest of the result is gone.
    */
-  readonly ifNotSaved?: "full" | "description";
+  readonly fallback?: "inline" | "summary";
   /**
    * Projects the output before its size is checked. Defaults to
    * `ctx.defaultModelOutput`, which is what the model sees without a
@@ -46,8 +54,10 @@ export interface OffloadContentOptions<TOutput> {
  * file's path and a one-line description of its shape, so it can read parts
  * of it with `jq`, `head` or `read_file`.
  *
- * The file holds the tool's raw output. When the result cannot be saved,
- * `ifNotSaved` decides what the model gets. Error results and results with
+ * The file holds the projected output, the same text or JSON the model would
+ * have seen, so a `toModelOutput` that redacts a field also keeps it out of
+ * the file. When the result cannot be saved,
+ * `fallback` decides what the model gets. Error results and results with
  * file parts are never written.
  *
  * ```ts
@@ -59,137 +69,189 @@ export interface OffloadContentOptions<TOutput> {
  */
 export function offloadContent<TOutput = unknown>(
   options: OffloadContentOptions<TOutput> = {},
-): (output: TOutput, ctx: ToolModelOutputContext) => Promise<ToolModelOutput> {
-  const { maxBytes = DEFAULT_MAX_BYTES, ifNotSaved = "full" } = options;
+): (output: TOutput, ctx?: ToolModelOutputContext) => Promise<ToolModelOutput> {
+  const { maxBytes = DEFAULT_MAX_BYTES, fallback = "inline" } = options;
   if (!Number.isInteger(maxBytes) || maxBytes < 1) {
     throw new TypeError("offloadContent: maxBytes must be a positive integer.");
   }
-  return async (output, ctx) => {
+  return async (output, ctx = DIRECT_CALL_CONTEXT) => {
     const projected =
       options.toModelOutput === undefined
         ? ctx.defaultModelOutput(output)
         : await options.toModelOutput(output, ctx);
-    const size = projectedBytes(projected);
-    if (size === undefined || size <= maxBytes) {
+    const file = serialize(projected);
+    if (file === undefined || file.bytes <= maxBytes) {
       return projected;
     }
-    const file = serialize(output);
     const path = `${RESULTS_DIRECTORY}/${fileStem(ctx)}.${file.extension}`;
+    const note = (saved: boolean): string =>
+      offloadNote({
+        budget: Math.floor(maxBytes / 4),
+        file,
+        path: saved ? path : undefined,
+        toolName: ctx.toolName,
+      });
     const notSaved = (): ToolModelOutput =>
-      ifNotSaved === "full"
-        ? projected
-        : {
-            type: "text",
-            value: offloadNote({ file, output, path: undefined, toolName: ctx.toolName }),
-          };
+      fallback === "inline" ? projected : { type: "text", value: note(false) };
+    const warn = (ctx as Partial<WarnOnceContext>)[WARN_ONCE];
+    const given = fallback === "inline" ? "the whole result" : "only a description of it";
     try {
       const sandbox = await ctx.getSandbox();
       if (sandbox === undefined) {
-        ctx.warnOnce(
+        warn?.(
           "offloadContent.no-sandbox",
-          `offloadContent did not save the result of ${ctx.toolName}: there is no sandbox that keeps files after the call (the agent has none, or the tool was invoked without a tool-session key), so the model gets ${ifNotSaved === "full" ? "the whole result" : "only a description of it"}.`,
+          `offloadContent did not save a tool result because there is no sandbox that keeps files after the call (the agent has none, or the tool was invoked without a tool-session key), so the model gets ${given}.`,
+          { toolName: ctx.toolName },
         );
         return notSaved();
       }
       await sandbox.writeTextFile({ content: file.text, path });
     } catch (error) {
-      ctx.warnOnce(
+      warn?.(
         "offloadContent.save-failed",
-        `offloadContent could not save the result of ${ctx.toolName}, so the model gets ${ifNotSaved === "full" ? "the whole result" : "only a description of it"}: ${error instanceof Error ? error.message : String(error)}`,
+        `offloadContent could not save a tool result, so the model gets ${given}.`,
+        { error: error instanceof Error ? error.message : String(error), toolName: ctx.toolName },
       );
       return notSaved();
     }
-    return {
-      type: "text",
-      value: offloadNote({ file, output, path, toolName: ctx.toolName }),
-    };
+    return { type: "text", value: note(true) };
   };
 }
 
-function projectedBytes(output: ToolModelOutput): number | undefined {
-  switch (output.type) {
+const DIRECT_CALL_CONTEXT: ToolModelOutputContext = {
+  callId: "direct",
+  defaultModelOutput: defaultToolModelOutput,
+  getSandbox: async () => undefined,
+  toolName: "tool",
+};
+
+const encoder = new TextEncoder();
+
+interface SerializedResult {
+  readonly bytes: number;
+  readonly extension: "json" | "txt";
+  readonly shape: (budget: number) => string;
+  readonly text: string;
+}
+
+function serialize(projected: ToolModelOutput): SerializedResult | undefined {
+  switch (projected.type) {
     case "error-text":
       return undefined;
     case "text":
-      return Buffer.byteLength(output.value);
-    case "json":
-      return Buffer.byteLength(JSON.stringify(output.value) ?? "null");
+      return textResult(projected.value);
+    case "json": {
+      const text = JSON.stringify(projected.value) ?? "null";
+      return {
+        bytes: encoder.encode(text).byteLength,
+        extension: "json",
+        shape: () => jsonShape(projected.value),
+        text,
+      };
+    }
     case "content": {
-      if (output.value.some((part) => part.type === "file")) return undefined;
-      return output.value.reduce(
-        (total, part) => total + (part.type === "text" ? Buffer.byteLength(part.text) : 0),
-        0,
+      if (projected.value.some((part) => part.type === "file")) return undefined;
+      return textResult(
+        projected.value.map((part) => (part.type === "text" ? part.text : "")).join("\n"),
       );
     }
   }
 }
 
-interface SerializedResult {
-  readonly bytes: number;
-  readonly extension: "json" | "txt";
-  readonly text: string;
-}
-
-function serialize(output: unknown): SerializedResult {
-  const isText = typeof output === "string";
-  const text = isText ? output : (JSON.stringify(output) ?? "null");
-  return { bytes: Buffer.byteLength(text), extension: isText ? "txt" : "json", text };
+function textResult(text: string): SerializedResult {
+  return {
+    bytes: encoder.encode(text).byteLength,
+    extension: "txt",
+    shape: (budget) => textPreview(text, budget),
+    text,
+  };
 }
 
 function fileStem(ctx: ToolModelOutputContext): string {
-  return `${ctx.toolName}-${ctx.callId}`.replace(/[^A-Za-z0-9._-]/g, "_");
+  return `${boundedName(ctx.toolName)}-${boundedName(ctx.callId)}`;
+}
+
+function boundedName(value: string): string {
+  const safe = value.replace(/[^A-Za-z0-9._-]/g, "_");
+  if (safe.length <= FILE_STEM_PART_LIMIT) return safe;
+  return `${safe.slice(0, FILE_STEM_PART_LIMIT - 9)}-${hash(value)}`;
+}
+
+function hash(value: string): string {
+  let result = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    result = Math.imul(result ^ value.charCodeAt(index), 0x01000193);
+  }
+  return (result >>> 0).toString(16).padStart(8, "0");
 }
 
 function offloadNote(input: {
+  readonly budget: number;
   readonly file: SerializedResult;
-  readonly output: unknown;
   readonly path: string | undefined;
   readonly toolName: string;
 }): string {
   const { file, path, toolName } = input;
   const size = `${file.bytes.toLocaleString("en-US")} bytes`;
-  const shape = file.extension === "txt" ? textPreview(file.text) : jsonShape(input.output);
+  const shape = file.shape(input.budget);
   if (path === undefined) {
     return [
-      `The result of ${toolName} is ${size} and could not be saved, so only this description is shown.`,
+      `Output of ${toolName} (${size}) exceeded the inline limit and could not be saved to the sandbox. Only a summary is shown below.`,
       shape,
     ].join("\n");
   }
+  const tools =
+    file.extension === "json"
+      ? "bash (for example jq) or read_file"
+      : "read_file or bash (for example head, sed, or grep)";
   return [
-    `The result of ${toolName} was saved to`,
-    path,
-    `(${size}).`,
+    `Output of ${toolName} (${size}) was saved to ${path}.`,
     shape,
-    "Read parts of it with jq, head or read_file.",
+    `Inspect it with ${tools} instead of loading the entire file.`,
   ].join("\n");
 }
 
-function textPreview(text: string): string {
-  const lines = text
-    .split("\n")
-    .slice(0, TEXT_PREVIEW_LINES)
-    .map((line) =>
-      line.length > TEXT_PREVIEW_LINE_LIMIT ? `${line.slice(0, TEXT_PREVIEW_LINE_LIMIT)}...` : line,
-    );
-  return `It is text. Its first ${lines.length} lines are:\n${lines.join("\n")}`;
+function textPreview(text: string, budget: number): string {
+  const all = text.split(/\r?\n/);
+  if (all.length > 1 && all[all.length - 1] === "") all.pop();
+  const shown: string[] = [];
+  let used = 0;
+  for (const line of all.slice(0, TEXT_PREVIEW_LINES)) {
+    const room = Math.max(budget - used, 0);
+    if (room === 0 && shown.length > 0) break;
+    const limit = Math.min(TEXT_PREVIEW_LINE_LIMIT, room);
+    shown.push(line.length > limit ? `${line.slice(0, limit)}...` : line);
+    used += Math.min(line.length, limit) + 1;
+  }
+  const total = `${all.length.toLocaleString("en-US")} ${all.length === 1 ? "line" : "lines"}`;
+  const lead =
+    shown.length === all.length
+      ? "Preview:"
+      : `First ${shown.length} ${shown.length === 1 ? "line" : "lines"}:`;
+  return `Text (${total}). ${lead}\n${shown.join("\n")}`;
 }
 
 function jsonShape(value: unknown): string {
-  if (Array.isArray(value)) {
-    const first = value[0];
-    const noun = value.length === 1 ? "item" : "items";
-    const head = `It is a JSON array of ${value.length.toLocaleString("en-US")} ${noun}`;
-    if (isObject(first)) {
-      return `${head}. The first item is an object with the keys: ${keyList(Object.keys(first))}.`;
-    }
-    return first === undefined
-      ? `${head}.`
-      : `${head}. The first item is ${describeScalar(first)}.`;
-  }
+  if (Array.isArray(value)) return `JSON ${arrayShape(value)}.`;
   if (isObject(value)) {
-    return `It is a JSON object with the keys: ${keyList(Object.keys(value))}.`;
+    const entries = Object.entries(value).map(([key, entry]) =>
+      Array.isArray(entry) ? `${key} (${arrayShape(entry)})` : key,
+    );
+    return `JSON object with keys: ${entryList(entries)}.`;
   }
-  return `It is ${describeScalar(value)}.`;
+  return `JSON ${describeScalar(value)}.`;
+}
+
+function arrayShape(items: readonly unknown[]): string {
+  const count = items.length.toLocaleString("en-US");
+  const first = items[0];
+  if (isObject(first)) {
+    return `array of ${count} ${items.length === 1 ? "object" : "objects"} with keys: ${entryList(Object.keys(first), NESTED_KEYS_LIMIT)}`;
+  }
+  const noun = items.length === 1 ? "item" : "items";
+  return first === undefined
+    ? `array of ${count} ${noun}`
+    : `array of ${count} ${noun}, the first is ${describeScalar(first)}`;
 }
 
 function describeScalar(value: unknown): string {
@@ -198,15 +260,15 @@ function describeScalar(value: unknown): string {
   return `a ${typeof value}`;
 }
 
-function keyList(keys: readonly string[]): string {
-  const total = keys.length;
+function entryList(entries: readonly string[], limit: number = SHAPE_LIMIT): string {
+  const total = entries.length;
   if (total === 0) return "none";
   const listed: string[] = [];
   let length = 0;
-  for (const key of keys) {
-    length += key.length + 2;
-    if (length > SHAPE_LIMIT && listed.length > 0) break;
-    listed.push(key);
+  for (const entry of entries) {
+    length += entry.length + 2;
+    if (length > limit && listed.length > 0) break;
+    listed.push(entry);
   }
-  return listed.length === total ? listed.join(", ") : `${listed.join(", ")}, ... (${total} keys)`;
+  return listed.length === total ? listed.join(", ") : `${listed.join(", ")}, ... (${total} total)`;
 }

@@ -7,7 +7,12 @@ import { loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import { SandboxKey } from "#context/keys.js";
 import type { ToolModelOutputPart } from "#tools/definition.js";
-import type { ToolModelOutput, ToolModelOutputContext } from "#tools/model-output.js";
+import {
+  defaultToolModelOutput,
+  WARN_ONCE,
+  type ToolModelOutputContext,
+  type WarnOnceContext,
+} from "#tools/model-output.js";
 import { formatValidationError } from "#runtime/validation.js";
 import { withToolOutputSerializationError } from "#harness/tool-output-serialization.js";
 
@@ -29,10 +34,6 @@ type ToolModelOutputValuePart =
     };
 
 export interface ToolModelOutputContextOptions {
-  /**
-   * False when the call's sandbox ends with the call, so a file written to it
-   * would be gone before the caller reads the result.
-   */
   readonly sandboxOutlivesCall?: boolean;
 }
 
@@ -40,7 +41,7 @@ export function toolModelOutputContext(
   toolName: string,
   callId: string,
   options: ToolModelOutputContextOptions = {},
-): ToolModelOutputContext {
+): ToolModelOutputContext & WarnOnceContext {
   const sandboxOutlivesCall = options.sandboxOutlivesCall ?? true;
   return {
     callId,
@@ -48,20 +49,14 @@ export function toolModelOutputContext(
     getSandbox: async () =>
       sandboxOutlivesCall ? ((await loadContext().get(SandboxKey)?.get()) ?? undefined) : undefined,
     toolName,
-    warnOnce: (id, message) => {
+    [WARN_ONCE]: (id, message, fields) => {
       const context = loadContext();
       const seen = context.get(WarnedKey) ?? [];
       if (seen.includes(id)) return;
       context.set(WarnedKey, [...seen, id]);
-      log.warn(message, { toolName });
+      log.warn(message, { toolName, ...fields });
     },
   };
-}
-
-export function defaultToolModelOutput(output: unknown): ToolModelOutput {
-  return typeof output === "string"
-    ? { type: "text", value: output }
-    : { type: "json", value: output ?? null };
 }
 
 const log = createLogger("harness.tool-model-output");

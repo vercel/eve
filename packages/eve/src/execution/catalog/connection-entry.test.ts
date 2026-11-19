@@ -283,7 +283,10 @@ describe("connection tool model output", () => {
   };
   const issues = Array.from({ length: 60 }, (_, number) => ({ body: "x".repeat(200), number }));
 
-  async function modelOutput(toolCall: ResolvedConnectionDefinition["toolCall"]) {
+  async function modelOutput(
+    toolCall: ResolvedConnectionDefinition["toolCall"],
+    content: readonly unknown[] = [{ text: JSON.stringify(issues), type: "text" }],
+  ) {
     const connection = {
       connectionName: "tracker",
       description: "Issue tracker.",
@@ -297,9 +300,7 @@ describe("connection tool model output", () => {
     const client: ConnectionClient = {
       close: async () => {},
       connect: async () => undefined,
-      executeTool: async () => ({
-        content: [{ text: JSON.stringify(issues), type: "text" }],
-      }),
+      executeTool: async () => ({ content }),
       getToolMetadata: async () => [listIssues],
     };
     const registry: ConnectionRegistry = {
@@ -329,6 +330,21 @@ describe("connection tool model output", () => {
       "/tmp/.eve/tool-results/tracker__list_issues-call-1.json",
     );
     expect([...files.values()]).toEqual([JSON.stringify(issues)]);
+  });
+
+  it("keeps an image block as a file part and writes nothing", async () => {
+    const { files, output } = await modelOutput(
+      { toModelOutput: offloadContent({ maxBytes: 10 }) },
+      [
+        { text: "x".repeat(200), type: "text" },
+        { data: "AAAA", mimeType: "image/png", type: "image" },
+      ],
+    );
+    expect(output.type).toBe("content");
+    expect((output as { value: { type: string }[] }).value.map((part) => part.type)).toContain(
+      "file",
+    );
+    expect(files.size).toBe(0);
   });
 
   it("sends the whole result when the connection sets no toolCall.toModelOutput", async () => {

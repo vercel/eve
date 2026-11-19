@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ToolModelOutputContext } from "eve/tools";
 import { z } from "zod";
 import search from "../agent/tools/web_search";
 import extract from "../agent/tools/web_fetch";
@@ -471,17 +470,7 @@ describe("Parallel public research", () => {
     const ctx = { abortSignal: controller.signal } as never;
     const output = await search.execute({ ...query, max_results: 5 }, ctx);
     if (!("results" in output)) throw new Error("Expected a completed search result");
-    const modelOutputContext: ToolModelOutputContext = {
-      callId: "call-1",
-      defaultModelOutput: (value) => ({ type: "json", value }),
-      getSandbox: async () => undefined,
-      warnOnce: () => {},
-      toolName: "web_search",
-    };
-    expect(search.toModelOutput!(output, modelOutputContext)).toEqual({
-      type: "json",
-      value: output,
-    });
+    expect(search.toModelOutput!(output)).toEqual({ type: "json", value: output });
     controller.abort();
     expect(fetcher.mock.calls[0][1]!.signal!.aborted).toBe(true);
     await expect(

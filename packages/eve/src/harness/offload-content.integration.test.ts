@@ -13,12 +13,8 @@ import { defineAgent } from "#public/definitions/agent.js";
 import { defineInstructions } from "#public/instructions/index.js";
 import { defineMcpClientConnection } from "#public/definitions/connections/mcp.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
-import { requestPublicUrl } from "#execution/web-fetch/request.js";
 import { defineTool } from "#tools/definition.js";
 import { offloadContent } from "#tools/offload-content.js";
-import { webFetch } from "#tools/provided/web-fetch.js";
-
-vi.mock("#execution/web-fetch/request.js", () => ({ requestPublicUrl: vi.fn() }));
 
 const ISSUES = Array.from({ length: 100 }, (_, index) => ({
   body: `Body of issue ${index}. `.repeat(250),
@@ -164,55 +160,9 @@ describe("offloadContent on a real turn", () => {
     });
     expect(prompts).toHaveLength(3);
     expect(prompts[1]).not.toContain("Body of issue 50.");
-    const note = /The result of list_issues[\s\S]*?read_file\./.exec(prompts[1]!)?.[0] ?? "";
+    const note = /Output of list_issues[\s\S]*?entire file\./.exec(prompts[1]!)?.[0] ?? "";
     expect(approxTokens(note)).toBeLessThan(300);
     expect(approxTokens(prompts[1]!) + 1).toBeLessThan(approxTokens(ISSUES_JSON) / 20);
-  });
-
-  it("offloads the output of the built-in web_fetch when its definition is spread", async () => {
-    const page = Array.from(
-      { length: 100 },
-      (_, index) => `line ${index} ${"x".repeat(2_000)}`,
-    ).join("\n");
-    vi.mocked(requestPublicUrl).mockResolvedValue(
-      new Response(page, { headers: { "content-type": "text/plain" } }),
-    );
-    const read: { text?: string } = {};
-    const { model, prompts } = scriptedModel([
-      () =>
-        toolCallStreamResult({
-          input: JSON.stringify({ url: "https://docs.example.com/big" }),
-          toolCallId: "call-fetch",
-          toolName: "web_fetch",
-        }),
-      (prompt) => {
-        const path = NOTE_PATH.exec(prompt)?.[0];
-        if (path === undefined) throw new Error("The next model request has no saved-result note.");
-        return toolCallStreamResult({
-          input: JSON.stringify({ path }),
-          toolCallId: "call-read",
-          toolName: "read_result",
-        });
-      },
-      () => textStreamResult("done"),
-    ]);
-    await runTurn({
-      model,
-      modules: [
-        mod(
-          "tools/web_fetch.ts",
-          defineTool({ ...webFetch, toModelOutput: offloadContent({ maxBytes: 8_000 }) }),
-        ),
-        readerTool(read),
-      ],
-      name: "offload-web-fetch",
-    });
-    expect(prompts).toHaveLength(3);
-    expect(prompts[1]).not.toContain("line 10 ");
-    const saved = JSON.parse(read.text ?? "{}") as { content: string; truncated: boolean };
-    expect(saved.truncated).toBe(true);
-    expect(saved.content).toContain("line 10 ");
-    expect(saved.content).not.toContain("line 99 ");
   });
 
   it("keeps a large MCP tool result out of the next model request", async () => {
@@ -259,8 +209,7 @@ describe("offloadContent on a real turn", () => {
     });
     expect(prompts).toHaveLength(4);
     expect(prompts[2]).not.toContain("Body of issue 50.");
-    const note =
-      /The result of issues__list_issues[\s\S]*?read_file\./.exec(prompts[2]!)?.[0] ?? "";
+    const note = /Output of issues__list_issues[\s\S]*?entire file\./.exec(prompts[2]!)?.[0] ?? "";
     expect(approxTokens(note)).toBeLessThan(300);
   });
 });

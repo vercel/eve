@@ -65,11 +65,18 @@ export interface ToolModelOutputContext {
    * turns MCP content blocks into text and file parts.
    */
   defaultModelOutput(output: unknown): ToolModelOutput;
-  /**
-   * Logs `message` as a warning the first time `id` is seen in the session
-   * and does nothing for later calls with the same `id`.
-   */
-  warnOnce(id: string, message: string): void;
+}
+
+export const WARN_ONCE = Symbol.for("eve.toolModelOutput.warnOnce");
+
+export interface WarnOnceContext {
+  readonly [WARN_ONCE]: (id: string, message: string, fields?: Record<string, unknown>) => void;
+}
+
+export function defaultToolModelOutput(output: unknown): ToolModelOutput {
+  return typeof output === "string"
+    ? { type: "text", value: output }
+    : { type: "json", value: output ?? null };
 }
 
 /**

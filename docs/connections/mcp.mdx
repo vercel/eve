@@ -164,13 +164,13 @@ If you don't control the server, replace that operation with an authored tool th
 
 To keep a large result out of the model's context without changing the server, set `toolCall.toModelOutput` to [`offloadContent`](../tools#keep-large-results-out-of-context-with-offloadcontent). A result over 20,000 bytes goes to a file in the sandbox, and the model gets the file's path and shape:
 
-```ts title="agent/connections/github.ts"
+```ts title="agent/connections/issues.ts"
 import { defineMcpClientConnection } from "eve/connections";
 import { offloadContent } from "eve/tools";
 
 export default defineMcpClientConnection({
-  url: "https://api.githubcopilot.com/mcp/",
-  description: "GitHub issues and pull requests.",
+  url: "https://mcp.example.com/",
+  description: "Issue tracker.",
   toolCall: { toModelOutput: offloadContent() },
 });
 ```

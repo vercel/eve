@@ -9,13 +9,13 @@ import {
 import { resolveToolCallInputObject } from "#harness/coordination.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import {
-  defaultToolModelOutput,
   normalizeToolModelOutput,
   toolModelOutputContext,
   type ToolModelOutputContextOptions,
   type ToolModelOutputValue,
 } from "#harness/tool-model-output.js";
 import { toErrorMessage } from "#shared/errors.js";
+import { defaultToolModelOutput } from "#tools/model-output.js";
 import { isObject } from "#shared/guards.js";
 import type { JsonObject } from "#shared/json.js";
 import { toModelSchema } from "#tools/schema.js";

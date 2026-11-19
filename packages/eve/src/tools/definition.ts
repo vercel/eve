@@ -315,14 +315,20 @@ export interface ToolDefinition<TInput = unknown, TOutput = unknown> extends Pub
    * (`call.settled`) always receive the full output regardless.
    *
    * The second argument, {@link ToolModelOutputContext}, gives the call id,
-   * the tool name and the session's sandbox. A function that takes only the
-   * output keeps working.
+   * the tool name and the session's sandbox. eve always passes it, and a
+   * function that takes only the output keeps working. `defineTool` types it
+   * as always present.
    */
-  toModelOutput?: (
+  toModelOutput?(
     output: TOutput,
-    ctx: ToolModelOutputContext,
-  ) => ToolModelOutput | Promise<ToolModelOutput>;
+    ctx?: ToolModelOutputContext,
+  ): ToolModelOutput | Promise<ToolModelOutput>;
 }
+
+type DefinedToolModelOutput<TOutput> = (
+  output: TOutput,
+  ctx: ToolModelOutputContext,
+) => ToolModelOutput | Promise<ToolModelOutput>;
 
 type ToolOutputFromExecuteReturn<TReturn> =
   TReturn extends Promise<infer TOutput>
@@ -361,10 +367,7 @@ export function defineTool<
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
   >["label"];
   approval?: ToolDefinition<StandardSchemaV1.InferOutput<TInputSchema>, unknown>["approval"];
-  toModelOutput?: ToolDefinition<
-    unknown,
-    StandardJSONSchemaV1.InferOutput<TOutputSchema>
-  >["toModelOutput"];
+  toModelOutput?: DefinedToolModelOutput<StandardJSONSchemaV1.InferOutput<TOutputSchema>>;
 }): ToolDefinitionWithExecuteReturn<
   StandardSchemaV1.InferOutput<TInputSchema>,
   StandardJSONSchemaV1.InferOutput<TOutputSchema>,
@@ -384,7 +387,7 @@ export function defineTool<
     ToolOutputFromExecuteReturn<TReturn>
   >["label"];
   approval?: ToolDefinition<StandardSchemaV1.InferOutput<TSchema>, unknown>["approval"];
-  toModelOutput?: ToolDefinition<unknown, ToolOutputFromExecuteReturn<TReturn>>["toModelOutput"];
+  toModelOutput?: DefinedToolModelOutput<ToolOutputFromExecuteReturn<TReturn>>;
 }): ToolDefinitionWithExecuteReturn<
   StandardSchemaV1.InferOutput<TSchema>,
   ToolOutputFromExecuteReturn<TReturn>,
@@ -407,10 +410,7 @@ export function defineTool<
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
   >["label"];
   approval?: ToolDefinition<Record<string, unknown>, unknown>["approval"];
-  toModelOutput?: ToolDefinition<
-    unknown,
-    StandardJSONSchemaV1.InferOutput<TOutputSchema>
-  >["toModelOutput"];
+  toModelOutput?: DefinedToolModelOutput<StandardJSONSchemaV1.InferOutput<TOutputSchema>>;
 }): ToolDefinitionWithExecuteReturn<
   Record<string, unknown>,
   StandardJSONSchemaV1.InferOutput<TOutputSchema>,
@@ -424,7 +424,7 @@ export function defineTool<TReturn>(definition: {
   execute(input: Record<string, unknown>, ctx: ToolContext): TReturn;
   label?: ToolDefinition<Record<string, unknown>, ToolOutputFromExecuteReturn<TReturn>>["label"];
   approval?: ToolDefinition<Record<string, unknown>, unknown>["approval"];
-  toModelOutput?: ToolDefinition<unknown, ToolOutputFromExecuteReturn<TReturn>>["toModelOutput"];
+  toModelOutput?: DefinedToolModelOutput<ToolOutputFromExecuteReturn<TReturn>>;
 }): ToolDefinitionWithExecuteReturn<
   Record<string, unknown>,
   ToolOutputFromExecuteReturn<TReturn>,

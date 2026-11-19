@@ -99,7 +99,7 @@ const base = e2eAgentConfig({
       if (report === undefined) return { toolCalls: [{ name: "big_report", input: {} }] };
       const note =
         typeof report.output === "string" ? report.output : JSON.stringify(report.output);
-      const path = /(\/tmp\/\.eve\/tool-results\/\S+)/u.exec(note)?.[1] ?? "";
+      const path = /(\/tmp\/\.eve\/tool-results\/\S+?\.(?:json|txt))/u.exec(note)?.[1] ?? "";
       const counted = request.toolResults.find((result) => result.name === "bash");
       if (counted === undefined) {
         return {

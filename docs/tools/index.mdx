@@ -133,10 +133,11 @@ A tool result goes into the conversation in full, and every later model call in 
 
 ```ts title="agent/tools/fetch_issues.ts"
 import { defineTool, offloadContent } from "eve/tools";
+import { z } from "zod";
 
 export default defineTool({
   description: "List the issues of a repository.",
-  inputSchema: { type: "object", properties: { repo: { type: "string" } }, required: ["repo"] },
+  inputSchema: z.object({ repo: z.string() }),
   async execute({ repo }) {
     const response = await fetch(
       `https://api.github.com/repos/${repo}/issues?state=all&per_page=100`,
@@ -147,10 +148,10 @@ export default defineTool({
 });
 ```
 
-`maxBytes` is the largest result, in UTF-8 bytes, that reaches the model unchanged. It defaults to 20,000 bytes, about 5,000 tokens. A result over the limit is written, as the tool returned it, to `/tmp/.eve/tool-results/<tool name>-<call id>.json` (`.txt` for a string). The model sees the path, the size, a one-line description of the shape, and a hint to read parts of the file with `jq`, `head` or `read_file`. Channels and hooks still get the full output on `call.settled`.
+`maxBytes` is the largest result, in UTF-8 bytes, that reaches the model unchanged. It defaults to 20,000 bytes, about 5,000 tokens. A result over the limit is written to `/tmp/.eve/tool-results/<tool name>-<call id>.json` (`.txt` for a string). The file holds what the model would have seen without offloading: the tool's output, or the output of the `toModelOutput` you pass. The model sees the path, the size, a short description of the shape (for text, the line count and the first 20 lines), and a hint to read parts of the file with `jq`, `read_file` or `bash`. Channels and hooks still get the full output on `call.settled`.
 
-- To shrink the result first, pass `toModelOutput`. `offloadContent` applies it and checks the size of its output.
-- When a result is over the limit and can't be saved, because there is no sandbox or opening the sandbox or writing the file fails, `ifNotSaved` decides what the model gets, and eve logs one warning per session. `"full"` (the default) sends the whole result, so nothing is lost and the context may grow. `"description"` sends only the size, shape and first lines, so the context stays small and the rest of the result is gone. A tool invoked through MCP without a tool-session key has no sandbox that outlives the call, so it counts as not saved.
+- To shrink or redact the result first, pass `toModelOutput`. `offloadContent` applies it, checks the size of its output, and writes that output, so a field you remove never reaches the file.
+- When a result is over the limit and can't be saved, because there is no sandbox or opening the sandbox or writing the file fails, `fallback` decides what the model gets, and eve logs one warning per session. `"inline"` (the default) sends the result as the model would have seen it without offloading, so nothing is lost and the context may grow. `"summary"` sends only the size, shape and first lines, so the context stays small and the rest of the result is gone. A tool invoked through MCP without a tool-session key has no sandbox that outlives the call, so it counts as not saved.
 - Error results and results with image or file parts are never written.
 - The file lasts as long as the sandbox. If the sandbox is replaced, the model has to run the tool again.
 

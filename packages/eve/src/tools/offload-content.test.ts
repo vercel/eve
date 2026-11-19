@@ -45,7 +45,7 @@ describe("offloadContent", () => {
     expect(files.size).toBe(0);
   });
 
-  it("writes the raw output to the sandbox and returns a note when over the limit", async () => {
+  it("writes the output to the sandbox and returns a note when over the limit", async () => {
     const { access, files } = fakeSandbox();
     const toModelOutput = offloadContent({ maxBytes: 4_000 });
     const result = await inContext(access, () =>
@@ -57,11 +57,9 @@ describe("offloadContent", () => {
     expect(result).toEqual({
       type: "text",
       value: [
-        "The result of github__list_issues was saved to",
-        path,
-        `(${bytes.toLocaleString("en-US")} bytes).`,
-        "It is a JSON array of 50 items. The first item is an object with the keys: body, number, state, title.",
-        "Read parts of it with jq, head or read_file.",
+        `Output of github__list_issues (${bytes.toLocaleString("en-US")} bytes) was saved to ${path}.`,
+        "JSON array of 50 objects with keys: body, number, state, title.",
+        "Inspect it with bash (for example jq) or read_file instead of loading the entire file.",
       ].join("\n"),
     });
   });
@@ -70,11 +68,64 @@ describe("offloadContent", () => {
     const { access, files } = fakeSandbox();
     const text = Array.from({ length: 400 }, (_, index) => `line ${index}`).join("\n");
     const result = (await inContext(access, () =>
-      offloadContent({ maxBytes: 400 })(text, toolModelOutputContext("web_fetch", "call/1")),
+      offloadContent({ maxBytes: 3_000 })(text, toolModelOutputContext("web_fetch", "call/1")),
     )) as { value: string };
     expect(files.get("/tmp/.eve/tool-results/web_fetch-call_1.txt")).toBe(text);
+    expect(result.value).toContain("Text (400 lines). First 20 lines:\nline 0\n");
     expect(result.value).toContain("line 19\n");
     expect(result.value).not.toContain("line 20\n");
+    expect(result.value).toContain("read_file or bash (for example head, sed, or grep)");
+  });
+
+  it("previews a single long line and counts CRLF lines without carriage returns", async () => {
+    const { access } = fakeSandbox();
+    const one = (await inContext(access, () =>
+      offloadContent({ maxBytes: 4_000 })("y".repeat(5_000), toolModelOutputContext("t", "one")),
+    )) as { value: string };
+    expect(one.value).toContain(`Text (1 line). Preview:\n${"y".repeat(200)}...\n`);
+    const crlf = (await inContext(access, () =>
+      offloadContent({ maxBytes: 160 })(
+        "a\r\nb\r\n".repeat(30),
+        toolModelOutputContext("t", "crlf"),
+      ),
+    )) as { value: string };
+    expect(crlf.value).toContain("Text (60 lines). First 20 lines:\na\nb\n");
+    expect(crlf.value).not.toContain("\r");
+  });
+
+  it("keeps a text preview inside a small limit", async () => {
+    const { access } = fakeSandbox();
+    const text = Array.from({ length: 50 }, () => "z".repeat(190)).join("\n");
+    const result = (await inContext(access, () =>
+      offloadContent({ maxBytes: 1_000 })(text, toolModelOutputContext("t", "small")),
+    )) as { value: string };
+    expect(Buffer.byteLength(result.value)).toBeLessThan(1_000);
+  });
+
+  it("describes arrays nested in a wrapper object", async () => {
+    const { access } = fakeSandbox();
+    const rows = { rows: Array.from({ length: 400 }, (_, id) => ({ id, label: `row-${id}` })) };
+    const result = (await inContext(access, () =>
+      offloadContent({ maxBytes: 400 })(rows, toolModelOutputContext("big_report", "call_1")),
+    )) as { value: string };
+    expect(result.value).toContain(
+      "JSON object with keys: rows (array of 400 objects with keys: id, label).",
+    );
+  });
+
+  it("keeps long tool names and call ids inside a valid file name", async () => {
+    const { access, files } = fakeSandbox();
+    const toolName = `mcp__${"server".repeat(30)}__tool`;
+    const callId = `call_${"0123456789".repeat(30)}`;
+    const other = `${toolName}2`;
+    await inContext(access, async () => {
+      const toModelOutput = offloadContent({ maxBytes: 40 });
+      await toModelOutput("x".repeat(100), toolModelOutputContext(toolName, callId));
+      await toModelOutput("x".repeat(100), toolModelOutputContext(other, callId));
+    });
+    const names = [...files.keys()].map((path) => path.split("/").at(-1)!);
+    expect(names).toHaveLength(2);
+    for (const name of names) expect(name.length).toBeLessThanOrEqual(64 + 1 + 64 + 4);
   });
 
   it("lists object keys and caps the list", async () => {
@@ -85,8 +136,8 @@ describe("offloadContent", () => {
     const result = (await inContext(access, () =>
       offloadContent({ maxBytes: 400 })(wide, toolModelOutputContext("t", "c")),
     )) as { value: string };
-    expect(result.value).toContain("It is a JSON object with the keys: field_number_0,");
-    expect(result.value).toContain("... (200 keys).");
+    expect(result.value).toContain("JSON object with keys: field_number_0,");
+    expect(result.value).toContain("... (200 total).");
     expect(result.value.length).toBeLessThan(800);
   });
 
@@ -162,8 +213,80 @@ describe("offloadContent", () => {
         toModelOutput: (output: typeof issues) => toolOutput.text(JSON.stringify(output, null, 2)),
       })(issues, toolModelOutputContext("t", "call_2")),
     );
-    expect((expanded as { value: string }).value).toContain("/tmp/.eve/tool-results/t-call_2.json");
-    expect(files.get("/tmp/.eve/tool-results/t-call_2.json")).toBe(big);
+    expect((expanded as { value: string }).value).toContain("/tmp/.eve/tool-results/t-call_2.txt");
+    expect(files.get("/tmp/.eve/tool-results/t-call_2.txt")).toBe(JSON.stringify(issues, null, 2));
+  });
+
+  describe("with an inner toModelOutput that redacts", () => {
+    const secret = "TOP-SECRET-TOKEN";
+    const accounts = Array.from({ length: 50 }, (_, id) => ({ id, name: `a${id}`, token: secret }));
+    const redactJson = (output: typeof accounts) =>
+      toolOutput.json(output.map(({ token: _token, ...rest }) => rest));
+    const log = "line with TOP-SECRET-TOKEN in it\n".repeat(100);
+    const redactText = (output: string) => toolOutput.text(output.replaceAll(secret, "[redacted]"));
+    const unsaved = {
+      getSandbox: async () => {
+        throw new Error("cold start failed");
+      },
+    };
+
+    it("writes and previews the projected JSON, never the raw output", async () => {
+      const { access, files } = fakeSandbox();
+      const result = (await inContext(access, () =>
+        offloadContent({ maxBytes: 400, toModelOutput: redactJson })(
+          accounts,
+          toolModelOutputContext("accounts", "c1"),
+        ),
+      )) as { value: string };
+      const written = files.get("/tmp/.eve/tool-results/accounts-c1.json")!;
+      expect(written).toBe(JSON.stringify(accounts.map(({ id, name }) => ({ id, name }))));
+      expect(written).not.toContain(secret);
+      expect(result.value).not.toContain(secret);
+      expect(result.value).toContain("keys: id, name.");
+    });
+
+    it("writes and previews the projected text, never the raw output", async () => {
+      const { access, files } = fakeSandbox();
+      const result = (await inContext(access, () =>
+        offloadContent({ maxBytes: 400, toModelOutput: redactText })(
+          log,
+          toolModelOutputContext("logs", "c1"),
+        ),
+      )) as { value: string };
+      const written = files.get("/tmp/.eve/tool-results/logs-c1.txt")!;
+      expect(written).toBe(log.replaceAll(secret, "[redacted]"));
+      expect(result.value).not.toContain(secret);
+      expect(result.value).toContain("[redacted]");
+    });
+
+    it("describes only the projected output when the result cannot be saved", async () => {
+      captureLogRecords();
+      const run = (output: unknown, toModelOutput: never) =>
+        inContext(undefined, () =>
+          offloadContent({ fallback: "summary", maxBytes: 400, toModelOutput })(output, {
+            ...toolModelOutputContext("t", "c1"),
+            ...unsaved,
+          }),
+        ) as Promise<{ value: string }>;
+      for (const result of [
+        await run(accounts, redactJson as never),
+        await run(log, redactText as never),
+      ]) {
+        expect(result.value).toContain("could not be saved");
+        expect(result.value).not.toContain(secret);
+      }
+    });
+  });
+
+  it("falls back to the default projection when called with only the output", async () => {
+    expect(await offloadContent({ maxBytes: 400 })(issues)).toEqual({
+      type: "json",
+      value: issues,
+    });
+    expect(await offloadContent({ maxBytes: 400, fallback: "summary" })(issues)).toMatchObject({
+      type: "text",
+      value: expect.stringContaining("could not be saved"),
+    });
   });
 
   it("never saves error results or results with file parts", async () => {
@@ -203,23 +326,23 @@ describe("offloadContent", () => {
     expect([...files.keys()]).toEqual(["/tmp/.eve/tool-results/t-large.txt"]);
   });
 
-  it("sends only a description when ifNotSaved is description and there is no sandbox", async () => {
+  it("sends only a description when fallback is summary and there is no sandbox", async () => {
     const { records } = captureLogRecords();
-    const toModelOutput = offloadContent({ maxBytes: 400, ifNotSaved: "description" });
+    const toModelOutput = offloadContent({ maxBytes: 400, fallback: "summary" });
     const result = (await inContext(undefined, () =>
       toModelOutput(issues, toolModelOutputContext("list_issues", "call_1")),
     )) as { type: string; value: string };
     expect(result.type).toBe("text");
     expect(result.value).toBe(
       [
-        `The result of list_issues is ${Buffer.byteLength(big).toLocaleString("en-US")} bytes and could not be saved, so only this description is shown.`,
-        "It is a JSON array of 50 items. The first item is an object with the keys: body, number, state, title.",
+        `Output of list_issues (${Buffer.byteLength(big).toLocaleString("en-US")} bytes) exceeded the inline limit and could not be saved to the sandbox. Only a summary is shown below.`,
+        "JSON array of 50 objects with keys: body, number, state, title.",
       ].join("\n"),
     );
     expect(records.filter((record) => record.level === "warn")).toHaveLength(1);
   });
 
-  it("sends only a description when ifNotSaved is description and the write fails", async () => {
+  it("sends only a description when fallback is summary and the write fails", async () => {
     captureLogRecords();
     const ctx = {
       ...toolModelOutputContext("list_issues", "call_1"),
@@ -231,7 +354,7 @@ describe("offloadContent", () => {
       }),
     } satisfies ToolModelOutputContext;
     const result = (await inContext(undefined, () =>
-      offloadContent({ maxBytes: 400, ifNotSaved: "description" })(issues, ctx),
+      offloadContent({ maxBytes: 400, fallback: "summary" })(issues, ctx),
     )) as { value: string };
     expect(result.value).toContain("could not be saved");
     expect(result.value).not.toContain("Issue 1");

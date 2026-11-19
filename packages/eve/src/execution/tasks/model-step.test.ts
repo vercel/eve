@@ -1,4 +1,4 @@
-import type { TextStreamPart, ToolSet } from "ai";
+import { jsonSchema, type TextStreamPart, type ToolSet } from "ai";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -134,15 +134,15 @@ describe("task results projected by toModelOutput", () => {
       ],
     });
     const seen: string[] = [];
-    const definition = {
+    const definition: HarnessToolDefinition = {
       description: "lookup",
-      inputSchema: { type: "object" },
+      inputSchema: jsonSchema({ type: "object" }),
       name: "lookup",
-      toModelOutput: (output: unknown, ctx: { readonly callId: string }) => {
+      toModelOutput: (output, ctx) => {
         seen.push(ctx.callId);
         return { type: "text", value: String(output) };
       },
-    } as unknown as HarnessToolDefinition;
+    };
 
     await appendTaskContext({
       messages: [],

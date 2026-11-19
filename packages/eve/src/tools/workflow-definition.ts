@@ -218,10 +218,10 @@ interface WorkflowToolDefinitionBase<TInput, TOutput> extends PublicToolDefiniti
 > {
   readonly [WORKFLOW_TOOL_BRAND]: true;
   approval?: Approval<unknown extends TInput ? Record<string, unknown> : TInput>;
-  toModelOutput?: (
+  toModelOutput?(
     output: TOutput,
-    ctx: ToolModelOutputContext,
-  ) => ToolModelOutput | Promise<ToolModelOutput>;
+    ctx?: ToolModelOutputContext,
+  ): ToolModelOutput | Promise<ToolModelOutput>;
 }
 
 /** A workflow tool whose calls are ordinary tool calls: the turn waits until each settles. */
