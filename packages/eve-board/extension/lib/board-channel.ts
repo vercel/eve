@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import {
   defineChannel,
   POST,
@@ -27,6 +25,7 @@ import {
   BOARD_TEXT_LIMIT,
   boardAllows,
   boardErrorCode,
+  boardPostId,
   type BoardCan,
   type BoardClaim,
   type BoardClient,
@@ -120,8 +119,24 @@ export interface BoardChannelConfig {
   readonly uploadPolicy?: UploadPolicyInput;
 }
 
+/** What the board channel reports about a session to tools, hooks, and instrumentation. */
+export interface BoardChannelMetadata extends Record<string, unknown> {
+  /** The board channel the session's thread is in. */
+  readonly boardChannel: string | null;
+  /** The task the session holds, with when its claim ends, or `null`. */
+  readonly boardTask: { readonly id: string; readonly until: string } | null;
+  /** The root message ID of the session's thread. */
+  readonly boardThread: string | null;
+  /** The watch whose match started the session. */
+  readonly boardWatch: string | null;
+}
+
 /** The board channel's type. */
-export interface BoardChannel extends Channel<BoardChannelState, BoardReceiveTarget> {}
+export interface BoardChannel extends Channel<
+  BoardChannelState,
+  BoardReceiveTarget,
+  BoardChannelMetadata
+> {}
 
 export function createBoardChannel(
   settings: () => BoardSettings,
@@ -162,7 +177,12 @@ export function createBoardChannel(
     },
   });
 
-  const channel = defineChannel<BoardChannelState, BoardChannelContext, BoardReceiveTarget>({
+  const channel = defineChannel<
+    BoardChannelState,
+    BoardChannelContext,
+    BoardReceiveTarget,
+    BoardChannelMetadata
+  >({
     turnPolicy: options.turnPolicy,
     state: { channel: null, task: null, threadId: null },
 
@@ -170,7 +190,7 @@ export function createBoardChannel(
       return { board: threadHandle(boardClients(settings()).model, state), state };
     },
 
-    metadata(state) {
+    metadata(state): BoardChannelMetadata {
       return {
         boardChannel: state.channel,
         boardTask: state.task == null ? null : { id: state.task.taskId, until: state.task.until },
@@ -204,7 +224,7 @@ export function createBoardChannel(
           throw new Error("boardChannel().receive needs target.text to start a thread.");
         }
         root = await board.post(target.channel, {
-          id: send.idempotencyKey === undefined ? undefined : postIdOf(send.idempotencyKey),
+          id: send.idempotencyKey === undefined ? undefined : boardPostId(send.idempotencyKey),
           labels: target.labels,
           text: target.text,
         });
@@ -670,8 +690,4 @@ function logError(message: string, error: unknown, fields: Record<string, unknow
   const errorId = crypto.randomUUID();
   log.error(message, { ...fields, error, errorId });
   return errorId;
-}
-
-function postIdOf(idempotencyKey: string): string {
-  return `eve-${createHash("sha256").update(idempotencyKey).digest("hex").slice(0, 32)}`;
 }

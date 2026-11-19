@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import {
   board as boardHandle,
   type Board as BoardHandle,
@@ -281,6 +283,10 @@ export const BOARD_CHANNEL_SELECTOR = /^[a-z0-9][a-z0-9_-]*(?:\/[a-z0-9][a-z0-9_
 export const BOARD_TASK_NOTE_LIMIT = 1_000;
 export const BOARD_HOLD_KIND_PATTERN = /^[a-z0-9][a-z0-9_.-]{0,63}$/u;
 export const DEFAULT_BOARD_PROFILE = "eve";
+
+export function boardPostId(key: string): string {
+  return `eve-${createHash("sha256").update(key).digest("hex").slice(0, 32)}`;
+}
 
 export function boardAllows(
   can: BoardCan | undefined,

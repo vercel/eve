@@ -1,15 +1,15 @@
-import { createHash } from "node:crypto";
-
 import type { SandboxSession } from "eve/sandbox";
 import { defineTool, type ToolContext } from "eve/tools";
 import { z } from "zod";
 
+import type { BoardChannelMetadata } from "./board-channel.ts";
 import {
   BOARD_HOLD_KIND_PATTERN,
   BOARD_TASK_NOTE_LIMIT,
   BOARD_TEXT_LIMIT,
   BOARD_NAME_PATTERN,
   BOARD_UPLOAD_LIMIT,
+  boardPostId,
   type BoardClient,
   type BoardMessage,
   type BoardSettings,
@@ -39,12 +39,15 @@ function client(settings: Settings): BoardClient {
 }
 
 function postId(ctx: ToolContext) {
-  return createHash("sha256").update(`${ctx.session.id}:${ctx.callId}`).digest("hex");
+  return boardPostId(`${ctx.session.id}:${ctx.callId}`);
+}
+
+function boardMetadata(ctx: Pick<ToolContext, "channel">): Partial<BoardChannelMetadata> {
+  return ctx.channel.metadata as Partial<BoardChannelMetadata>;
 }
 
 function currentThread(ctx: ToolContext): string | undefined {
-  const thread = ctx.channel.metadata.boardThread;
-  return typeof thread === "string" && thread.length > 0 ? thread : undefined;
+  return boardMetadata(ctx).boardThread || undefined;
 }
 
 function threadOrCurrent(id: string | undefined, ctx: ToolContext): string {
@@ -55,14 +58,12 @@ function threadOrCurrent(id: string | undefined, ctx: ToolContext): string {
   return thread;
 }
 
-type Held = { readonly id: string; readonly until: string } | null | undefined;
-
 export function holdsTask(ctx: Pick<ToolContext, "channel">): boolean {
-  return (ctx.channel.metadata.boardTask as Held) != null;
+  return boardMetadata(ctx).boardTask != null;
 }
 
 function heldClaim(ctx: ToolContext): string {
-  const task = ctx.channel.metadata.boardTask as Held;
+  const task = boardMetadata(ctx).boardTask;
   if (task == null) {
     throw new Error(
       "This session holds no board task: settle tools work only in a session that claimed one.",

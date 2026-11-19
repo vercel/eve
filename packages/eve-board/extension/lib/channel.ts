@@ -16,6 +16,7 @@ export function boardChannel(config: BoardChannelConfig = {}): BoardChannel {
 export type {
   BoardChannel,
   BoardChannelConfig,
+  BoardChannelMetadata,
   BoardChannelState,
   BoardReceiveTarget,
 } from "./board-channel.ts";
