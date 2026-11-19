@@ -311,7 +311,6 @@ function instrumentationEventsOf(
         {
           acceptedAtMs: line.settledAtMs?.[callId],
           cause: event.data.cause,
-          childSessionId: row?.childSessionId,
           taskId,
           error: line.capturesOutputs ? error : undefined,
           errorCode: event.data.error?.code,

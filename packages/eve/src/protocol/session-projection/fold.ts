@@ -234,7 +234,6 @@ function foldFact(
     }
     case "child.sent": {
       const { callId, childDeliveryId: deliveryId, sessionId } = fact.data;
-      delegate(view, callId, sessionId);
       const child = view.children[sessionId];
       if (child === undefined || child.deliveries?.some((sent) => sent.deliveryId === deliveryId))
         return;
@@ -368,11 +367,6 @@ function foldSpecifics(
   at: At,
 ): void {
   switch (fact.type) {
-    case "child.opened": {
-      const { owner, sessionId } = fact.data;
-      if ("callId" in owner) delegate(view, owner.callId, sessionId);
-      return;
-    }
     case "delivery.consumed": {
       const row = view.deliveries[fact.data.deliveryId]!;
       view.deliveries[row.deliveryId] = { ...row, consumedAt: at.position };
@@ -493,11 +487,6 @@ function dropRunPreviews(view: SessionView, previews: MutablePreviews, runId: st
   for (const [callId, preview] of Object.entries(previews.calls)) {
     if (preview.runId === runId && view.calls[callId] === undefined) delete previews.calls[callId];
   }
-}
-
-function delegate(view: MutableView, callId: string, sessionId: string): void {
-  const call = view.calls[callId];
-  if (call !== undefined) view.calls[callId] = { ...call, childSessionId: sessionId };
 }
 
 function prune(view: MutableView, keep: FoldOptions["keep"]): void {

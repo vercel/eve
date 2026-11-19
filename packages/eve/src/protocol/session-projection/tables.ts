@@ -131,7 +131,6 @@ export interface CallRow extends Introduced, Ended {
   readonly cause?: Cause;
   readonly label?: string;
   readonly usage?: Usage;
-  readonly childSessionId?: string;
 }
 
 export interface TaskRow extends Introduced, Ended {

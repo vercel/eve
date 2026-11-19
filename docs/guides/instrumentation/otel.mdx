@@ -191,7 +191,6 @@ A remote child starts a separate trace with a root `invoke_agent` span. Its firs
 | `gen_ai.conversation.id` | Find the root session and its child sessions across traces.                          |
 | `agent.run.id`           | Identify one agent session, not the full conversation.                               |
 | `gen_ai.tool.call.id`    | Match tool spans with their approval spans.                                          |
-| `agent.child_run.id`     | The child session an agent call delegated to, local or remote, on its tool span.     |
 | `agent.task.id`          | The task a call started or continued, on its tool span.                              |
 | `error.type`             | Classify tool failures.                                                              |
 | `gen_ai.usage.*`         | Token counts on model and activation spans.                                          |

@@ -2,6 +2,6 @@
 "eve": minor
 ---
 
-Agent call spans now record the child session they delegated to as `agent.child_run.id` and the task they started or continued as `agent.task.id`, so a remote agent's run can be found from the caller's trace, including calls that continue an existing task.
+Agent and task call spans now record the task they started or continued as `agent.task.id`, so the calls that serve one task, including continuations of a remote agent's task, can be grouped in a trace.
 
-Instrumentation providers receive the same values as `childSessionId` and `taskId` on `call.settled`.
+Instrumentation providers receive the same value as `taskId` on `call.settled`.

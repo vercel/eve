@@ -599,59 +599,62 @@ describe("a session's spans, from its committed lines", () => {
     },
   );
 
-  it("names the task and child session an agent call delegated to, across later lines", async () => {
+  it("names the task an agent call started or continued, but not the child session", async () => {
     const { commit, spans } = session(() => ({
       emit: true,
       recordInputs: false,
       recordOutputs: false,
     }));
-    const agentCall = (callId: string, name: string, remote: boolean) =>
+    const agentCall = (callId: string) =>
       ({
-        data: { callId, capability: { kind: "agent", name, remote }, input: {}, owner: run },
+        data: {
+          callId,
+          capability: { kind: "agent", name: "billing", remote: true },
+          input: {},
+          owner: run,
+        },
         scope: run,
         type: "call.requested",
       }) as SessionEvent;
-    const started = (callId: string, taskId: string) =>
-      ({ data: { callId, taskId }, scope: run, type: "call.started" }) as SessionEvent;
-    const opened = (callId: string, sessionId: string) =>
+    const started = (callId: string) =>
+      ({ data: { callId, taskId: "task_1" }, scope: run, type: "call.started" }) as SessionEvent;
+    const sent = (callId: string) =>
       ({
-        data: { name: "billing", owner: { callId }, sessionId, stream: "s" },
-        type: "child.opened",
-      }) as SessionEvent;
-    const sent = (callId: string, sessionId: string) =>
-      ({
-        data: { callId, childDeliveryId: `d_${callId}`, sessionId },
+        data: { callId, childDeliveryId: `d_${callId}`, sessionId: "child_billing" },
         type: "child.sent",
       }) as SessionEvent;
     await commit(...opening);
-    await commit(agentCall("call_start", "billing", true), started("call_start", "task_1"));
-    await commit(opened("call_start", "child_billing"), sent("call_start", "child_billing"));
+    await commit(agentCall("call_start"), started("call_start"));
+    await commit(
+      {
+        data: {
+          name: "billing",
+          owner: { callId: "call_start" },
+          sessionId: "child_billing",
+          stream: "s",
+        },
+        type: "child.opened",
+      } as SessionEvent,
+      sent("call_start"),
+    );
     await commit(requested("call_lookup", "lookup"));
     await commit(settled("call_start", { outcome: "completed", output: "started" }));
-    await commit(agentCall("call_again", "billing", true), started("call_again", "task_1"));
-    await commit(sent("call_again", "child_billing"));
+    await commit(agentCall("call_again"), started("call_again"));
+    await commit(sent("call_again"));
     await commit(settled("call_lookup", { outcome: "completed", output: "found" }));
     await commit(settled("call_again", { outcome: "completed", output: "sent" }));
-    await commit(agentCall("call_moved", "billing", true), started("call_moved", "task_1"));
-    await commit(opened("call_moved", "child_billing_2"), sent("call_moved", "child_billing_2"));
-    await commit(settled("call_moved", { outcome: "completed", output: "sent" }));
     await commit(turnSettled({ outcome: "completed" }));
 
-    const calls = (await spans())
-      .filter((span) => span.attributes["agent.action.kind"] === "remote-agent-call")
-      .map((span) => [
-        span.attributes["gen_ai.tool.call.id"],
-        span.attributes["agent.task.id"],
-        span.attributes["agent.child_run.id"],
-      ]);
-    expect(calls).toEqual(
-      expect.arrayContaining([
-        ["call_start", "task_1", "child_billing"],
-        ["call_again", "task_1", "child_billing"],
-        ["call_moved", "task_1", "child_billing_2"],
-      ]),
-    );
-    expect(calls).toHaveLength(3);
+    const exported = await spans();
+    expect(
+      exported
+        .filter((span) => span.attributes["agent.action.kind"] === "remote-agent-call")
+        .map((span) => [span.attributes["gen_ai.tool.call.id"], span.attributes["agent.task.id"]]),
+    ).toEqual([
+      ["call_start", "task_1"],
+      ["call_again", "task_1"],
+    ]);
+    expect(JSON.stringify(exported.map((span) => span.attributes))).not.toContain("child_billing");
   });
 
   it("records who approved a call on its approval and tool spans, the id only as the turn's principal", async () => {

@@ -459,8 +459,6 @@ export interface InstrumentationCallSettledEvent {
   readonly completedAtMs?: number;
   /** The task the call started or continued, when it runs as one. */
   readonly taskId?: string;
-  /** The child session an agent call delegated to, local or remote. */
-  readonly childSessionId?: string;
   /** How long the tool's `execute` ran, in milliseconds, when the publisher measured it. */
   readonly durationMs?: number;
   readonly idempotencyKey: string;
