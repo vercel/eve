@@ -1,29 +1,40 @@
 import { createHash } from "node:crypto";
 
+import type { SessionAuthContext } from "eve/context";
+import type { SandboxSession } from "eve/sandbox";
+import { defineTool } from "eve/tools";
+import { z } from "zod";
+
 import {
   BOARD_TEXT_LIMIT,
   BOARD_UPLOAD_LIMIT,
   createBoardClient,
   resolveBoardTarget,
-  type BoardCan,
-  type BoardChannelSettings,
   type BoardClient,
   type BoardHeldClaim,
   type BoardMessage,
+  type BoardSettings,
   type BoardThread,
   type BoardWrittenMessage,
-} from "eve/internal/board";
-import type { SandboxSession } from "eve/sandbox";
-import { defineTool } from "eve/tools";
-import { z } from "zod";
+} from "./client.ts";
+import {
+  checkWatchScope,
+  createWatch,
+  DEFAULT_WATCH_CHANNEL,
+  listWatches,
+  removeWatch,
+  watchIdOf,
+  type BoardWatchAction,
+} from "./watches.ts";
 
-type Settings = () => Pick<BoardChannelSettings, "name" | "team" | "profile"> & {
-  readonly can?: BoardCan;
-};
+type Settings = () => BoardSettings;
 
 interface ToolContext {
   readonly callId: string;
-  readonly session: { readonly id: string };
+  readonly session: {
+    readonly id: string;
+    readonly auth?: { readonly current: SessionAuthContext | null };
+  };
   readonly channel?: { readonly metadata?: unknown };
 }
 
@@ -33,11 +44,7 @@ const SHARED =
 const messageId = z.string().min(1).describe("Any message ID in the thread, as the board gave it.");
 
 function client(settings: Settings): BoardClient {
-  const config = settings();
-  return createBoardClient({
-    ...resolveBoardTarget(config),
-    ...(config.can !== undefined && { can: config.can }),
-  });
+  return createBoardClient(resolveBoardTarget(settings()));
 }
 
 function postId(ctx: ToolContext) {
@@ -459,7 +466,7 @@ export function defineBoardFailTaskTool(settings: Settings) {
 export function defineBoardBlockTaskTool(settings: Settings) {
   return defineTool({
     description:
-      "Hold the board task you hold for a person, with the one question they must answer: ask it in the thread with your recommendation first. Blocking ends your claim; once its owner answers and unblocks it, a worker claims it again and reads the whole thread.",
+      "Hold the board task you hold for a person, with the one question they must answer: ask it in the thread with your recommendation first. Blocking ends your claim; once its owner answers and unblocks it, whoever claims it next reads the whole thread.",
     inputSchema: z.object({
       reason: z.string().min(1).max(BOARD_TEXT_LIMIT).describe("The question, in one line."),
       kind: z
@@ -471,6 +478,126 @@ export function defineBoardBlockTaskTool(settings: Settings) {
     }),
     async execute({ reason, kind }, ctx) {
       return await settle(settings, ctx, "blocked", (held) => held.block(reason, { kind }));
+    },
+  });
+}
+
+function assertConfigurer(settings: Settings, ctx: ToolContext): void {
+  const caller = ctx.session.auth?.current ?? null;
+  const allowed = settings().configurers;
+  if (allowed !== undefined) {
+    const principal = caller?.attributes.principal;
+    const ids = [caller?.principalId, typeof principal === "string" ? principal : undefined];
+    if (ids.some((id) => id !== undefined && allowed.includes(id))) return;
+    throw new Error(
+      "Only the people this agent's `configurers` names may change its board watches. Ask one of them.",
+    );
+  }
+  if (caller?.authenticator === "board-watcher" && caller.attributes.actor_kind !== "person") {
+    throw new Error(
+      "Only a person on the team may change this agent's board watches, not a synced platform user or another agent.",
+    );
+  }
+}
+
+const queue = z
+  .object({
+    channel: z
+      .string()
+      .min(1)
+      .describe("The channel, or a subtree such as `work/`, to claim ready tasks from."),
+    label: z
+      .record(z.string(), z.string())
+      .optional()
+      .describe("Labels a task must have, such as `{ role: 'review' }`."),
+    from: z
+      .array(z.string().min(1))
+      .optional()
+      .describe(
+        "Owners whose tasks to take, by principal ID. Without them, only this deployment's own tasks.",
+      ),
+  })
+  .describe(
+    "Claim a ready task from this queue when the watch matches, and work the claimed task's thread. Leave it out to reply in the matching thread.",
+  );
+
+/** Creates a watch: the board wakes the agent with these instructions when the tail matches. */
+export function defineBoardWatchTool(settings: Settings) {
+  return defineTool({
+    description:
+      "Watch the board: from now on, every event the tail matches wakes you in that board thread with these instructions, across conversations, cold starts, and redeploys. Use it when someone asks you to watch a channel and act on what's posted there. Returns the watch's ID.",
+    inputSchema: z.object({
+      tail: z
+        .string()
+        .min(1)
+        .max(1000)
+        .describe(
+          "What to watch: what you'd type after `vb tail`, naming one channel, such as `incidents` or `work/ --label kind=bug`.",
+        ),
+      instructions: z
+        .string()
+        .min(1)
+        .max(BOARD_TEXT_LIMIT)
+        .describe(
+          "What to do when it matches, written for a reader who remembers nothing of this conversation.",
+        ),
+      claim: queue.optional(),
+    }),
+    async execute({ tail, instructions, claim }, ctx) {
+      assertConfigurer(settings, ctx);
+      const config = settings();
+      const watchChannel = config.watchChannel ?? DEFAULT_WATCH_CHANNEL;
+      const action: BoardWatchAction =
+        claim === undefined ? { type: "converse" } : { queue: claim, type: "claim" };
+      checkWatchScope({ action, can: config.can, tail, watchChannel });
+      const watch = await createWatch({
+        action,
+        client: client(settings),
+        id: watchIdOf(ctx.session.id, ctx.callId),
+        instructions,
+        tail: tail.trim(),
+        watchChannel,
+      });
+      return { action: watch.action, id: watch.id, tail: watch.tail };
+    },
+  });
+}
+
+/** Lists the agent's watches. */
+export function defineBoardWatchesTool(settings: Settings) {
+  return defineTool({
+    description:
+      "List your board watches: each one's ID and what it matches, and with `details`, what it does.",
+    inputSchema: z.object({
+      details: z.boolean().optional().describe("Also read each watch's instructions and action."),
+    }),
+    async execute({ details }) {
+      const config = settings();
+      return {
+        watches: await listWatches({
+          client: client(settings),
+          details: details === true,
+          watchChannel: config.watchChannel ?? DEFAULT_WATCH_CHANNEL,
+        }),
+      };
+    },
+  });
+}
+
+/** Removes a watch. */
+export function defineBoardUnwatchTool(settings: Settings) {
+  return defineTool({
+    description:
+      "Stop a board watch by its ID: it no longer wakes you, and your other watches keep running.",
+    inputSchema: z.object({ id: z.string().min(1).max(100) }),
+    async execute({ id }, ctx) {
+      assertConfigurer(settings, ctx);
+      const config = settings();
+      return await removeWatch({
+        client: client(settings),
+        id,
+        watchChannel: config.watchChannel ?? DEFAULT_WATCH_CHANNEL,
+      });
     },
   });
 }

@@ -1,28 +1,77 @@
 {
   "name": "@eve/board",
   "version": "0.0.0",
-  "private": true,
-  "description": "Source of the eve/extensions/board extension: a Vercel Board channel that claims tasks, board tools, and a collaboration skill.",
+  "description": "Vercel Board for eve agents: a channel that wakes the agent for watches it manages with tools, claims tasks, and replies in board threads",
+  "keywords": [
+    "eve",
+    "eve-channel",
+    "eve-extension",
+    "vercel-board"
+  ],
+  "homepage": "https://eve.dev/docs/channels/board",
+  "bugs": {
+    "url": "https://github.com/vercel/eve/issues"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vercel/eve.git",
+    "directory": "packages/eve-board"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "NOTICE"
+  ],
   "type": "module",
+  "sideEffects": false,
   "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.mjs"
+    },
+    "./extension": {
+      "types": "./dist/extension/extension.d.ts",
+      "default": "./dist/extension/extension.mjs"
+    },
+    "./tools": {
+      "types": "./dist/tools/index.d.ts",
+      "default": "./dist/tools/index.mjs"
+    },
+    "./channel": {
+      "types": "./dist/channel/channel.d.ts",
+      "default": "./dist/channel/channel.js"
+    },
     "./package.json": "./package.json"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
+    "build": "eve extension build && tsc -p tsconfig.channel.json && node ../../scripts/copy-package-license.mjs .",
     "test": "pnpm run test:integration",
-    "test:integration": "node --test \"test/integration/*.test.ts\"",
+    "test:integration": "node --test \"test/*.test.ts\"",
     "typecheck": "tsc"
   },
   "dependencies": {
-    "eve": "workspace:*",
+    "@vercel/board": "0.52.0",
     "zod": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "@vercel/board": "0.52.0",
-    "typescript": "catalog:",
-    "typescript-compiler": "npm:typescript@6.0.3"
+    "eve": "workspace:*",
+    "typescript": "catalog:"
+  },
+  "peerDependencies": {
+    "eve": ">=1.1.0"
   },
   "engines": {
     "node": ">=24"
+  },
+  "eve": {
+    "extension": {
+      "source": "./extension",
+      "dist": "./dist/extension"
+    }
   }
 }

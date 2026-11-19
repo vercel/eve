@@ -8,7 +8,6 @@
         "$TURBO_EXTENDS$",
         "$TURBO_ROOT$/packages/eve-code/extension/**",
         "$TURBO_ROOT$/packages/eve-git/extension/**",
-        "$TURBO_ROOT$/packages/eve-board/extension/**",
         "$TURBO_ROOT$/packages/eve-custom-skills/extension/**",
         "$TURBO_ROOT$/packages/eve-computer-use/extension/**",
         "$TURBO_ROOT$/docs/**",
@@ -23,7 +22,6 @@
         "!.generated/**",
         "!src/extensions/code/extension/**",
         "!src/extensions/git/extension/**",
-        "!src/extensions/board/extension/**",
         "!src/extensions/custom-skills/extension/**",
         "!src/computer-use/extension/**"
       ],
@@ -35,13 +33,11 @@
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/packages/eve-code/extension/**",
         "$TURBO_ROOT$/packages/eve-git/extension/**",
-        "$TURBO_ROOT$/packages/eve-board/extension/**",
         "$TURBO_ROOT$/packages/eve-custom-skills/extension/**",
         "$TURBO_ROOT$/packages/eve-computer-use/extension/**",
         "!.generated/**",
         "!src/extensions/code/extension/**",
         "!src/extensions/git/extension/**",
-        "!src/extensions/board/extension/**",
         "!src/extensions/custom-skills/extension/**",
         "!src/computer-use/extension/**"
       ],
@@ -49,7 +45,6 @@
         ".generated/compiled/**",
         "src/extensions/code/extension/**",
         "src/extensions/git/extension/**",
-        "src/extensions/board/extension/**",
         "src/extensions/custom-skills/extension/**",
         "src/computer-use/extension/**"
       ]
@@ -60,13 +55,11 @@
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/packages/eve-code/extension/**",
         "$TURBO_ROOT$/packages/eve-git/extension/**",
-        "$TURBO_ROOT$/packages/eve-board/extension/**",
         "$TURBO_ROOT$/packages/eve-custom-skills/extension/**",
         "$TURBO_ROOT$/packages/eve-computer-use/extension/**",
         "!.generated/**",
         "!src/extensions/code/extension/**",
         "!src/extensions/git/extension/**",
-        "!src/extensions/board/extension/**",
         "!src/extensions/custom-skills/extension/**",
         "!src/computer-use/extension/**"
       ],
@@ -78,13 +71,11 @@
         "$TURBO_EXTENDS$",
         "$TURBO_ROOT$/packages/eve-code/extension/**",
         "$TURBO_ROOT$/packages/eve-git/extension/**",
-        "$TURBO_ROOT$/packages/eve-board/extension/**",
         "$TURBO_ROOT$/packages/eve-custom-skills/extension/**",
         "$TURBO_ROOT$/packages/eve-computer-use/extension/**",
         "!.generated/**",
         "!src/extensions/code/extension/**",
         "!src/extensions/git/extension/**",
-        "!src/extensions/board/extension/**",
         "!src/extensions/custom-skills/extension/**",
         "!src/computer-use/extension/**"
       ]
@@ -99,13 +90,11 @@
         "$TURBO_ROOT$/packages/eve-recall/src/**",
         "$TURBO_ROOT$/packages/eve-code/extension/**",
         "$TURBO_ROOT$/packages/eve-git/extension/**",
-        "$TURBO_ROOT$/packages/eve-board/extension/**",
         "$TURBO_ROOT$/packages/eve-custom-skills/extension/**",
         "$TURBO_ROOT$/packages/eve-computer-use/extension/**",
         "!.generated/**",
         "!src/extensions/code/extension/**",
         "!src/extensions/git/extension/**",
-        "!src/extensions/board/extension/**",
         "!src/extensions/custom-skills/extension/**",
         "!src/computer-use/extension/**"
       ]

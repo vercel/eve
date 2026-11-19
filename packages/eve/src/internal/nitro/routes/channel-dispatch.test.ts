@@ -23,6 +23,7 @@ import {
   CHANNEL_SENTINEL,
   type CompiledChannel,
   setChannelInstrumentationKind,
+  setChannelStartHook,
 } from "#channel/compiled-channel.js";
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import { createInstrumentationHooks } from "#instrumentation/lifecycle.js";
@@ -224,6 +225,45 @@ describe("dispatchChannelRequest", () => {
 
     const response = await responsePromise;
     await expect(response.text()).resolves.toBe("ok");
+  });
+
+  it("runs a channel's start hook once, on the first request it serves", async () => {
+    const definition: CompiledChannel = {
+      __kind: CHANNEL_SENTINEL,
+      routes: [],
+      adapter: { kind: "http" },
+    };
+    const starts: string[] = [];
+    setChannelStartHook(definition, ({ request }) => {
+      starts.push(new URL(request.url).pathname);
+    });
+    mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      agentName: "test-agent",
+      channels: [
+        {
+          definition,
+          fetch: async () => new Response("ok"),
+          logicalPath: "agent/channels/board.ts",
+          method: "POST",
+          name: "board",
+          sourceId: "channel-board",
+          sourceKind: "module",
+          urlPath: "/board/wake",
+        } satisfies ResolvedChannelDefinition,
+      ],
+      runtime,
+    });
+    const wake = () =>
+      dispatchChannelRequest(
+        createEvent({ method: "POST", url: "https://eve.test/board/wake", waitUntil: vi.fn() }),
+        "POST /board/wake",
+        {} as never,
+      );
+
+    await wake();
+    await wake();
+
+    expect(starts).toEqual(["/board/wake"]);
   });
 
   it("hands the route handler a ctx.to() that hits another channel's receive", async () => {

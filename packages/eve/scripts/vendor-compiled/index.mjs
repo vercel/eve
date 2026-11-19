@@ -21,7 +21,6 @@ import opentelemetryOtlpTransformer from "./@opentelemetry/otlp-transformer.mjs"
 import standardSchemaSpec from "./@standard-schema/spec.mjs";
 import vercelAgentRuns from "./@vercel/agent-runs.mjs";
 import vercelBlob from "./@vercel/blob.mjs";
-import vercelBoard from "./@vercel/board.mjs";
 import vercelConnect from "./@vercel/connect.mjs";
 import vercelDetectAgent from "./@vercel/detect-agent.mjs";
 import vercelOidc from "./@vercel/oidc.mjs";
@@ -98,7 +97,6 @@ export const MODULES = [
   standardSchemaSpec,
   vercelAgentRuns,
   vercelBlob,
-  vercelBoard,
   vercelConnect,
   vercelDetectAgent,
   vercelOidc,

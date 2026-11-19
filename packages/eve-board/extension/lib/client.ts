@@ -5,7 +5,7 @@ import {
   type MessageView,
   type ScheduleView,
   type Written,
-} from "#compiled/@vercel/board/index.js";
+} from "@vercel/board";
 
 /** Who wrote a board message, as the board verified it. */
 export interface BoardAuthor {
@@ -65,9 +65,7 @@ export interface BoardMessage {
   readonly task?: BoardTaskState;
 }
 
-/** A message the caller just wrote. */
 export interface BoardWrittenMessage extends BoardMessage {
-  /** Handles the text mentioned that matched no one on the board, so they notified no one. */
   readonly unknownMentions?: readonly string[];
 }
 
@@ -176,11 +174,17 @@ export interface BoardMatch {
   readonly event: BoardEvent;
 }
 
+export interface BoardSyncEntry {
+  readonly key: string;
+  readonly platform: string;
+}
+
 export interface BoardRegistrationInput {
   readonly url?: string | null;
   readonly path?: string | null;
   readonly branch?: string | null;
   readonly watch: Readonly<Record<string, { readonly tail: string }>>;
+  readonly sync?: readonly BoardSyncEntry[];
 }
 
 export interface BoardRegistration extends BoardRegistrationInput {
@@ -244,12 +248,61 @@ export interface BoardClient {
   ): Promise<BoardSchedule>;
   cancelSchedule(id: string): Promise<{ readonly canceled: boolean }>;
   claimReady(query: BoardReadyTaskQuery): Promise<BoardClaimedTask | null>;
-  claimedTasks(channel: string): Promise<readonly BoardMessage[]>;
+  claim(taskId: string, lease?: number): Promise<BoardClaimedTask>;
   held(claim: BoardClaim): BoardHeldTask;
   createTask(channel: string, task: BoardNewTask): Promise<BoardMessage>;
 }
 
+/** Which board the agent reads and writes, and as whom. */
+export interface BoardSettings {
+  /** Which of the team's boards, by name. Defaults to the team's default board, or `BOARD_URL`'s. */
+  readonly name?: string;
+  /** Another team's board, by the team's ID (`team_…`) or slug. */
+  readonly team?: string;
+  /** The profile the agent writes as: a letter, then up to 31 letters, numbers, or hyphens. Defaults to `"eve"`. */
+  readonly profile?: string;
+  /** What the agent may do on the board at most, below what the deployment may. */
+  readonly can?: BoardCan;
+  /** The channel that keeps watch instructions. Defaults to `"eve-config/watches"`. */
+  readonly watchChannel?: string;
+  /** Principal IDs that may create and remove watches. Defaults to anyone but board actors who aren't people. */
+  readonly configurers?: readonly string[];
+}
+
+/** A task claim a session holds: what renews and settles it. */
+export interface BoardHeldClaim {
+  readonly id: string;
+  readonly epoch: number;
+  readonly token: string;
+  readonly until: string;
+  readonly lease: number;
+}
+
 export const BOARD_MAX_LEASE_SECONDS = 300;
+export const BOARD_TEXT_LIMIT = 10_000;
+export const BOARD_UPLOAD_LIMIT = 4 * 1024 * 1024;
+export const BOARD_PROFILE_PATTERN = /^[A-Za-z][A-Za-z0-9-]{0,31}$/u;
+export const DEFAULT_BOARD_PROFILE = "eve";
+
+export function resolveBoardTarget(config: {
+  readonly name?: string;
+  readonly team?: string;
+  readonly profile?: string;
+  readonly can?: BoardCan;
+}): BoardTarget {
+  const profile = config.profile ?? DEFAULT_BOARD_PROFILE;
+  if (!BOARD_PROFILE_PATTERN.test(profile)) {
+    throw new Error(
+      `Board profile "${profile}" is invalid: use a letter, then up to 31 letters, numbers, or hyphens.`,
+    );
+  }
+  return {
+    profile,
+    ...(config.name !== undefined && { name: config.name }),
+    ...(config.team !== undefined && { team: config.team }),
+    ...(config.can !== undefined && { can: config.can }),
+  };
+}
 
 export function boardErrorCode(error: unknown): string | undefined {
   if (typeof error !== "object" || error === null) return undefined;
@@ -338,7 +391,10 @@ export function createBoardClient(target: BoardTarget): BoardClient {
       const where = input.path
         ? { branch: input.branch ?? null, path: input.path }
         : { url: input.url ?? null };
-      return registrationOf(await handle.register({ ...where, watch } as never));
+      const sync = input.sync?.map(({ key, platform }) => ({ key, platform }));
+      return registrationOf(
+        await handle.register({ ...where, watch, ...(sync !== undefined && { sync }) } as never),
+      );
     },
     matches: async (options = {}) =>
       (
@@ -421,9 +477,15 @@ export function createBoardClient(target: BoardTarget): BoardClient {
         until: claim.until,
       };
     },
-    async claimedTasks(channel) {
-      const page = await handle.tasks.list({ channel, limit: 500, state: "claimed" });
-      return page.tasks.map((summary) => messageOf(summary.message));
+    async claim(taskId, lease) {
+      const claim = await handle.tasks.claim(taskId, lease === undefined ? {} : { lease });
+      return {
+        epoch: claim.epoch,
+        task: messageOf(claim.task),
+        taskId: claim.task.id,
+        token: claim.token,
+        until: claim.until,
+      };
     },
     held,
     async createTask(channel, task) {
@@ -517,10 +579,12 @@ function registrationOf(registration: {
   readonly path?: string;
   readonly branch?: string;
   readonly watch: Readonly<Record<string, { readonly tail: string }>>;
+  readonly sync?: readonly BoardSyncEntry[];
 }): BoardRegistration {
   return {
     hash: registration.hash,
     owner: registration.owner,
+    sync: (registration.sync ?? []).map(({ key, platform }) => ({ key, platform })),
     url: registration.url,
     ...(registration.path !== undefined && { path: registration.path }),
     ...(registration.branch !== undefined && { branch: registration.branch }),

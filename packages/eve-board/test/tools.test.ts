@@ -1,8 +1,5 @@
 import assert from "node:assert/strict";
-import { afterEach, test } from "node:test";
-
-import { board } from "@vercel/board";
-import { local } from "@vercel/board/backend-local";
+import { test } from "node:test";
 
 import {
   defineBoardChannelsTool,
@@ -16,71 +13,14 @@ import {
   defineBoardReplyTool,
   defineBoardScheduleTool,
   defineBoardTypingTool,
-} from "../../extension/lib/tools.ts";
+} from "../extension/lib/tools.ts";
+import { createBoardClient } from "../extension/lib/client.ts";
+import { runTool, startBoard } from "./helpers.ts";
 
-const EVE_TOKEN = "deployment:prj_eve:production";
-const realFetch = globalThis.fetch;
-let boards = 0;
-
-afterEach(() => {
-  globalThis.fetch = realFetch;
-  delete process.env.BOARD_URL;
-  delete process.env.BOARD_TOKEN;
-});
-
-async function startBoard() {
-  boards += 1;
-  const url = `https://board-${boards}.test/api/board`;
-  const team = board({
-    authenticate: ({ headers }) => {
-      const token = headers.get("authorization")?.replace(/^Bearer /u, "");
-      if (token === EVE_TOKEN) {
-        return { handle: "eve", id: "vercel:project:prj_eve:production", kind: "deployment" };
-      }
-      return token?.startsWith("person:")
-        ? { handle: token.slice(7), id: `vercel:user:${token.slice(7)}`, kind: "person" }
-        : null;
-    },
-    backend: local({ memory: true }),
-    url,
-  });
-  const as = async (person: string, path: string, body?: unknown) => {
-    const response = await team.fetch(
-      new Request(`${url}${path}`, {
-        body: body === undefined ? undefined : JSON.stringify(body),
-        headers: { authorization: `Bearer person:${person}`, "content-type": "application/json" },
-        method: body === undefined ? "GET" : "POST",
-      }),
-    );
-    assert.ok(response.ok, await response.clone().text());
-    return (await response.json()) as Record<string, any>;
-  };
-  await as("alice", "/grants", {
-    can: { "*": "all" },
-    principals: [{ environments: ["production"], kind: "project", project: "prj_eve" }],
-  });
-  process.env.BOARD_URL = url;
-  process.env.BOARD_TOKEN = EVE_TOKEN;
-  globalThis.fetch = async (input, init) => {
-    const request = new Request(input, init);
-    return request.url.startsWith(url) ? await team.fetch(request) : await realFetch(request);
-  };
-  return { as };
-}
-
-type Executable = { execute(input: unknown, ctx: unknown): Promise<unknown> };
 const settings = () => ({ profile: "helper" });
 const files = new Map([["/workspace/after.png", new Uint8Array([137, 80, 78, 71])]]);
 const run = (tool: unknown, input: unknown, callId: string, metadata: unknown = {}) =>
-  (tool as Executable).execute(input, {
-    abortSignal: new AbortController().signal,
-    callId,
-    channel: { kind: "channel:board__threads", metadata },
-    getSandbox: async () => ({
-      readBinaryFile: async ({ path }: { path: string }) => files.get(path) ?? null,
-    }),
-    session: { id: "session-1", auth: { current: null, initiator: null } },
-  }) as Promise<Record<string, any>>;
+  runTool(tool, input, { callId, files, metadata });
 
 test("the board tools post once per call, reply, label, and read back as the agent's profile", async () => {
   await startBoard();
@@ -179,18 +119,16 @@ test("task tools create a task and settle the claim the session holds", async ()
   );
   assert.equal(created.task.state, "ready");
 
-  const ready = (await (
-    await globalThis.fetch(`${process.env.BOARD_URL}/tasks/${created.id}/claim`, {
-      body: JSON.stringify({ lease: 60 }),
-      headers: {
-        authorization: `Bearer ${EVE_TOKEN}`,
-        "content-type": "application/json",
-        "x-board-profile": "helper",
-      },
-      method: "POST",
-    })
-  ).json()) as { claim: { epoch: number; token: string; until: string } };
-  const held = { boardTask: { id: created.id, lease: 60, ...ready.claim } };
+  const ready = await createBoardClient({ profile: "helper" }).claim(created.id, 60);
+  const held = {
+    boardTask: {
+      epoch: ready.epoch,
+      id: created.id,
+      lease: 60,
+      token: ready.token,
+      until: ready.until,
+    },
+  };
 
   assert.deepEqual(
     await run(defineBoardCompleteTaskTool(settings), { result: "Looks right." }, "c2", held),

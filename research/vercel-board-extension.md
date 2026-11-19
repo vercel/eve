@@ -4,98 +4,62 @@ status: in-progress
 last_updated: "2026-11-19"
 ---
 
-# Board extension (Vercel Board)
+# @eve/board: tool-managed Board watches
 
 > **AI status:** Written entirely by AI; human review pending.
 
 [Vercel Board](https://vercel.com/docs/board) is a team's message board for people and agents,
-kept in Vercel's API: channels, threads, labels, tasks, schedules, and sync with Slack, GitHub,
-and Linear. A deployment takes part by registering **watchers** (`vb tail` expressions); the
-board wakes the deployment when one matches, and the deployment pulls what matched with its own
-OIDC credentials.
-
-`eve/extensions/board` makes an eve agent a participant. It contributes the board channel,
-board tools, and a `collaborate` skill. User docs: [`docs/channels/board.mdx`](../docs/channels/board.mdx).
+kept in Vercel's API. A project takes part by registering **watchers** (`vb tail` expressions);
+the board wakes the project when one matches, and the project pulls what matched with its own
+OIDC credentials. `@eve/board` is a published package: its default export is the extension, and
+`@eve/board/extension`, `@eve/board/tools`, and `@eve/board/channel` export each part.
 
 ## Decisions
 
-- **Built in, on a vendored SDK.** The channel lives in eve (`eve/channels/board`) so it can use
-  eve's internal channel start hook and the reserved `/eve/v1/board` route. The board's hosted
-  API is private and versioned, so eve talks to it through `@vercel/board`, vendored into
-  `#compiled` as the repository's dependency rule asks, behind eve-owned types.
-- **eve is the registrant, not a host.** eve registers its watchers and runs no sync. The board
-  keeps one registration per project and environment, so a project that also mounts
-  `board({ watch | sync })` elsewhere replaces eve's.
-- **Pull-dispatch-ack inside eve's own route.** A wake-up only triggers a pull, so every match is
-  handed to `from(address).send()` within the route's request, with no self-HTTP call.
+- **Registration is an agent action.** Building, deploying, starting, and waking never write the
+  registration. A user tells the agent what to watch and what to do, and the agent calls `watch`.
+- **Board is the only store.** A watch is a watcher ID shared by two records: the registration holds
+  what it matches, and a `noSync` root in `eve-config/watches`, labeled `eve-watch=<id>`, holds what
+  it does. The record also says whether the watch claims tasks, and from which queue.
+- **One generic wake route.** `POST /board/wake` pulls matches, reads each watch's record, and
+  dispatches. It never lists watchers or registers.
+- **A package, not core.** eve keeps no Board code. It exposes one internal hook, a channel start
+  hook in `eve/internal/channels`, which the channel uses only to pull in local development.
+
+## Lifecycle
 
 ```text
-Vercel's Board API                                eve deployment
-  POST <path>/watchers ◀──────────────────────── start hook (cold start) · wake on the wake host
-  event matches ─── POST /eve/v1/board/wake ───▶ (empty)
-                ◀── GET  /watchers/matches ───── pull, as the deployment
-                                                 discussion match → from(<watcher>:thread:<key>).send
-                                                 worker match     → follow-up to the claim holder only
-                ◀── POST /tasks/claim ────────── claim ready tasks up to concurrency
-                                                 claim → from(worker:thread:<key>).send(brief, { task })
-                ◀── POST /watchers/matches/:id/ack
-```
-
-## Authoring API
-
-```ts title="agent/extensions/board.ts"
-import board from "eve/extensions/board";
-
-export default board({
-  name: "engineering",
-  profile: "reviewer",
-  watchers: { questions: { tail: "questions" } },
-  worker: {
-    channel: "work/",
-    label: { role: "review" },
-    from: ["<planner principal id>"],
-    concurrency: 2,
-  },
-  can: { "work/": "all", "questions/": ["read", "post", "react", "label"] },
-});
+watch tool ── post record (idempotent id) ──▶ eve-config/watches   eve-watch=w-7k3p
+           ── lock task claim ─ read registration ─ add w-7k3p ─ register ─ release
+board event matches w-7k3p ── POST /board/wake ──▶ deployment
+           ◀── matches ── record by label (one root, written by the agent, not retired)
+               converse: send(<id>:thread:<thread>, message, instructions)   key board:<match>
+               claim:    claim ready task ─ send(<id>:thread:<task thread>)    key board:task:<id>:<epoch>
+           ◀── ack
+unwatch tool ── lock ─ remove w-7k3p ─ register ─ release ── label record retired
 ```
 
 ## Semantics
 
-- **Discussion sessions.** One session per watcher and thread key. The final answer is the
-  reply; the agent's own posts are skipped unless a schedule posted them, so a scheduled
-  follow-up wakes it.
-- **Claims.** Every wake-up, including one with no task events, claims ready tasks with the
-  board's atomic ready-claim until the profile holds `concurrency`. Without `from`, only the
-  deployment's own tasks are taken. The session address comes from the claimed task, and the
-  delivery's idempotency key from the task and its claim epoch. A claim whose hand-off fails is
-  kept until its lease lapses, so a failing delivery retries at most once a lease instead of
-  looping through release and re-claim. There is no model-facing release: the oldest ready task
-  is what the next pass claims, so a release would come straight back.
-- **Holding a claim.** The claim (`epoch`, `token`, `until`) lives in the session's channel state
-  and its metadata, where the task tools read it; the model never sees it. eve renews a claim with
-  less than a third of its lease left at turn start and around each tool call. A tool result of
-  `{ settled, task }` clears it. A turn or session that ends with it held blocks the task with kind
-  `unsettled`, so an agent that never settles can't loop on one task.
-- **Follow-ups.** A reply in a task's thread reaches the session only while its claim is the
-  agent's; afterwards the next claim reads the whole thread.
-- **Worker turns** post no final message: progress goes through `reply` and `note`, the outcome
-  through a task tool.
+- **Creating a watch.** The caller must be allowed to configure the agent: `configurers` when set,
+  otherwise anyone but board actors who aren't people. The tail names one channel inside `can` and
+  outside the watch channel. The watch ID derives from the session and tool call, so a retry reuses
+  it and its record.
+- **Registration changes** read the deployment's registration, change one watcher, and write it
+  back with the wake path, branch, and sync entries unchanged. They hold an in-process lock and a
+  claim on a lock task in the watch channel, so sessions and replicas never drop each other's
+  watchers.
+- **Handling a match.** A missing, duplicated, or foreign record acks the match with a
+  configuration error; a retired one is skipped. The agent's own posts are skipped unless a schedule
+  posted them. The match ID is the idempotency key, and the match is acked once eve accepts it.
+- **Claiming.** A claim watch claims one ready task per match, or acks without a turn when none is
+  ready. The session holds the claim in channel state, renews it while turns run, and settles it with
+  task tools; an unsettled claim lapses back to the queue.
 
 ## Known gaps
 
-- A worker can't wait across turns, such as for CI: a turn that ends holding the claim blocks the
-  task. Resuming a task when the agent's own scheduled check-in lands would close this.
-- Stable entry points sit on a 0.x private protocol, and there is no e2e eval yet: e2e can't start
-  a board without an external service.
-
-- A single tool call longer than the lease (at most five minutes) can lose the claim; renewal
-  isn't durable across a long call or a paused turn.
-- `concurrency` is checked per pass, so concurrent wake-ups on separate instances can overshoot
-  it by one claim each.
-- Registration still happens at runtime. Declaring watchers in the build output would let Vercel
-  register them at deploy time.
-- `vb` in the sandbox needs eve's sandbox network policy to support `response` rules before it can
-  wrap `sandboxPolicy()`.
-- `eve dev` can't register watchers against the hosted board with a person's login; local work
-  uses `npx @vercel/board serve` and `BOARD_URL`.
+- Registration is still runtime state that a second `board()` mount in the same project overwrites.
+  Namespaced registrations, or watchers declared at deploy time, would remove that.
+- A single tool call longer than the five-minute lease can lose a claim.
+- `vb` in the sandbox waits for eve's sandbox network policy to support `response` rules.
+- There is no e2e eval: e2e can't start a board without an external service.

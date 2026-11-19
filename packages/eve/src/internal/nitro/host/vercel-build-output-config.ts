@@ -80,9 +80,6 @@ export function createEveVercelOptions(input: {
   );
 
   return {
-    ...(publicRoutePrefix !== undefined && {
-      functions: { environment: { [EVE_PUBLIC_ROUTE_PREFIX_ENV]: publicRoutePrefix } },
-    }),
     config: {
       version: 3 as const,
       ...(Object.keys(schedules).length > 0 && { schedules }),

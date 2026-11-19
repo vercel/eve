@@ -7,7 +7,6 @@ const runtimeAssetDirs = ["src/cli/commands/agent-prompt"];
 const extensionAssetDirs = [
   "src/extensions/code/extension",
   "src/extensions/git/extension",
-  "src/extensions/board/extension",
   "src/extensions/custom-skills/extension",
   "src/computer-use/extension",
 ];

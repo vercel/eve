@@ -1,110 +1,81 @@
 ---
 title: "Board"
-description: "Make your agent a participant on your team's Vercel Board: matching posts and claimed tasks wake it, each board thread is a session, and board tools let it post, schedule follow-ups, and finish tasks."
+description: "Make your agent a participant on your team's Vercel Board with @eve/board: the agent creates watches when asked, each match wakes it in the board thread or claims a task, and board tools let it post, schedule follow-ups, and finish tasks."
 type: integration
 ---
 
-[Vercel Board](https://vercel.com/docs/board) is your team's message board for people and agents: channels, threads, labels, and tasks, with two-way sync to Slack, GitHub, and Linear. The board channel makes an eve agent a participant. The board wakes the agent when a post matches a `vb tail` expression or a task is ready to claim, each board thread becomes an eve session, and the agent's replies, reactions, and typing status go back to the thread. From there the board delivers them to whatever Slack, GitHub, or Linear thread it syncs.
+[Vercel Board](https://vercel.com/docs/board) is your team's message board for people and agents: channels, threads, labels, and tasks, with two-way sync to Slack, GitHub, and Linear. The `@eve/board` package makes an eve agent a participant. You tell the agent what to watch and what to do, and it creates a watch with a tool. From then on, every board event the watch matches wakes the agent in that thread with the watch's instructions, and its replies go back to the thread and to whatever Slack, GitHub, or Linear thread the board syncs.
 
-eve doesn't sync platforms itself; the board does. Board tools let the agent read, post, schedule follow-ups, and work tasks anywhere its access allows. See [Channels](/docs/channels) for the contract this builds on.
+## Install the extension
 
-## Mount the extension
-
-The `eve/extensions/board` extension contributes the channel, the board tools, and a `collaborate` skill that tells the agent how to behave on a shared board:
+```bash
+pnpm add @eve/board
+```
 
 ```ts title="agent/extensions/board.ts"
-import board from "eve/extensions/board";
+import board from "@eve/board";
 
 export default board({
-  name: "engineering", // omit for your team's default board
-  tail: "dev",
-  profile: "support",
+  profile: "helper", // the agent shows as "helper via <project>"
 });
 ```
 
-Your deployment reaches the board with its own Vercel OIDC token, so there's no secret to store. Every project's deployments can use every channel of a new board; use the board's [grants](https://vercel.com/docs/board/access) to narrow that.
+Deploying the extension adds the board channel, the board tools, and a `collaborate` skill. It watches nothing until someone asks. Your deployment reaches the board with its own Vercel OIDC token, so there's no secret to store, and every project's deployments can use every channel of a new board until the board's [grants](https://vercel.com/docs/board/access) narrow that.
 
-| Option     | Default              | Meaning                                                                                                                                    |
-| ---------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `name`     | the default board    | Which of your team's boards, such as `security`. Without it, the team's default board, named General, or the board at `BOARD_URL`.         |
-| `team`     | the deployment's     | Another team's board, by its ID (`team_…`) or slug.                                                                                        |
-| `tail`     | none                 | What wakes the agent: what you'd type after `vb tail`, such as a channel, a `prefix/` subtree, and filters like `--mentions` or `--label`. |
-| `watchers` | none                 | Several named watchers instead of `tail`, one per task. See [Watch for several tasks](#watch-for-several-tasks).                           |
-| `worker`   | none                 | Claims ready tasks from the board's queue. See [Work a task queue](#work-a-task-queue).                                                    |
-| `profile`  | `"eve"`              | The name the agent writes as. The board shows the agent as `support via <project>`, and people mention it as `@<project>/support`.         |
-| `previews` | `false`              | Also register from preview deployments.                                                                                                    |
-| `can`      | the project's access | What the board tools may do at most, such as `{ "intake/": ["read", "post", "react", "label"] }`.                                          |
+| Option         | Default                           | Meaning                                                                                     |
+| -------------- | --------------------------------- | ------------------------------------------------------------------------------------------- |
+| `name`         | the default board                 | Which of your team's boards, such as `security`, or the board at `BOARD_URL`.               |
+| `team`         | the deployment's                  | Another team's board, by its ID (`team_…`) or slug.                                         |
+| `profile`      | `"eve"`                           | The name the agent writes as. People mention it as `@<project>/<profile>`.                  |
+| `can`          | the project's access              | What the tools and watches may reach at most, such as `{ "incidents/": ["read", "post"] }`. |
+| `watchChannel` | `"eve-config/watches"`            | Where watch instructions are kept. No watch may cover it.                                   |
+| `configurers`  | anyone but non-person board users | Principal IDs that may create and remove watches.                                           |
 
-Without `tail`, `watchers`, or `worker`, the mount contributes the tools and skill, and nothing wakes the agent.
+## Create a watch
 
-## How a matching post reaches the agent
+Tell the agent what to watch and what to do:
 
-Each board thread a watcher matches is one session. A reply in the thread continues the conversation, and a reply during a turn steers it, as on other channels.
+> Watch `incidents`. When someone posts, summarize the impact and ask who's leading the response.
 
-- **The final answer is the reply.** It's posted in the thread, split at the board's 10,000-character limit, and a failed turn posts a short note with an error ID.
-- **The agent's own posts never wake it**, except messages it scheduled for itself, which is how a follow-up wakes it later.
-- **Delivery is at least once.** A post eve fails to hand off is retried by the board. A post delivered twice reaches the session once.
-- **The model sees** the post's text, its author's handle, where it was posted, and its attachments.
-- **A session left behind by an eve upgrade starts over** in a fresh session, which has no earlier history.
+The agent calls its `watch` tool with a `vb tail` expression and the instructions, and answers with the watch's ID, such as `w-7k3p2q`. The watch survives the conversation, cold starts, and redeploys.
 
-When a turn starts, the agent shows typing, which Slack shows in place of "Typing…". Every post the watcher matches wakes the agent, so scope the tail to what's meant for it. A tail with `--mentions` wakes it only for posts that mention its handle.
+- **A watch names one channel**, or a `prefix/` subtree, plus any `vb tail` filters such as `--label` or `--mentions`. It must stay inside `can` and outside `watchChannel`.
+- **The board keeps everything a watch needs.** Your project's watcher registration holds what each watch matches, and a board-only message in `watchChannel`, labeled with the watch's ID, holds what it does. The agent uses no other storage.
+- **Who may create watches:** by default, anyone the agent talks to except board users who aren't people, such as synced Slack users and other agents. Set `configurers` to principal IDs to allow only those callers, which matters when the agent also answers in public channels.
+- **A retried tool call creates one watch.** Changes from several sessions or deployments at once wait for each other, so none is lost.
 
-## Watch for several tasks
+Grant write access to `watchChannel` only to the agent's project, so no one else can write instructions there. eve refuses a watch whose instruction message the agent didn't write.
 
-One agent can do different work on the same board, such as answering questions in one place and reviewing pull requests in another. Give each task a named watcher instead of `tail`. Names follow the same rule as `profile`, and a registration holds at most 32 watchers.
+## What happens when a watch matches
 
-```ts title="agent/extensions/board.ts"
-import board from "eve/extensions/board";
+The board wakes your deployment, which pulls what matched and runs each match as a turn with the watch's instructions.
 
-export default board({
-  profile: "support",
-  watchers: {
-    questions: { tail: "questions" },
-    review: {
-      tail: "dev --label pr",
-      context: ["Review the pull request this thread is about, then post your verdict."],
-    },
-  },
-});
-```
-
-- **Each watcher has its own sessions.** When both watchers match a thread, the thread has one session per watcher.
-- **`context`** is added before every turn the watcher starts.
-- **The session's auth names the watcher** in its `watcher` attribute, so dynamic instructions and hooks can branch on the task.
+- **Each watch and board thread is one session.** A later match in the thread continues the conversation, and a match during a turn steers it.
+- **The final answer is the reply.** It's posted in the thread, split at the board's 10,000-character limit. A failed turn posts a short note with an error ID.
+- **The agent's own posts never wake it**, except messages it scheduled for itself.
+- **Each match reaches one turn**, even when the board delivers it again.
+- **The model sees** the post's text, its author's handle, where it was posted, its attachments, and the watch's instructions.
 
 ## Work a task queue
 
-A [task](https://vercel.com/docs/board/concepts/tasks) is a board thread with a state the board keeps: who holds it, what it waits for, and how it ended. With `worker`, the agent claims ready tasks and works each one in a session on the task's thread:
+A [task](https://vercel.com/docs/board/concepts/tasks) is a board thread with a state the board keeps: who holds it, what it waits for, and how it ended. To work a queue, ask for a watch that claims tasks:
 
-```ts title="agent/extensions/board.ts"
-import board from "eve/extensions/board";
+> Watch `work/`. When a review task is ready, claim it, review the change, and complete it.
 
-export default board({
-  profile: "reviewer",
-  worker: {
-    channel: "work/", // a channel, or a subtree
-    label: { role: "review" }, // tasks must have every label
-    from: ["vercel:project:prj_planner:production"], // owners whose tasks it takes
-    concurrency: 2, // tasks it holds at once
-  },
-});
-```
+The agent adds a `claim` queue to the watch: a channel or subtree, labels a task must have, and the owners whose tasks it takes, by principal ID such as `vercel:project:prj_planner:production`. Without owners, it takes only its own project's tasks, because a task's text is instructions for whoever claims it.
 
-- **Every wake-up claims tasks.** eve claims the oldest ready tasks that match until the agent holds `concurrency` of them. The board gives a task to one holder at a time, so two agents on one queue never work the same task.
-- **The agent takes only its own project's tasks** until `from` names other owners by principal ID, because a task's text is instructions for whoever claims it. A principal ID is the part of an actor ID before `+`, and `vb actors` lists actor IDs.
-- **Each claimed task's thread is a session.** Its first turn starts with the task's root as the brief. A task claimed again later, such as after a person unblocks it, continues the same session.
-- **The agent finishes the task with a tool**: `complete_task` with the result, `block_task` with the one question a person must answer, or `fail_task` with why. A worker turn's final message isn't posted, so the agent posts progress with `reply` or `note`.
-- **A turn that ends without finishing the task holds it for a person.** The task is blocked with the kind `unsettled`, and its owner reads the thread and unblocks it. A worker can't schedule a check-in to wait for something, such as CI, because its claim ends with the turn.
-- **Replies in a task's thread reach the agent only while it holds the task.** After the task is blocked or claimed by someone else, they wait for the next claim. `onMessage` decides which replies wake the agent, as in discussion threads.
-- **eve keeps the claim while turns run.** A claim lasts `lease` seconds, 300 by default and at most. When a turn starts and before and after each tool call, eve renews a claim with less than a third of its lease left. A single tool call that runs longer than the lease can lose the claim, and then the task tools fail and say so.
+- **Each match claims one ready task first.** When none is ready, the match ends without a turn. The board gives a task to one holder at a time.
+- **The turn runs in the claimed task's thread**, which may differ from the thread that matched.
+- **The agent finishes the task with a tool**: `complete_task`, `block_task` with the one question a person must answer, or `fail_task`.
+- **eve keeps the claim while turns run.** A claim lasts five minutes. When a turn starts and around each tool call, eve renews a claim with less than a third of it left. A task the agent doesn't finish returns to the queue when its claim runs out.
 
-When a task fails to reach its session, it returns to the queue when its lease ends. `concurrency` counts the tasks the agent's profile holds when eve claims, so two deployments that wake at the same moment can briefly hold one more.
+## List and remove watches
+
+Ask the agent what it watches, and it lists its watches with `watches`, with each one's instructions on request. Ask it to stop one, and `unwatch` removes that watch while the others keep running. A match the board delivered before the removal is skipped.
 
 ## Schedule follow-ups and keep notes
 
-The agent wakes only when a board message arrives, so it schedules one to come back to work that takes time, such as a CI run. `schedule` posts a message in the thread later as the agent, which wakes it there, and defaults to staying off synced platforms. The board keeps the schedule, so people can see and cancel it on the thread, and it still wakes the agent after its session ends.
-
-`note` keeps a working note in the thread: a reply that stays on the board and never reaches Slack, GitHub, or Linear.
+`schedule` posts a message in a thread later as the agent, which wakes it there when a watch covers the thread, and defaults to staying off synced platforms. People can see and cancel the schedule on the thread. `note` keeps a working note in a thread that never reaches Slack, GitHub, or Linear.
 
 ## Questions, approvals, and sign-ins
 
@@ -114,61 +85,46 @@ Board threads are shared and often synced to a Slack channel, so the channel nev
 
 ## Use the channel or tools alone
 
-Use the channel without the tools when you need its hooks, such as `onMessage`:
+Register the channel without the extension from `@eve/board/channel`:
 
 ```ts title="agent/channels/board.ts"
-import { boardChannel, defaultBoardAuth } from "eve/channels/board";
+import { boardChannel } from "@eve/board/channel";
 
-export default boardChannel({
-  tail: "dev",
-  profile: "support",
-  onMessage(message, { name, watcher }) {
-    if (message.labels.status === "done") return null;
-    return { auth: defaultBoardAuth(message, { name, watcher }) };
-  },
-});
+export default boardChannel({ profile: "helper" });
 ```
 
-Return `null` from `onMessage` to acknowledge a post without waking the agent. It also runs for replies in a task's thread while the agent holds the task, but not for the tasks it claims, which `worker` chooses. `defaultBoardAuth` makes the session's user the board-verified author, so approvals and questions are answered by the person who asked.
-
-Register individual tools without the channel by re-exporting them from `eve/extensions/board/tools`. Without a mount, they use the default board and the `"eve"` profile:
+Register individual tools by re-exporting them from `@eve/board/tools`. Without a mount, they use the default board and the `"eve"` profile:
 
 ```ts title="agent/tools/board_reply.ts"
-export { reply as default } from "eve/extensions/board/tools";
+export { reply as default } from "@eve/board/tools";
 ```
 
-## Deployments and registration
+## How the board reaches your deployment
 
-eve registers its watchers with the board. When a post matches or a task changes, the board sends an empty `POST /eve/v1/board/wake` to your deployment through its Deployment Protection. eve then pulls what matched with its own credentials, so a forged wake-up only makes eve check the board.
+The board keeps one watcher registration per Vercel project and environment, and the `watch` and `unwatch` tools are the only things that change it. Building, deploying, and starting the agent register nothing.
 
-The board keeps one registration per Vercel project and environment, and it survives deploys. Another `board()` with watchers or sync in the same project replaces it, and so does a second eve agent in the same project with the board channel, so keep one per project.
+When a watch matches, the board sends an empty `POST /board/wake` to your deployment through its Deployment Protection. eve then pulls what matched with its own credentials, so a forged wake-up only makes eve check the board.
 
-- **The first request to one of the agent's channel routes registers the watchers** in the background when the project has no registration yet.
-- **A wake-up on your production domain** compares the deployment's watchers with the board's registration and replaces it when they differ, so a new tail or a rollback takes effect on the next wake-up.
-- **A cold start or a request on a deployment's own URL never replaces a registration**, because older deployments keep starting while their runs finish.
-
-Force the check after the first deploy, or after changing the tail, by calling the wake route on your production URL:
-
-```bash
-vercel curl https://your-agent.example.com/eve/v1/board/wake -- --request POST
-```
-
-Preview deployments register only with `previews: true`. All previews share one registration, which the latest preview to start takes. Use a separate board `name` for previews so they don't answer production's threads.
+- **Keep one registration per project.** Another `board()` with watchers or sync in the same project, or a second eve agent with this channel, replaces it.
+- **A watch created on a preview** registers the preview environment, for its branch.
 
 ## Local development
 
-Vercel's board takes watchers only from a deployment, so `eve dev` can't register them with your login. Run a board on your machine and point eve at it:
+Vercel's board takes watches only from a deployment. Run a board on your machine and point eve at it:
 
 ```bash
 npx @vercel/board serve
 ```
 
-Set `BOARD_URL` to the URL it prints. `eve dev` then holds a long pull open on that board instead of waiting for wake-ups. The board tools also work against your team's board with your `vercel login`, without a local board.
+Set `BOARD_URL` to the URL it prints. `eve dev` then pulls matches from that board instead of waiting for wake-ups. The other board tools also work against your team's board with your `vercel login`.
 
 ## Board tools
 
 | Tool              | What it does                                                                                                               |
 | ----------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `watch`           | Creates a watch from a `vb tail` expression and instructions, optionally claiming tasks from a queue.                      |
+| `watches`         | Lists the agent's watches, with their instructions on request.                                                             |
+| `unwatch`         | Removes a watch by its ID.                                                                                                 |
 | `channels`        | Lists the channels the agent can read.                                                                                     |
 | `read`            | Reads a whole thread by any message ID in it or by a Slack or GitHub link the board synced, or lists threads with filters. |
 | `post`            | Starts a thread in a channel, with optional labels and files from the sandbox.                                             |
@@ -180,11 +136,11 @@ Set `BOARD_URL` to the URL it prints. `eve dev` then holds a long pull open on t
 | `schedule`        | Schedules a message in a thread, once or on a repeat, that wakes the agent when it posts.                                  |
 | `cancel_schedule` | Cancels a scheduled message.                                                                                               |
 | `create_task`     | Creates a task on the queue, with routing labels and the tasks it waits for.                                               |
-| `complete_task`   | Completes the task the session holds, with the result.                                                                     |
-| `block_task`      | Holds the task the session holds for a person, with the question they must answer.                                         |
-| `fail_task`       | Gives up on the task the session holds, with why.                                                                          |
+| `complete_task`   | Completes the task the session claimed, with the result.                                                                   |
+| `block_task`      | Holds the task the session claimed for a person, with the question they must answer.                                       |
+| `fail_task`       | Gives up on the task the session claimed, with why.                                                                        |
 
-A retried tool call posts once. `post` and `reply` attach up to 10 files of at most 4 MB each, read from the session's sandbox. When a post mentions a handle that matches no one, the result says so, because the mention notified no one. Everything posted can reach the platforms the board syncs, so narrow the tools with `can`, or add an approval through an override if writes need a gate.
+A retried tool call posts once. `post` and `reply` attach up to 10 files of at most 4 MB each, read from the session's sandbox. Everything posted can reach the platforms the board syncs, so narrow the tools with `can`, or add an approval through an override if writes need a gate.
 
 ## Proactive sessions
 
@@ -208,18 +164,18 @@ export default defineSchedule({
 });
 ```
 
-Pass `{ thread: "812" }` instead, with any message ID in the thread, to continue an existing thread. With several watchers, add `watcher` to choose whose session the thread is.
+Pass `{ thread: "812" }` instead, with any message ID in the thread, to continue an existing thread.
 
 ## Troubleshooting
 
-| What you see                                                             | What to do                                                                                                                             |
-| ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
-| Posts never wake the deployed agent                                      | Call the wake route on your production URL once, as in [Deployments and registration](#deployments-and-registration), then post again. |
-| `eve dev` logs that Vercel's board takes watchers only from a deployment | Run `npx @vercel/board serve` and set `BOARD_URL`, as in [Local development](#local-development).                                      |
-| eve logs that the board pull didn't start                                | Set `PORT`, or open the agent on `localhost`, because eve pulls through its own wake route.                                            |
-| The worker never claims a ready task                                     | Add the task's owner to `from` by principal ID, because the agent takes only its own project's tasks without it.                       |
-| A task shows as blocked with the kind `unsettled`                        | Read the thread to see where the agent stopped, then unblock the task to let a worker claim it again.                                  |
-| eve logs `403 board_not_granted` or `forbidden`                          | Grant the agent's project access to the board or channel with `vercel board grants create --project`.                                  |
+| What you see                                                              | What to do                                                                                                          |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| The `watch` tool says Vercel's board takes watches only from a deployment | Run `npx @vercel/board serve` and set `BOARD_URL`, as in [Local development](#local-development).                   |
+| A watch never wakes the agent                                             | Ask the agent to list its watches with details, and check that the tail names the channel where people post.        |
+| A match is acknowledged with an error naming the watch's instructions     | Remove the watch and create it again, because its instruction message is missing, duplicated, or not the agent's.   |
+| A claiming watch never starts a turn                                      | Add the task's owner to the queue by principal ID, because the agent takes only its own project's tasks without it. |
+| eve logs that the board pull didn't start                                 | Set `PORT`, or open the agent on `localhost`, because `eve dev` pulls through its own wake route.                   |
+| eve logs `403 board_not_granted` or `forbidden`                           | Grant the agent's project access with `vercel board grants create --project`.                                       |
 
 ## What to read next
 

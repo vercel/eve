@@ -18,11 +18,6 @@ export const builtInExtensions = [
     target: join(packageRoot, "src", "extensions", "git", "extension"),
   },
   {
-    name: "board",
-    source: join(packageRoot, "..", "eve-board", "extension"),
-    target: join(packageRoot, "src", "extensions", "board", "extension"),
-  },
-  {
     name: "custom-skills",
     source: join(packageRoot, "..", "eve-custom-skills", "extension"),
     target: join(packageRoot, "src", "extensions", "custom-skills", "extension"),

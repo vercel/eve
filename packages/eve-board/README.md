@@ -1,32 +1,34 @@
-# eve/extensions/board
+# @eve/board
 
-`eve/extensions/board` makes an eve agent a participant on your team's [Vercel Board](https://vercel.com/docs/board). It contributes the `threads` channel, which wakes the agent for matching posts and claims ready tasks, the board tools (`channels`, `read`, `post`, `reply`, `note`, `react`, `label`, `typing`, `schedule`, `cancel_schedule`, `create_task`, `complete_task`, `block_task`, `fail_task`), and a `collaborate` skill.
+`@eve/board` makes an eve agent a participant on your team's [Vercel Board](https://vercel.com/docs/board). The agent creates watches with a tool when someone asks it to keep an eye on a channel; each match wakes it in the board thread with the watch's instructions, or claims a ready task first and wakes it in the task's thread.
 
-It ships inside the `eve` package. This private `@eve/board` workspace package is its source of truth, published through these entry points:
+## Install
 
-- `eve/extensions/board`: the extension
-- `eve/extensions/board/tools`: the board tools, for agents that register them directly
-
-The channel and its board client live in eve (`eve/channels/board`), on a vendored `@vercel/board`.
-
-## Mount
+```sh
+pnpm add @eve/board
+```
 
 ```ts
 // agent/extensions/board.ts
-import board from "eve/extensions/board";
+import board from "@eve/board";
 
-export default board({
-  profile: "reviewer",
-  tail: "dev",
-  worker: { channel: "work/", label: { role: "review" } },
-});
+export default board({ profile: "helper" });
 ```
 
-See [`docs/channels/board.mdx`](../../docs/channels/board.mdx) for tasks, registration, and local development.
+Then tell the agent what to watch: "Watch `incidents`. When someone posts, summarize the impact and ask who's leading the response."
+
+## Entry points
+
+- `@eve/board` and `@eve/board/extension`: the extension, with the channel, tools, and a `collaborate` skill
+- `@eve/board/tools`: each tool, to register on its own
+- `@eve/board/channel`: `boardChannel()`, to use the channel on its own
+
+See [`docs/channels/board.mdx`](../../docs/channels/board.mdx) for watches, tasks, and local development.
 
 ## Validate
 
 ```sh
 pnpm --filter @eve/board typecheck
 pnpm --filter @eve/board test
+pnpm --filter @eve/board build
 ```

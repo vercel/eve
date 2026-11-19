@@ -3,6 +3,9 @@
   "tasks": {
     "test:integration": {
       "dependsOn": ["eve#build"]
+    },
+    "typecheck": {
+      "dependsOn": ["eve#build"]
     }
   }
 }

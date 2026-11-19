@@ -1997,9 +1997,6 @@ importers:
       '@vercel/blob':
         specifier: 2.9.0
         version: 2.9.0
-      '@vercel/board':
-        specifier: 0.52.0
-        version: 0.52.0(@chat-adapter/slack@4.44.0(ai@7.0.172(zod@4.6.7))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.6.7))(@vercel/connect@2.9.2(@ai-sdk/mcp@2.0.99(zod@4.6.7))(@auth/core@0.41.3)(@chat-adapter/slack@4.44.0(ai@7.0.172(zod@4.6.7))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.6.7))(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.6)(supports-color@10.2.2)(zod@4.6.7))(ai@7.0.172(zod@4.6.7))(better-auth@1.7.19(ffe7520ccc6ea076d06aab563aa3b80c)))(chat@4.44.0(ai@7.0.172(zod@4.6.7))(supports-color@10.2.2)(zod@4.6.7))
       '@vercel/connect':
         specifier: 'catalog:'
         version: 2.9.2(@ai-sdk/mcp@2.0.99(zod@4.6.7))(@auth/core@0.41.3)(@chat-adapter/slack@4.44.0(ai@7.0.172(zod@4.6.7))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.6.7))(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.6)(supports-color@10.2.2)(zod@4.6.7))(ai@7.0.172(zod@4.6.7))(better-auth@1.7.19(ffe7520ccc6ea076d06aab563aa3b80c))
@@ -2166,9 +2163,9 @@ importers:
 
   packages/eve-board:
     dependencies:
-      eve:
-        specifier: workspace:*
-        version: link:../eve
+      '@vercel/board':
+        specifier: 0.52.0
+        version: 0.52.0(@chat-adapter/slack@4.44.0(ai@7.0.172(zod@4.6.7))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.6.7))(@vercel/connect@2.9.2(593403a60853e604f43ac19c7bf472df))(chat@4.44.0(ai@7.0.172(zod@4.6.7))(supports-color@10.2.2)(zod@4.6.7))
       zod:
         specifier: 'catalog:'
         version: 4.6.7
@@ -2176,15 +2173,12 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.6
-      '@vercel/board':
-        specifier: 0.52.0
-        version: 0.52.0(@chat-adapter/slack@4.44.0(ai@7.0.172(zod@4.6.7))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.6.7))(@vercel/connect@2.9.2(593403a60853e604f43ac19c7bf472df))(chat@4.44.0(ai@7.0.172(zod@4.6.7))(supports-color@10.2.2)(zod@4.6.7))
+      eve:
+        specifier: workspace:*
+        version: link:../eve
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
-      typescript-compiler:
-        specifier: npm:typescript@6.0.3
-        version: typescript@6.0.3
 
   packages/eve-catalog:
     devDependencies:
@@ -21542,16 +21536,6 @@ snapshots:
     optionalDependencies:
       '@chat-adapter/slack': 4.44.0(ai@7.0.172(zod@4.6.7))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.6.7)
       '@vercel/connect': 2.9.2(593403a60853e604f43ac19c7bf472df)
-      chat: 4.44.0(ai@7.0.172(zod@4.6.7))(supports-color@10.2.2)(zod@4.6.7)
-
-  '@vercel/board@0.52.0(@chat-adapter/slack@4.44.0(ai@7.0.172(zod@4.6.7))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.6.7))(@vercel/connect@2.9.2(@ai-sdk/mcp@2.0.99(zod@4.6.7))(@auth/core@0.41.3)(@chat-adapter/slack@4.44.0(ai@7.0.172(zod@4.6.7))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.6.7))(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.6)(supports-color@10.2.2)(zod@4.6.7))(ai@7.0.172(zod@4.6.7))(better-auth@1.7.19(ffe7520ccc6ea076d06aab563aa3b80c)))(chat@4.44.0(ai@7.0.172(zod@4.6.7))(supports-color@10.2.2)(zod@4.6.7))':
-    dependencies:
-      '@vercel/oidc': 3.8.10
-      jose: 6.2.17
-      zod: 4.6.7
-    optionalDependencies:
-      '@chat-adapter/slack': 4.44.0(ai@7.0.172(zod@4.6.7))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.6.7)
-      '@vercel/connect': 2.9.2(@ai-sdk/mcp@2.0.99(zod@4.6.7))(@auth/core@0.41.3)(@chat-adapter/slack@4.44.0(ai@7.0.172(zod@4.6.7))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.6.7))(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.6)(supports-color@10.2.2)(zod@4.6.7))(ai@7.0.172(zod@4.6.7))(better-auth@1.7.19(ffe7520ccc6ea076d06aab563aa3b80c))
       chat: 4.44.0(ai@7.0.172(zod@4.6.7))(supports-color@10.2.2)(zod@4.6.7)
 
   '@vercel/cli-config@0.2.1':

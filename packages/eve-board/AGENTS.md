@@ -1,13 +1,16 @@
-# @eve/board Extension Package
+# @eve/board
 
-This private package is the source of the `eve/extensions/board` extension: a `@vercel/board` channel, board tools, and a `collaborate` skill.
+This published package brings Vercel Board to eve agents: a channel, board tools, watch tools, and a `collaborate` skill, built with `eve extension build`.
 
 ## Boundaries
 
-- The channel lives in eve (`eve/channels/board`), which owns the board client, registration, and delivery. `extension/channels/threads.ts` only binds it to the mount's config through `eve/internal/board`.
-- Tools act through the same client. Read `extension.config` lazily, inside `execute` or a thunk, so a tool re-exported without a mount falls back to `BOARD_URL`.
-- Keep shared implementation under `extension/lib/`; filesystem paths define contribution names.
+- Watches are created, listed, and removed only by the `watch`, `watches`, and `unwatch` tools. The channel, its start hook, and its wake route never write the board registration.
+- A watch is a watcher ID shared by two board records: the registration holds what it matches, and a labeled `noSync` root in the watch channel holds what it does. Keep no other watch store.
+- Registration changes read, modify, and write the whole registration under the board lock task, so concurrent sessions and replicas never drop each other's watchers.
+- Talk to the board only through `extension/lib/client.ts`, which wraps `@vercel/board` in eve-owned types.
+- Read `extension.config` lazily, inside `execute` or a thunk, so a tool re-exported without a mount falls back to defaults.
+- Import only public `eve/*` entry points and `eve/internal/channels`.
 
-## Build and publish
+## Build and test
 
-The eve build copies `extension/` into `packages/eve/src/extensions/board/extension` and compiles it into the `eve` package; public entry points are declared in `packages/eve/package.json` and `packages/eve/src/extensions/board/`. Do not publish this package or add it as an eve dependency (it depends on eve). Import only `eve/*` exports from `extension/`. Run typecheck, the integration tests (they need eve built), and eve's build before completion.
+Run `pnpm --filter @eve/board typecheck`, `test`, and `build`. The tests run against an in-memory `@vercel/board` and need eve built.

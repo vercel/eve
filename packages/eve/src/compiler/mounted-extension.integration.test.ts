@@ -272,46 +272,6 @@ describe("mounted extension via authored-source loader", () => {
     }
   });
 
-  it("mounts the built-in board extension's channel, tools, and skill", async () => {
-    const app = await createAppRoot("eve-board-mount-", {
-      files: {
-        "agent/agent.mjs":
-          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
-        "agent/instructions.md": "Work with the available tools.",
-        "agent/extensions/board.mjs":
-          'import board from "eve/extensions/board"; export default board({ name: "engineering", tail: "dev", worker: { channel: "work/" } });',
-      },
-    });
-    const { graph, manifest } = await compileRuntimeGraph(app.appRoot);
-    expect(
-      graph.root.channels
-        .filter((channel) => channel.name.startsWith("board__"))
-        .map((channel) => `${channel.name} ${channel.method} ${channel.urlPath}`),
-    ).toEqual(["board__threads POST /eve/v1/board/wake"]);
-    expect(
-      manifest.tools
-        .map((tool) => tool.name)
-        .filter((name) => name.startsWith("board__"))
-        .sort(),
-    ).toEqual([
-      "board__block_task",
-      "board__cancel_schedule",
-      "board__channels",
-      "board__complete_task",
-      "board__create_task",
-      "board__fail_task",
-      "board__label",
-      "board__note",
-      "board__post",
-      "board__react",
-      "board__read",
-      "board__reply",
-      "board__schedule",
-      "board__typing",
-    ]);
-    expect(manifest.skills.map((skill) => skill.name)).toContain("board__collaborate");
-  });
-
   it("keeps state independent across mounts and context restoration", async () => {
     const app = await createAppRoot("eve-mount-state-", {
       files: {

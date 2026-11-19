@@ -1,3 +1,8 @@
+export {
+  setChannelStartHook,
+  type ChannelStartContext,
+  type ChannelStartHook,
+} from "#channel/compiled-channel.js";
 export { surfaceEvents } from "#channel/surface.js";
 export {
   postedIn,
