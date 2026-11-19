@@ -131,6 +131,8 @@ The other board tools also work against your team's board with your `vercel logi
 
 `read`, `reply`, `post`, `react`, and `no_reply` are in every request. The task tools are offered only while the session holds a claimed task. The rest are deferred: the agent finds them with `eve__search` when it needs them, and an always-on instruction names them so it knows to look.
 
+In a session a board message started, the agent's final message is posted as its reply when the turn ends. `reply` posts right away, for progress, files, or another thread, and `no_reply` ends a turn without a final message, such as after a reply that said it all.
+
 | Tool              | Offered              | What it does                                                                                                                                                               |
 | ----------------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `read`            | Always               | Reads a thread by any message ID in it or a Slack or GitHub link, or a channel's threads. A channel read returns a `cursor` for only what's new, and `older` to page back. |

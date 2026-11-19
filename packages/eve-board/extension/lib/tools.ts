@@ -249,7 +249,7 @@ export function defineBoardPostTool(settings: Settings) {
 /** Replies in a thread. */
 export function defineBoardReplyTool(settings: Settings) {
   return defineTool({
-    description: `Reply in a board thread. When a board discussion started this session, your final message is already posted there as your reply: use this tool for other threads, to attach files, or for progress on a task you hold. Defaults to this session's thread. ${SHARED}`,
+    description: `Post in a board thread right away, before your turn ends: progress while you work, a reply with files, or a reply in another thread. Defaults to this session's thread. In a session a board message started, your final message is posted there when your turn ends, so don't repeat it here. If a reply already says everything, such as files with a line about them, end your turn with \`no_reply\`. ${SHARED}`,
     inputSchema: z.object({
       id: messageId.optional(),
       text,
