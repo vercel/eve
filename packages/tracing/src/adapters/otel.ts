@@ -28,6 +28,7 @@ import { withCapture } from "../capture.js";
 type Context = OtelContext;
 const ACTIVE_OPERATION = createContextKey("agent.tracing.active-operation");
 const SUPPRESS_TRACING_KEY = createContextKey("OpenTelemetry SDK Context Key SUPPRESS_TRACING");
+const AGENT_RUNS_SCOPE = "vercel.ai.tracing";
 
 /** Returns `context` with a capture decision that allows or declines recording error content, such as exception messages, for spans started under it. */
 export function withErrorContent<T extends { setValue(key: symbol, value: unknown): T }>(
@@ -119,6 +120,7 @@ export interface OtelTelemetryOptions {
   ) => boolean;
   /** Replaces the default mapping, which adds `vercel.session_id` on Vercel. */
   readonly mapping?: OutputMapping;
+  /** Defaults to `vercel.ai.tracing`, a scope Vercel Agent Runs reads. Another name keeps the spans out of Agent Runs. */
   readonly tracerName?: string;
   /** Recorded as the spans' instrumentation scope version. */
   readonly tracerVersion?: string;
@@ -130,7 +132,7 @@ export interface OtelTelemetryOptions {
 /** OpenTelemetry implementation of {@link AgentTelemetry}. */
 export function otelTelemetry(options: OtelTelemetryOptions = {}): AgentTelemetry {
   const provider = options.provider ?? trace.getTracerProvider();
-  const tracer = provider.getTracer(options.tracerName ?? "agent.tracing", options.tracerVersion);
+  const tracer = provider.getTracer(options.tracerName ?? AGENT_RUNS_SCOPE, options.tracerVersion);
   const mapping = options.mapping ?? DEFAULT_MAPPING;
   const idGenerator = options.idGenerator;
   function lifecycle(method: "forceFlush" | "shutdown"): () => Promise<void> {

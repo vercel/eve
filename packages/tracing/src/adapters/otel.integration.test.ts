@@ -56,6 +56,37 @@ describe("OTel trace output", () => {
     }
   });
 
+  it("writes spans in the Agent Runs scope unless given a tracer name", async () => {
+    const exporter = new InMemorySpanExporter();
+    const provider = new BasicTracerProvider({
+      spanProcessors: [new SimpleSpanProcessor(exporter)],
+    });
+    try {
+      for (const telemetry of [
+        otelTelemetry({ provider }),
+        otelTelemetry({ provider, tracerName: "custom" }),
+      ]) {
+        createSpanWriter({ telemetry })
+          .start(
+            {
+              type: "channelRequest",
+              operationId: "request",
+              name: "agent.channel.request",
+              attributes: {},
+            },
+            { emit: true, recordInputs: false, recordOutputs: false },
+          )
+          .end();
+      }
+      expect(exporter.getFinishedSpans().map((span) => span.instrumentationScope.name)).toEqual([
+        "vercel.ai.tracing",
+        "custom",
+      ]);
+    } finally {
+      await provider.shutdown();
+    }
+  });
+
   it("maps deferred spans and late updates without changing reserved identity", async () => {
     const exporter = new InMemorySpanExporter();
     const idGenerator = new AgentSpanIdGenerator();
