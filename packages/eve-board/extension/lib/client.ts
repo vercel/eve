@@ -6,6 +6,7 @@ import {
   type ScheduleView,
   type Written,
 } from "@vercel/board";
+import { compileAccess, type Can } from "@vercel/board/access";
 
 /** Who wrote a board message, as the board verified it. */
 export interface BoardAuthor {
@@ -312,6 +313,10 @@ export const BOARD_MAX_LEASE_SECONDS = 300;
 export const BOARD_TEXT_LIMIT = 10_000;
 export const BOARD_UPLOAD_LIMIT = 4 * 1024 * 1024;
 export const BOARD_PROFILE_PATTERN = /^[A-Za-z][A-Za-z0-9-]{0,31}$/u;
+export const BOARD_WATCHER_ID_PATTERN = /^[A-Za-z][A-Za-z0-9-]{0,31}$/u;
+export const BOARD_CHANNEL_SELECTOR = /^[a-z0-9][a-z0-9_-]*(?:\/[a-z0-9][a-z0-9_-]*)*\/?$/u;
+export const BOARD_TASK_NOTE_LIMIT = 1_000;
+export const BOARD_HOLD_KIND_PATTERN = /^[a-z0-9][a-z0-9_.-]{0,63}$/u;
 export const DEFAULT_BOARD_PROFILE = "eve";
 
 export function resolveBoardTarget(config: {
@@ -327,11 +332,22 @@ export function resolveBoardTarget(config: {
     );
   }
   return {
-    profile,
+    profile: profile.toLowerCase(),
     ...(config.name !== undefined && { name: config.name }),
     ...(config.team !== undefined && { team: config.team }),
     ...(config.can !== undefined && { can: config.can }),
   };
+}
+
+export function boardAllows(
+  can: BoardCan | undefined,
+  channel: string,
+  permission: string,
+): boolean {
+  if (can === undefined || can === "all") return true;
+  const access = compileAccess(can as Can);
+  const name = permission as Parameters<typeof access.can>[0];
+  return channel.endsWith("/") ? access.at(name, channel) : access.can(name, channel);
 }
 
 export function boardErrorCode(error: unknown): string | undefined {

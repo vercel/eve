@@ -3,6 +3,9 @@ import { afterEach } from "node:test";
 
 import { board } from "@vercel/board";
 import { local } from "@vercel/board/backend-local";
+import type { ChannelFrom, ChannelSendOptions } from "eve/channels";
+
+import type { BoardChannelState } from "../extension/lib/board-channel.ts";
 
 const EVE_TOKEN = "deployment:prj_eve:production";
 const realFetch = globalThis.fetch;
@@ -86,4 +89,36 @@ export function runTool(
       id: options.sessionId ?? "session-1",
     },
   }) as Promise<Record<string, any>>;
+}
+
+export interface Delivery {
+  readonly address: string;
+  readonly message: unknown;
+  readonly options: ChannelSendOptions<BoardChannelState>;
+}
+
+export function fakeFrom(
+  send: (address: string, message: unknown, options: Delivery["options"]) => void,
+): ChannelFrom<BoardChannelState> {
+  return ((address: string) => ({
+    async end() {},
+    async send(message: unknown, options: Delivery["options"]) {
+      send(address, message, options);
+      return { id: "delivery" };
+    },
+  })) as never;
+}
+
+export function recorder() {
+  const deliveries: Delivery[] = [];
+  const from = fakeFrom((address, message, options) => {
+    deliveries.push({ address, message, options });
+  });
+  return { deliveries, from };
+}
+
+export function accepts(tool: unknown, input: unknown): boolean {
+  const schema = (tool as { inputSchema: { safeParse(input: unknown): { success: boolean } } })
+    .inputSchema;
+  return schema.safeParse(input).success;
 }

@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
 
-import { compileAccess, type Can } from "@vercel/board/access";
-
 import {
+  BOARD_CHANNEL_SELECTOR,
   BOARD_MAX_LEASE_SECONDS,
+  BOARD_TEXT_LIMIT,
+  BOARD_WATCHER_ID_PATTERN,
+  boardAllows,
   boardErrorCode,
   type BoardCan,
   type BoardClaimedTask,
@@ -102,7 +104,7 @@ export function tailChannel(tail: string): string | undefined {
     }
     const eq = arg.indexOf("=");
     const name = arg.startsWith("--") ? arg.slice(2, eq === -1 ? undefined : eq) : null;
-    const type = name === null ? undefined : TAIL_FLAGS[name];
+    const type = name !== null && Object.hasOwn(TAIL_FLAGS, name) ? TAIL_FLAGS[name] : undefined;
     if (type === undefined) {
       throw new Error(`${name === null ? arg.slice(0, 2) : `--${name}`} isn't a tail filter.`);
     }
@@ -173,7 +175,7 @@ function selectorOf(channel: string) {
     : { path: channel, subtree: false };
 }
 
-function covers(pattern: string, channel: string): boolean {
+export function coversChannel(pattern: string, channel: string): boolean {
   if (pattern === "*") return true;
   const outer = selectorOf(pattern);
   const inner = selectorOf(channel);
@@ -182,14 +184,23 @@ function covers(pattern: string, channel: string): boolean {
 }
 
 function overlaps(a: string, b: string): boolean {
-  return covers(a, b) || covers(b, a);
+  return coversChannel(a, b) || coversChannel(b, a);
 }
 
-export function allows(can: BoardCan | undefined, channel: string, permission: string): boolean {
-  if (can === undefined || can === "all") return true;
-  const access = compileAccess(can as Can);
-  const name = permission as Parameters<typeof access.can>[0];
-  return channel.endsWith("/") ? access.at(name, channel) : access.can(name, channel);
+export const allows = boardAllows;
+
+function assertChannelSelector(channel: string): void {
+  if (!BOARD_CHANNEL_SELECTOR.test(channel)) {
+    throw new Error(
+      `"${channel}" isn't a board channel: use lowercase segments joined by "/", such as "incidents" or "www/production", and end it with "/" to cover a subtree.`,
+    );
+  }
+}
+
+export function assertWatchId(id: string): void {
+  if (!BOARD_WATCHER_ID_PATTERN.test(id)) {
+    throw new Error(`"${id}" isn't a board watch ID: watch IDs look like "w-7k3p2q".`);
+  }
 }
 
 export function modelCan(can: BoardCan | undefined, watchChannel: string): BoardCan {
@@ -210,11 +221,12 @@ export function checkWatchScope(input: {
   readonly watchChannel: string;
 }): void {
   const channel = tailChannel(input.tail);
-  if (channel === undefined) {
+  if (channel === undefined || channel.length === 0) {
     throw new Error(
       `A watch's tail must name the channel it watches, such as "incidents" or "work/", so it never matches the watch records in "${input.watchChannel}".`,
     );
   }
+  assertChannelSelector(channel);
   if (overlaps(channel, input.watchChannel)) {
     throw new Error(
       `A watch can't cover "${input.watchChannel}", where watch instructions are kept: choose a channel outside it.`,
@@ -230,6 +242,7 @@ export function checkQueueScope(
   queue: BoardQueue,
   input: { readonly can?: BoardCan; readonly watchChannel: string },
 ): void {
+  assertChannelSelector(queue.channel);
   if (overlaps(queue.channel, input.watchChannel)) {
     throw new Error(`A watch can't claim tasks in "${input.watchChannel}".`);
   }
@@ -473,28 +486,45 @@ export async function createWatch(input: {
   readonly env?: Env;
 }): Promise<BoardWatch> {
   const { action, client, id, tail } = input;
+  const text = watchRecordText(id, action, input.instructions);
+  if (text.length > BOARD_TEXT_LIMIT) {
+    throw new Error(
+      `These watch instructions are too long to store: shorten them by ${text.length - BOARD_TEXT_LIMIT} characters.`,
+    );
+  }
   const held = await heldRegistration(client);
   if (held?.watch[id] === undefined && Object.keys(held?.watch ?? {}).length >= MAX_WATCHES) {
     throw tooManyWatches();
   }
-  await client.post(input.watchChannel, {
+  const record = await client.post(input.watchChannel, {
     id: `eve-watch-${id}`,
     labels: { [WATCH_LABEL]: id },
     noSync: true,
-    text: watchRecordText(id, action, input.instructions),
+    text,
   });
-  await updateRegistration({
-    client,
-    env: input.env,
-    watchChannel: input.watchChannel,
-    change(watch) {
-      if (watch[id] === undefined && Object.keys(watch).length >= MAX_WATCHES) {
-        throw tooManyWatches();
-      }
-      watch[id] = { tail };
-      return true;
-    },
-  });
+  try {
+    await updateRegistration({
+      client,
+      env: input.env,
+      watchChannel: input.watchChannel,
+      change(watch) {
+        if (watch[id] === undefined && Object.keys(watch).length >= MAX_WATCHES) {
+          throw tooManyWatches();
+        }
+        watch[id] = { tail };
+        return true;
+      },
+    });
+  } catch (error) {
+    const now = await heldRegistration(client).catch(() => held);
+    if (now?.watch[id] === undefined) {
+      await client.label(record.id, { set: { [STATE_LABEL]: "retired" } }).catch(() => undefined);
+    }
+    throw error;
+  }
+  if (record.labels[STATE_LABEL] !== undefined) {
+    await client.label(record.id, { unset: [STATE_LABEL] });
+  }
   return { action, id, instructions: input.instructions, tail };
 }
 
@@ -523,6 +553,13 @@ export async function listWatches(input: {
           self,
           watchChannel: input.watchChannel,
         });
+        if (record.retired) {
+          return {
+            id,
+            problem: `Board watch ${id}'s instructions are retired, so it never fires. Remove it with unwatch and create it again.`,
+            tail,
+          };
+        }
         return { action: record.action, id, instructions: record.instructions, tail };
       } catch (error) {
         return { id, problem: (error as Error).message, tail };
@@ -538,6 +575,7 @@ export async function removeWatch(input: {
   readonly env?: Env;
 }): Promise<{ readonly id: string; readonly removed: boolean }> {
   const { client, id } = input;
+  assertWatchId(id);
   let removed = false;
   await updateRegistration({
     client,

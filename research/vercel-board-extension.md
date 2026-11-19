@@ -26,6 +26,7 @@ OIDC credentials. `@eve/board` is a published package: its default export is the
 - **`can` bounds the model, not the bookkeeping.** The board refuses registration, matches, and acks
   to a handle narrowed with `can`, so eve's own registration, records, lock, pulls, and claim
   settlement use the deployment's handle, and the watch tools enforce `can` on every tail and queue.
+  Claims go through the narrowed handle, so the board never offers a task outside `can`.
 - **A lean tool list.** `read`, `reply`, `post`, and `react` are in every request; the settle tools
   are a dynamic tool offered only while the session holds a claim; the rest are deferred behind
   `eve__search`, and an always-on instruction names them. The channel shows typing on every turn
@@ -66,7 +67,7 @@ unwatch tool ── lock ─ remove w-7k3p ─ register ─ release ── label
 - **Claiming.** A claim watch claims one ready task per task event, or acks without a turn when none is
   ready. The session holds the claim in channel state, never in metadata, and renews it while turns
   run. A task tool names the settlement and the channel performs it when a call from a settle tool
-  settles, keeping the claim when the board refuses for a retryable reason. A reply or the agent's
+  settles, keeping the claim only when the board is briefly unavailable. A reply or the agent's
   own check-in in a held task's thread goes to that task's session. The claiming watch labels the task
   `eve-claim-watch=<id>`, so when two of the agent's claim watches cover a thread, only the one that
   holds the task takes its replies. A claim whose hand-off fails is

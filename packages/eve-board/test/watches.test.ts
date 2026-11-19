@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import type { ChannelFrom, ChannelSendOptions } from "eve/channels";
+import type { ChannelFrom } from "eve/channels";
 
 import {
   drainMatches,
@@ -9,7 +9,11 @@ import {
   settlementOf,
   type BoardChannelState,
 } from "../extension/lib/board-channel.ts";
-import { createBoardClient, resolveBoardTarget } from "../extension/lib/client.ts";
+import {
+  BOARD_TEXT_LIMIT,
+  createBoardClient,
+  resolveBoardTarget,
+} from "../extension/lib/client.ts";
 import {
   defineBoardCreateTaskTool,
   defineBoardLabelTool,
@@ -22,48 +26,23 @@ import {
 import {
   createWatch,
   DEFAULT_WATCH_CHANNEL,
+  findWatchRecord,
   heldRegistration,
+  listWatches,
+  removeWatch,
   tailChannel,
 } from "../extension/lib/watches.ts";
-import { EVE_PRINCIPAL, runTool, startBoard } from "./helpers.ts";
+import { accepts, EVE_PRINCIPAL, fakeFrom, recorder, runTool, startBoard } from "./helpers.ts";
 
 const settings = () => ({ profile: "helper" });
 const client = () => createBoardClient(resolveBoardTarget(settings()));
 
-interface Delivery {
-  readonly address: string;
-  readonly message: unknown;
-  readonly options: ChannelSendOptions<BoardChannelState>;
-}
-
-function fakeFrom(
-  send: (address: string, message: unknown, options: Delivery["options"]) => void,
-): ChannelFrom<BoardChannelState> {
-  return ((address: string) => ({
-    async end() {},
-    async send(message: unknown, options: Delivery["options"]) {
-      send(address, message, options);
-      return { id: "delivery" };
-    },
-  })) as never;
-}
-
-function recorder() {
-  const deliveries: Delivery[] = [];
-  const from = fakeFrom((address, message, options) => {
-    deliveries.push({ address, message, options });
-  });
-  return { deliveries, from };
-}
-
 async function wake(from: ChannelFrom<BoardChannelState>, expect: "some" | "none") {
   if (expect === "none") await new Promise((resolve) => setTimeout(resolve, 200));
   return await drainMatches({
-    client: client(),
     from,
-    name: undefined,
+    settings: settings(),
     wait: expect === "some" ? 25 : 0,
-    watchChannel: () => DEFAULT_WATCH_CHANNEL,
   });
 }
 
@@ -227,6 +206,29 @@ test("the watch tool refuses tails outside the agent's scope and callers who may
     ),
     /Only a person on the team/u,
   );
+  await assert.rejects(
+    runTool(watch, { instructions, tail: '""' }, { callId: "c5" }),
+    /must name the channel it watches/u,
+  );
+  await assert.rejects(
+    runTool(watch, { instructions, tail: "incidents --constructor x" }, { callId: "c6" }),
+    /--constructor isn't a tail filter/u,
+  );
+  await assert.rejects(
+    runTool(watch, { instructions, tail: "Incidents" }, { callId: "c7" }),
+    /"Incidents" isn't a board channel/u,
+  );
+  await assert.rejects(
+    runTool(
+      defineBoardWatchesTool(settings),
+      { details: true },
+      {
+        auth: { attributes: { actor_kind: "external" }, authenticator: "board-watcher" },
+        callId: "c8",
+      },
+    ),
+    /Only a person on the team/u,
+  );
 });
 
 test("a watch change waits for another replica's change and keeps it", async () => {
@@ -313,12 +315,9 @@ test("a watch works when `can` narrows the agent's tools", async () => {
   const posted = (await as("alice", "/messages", { channel: "incidents", text: "Down." })).message;
 
   await drainMatches({
-    can: narrowed().can,
-    client: client(),
     from,
-    name: undefined,
+    settings: { ...settings(), can: narrowed().can },
     wait: 25,
-    watchChannel: () => DEFAULT_WATCH_CHANNEL,
   });
 
   assert.deepEqual(
@@ -486,12 +485,9 @@ test("a watch delivers nothing from channels a narrower `can` no longer lets the
   await as("alice", "/messages", { channel: "private/hr", text: "Salary bands." });
 
   await drainMatches({
-    can: { "public/": ["read", "post"] },
-    client: client(),
     from,
-    name: undefined,
+    settings: { ...settings(), can: { "public/": ["read", "post"] } },
     wait: 25,
-    watchChannel: () => DEFAULT_WATCH_CHANNEL,
   });
 
   assert.deepEqual(deliveries, []);
@@ -573,20 +569,14 @@ test("a nested exclusion in `can` wins over a broader read grant", async () => {
   const can = { "team/": ["read"], "team/hr": [] } as const;
   for (let pull = 0; pull < 6 && deliveries.length < 1; pull += 1) {
     await drainMatches({
-      can,
-      client: client(),
       from,
-      name: undefined,
+      settings: { ...settings(), can },
       wait: 25,
-      watchChannel: () => DEFAULT_WATCH_CHANNEL,
     });
   }
   await drainMatches({
-    can,
-    client: client(),
     from,
-    name: undefined,
-    watchChannel: () => DEFAULT_WATCH_CHANNEL,
+    settings: { ...settings(), can },
   });
 
   assert.deepEqual(
@@ -656,5 +646,166 @@ test("with two claim watches covering a task, a reply reaches only the watch tha
   assert.deepEqual(
     deliveries.slice(1).map((entry) => [entry.address, entry.message]),
     [[`${holder}:thread:${task.thread}`, "Check the burst limit too."]],
+  );
+});
+
+const converse = { type: "converse" } as const;
+
+test("a claim watch never takes a task in a channel `can` excludes", async () => {
+  const { as } = await startBoard();
+  const can = { "work/": ["read", "post", "react", "label"], "work/secret": [] } as const;
+  await createWatch({
+    action: { queue: { channel: "work/", from: ["vercel:user:alice"] }, type: "claim" },
+    client: client(),
+    id: "w-scope1",
+    instructions: "Do the task.",
+    tail: "work/",
+    watchChannel: DEFAULT_WATCH_CHANNEL,
+  });
+  const { deliveries, from } = recorder();
+  const secret = (await as("alice", "/tasks", { channel: "work/secret", text: "Rotate the keys." }))
+    .task;
+  const open = (await as("alice", "/tasks", { channel: "work/public", text: "Fix the docs." }))
+    .task;
+  for (let pull = 0; pull < 6 && deliveries.length < 1; pull += 1) {
+    await drainMatches({ from, settings: { ...settings(), can }, wait: 25 });
+  }
+  await drainMatches({ from, settings: { ...settings(), can } });
+
+  assert.deepEqual(
+    deliveries.map((entry) => entry.address),
+    [`w-scope1:thread:${open.thread}`],
+  );
+  assert.equal((await client().thread(secret.id)).message.task?.state, "ready");
+});
+
+test("a profile with capital letters still runs its watches", async () => {
+  const { as } = await startBoard();
+  const upper = () => ({ profile: "Helper" });
+  await runTool(
+    defineBoardWatchTool(upper),
+    { instructions: "Summarize it.", tail: "incidents" },
+    { callId: "c1" },
+  );
+  const { deliveries, from } = recorder();
+  await as("alice", "/messages", { channel: "incidents", text: "Down." });
+  for (let pull = 0; pull < 6 && deliveries.length < 1; pull += 1) {
+    await drainMatches({ from, settings: upper(), wait: 25 });
+  }
+
+  assert.deepEqual(
+    deliveries.map((entry) => entry.message),
+    ["Down."],
+  );
+  const listed = await runTool(defineBoardWatchesTool(upper), { details: true }, { callId: "c2" });
+  assert.equal(listed.watches[0].instructions, "Summarize it.");
+});
+
+test("a match inside the watch channel never starts a turn", async () => {
+  const { as } = await startBoard();
+  await createWatch({
+    action: converse,
+    client: client(),
+    id: "w-every1",
+    instructions: "Read it.",
+    tail: '""',
+    watchChannel: DEFAULT_WATCH_CHANNEL,
+  });
+  const { deliveries, from } = recorder();
+  await as("alice", "/messages", { channel: DEFAULT_WATCH_CHANNEL, text: "A note about watches." });
+  await as("alice", "/messages", { channel: "dev", text: "Shipped." });
+  await wakeUntil(from, () => deliveries.length > 0);
+  await wake(from, "none");
+
+  assert.deepEqual(
+    deliveries.map((entry) => entry.message),
+    ["Shipped."],
+  );
+});
+
+test("unwatch takes only a watch ID, and a retired record shows up as a problem", async () => {
+  await startBoard();
+  assert.equal(accepts(defineBoardUnwatchTool(settings), { id: "w-aaaaaa|w-bbbbbb" }), false);
+  await assert.rejects(
+    removeWatch({ client: client(), id: "w-aaaaaa|w-bbbbbb", watchChannel: DEFAULT_WATCH_CHANNEL }),
+    /isn't a board watch ID/u,
+  );
+  await createWatch({
+    action: converse,
+    client: client(),
+    id: "w-retire",
+    instructions: "Summarize it.",
+    tail: "incidents",
+    watchChannel: DEFAULT_WATCH_CHANNEL,
+  });
+  const record = await findWatchRecord({
+    client: client(),
+    id: "w-retire",
+    self: await client().me(),
+    watchChannel: DEFAULT_WATCH_CHANNEL,
+  });
+  await client().label(record.message.id, { set: { "eve-watch-state": "retired" } });
+
+  const [listed] = await listWatches({
+    client: client(),
+    details: true,
+    watchChannel: DEFAULT_WATCH_CHANNEL,
+  });
+  assert.match(listed?.problem ?? "", /retired, so it never fires/u);
+});
+
+test("a watch the board refuses leaves its record retired, and a retry revives it", async () => {
+  await startBoard();
+  const create = (tail: string) =>
+    createWatch({
+      action: converse,
+      client: client(),
+      id: "w-retry1",
+      instructions: "Summarize it.",
+      tail,
+      watchChannel: DEFAULT_WATCH_CHANNEL,
+    });
+  const recordState = async () =>
+    (
+      await findWatchRecord({
+        client: client(),
+        id: "w-retry1",
+        self: await client().me(),
+        watchChannel: DEFAULT_WATCH_CHANNEL,
+      })
+    ).retired;
+
+  await assert.rejects(create("incidents --bogus"));
+  assert.equal(await recordState(), true);
+  await create("incidents");
+  assert.equal(await recordState(), false);
+  assert.deepEqual((await heldRegistration(client()))?.watch, {
+    "w-retry1": { tail: "incidents" },
+  });
+});
+
+test("watch instructions too long to store are refused before anything is written", async () => {
+  const { calls } = await startBoard();
+  assert.equal(
+    accepts(defineBoardWatchTool(settings), {
+      instructions: "x".repeat(BOARD_TEXT_LIMIT),
+      tail: "incidents",
+    }),
+    false,
+  );
+  await assert.rejects(
+    createWatch({
+      action: converse,
+      client: client(),
+      id: "w-long01",
+      instructions: "x".repeat(BOARD_TEXT_LIMIT),
+      tail: "incidents",
+      watchChannel: DEFAULT_WATCH_CHANNEL,
+    }),
+    /too long to store/u,
+  );
+  assert.deepEqual(
+    calls.filter((call) => call.startsWith("POST")),
+    [],
   );
 });

@@ -6,7 +6,10 @@ import { defineTool } from "eve/tools";
 import { z } from "zod";
 
 import {
+  BOARD_HOLD_KIND_PATTERN,
+  BOARD_TASK_NOTE_LIMIT,
   BOARD_TEXT_LIMIT,
+  BOARD_WATCHER_ID_PATTERN,
   BOARD_UPLOAD_LIMIT,
   createBoardClient,
   resolveBoardTarget,
@@ -505,7 +508,7 @@ export function defineBoardCompleteTaskTool(_settings: Settings) {
   return defineTool({
     description:
       "Complete the board task you hold, with the result: what you did and the proof, such as a pull request link. Call it once the brief's check passes, as your last step.",
-    inputSchema: z.object({ result: z.string().min(1).max(BOARD_TEXT_LIMIT).optional() }),
+    inputSchema: z.object({ result: z.string().min(1).max(BOARD_TASK_NOTE_LIMIT).optional() }),
     async execute({ result }, ctx) {
       return settle(ctx, "completed", { result });
     },
@@ -516,7 +519,7 @@ export function defineBoardFailTaskTool(_settings: Settings) {
   return defineTool({
     description:
       "Give up on the board task you hold, with why. Its owner can reopen it. Use it when the task can't be done as briefed.",
-    inputSchema: z.object({ reason: z.string().min(1).max(BOARD_TEXT_LIMIT) }),
+    inputSchema: z.object({ reason: z.string().min(1).max(BOARD_TASK_NOTE_LIMIT) }),
     async execute({ reason }, ctx) {
       return settle(ctx, "failed", { reason });
     },
@@ -528,11 +531,10 @@ export function defineBoardBlockTaskTool(_settings: Settings) {
     description:
       "Hold the board task you hold for a person, with the one question they must answer: ask it in the thread with your recommendation first. Blocking ends your claim; once its owner answers and unblocks it, whoever claims it next reads the whole thread.",
     inputSchema: z.object({
-      reason: z.string().min(1).max(BOARD_TEXT_LIMIT).describe("The question, in one line."),
+      reason: z.string().min(1).max(BOARD_TASK_NOTE_LIMIT).describe("The question, in one line."),
       kind: z
         .string()
-        .min(1)
-        .max(64)
+        .regex(BOARD_HOLD_KIND_PATTERN)
         .optional()
         .describe("What the hold is for, such as `needs_input` or `awaiting_approval`."),
     }),
@@ -596,7 +598,7 @@ export function defineBoardWatchTool(settings: Settings) {
       instructions: z
         .string()
         .min(1)
-        .max(BOARD_TEXT_LIMIT)
+        .max(BOARD_TEXT_LIMIT - 1_000)
         .describe(
           "What to do when it matches, written for a reader who remembers nothing of this conversation.",
         ),
@@ -631,7 +633,8 @@ export function defineBoardWatchesTool(settings: Settings) {
     inputSchema: z.object({
       details: z.boolean().optional().describe("Also read each watch's instructions and action."),
     }),
-    async execute({ details }) {
+    async execute({ details }, ctx) {
+      assertConfigurer(settings, ctx);
       const config = settings();
       return {
         watches: await listWatches({
@@ -650,7 +653,12 @@ export function defineBoardUnwatchTool(settings: Settings) {
     deferred: true,
     description:
       "Stop a board watch by its ID: it no longer wakes you, and your other watches keep running.",
-    inputSchema: z.object({ id: z.string().min(1).max(100) }),
+    inputSchema: z.object({
+      id: z
+        .string()
+        .regex(BOARD_WATCHER_ID_PATTERN)
+        .describe("The watch's ID, such as `w-7k3p2q`."),
+    }),
     async execute({ id }, ctx) {
       assertConfigurer(settings, ctx);
       const config = settings();

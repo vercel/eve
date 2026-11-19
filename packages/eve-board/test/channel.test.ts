@@ -1,0 +1,217 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+
+import type { ChannelFrom } from "eve/channels";
+import { emptySessionView, foldEvents } from "eve/events";
+
+import {
+  createBoardChannel,
+  heldClaimOf,
+  keepBoardClaim,
+  settleAfterCall,
+  type BoardChannelState,
+} from "../extension/lib/board-channel.ts";
+import { createBoardClient, resolveBoardTarget } from "../extension/lib/client.ts";
+import { createWatch, DEFAULT_WATCH_CHANNEL } from "../extension/lib/watches.ts";
+import { recorder, startBoard } from "./helpers.ts";
+
+const settings = () => ({ profile: "helper" });
+const client = () => createBoardClient(resolveBoardTarget(settings()));
+
+interface CompiledBoardChannel {
+  readonly routes: readonly {
+    readonly method: string;
+    readonly path: string;
+    handler(
+      request: Request,
+      args: {
+        from: ChannelFrom<BoardChannelState>;
+        waitUntil(promise: Promise<unknown>): void;
+      },
+    ): Promise<Response>;
+  }[];
+  receive(
+    input: { message: string; target: { channel: string; text: string } },
+    ctx: { from: ChannelFrom<BoardChannelState> },
+  ): Promise<unknown>;
+  readonly adapter: {
+    createAdapterContext(base: { state: BoardChannelState; session: unknown }): unknown;
+    deliver(payload: unknown, ctx: unknown): Promise<void>;
+    readonly instrumentation: { metadata(state: BoardChannelState): Record<string, unknown> };
+  };
+}
+
+const compiledOf = (channel: unknown) => channel as CompiledBoardChannel;
+const compiled = () => compiledOf(createBoardChannel(settings));
+
+const emptyState = (): BoardChannelState => ({
+  channel: null,
+  messageId: null,
+  task: null,
+  threadId: null,
+});
+
+function viewWithCall(callId: string, name: string) {
+  return foldEvents(emptySessionView(), [
+    {
+      data: { callId, capability: { kind: "tool", name }, owner: { kind: "turn", turnId: "t-1" } },
+      meta: { at: new Date().toISOString(), position: { index: 0, line: 1 } },
+      type: "call.requested",
+    },
+  ] as never);
+}
+
+async function claimedTask(as: (person: string, path: string, body?: unknown) => Promise<any>) {
+  const task = (await as("alice", "/tasks", { channel: "work/a", text: "Fix the limiter." })).task;
+  const claim = await client().claimReady({
+    channel: "work/",
+    from: ["vercel:user:alice"],
+    lease: 300,
+  });
+  assert.ok(claim !== null);
+  const state: BoardChannelState = {
+    channel: "work/a",
+    messageId: task.id,
+    task: heldClaimOf(claim),
+    threadId: task.id,
+  };
+  return { state, task };
+}
+
+function noteRecorder() {
+  const notes: string[] = [];
+  const board = {
+    async reply(input: { readonly text: string }) {
+      notes.push(input.text);
+      return {};
+    },
+  };
+  return { board: board as never, notes };
+}
+
+test("the wake route answers at once and drains matches in the background, one drain at a time", async () => {
+  const { as } = await startBoard();
+  await createWatch({
+    action: { type: "converse" },
+    client: client(),
+    id: "w-wake01",
+    instructions: "Summarize it.",
+    tail: "incidents",
+    watchChannel: DEFAULT_WATCH_CHANNEL,
+  });
+  const posted = (await as("alice", "/messages", { channel: "incidents", text: "Down." })).message;
+  const { deliveries, from } = recorder();
+  const wake = compiled().routes.find((route) => route.path === "/board/wake")!;
+  const request = () => new Request("https://agent.test/board/wake", { method: "POST" });
+
+  const pending: Promise<unknown>[] = [];
+  const args = { from, waitUntil: (promise: Promise<unknown>) => void pending.push(promise) };
+  const first = await wake.handler(request(), args);
+  const second = await wake.handler(request(), args);
+  assert.deepEqual(
+    [wake.method, first.status, second.status, pending.length],
+    ["POST", 202, 202, 1],
+  );
+  await Promise.all(pending);
+  for (let attempt = 0; attempt < 10 && deliveries.length === 0; attempt += 1) {
+    pending.length = 0;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await wake.handler(request(), args);
+    await Promise.all(pending);
+  }
+
+  assert.deepEqual(
+    deliveries.map((entry) => [entry.address, entry.message, entry.options.state?.watch]),
+    [[`w-wake01:thread:${posted.thread}`, "Down.", "w-wake01"]],
+  );
+});
+
+test("deliver records the turn's message and claim, and metadata never carries the claim token", async () => {
+  await startBoard();
+  const channel = compiled();
+  const state = emptyState();
+  const ctx = channel.adapter.createAdapterContext({ session: { id: "s-1" }, state });
+  const until = new Date(Date.now() + 300_000).toISOString();
+  await channel.adapter.deliver(
+    {
+      state: {
+        messageId: "m-2",
+        noSync: true,
+        task: { epoch: 1, id: "t-1", lease: 300, token: "claim-token-123", until },
+      },
+    },
+    ctx,
+  );
+
+  assert.deepEqual([state.messageId, state.noSync, state.task?.id], ["m-2", true, "t-1"]);
+  const metadata = channel.adapter.instrumentation.metadata(state);
+  assert.deepEqual(metadata.boardTask, { id: "t-1", until });
+  assert.doesNotMatch(JSON.stringify(metadata), /claim-token-123/u);
+});
+
+test("receive starts a board thread and sends the message to its session", async () => {
+  await startBoard();
+  const { deliveries, from } = recorder();
+  await compiled().receive(
+    { message: "Check the deploy.", target: { channel: "dev", text: "Deploy check" } },
+    { from },
+  );
+
+  const [summary] = await client().threads({ channel: "dev", limit: 1 });
+  assert.equal(summary?.message.text, "Deploy check");
+  assert.deepEqual(
+    deliveries.map((entry) => [entry.address, entry.message]),
+    [[`helper:thread:${summary?.message.thread}`, "Check the deploy."]],
+  );
+});
+
+test("only a settle tool's call settles the held task", async () => {
+  const { as } = await startBoard();
+  const { state, task } = await claimedTask(as);
+  const { board, notes } = noteRecorder();
+  const output = { result: "Fixed in #12.", settled: "completed", task: task.id };
+
+  await settleAfterCall(client(), { board, state }, viewWithCall("c-1", "board__post"), {
+    callId: "c-1",
+    outcome: "completed",
+    output,
+  });
+  assert.notEqual(state.task, null);
+  assert.equal((await client().thread(task.id)).message.task?.state, "claimed");
+
+  await settleAfterCall(client(), { board, state }, viewWithCall("c-2", "board__complete_task"), {
+    callId: "c-2",
+    outcome: "completed",
+    output,
+  });
+  assert.equal(state.task, null);
+  assert.equal((await client().thread(task.id)).message.task?.state, "completed");
+  assert.deepEqual(notes, []);
+});
+
+test("a settlement the board refuses drops the claim and says so in the thread", async () => {
+  const { as } = await startBoard();
+  const { state, task } = await claimedTask(as);
+  const { board, notes } = noteRecorder();
+
+  await settleAfterCall(client(), { board, state }, viewWithCall("c-1", "board__complete_task"), {
+    callId: "c-1",
+    outcome: "completed",
+    output: { result: "x".repeat(1_500), settled: "completed", task: task.id },
+  });
+
+  assert.equal(state.task, null);
+  assert.equal(notes.length, 1);
+  assert.match(notes[0]!, /The board refused to mark task/u);
+});
+
+test("a claim near the end of its lease is renewed", async () => {
+  const { as } = await startBoard();
+  const { state } = await claimedTask(as);
+  const soon = new Date(Date.now() + 10_000).toISOString();
+  state.task = { ...state.task!, until: soon };
+
+  await keepBoardClaim(client(), state);
+
+  assert.ok(state.task !== null && Date.parse(state.task.until) > Date.parse(soon));
+});

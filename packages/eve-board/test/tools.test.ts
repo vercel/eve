@@ -23,7 +23,7 @@ import {
   holdsTask,
 } from "../extension/lib/tools.ts";
 import { withHints } from "../extension/lib/client.ts";
-import { runTool, startBoard } from "./helpers.ts";
+import { accepts, runTool, startBoard } from "./helpers.ts";
 
 const settings = () => ({ profile: "helper" });
 const files = new Map([["/workspace/after.png", new Uint8Array([137, 80, 78, 71])]]);
@@ -278,4 +278,23 @@ test("board errors carry the board's hint in their message and keep their code",
       message: "The task is claimed. Claim another with `claim --ready`.",
     });
   }
+});
+
+test("the task tools accept only results, reasons, and hold kinds the board stores", () => {
+  const settings = () => ({});
+
+  assert.equal(accepts(defineBoardCompleteTaskTool(settings), { result: "x".repeat(1_000) }), true);
+  assert.equal(
+    accepts(defineBoardCompleteTaskTool(settings), { result: "x".repeat(1_001) }),
+    false,
+  );
+  assert.equal(accepts(defineBoardFailTaskTool(settings), { reason: "x".repeat(1_001) }), false);
+  assert.equal(
+    accepts(defineBoardBlockTaskTool(settings), { kind: "needs_input", reason: "Which region?" }),
+    true,
+  );
+  assert.equal(
+    accepts(defineBoardBlockTaskTool(settings), { kind: "Needs input", reason: "Which region?" }),
+    false,
+  );
 });

@@ -13,7 +13,7 @@ import {
   type TurnPolicy,
   type UploadPolicyInput,
 } from "eve/channels";
-import { call as callOf, type Interaction } from "eve/events";
+import { call as callOf, type Interaction, type SessionView } from "eve/events";
 import {
   createLogger,
   postedIn,
@@ -55,6 +55,7 @@ import {
   BoardWatchConfigError,
   checkQueueScope,
   CLAIM_LEASE_SECONDS,
+  coversChannel,
   DEFAULT_WATCH_CHANNEL,
   allows,
   findWatchRecord,
@@ -173,13 +174,8 @@ export function createBoardChannel(
     );
   };
   const deployment = () => createBoardClient(resolveBoardTarget({ ...settings(), can: undefined }));
-  const watchChannel = () => settings().watchChannel ?? DEFAULT_WATCH_CHANNEL;
 
-  const keepClaim = async (state: BoardChannelState) => {
-    const claim = state.task;
-    if (claim == null || !claimDue(claim)) return;
-    state.task = await renewClaim(deployment(), claim);
-  };
+  const keepClaim = (state: BoardChannelState) => keepBoardClaim(deployment(), state);
 
   let draining: { again: boolean } | undefined;
   const coalesced = (drain: () => Promise<number>): Promise<number> | undefined => {
@@ -238,15 +234,7 @@ export function createBoardChannel(
 
     routes: [
       POST<BoardChannelState>(BOARD_WAKE_ROUTE, async (_request, { from, waitUntil }) => {
-        const wake = coalesced(() =>
-          drainMatches({
-            can: settings().can,
-            client: deployment(),
-            from,
-            name: settings().name,
-            watchChannel,
-          }),
-        );
+        const wake = coalesced(() => drainMatches({ from, settings: settings() }));
         if (wake !== undefined) {
           waitUntil(wake.catch((error) => logError("board wake-up failed", error)));
         }
@@ -295,24 +283,7 @@ export function createBoardChannel(
         await bestEffort("typing", () => ctx.channel.board.typing(status));
       },
       async "call.settled"(event, ctx) {
-        const { state } = ctx.channel;
-        const claim = state.task;
-        const call = ctx.view === undefined ? undefined : callOf(ctx.view, event.data.callId);
-        const settlement =
-          claim != null && event.data.outcome === "completed" && call !== undefined
-            ? settlementOf(event.data.output, claim.id, call)
-            : undefined;
-        if (claim == null || settlement === undefined) {
-          await keepClaim(state);
-          return;
-        }
-        const { problem, retry } = await settleClaim(deployment(), claim, settlement);
-        if (!retry) state.task = null;
-        if (problem !== undefined)
-          await bestEffort(
-            "note",
-            async () => void (await ctx.channel.board.reply({ noSync: true, text: problem })),
-          );
+        await settleAfterCall(deployment(), ctx.channel, ctx.view, event.data);
       },
     },
   });
@@ -323,15 +294,31 @@ export function createBoardChannel(
 interface DrainInput {
   readonly can?: BoardCan;
   readonly client: BoardClient;
+  readonly claimer: BoardClient;
   readonly from: ChannelFrom<BoardChannelState>;
   readonly name: string | undefined;
-  readonly wait?: number;
   readonly watchChannel: () => string;
 }
 
-export async function drainMatches(input: DrainInput): Promise<number> {
-  const { client } = input;
-  const wait = input.wait ?? 0;
+export async function drainMatches(options: {
+  readonly settings: BoardSettings;
+  readonly from: ChannelFrom<BoardChannelState>;
+  readonly wait?: number;
+}): Promise<number> {
+  const { settings } = options;
+  const watchChannel = settings.watchChannel ?? DEFAULT_WATCH_CHANNEL;
+  const client = createBoardClient(resolveBoardTarget({ ...settings, can: undefined }));
+  const input: DrainInput = {
+    can: settings.can,
+    claimer: createBoardClient(
+      resolveBoardTarget({ ...settings, can: modelCan(settings.can, watchChannel) }),
+    ),
+    client,
+    from: options.from,
+    name: settings.name,
+    watchChannel: () => watchChannel,
+  };
+  const wait = options.wait ?? 0;
   const self = await client.me();
   const records = new Map<string, Promise<BoardWatchRecord>>();
   const recordOf = (id: string) => {
@@ -410,6 +397,7 @@ async function dispatch(
   const { client, match, record } = input;
   const message = match.event.message;
   const watch = { name: input.name, watch: record.id };
+  if (message !== undefined && coversChannel(input.watchChannel(), message.channel)) return false;
 
   if (record.action.type === "claim") {
     if (match.event.type === "message.posted") {
@@ -417,7 +405,7 @@ async function dispatch(
     }
     if (!CLAIM_EVENTS.has(match.event.type)) return false;
     const { queue } = record.action;
-    const claim = await client.claimReady({ ...queue, lease: CLAIM_LEASE_SECONDS });
+    const claim = await input.claimer.claimReady({ ...queue, lease: CLAIM_LEASE_SECONDS });
     if (claim === null) return false;
     const { task } = claim;
     if (!allows(input.can, task.channel, "read") || !allows(input.can, task.channel, "label")) {
@@ -555,7 +543,7 @@ async function sendRecovering(
   }
 }
 
-function heldClaimOf(claim: BoardClaimedTask): BoardHeldClaim {
+export function heldClaimOf(claim: BoardClaimedTask): BoardHeldClaim {
   return {
     epoch: claim.epoch,
     id: claim.taskId,
@@ -563,6 +551,11 @@ function heldClaimOf(claim: BoardClaimedTask): BoardHeldClaim {
     token: claim.token,
     until: claim.until,
   };
+}
+
+function temporaryBoardFailure(error: unknown): boolean {
+  const status = (error as { readonly status?: unknown } | null)?.status;
+  return typeof status !== "number" || status === 429 || status >= 500;
 }
 
 function boardClaimOf(claim: BoardHeldClaim): BoardClaim {
@@ -614,6 +607,39 @@ export function settlementOf(
   return settlement as BoardSettlement;
 }
 
+export async function keepBoardClaim(client: BoardClient, state: BoardChannelState): Promise<void> {
+  const claim = state.task;
+  if (claim == null || !claimDue(claim)) return;
+  state.task = await renewClaim(client, claim);
+}
+
+export async function settleAfterCall(
+  client: BoardClient,
+  channel: Pick<BoardEventContext, "board" | "state">,
+  view: SessionView | undefined,
+  call: { readonly callId: string; readonly outcome: string; readonly output?: unknown },
+): Promise<void> {
+  const { state } = channel;
+  const claim = state.task;
+  const observed = view === undefined ? undefined : callOf(view, call.callId);
+  const settlement =
+    claim != null && call.outcome === "completed" && observed !== undefined
+      ? settlementOf(call.output, claim.id, observed)
+      : undefined;
+  if (claim == null || settlement === undefined) {
+    await keepBoardClaim(client, state);
+    return;
+  }
+  const { problem, retry } = await settleClaim(client, claim, settlement);
+  if (!retry) state.task = null;
+  if (problem !== undefined) {
+    await bestEffort(
+      "note",
+      async () => void (await channel.board.reply({ noSync: true, text: problem })),
+    );
+  }
+}
+
 export async function settleClaim(
   client: BoardClient,
   claim: BoardHeldClaim,
@@ -632,7 +658,13 @@ export async function settleClaim(
         retry: false,
       };
     }
-    logError("board task settlement failed", error, { task: claim.id });
+    const id = logError("board task settlement failed", error, { task: claim.id });
+    if (!temporaryBoardFailure(error)) {
+      return {
+        problem: `The board refused to mark task #${claim.id} ${settlement.settled} (error id ${id}). Its claim lapses on its own, and the task goes back to the queue.`,
+        retry: false,
+      };
+    }
     return {
       problem: `eve couldn't mark task #${claim.id} ${settlement.settled} on the board. Call the task tool again to retry.`,
       retry: true,

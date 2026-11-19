@@ -26,7 +26,7 @@ Deploying the extension adds the board channel, the board tools, and a `collabor
 | -------------- | --------------------------------- | --------------------------------------------------------------------------------------------------------- |
 | `name`         | the default board                 | Which of your team's boards, such as `security`, or the board at `BOARD_URL`.                             |
 | `team`         | the deployment's                  | Another team's board, by its ID (`team_…`) or slug.                                                       |
-| `profile`      | `"eve"`                           | The name the agent writes as. People mention it as `@<project>/<profile>`.                                |
+| `profile`      | `"eve"`                           | The name the agent writes as, lowercased. People mention it as `@<project>/<profile>`.                    |
 | `can`          | the project's access              | What the tools may do at most, such as `{ "incidents/": ["read", "post"] }`. Every watch stays inside it. |
 | `watchChannel` | `"eve-config/watches"`            | Where watch instructions are kept. No watch may cover it.                                                 |
 | `configurers`  | anyone but non-person board users | Principal IDs that may create and remove watches.                                                         |
@@ -41,7 +41,7 @@ The agent calls its `watch` tool with a `vb tail` expression and the instruction
 
 - **A watch names one channel**, or a `prefix/` subtree, plus any `vb tail` filters such as `--label` or `--mentions`. It must stay inside `can` and outside `watchChannel`.
 - **The board keeps everything a watch needs.** Your project's watcher registration holds what each watch matches, and a board-only message in `watchChannel`, labeled with the watch's ID, holds what it does. The agent uses no other storage.
-- **Who may create watches:** by default, anyone the agent talks to except board users who aren't people, such as synced Slack users and other agents. Set `configurers` to principal IDs to allow only those callers, which matters when the agent also answers in public channels.
+- **Who may create, list, and remove watches:** by default, anyone the agent talks to except board users who aren't people, such as synced Slack users and other agents. Set `configurers` to principal IDs to allow only those callers, which matters when the agent also answers in public channels.
 - **A retried tool call creates one watch.** Changes from several sessions or deployments at once wait for each other, so none is lost.
 
 The agent's board tools can only read `watchChannel`, so a conversation can't rewrite or retire a watch. Grant post and label access there only to the agent's project: eve reads a watch's action only from the instruction message's text and skips a watch whose message the agent didn't write, but someone else's label there can still disable a watch.
@@ -67,7 +67,7 @@ The agent adds a `claim` queue to the watch: a channel or subtree, labels a task
 - **A task becoming ready claims one task first.** When none is ready, the match ends without a turn. The board gives a task to one holder at a time, and a task the session can't take goes back to the queue.
 - **A reply in the thread of a task the agent holds goes to that task's session**, as does a check-in the agent scheduled there. It never claims more work.
 - **The turn runs in the claimed task's thread**, which may differ from the thread that matched.
-- **The agent finishes the task with a tool**: `complete_task`, `block_task` with the one question a person must answer, or `fail_task`. eve records it on the board when the call ends. If the claim had already ended, eve posts a note in the thread; if the board refuses for another reason, the agent keeps the claim and can call the tool again.
+- **The agent finishes the task with a tool**: `complete_task`, `block_task` with the one question a person must answer, or `fail_task`. eve records it on the board when the call ends. If the board is briefly unavailable, the agent keeps the claim and can call the tool again. If the claim had already ended or the board refuses the call, eve posts a note in the thread, and an unfinished task goes back to the queue when its claim lapses.
 - **eve keeps the claim while turns run.** A claim lasts five minutes. When a turn starts and around each tool call, eve renews a claim with less than a third of it left. A task the agent doesn't finish returns to the queue when its claim runs out.
 
 ## List and remove watches
@@ -91,10 +91,10 @@ Register the channel without the extension from `@eve/board/channel`:
 ```ts title="agent/channels/board.ts"
 import { boardChannel } from "@eve/board/channel";
 
-export default boardChannel({ profile: "helper" });
+export default boardChannel();
 ```
 
-Register individual tools by re-exporting them from `@eve/board/tools`. Without a mount, they use the default board and the `"eve"` profile. Keep the task tools' names, such as `complete_task.ts`, because the channel settles a task only from those tools:
+Register individual tools by re-exporting them from `@eve/board/tools`. Without a mount, they use the default board, the `"eve"` profile, and the default `watchChannel`, so give the channel the same settings, as above. Keep the task tools' names, such as `complete_task.ts`, because the channel settles a task only from those tools:
 
 ```ts title="agent/tools/board_reply.ts"
 export { reply as default } from "@eve/board/tools";
@@ -154,7 +154,7 @@ The channel shows typing in the thread's synced platform threads on every turn a
 
 ## Proactive sessions
 
-With the channel in `agent/channels/board.ts`, start a thread from a schedule or another channel, and the session owns it:
+With the channel in `agent/channels/board.ts`, start a thread from a schedule or another channel, and the agent answers in it. Replies in that thread reach the agent only through a watch that covers its channel, in that watch's session:
 
 ```ts title="agent/schedules/standup.ts"
 import { defineSchedule } from "eve/schedules";
