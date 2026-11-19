@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
@@ -12,9 +12,32 @@ import { runPnpmCommand } from "../../src/internal/testing/run-pnpm-command.js";
 const scenarioApp = useScenarioApp();
 const execFileAsync = promisify(execFile);
 
+interface VercelOutputConfig {
+  readonly routes: readonly {
+    readonly dest?: string;
+    readonly handle?: string;
+    readonly src?: string;
+  }[];
+  readonly services: Record<string, unknown>;
+}
+
+async function buildForVercel(
+  appRoot: string,
+  env: Record<string, string> = {},
+): Promise<VercelOutputConfig> {
+  await runPnpmCommand({
+    args: ["exec", "vite", "build"],
+    cwd: appRoot,
+    env: { ...process.env, ...env, VERCEL: "1" },
+  });
+  return JSON.parse(
+    await readFile(join(appRoot, ".vercel", "output", "config.json"), "utf8"),
+  ) as VercelOutputConfig;
+}
+
 describe("framework-solid build", () => {
   it("builds the SSR server bundle beside eveVite(), and renders eve/solid on the server", async () => {
-    const app = await scenarioApp(createSolidEveServiceDescriptor({ nitro: false }));
+    const app = await scenarioApp(createSolidEveServiceDescriptor({ ssr: true }));
 
     await runPnpmCommand({ args: ["exec", "vite", "build"], cwd: app.appRoot });
 
@@ -35,20 +58,10 @@ process.stdout.write(await response.text());`,
   }, 300_000);
 
   it("adds the eve service and route to the Build Output nitro() writes on Vercel", async () => {
-    const app = await scenarioApp(createSolidEveServiceDescriptor({ nitro: true }));
+    const app = await scenarioApp(createSolidEveServiceDescriptor({ nitro: true, ssr: true }));
 
-    await runPnpmCommand({
-      args: ["exec", "vite", "build"],
-      cwd: app.appRoot,
-      env: { ...process.env, NITRO_PRESET: "vercel", VERCEL: "1" },
-    });
+    const config = await buildForVercel(app.appRoot, { NITRO_PRESET: "vercel" });
 
-    const config = JSON.parse(
-      await readFile(join(app.appRoot, ".vercel", "output", "config.json"), "utf8"),
-    ) as {
-      readonly routes: readonly { readonly handle?: string; readonly src?: string }[];
-      readonly services: Record<string, unknown>;
-    };
     const eveRouteIndex = config.routes.findIndex((route) => route.src === "^/eve/v1/(.*)$");
     const filesystemIndex = config.routes.findIndex((route) => route.handle === "filesystem");
 
@@ -58,6 +71,22 @@ process.stdout.write(await response.text());`,
     });
     expect(filesystemIndex).not.toBe(-1);
     expect(eveRouteIndex).toBeLessThan(filesystemIndex);
+    expect(config.services.eve).toEqual(
+      expect.objectContaining({ framework: "eve", root: ".eve/vercel-services/eve" }),
+    );
+  }, 300_000);
+
+  it("deploys a client-rendered app as a static Build Output with an SPA fallback on Vercel", async () => {
+    const app = await scenarioApp(createSolidEveServiceDescriptor({ ssr: false }));
+
+    const config = await buildForVercel(app.appRoot);
+
+    await access(join(app.appRoot, ".vercel", "output", "static", "index.html"));
+    expect(config.routes).toEqual([
+      { destination: { service: "eve", type: "service" }, src: "^/eve/v1/(.*)$" },
+      { handle: "filesystem" },
+      { dest: "/index.html", src: "/(.*)" },
+    ]);
     expect(config.services.eve).toEqual(
       expect.objectContaining({ framework: "eve", root: ".eve/vercel-services/eve" }),
     );

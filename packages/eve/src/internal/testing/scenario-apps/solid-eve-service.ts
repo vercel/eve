@@ -9,7 +9,8 @@ const SOLID_VITE_PLUGIN_VERSION = "3.0.1";
 const VITE_VERSION = "^8.3.8";
 
 interface SolidEveServiceDescriptorOptions {
-  readonly nitro: boolean;
+  readonly nitro?: boolean;
+  readonly ssr: boolean;
 }
 
 export function createSolidEveServiceDescriptor(
@@ -44,11 +45,11 @@ import { eveVite } from "eve/vite";
 ${options.nitro ? 'import { nitro } from "nitro/vite";\n' : ""}import { defineConfig } from "vite";
 
 export default defineConfig({
-  plugins: [solid({ start: true, ssr: true }), ${options.nitro ? "nitro(), " : ""}eveVite()],
+  plugins: [solid({ start: true${options.ssr ? ", ssr: true" : ""} }), ${options.nitro ? "nitro(), " : ""}eveVite()],
 });
 `,
     },
     installDependencies: true,
-    name: options.nitro ? "solid-nitro-eve-service" : "solid-eve-service",
+    name: `solid-${options.ssr ? "ssr" : "spa"}${options.nitro ? "-nitro" : ""}-eve-service`,
   };
 }
