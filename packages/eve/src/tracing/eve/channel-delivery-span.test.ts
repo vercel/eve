@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
+import { callAdapterEventHandler } from "#channel/adapter-event-handler.js";
+import type { ChannelAdapter } from "#channel/adapter.js";
 import type { ChannelAdapterContext } from "#channel/adapter.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionIdKey } from "#context/keys.js";
