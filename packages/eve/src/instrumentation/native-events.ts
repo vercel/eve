@@ -201,6 +201,7 @@ function instrumentationEventsOf(
             outcome === "failed"
               ? new Error(event.data.error?.message ?? "The session failed.")
               : undefined,
+          errorCode: outcome === "failed" ? event.data.error?.code : undefined,
           idempotencyKey: session,
           outcome,
           sessionId,
@@ -231,6 +232,7 @@ function instrumentationEventsOf(
             outcome === "failed"
               ? new Error(event.data.error?.message ?? "The turn failed.")
               : undefined,
+          errorCode: outcome === "failed" ? event.data.error?.code : undefined,
           idempotencyKey: turnIdempotencyKey(sessionId, turnId),
           outcome,
           sessionId,
@@ -245,6 +247,7 @@ function instrumentationEventsOf(
       return [
         {
           error: new Error(event.data.error.message),
+          errorCode: event.data.error.code,
           idempotencyKey: attemptIdempotencyKey(scope),
           scope,
           type: "model.retried",
@@ -256,13 +259,14 @@ function instrumentationEventsOf(
       if (scope === undefined) return [];
       const { error, outcome } = event.data;
       const idempotencyKey = attemptIdempotencyKey(scope);
-      const cancelled =
-        outcome === "interrupted" &&
-        scope.turnId !== undefined &&
-        line.view?.turns[scope.turnId]?.outcome === "cancelled";
+      const turn = scope.turnId === undefined ? undefined : line.view?.turns[scope.turnId];
+      const cancelled = outcome === "interrupted" && turn?.outcome === "cancelled";
+      const cutByFailedTurn =
+        outcome === "interrupted" && turn?.outcome === "failed" ? turn.error : undefined;
       return [
         {
           error: error === undefined ? undefined : new Error(error.message),
+          errorCode: (error ?? cutByFailedTurn)?.code,
           idempotencyKey,
           scope,
           outcome: cancelled ? "cancelled" : outcome,

@@ -158,14 +158,21 @@ export function createAgentOtelInstrumentation(
   };
 
   const onStepTerminal = async (event: InstrumentationModelTerminalEvent): Promise<void> => {
-    const failure = attemptFailed(event) ? { error: event.error } : undefined;
+    const failure = attemptFailed(event)
+      ? { error: event.error, errorCode: event.errorCode }
+      : undefined;
     await drainOpenSpans(event);
     await tools.drain(attemptIdempotencyKey(event.scope), failure);
     const attempt =
       steps.get(attemptIdempotencyKey(event.scope)) ?? (await attemptFor(event.scope));
     steps.delete(attemptIdempotencyKey(event.scope));
     if (failure !== undefined) {
-      await attempt?.fail(failure.error);
+      await attempt?.complete({
+        outcome: "failed",
+        failed: true,
+        error: failure.error,
+        errorType: failure.errorCode,
+      });
       await tools.forgetAttempt(event.scope);
     } else await attempt?.complete();
   };

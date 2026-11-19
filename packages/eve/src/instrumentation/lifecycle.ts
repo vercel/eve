@@ -319,6 +319,8 @@ export interface InstrumentationSessionEndedEvent {
   readonly outcome: InstrumentationSessionOutcome;
   /** A failed session's error. Content: absent unless this provider records outputs. */
   readonly error?: unknown;
+  /** A failure's eve error code, such as `MODEL_CALL_FAILED`. Not content: present even when outputs are not recorded. */
+  readonly errorCode?: string;
   readonly idempotencyKey: string;
   readonly sessionId: string;
   /** The turn that failed it, when one did; otherwise the session's latest turn. */
@@ -349,6 +351,8 @@ export interface InstrumentationTurnSettledEvent {
   readonly outcome: InstrumentationTurnOutcome;
   /** A failed turn's error. Content: absent unless this provider records outputs. */
   readonly error?: unknown;
+  /** A failure's eve error code, such as `MODEL_CALL_FAILED`. Not content: present even when outputs are not recorded. */
+  readonly errorCode?: string;
   readonly idempotencyKey: string;
   readonly sessionId: string;
   readonly turnId: string;
@@ -359,6 +363,8 @@ export interface InstrumentationModelRetriedEvent {
   readonly idempotencyKey: string;
   readonly scope: InstrumentationScope;
   readonly error?: unknown;
+  /** A failure's eve error code, such as `MODEL_CALL_FAILED`. Not content: present even when outputs are not recorded. */
+  readonly errorCode?: string;
 }
 
 /**
@@ -373,6 +379,8 @@ export interface InstrumentationModelSettledEvent {
   readonly idempotencyKey: string;
   readonly scope: InstrumentationScope;
   readonly error?: unknown;
+  /** A failure's eve error code, such as `MODEL_CALL_FAILED`. Not content: present even when outputs are not recorded. */
+  readonly errorCode?: string;
 }
 
 export type InstrumentationModelTerminalEvent =
