@@ -37,6 +37,9 @@ export const DESKTOP_APT_PACKAGES = [
  * desktop packages change. eve rebuilds a template only when the sandbox file
  * or its environment options change, not when an imported helper does.
  */
+/** apt packages a desktop takeover needs: pass them as `extraPackages` to `installAgentDesktop`. */
+export const TAKEOVER_APT_PACKAGES = ["x11vnc"] as const;
+
 export const AGENT_DESKTOP_REVALIDATION_KEY = `agent-desktop:1:${AGENT_DESKTOP_VERSION}:${DESKTOP_APT_PACKAGES.join(",")}`;
 
 const SESSION_BUS_FILE = `${DESKTOP_ROOT}/dbus-session-address`;

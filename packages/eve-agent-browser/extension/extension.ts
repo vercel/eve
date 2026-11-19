@@ -1,3 +1,4 @@
+import type { Takeover } from "@eve/takeover/core";
 import { defineExtension } from "eve/extension";
 import { z } from "zod";
 
@@ -35,5 +36,15 @@ export default defineExtension({
     session: z.string().optional(),
     /** Prefix for the default session name inside each sandbox. */
     sessionPrefix: z.string().default("eve"),
+    /**
+     * Shared configuration from `defineTakeover` (`@eve/takeover/core`). When set, the extension
+     * adds a `takeover` tool that hands the browser to the person to sign in, then takes it back.
+     * Mount `@eve/takeover` with the same value to serve the viewer.
+     */
+    takeover: z
+      .custom<Takeover>((value) => typeof value === "object" && value !== null && "keys" in value, {
+        message: "Pass the value defineTakeover() returns.",
+      })
+      .optional(),
   }),
 });

@@ -1,3 +1,4 @@
+import type { Takeover } from "@eve/takeover/core";
 import { defineExtension } from "eve/extension";
 import { z } from "zod";
 
@@ -23,5 +24,15 @@ export default defineExtension({
      * model sees the pixels. When off, the output carries only the sandbox path.
      */
     inlineScreenshots: z.boolean().default(true),
+    /**
+     * Shared configuration from `defineTakeover` (`@eve/takeover/core`). When set, the extension adds a
+     * `takeover` tool that hands the desktop to the person over VNC, then takes it back. Install
+     * `x11vnc` in the sandbox (`extraPackages: TAKEOVER_APT_PACKAGES`) and mount `@eve/takeover` with the same value.
+     */
+    takeover: z
+      .custom<Takeover>((value) => typeof value === "object" && value !== null && "keys" in value, {
+        message: "Pass the value defineTakeover() returns.",
+      })
+      .optional(),
   }),
 });

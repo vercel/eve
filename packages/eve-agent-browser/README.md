@@ -97,6 +97,19 @@ Names, descriptions, and input schemas come from the matching CLI's MCP catalog.
 
 Cookie, storage, and saved-auth-state commands aren't exposed because they can reveal credentials to the model. Add scoped tools with your application's guardrails if you need those capabilities.
 
+## Hand the browser to a person
+
+Pass a [`@eve/takeover`](../eve-takeover) configuration and the extension adds a `takeover` tool. The agent opens the page that needs a person, such as a sign-in, then calls it: the person who asked gets a link to the live browser, does the step, and presses Done.
+
+```ts
+import browser from "@eve/agent-browser";
+import { takeover } from "../lib/takeover"; // defineTakeover(...) from @eve/takeover/core
+
+export default browser({ takeover });
+```
+
+Mount `@eve/takeover` with the same value to serve the viewer. The browser is streamed with agent-browser's own screencast, so no extra installs are needed.
+
 ## Override tools
 
 Use a directory mount to gate or replace individual tools:

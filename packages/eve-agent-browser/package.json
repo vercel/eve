@@ -50,6 +50,7 @@
     "typecheck": "tsc"
   },
   "dependencies": {
+    "@eve/takeover": "workspace:*",
     "zod": "catalog:"
   },
   "devDependencies": {
