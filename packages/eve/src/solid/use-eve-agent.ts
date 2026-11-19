@@ -1,6 +1,6 @@
 import type { Delivery } from "#shared/delivery.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
-import { createMemo, createSignal, getOwner, onSettled, type Accessor } from "solid-js";
+import { createMemo, createSignal, getOwner, onCleanup, onSettled, type Accessor } from "solid-js";
 import type { MessageContent } from "#shared/message-content.js";
 
 import {
@@ -202,18 +202,16 @@ export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentReturn
     prepareSend: options.prepareSend,
   });
 
-  const [snapshot, setSnapshot] = createSignal(store.snapshot);
+  const [snapshot, setSnapshot] = createSignal(store.snapshot, { ownedWrite: true });
+  const unsubscribe = store.subscribe(() => setSnapshot(store.snapshot));
 
+  onCleanup(() => {
+    unsubscribe();
+    detachSessionStore(store);
+  });
   onSettled(() => {
-    const unsubscribe = store.subscribe(() => setSnapshot(store.snapshot));
-    setSnapshot(store.snapshot);
     attachSessionStore(store);
     if (options.resume) void store.resume().catch(() => {});
-
-    return () => {
-      unsubscribe();
-      detachSessionStore(store);
-    };
   });
 
   return {

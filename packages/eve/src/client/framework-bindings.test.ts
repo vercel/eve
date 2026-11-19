@@ -25,10 +25,21 @@ import { useEveAgent as useSolidAgent } from "#solid/use-eve-agent.js";
 import { useEveAgent as useSvelteAgent } from "#svelte/use-eve-agent.js";
 import { useEveAgent as useVueAgent } from "#vue/use-eve-agent.js";
 
-const SOLID_SERVER_BUILD = join(
+const SOLID_DIST = join(
   dirname(createRequire(import.meta.url).resolve("solid-js/package.json")),
-  "dist/server.js",
+  "dist",
 );
+
+async function loadSolidBuild(file: "server.js" | "server.dev.js" | "solid.js" | "solid.dev.js") {
+  vi.resetModules();
+  vi.doMock("solid-js", () => import(join(SOLID_DIST, file)));
+  const solid = await import("solid-js");
+  const { useEveAgent } = await import("#solid/use-eve-agent.js");
+  vi.doUnmock("solid-js");
+  expect("createDeepProxy" in solid).toBe(file.startsWith("server"));
+  expect(solid.DEV !== undefined).toBe(file.endsWith(".dev.js"));
+  return { solid, useEveAgent };
+}
 const mounts: Array<() => void> = [];
 vi.mock("svelte", () => ({
   onMount: (callback: () => () => void) => void mounts.push(callback()),
@@ -356,34 +367,70 @@ describe("the Solid binding", () => {
     dispose();
   });
 
+  it.each(["send", "resume"] as const)(
+    "stops reading the session when disposed before settling, after %s()",
+    async (method) => {
+      const server = agent();
+      const dispose = createRoot((dispose) => {
+        const binding = useSolidAgent({
+          baseUrl: "https://eve.test",
+          initialSession: { sessionId: "session_1", streamIndex: 0 },
+        });
+        void (method === "send" ? binding.send("Weather?") : binding.resume()).catch(() => {});
+        return dispose;
+      });
+      dispose();
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(server.reading).toBe(0);
+    },
+  );
+
   it("throws a precise error without a reactive owner", () => {
     expect(() => useSolidAgent()).toThrow(
       "useEveAgent() must run inside a component or createRoot(). To share one conversation, create it inside createRoot() or a context provider.",
     );
   });
 
-  it("claims the same hydration ids when server-rendered as in the browser", async () => {
-    async function nextIdAfterBinding(build: "server" | "browser") {
-      vi.resetModules();
-      if (build === "server") vi.doMock("solid-js", () => import(SOLID_SERVER_BUILD));
-      else vi.stubGlobal("window", {});
-      const solid = await import("solid-js");
-      expect("createDeepProxy" in solid).toBe(build === "server");
-      const { useEveAgent } = await import("#solid/use-eve-agent.js");
-      vi.doUnmock("solid-js");
-      const id = solid.createRoot(
-        (dispose) => {
-          useEveAgent({ baseUrl: "https://eve.test" });
-          const id = solid.getNextChildId(solid.getOwner()!);
-          dispose();
-          return id;
-        },
-        { id: "app" },
+  it("claims the same hydration ids in Solid's server and browser builds, dev and production", async () => {
+    const ids: string[] = [];
+    for (const file of ["server.js", "server.dev.js", "solid.js", "solid.dev.js"] as const) {
+      const { solid, useEveAgent } = await loadSolidBuild(file);
+      if (!file.startsWith("server")) vi.stubGlobal("window", {});
+      ids.push(
+        solid.createRoot(
+          (dispose) => {
+            useEveAgent({ baseUrl: "https://eve.test" });
+            const id = solid.getNextChildId(solid.getOwner()!);
+            dispose();
+            return id;
+          },
+          { id: "app" },
+        ),
       );
       vi.unstubAllGlobals();
-      return id;
     }
 
-    expect(await nextIdAfterBinding("server")).toBe(await nextIdAfterBinding("browser"));
+    expect(ids).toEqual(ids.map(() => ids[0]));
+  });
+
+  it("accepts a send from another owned scope after settling, in Solid's dev build", async () => {
+    agent();
+    const { solid, useEveAgent } = await loadSolidBuild("solid.dev.js");
+    const { binding, dispose } = solid.createRoot((dispose) => ({
+      binding: useEveAgent({ baseUrl: "https://eve.test" }),
+      dispose,
+    }));
+    solid.flush();
+
+    const sent = solid.createRoot((disposeChild) => {
+      const sent = binding.send("Weather?");
+      disposeChild();
+      return sent;
+    });
+
+    await expect(sent).resolves.toMatchObject({ deliveryId: "d_0" });
+    expect(binding.messages().map((message) => message.role)).toEqual(["user"]);
+    dispose();
   });
 });
