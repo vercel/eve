@@ -349,16 +349,71 @@ describe("createEveVitePlugin", () => {
       await writeFile(join(projectRoot, ".vercel", "project.json"), "{}");
       await writeFile(
         join(projectRoot, "vercel.json"),
-        JSON.stringify({ cleanUrls: true, rewrites: [{ source: "/a", destination: "/b" }] }),
+        JSON.stringify({
+          cleanUrls: true,
+          headers: [{ source: "/(.*)", headers: [{ key: "X-Frame-Options", value: "DENY" }] }],
+          rewrites: [{ source: "/a", destination: "/b" }],
+        }),
       );
       await writeClientBuild(appRoot, { "index.html": "<!doctype html>\n" });
 
       await expect(buildForVercel(appRoot)).rejects.toThrow(
-        `${join(projectRoot, "vercel.json")} defines rewrites, cleanUrls`,
+        `${join(projectRoot, "vercel.json")} defines rewrites, cleanUrls, which`,
       );
       expect(existsSync(join(appRoot, ".vercel", "output"))).toBe(false);
     },
   );
+
+  it("applies vercel.json headers ahead of the eve, filesystem, and SPA fallback routes", async () => {
+    const root = await createAgentProject();
+    await writeFile(
+      join(root, "vercel.json"),
+      JSON.stringify({
+        headers: [
+          {
+            source: "/(.*)",
+            headers: [
+              { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+              { key: "Cross-Origin-Embedder-Policy", value: "require-corp" },
+            ],
+          },
+        ],
+      }),
+    );
+    await writeClientBuild(root, { "index.html": "<!doctype html>\n" });
+
+    await buildForVercel(root, { base: "/app/" });
+
+    const routes = (await readOutputRoutes(root)) as { handle?: string; src?: string }[];
+    expect(routes[0]).toEqual({
+      continue: true,
+      headers: {
+        "Cross-Origin-Embedder-Policy": "require-corp",
+        "Cross-Origin-Opener-Policy": "same-origin",
+      },
+      src: "^(?:/(.*))$",
+    });
+    expect(routes.map((route) => route.handle ?? route.src)).toEqual([
+      "^(?:/(.*))$",
+      "^/eve/v1/(.*)$",
+      "filesystem",
+      "/app/(.*)",
+    ]);
+  });
+
+  it("names vercel.json when its headers cannot become Build Output routes", async () => {
+    const root = await createAgentProject();
+    await writeFile(
+      join(root, "vercel.json"),
+      JSON.stringify({ headers: [{ source: "/((", headers: [{ key: "X-A", value: "b" }] }] }),
+    );
+    await writeClientBuild(root, { "index.html": "<!doctype html>\n" });
+
+    await expect(buildForVercel(root)).rejects.toThrow(
+      `cannot convert the headers in ${join(root, "vercel.json")} to Vercel Build Output routes`,
+    );
+    expect(existsSync(join(root, ".vercel", "output"))).toBe(false);
+  });
 
   it("merges the generated eve service into the user's Nitro Vercel config", async () => {
     vi.stubEnv("VERCEL", "1");

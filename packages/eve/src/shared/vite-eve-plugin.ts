@@ -4,8 +4,10 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import type { Plugin, PluginOption, ProxyOptions, UserConfig, ViteBuilder } from "vite";
 
+import routingUtils, { type Header } from "#compiled/@vercel/routing-utils/index.js";
 import {
   parseVercelServicesConfig,
+  type VercelRouteConfig,
   type VercelServicesConfig,
 } from "#internal/vercel/vercel-services-config.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
@@ -22,10 +24,9 @@ import { resolveDevServerTimeout, type EveFrameworkHost } from "#shared/framewor
 import { readOptionalFile } from "#shared/read-optional-file.js";
 
 const spawnedDevServers = new Map<string, ChildProcess>();
-const VERCEL_JSON_ROUTING_FIELDS = [
+const VERCEL_JSON_UNSUPPORTED_ROUTING_FIELDS = [
   "rewrites",
   "redirects",
-  "headers",
   "routes",
   "cleanUrls",
   "trailingSlash",
@@ -113,6 +114,22 @@ export function createEveVitePlugin(input: {
     );
   }
 
+  function convertVercelJsonHeaders(project: VercelProjectConfig): readonly VercelRouteConfig[] {
+    const headers = project.vercelJson.headers;
+    if (headers === undefined) {
+      return [];
+    }
+    const { error, routes } = Array.isArray(headers)
+      ? routingUtils.getTransformedRoutes({ headers: headers as Header[] })
+      : { error: { message: "headers must be an array." }, routes: null };
+    if (error !== null) {
+      throw new Error(
+        `The eve ${host.label} plugin cannot convert the headers in ${project.vercelJsonPath} to Vercel Build Output routes: ${error.message} Fix headers in ${project.vercelJsonPath}.`,
+      );
+    }
+    return routes ?? [];
+  }
+
   async function writeStaticVercelOutput(
     builder: ViteBuilder,
     project: VercelProjectConfig,
@@ -139,7 +156,7 @@ export function createEveVitePlugin(input: {
         `The eve ${host.label} plugin cannot write a static Vercel Build Output because ${project.vercelTsPath} configures the project, and Vercel does not apply its routing to a Build Output. Compose eve in vercel.ts with withEve from "eve/vercel", or use a framework or adapter that writes .vercel/output during vite build.`,
       );
     }
-    const routingFields = VERCEL_JSON_ROUTING_FIELDS.filter(
+    const routingFields = VERCEL_JSON_UNSUPPORTED_ROUTING_FIELDS.filter(
       (field) => project.vercelJson[field] !== undefined,
     );
     if (routingFields.length > 0) {
@@ -147,6 +164,7 @@ export function createEveVitePlugin(input: {
         `The eve ${host.label} plugin cannot write a static Vercel Build Output because ${project.vercelJsonPath} defines ${routingFields.join(", ")}, which Vercel does not apply to a Build Output. Move that configuration to vercel.ts and compose eve there with withEve from "eve/vercel", or use a framework or adapter that writes .vercel/output during vite build.`,
       );
     }
+    const headerRoutes = convertVercelJsonHeaders(project);
     const base = builder.config.base.startsWith("/") ? builder.config.base : "/";
     const outputRoot = join(viteRoot, ".vercel", "output");
     const staticRoot = join(outputRoot, "static");
@@ -162,6 +180,7 @@ export function createEveVitePlugin(input: {
     }
     return {
       routes: [
+        ...headerRoutes,
         { handle: "filesystem" },
         ...(builder.config.appType === "spa"
           ? [{ src: `${base}(.*)`, dest: `${base}index.html` }]
