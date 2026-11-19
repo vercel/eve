@@ -164,7 +164,12 @@ function startChannels(
     const hook = getChannelStartHook(definition);
     if (hook === undefined) continue;
     try {
-      hook(ctx);
+      const started: unknown = hook(ctx);
+      if (started instanceof Promise) {
+        started.catch((error: unknown) =>
+          logError(log, "channel start hook failed", error, { channel: channel.name }),
+        );
+      }
     } catch (error) {
       logError(log, "channel start hook threw", error, { channel: channel.name });
     }

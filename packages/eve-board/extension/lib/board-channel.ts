@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import {
   defineChannel,
@@ -29,6 +29,7 @@ import {
   boardErrorCode,
   createBoardClient,
   resolveBoardTarget,
+  type BoardCan,
   type BoardClaim,
   type BoardClaimedTask,
   type BoardClient,
@@ -52,6 +53,7 @@ import {
 import {
   BOARD_WAKE_ROUTE,
   BoardWatchConfigError,
+  checkQueueScope,
   CLAIM_LEASE_SECONDS,
   DEFAULT_WATCH_CHANNEL,
   findWatchRecord,
@@ -68,7 +70,7 @@ const MATCHES_PER_PULL = 10;
 const POLL_WAIT_SECONDS = 25;
 const MIN_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
-const SETTLEMENTS = new Set(["completed", "failed", "blocked", "released"]);
+const SETTLEMENTS = new Set(["completed", "failed", "blocked"]);
 
 /** JSON-serializable state for one board thread's session. */
 export interface BoardChannelState extends PromptQueueState {
@@ -153,12 +155,13 @@ export function createBoardChannel(
   options: Pick<BoardChannelConfig, "turnPolicy" | "uploadPolicy"> = {},
 ): BoardChannel {
   const client = () => createBoardClient(resolveBoardTarget(settings()));
+  const deployment = () => createBoardClient(resolveBoardTarget({ ...settings(), can: undefined }));
   const watchChannel = () => settings().watchChannel ?? DEFAULT_WATCH_CHANNEL;
 
   const keepClaim = async (state: BoardChannelState) => {
     const claim = state.task;
     if (claim == null || !claimDue(claim)) return;
-    state.task = await renewClaim(client(), claim);
+    state.task = await renewClaim(deployment(), claim);
   };
 
   let draining: { again: boolean } | undefined;
@@ -204,7 +207,7 @@ export function createBoardChannel(
     metadata(state) {
       return {
         boardChannel: state.channel,
-        boardTask: state.task ?? null,
+        boardTask: state.task == null ? null : { id: state.task.id, until: state.task.until },
         boardThread: state.threadId,
         boardWatch: state.watch ?? null,
       };
@@ -218,9 +221,17 @@ export function createBoardChannel(
     routes: [
       POST<BoardChannelState>(BOARD_WAKE_ROUTE, async (request, { from, waitUntil }) => {
         const poll =
-          hostedEnvironment() === undefined && request.headers.get(BOARD_POLL_HEADER) === "1";
+          hostedEnvironment() === undefined &&
+          request.headers.get(BOARD_POLL_HEADER) === pollSecret();
         const drain = () =>
-          drainMatches({ client: client(), from, name: settings().name, poll, watchChannel });
+          drainMatches({
+            can: settings().can,
+            client: deployment(),
+            from,
+            name: settings().name,
+            poll,
+            watchChannel,
+          });
         if (!poll) {
           const wake = coalesced(drain);
           if (wake !== undefined) {
@@ -280,15 +291,22 @@ export function createBoardChannel(
       },
       async "call.settled"(event, ctx) {
         const { state } = ctx.channel;
-        if (
-          state.task != null &&
-          event.data.outcome === "completed" &&
-          settledTask(event.data.output) === state.task.id
-        ) {
-          state.task = null;
-        } else {
+        const claim = state.task;
+        const settlement =
+          claim != null && event.data.outcome === "completed"
+            ? settlementOf(event.data.output, claim.id)
+            : undefined;
+        if (claim == null || settlement === undefined) {
           await keepClaim(state);
+          return;
         }
+        state.task = null;
+        const problem = await settleClaim(deployment(), claim, settlement);
+        if (problem !== undefined)
+          await bestEffort(
+            "note",
+            async () => void (await ctx.channel.board.reply({ noSync: true, text: problem })),
+          );
       },
     },
   });
@@ -309,6 +327,7 @@ export function createBoardChannel(
 }
 
 interface DrainInput {
+  readonly can?: BoardCan;
   readonly client: BoardClient;
   readonly from: ChannelFrom<BoardChannelState>;
   readonly name: string | undefined;
@@ -353,20 +372,34 @@ async function handleMatch(
   const { client, match } = input;
   try {
     const record = await input.recordOf(match.watcher);
-    const dispatched = record.retired ? false : await dispatch({ ...input, record });
+    if (record.retired) {
+      await client.ack(match, { skip: true });
+      return false;
+    }
+    if (record.action.type === "claim") {
+      try {
+        checkQueueScope(record.action.queue, {
+          can: input.can,
+          watchChannel: input.watchChannel(),
+        });
+      } catch (error) {
+        throw new BoardWatchConfigError(
+          `Board watch ${record.id} claims outside this agent's scope: ${(error as Error).message}`,
+        );
+      }
+    }
+    const dispatched = await dispatch({ ...input, record });
     await client.ack(match);
     return dispatched;
   } catch (error) {
-    const errorId =
+    const outcome =
       error instanceof BoardWatchConfigError
-        ? (log.warn(error.message, { match: match.id }), undefined)
-        : logError("board match failed", error, { match: match.id });
-    const reason =
-      error instanceof BoardWatchConfigError
-        ? error.message
-        : `eve couldn't dispatch this match (error id ${errorId})`;
+        ? (log.warn(error.message, { match: match.id }), { skip: true })
+        : {
+            error: `eve couldn't dispatch this match (error id ${logError("board match failed", error, { match: match.id })})`,
+          };
     await client
-      .ack(match, { error: reason })
+      .ack(match, outcome)
       .catch((ackError) => logError("board ack failed", ackError, { match: match.id }));
     return false;
   }
@@ -389,22 +422,32 @@ async function dispatch(
     const claim = await client.claimReady({ ...queue, lease: CLAIM_LEASE_SECONDS });
     if (claim === null) return false;
     const { task } = claim;
-    await sendRecovering(
-      input.from(boardSessionAddress(record.id, task)),
-      boardMessageContent(task),
-      {
-        auth: defaultBoardAuth(task, watch),
-        context: [formatWatchContext(record), formatTaskContext(claim)],
-        idempotencyKey: `board:task:${claim.taskId}:${claim.epoch}`,
-        state: {
-          channel: task.channel,
-          messageId: task.id,
-          task: heldClaimOf(claim),
-          threadId: task.id,
-          watch: record.id,
+    try {
+      await sendRecovering(
+        input.from(boardSessionAddress(record.id, task)),
+        boardMessageContent(task),
+        {
+          auth: defaultBoardAuth(task, watch),
+          context: [formatWatchContext(record), formatTaskContext(claim)],
+          idempotencyKey: `board:task:${claim.taskId}:${claim.epoch}`,
+          state: {
+            channel: task.channel,
+            messageId: task.id,
+            task: heldClaimOf(claim),
+            threadId: task.id,
+            watch: record.id,
+          },
         },
-      },
-    );
+      );
+    } catch (error) {
+      await client
+        .held(claim)
+        .release()
+        .catch((releaseError) =>
+          logError("board task release failed", releaseError, { task: claim.taskId }),
+        );
+      throw error;
+    }
     return true;
   }
 
@@ -494,12 +537,39 @@ async function renewClaim(
   }
 }
 
-function settledTask(output: unknown): string | undefined {
+export interface BoardSettlement {
+  readonly settled: "completed" | "failed" | "blocked";
+  readonly task: string;
+  readonly result?: string;
+  readonly reason?: string;
+  readonly kind?: string;
+}
+
+function settlementOf(output: unknown, taskId: string): BoardSettlement | undefined {
   if (typeof output !== "object" || output === null) return undefined;
-  const { settled, task } = output as { readonly settled?: unknown; readonly task?: unknown };
-  return typeof settled === "string" && SETTLEMENTS.has(settled) && typeof task === "string"
-    ? task
-    : undefined;
+  const settlement = output as Partial<BoardSettlement>;
+  if (settlement.task !== taskId || !SETTLEMENTS.has(settlement.settled ?? "")) return undefined;
+  return settlement as BoardSettlement;
+}
+
+export async function settleClaim(
+  client: BoardClient,
+  claim: BoardHeldClaim,
+  settlement: BoardSettlement,
+): Promise<string | undefined> {
+  const held = client.held(boardClaimOf(claim));
+  try {
+    if (settlement.settled === "completed") await held.complete(settlement.result);
+    else if (settlement.settled === "failed") await held.fail(settlement.reason ?? "Failed.");
+    else await held.block(settlement.reason ?? "Needs a person.", { kind: settlement.kind });
+    return undefined;
+  } catch (error) {
+    if (boardErrorCode(error) === "claim_lost") {
+      return `eve couldn't mark task #${claim.id} ${settlement.settled}: its claim ended before the agent settled it.`;
+    }
+    logError("board task settlement failed", error, { task: claim.id });
+    return `eve couldn't mark task #${claim.id} ${settlement.settled}. Try again, or settle it by hand.`;
+  }
 }
 
 function threadHandle(
@@ -588,7 +658,15 @@ function localOrigin(request: Request): string | undefined {
 }
 
 const POLLERS = Symbol.for("eve.board.pollers");
-type PollerGlobal = typeof globalThis & { [POLLERS]?: Map<string, AbortController> };
+const POLL_SECRET = Symbol.for("eve.board.pollSecret");
+type PollerGlobal = typeof globalThis & {
+  [POLLERS]?: Map<string, AbortController>;
+  [POLL_SECRET]?: string;
+};
+
+function pollSecret(): string {
+  return ((globalThis as PollerGlobal)[POLL_SECRET] ??= randomUUID());
+}
 
 function startLocalPoller(wakeUrl: string, settings: BoardSettings): void {
   const pollers = ((globalThis as PollerGlobal)[POLLERS] ??= new Map());
@@ -605,7 +683,7 @@ async function pollLoop(wakeUrl: string, signal: AbortSignal): Promise<void> {
     const startedAt = Date.now();
     try {
       const response = await fetch(wakeUrl, {
-        headers: { [BOARD_POLL_HEADER]: "1" },
+        headers: { [BOARD_POLL_HEADER]: pollSecret() },
         method: "POST",
         signal,
       });

@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Let channel packages run a start hook on the first request a deployment serves, through `eve/internal/channels`.
+Let channel packages run a start hook on the first channel request a deployment serves, through `eve/internal/channels`.

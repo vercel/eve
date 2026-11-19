@@ -18,8 +18,6 @@ export const BOARD_WAKE_ROUTE = `${BOARD_ROUTE_BASE}/wake`;
 export const MAX_WATCHES = 32;
 
 const WATCH_LABEL = "eve-watch";
-const ACTION_LABEL = "eve-watch-action";
-const QUEUE_LABEL = "eve-watch-queue";
 const STATE_LABEL = "eve-watch-state";
 const LOCK_LABEL = "eve-lock";
 const LOCK_LEASE_SECONDS = 30;
@@ -76,8 +74,18 @@ export function hostedEnvironment(env: Env = process.env): "production" | "previ
   return target === "production" || target === "preview" ? target : undefined;
 }
 
+const TAIL_FLAGS: Readonly<Record<string, "string" | "strings" | "boolean">> = {
+  all: "boolean",
+  by: "string",
+  label: "strings",
+  mentions: "string",
+  re: "string",
+  source: "string",
+  text: "string",
+};
+
 export function tailChannel(tail: string): string | undefined {
-  const args = words(tail);
+  const args = withMentions(words(tail));
   const positionals: string[] = [];
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i]!;
@@ -89,13 +97,20 @@ export function tailChannel(tail: string): string | undefined {
       positionals.push(arg);
       continue;
     }
-    if (arg.includes("=")) continue;
-    if (arg === "--mentions") {
-      const next = args[i + 1];
-      if (next !== undefined && !next.startsWith("-") && (next === "me" || next.includes("@"))) {
-        i += 1;
-      }
+    const eq = arg.indexOf("=");
+    const name = arg.startsWith("--") ? arg.slice(2, eq === -1 ? undefined : eq) : null;
+    const type = name === null ? undefined : TAIL_FLAGS[name];
+    if (type === undefined) {
+      throw new Error(`${name === null ? arg.slice(0, 2) : `--${name}`} isn't a tail filter.`);
+    }
+    if (type === "boolean") {
+      if (eq !== -1) throw new Error(`--${name} takes no value.`);
       continue;
+    }
+    if (eq !== -1) continue;
+    const next = args[i + 1];
+    if (next === undefined || (next.length > 1 && next.startsWith("-"))) {
+      throw new Error(`--${name} needs a value.`);
     }
     i += 1;
   }
@@ -103,6 +118,24 @@ export function tailChannel(tail: string): string | undefined {
     throw new Error(`A watch's tail names one channel; this one names ${positionals.join(", ")}.`);
   }
   return positionals[0];
+}
+
+function withMentions(args: readonly string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i]!;
+    if (arg === "--") {
+      out.push(...args.slice(i));
+      break;
+    }
+    const next = args[i + 1];
+    if (arg !== "--mentions") out.push(arg);
+    else if (next !== undefined && !next.startsWith("-") && (next === "me" || next.includes("@"))) {
+      out.push(`--mentions=${next}`);
+      i += 1;
+    } else out.push("--mentions=me");
+  }
+  return out;
 }
 
 function words(expression: string): string[] {
@@ -122,8 +155,11 @@ function words(expression: string): string[] {
     } else if (char === '"' || char === "'") {
       quote = char;
       word ??= "";
+    } else if (char === "\\" && i + 1 < expression.length) {
+      word = `${word ?? ""}${expression[++i]!}`;
     } else word = `${word ?? ""}${char}`;
   }
+  if (quote !== null) throw new Error(`The tail has an unterminated ${quote}.`);
   if (word !== null) out.push(word);
   return out;
 }
@@ -175,15 +211,20 @@ export function checkWatchScope(input: {
   if (!allows(input.can, channel, "read")) {
     throw new Error(`This agent may not read "${channel}" on the board, so it can't watch it.`);
   }
-  if (input.action.type !== "claim") return;
-  const queue = input.action.queue.channel;
-  if (overlaps(queue, input.watchChannel)) {
+  if (input.action.type === "claim") checkQueueScope(input.action.queue, input);
+}
+
+export function checkQueueScope(
+  queue: BoardQueue,
+  input: { readonly can?: BoardCan; readonly watchChannel: string },
+): void {
+  if (overlaps(queue.channel, input.watchChannel)) {
     throw new Error(`A watch can't claim tasks in "${input.watchChannel}".`);
   }
-  if (!allows(input.can, queue, "label")) {
-    throw new Error(`This agent may not claim tasks in "${queue}" on the board.`);
+  if (!allows(input.can, queue.channel, "label")) {
+    throw new Error(`This agent may not claim tasks in "${queue.channel}" on the board.`);
   }
-  for (const owner of input.action.queue.from ?? []) {
+  for (const owner of queue.from ?? []) {
     if (owner.includes("+") || !owner.includes(":")) {
       throw new Error(
         `"${owner}" isn't a principal ID: name a task owner such as "vercel:project:prj_abc:production", the part of an actor ID before "+".`,
@@ -192,19 +233,37 @@ export function checkWatchScope(input: {
   }
 }
 
-function actionOf(id: string, labels: Readonly<Record<string, string>>): BoardWatchAction {
-  const type = labels[ACTION_LABEL] ?? "converse";
-  if (type === "converse") return { type };
-  if (type !== "claim") {
-    throw new BoardWatchConfigError(`Board watch ${id} has an unknown action "${type}".`);
-  }
+const HEADER = /\n*```eve-watch\n([^\n]*)\n```\s*$/u;
+
+export function watchRecordText(
+  id: string,
+  action: BoardWatchAction,
+  instructions: string,
+): string {
+  return `${instructions.trim()}\n\n\`\`\`eve-watch\n${JSON.stringify({ action, id })}\n\`\`\``;
+}
+
+function parseRecord(id: string, text: string) {
+  const header = HEADER.exec(text);
+  let parsed: { readonly id?: unknown; readonly action?: BoardWatchAction } | undefined;
   try {
-    const queue = JSON.parse(labels[QUEUE_LABEL] ?? "") as BoardQueue;
-    if (typeof queue.channel !== "string" || queue.channel.length === 0) throw new Error();
-    return { queue, type };
+    parsed = header === null ? undefined : JSON.parse(header[1]!);
   } catch {
-    throw new BoardWatchConfigError(`Board watch ${id} claims tasks but its queue is unreadable.`);
+    parsed = undefined;
   }
+  if (parsed?.id !== id) {
+    throw new BoardWatchConfigError(`Board watch ${id}'s instruction record doesn't name it.`);
+  }
+  const action = parsed.action;
+  const valid =
+    action?.type === "converse" ||
+    (action?.type === "claim" &&
+      typeof action.queue?.channel === "string" &&
+      action.queue.channel.length > 0);
+  if (!valid) {
+    throw new BoardWatchConfigError(`Board watch ${id}'s instruction record has no valid action.`);
+  }
+  return { action: action!, instructions: text.slice(0, header!.index).trim() };
 }
 
 async function recordMessages(
@@ -244,10 +303,11 @@ export async function findWatchRecord(input: {
       `Board watch ${id}'s instructions were written by ${message.by.actor}, not by this agent.`,
     );
   }
+  const { action, instructions } = parseRecord(id, message.text);
   return {
-    action: actionOf(id, message.labels),
+    action,
     id,
-    instructions: message.text,
+    instructions,
     message,
     retired: message.labels[STATE_LABEL] === "retired",
   };
@@ -319,12 +379,26 @@ async function withRegistrationLock<T>(
 }
 
 async function lockTask(client: BoardClient, watchChannel: string): Promise<string> {
-  const found = await client.threads({
-    channel: watchChannel,
-    label: [`${LOCK_LABEL}=registration`],
-    limit: 1,
-  });
-  if (found[0] !== undefined) return found[0].message.id;
+  const self = await client.me();
+  const found = (
+    await client.threads({
+      channel: watchChannel,
+      label: [`${LOCK_LABEL}=registration`],
+      limit: 20,
+    })
+  )
+    .map((summary) => summary.message)
+    .filter((message) => message.by.principal === self.principal && !message.deleted);
+  const lock = found.find((message) => message.by.profile === client.profile);
+  if (lock !== undefined) {
+    const state = lock.task?.state;
+    if (state !== "ready" && state !== "claimed") {
+      throw new Error(
+        `The board task that serializes this agent's watch changes, #${lock.id} in "${watchChannel}", is ${state ?? "not a task"}. Reopen it so watches can change again.`,
+      );
+    }
+    return lock.id;
+  }
   const created = await client.createTask(watchChannel, {
     id: "eve-watch-lock",
     labels: { [LOCK_LABEL]: "registration" },
@@ -387,15 +461,15 @@ export async function createWatch(input: {
   readonly env?: Env;
 }): Promise<BoardWatch> {
   const { action, client, id, tail } = input;
+  const held = await heldRegistration(client);
+  if (held?.watch[id] === undefined && Object.keys(held?.watch ?? {}).length >= MAX_WATCHES) {
+    throw tooManyWatches();
+  }
   await client.post(input.watchChannel, {
     id: `eve-watch-${id}`,
-    labels: {
-      [ACTION_LABEL]: action.type,
-      [WATCH_LABEL]: id,
-      ...(action.type === "claim" && { [QUEUE_LABEL]: JSON.stringify(action.queue) }),
-    },
+    labels: { [WATCH_LABEL]: id },
     noSync: true,
-    text: input.instructions,
+    text: watchRecordText(id, action, input.instructions),
   });
   await updateRegistration({
     client,
@@ -403,15 +477,19 @@ export async function createWatch(input: {
     watchChannel: input.watchChannel,
     change(watch) {
       if (watch[id] === undefined && Object.keys(watch).length >= MAX_WATCHES) {
-        throw new Error(
-          `This agent already has ${MAX_WATCHES} board watches, the most one deployment can register. Remove one first.`,
-        );
+        throw tooManyWatches();
       }
       watch[id] = { tail };
       return true;
     },
   });
   return { action, id, instructions: input.instructions, tail };
+}
+
+function tooManyWatches(): Error {
+  return new Error(
+    `This agent already has ${MAX_WATCHES} board watches, the most one deployment can register. Remove one first.`,
+  );
 }
 
 export async function listWatches(input: {

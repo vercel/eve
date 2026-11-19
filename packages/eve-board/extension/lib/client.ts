@@ -223,7 +223,10 @@ export interface BoardClient {
     readonly limit?: number;
     readonly wait?: number;
   }): Promise<readonly BoardMatch[]>;
-  ack(match: BoardMatch, outcome?: { readonly error?: string }): Promise<void>;
+  ack(
+    match: BoardMatch,
+    outcome?: { readonly error?: string; readonly skip?: boolean },
+  ): Promise<void>;
   post(channel: string, options: BoardPostOptions): Promise<BoardWrittenMessage>;
   reply(id: string, options: BoardPostOptions): Promise<BoardWrittenMessage>;
   upload(file: {
@@ -407,6 +410,7 @@ export function createBoardClient(target: BoardTarget): BoardClient {
       await handle.ack(match.id, {
         lease: match.lease,
         ...(outcome.error !== undefined && { error: outcome.error.slice(0, 500) }),
+        ...(outcome.skip === true && { skip: true }),
       });
     },
     post: async (channel, post) => writtenOf(await handle.post(channel, postOf(post))),

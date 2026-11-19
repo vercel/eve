@@ -20,7 +20,12 @@ OIDC credentials. `@eve/board` is a published package: its default export is the
   registration. A user tells the agent what to watch and what to do, and the agent calls `watch`.
 - **Board is the only store.** A watch is a watcher ID shared by two records: the registration holds
   what it matches, and a `noSync` root in `eve-config/watches`, labeled `eve-watch=<id>`, holds what
-  it does. The record also says whether the watch claims tasks, and from which queue.
+  it does. The record's text ends in an `eve-watch` header naming the watch and its action (converse,
+  or claim from a queue); the label is only a lookup index, because anyone with label access can
+  change labels but only the author can change text.
+- **`can` bounds the model, not the bookkeeping.** The board refuses registration, matches, and acks
+  to a handle narrowed with `can`, so eve's own registration, records, lock, pulls, and claim
+  settlement use the deployment's handle, and the watch tools enforce `can` on every tail and queue.
 - **One generic wake route.** `POST /board/wake` pulls matches, reads each watch's record, and
   dispatches. It never lists watchers or registers.
 - **A package, not core.** eve keeps no Board code. It exposes one internal hook, a channel start
@@ -53,8 +58,9 @@ unwatch tool ── lock ─ remove w-7k3p ─ register ─ release ── label
   configuration error; a retired one is skipped. The agent's own posts are skipped unless a schedule
   posted them. The match ID is the idempotency key, and the match is acked once eve accepts it.
 - **Claiming.** A claim watch claims one ready task per match, or acks without a turn when none is
-  ready. The session holds the claim in channel state, renews it while turns run, and settles it with
-  task tools; an unsettled claim lapses back to the queue.
+  ready. The session holds the claim in channel state, never in metadata, and renews it while turns
+  run. A task tool names the settlement and the channel performs it when the call settles; a claim
+  whose hand-off fails is released, and an unsettled claim lapses back to the queue.
 
 ## Known gaps
 

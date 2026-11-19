@@ -11,7 +11,6 @@ import {
   createBoardClient,
   resolveBoardTarget,
   type BoardClient,
-  type BoardHeldClaim,
   type BoardMessage,
   type BoardSettings,
   type BoardThread,
@@ -47,6 +46,10 @@ function client(settings: Settings): BoardClient {
   return createBoardClient(resolveBoardTarget(settings()));
 }
 
+function deploymentClient(settings: Settings): BoardClient {
+  return createBoardClient(resolveBoardTarget({ ...settings(), can: undefined }));
+}
+
 function postId(ctx: ToolContext) {
   return createHash("sha256").update(`${ctx.session.id}:${ctx.callId}`).digest("hex");
 }
@@ -71,47 +74,32 @@ function threadOrCurrent(id: string | undefined, ctx: ToolContext): string {
   return thread;
 }
 
-function heldClaim(ctx: ToolContext): BoardHeldClaim {
-  const task = metadataOf(ctx).boardTask as Partial<BoardHeldClaim> | null | undefined;
+function heldClaim(ctx: ToolContext): { readonly id: string; readonly until: string } {
+  const task = metadataOf(ctx).boardTask as { id?: unknown; until?: unknown } | null | undefined;
   if (
     typeof task !== "object" ||
     task === null ||
     typeof task.id !== "string" ||
-    typeof task.epoch !== "number" ||
-    typeof task.token !== "string" ||
     typeof task.until !== "string"
   ) {
     throw new Error(
       "This session holds no board task: settle tools work only in a session that claimed one.",
     );
   }
-  return task as BoardHeldClaim;
-}
-
-async function settle<T>(
-  settings: Settings,
-  ctx: ToolContext,
-  settled: "completed" | "failed" | "blocked",
-  act: (held: ReturnType<BoardClient["held"]>) => Promise<T>,
-) {
-  const claim = heldClaim(ctx);
-  try {
-    await act(
-      client(settings).held({
-        epoch: claim.epoch,
-        taskId: claim.id,
-        token: claim.token,
-        until: claim.until,
-      }),
-    );
-  } catch (error) {
-    if ((error as { readonly code?: unknown } | null)?.code !== "claim_lost") throw error;
+  if (Date.parse(task.until) <= Date.now()) {
     throw new Error(
-      `You no longer hold board task #${claim.id}: its claim ended, because its lease ran out or it was held. Stop working on it.`,
-      { cause: error },
+      `You no longer hold board task #${task.id}: its claim ran out. Stop working on it.`,
     );
   }
-  return { settled, task: claim.id };
+  return { id: task.id, until: task.until };
+}
+
+function settle(
+  ctx: ToolContext,
+  settled: "completed" | "failed" | "blocked",
+  details: { readonly result?: string; readonly reason?: string; readonly kind?: string },
+) {
+  return { settled, task: heldClaim(ctx).id, ...details };
 }
 
 const attach = z
@@ -439,31 +427,31 @@ export function defineBoardCreateTaskTool(settings: Settings) {
 }
 
 /** Completes the task this session holds. */
-export function defineBoardCompleteTaskTool(settings: Settings) {
+export function defineBoardCompleteTaskTool(_settings: Settings) {
   return defineTool({
     description:
       "Complete the board task you hold, with the result: what you did and the proof, such as a pull request link. Call it once the brief's check passes, as your last step.",
     inputSchema: z.object({ result: z.string().min(1).max(BOARD_TEXT_LIMIT).optional() }),
     async execute({ result }, ctx) {
-      return await settle(settings, ctx, "completed", (held) => held.complete(result));
+      return settle(ctx, "completed", { result });
     },
   });
 }
 
 /** Fails the task this session holds. */
-export function defineBoardFailTaskTool(settings: Settings) {
+export function defineBoardFailTaskTool(_settings: Settings) {
   return defineTool({
     description:
       "Give up on the board task you hold, with why. Its owner can reopen it. Use it when the task can't be done as briefed.",
     inputSchema: z.object({ reason: z.string().min(1).max(BOARD_TEXT_LIMIT) }),
     async execute({ reason }, ctx) {
-      return await settle(settings, ctx, "failed", (held) => held.fail(reason));
+      return settle(ctx, "failed", { reason });
     },
   });
 }
 
 /** Holds the task this session holds for a person. */
-export function defineBoardBlockTaskTool(settings: Settings) {
+export function defineBoardBlockTaskTool(_settings: Settings) {
   return defineTool({
     description:
       "Hold the board task you hold for a person, with the one question they must answer: ask it in the thread with your recommendation first. Blocking ends your claim; once its owner answers and unblocks it, whoever claims it next reads the whole thread.",
@@ -477,7 +465,7 @@ export function defineBoardBlockTaskTool(settings: Settings) {
         .describe("What the hold is for, such as `needs_input` or `awaiting_approval`."),
     }),
     async execute({ reason, kind }, ctx) {
-      return await settle(settings, ctx, "blocked", (held) => held.block(reason, { kind }));
+      return settle(ctx, "blocked", { kind, reason });
     },
   });
 }
@@ -486,9 +474,7 @@ function assertConfigurer(settings: Settings, ctx: ToolContext): void {
   const caller = ctx.session.auth?.current ?? null;
   const allowed = settings().configurers;
   if (allowed !== undefined) {
-    const principal = caller?.attributes.principal;
-    const ids = [caller?.principalId, typeof principal === "string" ? principal : undefined];
-    if (ids.some((id) => id !== undefined && allowed.includes(id))) return;
+    if (caller !== null && allowed.includes(caller.principalId)) return;
     throw new Error(
       "Only the people this agent's `configurers` names may change its board watches. Ask one of them.",
     );
@@ -552,7 +538,7 @@ export function defineBoardWatchTool(settings: Settings) {
       checkWatchScope({ action, can: config.can, tail, watchChannel });
       const watch = await createWatch({
         action,
-        client: client(settings),
+        client: deploymentClient(settings),
         id: watchIdOf(ctx.session.id, ctx.callId),
         instructions,
         tail: tail.trim(),
@@ -575,7 +561,7 @@ export function defineBoardWatchesTool(settings: Settings) {
       const config = settings();
       return {
         watches: await listWatches({
-          client: client(settings),
+          client: deploymentClient(settings),
           details: details === true,
           watchChannel: config.watchChannel ?? DEFAULT_WATCH_CHANNEL,
         }),
@@ -594,7 +580,7 @@ export function defineBoardUnwatchTool(settings: Settings) {
       assertConfigurer(settings, ctx);
       const config = settings();
       return await removeWatch({
-        client: client(settings),
+        client: deploymentClient(settings),
         id,
         watchChannel: config.watchChannel ?? DEFAULT_WATCH_CHANNEL,
       });

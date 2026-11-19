@@ -14,7 +14,6 @@ import {
   defineBoardScheduleTool,
   defineBoardTypingTool,
 } from "../extension/lib/tools.ts";
-import { createBoardClient } from "../extension/lib/client.ts";
 import { runTool, startBoard } from "./helpers.ts";
 
 const settings = () => ({ profile: "helper" });
@@ -110,7 +109,7 @@ test("notes and schedules default to the session's own thread", async () => {
   );
 });
 
-test("task tools create a task and settle the claim the session holds", async () => {
+test("task tools create a task, and settle tools name the claim the session holds", async () => {
   await startBoard();
   const created = await run(
     defineBoardCreateTaskTool(settings),
@@ -119,27 +118,20 @@ test("task tools create a task and settle the claim the session holds", async ()
   );
   assert.equal(created.task.state, "ready");
 
-  const ready = await createBoardClient({ profile: "helper" }).claim(created.id, 60);
-  const held = {
-    boardTask: {
-      epoch: ready.epoch,
-      id: created.id,
-      lease: 60,
-      token: ready.token,
-      until: ready.until,
-    },
-  };
-
+  const until = new Date(Date.now() + 60_000).toISOString();
+  const held = { boardTask: { id: created.id, until } };
   assert.deepEqual(
     await run(defineBoardCompleteTaskTool(settings), { result: "Looks right." }, "c2", held),
-    { settled: "completed", task: created.id },
+    { result: "Looks right.", settled: "completed", task: created.id },
   );
-  const thread = await run(defineBoardReadTool(settings), { id: created.id }, "c3");
-  assert.equal(thread.message.task.state, "completed");
-  assert.equal(thread.message.task.result, "Looks right.");
-
+  assert.deepEqual(
+    await run(defineBoardFailTaskTool(settings), { reason: "Too late." }, "c3", held),
+    { reason: "Too late.", settled: "failed", task: created.id },
+  );
   await assert.rejects(
-    run(defineBoardFailTaskTool(settings), { reason: "Too late." }, "c4", held),
+    run(defineBoardFailTaskTool(settings), { reason: "Too late." }, "c4", {
+      boardTask: { id: created.id, until: new Date(Date.now() - 1_000).toISOString() },
+    }),
     /You no longer hold board task/u,
   );
   await assert.rejects(
