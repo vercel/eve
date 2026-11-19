@@ -91,6 +91,12 @@ function durableHost(name: string): DurableHost {
         return true;
       },
     },
+    channelEvents: {
+      start: async () => undefined,
+      find: async () => undefined,
+      retire: async () => true,
+      publish: async () => false,
+    },
   };
 }
 

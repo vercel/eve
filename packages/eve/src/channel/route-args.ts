@@ -5,6 +5,8 @@ import {
   createChannelDeliveryMetadata,
   type ChannelDeliverySource,
 } from "#channel/delivery-metadata.js";
+import { createPublishChannelEventFn } from "#runtime/channels/events/publish.js";
+import type { ChannelSubscriptions } from "#shared/channel-subscriptions.js";
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import { createAttachSessionFn } from "#channel/session.js";
 import type { SkillFileSource } from "#channel/skill-files.js";
@@ -31,6 +33,7 @@ export interface ChannelRoutePorts {
     RouteHandlerArgs,
     "describe" | "invokeTool" | "listSkillFiles" | "readSkill"
   >;
+  readonly subscriptions?: ChannelSubscriptions;
   readonly agentInfo: () => Promise<Response>;
   readonly to: CrossChannelToFn;
   readonly waitUntil: (task: Promise<unknown>) => void;
@@ -56,6 +59,7 @@ export function createChannelRouteArgs(ports: ChannelRoutePorts): RouteHandlerAr
             }),
             ...ports.agent,
             params: ports.params,
+            publish: createPublishChannelEventFn(channelName, ports.subscriptions),
             requestIp: ports.requestIp,
             to: ports.to,
             waitUntil: ports.waitUntil,

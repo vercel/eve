@@ -15,6 +15,7 @@ describe("agentDefinitionsOf", () => {
         files: {
           dynamicSubagents: [definition("subagent:subagents/research")],
           hooks: [definition("hook:audit")],
+          channelEventTools: [],
           memory: [definition("memory:notes:recall")],
           scheduleTools: [definition("tool::schedule__digest")],
         },

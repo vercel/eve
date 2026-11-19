@@ -6,7 +6,11 @@ import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache
 import { serializeDurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { SessionAgent, SessionAgentSettings } from "#runtime/sessions/session-agent.js";
-import { declared, type ResolvedScheduleCollection } from "#runtime/types.js";
+import {
+  declared,
+  type ResolvedChannelDefinition,
+  type ResolvedScheduleCollection,
+} from "#runtime/types.js";
 import { scheduleCollectionToolSlot } from "#shared/schedule-collection-tools.js";
 import { type AgentContents, settingsOf } from "./agent-definitions.js";
 import { createSessionAgent } from "./session-agent.js";
@@ -88,6 +92,7 @@ export async function agentContentsOf(bundle: CompiledBundle): Promise<AgentCont
           .filter((memory) => memory.offersTools === true)
           .map(memoryToolsDefinition),
       ],
+      channelEventTools: channelEventToolsDefinitions(agent.channels),
       scheduleTools: scheduleToolsDefinitions(
         declared(agent, "schedules").filter((collection) => collection.offersTools === true),
       ),
@@ -97,6 +102,21 @@ export async function agentContentsOf(bundle: CompiledBundle): Promise<AgentCont
     skills: declared(agent, "skill").map(skillDefinition),
     tools: declared(agent, "tool").map(toolDefinition),
   };
+}
+
+function channelEventToolsDefinitions(
+  channels: readonly ResolvedChannelDefinition[],
+): readonly Definition[] {
+  if (!channels.some((channel) => channel.definition?.subscriptions !== undefined)) return [];
+  return [
+    toolsDefinition(
+      { logicalPath: "tools/channel-events.ts", slug: "channel-events" },
+      async () => {
+        const { channelEventTools } = await import("#runtime/channels/events/tools.js");
+        return channelEventTools(channels);
+      },
+    ),
+  ];
 }
 
 function scheduleToolsDefinitions(

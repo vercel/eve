@@ -26,6 +26,7 @@ export interface AgentContents {
     readonly dynamicSubagents: readonly Definition[];
     readonly memory: readonly Definition[];
     readonly scheduleTools: readonly Definition[];
+    readonly channelEventTools: readonly Definition[];
   };
 }
 
@@ -44,6 +45,7 @@ export function agentDefinitionsOf(contents: AgentContents): readonly Definition
     ...files.memory,
     ...contents.tools,
     ...files.scheduleTools,
+    ...files.channelEventTools,
     ...contents.skills,
     eveSkills,
     approvals,

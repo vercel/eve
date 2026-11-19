@@ -1012,6 +1012,7 @@ function routeArgs(
   const args: RouteHandlerArgs = {
     ...mockAgentRouteArgs(),
     ...overrides,
+    publish: overrides.publish ?? (async () => false),
     attachSession: unavailable,
     from: unavailable,
     params: {},

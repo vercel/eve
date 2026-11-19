@@ -1,4 +1,6 @@
 import {
+  CHANNEL_EVENT_DELIVERY_WORKFLOW_NAME,
+  CHANNEL_EVENT_WORKFLOW_NAME,
   CONNECTION_EVENT_DELIVERY_WORKFLOW_NAME,
   CONNECTION_EVENT_WORKFLOW_NAME,
   SESSION_TIMEOUT_WORKFLOW_NAME,
@@ -27,4 +29,12 @@ export const connectionEventWorkflowReference = {
 
 export const connectionEventDeliveryWorkflowReference = {
   workflowId: `workflow//${STABLE_ID_BASE}//${CONNECTION_EVENT_DELIVERY_WORKFLOW_NAME}`,
+};
+
+export const channelEventWorkflowReference = {
+  workflowId: `workflow//${STABLE_ID_BASE}//${CHANNEL_EVENT_WORKFLOW_NAME}`,
+};
+
+export const channelEventDeliveryWorkflowReference = {
+  workflowId: `workflow//${STABLE_ID_BASE}//${CHANNEL_EVENT_DELIVERY_WORKFLOW_NAME}`,
 };

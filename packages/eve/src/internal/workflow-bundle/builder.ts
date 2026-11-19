@@ -71,6 +71,7 @@ export class WorkflowBundleBuilder {
       resolvePackageSourceDirectoryPath("src/execution"),
       resolvePackageSourceDirectoryPath("src/runtime/subagents"),
       resolvePackageSourceDirectoryPath("src/runtime/connections/events"),
+      resolvePackageSourceDirectoryPath("src/runtime/channels/events"),
       resolvePackageSourceDirectoryPath("src/subagents"),
       resolvePackageSourceDirectoryPath("src/tools/provided"),
     ];

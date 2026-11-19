@@ -419,6 +419,48 @@ Set `uploadPolicy` on `defineChannel` to cap what eve saves for the channel, for
 
 See [Inbound attachments](../sandbox#inbound-attachments) for the shared storage, size, and provider-input behavior.
 
+## Offer events to subscribing sessions
+
+A channel can let a session ask to hear about one kind of occurrence, such as a check finishing on a pull request. Declare each event under `subscriptions`, then call `publish` from a route when it happens:
+
+```ts title="agent/channels/builds.ts"
+import { defineChannel, POST } from "eve/channels";
+
+export default defineChannel({
+  subscriptions: {
+    build_finished: {
+      description: "A build of the given project finished.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["project"],
+        properties: { project: { type: "string" } },
+      },
+      normalize: (input) => ({ project: String(input.project).toLowerCase() }),
+    },
+  },
+  routes: [
+    POST("/builds", async (req, { publish }) => {
+      const build = await req.json();
+      await publish(
+        "build_finished",
+        { project: build.project },
+        { id: build.id, message: `Build ${build.id} finished: ${build.status}.` },
+      );
+      return Response.json({ ok: true });
+    }),
+  ],
+});
+```
+
+eve gives the model `subscribe_<channel>_<event>` for each event, plus `get_event_subscription` and `stop_event_subscription`. A subscription lives in a durable workflow run that outlasts the session that created it. `publish` resolves `true` when a subscription matched the input and `false` when nobody is subscribed.
+
+- `inputSchema` is a JSON Schema that picks which occurrences a subscriber hears about. `publish` validates its input against the same schema.
+- `normalize` rewrites arguments into one form on both sides, so a subscription to `Acme` matches a published `acme`.
+- `delivery.id` identifies the occurrence. Publishing the same id again reaches the subscriber once.
+- The message is queued in the subscribing session and runs under the auth it had when it subscribed. The caller of the route never supplies it.
+- Only one session at a time can hold a subscription for the same event and arguments.
+
 ## Cross-channel hand-off
 
 A cross-channel hand-off starts or resumes a conversation on another channel from a route handler with `ctx.to(channel, target).send(message, { auth })`. The agent runs and replies on the destination channel. The source channel starts no session and returns only its HTTP response.

@@ -49,6 +49,7 @@ import { snapshotOf, type SessionView } from "#protocol/session-projection/sessi
 import { currentView } from "#harness/session-machine/current.js";
 import { removedEventKeyMessage } from "#public/definitions/removed-event-keys.js";
 import type { GenericChannelDefinition, GenericReceiveInput } from "#shared/channel-definition.js";
+import { assertChannelSubscriptions } from "#shared/channel-subscriptions.js";
 
 declare const CHANNEL_METADATA_TYPE: unique symbol;
 
@@ -290,6 +291,7 @@ export function defineChannel<
 >(
   definition: ChannelDefinition<TState, TCtx, TReceiveTarget, TMetadata>,
 ): Channel<TState, TReceiveTarget, TMetadata> {
+  assertChannelSubscriptions(definition.subscriptions);
   const adapter = buildAdapter(definition);
   const cors = normalizeChannelCors(definition.cors);
 
@@ -300,6 +302,7 @@ export function defineChannel<
     cors,
     receive: definition.receive,
     turnPolicy: definition.turnPolicy,
+    subscriptions: definition.subscriptions,
   };
 
   return compiled;

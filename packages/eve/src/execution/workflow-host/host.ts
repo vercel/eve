@@ -13,6 +13,12 @@ import {
   retireConnectionEventOwner,
   startConnectionEventOwner,
 } from "#runtime/connections/events/owner.js";
+import {
+  findChannelEventOwner,
+  publishChannelEvent,
+  retireChannelEventOwner,
+  startChannelEventOwner,
+} from "#runtime/channels/events/owner.js";
 import { cancelRun, getRun, getWorld, resumeHook } from "#internal/workflow/runtime.js";
 
 const workflowLineStore: SessionLineStore = {
@@ -60,6 +66,12 @@ export const workflowHost: DurableHost = {
     start: (binding, bundle, signal) => startConnectionEventOwner(binding, bundle, signal),
     find: (bindingId) => findConnectionEventOwner(bindingId),
     retire: (bindingId) => retireConnectionEventOwner(bindingId),
+  },
+  channelEvents: {
+    start: (binding, bundle, signal) => startChannelEventOwner(binding, bundle, signal),
+    find: (bindingId) => findChannelEventOwner(bindingId),
+    retire: (bindingId) => retireChannelEventOwner(bindingId),
+    publish: (bindingId, delivery) => publishChannelEvent(bindingId, delivery),
   },
   callbackBaseUrl() {
     try {

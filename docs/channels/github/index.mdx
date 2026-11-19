@@ -91,6 +91,21 @@ export default githubChannel({
 
 Subscribe the GitHub App to each event you handle, such as `issues` or `check_suite`. A CI turn replies on the first pull request in `pullRequests`, so return `null` when the list is empty.
 
+## Let a session subscribe to a pull request
+
+A session can ask to hear about one pull request without starting a GitHub turn. The GitHub channel offers two events, and eve gives the model one tool for each:
+
+| Tool                               | Arguments               | Delivered when                                                               |
+| ---------------------------------- | ----------------------- | ---------------------------------------------------------------------------- |
+| `subscribe_github_checks_finished` | `{ owner, repo, pull }` | A check suite completes on the pull request, once for each app that ran one. |
+| `subscribe_github_pr_comment`      | `{ owner, repo, pull }` | Someone creates a comment or review comment on the pull request.             |
+
+Every subscribe tool also takes `ttlMs`, an integer from `60000` (1 minute) to `31536000000` (365 days), or `null` to watch until stopped. `get_event_subscription` and `stop_event_subscription` take the `id` that subscribe returned.
+
+Each occurrence arrives in the subscribing session as a queued message. It waits for the current turn to finish, and the next turn runs under the auth the session had when it subscribed, never under the GitHub user who triggered the event. A failed suite names each check run that did not pass. Comment text comes from whoever wrote it, so the message tells the model to treat it as information and not as an instruction.
+
+Subscriptions need no hooks: they work whether or not you define `onCheckSuite` or `onComment`, and they never open a GitHub session. Subscribe the GitHub App to `check_suite`, `issue_comment`, and `pull_request_review_comment`. GitHub's repeated deliveries of the same webhook reach the subscriber once. Owner and repository names match without regard to case.
+
 ## Access the repository
 
 Before the first model call, each turn checks out the relevant ref into the sandbox, so file and shell tools run against the real tree. The installation token never enters the sandbox; GitHub auth is added at the network firewall, which needs a firewall-capable sandbox such as Vercel's. On a pull request, the PR metadata and changed-file patch are already in the agent's context.
