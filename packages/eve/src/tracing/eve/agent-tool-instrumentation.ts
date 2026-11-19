@@ -157,6 +157,11 @@ export function createAgentToolInstrumentation(input: {
     try {
       const tool = await resumeTool(input.tracing, state);
       const failed = event.outcome !== "completed";
+      const delegation: Record<string, string> = {};
+      if (event.taskId !== undefined) delegation["agent.task.id"] = event.taskId;
+      if (event.childSessionId !== undefined)
+        delegation["agent.child_run.id"] = event.childSessionId;
+      tool?.attributes(delegation);
       await tool?.complete({
         outcome: event.outcome === "interrupted" ? "cancelled" : event.outcome,
         failed,

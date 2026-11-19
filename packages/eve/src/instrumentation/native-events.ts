@@ -306,10 +306,13 @@ function instrumentationEventsOf(
                 code: event.data.error.code,
                 name: event.data.error.name ?? "Error",
               });
+      const taskId = row?.taskId;
       return [
         {
           acceptedAtMs: line.settledAtMs?.[callId],
           cause: event.data.cause,
+          childSessionId: line.view === undefined ? undefined : childOf(line.view, callId, taskId),
+          taskId,
           error: line.capturesOutputs ? error : undefined,
           errorCode: event.data.error?.code,
           idempotencyKey,
@@ -427,4 +430,13 @@ function latestTurnId(view: SessionView | undefined): string | undefined {
 function turnSequence(turnId: string): number {
   const match = /^turn_(\d+)$/.exec(turnId);
   return match === null ? 0 : Number(match[1]);
+}
+
+function childOf(view: SessionView, callId: string, taskId: string | undefined) {
+  return Object.values(view.children).find(
+    ({ deliveries, owner }) =>
+      ("callId" in owner && owner.callId === callId) ||
+      (taskId !== undefined && "taskId" in owner && owner.taskId === taskId) ||
+      deliveries?.some((delivery) => delivery.callId === callId) === true,
+  )?.sessionId;
 }

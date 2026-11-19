@@ -599,6 +599,84 @@ describe("a session's spans, from its committed lines", () => {
     },
   );
 
+  it("names the task and child session an agent call delegated to, including a continuation", async () => {
+    const { commit, spans } = session(() => ({
+      emit: true,
+      recordInputs: false,
+      recordOutputs: false,
+    }));
+    const agentCall = (callId: string, name: string, remote: boolean) =>
+      ({
+        data: { callId, capability: { kind: "agent", name, remote }, input: {}, owner: run },
+        scope: run,
+        type: "call.requested",
+      }) as SessionEvent;
+    const started = (callId: string, taskId?: string) =>
+      ({
+        data: taskId === undefined ? { callId } : { callId, taskId },
+        scope: run,
+        type: "call.started",
+      }) as SessionEvent;
+    await commit(...opening);
+    await commit(agentCall("call_start", "billing", true), started("call_start", "task_1"));
+    await commit(
+      {
+        data: {
+          kind: "agent",
+          name: "billing",
+          startedBy: { callId: "call_start" },
+          taskId: "task_1",
+        },
+        scope: run,
+        type: "task.started",
+      } as SessionEvent,
+      {
+        data: {
+          name: "billing",
+          owner: { taskId: "task_1" },
+          sessionId: "child_billing",
+          stream: "s",
+        },
+        type: "child.opened",
+      } as SessionEvent,
+    );
+    await commit(settled("call_start", { outcome: "completed", output: "started" }));
+    await commit(agentCall("call_again", "billing", true), started("call_again", "task_1"));
+    await commit({
+      data: { callId: "call_again", childDeliveryId: "d_1", sessionId: "child_billing" },
+      type: "child.sent",
+    } as SessionEvent);
+    await commit(settled("call_again", { outcome: "completed", output: "sent" }));
+    await commit(agentCall("call_local", "researcher", false), started("call_local"));
+    await commit({
+      data: {
+        name: "researcher",
+        owner: { callId: "call_local" },
+        sessionId: "child_local",
+        stream: "s",
+      },
+      type: "child.opened",
+    } as SessionEvent);
+    await commit(settled("call_local", { outcome: "completed", output: "done" }));
+    await commit(turnSettled({ outcome: "completed" }));
+
+    const calls = (await spans())
+      .filter((span) => span.name.startsWith("execute_tool "))
+      .map((span) => [
+        span.attributes["gen_ai.tool.call.id"],
+        span.attributes["agent.task.id"],
+        span.attributes["agent.child_run.id"],
+      ]);
+    expect(calls).toEqual(
+      expect.arrayContaining([
+        ["call_start", "task_1", "child_billing"],
+        ["call_again", "task_1", "child_billing"],
+        ["call_local", undefined, "child_local"],
+      ]),
+    );
+    expect(calls).toHaveLength(3);
+  });
+
   it("records who approved a call on its approval and tool spans, the id only as the turn's principal", async () => {
     for (const { audience, records, id, outcome = "accepted" } of [
       { audience: "public", records: true, id: "slack:T1:U2" },
