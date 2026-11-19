@@ -8,6 +8,7 @@ import type { Session } from "#channel/session.js";
 import type { JsonObject } from "#shared/json.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 import type { ChannelMethod } from "#public/definitions/channel.js";
+import type { EmitChannelEventFn } from "#shared/channel-subscriptions.js";
 import type { AgentDescription, AgentSkillFileDescription } from "#channel/agent-description.js";
 
 type WebSocketHeaders = Headers | readonly (readonly [string, string])[] | Record<string, string>;
@@ -35,6 +36,13 @@ export interface RouteHandlerArgs<TState = undefined> {
    * separator.
    */
   params: Readonly<Record<string, string>>;
+  /**
+   * Hands one occurrence to every session subscribed to `key`, the key that this channel's
+   * `subscriptions.onSubscribe` returned for them. `event.id` makes a redelivery of the same
+   * occurrence reach each subscriber once. Resolves `true` when at least one subscription holds
+   * the key.
+   */
+  readonly emit: EmitChannelEventFn;
   /** Keeps background work alive after the route returns its response. */
   waitUntil: (task: Promise<unknown>) => void;
   /** Best-effort client IP reported by the host, or `null` when unavailable. */

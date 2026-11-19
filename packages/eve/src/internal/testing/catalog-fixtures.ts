@@ -114,6 +114,7 @@ export function catalogBundle(
     moduleMap: undefined as never,
     nodeId: undefined,
     resolvedAgent: {
+      channels: [],
       config: { approval: input.approval, name: "test-agent" },
       connections: input.connections ?? [],
       definitions: [],

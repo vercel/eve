@@ -4,6 +4,9 @@ export const SESSION_TIMEOUT_WORKFLOW_NAME = "sessionTimeoutWorkflow";
 export const WORKFLOW_TOOL_RUN_WORKFLOW_NAME = "workflowToolRunWorkflow";
 export const CONNECTION_EVENT_WORKFLOW_NAME = "connectionEventWorkflow";
 export const CONNECTION_EVENT_DELIVERY_WORKFLOW_NAME = "connectionEventDeliveryWorkflow";
+export const CHANNEL_SUBSCRIPTION_WORKFLOW_NAME = "channelSubscriptionWorkflow";
+export const CHANNEL_SUBSCRIPTION_KEY_WORKFLOW_NAME = "channelSubscriptionKeyWorkflow";
+export const CHANNEL_SUBSCRIPTION_DELIVERY_WORKFLOW_NAME = "channelSubscriptionDeliveryWorkflow";
 
 export const STABLE_WORKFLOW_NAMES: ReadonlySet<string> = new Set([
   WORKFLOW_ENTRY_NAME,
@@ -12,4 +15,7 @@ export const STABLE_WORKFLOW_NAMES: ReadonlySet<string> = new Set([
   WORKFLOW_TOOL_RUN_WORKFLOW_NAME,
   CONNECTION_EVENT_WORKFLOW_NAME,
   CONNECTION_EVENT_DELIVERY_WORKFLOW_NAME,
+  CHANNEL_SUBSCRIPTION_WORKFLOW_NAME,
+  CHANNEL_SUBSCRIPTION_KEY_WORKFLOW_NAME,
+  CHANNEL_SUBSCRIPTION_DELIVERY_WORKFLOW_NAME,
 ]);

@@ -333,6 +333,8 @@ function unexpectedRouteContext() {
     params: { sessionId: "session/one" },
     readSkill: unexpectedRouteRequest,
     requestIp: null,
+    // Spread so the fixture typechecks against the pinned release, which has no `publish`, and the packed eve, which requires it.
+    ...{ emit: async () => false },
     resolveSession: unexpectedRouteRequest,
     to: unexpectedRouteRequest,
     waitUntil: unexpectedRouteRequest,

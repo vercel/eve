@@ -7,6 +7,7 @@ import {
 import type { CreateRuntime } from "#execution/node-step.js";
 import type { AuthorizationCallbackPayload } from "#execution/session-inbox/inbox.js";
 import type { SessionLineStore } from "#execution/session-line-store.js";
+import type { ChannelSubscriptionOwners } from "#runtime/subscriptions/channel/owners.js";
 import type { ConnectionEventOwners } from "#runtime/subscriptions/owners.js";
 import { HookNotFoundError, isRunNotFound, isRunTargetGone } from "#shared/run-errors.js";
 
@@ -38,6 +39,7 @@ export interface DurableHost {
   callbackBaseUrl(): string | undefined;
   readonly createRuntime: CreateRuntime;
   readonly connectionEvents: ConnectionEventOwners;
+  readonly channelSubscriptions: ChannelSubscriptionOwners;
 }
 
 interface Hosts {

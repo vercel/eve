@@ -300,6 +300,7 @@ export function defineChannel<
     cors,
     receive: definition.receive,
     turnPolicy: definition.turnPolicy,
+    subscriptions: definition.subscriptions,
   };
 
   return compiled;

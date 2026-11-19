@@ -5,7 +5,11 @@ import type { ChannelContext } from "#shared/channel-context.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
-import { createLogger } from "#internal/logging.js";
+import { createLogger, logError } from "#internal/logging.js";
+import {
+  GITHUB_CHANNEL_SUBSCRIPTIONS,
+  emitGitHubSubscriptionEvents,
+} from "#public/channels/github/subscriptions.js";
 import {
   buildGitHubBinding,
   type GitHubHandle,
@@ -246,6 +250,7 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
   const channel = defineChannel<GitHubChannelState, GitHubChannelContext, GitHubReceiveTarget>({
     turnPolicy: config.turnPolicy,
     state: initialGitHubState(),
+    subscriptions: GITHUB_CHANNEL_SUBSCRIPTIONS,
 
     context(state, session) {
       return rebuildGitHubContext(state, session, config);
@@ -258,7 +263,7 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
     routes: [
       POST<GitHubChannelState>(
         config.route ?? GITHUB_CHANNEL_DEFAULT_ROUTE,
-        async (req, { from, waitUntil }) => {
+        async (req, { emit, from, waitUntil }) => {
           const body = await verifyInbound(req, config.credentials);
           if (body === null) return new Response("unauthorized", { status: 401 });
           const missingHeaders = missingGitHubWebhookHeaders(req.headers);
@@ -292,6 +297,21 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
             });
           }
           if (event.kind === "ping") return jsonOk({ ok: true });
+
+          waitUntil(
+            emitGitHubSubscriptionEvents({
+              api: config.api,
+              credentials: config.credentials,
+              event,
+              emit,
+            }).catch((error: unknown) => {
+              logError(log, "GitHub subscription delivery failed", error, {
+                deliveryId: event.delivery.id,
+                event: event.delivery.event,
+                repository: event.repository.fullName,
+              });
+            }),
+          );
 
           if (event.kind === "issue_comment" && event.action === "created") {
             waitUntil(

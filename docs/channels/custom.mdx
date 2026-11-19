@@ -419,6 +419,46 @@ Set `uploadPolicy` on `defineChannel` to cap what eve saves for the channel, for
 
 See [Inbound attachments](../sandbox#inbound-attachments) for the shared storage, size, and provider-input behavior.
 
+## Let sessions subscribe to events
+
+A channel can let a session ask to hear about something later, such as a check finishing on a pull request. Declare `subscriptions` on the channel and call `emit` from a route when the thing happens:
+
+```ts title="agent/channels/builds.ts"
+import { defineChannel, POST } from "eve/channels";
+
+export default defineChannel({
+  subscriptions: {
+    description: "Watch a project for finished builds.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["project"],
+      properties: { project: { type: "string" } },
+    },
+    onSubscribe: ({ input }) => ({ key: `project:${String(input.project).toLowerCase()}` }),
+    onEvent: ({ event }) => `Build ${event.id} finished: ${String(event.data.status)}.`,
+  },
+  routes: [
+    POST("/builds", async (req, { emit }) => {
+      const build = await req.json();
+      await emit(`project:${build.project.toLowerCase()}`, {
+        id: build.id,
+        data: { status: build.status },
+      });
+      return Response.json({ ok: true });
+    }),
+  ],
+});
+```
+
+eve gives the model `subscribe`, `get_subscription` and `stop_subscription`. `subscribe` takes the channel's `inputSchema` and a `ttlMs`. A subscription lives in a durable workflow run that outlasts the turn that created it.
+
+- `onSubscribe` runs when the model subscribes, as the subscribing session. Authorize the request there, open anything you need upstream, and return the `key` that `emit` addresses events to. Throwing refuses the subscription and the model sees the message.
+- `onUnsubscribe` runs once when a subscription ends, to close what `onSubscribe` opened.
+- `onEvent` runs once per subscription for each occurrence, as the subscriber, and returns the message the session receives, or nothing to drop the occurrence. Without it the session receives the event's `data` as JSON.
+- `emit(key, { id, data })` reaches every session subscribed to `key`. `id` identifies the occurrence, so emitting the same one again reaches each subscriber once. It resolves `true` when a subscription holds the key.
+- The message is queued in the subscribing session and runs under the auth it had when it subscribed. The caller of the route never supplies it.
+
 ## Cross-channel hand-off
 
 A cross-channel hand-off starts or resumes a conversation on another channel from a route handler with `ctx.to(channel, target).send(message, { auth })`. The agent runs and replies on the destination channel. The source channel starts no session and returns only its HTTP response.
