@@ -11,70 +11,104 @@ import { defineMcpClientConnection } from "#public/definitions/connections/mcp.j
 import { afterEach, beforeEach, expect, it, vi, onTestFinished } from "vitest";
 import { ContextContainer, contextStorage, loadContext } from "#context/container.js";
 import { AuthKey, SessionIdKey, SessionTraceSeedKey } from "#context/keys.js";
-import { serializeContext } from "#context/serialize.js";
+import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { fromCompiledBundle } from "#definitions/compiled-agent.js";
 import { requireCompiledBundle, SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { ConnectionEventActions } from "#runtime/subscriptions/actions.js";
-import { startConnectionEventOwner } from "#runtime/subscriptions/owner.js";
-import type { EventBinding } from "#runtime/subscriptions/state.js";
+import { startSubscriptionOwner } from "#runtime/subscriptions/owner.js";
+import type {
+  ConnectionBinding,
+  OpenedSubscription,
+  SubscriptionEvent,
+} from "#runtime/subscriptions/state.js";
 import {
-  openConnectionEventStep,
-  subscribeConnectionEvent,
-  unsubscribeConnectionEventStep,
-} from "#runtime/subscriptions/lifecycle-step.js";
+  closeSubscriptionStep,
+  dispatchSubscriptionStep,
+  fanOutEventStep,
+  openSubscriptionStep,
+} from "#runtime/subscriptions/steps.js";
 import { isMcpAuthRequiredError } from "#runtime/connections/mcp-client.js";
-import { dispatchConnectionEventStep } from "#runtime/subscriptions/dispatch-step.js";
-import type { ConnectionEventPayload } from "#runtime/subscriptions/delivery.js";
 import { listToolMetadata } from "#execution/catalog/connection-auth.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import type {
+  ConnectionEventDelivery,
   ConnectionEventsAdapter,
   ManagedEventSubscribeInput,
   ManagedEventSubscription,
 } from "#shared/connection-events.js";
 
-const { createClient, loadBundle, handlers, retired, workflowRunId } = vi.hoisted(() => ({
-  createClient: vi.fn(),
-  workflowRunId: { current: "wrun_1" },
-  loadBundle: vi.fn(),
-  handlers: new Map<
-    string,
-    { binding: EventBinding; subscription: ManagedEventSubscription | undefined }
-  >(),
-  retired: new Set<string>(),
-}));
+const { createClient, loadBundle, handlers, retired, workflowRunId, ownerHooks } = vi.hoisted(
+  () => ({
+    createClient: vi.fn(),
+    workflowRunId: { current: "wrun_1" },
+    ownerHooks: {
+      routed: false,
+      deliveries: [] as Promise<void>[],
+      serializedContext: (_binding: ConnectionBinding): Record<string, unknown> => ({}),
+    },
+    loadBundle: vi.fn(),
+    handlers: new Map<
+      string,
+      { binding: ConnectionBinding; opened: OpenedSubscription | undefined }
+    >(),
+    retired: new Set<string>(),
+  }),
+);
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   getWorkflowMetadata: () => ({ workflowRunId: workflowRunId.current }),
   getWritable: () => new WritableStream(),
 }));
+vi.mock("#internal/workflow/runtime.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("#internal/workflow/runtime.js")>();
+  return {
+    ...actual,
+    resumeHook: async (token: string, message: unknown) => {
+      if (!ownerHooks.routed) return actual.resumeHook(token, message as never);
+      const { HookNotFoundError } = await import("#compiled/@workflow/errors/index.js");
+      const bindingId = token.replace(/^eve:subscription:/, "");
+      const handler = handlers.get(bindingId);
+      if (handler === undefined || bindingId === token) throw new HookNotFoundError(token);
+      const { event } = message as { event: SubscriptionEvent };
+      ownerHooks.deliveries.push(
+        dispatchSubscriptionStep({
+          serializedContext: ownerHooks.serializedContext(handler.binding),
+          binding: handler.binding,
+          event,
+        }),
+      );
+      return {} as never;
+    },
+  };
+});
 vi.mock("#compiled/@ai-sdk/mcp/index.js", () => ({ createMCPClient: createClient }));
-vi.mock("#runtime/subscriptions/owner.js", () => ({
-  startConnectionEventOwner: vi.fn(async (binding: EventBinding, bundle: unknown) => {
-    const existing = handlers.get(binding.id);
-    if (existing !== undefined) return existing.subscription;
-    const { subscribeConnectionEvent } =
-      await import("#runtime/subscriptions/lifecycle-step.js");
-    const { subscriptionFromOutcome } = await vi.importActual<
-      typeof import("#runtime/subscriptions/owner.js")
-    >("#runtime/subscriptions/owner.js");
-    const subscription = subscriptionFromOutcome(
-      await subscribeConnectionEvent(handlerContext(binding, bundle), binding, binding.id),
-    );
-    handlers.set(binding.id, { binding, subscription });
-    return subscription;
-  }),
-  findConnectionEventOwner: vi.fn(async (bindingId: string) => {
-    const handler = handlers.get(bindingId);
-    return handler && { owner: handler.binding, subscription: handler.subscription };
-  }),
-  retireConnectionEventOwner: vi.fn(async (bindingId: string) => {
-    if (!handlers.has(bindingId)) return false;
-    retired.add(bindingId);
-    return true;
-  }),
-}));
+vi.mock("#runtime/subscriptions/owner.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("#runtime/subscriptions/owner.js")>();
+  return {
+    ...actual,
+    startSubscriptionOwner: vi.fn(async (binding: ConnectionBinding, bundle: unknown) => {
+      const existing = handlers.get(binding.id);
+      if (existing !== undefined) return existing.opened;
+      const { connectionSource } = await import("#runtime/subscriptions/sources/connection.js");
+      const outcome = await connectionSource.open({
+        ctx: await deserializeContext(handlerContext(binding, bundle)),
+        binding,
+        idempotencyKey: binding.id,
+      });
+      if ("error" in outcome)
+        throw Object.assign(new Error(outcome.error), { status: outcome.status });
+      handlers.set(binding.id, { binding, opened: outcome.opened });
+      return outcome.opened;
+    }),
+    findSubscriptionOwner: vi.fn(async (bindingId: string) => handlers.get(bindingId)),
+    retireSubscriptionOwner: vi.fn(async (bindingId: string) => {
+      if (!handlers.has(bindingId)) return false;
+      retired.add(bindingId);
+      return true;
+    }),
+  };
+});
 vi.mock("#runtime/sessions/compiled-agent-cache.js", () => ({
   getCompiledRuntimeAgentBundle: loadBundle,
 }));
@@ -95,7 +129,7 @@ let gap: ReturnType<typeof vi.fn<(...args: unknown[]) => Promise<void>>>;
 let terminated: ReturnType<typeof vi.fn<(...args: unknown[]) => Promise<void>>>;
 let initial: {
   serializedContext: Record<string, unknown>;
-  binding: EventBinding | undefined;
+  binding: ConnectionBinding | undefined;
 };
 let eventSchema: Record<string, unknown>;
 
@@ -110,6 +144,8 @@ beforeEach(async () => {
   saved = new Map();
   handlers.clear();
   retired.clear();
+  ownerHooks.routed = false;
+  ownerHooks.deliveries = [];
   callback = vi.fn(async () => {});
   gap = vi.fn(async () => {});
   terminated = vi.fn(async () => {});
@@ -299,7 +335,7 @@ it.each([3_600_000, null])(
     expect(subscriber).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ name: "issue.created", arguments: { project: "ABC" }, ttlMs }),
     );
-    expect(handlers.get(initial.binding!.id)?.subscription?.id).toBe("sub_0");
+    expect(handlers.get(initial.binding!.id)?.opened?.upstream?.id).toBe("sub_0");
   },
 );
 
@@ -309,7 +345,7 @@ it.each([120_000, 31_536_000_000, null])(
     await watch("watch-1", ttlMs);
     expect(requested[0]).toMatchObject({ ttlMs, idempotencyKey: initial.binding!.id });
     expect(requested[0]).not.toHaveProperty("expiresAt");
-    expect(initial.binding!.request.ttlMs).toBe(ttlMs);
+    expect(initial.binding!.source.request.ttlMs).toBe(ttlMs);
     const [tool] = await contextStorage.run(ctx, () => actions.metadata());
     const { toInputSchema } = await import("#tools/schema.js");
     const schema = toInputSchema(tool!.inputSchema);
@@ -505,40 +541,64 @@ async function watch(callId = "watch-1", ttlMs: number | null = TTL_MS) {
     }
   });
 }
-function handlerContext(binding: EventBinding, bundle: unknown): Record<string, unknown> {
+function handlerContext(binding: ConnectionBinding, bundle: unknown): Record<string, unknown> {
   const handler = new ContextContainer();
   handler.set(SessionAgentKey, fromCompiledBundle(bundle as CompiledRuntimeAgentBundle));
   handler.set(AuthKey, binding.auth);
   handler.set(SessionIdKey, binding.sessionId);
   return serializeContext(handler);
 }
-function payload(): ConnectionEventPayload {
-  const binding = initial.binding!;
+function deliveryFor(
+  eventName: string,
+  subscriptionId: string,
+  deliveryId: string,
+): ConnectionEventDelivery {
   return {
-    kind: "connection-event",
-    connectionName: "issues",
-    bindingId: binding.id,
-    delivery: {
-      version: 1,
-      deliveryId: "delivery-1",
-      subscriptionId: "sub_0",
-      source: { type: "mcp", connectorId: "connector" },
-      context: binding.request.context!,
-      event: {
-        eventId: "event-1",
-        name: binding.request.name,
-        timestamp: "2026-10-07T00:00:00Z",
-        data: { issue: "ABC-1" },
-        cursor: null,
-      },
+    version: 1,
+    deliveryId,
+    subscriptionId,
+    source: { type: "mcp", connectorId: "connector" },
+    context: {},
+    event: {
+      eventId: "event-1",
+      name: eventName,
+      timestamp: "2026-10-07T00:00:00Z",
+      data: { issue: "ABC-1" },
+      cursor: null,
     },
   };
 }
-async function dispatch(message: ConnectionEventPayload) {
-  await dispatchConnectionEventStep({
+function eventOf(
+  delivery: ConnectionEventDelivery,
+  requestTraceContext?: SubscriptionEvent["requestTraceContext"],
+): SubscriptionEvent {
+  return {
+    id: delivery.deliveryId,
+    data: delivery as unknown as SubscriptionEvent["data"],
+    ...(requestTraceContext === undefined ? {} : { requestTraceContext }),
+  };
+}
+function controlOf(
+  delivery: ConnectionEventDelivery,
+  control: Extract<ConnectionEventDelivery, { control: unknown }>["control"],
+): ConnectionEventDelivery {
+  const { event: _event, ...envelope } = delivery as Extract<
+    ConnectionEventDelivery,
+    { event: unknown }
+  >;
+  return { ...envelope, control } as ConnectionEventDelivery;
+}
+function delivery(): ConnectionEventDelivery {
+  return deliveryFor(initial.binding!.source.request.name, "sub_0", "delivery-1");
+}
+function payload(): SubscriptionEvent {
+  return eventOf(delivery());
+}
+async function dispatch(event: SubscriptionEvent, binding = initial.binding!) {
+  await dispatchSubscriptionStep({
     serializedContext: initial.serializedContext,
-    binding: initial.binding!,
-    payload: message,
+    binding,
+    event,
   });
 }
 
@@ -602,17 +662,27 @@ it("keeps a 401 from subscribe classifiable as a sign-in request", async () => {
 
 it("throws when a subscribe response is lost, so the step retries with the same key", async () => {
   await watch();
-  const binding: EventBinding = { ...initial.binding!, id: "lost" };
-  const context = handlerContext(binding, requireCompiledBundle(ctx));
+  const binding: ConnectionBinding = { ...initial.binding!, id: "lost" };
+  const open = () =>
+    openSubscriptionStep({
+      serializedContext: handlerContext(binding, requireCompiledBundle(ctx)),
+      binding,
+    });
   const subscribe = subscriber.getMockImplementation()!;
   subscriber.mockImplementationOnce(async (input) => {
     await subscribe(input);
     throw new Error("The operation timed out.");
   });
-  await expect(subscribeConnectionEvent(context, binding, "lost")).rejects.toThrow("timed out");
-  expect(await subscribeConnectionEvent(context, binding, "lost")).toEqual({
-    subscription: saved.get("lost"),
+  await expect(open()).rejects.toThrow("timed out");
+  const opened = await open();
+  expect(opened).toEqual({
+    opened: {
+      key: [...saved.values()].at(-1)!.id,
+      expiresAt: null,
+      upstream: [...saved.values()].at(-1),
+    },
   });
+  expect(saved.size).toBe(2);
 });
 
 it("fails the subscribe action with Connect's error, and a retry reuses its idempotency key", async () => {
@@ -641,19 +711,12 @@ it("runs callbacks as the creator under the run's saved binding", async () => {
 it("does not run a delivery whose connection or event name differs from its binding", async () => {
   await watch();
   initial = { ...initial, serializedContext: serializeContext(ctx) };
-  const message = payload();
-  for (const candidate of [
-    { ...message, connectionName: "other" },
-    {
-      ...message,
-      delivery: {
-        ...message.delivery,
-        event: { ...(message.delivery as { event: object }).event, name: "other.event" },
-      },
-    },
-  ])
-    await dispatch(candidate as ConnectionEventPayload);
+  const binding = initial.binding!;
+  await dispatch(payload(), { ...binding, source: { ...binding.source, name: "other" } });
+  await dispatch(eventOf(deliveryFor("other.event", "sub_0", "delivery-1")));
   expect(callback).not.toHaveBeenCalled();
+  await dispatch(payload());
+  expect(callback).toHaveBeenCalledTimes(1);
 });
 
 it("returns the same watch when the same event and arguments are watched again", async () => {
@@ -683,7 +746,7 @@ it("keys Connect's subscribe by watch and run, so a step retry reuses it and a l
   await watch();
   const binding = initial.binding!;
   const open = () =>
-    openConnectionEventStep({
+    openSubscriptionStep({
       serializedContext: handlerContext(binding, requireCompiledBundle(ctx)),
       binding,
     });
@@ -700,14 +763,14 @@ it("keys Connect's subscribe by watch and run, so a step retry reuses it and a l
 });
 
 it("returns a subscribe that outlasts the wait as pending under its id, which get later resolves", async () => {
-  vi.mocked(startConnectionEventOwner).mockImplementationOnce(async (binding) => {
-    handlers.set(binding.id, { binding, subscription: undefined });
+  vi.mocked(startSubscriptionOwner).mockImplementationOnce(async (binding) => {
+    handlers.set(binding.id, { binding: binding as ConnectionBinding, opened: undefined });
     return undefined;
   });
   const pending = await watch();
   expect(pending).toEqual({
     id: initial.binding!.id,
-    name: initial.binding!.request.name,
+    name: initial.binding!.source.request.name,
     arguments: { project: "ABC" },
     status: "pending",
   });
@@ -717,7 +780,14 @@ it("returns a subscribe that outlasts the wait as pending under its id, which ge
     expect(await actions.execute("events_get_subscription", { id }, { callId: "get" })).toEqual(
       pending,
     );
-    handlers.set(id, { binding: initial.binding!, subscription: late as ManagedEventSubscription });
+    handlers.set(id, {
+      binding: initial.binding!,
+      opened: {
+        key: "sub_late",
+        expiresAt: null,
+        upstream: late as ManagedEventSubscription,
+      },
+    });
     vi.mocked(adapter.getSubscription).mockResolvedValue(late as ManagedEventSubscription);
     expect(
       await actions.execute("events_get_subscription", { id }, { callId: "get-again" }),
@@ -727,8 +797,8 @@ it("returns a subscribe that outlasts the wait as pending under its id, which ge
 });
 
 it("takes a stop while the subscribe is still in flight, for the watch's run to carry out", async () => {
-  vi.mocked(startConnectionEventOwner).mockImplementationOnce(async (binding) => {
-    handlers.set(binding.id, { binding, subscription: undefined });
+  vi.mocked(startSubscriptionOwner).mockImplementationOnce(async (binding) => {
+    handlers.set(binding.id, { binding: binding as ConnectionBinding, opened: undefined });
     return undefined;
   });
   const { id } = await watch();
@@ -744,19 +814,9 @@ it("takes a stop while the subscribe is still in flight, for the watch's run to 
 it("ends the watch after its terminated callback", async () => {
   await watch();
   initial = { ...initial, serializedContext: serializeContext(ctx) };
-  const normal = payload();
-  const { event: _event, ...envelope } = normal.delivery as Extract<
-    typeof normal.delivery,
-    { event: unknown }
-  >;
-  const message: ConnectionEventPayload = {
-    ...normal,
-    delivery: {
-      ...envelope,
-      control: { type: "terminated", error: { code: 1, message: "Ended" } },
-    },
-  };
-  await dispatch(message);
+  await dispatch(
+    eventOf(controlOf(delivery(), { type: "terminated", error: { code: 1, message: "Ended" } })),
+  );
   expect(terminated).toHaveBeenCalledTimes(1);
   expect(retired.has(initial.binding!.id)).toBe(true);
   expect(callback).not.toHaveBeenCalled();
@@ -829,10 +889,10 @@ it.each([
     else vi.mocked(adapter.unsubscribe).mockResolvedValueOnce({ ...subscription, ...answer });
     const binding = initial.binding!;
     expect(
-      await unsubscribeConnectionEventStep({
+      await closeSubscriptionStep({
         serializedContext: handlerContext(binding, requireCompiledBundle(ctx)),
         binding,
-        subscriptionId: subscription.id,
+        opened: { key: subscription.id, expiresAt: null },
       }),
     ).toBe(expected);
     expect(adapter.unsubscribe).toHaveBeenCalledWith(
@@ -844,19 +904,11 @@ it.each([
 it("records a gap before dispatch and keeps the subscription available for later events", async () => {
   await watch();
   initial = { ...initial, serializedContext: serializeContext(ctx) };
-  const normal = payload();
-  const { event: _event, ...envelope } = normal.delivery as Extract<
-    typeof normal.delivery,
-    { event: unknown }
-  >;
-  const message: ConnectionEventPayload = {
-    ...normal,
-    delivery: { ...envelope, control: { type: "gap", cursor: "cursor-2", truncated: true } },
-  };
-  await dispatch(message);
+  await dispatch(
+    eventOf(controlOf(delivery(), { type: "gap", cursor: "cursor-2", truncated: true })),
+  );
   expect(gap).toHaveBeenCalledTimes(1);
-  const next = { ...normal, delivery: { ...normal.delivery, deliveryId: "next" } };
-  await dispatch(next);
+  await dispatch(eventOf({ ...delivery(), deliveryId: "next" }));
   expect(callback).toHaveBeenCalledTimes(1);
 });
 
@@ -869,30 +921,18 @@ it.each(["event", "gap", "terminated"] as const)(
     try {
       await watch();
       initial = { ...initial, serializedContext: serializeContext(ctx) };
-      const message = payload();
-      const delivery = message.delivery;
-      const tracedMessage: ConnectionEventPayload = {
-        ...message,
-        requestTraceContext: { traceId: "1".repeat(32), spanId: "2".repeat(16), traceFlags: 1 },
-        delivery:
-          kind === "event"
-            ? delivery
-            : {
-                version: delivery.version,
-                subscriptionId: delivery.subscriptionId,
-                deliveryId: delivery.deliveryId,
-                source: delivery.source,
-                context: delivery.context,
-                ...(kind === "gap"
-                  ? { control: { type: "gap" as const, cursor: null } }
-                  : {
-                      control: {
-                        type: "terminated" as const,
-                        error: { code: 1, message: "private" },
-                      },
-                    }),
-              },
-      };
+      const normal = delivery();
+      const tracedMessage = eventOf(
+        kind === "event"
+          ? normal
+          : controlOf(
+              normal,
+              kind === "gap"
+                ? { type: "gap", cursor: null }
+                : { type: "terminated", error: { code: 1, message: "private" } },
+            ),
+        { traceId: "1".repeat(32), spanId: "2".repeat(16), traceFlags: 1 },
+      );
       const handler = kind === "event" ? callback : kind === "gap" ? gap : terminated;
       const active: string[] = [];
       handler
@@ -1005,11 +1045,50 @@ it("does not let a sampled webhook override the session's saved sampling decisio
     decision: { action: "record", recordInputs: false, recordOutputs: false },
   });
   initial = { ...initial, serializedContext: serializeContext(ctx) };
-  const message = {
-    ...payload(),
-    requestTraceContext: { traceId: "1".repeat(32), spanId: "2".repeat(16), traceFlags: 1 },
-  };
-  await dispatch(message);
+  await dispatch(
+    eventOf(delivery(), { traceId: "1".repeat(32), spanId: "2".repeat(16), traceFlags: 1 }),
+  );
   expect(callback).toHaveBeenCalledOnce();
   expect(tracing.exporter.getFinishedSpans()).toEqual([]);
+});
+
+it("delivers one upstream event to every session holding the same upstream subscription, each once", async () => {
+  subscriber.mockImplementation(async (input: ManagedEventSubscribeInput) => ({
+    id: "sub_shared",
+    name: input.name,
+    arguments: input.arguments,
+    status: "active",
+    expiresAt: null,
+  }));
+  ownerHooks.routed = true;
+  const bundle = requireCompiledBundle(ctx);
+  ownerHooks.serializedContext = (binding) => handlerContext(binding, bundle);
+  const bindings: ConnectionBinding[] = [];
+  for (const sessionId of ["session-1", "session-2"]) {
+    ctx.set(SessionIdKey, sessionId);
+    await watch(`watch-${sessionId}`);
+    bindings.push(initial.binding!);
+  }
+  const [first, second] = bindings as [ConnectionBinding, ConnectionBinding];
+  expect(first.id).not.toBe(second.id);
+  expect(handlers.get(first.id)!.opened!.key).toBe(handlers.get(second.id)!.opened!.key);
+
+  const event = eventOf(deliveryFor(first.source.request.name, "sub_shared", "delivery-1"));
+  expect(
+    await fanOutEventStep({ bindingIds: [first.id, second.id, "ended-owner"], event }),
+  ).toEqual(["ended-owner"]);
+  await Promise.all(ownerHooks.deliveries);
+
+  expect(callback).toHaveBeenCalledTimes(2);
+  expect(
+    callback.mock.calls
+      .map(([args]) => (args as { origin: { sessionId: string } }).origin.sessionId)
+      .sort(),
+  ).toEqual(["session-1", "session-2"]);
+  expect(callback).toHaveBeenCalledWith(
+    expect.objectContaining({
+      deliveryId: "delivery-1",
+      origin: expect.objectContaining({ subscriptionId: "sub_shared" }),
+    }),
+  );
 });

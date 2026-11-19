@@ -1,10 +1,8 @@
 import {
-  CHANNEL_SUBSCRIPTION_DELIVERY_WORKFLOW_NAME,
-  CHANNEL_SUBSCRIPTION_KEY_WORKFLOW_NAME,
-  CHANNEL_SUBSCRIPTION_WORKFLOW_NAME,
-  CONNECTION_EVENT_DELIVERY_WORKFLOW_NAME,
-  CONNECTION_EVENT_WORKFLOW_NAME,
   SESSION_TIMEOUT_WORKFLOW_NAME,
+  SUBSCRIPTION_DELIVERY_WORKFLOW_NAME,
+  SUBSCRIPTION_KEY_WORKFLOW_NAME,
+  SUBSCRIPTION_WORKFLOW_NAME,
   WORKFLOW_ENTRY_NAME,
   WORKFLOW_TOOL_RUN_WORKFLOW_NAME,
 } from "#execution/stable-workflow-names.js";
@@ -24,22 +22,14 @@ export const workflowToolRunWorkflowReference = {
   workflowId: `workflow//${STABLE_ID_BASE}//${WORKFLOW_TOOL_RUN_WORKFLOW_NAME}`,
 };
 
-export const connectionEventWorkflowReference = {
-  workflowId: `workflow//${STABLE_ID_BASE}//${CONNECTION_EVENT_WORKFLOW_NAME}`,
+export const subscriptionWorkflowReference = {
+  workflowId: `workflow//${STABLE_ID_BASE}//${SUBSCRIPTION_WORKFLOW_NAME}`,
 };
 
-export const connectionEventDeliveryWorkflowReference = {
-  workflowId: `workflow//${STABLE_ID_BASE}//${CONNECTION_EVENT_DELIVERY_WORKFLOW_NAME}`,
+export const subscriptionDeliveryWorkflowReference = {
+  workflowId: `workflow//${STABLE_ID_BASE}//${SUBSCRIPTION_DELIVERY_WORKFLOW_NAME}`,
 };
 
-export const channelSubscriptionWorkflowReference = {
-  workflowId: `workflow//${STABLE_ID_BASE}//${CHANNEL_SUBSCRIPTION_WORKFLOW_NAME}`,
-};
-
-export const channelSubscriptionDeliveryWorkflowReference = {
-  workflowId: `workflow//${STABLE_ID_BASE}//${CHANNEL_SUBSCRIPTION_DELIVERY_WORKFLOW_NAME}`,
-};
-
-export const channelSubscriptionKeyWorkflowReference = {
-  workflowId: `workflow//${STABLE_ID_BASE}//${CHANNEL_SUBSCRIPTION_KEY_WORKFLOW_NAME}`,
+export const subscriptionKeyWorkflowReference = {
+  workflowId: `workflow//${STABLE_ID_BASE}//${SUBSCRIPTION_KEY_WORKFLOW_NAME}`,
 };

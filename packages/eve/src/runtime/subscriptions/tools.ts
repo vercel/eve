@@ -2,11 +2,12 @@ import { contextStorage } from "#context/container.js";
 import { AuthKey, SessionIdKey, SessionTraceSeedKey } from "#context/keys.js";
 import { installedDurableHost } from "#execution/hosts.js";
 import { principalOf } from "#execution/session/principal.js";
-import { channelSubscriptionId } from "#runtime/subscriptions/channel/id.js";
-import {
-  type ChannelSubscriptionBinding,
-  type ChannelSubscriptionStatus,
-} from "#runtime/subscriptions/channel/state.js";
+import { channelSubscriptionId } from "#runtime/subscriptions/id.js";
+import type {
+  ChannelSubscriptionSource,
+  OpenedSubscription,
+  SubscriptionBinding,
+} from "#runtime/subscriptions/state.js";
 import { requireCompiledBundle, SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 import type { ChannelSubscriptions } from "#shared/channel-subscriptions.js";
@@ -75,8 +76,8 @@ export function channelSubscriptionTools(
       inputSchema: idSchema(),
       label: { start: () => "Get subscription" },
       execute: async ({ id }) => {
-        const found = await ownedSubscription(id);
-        return found.status ?? pending(found.binding);
+        const { binding, opened } = await ownedSubscription(id);
+        return opened === undefined ? pending(binding) : active(binding, opened);
       },
     }) as DynamicToolEntry,
     [STOP_TOOL]: defineTool({
@@ -117,7 +118,7 @@ function idSchema() {
 }
 
 function owners() {
-  const host = installedDurableHost()?.channelSubscriptions;
+  const host = installedDurableHost()?.subscriptions;
   if (host === undefined)
     throw new Error("This host keeps no channel subscriptions: subscribe from a deployed agent.");
   return host;
@@ -141,7 +142,7 @@ async function subscribe(
   offered: readonly OfferedSubscriptions[],
   input: SubscribeInput,
   signal: AbortSignal | undefined,
-): Promise<ChannelSubscriptionStatus | ReturnType<typeof pending>> {
+): Promise<ReturnType<typeof active> | ReturnType<typeof pending>> {
   const { ctx, auth, sessionId, executionPrincipal } = scope();
   const host = owners();
   const { channel: channelName, input: channelInput } = input.subscription;
@@ -160,23 +161,31 @@ async function subscribe(
     sessionId,
     input: subscriptionInput,
   });
-  const binding: ChannelSubscriptionBinding = {
+  const binding: SubscriptionBinding = {
     id: channelSubscriptionId({ channelName, key, sessionId, executionPrincipal }),
-    channelName,
-    key,
-    input: structuredClone(subscriptionInput),
+    source: {
+      kind: "channel",
+      name: channelName,
+      key,
+      input: structuredClone(subscriptionInput),
+      ttlMs: input.ttlMs,
+    },
     sessionId,
     executionPrincipal,
     auth: structuredClone(auth),
     traceSeed: ctx.get(SessionTraceSeedKey),
-    ttlMs: input.ttlMs,
   };
-  return (await host.start(binding, requireCompiledBundle(ctx), signal)) ?? pending(binding);
+  const opened = await host.start(binding, requireCompiledBundle(ctx), signal);
+  return opened === undefined ? pending(binding) : active(binding, opened);
 }
 
 async function ownedSubscription(id: string) {
   const found = await owners().find(id);
-  if (found === undefined || found.binding.executionPrincipal !== scope().executionPrincipal)
+  if (
+    found === undefined ||
+    found.binding.source.kind !== "channel" ||
+    found.binding.executionPrincipal !== scope().executionPrincipal
+  )
     throw unknownSubscription();
   return found;
 }
@@ -185,11 +194,23 @@ function unknownSubscription(): Error {
   return new Error("Unknown subscription for this caller.");
 }
 
-function pending(binding: ChannelSubscriptionBinding) {
+function channelOf(binding: SubscriptionBinding): ChannelSubscriptionSource {
+  if (binding.source.kind !== "channel") throw unknownSubscription();
+  return binding.source;
+}
+
+function active(binding: SubscriptionBinding, opened: OpenedSubscription) {
+  const { name, input } = channelOf(binding);
   return {
     id: binding.id,
-    channel: binding.channelName,
-    input: binding.input,
-    status: "pending" as const,
+    channel: name,
+    input,
+    status: "active" as const,
+    expiresAt: opened.expiresAt,
   };
+}
+
+function pending(binding: SubscriptionBinding) {
+  const { name, input } = channelOf(binding);
+  return { id: binding.id, channel: name, input, status: "pending" as const };
 }

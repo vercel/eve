@@ -6,21 +6,23 @@ import { AuthKey, SessionIdKey } from "#context/keys.js";
 import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import { serializeInputSchema } from "#tools/schema.js";
 import { channelSubscriptionId } from "./id.js";
-import type { ChannelSubscriptionBinding, ChannelSubscriptionStatus } from "./state.js";
+import type { OpenedSubscription, SubscriptionBinding } from "./state.js";
 
 const host = vi.hoisted(() => ({
-  bindings: new Map<string, ChannelSubscriptionBinding>(),
+  bindings: new Map<string, SubscriptionBinding>(),
   start: vi.fn(),
   retire: vi.fn(),
+  find: undefined as undefined | ((id: string) => Promise<unknown>),
 }));
 vi.mock("#execution/hosts.js", () => ({
   installedDurableHost: () => ({
-    channelSubscriptions: {
+    subscriptions: {
       start: host.start,
       retire: host.retire,
       async find(id: string) {
+        if (host.find !== undefined) return host.find(id);
         const binding = host.bindings.get(id);
-        return binding && { binding, status: undefined };
+        return binding && { binding, opened: undefined };
       },
     },
   }),
@@ -86,23 +88,21 @@ const subscribeInput = {
 const subscribeAs = (sessionId: string, user: string, input: unknown = subscribeInput) =>
   inSession(sessionId, authOf(user), () => call("subscribe", input));
 
-const status = (binding: ChannelSubscriptionBinding): ChannelSubscriptionStatus => ({
-  id: binding.id,
-  channel: binding.channelName,
-  input: binding.input,
-  status: "active",
+const opened = (binding: SubscriptionBinding): OpenedSubscription => ({
+  key: (binding.source as { key: string }).key,
   expiresAt: null,
 });
 
 beforeEach(() => {
   host.bindings.clear();
+  host.find = undefined;
   host.start.mockReset();
   host.retire.mockReset();
   onSubscribe.mockReset();
   onSubscribe.mockResolvedValue({ key: "vercel/eve#7:checks_finished" });
-  host.start.mockImplementation(async (binding: ChannelSubscriptionBinding) => {
+  host.start.mockImplementation(async (binding: SubscriptionBinding) => {
     host.bindings.set(binding.id, binding);
-    return status(binding);
+    return opened(binding);
   });
   host.retire.mockResolvedValue(true);
 });
@@ -144,7 +144,7 @@ it("runs onSubscribe as the caller and starts a binding carrying key, ttl and pr
     sessionId: "s1",
     input: { owner: "vercel", pull: 7 },
   });
-  const executionPrincipal = (host.start.mock.calls[0]![0] as ChannelSubscriptionBinding)
+  const executionPrincipal = (host.start.mock.calls[0]![0] as SubscriptionBinding)
     .executionPrincipal;
   const id = channelSubscriptionId({
     channelName: "github",
@@ -152,15 +152,24 @@ it("runs onSubscribe as the caller and starts a binding carrying key, ttl and pr
     sessionId: "s1",
     executionPrincipal,
   });
-  expect(result).toMatchObject({ id, channel: "github", status: "active" });
+  expect(result).toMatchObject({
+    id,
+    channel: "github",
+    input: { owner: "vercel", pull: 7 },
+    status: "active",
+    expiresAt: null,
+  });
   expect(host.start.mock.calls[0]![0]).toMatchObject({
     id,
-    channelName: "github",
-    key: "vercel/eve#7:checks_finished",
-    input: { owner: "vercel", pull: 7 },
+    source: {
+      kind: "channel",
+      name: "github",
+      key: "vercel/eve#7:checks_finished",
+      input: { owner: "vercel", pull: 7 },
+      ttlMs: 120_000,
+    },
     sessionId: "s1",
     auth: authOf("rui"),
-    ttlMs: 120_000,
   });
   expect(executionPrincipal).toEqual(expect.any(String));
 });
@@ -231,4 +240,45 @@ it("reports an unknown id and a subscription that already ended", async () => {
   await expect(
     inSession("s1", authOf("rui"), () => call("stop_subscription", { id })),
   ).rejects.toThrow("Unknown subscription for this caller.");
+});
+
+it("reports an opened subscription as active with its expiry", async () => {
+  const { id } = (await subscribeAs("s1", "rui")) as { id: string };
+  const binding = host.bindings.get(id)!;
+  host.find = async () => ({
+    binding,
+    opened: { key: "k", expiresAt: "2030-01-01T00:00:00.000Z" },
+  });
+  await expect(
+    inSession("s1", authOf("rui"), () => call("get_subscription", { id })),
+  ).resolves.toEqual({
+    id,
+    channel: "github",
+    input: { owner: "vercel", pull: 7 },
+    status: "active",
+    expiresAt: "2030-01-01T00:00:00.000Z",
+  });
+});
+
+it("does not expose a connection subscription held by the same principal", async () => {
+  const { id } = (await subscribeAs("s1", "rui")) as { id: string };
+  const binding = host.bindings.get(id)!;
+  host.bindings.set(id, {
+    ...binding,
+    source: {
+      kind: "connection",
+      name: "issues",
+      instanceId: undefined,
+      connector: "linear",
+      principalKey: "p",
+      request: {},
+    } as never,
+  });
+  await expect(
+    inSession("s1", authOf("rui"), () => call("get_subscription", { id })),
+  ).rejects.toThrow("Unknown subscription for this caller.");
+  await expect(
+    inSession("s1", authOf("rui"), () => call("stop_subscription", { id })),
+  ).rejects.toThrow("Unknown subscription for this caller.");
+  expect(host.retire).not.toHaveBeenCalled();
 });

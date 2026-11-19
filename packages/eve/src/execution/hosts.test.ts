@@ -83,18 +83,13 @@ function durableHost(name: string): DurableHost {
     createRuntime: () => {
       throw new Error("no runtime in this test");
     },
-    connectionEvents: {
+    subscriptions: {
       start: async () => undefined,
       find: async () => undefined,
       retire: async (bindingId) => {
         durable.reached.push(`retire ${bindingId}`);
         return true;
       },
-    },
-    channelSubscriptions: {
-      start: async () => undefined,
-      find: async () => undefined,
-      retire: async () => true,
       emit: async () => false,
     },
   };

@@ -113,7 +113,7 @@ function channelSubscriptionToolsDefinitions(
       { logicalPath: "tools/channel-subscriptions.ts", slug: "channel-subscriptions" },
       async () => {
         const { channelSubscriptionTools } =
-          await import("#runtime/subscriptions/channel/tools.js");
+          await import("#runtime/subscriptions/tools.js");
         return channelSubscriptionTools(channels);
       },
     ),

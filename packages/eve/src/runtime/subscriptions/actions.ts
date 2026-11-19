@@ -22,10 +22,10 @@ import type { ManagedEventSubscribeInput } from "#shared/connection-events.js";
 import { parseJsonObject } from "#shared/json.js";
 import { principalKey, resolveConnectionPrincipal } from "#runtime/connections/principal.js";
 import { connectionEventDestination } from "#runtime/subscriptions/path.js";
-import {
-  sameEventOwner,
-  type EventBinding,
-  type EventOwner,
+import type {
+  ConnectionBinding,
+  ConnectionSubscriptionSource,
+  SubscriptionBinding,
 } from "#runtime/subscriptions/state.js";
 import type { ManagedEventSubscription } from "#shared/connection-events.js";
 
@@ -76,7 +76,7 @@ export class ConnectionEventActions {
     const sessionId = ctx.require(SessionIdKey);
     const owner = principalKey(principal);
     const executionPrincipal = principalOf(ctx.get(AuthKey));
-    const caller: EventOwner = {
+    const caller: Caller = {
       connectionName: this.connection.connectionName,
       instanceId: this.connection.instanceId,
       connector,
@@ -178,7 +178,7 @@ export class ConnectionEventActions {
   ): Promise<unknown> {
     const args = parseJsonObject(input);
     const { ctx, principal, backend, sessionId, owner, executionPrincipal, caller } = this.scope();
-    const owners = installedDurableHost()?.connectionEvents;
+    const owners = installedDurableHost()?.subscriptions;
     if (owners === undefined)
       throw new Error(
         "This host keeps no connection event subscriptions: watch events from a deployed agent.",
@@ -187,15 +187,15 @@ export class ConnectionEventActions {
       if (typeof args.id !== "string") throw new Error("id must be a subscription id.");
       const bindingId = args.id;
       const handler = await owners.find(bindingId);
-      if (handler === undefined || !sameEventOwner(handler.owner, caller))
+      if (handler === undefined || !heldBy(handler.binding, caller))
         throw new Error("Unknown subscription for this caller and account.");
       if (name === STOP) {
         if (!(await owners.retire(bindingId)))
           throw new Error("Unknown subscription for this caller and account.");
         return { id: bindingId, status: "stopping" as const };
       }
-      if (handler.subscription === undefined) return pendingResult(handler.owner);
-      const subscriptionId = handler.subscription.id;
+      if (handler.opened === undefined) return pendingResult(handler.binding);
+      const subscriptionId = handler.opened.key;
       const events = await backend.createAdapter({
         principal,
         connection: { url: this.connection.url },
@@ -248,27 +248,30 @@ export class ConnectionEventActions {
           ]),
         )
         .digest("hex");
-      const binding: EventBinding = {
-        ...caller,
+      const binding: ConnectionBinding = {
         id,
+        source: {
+          kind: "connection",
+          name: caller.connectionName,
+          instanceId: caller.instanceId,
+          connector: caller.connector,
+          principalKey: caller.principalKey,
+          request: {
+            name: definition.name,
+            arguments: structuredClone(eventArguments) as ManagedEventSubscribeInput["arguments"],
+            ttlMs,
+            context: { eve: { version: 1, sessionId, bindingId: id } },
+          },
+        },
         sessionId,
+        executionPrincipal,
         auth: structuredClone(ctx.get(AuthKey) ?? null),
         traceSeed: ctx.get(SessionTraceSeedKey),
-        request: {
-          name: definition.name,
-          arguments: structuredClone(eventArguments) as ManagedEventSubscribeInput["arguments"],
-          ttlMs,
-          context: { eve: { version: 1, sessionId, bindingId: id } },
-        },
       };
-      const subscription = await owners.start(
-        binding,
-        requireCompiledBundle(ctx),
-        options.abortSignal,
-      );
-      return subscription === undefined
+      const opened = await owners.start(binding, requireCompiledBundle(ctx), options.abortSignal);
+      return opened?.upstream === undefined
         ? pendingResult(binding)
-        : subscriptionResult(id, subscription);
+        : subscriptionResult(id, opened.upstream);
     });
   }
 }
@@ -296,9 +299,26 @@ function subscriptionResult(bindingId: string, subscription: ManagedEventSubscri
   return { ...subscription, id: bindingId, subscriptionId: subscription.id };
 }
 
-function pendingResult(binding: EventBinding) {
-  const { name, arguments: eventArguments } = binding.request;
+function pendingResult(binding: ConnectionBinding) {
+  const { name, arguments: eventArguments } = binding.source.request;
   return { id: binding.id, name, arguments: eventArguments, status: "pending" as const };
+}
+
+type Caller = Pick<ConnectionSubscriptionSource, "instanceId" | "connector" | "principalKey"> & {
+  readonly connectionName: string;
+  readonly executionPrincipal: string;
+};
+
+function heldBy(binding: SubscriptionBinding, caller: Caller): binding is ConnectionBinding {
+  const { source } = binding;
+  return (
+    source.kind === "connection" &&
+    source.name === caller.connectionName &&
+    source.instanceId === caller.instanceId &&
+    source.connector === caller.connector &&
+    source.principalKey === caller.principalKey &&
+    binding.executionPrincipal === caller.executionPrincipal
+  );
 }
 
 function canonicalJson(value: unknown): string {

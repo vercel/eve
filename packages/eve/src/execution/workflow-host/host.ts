@@ -9,16 +9,11 @@ import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import {
-  findConnectionEventOwner,
-  retireConnectionEventOwner,
-  startConnectionEventOwner,
+  emitSubscriptionEvent,
+  findSubscriptionOwner,
+  retireSubscriptionOwner,
+  startSubscriptionOwner,
 } from "#runtime/subscriptions/owner.js";
-import {
-  emitChannelSubscriptionEvent,
-  findChannelSubscriptionOwner,
-  retireChannelSubscriptionOwner,
-  startChannelSubscriptionOwner,
-} from "#runtime/subscriptions/channel/owner.js";
 import { cancelRun, getRun, getWorld, resumeHook } from "#internal/workflow/runtime.js";
 
 const workflowLineStore: SessionLineStore = {
@@ -62,16 +57,11 @@ export const workflowHost: DurableHost = {
   },
   lineStore: workflowLineStore,
   createRuntime: (input) => createWorkflowRuntime(input),
-  connectionEvents: {
-    start: (binding, bundle, signal) => startConnectionEventOwner(binding, bundle, signal),
-    find: (bindingId) => findConnectionEventOwner(bindingId),
-    retire: (bindingId) => retireConnectionEventOwner(bindingId),
-  },
-  channelSubscriptions: {
-    start: (binding, bundle, signal) => startChannelSubscriptionOwner(binding, bundle, signal),
-    find: (bindingId) => findChannelSubscriptionOwner(bindingId),
-    retire: (bindingId) => retireChannelSubscriptionOwner(bindingId),
-    emit: (channelName, key, event) => emitChannelSubscriptionEvent(channelName, key, event),
+  subscriptions: {
+    start: (binding, bundle, signal) => startSubscriptionOwner(binding, bundle, signal),
+    find: (bindingId) => findSubscriptionOwner(bindingId),
+    retire: (bindingId) => retireSubscriptionOwner(bindingId),
+    emit: (source, key, event) => emitSubscriptionEvent(source, key, event),
   },
   callbackBaseUrl() {
     try {

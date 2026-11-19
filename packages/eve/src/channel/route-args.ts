@@ -5,7 +5,7 @@ import {
   createChannelDeliveryMetadata,
   type ChannelDeliverySource,
 } from "#channel/delivery-metadata.js";
-import { createEmitChannelEventFn } from "#runtime/subscriptions/channel/emit.js";
+import { createEmitChannelEventFn } from "#runtime/subscriptions/emit.js";
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import { createAttachSessionFn } from "#channel/session.js";
 import type { SkillFileSource } from "#channel/skill-files.js";
