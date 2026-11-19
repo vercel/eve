@@ -9,9 +9,9 @@ import {
 
 const watcher: BoardWatcherConfig = {
   previews: false,
-  watchers: { eve: { tail: "dev --mentions @eve", when: "matches" } },
+  watchers: { eve: { tail: "dev --mentions @eve" } },
 };
-const watch = { eve: { tail: "dev --mentions @eve", when: "matches" } };
+const watch = { eve: { tail: "dev --mentions @eve" } };
 
 describe("desiredRegistration", () => {
   it.each([

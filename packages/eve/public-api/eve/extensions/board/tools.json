@@ -1,1 +1,17 @@
-["channels", "label", "post", "react", "read", "reply", "typing"]
+[
+  "block_task",
+  "cancel_schedule",
+  "channels",
+  "complete_task",
+  "create_task",
+  "fail_task",
+  "label",
+  "note",
+  "post",
+  "react",
+  "read",
+  "release_task",
+  "reply",
+  "schedule",
+  "typing"
+]

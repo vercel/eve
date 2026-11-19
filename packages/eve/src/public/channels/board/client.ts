@@ -1,12 +1,18 @@
-import { getVercelOidcToken } from "#compiled/@vercel/oidc/index.js";
+import {
+  board as boardHandle,
+  type Board as BoardHandle,
+  type MatchView,
+  type MessageView,
+  type ScheduleView,
+  type Written,
+} from "#compiled/@vercel/board/index.js";
 
 /** Who wrote a board message, as the board verified it. */
 export interface BoardAuthor {
-  /** The actor ID: `principal` or `principal+profile`, such as `slack:user:U0456`. */
+  /** The actor ID: `principal` or `principal+profile`, such as `vercel:user:u_abc+claude`. */
   readonly actor: string;
   readonly principal: string;
   readonly profile: string | null;
-  readonly session: string | null;
 }
 
 /** A board actor's display details. */
@@ -25,17 +31,27 @@ export interface BoardAttachment {
   readonly size: number;
 }
 
-/** A board message, as the board's HTTP API returns it. */
+/** The state the board keeps on a thread that is a task. */
+export interface BoardTaskState {
+  /** `waiting`, `ready`, `claimed`, `blocked`, `completed`, `failed`, or `canceled`. */
+  readonly state: string;
+  /** The principal that made the thread a task. */
+  readonly owner: string;
+  /** Who holds it, until when. A claim whose `until` has passed is over. */
+  readonly claim: { readonly actor: string; readonly until: string } | null;
+  readonly blocked: { readonly kind: string | null; readonly reason: string } | null;
+  readonly result: string | null;
+  readonly reason: string | null;
+}
+
+/** A board message, as the board returns it. */
 export interface BoardMessage {
   readonly id: string;
   readonly channel: string;
   readonly text: string;
   /** The thread's root message ID, or `null` for a root. */
   readonly re: string | null;
-  /**
-   * The thread's key: unique across boards and store resets, unlike message IDs, which are
-   * positions in one board's log.
-   */
+  /** The thread's key, unique across boards and store resets, unlike message IDs. */
   readonly thread: string;
   readonly labels: Readonly<Record<string, string>>;
   readonly by: BoardAuthor;
@@ -45,53 +61,14 @@ export interface BoardMessage {
   readonly deleted: boolean;
   /** Set when a schedule posted it. */
   readonly schedule?: { readonly id: string; readonly n: number };
+  /** Set on a root that is a task. */
+  readonly task?: BoardTaskState;
 }
 
-/** A board event, as a watcher match carries it. */
-export interface BoardEvent {
-  readonly cursor: string;
-  readonly type: string;
-  readonly createdAt: string;
-  /** The message the event concerns, as it is after the event. */
-  readonly message?: BoardMessage;
-}
-
-/** One match of a registered watcher, leased to the caller that pulled it. */
-export interface BoardMatch {
-  readonly id: string;
-  readonly watcher: string;
-  readonly lease: string;
-  readonly attempt: number;
-  readonly event: BoardEvent;
-}
-
-/** A registered watcher: the tail expression it matches. */
-export interface BoardWatch {
-  readonly tail: string;
-  readonly when: "matches" | "enters";
-}
-
-/** What a caller registers with a board: its watchers and where to wake it. */
-export interface BoardRegistrationInput {
-  /** The base URL the board wakes at `<url>/wake`, or `null` to pull without wake-ups. */
-  readonly url?: string | null;
-  /** The base path on the caller's own Vercel project, on a board whose discovery says `wake_by_path`. */
-  readonly path?: string | null;
-  readonly branch?: string | null;
-  readonly watch: Readonly<Record<string, BoardWatch>>;
-}
-
-/** A caller's registration, as the board holds it. */
-export interface BoardRegistration extends BoardRegistrationInput {
-  readonly owner: string;
-  readonly hash: string;
-}
-
-/** The board's discovery document. */
-export interface BoardDiscovery {
-  readonly version: string;
-  readonly url: string;
-  readonly wake_by_path?: boolean;
+/** A message the caller just wrote. */
+export interface BoardWrittenMessage extends BoardMessage {
+  /** Handles the text mentioned that matched no one on the board, so they notified no one. */
+  readonly unknownMentions?: readonly string[];
 }
 
 /** A whole thread: its root and every reply. */
@@ -100,21 +77,16 @@ export interface BoardThread {
   readonly replies: readonly BoardMessage[];
 }
 
-/** A thread at a glance. */
 export interface BoardThreadSummary {
   readonly message: BoardMessage;
   readonly replies: number;
   readonly last: BoardMessage | null;
 }
 
-/** A channel's path and size. */
 export interface BoardChannelSummary {
   readonly path: string;
-  readonly messages: number;
-  readonly threads: number;
 }
 
-/** Filters for listing threads. */
 export interface BoardThreadsQuery {
   readonly channel?: string;
   readonly by?: string;
@@ -128,7 +100,7 @@ export interface BoardThreadsQuery {
 export interface BoardPostOptions {
   readonly text: string;
   readonly labels?: Readonly<Record<string, string>>;
-  /** Keep the message on the board: it doesn't reach synced Slack or GitHub threads. */
+  /** Keep the message on the board: it doesn't reach synced Slack, GitHub, or Linear threads. */
   readonly noSync?: boolean;
   /** An idempotency key: the same `id` from the same profile never posts twice. */
   readonly id?: string;
@@ -136,57 +108,109 @@ export interface BoardPostOptions {
   readonly attachments?: readonly string[];
 }
 
-/** A message the caller just wrote. */
-export interface BoardWrittenMessage extends BoardMessage {
-  /** Handles the text mentioned that matched no one on the board, so they notified no one. */
-  readonly unknownMentions?: readonly string[];
+export interface BoardScheduleOptions {
+  readonly text: string;
+  readonly noSync?: boolean;
+  readonly in?: string;
+  readonly at?: string;
+  readonly every?: string;
+  readonly times?: number;
+  readonly until?: string;
 }
 
-/** The most one upload request carries; the board takes larger files only as direct uploads. */
-export const BOARD_UPLOAD_LIMIT = 4 * 1024 * 1024;
-
-/** HTTP transport overrides, used by tests and proxies. */
-export interface BoardApiOptions {
-  readonly fetch?: typeof globalThis.fetch;
+export interface BoardSchedule {
+  readonly id: string;
+  readonly channel: string;
+  readonly re: string | null;
+  readonly text: string;
+  readonly next: string | null;
+  readonly state: string;
 }
 
-/** How eve authenticates to the board. */
-export interface BoardCredentials {
-  /**
-   * An OIDC token whose audience is the board's URL. Defaults to `BOARD_TOKEN`, then to the
-   * deployment's Vercel OIDC token exchanged for the board's audience.
-   */
-  readonly token?: string | (() => string | Promise<string>);
+export interface BoardClaim {
+  readonly taskId: string;
+  readonly epoch: number;
+  readonly token: string;
+  readonly until: string;
 }
 
-/** Options for {@link createBoardClient}. */
-export interface BoardClientOptions {
-  /** The board's full URL, as its discovery returns it: `https://team.example/api/board`. */
+export interface BoardClaimedTask extends BoardClaim {
+  readonly task: BoardMessage;
+}
+
+export interface BoardHeldTask {
+  renew(lease?: number): Promise<BoardClaim>;
+  release(): Promise<void>;
+  complete(result?: string): Promise<void>;
+  fail(reason: string): Promise<void>;
+  block(reason: string, options?: { readonly kind?: string }): Promise<void>;
+}
+
+export interface BoardReadyTaskQuery {
+  readonly channel: string;
+  readonly label?: Readonly<Record<string, string>>;
+  readonly from?: readonly string[];
+  readonly lease?: number;
+}
+
+export interface BoardNewTask {
+  readonly text: string;
+  readonly labels?: Readonly<Record<string, string>>;
+  readonly needs?: readonly string[];
+  readonly noSync?: boolean;
+  readonly id?: string;
+}
+
+export interface BoardEvent {
+  readonly cursor: string;
+  readonly type: string;
+  readonly createdAt: string;
+  readonly message?: BoardMessage;
+}
+
+export interface BoardMatch {
+  readonly id: string;
+  readonly watcher: string;
+  readonly lease: string;
+  readonly attempt: number;
+  readonly event: BoardEvent;
+}
+
+export interface BoardRegistrationInput {
+  readonly url?: string | null;
+  readonly path?: string | null;
+  readonly branch?: string | null;
+  readonly watch: Readonly<Record<string, { readonly tail: string }>>;
+}
+
+export interface BoardRegistration extends BoardRegistrationInput {
+  readonly owner: string;
+  readonly hash: string;
+}
+
+export interface BoardDiscovery {
   readonly url: string;
-  /** The profile eve writes as, under its verified principal. */
+  readonly wake_by_path?: boolean;
+}
+
+/** What a handle may do at most: `"all"`, permissions for every channel, or a map from channel pattern to permissions. */
+export type BoardCan =
+  | "all"
+  | readonly BoardPermission[]
+  | Readonly<Record<string, "all" | readonly BoardPermission[]>>;
+
+/** A permission on a board channel. */
+export type BoardPermission = "read" | "post" | "react" | "label" | "sync" | "manage";
+
+export interface BoardTarget {
+  readonly name?: string;
+  readonly team?: string;
   readonly profile: string;
-  /** Recorded on writes as `by.session`. */
-  readonly session?: string;
-  readonly api?: BoardApiOptions;
-  readonly credentials?: BoardCredentials;
+  readonly can?: BoardCan;
 }
 
-/** A board request that failed, with the board's error code and message. */
-export class BoardRequestError extends Error {
-  readonly code: string;
-  readonly status: number;
-
-  constructor(input: { code: string; message: string; status: number }) {
-    super(input.message);
-    this.name = "BoardRequestError";
-    this.code = input.code;
-    this.status = input.status;
-  }
-}
-
-/** The board's HTTP API, as eve uses it. */
 export interface BoardClient {
-  readonly url: string;
+  readonly profile: string;
   discovery(): Promise<BoardDiscovery>;
   me(): Promise<{ readonly principal: string; readonly actor: string }>;
   watchers(): Promise<readonly BoardRegistration[]>;
@@ -198,7 +222,6 @@ export interface BoardClient {
   ack(match: BoardMatch, outcome?: { readonly error?: string }): Promise<void>;
   post(channel: string, options: BoardPostOptions): Promise<BoardWrittenMessage>;
   reply(id: string, options: BoardPostOptions): Promise<BoardWrittenMessage>;
-  /** Stores a file for a later post to attach, up to {@link BOARD_UPLOAD_LIMIT}. */
   upload(file: {
     readonly data: Uint8Array;
     readonly name: string;
@@ -211,186 +234,281 @@ export interface BoardClient {
   ): Promise<void>;
   typing(id: string, status?: string): Promise<void>;
   thread(id: string): Promise<BoardThread>;
-  /** The thread a synced platform's link names, such as a Slack permalink or a GitHub comment. */
   linked(url: string): Promise<BoardThread>;
   threads(query?: BoardThreadsQuery): Promise<readonly BoardThreadSummary[]>;
   channels(): Promise<readonly BoardChannelSummary[]>;
   download(attachmentId: string): Promise<Response>;
+  schedule(
+    target: { readonly re: string } | { readonly channel: string },
+    options: BoardScheduleOptions,
+  ): Promise<BoardSchedule>;
+  cancelSchedule(id: string): Promise<{ readonly canceled: boolean }>;
+  claimReady(query: BoardReadyTaskQuery): Promise<BoardClaimedTask | null>;
+  claimedTasks(channel: string): Promise<readonly BoardMessage[]>;
+  held(claim: BoardClaim): BoardHeldTask;
+  createTask(channel: string, task: BoardNewTask): Promise<BoardMessage>;
 }
 
-/** Creates a client for the board at `options.url`. */
-export function createBoardClient(options: BoardClientOptions): BoardClient {
-  const base = options.url.replace(/\/+$/, "");
-  const fetchImpl = options.api?.fetch ?? globalThis.fetch;
+export const BOARD_MAX_LEASE_SECONDS = 300;
 
-  async function headers(): Promise<Record<string, string>> {
-    const token = await resolveBoardToken(base, options.credentials);
-    return {
-      authorization: `Bearer ${token}`,
-      // On Vercel, Deployment Protection's Trusted Sources reads this header; the board reads the bearer.
-      ...(process.env.VERCEL === "1" && { "x-vercel-trusted-oidc-idp-token": token }),
-      "x-board-profile": options.profile,
-      ...(options.session !== undefined && { "x-board-session": options.session.slice(0, 200) }),
-    };
-  }
+export function boardErrorCode(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null) return undefined;
+  const code = (error as { readonly code?: unknown }).code;
+  return typeof code === "string" ? code : undefined;
+}
 
-  async function send(
-    method: "GET" | "POST",
-    path: string,
-    body?: unknown,
-    raw?: { readonly data: Uint8Array; readonly headers: Record<string, string> },
-  ): Promise<Response> {
-    const response = await fetchImpl(`${base}${path}`, {
-      body: raw !== undefined ? raw.data : body === undefined ? undefined : JSON.stringify(body),
-      headers: {
-        ...(await headers()),
-        ...(body !== undefined && { "content-type": "application/json" }),
-        ...raw?.headers,
-      },
-      method,
+const handles = new Map<string, BoardHandle>();
+const principals = new Map<string, Promise<{ principal: string; actor: string }>>();
+
+function handleKey(target: BoardTarget): string {
+  return JSON.stringify([
+    target.name ?? null,
+    target.team ?? null,
+    process.env.BOARD_URL?.trim() || null,
+    process.env.BOARD_TOKEN ?? null,
+  ]);
+}
+
+function baseHandle(target: BoardTarget): BoardHandle {
+  const key = handleKey(target);
+  let handle = handles.get(key);
+  if (handle === undefined) {
+    handle = boardHandle({
+      ...(target.name !== undefined && { name: target.name }),
+      ...(target.team !== undefined && { team: target.team }),
     });
-    if (!response.ok) throw await requestError(method, path, response);
-    return response;
+    handles.set(key, handle);
   }
+  return handle;
+}
 
-  let me: Promise<{ principal: string; actor: string }> | undefined;
-  const json = async <T>(method: "GET" | "POST", path: string, body?: unknown) =>
-    (await (await send(method, path, body)).json()) as T;
-  const write = async (body: Record<string, unknown>): Promise<BoardWrittenMessage> => {
-    const { message, unknownMentions } = await json<{
-      message: BoardMessage;
-      unknownMentions?: string[];
-    }>("POST", "/messages", body);
-    return unknownMentions === undefined ? message : { ...message, unknownMentions };
+export function createBoardClient(target: BoardTarget): BoardClient {
+  const base = baseHandle(target);
+  const handle = base.as(
+    target.profile,
+    target.can === undefined ? undefined : { can: target.can as never },
+  );
+  const meKey = `${handleKey(target)}\n${target.profile}\n${JSON.stringify(target.can ?? null)}`;
+
+  const held = (claim: BoardClaim): BoardHeldTask => {
+    const task = handle.tasks.held(claim.taskId, { epoch: claim.epoch, token: claim.token });
+    return {
+      async renew(lease) {
+        const renewed = await task.renew(lease);
+        return {
+          epoch: renewed.epoch,
+          taskId: claim.taskId,
+          token: renewed.token,
+          until: renewed.until,
+        };
+      },
+      release: async () => void (await task.release()),
+      complete: async (result) => void (await task.complete(result)),
+      fail: async (reason) => void (await task.fail(reason)),
+      block: async (reason, options) =>
+        void (await task.block(
+          reason,
+          options?.kind === undefined ? undefined : { kind: options.kind },
+        )),
+    };
   };
 
   return {
-    url: base,
-    async discovery() {
-      // Discovery takes no token, but Deployment Protection's Trusted Sources still needs one.
-      const response = await fetchImpl(base, { headers: await headers(), method: "GET" });
-      if (!response.ok) throw await requestError("GET", "/", response);
-      return (await response.json()) as BoardDiscovery;
-    },
-    // Who this token is doesn't change for the client's life, and dispatch and registration both ask.
-    me: () =>
-      (me ??= json<{ principal: string; actor: string }>("GET", "/me").catch((error) => {
-        me = undefined;
-        throw error;
-      })),
-    async watchers() {
-      return (await json<{ watchers: BoardRegistration[] }>("GET", "/watchers")).watchers;
-    },
-    register: (input) => json("POST", "/watchers", input),
-    async matches(query = {}) {
-      const params = new URLSearchParams();
-      if (query.limit !== undefined) params.set("limit", String(query.limit));
-      if (query.wait !== undefined) params.set("wait", String(query.wait));
-      const suffix = params.size > 0 ? `?${params}` : "";
-      return (await json<{ matches: BoardMatch[] }>("GET", `/watchers/matches${suffix}`)).matches;
-    },
-    async ack(match, outcome = {}) {
-      await send("POST", `/watchers/matches/${encodeURIComponent(match.id)}/ack`, {
-        lease: match.lease,
-        ...(outcome.error !== undefined && { error: outcome.error.slice(0, 1000) }),
-      });
-    },
-    post: (channel, post) => write({ channel, ...post }),
-    reply: (id, post) => write({ re: id, ...post }),
-    async upload(file) {
-      if (file.data.byteLength > BOARD_UPLOAD_LIMIT) {
-        throw new Error(`${file.name} is over 4 MB, the most one board upload takes.`);
+    profile: target.profile,
+    discovery: async () => await handle.discovery(),
+    me: () => {
+      let me = principals.get(meKey);
+      if (me === undefined) {
+        me = handle.me().then(
+          ({ actor, principal }) => ({ actor, principal }),
+          (error: unknown) => {
+            principals.delete(meKey);
+            throw error;
+          },
+        );
+        principals.set(meKey, me);
       }
-      const response = await send("POST", "/attachments", undefined, {
-        data: file.data,
-        headers: {
-          "content-type": file.type ?? "application/octet-stream",
-          "x-board-filename": encodeURIComponent(file.name),
-        },
-      });
-      return ((await response.json()) as { attachment: BoardAttachment }).attachment;
+      return me;
     },
-    async react(id, emoji, reaction = {}) {
-      await send("POST", `/messages/${encodeURIComponent(id)}/reactions`, {
-        emoji,
-        ...(reaction.remove === true && { remove: true }),
+    watchers: async () => (await handle.watchers()).map(registrationOf),
+    async register(input) {
+      const watch = Object.fromEntries(
+        Object.entries(input.watch).map(([name, { tail }]) => [name, { tail }]),
+      );
+      const where = input.path
+        ? { branch: input.branch ?? null, path: input.path }
+        : { url: input.url ?? null };
+      return registrationOf(await handle.register({ ...where, watch } as never));
+    },
+    matches: async (options = {}) =>
+      (
+        await handle.matches({
+          ...(options.limit !== undefined && { limit: options.limit }),
+          ...(options.wait !== undefined && { wait: options.wait }),
+        })
+      ).map(matchOf),
+    async ack(match, outcome = {}) {
+      await handle.ack(match.id, {
+        lease: match.lease,
+        ...(outcome.error !== undefined && { error: outcome.error.slice(0, 500) }),
       });
+    },
+    post: async (channel, post) => writtenOf(await handle.post(channel, postOf(post))),
+    reply: async (id, post) => writtenOf(await handle.reply(id, postOf(post))),
+    upload: async (file) =>
+      await handle.upload({
+        data: file.data as Uint8Array<ArrayBuffer>,
+        name: file.name,
+        ...(file.type !== undefined && { type: file.type }),
+      }),
+    async react(id, emoji, reaction = {}) {
+      await handle.react(id, emoji, reaction.remove === true ? { remove: true } : {});
     },
     async label(id, change) {
-      await send("POST", `/messages/${encodeURIComponent(id)}/labels`, change);
+      await handle.label(id, {
+        ...(change.set !== undefined && { set: change.set }),
+        ...(change.unset !== undefined && { unset: [...change.unset] }),
+      });
     },
     async typing(id, status) {
-      await send(
-        "POST",
-        `/messages/${encodeURIComponent(id)}/typing`,
-        status === undefined ? {} : { status: status.slice(0, 100) },
-      );
+      await handle.typing(id, status === undefined ? undefined : status.slice(0, 50));
     },
-    thread: (id) => json("GET", `/messages/${encodeURIComponent(id)}`),
-    linked: (url) => json("GET", `/links?${new URLSearchParams({ url })}`),
+    thread: async (id) => threadOf(await handle.thread(id)),
+    linked: async (url) => threadOf(await handle.linked(url)),
     async threads(query = {}) {
-      const params = new URLSearchParams();
-      for (const [key, value] of Object.entries(query)) {
-        if (value === undefined) continue;
-        if (Array.isArray(value)) for (const entry of value) params.append(key, String(entry));
-        else params.set(key, String(value));
-      }
-      const suffix = params.size > 0 ? `?${params}` : "";
-      return (await json<{ threads: BoardThreadSummary[] }>("GET", `/threads${suffix}`)).threads;
+      const page = await handle.threads({
+        ...query,
+        ...(query.label !== undefined && { label: [...query.label] }),
+      } as never);
+      return page.threads.map((summary) => ({
+        last: summary.last === null ? null : messageOf(summary.last),
+        message: messageOf(summary.message),
+        replies: summary.replies,
+      }));
     },
-    async channels() {
-      return (await json<{ channels: BoardChannelSummary[] }>("GET", "/channels")).channels;
+    channels: async () =>
+      (await handle.channels()).channels.map((channel) => ({ path: channel.path })),
+    download: async (attachmentId) => await handle.download(attachmentId),
+    async schedule(target, options) {
+      const schedule = await handle.schedule("re" in target ? { re: target.re } : target.channel, {
+        text: options.text,
+        ...(options.noSync !== undefined && { noSync: options.noSync }),
+        ...(options.in !== undefined && { in: options.in }),
+        ...(options.at !== undefined && { at: options.at }),
+        ...(options.every !== undefined && { every: options.every }),
+        ...(options.times !== undefined && { times: options.times }),
+        ...(options.until !== undefined && { until: options.until }),
+      } as never);
+      return scheduleOf(schedule);
     },
-    download: (attachmentId) => send("GET", `/attachments/${encodeURIComponent(attachmentId)}`),
+    async cancelSchedule(id) {
+      const { canceled } = await handle.cancelSchedule(id);
+      return { canceled };
+    },
+    async claimReady(query) {
+      const claim = await handle.tasks.claim({
+        channel: query.channel,
+        ...(query.label !== undefined && { label: { ...query.label } }),
+        ...(query.from !== undefined && query.from.length > 0 && { from: [...query.from] }),
+        ...(query.lease !== undefined && { lease: query.lease }),
+      });
+      if (claim === null) return null;
+      return {
+        epoch: claim.epoch,
+        task: messageOf(claim.task),
+        taskId: claim.task.id,
+        token: claim.token,
+        until: claim.until,
+      };
+    },
+    async claimedTasks(channel) {
+      const page = await handle.tasks.list({ channel, limit: 500, state: "claimed" });
+      return page.tasks.map((summary) => messageOf(summary.message));
+    },
+    held,
+    async createTask(channel, task) {
+      const created = await handle.tasks.create(channel, {
+        text: task.text,
+        ...(task.labels !== undefined && { labels: { ...task.labels } }),
+        ...(task.needs !== undefined && { needs: [...task.needs] }),
+        ...(task.noSync !== undefined && { noSync: task.noSync }),
+        ...(task.id !== undefined && { id: task.id }),
+      });
+      return messageOf(created.task);
+    },
   };
 }
 
-/**
- * An OIDC token for the board at `audience`: `credentials.token`, then `BOARD_TOKEN`, then the
- * deployment's Vercel OIDC token exchanged for the board's audience.
- */
-export async function resolveBoardToken(
-  audience: string,
-  credentials?: BoardCredentials,
-): Promise<string> {
-  const explicit = credentials?.token;
-  if (typeof explicit === "function") return await explicit();
-  if (explicit !== undefined) return explicit;
-  const fromEnv = process.env.BOARD_TOKEN?.trim();
-  if (fromEnv) return fromEnv;
-  try {
-    return await getVercelOidcToken({ audience });
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    throw new Error(
-      `Couldn't get an OIDC token for the board at ${audience}: ${reason}. On Vercel, eve uses the ` +
-        "deployment's OIDC token. Locally, run `vercel link` and `vercel env pull`, or set BOARD_TOKEN.",
-      { cause: error },
-    );
-  }
+function postOf(post: BoardPostOptions) {
+  return {
+    text: post.text,
+    ...(post.labels !== undefined && { labels: { ...post.labels } }),
+    ...(post.noSync !== undefined && { noSync: post.noSync }),
+    ...(post.id !== undefined && { id: post.id }),
+    ...(post.attachments !== undefined && { attachments: [...post.attachments] }),
+  };
 }
 
-async function requestError(
-  method: string,
-  path: string,
-  response: Response,
-): Promise<BoardRequestError> {
-  let code = "http_error";
-  let detail = response.statusText;
-  try {
-    const body = (await response.json()) as { error?: { code?: unknown; message?: unknown } };
-    if (typeof body.error?.code === "string") code = body.error.code;
-    if (typeof body.error?.message === "string") detail = body.error.message;
-  } catch {
-    // Not the board's JSON error, such as a Deployment Protection page.
-  }
-  const hint =
-    response.status === 401 && code === "http_error"
-      ? " The board may be behind Vercel Deployment Protection: add this project to its Trusted Sources."
-      : "";
-  return new BoardRequestError({
-    code,
-    message: `Board ${method} ${path} failed with ${response.status} ${code}: ${detail}.${hint}`,
-    status: response.status,
-  });
+function messageOf(view: MessageView): BoardMessage {
+  return view;
+}
+
+function writtenOf(written: Written<MessageView>): BoardWrittenMessage {
+  const unknown = (written.mentions ?? [])
+    .filter((mention) => mention.actor === null)
+    .map((mention) => mention.written.replace(/^@/u, ""));
+  return unknown.length === 0
+    ? messageOf(written)
+    : { ...messageOf(written), unknownMentions: unknown };
+}
+
+function threadOf(view: {
+  readonly message: MessageView;
+  readonly replies: readonly MessageView[];
+}): BoardThread {
+  return { message: messageOf(view.message), replies: view.replies.map(messageOf) };
+}
+
+function matchOf(match: MatchView): BoardMatch {
+  return {
+    attempt: match.attempt,
+    event: {
+      createdAt: match.event.createdAt,
+      cursor: match.event.cursor,
+      type: match.event.type,
+      ...(match.event.message !== undefined && { message: messageOf(match.event.message) }),
+    },
+    id: match.id,
+    lease: match.lease,
+    watcher: match.watcher,
+  };
+}
+
+function registrationOf(registration: {
+  readonly owner: string;
+  readonly hash: string;
+  readonly url: string | null;
+  readonly path?: string;
+  readonly branch?: string;
+  readonly watch: Readonly<Record<string, { readonly tail: string }>>;
+}): BoardRegistration {
+  return {
+    hash: registration.hash,
+    owner: registration.owner,
+    url: registration.url,
+    ...(registration.path !== undefined && { path: registration.path }),
+    ...(registration.branch !== undefined && { branch: registration.branch }),
+    watch: registration.watch,
+  };
+}
+
+function scheduleOf(schedule: ScheduleView): BoardSchedule {
+  return {
+    channel: schedule.channel,
+    id: schedule.id,
+    next: schedule.next,
+    re: schedule.re,
+    state: schedule.state,
+    text: schedule.text,
+  };
 }

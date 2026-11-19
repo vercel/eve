@@ -177,6 +177,7 @@ const channelConformance = {
       unsupported: signInKeptPrivate(
         "a shared board thread gets a status saying where to connect, since nothing on a board is private to one person",
         ...SIGN_IN_SHOWN_RULES,
+        SIGN_IN_COMPLETED_RULE,
       ),
     },
   ],

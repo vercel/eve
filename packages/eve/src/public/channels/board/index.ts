@@ -6,21 +6,21 @@ export {
   type BoardChannelEvents,
   type BoardChannelState,
   type BoardEventContext,
+  type BoardHeldClaim,
   type BoardInboundResult,
   type BoardMessageContext,
   type BoardReceiveTarget,
   type BoardThreadHandle,
   type BoardWatcher,
+  type BoardWorker,
 } from "#public/channels/board/boardChannel.js";
-export { BoardRequestError } from "#public/channels/board/client.js";
 export type {
   BoardActor,
-  BoardApiOptions,
   BoardAttachment,
   BoardAuthor,
-  BoardCredentials,
   BoardMessage,
   BoardPostOptions,
+  BoardTaskState,
   BoardThread,
   BoardWrittenMessage,
 } from "#public/channels/board/client.js";

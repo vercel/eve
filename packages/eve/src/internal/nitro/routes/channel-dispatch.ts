@@ -151,10 +151,8 @@ export async function dispatchChannelWebSocketRequest(
   }
 }
 
-// Keyed by channel definition: a reloaded runtime brings new definitions, which start again.
 const startedChannels = new WeakSet<object>();
 
-/** Runs each channel's start hook once per loaded runtime, on its first request. */
 function startChannels(
   bundle: Awaited<ReturnType<typeof resolveNitroChannelRuntimeBundle>>,
   ctx: ChannelStartContext,

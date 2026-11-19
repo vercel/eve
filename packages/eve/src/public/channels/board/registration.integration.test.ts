@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
-import { createTestBoard } from "#internal/testing/board-server.js";
-import { createBoardClient } from "#public/channels/board/client.js";
+import { createTestBoard, type TestBoard } from "#internal/testing/board-server.js";
+import { createBoardClient, type BoardClient } from "#public/channels/board/client.js";
 import {
   reconcileRegistration,
   type BoardWatcherConfig,
@@ -9,55 +9,57 @@ import {
 
 const watcher = (tail: string): BoardWatcherConfig => ({
   previews: false,
-  watchers: { eve: { tail, when: "matches" } },
+  watchers: { eve: { tail } },
 });
 
-// A production deployment on a board that wakes only URLs.
-const env = { VERCEL_ENV: "production", VERCEL_PROJECT_PRODUCTION_URL: "agent.example.com" };
+const env = {};
+
+const boards: TestBoard[] = [];
+
+afterEach(() => {
+  for (const board of boards.splice(0)) board.dispose();
+});
 
 describe("reconcileRegistration against @vercel/board", () => {
   it("bootstraps on a cold start, keeps a newer tail from older deployments, and lets a wake-up replace it", async () => {
-    const team = createTestBoard();
-    const client = createBoardClient({
-      api: { fetch: (input, init) => team.fetch(new Request(input, init)) },
-      credentials: { token: () => team.eveToken() },
-      profile: "eve",
-      url: team.url,
-    });
+    boards.push(await createTestBoard());
+    const client = createBoardClient({ profile: "eve" });
     const registered = async () => (await client.watchers()).map((r) => r.watch);
 
-    // Nothing is registered, so a cold start registers.
     await expect(
       reconcileRegistration({ client, env, overwrite: false, watcher: watcher("dev") }),
     ).resolves.toBe("registered");
-    expect(await registered()).toEqual([{ eve: { tail: "dev", when: "matches" } }]);
+    expect(await registered()).toEqual([{ eve: { tail: "dev" } }]);
 
-    // A deployment still finishing a run cold-starts with an older tail: it must not overwrite.
     await expect(
       reconcileRegistration({ client, env, overwrite: false, watcher: watcher("old") }),
     ).resolves.toBe("skipped");
-    expect(await registered()).toEqual([{ eve: { tail: "dev", when: "matches" } }]);
+    expect(await registered()).toEqual([{ eve: { tail: "dev" } }]);
 
-    // A wake-up reaches the current wake target, which replaces a registration that differs.
     await expect(
       reconcileRegistration({ client, env, overwrite: true, watcher: watcher("ops") }),
     ).resolves.toBe("registered");
     await expect(
       reconcileRegistration({ client, env, overwrite: true, watcher: watcher("ops") }),
     ).resolves.toBe("unchanged");
-    expect(await registered()).toEqual([{ eve: { tail: "ops", when: "matches" } }]);
+    expect(await registered()).toEqual([{ eve: { tail: "ops" } }]);
   });
 
-  it("surfaces the board's access error, which names the rule to add", async () => {
-    const team = createTestBoard();
-    const client = createBoardClient({
-      api: { fetch: (input, init) => team.fetch(new Request(input, init)) },
-      credentials: { token: () => team.eveToken("preview") },
-      profile: "eve",
-      url: team.url,
+  it("says how to develop locally when Vercel's board refuses a person's registration", async () => {
+    const refused = Object.assign(new Error("watchers need a project"), {
+      code: "watchers_need_project",
     });
+    const client = {
+      discovery: async () => ({ url: "https://api.vercel.com", wake_by_path: true }),
+      me: async () => ({ actor: "vercel:user:ada+eve", principal: "vercel:user:ada" }),
+      register: async () => {
+        throw refused;
+      },
+      watchers: async () => [],
+    } as Partial<BoardClient> as BoardClient;
+
     await expect(
-      reconcileRegistration({ client, env, overwrite: false, watcher: watcher("dev") }),
-    ).rejects.toThrow(/403 forbidden: .*vercelProject\(\{ project: 'eve', can \}\)/u);
+      reconcileRegistration({ client, env: {}, overwrite: true, watcher: watcher("dev") }),
+    ).rejects.toThrow(/npx @vercel\/board serve.*BOARD_URL/u);
   });
 });

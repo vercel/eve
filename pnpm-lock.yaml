@@ -2177,11 +2177,8 @@ importers:
         specifier: 'catalog:'
         version: 26.6.6
       '@vercel/board':
-        specifier: 0.21.0
-        version: 0.21.0(@chat-adapter/slack@4.44.0(ai@7.0.172(zod@4.6.7))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.6.7))(@vercel/blob@2.9.0)(@vercel/connect@2.9.2(593403a60853e604f43ac19c7bf472df))(@vercel/queue@0.11.0(@opentelemetry/api@1.9.1))(chat@4.44.0(ai@7.0.172(zod@4.6.7))(supports-color@10.2.2)(zod@4.6.7))(ioredis@5.11.1(supports-color@10.2.2))(pg@8.23.1)
-      jose:
-        specifier: 6.2.3
-        version: 6.2.3
+        specifier: 0.52.0
+        version: 0.52.0(@chat-adapter/slack@4.44.0(ai@7.0.172(zod@4.6.7))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.6.7))(@vercel/connect@2.9.2(593403a60853e604f43ac19c7bf472df))(chat@4.44.0(ai@7.0.172(zod@4.6.7))(supports-color@10.2.2)(zod@4.6.7))
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
@@ -8016,43 +8013,6 @@ packages:
   '@vercel/blob@2.9.0':
     resolution: {integrity: sha512-o+1CMRlT8/RvGo1aGkFv40F7v3MLdSOaVaIccepBXWrXgonKId3hHKSKGQ+iBDPoSe03crmHfhpHtTs0CCXiig==}
     engines: {node: '>=20.0.0'}
-
-  '@vercel/board@0.21.0':
-    resolution: {integrity: sha512-5Sh82PZptj5gUAPH1pro5gyGJRRh4h/Q/xP2SnyI4m3xPnJItILCmF8Nhy2LgsD91estpImcCc5Tx6Z74foWDg==}
-    engines: {node: '>=22.18'}
-    hasBin: true
-    peerDependencies:
-      '@chat-adapter/github': ^4.41.1
-      '@chat-adapter/linear': ^4.41.1
-      '@chat-adapter/slack': ^4.41.1
-      '@upstash/qstash': ^2.11.0
-      '@vercel/blob': ^2.8.0
-      '@vercel/connect': ^2.3.4
-      '@vercel/queue': '*'
-      chat: ^4.41.1
-      ioredis: ^5.4.0
-      pg: ^8.11.0
-    peerDependenciesMeta:
-      '@chat-adapter/github':
-        optional: true
-      '@chat-adapter/linear':
-        optional: true
-      '@chat-adapter/slack':
-        optional: true
-      '@upstash/qstash':
-        optional: true
-      '@vercel/blob':
-        optional: true
-      '@vercel/connect':
-        optional: true
-      '@vercel/queue':
-        optional: true
-      chat:
-        optional: true
-      ioredis:
-        optional: true
-      pg:
-        optional: true
 
   '@vercel/board@0.52.0':
     resolution: {integrity: sha512-ARsgjNfQaKgAE8Pbwu+aP4IbMpCaiZNcwQYSiBHRDPODpgE+kQQbtjkIWHTjTg7jUrvCi9rPHW8qozhnGzfqfQ==}
@@ -21574,19 +21534,15 @@ snapshots:
       throttleit: 2.1.0
       undici: 6.28.1
 
-  '@vercel/board@0.21.0(@chat-adapter/slack@4.44.0(ai@7.0.172(zod@4.6.7))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.6.7))(@vercel/blob@2.9.0)(@vercel/connect@2.9.2(593403a60853e604f43ac19c7bf472df))(@vercel/queue@0.11.0(@opentelemetry/api@1.9.1))(chat@4.44.0(ai@7.0.172(zod@4.6.7))(supports-color@10.2.2)(zod@4.6.7))(ioredis@5.11.1(supports-color@10.2.2))(pg@8.23.1)':
+  '@vercel/board@0.52.0(@chat-adapter/slack@4.44.0(ai@7.0.172(zod@4.6.7))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.6.7))(@vercel/connect@2.9.2(593403a60853e604f43ac19c7bf472df))(chat@4.44.0(ai@7.0.172(zod@4.6.7))(supports-color@10.2.2)(zod@4.6.7))':
     dependencies:
       '@vercel/oidc': 3.8.10
       jose: 6.2.17
       zod: 4.6.7
     optionalDependencies:
       '@chat-adapter/slack': 4.44.0(ai@7.0.172(zod@4.6.7))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.6.7)
-      '@vercel/blob': 2.9.0
       '@vercel/connect': 2.9.2(593403a60853e604f43ac19c7bf472df)
-      '@vercel/queue': 0.11.0(@opentelemetry/api@1.9.1)
       chat: 4.44.0(ai@7.0.172(zod@4.6.7))(supports-color@10.2.2)(zod@4.6.7)
-      ioredis: 5.11.1(supports-color@10.2.2)
-      pg: 8.23.1
 
   '@vercel/board@0.52.0(@chat-adapter/slack@4.44.0(ai@7.0.172(zod@4.6.7))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.6.7))(@vercel/connect@2.9.2(@ai-sdk/mcp@2.0.99(zod@4.6.7))(@auth/core@0.41.3)(@chat-adapter/slack@4.44.0(ai@7.0.172(zod@4.6.7))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.6.7))(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.6)(supports-color@10.2.2)(zod@4.6.7))(ai@7.0.172(zod@4.6.7))(better-auth@1.7.19(ffe7520ccc6ea076d06aab563aa3b80c)))(chat@4.44.0(ai@7.0.172(zod@4.6.7))(supports-color@10.2.2)(zod@4.6.7))':
     dependencies:

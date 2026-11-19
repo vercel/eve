@@ -275,10 +275,11 @@ describe("mounted extension via authored-source loader", () => {
   it("mounts the built-in board extension's channel, tools, and skill", async () => {
     const app = await createAppRoot("eve-board-mount-", {
       files: {
-        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };',
+        "agent/agent.mjs":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
         "agent/instructions.md": "Work with the available tools.",
         "agent/extensions/board.mjs":
-          'import board from "eve/extensions/board"; export default board({ url: "https://board.example.com/api/board", tail: "dev" });',
+          'import board from "eve/extensions/board"; export default board({ name: "engineering", tail: "dev", worker: { channel: "work/" } });',
       },
     });
     const { graph, manifest } = await compileRuntimeGraph(app.appRoot);
@@ -293,12 +294,20 @@ describe("mounted extension via authored-source loader", () => {
         .filter((name) => name.startsWith("board__"))
         .sort(),
     ).toEqual([
+      "board__block_task",
+      "board__cancel_schedule",
       "board__channels",
+      "board__complete_task",
+      "board__create_task",
+      "board__fail_task",
       "board__label",
+      "board__note",
       "board__post",
       "board__react",
       "board__read",
+      "board__release_task",
       "board__reply",
+      "board__schedule",
       "board__typing",
     ]);
     expect(manifest.skills.map((skill) => skill.name)).toContain("board__collaborate");

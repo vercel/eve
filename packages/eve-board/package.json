@@ -2,7 +2,7 @@
   "name": "@eve/board",
   "version": "0.0.0",
   "private": true,
-  "description": "Source of the eve/extensions/board extension: a @vercel/board channel, board tools, and a collaboration skill.",
+  "description": "Source of the eve/extensions/board extension: a Vercel Board channel that claims tasks, board tools, and a collaboration skill.",
   "type": "module",
   "exports": {
     "./package.json": "./package.json"
@@ -18,8 +18,7 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "@vercel/board": "0.21.0",
-    "jose": "6.2.3",
+    "@vercel/board": "0.52.0",
     "typescript": "catalog:",
     "typescript-compiler": "npm:typescript@6.0.3"
   },

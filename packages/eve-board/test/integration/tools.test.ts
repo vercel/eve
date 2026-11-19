@@ -2,64 +2,80 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
 import { board } from "@vercel/board";
-import { oidcTokens, vercelProject } from "@vercel/board/access";
-import { a2, memoryBlob } from "@vercel/board/backend-a2";
-import { memory } from "@vercel/board/backend-a2/store-memory";
-import { generateKeyPair, SignJWT } from "jose";
+import { local } from "@vercel/board/backend-local";
 
 import {
   defineBoardChannelsTool,
+  defineBoardCompleteTaskTool,
+  defineBoardCreateTaskTool,
   defineBoardLabelTool,
+  defineBoardNoteTool,
   defineBoardPostTool,
   defineBoardReadTool,
+  defineBoardReleaseTaskTool,
   defineBoardReplyTool,
+  defineBoardScheduleTool,
   defineBoardTypingTool,
 } from "../../extension/lib/tools.ts";
 
-const URL_ = "https://board.example.com/api/board";
-const ISSUER = "https://oidc.vercel.com/acme";
+const EVE_TOKEN = "deployment:prj_eve:production";
 const realFetch = globalThis.fetch;
+let boards = 0;
 
 afterEach(() => {
   globalThis.fetch = realFetch;
+  delete process.env.BOARD_URL;
   delete process.env.BOARD_TOKEN;
 });
 
-/** A real board in memory that lets the `prj_eve` project's production deployment do everything. */
 async function startBoard() {
-  const { privateKey, publicKey } = await generateKeyPair("RS256");
+  boards += 1;
+  const url = `https://board-${boards}.test/api/board`;
   const team = board({
-    access: [vercelProject({ can: "all", environments: ["production"], project: "prj_eve" })],
-    authenticate: oidcTokens({ vercel: { issuer: ISSUER, jwks: async () => publicKey } }),
-    backend: a2({ blob: memoryBlob(), store: memory() }),
-    project: { id: "prj_board" },
-    url: URL_,
+    authenticate: ({ headers }) => {
+      const token = headers.get("authorization")?.replace(/^Bearer /u, "");
+      if (token === EVE_TOKEN) {
+        return { handle: "eve", id: "vercel:project:prj_eve:production", kind: "deployment" };
+      }
+      return token?.startsWith("person:")
+        ? { handle: token.slice(7), id: `vercel:user:${token.slice(7)}`, kind: "person" }
+        : null;
+    },
+    backend: local({ memory: true }),
+    url,
   });
-  process.env.BOARD_TOKEN = await new SignJWT({
-    environment: "production",
-    project: "eve",
-    project_id: "prj_eve",
-    sub: "owner:acme:project:eve:environment:production",
-  })
-    .setProtectedHeader({ alg: "RS256" })
-    .setIssuer(ISSUER)
-    .setAudience(URL_)
-    .setIssuedAt()
-    .setExpirationTime("1h")
-    .sign(privateKey);
+  const as = async (person: string, path: string, body?: unknown) => {
+    const response = await team.fetch(
+      new Request(`${url}${path}`, {
+        body: body === undefined ? undefined : JSON.stringify(body),
+        headers: { authorization: `Bearer person:${person}`, "content-type": "application/json" },
+        method: body === undefined ? "GET" : "POST",
+      }),
+    );
+    assert.ok(response.ok, await response.clone().text());
+    return (await response.json()) as Record<string, any>;
+  };
+  await as("alice", "/grants", {
+    can: { "*": "all" },
+    principals: [{ environments: ["production"], kind: "project", project: "prj_eve" }],
+  });
+  process.env.BOARD_URL = url;
+  process.env.BOARD_TOKEN = EVE_TOKEN;
   globalThis.fetch = async (input, init) => {
     const request = new Request(input, init);
-    return request.url.startsWith(URL_) ? await team.fetch(request) : await realFetch(request);
+    return request.url.startsWith(url) ? await team.fetch(request) : await realFetch(request);
   };
+  return { as };
 }
 
 type Executable = { execute(input: unknown, ctx: unknown): Promise<unknown> };
-const settings = () => ({ url: URL_, profile: "helper" });
+const settings = () => ({ profile: "helper" });
 const files = new Map([["/workspace/after.png", new Uint8Array([137, 80, 78, 71])]]);
-const run = (tool: unknown, input: unknown, callId: string) =>
+const run = (tool: unknown, input: unknown, callId: string, metadata: unknown = {}) =>
   (tool as Executable).execute(input, {
     abortSignal: new AbortController().signal,
     callId,
+    channel: { kind: "channel:board__threads", metadata },
     getSandbox: async () => ({
       readBinaryFile: async ({ path }: { path: string }) => files.get(path) ?? null,
     }),
@@ -71,7 +87,6 @@ test("the board tools post once per call, reply, label, and read back as the age
   const post = defineBoardPostTool(settings);
 
   const root = await run(post, { channel: "dev", text: "Deploy checklist" }, "call-1");
-  // A retried call carries the same call ID, so it lands once.
   const retried = await run(post, { channel: "dev", text: "Deploy checklist" }, "call-1");
   assert.equal(retried.id, root.id);
   assert.equal(root.author, "eve/helper");
@@ -91,22 +106,7 @@ test("the board tools post once per call, reply, label, and read back as the age
   assert.equal(listed.threads[0].replies, 1);
 
   const { channels } = await run(defineBoardChannelsTool(settings), {}, "call-6");
-  assert.deepEqual(
-    channels.map((channel: { path: string; threads: number }) => [channel.path, channel.threads]),
-    [["dev", 1]],
-  );
-});
-
-test("the board tools explain a missing board URL", async () => {
-  delete process.env.BOARD_URL;
-  await assert.rejects(
-    run(
-      defineBoardChannelsTool(() => ({})),
-      {},
-      "call-1",
-    ),
-    /set BOARD_URL, or pass `url` to the board channel or extension/u,
-  );
+  assert.deepEqual(channels, [{ path: "dev" }]);
 });
 
 test("a reply attaches files from the sandbox and warns about mentions that notified no one", async () => {
@@ -122,7 +122,6 @@ test("a reply attaches files from the sandbox and warns about mentions that noti
   assert.deepEqual(shot.attachments, ["after.png"]);
   assert.equal(shot.warning, undefined);
 
-  // A bad path uploads nothing and posts nothing.
   await assert.rejects(
     run(
       reply,
@@ -138,10 +137,75 @@ test("a reply attaches files from the sandbox and warns about mentions that noti
 
   assert.deepEqual(
     await run(defineBoardTypingTool(settings), { id: root.id, status: "Checking" }, "call-5"),
-    {
-      ok: true,
-    },
+    { ok: true },
   );
   const thread = await run(defineBoardReadTool(settings), { id: root.id }, "call-6");
   assert.equal(thread.replies.length, 2);
+});
+
+test("notes and schedules default to the session's own thread", async () => {
+  await startBoard();
+  const root = await run(defineBoardPostTool(settings), { channel: "dev", text: "Ship it" }, "c1");
+  const session = { boardThread: root.id };
+
+  const note = await run(
+    defineBoardNoteTool(settings),
+    { text: "Tried the cache." },
+    "c2",
+    session,
+  );
+  assert.equal(note.re, root.id);
+  const schedule = await run(
+    defineBoardScheduleTool(settings),
+    { in: "5m", text: "Check CI for the deploy." },
+    "c3",
+    session,
+  );
+  assert.equal(schedule.thread, root.id);
+  assert.ok(schedule.next);
+
+  await assert.rejects(
+    run(defineBoardNoteTool(settings), { text: "Nowhere." }, "c4"),
+    /Pass the thread's `id`/u,
+  );
+});
+
+test("task tools create a task and settle the claim the session holds", async () => {
+  await startBoard();
+  const created = await run(
+    defineBoardCreateTaskTool(settings),
+    { channel: "work/a", labels: { role: "review" }, text: "Review the limiter." },
+    "c1",
+  );
+  assert.equal(created.task.state, "ready");
+
+  const ready = (await (
+    await globalThis.fetch(`${process.env.BOARD_URL}/tasks/${created.id}/claim`, {
+      body: JSON.stringify({ lease: 60 }),
+      headers: {
+        authorization: `Bearer ${EVE_TOKEN}`,
+        "content-type": "application/json",
+        "x-board-profile": "helper",
+      },
+      method: "POST",
+    })
+  ).json()) as { claim: { epoch: number; token: string; until: string } };
+  const held = { boardTask: { id: created.id, lease: 60, ...ready.claim } };
+
+  assert.deepEqual(
+    await run(defineBoardCompleteTaskTool(settings), { result: "Looks right." }, "c2", held),
+    { settled: "completed", task: created.id },
+  );
+  const thread = await run(defineBoardReadTool(settings), { id: created.id }, "c3");
+  assert.equal(thread.message.task.state, "completed");
+  assert.equal(thread.message.task.result, "Looks right.");
+
+  await assert.rejects(
+    run(defineBoardReleaseTaskTool(settings), {}, "c4", held),
+    /You no longer hold board task/u,
+  );
+  await assert.rejects(
+    run(defineBoardCompleteTaskTool(settings), {}, "c5"),
+    /This session holds no board task/u,
+  );
 });
