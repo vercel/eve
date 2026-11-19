@@ -5,6 +5,7 @@ import { runTelemetry } from "../core/run-telemetry.js";
 import type { RunIdentity } from "../core/types.js";
 import type { Operation } from "../operations.js";
 import { aiSdkOpenTelemetry } from "./ai-sdk-otel.js";
+import { telemetryTracerProviders } from "./otel.js";
 import type { Telemetry } from "ai";
 import type { AgentRun, TurnInput } from "../agent-run.js";
 import type {
@@ -57,7 +58,9 @@ export function aiSdkTelemetry(run: AgentRun, options: AiSdkTelemetryOptions = {
     provider.getDelegateTracer("agent.tracing") === undefined
   )
     registerOTel({ serviceName: "agent-runs", instrumentations: [] });
-  const native = aiSdkOpenTelemetry();
+  const native = aiSdkOpenTelemetry(
+    backend === undefined ? undefined : telemetryTracerProviders.get(backend.telemetry),
+  );
   const generations = new Map<string, Generation>();
 
   function executeInGeneration<T>(

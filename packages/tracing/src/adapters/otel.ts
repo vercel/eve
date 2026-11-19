@@ -97,6 +97,8 @@ const DEFAULT_MAPPING: OutputMapping = {
   link: (_span, link) => ({ "agent.link.type": link.relationship }),
 };
 
+export const telemetryTracerProviders = new WeakMap<AgentTelemetry, () => TracerProvider>();
+
 function onVercel(): boolean {
   const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
     ?.env;
@@ -187,7 +189,7 @@ export function otelTelemetry(options: OtelTelemetryOptions = {}): AgentTelemetr
       },
     };
   }
-  return {
+  const telemetry: AgentTelemetry = {
     startSpan(span, { reference, context: host } = {}) {
       if (reference === undefined || idGenerator === undefined) return start(span, host);
       const writer = idGenerator.withTraceId(reference.traceId, () =>
@@ -240,4 +242,6 @@ export function otelTelemetry(options: OtelTelemetryOptions = {}): AgentTelemetr
     forceFlush: lifecycle("forceFlush"),
     shutdown: lifecycle("shutdown"),
   };
+  telemetryTracerProviders.set(telemetry, provider);
+  return telemetry;
 }

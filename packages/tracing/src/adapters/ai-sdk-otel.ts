@@ -9,19 +9,19 @@ import {
   type Span,
   type SpanOptions,
   type Tracer,
+  type TracerProvider,
 } from "@opentelemetry/api";
 import type { Operation } from "../operations.js";
 
-export function aiSdkOpenTelemetry() {
+export function aiSdkOpenTelemetry(provider: (() => TracerProvider) | undefined) {
   let starting: Operation | undefined;
   let suppressNewSpans = false;
-  const fallback = trace.getTracer("gen_ai");
   function startSpan(name: string, options?: SpanOptions, host?: Context): Span {
     const operation = starting;
     if (operation === undefined)
-      return suppressNewSpans
+      return suppressNewSpans || provider === undefined
         ? trace.wrapSpanContext(INVALID_SPAN_CONTEXT)
-        : fallback.startSpan(name, options, host);
+        : provider().getTracer("gen_ai").startSpan(name, options, host);
     const span = trace.wrapSpanContext({
       ...operation.reference,
       traceState:

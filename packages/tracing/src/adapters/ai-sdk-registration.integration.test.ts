@@ -43,6 +43,50 @@ function recording() {
   const run = createAgentRun({ telemetry: otelTelemetry({ provider }) });
   return { exporter, run, provider };
 }
+function transcribe(telemetry?: { recordInputs: boolean; recordOutputs: boolean }) {
+  return experimental_streamTranscribe({
+    model: new MockTranscriptionModelV4({
+      modelId: "transcription",
+      doStream: async () => ({
+        stream: new ReadableStream({
+          start(controller) {
+            controller.enqueue({ type: "stream-start", warnings: [] });
+            controller.enqueue({ type: "transcript-delta", delta: "Private transcript" });
+            controller.enqueue({
+              type: "finish",
+              text: "Private transcript",
+              segments: [{ text: "Private transcript", startSecond: 0, endSecond: 1 }],
+            });
+            controller.close();
+          },
+        }),
+      }),
+    }),
+    audio: new ReadableStream({
+      start(controller) {
+        controller.close();
+      },
+    }),
+    inputAudioFormat: { type: "audio/pcm", rate: 24000 },
+    telemetry,
+  });
+}
+async function embedding() {
+  return embed({
+    model: new MockEmbeddingModelV3({
+      modelId: "embedding",
+      doEmbed: { embeddings: [[1, 2, 3]], usage: { tokens: 4 }, warnings: [] },
+    }),
+    value: "Private embedding input",
+  });
+}
+function globalRecording() {
+  const exporter = new InMemorySpanExporter();
+  trace.setGlobalTracerProvider(
+    new BasicTracerProvider({ spanProcessors: [new SimpleSpanProcessor(exporter)] }),
+  );
+  return exporter;
+}
 afterEach(() => {
   globalThis.AI_SDK_TELEMETRY_INTEGRATIONS = undefined;
   context.disable();
@@ -482,32 +526,7 @@ describe("AI SDK adapter registration", () => {
       trace.setGlobalTracerProvider(provider);
       registerTelemetry(aiSdkTelemetry(run));
       try {
-        const result = experimental_streamTranscribe({
-          model: new MockTranscriptionModelV4({
-            modelId: "transcription",
-            doStream: async () => ({
-              stream: new ReadableStream({
-                start(controller) {
-                  controller.enqueue({ type: "stream-start", warnings: [] });
-                  controller.enqueue({ type: "transcript-delta", delta: "Private transcript" });
-                  controller.enqueue({
-                    type: "finish",
-                    text: "Private transcript",
-                    segments: [{ text: "Private transcript", startSecond: 0, endSecond: 1 }],
-                  });
-                  controller.close();
-                },
-              }),
-            }),
-          }),
-          audio: new ReadableStream({
-            start(controller) {
-              controller.close();
-            },
-          }),
-          inputAudioFormat: { type: "audio/pcm", rate: 24000 },
-          telemetry,
-        });
+        const result = transcribe(telemetry);
         const deltas: string[] = [];
         for await (const part of result.fullStream) {
           if (part.type === "transcript-delta") deltas.push(part.delta);
@@ -540,23 +559,46 @@ describe("AI SDK adapter registration", () => {
     const run = createAgentRun({});
     registerTelemetry(aiSdkTelemetry(run));
     try {
-      const result = await embed({
-        model: new MockEmbeddingModelV3({
-          modelId: "embedding",
-          doEmbed: {
-            embeddings: [[1, 2, 3]],
-            usage: { tokens: 4 },
-            warnings: [],
-          },
-        }),
-        value: "Private embedding input",
-      });
+      const result = await embedding();
       expect(result.embedding).toEqual([1, 2, 3]);
       const spans = exporter.getFinishedSpans();
       expect(spans).toHaveLength(2);
       expect(spans.every((span) => span.name === "embeddings embedding")).toBe(true);
       expect(spans[0]!.parentSpanContext?.spanId).toBe(spans[1]!.spanContext().spanId);
       expect(JSON.stringify(spans.map((span) => span.attributes))).not.toContain("Private");
+    } finally {
+      await run.shutdown();
+    }
+  });
+
+  it("records native-only spans with the run's dedicated provider instead of the global one", async () => {
+    const global = globalRecording();
+    const { exporter, run } = recording();
+    registerTelemetry(aiSdkTelemetry(run));
+    try {
+      await transcribe().text;
+      await embedding();
+      expect(global.getFinishedSpans()).toEqual([]);
+      expect(exporter.getFinishedSpans().map((span) => span.name)).toEqual([
+        "ai.streamTranscribe transcription",
+        "embeddings embedding",
+        "embeddings embedding",
+      ]);
+    } finally {
+      await run.shutdown();
+    }
+  });
+
+  it("drops native-only spans when the run's telemetry cannot record them", async () => {
+    const global = globalRecording();
+    const { exporter, provider } = recording();
+    const run = createAgentRun({ telemetry: { ...otelTelemetry({ provider }) } });
+    registerTelemetry(aiSdkTelemetry(run));
+    try {
+      expect(await transcribe().text).toBe("Private transcript");
+      expect((await embedding()).embedding).toEqual([1, 2, 3]);
+      expect(global.getFinishedSpans()).toEqual([]);
+      expect(exporter.getFinishedSpans()).toEqual([]);
     } finally {
       await run.shutdown();
     }
