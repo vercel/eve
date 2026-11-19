@@ -8,6 +8,7 @@ import { isDynamicSentinel } from "#dynamic/definition.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import { classifyModelRouting } from "#internal/classify-model-routing.js";
 import { isMockModel } from "#internal/mock-model-identity.js";
+import { isDefinedModel } from "#models/definition.js";
 import { isChatGptModelRouting } from "#shared/chatgpt-model.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
@@ -17,7 +18,7 @@ import {
   type AgentPromptCacheDefinition,
   type AgentToolExposure,
   type ModelRouting,
-  type PublicAgentStaticModelDefinition,
+  type PublicAgentTurnModelDefinition,
 } from "#shared/agent-definition.js";
 import type { CompiledAgentDefinition, CompiledRuntimeModelReference } from "#compiler/manifest.js";
 import {
@@ -74,7 +75,7 @@ export async function compileAgentConfig(
           providerOptions: definition.modelOptions?.providerOptions,
           source: configModule,
           sourcePath: configModulePath,
-          value: definition.model as PublicAgentStaticModelDefinition,
+          value: definition.model as PublicAgentTurnModelDefinition,
         })
       : undefined;
   const compaction: {
@@ -214,7 +215,7 @@ async function normalizeAuthoredModelReference(input: {
   readonly source?: ModuleSourceRef;
   readonly sourceField?: CompiledRuntimeModelReference["sourceField"];
   readonly sourcePath?: string;
-  readonly value: PublicAgentStaticModelDefinition;
+  readonly value: PublicAgentTurnModelDefinition;
 }): Promise<CompiledRuntimeModelReference> {
   if (typeof input.value === "string") {
     const routing = classifyModelRouting(input.value, input.providerOptions);
@@ -234,6 +235,25 @@ async function normalizeAuthoredModelReference(input: {
     throw new Error(
       `Expected ${input.purpose} to provide a valid AI SDK language model reference.`,
     );
+  }
+
+  const sourceRef = {
+    exportName: source.exportName,
+    sourceKind: "module" as const,
+    logicalPath: source.logicalPath,
+    sourceId: source.sourceId,
+  };
+
+  if (isDefinedModel(input.value)) {
+    const reference: CompiledRuntimeModelReference = {
+      id: input.value.id,
+      source: sourceRef,
+      providerOptions: parseProviderOptionsRecord(input.providerOptions),
+      routing: classifyModelRouting(input.value, input.providerOptions),
+    };
+    if (input.sourceField !== undefined) reference.sourceField = input.sourceField;
+    if (input.promptCache !== undefined) reference.promptCache = input.promptCache;
+    return await withCompiledRuntimeModelLimits(reference, input);
   }
 
   const languageModel = input.value;
@@ -264,12 +284,7 @@ async function normalizeAuthoredModelReference(input: {
   rejectGatewayPromptCache(input, routing);
   const sourceBackedModel: CompiledRuntimeModelReference = {
     id: formatLanguageModelGatewayId(languageModel),
-    source: {
-      exportName: source.exportName,
-      sourceKind: "module" as const,
-      logicalPath: source.logicalPath,
-      sourceId: source.sourceId,
-    },
+    source: sourceRef,
     providerOptions: parseProviderOptionsRecord(input.providerOptions),
     routing,
   };
@@ -314,7 +329,7 @@ function rejectGatewayPromptCache(
   input: {
     readonly promptCache?: AgentPromptCacheDefinition;
     readonly sourcePath?: string;
-    readonly value: PublicAgentStaticModelDefinition;
+    readonly value: PublicAgentTurnModelDefinition;
   },
   routing: ModelRouting,
 ): void {
@@ -367,6 +382,7 @@ async function withCompiledRuntimeModelLimits(
   const limits = await input.modelCatalog.getModelLimits(model.id).catch((error: unknown) => {
     throw new Error(
       `Failed to load AI Gateway model metadata for ${input.purpose} "${model.id}". ${toErrorMessage(error)}`,
+      { cause: error },
     );
   });
 

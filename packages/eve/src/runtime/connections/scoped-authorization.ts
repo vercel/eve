@@ -132,6 +132,8 @@ class ScopedAuthorizationRequiredError extends Error {
   }
 }
 
+export type { ScopedAuthorizationRequiredError };
+
 export function isScopedAuthorizationRequiredError(
   error: unknown,
 ): error is ScopedAuthorizationRequiredError {

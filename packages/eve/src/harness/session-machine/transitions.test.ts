@@ -421,10 +421,11 @@ describe("controls and callbacks as deliveries", () => {
     },
   );
 
-  it("completes a sign-in from its callback without recording the provider's payload", () => {
+  it("completes a responder's sign-in from its callback without recording the provider's payload", () => {
     const session = waitingTurn();
     const { events } = completeSignIn(viewOf(session), {
-      completions: [GITHUB_CALLBACK],
+      completions: [{ ...GITHUB_CALLBACK, candidateId: "answer-1" }],
+      declined: new Set(),
     });
 
     expect(events.map((event) => event.type)).toEqual([
@@ -445,9 +446,31 @@ describe("controls and callbacks as deliveries", () => {
     expect(accepted(session, events)).toEqual([]);
   });
 
+  it("settles a sign-in that no call owns accepted from its callback", () => {
+    const { events } = completeSignIn(viewOf(waitingTurn()), {
+      completions: [GITHUB_CALLBACK],
+      declined: new Set(),
+    });
+    expect(events.find((event) => event.type === "interaction.settled")?.data).toMatchObject({
+      outcome: "accepted",
+    });
+  });
+
+  it("settles a sign-in that no call owns declined from a refused callback", () => {
+    const { events } = completeSignIn(viewOf(waitingTurn()), {
+      completions: [GITHUB_CALLBACK],
+      declined: new Set([GITHUB_CALLBACK.attemptId]),
+    });
+    expect(events.find((event) => event.type === "interaction.settled")?.data).toMatchObject({
+      outcome: "declined",
+      reason: "access_denied",
+    });
+  });
+
   it("ignores a callback for a sign-in that already ended", () => {
     const { events } = completeSignIn(viewOf(BASE), {
       completions: [GITHUB_CALLBACK],
+      declined: new Set(),
     });
     expect(events).toEqual([]);
   });
@@ -575,7 +598,9 @@ describe("calls a sign-in stopped", () => {
       ...view,
       signIns: matchSignIns(view, { attemptIds: ["google-1"] }).signIns!,
     };
-    expect(completeSignIn(matched, { completions: [signIn("google")] }).events).toEqual([]);
+    expect(
+      completeSignIn(matched, { completions: [signIn("google")], declined: new Set() }).events,
+    ).toEqual([]);
     expect(runnable(matched)).toEqual(["call-1"]);
 
     const [first, second] = step.approved!;

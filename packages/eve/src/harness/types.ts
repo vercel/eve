@@ -2,13 +2,13 @@ import type { EveAttributeValue } from "#runtime/attributes/normalize.js";
 import type { Fact, Progress } from "#protocol/session-events/facts.js";
 import type { ConsumedDelivery } from "#harness/session-machine/transitions.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
-import type { LanguageModel } from "ai";
 import type { MessageContent } from "#shared/message-content.js";
 
 import type { SessionAuthContext, SessionCapabilities } from "#channel/types.js";
 import type { RuntimeIdentity } from "#protocol/session-events/families/session.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
+import type { RuntimeModel } from "#runtime/agent/resolve-model.js";
 import type { Answer } from "#shared/input.js";
 import type { SandboxState } from "#sandbox/state.js";
 import type { JsonObject } from "#shared/json.js";
@@ -163,7 +163,7 @@ export interface KernelConfig {
   readonly setAttributes?: (attributes: Record<string, EveAttributeValue>) => Promise<void>;
   readonly signInCompletions?: readonly AuthorizationChallenge[];
   readonly typedAnswers?: boolean;
-  readonly resolveModel: (reference: RuntimeModelReference) => Promise<LanguageModel>;
+  readonly resolveModel: (reference: RuntimeModelReference) => Promise<RuntimeModel>;
   readonly runtimeIdentity?: RuntimeIdentity;
   readonly tools: HarnessToolMap;
 }

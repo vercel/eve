@@ -251,6 +251,8 @@ A sign-in keeps the turn open until the user connects, the turn is cancelled, or
 
 When a local subagent at any depth needs sign-in, the root session's channel gets it as the parent's own `interaction.opened`. Completing it continues the child, and the parent's turn continues under the same `turnId` after the subagent returns.
 
+A model defined with [`defineModel`](/docs/agent-config#run-the-model-on-each-persons-credential) opens the same sign-in before its model call, with the turn as the subject, and the turn continues after the callback.
+
 The channel that creates or continues the session must authenticate a real user. For a web app, configure `agent/channels/eve.ts` to map your app session to `principalType: "user"`. Platform channels' built-in auth maps the sender to a user.
 
 With `principalType: "app"`, the service acts as the agent, and nobody is asked to sign in. If the connector isn't installed or can't issue an app token, the tool call fails and doesn't retry, so an operator can fix the connector. See [Authentication](/docs/guides/auth-and-route-protection) to identify the caller in your HTTP channel.

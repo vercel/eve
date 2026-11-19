@@ -1,5 +1,13 @@
 # @eve/agent-browser
 
+## 0.2.1
+
+Released 2026-11-18 · [Compare with 0.2.0](https://github.com/vercel/eve/compare/%40eve%2Fagent-browser%400.2.0...%40eve%2Fagent-browser%400.2.1)
+
+### Dependencies
+
+- Updated eve to 1.1.0.
+
 ## 0.2.0
 
 Released 2026-11-16 · [Compare with 0.1.0](https://github.com/vercel/eve/compare/%40eve%2Fagent-browser%400.1.0...%40eve%2Fagent-browser%400.2.0)

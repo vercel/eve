@@ -6,7 +6,7 @@ import type { Commit, HandleEventFn } from "#harness/types.js";
 import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
 import type { EveAttributeValue } from "#runtime/attributes/normalize.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
-import { contextStorage } from "#context/container.js";
+import { type ContextContainer, contextStorage } from "#context/container.js";
 import { startSessionPrewarmers } from "#context/prewarm.js";
 import { runStep, withContextScope } from "#context/run-step.js";
 import { sessionProvider } from "#context/providers/session.js";
@@ -722,6 +722,7 @@ async function runSessionStepBody(
       ctx,
     );
     agentTraceState.pruneAgentTraceState(ctx, aliased.sessionId, aliased.state);
+    dropClosedSignInResults(ctx);
     const nextSerializedContext = serializeContext(ctx);
     stepResult = { ...stepResult, session: aliased };
 
@@ -736,6 +737,18 @@ async function runSessionStepBody(
   } finally {
     await publisher.release();
   }
+}
+
+function dropClosedSignInResults(ctx: ContextContainer): void {
+  const results = ctx.get(PendingAuthorizationResultKey);
+  if (results === undefined) return;
+  const { interactions } = currentProjection(ctx).view;
+  const open = results.filter(
+    (result) => interactions[signInInteractionId(result)]?.status === "open",
+  );
+  if (open.length === results.length) return;
+  ctx.delete(PendingAuthorizationResultKey);
+  if (open.length > 0) ctx.set(PendingAuthorizationResultKey, open);
 }
 
 function stoppedForPerson(result: StepResult): boolean {

@@ -6,7 +6,7 @@ import {
   readDevelopmentEnvironmentValues,
 } from "#shared/development-env-files.js";
 import { MODEL_CONNECTION_ENV } from "#shared/model-helper.js";
-import { readProviderSettingsSync } from "#setup/provider-settings.js";
+import { readProviderSettingsSync } from "#shared/provider-settings.js";
 
 interface DevelopmentEnvironmentLoader {
   readonly environmentRoot: string;

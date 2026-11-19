@@ -18,6 +18,8 @@ const MODEL_CATALOG_CACHE_KIND = "eve-model-catalog-cache";
 const MODEL_CATALOG_CACHE_VERSION = 2;
 const MODEL_CATALOG_CACHE_TTL_MS = 5 * 60 * 1000;
 const MODEL_CATALOG_FETCH_TIMEOUT_MS = 15_000;
+const MODEL_CATALOG_RETRY_DELAYS_MS = [250, 500];
+const MODEL_CATALOG_RETRY_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
 
 const modelCatalogCacheSchema = z
   .object({
@@ -122,18 +124,35 @@ export function createCompiledRuntimeModelCatalogLoader(
   };
 }
 
-async function fetchAndPersistModelCatalog(appRoot: string): Promise<ModelCatalogCache> {
-  const response = await vercelGatewayFetch(AI_GATEWAY_MODELS_CATALOG_URL, {
-    signal: AbortSignal.timeout(MODEL_CATALOG_FETCH_TIMEOUT_MS),
-  });
-
-  if (!response.ok) {
-    throw new Error(
-      `AI Gateway model catalog request failed with HTTP ${response.status} ${response.statusText}.`,
-    );
+async function fetchModelCatalog(): Promise<unknown> {
+  const signal = AbortSignal.timeout(MODEL_CATALOG_FETCH_TIMEOUT_MS);
+  let retriedError: unknown;
+  for (let attempt = 0; ; attempt++) {
+    let retryableStatus = false;
+    try {
+      const response = await vercelGatewayFetch(AI_GATEWAY_MODELS_CATALOG_URL, { signal });
+      if (response.ok) return await response.json();
+      retryableStatus = MODEL_CATALOG_RETRY_STATUSES.has(response.status);
+      await response.body?.cancel().catch(() => {});
+      throw new Error(
+        `AI Gateway model catalog request failed with HTTP ${response.status} ${response.statusText}.`,
+      );
+    } catch (error) {
+      if (signal.aborted) throw retriedError ?? error;
+      const delayMs = MODEL_CATALOG_RETRY_DELAYS_MS[attempt];
+      const transient =
+        retryableStatus ||
+        (error instanceof TypeError &&
+          (error.message === "fetch failed" || error.message === "terminated"));
+      if (delayMs === undefined || !transient) throw error;
+      retriedError = error;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
   }
+}
 
-  const parsed = modelCatalogResponseSchema.safeParse(await response.json());
+async function fetchAndPersistModelCatalog(appRoot: string): Promise<ModelCatalogCache> {
+  const parsed = modelCatalogResponseSchema.safeParse(await fetchModelCatalog());
 
   if (!parsed.success) {
     throw new Error("AI Gateway model catalog response did not match the expected schema.");

@@ -20,6 +20,8 @@ import {
   resolveEffectiveRuntimeModel,
   withGatewayTraceContext,
 } from "#harness/model-call/model.js";
+import { type CredentialedModel, credentialedModel } from "#harness/model-call/credential.js";
+import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import {
   compactMessages,
   type CompactionSummarizer,
@@ -31,7 +33,7 @@ import { takeBlockingFailure } from "#definitions/kernel.js";
 import { isDeepStrictEqual } from "node:util";
 import type { Usage } from "#protocol/session-events/envelope.js";
 import { nextChangeId, nextRunId } from "#protocol/session-projection.js";
-import { normalizeModelStreamError } from "#harness/model-call/errors.js";
+import { normalizeModelStreamError, rejectsCredential } from "#harness/model-call/errors.js";
 import { runModelCallWithRetries } from "#harness/model-call/retry.js";
 import {
   extractGatewayCostUsd,
@@ -96,7 +98,7 @@ export async function compactHistory(step: Step): Promise<StepResult> {
       change,
       compact: true,
       messages,
-      model: resolvedModel.model,
+      turnModel: () => credentialedModel(resolvedModel.model),
       promptMessages: messages,
       requestEnvelopeTokens: compaction.requestEnvelopeTokens,
     });
@@ -115,6 +117,7 @@ interface HistoryBeforeCallInput {
   readonly messages: readonly HarnessModelMessage[];
   readonly promptMessages: readonly HarnessModelMessage[];
   readonly model: LanguageModel;
+  readonly renew?: (rejection: unknown) => Promise<void>;
   readonly requestEnvelopeTokens: number;
 }
 
@@ -180,7 +183,7 @@ async function compactUnder(
     change,
     compaction: config,
     messages: input.messages,
-    model: input.model,
+    turnModel: async () => ({ model: input.model, renew: input.renew }),
     promptMessages: prompt,
     requestEnvelopeTokens: input.requestEnvelopeTokens,
     telemetryTurnId: activeTurnId(step.position()),
@@ -228,7 +231,7 @@ async function summarizeHistory(
     readonly compact?: true;
     readonly compaction: CompactionConfig;
     readonly messages: readonly HarnessModelMessage[];
-    readonly model: LanguageModel;
+    readonly turnModel: () => Promise<CredentialedModel>;
     readonly promptMessages: readonly HarnessModelMessage[];
     readonly requestEnvelopeTokens: number | undefined;
     readonly telemetryTurnId?: string;
@@ -349,11 +352,19 @@ function historyConfig(
   };
 }
 
+async function compactionModel(
+  step: Step,
+  reference: RuntimeModelReference,
+): Promise<CredentialedModel> {
+  const resolved = await step.config.resolveModel(reference);
+  return await credentialedModel(resolved);
+}
+
 async function summaryExecutor(
   step: Step,
   input: {
     readonly change: { readonly runId: string };
-    readonly model: LanguageModel;
+    readonly turnModel: () => Promise<CredentialedModel>;
     readonly telemetryTurnId?: string;
   },
 ): Promise<{
@@ -363,7 +374,8 @@ async function summaryExecutor(
   const { config, session } = step;
   const turnReference = stepReference(step);
   const reference = agentSettings(step).compactionModel ?? turnReference;
-  const model = reference === turnReference ? input.model : await config.resolveModel(reference);
+  const { model, renew } =
+    reference === turnReference ? await input.turnModel() : await compactionModel(step, reference);
   const profile = resolveModelProfile(model);
   const call = {
     abortSignal: config.abortSignal,
@@ -387,14 +399,24 @@ async function summaryExecutor(
     }).telemetry,
   };
   const retryScope = { sessionId: session.sessionId, turnId: step.position().turnId };
+  const summarize = (prompt: CompactionSummaryPrompt) =>
+    runModelCallWithRetries(
+      () => streamCompactionSummary({ ...call, ...prompt }),
+      retryScope,
+      config.abortSignal,
+    );
   return {
     modelId: gatewayModelId(model) ?? "unknown",
-    summarize: (prompt) =>
-      runModelCallWithRetries(
-        () => streamCompactionSummary({ ...call, ...prompt }),
-        retryScope,
-        config.abortSignal,
-      ),
+    async summarize(prompt) {
+      for (;;) {
+        try {
+          return await summarize(prompt);
+        } catch (error) {
+          if (renew === undefined || !rejectsCredential(error)) throw error;
+          await renew(error);
+        }
+      }
+    },
   };
 }
 

@@ -1,4 +1,3 @@
-import type { LanguageModel } from "ai";
 import { handleStepResult } from "#harness/step/after-model.js";
 
 import { HistoryStateKey } from "#context/keys.js";
@@ -7,6 +6,9 @@ import { stepCatalog } from "#definitions/step.js";
 import type { GenerationSteering } from "#harness/generation-steering.js";
 import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
 import { enforceBudget, humanInputContext } from "#harness/hitl/index.js";
+import { failModelCredential, pauseForModelSignIn } from "./credential-failure.js";
+import { isScopedAuthorizationRequiredError } from "#runtime/connections/scoped-authorization.js";
+import { changeHistory } from "#harness/session-machine/history.js";
 import {
   requestRun as requestRunFact,
   startRun as startRunFact,
@@ -33,6 +35,8 @@ import { throwIfSessionStreamDead } from "#harness/session-stream-write-error.js
 import type { StepResult } from "#harness/types.js";
 import { stepReference } from "#harness/step/context.js";
 import { ModelCaller } from "./call.js";
+import { type CredentialedModel, credentialedModel } from "./credential.js";
+import { credentialErrorIn, ModelCredentialFailure, refusesCredential } from "./errors.js";
 import { type EndsTurnTools, endsTurnTools, frameworkToolNames } from "./tools.js";
 import { reportModelCallFailure } from "./failure.js";
 import { resolveEffectiveRuntimeModel } from "./model.js";
@@ -62,8 +66,10 @@ export async function runModelStep(
   const overBudget = await enforceBudget(step, prompt.messages);
   if (overBudget !== undefined) return overBudget;
 
-  const run = await requestRun(step, prompt);
-  if ("failed" in run) return run.failed;
+  const resolved = await resolveModel(step);
+  if ("failed" in resolved) return resolved.failed;
+  const requested = await requestRun(step, prompt);
+  if (requested !== undefined) return requested;
   const projectedMessages = projectPrompt(prompt);
   const catalog = await stepCatalog(step);
   step.frameworkToolNames = frameworkToolNames(catalog);
@@ -72,10 +78,11 @@ export async function runModelStep(
     approvalMemory,
     catalog,
     generation,
-    model: run.model,
+    model: resolved.model,
+    renewCredential: resolved.renew,
     newRun: async () => {
       const next = await requestRun(step, prompt);
-      if ("failed" in next) throw new Error("The model run's replacement found no model.");
+      if (next !== undefined) throw new Error("eve couldn't request the replacement model run.");
     },
     startRun: async (attempt) => await startRun(step, attempt),
     projectedMessages,
@@ -88,13 +95,30 @@ export async function runModelStep(
   } catch (error) {
     throwIfSessionStreamDead(error);
     throwIfTurnAborted(step.config.abortSignal);
+    const credentialError = credentialErrorIn(error);
+    if (credentialError !== undefined) {
+      if (generation.interrupted) return caller.steered();
+      if (credentialError instanceof ModelCredentialFailure)
+        return await failModelCredential(
+          step,
+          credentialError.code,
+          credentialError.cause,
+          credentialError.scoped,
+        );
+      return await pauseForModelSignIn(step, credentialError, async () => {
+        const messages = await caller.abandon();
+        step.session = changeHistory(step.session, { extend: messages });
+      });
+    }
     const compactionFailed = await caller.failIfCompactionFailed();
     if (compactionFailed !== undefined) return compactionFailed;
     if (generation.interrupted) return caller.steered();
+    if (resolved.scoped !== undefined && refusesCredential(error))
+      return await failModelCredential(step, "MODEL_AUTHORIZATION_FAILED", error, resolved.scoped);
     return reportModelCallFailure(step, error, caller.takeUnkeptUsage());
   }
 
-  await recordModelUsage(step, { model: run.model, tools: catalog.advertised.size });
+  await recordModelUsage(step, { model: resolved.model, tools: catalog.advertised.size });
 
   let stepResult: StepResult;
   try {
@@ -120,25 +144,35 @@ export async function runModelStep(
   return stepResult;
 }
 
-async function requestRun(
+async function resolveModel(
   step: Step,
-  prompt: Prompt,
-): Promise<{ readonly model: LanguageModel } | { readonly failed: StepResult }> {
+): Promise<CredentialedModel | { readonly failed: StepResult }> {
+  let resolved: Awaited<ReturnType<typeof resolveEffectiveRuntimeModel>>;
+  try {
+    resolved = await resolveEffectiveRuntimeModel(step);
+  } catch (error) {
+    return { failed: await failModelSelection(step, error) };
+  }
+  step.model = resolved.choice;
+  try {
+    return await credentialedModel(resolved.model);
+  } catch (error) {
+    const credentialError = credentialErrorIn(error);
+    if (credentialError === undefined) throw error;
+    return { failed: await failOrAsk(step, credentialError) };
+  }
+}
+
+async function requestRun(step: Step, prompt: Prompt): Promise<StepResult | undefined> {
   try {
     await step.apply(
       requestRunFact({ turnId: activeTurnId(step.position()) }, nextRunId(step.view().projection)),
       validateHarnessModelMessages(withClientContext(prompt)),
     );
   } catch (error) {
-    return { failed: await failBoundaryEvent(step, error) };
+    return await failBoundaryEvent(step, error);
   }
-  try {
-    const resolved = await resolveEffectiveRuntimeModel(step);
-    step.model = resolved.choice;
-    return { model: resolved.model };
-  } catch (error) {
-    return { failed: await failModelSelection(step, error) };
-  }
+  return undefined;
 }
 
 async function startRun(step: Step, attempt: number): Promise<void> {
@@ -146,4 +180,12 @@ async function startRun(step: Step, attempt: number): Promise<void> {
   if (runId === undefined) return;
   const modelId = stepReference(step).id;
   await step.apply(startRunFact({ attempt, modelId, runId }));
+}
+
+async function failOrAsk(
+  step: Step,
+  error: NonNullable<ReturnType<typeof credentialErrorIn>>,
+): Promise<StepResult> {
+  if (isScopedAuthorizationRequiredError(error)) return await pauseForModelSignIn(step, error);
+  return await failModelCredential(step, error.code, error.cause, error.scoped);
 }

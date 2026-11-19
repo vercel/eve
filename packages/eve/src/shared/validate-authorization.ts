@@ -109,3 +109,15 @@ export function normalizeAuthorizationSpec(
   if (evict !== undefined) nonInteractive = { ...nonInteractive, evict };
   return nonInteractive;
 }
+
+export function assertAuthKey(authKey: string, label: string): string {
+  if (!/^[A-Za-z0-9_.:-]+$/u.test(authKey)) {
+    throw new Error(`${label} must contain only letters, digits, "_", "-", ".", or ":".`);
+  }
+  return authKey;
+}
+
+export function sanitizeScopeSegment(value: string): string {
+  const sanitized = value.replace(/[^A-Za-z0-9_.:-]+/gu, "_").replace(/^_+|_+$/gu, "");
+  return sanitized.length > 0 ? sanitized : "provider";
+}

@@ -1,4 +1,3 @@
-import type { LanguageModel } from "ai";
 import { isFrameworkTool, isInteractionOnly } from "#tools/provided/framework-tool.js";
 
 import type { Runtime, SessionCapabilities } from "#channel/types.js";
@@ -12,6 +11,7 @@ import type { RuntimeIdentity } from "#protocol/session-events/families/session.
 import { UNSPECIFIED_INPUT_SCHEMA } from "#tools/schema.js";
 import {
   resolveRuntimeModelReference,
+  type RuntimeModel,
   type RuntimeModelResolutionScope,
 } from "#runtime/agent/resolve-model.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
@@ -123,7 +123,7 @@ export function buildRuntimeIdentity(agent: RuntimeAgentIdentity): RuntimeIdenti
 
 function createRuntimeModelResolver(
   scope: RuntimeModelResolutionScope,
-): (modelReference: Parameters<typeof resolveRuntimeModelReference>[0]) => Promise<LanguageModel> {
+): (modelReference: Parameters<typeof resolveRuntimeModelReference>[0]) => Promise<RuntimeModel> {
   return (modelReference) => resolveRuntimeModelReference(modelReference, scope);
 }
 

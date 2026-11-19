@@ -31,14 +31,7 @@ beforeEach(() => {
   vi.stubEnv("GITHUB_APP_PRIVATE_KEY", privateKey);
   vi.stubEnv("GITHUB_WEBHOOK_SECRET", webhookSecret);
   vi.stubEnv("METRICS_TOKEN", "test-metrics-token");
-  // The channel fetches PR context from GitHub before dispatching and swallows
-  // failures, so no test reaches the real API.
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async () => {
-      throw new Error("network disabled in the grader");
-    }),
-  );
+  vi.stubGlobal("fetch", vi.fn(githubResponse));
 });
 
 afterEach(() => {
@@ -179,7 +172,7 @@ test("a metrics outage does not disrupt the rest of the turn's work", async () =
   );
   const healthyStops = (await settleTurn()).sandbox.stops;
 
-  const outages = [
+  const outages: Array<typeof globalThis.fetch> = [
     async () => {
       throw new TypeError("fetch failed");
     },
@@ -310,6 +303,71 @@ async function deliver(event: string, payload: object, signature?: string): Prom
   );
   await Promise.all(pending);
   return { status: response.status, sends };
+}
+
+/** Successful GitHub reads for the positive dispatch tests, never a live network fallback. */
+async function githubResponse(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const request = new Request(input, init);
+  const { origin, pathname } = new URL(request.url);
+  if (origin === "https://api.github.com") {
+    if (request.method === "POST" && pathname === "/app/installations/55/access_tokens") {
+      return Response.json({
+        token: "test-installation-token",
+        expires_at: new Date(Date.now() + 3_600_000).toISOString(),
+      });
+    }
+    const repo = "/repos/pinecone-labs/ledger";
+    if (request.method === "GET") {
+      const failedCheck = {
+        id: 777001,
+        name: "unit tests",
+        conclusion: "failure",
+        output: { title: "Ledger total", summary: "Expected total 100, received 99" },
+      };
+      if (pathname === `${repo}/check-suites/777001/check-runs`) {
+        return Response.json({ total_count: 1, check_runs: [failedCheck] });
+      }
+      if (pathname === `${repo}/check-runs/777001`) return Response.json(failedCheck);
+      if (pathname === `${repo}/actions/runs`) {
+        return Response.json({ total_count: 1, workflow_runs: [failedCheck] });
+      }
+      if (pathname === `${repo}/actions/runs/777001/jobs`) {
+        return Response.json({ total_count: 1, jobs: [{ ...failedCheck, steps: [failedCheck] }] });
+      }
+      if (pathname === `${repo}/actions/jobs/777001/logs`) {
+        return new Response("Ledger total: expected 100, received 99");
+      }
+      if (pathname === `${repo}/check-runs/777001/annotations`) {
+        return Response.json([
+          {
+            path: "src/ledger.test.ts",
+            start_line: 12,
+            end_line: 12,
+            annotation_level: "failure",
+            title: "Ledger total",
+            message: "Expected total 100, received 99",
+          },
+        ]);
+      }
+      if (pathname === `${repo}/pulls/31`) {
+        return Response.json({
+          number: 31,
+          title: "Update ledger totals",
+          state: "open",
+          body: "Recalculate ledger totals.",
+          base: { ref: "main", sha: "a".repeat(40) },
+          head: { ref: "fix-ledger", sha: "4f1c2e9d8b7a6f5e4d3c2b1a0f9e8d7c6b5a4f3e" },
+        });
+      }
+      if (pathname === `${repo}/pulls/31/files`) return Response.json([]);
+      if (
+        pathname === `${repo}/compare/${"a".repeat(40)}...4f1c2e9d8b7a6f5e4d3c2b1a0f9e8d7c6b5a4f3e`
+      ) {
+        return Response.json({ files: [] });
+      }
+    }
+  }
+  throw new Error(`Unexpected grader request: ${request.method} ${request.url}`);
 }
 
 function webhookBase() {
