@@ -1,9 +1,4 @@
 /**
- * Checks shared by the app's own API routes, which run beside the agent rather than behind its
- * channel auth in agent/channels/eve.ts.
- */
-
-/**
  * Whether a request comes from this app's own pages. Browsers always send `Origin` on a WebSocket
  * and a cross-site `fetch`, so a page on another site can't use a session ID it learned to watch
  * or drive a sandbox. A request without `Origin`, from a server or a CLI, passes here and still

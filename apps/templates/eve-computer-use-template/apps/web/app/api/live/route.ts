@@ -3,7 +3,7 @@ import WebSocket from "ws";
 
 import { controlMessage, type Control } from "../../../../../agent/lib/live-config";
 import { getViewer } from "../../../lib/session";
-import { isSameOrigin } from "../caller";
+import { isSameOrigin } from "../../../lib/origin";
 import { browserRelay, desktopTicket, findSandbox, type Relay } from "./relay";
 
 export const dynamic = "force-dynamic";

@@ -69,14 +69,16 @@ export function SignIn() {
   );
 }
 
-/** A deployment without `EVE_COMPUTER_USE_PASSWORD` lets no one in. */
-export function NotConfigured() {
+/** A deployment without a long enough `EVE_COMPUTER_USE_PASSWORD` lets no one in. */
+export function NotConfigured({ reason }: { readonly reason: string }) {
   return (
     <Gate>
       <h1 className="gate-title">Not configured</h1>
+      <p className="gate-note">{reason}</p>
       <p className="gate-note">
-        Set <code>EVE_COMPUTER_USE_PASSWORD</code> in the project&apos;s environment variables and
-        redeploy. Everyone with the password shares this agent and its sandboxes.
+        Set <code>EVE_COMPUTER_USE_PASSWORD</code> to at least 16 characters in the project&apos;s
+        environment variables and redeploy. Everyone with the password shares this agent and its
+        sandboxes.
       </p>
     </Gate>
   );

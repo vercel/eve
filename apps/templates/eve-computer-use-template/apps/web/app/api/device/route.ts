@@ -2,7 +2,7 @@ import { experimental_decide as decide } from "ai";
 
 import { getViewer } from "../../../lib/session";
 import { enforceRateLimit, RateLimitError } from "../../../lib/rate-limit";
-import { isSameOrigin } from "../caller";
+import { isSameOrigin } from "../../../lib/origin";
 
 import {
   DEFAULT_DEVICE,

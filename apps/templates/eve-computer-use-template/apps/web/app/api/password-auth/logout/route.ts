@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { PASSWORD_SESSION_COOKIE_NAME } from "../../../../lib/password-auth";
-import { isSameOrigin } from "../../caller";
+import { isSameOrigin } from "../../../../lib/origin";
 
 /** `POST`: signs out by clearing the password session. */
 export async function POST(request: Request) {

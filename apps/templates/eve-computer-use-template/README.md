@@ -74,11 +74,11 @@ pnpm exec eve deploy
 
 ### Access
 
-A deployment lets people in with one shared password, `EVE_COMPUTER_USE_PASSWORD`; pick a long one (16+ characters). Without it, the deployment lets no one in and says so. `pnpm dev:all` on your machine needs no password. The same sign-in covers the chat, the live view, and Auto: `agent/channels/eve.ts` accepts it through `passwordEveAuth`, and the app's own routes check it before they do anything (`apps/web/lib/`).
+A deployment lets people in with one shared password, `EVE_COMPUTER_USE_PASSWORD`, of at least 16 characters. Without it, or with a shorter one, the deployment lets no one in and says why. Sign-in allows 10 attempts per address every 15 minutes and 300 an hour in all. `pnpm dev:all` on your machine needs no password. The same sign-in covers the chat, the live view, and Auto: `agent/channels/eve.ts` accepts it through `passwordEveAuth`, and the app's own routes check it before they do anything (`apps/web/lib/`).
 
 Everyone with the password shares the agent: they can read each other's chats and watch and drive their sandboxes. For per-user accounts, the [chat template](../eve-chat-template) upgrades the same pattern to Sign in with Vercel with Better Auth and a database.
 
-Each Auto decision is a model call billed to the project. With [Upstash Redis](https://vercel.com/marketplace/upstash) connected (`UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`, or `KV_REST_API_URL` and `KV_REST_API_TOKEN`), each viewer gets 120 an hour; without it, there's no limit beyond sign-in.
+Each Auto decision is a model call billed to the project, so each viewer gets 120 an hour. These limits hold across the deployment with [Upstash Redis](https://vercel.com/marketplace/upstash) connected (`UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`, or `KV_REST_API_URL` and `KV_REST_API_TOKEN`); without it, each server instance counts on its own.
 
 ## Customize
 

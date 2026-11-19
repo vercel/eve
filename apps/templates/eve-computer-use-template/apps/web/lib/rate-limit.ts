@@ -1,5 +1,11 @@
 import { Redis } from "@upstash/redis";
 
+/*
+ * Fixed-window limits, from the voice template. With Upstash Redis connected they hold across
+ * every server instance; without it, each instance counts on its own, which still slows down
+ * a single caller hammering one instance.
+ */
+
 type LimitOptions = {
   readonly key: string;
   readonly limit: number;
@@ -42,20 +48,35 @@ function getRedis() {
   return redis;
 }
 
+/** Counts for instances without Redis, by window key; old windows are dropped as they pass. */
+const local = new Map<string, number>();
+const MAX_LOCAL_KEYS = 10_000;
+
+function countLocally(key: string): number {
+  if (local.size >= MAX_LOCAL_KEYS) local.clear();
+  const count = (local.get(key) ?? 0) + 1;
+  local.set(key, count);
+  return count;
+}
+
 export async function enforceRateLimit(options: LimitOptions) {
   const client = getRedis();
-
-  if (!client) {
-    return;
-  }
-
   const now = Math.floor(Date.now() / 1000);
   const windowId = Math.floor(now / options.windowSeconds);
   const redisKey = `rate:${options.prefix}:${options.key}:${windowId}`;
-  const count = await client.incr(redisKey);
+  let count: number;
 
-  if (count === 1) {
-    await client.expire(redisKey, options.windowSeconds);
+  if (client) {
+    count = await client.incr(redisKey);
+    if (count === 1) {
+      await client.expire(redisKey, options.windowSeconds);
+    }
+  } else {
+    for (const key of local.keys()) {
+      if (key.startsWith(`rate:${options.prefix}:`) && !key.endsWith(`:${windowId}`))
+        local.delete(key);
+    }
+    count = countLocally(redisKey);
   }
 
   if (count > options.limit) {

@@ -1,5 +1,5 @@
-import { getPasswordSessionFromHeaders } from "./password-auth";
-import { getAuthMode } from "./setup";
+import { getPasswordSessionFromHeaders } from "./password-auth.ts";
+import { getAuthMode } from "./setup.ts";
 
 /** Who is using the app. Password access has one shared viewer. */
 export interface Viewer {
