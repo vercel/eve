@@ -24,6 +24,10 @@ import {
   type SubscriptionSourceRef,
 } from "#runtime/subscriptions/state.js";
 
+export function currentDeploymentId(): string | undefined {
+  return process.env.VERCEL_DEPLOYMENT_ID?.trim() || undefined;
+}
+
 export async function bindingContext(
   binding: Pick<SubscriptionBinding, "auth" | "sessionId" | "traceSeed">,
   bundle: CompiledBundle,
@@ -46,7 +50,10 @@ export async function startSubscriptionOwner(
   signal?: AbortSignal,
 ): Promise<OpenedSubscription | undefined> {
   const run = await startWorkflowOnCurrentDeployment(subscriptionWorkflowReference, [
-    { binding, serializedContext: await bindingContext(binding, bundle) },
+    {
+      binding: { ...binding, deploymentId: currentDeploymentId() },
+      serializedContext: await bindingContext(binding, bundle),
+    },
   ]);
   let outcome = await readPublishedOutcome<SubscriptionOutcome>(
     run.runId,
@@ -98,7 +105,7 @@ export function emitSubscriptionEvent(
 ): Promise<boolean> {
   return resume(subscriptionKeyHookToken(source, key), {
     kind: "emit",
-    event,
+    event: { ...event, acceptedDeploymentId: currentDeploymentId() },
   } satisfies SubscriptionKeyMessage);
 }
 

@@ -1955,6 +1955,9 @@ importers:
       '@nuxt/schema':
         specifier: ^4.6.4
         version: 4.6.4
+      '@octokit/webhooks':
+        specifier: 14.2.0
+        version: 14.2.0
       '@opentelemetry/context-async-hooks':
         specifier: 'catalog:'
         version: 2.12.1(@opentelemetry/api@1.9.1)

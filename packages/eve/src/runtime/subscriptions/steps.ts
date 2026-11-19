@@ -11,6 +11,10 @@ import {
 import { startWorkflowOnCurrentDeployment } from "#execution/workflow-runtime.js";
 import { getHookByToken, resumeHook } from "#internal/workflow/runtime.js";
 import { readFirstPublished } from "#runtime/subscriptions/published-outcome.js";
+import {
+  isHeldByOlderDeployment,
+  retireOlderDeploymentSubscription,
+} from "#runtime/subscriptions/stale-deployment.js";
 import { subscriptionSource } from "#runtime/subscriptions/sources/index.js";
 import {
   joinAckNamespace,
@@ -174,9 +178,13 @@ export async function dispatchSubscriptionStep(input: SubscriptionDeliveryInput)
   const { binding, event } = input;
   const ctx = await deserializeContext(input.serializedContext);
   ctx.setVirtualContext(AuthKey, binding.auth);
-  await contextStorage.run(ctx, () =>
-    subscriptionSource(binding.source.kind).deliver({ ctx, binding, event }),
-  );
+  await contextStorage.run(ctx, async () => {
+    if (isHeldByOlderDeployment(binding, event)) {
+      await retireOlderDeploymentSubscription({ ctx, binding });
+      return;
+    }
+    await subscriptionSource(binding.source.kind).deliver({ ctx, binding, event });
+  });
 }
 
 export async function closeSubscriptionStep(input: {

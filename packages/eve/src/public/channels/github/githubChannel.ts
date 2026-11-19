@@ -245,6 +245,7 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
     botName: config.botName,
     credentials: config.credentials,
   });
+  const appSlug = createGitHubBotNameResolver({ credentials: config.credentials });
   const dispatchOptions = { botName };
   const mergedEvents: GitHubChannelEvents = {
     ...createDefaultEvents({
@@ -281,7 +282,7 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
             waitUntil(
               emitGitHubWebhook({
                 body,
-                botName,
+                appSlug,
                 contentType: req.headers.get("content-type") ?? undefined,
                 emit,
                 headers: req.headers,

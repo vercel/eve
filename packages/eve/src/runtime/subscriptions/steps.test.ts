@@ -234,6 +234,46 @@ it("retires the subscription when its session has ended, and fails a send that m
   expect(mocks.resumeHook).not.toHaveBeenCalled();
 });
 
+it("retires a subscription held by an older deployment and delivers nothing to its source", async () => {
+  const onEvent = vi.fn(async () => "Checks finished");
+  useSubscriptions({ onEvent });
+  mocks.hooks.add(subscriptionHookToken("binding-1"));
+
+  await dispatchSubscriptionStep({
+    ...delivery("e1"),
+    binding: { ...binding, deploymentId: "dpl_old" },
+    event: { id: "e1", data: {}, acceptedDeploymentId: "dpl_new" },
+  });
+
+  expect(mocks.resumeHook).toHaveBeenCalledWith(subscriptionHookToken("binding-1"), {
+    kind: "retire",
+  });
+  expect(onEvent).not.toHaveBeenCalled();
+  expect(mocks.send).toHaveBeenCalledTimes(1);
+  const [message, options] = mocks.send.mock.calls[0]!;
+  expect(message).toContain("ended because the agent was redeployed");
+  expect(message).toContain('"checks_finished" on channel "github"');
+  expect(options).toMatchObject({ auth: subscriberAuth, turnPolicy: "queue" });
+  expect((options as { idempotencyKey: string }).idempotencyKey).toMatch(
+    /^eve:subscription-retired:/,
+  );
+});
+
+it("delivers normally when the binding's deployment is the one that accepted the event", async () => {
+  const onEvent = vi.fn(async () => "Checks finished");
+  useSubscriptions({ onEvent });
+
+  await dispatchSubscriptionStep({
+    ...delivery("e1"),
+    binding: { ...binding, deploymentId: "dpl_same" },
+    event: { id: "e1", data: {}, acceptedDeploymentId: "dpl_same" },
+  });
+
+  expect(onEvent).toHaveBeenCalledTimes(1);
+  expect(mocks.resumeHook).not.toHaveBeenCalled();
+  expect(mocks.send.mock.calls[0]![0]).toBe("Checks finished");
+});
+
 it("hands the event to each owner hook and reports the owners that ended", async () => {
   mocks.hooks.add(subscriptionHookToken("a"));
   mocks.hooks.add(subscriptionHookToken("b"));

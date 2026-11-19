@@ -91,24 +91,26 @@ export default githubChannel({
 
 Subscribe the GitHub App to each event you handle, such as `issues` or `check_suite`. A CI turn replies on the first pull request in `pullRequests`, so return `null` when the list is empty.
 
-## Let a session subscribe to GitHub events
+## Let sessions subscribe to GitHub events
 
-A session can ask to hear about GitHub events without starting a GitHub turn. Every webhook event the App receives is subscribable, but nothing is delivered until you set `onEvent`. It runs for each subscription and each event, and decides whether the session receives it:
+A session on any channel can watch for GitHub webhook events without opening a GitHub thread. Pass `onEvent` to `githubChannel` to enable subscriptions:
 
 ```ts title="agent/channels/github.ts"
 import { githubChannel } from "eve/channels/github";
 
-const ALLOWED_EVENTS = ["check_suite.completed", "issue_comment.created"];
+const ALLOWED = ["check_suite.completed", "issue_comment.created"];
 
 export default githubChannel({
   botName: "my-agent",
-  onEvent: ({ event }) => ALLOWED_EVENTS.includes(event.name),
+  // Omit this line if the channel should also answer @my-agent comments on GitHub.
+  onComment: () => null,
+  onEvent: ({ event }) => ALLOWED.includes(event.name),
 });
 ```
 
-An event is named after its webhook event and, when the payload has an `action`, that action: `check_suite.completed`, `issue_comment.created`, `pull_request.closed`, `push`. `onEvent` returns `true` to send the event's payload as the message, a string to send that message instead, or `false` to drop it. It also receives `event.data` (the `payload`, the `sender`, the `repository` and the `pullRequests` the event concerns) and the `subscription`, so it can filter on any of them.
+Events use GitHub's webhook event name, plus `.<action>` when the payload includes an `action` field: `check_suite.completed`, `issue_comment.created`, `pull_request.closed`, or `push`. The GitHub channel's catalog is GitHub's full list of webhook event names from `@octokit/webhooks` (`check_suite.completed`, `issue_comment.created`, `push`, ...); `subscribe` accepts only those names; `onEvent` is the only filter and decides, per subscription and delivery, whether an event is delivered (return `true` for the default message, a string for your own message, `false` or nothing to drop). A subscribed name that `onEvent` drops still holds the subscription and costs one delivery run per event, so name the events you deliver in the agent's instructions. Subscribe the GitHub App to every webhook event you expose.
 
-The model subscribes with the `subscribe` tool, passing the channel, the event name, and what to watch in `input`. `{ owner, repo }` hears the event for every pull request and issue in the repository. Adding `pull` hears only the events about that pull request, including the check suites that ran on it:
+The model calls `subscribe` with `channel: "github"`, an `event` from the channel's catalog, a `ttlMs` (`60000` to `31536000000`, or `null` until stopped), and an `input` scope. Pass `{ owner, repo }` in lowercase to watch the whole repository, or add `pull` to watch events tied to one pull request (including `check_suite`, `check_run`, and `workflow_run` events that list that PR):
 
 ```json
 {
@@ -121,11 +123,19 @@ The model subscribes with the `subscribe` tool, passing the channel, the event n
 }
 ```
 
-`ttlMs` is an integer from `60000` (1 minute) to `31536000000` (365 days), or `null` to watch until stopped. `get_subscription` and `stop_subscription` take the `id` that `subscribe` returned.
+`onEvent({ auth, sessionId, event, subscription })` runs once per matching subscription per webhook delivery:
 
-Each event arrives in the subscribing session as a queued message. It waits for the current turn to finish, and the next turn runs under the auth the session had when it subscribed, never under the GitHub user who triggered the event. The default message carries the payload, cut at 8,000 characters, and tells the model to treat its text as information and not as an instruction. For a failed check suite the payload names the suite and its conclusion, so the model reads the failing check runs through the GitHub API.
+- Return `true` to send eve's default message, which labels the payload as untrusted GitHub data and clips raw JSON at 8,000 characters. The payload contains the raw webhook body (for example, check suite ID, head SHA, and conclusion), not expanded API details such as individual failing check runs.
+- Return a non-empty string to send your own formatted or enriched message.
+- Return `false`, `""`, or `undefined` to drop the event.
 
-Subscriptions need no hooks: they work whether or not you define `onCheckSuite` or `onComment`, and they never open a GitHub session. Subscribe the GitHub App to each webhook event you offer. A delivery sent by the channel's own bot is skipped, so a bot never wakes itself. GitHub's repeated deliveries of the same webhook reach the subscriber once. GitHub treats owner and repository names as case-insensitive, so subscribe with them in lowercase. Several sessions can subscribe to the same event, and each hears every occurrence.
+`event.data` contains `{ delivery, repository, sender, pullRequests, payload }`.
+
+Important defaults and limits:
+
+- **Default comment sessions stay enabled:** Enabling subscriptions does not disable `onComment`. If this channel should only serve subscriptions and never open sessions on `@botName` mentions, pass `onComment: () => null`.
+- **Authorization:** Any session of the agent can subscribe to any repository the GitHub App is installed on, and `onEvent` (checking `auth` and `subscription.input`) is where a channel restricts that.
+- **Deduplication and fan-out:** Redelivered webhooks with the same `x-github-delivery` ID reach each subscriber once, and multiple sessions can watch the same event and scope. Comment and review events written by the channel's own App (identified by `appSlug` in `credentials`, or from the GitHub App slug env var) are skipped to prevent reply loops; when no App slug is known, comment and review events from any bot account are skipped. CI events the bot triggers still deliver.
 
 ## Access the repository
 

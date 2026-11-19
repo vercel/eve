@@ -51,6 +51,7 @@ const channelsOf = (...entries: readonly [string, unknown][]) =>
   entries.map(([name, subscriptions]) => ({ name, definition: { subscriptions } })) as never;
 const github = {
   description: "Watch a pull request until its checks finish.",
+  events: ["checks_finished", "review_submitted"],
   inputSchema: githubSchema,
   onEvent: () => true,
 };
@@ -120,7 +121,15 @@ it("offers subscribe, get and stop, or nothing when no channel has subscriptions
 it("gives the subscribe schema one anyOf entry per channel with subscriptions", () => {
   const two = channelsOf(
     ["github", github],
-    ["slack", { description: "Watch a thread.", inputSchema: slackSchema, onEvent: () => true }],
+    [
+      "slack",
+      {
+        description: "Watch a thread.",
+        events: ["reply"],
+        inputSchema: slackSchema,
+        onEvent: () => true,
+      },
+    ],
     ["email", undefined],
     ["empty", undefined],
   );
@@ -135,6 +144,10 @@ it("gives the subscribe schema one anyOf entry per channel with subscriptions", 
   expect(entries.map((entry) => entry.properties.channel)).toEqual([
     { const: "github" },
     { const: "slack" },
+  ]);
+  expect(entries.map((entry) => entry.properties.event)).toMatchObject([
+    { type: "string", enum: ["checks_finished", "review_submitted"] },
+    { type: "string", enum: ["reply"] },
   ]);
   expect(entries[0]!.properties.input).toEqual(githubSchema);
   expect(entries[1]!.properties.input).toEqual(slackSchema);
@@ -207,6 +220,34 @@ it("validates the input and derives the key emit derives, comparing strings exac
     }),
   ).rejects.toThrow("does not match the channel's schema");
   expect(host.start).toHaveBeenCalledTimes(2);
+});
+
+it("refuses an event name the channel does not declare, before validating input or starting an owner", async () => {
+  await expect(
+    subscribeAs("s1", "rui", {
+      subscription: { channel: "github", event: "pushed", input: { owner: "vercel", pull: 7 } },
+      ttlMs: null,
+    }),
+  ).rejects.toThrow('Channel "github" emits no event named "pushed".');
+  await expect(
+    subscribeAs("s1", "rui", {
+      subscription: { channel: "github", event: "pushed", input: {} },
+      ttlMs: null,
+    }),
+  ).rejects.toThrow('Channel "github" emits no event named "pushed".');
+  expect(host.start).not.toHaveBeenCalled();
+
+  await expect(
+    subscribeAs("s1", "rui", {
+      subscription: {
+        channel: "github",
+        event: "review_submitted",
+        input: { owner: "vercel", pull: 7 },
+      },
+      ttlMs: null,
+    }),
+  ).resolves.toMatchObject({ event: "review_submitted", status: "active" });
+  expect(host.start).toHaveBeenCalledTimes(1);
 });
 
 it("refuses a channel that offers no subscriptions", async () => {

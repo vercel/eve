@@ -63,7 +63,11 @@ export function channelSubscriptionTools(
               required: ["channel", "event", "input"],
               properties: {
                 channel: { const: channelName },
-                event: { type: "string", minLength: 1, description: "The event name to watch." },
+                event: {
+                  type: "string",
+                  enum: [...declaration.events],
+                  description: "The event name to watch.",
+                },
                 input: declaration.inputSchema,
               },
             })),
@@ -156,6 +160,8 @@ async function subscribe(
   const { channel: channelName, event, input: eventInput } = input.subscription;
   const entry = offered.find((candidate) => candidate.channelName === channelName);
   if (entry === undefined) throw new Error(`Channel "${channelName}" offers no subscriptions.`);
+  if (!entry.declaration.events.includes(event))
+    throw new Error(`Channel "${channelName}" emits no event named "${event}".`);
   const validated = await defineJsonSchema(entry.declaration.inputSchema)["~standard"].validate(
     eventInput,
   );

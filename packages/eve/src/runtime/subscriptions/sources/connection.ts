@@ -1,3 +1,4 @@
+import { CONNECTION_EVENT_CHANNEL_KIND } from "#channel/delivery-metadata.js";
 import { createAttachSessionFn } from "#channel/session.js";
 import type { AlsContext } from "#context/container.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
@@ -154,7 +155,7 @@ export const connectionSource: SubscriptionSourceRuntime = {
             createWorkflowRuntime({ compiledArtifactsSource: bundle.compiledArtifactsSource }),
             {
               turnPolicy: "queue",
-              channelKind: "mcp-events",
+              channelKind: CONNECTION_EVENT_CHANNEL_KIND,
               channelName: source.name,
               requestId: delivery.deliveryId,
               requestTraceContext: reference,

@@ -1,6 +1,6 @@
 ---
 title: "Custom Channels"
-description: "Author custom HTTP and WebSocket channels with routes, events, metadata, continuation tokens, and file uploads."
+description: "Author custom HTTP and WebSocket channels with routes, events, subscriptions, metadata, continuation tokens, and file uploads."
 ---
 
 A custom channel connects your own HTTP or WebSocket endpoint to your agent. Each one is a file under `agent/channels/` that default-exports `defineChannel(...)` from `eve/channels`. Use one for an internal webhook, a WebSocket client, or a platform eve has no channel for. A custom channel can host a conversation or pass incoming events to another channel.
@@ -41,6 +41,7 @@ Each route handler receives:
 - `resolveSession(address)` returns the session that currently uses an address.
 - `attachSession(sessionId)` returns a handle for one session ID, without a lookup.
 - `to(channel, target).send(message, options)` hands work to another authored channel.
+- `emit(event, input, { id, data })` delivers an occurrence to sessions subscribed to that event name and input. See [Let sessions subscribe to events](#let-sessions-subscribe-to-events).
 - `params`, `waitUntil`, and `requestIp` provide request metadata and lifetime control.
 - `describe()`, `invokeTool()`, `listSkillFiles()`, and `readSkill()` describe the agent and run its tools without a conversation. See [Describe the agent and run tools directly](#describe-the-agent-and-run-tools-directly).
 
@@ -421,31 +422,35 @@ See [Inbound attachments](../sandbox#inbound-attachments) for the shared storage
 
 ## Let sessions subscribe to events
 
-A channel can let a session ask to hear about something later, such as a build finishing. Set `subscriptions` to describe what a session can watch and to decide what it receives, and call `emit` from a route for every occurrence:
+A channel can let an active session watch for future occurrences, such as a build finishing or a webhook arriving. Set `subscriptions` on `defineChannel` with the channel's event catalog and call `emit` from your route handler when an occurrence arrives:
 
 ```ts title="agent/channels/builds.ts"
 import { defineChannel, POST } from "eve/channels";
 
-const ALLOWED_EVENTS = ["build.finished", "build.failed"];
-
 export default defineChannel({
   subscriptions: {
-    description: "Builds of a project. `event` is `build.<status>`, such as `build.finished`.",
+    description:
+      "Build status events for a project. `build.finished` means a build succeeded for the project, and `build.failed` means a build failed for the project.",
+    events: ["build.finished", "build.failed"],
     inputSchema: {
       type: "object",
       additionalProperties: false,
       required: ["project"],
-      properties: { project: { type: "string" } },
+      properties: {
+        project: { type: "string", pattern: "^[^A-Z]+$" },
+      },
     },
-    onEvent: ({ event }) =>
-      ALLOWED_EVENTS.includes(event.name) ? `Build ${event.id}: ${event.name}.` : false,
+    onEvent({ event, auth }) {
+      if (auth === null) return false;
+      return `Build ${event.id} (${event.name}): ${JSON.stringify(event.data)}`;
+    },
   },
   routes: [
     POST("/builds", async (req, { emit }) => {
       const build = await req.json();
       await emit(
         `build.${build.status}`,
-        { project: build.project },
+        { project: String(build.project).toLowerCase() },
         { id: build.id, data: { status: build.status } },
       );
       return Response.json({ ok: true });
@@ -454,12 +459,29 @@ export default defineChannel({
 });
 ```
 
-eve gives the model `subscribe`, `get_subscription` and `stop_subscription`. `subscribe` shows the channel's `description` and takes the channel, an event name, the channel's `inputSchema` and a `ttlMs`. A subscription lives in a durable workflow run that outlasts the turn that created it.
+When at least one source offers subscriptions, eve exposes `subscribe`, `get_subscription`, and `stop_subscription` to the model. Each subscription lives in a durable workflow run that outlasts the turn that created it.
 
-- Any event name can be subscribed to. The `description` tells the model how the channel names events, and `inputSchema` is the JSON Schema of the `input` that says what to watch, such as a repository. eve validates the model's input against it before it starts the subscription.
-- `emit(event, input, { id, data })` reaches every session subscribed to that `event` name with an equal `input`. Input values match exactly, so `{ project: "Web" }` and `{ project: "web" }` are different subscriptions; normalize the case in `emit` and constrain it in `inputSchema`. A route can emit one occurrence under several inputs, such as a repository and a pull request. `id` identifies the occurrence, so emitting the same one again reaches each subscriber once. It resolves `true` when a subscription holds the event and input.
-- `onEvent` runs once per subscription for each occurrence, as the subscriber. It receives `event` (`id`, `name` and `data`) and the `subscription`. Filter there: return a string to send that message, `true` to send the occurrence's `data` as JSON, or `false` or nothing to drop it. Without `subscriptions` the channel offers nothing to subscribe to.
-- The message is queued in the subscribing session and runs under the auth it had when it subscribed. The caller of the route never supplies it.
+| Field         | Role                                                                                                                                     |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `description` | Shown to the model inside `subscribe`. Explain when to watch this channel and how to fill `input`.                                       |
+| `events`      | The event names this channel can emit (`readonly string[]`). `subscribe` exposes only these names and rejects unknown ones.              |
+| `inputSchema` | JSON Schema for the `input` scope the model passes with an event name. eve validates `input` before starting the subscription.           |
+| `onEvent`     | Runs once per matching subscription per occurrence inside the subscriber's context. Receives `{ auth, sessionId, event, subscription }`. |
+
+`onEvent` decides what reaches the subscribing session:
+
+- Return a non-empty `string` to queue that message on the session.
+- Return `true` to queue `JSON.stringify(event.data)`.
+- Return `false`, `""`, or `undefined` to drop the occurrence for that subscription.
+
+Key behaviors to plan around:
+
+- **Catalog validation:** `subscribe` restricts `event` to the names declared in `events` and validates `input` against `inputSchema`, so misspelled or unsupported event names fail immediately rather than creating an idle watch.
+- **Exact scope matching:** `emit(event, input, { id, data })` matches subscriptions with the exact same `event` name and canonical `input`. `{ project: "Web" }` and `{ project: "web" }` do not match; normalize case in `emit` and constrain it in `inputSchema`. One route call can emit the same occurrence under multiple scopes. `emit` resolves to `true` when at least one subscription holds that key.
+- **Deduplication and lifetime:** Each key remembers the last 256 occurrence IDs so redeliveries reach each subscriber once. `ttlMs` accepts `60000` (1 minute) through `31536000000` (365 days), or `null` to watch until stopped. When the subscribing session ends, the subscription retires automatically on the next delivery.
+- **Identity and authorization:** Occurrences are queued (`turnPolicy: "queue"`) under the `auth` snapshot the session held when it subscribed, never the webhook caller's identity. Stored `auth` is not revalidated on each delivery, so check `auth` and `subscription.input` inside `onEvent` whenever a channel can receive events for resources a subscriber should not read.
+- A delivered event never steers a running turn. Even when the subscribing session is waiting on a sign-in, an approval or a question, the event waits for the turn to end and then runs as the next turn, because its text comes from outside the session.
+- A subscription runs the `onEvent` of the deployment that created it. After a redeploy, the first event the new deployment accepts for an older subscription ends it without delivering, and the session receives a message to subscribe again, so tightened event rules take effect for every watch.
 
 ## Cross-channel hand-off
 

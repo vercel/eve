@@ -1,3 +1,12 @@
+export type {
+  ChannelEvent,
+  ChannelEventDecision,
+  ChannelOccurrence,
+  ChannelSubscriber,
+  ChannelSubscription,
+  ChannelSubscriptions,
+  EmitChannelEventFn,
+} from "#shared/channel-subscriptions.js";
 export { InvalidSessionHistoryError, type SessionHistoryMessage } from "#shared/session-history.js";
 export {
   defineChannel,

@@ -657,6 +657,7 @@
     "@modelcontextprotocol/server": "2.4.0",
     "@nuxt/kit": "^4.6.4",
     "@nuxt/schema": "^4.6.4",
+    "@octokit/webhooks": "14.2.0",
     "@opentelemetry/context-async-hooks": "catalog:",
     "@opentelemetry/core": "catalog:",
     "@opentelemetry/otlp-transformer": "0.223.1",

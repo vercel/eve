@@ -34,21 +34,24 @@ export interface ChannelSubscriber {
 
 /**
  * What `onEvent` decides for one subscription and one occurrence. A string is the message the
- * subscribing session receives. `true` sends the occurrence's data as the message. `false` or
+ * subscribing session receives; an empty string drops it. `true` sends the occurrence's data as the message. `false` or
  * nothing drops the occurrence for that subscription.
  */
 export type ChannelEventDecision = string | boolean | undefined;
 
 /**
- * What a channel lets a session subscribe to. Any event name can be subscribed to; the channel's
- * `onEvent` decides, for each subscription and each occurrence, whether and how it is delivered.
- * The model calls the `subscribe` tool with an event name and an `input` naming the scope it
- * watches; eve holds the subscription, delivers each occurrence the channel's routes `emit` for
- * the same event name and scope, and ends it when the session stops it or its lifetime runs out.
+ * What a channel lets a session subscribe to. `events` is the only set of names `subscribe`
+ * accepts; the channel's `onEvent` then decides, for each subscription and each occurrence,
+ * whether and how it is delivered. The model calls the `subscribe` tool with an event name and an
+ * `input` naming the scope it watches; eve holds the subscription, delivers each occurrence the
+ * channel's routes `emit` for the same event name and scope, and ends it when the session stops it
+ * or its lifetime runs out.
  */
 export interface ChannelSubscriptions {
-  /** What the channel reports and how its event names are written, for the model deciding to subscribe. */
+  /** What the channel reports, for the model deciding to subscribe. */
   readonly description: string;
+  /** The events the channel emits. `subscribe` rejects any other name. */
+  readonly events: readonly string[];
   /**
    * JSON Schema of the scope the model passes with an event name. A route's `emit` reaches the
    * subscriptions whose scope equals the scope it passes, compared exactly. Constrain a

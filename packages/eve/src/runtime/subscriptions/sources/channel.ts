@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { SUBSCRIPTION_CHANNEL_KIND } from "#channel/delivery-metadata.js";
 import { createAttachSessionFn } from "#channel/session.js";
 import { SessionNotActiveError } from "#channel/session-not-active-error.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
@@ -68,13 +69,13 @@ export const channelSource: SubscriptionSourceRuntime = {
       event: channelEvent,
       subscription: subscriptionOf(binding),
     });
-    if (decision === undefined || decision === false) return;
+    if (decision === undefined || decision === false || decision === "") return;
     const message = decision === true ? JSON.stringify(channelEvent.data) : decision;
     const attach = createAttachSessionFn(
       createWorkflowRuntime({ compiledArtifactsSource: bundle.compiledArtifactsSource }),
       {
         turnPolicy: "queue",
-        channelKind: "channel-subscriptions",
+        channelKind: SUBSCRIPTION_CHANNEL_KIND,
         channelName: source.name,
         requestId: event.id,
       },

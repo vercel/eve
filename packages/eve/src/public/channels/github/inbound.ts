@@ -140,7 +140,7 @@ export function parseGitHubWebhookEvent(input: {
   return null;
 }
 
-function inferGitHubWebhookEventName(raw: JsonObject): string | null {
+export function inferGitHubWebhookEventName(raw: JsonObject): string | null {
   if (isObject(raw.hook) && typeof raw.zen === "string") return "ping";
   if (isObject(raw.comment) && isObject(raw.issue)) return "issue_comment";
   if (isObject(raw.comment) && isObject(raw.pull_request)) {
@@ -154,7 +154,7 @@ function inferGitHubWebhookEventName(raw: JsonObject): string | null {
   return null;
 }
 
-function inferGitHubDeliveryId(eventName: string, raw: JsonObject): string {
+export function inferGitHubDeliveryId(eventName: string, raw: JsonObject): string {
   const id =
     readObjectNumber(raw.comment, "id") ??
     readObjectNumber(raw.issue, "id") ??

@@ -83,6 +83,7 @@ The invocation token is plain text, not a GitHub mention, so GitHub may not auto
 | `onCheckSuite`       | None                                                                   | `(ctx, checkSuite)` hook for `check_suite` events.                                                                            |
 | `onCheckRun`         | None                                                                   | `(ctx, checkRun)` hook for `check_run` events.                                                                                |
 | `onWorkflowRun`      | None                                                                   | `(ctx, workflowRun)` hook for `workflow_run` events.                                                                          |
+| `onEvent`            | None                                                                   | Enables channel event subscriptions and filters or formats each matching webhook occurrence for each subscriber.              |
 | `events`             | eve's default handlers                                                 | Per-event handler overrides for replies, reactions, and checkout.                                                             |
 
 The channel mounts `POST /eve/v1/github`.
@@ -117,6 +118,18 @@ export default githubChannel({
 ```
 
 The CI hooks expose normalized `action`, `status`, `conclusion`, `app.slug`, `headSha`, and `pullRequests` fields, plus `checkSuiteId`, `checkRunId`, or `workflowRunId`. For `workflow_run`, which only GitHub Actions sends, `app.slug` is `"github-actions"`. A CI turn replies on the first PR in `pullRequests`. When the array is empty, the hook still runs but must return `null`, because there is no thread to reply in.
+
+## Subscriptions
+
+Passing `onEvent` enables durable event subscriptions (`subscribe`, `get_subscription`, and `stop_subscription`) for the GitHub channel.
+
+- **Event catalog:** Event names follow `<x-github-event>.<payload.action>` when `payload.action` is a string, or `<x-github-event>` otherwise (for example `push`). The GitHub channel's catalog is GitHub's full list of webhook event names from `@octokit/webhooks` (`check_suite.completed`, `issue_comment.created`, `push`, ...); `subscribe` accepts only those names; `onEvent` is the only filter and decides, per subscription and delivery, whether an event is delivered (return `true` for the default message, a string for your own message, `false` or nothing to drop). `ping` deliveries and webhooks missing a repository or an identifiable event name are ignored.
+- **Scopes (`input`):** `{ owner, repo }` (both lowercase, matching `^[^A-Z]+$`), plus optional integer `pull >= 1`. Each webhook emits under `{ owner, repo }` and under `{ owner, repo, pull }` for every pull request number found in `pull_request`, an `issue` with `pull_request`, or `pull_requests` on `check_suite`, `check_run`, or `workflow_run`.
+- **Authorization:** Any session of the agent can subscribe to any repository the GitHub App is installed on, and `onEvent` (checking `auth` and `subscription.input`) is where a channel restricts that.
+- **Callback input:** `onEvent({ auth, sessionId, event, subscription })`, where `event` has `{ id, name, data }` and `event.data` has `{ delivery, repository, sender, pullRequests, payload }`.
+- **Return value:** `true` sends the default message with the JSON payload truncated to 8,000 characters and marked as untrusted external content; a non-empty `string` sends that message; `false`, `""`, or `undefined` drops the occurrence. A subscribed name that `onEvent` drops still holds the subscription and costs one delivery run per event, so name the events you deliver in the agent's instructions.
+- **Bot-loop guard:** Comment and review events (`issue_comment`, `pull_request_review_comment`, `pull_request_review`) written by the channel's own App (identified by `appSlug` in `credentials`, or from the GitHub App slug env var) are skipped; when no App slug is known, comment and review events from any bot account are skipped. CI events the bot triggers, such as `check_suite.completed`, still deliver.
+- **Interaction with inbound hooks:** Subscriptions run independently of `onComment`, `onIssue`, `onPullRequest`, `onCheckSuite`, `onCheckRun`, and `onWorkflowRun`. `onComment` still dispatches `@botName` mentions by default unless you pass `onComment: () => null`.
 
 ## Delivery
 
