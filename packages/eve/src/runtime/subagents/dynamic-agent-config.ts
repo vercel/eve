@@ -2,7 +2,9 @@ import { normalizeAgentDefinition } from "#internal/authored-definition/core.js"
 import { isDefinedAgent } from "#public/definitions/agent.js";
 import type { ContextAccessor } from "#context/key.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
+import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { currentModel } from "#definitions/model.js";
+import { compiledBundleOf } from "#runtime/sessions/runtime-context-keys.js";
 import { resolveRuntimeModelSelection } from "#runtime/agent/resolve-model.js";
 import type { ModelMetadata } from "#internal/model-catalog.js";
 import {
@@ -75,15 +77,18 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
     tool?: AgentToolExposure;
   } = {
     description: definition.description,
-    model: await normalizeDurableModelSelection({
-      modelMetadata: input.modelMetadata,
-      selection: {
-        model: definition.model,
-        modelContextWindowTokens:
-          definition.modelContextWindowTokens ?? parentContextWindow(input.state, definition.model),
-        modelOptions: definition.modelOptions,
-      },
-    }),
+    model:
+      parentProviderModel(input.state, definition) ??
+      (await normalizeDurableModelSelection({
+        modelMetadata: input.modelMetadata,
+        selection: {
+          model: definition.model,
+          modelContextWindowTokens:
+            definition.modelContextWindowTokens ??
+            parentContextWindow(input.state, definition.model),
+          modelOptions: definition.modelOptions,
+        },
+      })),
   };
 
   if (definition.compaction !== undefined) {
@@ -129,6 +134,23 @@ async function normalizeDurableModelSelection(input: {
     selection: input.selection,
   });
   return resolved.reference;
+}
+
+function parentProviderModel(
+  state: ContextAccessor,
+  definition: ReturnType<typeof normalizeAgentDefinition>,
+): DynamicSubagentModelReference | undefined {
+  if (definition.modelContextWindowTokens !== undefined || definition.modelOptions !== undefined) {
+    return undefined;
+  }
+  const parent = currentModel(state);
+  if (parent?.source === undefined || parent.id !== definition.model) return undefined;
+  const { reasoning: _reasoning, ...reference } = parent;
+  return {
+    ...reference,
+    sourceNodeId:
+      reference.sourceNodeId ?? compiledBundleOf(state)?.nodeId ?? ROOT_COMPILED_AGENT_NODE_ID,
+  };
 }
 
 function parentContextWindow(state: ContextAccessor, model: unknown): number | undefined {

@@ -1,4 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import type { CompiledModuleMap } from "#compiler/module-map.js";
+import type { DynamicContext } from "#dynamic/definition.js";
+import { mockModel } from "#evals/mock-model.js";
+import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
+import { chatgpt } from "#public/models/openai/index.js";
+import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
+import { resolveRuntimeModelReference } from "#runtime/agent/resolve-model.js";
 
 import {
   beforeModelCall,
@@ -103,5 +111,97 @@ describe("dynamic subagents", () => {
     expect(await evaluationError(ctx)).toContain(
       "Declare packaging configuration such as build.externalDependencies on the root agent",
     );
+  });
+});
+
+describe("a dynamic subagent that runs its parent's model", () => {
+  const agentSource = {
+    exportName: undefined,
+    logicalPath: "agent.ts",
+    sourceId: "agent.ts",
+    sourceKind: "module" as const,
+  };
+  const followsParent = (ctx: DynamicContext) =>
+    defineAgent({ description: "Edits the agent.", model: ctx.model.id });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it.each([
+    { label: "chatgpt()", contextWindowTokens: 200_000, model: () => chatgpt() },
+    { label: "mockModel", contextWindowTokens: 1_000_000, model: () => mockModel() },
+  ])(
+    "keeps a $label parent's provider across a restore",
+    async ({ contextWindowTokens, model }) => {
+      const instance = model();
+      const parent: RuntimeModelReference = {
+        contextWindowTokens,
+        id: formatLanguageModelGatewayId(instance),
+        source: agentSource,
+      };
+      const { ctx } = definitionSession({
+        model: parent,
+        subagents: [{ evaluate: followsParent, name: "editor" }],
+      });
+      await beforeModelCall(ctx);
+
+      const selection = readDynamicSubagentSelections(ctx)["subagents/editor"];
+      if (selection?.kind !== "subagent") throw new Error("Expected a local subagent.");
+      const restored = JSON.parse(
+        JSON.stringify(selection.agentConfig.model),
+      ) as RuntimeModelReference;
+      expect(restored).toEqual({ ...parent, sourceNodeId: "root" });
+
+      vi.stubEnv("NODE_ENV", "production");
+      const moduleMap: CompiledModuleMap = {
+        nodes: {
+          root: { modules: { "agent.ts": { default: defineAgent({ model: instance }) } } },
+          "subagents/editor": { modules: {} },
+        },
+      };
+      await expect(
+        resolveRuntimeModelReference(restored, { moduleMap, nodeId: "subagents/editor" }),
+      ).resolves.toBe(instance);
+    },
+  );
+
+  it("inherits a Gateway parent's id and window", async () => {
+    const { ctx } = definitionSession({
+      model: { contextWindowTokens: 1_000_000, id: "acme/custom-model" },
+      subagents: [{ evaluate: followsParent, name: "editor" }],
+    });
+    await beforeModelCall(ctx);
+
+    expect(readDynamicSubagentSelections(ctx)["subagents/editor"]).toMatchObject({
+      agentConfig: { model: { contextWindowTokens: 1_000_000, id: "acme/custom-model" } },
+    });
+  });
+
+  it("inherits nothing for a model the subagent names itself", async () => {
+    const { ctx } = definitionSession({
+      model: { contextWindowTokens: 200_000, id: "codex/gpt-5.5", source: agentSource },
+      subagents: [{ evaluate: () => analyst(), name: "analyst" }],
+    });
+    await beforeModelCall(ctx);
+
+    const selection = readDynamicSubagentSelections(ctx)["subagents/analyst"];
+    if (selection?.kind !== "subagent") throw new Error("Expected a local subagent.");
+    expect(selection.agentConfig.model).toEqual({
+      contextWindowTokens: 400_000,
+      id: "openai/gpt-5.4",
+    });
+  });
+
+  it("still rejects a provider instance the subagent returns", async () => {
+    const { ctx } = definitionSession({
+      subagents: [
+        {
+          evaluate: () => defineAgent({ description: "Edits the agent.", model: chatgpt() }),
+          name: "editor",
+        },
+      ],
+    });
+    expect(await evaluationError(ctx)).toContain("durable model selections must be serializable");
   });
 });
