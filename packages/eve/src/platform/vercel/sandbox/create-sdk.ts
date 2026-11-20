@@ -1,13 +1,13 @@
 import {
   getVercelSandboxFetch,
   resolveVercelSandboxCredentials,
-} from "#execution/sandbox/bindings/vercel-credentials.js";
+} from "#platform/vercel/sandbox/credentials.js";
 import { VERCEL_EVE_SANDBOX_IMAGE } from "#execution/sandbox/bindings/eve-image.js";
 import type {
   VercelCreateOptions,
   VercelModule,
   VercelSandbox,
-} from "#execution/sandbox/bindings/vercel-sdk-types.js";
+} from "#platform/vercel/sandbox/sdk-types.js";
 
 export type VercelSandboxCreateParams = VercelCreateOptions & {
   readonly name: string;

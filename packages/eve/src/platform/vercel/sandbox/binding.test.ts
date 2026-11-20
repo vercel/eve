@@ -16,12 +16,12 @@ import {
   createVercelSandbox as createVercelImplementation,
   type VercelSandboxPreparedArtifact,
   type VercelSandboxSessionState,
-} from "#execution/sandbox/bindings/vercel.js";
+} from "#platform/vercel/sandbox/binding.js";
 import { createSandboxEnvironmentHarness } from "#internal/testing/sandbox-provider-harness.js";
 import { defineSandboxProvider } from "#public/sandbox/provider.js";
 import type { VercelSandboxSession } from "#public/sandbox/vercel.js";
 import type { VercelSandboxRuntimeOptions } from "#public/sandbox/vercel-sandbox.js";
-import { VercelSandbox } from "#sandbox/providers/vercel.js";
+import { VercelSandbox } from "#platform/vercel/sandbox/provider.js";
 import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
 import { DefaultSandbox } from "#sandbox/providers/default.js";
 

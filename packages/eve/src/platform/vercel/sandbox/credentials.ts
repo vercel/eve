@@ -1,7 +1,7 @@
 import { getVercelOidcToken } from "#compiled/@vercel/oidc/index.js";
 import { decodeVercelOidcTokenClaims } from "#platform/vercel/project.js";
 import { withPackageUserAgent } from "#internal/user-agent.js";
-import type { VercelCreateOptions } from "#execution/sandbox/bindings/vercel-sdk-types.js";
+import type { VercelCreateOptions } from "#platform/vercel/sandbox/sdk-types.js";
 
 export function getVercelSandboxFetch(createOptions: VercelCreateOptions): typeof globalThis.fetch {
   const fetchOverride = Reflect.get(createOptions, "fetch");

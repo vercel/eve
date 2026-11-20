@@ -1,18 +1,18 @@
 import {
   getVercelSandboxFetch,
   resolveVercelSandboxCredentials,
-} from "#execution/sandbox/bindings/vercel-credentials.js";
+} from "#platform/vercel/sandbox/credentials.js";
 import {
   isVercelSandboxMissingError,
   isVercelSnapshotUnavailableError,
-} from "#execution/sandbox/bindings/vercel-errors.js";
-import { errorMessage } from "#execution/sandbox/bindings/vercel-options.js";
+} from "#platform/vercel/sandbox/errors.js";
+import { errorMessage } from "#platform/vercel/sandbox/options.js";
 import type {
   VercelCreateOptions,
   VercelGetOptions,
   VercelModule,
   VercelSandbox,
-} from "#execution/sandbox/bindings/vercel-sdk-types.js";
+} from "#platform/vercel/sandbox/sdk-types.js";
 
 export async function getNamedVercelSandbox(input: {
   readonly createOptions: VercelCreateOptions;

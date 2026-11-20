@@ -1,6 +1,6 @@
 import type { VercelSandboxSession } from "#public/sandbox/vercel.js";
-import { createVercelSandbox } from "#execution/sandbox/bindings/vercel.js";
-import type { VercelCreateOptions } from "#execution/sandbox/bindings/vercel-sdk-types.js";
+import { createVercelSandbox } from "#platform/vercel/sandbox/binding.js";
+import type { VercelCreateOptions } from "#platform/vercel/sandbox/sdk-types.js";
 import {
   defineSandboxProvider,
   type SandboxProvider,

@@ -35,40 +35,37 @@ import {
   ensureVercelSandboxBaseRuntime,
   toVercelNetworkPolicy,
   withBaseSetupNetworkPolicy,
-} from "#execution/sandbox/bindings/vercel-base-runtime.js";
+} from "#platform/vercel/sandbox/base-runtime.js";
 import {
   createVercelEveImageSandbox,
   type CreateVercelSandbox,
   type VercelSandboxCreateParams,
-} from "#execution/sandbox/bindings/vercel-create-sdk.js";
+} from "#platform/vercel/sandbox/create-sdk.js";
 import {
   isVercelSandboxMissingError,
   isVercelSandboxNameConflictError,
   isVercelSnapshotNotFoundError,
   isVercelSnapshotUnavailableError,
-} from "#execution/sandbox/bindings/vercel-errors.js";
+} from "#platform/vercel/sandbox/errors.js";
 import {
   deleteNamedVercelSandbox,
   deleteUnusableVercelSandbox,
   stopVercelSandbox,
-} from "#execution/sandbox/bindings/vercel-lifecycle.js";
-import {
-  getNamedVercelSandbox,
-  isVercelSnapshotCreated,
-} from "#execution/sandbox/bindings/vercel-lookup.js";
+} from "#platform/vercel/sandbox/lifecycle.js";
+import { getNamedVercelSandbox, isVercelSnapshotCreated } from "#platform/vercel/sandbox/lookup.js";
 import {
   errorMessage,
   ensureVercelSandboxTags,
   resolveVercelSandboxTags,
-} from "#execution/sandbox/bindings/vercel-options.js";
-import { createVercelTimeout } from "#execution/sandbox/bindings/vercel-timeout.js";
-import { normalizeVercelReadStream } from "#execution/sandbox/bindings/vercel-read-stream.js";
+} from "#platform/vercel/sandbox/options.js";
+import { createVercelTimeout } from "#platform/vercel/sandbox/timeout.js";
+import { normalizeVercelReadStream } from "#platform/vercel/sandbox/read-stream.js";
 import type {
   VercelCreateOptions,
   VercelModule,
   VercelSandbox,
-} from "#execution/sandbox/bindings/vercel-sdk-types.js";
-import { withToolSessionRetention } from "#execution/sandbox/bindings/vercel-tool-sessions.js";
+} from "#platform/vercel/sandbox/sdk-types.js";
+import { withToolSessionRetention } from "#platform/vercel/sandbox/tool-sessions.js";
 import { adaptMultiplexedCommandToSandboxProcess } from "#execution/sandbox/multiplexed-command.js";
 import { createSandboxProviderIdentity } from "#execution/sandbox/provider-identity.js";
 import { isObject } from "#shared/guards.js";

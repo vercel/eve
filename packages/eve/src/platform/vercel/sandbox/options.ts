@@ -1,4 +1,4 @@
-import type { VercelCreateOptions } from "#execution/sandbox/bindings/vercel-sdk-types.js";
+import type { VercelCreateOptions } from "#platform/vercel/sandbox/sdk-types.js";
 
 const VERCEL_SANDBOX_TAG_LIMIT = 5;
 

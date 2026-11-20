@@ -10,7 +10,7 @@ import { defineChannel, WS } from "#public/definitions/channel.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
 import { defineDynamicSchedules } from "#public/schedules/subscription.js";
 import { JustBashSandbox } from "#sandbox/providers/just-bash.js";
-import { VercelSandbox } from "#sandbox/providers/vercel.js";
+import { VercelSandbox } from "#platform/vercel/sandbox/provider.js";
 import { defineTool } from "#tools/definition.js";
 import { defineWorkflowTool } from "#tools/workflow-definition.js";
 import { attachWorkflowProgramOptions } from "#tools/workflow-program-input.js";

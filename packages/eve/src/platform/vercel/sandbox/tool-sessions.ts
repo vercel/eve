@@ -1,4 +1,4 @@
-import type { VercelCreateOptions } from "#execution/sandbox/bindings/vercel-sdk-types.js";
+import type { VercelCreateOptions } from "#platform/vercel/sandbox/sdk-types.js";
 
 export const VERCEL_TOOL_SESSION_SNAPSHOT_EXPIRATION_MS = 24 * 60 * 60 * 1000;
 

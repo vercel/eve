@@ -1,4 +1,4 @@
-import type { VercelSandbox } from "#execution/sandbox/bindings/vercel-sdk-types.js";
+import type { VercelSandbox } from "#platform/vercel/sandbox/sdk-types.js";
 import { createLogger } from "#internal/logging.js";
 
 const log = createLogger("execution.sandbox.vercel");

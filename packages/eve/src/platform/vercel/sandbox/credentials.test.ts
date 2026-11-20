@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getVercelSandboxCredentials,
   resolveVercelSandboxCredentials,
-} from "#execution/sandbox/bindings/vercel-credentials.js";
+} from "#platform/vercel/sandbox/credentials.js";
 
 const oidc = vi.hoisted(() => ({
   getVercelOidcToken: vi.fn<typeof import("#compiled/@vercel/oidc/index.js").getVercelOidcToken>(),

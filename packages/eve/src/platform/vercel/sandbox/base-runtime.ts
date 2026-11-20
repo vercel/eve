@@ -1,10 +1,7 @@
-import { createVercelTimeout } from "#execution/sandbox/bindings/vercel-timeout.js";
+import { createVercelTimeout } from "#platform/vercel/sandbox/timeout.js";
 import { buildDockerBaseSetupScript } from "#execution/sandbox/bindings/docker-base-setup.js";
-import type { VercelSandboxCreateParams } from "#execution/sandbox/bindings/vercel-create-sdk.js";
-import type {
-  VercelCreateOptions,
-  VercelSandbox,
-} from "#execution/sandbox/bindings/vercel-sdk-types.js";
+import type { VercelSandboxCreateParams } from "#platform/vercel/sandbox/create-sdk.js";
+import type { VercelCreateOptions, VercelSandbox } from "#platform/vercel/sandbox/sdk-types.js";
 import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
 
 export async function ensureVercelSandboxBaseRuntime(sandbox: VercelSandbox): Promise<void> {

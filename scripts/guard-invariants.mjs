@@ -92,9 +92,10 @@
  *             import subagent modules; session/turn composition roots may
  *             compose built-in executors directly.
  *   rule 44 — Sandbox providers are built on the public provider contract.
- *             Files under `src/execution/sandbox/bindings/` and
- *             `src/sandbox/providers/` reach the contract only through
- *             `#public/sandbox/*` and never import core sandbox modules
+ *             Files under `src/execution/sandbox/bindings/`,
+ *             `src/platform/vercel/sandbox/`, and `src/sandbox/providers/`
+ *             reach the contract only through `#public/sandbox/*` and never
+ *             import core sandbox modules
  *             (session construction, ensure, prewarm, sandbox state, the
  *             shutdown registry, tool sessions, the runtime sandbox
  *             registry, or the shared provider and session internals).
@@ -546,8 +547,13 @@ function checkLegacySessionImports(posix, lines, violations) {
 
 const SANDBOX_PROVIDER_DIRS = [
   "packages/eve/src/execution/sandbox/bindings/",
+  "packages/eve/src/platform/vercel/sandbox/",
   "packages/eve/src/sandbox/providers/",
 ];
+
+const BUILT_IN_SANDBOX_PROVIDER_FILES = new Set([
+  "packages/eve/src/platform/vercel/sandbox/provider.ts",
+]);
 
 const SANDBOX_CORE_IMPORT_RE =
   /(?:from\s+|import\s*\()["']#(?:sandbox\/(?:provider|state)|execution\/sandbox\/(?:active-connections|ensure|prewarm|session|logging-session)|execution\/tool-session\/[^"']*|runtime\/sandbox\/[^"']*|shared\/sandbox-(?:provider|session|write-files))\.js["']/;
@@ -571,7 +577,11 @@ function checkRule44(posix, lines, violations) {
         "Sandbox providers reach the provider contract only through #public/sandbox/* and may not import core sandbox modules. Use the public contract, or an engine helper such as another binding module.",
     });
   });
-  if (!posix.startsWith("packages/eve/src/sandbox/providers/")) return;
+  if (
+    !posix.startsWith("packages/eve/src/sandbox/providers/") &&
+    !BUILT_IN_SANDBOX_PROVIDER_FILES.has(posix)
+  )
+    return;
   const source = lines.join("\n");
   if (!/\bdefineSandboxProvider\(/.test(source)) {
     violations.push({
@@ -1309,6 +1319,7 @@ const VERCEL_PLATFORM_ACCESS_DIRS = [
 const VERCEL_PUBLIC_ENTRY_FILES = new Set([
   "packages/eve/src/public/agents/vercel-oidc.ts",
   "packages/eve/src/public/experimental/schedules/vercel.ts",
+  "packages/eve/src/public/sandbox/vercel.ts",
 ]);
 const VERCEL_ENV_READ_RE = /\benv\.VERCEL\w*|["']VERCEL(?:_[A-Z0-9]+)*["']/g;
 const VERCEL_PLATFORM_IMPORT_RE =

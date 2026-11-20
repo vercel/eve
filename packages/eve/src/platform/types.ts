@@ -3,6 +3,7 @@ import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import type { prewarmAppSandboxes } from "#execution/sandbox/prewarm.js";
 import type { HostRouteTable } from "#internal/nitro/host/host-routes.js";
 import type { createEveVercelOptions } from "#platform/vercel/build-output-config.js";
+import type { VercelSandbox } from "#platform/vercel/sandbox/provider.js";
 import type { ScheduleProvider } from "#public/schedules/subscription.js";
 import type { SpanProcessor } from "#tracing/eve/otel-configuration.js";
 
@@ -76,6 +77,10 @@ export interface PlatformBuildOutput {
   scheduleTaskName(input: { readonly agentName?: string; readonly scheduleId: string }): string;
   scheduleConsumerModulePath(): string;
   localSchedulesPluginModulePath(): string;
+}
+
+export interface PlatformSandboxes {
+  readonly hostedEnvironment: (typeof VercelSandbox)["environment"];
 }
 
 export interface PlatformSchedules {

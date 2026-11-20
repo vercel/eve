@@ -16,7 +16,7 @@ import type { VercelSandboxCreateOptions } from "#public/sandbox/vercel-sandbox.
 import { withAdoptedSandboxSessionStates, withRecordedSandboxProvider } from "#sandbox/state.js";
 import { DockerSandbox } from "#sandbox/providers/docker.js";
 import { JustBashSandbox } from "#sandbox/providers/just-bash.js";
-import { VercelSandbox } from "#sandbox/providers/vercel.js";
+import { platformSandboxes } from "#platform/sandbox.js";
 import { isObject } from "#shared/guards.js";
 import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
 import type {
@@ -216,7 +216,7 @@ function createEnvironment(
     case "just-bash":
       return JustBashSandbox.environment(options.justBash ?? {});
     case "vercel":
-      return VercelSandbox.environment(options.vercel ?? {});
+      return platformSandboxes().hostedEnvironment(options.vercel ?? {});
   }
 }
 

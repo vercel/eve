@@ -10,7 +10,7 @@ import { defineSandboxProvider, type SandboxConnection } from "#sandbox/provider
 import { DefaultSandbox } from "#sandbox/providers/default.js";
 import { DockerSandbox } from "#sandbox/providers/docker.js";
 import { JustBashSandbox } from "#sandbox/providers/just-bash.js";
-import { VercelSandbox } from "#sandbox/providers/vercel.js";
+import { VercelSandbox } from "#platform/vercel/sandbox/provider.js";
 import {
   getSandboxEnvironmentRuntime,
   type SandboxEnvironmentIdentity,
