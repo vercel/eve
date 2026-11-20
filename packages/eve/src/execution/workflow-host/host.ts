@@ -12,7 +12,7 @@ import {
   findConnectionEventOwner,
   retireConnectionEventOwner,
   startConnectionEventOwner,
-} from "#runtime/connections/events/owner.js";
+} from "#runtime/subscriptions/owner.js";
 import { cancelRun, getRun, getWorld, resumeHook } from "#internal/workflow/runtime.js";
 
 const workflowLineStore: SessionLineStore = {

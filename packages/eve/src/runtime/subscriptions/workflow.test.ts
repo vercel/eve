@@ -93,10 +93,10 @@ vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: world.createHook,
   sleep: world.sleep,
 }));
-vi.mock("#runtime/connections/events/dispatch-step.js", () => ({
+vi.mock("#runtime/subscriptions/dispatch-step.js", () => ({
   dispatchConnectionEventStep: world.dispatch,
 }));
-vi.mock("#runtime/connections/events/lifecycle-step.js", () => ({
+vi.mock("#runtime/subscriptions/lifecycle-step.js", () => ({
   async openConnectionEventStep() {
     await world.subscribed;
     return world.refuse
