@@ -8,7 +8,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { availableParallelism, tmpdir } from "node:os";
 import { basename, delimiter, join, resolve } from "node:path";
 import { execFileSync, spawn } from "node:child_process";
 
@@ -21,9 +21,9 @@ const temporaryDirectory = mkdtempSync(join(tmpdir(), "eve-template-compatibilit
 // eve tarball is packed once up front and only read afterwards, and the one
 // template that boots a server (`personal-agent-template`'s smoke test) is the
 // only one that binds a port. That makes it safe to run several templates at
-// once, bounded so an install/build-heavy template cannot starve the others on
-// a 4-vCPU runner.
-const MAX_CONCURRENT_TEMPLATES = 3;
+// once, bounded at one template per two CPUs (at least three) so an
+// install/build-heavy template cannot starve the others.
+const MAX_CONCURRENT_TEMPLATES = Math.max(3, Math.floor(availableParallelism() / 2));
 
 // These values satisfy build-time validation without granting service access.
 // Runtime requests still require the deployment's real configuration.

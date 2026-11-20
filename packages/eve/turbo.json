@@ -115,7 +115,8 @@
       "tags": ["$TURBO_EXTENDS$", "ci:cpus:8"]
     },
     "test:scenario": {
-      "dependsOn": ["$TURBO_EXTENDS$", "build"]
+      "dependsOn": ["$TURBO_EXTENDS$", "build"],
+      "tags": ["$TURBO_EXTENDS$", "ci:cpus:8"]
     },
     "test:webchat": {
       "cache": false,
