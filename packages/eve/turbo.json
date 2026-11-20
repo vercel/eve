@@ -111,7 +111,8 @@
       "tags": ["$TURBO_EXTENDS$", "ci:cpus:8"]
     },
     "test:integration": {
-      "dependsOn": ["build"]
+      "dependsOn": ["build"],
+      "tags": ["$TURBO_EXTENDS$", "ci:cpus:8"]
     },
     "test:scenario": {
       "dependsOn": ["$TURBO_EXTENDS$", "build"]
@@ -123,7 +124,8 @@
     },
     "test:build": {
       "cache": false,
-      "dependsOn": ["build"]
+      "dependsOn": ["build"],
+      "tags": ["ci", "ci:cpus:8"]
     },
     "test:public-types": {
       "cache": false,
