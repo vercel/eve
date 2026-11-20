@@ -10,12 +10,14 @@ import {
   SKILL_TOOL_NAME,
 } from "#protocol/catalog-tools.js";
 import { eveNamespaceReservation } from "#protocol/runtime-tools.js";
+import { SUBSCRIBE_TOOL } from "#runtime/subscriptions/tools.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { isObject } from "#shared/guards.js";
 import { defineJsonSchema } from "#tools/schema.js";
 
 import { closestNames } from "./rank.js";
 import { createSearchTool } from "./search.js";
+import { subscriptionTools } from "./subscription-tools.js";
 import { entrySignature } from "./signatures.js";
 import { unknownSkillMessage } from "./skills.js";
 import type { Callable } from "./step-catalog.js";
@@ -70,6 +72,7 @@ export function catalogTools(
     });
   }
   if (offered.tools) tools.set(CALL_TOOL_NAME, callRoute(callable, listed, offered));
+  for (const [name, entry] of subscriptionTools(callable)) tools.set(name, entry);
   if (offered.skills) {
     tools.set(SKILL_TOOL_NAME, {
       ...skillRoute(callable, listed, offered),
@@ -126,6 +129,8 @@ function callRoute(
       const entry = callable.get(name);
       if (entry === undefined) return miss(unknownEntryMessage(name, callable));
       if (!callableByName(entry)) return miss(`"${name}" is in your tool list; call it directly.`);
+      if (isEventActionOf(name, callable))
+        return miss(`Subscribe to a connection's events with ${SUBSCRIBE_TOOL}.`);
       return { at: "input", input: (input as { readonly input?: unknown }).input ?? {}, name };
     },
   });
@@ -187,6 +192,18 @@ function callableByName(definition: HarnessToolDefinition): boolean {
     (eveNamespaceReservation(definition.name) === undefined &&
       (definition.execute !== undefined || definition.workflowId !== undefined))
   );
+}
+
+function isEventActionOf(name: string, callable: Callable): boolean {
+  return callable.connections.some(({ connectionName }) => {
+    const prefix = connectionToolName(connectionName, "");
+    return (
+      name.startsWith(prefix) &&
+      callable.registry
+        ?.getClient(connectionName)
+        .eventActions?.ownsName(name.slice(prefix.length)) === true
+    );
+  });
 }
 
 function isConnectionTool(

@@ -27,6 +27,9 @@ import { fromCompiledBundle } from "#definitions/compiled-agent.js";
 import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import { serializeInputSchema, type ToolSchemaSource } from "#tools/schema.js";
 
+import { connectionToolName } from "#connections/ownership.js";
+import { eventActionName } from "#runtime/subscriptions/actions.js";
+import { CHANNEL_SUBSCRIBE_ENTRY } from "#runtime/subscriptions/tools.js";
 import type { StepCatalog } from "./step-catalog.js";
 import { labelCallbacks } from "#internal/testing/tool-labels.js";
 
@@ -845,6 +848,76 @@ describe("buildStepCatalog", () => {
     ])("fails for %s", async (_case, options, message) => {
       captureLogRecords();
       await expect((await notionCatalog(options)).connect()).rejects.toThrow(message);
+    });
+  });
+  describe("subscribe", () => {
+    const channels = [
+      {
+        name: "github",
+        definition: {
+          onEvent: () => true,
+        },
+      },
+    ];
+    const subscribed = async (subscription: unknown) => {
+      const tracker = fakeConnection({ name: "tracker", tools: [], events: ["build.finished"] });
+      const { catalog, run } = await catalogContext({ channels, connections: [tracker] });
+      const input = { subscription, ttlMs: 120_000 };
+      const validated = await validate(catalog, "subscribe", input);
+      return { catalog, run, tracker, validated, input };
+    };
+
+    it("advertises subscribe, get_subscription and stop_subscription, and not the connection's own event tool", async () => {
+      const { catalog } = await subscribed({});
+      expect(names(catalog.advertised)).toEqual(
+        expect.arrayContaining(["subscribe", "get_subscription", "stop_subscription"]),
+      );
+      expect(names(catalog.advertised).filter((name) => name.includes("events_"))).toEqual([]);
+    });
+
+    it("runs a connection source on that connection's own event tool", async () => {
+      const { catalog, run, tracker, validated, input } = await subscribed({
+        source: "tracker",
+        event: "build.finished",
+        input: { job: "web" },
+      });
+      expect(validated).toEqual({ value: input });
+      const resolved = catalog.resolve({ input, toolName: "subscribe" });
+      expect(resolved?.call.toolName).toBe(
+        connectionToolName("tracker", eventActionName("build.finished")),
+      );
+      await run(() =>
+        resolved?.definition.execute?.(resolved.call.input, { messages: [], toolCallId: "call-1" }),
+      );
+      expect(tracker.eventCalls).toEqual([
+        {
+          name: eventActionName("build.finished"),
+          input: { arguments: { job: "web" }, ttlMs: 120_000 },
+        },
+      ]);
+    });
+
+    it("routes a channel source to the channel subscription entry", async () => {
+      const { catalog, input } = await subscribed({
+        source: "github",
+        event: "check_suite.completed",
+        input: { pull: 7 },
+      });
+      const resolved = catalog.resolve({ input, toolName: "subscribe" });
+      expect(resolved?.call.toolName).toBe(CHANNEL_SUBSCRIBE_ENTRY);
+    });
+
+    it("does not let eve__tool call the connection's event tool directly", async () => {
+      const { catalog } = await subscribed({});
+      const name = connectionToolName("tracker", eventActionName("build.finished"));
+      const call = {
+        input: { name, input: { arguments: {}, ttlMs: null } },
+        toolName: CALL_TOOL_NAME,
+      };
+      const validatedCall = await validate(catalog, CALL_TOOL_NAME, call.input);
+      expect(JSON.stringify(validatedCall)).toContain(
+        "Subscribe to a connection's events with subscribe.",
+      );
     });
   });
 });

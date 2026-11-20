@@ -303,9 +303,9 @@ experimental: {
       );
     },
     async onTerminated({ origin, auth, error, attachSession }) {
-      // The upstream subscription ended. The watch ends when this returns.
+      // The upstream subscription ended. The subscription closes when this returns.
       await attachSession(origin.sessionId).send(
-        `The Bird watch ended: ${error.message}`,
+        `The Bird subscription ended: ${error.message}`,
         { auth },
       );
     },
@@ -315,26 +315,26 @@ experimental: {
 
 ### What the model can call
 
-`eve__search` lists three kinds of actions for the connection:
+The model uses the same three tools as channel subscriptions: `subscribe`, `get_subscription`, and `stop_subscription`. For a connection, `subscribe` takes `{ subscription: { source: "<connection name>", event, input }, ttlMs }`, where `event` is an event name from the server's catalog and `input` holds the event's arguments. Passing an unsupported event name returns the names the server supports.
 
-| Action                    | Input                  | Result                                  |
-| ------------------------- | ---------------------- | --------------------------------------- |
-| `events_subscribe_<hash>` | `{ arguments, ttlMs }` | `{ id, status, expiresAt, ... }`        |
-| `events_get_subscription` | `{ id }`               | The subscription, or unknown once ended |
-| `events_unsubscribe`      | `{ id }`               | `{ id, status: "stopping" }`            |
+| Tool                | Input                                               | Result                                  |
+| ------------------- | --------------------------------------------------- | --------------------------------------- |
+| `subscribe`         | `{ subscription: { source, event, input }, ttlMs }` | `{ id, status, expiresAt, ... }`        |
+| `get_subscription`  | `{ id }`                                            | The subscription, or unknown once ended |
+| `stop_subscription` | `{ id }`                                            | `{ id, status: "stopping" }`            |
 
-Each event the server offers gets one subscribe action, whose description names the event. `ttlMs` is required: an integer from `120000` (2 minutes) to `31536000000` (365 days), or `null` to watch until stopped. `expiresAt` is the resulting deadline, or `null`.
+`subscribe` runs through the connection's event action, so the connection's sign-in, approval policy, and event catalog check still apply. `ttlMs` is required: an integer from `120000` (2 minutes) to `31536000000` (365 days), or `null` until stopped. `expiresAt` is the resulting deadline, or `null`.
 
-- **Pending.** If Connect has not confirmed in time, subscribe returns the `id` with `status: "pending"`. Call get with that `id` later.
-- **Repeats.** Subscribing again to the same event with the same arguments from the same session returns the existing watch. Another session gets its own watch.
-- **Stopping.** Get and stop accept the `id` from any of the creator's sessions. Until Connect confirms the unsubscribe, get still reports the watch and stop can be called again.
-- **Lifetime.** A watch outlives the session that created it. It ends on stop, at `expiresAt`, or when the upstream subscription terminates.
+- **Pending.** If Connect has not confirmed in time, `subscribe` returns the `id` with `status: "pending"`. Call `get_subscription` with that `id` later.
+- **Repeats.** Subscribing again to the same event with the same arguments from the same session returns the existing subscription. Another session gets its own subscription.
+- **Stopping.** `get_subscription` and `stop_subscription` accept the `id` from any of the creator's sessions. Until Connect confirms the unsubscribe, `get_subscription` still reports the subscription and `stop_subscription` can be called again.
+- **Lifetime.** A subscription outlives the session that created it. It ends when stopped, at `expiresAt`, or when the upstream subscription terminates.
 
-`tools.allow` and `tools.block` apply to these actions, so an allow list must name the exact `events_subscribe_<hash>` names from `eve__search`. `toolCall.providedArguments` doesn't apply to them.
+`tools.allow` and `tools.block` can filter generated `events_subscribe_<hash>` entries reached through `subscribe`, where `<hash>` is the first 24 hex characters of the SHA-256 of the event name. These entries do not appear in `eve__search`, and `toolCall.providedArguments` does not apply to them.
 
 ### Receiver
 
-eve serves `POST /eve/v1/hooks/:connectionName`, under any configured agent or public prefix. It accepts only requests that carry Connect's token, and only for a watch that is still active. It answers `410` once the watch has ended. The callback's `auth` always comes from the saved watch, never from the event body.
+eve serves `POST /eve/v1/hooks/:connectionName`, under any configured agent or public prefix. It accepts only requests that carry Connect's token for an active subscription, and answers `410` once the subscription has ended. The callback's `auth` always comes from the saved subscription, never from the event body.
 
 ## Troubleshooting
 

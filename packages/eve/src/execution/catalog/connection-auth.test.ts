@@ -23,7 +23,6 @@ function client(): ConnectionClient {
     eventActions: {
       ownsName: (name) => name === management.name,
       metadata: vi.fn(async () => [management]),
-      recoveryMetadata: () => [management],
       execute: vi.fn(async () => {}),
     },
   };
@@ -32,10 +31,10 @@ function client(): ConnectionClient {
 it("keeps ordinary MCP tools available when event discovery fails", async () => {
   const connection = client();
   vi.mocked(connection.eventActions!.metadata).mockRejectedValue(new Error("Events unavailable"));
-  expect(await listToolMetadata(issues, connection)).toEqual([remote, management]);
+  expect(await listToolMetadata(issues, connection)).toEqual([remote]);
 });
 
-it("keeps management actions available when MCP tool discovery fails", async () => {
+it("keeps event actions available when MCP tool discovery fails", async () => {
   const connection = client();
   vi.mocked(connection.getToolMetadata).mockRejectedValue(new Error("MCP unavailable"));
   expect(await listToolMetadata(issues, connection)).toEqual([management]);
@@ -60,7 +59,7 @@ it("does not let hung event discovery hide responsive MCP tools", async () => {
     vi.mocked(connection.eventActions!.metadata).mockReturnValue(new Promise(() => {}));
     const listing = listToolMetadata(issues, connection);
     await vi.advanceTimersByTimeAsync(10_000);
-    expect(await listing).toEqual([remote, management]);
+    expect(await listing).toEqual([remote]);
   } finally {
     vi.useRealTimers();
   }
