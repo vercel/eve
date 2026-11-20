@@ -7,7 +7,7 @@ export default defineDynamic(async (ctx: DynamicContext) => {
   const scopes = await loadTurnSkills({
     session: ctx.session,
     ...(ctx.conversation !== undefined && { conversation: ctx.conversation }),
-    turnId: ctx.turn?.id,
+    ...(ctx.turn !== null && { turn: { id: ctx.turn.id } }),
   });
   const sections = scopes.flatMap(({ scope, skills }) => {
     const section = renderAlwaysOnSection(

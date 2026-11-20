@@ -1,4 +1,4 @@
-import type { ConversationContext, SessionAuth, SessionAuthContext } from "eve/context";
+import type { ConversationContext, SessionAuthContext, SessionInfo } from "eve/context";
 import type { ApprovalConfiguration, ApprovalContext } from "eve/tools/approval";
 import { z } from "zod";
 
@@ -64,7 +64,7 @@ export const modeField = z
   );
 
 export interface SkillCallContext {
-  readonly session: { readonly id: string; readonly auth: SessionAuth };
+  readonly session: Pick<SessionInfo, "id" | "auth" | "turn" | "parent">;
   readonly conversation?: ConversationContext;
 }
 
@@ -76,9 +76,10 @@ export function loadName(scope: SkillScope, name: string): string {
   return scope.loadPrefix ? `${scope.loadPrefix}_${name}` : name;
 }
 
-async function scopesFor(ctx: SkillCallContext) {
+export async function scopesFor(ctx: SkillCallContext): Promise<readonly SkillScope[]> {
   return skillScopes({
     session: ctx.session,
+    turn: ctx.session.turn,
     ...(ctx.conversation !== undefined && { conversation: ctx.conversation }),
   });
 }
