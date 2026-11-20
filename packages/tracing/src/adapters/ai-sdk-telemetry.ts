@@ -1,3 +1,13 @@
+import { context, trace, ProxyTracerProvider, createContextKey } from "@opentelemetry/api";
+import { registerOTel } from "@vercel/otel";
+import { currentCapture } from "../capture.js";
+import { intersectCapture } from "../core/activation.js";
+import { currentAgentHandoff } from "../core/delegation.js";
+import { runTelemetry } from "../core/run-telemetry.js";
+import type { RunIdentity } from "../core/types.js";
+import type { Operation } from "../operations.js";
+import { aiSdkOpenTelemetry } from "./ai-sdk-otel.js";
+import { telemetryTracerProviders } from "./otel.js";
 import type { Telemetry } from "ai";
 import type { AgentRun, TurnInput } from "../agent-run.js";
 import type {
@@ -12,43 +22,88 @@ type Event<K extends keyof Telemetry & `on${string}`> = Parameters<NonNullable<T
 
 /** Options for `aiSdkTelemetry`. */
 export interface AiSdkTelemetryOptions {
-  /** The turn a generation records. Called once per AI SDK call. */
-  readonly turn: TurnInput | ((call: { readonly callId: string }) => TurnInput);
+  /** Optional identity, capture, and placement overrides. Called once per AI SDK call. */
+  readonly turn?: AiSdkTurnInput | ((call: { readonly callId: string }) => AiSdkTurnInput);
 }
 
+/** Turn overrides; omitted IDs are generated for each call. */
+export type AiSdkTurnInput = Partial<Omit<TurnInput, "identity">> & {
+  readonly identity?: Partial<RunIdentity>;
+};
+
+interface ActiveGeneration {
+  readonly identity: RunIdentity;
+  readonly operation: Operation;
+  readonly toolCallId?: string;
+}
+const ACTIVE_GENERATION = createContextKey("agent.tracing.ai-sdk.generation");
+const METADATA_ONLY = { emit: true, recordInputs: false, recordOutputs: false };
+
 interface Generation {
-  readonly startTimeMs: number;
-  turn?: Promise<TurnOperation>;
+  readonly identity: RunIdentity;
+  readonly turn: Promise<TurnOperation>;
   attempt?: Promise<AttemptOperation>;
   model?: Promise<ModelOperation>;
+  modelFailure?: { readonly error: unknown };
   readonly tools: Map<string, Promise<ToolOperation>>;
 }
 
 const ABANDONED = { outcome: "abandoned" } as const;
 
-/**
- * An AI SDK telemetry integration that records each generation as a turn.
- * Pass it to `telemetry.integrations` of `generateText`, `streamText`, or an
- * agent such as `HarnessAgent`.
- */
-export function aiSdkTelemetry(run: AgentRun, options: AiSdkTelemetryOptions): Telemetry {
+/** Reuses the run's telemetry for SDK turns and initializes the default OTel provider when needed. */
+export function aiSdkTelemetry(run: AgentRun, options: AiSdkTelemetryOptions = {}): Telemetry {
+  const backend = runTelemetry.get(run);
+  const provider = trace.getTracerProvider();
+  if (
+    backend?.usesGlobalProvider &&
+    provider instanceof ProxyTracerProvider &&
+    provider.getDelegateTracer("agent.tracing") === undefined
+  )
+    registerOTel({ serviceName: "agent-runs", instrumentations: [] });
+  const native = aiSdkOpenTelemetry(
+    backend === undefined ? undefined : telemetryTracerProviders.get(backend.telemetry),
+  );
   const generations = new Map<string, Generation>();
 
-  function generation(callId: string): Generation {
-    let state = generations.get(callId);
-    if (state === undefined) {
-      state = { startTimeMs: Date.now(), tools: new Map() };
-      generations.set(callId, state);
-    }
-    return state;
+  function activeGeneration(): ActiveGeneration | undefined {
+    return context.active().getValue(ACTIVE_GENERATION) as ActiveGeneration | undefined;
+  }
+
+  function turnOverrides(callId: string) {
+    return typeof options.turn === "function" ? options.turn({ callId }) : options.turn;
+  }
+
+  function emitsNativeSpans(callId: string): boolean {
+    return (
+      turnOverrides(callId)?.capture?.emit !== false &&
+      activeGeneration()?.operation.capture.emit !== false &&
+      backend?.telemetry.active()?.capture.emit !== false &&
+      currentCapture()?.emit !== false &&
+      currentAgentHandoff()?.capture.emit !== false
+    );
+  }
+
+  function executeInGeneration<T>(
+    state: Generation,
+    operation: Operation,
+    execute: () => T,
+    toolCallId?: string,
+  ): T {
+    const active: ActiveGeneration = { identity: state.identity, operation, toolCallId };
+    return operation.run(() =>
+      context.with(context.active().setValue(ACTIVE_GENERATION, active), execute),
+    );
   }
 
   async function closeStep(state: Generation, failure?: unknown) {
     const result =
       failure === undefined ? ABANDONED : { outcome: "abandoned", failed: true, error: failure };
-    await (await state.model)?.complete(result);
+    const model = await state.model;
+    if (state.modelFailure === undefined) await model?.complete(result);
+    else await model?.fail(state.modelFailure.error);
     for (const tool of state.tools.values()) await (await tool).complete(result);
     state.model = undefined;
+    state.modelFailure = undefined;
     state.tools.clear();
     const attempt = await state.attempt;
     state.attempt = undefined;
@@ -65,44 +120,127 @@ export function aiSdkTelemetry(run: AgentRun, options: AiSdkTelemetryOptions): T
     generations.delete(callId);
     if (state === undefined) return;
     await closeStep(state, failure);
-    const turn = await state.turn;
-    if (turn !== undefined) await end(turn);
+    await end(await state.turn);
   }
 
   return {
-    onStart(event: Event<"onStart">) {
-      generation(event.callId);
+    onObjectStepStart: native.telemetry.onObjectStepStart.bind(native.telemetry),
+    onObjectStepEnd: native.telemetry.onObjectStepEnd.bind(native.telemetry),
+    onEmbedStart: native.telemetry.onEmbedStart.bind(native.telemetry),
+    onEmbedEnd: native.telemetry.onEmbedEnd.bind(native.telemetry),
+    onRerankStart: native.telemetry.onRerankStart.bind(native.telemetry),
+    onRerankEnd: native.telemetry.onRerankEnd.bind(native.telemetry),
+    experimental_onDecideStart(event) {
+      if (emitsNativeSpans(event.callId)) native.telemetry.experimental_onDecideStart(event);
+    },
+    experimental_onDecideEnd: native.telemetry.experimental_onDecideEnd.bind(native.telemetry),
+    experimental_onDecisionModelCallStart:
+      native.telemetry.experimental_onDecisionModelCallStart.bind(native.telemetry),
+    experimental_onDecisionModelCallEnd: native.telemetry.experimental_onDecisionModelCallEnd.bind(
+      native.telemetry,
+    ),
+    experimental_onStreamTranscriptionStart(event) {
+      if (!emitsNativeSpans(event.callId)) return;
+      native.telemetry.experimental_onStreamTranscriptionStart({
+        ...event,
+        recordInputs: false,
+        recordOutputs: false,
+      });
+    },
+    experimental_onStreamTranscriptionEnd:
+      native.telemetry.experimental_onStreamTranscriptionEnd.bind(native.telemetry),
+    async onStart(event: Event<"onStart">) {
+      if (!["ai.generateText", "ai.streamText", "ai.harness"].includes(event.operationId)) {
+        if (emitsNativeSpans(event.callId))
+          native.telemetry.onStart({ ...event, recordInputs: false, recordOutputs: false });
+        return;
+      }
+      const inherited = activeGeneration();
+      const active = backend?.telemetry.active();
+      const overrides = turnOverrides(event.callId);
+      const identity: RunIdentity = {
+        conversationId:
+          overrides?.identity?.conversationId ?? inherited?.identity.conversationId ?? event.callId,
+        runId: overrides?.identity?.runId ?? event.callId,
+        turnId: overrides?.identity?.turnId ?? event.callId,
+      };
+      const owner = inherited?.operation.reference ?? active?.reference;
+      const host = backend?.telemetry.activeSpan?.();
+      const parent =
+        owner === undefined || host?.traceId === owner.traceId ? (host ?? owner) : owner;
+      const capture = intersectCapture(
+        intersectCapture(
+          intersectCapture(overrides?.capture ?? METADATA_ONLY, inherited?.operation.capture),
+          active?.capture,
+        ),
+        {
+          emit: true,
+          recordInputs: event.recordInputs !== false,
+          recordOutputs: event.recordOutputs !== false,
+        },
+      );
+      const state: Generation = {
+        identity,
+        tools: new Map(),
+        turn: run.turn({
+          sequence: 0,
+          agentName: event.functionId,
+          framework: { name: "ai-sdk", version: event.aiVersion },
+          context: context.active(),
+          parent,
+          lineage:
+            inherited === undefined
+              ? undefined
+              : {
+                  parentRunId: inherited.identity.runId,
+                  parentCallId: inherited.toolCallId,
+                  agentName: overrides?.agentName ?? event.functionId,
+                },
+          ...overrides,
+          identity,
+          capture,
+        }),
+      };
+      generations.set(event.callId, state);
+      const turn = await state.turn;
+      native.instrument(turn, () =>
+        native.telemetry.onStart({ ...event, recordInputs: false, recordOutputs: false }),
+      );
     },
     async onStepStart(event: Event<"onStepStart">) {
-      const state = generation(event.callId);
+      const state = generations.get(event.callId);
+      if (state === undefined) return;
       await closeStep(state);
-      state.turn ??= run.turn({
-        startTimeMs: state.startTimeMs,
-        ...(typeof options.turn === "function"
-          ? options.turn({ callId: event.callId })
-          : options.turn),
-      });
       const turn = await state.turn;
       state.attempt = turn.attempt({ stepIndex: event.stepNumber, attempt: 0 });
+      native.instrument(await state.attempt, () => native.telemetry.onStepStart(event));
     },
     async onLanguageModelCallStart(event: Event<"onLanguageModelCallStart">) {
       const attempt = await generations.get(event.callId)?.attempt;
       if (attempt === undefined) return;
-      generations.get(event.callId)!.model = attempt.modelCall({
+      const state = generations.get(event.callId)!;
+      await (await state.model)?.fail(state.modelFailure?.error);
+      state.modelFailure = undefined;
+      state.model = attempt.modelCall({
         provider: event.provider,
         modelId: event.modelId,
         messages: event.messages,
         instructions: event.instructions,
         tools: event.tools,
       });
+      native.instrument(await state.model, () => native.telemetry.onLanguageModelCallStart(event));
     },
-    async executeLanguageModelCall({ callId, execute }) {
-      const model = await generations.get(callId)?.model;
-      if (model === undefined || model.finished) return execute();
+    async executeLanguageModelCall(event) {
+      const state = generations.get(event.callId);
+      const model = await state?.model;
+      if (state === undefined || model === undefined || model.finished) return event.execute();
       try {
-        return await model.run(execute);
+        return await native.telemetry.executeLanguageModelCall({
+          ...event,
+          execute: () => executeInGeneration(state, model, event.execute),
+        });
       } catch (error) {
-        await model.fail(error);
+        state.modelFailure = { error };
         throw error;
       }
     },
@@ -110,7 +248,9 @@ export function aiSdkTelemetry(run: AgentRun, options: AiSdkTelemetryOptions): T
       const state = generations.get(event.callId);
       const model = await state?.model;
       if (state === undefined || model === undefined) return;
+      native.withoutNewSpans(() => native.telemetry.onLanguageModelCallEnd(event));
       state.model = undefined;
+      state.modelFailure = undefined;
       await model.complete({
         outcome: "completed",
         result: {
@@ -131,15 +271,24 @@ export function aiSdkTelemetry(run: AgentRun, options: AiSdkTelemetryOptions): T
         call.toolCallId,
         attempt.tool({ callId: call.toolCallId, name: call.toolName, arguments: call.input }),
       );
+      native.instrument(await state.tools.get(call.toolCallId)!, () =>
+        native.telemetry.onToolExecutionStart(event),
+      );
     },
-    async executeTool({ callId, toolCallId, execute }) {
-      const tool = await generations.get(callId)?.tools.get(toolCallId);
-      return tool === undefined || tool.finished ? execute() : tool.run(execute);
+    async executeTool(event) {
+      const state = generations.get(event.callId);
+      const tool = await state?.tools.get(event.toolCallId);
+      if (state === undefined || tool === undefined || tool.finished) return event.execute();
+      return native.telemetry.executeTool({
+        ...event,
+        execute: () => executeInGeneration(state, tool, event.execute, event.toolCallId),
+      });
     },
     async onToolExecutionEnd(event: Event<"onToolExecutionEnd">) {
       const state = generations.get(event.callId);
       const tool = await state?.tools.get(event.toolCall.toolCallId);
       if (state === undefined || tool === undefined) return;
+      native.telemetry.onToolExecutionEnd(event);
       state.tools.delete(event.toolCall.toolCallId);
       const output = event.toolOutput;
       const completion =
@@ -154,9 +303,11 @@ export function aiSdkTelemetry(run: AgentRun, options: AiSdkTelemetryOptions): T
     },
     async onStepEnd(event: Event<"onStepEnd">) {
       const state = generations.get(event.callId);
+      native.telemetry.onStepEnd(event);
       if (state !== undefined) await closeStep(state);
     },
     async onEnd(event: Event<"onEnd">) {
+      native.telemetry.onEnd("totalUsage" in event ? { ...event, usage: event.totalUsage } : event);
       await finish(event.callId, (turn) =>
         turn.complete({
           outcome: "completed",
@@ -165,15 +316,16 @@ export function aiSdkTelemetry(run: AgentRun, options: AiSdkTelemetryOptions): T
       );
     },
     async onAbort(event: Event<"onAbort">) {
+      native.telemetry.onAbort(event);
       await finish(event.callId, (turn) => turn.complete({ outcome: "cancelled" }));
     },
     async onError(value: unknown) {
+      native.telemetry.onError(value);
       const { callId, error } =
         value !== null && typeof value === "object" && "callId" in value && "error" in value
           ? (value as { callId: string; error: unknown })
           : { callId: undefined, error: value };
-      for (const id of callId === undefined ? [...generations.keys()] : [callId])
-        await finish(id, (turn) => turn.fail(error), error);
+      if (callId !== undefined) await finish(callId, (turn) => turn.fail(error), error);
     },
   };
 }

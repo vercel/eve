@@ -1,11 +1,10 @@
-import type { SessionAuthContext } from "eve/context";
 import type {
   ApprovalConfiguration,
   ApprovalContext,
   ApprovalResponsePolicy,
 } from "eve/tools/approval";
 
-import { SkillChangeRefusedError, SkillLifecycleError } from "./errors.ts";
+import { SkillLifecycleError } from "./errors.ts";
 import type {
   SkillApprovalDecision,
   SkillApprovalRequest,
@@ -35,44 +34,18 @@ export const defaultSkillApproval: SkillApprovalRule = (request) => {
   return request.action === "create" || request.action === "set_mode" ? "allow" : "ask";
 };
 
-function sameAccount(left: SessionAuthContext, right: SessionAuthContext): boolean {
-  return (
-    left.authenticator === right.authenticator &&
-    (left.issuer ?? "") === (right.issuer ?? "") &&
-    left.principalType === right.principalType &&
-    left.principalId === right.principalId
-  );
-}
-
-export function responderRefusal(
-  shared: boolean,
-  requester: SessionAuthContext | null,
-  responder: SessionAuthContext,
-): string | undefined {
-  if (requester === null) return undefined;
-  if (shared) {
-    return sameAccount(requester, responder)
-      ? "A change to shared skills needs someone other than the person who asked to approve it."
-      : undefined;
-  }
-  return sameAccount(requester, responder) &&
-    (requester.subject ?? "") === (responder.subject ?? "")
-    ? undefined
-    : "Only the person who asked can approve a change to their own skills.";
-}
-
-export function defaultSkillResponse(
-  isShared: (ctx: Parameters<ApprovalResponsePolicy>[0]) => Promise<boolean>,
-): ApprovalResponsePolicy {
-  return async (ctx) => {
-    const reason = responderRefusal(
-      await isShared(ctx),
-      ctx.request.principal,
-      ctx.response.principal,
-    );
-    return reason === undefined ? { status: "allowed" } : { status: "rejected", reason };
-  };
-}
+export const defaultSkillResponse: ApprovalResponsePolicy = ({ request, response }) => {
+  const requester = request.principal;
+  const responder = response.principal;
+  return requester === null ||
+    (requester.authenticator === responder.authenticator &&
+      (requester.issuer ?? "") === (responder.issuer ?? "") &&
+      requester.principalType === responder.principalType &&
+      requester.principalId === responder.principalId &&
+      (requester.subject ?? "") === (responder.subject ?? ""))
+    ? { status: "allowed" }
+    : { status: "rejected", reason: "Only the person who asked can approve this change." };
+};
 
 const MAX_CARD = 3_000;
 const MAX_PREVIEW = 2_000;
@@ -232,13 +205,4 @@ export function skillApproval<TInput extends object, TPlan>(input: {
       takeCard(cardKey(toolName, callId, toolInput)) ?? input.fallbackCard(toolInput),
     response: (ctx) => input.response()(ctx as Parameters<ApprovalResponsePolicy>[0]),
   };
-}
-
-export function requireDefaultResponder(
-  scope: SkillScope,
-  requester: SessionAuthContext | null,
-  responder: SessionAuthContext,
-): void {
-  const reason = responderRefusal(scope.shared, requester, responder);
-  if (reason !== undefined) throw new SkillChangeRefusedError(reason);
 }

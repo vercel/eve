@@ -457,6 +457,8 @@ export interface InstrumentationCallSettledEvent {
   readonly cause?: Cause;
   readonly acceptedAtMs?: number;
   readonly completedAtMs?: number;
+  /** The task the call started or continued, when it runs as one. */
+  readonly taskId?: string;
   /** How long the tool's `execute` ran, in milliseconds, when the publisher measured it. */
   readonly durationMs?: number;
   readonly idempotencyKey: string;
