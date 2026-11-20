@@ -13,7 +13,7 @@ export default defineDynamic(async (ctx: DynamicContext) => {
   const scopes = await loadTurnSkills({
     session: ctx.session,
     ...(ctx.conversation !== undefined && { conversation: ctx.conversation }),
-    turnId: ctx.turn?.id,
+    ...(ctx.turn !== null && { turn: { id: ctx.turn.id } }),
   });
   // No prototype, so a skill named `constructor` is an entry like any other.
   const entries: Record<string, ReturnType<typeof defineSkill>> = Object.create(null);
