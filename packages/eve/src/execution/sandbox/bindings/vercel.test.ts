@@ -2713,6 +2713,27 @@ describe("scheduled template rebuilds", () => {
     expect(await first).toEqual({ rebuilt: true });
   });
 
+  it("keeps the published snapshot when stopping the new pointer fails", async () => {
+    const { fake, rebuild, sessionSource } = setup();
+    const create = fake.sandboxModule.Sandbox.create.getMockImplementation();
+    fake.sandboxModule.Sandbox.create.mockImplementation(async (options: MockCreateOptions) => {
+      const sandbox = await create!(options);
+      if (TEMPLATE_POINTER_NAME.test(options.name)) {
+        sandbox.stop.mockRejectedValue(new Error("stop failed"));
+      }
+      return sandbox;
+    });
+
+    expect(await rebuild(artifact, { prepare: async () => {}, revision: "rev-1" })).toEqual({
+      rebuilt: true,
+    });
+
+    const published = fake.pointer()?.sourceSnapshotId as string;
+    expect(published).not.toBe(buildSnapshotId);
+    expect(fake.snapshots.has(published)).toBe(true);
+    expect(await sessionSource("session-after")).toBe(published);
+  });
+
   it("discards its snapshot when another process published first", async () => {
     const { fake, rebuild } = setup();
     const result = await rebuild(artifact, {

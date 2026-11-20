@@ -446,7 +446,11 @@ async function publishTemplatePointer(
     if (isVercelSandboxNameConflictError(error)) return false;
     throw error;
   }
-  await stopVercelSandbox(pointer);
+  await stopVercelSandbox(pointer).catch((error: unknown) => {
+    log.warn(
+      `published the sandbox template but could not stop its pointer: ${errorMessage(error)}`,
+    );
+  });
   return true;
 }
 
