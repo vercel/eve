@@ -18,7 +18,14 @@ export interface PlatformIdentity {
   ambientToken(): string | undefined;
 }
 
+export type BuildTarget = "vercel" | "node";
+
+export interface PlatformBuild {
+  target(): BuildTarget;
+}
+
 export interface Platform {
+  readonly build: PlatformBuild;
   readonly deployment: PlatformDeployment;
   readonly identity: PlatformIdentity;
 }

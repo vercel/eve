@@ -1,6 +1,7 @@
 import { compileAgentInWorkspace, type CompileAgentResult } from "#compiler/compile-agent.js";
 import type { DevelopmentExtensionSelection } from "#compiler/development-extensions.js";
 import type { AuthoredModuleGraph } from "#internal/authored-module-graph.js";
+import { currentPlatform } from "#platform/current.js";
 import { createScheduleRegistrations } from "#runtime/schedules/register.js";
 import { resolveSchedules } from "#runtime/schedules/resolve-schedule.js";
 import type { ResolvedScheduleDefinition } from "#runtime/types.js";
@@ -157,9 +158,5 @@ function createPreparedApplicationHost(input: {
 }
 
 function resolveProductionWorkflowWorldTarget(): BuiltInWorkflowWorldTarget {
-  if (process.env.VERCEL) {
-    return "vercel";
-  }
-
-  return "local";
+  return currentPlatform().build.target() === "vercel" ? "vercel" : "local";
 }

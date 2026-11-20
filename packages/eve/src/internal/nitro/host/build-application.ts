@@ -26,6 +26,7 @@ import {
 import { stageProductionCompilerArtifacts } from "#internal/application/production-compiler-artifacts.js";
 import { stageBuildDeploymentId } from "#internal/nitro/host/stage-build-deployment-id.js";
 import { createHostNitro } from "#internal/nitro/host/create-host-nitro.js";
+import { currentPlatform } from "#platform/current.js";
 import { createHostSpec } from "#internal/nitro/host/host-spec.js";
 import { normalizeVercelServiceOutput } from "#internal/nitro/host/vercel-output.js";
 import { emitVercelAgentSummary } from "#internal/nitro/host/build-vercel-agent-summary.js";
@@ -89,7 +90,7 @@ async function writeOptionalApplicationBuildProfile(input: {
       createApplicationBuildProfile({
         deploymentId: input.deploymentId,
         output,
-        target: process.env.VERCEL ? "vercel" : "local",
+        target: currentPlatform().build.target() === "vercel" ? "vercel" : "local",
         timing,
       }),
     );
@@ -276,7 +277,7 @@ async function buildApplicationInWorkspace(
   const preparedHost = await measureBuildPhase(profiler, "host.prepare", () =>
     prepareProductionApplicationHost(workspace),
   );
-  const isVercelBuild = Boolean(process.env.VERCEL);
+  const isVercelBuild = currentPlatform().build.target() === "vercel";
 
   const servicePrefix = isVercelBuild
     ? await measureBuildPhase(profiler, "vercel.service-prefix.resolve", () =>

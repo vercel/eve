@@ -3,6 +3,7 @@ import { join, relative, resolve } from "node:path";
 import type { CompiledWorkspaceResourceRoot } from "#compiler/manifest.js";
 import { copyDirectoryAtomically } from "#execution/sandbox/bindings/local-provider-utils.js";
 import { createLoggingSandboxSession } from "#execution/sandbox/logging-session.js";
+import { currentPlatform } from "#platform/current.js";
 import { createSandboxProviderIdentity } from "#execution/sandbox/provider-identity.js";
 import { createConnectionSession } from "#execution/sandbox/session.js";
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
@@ -426,7 +427,7 @@ function formatPrewarmFailureForEnvironment(input: {
 }
 
 function isVercelEnvironment(): boolean {
-  return Boolean(process.env.VERCEL?.trim());
+  return currentPlatform().build.target() === "vercel";
 }
 
 function isLocalSandboxProvider(providerName: string): boolean {
