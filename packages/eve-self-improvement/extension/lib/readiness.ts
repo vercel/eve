@@ -8,7 +8,6 @@ import { store, storageBackend } from "./store.js";
 import { verifyRelease } from "./verify.js";
 import type { Check, Experiment } from "./types.js";
 
-/** Checks the configured identities, evidence store, provider access, and observed execution without claiming unrun checks passed. */
 export async function checkReadiness(
   c: Config,
   options: { sandbox?: boolean; production?: boolean } = {},

@@ -4,9 +4,10 @@ Read the root AGENTS.md, CONTRIBUTING.md, and this package README before changes
 Use the workspace Node and pnpm versions. Read docs/extensions/index.md before
 changing the extension contract.
 
-Keep runtime contributions in extension/, portable exports in api/, and isolated
-regressions in test/integration/. Run the package typecheck, integration tests,
-build, and packed-consumer scenario when changing installation or exports.
+Keep runtime contributions and public entries in extension/ so they share one
+compiled module graph; isolated regressions belong in test/integration/. Run the
+package typecheck, integration tests, build, and packed-consumer scenario when
+changing installation or exports.
 
 Private Blob is the default store. The optional Postgres adapter preserves
 existing ledgers; never switch an existing backend on errors. Keep credentials,

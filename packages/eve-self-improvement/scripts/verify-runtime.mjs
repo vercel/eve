@@ -9,24 +9,31 @@ import { setTimeout as delay } from "node:timers/promises";
 import assert from "node:assert/strict";
 
 const directory = process.argv[2],
-  databaseUrl = process.env.EVE_EVOLUTION_TEST_DATABASE_URL;
+  databaseUrl = process.env.EVE_SELF_IMPROVEMENT_TEST_DATABASE_URL;
 if (!directory)
   throw new Error(
-    "Provide a fresh packed-consumer directory and private Blob credentials, or EVE_EVOLUTION_TEST_DATABASE_URL",
+    "Provide a fresh packed-consumer directory and private Blob credentials, or EVE_SELF_IMPROVEMENT_TEST_DATABASE_URL",
   );
 const requireConsumer = createRequire(path.join(directory, "package.json"));
 const { Client } = await import(pathToFileURL(requireConsumer.resolve("eve/client")));
-const { configSchema, store, closeStores } = await import(
-  pathToFileURL(requireConsumer.resolve("@eve/self-improvement/core"))
-);
+const library = (name) =>
+  pathToFileURL(
+    path.join(
+      path.dirname(requireConsumer.resolve("@eve/self-improvement/package.json")),
+      "dist/extension/lib",
+      `${name}.mjs`,
+    ),
+  );
+const { configSchema } = await import(library("config"));
+const { store, closeStores } = await import(library("store"));
 const instance = `runtime-${randomUUID()}`;
-const hosted = process.env.EVE_EVOLUTION_TEST_HOSTED_CONFIG
-  ? JSON.parse(process.env.EVE_EVOLUTION_TEST_HOSTED_CONFIG)
+const hosted = process.env.EVE_SELF_IMPROVEMENT_TEST_HOSTED_CONFIG
+  ? JSON.parse(process.env.EVE_SELF_IMPROVEMENT_TEST_HOSTED_CONFIG)
   : null;
 if (
   hosted &&
   (!/^[a-f0-9]{40}$/.test(hosted.sha ?? "") ||
-    !process.env.EVE_EVOLUTION_GITHUB_TOKEN ||
+    !process.env.EVE_SELF_IMPROVEMENT_GITHUB_TOKEN ||
     !process.env.VERCEL_TOKEN)
 )
   throw new Error(
@@ -64,8 +71,8 @@ await writeFile(
 import { mockModel } from "eve/evals";
 export default defineAgent({ defaultTools: false, model: mockModel(({ lastUserMessage, toolResults }) => {
   const last=toolResults.at(-1);
-  if(last?.name==="evolution__cycle" && last.output?.status==="delegated") return {toolCalls:[{name:"evolution__coordinator",input:{message:"Resume the stored isolated fixture experiment"}}]};
-  return toolResults.length ? "Tool attempt completed" : {toolCalls:[{name:(lastUserMessage??"").startsWith("status") ? "evolution__status" : (lastUserMessage??"").startsWith("coordinator") ? "evolution__coordinator" : "evolution__cycle",input:(lastUserMessage??"").startsWith("coordinator")?{message:"Unauthorized isolated fixture request"}:{}}]};
+  if(last?.name==="self-improvement__cycle" && last.output?.status==="delegated") return {toolCalls:[{name:"self-improvement__coordinator",input:{message:"Resume the stored isolated fixture experiment"}}]};
+  return toolResults.length ? "Tool attempt completed" : {toolCalls:[{name:(lastUserMessage??"").startsWith("status") ? "self-improvement__status" : (lastUserMessage??"").startsWith("coordinator") ? "self-improvement__coordinator" : "self-improvement__cycle",input:(lastUserMessage??"").startsWith("coordinator")?{message:"Unauthorized isolated fixture request"}:{}}]};
 }) });\n`,
 );
 await writeFile(
@@ -77,8 +84,8 @@ export default eveChannel({auth: request => {
 }});\n`,
 );
 await writeFile(
-  path.join(directory, "agent", "extensions", "evolution.ts"),
-  `import evolution from "@eve/self-improvement";
+  path.join(directory, "agent", "extensions", "self-improvement.ts"),
+  `import selfImprovement from "@eve/self-improvement";
 import {mockModel} from "eve/evals";
 const originalFetch = globalThis.fetch;
 globalThis.fetch = async (input, init) => {
@@ -99,12 +106,9 @@ const analyst = mockModel(({tools,toolResults,messages})=> {
   if(last?.name==="step" && last.output?.action==="code") return {toolCalls:[{name:"maintainer",input:{message:"Exercise checkout, an isolated scratch source edit and its verification. Do not publish."}}]};
   const delegated=toolResults.find(result=>result.name==="maintainer");
   if(delegated) {
-    const receipt=delegated.output;
     const result=messages.map(message=>message.text).find(text=>text.includes('<task_result ') && text.includes('tool="maintainer"'));
-    if(result) return {toolCalls:[{name:"step",input:{action:"coded",result}}]};
-    // Deliberately attempt the premature transition once: server facts must
-    // preserve the active stage/lease until the actual task result arrives.
-    if(last?.name==="maintainer") return {toolCalls:[{name:"step",input:{action:"coded",result:JSON.stringify(receipt)}}]};
+    if(result) return {toolCalls:[{name:"step",input:{action:"coded"}}]};
+    if(last?.name==="maintainer") return {toolCalls:[{name:"step",input:{action:"coded"}}]};
     return {toolCalls:[{name:"eve__task_wait",input:{timeoutSeconds:5}}]};
   }
   return {toolCalls:[{name:"step",input:{action:toolResults.some(result=>result.name==="step")?"finish":"next"}}]};
@@ -116,7 +120,7 @@ const maintainer=mockModel(({tools,toolResults})=>{
   if(!toolResults.some(result=>result.name==="bash")) return {toolCalls:[{name:"bash",input:{command:"cd /workspace/repository && test \\"$(cat evolution-isolated-fixture.txt)\\" = isolated-source-edit && rm evolution-isolated-fixture.txt && git rev-parse HEAD"}}]};
   return "Isolated coding fixture complete; no publication requested";
 });
-export default evolution({...${JSON.stringify(options)}, models:{analyst:{model:analyst,modelContextWindowTokens:1000000},maintainer:{model:maintainer,modelContextWindowTokens:1000000}}, credentials:{github:async()=>${hosted ? "process.env.EVE_EVOLUTION_GITHUB_TOKEN" : '"isolated-fixture"'},vercel:async()=>${hosted ? "process.env.VERCEL_TOKEN" : '"isolated-fixture"'}}});\n`,
+export default selfImprovement({...${JSON.stringify(options)}, models:{analyst:{model:analyst,modelContextWindowTokens:1000000},maintainer:{model:maintainer,modelContextWindowTokens:1000000}}, credentials:{github:async()=>${hosted ? "process.env.EVE_SELF_IMPROVEMENT_GITHUB_TOKEN" : '"isolated-fixture"'},vercel:async()=>${hosted ? "process.env.VERCEL_TOKEN" : '"isolated-fixture"'}}});\n`,
 );
 
 await writeFile(
@@ -137,8 +141,8 @@ const server = spawn(
     stdio: ["ignore", log.fd, log.fd],
     env: {
       ...process.env,
-      ...(databaseUrl ? { EVE_EVOLUTION_DATABASE_URL: databaseUrl } : {}),
-      EVE_EVOLUTION_HMAC_SECRET: "isolated-runtime-fixture-key-at-least-32-characters",
+      ...(databaseUrl ? { EVE_SELF_IMPROVEMENT_DATABASE_URL: databaseUrl } : {}),
+      EVE_SELF_IMPROVEMENT_HMAC_SECRET: "isolated-runtime-fixture-key-at-least-32-characters",
     },
   },
 );
@@ -182,27 +186,27 @@ try {
   ]) {
     const calls = await send(owner, message);
     assert.ok(
-      calls.some((call) => call.tool === "evolution__cycle" && call.outcome === "failed"),
+      calls.some((call) => call.tool === "self-improvement__cycle" && call.outcome === "failed"),
       "Ordinary/forged schedule must be denied by actual tool auth",
     );
   }
   assert.ok(
     (await send(owner, "status")).some(
-      (call) => call.tool === "evolution__status" && call.outcome === "completed",
+      (call) => call.tool === "self-improvement__status" && call.outcome === "completed",
     ),
   );
   assert.ok(
     (await send(stranger, "status")).some(
-      (call) => call.tool === "evolution__status" && call.outcome === "failed",
+      (call) => call.tool === "self-improvement__status" && call.outcome === "failed",
     ),
   );
   assert.ok(
     (await send(owner, "coordinator")).some(
-      (call) => call.tool === "evolution__coordinator" && call.outcome === "failed",
+      (call) => call.tool === "self-improvement__coordinator" && call.outcome === "failed",
     ),
     "Direct ordinary delegation must fail its real lineage hook before model execution",
   );
-  const response = await fetch(`${baseUrl}/eve/v1/dev/schedules/evolution__daily`, {
+  const response = await fetch(`${baseUrl}/eve/v1/dev/schedules/self-improvement__daily`, {
     method: "POST",
   });
   assert.equal(response.status, 200);
@@ -221,7 +225,7 @@ try {
   assert.ok(
     scheduled.some(
       (call) =>
-        call.tool === "evolution__cycle" &&
+        call.tool === "self-improvement__cycle" &&
         call.outcome === "completed" &&
         call.output?.status === occurrence.status,
     ),
@@ -256,7 +260,7 @@ try {
   await db.release(claim.lease);
   let previousCoordinator;
   for (let round = 0; round < 2; round++) {
-    const resumedResponse = await fetch(`${baseUrl}/eve/v1/dev/schedules/evolution__daily`, {
+    const resumedResponse = await fetch(`${baseUrl}/eve/v1/dev/schedules/self-improvement__daily`, {
       method: "POST",
     });
     assert.equal(resumedResponse.status, 200);
@@ -314,7 +318,7 @@ try {
       checks: [],
     });
     await db.release(claim.lease);
-    const dispatched = await fetch(`${baseUrl}/eve/v1/dev/schedules/evolution__daily`, {
+    const dispatched = await fetch(`${baseUrl}/eve/v1/dev/schedules/self-improvement__daily`, {
       method: "POST",
     });
     assert.equal(dispatched.status, 200);

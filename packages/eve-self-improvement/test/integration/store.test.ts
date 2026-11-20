@@ -19,9 +19,9 @@ const makeStore = () => {
   return new Store(sql, scope, 7, 90);
 };
 before(async () => {
-  if (process.env.EVE_EVOLUTION_TEST_DATABASE_URL) {
+  if (process.env.EVE_SELF_IMPROVEMENT_TEST_DATABASE_URL) {
     const pool = new Pool({
-      connectionString: process.env.EVE_EVOLUTION_TEST_DATABASE_URL,
+      connectionString: process.env.EVE_SELF_IMPROVEMENT_TEST_DATABASE_URL,
       max: 8,
     });
     sql = pool;
@@ -87,18 +87,34 @@ test("Vercel Postgres defers and refreshes project-scoped OIDC with verified TLS
   );
   assert.notEqual(key, other.key, "Different projects cannot share the first project's OIDC pool");
 });
-test("standard and explicit Postgres URLs remain compatible and take precedence", () => {
-  const c = config({ database: "vercel-postgres" });
-  for (const name of ["EVE_EVOLUTION_DATABASE_URL", "POSTGRES_URL", "DATABASE_URL"]) {
-    const { options } = databaseConnection(c, { [name]: "postgresql://fixture/records" });
-    assert.equal(options.connectionString, "postgresql://fixture/records");
-    assert.equal(options.password, undefined);
-  }
+test("Postgres connects only through its dedicated URL or an explicit resolver", () => {
+  const { options } = databaseConnection(config({ database: "postgres" }), {
+    EVE_SELF_IMPROVEMENT_DATABASE_URL: "postgresql://fixture/records",
+    POSTGRES_URL: "postgresql://fixture/unrelated",
+    DATABASE_URL: "postgresql://fixture/also-unrelated",
+  });
+  assert.equal(options.connectionString, "postgresql://fixture/records");
+  assert.equal(options.password, undefined);
   const explicit = databaseConnection(
     config({ databaseUrl: () => "postgresql://fixture/explicit" }),
-    { POSTGRES_URL: "postgresql://fixture/fallback" },
+    { EVE_SELF_IMPROVEMENT_DATABASE_URL: "postgresql://fixture/fallback" },
   );
   assert.equal(explicit.options.connectionString, "postgresql://fixture/explicit");
+  for (const name of ["POSTGRES_URL", "DATABASE_URL", "EVE_EVOLUTION_DATABASE_URL"])
+    assert.throws(
+      () =>
+        databaseConnection(config({ database: "postgres" }), {
+          [name]: "postgresql://fixture/unrelated",
+        }),
+      /Configure/,
+    );
+  const vercel = databaseConnection(config({ database: "vercel-postgres" }), {
+    PGHOST: "database.fixture",
+    POSTGRES_URL: "postgresql://fixture/unrelated",
+    DATABASE_URL: "postgresql://fixture/also-unrelated",
+  });
+  assert.equal(vercel.options.host, "database.fixture");
+  assert.equal(vercel.options.connectionString, undefined);
 });
 test("Vercel Postgres needs explicit opt-in and real project connection settings", () => {
   assert.throws(() => databaseConnection(config(), { PGHOST: "database.fixture" }), /Configure/);

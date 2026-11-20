@@ -10,7 +10,6 @@ type Verify = (
   deployment: Deployment,
   options?: Parameters<typeof verifyRelease>[2],
 ) => ReturnType<typeof verifyRelease>;
-/** Trusted provider and verification operations used to monitor or restore a recorded release. */
 export interface MonitorServices {
   platform: Pick<Vercel, "deployment" | "rollback">;
   journal: Pick<Storage, "get" | "put">;
@@ -23,7 +22,6 @@ interface RollbackIntent {
   confirmedRegression: true;
 }
 
-/** Monitors the released deployment and restores the recorded baseline only after a correlated release regression. */
 export async function monitorRelease(
   c: Config,
   experiment: Experiment,
@@ -46,11 +44,21 @@ export async function monitorRelease(
       rollbackIntent.confirmedRegression !== true)
   )
     throw new Error("Rollback intent does not match the recorded release/baseline");
+  const superseded = () => {
+    experiment.status = "superseded";
+    experiment.reason =
+      "Production now serves another deployment; monitoring of this release is complete";
+    return experiment;
+  };
   let result: Awaited<ReturnType<Verify>> | undefined;
   if (!rollbackIntent) {
     try {
+      if ((await platform.deployment(c.project.productionUrl)).id !== deployed.id)
+        return superseded();
       result = await verify(deployed, { baseline: release.baseline, delivery: true });
     } catch {
+      const current = await platform.deployment(c.project.productionUrl).catch(() => null);
+      if (current && current.id !== deployed.id) return superseded();
       experiment.status = "blocked";
       experiment.reason =
         "Production identity/verification unavailable; preserve baseline and reconcile before another release";

@@ -16,14 +16,12 @@ export const feedbackScope = defineState<{
   previousTargets: [],
 }));
 
-/** Derives a stable keyed pseudonym without exposing the original identifier. */
 export function pseudonym(c: Config, value: string): string {
   return createHmac("sha256", hmacSecret(c)).update(value).digest("hex").slice(0, 32);
 }
 export function fingerprint(c: Config, input: unknown): string {
   return pseudonym(c, JSON.stringify(input) ?? "undefined");
 }
-/** Persists a minimized observation with keyed pseudonyms for session, turn, and principal identifiers. */
 export async function observe(
   c: Config,
   value: Omit<Observation, "session" | "turn" | "principal"> & {

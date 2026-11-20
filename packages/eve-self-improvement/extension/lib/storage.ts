@@ -1,6 +1,5 @@
 import type { Active, Experiment, Lease, Observation } from "./types.js";
 
-/** Durable evidence and fenced recovery operations; physical presence includes expired records until purge. */
 export interface Storage {
   readonly scope: string;
   hasRecord(key: string): Promise<boolean>;

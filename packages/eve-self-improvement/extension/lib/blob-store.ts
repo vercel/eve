@@ -5,12 +5,10 @@ import { digest } from "./config.js";
 import type { Storage } from "./storage.js";
 import type { Active, Experiment, Lease, Observation } from "./types.js";
 
-/** Fresh private object content and its strong origin ETag. */
 export interface BlobObject {
   text: string;
   etag: string;
 }
-/** Conditional private object operations required for fenced storage. */
 export interface BlobObjects {
   read(path: string): Promise<BlobObject | null>;
 
@@ -126,7 +124,6 @@ const initial = (): Control => ({
   records: {},
 });
 
-/** Stores private observations and atomically fenced experiment state in Vercel Blob. */
 export class BlobStore implements Storage {
   readonly prefix: string;
   constructor(
@@ -308,18 +305,15 @@ export class BlobStore implements Storage {
     if (sample.expiresAt <= this.now()) return;
     sample.index = this.indexPath(value, sample.expiresAt);
 
-    await this.index(sample);
-    if (await this.objects.write(path, JSON.stringify(sample), null, this.ttl(sample.expiresAt)))
+    if (await this.objects.write(path, JSON.stringify(sample), null, this.ttl(sample.expiresAt))) {
+      await this.index(sample);
       return;
+    }
     const saved = await this.objects.read(path);
     if (!saved) throw new Error("Observation write was not confirmed");
-    const canonical = JSON.parse(saved.text) as Sample;
-    if (canonical.index !== sample.index) {
-      await this.index(canonical);
-      const alias = await this.objects.read(sample.index);
-      if (alias) await this.objects.remove(sample.index, alias.etag);
-    }
+    await this.index(JSON.parse(saved.text) as Sample);
   }
+
   private async *pages(prefix: string) {
     let cursor: string | undefined;
     do {
@@ -419,14 +413,13 @@ export class BlobStore implements Storage {
         await Promise.all(
           page.slice(i, i + 16).map(async (item) => {
             const [at, expiry, hash] = item.path.split("/").at(-1)!.split("_");
-            if (!Number.isFinite(Number(at)) || !Number.isFinite(Number(expiry)) || !hash)
-              throw new Error("Corrupt observation index");
+            if (!Number.isFinite(Number(at)) || !Number.isFinite(Number(expiry)) || !hash) return;
             if (Number(expiry) <= now) {
               await this.objects.remove(item.path, item.etag);
               return;
             }
             const body = await this.objects.read(`${this.prefix}observations/${hash}`);
-            if (body && (JSON.parse(body.text) as Sample).index !== item.path)
+            if (!body || (JSON.parse(body.text) as Sample).index !== item.path)
               await this.objects.remove(item.path, item.etag);
           }),
         );

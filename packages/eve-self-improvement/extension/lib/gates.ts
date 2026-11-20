@@ -9,7 +9,6 @@ const cohort = z.object({
   p95LatencyMs: z.number().positive(),
   costPerSessionUsd: z.number().nonnegative().optional(),
 });
-/** Evaluates comparable measured cohorts while protecting quality, corrections, failures, and latency. */
 export function compareMetrics(before: Cohort, after: Cohort, target: string): Check {
   const a = cohort.safeParse(before),
     b = cohort.safeParse(after);
@@ -48,7 +47,6 @@ export function compareMetrics(before: Cohort, after: Cohort, target: string): C
       : "Target did not improve at least 10% from a nonzero baseline",
   };
 }
-/** Returns whether a nonempty set of verification checks all passed. */
 export function allPassed(checks: Check[]): boolean {
   return checks.length > 0 && checks.every((c) => c.status === "passed");
 }

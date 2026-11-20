@@ -27,7 +27,6 @@ const pools = new Map<string, Promise<Pool>>();
 const requirePg = createRequire(import.meta.url);
 const clients = new Map<string, Sql>();
 const initialized = new WeakMap<object, Promise<unknown>>();
-/** Preserves existing experiment ledgers in the optional PostgreSQL backend. */
 export class PostgresStore implements Storage {
   constructor(
     readonly sql: Sql,
@@ -194,8 +193,7 @@ export function databaseConnection(
   env: NodeJS.ProcessEnv = process.env,
   token: typeof getVercelOidcToken = getVercelOidcToken,
 ): { key: string; options: ConnectionOptions } {
-  const url =
-    c.databaseUrl?.() ?? env.EVE_EVOLUTION_DATABASE_URL ?? env.POSTGRES_URL ?? env.DATABASE_URL;
+  const url = c.databaseUrl?.() ?? env.EVE_SELF_IMPROVEMENT_DATABASE_URL;
   const limits = {
     max: 3,
     connectionTimeoutMillis: 5000,
@@ -205,7 +203,7 @@ export function databaseConnection(
   if (url) return { key: `url:${url}`, options: { ...limits, connectionString: url } };
   if (c.database !== "vercel-postgres")
     throw new Error(
-      "Configure a private durable Postgres URL or database:vercel-postgres for self-improvement",
+      "Configure databaseUrl or EVE_SELF_IMPROVEMENT_DATABASE_URL for database:postgres, or select database:vercel-postgres",
     );
   const host = env.PGHOST?.trim(),
     port = Number(env.PGPORT || 5432);
@@ -214,7 +212,7 @@ export function databaseConnection(
       "Vercel Postgres requires the project's PGHOST setting; load its environment before connecting locally",
     );
   if (!Number.isInteger(port) || port < 1 || port > 65535)
-    throw new Error("Vercel Postgres PGPORT is invalid");
+    throw new Error("Vercel Postgres PGPORT must be an integer from 1 to 65535");
   const connection = {
     host,
     port,
@@ -264,7 +262,6 @@ export function postgresStore(c: Config): PostgresStore {
   }
   return new PostgresStore(sql, namespace(c), c.privacy.retentionDays, c.privacy.ledgerDays);
 }
-/** Closes lazily opened PostgreSQL pools after trusted local work finishes. */
 export async function closeStores(): Promise<void> {
   await Promise.all([...pools.values()].map(async (pool) => (await pool).end()));
   pools.clear();

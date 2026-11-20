@@ -82,10 +82,10 @@ try {
     "Isolated package fixture. Use the installed tools when requested.\n",
   );
   await writeFile(
-    path.join(directory, "agent", "extensions", "evolution.ts"),
-    `import evolution from "@eve/self-improvement";
-export default evolution({
-  instance: "consumer-fixture", database: "blob",
+    path.join(directory, "agent", "extensions", "self-improvement.ts"),
+    `import selfImprovement from "@eve/self-improvement";
+export default selfImprovement({
+  instance: "consumer-fixture",
   project: { teamId: "team_fixture", projectId: "prj_fixture", productionUrl: "https://fixture.example.com" },
   repository: { owner: "fixture", name: "agent" },
   owner: { authenticator: "fixture", principalId: "fixture" },
@@ -99,10 +99,9 @@ export default evolution({
   );
   await writeFile(
     path.join(directory, "public-api.ts"),
-    `import { compareMetrics, configSchema, store, type Report, type SelfImprovementOptions } from "@eve/self-improvement/core";
-export const configuredStore = (options: SelfImprovementOptions) => store(configSchema.parse(options));
+    `import type { Report, SelfImprovementOptions } from "@eve/self-improvement/core";
 export const reportStatus = (report: Report) => report.status;
-void compareMetrics;
+export const publisher: NonNullable<NonNullable<SelfImprovementOptions["verification"]>["publisher"]> = async ({ sha, deployment }) => ({ name: "publisher identity", status: sha === deployment.sha ? "passed" : "failed", reason: "Compared the actual published source" });
 `,
   );
   await writeFile(
@@ -140,7 +139,7 @@ void compareMetrics;
     [
       path.join(directory, "node_modules", "eve", "bin", "eve.js"),
       "build",
-      ...(process.env.EVE_EVOLUTION_HOSTED_CONSUMER ? [] : ["--skip-sandbox-prewarm"]),
+      ...(process.env.EVE_SELF_IMPROVEMENT_HOSTED_CONSUMER ? [] : ["--skip-sandbox-prewarm"]),
     ],
     directory,
   );
@@ -150,11 +149,11 @@ void compareMetrics;
   assert.equal(manifest.diagnostics.errors, 0, "Consumer has compilation errors");
   const text = JSON.stringify(manifest);
   for (const contribution of [
-    "evolution__cycle",
-    "evolution__doctor",
-    "evolution__status",
-    "evolution__coordinator",
-    "evolution__daily",
+    "self-improvement__cycle",
+    "self-improvement__doctor",
+    "self-improvement__status",
+    "self-improvement__coordinator",
+    "self-improvement__daily",
   ])
     assert.ok(text.includes(contribution), `Packed consumer omitted ${contribution}`);
   assert.ok(
@@ -167,8 +166,13 @@ void compareMetrics;
       "--input-type=module",
       "-e",
       `import assert from "node:assert/strict";
-import { compareMetrics, configSchema, store, closeStores } from "@eve/self-improvement/core";
-assert.equal(typeof compareMetrics, "function");
+import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
+import path from "node:path";
+const require = createRequire(import.meta.url);
+const library = (name) => pathToFileURL(path.join(path.dirname(require.resolve("@eve/self-improvement/package.json")), "dist/extension/lib", name + ".mjs"));
+const { configSchema } = await import(library("config"));
+const { store, closeStores } = await import(library("store"));
 const config = configSchema.parse({ instance: "missing-driver", project: { teamId: "team_fixture", projectId: "prj_fixture", productionUrl: "https://fixture.example.com" }, repository: { owner: "fixture", name: "agent" }, owner: { authenticator: "fixture", principalId: "fixture" }, models: { analyst: "fixture/analyst", maintainer: "fixture/maintainer" }, database: "postgres", databaseUrl: () => "postgresql://fixture.invalid/fixture" });
 await assert.rejects(store(config).get("fixture"), /Install pg@/);
 await closeStores();`,
@@ -181,11 +185,11 @@ await closeStores();`,
       check: "fresh packed consumer install/build",
       postgresDriver: "not installed",
       publicTypes: "passed without skipLibCheck or optional storage SDK types",
-      sandboxPrewarm: process.env.EVE_EVOLUTION_HOSTED_CONSUMER
+      sandboxPrewarm: process.env.EVE_SELF_IMPROVEMENT_HOSTED_CONSUMER
         ? "hosted"
         : "unavailable: offline compilation only; output is not deployable",
       contributions:
-        "tools, schedule, coordinator, analyst, maintainer, instrumentation and portable API",
+        "tools, schedule, coordinator, analyst, maintainer, instrumentation and callback types",
     }),
   );
   passed = true;
@@ -195,7 +199,7 @@ await closeStores();`,
   if (error.stderr) process.stderr.write(error.stderr);
   throw error;
 } finally {
-  if (passed && !process.env.EVE_EVOLUTION_KEEP_CONSUMER)
+  if (passed && !process.env.EVE_SELF_IMPROVEMENT_KEEP_CONSUMER)
     await rm(directory, { recursive: true, force: true });
   else if (passed) console.log(`Consumer retained at ${directory}`);
 }

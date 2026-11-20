@@ -1,6 +1,6 @@
 import { test, mock } from "node:test";
 import assert from "node:assert/strict";
-import { config, experiment, candidate, evidence, BASE, MERGED } from "./fixtures.js";
+import { config, experiment, candidate, evidence, BASE, HEAD, MERGED } from "./fixtures.js";
 import type { Active, Experiment, ReviewFeedback } from "../../extension/lib/types.js";
 
 const c = config();
@@ -16,6 +16,14 @@ const records = new Map<string, unknown>();
 let monitored: string[] = [];
 let monitorStatus: Experiment["status"] = "shipped";
 let failJournal = false;
+let prState: Record<string, unknown> = { state: "open", draft: false };
+let inspectionChecks: Experiment["checks"] = [];
+let sandboxChecks: Experiment["checks"] = [];
+let previewChecks: Experiment["checks"] = [];
+let verified: string[] = [];
+let verifiedBaselines: string[] = [];
+let releasedLeases = 0;
+let mergeError: Error | undefined;
 const db = {
   async active() {
     return structuredClone(active);
@@ -41,7 +49,9 @@ const db = {
   async save(_lease: unknown, value: Experiment | null) {
     active.experiment = structuredClone(value);
   },
-  async release() {},
+  async release() {
+    releasedLeases++;
+  },
 };
 mock.module("../../extension/extension.js", { exports: { default: { config: c } } });
 mock.module("../../extension/lib/store.js", { exports: { store: () => db } });
@@ -66,13 +76,14 @@ mock.module("../../extension/lib/review.js", {
   exports: {
     ...review,
     inspectCandidate: async () => ({
-      checks: [],
+      checks: inspectionChecks,
       outputs: [],
       feedback,
-      pr: { state: "open", draft: false },
+      pr: prState,
     }),
     reviewFingerprint: () => "reviewed",
     mergeExact: async () => {
+      if (mergeError) throw mergeError;
       writes.push("merge");
       return MERGED;
     },
@@ -81,14 +92,40 @@ mock.module("../../extension/lib/review.js", {
 mock.module("../../extension/lib/agent-runs.js", {
   exports: { readAgentRuns: async () => structuredClone(metadata) },
 });
+const hosted = await import("../../extension/lib/hosted.js");
+mock.module("../../extension/lib/hosted.js", {
+  exports: {
+    ...hosted,
+    createHostedRunner: () => ({
+      verify: async (proposal: { head: string }) => {
+        verified.push(proposal.head);
+        return structuredClone(sandboxChecks);
+      },
+      deploy: async () => {
+        writes.push("deploy");
+      },
+    }),
+  },
+});
+const verification = await import("../../extension/lib/verify.js");
+mock.module("../../extension/lib/verify.js", {
+  exports: {
+    ...verification,
+    verifyChange: async () => structuredClone(previewChecks),
+    verifyRelease: async (_config: unknown, deployment: { id: string }) => {
+      verifiedBaselines.push(deployment.id);
+      return { checks: [{ name: "baseline", status: "passed", reason: "Healthy fixture" }] };
+    },
+  },
+});
 const { prepare, advance } = await import("../../extension/lib/controller.js");
 const ctx = {
-  toolName: "evolution__cycle",
+  toolName: "self-improvement__cycle",
   callId: "call",
   session: {
     id: "scheduled",
     auth: { current: { authenticator: "app", principalId: "eve:app", principalType: "runtime" } },
-    schedule: { definition: "evolution__daily" },
+    schedule: { definition: "self-improvement__daily" },
   },
 } as Parameters<typeof prepare>[0];
 const released = (): Experiment => ({
@@ -126,6 +163,15 @@ function reset(e: Experiment) {
   monitored = [];
   monitorStatus = "shipped";
   failJournal = false;
+  prState = { state: "open", draft: false };
+  inspectionChecks = [];
+  sandboxChecks = [];
+  previewChecks = [];
+  verified = [];
+  verifiedBaselines = [];
+  releasedLeases = 0;
+  mergeError = undefined;
+  c.policy.mode = "propose";
   active = { lease: { owner: "owner", fence: 1, until: Date.now() + 60_000 }, experiment: e };
 }
 test("scheduled analysis and PR review still monitor the last production release", async () => {
@@ -139,12 +185,15 @@ test("scheduled analysis and PR review still monitor the last production release
   }
 });
 test("release recovery pauses and later resumes a pending experiment", async () => {
-  reset({ ...experiment(), id: "pending", status: "review", candidate: candidate() });
-  records.set("release:last", released());
-  monitorStatus = "blocked";
-  await prepare(ctx);
-  assert.equal(active.experiment!.id, "released");
-  assert.equal((records.get("resume:experiment") as Experiment).id, "pending");
+  for (const status of ["blocked", "rolled-back"] as const) {
+    reset({ ...experiment(), id: "pending", status: "review", candidate: candidate() });
+    records.set("release:last", released());
+    monitorStatus = status;
+    await prepare(ctx);
+    assert.equal(active.experiment!.id, "released");
+    assert.equal(active.experiment!.status, status);
+    assert.equal((records.get("resume:experiment") as Experiment).id, "pending");
+  }
   active.experiment = { ...experiment(), id: "revert", status: "rejected" };
   records.set("release:last", null);
   assert.equal((await prepare(ctx)).report!.status, "recovery-blocked");
@@ -296,4 +345,194 @@ test("a rejected recovery PR blocks new work even without a paused experiment", 
   assert.equal(result.report!.status, "recovery-blocked");
   assert.equal(active.experiment!.id, "revert-fixture");
   assert.equal(active.experiment!.status, "blocked");
+});
+
+test("an externally merged verified proposal completes without blocking later cycles", async (t) => {
+  reset({ ...experiment(), status: "ready", candidate: candidate(), verifiedHead: HEAD });
+  prState = { state: "closed", merged: true, head: { sha: HEAD }, merge_commit_sha: MERGED };
+  t.mock.method(GitHub.prototype, "api", async (path: string) =>
+    path.includes("/commits/")
+      ? { commit: { verification: { verified: true } } }
+      : { id: 1, full_name: "fixture/agent" },
+  );
+  assert.equal((await advance(active.lease)).action, "done");
+  assert.equal(active.experiment!.status, "merged");
+  records.set(`analysis:${new Date().toISOString().slice(0, 10)}`, { status: "no-findings" });
+  await prepare(ctx);
+  assert.equal(active.experiment, null);
+  assert.deepEqual(writes, []);
+});
+test("an externally merged unverified head remains blocked", async () => {
+  reset({ ...experiment(), status: "review", candidate: candidate(), verifiedHead: HEAD });
+  prState = { state: "closed", merged: true, head: { sha: BASE }, merge_commit_sha: MERGED };
+  await advance(active.lease);
+  assert.equal(active.experiment!.status, "blocked");
+});
+test("a moving base exits merging so normal review can update and reverify the candidate", async (t) => {
+  reset({ ...released(), status: "merging", candidate: candidate(), reviewedDigest: "reviewed" });
+  c.policy.mode = "ship";
+  t.mock.method(GitHub.prototype, "api", async () => ({ merged: false }));
+  t.mock.method(GitHub.prototype, "main", async () => MERGED);
+  t.mock.method(Vercel.prototype, "deployment", async () => released().release!.baseline);
+  inspectionChecks = [{ name: "up-to-date branch", status: "pending", reason: "Main moved" }];
+  assert.equal((await advance(active.lease)).action, "wait");
+  assert.equal(active.experiment!.status, "review");
+  assert.equal(active.experiment!.release, undefined);
+  assert.deepEqual(writes, []);
+});
+test("production already serving the verified release is adopted even when main advanced", async (t) => {
+  reset({ ...released(), status: "deploying", candidate: candidate() });
+  t.mock.method(GitHub.prototype, "api", async (path: string) =>
+    path.includes("/commits/")
+      ? { commit: { verification: { verified: true } } }
+      : { merged: true, merge_commit_sha: MERGED, head: { sha: HEAD } },
+  );
+  t.mock.method(GitHub.prototype, "main", async () => "d".repeat(40));
+  t.mock.method(Vercel.prototype, "deployment", async () => released().release!.deployment!);
+  await advance(active.lease);
+  assert.equal(active.experiment!.status, "shipped");
+  assert.deepEqual(monitored, ["released"]);
+  assert.deepEqual(writes, []);
+});
+test("ready but unaliased deployment attempts stop waiting after the reconciliation deadline", async (t) => {
+  const e = { ...released(), status: "deploying" as const, candidate: candidate() };
+  e.release!.deployment = undefined;
+  e.release!.deployStartedAt = Date.now() - 1_200_001;
+  e.release!.deployAttempts = c.policy.maxAttempts;
+  reset(e);
+  c.policy.mode = "ship";
+  t.mock.method(GitHub.prototype, "api", async (path: string) =>
+    path.includes("/commits/")
+      ? { commit: { verification: { verified: true } } }
+      : { merged: true, merge_commit_sha: MERGED, head: { sha: HEAD } },
+  );
+  t.mock.method(GitHub.prototype, "main", async () => MERGED);
+  t.mock.method(Vercel.prototype, "deployment", async () => e.release!.baseline);
+  t.mock.method(Vercel.prototype, "deploymentAttempts", async () => [
+    { id: "attempt", state: "READY" },
+  ]);
+  assert.equal((await advance(active.lease)).action, "done");
+  assert.equal(active.experiment!.status, "blocked");
+  assert.deepEqual(writes, []);
+});
+test("failed sandbox verification is recorded once per immutable candidate head", async (t) => {
+  reset({ ...experiment(), status: "review", candidate: candidate(), reviewedDigest: "reviewed" });
+  t.mock.method(GitHub.prototype, "main", async () => BASE);
+  sandboxChecks = [{ name: "candidate tests", status: "failed", reason: "Regression fails" }];
+  await advance(active.lease);
+  await advance(active.lease);
+  assert.deepEqual(verified, [HEAD]);
+  active.experiment!.candidate!.head = MERGED;
+  await advance(active.lease);
+  assert.deepEqual(verified, [HEAD, MERGED]);
+});
+test("quiet completed scheduled cycles settle readiness and release their lease", async (t) => {
+  reset(experiment());
+  t.mock.method(GitHub.prototype, "main", async () => BASE);
+  active.experiment = null;
+  const cycle = (await import("../../extension/tools/cycle.js")).default;
+  await cycle.execute!({}, ctx as never);
+  const occurrence = records.get("occurrence:last") as {
+    settled: boolean;
+    outcome: string;
+    status: string;
+  };
+  assert.equal(occurrence.settled, true);
+  assert.equal(occurrence.outcome, "completed");
+  assert.equal(occurrence.status, "insufficient-evidence");
+  assert.equal(releasedLeases, 1);
+});
+test("recovery-blocked cycles release their acquired lease", async () => {
+  reset({ ...experiment(), id: "revert-fixture", status: "rejected" });
+  const cycle = (await import("../../extension/tools/cycle.js")).default;
+  await cycle.execute!({}, ctx as never);
+  assert.equal(releasedLeases, 1);
+});
+test("only verified feedback threads owned by the publishing bot are auto-resolved", async (t) => {
+  reset({
+    ...experiment(),
+    status: "review",
+    candidate: {
+      ...candidate(),
+      addressedThreads: ["own-bot", "human", "other-bot", "unknown"],
+    },
+    verifiedHead: HEAD,
+    previewHead: HEAD,
+  });
+  feedback.threads = ["own-bot", "human", "other-bot", "unknown"].map((id) => ({
+    id,
+    resolved: false,
+    outdated: false,
+    body: "Review finding",
+    canAutoResolve: id === "unknown" ? undefined : id === "own-bot",
+  }));
+  const resolved: string[] = [];
+  t.mock.method(GitHub.prototype, "resolveThread", async (id: string) => {
+    resolved.push(id);
+  });
+  await advance(active.lease);
+  assert.deepEqual(resolved, ["own-bot"]);
+});
+test("a changed production baseline is reverified before merging and used for recovery", async (t) => {
+  const e = {
+    ...released(),
+    status: "merging" as const,
+    candidate: candidate(),
+    reviewedDigest: "reviewed",
+  };
+  e.release!.deployment = undefined;
+  reset(e);
+  c.policy.mode = "ship";
+  inspectionChecks = [{ name: "required check", status: "passed", reason: "Verified fixture" }];
+  t.mock.method(GitHub.prototype, "api", async () => ({ merged: false }));
+  t.mock.method(GitHub.prototype, "main", async () => (writes.includes("merge") ? MERGED : BASE));
+  const baseline = { ...e.release!.baseline, id: "new-baseline" };
+  t.mock.method(Vercel.prototype, "deployment", async () =>
+    writes.includes("deploy") ? released().release!.deployment! : baseline,
+  );
+  await advance(active.lease);
+  assert.equal(active.experiment!.release!.baseline.id, "new-baseline");
+  assert.deepEqual(verifiedBaselines, ["new-baseline"]);
+  assert.deepEqual(writes, ["merge", "deploy"]);
+});
+test("pending GitHub merge policy returns to review without discarding the candidate", async (t) => {
+  const e = {
+    ...released(),
+    status: "merging" as const,
+    candidate: candidate(),
+    reviewedDigest: "reviewed",
+  };
+  e.release!.deployment = undefined;
+  reset(e);
+  c.policy.mode = "ship";
+  mergeError = new review.MergePolicyBlocked("GitHub mergeability is UNKNOWN");
+  inspectionChecks = [{ name: "required check", status: "passed", reason: "Verified fixture" }];
+  t.mock.method(GitHub.prototype, "api", async () => ({ merged: false }));
+  t.mock.method(GitHub.prototype, "main", async () => BASE);
+  t.mock.method(Vercel.prototype, "deployment", async () => e.release!.baseline);
+  assert.equal((await advance(active.lease)).action, "wait");
+  assert.equal(active.experiment!.status, "review");
+  assert.equal(active.experiment!.candidate!.head, HEAD);
+  assert.equal(active.experiment!.release, undefined);
+  assert.deepEqual(writes, []);
+});
+
+test("a newer production release completes superseded deployment reconciliation in proposal mode", async (t) => {
+  const e = { ...released(), status: "deploying" as const, candidate: candidate() };
+  e.release!.deployment = undefined;
+  reset(e);
+  t.mock.method(GitHub.prototype, "api", async (path: string) =>
+    path.includes("/commits/")
+      ? { commit: { verification: { verified: true } } }
+      : { merged: true, merge_commit_sha: MERGED, head: { sha: HEAD } },
+  );
+  t.mock.method(GitHub.prototype, "main", async () => "d".repeat(40));
+  t.mock.method(Vercel.prototype, "deployment", async () => ({
+    ...released().release!.deployment!,
+    id: "newer",
+    sha: "d".repeat(40),
+  }));
+  await advance(active.lease);
+  assert.equal(active.experiment!.status, "superseded");
+  assert.deepEqual(writes, []);
 });

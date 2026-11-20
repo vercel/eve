@@ -11,6 +11,8 @@ function observeTasks(ctx: HookContext) {
     calls: calls(ctx.view, { kind: "agent", turnId }).map((call) => ({
       name: call.name,
       state: call.state,
+      output:
+        typeof call.output === "string" && call.output.length <= 16000 ? call.output : undefined,
     })),
   }));
 }

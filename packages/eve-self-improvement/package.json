@@ -35,14 +35,12 @@
       "default": "./dist/tools/index.mjs"
     },
     "./core": {
-      "eve-source": "./api/core.ts",
-      "types": "./dist/portable/api/core.d.ts",
-      "default": "./dist/portable/api/core.js"
+      "types": "./dist/extension/lib/core.d.ts",
+      "default": "./dist/extension/lib/core.mjs"
     },
     "./telemetry": {
-      "eve-source": "./api/telemetry.ts",
-      "types": "./dist/portable/api/telemetry.d.ts",
-      "default": "./dist/portable/api/telemetry.js"
+      "types": "./dist/extension/lib/telemetry.d.ts",
+      "default": "./dist/extension/lib/telemetry.mjs"
     },
     "./package.json": "./package.json"
   },
@@ -50,7 +48,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "eve extension build && tsc -p tsconfig.api.json && node scripts/bundle-blob.mjs && node ../../scripts/copy-package-license.mjs .",
+    "build": "eve extension build && node scripts/bundle-blob.mjs && node ../../scripts/copy-package-license.mjs .",
     "typecheck": "tsc --noEmit",
     "test": "pnpm run test:integration",
     "test:integration": "node --experimental-test-module-mocks --import tsx --test \"test/integration/*.test.ts\"",

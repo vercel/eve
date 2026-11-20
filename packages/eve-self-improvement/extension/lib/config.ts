@@ -152,7 +152,6 @@ export const configSchema = z
           "Shipping needs a trusted release.deploy executor, requiredChecks, authenticated smoke, change, runtime and publisher verifiers, and a report callback for rollback failures",
       });
   });
-/** Validated host settings with defaults applied. */
 export type Config = z.output<typeof configSchema>;
 export function safePath(value: string): boolean {
   return (
@@ -178,16 +177,23 @@ export function namespace(c: Config): string {
   ]).slice(0, 32);
 }
 export function hmacSecret(c: Config): string {
-  const secret = c.privacy.hmacSecret?.() ?? process.env.EVE_EVOLUTION_HMAC_SECRET;
+  const secret = c.privacy.hmacSecret?.() ?? process.env.EVE_SELF_IMPROVEMENT_HMAC_SECRET;
   if (!secret || secret.length < 32)
-    throw new Error("A private EVE_EVOLUTION_HMAC_SECRET of at least 32 characters is required");
+    throw new Error(
+      "A private EVE_SELF_IMPROVEMENT_HMAC_SECRET of at least 32 characters is required",
+    );
   return secret;
 }
 export async function credential(c: Config, kind: "github" | "vercel"): Promise<string> {
   const value =
     (await c.credentials[kind]?.()) ??
-    process.env[kind === "github" ? "EVE_EVOLUTION_GITHUB_TOKEN" : "EVE_EVOLUTION_VERCEL_TOKEN"];
-  if (!value?.trim()) throw new Error(`Missing ${kind} credentials for self-improvement`);
+    process.env[
+      kind === "github" ? "EVE_SELF_IMPROVEMENT_GITHUB_TOKEN" : "EVE_SELF_IMPROVEMENT_VERCEL_TOKEN"
+    ];
+  if (!value?.trim())
+    throw new Error(
+      `Configure credentials.${kind} or EVE_SELF_IMPROVEMENT_${kind.toUpperCase()}_TOKEN for self-improvement`,
+    );
   return value.trim();
 }
 export function owned(

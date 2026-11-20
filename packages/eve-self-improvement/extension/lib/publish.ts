@@ -20,7 +20,7 @@ export async function authorizedActive(
     active.experiment.coordinatorSession !== ctx.session.parent.sessionId ||
     active.experiment.status !== "coding"
   )
-    throw new Error("No authorized active evolution delegation for this session");
+    throw new Error("No authorized active self-improvement delegation for this session");
   active.experiment = await store(c).bindSession(active.lease, "writerSession", ctx.session.id);
   return active as Active & { experiment: NonNullable<Active["experiment"]> };
 }
@@ -146,11 +146,6 @@ export async function publishCandidate(
         throw new Error("PR publication unconfirmed; reconcile deterministic branch before retry");
     }
   }
-  const feedback = experiment.feedback;
-  if (
-    input.addressedThreads.some((id) => !feedback?.threads.some((t) => t.id === id && !t.resolved))
-  )
-    throw new Error("Resolution request names a thread outside the observed review");
   const candidate: Candidate = {
     branch,
     head,

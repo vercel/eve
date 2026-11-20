@@ -88,7 +88,7 @@ export async function checkout(
   if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error("Checkout needs an immutable source SHA");
   const mutable = sandbox as SandboxSession & { setNetworkPolicy?: (policy: any) => Promise<void> };
   if (!mutable.setNetworkPolicy)
-    throw new Error("Hosted evolution requires Vercel Sandbox firewall credential delivery");
+    throw new Error("Hosted self-improvement requires Vercel Sandbox firewall credential delivery");
   try {
     const repo = `/${c.repository.owner}/${c.repository.name}.git`.replace(
       /[.*+?^${}()|[\]\\]/g,
@@ -126,7 +126,6 @@ export async function checkout(
     await mutable.setNetworkPolicy("allow-all");
   }
 }
-/** Creates isolated checkout and verification execution, with deployment delegated to the trusted host service. */
 export function createHostedRunner(c: Config, git = new GitHub(c)): HostedRunner {
   return {
     checkout: (sandbox, sha) => checkout(c, sandbox, sha),

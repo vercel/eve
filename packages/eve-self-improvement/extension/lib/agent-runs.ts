@@ -21,13 +21,15 @@ function epoch(value: unknown): number | undefined {
     return Number.isFinite(parsed) ? parsed : undefined;
   }
 }
-/** Reads an opaque continuation from merged Agent Runs source offsets. */
 export function sourceCursor(offsets?: Record<string, unknown>): string | undefined {
   if (!offsets) return;
   const valid = (v: unknown): v is number =>
     Number.isSafeInteger(v) && (v as number) >= 0 && (v as number) <= 10000;
-  if (!valid(offsets.otel) || !valid(offsets.workflow)) return;
-  const result = [offsets.otel.toString(36), offsets.workflow.toString(36)];
+  const result: string[] = [];
+  if (offsets.otel !== undefined || offsets.workflow !== undefined) {
+    if (!valid(offsets.otel) || !valid(offsets.workflow)) return;
+    result.push(offsets.otel.toString(36), offsets.workflow.toString(36));
+  }
   const range = offsets.otelRange as { from?: unknown; to?: unknown } | undefined;
   if (range !== undefined) {
     if (
@@ -49,9 +51,8 @@ export function sourceCursor(offsets?: Record<string, unknown>): string | undefi
       return;
     result.push(offsets.otelCursor);
   }
-  return result.join(".");
+  return result.length ? result.join(".") : undefined;
 }
-/** Projects provider run metadata into a record without titles, prompts, or raw arguments. */
 export function minimizeRun(raw: Record<string, unknown>): Run | undefined {
   const createdAt = epoch(raw.createdAt ?? raw.startedAt);
   if (typeof raw.id !== "string" || typeof raw.status !== "string" || createdAt === undefined)
@@ -79,7 +80,6 @@ export function minimizeRun(raw: Record<string, unknown>): Run | undefined {
       : undefined,
   };
 }
-/** Reads a fixed, bounded Agent Runs window and reports incomplete pagination or provider evidence. */
 export async function readAgentRuns(
   c: Config,
   window: Window,

@@ -2,9 +2,9 @@ You run the private improvement loop as a durable eve session on Vercel. The ste
 
 Call step with action `next`. Follow its action:
 
-- `analyze`: delegate the returned payload to analyst. Pass its JSON reply to step with action `analysis`.
-- `code`: delegate the returned payload to maintainer. Pass its actual final reply to step with action `coded`. Publication is confirmed through the server's ledger, not prose.
-- `review`: delegate the complete returned payload to analyst. Pass its JSON reply to step with action `review`. The server still enforces every executable gate.
+- `analyze`: delegate the returned payload to analyst. Call step with action `analysis` after it finishes; the server reads its committed reply.
+- `code`: delegate the returned payload to maintainer. Call step with action `coded` after it finishes. Publication is confirmed through the server's ledger, not prose.
+- `review`: delegate the complete returned payload to analyst. Call step with action `review` after it finishes; the server reads its committed reply. The server still enforces every executable gate.
 - `pending`: call `eve__task_wait`, then read the actual child result. A task start receipt cannot complete a stage or release its lease.
 - `wait`: call step `next` once more if you just completed a local transition. If external checks, a new review round, evidence or provider work is pending, call step `finish`. The next real schedule resumes the same ledger/PR/head.
 - `done`: call step `finish`.

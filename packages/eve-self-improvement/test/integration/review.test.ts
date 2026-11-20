@@ -25,6 +25,7 @@ class FixtureGit extends GitHub {
   comment = "Conversation suggestion";
   reviewBody = "Submitted review";
   threadBody = "Thread finding";
+  threadAuthor: { viewerDidAuthor?: boolean; author?: { __typename: string } } = {};
   override async api<T = any>(path: string, method = "GET", body?: unknown): Promise<T> {
     this.calls.push({ path, method, body });
     let result: any;
@@ -95,7 +96,7 @@ class FixtureGit extends GitHub {
                   id: "thread",
                   isResolved: !this.unresolved,
                   isOutdated: false,
-                  comments: { nodes: [{ body: this.threadBody }] },
+                  comments: { nodes: [{ body: this.threadBody, ...this.threadAuthor }] },
                 },
               ],
               pageInfo: { hasNextPage: false },
@@ -298,4 +299,18 @@ test("checkout credential leases cannot authorize GitHub API writes and are clea
   assert.equal(policies.at(-1), "allow-all");
   assert.ok(!commands.join("\n").includes("fixture-token"));
   assert.ok(commands.join("\n").includes("--depth=2"));
+});
+
+test("automatic thread resolution requires the root comment to belong to the current bot", async () => {
+  const git = new FixtureGit(config());
+  for (const [author, allowed] of [
+    [{ viewerDidAuthor: true, author: { __typename: "Bot" } }, true],
+    [{ viewerDidAuthor: true, author: { __typename: "User" } }, false],
+    [{ viewerDidAuthor: false, author: { __typename: "Bot" } }, false],
+    [{}, false],
+  ] as const) {
+    git.threadAuthor = author;
+    const feedback = await git.feedback(candidate());
+    assert.equal(feedback.threads[0].canAutoResolve, allowed);
+  }
 });

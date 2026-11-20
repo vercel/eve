@@ -142,10 +142,58 @@ test("merged Agent Runs pagination continues an empty page with a stable absolut
     assert.equal(url.searchParams.has("page"), false);
   }
 });
+test("Agent Runs pagination binds current API cursors to the provider's clamped range", async () => {
+  const urls: URL[] = [];
+  const fetcher = requestFixture((url) => {
+    urls.push(url);
+    return Response.json(
+      urls.length === 1
+        ? {
+            runs: [],
+            meta: { dataConfidence: "real" },
+            pageInfo: {
+              hasMore: true,
+              nextCursor: "opaque_cursor",
+              nextOffsets: {
+                otelRange: { from: 120000, to: 200000 },
+                otelCursor: "opaque_cursor",
+              },
+            },
+          }
+        : {
+            runs: [{ id: "next-page", status: "failed", createdAt: 150 }],
+            meta: { dataConfidence: "real" },
+            pageInfo: { hasMore: false },
+          },
+    );
+  });
+  const result = await readAgentRuns(config(), { from: 100, to: 200 }, fetcher);
+  assert.equal(result.complete, true);
+  assert.deepEqual(
+    result.runs.map((run) => run.id),
+    ["next-page"],
+  );
+  assert.equal(urls[1].searchParams.get("cursor"), "2klc.4abk.opaque_cursor");
+  assert.equal(urls[1].searchParams.get("from"), "100");
+  assert.equal(urls[1].searchParams.get("to"), "200");
+});
 test("missing/repeated continuations, fake source confidence and provider errors remain unavailable", async () => {
   for (const value of [
     { runs: [], meta: { dataConfidence: "real" }, pageInfo: { hasMore: true } },
     { runs: [], meta: { dataConfidence: "synthetic" }, pageInfo: { hasMore: false } },
+    {
+      runs: [],
+      meta: { dataConfidence: "real" },
+      pageInfo: { hasMore: true, nextOffsets: { otelCursor: "unbound" } },
+    },
+    {
+      runs: [],
+      meta: { dataConfidence: "real" },
+      pageInfo: {
+        hasMore: true,
+        nextOffsets: { otelRange: { from: 200, to: 100 }, otelCursor: "reversed" },
+      },
+    },
   ])
     assert.equal(
       (
@@ -181,14 +229,14 @@ test("missing/repeated continuations, fake source confidence and provider errors
 });
 test("only the exact real app schedule authorizes a root cycle", () => {
   const ctx: any = {
-    toolName: "evolution__cycle",
+    toolName: "self-improvement__cycle",
     session: {
       id: "fixture",
       auth: { current: { authenticator: "app", principalType: "runtime", principalId: "eve:app" } },
-      schedule: { definition: "evolution__daily" },
+      schedule: { definition: "self-improvement__daily" },
     },
   };
-  assert.equal(authorizeCycle(ctx), "evolution__");
+  assert.equal(authorizeCycle(ctx), "self-improvement__");
   assert.throws(() =>
     authorizeCycle({
       ...ctx,

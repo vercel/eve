@@ -4,6 +4,15 @@ import { isScheduleAuth } from "eve/schedules";
 import extension from "../extension.js";
 import { feedbackScope, fingerprint, observe } from "../lib/observe.js";
 
+let warned = false;
+function warnTelemetry() {
+  if (warned) return;
+  warned = true;
+  console.warn(
+    "Self-improvement telemetry unavailable; check the host's private storage access and HMAC configuration",
+  );
+}
+
 export default defineHook({
   events: {
     "turn.started"(event) {
@@ -38,7 +47,9 @@ export default defineHook({
           at: ended,
           session: ctx.session.id,
           turn: observed.turnId,
-          principal: `${ctx.session.auth.current?.authenticator}:${ctx.session.auth.current?.principalId}`,
+          principal: ctx.session.auth.current
+            ? `${ctx.session.auth.current.authenticator}:${ctx.session.auth.current.principalId}`
+            : `anonymous-session:${ctx.session.id}`,
           kind: "tool",
           target: observed.name,
           outcome: event.data.outcome,
@@ -50,7 +61,7 @@ export default defineHook({
           revision: process.env.VERCEL_GIT_COMMIT_SHA,
         });
       } catch {
-        console.warn("Self-improvement tool telemetry unavailable; no arguments or errors logged");
+        warnTelemetry();
       }
     },
     async "turn.settled"(event, ctx) {
@@ -64,7 +75,9 @@ export default defineHook({
           at: ended,
           session: ctx.session.id,
           turn: event.data.turnId,
-          principal: `${ctx.session.auth.current?.authenticator}:${ctx.session.auth.current?.principalId}`,
+          principal: ctx.session.auth.current
+            ? `${ctx.session.auth.current.authenticator}:${ctx.session.auth.current.principalId}`
+            : `anonymous-session:${ctx.session.id}`,
           kind: "turn",
           target: "agent",
           outcome: event.data.outcome,
@@ -72,7 +85,7 @@ export default defineHook({
           revision: process.env.VERCEL_GIT_COMMIT_SHA,
         });
       } catch {
-        console.warn("Self-improvement turn telemetry unavailable; no content or errors logged");
+        warnTelemetry();
       }
     },
   },

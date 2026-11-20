@@ -58,19 +58,30 @@ function fixture() {
   };
 }
 
-test("new installs use Blob; existing database configuration never silently changes ledgers", () => {
-  assert.equal(storageBackend(config(), {}), "blob");
-  for (const name of ["DATABASE_URL", "POSTGRES_URL", "EVE_EVOLUTION_DATABASE_URL"])
-    assert.equal(storageBackend(config(), { [name]: "postgresql://fixture" }), "postgres");
-  assert.equal(
-    storageBackend(config({ databaseUrl: () => "postgresql://fixture" }), {}),
-    "postgres",
-  );
-  assert.equal(storageBackend(config({ database: "vercel-postgres" }), {}), "vercel-postgres");
-  assert.equal(
-    storageBackend(config({ database: "blob" }), { DATABASE_URL: "postgresql://fixture" }),
-    "blob",
-  );
+test("Postgres requires explicit configuration; host environment cannot switch the default ledger", () => {
+  const names = [
+    "DATABASE_URL",
+    "POSTGRES_URL",
+    "EVE_EVOLUTION_DATABASE_URL",
+    "EVE_SELF_IMPROVEMENT_DATABASE_URL",
+  ];
+  const original = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+  try {
+    for (const name of names) process.env[name] = "postgresql://fixture";
+    assert.equal(storageBackend(config()), "blob");
+    assert.equal(storageBackend(config({ databaseUrl: () => "postgresql://fixture" })), "postgres");
+    assert.equal(storageBackend(config({ database: "postgres" })), "postgres");
+    assert.equal(storageBackend(config({ database: "vercel-postgres" })), "vercel-postgres");
+    assert.equal(
+      storageBackend(config({ database: "blob", databaseUrl: () => "postgresql://fixture" })),
+      "blob",
+    );
+  } finally {
+    for (const name of names) {
+      if (original[name] === undefined) delete process.env[name];
+      else process.env[name] = original[name];
+    }
+  }
 });
 test("Blob claims, recovery and fencing remain atomic across independent workers", async () => {
   const { db, objects, time } = fixture();
@@ -199,21 +210,55 @@ test("Blob retries preserve the first observation and original expiry across con
   await db.observe(original);
   assert.equal(objects.values.size, 0, "Old replays cannot renew retention after deletion");
 });
-test("Blob interruption leaves explicitly incomplete evidence and the retry repairs it", async () => {
+test("failed Blob body writes leave no marker and interrupted indexing is repaired by retry", async () => {
   const { db, objects } = fixture(),
     sample = observation(1, { at: epoch });
   objects.failBefore = "/observations/";
   await assert.rejects(db.observe(sample), /interrupted/);
-  assert.deepEqual(await db.observations(0, epoch + 1), { values: [], complete: false });
-  await db.observe(sample);
-  assert.deepEqual(await db.observations(0, epoch + 1), { values: [sample], complete: true });
-  const body = [...objects.values.keys()].find((path) => path.includes("/observations/"))!;
-  objects.values.delete(body);
+  assert.equal(objects.values.size, 0);
+  assert.deepEqual(await db.observations(0, epoch + 1), { values: [], complete: true });
+  objects.failBefore = "/index/";
+  await assert.rejects(db.observe(sample), /interrupted/);
   assert.equal(
-    (await db.observations(0, epoch + 1)).complete,
-    false,
-    "Missing bodies never become passing empty evidence",
+    [...objects.values.keys()].filter((path) => path.includes("/observations/")).length,
+    1,
   );
+  assert.deepEqual(await db.observations(0, epoch + 1), { values: [], complete: true });
+  await db.observe({ ...sample, outcome: "changed retry" });
+  assert.deepEqual(await db.observations(0, epoch + 1), { values: [sample], complete: true });
+});
+test("Blob purge skips unknown index files and removes orphan markers while preserving canonical evidence", async () => {
+  const { db, objects } = fixture();
+  await db.observe(observation(1, { at: epoch }));
+  await db.observe(observation(2, { at: epoch }));
+  const body = `${db.prefix}observations/${digest(observation(2).id)}.json`;
+  objects.values.delete(body);
+  assert.equal((await db.observations(0, epoch + 1)).complete, false);
+  const unknown = `${db.prefix}index/unknown.json`;
+  objects.values.set(unknown, { text: "{}", etag: String(++objects.version) });
+  await db.purge();
+  assert.equal(
+    objects.values.has(unknown),
+    true,
+    "Unknown files are not deleted by evidence cleanup",
+  );
+  assert.deepEqual(await db.observations(0, epoch + 1), {
+    values: [observation(1, { at: epoch })],
+    complete: true,
+  });
+  const indexes = [...objects.values.keys()].filter(
+    (path) => path.includes("/index/") && path !== unknown,
+  );
+  assert.equal(indexes.length, 1);
+  const alias = indexes[0].replace(`${epoch}_`, `${epoch - 1}_`);
+  objects.values.set(alias, { text: "{}", etag: String(++objects.version) });
+  assert.equal((await db.observations(0, epoch + 1)).complete, false);
+  await db.purge();
+  assert.equal(objects.values.has(alias), false);
+  assert.deepEqual(await db.observations(0, epoch + 1), {
+    values: [observation(1, { at: epoch })],
+    complete: true,
+  });
 });
 test("racing duplicate Blob observations repair indexes without inventing a second sample", async () => {
   const { db, objects } = fixture();

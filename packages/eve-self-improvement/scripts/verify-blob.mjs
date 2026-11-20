@@ -5,9 +5,16 @@ import { pathToFileURL } from "node:url";
 import path from "node:path";
 import { head } from "@vercel/blob";
 const requireConsumer = createRequire(path.resolve(process.argv[2] ?? ".", "package.json"));
-const { configSchema, store, BlobStore, storageBackend } = await import(
-  pathToFileURL(requireConsumer.resolve("@eve/self-improvement/core"))
-);
+const library = (name) =>
+  pathToFileURL(
+    path.join(
+      path.dirname(requireConsumer.resolve("@eve/self-improvement/package.json")),
+      "dist/extension/lib",
+      `${name}.mjs`,
+    ),
+  );
+const { configSchema } = await import(library("config"));
+const { store, BlobStore, storageBackend } = await import(library("store"));
 const c = configSchema.parse({
   instance: `blob-verification-${randomUUID()}`,
   project: {

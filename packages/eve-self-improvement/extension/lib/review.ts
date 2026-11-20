@@ -2,6 +2,8 @@ import { checkPath, digest, type Config } from "./config.js";
 import { GitHub } from "./providers.js";
 import type { Candidate, Check, Experiment, ReviewFeedback } from "./types.js";
 
+export class MergePolicyBlocked extends Error {}
+
 export interface ReviewInspection {
   checks: Check[];
   feedback: ReviewFeedback;
@@ -62,7 +64,6 @@ export function completePatch(file: {
     lines.filter((line) => line.startsWith("-")).length === file.deletions
   );
 }
-/** Reads the current published head, complete diff, review surfaces, and checks before accepting a candidate. */
 export async function inspectCandidate(
   c: Config,
   candidate: Candidate,
@@ -196,7 +197,6 @@ export async function markReady(git: GitHub, pr: any): Promise<void> {
       { id: pr.node_id },
     );
 }
-/** Merges only the independently verified current head after the configured repository checks and review requirements pass. */
 export async function mergeExact(
   c: Config,
   candidate: Candidate,
@@ -224,7 +224,9 @@ export async function mergeExact(
     pr.reviewDecision === "CHANGES_REQUESTED" ||
     pr.reviewDecision === "REVIEW_REQUIRED"
   )
-    throw new Error("GitHub's enforced merge policy blocks this exact head; no bypass attempted");
+    throw new MergePolicyBlocked(
+      "GitHub's enforced merge policy blocks this exact head; no bypass attempted",
+    );
   const merged = await git.api(`/repos/${git.repo}/pulls/${candidate.pr}/merge`, "PUT", {
     sha: candidate.head,
     merge_method: "squash",

@@ -4,4 +4,3 @@ import { otel } from "eve/instrumentation/otel";
 export const privateTelemetry = otel({
   tracePolicy: () => ({ emit: true, recordInputs: false, recordOutputs: false }),
 });
-export { observe, pseudonym } from "../extension/lib/observe.js";

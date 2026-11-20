@@ -5,7 +5,6 @@ import { Vercel, assertDeployment } from "./providers.js";
 import { compareMetrics } from "./gates.js";
 import type { Candidate, Check, Deployment, Receipt, RuntimeProof } from "./types.js";
 
-/** Runs a fresh authenticated tool turn and verifies its actual completed event and deterministic output. */
 export async function authenticatedSmoke(
   c: Config,
   deployment: Deployment,
@@ -80,7 +79,6 @@ export function receiptValid(receipt: Receipt | undefined, expectedId?: string):
     return false;
   }
 }
-/** Verifies the exact ready preview before attaching evaluation credentials and exercising changed behavior. */
 export async function verifyChange(
   c: Config,
   candidate: Candidate,
@@ -134,7 +132,6 @@ export async function verifyChange(
   await platform.deployment(preview.id, candidate.head, "preview");
   return checks;
 }
-/** Collects exact production identity, authenticated behavior, runtime, publisher, and optional delivery proof. */
 export async function verifyRelease(
   c: Config,
   deployment: Deployment,

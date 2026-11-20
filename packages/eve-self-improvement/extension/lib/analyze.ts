@@ -3,7 +3,6 @@ import { metricPriority } from "./gates.js";
 import type { Evidence, Finding, Observation } from "./types.js";
 
 const p95 = (values: number[]) => values.sort((a, b) => a - b)[Math.ceil(values.length * 0.95) - 1];
-/** Ranks evidence-backed correction, failure, latency, and redundant-work findings, preserving missing-evidence boundaries. */
 export function rankFindings(evidence: Evidence, baseline?: Evidence): Finding[] {
   if (!evidence.complete) return [];
   const findings: Finding[] = [];
@@ -120,7 +119,6 @@ export function rankFindings(evidence: Evidence, baseline?: Evidence): Finding[]
     .sort((a, b) => metricPriority(b.metric) - metricPriority(a.metric) || b.count - a.count)
     .slice(0, 3);
 }
-/** Summarizes observed run counts and available provider pricing without inventing missing costs. */
 export function summarizeUsage(evidence: Evidence) {
   const runs = evidence.runs.filter((r) => !r.scheduled);
   const priced = runs.filter((r) => r.usage?.costUsd !== undefined);

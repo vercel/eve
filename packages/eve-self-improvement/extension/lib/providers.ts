@@ -50,7 +50,6 @@ export class ProviderError extends Error {
     super(`${provider} request failed (HTTP ${status}); response withheld`);
   }
 }
-/** Wraps repository, signed publishing, and review APIs for the configured GitHub repository. */
 export class GitHub {
   readonly repo: string;
   constructor(
@@ -149,7 +148,7 @@ export class GitHub {
     let cursor: string | null = null;
     for (let page = 0; page < 10; page++) {
       const result: any = await this.graphql(
-        `query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100,after:$cursor){nodes{id isResolved isOutdated comments(first:1){nodes{body}}}pageInfo{hasNextPage endCursor}}}}}`,
+        `query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100,after:$cursor){nodes{id isResolved isOutdated comments(first:1){nodes{body viewerDidAuthor author{__typename}}}}pageInfo{hasNextPage endCursor}}}}}`,
         {
           owner: this.config.repository.owner,
           name: this.config.repository.name,
@@ -166,6 +165,9 @@ export class GitHub {
           resolved: t.isResolved,
           outdated: t.isOutdated,
           body: String(t.comments.nodes[0]?.body ?? ""),
+          canAutoResolve:
+            t.comments.nodes[0]?.viewerDidAuthor === true &&
+            t.comments.nodes[0]?.author?.__typename === "Bot",
         })),
       );
       if (!data.pageInfo.hasNextPage)
@@ -195,7 +197,6 @@ export class GitHub {
     );
   }
 }
-/** Wraps deployment identity, preview selection, and supported rollback APIs for the configured Vercel project. */
 export class Vercel {
   constructor(
     readonly config: Config,
@@ -273,7 +274,6 @@ export class Vercel {
     );
   }
 }
-/** Requires the exact project, team, immutable source, environment, and clean HTTPS deployment origin. */
 export function assertDeployment(
   c: Config,
   d: Deployment,

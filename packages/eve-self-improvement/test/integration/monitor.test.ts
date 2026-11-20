@@ -195,3 +195,15 @@ test("a prior receipt cannot satisfy another release or rollback verification", 
   assert.equal(receiptValid(receipt, "release:new"), false);
   assert.equal(receiptValid(receipt, "release:old"), true);
 });
+
+test("a superseding production deployment ends monitoring without blocking or rollback", async () => {
+  const f = fixture();
+  f.setCurrent({ ...deployed, id: "dpl_newer", sha: "d".repeat(40) });
+  f.services.verify = async () => {
+    throw new Error("Production alias moved");
+  };
+  const e = await monitorRelease(config(), released(), f.services);
+  assert.equal(e.status, "superseded");
+  assert.equal(f.records.size, 0);
+  assert.ok(!f.calls.some((call) => call.startsWith("verify:") || call.startsWith("rollback:")));
+});

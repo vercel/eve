@@ -12,14 +12,14 @@ export async function createRevert(c: Config, experiment: Experiment): Promise<C
     bad = experiment.release?.sha;
   if (!bad || !/^[a-f0-9]{40}$/.test(bad))
     throw new Error("Missing offending release SHA for revert");
+  if (main !== bad)
+    throw new Error(
+      "Main advanced after the regression; reconcile the revert against those changes before publishing",
+    );
   const sandbox = await openIndependent(c);
   try {
     await checkout(c, sandbox, main);
 
-    if (main !== bad)
-      throw new Error(
-        "Main advanced after the regression; reconcile the revert against those changes before publishing",
-      );
     const reverted = await sandbox.run({
       command: `git revert --no-commit ${bad}`,
       workingDirectory: repositoryPath,

@@ -20,8 +20,9 @@ export default defineHook({
         return;
       const db = store(extension.config);
       const occurrence = await db.get<{ session: string; analysisId: string }>("occurrence:last");
-      if (occurrence?.session !== ctx.session.id || !(await db.get(occurrence.analysisId))) return;
+      if (occurrence?.session !== ctx.session.id) return;
       const decision = await db.get<{ status: string }>(occurrence.analysisId);
+      if (!decision) return;
       await db.put("occurrence:last", {
         ...occurrence,
         settled:

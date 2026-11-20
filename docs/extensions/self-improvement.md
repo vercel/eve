@@ -23,12 +23,11 @@ pnpm add @eve/self-improvement
 
 Add one mount and a telemetry policy:
 
-```ts title="agent/extensions/evolution.ts"
-import evolution from "@eve/self-improvement";
+```ts title="agent/extensions/self-improvement.ts"
+import selfImprovement from "@eve/self-improvement";
 
-export default evolution({
+export default selfImprovement({
   instance: "support",
-  database: "blob",
   project: {
     teamId: "team_YOUR_TEAM_ID",
     projectId: "prj_YOUR_PROJECT_ID",
@@ -57,15 +56,16 @@ expression uses UTC, so a fixed expression shifts local time across DST.
 
 Connect a **private Blob store** to the host project. It uses `BLOB_STORE_ID`
 with project OIDC, or `BLOB_READ_WRITE_TOKEN`. The default setup needs no
-Postgres service or driver.
+Postgres service or driver. Postgres requires explicit `database` or `databaseUrl`;
+environment variables never switch the backend.
 
 Configure these additional secrets in the host environment:
 
-| Variable                     | Access                                                                                                       |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `EVE_EVOLUTION_HMAC_SECRET`  | At least 32 random characters for pseudonymizing identifiers and argument fingerprints                       |
-| `EVE_EVOLUTION_GITHUB_TOKEN` | Repository read, contents/PR write, reviews/checks read, and normal merge authority when shipping is enabled |
-| `EVE_EVOLUTION_VERCEL_TOKEN` | The configured team's Agent Runs, Sandbox, and deployment access                                             |
+| Variable                            | Access                                                                                                       |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `EVE_SELF_IMPROVEMENT_HMAC_SECRET`  | At least 32 random characters for pseudonymizing identifiers and argument fingerprints                       |
+| `EVE_SELF_IMPROVEMENT_GITHUB_TOKEN` | Repository read, contents/PR write, reviews/checks read, and normal merge authority when shipping is enabled |
+| `EVE_SELF_IMPROVEMENT_VERCEL_TOKEN` | The configured team's Agent Runs, Sandbox, and deployment access                                             |
 
 Trusted credential resolvers can supply short-lived tokens. Keep credentials
 outside prompts and candidate processes. Repository signing, SSO, branch
@@ -90,8 +90,8 @@ formatting. Types are available from `@eve/self-improvement/core`.
 ## Verify the first occurrence
 
 Deploy with [eve CLI](/docs/guides/deployment/vercel). As the configured owner,
-ask the agent to call `evolution__doctor` with `sandbox: true`. Inspect
-`evolution__status` for findings, PRs, exact heads, checks, and next actions.
+ask the agent to call `self-improvement__doctor` with `sandbox: true`. Inspect
+`self-improvement__status` for findings, PRs, exact heads, checks, and next actions.
 
 Observe the next real scheduled occurrence: its runtime identity, cycle tool
 call, completed coordinator, matching stored decision, and configured report

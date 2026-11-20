@@ -10,12 +10,10 @@ export interface Check {
   reason: string;
   url?: string;
 }
-/** An absolute Agent Runs evidence window in epoch seconds. */
 export interface Window {
   from: number;
   to: number;
 }
-/** Minimized run metadata without conversation or argument contents. */
 export interface Run {
   id: string;
   status: string;
@@ -26,7 +24,6 @@ export interface Run {
   scheduled: boolean;
   usage?: { inputTokens?: number; outputTokens?: number; costUsd?: number };
 }
-/** A pseudonymized tool, turn, reply, or explicit feedback observation. */
 export interface Observation {
   id: string;
   at: number;
@@ -42,7 +39,6 @@ export interface Observation {
   confidence?: number;
   revision?: string;
 }
-/** A fixed telemetry window with explicit completeness for each evidence source. */
 export interface Evidence {
   window: Window;
   complete: boolean;
@@ -122,7 +118,13 @@ export interface ReviewFeedback {
   comments: { id: string; body: string; url: string }[];
   commentsDigest?: string;
   omittedComments?: number;
-  threads: { id: string; resolved: boolean; outdated: boolean; body: string }[];
+  threads: {
+    id: string;
+    resolved: boolean;
+    outdated: boolean;
+    body: string;
+    canAutoResolve?: boolean;
+  }[];
   threadsDigest?: string;
   reviews: { id: string; state: string; body: string; submittedAt: string }[];
   reviewsDigest?: string;
@@ -167,6 +169,8 @@ export interface Experiment {
     | "deploying"
     | "monitoring"
     | "shipped"
+    | "merged"
+    | "superseded"
     | "rejected"
     | "blocked"
     | "rolled-back";
@@ -177,6 +181,7 @@ export interface Experiment {
   candidate?: Candidate;
   checks: Check[];
   feedback?: ReviewFeedback;
+  attemptedHead?: string;
   verifiedHead?: string;
   previewHead?: string;
   reviewedDigest?: string;
@@ -192,13 +197,11 @@ export interface Experiment {
   };
   baseUpdate?: { expectedHead: string; base: string; startedAt: number; attempts: number };
 }
-/** An expiring owner claim with a monotonically increasing fencing token. */
 export interface Lease {
   owner: string;
   fence: number;
   until: number;
 }
-/** The current fenced claim and resumable experiment. */
 export interface Active {
   lease: Lease;
   experiment: Experiment | null;
@@ -236,7 +239,7 @@ export interface SelfImprovementOptions {
   cron?: string;
   credentials?: { github?: () => Promise<string>; vercel?: () => Promise<string> };
 
-  /** Private Blob by default; existing Postgres settings keep selecting the existing ledger. */
+  /** Private Blob by default; select Postgres explicitly with database or databaseUrl. */
   database?: "blob" | "postgres" | "vercel-postgres";
   databaseUrl?: () => string;
   privacy?: { retentionDays?: number; ledgerDays?: number; hmacSecret?: () => string };
@@ -279,7 +282,6 @@ export interface SelfImprovementOptions {
   /** Reports through the host bot/connector with a stable idempotency ID and confirmed receipt. */
   report?: (report: Report) => Promise<Receipt>;
 }
-/** Isolated checkout and validation execution with a trusted external deployment boundary. */
 export interface HostedRunner {
   checkout(sandbox: SandboxSession, sha: string): Promise<void>;
   verify(candidate: Candidate): Promise<Check[]>;

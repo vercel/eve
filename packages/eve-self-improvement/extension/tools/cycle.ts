@@ -10,7 +10,7 @@ export default defineTool({
   inputSchema: z.object({}),
   async execute(_input, ctx) {
     const next = await prepare(ctx);
-    if (next.action === "done") return finish(undefined, next.report);
+    if (next.action === "done") return finish(next.lease, next.report, ctx.session.id);
     return {
       status: "delegated",
       agent: `${next.prefix}coordinator`,

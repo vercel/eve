@@ -14,6 +14,7 @@ import {
   mergeExact,
   reviewFingerprint,
   reconcileBaseUpdate,
+  MergePolicyBlocked,
 } from "./review.js";
 import { receiptValid, verifyChange, verifyRelease } from "./verify.js";
 import { store } from "./store.js";
@@ -39,7 +40,7 @@ const reviewDecision = z.object({
   action: z.enum(["fix", "accept", "wait"]),
   reason: z.string().min(1).max(4000),
 });
-const terminal = new Set(["shipped", "rejected", "rolled-back"]);
+const terminal = new Set(["shipped", "merged", "superseded", "rejected", "rolled-back"]);
 const date = () => new Date().toISOString().slice(0, 10);
 function parseJson(text: string): unknown {
   return JSON.parse(text.replace(/^```(?:json)?\s*/, "").replace(/\s*```$/, ""));
@@ -52,7 +53,9 @@ export function authorizeCycle(ctx: Pick<ToolContext, "session" | "toolName">): 
     ctx.session.parent ||
     ctx.session.schedule?.definition !== `${prefix}daily`
   )
-    throw new Error("Evolution requires its real app schedule; message claims do not authorize it");
+    throw new Error(
+      "Self-improvement requires its real app schedule; message claims do not authorize it",
+    );
   return prefix;
 }
 export async function bindings(c: Config): Promise<Check> {
@@ -127,12 +130,13 @@ export async function prepare(
     const previous = await db.get<Experiment>("release:last");
     if (
       previous?.release?.deployment &&
+      previous.status !== "superseded" &&
       !previous.release.rollback &&
       active.experiment?.status !== "rolled-back" &&
       (!active.experiment || terminal.has(active.experiment.status) || !active.experiment.release)
     ) {
       const monitoredPrevious = await monitorRelease(c, previous);
-      if (monitoredPrevious.status !== "shipped") {
+      if (!["shipped", "superseded"].includes(monitoredPrevious.status)) {
         if (
           active.experiment &&
           active.experiment.id !== monitoredPrevious.id &&
@@ -303,7 +307,7 @@ async function current(c: Config, lease: Lease): Promise<Active & { experiment: 
     active.lease.fence !== lease.fence ||
     active.lease.until <= Date.now()
   )
-    throw new Error("Evolution lease lost; stop and reconcile");
+    throw new Error("Self-improvement lease lost; stop and reconcile");
   await store(c).renew(lease);
   return active as Active & { experiment: Experiment };
 }
@@ -424,7 +428,11 @@ export async function advance(lease: Lease): Promise<Action> {
       ),
     };
   }
-  if (e.status === "deploying" || e.status === "merging") {
+  if (
+    e.status === "deploying" ||
+    e.status === "merging" ||
+    (e.status === "blocked" && e.release?.sha && !e.release.deployment)
+  ) {
     if (!e.release) throw new Error("Release baseline missing; stop instead of deploying");
     const pr = await git.api(`/repos/${git.repo}/pulls/${e.candidate!.pr}`);
     if (pr.merged && /^[a-f0-9]{40}$/.test(pr.merge_commit_sha ?? "")) {
@@ -440,16 +448,51 @@ export async function advance(lease: Lease): Promise<Action> {
       }
       const inspection = await inspectCandidate(c, e.candidate!, git);
       const fingerprint = reviewFingerprint(e.candidate!, inspection);
-      if (e.reviewedDigest !== fingerprint) {
+      if (
+        e.reviewedDigest !== fingerprint ||
+        (await git.main()) !== e.candidate!.base ||
+        !allPassed(inspection.checks) ||
+        inspection.pr.state === "closed"
+      ) {
         e.status = "review";
+        e.release = undefined;
         e.reviewDigest = fingerprint;
         e.feedback = inspection.feedback;
         await save(c, active);
-        return { action: "review", lease, payload: reviewPayload(e.candidate!, inspection) };
+        return e.reviewedDigest !== fingerprint
+          ? { action: "review", lease, payload: reviewPayload(e.candidate!, inspection) }
+          : { action: "wait", lease };
       }
-      e.release.sha = await mergeExact(c, e.candidate!, e.reviewedDigest!, git);
+      const baseline = await platform.deployment(c.project.productionUrl);
+      const proof = await verifyRelease(c, baseline);
+      if (!allPassed(proof.checks)) {
+        e.reason = "Current production baseline could not be verified; merge remains paused";
+        await save(c, active);
+        return { action: "done", lease };
+      }
+      e.release.baseline = baseline;
+      e.release.baselineChecks = proof.checks;
+      await save(c, active);
+      try {
+        e.release.sha = await mergeExact(c, e.candidate!, e.reviewedDigest!, git);
+      } catch (error) {
+        if (!(error instanceof MergePolicyBlocked)) throw error;
+        e.status = "review";
+        e.release = undefined;
+        e.reason =
+          "GitHub merge policy is pending; review and baseline will be reconciled before retry";
+        await save(c, active);
+        return { action: "wait", lease };
+      }
     }
-    if ((await git.main()) !== e.release.sha) {
+    let deployed = await platform.deployment(c.project.productionUrl);
+    if (deployed.sha !== e.release.sha && deployed.id !== e.release.baseline.id) {
+      e.status = "superseded";
+      e.reason = "Another production deployment superseded this release before deployment";
+      await save(c, active);
+      return { action: "done", lease };
+    }
+    if (deployed.sha !== e.release.sha && (await git.main()) !== e.release.sha) {
       e.status = "blocked";
       e.reason = "Target branch changed after merge; reconcile before deployment";
       await save(c, active);
@@ -457,24 +500,25 @@ export async function advance(lease: Lease): Promise<Action> {
     }
     e.status = "deploying";
     await save(c, active);
-    let deployed = await platform.deployment(c.project.productionUrl);
     if (deployed.sha !== e.release.sha) {
       if (c.policy.mode !== "ship") {
         e.reason = "Release paused: current policy permits proposals, not new deployments";
         await save(c, active);
         return { action: "done", lease };
       }
-      if (deployed.id !== e.release.baseline.id)
-        throw new Error("Production moved during release; do not overwrite another deployment");
       if (e.release.deployStartedAt) {
         const attempts = await platform.deploymentAttempts(e.release.sha);
-        if (
-          attempts.some((attempt) => !["ERROR", "CANCELED"].includes(attempt.state)) ||
-          Date.now() - e.release.deployStartedAt < 1_200_000
-        ) {
+        if (Date.now() - e.release.deployStartedAt < 1_200_000) {
           e.reason = "Reconciled a pending/unconfirmed deployment; waiting without duplicating it";
           await save(c, active);
           return { action: "wait", lease };
+        }
+        if (attempts.some((attempt) => !["ERROR", "CANCELED"].includes(attempt.state))) {
+          e.status = "blocked";
+          e.reason =
+            "Deployment did not reach the production alias within the reconciliation deadline; inspect the existing attempt before retrying";
+          await save(c, active);
+          return { action: "done", lease };
         }
       }
       if ((e.release.deployAttempts ?? 0) >= c.policy.maxAttempts) {
@@ -545,15 +589,24 @@ export async function advance(lease: Lease): Promise<Action> {
     return { action: "done", lease };
   }
   if (inspection.pr.merged) {
-    e.status = "blocked";
-    e.reason =
-      "PR was merged outside this release transaction; verify production and capture a fresh baseline before releasing";
+    const sha = inspection.pr.merge_commit_sha;
+    const verified =
+      e.verifiedHead === candidate.head &&
+      inspection.pr.head?.sha === candidate.head &&
+      /^[a-f0-9]{40}$/.test(sha ?? "") &&
+      (await git.api(`/repos/${git.repo}/commits/${sha}`)).commit?.verification?.verified === true;
+    e.status = verified ? "merged" : "blocked";
+    e.reason = verified
+      ? "The verified proposal was merged externally; no deployment was requested by this controller"
+      : "PR was merged outside this release transaction without a matching verified head/signature; reconcile before releasing";
     await save(c, active);
     return { action: "done", lease };
   }
-  if (e.verifiedHead !== candidate.head) {
+  if (e.verifiedHead !== candidate.head && e.attemptedHead !== candidate.head) {
     e.checks = await createHostedRunner(c).verify(candidate);
+    e.attemptedHead = candidate.head;
     if (allPassed(e.checks)) e.verifiedHead = candidate.head;
+    await save(c, active);
   }
   if (e.verifiedHead === candidate.head && e.previewHead !== candidate.head) {
     const checks = await verifyChange(c, candidate, platform);
@@ -573,7 +626,11 @@ export async function advance(lease: Lease): Promise<Action> {
   }
   if (e.verifiedHead === candidate.head && e.previewHead === candidate.head) {
     for (const id of candidate.addressedThreads)
-      if (inspection.feedback.threads.some((thread) => thread.id === id && !thread.resolved))
+      if (
+        inspection.feedback.threads.some(
+          (thread) => thread.id === id && !thread.resolved && thread.canAutoResolve === true,
+        )
+      )
         await git.resolveThread(id);
     await markReady(git, inspection.pr);
   }
@@ -647,7 +704,11 @@ function reviewPayload(
     );
   return payload;
 }
-export async function finish(lease: Lease | undefined, supplied?: Report): Promise<Report> {
+export async function finish(
+  lease: Lease | undefined,
+  supplied?: Report,
+  rootSession?: string,
+): Promise<Report> {
   const c = extension.config,
     db = store(c);
   const active = lease ? await db.active() : null;
@@ -660,6 +721,27 @@ export async function finish(lease: Lease | undefined, supplied?: Report): Promi
     );
   if (report.status === "already-running") return report;
   await db.put(`analysis:${report.date}`, report);
+  const occurrence = await db.get<{ session: string; analysisId: string }>("occurrence:last");
+  const session =
+    rootSession ??
+    (active?.lease.owner === lease?.owner &&
+    active?.lease.fence === lease?.fence &&
+    active &&
+    active.lease.until > Date.now()
+      ? active.experiment?.rootSession
+      : undefined);
+  if (
+    session &&
+    occurrence?.session === session &&
+    occurrence.analysisId === `analysis:${report.date}`
+  )
+    await db.put("occurrence:last", {
+      ...occurrence,
+      settled: !["interrupted", "setup-blocked", "analyzing"].includes(report.status),
+      outcome: report.status === "interrupted" ? "failed" : "completed",
+      status: report.status,
+      at: new Date().toISOString(),
+    });
   if (lease) await db.release(lease);
   if (c.report) {
     try {

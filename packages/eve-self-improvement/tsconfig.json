@@ -10,5 +10,5 @@
     "noEmit": true,
     "stripInternal": true
   },
-  "include": ["extension/**/*.ts", "api/**/*.ts", "test/**/*.ts"]
+  "include": ["extension/**/*.ts", "test/**/*.ts"]
 }

@@ -4,39 +4,32 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 
 const require = createRequire(import.meta.url);
-for (const output of [
-  "dist/portable/extension/lib/blob-store.js",
-  "dist/extension/lib/blob-store.mjs",
-]) {
-  const extension = output.endsWith(".mjs");
-  await build({
-    entryPoints: ["extension/lib/blob-store.ts"],
-    outfile: `${output}.tmp`,
-    bundle: true,
-    platform: "node",
-    target: "node24",
-    format: "esm",
-    external: ["./config.js", "@vercel/oidc"],
-    legalComments: "inline",
-    plugins: extension
-      ? [
-          {
-            name: "extension-imports",
-            setup(build) {
-              build.onResolve({ filter: /^\.\/config\.js$/ }, () => ({
-                path: "./config.mjs",
-                external: true,
-              }));
-            },
-          },
-        ]
-      : [],
-    banner: {
-      js: 'import { createRequire as __blobCreateRequire } from "node:module"; const require = __blobCreateRequire(import.meta.url);',
+const output = "dist/extension/lib/blob-store.mjs";
+await build({
+  entryPoints: ["extension/lib/blob-store.ts"],
+  outfile: `${output}.tmp`,
+  bundle: true,
+  platform: "node",
+  target: "node24",
+  format: "esm",
+  external: ["./config.js", "@vercel/oidc"],
+  legalComments: "inline",
+  plugins: [
+    {
+      name: "extension-imports",
+      setup(build) {
+        build.onResolve({ filter: /^\.\/config\.js$/ }, () => ({
+          path: "./config.mjs",
+          external: true,
+        }));
+      },
     },
-  });
-  await rename(`${output}.tmp`, output);
-}
+  ],
+  banner: {
+    js: 'import { createRequire as __blobCreateRequire } from "node:module"; const require = __blobCreateRequire(import.meta.url);',
+  },
+});
+await rename(`${output}.tmp`, output);
 
 async function packageRoot(name, resolver = require) {
   let directory = dirname(resolver.resolve(name));
