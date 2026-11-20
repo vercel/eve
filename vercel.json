@@ -11,6 +11,16 @@
             }
           }
         }
+      },
+      {
+        "name": "test:public-types",
+        "env": {
+          "EVE_TELEMETRY_DISABLED": {
+            "constant": {
+              "value": "1"
+            }
+          }
+        }
       }
     ]
   }
