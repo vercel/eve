@@ -267,11 +267,17 @@
  *             only in the Workflow binding, the named engine modules whose
  *             step IDs pin their paths, and test helpers. Everything else
  *             goes through `DurableHost`.
+ *   rule 72 — Each `EveRuntime` slot has one owner module, and everything
+ *             else uses that owner's accessor (`platformContext()`,
+ *             `requireDurableHost()`, `getInstrumentationRuntime()`, ...).
+ *             Value imports of `#runtime/eve-runtime.js` and the
+ *             `eve.runtime` key appear only in boot, the slot owners, and
+ *             test helpers. Type-only imports of `EveRuntime` stay allowed.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
  * may only shrink (as offenders are removed) — they may never grow.
- * Rules 67, 68, 69, 70, and 71 have no baseline.
+ * Rules 67, 68, 69, 70, 71, and 72 have no baseline.
  */
 import { glob, readFile, readdir, lstat } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -404,6 +410,7 @@ function isTsLike(relPath) {
  *   rule69: Map<string, number>;
  *   rule70: Violation[];
  *   rule71: Violation[];
+ *   rule72: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -442,6 +449,7 @@ async function scanRepo(state) {
     checkRule69(posix, content, state.rule69);
     checkRule70(posix, lines, state.rule70);
     checkRule71(posix, content, state.rule71);
+    checkRule72(posix, content, state.rule72);
     if (posix.startsWith("packages/tracing/src/")) {
       for (const [index, line] of lines.entries()) {
         const imports = [...line.matchAll(/(?:from\s+|import\s*\()(["'])([^"']+)\1/g)];
@@ -1453,6 +1461,41 @@ function checkRule71(posix, content, violations) {
       message: `reaches the Workflow SDK's World through \`${WORKFLOW_RUNTIME_FACADE}\`. Outside the Workflow engine, eve uses durable execution through \`DurableHost\` (\`requireDurableHost()\` in \`#execution/hosts.js\`); add the eve-level operation you need there and implement it in \`execution/workflow-host/host.ts\`.`,
     });
   }
+}
+
+// ---------- Rule 72: one owner per EveRuntime slot ----------
+
+const EVE_RUNTIME_MODULE = "#runtime/eve-runtime.js";
+const EVE_RUNTIME_SLOT_OWNERS = new Set(
+  [
+    "execution/hosts.ts",
+    "instrumentation/providers.ts",
+    "instrumentation/runtime-global.ts",
+    "platform/context.ts",
+    "platform/install-runtime.ts",
+    "runtime/boot.ts",
+    "runtime/eve-runtime.ts",
+    "runtime/sessions/runtime-session.ts",
+  ].map((file) => `${EVE_SRC}${file}`),
+);
+const NAMED_IMPORT_RE = /import\s*\{([^}]*)\}\s*from\s*(["'])([^"']+)\2/g;
+
+function checkRule72(posix, content, violations) {
+  if (!posix.startsWith(EVE_SRC) || posix.endsWith(".test.ts")) return;
+  if (EVE_RUNTIME_SLOT_OWNERS.has(posix) || posix.startsWith(`${EVE_SRC}internal/testing/`)) return;
+  const message = `reaches the process \`EveRuntime\` directly. Each runtime slot has one owner module; use its accessor (\`platformContext()\`, \`requireDurableHost()\`, \`getInstrumentationRuntime()\`, \`getActiveRuntimeSession()\`), or add a slot and its owner to \`EVE_RUNTIME_SLOT_OWNERS\`. Type-only imports of \`EveRuntime\` are fine.`;
+  const lineOf = (index) => content.slice(0, index).split("\n").length;
+  for (const match of content.matchAll(NAMED_IMPORT_RE)) {
+    if (aliasOfSpecifier(posix, match[3]) !== EVE_RUNTIME_MODULE) continue;
+    const values = match[1]
+      .split(",")
+      .map((name) => name.trim())
+      .filter((name) => name !== "" && !name.startsWith("type "));
+    if (values.length === 0) continue;
+    violations.push({ rule: 72, file: `${posix}:${lineOf(match.index)}`, message });
+  }
+  const key = content.indexOf('Symbol.for("eve.runtime")');
+  if (key >= 0) violations.push({ rule: 72, file: `${posix}:${lineOf(key)}`, message });
 }
 
 /**
@@ -2544,6 +2587,7 @@ async function main() {
     rule69: /** @type {Map<string, number>} */ (new Map()),
     rule70: /** @type {Violation[]} */ ([]),
     rule71: /** @type {Violation[]} */ ([]),
+    rule72: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -2680,6 +2724,7 @@ async function main() {
   violations.push(...state.rule66);
   violations.push(...state.rule70);
   violations.push(...state.rule71);
+  violations.push(...state.rule72);
   for (const [file, count] of state.rule69) {
     violations.push({
       rule: 69,

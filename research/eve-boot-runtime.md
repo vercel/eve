@@ -19,11 +19,10 @@ The platform layer (#6661, #6687, and #6688) made the cost concrete. Moving Verc
 contract still left 51 `platformContext()` lookups spread through leaf code, because no value flows
 from boot to the code that needs it.
 
-This doc proposes that boot become a function that returns a value. `bootEve()` builds an
-`EveRuntime` from the generated inputs in one explicit order. A single holder serves the places eve
-is re-entered from outside (Nitro handlers, Workflow steps, plugin hooks). Everything below those
-entry points receives the runtime as a parameter, and definitions stay inert until eve resolves
-them with it.
+This doc proposes that boot fill one `EveRuntime` value in an explicit order, under a single holder.
+Each slot of that value (platform, hosts and the durable host, instrumentation, the default runtime
+session) has one owner module, and everything else uses the owner's accessor. Definitions stay
+inert until eve first uses them.
 
 This is an internal change. It adds no public API and changes no observable behavior.
 
@@ -128,17 +127,38 @@ which grows only by eve-level operations its callers need: `findRun()` for invoc
 `deploymentId()` for channel ingress. Rule 71 enforces the boundary, and a second durable engine
 replaces the binding and those engine modules together.
 
-Only entry modules read the holder: route handlers, Workflow step and flow entries, Nitro plugin
-functions, and CLI commands. Each reads it once and passes the runtime, or the part of it a callee
-needs, to everything below.
+### Generated code
 
-| Read today                                                | Read after                            |
-| --------------------------------------------------------- | ------------------------------------- |
-| `platformContext()`                                       | `runtime.platform`                    |
-| `getWorld()` outside the Workflow engine                  | `requireDurableHost()`                |
-| hosted routes registry                                    | `runtime.hosts`                       |
-| runtime-session compiled artifacts and agent bundle cache | `runtime.artifacts`, `runtime.agents` |
-| instrumentation runtime and providers                     | `runtime.instrumentation`             |
+The generated boot modules only gather inputs. Data arrives through data imports, as the Nitro host
+rules require, and modules arrive through ordinary imports. The bootstrap imports
+`platform/install-runtime` first and calls `bootEveProcess`. The world plugin calls `bootEve` once;
+the runtime plugin and `workflows-handler.mjs` both import it, so it evaluates once. The runtime
+plugin registers `runtime.close` on Nitro's `close` hook.
+
+### Entry points and the one holder
+
+Nitro calls route handlers, the Workflow runtime calls steps with serialized input, and
+OpenTelemetry calls span hooks. None of them can pass an eve value, so one holder remains:
+`eveRuntime()`, which returns the process runtime and creates it on first access. It is the only
+way a call from outside reaches the value boot built.
+
+### Slot owners
+
+Each slot has one owner module that reads and writes it on the runtime; everything else calls the
+owner's accessor. Rule 72 enforces this.
+
+| Slot                         | Owner                                               | Accessor                                      |
+| ---------------------------- | --------------------------------------------------- | --------------------------------------------- |
+| `platform`                   | `platform/context.ts`                               | `platformContext()`                           |
+| `hosts` and the durable host | `execution/hosts.ts`                                | `requireDurableHost()`, `registerHost()`, ... |
+| `instrumentation`            | `instrumentation/runtime-global.ts`, `providers.ts` | `getInstrumentationRuntime()`, ...            |
+| `defaultSession`             | `runtime/sessions/runtime-session.ts`               | `getActiveRuntimeSession()`                   |
+
+The accessors stay ambient on purpose. Most of their callers are leaf helpers in tracing,
+instrumentation, auth, and the harness with no constructed context to receive a parameter from.
+Threading the runtime through them would move each lookup up a few frames without adding a
+capability. What changed is that every lookup reads one runtime value that boot built, through a
+contract eve owns.
 
 ### Ambient state that stays
 
@@ -155,30 +175,27 @@ needs, to everything below.
 
 ### Inert definitions
 
-Definitions record that they want the platform default, and eve fills it in when it resolves
-them:
-
-- Dynamic schedules resolve their default provider at compile time, using the build runtime's
-  platform, because the manifest records the provider kind.
-- The self-modification sandbox, the `fileMemory` backend and namespace, and the workspace-agent
-  transport resolve their defaults when eve resolves the agent graph.
-- `DefaultSandbox` already selects its provider inside `prepare(context)`, so the hosted-sandbox
-  choice can arrive through the context eve builds for that hook.
-- Auth strategies receive the platform issuer check when eve resolves a route's auth chain.
+Definitions don't resolve platform defaults when the user's module loads. `defineDynamicSchedules`
+was the one that did; its `provider` is now resolved when eve first reads it, at compile time for
+the manifest and at use in the schedules runtime. The others already resolve at use: the default
+sandbox selects its provider when eve prepares it, the workspace transport, memory defaults, and
+Discord relay read the platform when called, and auth strategies read it per request. The deployed
+self-modification sandbox binds its hosted environment at definition because the compiler reads that
+environment to compile the sandbox.
 
 ### Build and CLI
 
-Builds get the same shape: `bootBuild({ target })` returns the build-time value (the platform and
-the build-output port) that the build root already passes to the Nitro host. CLI commands construct
-it at the start of the command.
+Builds don't need a runtime value. The build root resolves the build target and build-output port
+once and passes them to the Nitro host, the route table, and the plugin list as data.
 
 ## Invariants
 
 - One holder per process, and `bootEve` runs once per process. Each `eve dev` generation runs in its
   own worker, with its own globals.
-- Only entry modules call `eveRuntime()`. A guard rule enforces this.
-- New `globalThis` state under `Symbol.for("eve.*")` outside the holder fails a guard rule. Existing
-  slots are baselined, and the baseline can only shrink.
+- Only boot and the slot owners reach the runtime. Rule 72 enforces this.
+- New process-wide boot state becomes an `EveRuntime` slot with one owner, not a new
+  `Symbol.for("eve.*")` global. The remaining `eve.*` symbols are per-feature registries, caches,
+  and brands outside this plan.
 - Generated code carries data only through `text:` and `bytes:` imports.
 - The platform is installed before the deployment ID, which reads it.
 - The queue namespace is set before anything that produces queue messages (rule 33).
@@ -196,11 +213,10 @@ Each step is an internal refactor with a patch changeset, and existing tests kee
 2. Move each slot onto the runtime, one PR per slot: platform, instrumentation, hosts, and the
    default runtime session. Then route generic durable access through `DurableHost` and add rule 71
    so only the Workflow engine touches the SDK's World.
-3. Read the runtime once at each entry point and pass it down to route handlers, steps, plugins,
-   the harness kernel config, and tracing.
-4. Make definitions inert and bind auth strategies when eve resolves them.
-5. Add the guard rules for holder access, global state, and World access outside the Workflow
-   binding.
+3. Dropped: passing the runtime down from entry points. "Slot owners" explains why the
+   accessors stay.
+4. Resolve `defineDynamicSchedules`'s default provider on first use.
+5. Add rule 72 so only boot and the slot owners reach the runtime.
 
 ## Open questions
 
@@ -213,5 +229,4 @@ Each step is an internal refactor with a patch changeset, and existing tests kee
   concept (for example durable backend, durable engine, or durable host) and rename the
   experimental config and docs together with the durable-engine work. "World" stays only where
   users choose an SDK package such as `@workflow/world-postgres`.
-- `bootEve` awaits the durable backend and instrumentation in one place. Cold start should be
-  measured against today's boot before step 2 lands.
+- Cold start hasn't been measured against the boot before this plan.
