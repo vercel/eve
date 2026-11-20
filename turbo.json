@@ -3,6 +3,9 @@
   "envMode": "strict",
   "globalDependencies": [".nvmrc", "pnpm-workspace.yaml", "tsconfig.json"],
   "tasks": {
+    "//#lint": {
+      "tags": ["ci", "ci:cpus:4"]
+    },
     "build": {
       "dependsOn": ["^build"],
       "env": ["VERCEL"],
@@ -126,6 +129,7 @@
     },
     "test:unit": {
       "cache": false,
+      "tags": ["ci"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!.eve/**",
@@ -140,6 +144,8 @@
     },
     "typecheck": {
       "dependsOn": ["^build"],
+      "passThroughEnv": ["EVE_TELEMETRY_DISABLED"],
+      "tags": ["ci"],
       "inputs": [
         "**/*.ts",
         "**/*.tsx",
