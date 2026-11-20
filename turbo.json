@@ -41,7 +41,7 @@
         "!packages/**",
         "!research/**"
       ],
-      "passThroughEnv": ["EVE_TELEMETRY_DISABLED"],
+      "passThroughEnv": ["EVE_SANDBOX_IMAGE_TAG", "EVE_TELEMETRY_DISABLED"],
       "tags": ["ci", "ci:cpus:16"]
     },
     "//#check:template-files": {

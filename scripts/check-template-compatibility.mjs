@@ -296,7 +296,30 @@ const checkTemplate = async (template, tarball, tarballName) => {
   }
 };
 
+// Templates without Vercel Sandbox build their sandbox template from eve's
+// pinned image. A change that edits packages/eve/Dockerfile pins a tag the
+// release workflow publishes only after merge, so fall back to :latest then, as
+// .github/actions/sandbox-image does on GitHub Actions. Any other failure keeps
+// the pinned tag, which the builds then report.
+const resolveSandboxImage = () => {
+  if (process.env.EVE_SANDBOX_IMAGE_TAG) return;
+  const tag = execFileSync(process.execPath, [join(repoRoot, "scripts", "sandbox-image-tag.mjs")], {
+    encoding: "utf8",
+  }).trim();
+  const image = `ghcr.io/vercel/eve:${tag}`;
+  try {
+    execFileSync("docker", ["buildx", "imagetools", "inspect", "--raw", image], { stdio: "pipe" });
+  } catch (error) {
+    if (!/: not found|manifest unknown/u.test(`${error.stdout ?? ""}${error.stderr ?? ""}`)) return;
+    process.stdout.write(
+      `${image} is not published, so this run uses ghcr.io/vercel/eve:latest. This happens when a change edits packages/eve/Dockerfile, because the release workflow publishes the image after the change reaches main.\n`,
+    );
+    process.env.EVE_SANDBOX_IMAGE_TAG = "latest";
+  }
+};
+
 try {
+  resolveSandboxImage();
   const packageDirectory = join(repoRoot, "packages", "eve");
   const packedDirectory = join(temporaryDirectory, "packed");
   await run("eve", "pnpm", [
