@@ -1,12 +1,12 @@
 import { test, mock } from "node:test";
 import assert from "node:assert/strict";
 import { config, experiment, candidate, evidence, BASE, MERGED } from "./fixtures.js";
-import type { Active, Experiment } from "../../extension/lib/types.js";
+import type { Active, Experiment, ReviewFeedback } from "../../extension/lib/types.js";
 
 const c = config();
 let metadata = evidence();
-let feedback = {
-  comments: [] as { id: string; body: string; url: string }[],
+let feedback: ReviewFeedback = {
+  comments: [],
   reviews: [],
   threads: [],
 };
@@ -212,7 +212,7 @@ test("truncated local observations do not suppress complete independent run fail
   assert.equal(active.experiment!.finding.metric, "failure");
   assert.equal(active.experiment!.finding.samples, 2);
 });
-test("large ordinary comments have bounded review display without discarding candidate review", async () => {
+test("oversized review text stays classifiable and bounded across scheduled resumes", async () => {
   reset({
     ...experiment(),
     status: "review",
@@ -225,6 +225,18 @@ test("large ordinary comments have bounded review display without discarding can
     url: `https://github.com/fixture/comment/${i}`,
     body: "大量のコメント".repeat(10000),
   }));
+  feedback.reviews = feedback.comments.map((comment, i) => ({
+    id: `review-${i}`,
+    state: i === 0 ? "CHANGES_REQUESTED" : "COMMENTED",
+    body: comment.body,
+    submittedAt: "2026-11-12T00:00:00Z",
+  }));
+  feedback.threads = feedback.comments.map((comment, i) => ({
+    id: `thread-${i}`,
+    resolved: i !== 0,
+    outdated: i % 2 === 0,
+    body: comment.body,
+  }));
   const result = await advance(active.lease);
   assert.equal(result.action, "review");
   assert.ok(Buffer.byteLength(result.payload!) < 200_000);
@@ -233,12 +245,24 @@ test("large ordinary comments have bounded review display without discarding can
   assert.ok(Buffer.byteLength(JSON.stringify(display.comments)) < 20_002);
   assert.equal(display.comments.at(-1).id, "59");
   assert.ok(display.commentsDigest);
+  for (const key of ["reviews", "threads"] as const) {
+    assert.ok(Buffer.byteLength(JSON.stringify(display[key])) < 30_000);
+    assert.deepEqual(
+      display[key].map(({ body: _body, ...metadata }: { body: string }) => metadata),
+      feedback[key].map(({ body: _body, ...metadata }) => metadata),
+    );
+    assert.ok(display[`${key}Digest`]);
+  }
   const resumed = await prepare(ctx);
-  assert.ok(Buffer.byteLength(resumed.payload!) < 50_000);
-  assert.equal(JSON.parse(resumed.payload!).feedback.commentsDigest, display.commentsDigest);
+  assert.ok(Buffer.byteLength(resumed.payload!) < 100_000);
+  for (const key of ["commentsDigest", "reviewsDigest", "threadsDigest"])
+    assert.equal(JSON.parse(resumed.payload!).feedback[key], display[key]);
   feedback.comments[0].body += " edited";
+  feedback.reviews[0].body += " edited";
+  feedback.threads[0].body += " edited";
   const edited = await advance(active.lease);
-  assert.notEqual(JSON.parse(edited.payload!).feedback.commentsDigest, display.commentsDigest);
+  for (const key of ["commentsDigest", "reviewsDigest", "threadsDigest"])
+    assert.notEqual(JSON.parse(edited.payload!).feedback[key], display[key]);
 });
 test("private status requires an owner-exclusive direct conversation", async () => {
   reset(experiment());

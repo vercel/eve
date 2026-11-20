@@ -23,6 +23,8 @@ class FixtureGit extends GitHub {
   head = HEAD;
   decision: string | null = null;
   comment = "Conversation suggestion";
+  reviewBody = "Submitted review";
+  threadBody = "Thread finding";
   override async api<T = any>(path: string, method = "GET", body?: unknown): Promise<T> {
     this.calls.push({ path, method, body });
     let result: any;
@@ -48,7 +50,7 @@ class FixtureGit extends GitHub {
         {
           id: 2,
           state: "COMMENTED",
-          body: "Submitted review",
+          body: this.reviewBody,
           submitted_at: "2026-11-12T00:00:00Z",
         },
       ];
@@ -93,7 +95,7 @@ class FixtureGit extends GitHub {
                   id: "thread",
                   isResolved: !this.unresolved,
                   isOutdated: false,
-                  comments: { nodes: [{ body: "Thread finding" }] },
+                  comments: { nodes: [{ body: this.threadBody }] },
                 },
               ],
               pageInfo: { hasNextPage: false },
@@ -158,13 +160,16 @@ test("zero required human approvals do not introduce a manual approval gate", as
   assert.equal(await mergeExact(c, candidate(), reviewed, git), MERGED);
   assert.equal(git.calls.find((call) => call.method === "PUT")!.body.sha, HEAD);
 });
-test("feedback arriving after classification blocks merge even with passing checks", async () => {
-  const c = configured(),
-    git = new FixtureGit(c);
-  const reviewed = reviewFingerprint(candidate(), await inspectCandidate(c, candidate(), git));
-  git.comment = "New actionable finding after baseline verification";
-  await assert.rejects(mergeExact(c, candidate(), reviewed, git), /Review evidence changed/);
-  assert.ok(!git.calls.some((call) => call.method === "PUT"));
+test("edits beyond displayed feedback invalidate classification even with passing checks", async () => {
+  for (const source of ["comment", "reviewBody", "threadBody"] as const) {
+    const c = configured(),
+      git = new FixtureGit(c);
+    git[source] = "Review evidence. ".repeat(1000);
+    const reviewed = reviewFingerprint(candidate(), await inspectCandidate(c, candidate(), git));
+    git[source] += "New actionable finding after baseline verification";
+    await assert.rejects(mergeExact(c, candidate(), reviewed, git), /Review evidence changed/);
+    assert.ok(!git.calls.some((call) => call.method === "PUT"));
+  }
 });
 test("delayed GitHub base updates reconcile the signed head before exact-head inspection", async () => {
   const c = configured(),

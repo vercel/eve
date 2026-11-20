@@ -117,13 +117,15 @@ export interface Receipt {
   id: string;
   url: string;
 }
-/** Conversation, inline-thread, and submitted-review evidence from the source forge. */
+/** Forge evidence with bounded display text and digests of the complete contents. */
 export interface ReviewFeedback {
   comments: { id: string; body: string; url: string }[];
   commentsDigest?: string;
   omittedComments?: number;
   threads: { id: string; resolved: boolean; outdated: boolean; body: string }[];
+  threadsDigest?: string;
   reviews: { id: string; state: string; body: string; submittedAt: string }[];
+  reviewsDigest?: string;
 }
 /** A published branch, exact head, full intended paths, and PR identity. */
 export interface Candidate {

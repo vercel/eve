@@ -1,17 +1,30 @@
 import { credential, digest, type Config } from "./config.js";
 import type { Candidate, Deployment, ReviewFeedback } from "./types.js";
 
+function displayBody(body: string): string {
+  return body.length > 1000
+    ? `${body.slice(0, 900)}\n[Truncated; inspect the PR for full evidence.]`
+    : body;
+}
+function boundBodies<T extends { body: string }>(entries: T[]): T[] {
+  let remaining = 20_000;
+  return entries
+    .slice()
+    .reverse()
+    .map((entry) => {
+      const body = displayBody(entry.body);
+      const bytes = Buffer.byteLength(JSON.stringify(body)) - 2;
+      if (bytes > remaining) return { ...entry, body: "" };
+      remaining -= bytes;
+      return { ...entry, body };
+    })
+    .reverse();
+}
 export function boundFeedback(feedback: ReviewFeedback): ReviewFeedback {
   const comments: ReviewFeedback["comments"] = [];
   let remaining = 20_000;
   for (const comment of feedback.comments.slice(-50).reverse()) {
-    const bounded = {
-      ...comment,
-      body:
-        comment.body.length > 1000
-          ? `${comment.body.slice(0, 900)}\n[Truncated; open the linked comment for full evidence.]`
-          : comment.body,
-    };
+    const bounded = { ...comment, body: displayBody(comment.body) };
     const bytes = Buffer.byteLength(JSON.stringify(bounded)) + 1;
     if (bytes > remaining) continue;
     comments.unshift(bounded);
@@ -22,6 +35,10 @@ export function boundFeedback(feedback: ReviewFeedback): ReviewFeedback {
     comments,
     commentsDigest: feedback.commentsDigest ?? digest(feedback.comments),
     omittedComments: (feedback.omittedComments ?? 0) + feedback.comments.length - comments.length,
+    reviews: boundBodies(feedback.reviews),
+    reviewsDigest: feedback.reviewsDigest ?? digest(feedback.reviews),
+    threads: boundBodies(feedback.threads),
+    threadsDigest: feedback.threadsDigest ?? digest(feedback.threads),
   };
 }
 
