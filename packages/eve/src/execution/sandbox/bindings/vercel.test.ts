@@ -2647,6 +2647,14 @@ describe("scheduled template rebuilds", () => {
     expect(await sessionSource("session-after")).toBe(rebuilt);
   });
 
+  it("says why an environment without a snapshot cannot be rebuilt", async () => {
+    const { rebuild } = setup();
+
+    await expect(rebuild({}, { prepare: async () => {}, revision: "rev-1" })).rejects.toThrow(
+      "no snapshot to rebuild",
+    );
+  });
+
   it("asks for a redeploy when no snapshot of the template is left", async () => {
     const { fake, rebuild } = setup();
     fake.snapshots.clear();

@@ -468,11 +468,16 @@ async function rebuildTemplate(
   input: SandboxTemplateRebuilderInput,
 ): Promise<SandboxTemplateRebuildResult> {
   const { templateKey } = artifact;
-  if (templateKey === undefined || artifact.snapshotId === undefined) {
+  if (artifact.snapshotId === undefined) {
+    throw new Error(
+      "This sandbox environment has no `prepare` callback, workspace files, skills or `source`, so the build captured no snapshot to rebuild. Add one of them, then run `eve build` again.",
+    );
+  }
+  if (templateKey === undefined) {
     throw new SandboxTemplateNotProvisionedError({
       providerName: "vercel",
       reason: "The build recorded no Vercel sandbox template key.",
-      templateKey: artifact.snapshotId ?? "none",
+      templateKey: artifact.snapshotId,
     });
   }
   if (rebuildsInFlight.has(templateKey)) return { rebuilt: false };
