@@ -1,10 +1,12 @@
-import { getVercelOidcToken } from "#compiled/@vercel/oidc/index.js";
 import type { PlatformIdentity } from "#platform/types.js";
 
 const VERCEL_REQUEST_CONTEXT = Symbol.for("@vercel/request-context");
 
 export const vercelIdentity: PlatformIdentity = {
-  token: () => getVercelOidcToken(),
+  async token() {
+    const { getVercelOidcToken } = await import("#compiled/@vercel/oidc/index.js");
+    return await getVercelOidcToken();
+  },
   ambientToken() {
     const requestContext = (
       globalThis as typeof globalThis & {
