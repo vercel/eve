@@ -13,7 +13,7 @@ export default defineEval({
     const project = `denied-${crypto.randomUUID()}`;
     const attempt = await t.send(`SUBSCRIBE ${project}`);
     attempt.expectOk();
-    attempt.calledTool("eve__subscribe_channel", { count: 1, status: "failed" });
+    attempt.calledTool("eve__subscribe", { count: 1, status: "failed" });
     await t.require(attempt.reply ?? "", includes(`Project ${project} may not be watched.`));
 
     const emitted = await postChannel<{ delivered: boolean }>(t.target, "/events/emit", {

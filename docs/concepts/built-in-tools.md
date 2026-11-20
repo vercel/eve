@@ -471,6 +471,7 @@ eve adds `eve__task_wait` and `eve__task_cancel` when the agent has a tool that 
 eve adds these three tools to the root agent when a channel defines `experimental.subscriptions.onEvent` or an MCP connection enables `experimental.events`. Subagents do not get them. A channel and a connection that both offer subscriptions cannot share a name.
 
 - `eve__subscribe({ subscription: { source, event, input }, ttlMs })` subscribes the session to future events from a channel or connection. See [Let sessions subscribe to events](/docs/channels/custom#let-sessions-subscribe-to-events) and [MCP connection events](/docs/connections/mcp).
+  Approvals, hooks, and traces see a channel subscription as a call to `eve__subscribe`. A connection subscription runs as the connection's generated `events_subscribe_<hash>` entry, so a connection's approval policy applies to it and not an `eve__subscribe` rule.
 - `eve__subscription_get({ id })` reports a subscription. `eve__subscription_stop({ id })` ends it. For a connection's subscription both run through the connection's approval policy.
 
 Review these tools before production use. Disable, wrap, restrict, or require approval for any tool that can access the filesystem, network, shell, or sensitive data.

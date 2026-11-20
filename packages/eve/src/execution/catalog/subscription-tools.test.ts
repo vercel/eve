@@ -2,7 +2,7 @@ import { expect, it, vi } from "vitest";
 
 import { connectionToolName } from "#connections/ownership.js";
 import { eventActionName } from "#runtime/subscriptions/actions.js";
-import { CHANNEL_SUBSCRIBE_ENTRY } from "#runtime/subscriptions/tools.js";
+import { SUBSCRIBE_TOOL } from "#runtime/subscriptions/tools.js";
 import { serializeInputSchema } from "#tools/schema.js";
 
 import { subscriptionTools } from "./subscription-tools.js";
@@ -78,7 +78,7 @@ it("offers one subscribe, get and stop for channels and connections together", (
   expect(subscribe.definition.description).toContain("Channel github:");
   expect(subscribe.definition.description).toContain("Connection tracker: Issue tracker updates.");
   expect(subscribe.definition.description).not.toContain("docs");
-  expect(subscribe.route?.owns?.map(({ name }) => name)).toEqual([CHANNEL_SUBSCRIBE_ENTRY]);
+  expect(subscribe.route?.owns?.map(({ name }) => name)).toEqual([SUBSCRIBE_TOOL]);
 });
 
 it("offers the management tools and a route without a private entry for connections only", () => {
@@ -98,7 +98,7 @@ it("routes a channel's event to the entry that opens a channel subscription, inp
     event: "check_suite.completed",
     input: { owner: "vercel", pull: 7 },
   });
-  expect(route!.target(call)).toEqual({ input: call, name: CHANNEL_SUBSCRIBE_ENTRY });
+  expect(route!.target(call)).toEqual({ input: call, name: SUBSCRIBE_TOOL });
 });
 
 it("routes a connection's event to that connection's generated tool for it", () => {

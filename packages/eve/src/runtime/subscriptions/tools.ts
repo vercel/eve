@@ -45,8 +45,6 @@ export interface SubscribeInput {
   readonly ttlMs: number | null;
 }
 
-export const CHANNEL_SUBSCRIBE_ENTRY = "eve__subscribe_channel";
-
 export function channelSubscriptionSchemas(offered: readonly OfferedSubscription[]): JsonObject[] {
   return offered.map(({ channelName, catalog }) => {
     const event: JsonObject =
@@ -89,7 +87,7 @@ export function channelSubscribeEntry(
   offered: readonly OfferedSubscription[],
 ): HarnessToolDefinition {
   return {
-    name: CHANNEL_SUBSCRIBE_ENTRY,
+    name: SUBSCRIBE_TOOL,
     description: "Subscribes this conversation to a channel's event.",
     frameworkTool: true,
     rootOnly: true,

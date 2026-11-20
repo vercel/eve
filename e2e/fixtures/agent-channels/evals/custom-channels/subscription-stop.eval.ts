@@ -16,7 +16,7 @@ export default defineEval({
     const project = `web-${crypto.randomUUID()}`;
     const subscribed = await t.send(`SUBSCRIBE ${project}`);
     subscribed.expectOk();
-    subscribed.calledTool("eve__subscribe_channel", { count: 1, status: "completed" });
+    subscribed.calledTool("eve__subscribe", { count: 1, status: "completed" });
     const { id } = resultOf(subscribed.reply, "active");
 
     const emit = (eventId: string) =>

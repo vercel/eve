@@ -10,7 +10,6 @@ import type {
 } from "#definitions/definition.js";
 import { eventActionName } from "#runtime/subscriptions/actions.js";
 import {
-  CHANNEL_SUBSCRIBE_ENTRY,
   connectionOfSubscription,
   type ConnectionSubscriptionAction,
   type ConnectionSubscriptionGate,
@@ -78,7 +77,7 @@ export function subscriptionTools(
       if (!isObject(subscription) || typeof subscription.source !== "string")
         return miss("Name the source to subscribe to.");
       const { source, event } = subscription;
-      if (channelNames.has(source)) return { input, name: CHANNEL_SUBSCRIBE_ENTRY };
+      if (channelNames.has(source)) return { input, name: SUBSCRIBE_TOOL };
       if (!connectionNames.has(source) || typeof event !== "string")
         return miss(`No source named "${source}" offers subscriptions.`);
       return {

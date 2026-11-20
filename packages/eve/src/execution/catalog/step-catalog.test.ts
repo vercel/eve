@@ -29,7 +29,7 @@ import { serializeInputSchema, type ToolSchemaSource } from "#tools/schema.js";
 
 import { connectionToolName } from "#connections/ownership.js";
 import { eventActionName } from "#runtime/subscriptions/actions.js";
-import { CHANNEL_SUBSCRIBE_ENTRY } from "#runtime/subscriptions/tools.js";
+import { SUBSCRIBE_TOOL } from "#runtime/subscriptions/tools.js";
 import type { StepCatalog } from "./step-catalog.js";
 import { labelCallbacks } from "#internal/testing/tool-labels.js";
 
@@ -908,7 +908,7 @@ describe("buildStepCatalog", () => {
         input: { pull: 7 },
       });
       const resolved = catalog.resolve({ input, toolName: "eve__subscribe" });
-      expect(resolved?.call.toolName).toBe(CHANNEL_SUBSCRIBE_ENTRY);
+      expect(resolved?.call.toolName).toBe(SUBSCRIBE_TOOL);
     });
 
     it("does not let eve__tool call the connection's event tool directly", async () => {

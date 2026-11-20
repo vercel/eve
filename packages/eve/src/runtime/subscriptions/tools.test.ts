@@ -318,7 +318,7 @@ it("marks all three tools as framework tools only the root agent sees", () => {
   expect(
     entries.map(({ name, frameworkTool, rootOnly }) => [name, frameworkTool, rootOnly]),
   ).toEqual([
-    ["eve__subscribe_channel", true, true],
+    ["eve__subscribe", true, true],
     ["eve__subscription_get", true, true],
     ["eve__subscription_stop", true, true],
   ]);

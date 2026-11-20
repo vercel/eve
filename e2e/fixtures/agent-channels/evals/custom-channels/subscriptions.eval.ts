@@ -11,8 +11,8 @@ export default defineEval({
       "Tell me when the build of the project `web` breaks, for the next 10 minutes. Reply `subscribed` once you are watching.",
     );
     subscribed.expectOk();
-    // The trace names the entry `eve__subscribe` routed to, not the route the model called.
-    t.calledTool("eve__subscribe_channel", {
+    // The route the model called and the entry it runs as are both `eve__subscribe`.
+    t.calledTool("eve__subscribe", {
       count: 1,
       input: { subscription: { source: "events", event: /^build\.(finished|failed)$/ } },
     });
