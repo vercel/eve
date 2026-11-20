@@ -3,6 +3,7 @@ import { equals } from "eve/evals/expect";
 import { postChannel } from "./shared";
 
 export default defineEval({
+  tags: ["real-model"],
   description:
     "A session subscribes only to events the channel declares, and a redelivered event reaches it once.",
   async test(t) {

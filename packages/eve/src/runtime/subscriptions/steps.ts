@@ -8,13 +8,12 @@ import {
   subscriptionDeliveryWorkflowReference,
   subscriptionKeyWorkflowReference,
 } from "#execution/workflow-references.js";
-import { startWorkflowOnCurrentDeployment } from "#execution/workflow-runtime.js";
+import {
+  startWorkflowOnCurrentDeployment,
+  startWorkflowOnDeployment,
+} from "#execution/workflow-runtime.js";
 import { getHookByToken, resumeHook } from "#internal/workflow/runtime.js";
 import { readFirstPublished } from "#runtime/subscriptions/published-outcome.js";
-import {
-  isHeldByOlderDeployment,
-  retireOlderDeploymentSubscription,
-} from "#runtime/subscriptions/stale-deployment.js";
 import { subscriptionSource } from "#runtime/subscriptions/sources/index.js";
 import {
   joinAckNamespace,
@@ -170,7 +169,15 @@ export async function startSubscriptionDeliveryStep(
   input: SubscriptionDeliveryInput,
 ): Promise<void> {
   "use step";
-  await startWorkflowOnCurrentDeployment(subscriptionDeliveryWorkflowReference, [input]);
+  const { acceptedDeploymentId } = input.event;
+  if (acceptedDeploymentId === undefined)
+    await startWorkflowOnCurrentDeployment(subscriptionDeliveryWorkflowReference, [input]);
+  else
+    await startWorkflowOnDeployment(
+      subscriptionDeliveryWorkflowReference,
+      [input],
+      acceptedDeploymentId,
+    );
 }
 
 export async function dispatchSubscriptionStep(input: SubscriptionDeliveryInput): Promise<void> {
@@ -179,10 +186,6 @@ export async function dispatchSubscriptionStep(input: SubscriptionDeliveryInput)
   const ctx = await deserializeContext(input.serializedContext);
   ctx.setVirtualContext(AuthKey, binding.auth);
   await contextStorage.run(ctx, async () => {
-    if (isHeldByOlderDeployment(binding, event)) {
-      await retireOlderDeploymentSubscription({ ctx, binding });
-      return;
-    }
     await subscriptionSource(binding.source.kind).deliver({ ctx, binding, event });
   });
 }
