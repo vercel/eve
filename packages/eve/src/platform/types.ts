@@ -97,7 +97,10 @@ export interface PlatformSchedules {
   defaultProvider(): ScheduleProvider;
 }
 
+export type PlatformTarget = "vercel";
+
 export interface Platform {
+  readonly target: PlatformTarget;
   readonly build: PlatformBuild;
   readonly deployment: PlatformDeployment;
   readonly identity: PlatformIdentity;
