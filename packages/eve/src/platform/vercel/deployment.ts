@@ -23,6 +23,8 @@ export const vercelDeployment: PlatformDeployment = {
   environmentName: () => readTrimmed("VERCEL_TARGET_ENV") ?? readTrimmed("VERCEL_ENV"),
   projectId: () => resolveVercelProjectIdFromEnvironment(),
   deploymentId: () => readTrimmed("VERCEL_DEPLOYMENT_ID"),
+  hostedDeploymentId: () =>
+    process.env.VERCEL === "1" ? readTrimmed("VERCEL_DEPLOYMENT_ID") : undefined,
   build() {
     const gitSha = readTrimmed("VERCEL_GIT_COMMIT_SHA");
     const gitBranch = readTrimmed("VERCEL_GIT_COMMIT_REF");

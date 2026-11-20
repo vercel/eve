@@ -15,12 +15,6 @@ import { isObject } from "#shared/guards.js";
 const log = createLogger("execution.session-callback");
 const SESSION_CALLBACK_TIMEOUT_MS = 30_000;
 const MAX_CALLBACK_RESPONSE_BYTES = 64 * 1024;
-const VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER = "x-vercel-trusted-oidc-idp-token";
-const VERCEL_CALLBACK_HOST_ENVS = [
-  "VERCEL_URL",
-  "VERCEL_BRANCH_URL",
-  "VERCEL_PROJECT_PRODUCTION_URL",
-] as const;
 
 export async function postSessionCallbackRequest(input: {
   readonly body: unknown;
@@ -123,25 +117,12 @@ function callbackLogFields(input: { readonly body: unknown; readonly url: string
 }
 
 async function resolveSessionCallbackHeaders(urlValue: string): Promise<Record<string, string>> {
-  const headers: Record<string, string> = { "content-type": "application/json" };
-  if (process.env.VERCEL !== "1") return headers;
-
-  let url: URL;
-  try {
-    url = new URL(urlValue);
-  } catch {
-    return headers;
-  }
-  const currentHost = VERCEL_CALLBACK_HOST_ENVS.some((name) => {
-    const host = process.env[name]?.trim();
-    return host !== undefined && host !== "" && URL.parse(`https://${host}`)?.origin === url.origin;
-  });
-  if (url.protocol !== "https:") return headers;
-  if (!currentHost && !configuredCallbackOrigins().some((matches) => matches(url))) return headers;
-
-  const token = currentPlatform().identity.ambientToken();
-  if (token !== undefined) headers[VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER] = token;
-  return headers;
+  return {
+    "content-type": "application/json",
+    ...currentPlatform().identity.callbackHeaders(urlValue, (url) =>
+      configuredCallbackOrigins().some((matches) => matches(url)),
+    ),
+  };
 }
 
 function configuredCallbackOrigins(): Array<(url: URL) => boolean> {

@@ -242,7 +242,8 @@
  *   rule 69 — Vercel platform knowledge lives in `packages/eve/src/platform/`,
  *             so eve can run on other hosts. Elsewhere in `packages/eve/src`
  *             (except the Vercel-only CLI, setup, and dev-client code, and the
- *             gitignored extension copies that builds generate), source
+ *             gitignored extension copies that builds generate, and the
+ *             Vercel-only public files that re-export `src/platform/vercel/`), source
  *             doesn't read `VERCEL*` environment variables, import a vendored
  *             `#compiled/@vercel/*` package, or import `#platform/vercel/*`
  *             directly. The eve-owned `@vercel/agent-runs` library and the
@@ -1305,6 +1306,7 @@ const VERCEL_PLATFORM_ACCESS_DIRS = [
   "packages/eve/src/extensions/custom-skills/extension/",
   "packages/eve/src/computer-use/extension/",
 ];
+const VERCEL_PUBLIC_ENTRY_FILES = new Set(["packages/eve/src/public/agents/vercel-oidc.ts"]);
 const VERCEL_ENV_READ_RE = /\benv\.VERCEL\w*|["']VERCEL(?:_[A-Z0-9]+)*["']/g;
 const VERCEL_PLATFORM_IMPORT_RE =
   /["'](?:#compiled\/@vercel\/(?!agent-runs\/|otel\/)[^"']+|[^"']*(?:#|\/)platform\/vercel\/[^"']+)["']/g;
@@ -1319,6 +1321,7 @@ const VERCEL_PLATFORM_IMPORT_RE =
 function checkRule69(posix, content, current) {
   if (!posix.startsWith("packages/eve/src/") || posix.endsWith(".test.ts")) return;
   if (VERCEL_PLATFORM_ACCESS_DIRS.some((dir) => posix.startsWith(dir))) return;
+  if (VERCEL_PUBLIC_ENTRY_FILES.has(posix)) return;
   const count =
     [...content.matchAll(VERCEL_ENV_READ_RE)].length +
     [...content.matchAll(VERCEL_PLATFORM_IMPORT_RE)].length;

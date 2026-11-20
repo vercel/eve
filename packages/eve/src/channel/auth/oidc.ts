@@ -6,7 +6,7 @@ import {
   areTokenClaimMatchersSatisfied,
   createJwtAuthenticatedCallerPrincipal,
 } from "#channel/auth/token-claims.js";
-import { isVercelOidcIssuer } from "#platform/vercel/project.js";
+import { currentPlatform } from "#platform/current.js";
 import type {
   ResolvedOidcAuthStrategy,
   RouteStrategyAuthenticationResult,
@@ -49,7 +49,7 @@ export async function authenticateOidcStrategy(input: {
 
     const hasExternalSubject =
       input.strategy.acceptCurrentVercelProject &&
-      isVercelOidcIssuer(input.strategy.issuer) &&
+      currentPlatform().identity.isPlatformIssuer(input.strategy.issuer) &&
       verified.payload.external_sub !== undefined;
     if (hasExternalSubject) {
       if (
@@ -77,7 +77,7 @@ export async function authenticateOidcStrategy(input: {
 
     const hasDevelopmentUserSubject =
       input.strategy.acceptCurrentVercelProject &&
-      isVercelOidcIssuer(input.strategy.issuer) &&
+      currentPlatform().identity.isPlatformIssuer(input.strategy.issuer) &&
       verified.payload.user_id !== undefined;
     if (hasDevelopmentUserSubject) {
       if (
@@ -207,7 +207,7 @@ function isCurrentVercelProjectToken(input: {
   readonly payload: JWTPayload;
   readonly strategy: ResolvedOidcAuthStrategy;
 }): boolean {
-  if (!isVercelOidcIssuer(input.issuer)) {
+  if (!currentPlatform().identity.isPlatformIssuer(input.issuer)) {
     return false;
   }
 

@@ -15,7 +15,6 @@ import { authenticateHttpBasicStrategy } from "#channel/auth/http-basic.js";
 import { authenticateJwtEcdsaStrategy } from "#channel/auth/jwt-ecdsa.js";
 import { authenticateJwtHmacStrategy } from "#channel/auth/jwt-hmac.js";
 import { authenticateOidcStrategy } from "#channel/auth/oidc.js";
-import { resolveVercelOidcCurrentProject } from "#platform/vercel/oidc-project.js";
 import {
   createRuntimeSessionAuthContext,
   type ResolvedJwtEcdsaAuthStrategy,
@@ -23,7 +22,6 @@ import {
   type ResolvedOidcAuthStrategy,
   type RouteStrategyAuthenticationResult,
 } from "#channel/auth/types.js";
-import { isVercelOidcIssuer } from "#platform/vercel/project.js";
 import { currentPlatform } from "#platform/current.js";
 
 const vercelOidcLog = createLogger("auth.vercel-oidc");
@@ -889,7 +887,7 @@ export async function verifyVercelOidc(
     return { ok: false };
   }
 
-  if (!isVercelOidcIssuer(claims.issuer)) {
+  if (!currentPlatform().identity.isPlatformIssuer(claims.issuer)) {
     vercelOidcLog.debug("Rejected token whose issuer is not a Vercel OIDC issuer.", {
       issuer: claims.issuer,
     });
@@ -941,12 +939,7 @@ function resolveCurrentVercelProject(
   opts: VerifyVercelOidcOptions,
 ): NonNullable<ResolvedOidcAuthStrategy["currentVercelProject"]> | undefined {
   if (opts.currentVercelProject !== undefined) return opts.currentVercelProject;
-
-  const projectId = process.env.VERCEL_PROJECT_ID?.trim();
-  if (projectId === undefined || projectId.length === 0) return undefined;
-
-  const environment = currentPlatform().deployment.environmentName();
-  return environment === undefined ? { projectId } : { environment, projectId };
+  return currentPlatform().identity.currentProject();
 }
 
 /**
@@ -1061,7 +1054,7 @@ export function vercelOidc(opts: VercelOidcOptions = {}): AuthFn<Request> {
       const currentVercelProject =
         opts.currentVercelProject ??
         (token !== null && isLocalDevelopmentVercelOidc()
-          ? await resolveVercelOidcCurrentProject(request)
+          ? await currentPlatform().identity.requestProject(request)
           : undefined);
       const result = await verifyVercelOidc(
         token,

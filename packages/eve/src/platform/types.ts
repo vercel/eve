@@ -1,3 +1,4 @@
+import type { CurrentVercelProject } from "#channel/auth/types.js";
 import type { SpanProcessor } from "#tracing/eve/otel-configuration.js";
 
 export type DeploymentEnvironmentKind = "development" | "preview" | "production";
@@ -16,15 +17,30 @@ export interface PlatformDeployment {
   environmentName(): string | undefined;
   projectId(): string | undefined;
   deploymentId(): string | undefined;
+  hostedDeploymentId(): string | undefined;
   build(): DeploymentBuild | undefined;
   productionHost(): string | undefined;
   deploymentHost(): string | undefined;
   publicHost(): string | undefined;
 }
 
+export type PlatformProject = CurrentVercelProject;
+
+export type PlatformProjectResolver = () =>
+  | PlatformProject
+  | undefined
+  | Promise<PlatformProject | undefined>;
+
 export interface PlatformIdentity {
   token(): Promise<string>;
-  ambientToken(): string | undefined;
+  isPlatformIssuer(issuer: string | undefined): boolean;
+  currentProject(): PlatformProject | undefined;
+  requestProject(request: Request): Promise<PlatformProject | undefined>;
+  withRequestProject<T>(
+    input: { readonly request: Request; readonly resolveCurrentProject: PlatformProjectResolver },
+    callback: () => Promise<T> | T,
+  ): Promise<T>;
+  callbackHeaders(url: string, isTrustedOrigin: (url: URL) => boolean): Record<string, string>;
 }
 
 export interface PlatformTelemetry {
