@@ -145,7 +145,7 @@ function serialize(projected: ToolModelOutput): SerializedResult | undefined {
       return {
         bytes: encoder.encode(text).byteLength,
         extension: "json",
-        shape: () => jsonShape(projected.value),
+        shape: (budget) => jsonShape(projected.value, budget),
         text,
       };
     }
@@ -212,41 +212,61 @@ function offloadNote(input: {
 }
 
 function textPreview(text: string, budget: number): string {
-  const all = text.split(/\r?\n/);
-  if (all.length > 1 && all[all.length - 1] === "") all.pop();
   const shown: string[] = [];
   let used = 0;
-  for (const line of all.slice(0, TEXT_PREVIEW_LINES)) {
-    const room = Math.max(budget - used, 0);
-    if (room === 0 && shown.length > 0) break;
-    const limit = Math.min(TEXT_PREVIEW_LINE_LIMIT, room);
-    shown.push(line.length > limit ? `${line.slice(0, limit)}...` : line);
-    used += Math.min(line.length, limit) + 1;
+  let total = 0;
+  let capped = false;
+  let start = 0;
+  for (;;) {
+    const newline = text.indexOf("\n", start);
+    if (newline === -1 && start === text.length && start > 0) break;
+    total += 1;
+    const end = newline === -1 ? text.length : newline;
+    if (!capped && shown.length < TEXT_PREVIEW_LINES) {
+      const room = Math.max(budget - used, 0);
+      if (room === 0 && shown.length > 0) {
+        capped = true;
+      } else {
+        const lineEnd = end > start && text.charCodeAt(end - 1) === 13 ? end - 1 : end;
+        const length = lineEnd - start;
+        const limit = Math.min(TEXT_PREVIEW_LINE_LIMIT, room);
+        shown.push(
+          length > limit ? `${text.slice(start, start + limit)}...` : text.slice(start, lineEnd),
+        );
+        used += Math.min(length, limit) + 1;
+      }
+    }
+    if (newline === -1) break;
+    start = newline + 1;
   }
-  const total = `${all.length.toLocaleString("en-US")} ${all.length === 1 ? "line" : "lines"}`;
+  const count = `${total.toLocaleString("en-US")} ${total === 1 ? "line" : "lines"}`;
   const lead =
-    shown.length === all.length
+    shown.length === total
       ? "Preview:"
       : `First ${shown.length} ${shown.length === 1 ? "line" : "lines"}:`;
-  return `Text (${total}). ${lead}\n${shown.join("\n")}`;
+  return `Text (${count}). ${lead}\n${shown.join("\n")}`;
 }
 
-function jsonShape(value: unknown): string {
-  if (Array.isArray(value)) return `JSON ${arrayShape(value)}.`;
+function jsonShape(value: unknown, budget: number): string {
+  if (Array.isArray(value)) return `JSON ${arrayShape(value, budget)}.`;
   if (isObject(value)) {
-    const entries = Object.entries(value).map(([key, entry]) =>
-      Array.isArray(entry) ? `${key} (${arrayShape(entry)})` : key,
-    );
-    return `JSON object with keys: ${entryList(entries)}.`;
+    const keys = Object.keys(value);
+    const describe = (index: number): string => {
+      const key = keys[index] as string;
+      const entry = value[key];
+      return Array.isArray(entry) ? `${key} (${arrayShape(entry, budget)})` : key;
+    };
+    return `JSON object with keys: ${entryList(keys.length, describe, Math.min(SHAPE_LIMIT, budget))}.`;
   }
   return `JSON ${describeScalar(value)}.`;
 }
 
-function arrayShape(items: readonly unknown[]): string {
+function arrayShape(items: readonly unknown[], budget: number): string {
   const count = items.length.toLocaleString("en-US");
   const first = items[0];
   if (isObject(first)) {
-    return `array of ${count} ${items.length === 1 ? "object" : "objects"} with keys: ${entryList(Object.keys(first), NESTED_KEYS_LIMIT)}`;
+    const keys = Object.keys(first);
+    return `array of ${count} ${items.length === 1 ? "object" : "objects"} with keys: ${entryList(keys.length, (index) => keys[index] as string, Math.min(NESTED_KEYS_LIMIT, budget))}`;
   }
   const noun = items.length === 1 ? "item" : "items";
   return first === undefined
@@ -260,15 +280,21 @@ function describeScalar(value: unknown): string {
   return `a ${typeof value}`;
 }
 
-function entryList(entries: readonly string[], limit: number = SHAPE_LIMIT): string {
-  const total = entries.length;
+function entryList(total: number, entryAt: (index: number) => string, limit: number): string {
   if (total === 0) return "none";
   const listed: string[] = [];
   let length = 0;
-  for (const entry of entries) {
-    length += entry.length + 2;
-    if (length > limit && listed.length > 0) break;
+  for (let index = 0; index < total; index += 1) {
+    const entry = entryAt(index);
+    const room = limit - length;
+    if (listed.length === 0) {
+      listed.push(entry.length > room ? `${entry.slice(0, Math.max(room, 0))}...` : entry);
+      length += Math.min(entry.length, room) + 2;
+      continue;
+    }
+    if (entry.length + 2 > room) break;
     listed.push(entry);
+    length += entry.length + 2;
   }
   return listed.length === total ? listed.join(", ") : `${listed.join(", ")}, ... (${total} total)`;
 }

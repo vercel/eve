@@ -141,6 +141,45 @@ describe("offloadContent", () => {
     expect(result.value.length).toBeLessThan(800);
   });
 
+  it("gives the same preview for a text with a million lines", async () => {
+    const { access } = fakeSandbox();
+    const text = `${Array.from({ length: 1_000_000 }, (_, index) => `row ${index}`).join("\n")}\n`;
+    const result = (await inContext(access, () =>
+      offloadContent({ maxBytes: 4_000 })(text, toolModelOutputContext("t", "lines")),
+    )) as { value: string };
+    expect(result.value).toContain("Text (1,000,000 lines). First 20 lines:\nrow 0\nrow 1\n");
+    expect(result.value).toContain("\nrow 19\n");
+    expect(result.value).not.toContain("row 20");
+  });
+
+  it("counts carriage-return line endings and a trailing newline as before", async () => {
+    const { access } = fakeSandbox();
+    const text = `${Array.from({ length: 30 }, (_, index) => `r${index}`).join("\r\n")}\r\n`;
+    const result = (await inContext(access, () =>
+      offloadContent({ maxBytes: 100 })(text, toolModelOutputContext("t", "crlf")),
+    )) as { value: string };
+    expect(result.value).toContain("Text (30 lines). First ");
+    expect(result.value).toContain(":\nr0\nr1\nr2\n");
+    expect(result.value).not.toContain("\r");
+  });
+
+  it("keeps the note short when a key is huge", async () => {
+    const { access } = fakeSandbox();
+    const huge = "k".repeat(100_000);
+    const cases: unknown[] = [
+      { [huge]: "x".repeat(2_000) },
+      [{ [huge]: "x".repeat(2_000) }],
+      { rows: [{ [huge]: "x".repeat(2_000) }] },
+      { [huge]: [{ [huge]: 1 }] },
+    ];
+    for (const value of cases) {
+      const result = (await inContext(access, () =>
+        offloadContent({ maxBytes: 400 })(value, toolModelOutputContext("t", "huge")),
+      )) as { value: string };
+      expect(result.value.length).toBeLessThan(600);
+    }
+  });
+
   it("returns the projection unchanged and warns once per session without a sandbox", async () => {
     const { records } = captureLogRecords();
     const toModelOutput = offloadContent({ maxBytes: 400 });
