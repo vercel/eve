@@ -2,6 +2,7 @@ import type { Hosts } from "#execution/hosts.js";
 import type { InstrumentationProvider } from "#instrumentation/provider.js";
 import type { InstrumentationRuntime } from "#instrumentation/runtime.js";
 import type { PlatformContext } from "#platform/context.js";
+import type { RuntimeSession } from "#runtime/sessions/runtime-session.js";
 
 export interface EveRuntimeInstrumentation {
   runtime: InstrumentationRuntime | undefined;
@@ -10,6 +11,7 @@ export interface EveRuntimeInstrumentation {
 
 export interface EveRuntime {
   platform: PlatformContext | undefined;
+  defaultSession: RuntimeSession | undefined;
   readonly hosts: Hosts;
   readonly instrumentation: EveRuntimeInstrumentation;
   onClose(close: () => Promise<void>): void;
@@ -20,6 +22,7 @@ export function createEveRuntime(): EveRuntime {
   const closers: Array<() => Promise<void>> = [];
   return {
     platform: undefined,
+    defaultSession: undefined,
     hosts: { routes: new Set(), streams: new Map() },
     instrumentation: { providers: new Map(), runtime: undefined },
     onClose(close) {
