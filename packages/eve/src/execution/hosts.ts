@@ -4,7 +4,8 @@ import {
   sessionInboxHookToken,
   type SessionInboxAddress,
 } from "#execution/session-inbox/address.js";
-import type { CreateRuntime } from "#execution/node-step.js";
+import type { Runtime } from "#channel/types.js";
+import type { CreateRuntimeConfig } from "#execution/node-step.js";
 import type { AuthorizationCallbackPayload } from "#execution/session-inbox/inbox.js";
 import type { SessionEventStore } from "#execution/session-event-store.js";
 import type { ConnectionEventOwners } from "#runtime/connections/events/owners.js";
@@ -47,7 +48,7 @@ export interface DurableHost {
   readonly sessionEvents: SessionEventStore;
   stepAttempt(): number | undefined;
   callbackBaseUrl(): string | undefined;
-  readonly createRuntime: CreateRuntime;
+  createRuntime(config: CreateRuntimeConfig): Runtime;
   readonly connectionEvents: ConnectionEventOwners;
 }
 
