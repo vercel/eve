@@ -53,7 +53,7 @@
     "build": "eve extension build && tsc -p tsconfig.api.json && node scripts/bundle-blob.mjs && node ../../scripts/copy-package-license.mjs .",
     "typecheck": "tsc --noEmit",
     "test": "pnpm run test:integration",
-    "test:integration": "node --import tsx --test \"test/integration/*.test.ts\"",
+    "test:integration": "node --experimental-test-module-mocks --import tsx --test \"test/integration/*.test.ts\"",
     "test:scenario": "node scripts/verify-consumer.mjs",
     "test:runtime": "node scripts/verify-runtime.mjs",
     "test:blob": "node scripts/verify-blob.mjs"

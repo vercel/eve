@@ -8,17 +8,6 @@ export async function createRevert(c: Config, experiment: Experiment): Promise<C
   const git = new GitHub(c),
     branch = `eve-evolve/revert-${experiment.id}`;
   const existing = await git.findPr(branch);
-  if (existing)
-    return {
-      branch,
-      head: existing.head.sha,
-      base: existing.base.sha,
-      pr: existing.number,
-      url: existing.html_url,
-      changedPaths: [],
-      addressedThreads: [],
-      publishedAt: Date.parse(existing.created_at),
-    };
   const main = await git.main(),
     bad = experiment.release?.sha;
   if (!bad || !/^[a-f0-9]{40}$/.test(bad))
@@ -81,24 +70,43 @@ export async function createRevert(c: Config, experiment: Experiment): Promise<C
     if (!head || !/^[a-f0-9]{40}$/.test(head))
       throw new Error("Revert publication unconfirmed; reconcile the deterministic branch");
     const commit = await git.api(`/repos/${git.repo}/commits/${head}`);
+    const released = await git.api(`/repos/${git.repo}/commits/${bad}`);
+    if (released.parents?.length !== 1)
+      throw new Error("Release parent is ambiguous; reconcile the reverse tree before publishing");
+    const parent = await git.api(`/repos/${git.repo}/commits/${released.parents[0].sha}`);
     if (
       !commit.commit?.verification?.verified ||
-      !String(commit.commit.message).includes(operation)
+      !String(commit.commit.message)
+        .split("\n")
+        .includes(`Eve-Evolution-Operation: ${operation}`) ||
+      commit.parents?.length !== 1 ||
+      commit.parents[0].sha !== main ||
+      !parent.commit?.tree?.sha ||
+      commit.commit?.tree?.sha !== parent.commit.tree.sha
     )
       throw new Error("Revert signature or operation identity is not verified");
-    let pr;
+    let pr = existing;
     try {
-      pr = await git.api(`/repos/${git.repo}/pulls`, "POST", {
-        head: branch,
-        base: c.repository.branch,
-        draft: true,
-        title: `Revert release regression ${bad.slice(0, 7)}`,
-        body: `Production was restored to its recorded known-good deployment. This signed revert reconciles source through the same tests, reviews, required checks and verified eve deployment. Experiment: ${experiment.id}.`,
-      });
+      if (!pr)
+        pr = await git.api(`/repos/${git.repo}/pulls`, "POST", {
+          head: branch,
+          base: c.repository.branch,
+          draft: true,
+          title: `Revert release regression ${bad.slice(0, 7)}`,
+          body: `Production was restored to its recorded known-good deployment. This signed revert reconciles source through the same tests, reviews, required checks and verified eve deployment. Experiment: ${experiment.id}.`,
+        });
     } catch {
       pr = await git.findPr(branch);
       if (!pr) throw new Error("Revert PR outcome unconfirmed; reconcile before retrying");
     }
+    if (
+      pr.head?.sha !== head ||
+      pr.head?.ref !== branch ||
+      pr.head?.repo?.full_name?.toLowerCase() !== git.repo.toLowerCase() ||
+      pr.base?.ref !== c.repository.branch ||
+      pr.base?.sha !== main
+    )
+      throw new Error("Recovery PR does not match the verified reverse tree and target branch");
     return {
       branch,
       head,

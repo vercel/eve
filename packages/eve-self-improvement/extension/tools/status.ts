@@ -15,6 +15,12 @@ export default defineTool({
     const c = extension.config;
     if (!owned(c, ctx.session.auth.current))
       throw new Error("Only the configured authenticated owner can read the evolution ledger");
+    if (
+      !owned(c, ctx.session.auth.initiator) ||
+      ctx.conversation?.space?.type !== "direct" ||
+      ctx.conversation.space.visibility !== "private"
+    )
+      throw new Error("Read the evolution ledger in a private direct conversation with its owner");
     const db = store(c),
       active = await db.active();
     const concise = (e: Experiment) => ({

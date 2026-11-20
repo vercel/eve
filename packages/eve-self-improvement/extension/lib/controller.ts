@@ -120,23 +120,53 @@ export async function prepare(
     await db.purge();
     await bindings(c);
 
+    if (active.experiment?.status === "shipped" && active.experiment.release?.deployment)
+      await db.put("release:last", active.experiment);
     const previous = await db.get<Experiment>("release:last");
     if (
       previous?.release?.deployment &&
       !previous.release.rollback &&
       active.experiment?.status !== "rolled-back" &&
-      (!active.experiment || terminal.has(active.experiment.status))
+      (!active.experiment || terminal.has(active.experiment.status) || !active.experiment.release)
     ) {
       const monitoredPrevious = await monitorRelease(c, previous);
+      if (monitoredPrevious.status !== "shipped") {
+        if (
+          active.experiment &&
+          active.experiment.id !== monitoredPrevious.id &&
+          !terminal.has(active.experiment.status)
+        )
+          await db.put("resume:experiment", active.experiment);
+        active.experiment = monitoredPrevious;
+        await save(c, active);
+      }
       await db.put("release:last", monitoredPrevious);
-      if (monitoredPrevious.status !== "shipped") active.experiment = monitoredPrevious;
     }
     if (
       active.experiment &&
       terminal.has(active.experiment.status) &&
       active.experiment.status !== "rolled-back"
-    )
-      active.experiment = null;
+    ) {
+      const pending = await db.get<Experiment>("resume:experiment");
+      if (
+        pending &&
+        pending.id !== active.experiment.id &&
+        active.experiment.status !== "shipped"
+      ) {
+        active.experiment.status = "blocked";
+        active.experiment.reason =
+          "Recovery has not shipped; the pending experiment remains paused";
+        await save(c, active);
+        return {
+          action: "done",
+          lease: active.lease,
+          report: reportFor(active.experiment, "recovery-blocked"),
+        };
+      }
+      active.experiment = pending?.id !== active.experiment.id ? pending : null;
+      await save(c, active);
+      if (pending) await db.put("resume:experiment", null);
+    }
     if (active.experiment) {
       active.experiment.rootSession = ctx.session.id;
       active.experiment.coordinatorSession = undefined;
@@ -167,10 +197,9 @@ export async function prepare(
     const end = Math.floor(Date.now() / 1000) - 120;
     const evidence = await readAgentRuns(c, { from: end - 86400, to: end });
     const observations = await db.observations((end - 86400) * 1000, end * 1000);
-    evidence.observations = observations.values;
+    evidence.observations = observations.complete ? observations.values : [];
     evidence.observationsComplete = observations.complete && observations.values.length > 0;
     if (!observations.complete) {
-      evidence.complete = false;
       evidence.reasons.push("Turn telemetry query was truncated");
     }
     const findings = rankFindings(evidence);
@@ -402,6 +431,11 @@ export async function advance(lease: Lease): Promise<Action> {
         throw new Error("Uncertain merge does not match the verified candidate/signature");
       e.release.sha = pr.merge_commit_sha;
     } else if (e.status === "merging") {
+      if (c.policy.mode !== "ship") {
+        e.reason = "Release paused: current policy permits proposals, not new merges";
+        await save(c, active);
+        return { action: "done", lease };
+      }
       const inspection = await inspectCandidate(c, e.candidate!, git);
       const fingerprint = reviewFingerprint(e.candidate!, inspection);
       if (e.reviewedDigest !== fingerprint) {
@@ -423,6 +457,11 @@ export async function advance(lease: Lease): Promise<Action> {
     await save(c, active);
     let deployed = await platform.deployment(c.project.productionUrl);
     if (deployed.sha !== e.release.sha) {
+      if (c.policy.mode !== "ship") {
+        e.reason = "Release paused: current policy permits proposals, not new deployments";
+        await save(c, active);
+        return { action: "done", lease };
+      }
       if (deployed.id !== e.release.baseline.id)
         throw new Error("Production moved during release; do not overwrite another deployment");
       if (e.release.deployStartedAt) {
@@ -597,7 +636,15 @@ function reviewPayload(
     kind: "review",
     candidate,
     checks: [...checks, ...inspection.checks],
-    feedback: inspection.feedback,
+    feedback: {
+      ...inspection.feedback,
+      comments: inspection.feedback.comments.slice(-50).map((comment) => ({
+        ...comment,
+        body: comment.body.slice(0, 1000),
+      })),
+      commentDigest: digest(inspection.feedback.comments),
+      omittedComments: Math.max(0, inspection.feedback.comments.length - 50),
+    },
     outputs: inspection.outputs,
   });
   if (Buffer.byteLength(payload) > 200_000)
