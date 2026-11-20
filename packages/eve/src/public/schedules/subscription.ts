@@ -500,8 +500,13 @@ export function defineDynamicSchedules(
     readonly provider?: ScheduleProvider;
   },
 ): DefinedDynamicSchedules<any, any, any> {
+  let provider = definition.provider;
+  Object.defineProperty(definition, "provider", {
+    configurable: true,
+    enumerable: true,
+    get: () => (provider ??= defaultScheduleProvider()),
+  });
   Object.assign(definition, {
-    provider: definition.provider ?? defaultScheduleProvider(),
     tool: definition.tool ?? true,
     [SCHEDULE_COLLECTION_DEFINITION_BRAND]: true,
   });
