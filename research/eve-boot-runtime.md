@@ -81,7 +81,7 @@ This shape causes four problems:
 interface EveRuntime {
   platform: PlatformContext | undefined;
   defaultSession: RuntimeSession | undefined;
-  readonly hosts: { routes; streams; durable?: DurableHost };
+  readonly hosts: { routes; sessionEventStores; durable?: DurableHost };
   readonly instrumentation: { runtime?: InstrumentationRuntime; providers };
   onClose(close: () => Promise<void>): void;
   close(): Promise<void>;
@@ -111,7 +111,7 @@ that produces queue messages.
 "World" is the Workflow SDK's name for its storage, queue, hooks, and streams backend. eve doesn't
 adopt it. `bootEve` creates the World, and the Workflow binding wraps it in a `DurableHost`, the
 eve-owned interface for delivery, run lookup and status, cancellation, the current deployment ID,
-the session line store, step attempts, and the callback URL.
+the session event store, step attempts, and the callback URL.
 
 Most of today's `getWorld()` calls are not generic code reaching past `DurableHost`; they are the
 Workflow engine itself. Session-inbox ownership and resume, ending stranded sessions, prewarm, the

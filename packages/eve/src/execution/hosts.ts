@@ -6,7 +6,7 @@ import {
 } from "#execution/session-inbox/address.js";
 import type { CreateRuntime } from "#execution/node-step.js";
 import type { AuthorizationCallbackPayload } from "#execution/session-inbox/inbox.js";
-import type { SessionLineStore } from "#execution/session-line-store.js";
+import type { SessionEventStore } from "#execution/session-event-store.js";
 import type { ConnectionEventOwners } from "#runtime/connections/events/owners.js";
 import { eveRuntime } from "#runtime/eve-runtime.js";
 import { HookNotFoundError, isRunNotFound, isRunTargetGone } from "#shared/run-errors.js";
@@ -44,7 +44,7 @@ export interface DurableHost {
   findRun(runId: string): Promise<DurableRun | undefined>;
   runStatus(runId: string): Promise<string>;
   cancelRun(runId: string, reason: string): Promise<void>;
-  readonly lineStore: SessionLineStore;
+  readonly sessionEvents: SessionEventStore;
   stepAttempt(): number | undefined;
   callbackBaseUrl(): string | undefined;
   readonly createRuntime: CreateRuntime;
@@ -53,7 +53,7 @@ export interface DurableHost {
 
 export interface Hosts {
   readonly routes: Set<HostedRoute>;
-  readonly streams: Map<string, SessionLineStore>;
+  readonly sessionEventStores: Map<string, SessionEventStore>;
   durable?: DurableHost;
 }
 
@@ -196,19 +196,20 @@ export async function cancelRoutedRun(runId: string, reason: string): Promise<bo
   return true;
 }
 
-export function registerSessionLineStore(sessionId: string, store: SessionLineStore): () => void {
-  const { streams } = hosts();
-  if (streams.has(sessionId)) throw new Error(`Session "${sessionId}" already has a line store.`);
-  streams.set(sessionId, store);
+export function registerSessionEventStore(sessionId: string, store: SessionEventStore): () => void {
+  const { sessionEventStores } = hosts();
+  if (sessionEventStores.has(sessionId))
+    throw new Error(`Session "${sessionId}" already has a session event store.`);
+  sessionEventStores.set(sessionId, store);
   return () => {
-    if (streams.get(sessionId) === store) streams.delete(sessionId);
+    if (sessionEventStores.get(sessionId) === store) sessionEventStores.delete(sessionId);
   };
 }
 
-export function sessionLineStore(sessionId: string): SessionLineStore {
-  const registered = hosts().streams.get(sessionId);
+export function sessionEventStore(sessionId: string): SessionEventStore {
+  const registered = hosts().sessionEventStores.get(sessionId);
   if (registered !== undefined) return registered;
   const { durable } = hosts();
   if (durable === undefined) throw new Error(`No host in this realm holds session "${sessionId}".`);
-  return durable.lineStore;
+  return durable.sessionEvents;
 }

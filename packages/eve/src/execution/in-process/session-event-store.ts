@@ -1,4 +1,4 @@
-import type { SessionLineStore } from "#execution/session-line-store.js";
+import type { SessionEventStore } from "#execution/session-event-store.js";
 
 interface MemoryStream {
   readonly chunks: Uint8Array[];
@@ -6,12 +6,12 @@ interface MemoryStream {
   readonly waiters: Set<() => void>;
 }
 
-export interface MemoryLineStore extends SessionLineStore {
+export interface MemorySessionEventStore extends SessionEventStore {
   open(sessionId: string): WritableStream<Uint8Array>;
   sessions(): readonly string[];
 }
 
-export function createMemoryLineStore(): MemoryLineStore {
+export function createMemorySessionEventStore(): MemorySessionEventStore {
   const streams = new Map<string, MemoryStream>();
   const streamOf = (sessionId: string): MemoryStream => {
     const stream = streams.get(sessionId);

@@ -1,6 +1,6 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { parseNdjsonStream } from "#execution/ndjson-stream.js";
-import { sessionLineStore } from "#execution/hosts.js";
+import { sessionEventStore } from "#execution/hosts.js";
 import { createEventReader } from "#protocol/session-lines.js";
 import { createV26HistoryReader, type V26HistoryReader } from "#execution/v26-history.js";
 import { isV26Line } from "#protocol/v26-lines.js";
@@ -23,7 +23,7 @@ export function readSessionRecords(
   startIndex?: number,
 ): ReadableStream<unknown> {
   return parseNdjsonStream<unknown>(() =>
-    sessionLineStore(sessionId).readable(sessionId, startIndex),
+    sessionEventStore(sessionId).readable(sessionId, startIndex),
   );
 }
 
@@ -113,11 +113,11 @@ export function readSessionRecordHistory(
 }
 
 export async function readSessionStreamTailIndex(sessionId: string): Promise<number> {
-  return await sessionLineStore(sessionId).tail(sessionId);
+  return await sessionEventStore(sessionId).tail(sessionId);
 }
 
 export async function assertSessionHistoryReadable(sessionId: string): Promise<void> {
-  await sessionLineStore(sessionId).assertReadable(sessionId);
+  await sessionEventStore(sessionId).assertReadable(sessionId);
 }
 
 export async function* streamSessionLines(
