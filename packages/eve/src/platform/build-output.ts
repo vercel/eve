@@ -1,9 +1,9 @@
-import { currentPlatform } from "#platform/current.js";
-import type { PlatformBuildOutput, PlatformTarget } from "#platform/types.js";
+import { platformContext, type PlatformTarget } from "#platform/context.js";
+import type { PlatformBuildOutput } from "#platform/types.js";
 import { vercelBuildOutput } from "#platform/vercel/build-output.js";
 
 const IMPLEMENTATIONS: Record<PlatformTarget, PlatformBuildOutput> = { vercel: vercelBuildOutput };
 
 export function platformBuildOutput(): PlatformBuildOutput {
-  return IMPLEMENTATIONS[currentPlatform().target];
+  return IMPLEMENTATIONS[platformContext().target];
 }

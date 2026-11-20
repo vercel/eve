@@ -1,4 +1,4 @@
-import type { PlatformIdentity } from "#platform/types.js";
+import type { PlatformIdentity } from "#platform/context.js";
 import { vercelDeployment } from "#platform/vercel/deployment.js";
 import {
   resolveVercelOidcCurrentProject,

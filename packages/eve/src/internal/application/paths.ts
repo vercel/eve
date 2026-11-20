@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import { workflowEntryReference } from "#execution/workflow-references.js";
-import { currentPlatform } from "#platform/current.js";
+import { platformContext } from "#platform/context.js";
 import {
   resolveInstalledPackageInfo,
   resolvePackageRoot,
@@ -68,11 +68,7 @@ export function resolveSandboxCacheDirectory(appRoot: string): string {
 }
 
 export function resolveOutputDirectory(appRoot: string): string {
-  if (currentPlatform().build.target() === "vercel") {
-    return join(appRoot, ".vercel", "output");
-  }
-
-  return join(appRoot, ".output");
+  return platformContext().build.outputDirectory(appRoot) ?? join(appRoot, ".output");
 }
 
 export function getApplicationInfo(appRoot: string): ApplicationInfo {

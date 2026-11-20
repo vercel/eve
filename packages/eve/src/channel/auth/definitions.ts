@@ -22,7 +22,7 @@ import {
   type ResolvedOidcAuthStrategy,
   type RouteStrategyAuthenticationResult,
 } from "#channel/auth/types.js";
-import { currentPlatform } from "#platform/current.js";
+import { platformContext } from "#platform/context.js";
 
 const vercelOidcLog = createLogger("auth.vercel-oidc");
 import {
@@ -718,7 +718,7 @@ function addInvalidBearerTokenError(
  */
 export function placeholderAuth(): AuthFn<Request> {
   return () => {
-    if (currentPlatform().deployment.environmentKind() !== "production") {
+    if (platformContext().deployment.environmentKind() !== "production") {
       return null;
     }
 
@@ -887,7 +887,7 @@ export async function verifyVercelOidc(
     return { ok: false };
   }
 
-  if (!currentPlatform().identity.isPlatformIssuer(claims.issuer)) {
+  if (!platformContext().identity.isPlatformIssuer(claims.issuer)) {
     vercelOidcLog.debug("Rejected token whose issuer is not a Vercel OIDC issuer.", {
       issuer: claims.issuer,
     });
@@ -939,7 +939,7 @@ function resolveCurrentVercelProject(
   opts: VerifyVercelOidcOptions,
 ): NonNullable<ResolvedOidcAuthStrategy["currentVercelProject"]> | undefined {
   if (opts.currentVercelProject !== undefined) return opts.currentVercelProject;
-  return currentPlatform().identity.currentProject();
+  return platformContext().identity.currentProject();
 }
 
 /**
@@ -1054,7 +1054,7 @@ export function vercelOidc(opts: VercelOidcOptions = {}): AuthFn<Request> {
       const currentVercelProject =
         opts.currentVercelProject ??
         (token !== null && isLocalDevelopmentVercelOidc()
-          ? await currentPlatform().identity.requestProject(request)
+          ? await platformContext().identity.requestProject(request)
           : undefined);
       const result = await verifyVercelOidc(
         token,
@@ -1068,7 +1068,7 @@ export function vercelOidc(opts: VercelOidcOptions = {}): AuthFn<Request> {
 }
 
 function isLocalDevelopmentVercelOidc(): boolean {
-  const environmentKind = currentPlatform().deployment.environmentKind();
+  const environmentKind = platformContext().deployment.environmentKind();
   if (environmentKind === "development") return true;
   if (environmentKind === "preview" || environmentKind === "production") return false;
   return isEveDevEnvironment();

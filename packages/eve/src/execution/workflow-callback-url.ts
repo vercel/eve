@@ -1,4 +1,4 @@
-import { currentPlatform } from "#platform/current.js";
+import { platformContext } from "#platform/context.js";
 import { joinEveRoutePath } from "#shared/eve-route-path.js";
 import {
   EVE_PUBLIC_ROUTE_PREFIX_ENV,
@@ -8,7 +8,7 @@ import {
 const WORKFLOW_LOCAL_BASE_URL_ENV = "WORKFLOW_LOCAL_BASE_URL";
 
 export function resolveVercelProductionCallbackBaseUrl(): string | null {
-  const { deployment } = currentPlatform();
+  const { deployment } = platformContext();
   const productionHost = deployment.productionHost();
   if (deployment.environmentKind() === "production" && productionHost !== undefined) {
     return `https://${productionHost}`;

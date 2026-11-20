@@ -3,7 +3,7 @@ import type { InstrumentationModelStartedInput } from "#public/instrumentation/i
 import type { JsonObject } from "#shared/json.js";
 import { batchSpanProcessor } from "#tracing/eve/batch-span-processor.js";
 import { contentFilteringProcessor } from "#tracing/eve/content-span-processor.js";
-import { platformTelemetry } from "#platform/telemetry.js";
+import { platformContext } from "#platform/context.js";
 import type {
   MetricReader,
   SpanExporter,
@@ -221,7 +221,10 @@ export function agentRunsIntegration(options: ManagedTraceOptions = {}): OtelInt
     [PROVIDER]: true,
     metricReaders: [],
     spanProcessors: [
-      contentFilteringProcessor(platformTelemetry().runtimeSpanProcessor(), options.exportPolicy),
+      contentFilteringProcessor(
+        platformContext().telemetry.runtimeSpanProcessor(),
+        options.exportPolicy,
+      ),
     ],
   };
 }

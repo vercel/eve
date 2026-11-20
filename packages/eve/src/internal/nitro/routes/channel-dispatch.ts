@@ -26,7 +26,7 @@ import { createRouteInvokeTool } from "#internal/nitro/routes/route-invoke-tool.
 import { readVercelProjectLink } from "#internal/vercel/project-link.js";
 import { withLocalDevRequestScope } from "#runtime/local-dev-capability.js";
 import { getWorld } from "#internal/workflow/runtime.js";
-import { currentPlatform } from "#platform/current.js";
+import { platformContext } from "#platform/context.js";
 
 const log = createLogger("channel.dispatch");
 
@@ -158,7 +158,7 @@ async function withDevelopmentVercelOidcContext<T>(
   return await withLocalDevRequestScope(
     request,
     async () =>
-      await currentPlatform().identity.withRequestProject(
+      await platformContext().identity.withRequestProject(
         {
           request,
           resolveCurrentProject: async () => {
@@ -251,7 +251,7 @@ async function buildRouteArgs(input: {
 async function resolveAcceptedDeploymentId(
   config: NitroArtifactsConfig,
 ): Promise<string | undefined> {
-  const hosted = currentPlatform().deployment.deploymentId();
+  const hosted = platformContext().deployment.deploymentId();
   if (hosted !== undefined) return validateDeploymentId(hosted);
 
   if (config.kind === "development" && process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV] === undefined) {

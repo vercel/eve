@@ -7,7 +7,7 @@ import { stepModel } from "#definitions/step.js";
 import type { Step } from "#harness/step/context.js";
 import type { ModelProfile } from "#harness/model-profile.js";
 import { appendPackageUserAgent } from "#internal/user-agent.js";
-import { currentPlatform } from "#platform/current.js";
+import { platformContext } from "#platform/context.js";
 
 export function buildGatewayAttributionHeaders(
   profile: ModelProfile,
@@ -16,7 +16,7 @@ export function buildGatewayAttributionHeaders(
   if (!profile.gateway) return undefined;
 
   const title = runtimeIdentity?.agentName ?? runtimeIdentity?.agentId;
-  const deploymentHost = currentPlatform().deployment.publicHost();
+  const deploymentHost = platformContext().deployment.publicHost();
   const referer = deploymentHost ? `https://${deploymentHost}` : undefined;
 
   const headers: Record<string, string> = Object.fromEntries(appendPackageUserAgent(new Headers()));

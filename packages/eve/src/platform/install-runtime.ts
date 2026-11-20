@@ -1,4 +1,4 @@
-import { createPlatform, DEFAULT_PLATFORM_TARGET } from "#platform/create.js";
-import { installPlatform } from "#platform/current.js";
+import { setPlatformContext } from "#platform/context.js";
+import { createVercelPlatformContext } from "#platform/vercel/context.js";
 
-installPlatform(createPlatform(DEFAULT_PLATFORM_TARGET));
+setPlatformContext(createVercelPlatformContext());

@@ -1,60 +1,20 @@
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
-import { currentPlatform } from "#platform/current.js";
+import { platformContext } from "#platform/context.js";
 import type { MemoryDocumentBackend } from "#public/memory/file/backend.js";
 import { inMemory } from "#public/memory/file/backends/in-memory.js";
 import { lazyBackend } from "#public/memory/file/backends/lazy.js";
-import { platformStorage } from "#platform/storage.js";
 
-interface VercelBlobCredentials {
-  readonly storeId?: string;
-  readonly token?: string;
-}
-
-interface DefaultFileMemoryBackendProbes {
-  readonly vercelBlobCredentials: () => VercelBlobCredentials | undefined;
-  readonly isEveDevelopment: () => boolean;
-  readonly isDeployedOnVercel: () => boolean;
-}
-
-const ENVIRONMENT_PROBES: DefaultFileMemoryBackendProbes = {
-  vercelBlobCredentials: () =>
-    credentialsFromEnvironment("EVE_MEMORY_BLOB") ?? credentialsFromEnvironment("BLOB"),
-  isEveDevelopment: isEveDevEnvironment,
-  isDeployedOnVercel: () => currentPlatform().deployment.host() === "vercel",
-};
 const DEVELOPMENT_BACKEND = inMemory();
 
 export function defaultFileMemoryBackend(): MemoryDocumentBackend {
-  return lazyBackend(() => selectDefaultFileMemoryBackend(ENVIRONMENT_PROBES));
+  return lazyBackend(selectDefaultFileMemoryBackend);
 }
 
-function selectDefaultFileMemoryBackend(
-  probes: DefaultFileMemoryBackendProbes,
-): MemoryDocumentBackend {
-  if (probes.isDeployedOnVercel()) {
-    const credentials = probes.vercelBlobCredentials();
-    if (credentials !== undefined) return platformStorage().hostedDocumentBackend(credentials);
-    throw new Error(
-      "fileMemory() requires Vercel Blob storage. Set up EVE_MEMORY_BLOB_STORE_ID with `/add memory/file` in eve dev or `eve integration setup file-memory`, then redeploy. Alternatively, pass fileMemory({ backend }).",
-    );
-  }
-  if (probes.isEveDevelopment()) return DEVELOPMENT_BACKEND;
+function selectDefaultFileMemoryBackend(): MemoryDocumentBackend {
+  const platformBackend = platformContext().memory.defaultDocumentBackend();
+  if (platformBackend !== undefined) return platformBackend;
+  if (isEveDevEnvironment()) return DEVELOPMENT_BACKEND;
   throw new Error(
     "fileMemory() requires an explicit backend outside Vercel and eve dev. Pass fileMemory({ backend }).",
   );
-}
-
-function credentialsFromEnvironment(
-  prefix: "BLOB" | "EVE_MEMORY_BLOB",
-): VercelBlobCredentials | undefined {
-  const storeId = environmentValue(`${prefix}_STORE_ID`);
-  if (storeId !== undefined) return { storeId };
-
-  const token = environmentValue(`${prefix}_READ_WRITE_TOKEN`);
-  return token === undefined ? undefined : { token };
-}
-
-function environmentValue(name: string): string | undefined {
-  const value = process.env[name]?.trim();
-  return value === "" ? undefined : value;
 }

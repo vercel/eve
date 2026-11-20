@@ -14,7 +14,7 @@ import {
   EVE_PUBLIC_ROUTE_PREFIX_ENV,
   normalizePublicRoutePrefix,
 } from "#shared/public-route-prefix.js";
-import { currentPlatform } from "#platform/current.js";
+import { platformContext } from "#platform/context.js";
 import type { ToolDefinition } from "#tools/definition.js";
 
 /**
@@ -236,7 +236,7 @@ export function defineMemory(definition: MemoryDefinition): DefinedMemory {
  * local application roots do not share memory.
  */
 export function defaultNamespace(context: MemoryNamespaceContext): string {
-  const { deployment } = currentPlatform();
+  const { deployment } = platformContext();
   const projectId = deployment.projectId();
   if (projectId === undefined) {
     return JSON.stringify([

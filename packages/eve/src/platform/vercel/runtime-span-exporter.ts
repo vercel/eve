@@ -1,4 +1,3 @@
-import { JsonTraceSerializer } from "#compiled/@opentelemetry/otlp-transformer/index.js";
 import { TraceFlags } from "#compiled/@opentelemetry/api/index.js";
 import type { SpanExporter, SpanProcessor } from "#tracing/eve/otel-configuration.js";
 
@@ -15,7 +14,17 @@ interface VercelRequestContextReader {
     | undefined;
 }
 
+type JsonTraceSerializer =
+  typeof import("#compiled/@opentelemetry/otlp-transformer/index.js").JsonTraceSerializer;
+
 export function vercelRuntimeSpanExporter(): SpanExporter {
+  let serializer: JsonTraceSerializer | undefined;
+  const loading = import("#compiled/@opentelemetry/otlp-transformer/index.js").then((module) => {
+    serializer = module.JsonTraceSerializer;
+    return serializer;
+  });
+  loading.catch(() => undefined);
+
   return {
     export(spans, resultCallback) {
       const reader = (globalThis as Record<symbol, unknown>)[VERCEL_REQUEST_CONTEXT] as
@@ -27,21 +36,34 @@ export function vercelRuntimeSpanExporter(): SpanExporter {
         return;
       }
 
-      try {
-        const serialized = JsonTraceSerializer.serializeRequest([...spans] as Parameters<
-          typeof JsonTraceSerializer.serializeRequest
+      const report = (loaded: JsonTraceSerializer) => {
+        const serialized = loaded.serializeRequest([...spans] as Parameters<
+          JsonTraceSerializer["serializeRequest"]
         >[0]);
         if (serialized === undefined) throw new Error("Failed to serialize spans.");
         telemetry.reportSpans(JSON.parse(new TextDecoder().decode(serialized)) as unknown);
         resultCallback({ code: 0 });
-      } catch (error: unknown) {
+      };
+      const fail = (error: unknown) => {
         resultCallback({
           code: 1,
           error: error instanceof Error ? error : new Error(String(error)),
         });
+      };
+
+      if (serializer === undefined) {
+        loading.then(report).catch(fail);
+        return;
+      }
+      try {
+        report(serializer);
+      } catch (error: unknown) {
+        fail(error);
       }
     },
-    forceFlush: async () => undefined,
+    forceFlush: async () => {
+      await loading.catch(() => undefined);
+    },
     shutdown: async () => undefined,
   };
 }

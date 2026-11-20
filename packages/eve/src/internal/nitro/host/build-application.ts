@@ -26,7 +26,7 @@ import {
 import { stageProductionCompilerArtifacts } from "#internal/application/production-compiler-artifacts.js";
 import { stageBuildDeploymentId } from "#internal/nitro/host/stage-build-deployment-id.js";
 import { createHostNitro } from "#internal/nitro/host/create-host-nitro.js";
-import { currentPlatform } from "#platform/current.js";
+import { platformContext } from "#platform/context.js";
 import { createHostSpec } from "#internal/nitro/host/host-spec.js";
 import { emitVercelAgentSummary } from "#internal/nitro/host/build-vercel-agent-summary.js";
 import { emitConnectManifest } from "#internal/external-resources.js";
@@ -38,7 +38,8 @@ import {
 } from "#internal/nitro/host/prepare-application-host.js";
 import { createProductionNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
 import { platformBuildOutput } from "#platform/build-output.js";
-import type { BuildTarget, PlatformBuildOutput } from "#platform/types.js";
+import type { PlatformBuildOutput } from "#platform/types.js";
+import type { BuildTarget } from "#platform/context.js";
 import { prewarmAppSandboxes } from "#execution/sandbox/prewarm.js";
 import type { ApplicationBuildOptions } from "#internal/nitro/host/types.js";
 import { findClosestVercelOutputDirectory } from "#shared/vercel-output-directory.js";
@@ -225,7 +226,7 @@ export async function buildApplication(
   const profiler = profileOutputPath === undefined ? undefined : new ApplicationBuildProfiler();
   const platform: ApplicationBuildPlatform = {
     output: platformBuildOutput(),
-    target: currentPlatform().build.target(),
+    target: platformContext().build.target(),
   };
 
   const extensionBuild = await measureBuildPhase(profiler, "extension.check", () =>

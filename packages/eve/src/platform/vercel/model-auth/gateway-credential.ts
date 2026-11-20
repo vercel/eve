@@ -1,4 +1,4 @@
-import { currentPlatform } from "#platform/current.js";
+import { platformContext } from "#platform/context.js";
 import { MODEL_CONNECTION_ENV } from "#shared/model-helper.js";
 import { resolveModelApiKey } from "#internal/model-auth/api-key.js";
 import {
@@ -32,5 +32,5 @@ export async function resolveGatewayModelCredential(
     return { kind: "api-key", token: await resolveModelApiKey("ai-gateway-key") };
   if (selected !== "ai-gateway-project" && process.env.AI_GATEWAY_API_KEY?.trim())
     return { kind: "api-key", token: process.env.AI_GATEWAY_API_KEY };
-  return { kind: "oidc", token: await currentPlatform().identity.token() };
+  return { kind: "oidc", token: await platformContext().identity.token() };
 }

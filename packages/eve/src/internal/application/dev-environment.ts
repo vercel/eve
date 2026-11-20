@@ -1,6 +1,6 @@
 import { join, resolve } from "node:path";
 
-import { currentPlatform } from "#platform/current.js";
+import { platformContext } from "#platform/context.js";
 
 export const EVE_DEV_ENV_FLAG = "EVE_DEV";
 
@@ -21,15 +21,11 @@ export function isEveDevEnvironment(): boolean {
 }
 
 export function isLocalDevelopmentServer(): boolean {
-  const { deployment } = currentPlatform();
-  if (deployment.host() === "vercel" && deployment.environmentKind() === "development") {
-    return true;
-  }
-  return isEveDevEnvironment();
+  return platformContext().deployment.isPlatformDevelopmentServer() || isEveDevEnvironment();
 }
 
 export function resolveInstrumentationEnvironment(): ConversationEnvironment {
-  const environmentKind = currentPlatform().deployment.environmentKind();
+  const environmentKind = platformContext().deployment.environmentKind();
   if (isEveDevEnvironment() || environmentKind === "development") return "development";
   return environmentKind === "preview" ? "preview" : "production";
 }

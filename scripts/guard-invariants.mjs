@@ -2571,7 +2571,7 @@ async function main() {
     violations.push({
       rule: 69,
       file,
-      message: `reads \`VERCEL*\` environment variables or imports \`#compiled/@vercel/*\` or \`#platform/vercel/*\` in ${count} place${count === 1 ? "" : "s"}. Vercel platform knowledge lives in \`packages/eve/src/platform/\` so eve can run on other hosts. Read platform facts through \`currentPlatform()\` from \`#platform/current.js\` or a \`#platform/<port>.js\` accessor, or add the fact to a platform port and its Vercel implementation.`,
+      message: `reads \`VERCEL*\` environment variables or imports \`#compiled/@vercel/*\` or \`#platform/vercel/*\` in ${count} place${count === 1 ? "" : "s"}. Vercel platform knowledge lives in \`packages/eve/src/platform/\` so eve can run on other hosts. Read platform facts and capabilities through \`platformContext()\` from \`#platform/context.js\`, or add the capability to the \`PlatformContext\` contract and \`platform/vercel/context.ts\`.`,
     });
   }
 

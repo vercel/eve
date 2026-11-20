@@ -4,8 +4,7 @@ import {
 } from "#internal/model-auth/development-broker-client.js";
 import type { ChatGptAuthState } from "#public/models/openai/chatgpt/token-broker.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
-import { platformModels } from "#platform/models.js";
-import { currentPlatform } from "#platform/current.js";
+import { platformContext } from "#platform/context.js";
 import { hasEnvValue } from "#internal/resolve-model-endpoint-status.js";
 import { buildAgentInfoResponse } from "#internal/nitro/routes/agent-info/build-agent-info-response.js";
 import {
@@ -54,7 +53,7 @@ async function resolveGatewayCredentialPresence(
     try {
       const credential =
         (await readDevelopmentModelCredential("gateway")) ??
-        (await platformModels().gatewayCredential());
+        (await platformContext().models.gatewayCredential());
       return {
         apiKey: credential.kind === "api-key",
         oidc: credential.kind === "oidc",
@@ -72,7 +71,7 @@ async function resolveGatewayCredentialPresence(
   }
 
   try {
-    await currentPlatform().identity.token();
+    await platformContext().identity.token();
     return { apiKey: false, oidc: true };
   } catch {
     return { apiKey: false, oidc: false };

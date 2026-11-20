@@ -9,7 +9,7 @@ import {
 } from "#execution/public-destination.js";
 import { isLocalDevelopmentServer } from "#internal/application/dev-environment.js";
 import { createLogger } from "#internal/logging.js";
-import { currentPlatform } from "#platform/current.js";
+import { platformContext } from "#platform/context.js";
 import { isObject } from "#shared/guards.js";
 
 const log = createLogger("execution.session-callback");
@@ -119,7 +119,7 @@ function callbackLogFields(input: { readonly body: unknown; readonly url: string
 async function resolveSessionCallbackHeaders(urlValue: string): Promise<Record<string, string>> {
   return {
     "content-type": "application/json",
-    ...currentPlatform().identity.callbackHeaders(urlValue, (url) =>
+    ...platformContext().identity.callbackHeaders(urlValue, (url) =>
       configuredCallbackOrigins().some((matches) => matches(url)),
     ),
   };

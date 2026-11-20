@@ -1,4 +1,3 @@
-import { getVercelOidcToken } from "#compiled/@vercel/oidc/index.js";
 import { decodeVercelOidcTokenClaims } from "#platform/vercel/project.js";
 import { withPackageUserAgent } from "#internal/user-agent.js";
 import type { VercelCreateOptions } from "#platform/vercel/sandbox/sdk-types.js";
@@ -32,6 +31,7 @@ export async function getVercelSandboxCredentials(
   }
 
   try {
+    const { getVercelOidcToken } = await import("#compiled/@vercel/oidc/index.js");
     const oidcToken = await getVercelOidcToken({
       project: projectId,
       team: teamId,

@@ -1,4 +1,4 @@
-import type { PlatformDeployment } from "#platform/types.js";
+import type { PlatformDeployment } from "#platform/context.js";
 import { isVercelEnvironment } from "#platform/vercel/environment.js";
 import { resolveVercelProjectIdFromEnvironment } from "#platform/vercel/project.js";
 
@@ -11,7 +11,6 @@ function readRaw(name: string): string | undefined {
 }
 
 export const vercelDeployment: PlatformDeployment = {
-  host: () => (isVercelEnvironment() ? "vercel" : "node"),
   environmentKind() {
     const environment = process.env.VERCEL_ENV;
     return environment === "development" ||
@@ -37,4 +36,6 @@ export const vercelDeployment: PlatformDeployment = {
   productionHost: () => readRaw("VERCEL_PROJECT_PRODUCTION_URL"),
   deploymentHost: () => readRaw("VERCEL_URL"),
   publicHost: () => readRaw("VERCEL_PROJECT_PRODUCTION_URL") ?? readRaw("VERCEL_URL"),
+  isPlatformDevelopmentServer: () =>
+    isVercelEnvironment() && process.env.VERCEL_ENV === "development",
 };

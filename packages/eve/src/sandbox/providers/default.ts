@@ -1,6 +1,6 @@
 import { isLinuxDockerDaemonAvailableSync } from "#execution/sandbox/bindings/local.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
-import { currentPlatform } from "#platform/current.js";
+import { platformContext } from "#platform/context.js";
 import type { DockerSandboxEnvironmentOptions } from "#public/sandbox/docker-sandbox.js";
 import type { SandboxSession } from "#public/sandbox/index.js";
 import {
@@ -16,7 +16,6 @@ import type { VercelSandboxCreateOptions } from "#public/sandbox/vercel-sandbox.
 import { withAdoptedSandboxSessionStates, withRecordedSandboxProvider } from "#sandbox/state.js";
 import { DockerSandbox } from "#sandbox/providers/docker.js";
 import { JustBashSandbox } from "#sandbox/providers/just-bash.js";
-import { platformSandboxes } from "#platform/sandbox.js";
 import { isObject } from "#shared/guards.js";
 import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
 import type {
@@ -201,7 +200,7 @@ export const DefaultSandbox: SandboxProvider<
 });
 
 function selectProvider(): SelectedProvider | null {
-  if (currentPlatform().deployment.host() === "vercel") return "vercel";
+  if (platformContext().sandbox.hostedAvailable()) return "vercel";
   if (isLinuxDockerDaemonAvailableSync()) return "docker";
   return isEveDevEnvironment() ? "just-bash" : null;
 }
@@ -216,7 +215,7 @@ function createEnvironment(
     case "just-bash":
       return JustBashSandbox.environment(options.justBash ?? {});
     case "vercel":
-      return platformSandboxes().hostedEnvironment(options.vercel ?? {});
+      return platformContext().sandbox.hostedEnvironment(options.vercel ?? {});
   }
 }
 

@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { currentPlatform } from "#platform/current.js";
+import { platformContext } from "#platform/context.js";
 
-const deployment = () => currentPlatform().deployment;
+const deployment = () => platformContext().deployment;
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -29,12 +29,13 @@ describe("Vercel platform deployment facts", () => {
     expect(deployment().environmentName()).toBe("preview");
   });
 
-  it("reports the Vercel host only when VERCEL is set", () => {
-    vi.stubEnv("VERCEL", "1");
-    expect(deployment().host()).toBe("vercel");
-
+  it("counts only vercel dev, not a pulled VERCEL_ENV, as the platform development server", () => {
+    vi.stubEnv("VERCEL_ENV", "development");
     vi.stubEnv("VERCEL", "");
-    expect(deployment().host()).toBe("node");
+    expect(deployment().isPlatformDevelopmentServer()).toBe(false);
+
+    vi.stubEnv("VERCEL", "1");
+    expect(deployment().isPlatformDevelopmentServer()).toBe(true);
   });
 
   it("trims the deployment id and treats a blank one as absent", () => {

@@ -7,7 +7,7 @@ import { createKernel } from "#harness/kernel.js";
 import type { HandleEventFn, HarnessToolMap, StepFn } from "#harness/types.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger } from "#internal/logging.js";
-import { currentPlatform } from "#platform/current.js";
+import { platformContext } from "#platform/context.js";
 import type { RuntimeIdentity } from "#protocol/session-events/families/session.js";
 import { UNSPECIFIED_INPUT_SCHEMA } from "#tools/schema.js";
 import {
@@ -104,7 +104,7 @@ export function buildRuntimeIdentity(agent: RuntimeAgentIdentity): RuntimeIdenti
     eveVersion: packageInfo.version,
   };
 
-  const build = currentPlatform().deployment.build();
+  const build = platformContext().deployment.build();
   return build === undefined ? identity : { ...identity, build };
 }
 

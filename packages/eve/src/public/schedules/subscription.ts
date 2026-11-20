@@ -20,8 +20,7 @@ import type { Delivery } from "#shared/delivery.js";
 import { SCHEDULE_COLLECTION_DEFINITION_BRAND } from "#shared/schedule-collection-definition.js";
 import type { ScheduleProviderContext } from "#runtime/schedules/provider-types.js";
 import type { AgentToolExposure } from "#shared/agent-definition.js";
-import { platformSchedules } from "#platform/schedules.js";
-
+import { platformContext } from "#platform/context.js";
 /** A provider namespace scope, represented by one key or a hierarchical key path. */
 export type ScheduleScopeValue = string | readonly string[];
 /** Return `null` to deny the current schedule operation. */
@@ -502,7 +501,7 @@ export function defineDynamicSchedules(
   },
 ): DefinedDynamicSchedules<any, any, any> {
   Object.assign(definition, {
-    provider: definition.provider ?? platformSchedules().defaultProvider(),
+    provider: definition.provider ?? platformContext().schedules.defaultProvider(),
     tool: definition.tool ?? true,
     [SCHEDULE_COLLECTION_DEFINITION_BRAND]: true,
   });
