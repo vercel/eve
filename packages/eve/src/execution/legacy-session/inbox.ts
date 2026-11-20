@@ -59,7 +59,6 @@ export async function resumeLegacyInbox(token: string, command: Command) {
       command,
       isObject(metadata) ? metadata.sessionInboxWireVersion : undefined,
     );
-    // After encoding, so pre-0.45 sessions keep their not-found fresh start.
     await assertRunnableSessionOwner({ runId: target.hook.runId, hook: target.hook });
   }
   const hook = await resumeRunnableHook(target.hook.token, payload);
