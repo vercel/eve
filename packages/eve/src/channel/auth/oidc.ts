@@ -6,7 +6,7 @@ import {
   areTokenClaimMatchersSatisfied,
   createJwtAuthenticatedCallerPrincipal,
 } from "#channel/auth/token-claims.js";
-import { isVercelOidcIssuer } from "#shared/vercel-project.js";
+import { isVercelOidcIssuer } from "#platform/vercel/project.js";
 import type {
   ResolvedOidcAuthStrategy,
   RouteStrategyAuthenticationResult,

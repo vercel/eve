@@ -6,7 +6,7 @@ import {
   createEveVercelOptions,
   EVE_WORKFLOW_FLOW_ROUTE_PATH,
   VERCEL_SCHEDULES_FUNCTION_ROUTE,
-} from "#internal/nitro/host/vercel-build-output-config.js";
+} from "#platform/vercel/build-output-config.js";
 import { deriveEveWorkflowQueueTopic } from "#internal/workflow/queue-namespace.js";
 import { EVE_SCHEDULE_COLLECTION_CONSUMER_ROUTE_PATH } from "#internal/schedules/consumer-route.js";
 import { deriveEveScheduleQueueTopic } from "#runtime/schedules/queue-namespace.js";

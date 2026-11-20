@@ -12,7 +12,7 @@ import {
 import { createHostRouteTable, type HostRouteTable } from "#internal/nitro/host/host-routes.js";
 import type { PreparedApplicationHost } from "#internal/nitro/host/types.js";
 import type { HostRuntime } from "#internal/nitro/host/runtime-plugin.js";
-import { createEveVercelOptions } from "#internal/nitro/host/vercel-build-output-config.js";
+import { createEveVercelOptions } from "#platform/vercel/build-output-config.js";
 import { usesLocalVercelSchedules } from "#internal/schedules/consumer-route.js";
 import type { AgentWorkflowWorldDefinition } from "#shared/agent-definition.js";
 

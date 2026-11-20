@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { vercelRuntimeSpanExporter } from "./vercel-runtime-span-exporter.js";
+import { vercelRuntimeSpanExporter } from "#platform/vercel/runtime-span-exporter.js";
 
 const { serializeRequest } = vi.hoisted(() => ({
   serializeRequest: vi.fn(() => new TextEncoder().encode('{"resourceSpans":[]}')),

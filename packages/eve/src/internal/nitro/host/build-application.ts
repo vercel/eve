@@ -28,7 +28,7 @@ import { stageBuildDeploymentId } from "#internal/nitro/host/stage-build-deploym
 import { createHostNitro } from "#internal/nitro/host/create-host-nitro.js";
 import { currentPlatform } from "#platform/current.js";
 import { createHostSpec } from "#internal/nitro/host/host-spec.js";
-import { normalizeVercelServiceOutput } from "#internal/nitro/host/vercel-output.js";
+import { normalizeVercelServiceOutput } from "#platform/vercel/service-output.js";
 import { emitVercelAgentSummary } from "#internal/nitro/host/build-vercel-agent-summary.js";
 import { emitConnectManifest } from "#internal/external-resources.js";
 import { tryReadExtensionBuildConfig } from "#internal/nitro/host/build-extension.js";
@@ -38,7 +38,7 @@ import {
   refreshProductionCompiledArtifacts,
 } from "#internal/nitro/host/prepare-application-host.js";
 import { createProductionNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
-import { runVercelBuildPrewarm } from "#internal/nitro/host/vercel-build-prewarm.js";
+import { runVercelBuildPrewarm } from "#platform/vercel/build-prewarm.js";
 import { prewarmAppSandboxes } from "#execution/sandbox/prewarm.js";
 import type { ApplicationBuildOptions } from "#internal/nitro/host/types.js";
 import { findClosestVercelOutputDirectory } from "#shared/vercel-output-directory.js";

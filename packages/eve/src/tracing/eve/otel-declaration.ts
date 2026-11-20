@@ -3,7 +3,7 @@ import type { InstrumentationModelStartedInput } from "#public/instrumentation/i
 import type { JsonObject } from "#shared/json.js";
 import { batchSpanProcessor } from "#tracing/eve/batch-span-processor.js";
 import { contentFilteringProcessor } from "#tracing/eve/content-span-processor.js";
-import { vercelRuntimeSpanProcessor } from "#tracing/eve/vercel-runtime-span-exporter.js";
+import { vercelRuntimeSpanProcessor } from "#platform/vercel/runtime-span-exporter.js";
 import type {
   MetricReader,
   SpanExporter,

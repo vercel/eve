@@ -4,7 +4,7 @@ import { createFakeVercelOidcToken } from "#internal/testing/vercel-oidc-token.j
 import {
   decodeVercelOidcTokenClaims,
   resolveVercelProjectIdFromEnvironment,
-} from "#shared/vercel-project.js";
+} from "#platform/vercel/project.js";
 
 const EMPTY_CLAIMS = { ownerId: undefined, projectId: undefined };
 

@@ -1,6 +1,6 @@
 import type { PlatformDeployment } from "#platform/types.js";
 import { isVercelEnvironment } from "#platform/vercel/environment.js";
-import { resolveVercelProjectIdFromEnvironment } from "#shared/vercel-project.js";
+import { resolveVercelProjectIdFromEnvironment } from "#platform/vercel/project.js";
 
 function readTrimmed(name: string): string | undefined {
   return process.env[name]?.trim() || undefined;

@@ -14,7 +14,7 @@ import { dirname, join, relative } from "node:path";
 
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import type { HostRouteTable } from "#internal/nitro/host/host-routes.js";
-import { VERCEL_SCHEDULES_FUNCTION_ROUTE } from "#internal/nitro/host/vercel-build-output-config.js";
+import { VERCEL_SCHEDULES_FUNCTION_ROUTE } from "#platform/vercel/build-output-config.js";
 
 const SHARED_SERVER_FUNCTION = "eve/__server";
 

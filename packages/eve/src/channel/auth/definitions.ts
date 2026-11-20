@@ -15,7 +15,7 @@ import { authenticateHttpBasicStrategy } from "#channel/auth/http-basic.js";
 import { authenticateJwtEcdsaStrategy } from "#channel/auth/jwt-ecdsa.js";
 import { authenticateJwtHmacStrategy } from "#channel/auth/jwt-hmac.js";
 import { authenticateOidcStrategy } from "#channel/auth/oidc.js";
-import { resolveVercelOidcCurrentProject } from "#channel/auth/vercel-oidc-project.js";
+import { resolveVercelOidcCurrentProject } from "#platform/vercel/oidc-project.js";
 import {
   createRuntimeSessionAuthContext,
   type ResolvedJwtEcdsaAuthStrategy,
@@ -23,7 +23,7 @@ import {
   type ResolvedOidcAuthStrategy,
   type RouteStrategyAuthenticationResult,
 } from "#channel/auth/types.js";
-import { isVercelOidcIssuer } from "#shared/vercel-project.js";
+import { isVercelOidcIssuer } from "#platform/vercel/project.js";
 import { currentPlatform } from "#platform/current.js";
 
 const vercelOidcLog = createLogger("auth.vercel-oidc");

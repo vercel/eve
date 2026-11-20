@@ -4,7 +4,7 @@ import { resolveCompilerArtifactPaths } from "#compiler/artifacts.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import { createHostSpec, type HostMode } from "#internal/nitro/host/host-spec.js";
 import type { PreparedApplicationHost } from "#internal/nitro/host/types.js";
-import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#internal/nitro/host/vercel-build-output-config.js";
+import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#platform/vercel/build-output-config.js";
 import { compileFromMemory } from "#internal/testing/compile-from-memory.js";
 import { defineChannel, WS } from "#public/definitions/channel.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";

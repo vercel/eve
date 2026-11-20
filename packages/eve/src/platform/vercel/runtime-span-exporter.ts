@@ -1,6 +1,6 @@
 import { JsonTraceSerializer } from "#compiled/@opentelemetry/otlp-transformer/index.js";
 import { TraceFlags } from "#compiled/@opentelemetry/api/index.js";
-import type { SpanExporter, SpanProcessor } from "./otel-configuration.js";
+import type { SpanExporter, SpanProcessor } from "#tracing/eve/otel-configuration.js";
 
 import { createLogger, formatError } from "#internal/logging.js";
 
