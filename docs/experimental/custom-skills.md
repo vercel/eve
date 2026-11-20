@@ -80,6 +80,8 @@ export default customSkills({
 });
 ```
 
+The resolver runs before every model call and tool call. Besides the session and conversation, it receives `ctx.turn`, the turn being run, and `ctx.session.parent` in a delegated session such as a subagent's, so it can pick scopes from state your app records per turn, such as which persona a turn speaks as.
+
 A scope's `key` says where its skills are stored and must be unique per owner. `label` is how the model and approval cards name who the skills are for. `shared` marks a scope many people use, which the default approval rule treats more carefully. `readOnly` lists and loads skills but refuses changes, and `loadPrefix` keeps the scope's load names apart from other scopes'.
 
 ## Approval

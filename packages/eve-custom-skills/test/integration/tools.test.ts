@@ -8,7 +8,11 @@ import extension from "../../extension/extension.ts";
 import { documentRepository } from "../../extension/lib/document-repository.ts";
 import { loadTurnSkills } from "../../extension/lib/runtime.ts";
 import { spaceScope } from "../../extension/lib/scopes.ts";
-import type { SkillApprovalRule, SkillChangeEvent } from "../../extension/lib/types.ts";
+import type {
+  SkillApprovalRule,
+  SkillChangeEvent,
+  SkillScopeContext,
+} from "../../extension/lib/types.ts";
 import create from "../../extension/tools/create.ts";
 import list from "../../extension/tools/list.ts";
 import publish from "../../extension/tools/publish.ts";
@@ -365,7 +369,7 @@ test("a scope whose storage fails is skipped for the turn, with a note for the m
   const loaded = await loadTurnSkills({
     session: { id: "session-1", auth: { current: alice, initiator: alice } },
     conversation: inChannel,
-    turnId: "turn-9",
+    turn: { id: "turn-9" },
   });
   assert.deepEqual(
     loaded.map(({ scope, skills, unavailable }) => [scope.name, skills.length, unavailable]),
@@ -385,4 +389,33 @@ test("a requester can approve their own shared change", async () => {
   );
   assert.equal(approved.success, true);
   assert.equal(approved.status, "active");
+});
+
+test("scope resolvers see the turn and the parent session, from tools and per-turn loading", async () => {
+  const seen: SkillScopeContext[] = [];
+  extension({
+    storage: inMemory(),
+    scopes: (ctx: SkillScopeContext) => {
+      seen.push(ctx);
+      return [
+        { name: "persona", key: `turn:${ctx.turn?.id}`, label: "this persona", shared: false },
+      ];
+    },
+  });
+  const parent = {
+    callId: "call-0",
+    rootSessionId: "root-1",
+    sessionId: "root-1",
+    turn: { id: "root-turn", sequence: 0 },
+  };
+  const child = { session: { ...(context() as { session: object }).session, parent } };
+  await run(list, {}, { ...(context() as object), ...child });
+  await loadTurnSkills({
+    session: { id: "session-1", auth: { current: alice, initiator: alice }, parent },
+    turn: { id: "turn-2" },
+  });
+  const resolved = seen.map(
+    ({ turn, session }) => `${turn?.id} in ${session.parent?.rootSessionId}`,
+  );
+  assert.deepEqual([...new Set(resolved)], ["turn-1 in root-1", "turn-2 in root-1"]);
 });
