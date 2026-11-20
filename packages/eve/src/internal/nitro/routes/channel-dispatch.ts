@@ -24,9 +24,9 @@ import { traceChannelRequest } from "#internal/nitro/routes/channel-request-inst
 import { resolveNitroChannelRuntimeBundle } from "#internal/nitro/routes/runtime-stack.js";
 import { createRouteInvokeTool } from "#internal/nitro/routes/route-invoke-tool.js";
 import { readVercelProjectLink } from "#internal/vercel/project-link.js";
-import { withVercelOidcProjectResolver } from "#channel/auth/vercel-oidc-project.js";
 import { withLocalDevRequestScope } from "#runtime/local-dev-capability.js";
 import { getWorld } from "#internal/workflow/runtime.js";
+import { platformContext } from "#platform/context.js";
 
 const log = createLogger("channel.dispatch");
 
@@ -158,7 +158,7 @@ async function withDevelopmentVercelOidcContext<T>(
   return await withLocalDevRequestScope(
     request,
     async () =>
-      await withVercelOidcProjectResolver(
+      await platformContext().identity.withRequestProject(
         {
           request,
           resolveCurrentProject: async () => {
@@ -251,8 +251,8 @@ async function buildRouteArgs(input: {
 async function resolveAcceptedDeploymentId(
   config: NitroArtifactsConfig,
 ): Promise<string | undefined> {
-  const hosted = process.env.VERCEL_DEPLOYMENT_ID?.trim();
-  if (hosted !== undefined && hosted.length > 0) return validateDeploymentId(hosted);
+  const hosted = platformContext().deployment.deploymentId();
+  if (hosted !== undefined) return validateDeploymentId(hosted);
 
   if (config.kind === "development" && process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV] === undefined) {
     return undefined;

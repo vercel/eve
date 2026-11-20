@@ -125,7 +125,7 @@ vi.mock("#discover/project.js", () => ({
   resolveDiscoveryProject: resolveDiscoveryProjectMock,
 }));
 
-vi.mock("./vercel-build-prewarm.js", () => ({
+vi.mock("#platform/vercel/build-prewarm.js", () => ({
   runVercelBuildPrewarm: runVercelBuildPrewarmMock,
 }));
 

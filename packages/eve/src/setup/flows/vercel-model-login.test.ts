@@ -20,7 +20,7 @@ vi.mock("#internal/model-auth/vercel.js", async (original) => ({
   validateVercelAccess: mocks.validate,
 }));
 vi.mock("#internal/model-auth/store.js", () => ({ writeVercelSession: mocks.write }));
-vi.mock("#internal/model-auth/vercel-cli.js", () => ({ readVercelCliTeam: mocks.cli }));
+vi.mock("#platform/vercel/model-auth/cli.js", () => ({ readVercelCliTeam: mocks.cli }));
 vi.mock("#setup/primitives/open-url.js", () => ({ openUrl: mocks.open }));
 import { loginVercelModel } from "./vercel-model-login.js";
 beforeEach(() => {
@@ -138,7 +138,7 @@ it("returns the validated team and retains its slug for the footer", async () =>
     teamName: "Alice Inc",
   });
   expect(mocks.validate).toHaveBeenCalledOnce();
-  const { resolveModelTeamSlug } = await import("#internal/model-auth/vercel-team.js");
+  const { resolveModelTeamSlug } = await import("#platform/vercel/model-auth/team.js");
   vi.stubEnv("EVE_MODEL_CONNECTION", "vercel");
   vi.stubEnv("EVE_MODEL_TEAM", "team_cached");
   try {

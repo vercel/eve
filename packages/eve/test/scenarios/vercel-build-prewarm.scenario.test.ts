@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { compileAgent } from "../../src/compiler/compile-agent.js";
 import { prewarmAppSandboxes } from "../../src/execution/sandbox/prewarm.js";
-import { runVercelBuildPrewarm } from "../../src/internal/nitro/host/vercel-build-prewarm.js";
+import { runVercelBuildPrewarm } from "../../src/platform/vercel/build-prewarm.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "../../src/runtime/graph.js";
 import { populatedPaths } from "../../src/internal/testing/sandbox-provider-harness.js";
 import type { SandboxPrepareContext } from "../../src/sandbox/provider.js";

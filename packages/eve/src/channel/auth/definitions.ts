@@ -15,7 +15,6 @@ import { authenticateHttpBasicStrategy } from "#channel/auth/http-basic.js";
 import { authenticateJwtEcdsaStrategy } from "#channel/auth/jwt-ecdsa.js";
 import { authenticateJwtHmacStrategy } from "#channel/auth/jwt-hmac.js";
 import { authenticateOidcStrategy } from "#channel/auth/oidc.js";
-import { resolveVercelOidcCurrentProject } from "#channel/auth/vercel-oidc-project.js";
 import {
   createRuntimeSessionAuthContext,
   type ResolvedJwtEcdsaAuthStrategy,
@@ -23,7 +22,7 @@ import {
   type ResolvedOidcAuthStrategy,
   type RouteStrategyAuthenticationResult,
 } from "#channel/auth/types.js";
-import { isVercelOidcIssuer } from "#shared/vercel-project.js";
+import { platformContext } from "#platform/context.js";
 
 const vercelOidcLog = createLogger("auth.vercel-oidc");
 import {
@@ -719,7 +718,7 @@ function addInvalidBearerTokenError(
  */
 export function placeholderAuth(): AuthFn<Request> {
   return () => {
-    if (process.env.VERCEL_ENV !== "production") {
+    if (platformContext().deployment.environmentKind() !== "production") {
       return null;
     }
 
@@ -888,7 +887,7 @@ export async function verifyVercelOidc(
     return { ok: false };
   }
 
-  if (!isVercelOidcIssuer(claims.issuer)) {
+  if (!platformContext().identity.isPlatformIssuer(claims.issuer)) {
     vercelOidcLog.debug("Rejected token whose issuer is not a Vercel OIDC issuer.", {
       issuer: claims.issuer,
     });
@@ -940,14 +939,7 @@ function resolveCurrentVercelProject(
   opts: VerifyVercelOidcOptions,
 ): NonNullable<ResolvedOidcAuthStrategy["currentVercelProject"]> | undefined {
   if (opts.currentVercelProject !== undefined) return opts.currentVercelProject;
-
-  const projectId = process.env.VERCEL_PROJECT_ID?.trim();
-  if (projectId === undefined || projectId.length === 0) return undefined;
-
-  const environment = process.env.VERCEL_TARGET_ENV?.trim() || process.env.VERCEL_ENV?.trim();
-  return environment === undefined || environment.length === 0
-    ? { projectId }
-    : { environment, projectId };
+  return platformContext().identity.currentProject();
 }
 
 /**
@@ -1062,7 +1054,7 @@ export function vercelOidc(opts: VercelOidcOptions = {}): AuthFn<Request> {
       const currentVercelProject =
         opts.currentVercelProject ??
         (token !== null && isLocalDevelopmentVercelOidc()
-          ? await resolveVercelOidcCurrentProject(request)
+          ? await platformContext().identity.requestProject(request)
           : undefined);
       const result = await verifyVercelOidc(
         token,
@@ -1076,10 +1068,9 @@ export function vercelOidc(opts: VercelOidcOptions = {}): AuthFn<Request> {
 }
 
 function isLocalDevelopmentVercelOidc(): boolean {
-  if (process.env.VERCEL_ENV === "development") return true;
-  if (process.env.VERCEL_ENV === "preview" || process.env.VERCEL_ENV === "production") {
-    return false;
-  }
+  const environmentKind = platformContext().deployment.environmentKind();
+  if (environmentKind === "development") return true;
+  if (environmentKind === "preview" || environmentKind === "production") return false;
   return isEveDevEnvironment();
 }
 

@@ -105,6 +105,7 @@ export async function prepareDevelopmentApplicationHost(
 
 export async function prepareProductionApplicationHost(
   workspace: ApplicationBuildWorkspace,
+  defaultWorkflowWorld: BuiltInWorkflowWorldTarget,
 ): Promise<PreparedApplicationHost & { readonly moduleGraph: AuthoredModuleGraph }> {
   await buildWorkspaceExtensions(workspace.appRoot);
   const { compileResult, moduleGraph } = await compileAgentInWorkspace({
@@ -118,7 +119,7 @@ export async function prepareProductionApplicationHost(
 
   const compiledArtifacts = await writeCompiledArtifactsFiles({
     compileResult,
-    defaultWorkflowWorld: resolveProductionWorkflowWorldTarget(),
+    defaultWorkflowWorld,
     outDir: workspace.host.artifactsDir,
   });
 
@@ -154,12 +155,4 @@ function createPreparedApplicationHost(input: {
     schedules: input.schedules,
     workflowBuildDir: input.workflowBuildDir,
   };
-}
-
-function resolveProductionWorkflowWorldTarget(): BuiltInWorkflowWorldTarget {
-  if (process.env.VERCEL) {
-    return "vercel";
-  }
-
-  return "local";
 }

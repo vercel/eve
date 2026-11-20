@@ -14,7 +14,7 @@ import {
 import { createInstrumentationEntry } from "#internal/nitro/host/instrumentation-entry.js";
 import { buildApplication } from "#internal/nitro/host.js";
 
-vi.mock("#internal/nitro/host/vercel-build-prewarm.js", () => ({
+vi.mock("#platform/vercel/build-prewarm.js", () => ({
   runVercelBuildPrewarm: async () => true,
 }));
 

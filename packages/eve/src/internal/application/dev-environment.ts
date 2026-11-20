@@ -1,5 +1,7 @@
 import { join, resolve } from "node:path";
 
+import { platformContext } from "#platform/context.js";
+
 export const EVE_DEV_ENV_FLAG = "EVE_DEV";
 
 export const EVE_DEV_STATE_DIR_ENV = "EVE_DEV_STATE_DIR";
@@ -19,15 +21,13 @@ export function isEveDevEnvironment(): boolean {
 }
 
 export function isLocalDevelopmentServer(): boolean {
-  if (process.env.VERCEL && process.env.VERCEL_ENV === "development") {
-    return true;
-  }
-  return isEveDevEnvironment();
+  return platformContext().deployment.isPlatformDevelopmentServer() || isEveDevEnvironment();
 }
 
 export function resolveInstrumentationEnvironment(): ConversationEnvironment {
-  if (isEveDevEnvironment() || process.env.VERCEL_ENV === "development") return "development";
-  return process.env.VERCEL_ENV === "preview" ? "preview" : "production";
+  const environmentKind = platformContext().deployment.environmentKind();
+  if (isEveDevEnvironment() || environmentKind === "development") return "development";
+  return environmentKind === "preview" ? "preview" : "production";
 }
 
 export const EVE_EVALUATION_ENV_FLAG = "EVE_EVALUATION";

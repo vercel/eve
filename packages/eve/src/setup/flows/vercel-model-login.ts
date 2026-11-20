@@ -9,10 +9,10 @@ import {
   VERCEL_MODEL_CLIENT_ID,
   VERCEL_OAUTH_ISSUER,
 } from "#internal/model-auth/vercel.js";
-import { readVercelCliTeam } from "#internal/model-auth/vercel-cli.js";
+import { readVercelCliTeam } from "#platform/vercel/model-auth/cli.js";
 import { writeVercelSession } from "#internal/model-auth/store.js";
 import { withLoginProgress } from "./model-login-progress.js";
-import { rememberModelTeamSlug } from "#internal/model-auth/vercel-team.js";
+import { rememberModelTeamSlug } from "#platform/vercel/model-auth/team.js";
 import { openUrl } from "#setup/primitives/open-url.js";
 import type { Prompter } from "#setup/prompter.js";
 

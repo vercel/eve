@@ -92,9 +92,10 @@
  *             import subagent modules; session/turn composition roots may
  *             compose built-in executors directly.
  *   rule 44 — Sandbox providers are built on the public provider contract.
- *             Files under `src/execution/sandbox/bindings/` and
- *             `src/sandbox/providers/` reach the contract only through
- *             `#public/sandbox/*` and never import core sandbox modules
+ *             Files under `src/execution/sandbox/bindings/`,
+ *             `src/platform/vercel/sandbox/`, and `src/sandbox/providers/`
+ *             reach the contract only through `#public/sandbox/*` and never
+ *             import core sandbox modules
  *             (session construction, ensure, prewarm, sandbox state, the
  *             shutdown registry, tool sessions, the runtime sandbox
  *             registry, or the shared provider and session internals).
@@ -239,11 +240,23 @@
  *   rule 68 — Every export of a published package entry has JSDoc. Users
  *             read these docs in their editor and in the generated API
  *             reference.
+ *   rule 69 — Vercel platform knowledge lives in `packages/eve/src/platform/`,
+ *             so eve can run on other hosts. Elsewhere in `packages/eve/src`,
+ *             source doesn't read `VERCEL*` environment variables, import a
+ *             vendored `#compiled/@vercel/*` package, or import
+ *             `#platform/vercel/*` directly. Exempt: the Vercel-only CLI
+ *             (`src/cli/`, `src/evals/cli/`), setup, and dev-client code; the
+ *             gitignored extension copies that builds generate; the Vercel-only
+ *             public files that re-export `src/platform/vercel/`; and the
+ *             self-modification setup template, which generates Vercel-specific
+ *             user code. The eve-owned `@vercel/agent-runs` library and the
+ *             `@vercel/otel` OpenTelemetry bootstrap run on any host, so they
+ *             are exempt.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
  * may only shrink (as offenders are removed) — they may never grow.
- * Rules 67 and 68 have no baseline.
+ * Rules 67, 68, and 69 have no baseline.
  */
 import { glob, readFile, readdir, lstat } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -373,6 +386,7 @@ function isTsLike(relPath) {
  *   rule63: Violation[];
  *   rule64: Violation[];
  *   rule66: Violation[];
+ *   rule69: Map<string, number>;
  *   symlinks: string[];
  * }} state
  */
@@ -408,6 +422,7 @@ async function scanRepo(state) {
     checkRule47(posix, lines, state.rule47);
     checkRule50(posix, lines, state.rule50);
     checkRule51(posix, content, lines, state.rule51);
+    checkRule69(posix, content, state.rule69);
     if (posix.startsWith("packages/tracing/src/")) {
       for (const [index, line] of lines.entries()) {
         const imports = [...line.matchAll(/(?:from\s+|import\s*\()(["'])([^"']+)\1/g)];
@@ -533,8 +548,13 @@ function checkLegacySessionImports(posix, lines, violations) {
 
 const SANDBOX_PROVIDER_DIRS = [
   "packages/eve/src/execution/sandbox/bindings/",
+  "packages/eve/src/platform/vercel/sandbox/",
   "packages/eve/src/sandbox/providers/",
 ];
+
+const BUILT_IN_SANDBOX_PROVIDER_FILES = new Set([
+  "packages/eve/src/platform/vercel/sandbox/provider.ts",
+]);
 
 const SANDBOX_CORE_IMPORT_RE =
   /(?:from\s+|import\s*\()["']#(?:sandbox\/(?:provider|state)|execution\/sandbox\/(?:active-connections|ensure|prewarm|session|logging-session)|execution\/tool-session\/[^"']*|runtime\/sandbox\/[^"']*|shared\/sandbox-(?:provider|session|write-files))\.js["']/;
@@ -558,7 +578,11 @@ function checkRule44(posix, lines, violations) {
         "Sandbox providers reach the provider contract only through #public/sandbox/* and may not import core sandbox modules. Use the public contract, or an engine helper such as another binding module.",
     });
   });
-  if (!posix.startsWith("packages/eve/src/sandbox/providers/")) return;
+  if (
+    !posix.startsWith("packages/eve/src/sandbox/providers/") &&
+    !BUILT_IN_SANDBOX_PROVIDER_FILES.has(posix)
+  )
+    return;
   const source = lines.join("\n");
   if (!/\bdefineSandboxProvider\(/.test(source)) {
     violations.push({
@@ -1279,6 +1303,47 @@ function checkRule66(posix, lines, violations) {
         "imports Workflow into the host-neutral core. Reach Workflow through a host port or the host registry (`execution/hosts.ts`), and implement Workflow's side under `execution/workflow-host/`.",
     });
   }
+}
+
+// ---------- Rule 69: Vercel platform access stays in src/platform ----------
+
+const VERCEL_PLATFORM_ACCESS_DIRS = [
+  "packages/eve/src/platform/",
+  "packages/eve/src/cli/",
+  "packages/eve/src/evals/cli/",
+  "packages/eve/src/setup/",
+  "packages/eve/src/services/dev-client/",
+  "packages/eve/src/extensions/code/extension/",
+  "packages/eve/src/extensions/git/extension/",
+  "packages/eve/src/extensions/custom-skills/extension/",
+  "packages/eve/src/computer-use/extension/",
+];
+const VERCEL_PLATFORM_ACCESS_FILES = new Set([
+  "packages/eve/src/public/agents/vercel-oidc.ts",
+  "packages/eve/src/public/experimental/schedules/vercel.ts",
+  "packages/eve/src/public/memory/file/vercel.ts",
+  "packages/eve/src/public/sandbox/vercel.ts",
+  "packages/eve/src/self-modification/setup.ts",
+]);
+const VERCEL_ENV_READ_RE = /\benv\.VERCEL\w*|["']VERCEL(?:_[A-Z0-9]+)*["']/g;
+const VERCEL_PLATFORM_IMPORT_RE =
+  /["'](?:#compiled\/@vercel\/(?!agent-runs\/|otel\/)[^"']+|[^"']*(?:#|\/)platform\/vercel\/[^"']+)["']/g;
+
+/**
+ * Counts a file's `VERCEL*` environment reads and vendored Vercel platform imports.
+ *
+ * @param {string} posix
+ * @param {string} content
+ * @param {Map<string, number>} current
+ */
+function checkRule69(posix, content, current) {
+  if (!posix.startsWith("packages/eve/src/") || posix.endsWith(".test.ts")) return;
+  if (VERCEL_PLATFORM_ACCESS_DIRS.some((dir) => posix.startsWith(dir))) return;
+  if (VERCEL_PLATFORM_ACCESS_FILES.has(posix)) return;
+  const count =
+    [...content.matchAll(VERCEL_ENV_READ_RE)].length +
+    [...content.matchAll(VERCEL_PLATFORM_IMPORT_RE)].length;
+  if (count > 0) current.set(posix, count);
 }
 
 /**
@@ -2367,6 +2432,7 @@ async function main() {
     rule63: /** @type {Violation[]} */ ([]),
     rule64: /** @type {Violation[]} */ ([]),
     rule66: /** @type {Violation[]} */ ([]),
+    rule69: /** @type {Map<string, number>} */ (new Map()),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -2501,6 +2567,13 @@ async function main() {
   violations.push(...state.rule64);
   violations.push(...(await checkRule65()));
   violations.push(...state.rule66);
+  for (const [file, count] of state.rule69) {
+    violations.push({
+      rule: 69,
+      file,
+      message: `reads \`VERCEL*\` environment variables or imports \`#compiled/@vercel/*\` or \`#platform/vercel/*\` in ${count} place${count === 1 ? "" : "s"}. Vercel platform knowledge lives in \`packages/eve/src/platform/\` so eve can run on other hosts. Read platform facts and capabilities through \`platformContext()\` from \`#platform/context.js\`, or add the capability to the \`PlatformContext\` contract and \`platform/vercel/context.ts\`.`,
+    });
+  }
 
   for (const issue of await checkPublicExports()) {
     violations.push({ rule: 55, ...issue });

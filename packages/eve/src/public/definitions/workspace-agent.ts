@@ -1,5 +1,6 @@
 import type { HeadersValue } from "#client/types.js";
-import { type OutboundAuthFn, vercelOidc } from "#public/agents/auth.js";
+import { platformContext } from "#platform/context.js";
+import type { OutboundAuthFn } from "#public/agents/auth.js";
 import {
   defineRemoteAgent,
   type RemoteAgentDefinition,
@@ -66,37 +67,26 @@ function workspaceAgentRoutePrefix(name: string): string {
   const callerRoutePrefix = normalizePublicRoutePrefix(process.env.EVE_PUBLIC_ROUTE_PREFIX);
   const namespace =
     callerRoutePrefix?.slice(0, callerRoutePrefix.lastIndexOf("/")) ??
-    (process.env.VERCEL_ENV === "development" ? "" : "/eve");
+    (platformContext().deployment.environmentKind() === "development" ? "" : "/eve");
   return `${namespace}/${name}`;
 }
 
 function defaultWorkspaceAgentTransport(name: string): WorkspaceAgentTransport {
-  const auth = vercelOidc();
+  const platformTransport = (): WorkspaceAgentTransport => {
+    const transport = platformContext().workspace.transport(workspaceAgentRoutePrefix(name));
+    if (transport !== undefined) return transport;
+    throw new Error(
+      "No default workspace-agent transport is available in this environment. Provide transport to defineWorkspaceAgent().",
+    );
+  };
   return {
     auth: async () => {
-      requireVercelWorkspaceEnvironment();
-      return process.env.VERCEL_ENV === "development" ? { headers: {} } : auth();
+      const auth = platformTransport().auth;
+      return auth === undefined ? { headers: {} } : await auth();
     },
     url: () => {
-      requireVercelWorkspaceEnvironment();
-      const development = process.env.VERCEL_ENV === "development";
-      const host =
-        process.env.VERCEL_ENV === "production"
-          ? process.env.VERCEL_PROJECT_PRODUCTION_URL
-          : process.env.VERCEL_URL;
-      if (host === undefined || host.length === 0) {
-        throw new Error(
-          "The default workspace-agent transport requires VERCEL_URL, or VERCEL_PROJECT_PRODUCTION_URL in production.",
-        );
-      }
-      return `${development ? "http" : "https"}://${host}${workspaceAgentRoutePrefix(name)}`;
+      const url = platformTransport().url;
+      return typeof url === "string" ? url : url();
     },
   };
-}
-
-function requireVercelWorkspaceEnvironment(): void {
-  if (process.env.VERCEL) return;
-  throw new Error(
-    "No default workspace-agent transport is available in this environment. Provide transport to defineWorkspaceAgent().",
-  );
 }

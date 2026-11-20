@@ -16,7 +16,9 @@ const mocks = vi.hoisted(() => ({
   chatgpt: vi.fn(),
 }));
 vi.mock("#cli/dev/environment.js", () => ({ loadDevelopmentEnvironmentFiles: mocks.environment }));
-vi.mock("./gateway-credential.js", () => ({ resolveGatewayModelCredential: mocks.gateway }));
+vi.mock("#platform/vercel/model-auth/gateway-credential.js", () => ({
+  resolveGatewayModelCredential: mocks.gateway,
+}));
 vi.mock("./api-key.js", () => ({ resolveModelApiKey: mocks.key }));
 vi.mock("#public/models/openai/chatgpt/token-broker.js", () => ({
   getDefaultCodexTokenBroker: () => ({ getToken: mocks.chatgpt }),

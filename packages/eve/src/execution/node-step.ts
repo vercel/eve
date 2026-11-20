@@ -7,6 +7,7 @@ import { createKernel } from "#harness/kernel.js";
 import type { HandleEventFn, HarnessToolMap, StepFn } from "#harness/types.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger } from "#internal/logging.js";
+import { platformContext } from "#platform/context.js";
 import type { RuntimeIdentity } from "#protocol/session-events/families/session.js";
 import { UNSPECIFIED_INPUT_SCHEMA } from "#tools/schema.js";
 import {
@@ -103,22 +104,8 @@ export function buildRuntimeIdentity(agent: RuntimeAgentIdentity): RuntimeIdenti
     eveVersion: packageInfo.version,
   };
 
-  const gitSha = process.env.VERCEL_GIT_COMMIT_SHA?.trim();
-  const gitBranch = process.env.VERCEL_GIT_COMMIT_REF?.trim();
-  const deployedAt = process.env.VERCEL_DEPLOYMENT_CREATED_AT?.trim();
-
-  if (gitSha || gitBranch || deployedAt) {
-    return {
-      ...identity,
-      build: {
-        deployedAt: deployedAt || undefined,
-        gitBranch: gitBranch || undefined,
-        gitSha: gitSha || undefined,
-      },
-    };
-  }
-
-  return identity;
+  const build = platformContext().deployment.build();
+  return build === undefined ? identity : { ...identity, build };
 }
 
 function createRuntimeModelResolver(
