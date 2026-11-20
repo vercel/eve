@@ -8,6 +8,7 @@ import { slackSessionToken } from "#public/channels/slack/api.js";
 const log = createLogger("slack.interactions");
 
 export const SIGN_IN_CANCEL_ACTION_ID = "eve_sign_in:cancel";
+export const SIGN_IN_CONNECT_ACTION_ID = "eve_sign_in:connect";
 
 export type SignInCancelTarget = SlackSessionTarget & { readonly turnId: string };
 
@@ -37,6 +38,30 @@ export function dispatchSignInCancel(
   if (cancel === undefined) return false;
   ctx.waitUntil(cancelHeldSignIn(cancel, ctx));
   return true;
+}
+
+export function dispatchSignInConnect(
+  raw: Record<string, unknown>,
+  ctx: { readonly waitUntil: (task: Promise<unknown>) => void },
+): boolean {
+  const actions = Array.isArray(raw.actions) ? (raw.actions as unknown[]) : [];
+  const clicked = actions.some(
+    (entry) => isObjectRecord(entry) && entry.action_id === SIGN_IN_CONNECT_ACTION_ID,
+  );
+  if (!clicked) return false;
+  const ephemeral = isObjectRecord(raw.container) && raw.container.is_ephemeral === true;
+  if (ephemeral && typeof raw.response_url === "string") {
+    ctx.waitUntil(removeSignInPrompt(raw.response_url));
+  }
+  return true;
+}
+
+async function removeSignInPrompt(responseUrl: string): Promise<void> {
+  try {
+    await sendSlackResponseUrl(responseUrl, { deleteOriginal: true });
+  } catch (error) {
+    log.warn("failed to remove the opened sign-in prompt", { error });
+  }
 }
 
 interface SignInCancel {
