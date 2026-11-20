@@ -15,6 +15,7 @@ import { defineTool } from "#tools/definition.js";
 import { defineWorkflowTool } from "#tools/workflow-definition.js";
 import { attachWorkflowProgramOptions } from "#tools/workflow-program-input.js";
 import { z } from "zod";
+import { platformBuildOutput } from "#platform/build-output.js";
 
 const APP_ROOT = "/tmp/weather-agent";
 const DEVELOPMENT: HostMode = { kind: "development" };
@@ -153,10 +154,12 @@ function spec(
     schedules: [],
     workflowBuildDir: `${APP_ROOT}/.eve/workflow`,
   };
-  return createHostSpec(host, mode, {
-    buildDir: `${APP_ROOT}/.eve/nitro`,
-    outputDir: `${APP_ROOT}/.output`,
-  });
+  return createHostSpec(
+    host,
+    mode,
+    { buildDir: `${APP_ROOT}/.eve/nitro`, outputDir: `${APP_ROOT}/.output` },
+    platformBuildOutput(),
+  );
 }
 
 afterEach(() => {

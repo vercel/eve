@@ -12,8 +12,7 @@ import {
 import { createHostRouteTable, type HostRouteTable } from "#internal/nitro/host/host-routes.js";
 import type { PreparedApplicationHost } from "#internal/nitro/host/types.js";
 import type { HostRuntime } from "#internal/nitro/host/runtime-plugin.js";
-import { platformBuildOutput } from "#platform/build-output.js";
-import type { PlatformNitroOptions } from "#platform/types.js";
+import type { PlatformBuildOutput, PlatformNitroOptions } from "#platform/types.js";
 import type { AgentWorkflowWorldDefinition } from "#shared/agent-definition.js";
 
 export type HostMode =
@@ -47,6 +46,7 @@ export interface HostSpec {
   readonly extensionOverridePaths: ReadonlyMap<string, string>;
   readonly externals: ExternalsPolicy;
   readonly instrumented: boolean;
+  readonly localSchedulesPluginModulePath: string;
   readonly preset: "vercel" | undefined;
   readonly routes: HostRouteTable;
   readonly runtime: HostRuntime;
@@ -76,6 +76,7 @@ export function createHostSpec(
   preparedHost: PreparedApplicationHost,
   mode: HostMode,
   dirs: HostDirectories,
+  platform: PlatformBuildOutput,
 ): HostSpec {
   const { appRoot, compiledArtifacts } = preparedHost;
   const { manifest, paths } = preparedHost.compileResult;
@@ -87,6 +88,7 @@ export function createHostSpec(
   const routes = createHostRouteTable({
     manifest,
     mode: mode.kind,
+    platform,
     scheduleRegistrations: preparedHost.scheduleRegistrations,
     vercel: preset === "vercel",
     vercelService: mode.kind === "production" && mode.vercelService === true,
@@ -94,9 +96,7 @@ export function createHostSpec(
   const runtimePlugins: HostRuntimePlugin[] = [
     ...(development ? [] : (["skill-files"] as const)),
     ...(instrumented ? (["instrumentation"] as const) : []),
-    ...(development && platformBuildOutput().usesLocalSchedules(manifest)
-      ? (["local-schedules"] as const)
-      : []),
+    ...(development && platform.usesLocalSchedules(manifest) ? (["local-schedules"] as const) : []),
     ...(!development &&
     preset !== "vercel" &&
     routes.scheduleTasks.some((task) => task.timezone !== undefined)
@@ -114,6 +114,7 @@ export function createHostSpec(
     extensionOverridePaths: extensionOverridePaths(manifest),
     externals: createExternalsPolicy({ development, manifest, preset }),
     instrumented,
+    localSchedulesPluginModulePath: platform.localSchedulesPluginModulePath(),
     locations: {
       appRoot,
       buildDir: dirs.buildDir,
@@ -134,7 +135,7 @@ export function createHostSpec(
     },
     runtimePlugins,
     skills: development ? [] : manifest.skills.map((skill) => skill.name),
-    vercel: platformBuildOutput().nitroOptions({
+    vercel: platform.nitroOptions({
       agentName: manifest.config.name,
       enabled: preset === "vercel",
       publicRoutePrefix: mode.kind === "production" ? mode.publicRoutePrefix : undefined,

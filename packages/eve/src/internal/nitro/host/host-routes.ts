@@ -10,7 +10,7 @@ import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import type { ChannelRouteMethod } from "#public/definitions/channel.js";
 import { EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN } from "#protocol/routes.js";
 import { connectionEventRoute } from "#runtime/connections/events/path.js";
-import { platformBuildOutput } from "#platform/build-output.js";
+import type { PlatformBuildOutput } from "#platform/types.js";
 import type { ScheduleRegistration } from "#runtime/schedules/register.js";
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
 import { resolveWorkflowModulePath } from "#internal/application/package.js";
@@ -57,6 +57,7 @@ type HostRoute =
   | {
       readonly kind: "schedule-consumer";
       readonly method: "POST";
+      readonly modulePath: string;
       readonly path: string;
       readonly vercelFunction: "schedule-queue";
     }
@@ -81,6 +82,10 @@ interface HostRouteTableInput {
   readonly manifest: Pick<CompiledAgentManifest, "channelRoutes" | "config"> &
     Partial<Pick<CompiledAgentManifest, "connections" | "scheduleCollections">>;
   readonly mode: "development" | "production";
+  readonly platform: Pick<
+    PlatformBuildOutput,
+    "hasScheduleCollections" | "scheduleConsumerModulePath" | "scheduleTaskName"
+  >;
   readonly scheduleRegistrations: readonly ScheduleRegistration[];
   readonly vercel: boolean;
   readonly vercelService?: boolean;
@@ -122,10 +127,11 @@ export function createHostRouteTable(input: HostRouteTableInput): HostRouteTable
       path: EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN,
     });
   }
-  if (!development && input.vercel && platformBuildOutput().hasScheduleCollections(manifest)) {
+  if (!development && input.vercel && input.platform.hasScheduleCollections(manifest)) {
     routes.push({
       kind: "schedule-consumer",
       method: "POST",
+      modulePath: input.platform.scheduleConsumerModulePath(),
       path: staticVercelFunctionPath(EVE_SCHEDULE_COLLECTION_CONSUMER_ROUTE_PATH),
       vercelFunction: "schedule-queue",
     });
@@ -142,7 +148,7 @@ export function createHostRouteTable(input: HostRouteTableInput): HostRouteTable
 
   const scheduleTasks = (development ? [] : input.scheduleRegistrations).map((task) => ({
     ...task,
-    nitroTaskName: platformBuildOutput().scheduleTaskName({
+    nitroTaskName: input.platform.scheduleTaskName({
       agentName: input.vercelService ? manifest.config.name : undefined,
       scheduleId: task.scheduleId,
     }),
@@ -312,7 +318,7 @@ export async function renderHostRoutes(
           `route${route.path}`,
           renderHostHandler({
             handlerExport: "handleScheduleCollectionConsumer",
-            modulePath: platformBuildOutput().scheduleConsumerModulePath(),
+            modulePath: route.modulePath,
           }),
           { method: route.method, route: route.path },
         );

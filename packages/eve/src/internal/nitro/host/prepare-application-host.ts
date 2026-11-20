@@ -1,7 +1,6 @@
 import { compileAgentInWorkspace, type CompileAgentResult } from "#compiler/compile-agent.js";
 import type { DevelopmentExtensionSelection } from "#compiler/development-extensions.js";
 import type { AuthoredModuleGraph } from "#internal/authored-module-graph.js";
-import { currentPlatform } from "#platform/current.js";
 import { createScheduleRegistrations } from "#runtime/schedules/register.js";
 import { resolveSchedules } from "#runtime/schedules/resolve-schedule.js";
 import type { ResolvedScheduleDefinition } from "#runtime/types.js";
@@ -106,6 +105,7 @@ export async function prepareDevelopmentApplicationHost(
 
 export async function prepareProductionApplicationHost(
   workspace: ApplicationBuildWorkspace,
+  defaultWorkflowWorld: BuiltInWorkflowWorldTarget,
 ): Promise<PreparedApplicationHost & { readonly moduleGraph: AuthoredModuleGraph }> {
   await buildWorkspaceExtensions(workspace.appRoot);
   const { compileResult, moduleGraph } = await compileAgentInWorkspace({
@@ -119,7 +119,7 @@ export async function prepareProductionApplicationHost(
 
   const compiledArtifacts = await writeCompiledArtifactsFiles({
     compileResult,
-    defaultWorkflowWorld: resolveProductionWorkflowWorldTarget(),
+    defaultWorkflowWorld,
     outDir: workspace.host.artifactsDir,
   });
 
@@ -155,8 +155,4 @@ function createPreparedApplicationHost(input: {
     schedules: input.schedules,
     workflowBuildDir: input.workflowBuildDir,
   };
-}
-
-function resolveProductionWorkflowWorldTarget(): BuiltInWorkflowWorldTarget {
-  return currentPlatform().build.target() === "vercel" ? "vercel" : "local";
 }

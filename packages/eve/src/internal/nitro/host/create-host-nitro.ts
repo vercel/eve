@@ -25,7 +25,6 @@ import { createHostPlugins } from "#internal/nitro/host/host-plugins.js";
 import { type HostNitroRoutes, renderHostRoutes } from "#internal/nitro/host/host-routes.js";
 import type { HostRuntimePlugin, HostSpec } from "#internal/nitro/host/host-spec.js";
 import { createInstrumentationEntry } from "#internal/nitro/host/instrumentation-entry.js";
-import { platformBuildOutput } from "#platform/build-output.js";
 import {
   createRuntimePluginSource,
   EVE_RUNTIME_PLUGIN_ID,
@@ -178,7 +177,7 @@ function toNitroConfig(
     output: { dir: locations.outputDir },
     plugins: [
       EVE_RUNTIME_PLUGIN_ID,
-      ...spec.runtimePlugins.map((plugin) => resolveRuntimePluginPath(plugin, compiledArtifacts)),
+      ...spec.runtimePlugins.map((plugin) => resolveRuntimePluginPath(plugin, spec)),
     ],
     preset: spec.preset,
     publicAssets: [],
@@ -218,10 +217,8 @@ const EVE_RUNTIME_PLUGIN_PATHS = {
   "sandbox-shutdown": "src/internal/nitro/host/sandbox-shutdown-plugin.ts",
 } as const;
 
-function resolveRuntimePluginPath(
-  plugin: HostRuntimePlugin,
-  compiledArtifacts: HostSpec["locations"]["compiledArtifacts"],
-): string {
+function resolveRuntimePluginPath(plugin: HostRuntimePlugin, spec: HostSpec): string {
+  const { compiledArtifacts } = spec.locations;
   switch (plugin) {
     case "instrumentation":
       if (compiledArtifacts.instrumentationPluginPath === undefined) {
@@ -233,7 +230,7 @@ function resolveRuntimePluginPath(
     case "timezone-schedules":
       return TIMEZONE_SCHEDULES_PLUGIN_ID;
     case "local-schedules":
-      return resolvePackageSourceFilePath(platformBuildOutput().localSchedulesPluginModulePath());
+      return resolvePackageSourceFilePath(spec.localSchedulesPluginModulePath);
     default:
       return resolvePackageSourceFilePath(EVE_RUNTIME_PLUGIN_PATHS[plugin]);
   }

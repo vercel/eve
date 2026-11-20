@@ -38,6 +38,7 @@ import {
 } from "#internal/nitro/host/prepare-application-host.js";
 import { createProductionNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
 import { platformBuildOutput } from "#platform/build-output.js";
+import type { BuildTarget, PlatformBuildOutput } from "#platform/types.js";
 import { prewarmAppSandboxes } from "#execution/sandbox/prewarm.js";
 import type { ApplicationBuildOptions } from "#internal/nitro/host/types.js";
 import { findClosestVercelOutputDirectory } from "#shared/vercel-output-directory.js";
@@ -74,8 +75,14 @@ function assertProfileOutputOutsideBuildOutput(
   }
 }
 
+interface ApplicationBuildPlatform {
+  readonly output: PlatformBuildOutput;
+  readonly target: BuildTarget;
+}
+
 async function writeOptionalApplicationBuildProfile(input: {
   readonly deploymentId: string | undefined;
+  readonly target: BuildTarget;
   readonly outputDirectory: string;
   readonly profileOutputPath: string;
   readonly profiler: ApplicationBuildProfiler;
@@ -89,7 +96,7 @@ async function writeOptionalApplicationBuildProfile(input: {
       createApplicationBuildProfile({
         deploymentId: input.deploymentId,
         output,
-        target: currentPlatform().build.target() === "vercel" ? "vercel" : "local",
+        target: input.target === "vercel" ? "vercel" : "local",
         timing,
       }),
     );
@@ -216,6 +223,10 @@ export async function buildApplication(
   const profileOutputPath =
     options.profileOutputPath === undefined ? undefined : resolve(options.profileOutputPath);
   const profiler = profileOutputPath === undefined ? undefined : new ApplicationBuildProfiler();
+  const platform: ApplicationBuildPlatform = {
+    output: platformBuildOutput(),
+    target: currentPlatform().build.target(),
+  };
 
   const extensionBuild = await measureBuildPhase(profiler, "extension.check", () =>
     tryReadExtensionBuildConfig(rootDir),
@@ -239,7 +250,7 @@ export async function buildApplication(
   let preserveWorkspaceForRecovery = false;
   let built: BuiltApplicationOutput;
   try {
-    built = await buildApplicationInWorkspace(workspace, options, profiler);
+    built = await buildApplicationInWorkspace(workspace, options, profiler, platform);
   } catch (error) {
     preserveWorkspaceForRecovery = error instanceof RecoverablePublicationError;
     throw error;
@@ -257,6 +268,7 @@ export async function buildApplication(
       outputDirectory: built.outputDirectory,
       profileOutputPath,
       profiler,
+      target: platform.target,
     });
   }
 
@@ -272,11 +284,12 @@ async function buildApplicationInWorkspace(
   workspace: ApplicationBuildWorkspace,
   options: ApplicationBuildOptions,
   profiler: ApplicationBuildProfiler | undefined,
+  platform: ApplicationBuildPlatform,
 ): Promise<BuiltApplicationOutput> {
+  const isVercelBuild = platform.target === "vercel";
   const preparedHost = await measureBuildPhase(profiler, "host.prepare", () =>
-    prepareProductionApplicationHost(workspace),
+    prepareProductionApplicationHost(workspace, isVercelBuild ? "vercel" : "local"),
   );
-  const isVercelBuild = currentPlatform().build.target() === "vercel";
 
   const servicePrefix = isVercelBuild
     ? await measureBuildPhase(profiler, "vercel.service-prefix.resolve", () =>
@@ -310,6 +323,7 @@ async function buildApplicationInWorkspace(
       workspaceMember: options.workspaceMember,
     },
     { buildDir: workspace.nitro.buildDir, outputDir: workspace.publication.output.stagedDir },
+    platform.output,
   );
   const nitro = await measureBuildPhase(profiler, "nitro.create", () => createHostNitro(spec));
 
@@ -334,7 +348,7 @@ async function buildApplicationInWorkspace(
       };
       await measureBuildPhase(profiler, "sandbox.prewarm", async () => {
         if (isVercelBuild) {
-          await platformBuildOutput().prewarmSandboxes(prewarmInput);
+          await platform.output.prewarmSandboxes(prewarmInput);
         } else {
           await prewarmAppSandboxes(prewarmInput);
         }
@@ -344,10 +358,7 @@ async function buildApplicationInWorkspace(
     await buildNitroOutput(nitro, profiler, "nitro");
     if (servicePrefix !== undefined) {
       await measureBuildPhase(profiler, "vercel.functions.normalize", () =>
-        platformBuildOutput().normalizeServiceOutput(
-          workspace.publication.output.stagedDir,
-          spec.routes,
-        ),
+        platform.output.normalizeServiceOutput(workspace.publication.output.stagedDir, spec.routes),
       );
     }
     const vercelServiceOutput = options.vercelServiceOutput;

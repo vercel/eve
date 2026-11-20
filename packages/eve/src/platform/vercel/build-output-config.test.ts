@@ -20,6 +20,7 @@ const FLOW_ROUTE = {
 const CONSUMER_ROUTE = {
   kind: "schedule-consumer",
   method: "POST",
+  modulePath: "src/platform/vercel/schedules/consumer.ts",
   path: EVE_SCHEDULE_COLLECTION_CONSUMER_ROUTE_PATH,
   vercelFunction: "schedule-queue",
 } as const;
