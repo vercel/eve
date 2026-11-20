@@ -144,7 +144,9 @@
         ".next/**",
         "!.next/cache/**",
         ".output/**",
-        ".vercel/output/**"
+        ".vercel/output/**",
+        "LICENSE",
+        "NOTICE"
       ]
     },
     "build:types": {
@@ -243,8 +245,7 @@
         "!.turbo/**",
         "!node_modules/**"
       ],
-      "outputs": [],
-      "tags": ["ci"]
+      "outputs": []
     },
     "test:unit": {
       "dependsOn": ["^build"],
