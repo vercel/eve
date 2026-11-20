@@ -239,6 +239,14 @@
  *   rule 68 — Every export of a published package entry has JSDoc. Users
  *             read these docs in their editor and in the generated API
  *             reference.
+ *   rule 69 — Vercel platform knowledge lives in `packages/eve/src/platform/`,
+ *             so eve can run on other hosts. Elsewhere in `packages/eve/src`
+ *             (except the Vercel-only CLI, setup, and dev-client code, and the
+ *             gitignored extension copies that builds generate), source
+ *             doesn't read `VERCEL*` environment variables or import a vendored
+ *             `#compiled/@vercel/*` package. The eve-owned `@vercel/agent-runs`
+ *             library is exempt. Files that predate the rule are baselined per
+ *             file, and the count must match exactly, so a cleanup lowers it.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -373,6 +381,7 @@ function isTsLike(relPath) {
  *   rule63: Violation[];
  *   rule64: Violation[];
  *   rule66: Violation[];
+ *   rule69: Map<string, number>;
  *   symlinks: string[];
  * }} state
  */
@@ -408,6 +417,7 @@ async function scanRepo(state) {
     checkRule47(posix, lines, state.rule47);
     checkRule50(posix, lines, state.rule50);
     checkRule51(posix, content, lines, state.rule51);
+    checkRule69(posix, content, state.rule69);
     if (posix.startsWith("packages/tracing/src/")) {
       for (const [index, line] of lines.entries()) {
         const imports = [...line.matchAll(/(?:from\s+|import\s*\()(["'])([^"']+)\1/g)];
@@ -1279,6 +1289,37 @@ function checkRule66(posix, lines, violations) {
         "imports Workflow into the host-neutral core. Reach Workflow through a host port or the host registry (`execution/hosts.ts`), and implement Workflow's side under `execution/workflow-host/`.",
     });
   }
+}
+
+// ---------- Rule 69: Vercel platform access stays in src/platform ----------
+
+const VERCEL_PLATFORM_ACCESS_DIRS = [
+  "packages/eve/src/platform/",
+  "packages/eve/src/cli/",
+  "packages/eve/src/setup/",
+  "packages/eve/src/services/dev-client/",
+  "packages/eve/src/extensions/code/extension/",
+  "packages/eve/src/extensions/git/extension/",
+  "packages/eve/src/extensions/custom-skills/extension/",
+  "packages/eve/src/computer-use/extension/",
+];
+const VERCEL_ENV_READ_RE = /\benv\.VERCEL\w*|["']VERCEL(?:_[A-Z0-9]+)*["']/g;
+const VERCEL_PLATFORM_IMPORT_RE = /["']#compiled\/@vercel\/(?!agent-runs\/)[^"']+["']/g;
+
+/**
+ * Counts a file's `VERCEL*` environment reads and vendored Vercel platform imports.
+ *
+ * @param {string} posix
+ * @param {string} content
+ * @param {Map<string, number>} current
+ */
+function checkRule69(posix, content, current) {
+  if (!posix.startsWith("packages/eve/src/") || posix.endsWith(".test.ts")) return;
+  if (VERCEL_PLATFORM_ACCESS_DIRS.some((dir) => posix.startsWith(dir))) return;
+  const count =
+    [...content.matchAll(VERCEL_ENV_READ_RE)].length +
+    [...content.matchAll(VERCEL_PLATFORM_IMPORT_RE)].length;
+  if (count > 0) current.set(posix, count);
 }
 
 /**
@@ -2367,6 +2408,7 @@ async function main() {
     rule63: /** @type {Violation[]} */ ([]),
     rule64: /** @type {Violation[]} */ ([]),
     rule66: /** @type {Violation[]} */ ([]),
+    rule69: /** @type {Map<string, number>} */ (new Map()),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -2501,6 +2543,20 @@ async function main() {
   violations.push(...state.rule64);
   violations.push(...(await checkRule65()));
   violations.push(...state.rule66);
+  const rule69Baseline = baseline.rule69_vercelPlatformAccessByFile ?? {};
+  for (const file of new Set([...state.rule69.keys(), ...Object.keys(rule69Baseline)])) {
+    const now = state.rule69.get(file) ?? 0;
+    const was = rule69Baseline[file] ?? 0;
+    if (now === was) continue;
+    violations.push({
+      rule: 69,
+      file,
+      message:
+        now > was
+          ? `reads \`VERCEL*\` environment variables or imports \`#compiled/@vercel/*\` in ${now} place${now === 1 ? "" : "s"} (baseline: ${was}). Vercel platform knowledge lives in \`packages/eve/src/platform/\` so eve can run on other hosts. Read deployment facts through \`currentPlatform()\` from \`#platform/current.js\`, or add the fact to the platform port and its Vercel implementation.`
+          : `reads \`VERCEL*\` environment variables or imports \`#compiled/@vercel/*\` in ${now} place${now === 1 ? "" : "s"}, fewer than its baseline (${was}). Lower \`rule69_vercelPlatformAccessByFile\` in scripts/guard-invariants-baseline.json.`,
+    });
+  }
 
   for (const issue of await checkPublicExports()) {
     violations.push({ rule: 55, ...issue });
