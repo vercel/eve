@@ -11,7 +11,12 @@ export interface EveBootInput {
 }
 
 export async function bootEve(input: EveBootInput): Promise<EveRuntime> {
-  const runtime = requireInstalledRuntime();
+  const runtime = eveRuntime();
+  if (runtime.platform === undefined) {
+    throw new Error(
+      "eve tried to boot the Workflow World before installing its platform. The generated bootstrap must import platform/install-runtime before anything else.",
+    );
+  }
   if (input.workflowEnvironment !== undefined) {
     installWorkflowDeploymentId(input.workflowEnvironment.buildDeploymentId);
     applyWorkflowSpecVersionDefault();
@@ -20,12 +25,4 @@ export async function bootEve(input: EveBootInput): Promise<EveRuntime> {
   await installWorkflowWorld({ packageName: input.configuredWorld, world });
   runtime.onClose(closeWorkflowWorld);
   return runtime;
-}
-
-function requireInstalledRuntime(): EveRuntime {
-  const runtime = eveRuntime();
-  if (runtime !== undefined) return runtime;
-  throw new Error(
-    "eve tried to boot the Workflow World before installing its runtime. The generated bootstrap must import platform/install-runtime before anything else.",
-  );
 }

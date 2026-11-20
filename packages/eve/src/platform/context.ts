@@ -70,5 +70,5 @@ export interface PlatformContext {
 let fallbackPlatform: PlatformContext | undefined;
 
 export function platformContext(): PlatformContext {
-  return eveRuntime()?.platform ?? (fallbackPlatform ??= createVercelPlatformContext());
+  return eveRuntime().platform ?? (fallbackPlatform ??= createVercelPlatformContext());
 }

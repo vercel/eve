@@ -1,15 +1,15 @@
 import type { PlatformContext } from "#platform/context.js";
 
 export interface EveRuntime {
-  readonly platform: PlatformContext;
+  platform: PlatformContext | undefined;
   onClose(close: () => Promise<void>): void;
   close(): Promise<void>;
 }
 
-export function createEveRuntime(input: { readonly platform: PlatformContext }): EveRuntime {
+export function createEveRuntime(): EveRuntime {
   const closers: Array<() => Promise<void>> = [];
   return {
-    platform: input.platform,
+    platform: undefined,
     onClose(close) {
       closers.push(close);
     },
@@ -27,14 +27,14 @@ interface EveRuntimeHolder {
 
 const holder = globalThis as EveRuntimeHolder;
 
+export function eveRuntime(): EveRuntime {
+  return (holder[EVE_RUNTIME] ??= createEveRuntime());
+}
+
 export function installEveRuntime(runtime: EveRuntime): () => void {
   const previous = holder[EVE_RUNTIME];
   holder[EVE_RUNTIME] = runtime;
   return () => {
     holder[EVE_RUNTIME] = previous;
   };
-}
-
-export function eveRuntime(): EveRuntime | undefined {
-  return holder[EVE_RUNTIME];
 }

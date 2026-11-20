@@ -11,14 +11,16 @@ afterEach(() => uninstall?.());
 describe("EveRuntime", () => {
   it("is where platformContext() reads the platform from", () => {
     const platform = createVercelPlatformContext();
-    uninstall = installEveRuntime(createEveRuntime({ platform }));
+    const runtime = createEveRuntime();
+    runtime.platform = platform;
+    uninstall = installEveRuntime(runtime);
 
     expect(platformContext()).toBe(platform);
   });
 
   it("closes what boot registered once, newest first", async () => {
     const closed: string[] = [];
-    const runtime = createEveRuntime({ platform: createVercelPlatformContext() });
+    const runtime = createEveRuntime();
     runtime.onClose(async () => void closed.push("world"));
     runtime.onClose(async () => void closed.push("instrumentation"));
 

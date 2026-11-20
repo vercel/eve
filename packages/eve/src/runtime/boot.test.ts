@@ -23,9 +23,9 @@ afterEach(() => {
 });
 
 beforeEach(() => {
-  uninstallRuntime = installEveRuntime(
-    createEveRuntime({ platform: createVercelPlatformContext() }),
-  );
+  const runtime = createEveRuntime();
+  runtime.platform = createVercelPlatformContext();
+  uninstallRuntime = installEveRuntime(runtime);
   for (const name of [
     "VERCEL",
     "VERCEL_DEPLOYMENT_ID",
@@ -57,12 +57,12 @@ describe("bootEve", () => {
     });
   });
 
-  it("refuses to boot the World before the runtime is installed", async () => {
+  it("refuses to boot the World before the platform is installed", async () => {
     uninstallRuntime?.();
-    uninstallRuntime = installEveRuntime(undefined as never);
+    uninstallRuntime = installEveRuntime(createEveRuntime());
 
     await expect(bootEve({ createWorld: () => Promise.reject(STOP) })).rejects.toThrow(
-      "before installing its runtime",
+      "before installing its platform",
     );
   });
 
