@@ -66,6 +66,7 @@ mock.module("../../extension/lib/monitor.js", {
 });
 const { GitHub, Vercel } = await import("../../extension/lib/providers.js");
 mock.method(GitHub.prototype, "api", async () => ({ id: 1, full_name: "fixture/agent" }));
+mock.method(GitHub.prototype, "feedback", async () => structuredClone(feedback));
 mock.method(Vercel.prototype, "api", async () => ({
   id: "prj_fixture",
   accountId: "team_fixture",
@@ -118,7 +119,7 @@ mock.module("../../extension/lib/verify.js", {
     },
   },
 });
-const { prepare, advance } = await import("../../extension/lib/controller.js");
+const { prepare, advance, acceptReview } = await import("../../extension/lib/controller.js");
 const ctx = {
   toolName: "self-improvement__cycle",
   callId: "call",
@@ -535,4 +536,76 @@ test("a newer production release completes superseded deployment reconciliation 
   await advance(active.lease);
   assert.equal(active.experiment!.status, "superseded");
   assert.deepEqual(writes, []);
+});
+
+test("analyst acceptance requires all fetched feedback to fit the classified evidence", async () => {
+  const { boundFeedback } = await import("../../extension/lib/providers.js");
+  const complete = {
+    comments: [
+      { id: "warning", body: "A complete warning", url: "https://github.com/fixture/comment" },
+    ],
+    reviews: [],
+    threads: [],
+  };
+  const flooded = {
+    ...complete,
+    comments: Array.from({ length: 60 }, (_, i) => ({
+      id: String(i),
+      body: i === 0 ? "Early security warning" : "Routine message",
+      url: `https://github.com/fixture/comment/${i}`,
+    })),
+  };
+  const shortened = {
+    ...complete,
+    reviews: [
+      {
+        id: "review",
+        body: "Review warning".repeat(1000),
+        state: "COMMENTED",
+        submittedAt: "2026-11-20T00:00:00Z",
+      },
+    ],
+  };
+  const legacy = boundFeedback(shortened);
+  delete legacy.truncated;
+  for (const raw of [flooded, shortened, legacy, complete]) {
+    const bounded = boundFeedback(raw);
+    reset({
+      ...experiment(),
+      status: "review",
+      candidate: candidate(),
+      reviewDigest: "observed",
+      feedback: bounded,
+    });
+    await acceptReview(
+      active.lease,
+      JSON.stringify({ action: "accept", reason: "Reviewed the displayed evidence" }),
+    );
+    assert.equal(active.experiment!.reviewedDigest, raw === complete ? "observed" : undefined);
+    if (raw !== complete) assert.match(active.experiment!.reason!, /omitted|truncated/i);
+  }
+});
+test("incomplete feedback cannot start a new deployment while resuming a merged release", async (t) => {
+  const e = { ...released(), status: "deploying" as const, candidate: candidate() };
+  e.release!.deployment = undefined;
+  reset(e);
+  c.policy.mode = "ship";
+  feedback.comments = [
+    {
+      id: "long-warning",
+      body: "Do not ship. ".repeat(1000),
+      url: "https://github.com/fixture/comment",
+    },
+  ];
+  t.mock.method(GitHub.prototype, "api", async (path: string) =>
+    path.includes("/commits/")
+      ? { commit: { verification: { verified: true } } }
+      : { merged: true, merge_commit_sha: MERGED, head: { sha: HEAD } },
+  );
+  t.mock.method(GitHub.prototype, "main", async () => MERGED);
+  t.mock.method(Vercel.prototype, "deployment", async () => e.release!.baseline);
+  assert.equal((await advance(active.lease)).action, "done");
+  assert.deepEqual(writes, []);
+  assert.equal(active.experiment!.release!.deployStartedAt, undefined);
+  assert.match(active.experiment!.reason!, /omitted|truncated/i);
 });

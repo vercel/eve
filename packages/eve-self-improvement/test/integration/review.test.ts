@@ -23,6 +23,7 @@ class FixtureGit extends GitHub {
   head = HEAD;
   decision: string | null = null;
   comment = "Conversation suggestion";
+  commentCount = 1;
   reviewBody = "Submitted review";
   threadBody = "Thread finding";
   threadAuthor: { viewerDidAuthor?: boolean; author?: { __typename: string } } = {};
@@ -45,7 +46,11 @@ class FixtureGit extends GitHub {
       };
     else if (path.includes("/statuses?")) result = [{ context: "Vercel CI", state: "success" }];
     else if (path.includes("/issues/1/comments?"))
-      result = [{ id: 1, body: this.comment, html_url: "https://github.com/fixture/comment" }];
+      result = Array.from({ length: this.commentCount }, (_, i) => ({
+        id: i + 1,
+        body: i === 0 ? this.comment : "Routine conversation",
+        html_url: `https://github.com/fixture/comment/${i}`,
+      }));
     else if (path.includes("/pulls/1/reviews?"))
       result = [
         {
@@ -161,14 +166,18 @@ test("zero required human approvals do not introduce a manual approval gate", as
   assert.equal(await mergeExact(c, candidate(), reviewed, git), MERGED);
   assert.equal(git.calls.find((call) => call.method === "PUT")!.body.sha, HEAD);
 });
-test("edits beyond displayed feedback invalidate classification even with passing checks", async () => {
+test("edits beyond displayed feedback change the review fingerprint while merging stays blocked", async () => {
   for (const source of ["comment", "reviewBody", "threadBody"] as const) {
     const c = configured(),
       git = new FixtureGit(c);
     git[source] = "Review evidence. ".repeat(1000);
     const reviewed = reviewFingerprint(candidate(), await inspectCandidate(c, candidate(), git));
     git[source] += "New actionable finding after baseline verification";
-    await assert.rejects(mergeExact(c, candidate(), reviewed, git), /Review evidence changed/);
+    assert.notEqual(
+      reviewFingerprint(candidate(), await inspectCandidate(c, candidate(), git)),
+      reviewed,
+    );
+    await assert.rejects(mergeExact(c, candidate(), reviewed, git), /block merge/);
     assert.ok(!git.calls.some((call) => call.method === "PUT"));
   }
 });
@@ -312,5 +321,24 @@ test("automatic thread resolution requires the root comment to belong to the cur
     git.threadAuthor = author;
     const feedback = await git.feedback(candidate());
     assert.equal(feedback.threads[0].canAutoResolve, allowed);
+  }
+});
+
+test("omitted or truncated warnings cannot authorize an exact-head merge", async () => {
+  for (const source of ["comment-count", "comment", "reviewBody", "threadBody"] as const) {
+    const c = configured(),
+      git = new FixtureGit(c);
+    if (source === "comment-count") {
+      git.commentCount = 51;
+      git.comment = "Security warning in the first comment";
+    } else git[source] = "Security warning. ".repeat(1000);
+    const inspection = await inspectCandidate(c, candidate(), git);
+    assert.equal(
+      inspection.checks.find((check) => check.name === "complete review evidence")?.status,
+      "unavailable",
+    );
+    const reviewed = reviewFingerprint(candidate(), inspection);
+    await assert.rejects(mergeExact(c, candidate(), reviewed, git), /block merge/);
+    assert.ok(!git.calls.some((call) => call.method === "PUT"));
   }
 });

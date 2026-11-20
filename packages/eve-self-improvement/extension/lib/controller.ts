@@ -353,8 +353,17 @@ export async function acceptReview(lease: Lease, text: string): Promise<Action> 
       e.publishIntent = undefined;
       e.attempts++;
     }
-  } else if (decision.action === "accept") e.reviewedDigest = e.reviewDigest;
-  else e.reason = decision.reason;
+  } else if (decision.action === "accept") {
+    if (!e.reviewDigest || !e.feedback || boundFeedback(e.feedback).truncated) {
+      e.status = "review";
+      e.reviewedDigest = undefined;
+      e.reason =
+        "Review feedback is missing, omitted or truncated; reconcile complete evidence before automatic acceptance";
+      await save(c, active);
+      return { action: "done", lease, payload: JSON.stringify(e) };
+    }
+    e.reviewedDigest = e.reviewDigest;
+  } else e.reason = decision.reason;
   await save(c, active);
   return {
     action:
@@ -525,6 +534,12 @@ export async function advance(lease: Lease): Promise<Action> {
         e.status = "blocked";
         e.reason =
           "Bounded deployment attempts exhausted after reconciliation; inspect publisher/setup logs";
+        await save(c, active);
+        return { action: "done", lease };
+      }
+      if (boundFeedback(await git.feedback(e.candidate!)).truncated) {
+        e.reason =
+          "Review text is omitted or truncated; reconcile complete feedback before a new deployment";
         await save(c, active);
         return { action: "done", lease };
       }

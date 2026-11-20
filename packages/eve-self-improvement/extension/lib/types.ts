@@ -113,11 +113,12 @@ export interface Receipt {
   id: string;
   url: string;
 }
-/** Forge evidence with bounded display text and digests of the complete contents. */
+/** Forge evidence with explicit text completeness, bounded display and full-content digests. */
 export interface ReviewFeedback {
   comments: { id: string; body: string; url: string }[];
   commentsDigest?: string;
   omittedComments?: number;
+  truncated?: boolean;
   threads: {
     id: string;
     resolved: boolean;

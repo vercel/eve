@@ -1,5 +1,5 @@
 import { checkPath, digest, type Config } from "./config.js";
-import { GitHub } from "./providers.js";
+import { boundFeedback, GitHub } from "./providers.js";
 import type { Candidate, Check, Experiment, ReviewFeedback } from "./types.js";
 
 export class MergePolicyBlocked extends Error {}
@@ -69,13 +69,22 @@ export async function inspectCandidate(
   candidate: Candidate,
   git = new GitHub(c),
 ): Promise<ReviewInspection> {
-  const [pr, feedback, statuses, files] = await Promise.all([
+  const [pr, fetchedFeedback, statuses, files] = await Promise.all([
     git.api(`/repos/${git.repo}/pulls/${candidate.pr}`),
     git.feedback(candidate),
     git.pages(`/repos/${git.repo}/commits/${candidate.head}/statuses`),
     git.pages(`/repos/${git.repo}/pulls/${candidate.pr}/files`),
   ]);
-  const checks: Check[] = [],
+  const feedback = boundFeedback(fetchedFeedback);
+  const checks: Check[] = [
+      {
+        name: "complete review evidence",
+        status: feedback.truncated ? "unavailable" : "passed",
+        reason: feedback.truncated
+          ? "Review text was omitted or truncated; automatic acceptance and merging require complete classified feedback"
+          : "Every fetched comment, review and thread body is present in the classification evidence",
+      },
+    ],
     outputs: ReviewInspection["outputs"] = [];
   const checkRuns: any[] = [];
   for (let page = 1; page <= 10; page++) {

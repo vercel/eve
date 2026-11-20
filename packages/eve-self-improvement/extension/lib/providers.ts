@@ -30,15 +30,28 @@ export function boundFeedback(feedback: ReviewFeedback): ReviewFeedback {
     comments.unshift(bounded);
     remaining -= bytes;
   }
+  const reviews = boundBodies(feedback.reviews),
+    threads = boundBodies(feedback.threads);
+  const commentsDigest = feedback.commentsDigest ?? digest(feedback.comments);
+  const reviewsDigest = feedback.reviewsDigest ?? digest(feedback.reviews);
+  const threadsDigest = feedback.threadsDigest ?? digest(feedback.threads);
+  const omittedComments =
+    (feedback.omittedComments ?? 0) + feedback.comments.length - comments.length;
   return {
     ...feedback,
     comments,
-    commentsDigest: feedback.commentsDigest ?? digest(feedback.comments),
-    omittedComments: (feedback.omittedComments ?? 0) + feedback.comments.length - comments.length,
-    reviews: boundBodies(feedback.reviews),
-    reviewsDigest: feedback.reviewsDigest ?? digest(feedback.reviews),
-    threads: boundBodies(feedback.threads),
-    threadsDigest: feedback.threadsDigest ?? digest(feedback.threads),
+    commentsDigest,
+    omittedComments,
+    reviews,
+    reviewsDigest,
+    threads,
+    threadsDigest,
+    truncated:
+      feedback.truncated === true ||
+      omittedComments > 0 ||
+      commentsDigest !== digest(comments) ||
+      reviewsDigest !== digest(reviews) ||
+      threadsDigest !== digest(threads),
   };
 }
 
