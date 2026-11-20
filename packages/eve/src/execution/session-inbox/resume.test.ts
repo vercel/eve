@@ -233,7 +233,7 @@ describe("session inbox resume", () => {
     expect(resumeHookMock).not.toHaveBeenCalled();
   });
 
-  it.fails("refuses a pre-1.0 owner reached through its legacy inbox address", async () => {
+  it("refuses a pre-1.0 owner reached through its legacy inbox address", async () => {
     getWorldMock.mockResolvedValue(singleDeploymentWorld("0.50.0"));
     getHookByTokenMock.mockImplementation(async (token: string) => {
       if (token.startsWith(sessionInboxHookToken(""))) throw new HookNotFoundError(token);
@@ -255,6 +255,26 @@ describe("session inbox resume", () => {
       "slack:C1:1700000000.000100",
       expect.anything(),
     );
+  });
+
+  it("treats a pre-0.45 owner reached through its legacy inbox address as not found", async () => {
+    const world = singleDeploymentWorld("0.40.0");
+    getWorldMock.mockResolvedValue(world);
+    getHookByTokenMock.mockImplementation(async (token: string) => {
+      if (token.startsWith(sessionInboxHookToken(""))) throw new HookNotFoundError(token);
+      return sessionHook("wrun_pre_v045", token, {});
+    });
+    resumeHookMock.mockImplementation(async (token: string) => {
+      throw new HookNotFoundError(token);
+    });
+
+    const refusal = await resumeSessionInbox("slack:C1:1600000000.000100", {
+      kind: "send",
+      payload: { message: "Alice follows up on an old thread." },
+    }).catch((error: unknown) => error);
+
+    expect(HookNotFoundError.is(refusal)).toBe(true);
+    expect(world.runs.get).not.toHaveBeenCalled();
   });
 
   it.each([
