@@ -4,6 +4,5 @@
   "dependencies": {
     "@vercel/connect": "^2.9.3",
     "eve": "1.2.0"
-  },
-  "packageManager": "pnpm@12.21.0"
+  }
 }
