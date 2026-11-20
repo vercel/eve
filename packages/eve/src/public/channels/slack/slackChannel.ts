@@ -72,7 +72,7 @@ import {
 } from "#public/channels/slack/defaults.js";
 import { withFinalReplyDelivery } from "#public/channels/slack/reply-delivery.js";
 import {
-  renderersAllowStreaming,
+  rendererStreamsReplies,
   withReplyStreaming,
   withStreamedDeltas,
 } from "#public/channels/slack/reply-stream.js";
@@ -1079,8 +1079,8 @@ export interface SlackChannelConfig {
      *
      * What streams is the text that reaches eve's default `content.delta`, so
      * a renderer's `content.delta` handler decides it: pass a delta on, change
-     * it, or drop it. A renderer that handles `content.completed`, such as one
-     * that redacts replies, must also handle `content.delta`; until one does,
+     * it, or drop it. A renderer that handles `content.completed` must opt in
+     * with `experimental: { streamsReplies: true }`; until every one does,
      * replies post whole and eve logs a warning.
      *
      * The completed reply still runs through `renderers`. Delivering it with
@@ -1168,10 +1168,13 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   });
   const onAnswers = config.onAnswers ?? defaultOnAnswers;
   const renderers = config.renderers ?? [];
-  const streaming = config.experimental?.streaming === true && renderersAllowStreaming(renderers);
+  const nonStreaming = renderers.findIndex((renderer) => !rendererStreamsReplies(renderer));
+  const streaming = config.experimental?.streaming === true && nonStreaming === -1;
   if (config.experimental?.streaming === true && !streaming) {
     log.warn(
-      "Slack reply streaming is off: a renderer handles content.completed but not content.delta. Add a content.delta handler that decides what streams, such as one that calls next().",
+      renderers[nonStreaming]?.experimental?.streamsReplies === false
+        ? `Slack reply streaming is off: renderers[${nonStreaming}] sets experimental.streamsReplies to false.`
+        : `Slack reply streaming is off: renderers[${nonStreaming}] handles content.completed. If it never changes the reply text, set experimental: { streamsReplies: true } on it. If it does, make the same change in its content.delta handler too, then set streamsReplies.`,
     );
   }
   const interactionCard = composeInteractionCards(renderers);

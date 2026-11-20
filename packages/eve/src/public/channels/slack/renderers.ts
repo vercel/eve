@@ -162,6 +162,23 @@ export interface SlackRenderer {
     card: SlackInteractionCard,
     next: (card: SlackInteractionCard) => SlackInteractionCardParts,
   ) => SlackInteractionCardParts;
+  /**
+   * Options with no compatibility promise. They can change or go away in any release.
+   */
+  readonly experimental?: {
+    /**
+     * Whether replies can stream while this renderer is in the chain, with
+     * the Slack channel's `experimental.streaming` on. A renderer that
+     * handles `content.completed` must set `true` before replies stream,
+     * because what streams is the text before `content.completed` runs. Set
+     * it when its `content.completed` doesn't change the reply text, such as
+     * one that only adds a follow-up message, or when its `content.delta`
+     * makes the same change. Set `false` to turn streaming off. Defaults to
+     * `true` for a renderer without a `content.completed` handler, and
+     * `false` otherwise.
+     */
+    readonly streamsReplies?: boolean;
+  };
 }
 
 /** Types a Slack renderer. */

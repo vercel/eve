@@ -157,8 +157,8 @@ describe("Slack reply streaming", () => {
 
   it("rewrites the streamed message when a renderer changes the reply", async () => {
     const signed = defineSlackRenderer({
+      experimental: { streamsReplies: true },
       events: {
-        "content.delta": (event, _ctx, next) => next(event),
         async "content.completed"(event, _ctx, next) {
           const { value } = event.data;
           await next({ ...event, data: { ...event.data, value: `${String(value)}\n\n— eve` } });
@@ -205,8 +205,42 @@ describe("Slack reply streaming", () => {
     expect(operations()).toEqual(["chat.getPermalink", "chat.postMessage"]);
   });
 
+  it("posts replies whole while a renderer with content.delta hasn't opted in", async () => {
+    const redacting = defineSlackRenderer({
+      events: {
+        "content.delta": (event, _ctx, next) => next(event),
+        "content.completed": (event, _ctx, next) => next(event),
+      },
+    });
+    const { complete, start, write } = harness({
+      experimental: { streaming: true },
+      renderers: [redacting],
+    });
+    await start();
+
+    await write(LONG);
+    await complete(LONG);
+
+    expect(operations()).toEqual(["chat.getPermalink", "chat.postMessage"]);
+  });
+
+  it("posts replies whole while a renderer opts out", async () => {
+    const quiet = defineSlackRenderer({ experimental: { streamsReplies: false } });
+    const { complete, start, write } = harness({
+      experimental: { streaming: true },
+      renderers: [quiet],
+    });
+    await start();
+
+    await write(LONG);
+    await complete(LONG);
+
+    expect(operations()).toEqual(["chat.getPermalink", "chat.postMessage"]);
+  });
+
   it("streams what a renderer's content.delta passes on", async () => {
     const redacting = defineSlackRenderer({
+      experimental: { streamsReplies: true },
       events: {
         "content.delta": (event, _ctx, next) =>
           next({

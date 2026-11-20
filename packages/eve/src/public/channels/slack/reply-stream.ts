@@ -50,11 +50,8 @@ interface FinalReply {
   readonly text?: string;
 }
 
-export function renderersAllowStreaming(renderers: readonly SlackRenderer[]): boolean {
-  return renderers.every(
-    ({ events }) =>
-      events?.["content.completed"] === undefined || events["content.delta"] !== undefined,
-  );
+export function rendererStreamsReplies({ events, experimental }: SlackRenderer): boolean {
+  return experimental?.streamsReplies ?? events?.["content.completed"] === undefined;
 }
 
 export function withStreamedDeltas(
