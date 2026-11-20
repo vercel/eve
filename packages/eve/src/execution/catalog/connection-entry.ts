@@ -20,6 +20,7 @@ import { approvalDecision } from "#approval/status.js";
 import { isAuthorizationSignal, type AuthorizationSignal } from "#harness/authorization.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { withConnectionApproval } from "#runtime/connections/approval-scope.js";
+import { isEventAction } from "#runtime/subscriptions/actions.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
 import {
   connectionToolModelOutput,
@@ -275,6 +276,12 @@ function unknownToolMessage(
   tools: readonly ConnectionToolMetadata[],
 ): string {
   const { connectionName } = connection;
+  if (isEventAction(toolName)) {
+    const events = tools.flatMap((tool) => (tool.event === undefined ? [] : [tool.event]));
+    return events.length > 0
+      ? `Connection "${connectionName}" emits no such event. Its events: ${events.join(", ")}.`
+      : `Connection "${connectionName}" lists no events to subscribe to.`;
+  }
   const suggestions = closestNames(toolName, tools).map((name) =>
     connectionToolName(connectionName, name),
   );

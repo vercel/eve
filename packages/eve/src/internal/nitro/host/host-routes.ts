@@ -9,7 +9,7 @@ import { normalizeRoutePattern } from "#compiler/channel-route-plan.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import type { ChannelRouteMethod } from "#public/definitions/channel.js";
 import { EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN } from "#protocol/routes.js";
-import { connectionEventRoute } from "#runtime/connections/events/path.js";
+import { connectionEventRoute } from "#runtime/subscriptions/path.js";
 import { createVercelScheduleName } from "#internal/nitro/host/vercel-schedule-name.js";
 import type { ScheduleRegistration } from "#runtime/schedules/register.js";
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";

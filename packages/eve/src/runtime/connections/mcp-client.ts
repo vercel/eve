@@ -1,4 +1,4 @@
-import { ConnectionEventActions, isEventAction } from "#runtime/connections/events/actions.js";
+import { ConnectionEventActions, isEventAction } from "#runtime/subscriptions/actions.js";
 import { createMCPClient, type MCPClient } from "#compiled/@ai-sdk/mcp/index.js";
 import type { ToolSet } from "ai";
 
@@ -81,7 +81,6 @@ export class McpConnectionClient implements ConnectionClient {
       );
       this.eventActions = {
         ownsName: isEventAction,
-        recoveryMetadata: () => events.recoveryMetadata(),
         metadata: async () => {
           try {
             return await events.metadata();

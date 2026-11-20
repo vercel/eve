@@ -164,7 +164,6 @@ describe("connection tool call", () => {
         }),
         metadata: async () => [subscribe],
         ownsName: (name) => name === subscribe.name,
-        recoveryMetadata: () => [subscribe],
       },
       executeTool: async (name, args, options) => ({
         structuredContent: await resolveProvidedArguments({

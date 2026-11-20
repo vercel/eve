@@ -5,7 +5,12 @@ import type { ChannelContext } from "#shared/channel-context.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
-import { createLogger } from "#internal/logging.js";
+import { createLogger, logError } from "#internal/logging.js";
+import {
+  type GitHubOnEvent,
+  emitGitHubWebhook,
+  githubChannelOnEvent,
+} from "#public/channels/github/subscriptions.js";
 import {
   buildGitHubBinding,
   type GitHubHandle,
@@ -160,6 +165,14 @@ export interface GitHubChannelConfig {
   readonly progress?: GitHubProgressConfig;
   readonly pullRequestContext?: GitHubPullRequestContextConfig;
   readonly route?: string;
+  /**
+   * Makes every GitHub webhook event subscribable with the `subscribe` tool, and runs for each
+   * subscription and each event it receives, as the subscribed session. Return `true` to send the
+   * event's payload as the message, a string to send that message instead, or `false` to drop it.
+   * Filter on `event.name` (`check_suite.completed`) or `event.data`. Nothing is subscribable
+   * without it.
+   */
+  readonly onEvent?: GitHubOnEvent;
   /** Policy for accepted messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
 
@@ -232,6 +245,7 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
     botName: config.botName,
     credentials: config.credentials,
   });
+  const appSlug = createGitHubBotNameResolver({ credentials: config.credentials });
   const dispatchOptions = { botName };
   const mergedEvents: GitHubChannelEvents = {
     ...createDefaultEvents({
@@ -246,6 +260,7 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
   const channel = defineChannel<GitHubChannelState, GitHubChannelContext, GitHubReceiveTarget>({
     turnPolicy: config.turnPolicy,
     state: initialGitHubState(),
+    onEvent: githubChannelOnEvent(config.onEvent),
 
     context(state, session) {
       return rebuildGitHubContext(state, session, config);
@@ -258,10 +273,27 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
     routes: [
       POST<GitHubChannelState>(
         config.route ?? GITHUB_CHANNEL_DEFAULT_ROUTE,
-        async (req, { from, waitUntil }) => {
+        async (req, { emit, from, waitUntil }) => {
           const body = await verifyInbound(req, config.credentials);
           if (body === null) return new Response("unauthorized", { status: 401 });
           const missingHeaders = missingGitHubWebhookHeaders(req.headers);
+
+          if (config.onEvent !== undefined) {
+            waitUntil(
+              emitGitHubWebhook({
+                body,
+                appSlug,
+                contentType: req.headers.get("content-type") ?? undefined,
+                emit,
+                headers: req.headers,
+              }).catch((error: unknown) => {
+                logError(log, "GitHub subscription delivery failed", error, {
+                  deliveryId: req.headers.get("x-github-delivery"),
+                  event: req.headers.get("x-github-event"),
+                });
+              }),
+            );
+          }
 
           let event: GitHubInboundEvent | null;
           try {

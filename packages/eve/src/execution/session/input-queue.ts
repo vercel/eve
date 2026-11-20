@@ -1,4 +1,8 @@
 import type { DeliverHookPayload, DeliverPayload, SessionAuthContext } from "#channel/types.js";
+import {
+  CONNECTION_EVENT_CHANNEL_KIND,
+  SUBSCRIPTION_CHANNEL_KIND,
+} from "#channel/delivery-metadata.js";
 import { DELIVERY_IDEMPOTENCY_WINDOW } from "#channel/delivery-idempotency.js";
 import { coalesceDeliveries } from "#harness/messages.js";
 import { ANONYMOUS_PRINCIPAL, principalOf } from "#execution/session/principal.js";
@@ -244,16 +248,27 @@ export interface SteeringOptions {
   readonly heldSince?: number;
 }
 
+/**
+ * Whether a delivery steers the running turn. A message an event subscription delivers runs under
+ * the subscriber's auth but carries text its outside source wrote, so it never steers, answers a
+ * pending request or withdraws a sign-in: it waits for the turn to end.
+ */
 export function isSteeringDelivery(
   delivery: DeliverHookPayload,
   turn: SteeringTurn,
   options?: { readonly heldOnPerson?: boolean },
 ): boolean {
+  if (delivery.deliveryMetadata?.some(({ channelKind }) => isEventChannelKind(channelKind)))
+    return false;
   return (
     (options?.heldOnPerson === true || (delivery.turnPolicy ?? "steer") === "steer") &&
     (delivery.caller === undefined || delivery.caller.callId === turn.callerCallId) &&
     (delivery.auth === undefined || principalOf(delivery.auth) === turn.principal)
   );
+}
+
+function isEventChannelKind(channelKind: string): boolean {
+  return channelKind === SUBSCRIPTION_CHANNEL_KIND || channelKind === CONNECTION_EVENT_CHANNEL_KIND;
 }
 
 export function isSteeringMessage(delivery: DeliverHookPayload, turn: SteeringTurn): boolean {

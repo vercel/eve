@@ -5,6 +5,7 @@ import {
   createChannelDeliveryMetadata,
   type ChannelDeliverySource,
 } from "#channel/delivery-metadata.js";
+import { createEmitChannelEventFn } from "#runtime/subscriptions/emit.js";
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import { createAttachSessionFn } from "#channel/session.js";
 import type { SkillFileSource } from "#channel/skill-files.js";
@@ -56,6 +57,7 @@ export function createChannelRouteArgs(ports: ChannelRoutePorts): RouteHandlerAr
             }),
             ...ports.agent,
             params: ports.params,
+            emit: createEmitChannelEventFn(channelName),
             requestIp: ports.requestIp,
             to: ports.to,
             waitUntil: ports.waitUntil,

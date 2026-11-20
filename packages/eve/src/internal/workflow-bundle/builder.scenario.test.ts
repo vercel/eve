@@ -178,7 +178,7 @@ describe("WorkflowBundleBuilder", () => {
     expect(builder.snapshot.dirs).toEqual([
       resolvePackageSourceDirectoryPath("src/execution"),
       resolvePackageSourceDirectoryPath("src/runtime/subagents"),
-      resolvePackageSourceDirectoryPath("src/runtime/connections/events"),
+      resolvePackageSourceDirectoryPath("src/runtime/subscriptions"),
       resolvePackageSourceDirectoryPath("src/subagents"),
       resolvePackageSourceDirectoryPath("src/tools/provided"),
     ]);
@@ -682,11 +682,7 @@ describe("WorkflowBundleBuilder", () => {
     ["sleep tool", "src/tools/provided/sleep-workflow.ts", "executeSleepTool"],
     ["session owner", "src/execution/session/entry.ts", "nextTurnDelivery"],
     ["workflow tool owner", "src/execution/tools/workflow/workflow.ts", "workflowToolRunWorkflow"],
-    [
-      "connection event owner",
-      "src/runtime/connections/events/workflow.ts",
-      "connectionEventWorkflow",
-    ],
+    ["subscription owner", "src/runtime/subscriptions/workflow.ts", "subscriptionWorkflow"],
   ])("keeps the %s schemas out of the workflow driver", async (_name, sourcePath, marker) => {
     const tempRoot = await mkdtemp(join(tmpdir(), "eve-workflow-bundle-no-schemas-"));
     const outDir = join(tempRoot, "workflow-build");

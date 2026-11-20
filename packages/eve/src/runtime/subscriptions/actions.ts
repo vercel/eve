@@ -21,26 +21,26 @@ import type {
 import type { ManagedEventSubscribeInput } from "#shared/connection-events.js";
 import { parseJsonObject } from "#shared/json.js";
 import { principalKey, resolveConnectionPrincipal } from "#runtime/connections/principal.js";
-import { connectionEventDestination } from "#runtime/connections/events/path.js";
-import {
-  sameEventOwner,
-  type EventBinding,
-  type EventOwner,
-} from "#runtime/connections/events/state.js";
+import { connectionEventDestination } from "#runtime/subscriptions/path.js";
+import type {
+  ConnectionBinding,
+  ConnectionSubscriptionSource,
+  SubscriptionBinding,
+} from "#runtime/subscriptions/state.js";
 import type { ManagedEventSubscription } from "#shared/connection-events.js";
 
-const GET = "events_get_subscription";
-const STOP = "events_unsubscribe";
+export const EVENT_GET_ACTION = "events_get_subscription";
+export const EVENT_STOP_ACTION = "events_unsubscribe";
 const PREFIX = "events_subscribe_";
-const MIN_TTL_MS = 120_000;
-const MAX_TTL_MS = 31_536_000_000;
+export const MIN_TTL_MS = 120_000;
+export const MAX_TTL_MS = 31_536_000_000;
 type EventCatalog = Pick<MCPEvents, "list">;
 const SUBSCRIBE_INPUT_SCHEMA = defineJsonSchema<
   Pick<ManagedEventSubscribeInput, "arguments" | "ttlMs">
 >(parseJsonObject(subscribeInputSchema()));
 
 export function isEventAction(name: string): boolean {
-  return name === GET || name === STOP || name.startsWith(PREFIX);
+  return name === EVENT_GET_ACTION || name === EVENT_STOP_ACTION || name.startsWith(PREFIX);
 }
 
 export class ConnectionEventActions {
@@ -76,7 +76,7 @@ export class ConnectionEventActions {
     const sessionId = ctx.require(SessionIdKey);
     const owner = principalKey(principal);
     const executionPrincipal = principalOf(ctx.get(AuthKey));
-    const caller: EventOwner = {
+    const caller: Caller = {
       connectionName: this.connection.connectionName,
       instanceId: this.connection.instanceId,
       connector,
@@ -152,23 +152,13 @@ export class ConnectionEventActions {
   async metadata(): Promise<ConnectionToolMetadata[]> {
     return this.withClient(async (events) => {
       const catalog = await this.catalog(events);
-      return [
-        ...catalog.map((event) => ({
-          name: actionName(event.name),
-          description: `Watch ${event.name}. ${event.description ?? ""} Events reach this connection's authored callback for ttlMs milliseconds or until stopped. Set ttlMs to null to watch indefinitely. Watching the same event with the same arguments again returns the existing watch.`,
-          inputSchema: subscribeInputSchema(event.inputSchema),
-        })),
-        ...managementMetadata(),
-      ];
+      return catalog.map((event) => ({
+        name: eventActionName(event.name),
+        event: event.name,
+        description: `Subscribe to ${event.name}.${event.description ? ` ${event.description}` : ""} Events are delivered to this connection's callback for ttlMs milliseconds, or until stopped when ttlMs is null. Subscribing again with the same event and arguments returns the existing subscription.`,
+        inputSchema: subscribeInputSchema(event.inputSchema),
+      }));
     });
-  }
-
-  recoveryMetadata(): ConnectionToolMetadata[] {
-    this.scope();
-    return managementMetadata().map((tool) => ({
-      ...tool,
-      description: `MCP discovery is unavailable. ${tool.description}`,
-    }));
   }
 
   async execute(
@@ -178,24 +168,22 @@ export class ConnectionEventActions {
   ): Promise<unknown> {
     const args = parseJsonObject(input);
     const { ctx, principal, backend, sessionId, owner, executionPrincipal, caller } = this.scope();
-    const owners = installedDurableHost()?.connectionEvents;
+    const owners = installedDurableHost()?.subscriptions;
     if (owners === undefined)
-      throw new Error(
-        "This host keeps no connection event subscriptions: watch events from a deployed agent.",
-      );
-    if (name === GET || name === STOP) {
+      throw new Error("Subscriptions are not supported on this host. Run from a deployed agent.");
+    if (name === EVENT_GET_ACTION || name === EVENT_STOP_ACTION) {
       if (typeof args.id !== "string") throw new Error("id must be a subscription id.");
       const bindingId = args.id;
       const handler = await owners.find(bindingId);
-      if (handler === undefined || !sameEventOwner(handler.owner, caller))
+      if (handler === undefined || !heldBy(handler.binding, caller))
         throw new Error("Unknown subscription for this caller and account.");
-      if (name === STOP) {
+      if (name === EVENT_STOP_ACTION) {
         if (!(await owners.retire(bindingId)))
           throw new Error("Unknown subscription for this caller and account.");
         return { id: bindingId, status: "stopping" as const };
       }
-      if (handler.subscription === undefined) return pendingResult(handler.owner);
-      const subscriptionId = handler.subscription.id;
+      if (handler.opened === undefined) return pendingResult(handler.binding);
+      const subscriptionId = handler.opened.key;
       const events = await backend.createAdapter({
         principal,
         connection: { url: this.connection.url },
@@ -215,7 +203,7 @@ export class ConnectionEventActions {
     }
     return this.withClient(async (events) => {
       const definition = (await this.catalog(events)).find(
-        (event) => actionName(event.name) === name,
+        (event) => eventActionName(event.name) === name,
       );
       if (definition === undefined)
         throw new Error("Unknown event subscription action for this account.");
@@ -248,27 +236,30 @@ export class ConnectionEventActions {
           ]),
         )
         .digest("hex");
-      const binding: EventBinding = {
-        ...caller,
+      const binding: ConnectionBinding = {
         id,
+        source: {
+          kind: "connection",
+          name: caller.connectionName,
+          instanceId: caller.instanceId,
+          connector: caller.connector,
+          principalKey: caller.principalKey,
+          request: {
+            name: definition.name,
+            arguments: structuredClone(eventArguments) as ManagedEventSubscribeInput["arguments"],
+            ttlMs,
+            context: { eve: { version: 1, sessionId, bindingId: id } },
+          },
+        },
         sessionId,
+        executionPrincipal,
         auth: structuredClone(ctx.get(AuthKey) ?? null),
         traceSeed: ctx.get(SessionTraceSeedKey),
-        request: {
-          name: definition.name,
-          arguments: structuredClone(eventArguments) as ManagedEventSubscribeInput["arguments"],
-          ttlMs,
-          context: { eve: { version: 1, sessionId, bindingId: id } },
-        },
       };
-      const subscription = await owners.start(
-        binding,
-        requireCompiledBundle(ctx),
-        options.abortSignal,
-      );
-      return subscription === undefined
+      const opened = await owners.start(binding, requireCompiledBundle(ctx), options.abortSignal);
+      return opened?.upstream === undefined
         ? pendingResult(binding)
-        : subscriptionResult(id, subscription);
+        : subscriptionResult(id, opened.upstream);
     });
   }
 }
@@ -286,7 +277,7 @@ function subscribeInputSchema(
         type: ["integer", "null"],
         minimum: MIN_TTL_MS,
         maximum: MAX_TTL_MS,
-        description: `How long to watch, in milliseconds (${MIN_TTL_MS} to ${MAX_TTL_MS}), or null until stopped`,
+        description: `How long to keep the subscription active, in milliseconds (${MIN_TTL_MS} for 2 minutes up to ${MAX_TTL_MS} for 365 days), or null until stopped.`,
       },
     },
   };
@@ -296,9 +287,26 @@ function subscriptionResult(bindingId: string, subscription: ManagedEventSubscri
   return { ...subscription, id: bindingId, subscriptionId: subscription.id };
 }
 
-function pendingResult(binding: EventBinding) {
-  const { name, arguments: eventArguments } = binding.request;
+function pendingResult(binding: ConnectionBinding) {
+  const { name, arguments: eventArguments } = binding.source.request;
   return { id: binding.id, name, arguments: eventArguments, status: "pending" as const };
+}
+
+type Caller = Pick<ConnectionSubscriptionSource, "instanceId" | "connector" | "principalKey"> & {
+  readonly connectionName: string;
+  readonly executionPrincipal: string;
+};
+
+function heldBy(binding: SubscriptionBinding, caller: Caller): binding is ConnectionBinding {
+  const { source } = binding;
+  return (
+    source.kind === "connection" &&
+    source.name === caller.connectionName &&
+    source.instanceId === caller.instanceId &&
+    source.connector === caller.connector &&
+    source.principalKey === caller.principalKey &&
+    binding.executionPrincipal === caller.executionPrincipal
+  );
 }
 
 function canonicalJson(value: unknown): string {
@@ -309,22 +317,7 @@ function canonicalJson(value: unknown): string {
   );
 }
 
-function actionName(eventName: string): string {
+/** The name of the generated tool that subscribes to one MCP event. */
+export function eventActionName(eventName: string): string {
   return `${PREFIX}${createHash("sha256").update(eventName).digest("hex").slice(0, 24)}`;
-}
-
-function managementMetadata(): ConnectionToolMetadata[] {
-  return [GET, STOP].map((name) => ({
-    name,
-    description:
-      name === GET
-        ? "Get one of this caller's subscriptions, by the id its subscribe call returned, with Connect's current status."
-        : "Stop one of this caller's subscriptions, by the id its subscribe call returned. The watch then cancels upstream and ends; get reports it until it has.",
-    inputSchema: {
-      type: "object",
-      properties: { id: { type: "string" } },
-      required: ["id"],
-      additionalProperties: false,
-    },
-  }));
 }

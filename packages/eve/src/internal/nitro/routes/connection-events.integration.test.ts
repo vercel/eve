@@ -2,13 +2,15 @@ import { eventTracing } from "#internal/testing/event-tracing.js";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { handleConnectionEventRequest } from "#internal/nitro/routes/connection-events.js";
 
-const { verify, start, load } = vi.hoisted(() => ({
+const { verify, emit, find, load } = vi.hoisted(() => ({
   verify: vi.fn(),
-  start: vi.fn(),
+  emit: vi.fn(),
+  find: vi.fn(),
   load: vi.fn(),
 }));
-vi.mock("#runtime/connections/events/owner.js", () => ({
-  startConnectionEventDelivery: start,
+vi.mock("#execution/hosts.js", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  installedDurableHost: () => ({ subscriptions: { emit, find } }),
 }));
 vi.mock("#runtime/sessions/compiled-agent-cache.js", () => ({
   getCompiledRuntimeAgentBundle: load,
@@ -33,7 +35,8 @@ function request() {
 }
 beforeEach(() => {
   verify.mockResolvedValue(envelope);
-  start.mockResolvedValue(true);
+  emit.mockResolvedValue(true);
+  find.mockResolvedValue(undefined);
   load.mockResolvedValue({
     resolvedAgent: {
       connections: [
@@ -50,14 +53,14 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-it("verifies the untouched request and acknowledges only durable handler acceptance", async () => {
+it("verifies the untouched request and acknowledges only once the key run has taken the event", async () => {
   vi.stubEnv("EVE_PUBLIC_ROUTE_PREFIX", "/eve/support");
   let accepted!: () => void;
   let accepting!: () => void;
   const started = new Promise<void>((resolve) => {
     accepting = resolve;
   });
-  start.mockImplementation(() => {
+  emit.mockImplementation(() => {
     accepting();
     return new Promise<boolean>((resolve) => {
       accepted = () => resolve(true);
@@ -72,15 +75,11 @@ it("verifies the untouched request and acknowledges only durable handler accepta
   await started;
   expect(settled).toBe(false);
   expect(verify).toHaveBeenCalledWith(req, { path: "/eve/support/v1/hooks/issues" });
-  expect(start).toHaveBeenCalledWith(
-    expect.objectContaining({
-      kind: "connection-event",
-      bindingId: "a".repeat(64),
-      connectionName: "issues",
-      delivery: envelope,
-    }),
-    expect.anything(),
-  );
+  expect(emit).toHaveBeenCalledExactlyOnceWith({ kind: "connection", name: "issues" }, "sub_1", {
+    id: "del_1",
+    data: envelope,
+    requestTraceContext: undefined,
+  });
   accepted();
   expect((await response).status).toBe(202);
 });
@@ -92,14 +91,39 @@ it.each([
 ])("does not enqueue unverified deliveries: %j", async (error, status) => {
   verify.mockRejectedValue(error);
   expect((await handleConnectionEventRequest(input, request())).status).toBe(status);
-  expect(start).not.toHaveBeenCalled();
+  expect(emit).not.toHaveBeenCalled();
 });
 
-it("tells Connect an ended watch is gone and leaves failed starts retryable", async () => {
-  start.mockResolvedValueOnce(false);
+it("rejects a delivery whose context does not name a session and binding", async () => {
+  for (const eve of [
+    undefined,
+    { version: 2, sessionId: "session-1", bindingId: "a".repeat(64) },
+    { version: 1, sessionId: "", bindingId: "a".repeat(64) },
+    { version: 1, sessionId: "a:b", bindingId: "a".repeat(64) },
+    { version: 1, sessionId: "session-1", bindingId: "not-a-binding" },
+  ]) {
+    verify.mockResolvedValueOnce({ ...envelope, context: { eve } });
+    expect((await handleConnectionEventRequest(input, request())).status).toBe(400);
+  }
+  expect(emit).not.toHaveBeenCalled();
+});
+
+it("asks Connect to retry while the watch's owner exists but no key run holds the key", async () => {
+  emit.mockResolvedValueOnce(false);
+  find.mockResolvedValueOnce({ binding: {}, opened: undefined });
+  const response = await handleConnectionEventRequest(input, request());
+  expect(response.status).toBe(503);
+  expect(response.headers.get("Retry-After")).toBe("5");
+  expect(find).toHaveBeenCalledExactlyOnceWith("a".repeat(64));
+});
+
+it("tells Connect an ended watch is gone and leaves failed emits retryable", async () => {
+  emit.mockResolvedValueOnce(false);
   expect((await handleConnectionEventRequest(input, request())).status).toBe(410);
-  start.mockRejectedValueOnce(new Error("temporarily unavailable"));
-  expect((await handleConnectionEventRequest(input, request())).status).toBe(503);
+  emit.mockRejectedValueOnce(new Error("temporarily unavailable"));
+  const failed = await handleConnectionEventRequest(input, request());
+  expect(failed.status).toBe(503);
+  expect(failed.headers.get("Retry-After")).toBe("5");
 });
 
 it("does not expose a receiver when the connection has not opted in", async () => {
@@ -108,7 +132,7 @@ it("does not expose a receiver when the connection has not opted in", async () =
   expect(verify).not.toHaveBeenCalled();
 });
 
-it("traces verified acceptance and propagates a serializable request parent to the durable inbox", async () => {
+it("traces verified acceptance and propagates a serializable request parent to the key run", async () => {
   const tracing = eventTracing();
   tracing.enable();
   try {
@@ -126,7 +150,7 @@ it("traces verified acceptance and propagates a serializable request parent to t
       "agent.run.id": "session-1",
       "connect.delivery.id": "del_1",
     });
-    expect(JSON.parse(JSON.stringify(start.mock.calls[0]![0])).requestTraceContext).toEqual({
+    expect(JSON.parse(JSON.stringify(emit.mock.calls[0]![2])).requestTraceContext).toEqual({
       traceId: span.spanContext().traceId,
       spanId: span.spanContext().spanId,
       traceFlags: 1,

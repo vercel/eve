@@ -2,12 +2,13 @@ import type { RouteHandlerArgs } from "#channel/routes.js";
 
 export function mockAgentRouteArgs(): Pick<
   RouteHandlerArgs,
-  "describe" | "invokeTool" | "listSkillFiles" | "readSkill"
+  "describe" | "invokeTool" | "emit" | "listSkillFiles" | "readSkill"
 > {
   return {
     describe: async () => {
       throw new Error("describe() is unavailable in this test.");
     },
+    emit: async () => false,
     invokeTool: async () => {
       throw new Error("invokeTool() is unavailable in this test.");
     },
