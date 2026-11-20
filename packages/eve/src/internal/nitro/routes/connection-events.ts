@@ -8,8 +8,8 @@ import { createLogger, logError } from "#internal/logging.js";
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
 import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runtime-artifacts.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
-import { connectionEventDestination } from "#runtime/connections/events/path.js";
-import { startConnectionEventDelivery } from "#runtime/connections/events/owner.js";
+import { connectionEventDestination } from "#runtime/subscriptions/path.js";
+import { startConnectionEventDelivery } from "#runtime/subscriptions/owner.js";
 import { isObject } from "#shared/guards.js";
 
 export async function handleConnectionEventRequest(

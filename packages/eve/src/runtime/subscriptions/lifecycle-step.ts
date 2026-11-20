@@ -2,16 +2,16 @@ import { createHash } from "node:crypto";
 import { getWorkflowMetadata, getWritable } from "#compiled/@workflow/core/index.js";
 import { deserializeContext } from "#context/serialize.js";
 import { readHttpStatus } from "#runtime/connections/mcp-client.js";
-import { resolveBinding } from "#runtime/connections/events/dispatch-step.js";
-import { startConnectionEventDeliveryRun } from "#runtime/connections/events/owner.js";
-import { connectionEventDestination } from "#runtime/connections/events/path.js";
+import { resolveBinding } from "#runtime/subscriptions/dispatch-step.js";
+import { startConnectionEventDeliveryRun } from "#runtime/subscriptions/owner.js";
+import { connectionEventDestination } from "#runtime/subscriptions/path.js";
 import {
   CONNECTION_EVENT_SUBSCRIPTION_NAMESPACE,
   type ConnectionEventSubscribeOutcome,
   type ConnectionEventSubscribeResult,
   type EventBinding,
-} from "#runtime/connections/events/state.js";
-import type { ConnectionEventPayload } from "#runtime/connections/events/delivery.js";
+} from "#runtime/subscriptions/state.js";
+import type { ConnectionEventPayload } from "#runtime/subscriptions/delivery.js";
 import { withConnectionEventSpan } from "#tracing/eve/connection-events.js";
 
 export async function openConnectionEventStep(input: {

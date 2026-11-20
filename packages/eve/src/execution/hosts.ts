@@ -7,7 +7,7 @@ import {
 import type { CreateRuntime } from "#execution/node-step.js";
 import type { AuthorizationCallbackPayload } from "#execution/session-inbox/inbox.js";
 import type { SessionLineStore } from "#execution/session-line-store.js";
-import type { ConnectionEventOwners } from "#runtime/connections/events/owners.js";
+import type { ConnectionEventOwners } from "#runtime/subscriptions/owners.js";
 import { HookNotFoundError, isRunNotFound, isRunTargetGone } from "#shared/run-errors.js";
 
 export interface HostedRoute {
