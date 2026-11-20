@@ -7,6 +7,7 @@ import { createInstrumentationSetupContext } from "#instrumentation/setup-contex
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { DEVELOPMENT_WORKER_APP_ROOT_ENV } from "#internal/workflow/development-world-protocol.js";
 import { platformContext } from "#platform/context.js";
+import { eveRuntime } from "#runtime/eve-runtime.js";
 import { agentRuns, localTraces } from "#public/instrumentation/otel.js";
 import { installInstrumentationRuntime } from "#tracing/eve/install-instrumentation-runtime.js";
 import {
@@ -19,28 +20,13 @@ import {
   type InstrumentationProvider,
 } from "#instrumentation/provider.js";
 
-const INSTRUMENTATION_PROVIDERS_GLOBAL_KEY = Symbol.for("eve.harness-instrumentation-providers");
-
 export interface RegisteredInstrumentationProvider {
   readonly provider: InstrumentationProvider;
   readonly slot: string;
 }
 
-interface InstrumentationProvidersGlobal {
-  [INSTRUMENTATION_PROVIDERS_GLOBAL_KEY]?: Map<string, InstrumentationProvider>;
-}
-
-const globalContainer = globalThis as typeof globalThis & InstrumentationProvidersGlobal;
-
 function providerRegistry(): Map<string, InstrumentationProvider> {
-  const existing = globalContainer[INSTRUMENTATION_PROVIDERS_GLOBAL_KEY];
-  if (existing !== undefined) {
-    return existing;
-  }
-
-  const created = new Map<string, InstrumentationProvider>();
-  globalContainer[INSTRUMENTATION_PROVIDERS_GLOBAL_KEY] = created;
-  return created;
+  return eveRuntime().instrumentation.providers;
 }
 
 export function seedInstrumentationProviders(): void {

@@ -1,25 +1,18 @@
 import type { InstrumentationRuntime } from "#instrumentation/runtime.js";
-
-const INSTRUMENTATION_RUNTIME_KEY = Symbol.for("eve.instrumentation-runtime");
-
-type InstrumentationGlobal = typeof globalThis & {
-  [INSTRUMENTATION_RUNTIME_KEY]?: InstrumentationRuntime;
-};
-
-const globalRuntime = globalThis as InstrumentationGlobal;
+import { eveRuntime } from "#runtime/eve-runtime.js";
 
 export function registerInstrumentationRuntime(
   runtime: InstrumentationRuntime,
 ): InstrumentationRuntime {
-  const existing = globalRuntime[INSTRUMENTATION_RUNTIME_KEY];
-  if (existing !== undefined) {
-    existing.otelSettings = runtime.otelSettings;
-    return existing;
+  const instrumentation = eveRuntime().instrumentation;
+  if (instrumentation.runtime !== undefined) {
+    instrumentation.runtime.otelSettings = runtime.otelSettings;
+    return instrumentation.runtime;
   }
-  globalRuntime[INSTRUMENTATION_RUNTIME_KEY] = runtime;
+  instrumentation.runtime = runtime;
   return runtime;
 }
 
 export function getInstrumentationRuntime(): InstrumentationRuntime | undefined {
-  return globalRuntime[INSTRUMENTATION_RUNTIME_KEY];
+  return eveRuntime().instrumentation.runtime;
 }

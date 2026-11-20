@@ -1,4 +1,4 @@
-const REALM_KEYS = [Symbol.for("eve.hosts"), Symbol.for("eve.instrumentation-runtime")] as const;
+const REALM_KEYS = [Symbol.for("eve.hosts"), Symbol.for("eve.runtime")] as const;
 
 export function resetTestRealm(): void {
   for (const key of REALM_KEYS) {

@@ -23,9 +23,7 @@ describe("writeCompiledArtifactsFiles", () => {
   afterEach(() => {
     delete (globalThis as Record<string, unknown>).__eveInstrumentationLoaded;
     delete (globalThis as Record<string, unknown>).__eveProviderSetups;
-    delete (globalThis as Record<symbol, unknown>)[
-      Symbol.for("eve.harness-instrumentation-providers")
-    ];
+    delete (globalThis as Record<symbol, unknown>)[Symbol.for("eve.runtime")];
   });
 
   it("installs the platform before the module map loads authored modules", async () => {
