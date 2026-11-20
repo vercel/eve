@@ -23,7 +23,6 @@ import {
 import { traceChannelRequest } from "#internal/nitro/routes/channel-request-instrumentation.js";
 import { resolveNitroChannelRuntimeBundle } from "#internal/nitro/routes/runtime-stack.js";
 import { createRouteInvokeTool } from "#internal/nitro/routes/route-invoke-tool.js";
-import { readVercelProjectLink } from "#internal/vercel/project-link.js";
 import { withLocalDevRequestScope } from "#runtime/local-dev-capability.js";
 import { getWorld } from "#internal/workflow/runtime.js";
 import { platformContext } from "#platform/context.js";
@@ -68,7 +67,7 @@ export async function dispatchChannelRequest(
     });
 
     try {
-      return await withDevelopmentVercelOidcContext(config, event.req, async () => {
+      return await withDevelopmentPlatformIdentity(config, event.req, async () => {
         if (matchedChannel.handler) {
           return await matchedChannel.handler(event.req, args);
         }
@@ -129,7 +128,7 @@ export async function dispatchChannelWebSocketRequest(
   });
 
   try {
-    return await withDevelopmentVercelOidcContext(
+    return await withDevelopmentPlatformIdentity(
       config,
       event.req,
       async () => await websocket(event.req, args),
@@ -146,7 +145,7 @@ export async function dispatchChannelWebSocketRequest(
   }
 }
 
-async function withDevelopmentVercelOidcContext<T>(
+async function withDevelopmentPlatformIdentity<T>(
   config: NitroArtifactsConfig,
   request: Request,
   callback: () => Promise<T>,
@@ -158,16 +157,8 @@ async function withDevelopmentVercelOidcContext<T>(
   return await withLocalDevRequestScope(
     request,
     async () =>
-      await platformContext().identity.withRequestProject(
-        {
-          request,
-          resolveCurrentProject: async () => {
-            const link = await readVercelProjectLink(config.appRoot);
-            return link === undefined
-              ? undefined
-              : { environment: "development", projectId: link.projectId };
-          },
-        },
+      await platformContext().identity.withDevelopmentRequestScope(
+        { appRoot: config.appRoot, request },
         callback,
       ),
   );

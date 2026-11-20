@@ -1,10 +1,8 @@
 import type { PlatformIdentity } from "#platform/context.js";
 import { vercelDeployment } from "#platform/vercel/deployment.js";
-import {
-  resolveVercelOidcCurrentProject,
-  withVercelOidcProjectResolver,
-} from "#platform/vercel/oidc-project.js";
+import { withVercelOidcProjectResolver } from "#platform/vercel/oidc-project.js";
 import { isVercelOidcIssuer } from "#platform/vercel/project.js";
+import type { CurrentVercelProject } from "#channel/auth/types.js";
 
 const VERCEL_REQUEST_CONTEXT = Symbol.for("@vercel/request-context");
 const VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER = "x-vercel-trusted-oidc-idp-token";
@@ -26,20 +24,33 @@ function readAmbientToken(): string | undefined {
   return trimmed === "" ? undefined : trimmed;
 }
 
+export function vercelCurrentProject(): CurrentVercelProject | undefined {
+  const projectId = process.env.VERCEL_PROJECT_ID?.trim();
+  if (projectId === undefined || projectId.length === 0) return undefined;
+  const environment = vercelDeployment.environmentName();
+  return environment === undefined ? { projectId } : { environment, projectId };
+}
+
 export const vercelIdentity: PlatformIdentity = {
   async token() {
     const { getVercelOidcToken } = await import("#compiled/@vercel/oidc/index.js");
     return await getVercelOidcToken();
   },
   isPlatformIssuer: (issuer) => isVercelOidcIssuer(issuer),
-  currentProject() {
-    const projectId = process.env.VERCEL_PROJECT_ID?.trim();
-    if (projectId === undefined || projectId.length === 0) return undefined;
-    const environment = vercelDeployment.environmentName();
-    return environment === undefined ? { projectId } : { environment, projectId };
-  },
-  requestProject: (request) => resolveVercelOidcCurrentProject(request),
-  withRequestProject: (input, callback) => withVercelOidcProjectResolver(input, callback),
+  withDevelopmentRequestScope: (input, callback) =>
+    withVercelOidcProjectResolver(
+      {
+        request: input.request,
+        resolveCurrentProject: async () => {
+          const { readVercelProjectLink } = await import("#internal/vercel/project-link.js");
+          const link = await readVercelProjectLink(input.appRoot);
+          return link === undefined
+            ? undefined
+            : { environment: "development", projectId: link.projectId };
+        },
+      },
+      callback,
+    ),
   callbackHeaders(urlValue, isTrustedOrigin) {
     if (process.env.VERCEL !== "1") return {};
     let url: URL;

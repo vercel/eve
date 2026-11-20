@@ -1,4 +1,3 @@
-import type { CurrentVercelProject } from "#channel/auth/types.js";
 import { createVercelPlatformContext } from "#platform/vercel/context.js";
 import type { WorkspaceAgentTransport } from "#public/definitions/workspace-agent.js";
 
@@ -27,21 +26,12 @@ export interface PlatformDeployment {
   isPlatformDevelopmentServer(): boolean;
 }
 
-export type PlatformProject = CurrentVercelProject;
-
-export type PlatformProjectResolver = () =>
-  | PlatformProject
-  | undefined
-  | Promise<PlatformProject | undefined>;
-
 export interface PlatformIdentity {
   token(): Promise<string>;
   isPlatformIssuer(issuer: string | undefined): boolean;
-  currentProject(): PlatformProject | undefined;
-  requestProject(request: Request): Promise<PlatformProject | undefined>;
-  withRequestProject<T>(
-    input: { readonly request: Request; readonly resolveCurrentProject: PlatformProjectResolver },
-    callback: () => Promise<T> | T,
+  withDevelopmentRequestScope<T>(
+    input: { readonly appRoot: string; readonly request: Request },
+    callback: () => Promise<T>,
   ): Promise<T>;
   callbackHeaders(url: string, isTrustedOrigin: (url: URL) => boolean): Record<string, string>;
 }

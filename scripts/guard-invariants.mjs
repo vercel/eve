@@ -1320,6 +1320,7 @@ const VERCEL_PLATFORM_ACCESS_DIRS = [
 ];
 const VERCEL_PLATFORM_ACCESS_FILES = new Set([
   "packages/eve/src/public/agents/vercel-oidc.ts",
+  "packages/eve/src/public/channels/vercel-oidc.ts",
   "packages/eve/src/public/experimental/schedules/vercel.ts",
   "packages/eve/src/public/memory/file/vercel.ts",
   "packages/eve/src/public/sandbox/vercel.ts",
