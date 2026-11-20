@@ -17,6 +17,7 @@ import { SUBAGENT_ADAPTER } from "#subagents/adapter.js";
 import { SUBAGENT_ADAPTER_KIND } from "#subagents/adapter-state.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
+import { answerDispatcherProbe } from "#internal/testing/node-fetch.js";
 
 vi.mock("../runtime/sessions/compiled-agent-cache.js", () => ({
   getCompiledRuntimeAgentBundle: vi.fn(),
@@ -68,7 +69,7 @@ describe("turn caller notification", () => {
     resumeHookMock.mockResolvedValue(undefined as never);
     fetchMock.mockReset();
     fetchMock.mockResolvedValue(new Response(null, { status: 202 }));
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", answerDispatcherProbe(fetchMock));
   });
 
   afterEach(() => {
