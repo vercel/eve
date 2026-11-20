@@ -318,6 +318,7 @@ function instrumentationEventsOf(
           output: line.capturesOutputs ? output : undefined,
           scope,
           type: "call.settled",
+          taskId: row?.taskId,
           usage: row?.usage,
         },
       ];
