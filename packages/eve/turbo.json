@@ -112,6 +112,12 @@
     },
     "test:integration": {
       "dependsOn": ["build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/**",
+        "!$TURBO_ROOT$/**/node_modules/**",
+        "!$TURBO_ROOT$/**/.turbo/**"
+      ],
       "tags": ["$TURBO_EXTENDS$", "ci:cpus:8"]
     },
     "test:scenario": {
@@ -125,6 +131,12 @@
     "test:build": {
       "cache": false,
       "dependsOn": ["build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/**",
+        "!$TURBO_ROOT$/**/node_modules/**",
+        "!$TURBO_ROOT$/**/.turbo/**"
+      ],
       "tags": ["ci", "ci:cpus:8"]
     },
     "test:public-types": {
