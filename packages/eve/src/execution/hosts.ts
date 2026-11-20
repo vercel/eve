@@ -8,6 +8,7 @@ import type { CreateRuntime } from "#execution/node-step.js";
 import type { AuthorizationCallbackPayload } from "#execution/session-inbox/inbox.js";
 import type { SessionLineStore } from "#execution/session-line-store.js";
 import type { ConnectionEventOwners } from "#runtime/connections/events/owners.js";
+import { eveRuntime } from "#runtime/eve-runtime.js";
 import { HookNotFoundError, isRunNotFound, isRunTargetGone } from "#shared/run-errors.js";
 
 export interface HostedRoute {
@@ -40,17 +41,14 @@ export interface DurableHost {
   readonly connectionEvents: ConnectionEventOwners;
 }
 
-interface Hosts {
+export interface Hosts {
   readonly routes: Set<HostedRoute>;
   readonly streams: Map<string, SessionLineStore>;
   durable?: DurableHost;
 }
 
-const HOSTS = Symbol.for("eve.hosts");
-
 function hosts(): Hosts {
-  const holder = globalThis as { [HOSTS]?: Hosts };
-  return (holder[HOSTS] ??= { routes: new Set(), streams: new Map() });
+  return eveRuntime().hosts;
 }
 
 export function registerHost(route: HostedRoute): () => void {

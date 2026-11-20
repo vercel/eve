@@ -1,9 +1,7 @@
-const REALM_KEYS = [Symbol.for("eve.hosts"), Symbol.for("eve.runtime")] as const;
+const EVE_RUNTIME = Symbol.for("eve.runtime");
 
 export function resetTestRealm(): void {
-  for (const key of REALM_KEYS) {
-    delete (globalThis as Record<symbol, unknown>)[key];
-  }
+  delete (globalThis as Record<symbol, unknown>)[EVE_RUNTIME];
 }
 
 resetTestRealm();
