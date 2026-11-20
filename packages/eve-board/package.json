@@ -1,6 +1,6 @@
 {
   "name": "@eve/board",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Vercel Board for eve agents: a channel that wakes the agent for watches it manages with tools, claims tasks, and replies in board threads",
   "keywords": [
     "eve",
