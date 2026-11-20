@@ -1,4 +1,3 @@
-import { getToken } from "@vercel/connect";
 import type { rebuildSandboxTemplate, VercelSandboxSession } from "eve/sandbox/vercel";
 
 import { shellQuote } from "./shell.ts";
@@ -41,7 +40,18 @@ const DEFAULT_LOCKFILES = [
 
 export interface RepoSnapshotDependencies {
   readonly fetch: typeof fetch;
-  readonly getToken: typeof getToken;
+  readonly getToken: (
+    connector: string,
+    params: {
+      authorizationDetails: {
+        type: "github_app_installation";
+        org: string;
+        repositories: string[];
+        permissions: string[];
+      }[];
+      subject: { type: "app" };
+    },
+  ) => Promise<string>;
   readonly rebuild: typeof rebuildSandboxTemplate;
 }
 
@@ -60,7 +70,7 @@ export async function refresh(
 
 async function mintReadToken(
   options: RepoSnapshotOptions,
-  getTokenFn: typeof getToken,
+  getTokenFn: RepoSnapshotDependencies["getToken"],
 ): Promise<string> {
   const [owner, name, ...rest] = options.repository.split("/");
   if (!owner || !name || rest.length > 0) {
