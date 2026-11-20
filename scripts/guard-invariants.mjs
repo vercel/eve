@@ -252,11 +252,19 @@
  *             user code. The eve-owned `@vercel/agent-runs` library and the
  *             `@vercel/otel` OpenTelemetry bootstrap run on any host, so they
  *             are exempt.
+ *   rule 70 — Outside `packages/eve/src/platform/`, eve depends only on the
+ *             platform contract: `#platform/context.js`, the capability
+ *             modules whose implementations must stay out of bundles that
+ *             don't use them (`hosted-sandbox`, `document-store`,
+ *             `schedules`, `models`, `runtime-spans`), and, in the Nitro
+ *             build host, the build-output port (`#platform/build-output.js`,
+ *             `#platform/types.js`). Platform implementations stay behind
+ *             them.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
  * may only shrink (as offenders are removed) — they may never grow.
- * Rules 67, 68, and 69 have no baseline.
+ * Rules 67, 68, 69, and 70 have no baseline.
  */
 import { glob, readFile, readdir, lstat } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -387,6 +395,7 @@ function isTsLike(relPath) {
  *   rule64: Violation[];
  *   rule66: Violation[];
  *   rule69: Map<string, number>;
+ *   rule70: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -423,6 +432,7 @@ async function scanRepo(state) {
     checkRule50(posix, lines, state.rule50);
     checkRule51(posix, content, lines, state.rule51);
     checkRule69(posix, content, state.rule69);
+    checkRule70(posix, lines, state.rule70);
     if (posix.startsWith("packages/tracing/src/")) {
       for (const [index, line] of lines.entries()) {
         const imports = [...line.matchAll(/(?:from\s+|import\s*\()(["'])([^"']+)\1/g)];
@@ -1345,6 +1355,49 @@ function checkRule69(posix, content, current) {
     [...content.matchAll(VERCEL_ENV_READ_RE)].length +
     [...content.matchAll(VERCEL_PLATFORM_IMPORT_RE)].length;
   if (count > 0) current.set(posix, count);
+}
+
+// ---------- Rule 70: eve depends on the platform contract, not its implementations ----------
+
+const PLATFORM_CONTRACT_MODULES = new Set([
+  "#platform/context.js",
+  "#platform/document-store.js",
+  "#platform/hosted-sandbox.js",
+  "#platform/models.js",
+  "#platform/runtime-spans.js",
+  "#platform/schedules.js",
+]);
+const PLATFORM_BUILD_HOST_DIR = "packages/eve/src/internal/nitro/host/";
+const PLATFORM_BUILD_HOST_MODULES = new Set(["#platform/build-output.js", "#platform/types.js"]);
+
+/**
+ * Flags imports of `src/platform/` modules other than the contract from outside the platform layer.
+ * `#platform/vercel/*` imports are rule 69's.
+ *
+ * @param {string} posix
+ * @param {string[]} lines
+ * @param {Violation[]} violations
+ */
+function checkRule70(posix, lines, violations) {
+  if (!posix.startsWith(EVE_SRC) || posix.startsWith(`${EVE_SRC}platform/`)) return;
+  for (const [index, line] of lines.entries()) {
+    for (const match of line.matchAll(
+      /(?:from\s+|import\s*\(\s*|^\s*import\s+)(["'])([^"']+)\1/g,
+    )) {
+      const specifier = aliasOfSpecifier(posix, match[2]);
+      if (!specifier.startsWith("#platform/") || specifier.startsWith("#platform/vercel/"))
+        continue;
+      if (PLATFORM_CONTRACT_MODULES.has(specifier)) continue;
+      if (posix.startsWith(PLATFORM_BUILD_HOST_DIR) && PLATFORM_BUILD_HOST_MODULES.has(specifier)) {
+        continue;
+      }
+      violations.push({
+        rule: 70,
+        file: `${posix}:${index + 1}`,
+        message: `imports \`${specifier}\`. Outside \`packages/eve/src/platform/\`, eve depends only on the platform contract (\`#platform/context.js\` and its capability modules), plus the build-output port in the Nitro build host. Add what you need to the \`PlatformContext\` contract and \`platform/vercel/context.ts\`.`,
+      });
+    }
+  }
 }
 
 /**
@@ -2434,6 +2487,7 @@ async function main() {
     rule64: /** @type {Violation[]} */ ([]),
     rule66: /** @type {Violation[]} */ ([]),
     rule69: /** @type {Map<string, number>} */ (new Map()),
+    rule70: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -2568,6 +2622,7 @@ async function main() {
   violations.push(...state.rule64);
   violations.push(...(await checkRule65()));
   violations.push(...state.rule66);
+  violations.push(...state.rule70);
   for (const [file, count] of state.rule69) {
     violations.push({
       rule: 69,
