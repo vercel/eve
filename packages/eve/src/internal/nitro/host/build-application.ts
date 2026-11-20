@@ -28,7 +28,6 @@ import { stageBuildDeploymentId } from "#internal/nitro/host/stage-build-deploym
 import { createHostNitro } from "#internal/nitro/host/create-host-nitro.js";
 import { currentPlatform } from "#platform/current.js";
 import { createHostSpec } from "#internal/nitro/host/host-spec.js";
-import { normalizeVercelServiceOutput } from "#platform/vercel/service-output.js";
 import { emitVercelAgentSummary } from "#internal/nitro/host/build-vercel-agent-summary.js";
 import { emitConnectManifest } from "#internal/external-resources.js";
 import { tryReadExtensionBuildConfig } from "#internal/nitro/host/build-extension.js";
@@ -38,7 +37,7 @@ import {
   refreshProductionCompiledArtifacts,
 } from "#internal/nitro/host/prepare-application-host.js";
 import { createProductionNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
-import { runVercelBuildPrewarm } from "#platform/vercel/build-prewarm.js";
+import { platformBuildOutput } from "#platform/build-output.js";
 import { prewarmAppSandboxes } from "#execution/sandbox/prewarm.js";
 import type { ApplicationBuildOptions } from "#internal/nitro/host/types.js";
 import { findClosestVercelOutputDirectory } from "#shared/vercel-output-directory.js";
@@ -335,7 +334,7 @@ async function buildApplicationInWorkspace(
       };
       await measureBuildPhase(profiler, "sandbox.prewarm", async () => {
         if (isVercelBuild) {
-          await runVercelBuildPrewarm(prewarmInput);
+          await platformBuildOutput().prewarmSandboxes(prewarmInput);
         } else {
           await prewarmAppSandboxes(prewarmInput);
         }
@@ -345,7 +344,10 @@ async function buildApplicationInWorkspace(
     await buildNitroOutput(nitro, profiler, "nitro");
     if (servicePrefix !== undefined) {
       await measureBuildPhase(profiler, "vercel.functions.normalize", () =>
-        normalizeVercelServiceOutput(workspace.publication.output.stagedDir, spec.routes),
+        platformBuildOutput().normalizeServiceOutput(
+          workspace.publication.output.stagedDir,
+          spec.routes,
+        ),
       );
     }
     const vercelServiceOutput = options.vercelServiceOutput;

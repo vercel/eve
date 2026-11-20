@@ -12,7 +12,8 @@ import {
 import { createHostRouteTable, type HostRouteTable } from "#internal/nitro/host/host-routes.js";
 import type { PreparedApplicationHost } from "#internal/nitro/host/types.js";
 import type { HostRuntime } from "#internal/nitro/host/runtime-plugin.js";
-import { createEveVercelOptions } from "#platform/vercel/build-output-config.js";
+import { platformBuildOutput } from "#platform/build-output.js";
+import type { PlatformNitroOptions } from "#platform/types.js";
 import { usesLocalVercelSchedules } from "#internal/schedules/consumer-route.js";
 import type { AgentWorkflowWorldDefinition } from "#shared/agent-definition.js";
 
@@ -52,7 +53,7 @@ export interface HostSpec {
   readonly runtime: HostRuntime;
   readonly runtimePlugins: readonly HostRuntimePlugin[];
   readonly skills: readonly string[];
-  readonly vercel: ReturnType<typeof createEveVercelOptions>;
+  readonly vercel: PlatformNitroOptions;
   readonly websocket: boolean;
   readonly world: AgentWorkflowWorldDefinition | undefined;
   readonly locations: HostLocations;
@@ -132,7 +133,7 @@ export function createHostSpec(
     },
     runtimePlugins,
     skills: development ? [] : manifest.skills.map((skill) => skill.name),
-    vercel: createEveVercelOptions({
+    vercel: platformBuildOutput().nitroOptions({
       agentName: manifest.config.name,
       enabled: preset === "vercel",
       publicRoutePrefix: mode.kind === "production" ? mode.publicRoutePrefix : undefined,

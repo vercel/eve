@@ -1,4 +1,7 @@
 import type { CurrentVercelProject } from "#channel/auth/types.js";
+import type { prewarmAppSandboxes } from "#execution/sandbox/prewarm.js";
+import type { HostRouteTable } from "#internal/nitro/host/host-routes.js";
+import type { createEveVercelOptions } from "#platform/vercel/build-output-config.js";
 import type { SpanProcessor } from "#tracing/eve/otel-configuration.js";
 
 export type DeploymentEnvironmentKind = "development" | "preview" | "production";
@@ -52,6 +55,18 @@ export type BuildTarget = "vercel" | "node";
 
 export interface PlatformBuild {
   target(): BuildTarget;
+}
+
+export type PlatformNitroOptionsInput = Parameters<typeof createEveVercelOptions>[0];
+
+export type PlatformNitroOptions = ReturnType<typeof createEveVercelOptions>;
+
+export type PlatformSandboxPrewarmInput = Parameters<typeof prewarmAppSandboxes>[0];
+
+export interface PlatformBuildOutput {
+  nitroOptions(input: PlatformNitroOptionsInput): PlatformNitroOptions;
+  normalizeServiceOutput(outputDir: string, routes: HostRouteTable): Promise<void>;
+  prewarmSandboxes(input: PlatformSandboxPrewarmInput): Promise<boolean>;
 }
 
 export interface Platform {
