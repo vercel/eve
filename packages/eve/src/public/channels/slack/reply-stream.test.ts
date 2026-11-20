@@ -212,6 +212,7 @@ describe("Slack reply streaming", () => {
         "content.completed": (event, _ctx, next) => next(event),
       },
     });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { complete, start, write } = harness({
       experimental: { streaming: true },
       renderers: [redacting],
@@ -222,10 +223,14 @@ describe("Slack reply streaming", () => {
     await complete(LONG);
 
     expect(operations()).toEqual(["chat.getPermalink", "chat.postMessage"]);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("renderers[0] handles content.completed"),
+    );
   });
 
   it("posts replies whole while a renderer opts out", async () => {
     const quiet = defineSlackRenderer({ experimental: { streamsReplies: false } });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { complete, start, write } = harness({
       experimental: { streaming: true },
       renderers: [quiet],
@@ -236,6 +241,9 @@ describe("Slack reply streaming", () => {
     await complete(LONG);
 
     expect(operations()).toEqual(["chat.getPermalink", "chat.postMessage"]);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("renderers[0] sets experimental.streamsReplies to false"),
+    );
   });
 
   it("streams what a renderer's content.delta passes on", async () => {
