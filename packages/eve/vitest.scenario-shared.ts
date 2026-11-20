@@ -29,6 +29,7 @@ export const FRAMEWORK_SCENARIO_FILES = [
   "test/scenarios/framework-next-build.scenario.test.ts",
   "test/scenarios/framework-nuxt-build.scenario.test.ts",
   "test/scenarios/framework-nuxt-dev.scenario.test.ts",
+  "test/scenarios/framework-solid-build.scenario.test.ts",
   "test/scenarios/framework-sveltekit-build.scenario.test.ts",
   "test/scenarios/framework-tanstack-build.scenario.test.ts",
   "test/scenarios/framework-vite-build.scenario.test.ts",

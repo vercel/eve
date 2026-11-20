@@ -28,6 +28,7 @@ const DIST_SOURCE_ROOT = join(EVE_PACKAGE_ROOT, "dist", "src");
 const BROWSER_ENTRY_FILES = [
   "client/index.js",
   "react/index.js",
+  "solid/index.js",
   "svelte/index.js",
   "vue/index.js",
 ] as const;

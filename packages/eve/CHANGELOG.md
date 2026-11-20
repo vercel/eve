@@ -1,5 +1,24 @@
 # eve
 
+## 1.2.0
+
+Released 2026-11-20 · [Compare with 1.1.0](https://github.com/vercel/eve/compare/eve%401.1.0...eve%401.2.0)
+
+### Features
+
+- Traces now include an `agent.channel.deliver` span when a channel posts a final reply or a request for input, or fails to deliver a channel event, so a reply the user never saw shows up as a failed delivery with its error ID. ([#6644](https://github.com/vercel/eve/pull/6644))
+- Agent and task call spans now record the task they started or continued as `agent.task.id`, so the calls that serve one task, including continuations of a remote agent's task, can be grouped in a trace.
+  Instrumentation providers receive the same value as `taskId` on `call.settled`. ([#6654](https://github.com/vercel/eve/pull/6654))
+- `eveVite()` now deploys Vite single-page apps to Vercel without a `vercel.ts`: when no framework or adapter writes `.vercel/output`, it writes a static Build Output from the client build and adds the agents to it.
+  The client build needs a root `index.html`; without one, the build fails and asks for `nitro()` from `nitro/vite` or an adapter that writes `.vercel/output`. ([#6620](https://github.com/vercel/eve/pull/6620))
+
+### Bug Fixes
+
+- Custom skills now let the person who asked approve their own shared skill changes, so a channel skill no longer needs a second person to go live. ([#6532](https://github.com/vercel/eve/pull/6532))
+- `eveVite()`, `eveSvelteKit()`, and `eveTanStack()` no longer stop other Vite plugins, such as Solid start mode, from building their server output outside Vercel builds. ([#6619](https://github.com/vercel/eve/pull/6619))
+- Update the bundled Workflow runtime and worlds to the Workflow 5.7.0 release, which fixes stranded runs after a crashed first delivery and reduces World reads on hook-started runs and hook resumes.
+  The release also lowers the default `WORKFLOW_ORCHESTRATOR_LINGER_MS` to 5 seconds and keeps orchestrator deliveries alive through short sleeps. With the Postgres world, run `bootstrap` before deploying the upgrade so the database has migration 0032. ([#6657](https://github.com/vercel/eve/pull/6657))
+
 ## 1.1.0
 
 Released 2026-11-18 · [Compare with 1.0.2](https://github.com/vercel/eve/compare/eve%401.0.2...eve%401.1.0)
