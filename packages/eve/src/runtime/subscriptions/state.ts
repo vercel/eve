@@ -44,8 +44,6 @@ export interface SubscriptionBinding {
   readonly executionPrincipal: string;
   readonly auth: SessionAuthContext | null;
   readonly traceSeed?: SessionTraceSeed;
-  /** The deployment whose code holds this subscription and runs its callbacks. */
-  readonly deploymentId?: string;
 }
 
 export type ConnectionBinding = SubscriptionBinding & {
@@ -74,7 +72,7 @@ export interface SubscriptionEvent {
   readonly id: string;
   readonly data: JsonValue;
   readonly requestTraceContext?: SpanContext;
-  /** The deployment whose route accepted the occurrence, and whose callbacks are current. */
+  /** The deployment whose route accepted the occurrence. Its delivery workflow runs on that deployment, so the current `onEvent` judges the occurrence even when an older deployment holds the subscription. */
   readonly acceptedDeploymentId?: string;
 }
 
