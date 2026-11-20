@@ -1,6 +1,9 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "ci": {
+    "bootstrapping": {
+      "installEnv": {}
+    },
     "tasks": [
       {
         "name": "typecheck",
