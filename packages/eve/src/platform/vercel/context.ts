@@ -10,16 +10,22 @@ import { toErrorMessage } from "#shared/errors.js";
 
 const ON_VERCEL = hostCapabilities("1", {
   agentRuns: true,
+  documentStore: true,
   hostedSandbox: true,
+  modelCredentials: true,
   sandboxCredentialTransforms: true,
+  scheduleProvider: true,
   stopsSandboxesOnExit: true,
 });
 
-const OFF_VERCEL = hostCapabilities("1", { agentRuns: true });
+const OFF_VERCEL = hostCapabilities("1", {
+  agentRuns: true,
+  modelCredentials: true,
+  scheduleProvider: true,
+});
 
 export function createVercelPlatformContext(): PlatformContext {
   return {
-    target: "vercel",
     build: {
       target: () => (isVercelEnvironment() ? "vercel" : "node"),
       outputDirectory: (appRoot) =>

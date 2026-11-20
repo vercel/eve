@@ -1,9 +1,7 @@
-import type { HostCapabilities } from "#platform/capabilities.js";
+import type { HostCapabilities, PlatformHooks } from "#platform/capabilities.js";
 import { createVercelPlatformContext } from "#platform/vercel/context.js";
 import type { WorkspaceAgentTransport } from "#public/definitions/workspace-agent.js";
 import { eveRuntime } from "#runtime/eve-runtime.js";
-
-export type PlatformTarget = "vercel";
 
 export type BuildTarget = "vercel" | "node";
 
@@ -53,11 +51,11 @@ export interface PlatformTelemetry {
 }
 
 export interface PlatformContext {
-  readonly target: PlatformTarget;
   readonly build: PlatformBuild;
   readonly deployment: PlatformDeployment;
   readonly identity: PlatformIdentity;
   readonly capabilities: HostCapabilities;
+  readonly hooks?: PlatformHooks;
   readonly telemetry: PlatformTelemetry;
   readonly workspace: PlatformWorkspace;
 }
