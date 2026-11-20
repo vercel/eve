@@ -1,5 +1,5 @@
-import { resolveVercelSession, vercelApiJson } from "./vercel.js";
-import { readVercelCliConnection } from "./vercel-cli.js";
+import { resolveVercelSession, vercelApiJson } from "#internal/model-auth/vercel.js";
+import { readVercelCliConnection } from "#platform/vercel/model-auth/cli.js";
 import { readVercelResourceSlug } from "#internal/vercel/api-resource.js";
 
 let knownTeam: { teamId: string; slug: string } | undefined;

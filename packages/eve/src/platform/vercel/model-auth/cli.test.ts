@@ -20,7 +20,7 @@ vi.mock("node:module", () => ({
     },
   }),
 }));
-import { readVercelCliConnection, readVercelCliToken } from "./vercel-cli.js";
+import { readVercelCliConnection, readVercelCliToken } from "#platform/vercel/model-auth/cli.js";
 const base =
   process.platform === "darwin"
     ? "/test/home/Library/Application Support"

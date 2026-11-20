@@ -1,6 +1,7 @@
 import type { CurrentVercelProject } from "#channel/auth/types.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import type { prewarmAppSandboxes } from "#execution/sandbox/prewarm.js";
+import type { DevelopmentModelCredential } from "#internal/model-auth/development-broker-protocol.js";
 import type { HostRouteTable } from "#internal/nitro/host/host-routes.js";
 import type { createEveVercelOptions } from "#platform/vercel/build-output-config.js";
 import type { VercelSandbox } from "#platform/vercel/sandbox/provider.js";
@@ -77,6 +78,10 @@ export interface PlatformBuildOutput {
   scheduleTaskName(input: { readonly agentName?: string; readonly scheduleId: string }): string;
   scheduleConsumerModulePath(): string;
   localSchedulesPluginModulePath(): string;
+}
+
+export interface PlatformModels {
+  gatewayCredential(rejectedToken?: string): Promise<DevelopmentModelCredential>;
 }
 
 export interface PlatformSandboxes {

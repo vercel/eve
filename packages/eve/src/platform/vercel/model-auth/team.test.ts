@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { resolveModelTeamSlug } from "./vercel-team.js";
+import { resolveModelTeamSlug } from "#platform/vercel/model-auth/team.js";
 
 const mocks = vi.hoisted(() => ({ cli: vi.fn(), session: vi.fn(), json: vi.fn() }));
-vi.mock("./vercel-cli.js", () => ({ readVercelCliConnection: mocks.cli }));
-vi.mock("./vercel.js", () => ({
+vi.mock("#platform/vercel/model-auth/cli.js", () => ({ readVercelCliConnection: mocks.cli }));
+vi.mock("#internal/model-auth/vercel.js", () => ({
   resolveVercelSession: mocks.session,
   vercelApiJson: mocks.json,
 }));

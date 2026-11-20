@@ -10,7 +10,7 @@ import { resolveModelApiKey } from "#internal/model-auth/transport.js";
 import {
   readVercelCliConnection,
   refreshVercelCliConnection,
-} from "#internal/model-auth/vercel-cli.js";
+} from "#platform/vercel/model-auth/cli.js";
 import {
   resolveVercelSession,
   validateVercelAccess,

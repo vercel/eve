@@ -1,9 +1,12 @@
 import { currentPlatform } from "#platform/current.js";
 import { MODEL_CONNECTION_ENV } from "#shared/model-helper.js";
-import { resolveModelApiKey } from "./api-key.js";
-import { readVercelCliConnection, refreshVercelCliConnection } from "./vercel-cli.js";
-import { resolveVercelSession } from "./vercel.js";
-import type { DevelopmentModelCredential } from "./development-broker-protocol.js";
+import { resolveModelApiKey } from "#internal/model-auth/api-key.js";
+import {
+  readVercelCliConnection,
+  refreshVercelCliConnection,
+} from "#platform/vercel/model-auth/cli.js";
+import { resolveVercelSession } from "#internal/model-auth/vercel.js";
+import type { DevelopmentModelCredential } from "#internal/model-auth/development-broker-protocol.js";
 
 export async function resolveGatewayModelCredential(
   rejectedToken?: string,
