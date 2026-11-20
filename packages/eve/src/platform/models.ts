@@ -1,12 +1,17 @@
+import type { DevelopmentModelCredential } from "#internal/model-auth/development-broker-protocol.js";
 import { platformContext, type PlatformTarget } from "#platform/context.js";
 import { resolveGatewayModelCredential } from "#platform/vercel/model-auth/gateway-credential.js";
 
-const IMPLEMENTATIONS: Record<PlatformTarget, typeof resolveGatewayModelCredential> = {
+export type GatewayCredentialResolver = (
+  rejectedToken?: string,
+) => Promise<DevelopmentModelCredential>;
+
+const IMPLEMENTATIONS: Record<PlatformTarget, GatewayCredentialResolver> = {
   vercel: resolveGatewayModelCredential,
 };
 
 export function gatewayCredential(
-  ...args: Parameters<typeof resolveGatewayModelCredential>
-): ReturnType<typeof resolveGatewayModelCredential> {
+  ...args: Parameters<GatewayCredentialResolver>
+): Promise<DevelopmentModelCredential> {
   return IMPLEMENTATIONS[platformContext().target](...args);
 }

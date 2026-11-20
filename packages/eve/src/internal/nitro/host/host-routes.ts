@@ -82,10 +82,7 @@ interface HostRouteTableInput {
   readonly manifest: Pick<CompiledAgentManifest, "channelRoutes" | "config"> &
     Partial<Pick<CompiledAgentManifest, "connections" | "scheduleCollections">>;
   readonly mode: "development" | "production";
-  readonly platform: Pick<
-    PlatformBuildOutput,
-    "hasScheduleCollections" | "scheduleConsumerModulePath" | "scheduleTaskName"
-  >;
+  readonly platform: Pick<PlatformBuildOutput, "schedules">;
   readonly scheduleRegistrations: readonly ScheduleRegistration[];
   readonly vercel: boolean;
   readonly vercelService?: boolean;
@@ -127,11 +124,11 @@ export function createHostRouteTable(input: HostRouteTableInput): HostRouteTable
       path: EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN,
     });
   }
-  if (!development && input.vercel && input.platform.hasScheduleCollections(manifest)) {
+  if (!development && input.vercel && input.platform.schedules.hasCollections(manifest)) {
     routes.push({
       kind: "schedule-consumer",
       method: "POST",
-      modulePath: input.platform.scheduleConsumerModulePath(),
+      modulePath: input.platform.schedules.consumerModulePath(),
       path: staticVercelFunctionPath(EVE_SCHEDULE_COLLECTION_CONSUMER_ROUTE_PATH),
       vercelFunction: "schedule-queue",
     });
@@ -148,7 +145,7 @@ export function createHostRouteTable(input: HostRouteTableInput): HostRouteTable
 
   const scheduleTasks = (development ? [] : input.scheduleRegistrations).map((task) => ({
     ...task,
-    nitroTaskName: input.platform.scheduleTaskName({
+    nitroTaskName: input.platform.schedules.taskName({
       agentName: input.vercelService ? manifest.config.name : undefined,
       scheduleId: task.scheduleId,
     }),

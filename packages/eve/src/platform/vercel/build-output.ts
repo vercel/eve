@@ -12,9 +12,11 @@ export const vercelBuildOutput: PlatformBuildOutput = {
   nitroOptions: (input) => createEveVercelOptions(input),
   normalizeServiceOutput: (outputDir, routes) => normalizeVercelServiceOutput(outputDir, routes),
   prewarmSandboxes: (input) => runVercelBuildPrewarm(input),
-  usesLocalSchedules: (manifest) => usesLocalVercelSchedules(manifest),
-  hasScheduleCollections: (manifest) => hasVercelScheduleCollections(manifest),
-  scheduleTaskName: (input) => createVercelScheduleName(input),
-  scheduleConsumerModulePath: () => "src/platform/vercel/schedules/consumer.ts",
-  localSchedulesPluginModulePath: () => "src/platform/vercel/schedules/local-runtime-plugin.ts",
+  schedules: {
+    usesLocal: (manifest) => usesLocalVercelSchedules(manifest),
+    hasCollections: (manifest) => hasVercelScheduleCollections(manifest),
+    taskName: (input) => createVercelScheduleName(input),
+    consumerModulePath: () => "src/platform/vercel/schedules/consumer.ts",
+    localPluginModulePath: () => "src/platform/vercel/schedules/local-runtime-plugin.ts",
+  },
 };
