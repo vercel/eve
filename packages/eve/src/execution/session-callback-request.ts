@@ -9,6 +9,7 @@ import {
 } from "#execution/public-destination.js";
 import { isLocalDevelopmentServer } from "#internal/application/dev-environment.js";
 import { createLogger } from "#internal/logging.js";
+import { currentPlatform } from "#platform/current.js";
 import { isObject } from "#shared/guards.js";
 
 const log = createLogger("execution.session-callback");
@@ -20,7 +21,6 @@ const VERCEL_CALLBACK_HOST_ENVS = [
   "VERCEL_BRANCH_URL",
   "VERCEL_PROJECT_PRODUCTION_URL",
 ] as const;
-const VERCEL_REQUEST_CONTEXT = Symbol.for("@vercel/request-context");
 
 export async function postSessionCallbackRequest(input: {
   readonly body: unknown;
@@ -139,7 +139,7 @@ async function resolveSessionCallbackHeaders(urlValue: string): Promise<Record<s
   if (url.protocol !== "https:") return headers;
   if (!currentHost && !configuredCallbackOrigins().some((matches) => matches(url))) return headers;
 
-  const token = readAmbientVercelOidcToken();
+  const token = currentPlatform().identity.ambientToken();
   if (token !== undefined) headers[VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER] = token;
   return headers;
 }
@@ -188,16 +188,4 @@ function invalidCallbackOriginsError(): NonRetryableError {
   return new NonRetryableError(
     "EVE_CALLBACK_TRUSTED_ORIGINS must be a comma-separated list of HTTPS origins without credentials, paths, queries, or fragments. A leading `*.` label (e.g. `https://*.preview.example.com`) matches exactly one subdomain label and needs at least two labels after it; `*.vercel.app` and trailing dots are not allowed.",
   );
-}
-
-function readAmbientVercelOidcToken(): string | undefined {
-  const requestContext = (
-    globalThis as typeof globalThis & {
-      [key: symbol]: { get?(): { headers?: Record<string, string> } } | undefined;
-    }
-  )[VERCEL_REQUEST_CONTEXT];
-  const token =
-    requestContext?.get?.().headers?.["x-vercel-oidc-token"] ?? process.env.VERCEL_OIDC_TOKEN;
-  const trimmed = token?.trim();
-  return trimmed === "" ? undefined : trimmed;
 }

@@ -13,6 +13,12 @@ export interface PlatformDeployment {
   publicHost(): string | undefined;
 }
 
+export interface PlatformIdentity {
+  token(): Promise<string>;
+  ambientToken(): string | undefined;
+}
+
 export interface Platform {
   readonly deployment: PlatformDeployment;
+  readonly identity: PlatformIdentity;
 }
