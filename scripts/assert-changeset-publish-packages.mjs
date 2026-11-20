@@ -7,6 +7,7 @@ const allowedPublicPackages = new Set([
   "@eve/agent-desktop",
   "@eve/agent-browser",
   "@eve/board",
+  "@eve/self-improvement",
   "@eve/recall",
 ]);
 const workspaceRoots = ["apps", "packages"];
