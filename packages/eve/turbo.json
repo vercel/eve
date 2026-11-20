@@ -83,6 +83,14 @@
     },
     "test:unit": {
       "dependsOn": ["build"],
+      "inputs": [
+        "$TURBO_EXTENDS$",
+        "$TURBO_ROOT$/apps/templates/eve-discord-agent-template/**",
+        "!$TURBO_ROOT$/apps/templates/eve-discord-agent-template/**/node_modules/**",
+        "$TURBO_ROOT$/apps/templates/openinstinct/agent/instrumentation/otel.ts",
+        "$TURBO_ROOT$/packages/eve-recall/src/**",
+        "$TURBO_ROOT$/scripts/build-profile-report.mjs"
+      ],
       "tags": ["$TURBO_EXTENDS$", "ci:cpus:8"]
     },
     "typecheck": {
@@ -119,7 +127,9 @@
     },
     "test:public-types": {
       "cache": false,
-      "dependsOn": ["build"]
+      "dependsOn": ["build"],
+      "passThroughEnv": ["EVE_TELEMETRY_DISABLED"],
+      "tags": ["ci", "ci:cpus:4"]
     },
     "test:tui": {
       "cache": false,
