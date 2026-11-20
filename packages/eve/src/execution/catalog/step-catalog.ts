@@ -131,7 +131,8 @@ export function buildStepCatalog(input: CatalogInput): StepCatalog {
   };
   for (const [name, entry] of input.table.entries) {
     if (entry.route !== undefined) {
-      advertised.set(name, routeTool(entry.definition, entry.route, catalog));
+      if (isVisible(entry.definition, input.session))
+        advertised.set(name, routeTool(entry.definition, entry.route, catalog));
     } else {
       const definition = callable.entries.get(name);
       if (definition !== undefined && definition.deferred !== true)

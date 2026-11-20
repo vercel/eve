@@ -1,0 +1,15 @@
+[
+  "ChannelEvent",
+  "ChannelEventDecision",
+  "ChannelOccurrence",
+  "ChannelOnEvent",
+  "ChannelOnSubscription",
+  "ChannelSubscriber",
+  "ChannelSubscription",
+  "ChannelSubscriptionGrant",
+  "ChannelSubscriptionRequest",
+  "ChannelSubscriptionsDefinition",
+  "EmitChannelEventFn",
+  "GitHubOnEvent",
+  "describeGitHubEvent"
+]

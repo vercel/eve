@@ -62,13 +62,11 @@ export function githubChannelOnEvent(
   onEvent: GitHubOnEvent | undefined,
 ): ChannelOnEvent | undefined {
   if (onEvent === undefined) return undefined;
-  return withSubscriptionCatalog(async (input) => {
-    const decision = await onEvent(input);
-    return decision === true ? describeGitHubEvent(input.event) : decision;
-  }, GITHUB_SUBSCRIPTION_CATALOG);
+  return withSubscriptionCatalog(onEvent, GITHUB_SUBSCRIPTION_CATALOG);
 }
 
-function describeGitHubEvent(event: ChannelEvent): string {
+/** The message that names a GitHub event's repository, pull requests and sender, then carries its payload. */
+export function describeGitHubEvent(event: ChannelEvent): string {
   const { data } = event;
   const pulls = Array.isArray(data.pullRequests) ? data.pullRequests : [];
   const payload = JSON.stringify(data.payload);
@@ -152,6 +150,10 @@ export async function emitGitHubWebhook(input: {
 }): Promise<void> {
   const occurrence = parseGitHubWebhookOccurrence(input);
   if (occurrence === null) return;
+  if (!GITHUB_EVENTS.includes(occurrence.name))
+    throw new Error(
+      `GitHub event "${occurrence.name}" is not one eve can deliver to subscriptions.`,
+    );
   if (occurrence.authored && (await isOwnApp(occurrence, input.appSlug))) return;
   await Promise.all(
     occurrence.scopes.map((scope) =>

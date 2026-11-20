@@ -855,7 +855,7 @@ describe("buildStepCatalog", () => {
       {
         name: "github",
         definition: {
-          onEvent: () => true,
+          onEvent: () => null,
         },
       },
     ];
@@ -863,14 +863,18 @@ describe("buildStepCatalog", () => {
       const tracker = fakeConnection({ name: "tracker", tools: [], events: ["build.finished"] });
       const { catalog, run } = await catalogContext({ channels, connections: [tracker] });
       const input = { subscription, ttlMs: 120_000 };
-      const validated = await validate(catalog, "subscribe", input);
+      const validated = await validate(catalog, "eve__subscribe", input);
       return { catalog, run, tracker, validated, input };
     };
 
-    it("advertises subscribe, get_subscription and stop_subscription, and not the connection's own event tool", async () => {
+    it("advertises eve__subscribe, eve__subscription_get and eve__subscription_stop, and not the connection's own event tool", async () => {
       const { catalog } = await subscribed({});
       expect(names(catalog.advertised)).toEqual(
-        expect.arrayContaining(["subscribe", "get_subscription", "stop_subscription"]),
+        expect.arrayContaining([
+          "eve__subscribe",
+          "eve__subscription_get",
+          "eve__subscription_stop",
+        ]),
       );
       expect(names(catalog.advertised).filter((name) => name.includes("events_"))).toEqual([]);
     });
@@ -882,7 +886,7 @@ describe("buildStepCatalog", () => {
         input: { job: "web" },
       });
       expect(validated).toEqual({ value: input });
-      const resolved = catalog.resolve({ input, toolName: "subscribe" });
+      const resolved = catalog.resolve({ input, toolName: "eve__subscribe" });
       expect(resolved?.call.toolName).toBe(
         connectionToolName("tracker", eventActionName("build.finished")),
       );
@@ -903,7 +907,7 @@ describe("buildStepCatalog", () => {
         event: "check_suite.completed",
         input: { pull: 7 },
       });
-      const resolved = catalog.resolve({ input, toolName: "subscribe" });
+      const resolved = catalog.resolve({ input, toolName: "eve__subscribe" });
       expect(resolved?.call.toolName).toBe(CHANNEL_SUBSCRIBE_ENTRY);
     });
 
@@ -916,7 +920,7 @@ describe("buildStepCatalog", () => {
       };
       const validatedCall = await validate(catalog, CALL_TOOL_NAME, call.input);
       expect(JSON.stringify(validatedCall)).toContain(
-        "Subscribe to a connection's events with subscribe.",
+        "Subscribe to a connection's events with eve__subscribe.",
       );
     });
   });

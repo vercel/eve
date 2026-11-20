@@ -14,7 +14,7 @@ import type {
   ConversationSpaceContext,
 } from "#shared/conversation-context.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
-import type { ChannelOnEvent } from "#shared/channel-subscriptions.js";
+import type { ChannelSubscriptionsDefinition } from "#shared/channel-subscriptions.js";
 
 /**
  * Enriched return shape from a channel's {@link ChannelAdapter.fetchFile}
@@ -108,11 +108,16 @@ export interface GenericChannelDefinition<
   readonly routes: readonly RouteDefinition<TState>[];
 
   /**
-   * Lets a session of this agent subscribe to this channel's events, and decides what each
-   * subscription receives. eve gives the model subscribe, get and stop tools; a route delivers an
-   * occurrence with `emit`.
+   * Experimental. These fields can change in a minor release.
    */
-  readonly onEvent?: ChannelOnEvent;
+  readonly experimental?: {
+    /**
+     * Lets a session of this agent subscribe to this channel's events with `eve__subscribe`, and
+     * decides what each subscription receives. A route delivers an occurrence with
+     * `experimental.subscriptions.emit`.
+     */
+    readonly subscriptions?: ChannelSubscriptionsDefinition;
+  };
   receive?(
     input: GenericReceiveInput<TReceiveTarget>,
     ctx: ChannelReceiveContext<TState>,

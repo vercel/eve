@@ -127,7 +127,7 @@ beforeEach(() => {
   });
   mocks.readFirstPublished.mockReset();
   mocks.readFirstPublished.mockResolvedValue({ kind: "value", value: { joined: true } });
-  useSubscriptions(() => true);
+  useSubscriptions(() => "Checks finished");
 });
 
 it("sends onEvent's message queued, as the subscriber, with an idempotency key per binding and event", async () => {
@@ -148,7 +148,6 @@ it("sends onEvent's message queued, as the subscriber, with an idempotency key p
       channelName: "github",
       event: "checks_finished",
       input: { pull: 7 },
-      sessionId: "session-1",
     },
   });
   expect(mocks.attachFactory.mock.calls[0]![1]).toMatchObject({ turnPolicy: "queue" });
@@ -180,13 +179,6 @@ it("sends under the subscriber's auth even when the event names another principa
   expect((mocks.context.current as ContextContainer).get(AuthKey)).toEqual(subscriberAuth);
 });
 
-it("sends the event's data as JSON when onEvent returns true", async () => {
-  useSubscriptions(() => true);
-  await dispatchSubscriptionStep(delivery("e1", { pull: 7 }));
-  expect(mocks.send).toHaveBeenCalledTimes(1);
-  expect(mocks.send.mock.calls[0]![0]).toBe(JSON.stringify({ pull: 7 }));
-});
-
 it("runs onEvent inside the subscriber's context", async () => {
   let seen: unknown;
   useSubscriptions(() => {
@@ -197,14 +189,27 @@ it("runs onEvent inside the subscriber's context", async () => {
   expect(seen).toEqual(subscriberAuth);
 });
 
-it.each([undefined, false])("sends nothing when onEvent returns %s", async (decision) => {
-  useSubscriptions(() => decision);
+it("sends nothing when onEvent returns null", async () => {
+  useSubscriptions(() => null);
   await dispatchSubscriptionStep(delivery("e1"));
   expect(mocks.send).not.toHaveBeenCalled();
 });
 
+it.each([undefined, false, true, ""])(
+  "fails the delivery when onEvent returns %j",
+  async (decision) => {
+    useSubscriptions(() => decision);
+    await expect(dispatchSubscriptionStep(delivery("e1"))).rejects.toThrow(
+      'The "github" channel\'s onEvent must return a message or null',
+    );
+    expect(mocks.send).not.toHaveBeenCalled();
+  },
+);
+
 it("lets onEvent filter by event name", async () => {
-  useSubscriptions(({ event }: { event: { name: string } }) => event.name === "other");
+  useSubscriptions(({ event }: { event: { name: string } }) =>
+    event.name === "other" ? "Other" : null,
+  );
   await dispatchSubscriptionStep(delivery("e1"));
   expect(mocks.send).not.toHaveBeenCalled();
 });

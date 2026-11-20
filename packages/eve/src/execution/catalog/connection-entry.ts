@@ -80,6 +80,32 @@ export function connectionEntry(
   };
 }
 
+export function connectionEventActionApproval(
+  registry: ConnectionRegistry,
+  connection: ResolvedConnectionDefinition,
+  action: string,
+): Approval | undefined {
+  return connectionApproval(registry, connection, action, connection.approval);
+}
+
+export function runConnectionEventAction(
+  registry: ConnectionRegistry,
+  connection: ResolvedConnectionDefinition,
+  action: string,
+  input: unknown,
+  options: ToolExecuteOptions,
+): Promise<unknown> {
+  releaseApprovalPin(options.toolCallId, connection);
+  const actions = registry.getClient(connection.connectionName).eventActions;
+  if (actions === undefined) throw new Error("Unknown subscription for this caller.");
+  return withConnectionApproval(connection.connectionName, options.approval?.responder, () =>
+    actions.execute(action, input, {
+      abortSignal: options.abortSignal,
+      callId: options.toolCallId,
+    }),
+  );
+}
+
 export function connectionSignInEntry(
   registry: ConnectionRegistry,
   connection: ResolvedConnectionDefinition,

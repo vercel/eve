@@ -34,7 +34,6 @@ function subscriptionOf(binding: SubscriptionBinding): ChannelSubscription {
     channelName: source.name,
     event: source.event,
     input: source.input,
-    sessionId: binding.sessionId,
   };
 }
 
@@ -69,8 +68,11 @@ export const channelSource: SubscriptionSourceRuntime = {
       event: channelEvent,
       subscription: subscriptionOf(binding),
     });
-    if (decision === undefined || decision === false || decision === "") return;
-    const message = decision === true ? JSON.stringify(channelEvent.data) : decision;
+    if (decision === null) return;
+    if (typeof decision !== "string" || decision === "")
+      throw new Error(
+        `The "${source.name}" channel's onEvent must return a message or null, not ${decision === "" ? "an empty string" : typeof decision}.`,
+      );
     const attach = createAttachSessionFn(
       createWorkflowRuntime({ compiledArtifactsSource: bundle.compiledArtifactsSource }),
       {
@@ -81,7 +83,7 @@ export const channelSource: SubscriptionSourceRuntime = {
       },
     );
     try {
-      await attach(binding.sessionId).send(message, {
+      await attach(binding.sessionId).send(decision, {
         auth: binding.auth,
         turnPolicy: "queue",
         idempotencyKey: `eve:subscription:${createHash("sha256")

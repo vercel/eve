@@ -57,7 +57,7 @@ export function createChannelRouteArgs(ports: ChannelRoutePorts): RouteHandlerAr
             }),
             ...ports.agent,
             params: ports.params,
-            emit: createEmitChannelEventFn(channelName),
+            experimental: { subscriptions: { emit: createEmitChannelEventFn(channelName) } },
             requestIp: ports.requestIp,
             to: ports.to,
             waitUntil: ports.waitUntil,

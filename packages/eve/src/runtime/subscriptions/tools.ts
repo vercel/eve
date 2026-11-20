@@ -1,5 +1,4 @@
 import { contextStorage } from "#context/container.js";
-import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { AuthKey, SessionIdKey, SessionTraceSeedKey } from "#context/keys.js";
 import { installedDurableHost } from "#execution/hosts.js";
 import { principalOf } from "#execution/session/principal.js";
@@ -13,6 +12,7 @@ import { requireCompiledBundle, SessionAgentKey } from "#runtime/sessions/runtim
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 import {
   subscriptionCatalogOf,
+  type ChannelOnSubscription,
   type ChannelSubscriptionCatalog,
 } from "#shared/channel-subscriptions.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
@@ -26,13 +26,14 @@ import {
   MIN_TTL_MS,
 } from "#runtime/subscriptions/actions.js";
 
-export const SUBSCRIBE_TOOL = "subscribe";
-const GET_TOOL = "get_subscription";
-const STOP_TOOL = "stop_subscription";
+export const SUBSCRIBE_TOOL = "eve__subscribe";
+export const GET_SUBSCRIPTION_TOOL = "eve__subscription_get";
+export const STOP_SUBSCRIPTION_TOOL = "eve__subscription_stop";
 
 export interface OfferedSubscription {
   readonly channelName: string;
   readonly catalog: ChannelSubscriptionCatalog | undefined;
+  readonly onSubscription: ChannelOnSubscription | undefined;
 }
 
 export interface SubscribeInput {
@@ -90,6 +91,8 @@ export function channelSubscribeEntry(
   return {
     name: CHANNEL_SUBSCRIBE_ENTRY,
     description: "Subscribes this conversation to a channel's event.",
+    frameworkTool: true,
+    rootOnly: true,
     inputSchema: defineJsonSchema<SubscribeInput>({
       type: "object",
       additionalProperties: false,
@@ -104,23 +107,52 @@ export function channelSubscribeEntry(
   };
 }
 
-export function subscriptionManagementEntries(): readonly HarnessToolDefinition[] {
+export type ConnectionSubscriptionAction = typeof EVENT_GET_ACTION | typeof EVENT_STOP_ACTION;
+
+export interface ConnectionSubscriptionGate {
+  readonly approval: (action: ConnectionSubscriptionAction) => HarnessToolDefinition["approval"];
+  readonly run: (
+    connectionName: string,
+    action: ConnectionSubscriptionAction,
+    input: { readonly id: string },
+    options: ToolExecuteOptions,
+  ) => Promise<unknown>;
+}
+
+export function subscriptionManagementEntries(
+  gate: ConnectionSubscriptionGate,
+): readonly HarnessToolDefinition[] {
   return [
     {
-      name: GET_TOOL,
-      description: "Check the status of an active subscription by the ID returned from subscribe.",
+      name: GET_SUBSCRIPTION_TOOL,
+      description:
+        "Check the status of an active subscription by the ID returned from eve__subscribe.",
+      approval: gate.approval(EVENT_GET_ACTION),
+      frameworkTool: true,
       inputSchema: idSchema(),
       label: { start: () => "Get subscription" },
-      execute: (input: { id: string }, options) => getSubscription(input.id, options),
+      rootOnly: true,
+      execute: (input: { id: string }, options) =>
+        getSubscription(input.id, options, gate, EVENT_GET_ACTION),
     },
     {
-      name: STOP_TOOL,
+      name: STOP_SUBSCRIPTION_TOOL,
       description: "Stop an active subscription by ID so future events are not delivered.",
+      approval: gate.approval(EVENT_STOP_ACTION),
+      frameworkTool: true,
       inputSchema: idSchema(),
       label: { start: () => "Stop subscription" },
-      execute: (input: { id: string }, options) => stopSubscription(input.id, options),
+      rootOnly: true,
+      execute: (input: { id: string }, options) =>
+        stopSubscription(input.id, options, gate, EVENT_STOP_ACTION),
     },
   ];
+}
+
+export async function connectionOfSubscription(id: unknown): Promise<string | undefined> {
+  if (typeof id !== "string") return undefined;
+  const found = await installedDurableHost()?.subscriptions?.find(id);
+  return found?.binding.source.kind === "connection" ? found.binding.source.name : undefined;
 }
 
 export function offeredSubscriptions(
@@ -132,7 +164,11 @@ export function offeredSubscriptions(
     const onEvent = channel.definition?.onEvent;
     if (onEvent === undefined || seen.has(channel.name)) continue;
     seen.add(channel.name);
-    offered.push({ channelName: channel.name, catalog: subscriptionCatalogOf(onEvent) });
+    offered.push({
+      channelName: channel.name,
+      catalog: subscriptionCatalogOf(onEvent),
+      onSubscription: channel.definition?.onSubscription,
+    });
   }
   return offered;
 }
@@ -177,17 +213,26 @@ async function subscribe(
   const { source: channelName, event, input: eventInput } = input.subscription;
   const entry = offered.find((candidate) => candidate.channelName === channelName);
   if (entry === undefined) throw new Error(`Channel "${channelName}" offers no subscriptions.`);
-  const { catalog } = entry;
-  let subscriptionInput = parseJsonObject(eventInput);
-  if (catalog !== undefined) {
-    if (!catalog.events.includes(event))
-      throw new Error(`Channel "${channelName}" emits no event named "${event}".`);
-    const validated = await defineJsonSchema(catalog.inputSchema)["~standard"].validate(eventInput);
+  const { catalog, onSubscription } = entry;
+  if (catalog !== undefined && !catalog.events.includes(event))
+    throw new Error(`Channel "${channelName}" emits no event named "${event}".`);
+  const checked = async (value: unknown): Promise<JsonObject> => {
+    if (catalog === undefined) return parseJsonObject(value);
+    const validated = await defineJsonSchema(catalog.inputSchema)["~standard"].validate(value);
     if (validated.issues !== undefined)
       throw new Error(
         `Subscription input does not match the channel's schema: ${validated.issues.map(({ message }) => message).join("; ")}`,
       );
-    subscriptionInput = parseJsonObject(validated.value);
+    return parseJsonObject(validated.value);
+  };
+  let subscriptionInput = await checked(eventInput);
+  if (onSubscription !== undefined) {
+    const grant = await onSubscription({
+      auth,
+      sessionId,
+      subscription: { channelName, event, input: structuredClone(subscriptionInput) },
+    });
+    if (grant !== undefined) subscriptionInput = await checked(grant.input);
   }
   const key = channelEventKey(event, subscriptionInput);
   const binding: SubscriptionBinding = {
@@ -209,22 +254,30 @@ async function subscribe(
   return opened === undefined ? pending(binding) : active(binding, opened);
 }
 
-async function getSubscription(id: string, options: ToolExecuteOptions): Promise<unknown> {
+async function getSubscription(
+  id: string,
+  options: ToolExecuteOptions,
+  gate: ConnectionSubscriptionGate,
+  action: ConnectionSubscriptionAction,
+): Promise<unknown> {
   const found = await owners().find(id);
   if (found === undefined) throw unknownSubscription();
   const { binding, opened } = found;
-  if (binding.source.kind === "connection")
-    return connectionAction(binding, EVENT_GET_ACTION, options);
+  if (binding.source.kind === "connection") return connectionAction(binding, action, gate, options);
   ownedByCaller(binding);
   return opened === undefined ? pending(binding) : active(binding, opened);
 }
 
-async function stopSubscription(id: string, options: ToolExecuteOptions): Promise<unknown> {
+async function stopSubscription(
+  id: string,
+  options: ToolExecuteOptions,
+  gate: ConnectionSubscriptionGate,
+  action: ConnectionSubscriptionAction,
+): Promise<unknown> {
   const found = await owners().find(id);
   if (found === undefined) throw unknownSubscription();
   const { binding } = found;
-  if (binding.source.kind === "connection")
-    return connectionAction(binding, EVENT_STOP_ACTION, options);
+  if (binding.source.kind === "connection") return connectionAction(binding, action, gate, options);
   ownedByCaller(binding);
   if (!(await owners().retire(id))) throw unknownSubscription();
   return { id, status: "stopping" as const };
@@ -234,19 +287,13 @@ function ownedByCaller(binding: SubscriptionBinding): void {
   if (binding.executionPrincipal !== scope().executionPrincipal) throw unknownSubscription();
 }
 
-async function connectionAction(
+function connectionAction(
   binding: SubscriptionBinding,
-  action: typeof EVENT_GET_ACTION | typeof EVENT_STOP_ACTION,
+  action: ConnectionSubscriptionAction,
+  gate: ConnectionSubscriptionGate,
   options: ToolExecuteOptions,
 ): Promise<unknown> {
-  const registry = scope().ctx.get(ConnectionRegistryKey);
-  const actions = registry?.getClient(binding.source.name).eventActions;
-  if (actions === undefined) throw unknownSubscription();
-  return actions.execute(
-    action,
-    { id: binding.id },
-    { abortSignal: options.abortSignal, callId: options.toolCallId },
-  );
+  return gate.run(binding.source.name, action, { id: binding.id }, options);
 }
 
 function unknownSubscription(): Error {

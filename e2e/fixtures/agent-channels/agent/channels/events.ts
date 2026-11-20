@@ -2,14 +2,14 @@ import { defineChannel, POST } from "eve/channels";
 
 /**
  * A channel that reports builds. A session subscribes to `build.finished` or `build.failed` for a
- * project with the `subscribe` tool; the `/events/emit` route stands in for the outside system that
- * reports them.
+ * project with the `eve__subscribe` tool; the `/events/emit` route stands in for the outside system that
+ * reports them. A project that starts with `denied-` may not be subscribed to.
  */
 export default defineChannel({
   routes: [
-    POST("/events/emit", async (request, { emit }) => {
+    POST("/events/emit", async (request, { experimental }) => {
       const body = (await request.json()) as { event: string; id: string; project: string };
-      const delivered = await emit(
+      const delivered = await experimental.subscriptions.emit(
         body.event,
         { project: body.project },
         { id: body.id, data: { project: body.project } },
@@ -17,6 +17,14 @@ export default defineChannel({
       return Response.json({ delivered });
     }),
   ],
-  onEvent: ({ event }) =>
-    `Build event ${event.name} ${event.id} for ${String(event.data.project)}.`,
+  experimental: {
+    subscriptions: {
+      onSubscription: ({ subscription }) => {
+        if (String(subscription.input.project).startsWith("denied-"))
+          throw new Error(`Project ${String(subscription.input.project)} may not be watched.`);
+      },
+      onEvent: ({ event }) =>
+        `Build event ${event.name} ${event.id} for ${String(event.data.project)}.`,
+    },
+  },
 });

@@ -1,3 +1,5 @@
+import { resolveApprovalPolicy, type Approval } from "#approval/definition.js";
+import { requesterOnlyResponse } from "#approval/requester-only.js";
 import { connectionToolName } from "#connections/ownership.js";
 import type {
   Route,
@@ -9,6 +11,9 @@ import type {
 import { eventActionName } from "#runtime/subscriptions/actions.js";
 import {
   CHANNEL_SUBSCRIBE_ENTRY,
+  connectionOfSubscription,
+  type ConnectionSubscriptionAction,
+  type ConnectionSubscriptionGate,
   channelSubscribeEntry,
   channelSubscriptionSchemas,
   offeredSubscriptions,
@@ -20,10 +25,11 @@ import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { isObject } from "#shared/guards.js";
 import { defineJsonSchema } from "#tools/schema.js";
 
+import { connectionEventActionApproval, runConnectionEventAction } from "./connection-entry.js";
 import type { Callable } from "./step-catalog.js";
 
 export function subscriptionTools(
-  callable: Pick<Callable, "channels" | "connections">,
+  callable: Pick<Callable, "channels" | "connections" | "registry">,
 ): ReadonlyMap<string, ToolEntry> {
   const channels = offeredSubscriptions(callable.channels);
   const connections = callable.connections.filter(
@@ -33,6 +39,11 @@ export function subscriptionTools(
   const channelEntry = channelSubscribeEntry(channels);
   const channelNames = new Set(channels.map(({ channelName }) => channelName));
   const connectionNames = new Set(connections.map(({ connectionName }) => connectionName));
+  const shared = [...channelNames].filter((name) => connectionNames.has(name));
+  if (shared.length > 0)
+    throw new Error(
+      `A channel and a connection are both named ${shared.map((name) => `"${name}"`).join(", ")} and both offer subscriptions, so ${SUBSCRIBE_TOOL} could not tell them apart. Rename one.`,
+    );
   const route: Route = {
     inputSchema: {
       type: "object",
@@ -84,17 +95,51 @@ export function subscriptionTools(
         definition: {
           name: SUBSCRIBE_TOOL,
           frameworkTool: true,
+          rootOnly: true,
           description: subscribeDescription(channels, connections),
           inputSchema: defineJsonSchema(route.inputSchema),
         },
         route,
       },
     ],
-    ...subscriptionManagementEntries().map((definition): [string, ToolEntry] => [
-      definition.name,
-      { definition },
-    ]),
+    ...subscriptionManagementEntries(connectionGate(callable)).map(
+      (definition): [string, ToolEntry] => [definition.name, { definition }],
+    ),
   ]);
+}
+
+function connectionGate(
+  callable: Pick<Callable, "connections" | "registry">,
+): ConnectionSubscriptionGate {
+  const gated = async (id: unknown, action: ConnectionSubscriptionAction) => {
+    const name = await connectionOfSubscription(id);
+    const connection = callable.connections.find(({ connectionName }) => connectionName === name);
+    return connection === undefined || callable.registry === undefined
+      ? undefined
+      : connectionEventActionApproval(callable.registry, connection, action);
+  };
+  return {
+    approval: (action) => ({
+      request: async (context) => {
+        const approval = await gated(context.toolInput?.id, action);
+        return approval === undefined ? undefined : resolveApprovalPolicy(approval)(context);
+      },
+      response: async (context) => {
+        const approval: Approval | undefined = await gated(context.request.toolInput?.id, action);
+        return typeof approval === "object" && approval.response !== undefined
+          ? approval.response(context)
+          : requesterOnlyResponse(context);
+      },
+    }),
+    run: (connectionName, action, input, options) => {
+      const connection = callable.connections.find(
+        (entry) => entry.connectionName === connectionName,
+      );
+      if (connection === undefined || callable.registry === undefined)
+        throw new Error("Unknown subscription for this caller.");
+      return runConnectionEventAction(callable.registry, connection, action, input, options);
+    },
+  };
 }
 
 function subscribeDescription(

@@ -6,7 +6,12 @@ import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operati
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 import { githubChannel } from "#public/channels/github/githubChannel.js";
 import { subscriptionCatalogOf } from "#shared/channel-subscriptions.js";
-import { githubChannelOnEvent, type GitHubOnEvent } from "#public/channels/github/subscriptions.js";
+import {
+  describeGitHubEvent,
+  emitGitHubWebhook,
+  githubChannelOnEvent,
+  type GitHubOnEvent,
+} from "#public/channels/github/subscriptions.js";
 import { signGitHubWebhookBody } from "#public/channels/github/verify.js";
 import type {
   ChannelEvent,
@@ -15,7 +20,7 @@ import type {
 } from "#shared/channel-subscriptions.js";
 
 const SECRET = "github-secret";
-const SEND_ALL: GitHubOnEvent = () => true;
+const SEND_ALL: GitHubOnEvent = ({ event }) => describeGitHubEvent(event);
 
 function payload(extra: Record<string, unknown>): Record<string, unknown> {
   return {
@@ -40,7 +45,10 @@ async function deliver(input: {
   readonly delivery?: string | null;
 }): Promise<ReturnType<typeof vi.fn<EmitChannelEventFn>>> {
   const channel = githubChannel({
-    onEvent: input.onEvent === null ? undefined : (input.onEvent ?? SEND_ALL),
+    experimental:
+      input.onEvent === null
+        ? undefined
+        : { subscriptions: { onEvent: input.onEvent ?? SEND_ALL } },
     credentials: { appSlug: input.appSlug, installationToken: "ghs_test", webhookSecret: SECRET },
   });
   if (!isCompiledChannel(channel)) throw new Error("Expected a CompiledChannel.");
@@ -62,7 +70,7 @@ async function deliver(input: {
       ...mockAgentRouteArgs(),
       attachSession: vi.fn() as never,
       ...mockChannelContext(vi.fn().mockResolvedValue({ id: "s1" })),
-      emit,
+      experimental: { subscriptions: { emit } },
       params: {},
       requestIp: null,
       to: vi.fn() as never,
@@ -185,6 +193,21 @@ describe("GitHub channel subscriptions", () => {
     ]);
   });
 
+  it("throws for an event outside GitHub's catalog instead of reporting that nobody is subscribed", async () => {
+    const emit = vi.fn<EmitChannelEventFn>().mockResolvedValue(true);
+    const body = JSON.stringify(payload({ action: "invented" }));
+    await expect(
+      emitGitHubWebhook({
+        body,
+        contentType: "application/json",
+        headers: new Headers({ "x-github-delivery": "d1", "x-github-event": "release" }),
+        appSlug: async () => undefined,
+        emit,
+      }),
+    ).rejects.toThrow('GitHub event "release.invented" is not one eve can deliver');
+    expect(emit).not.toHaveBeenCalled();
+  });
+
   it("emits nothing for a ping", async () => {
     expect(
       (await deliver({ event: "ping", body: payload({ zen: "x", hook: {} }) })).mock.calls,
@@ -268,7 +291,6 @@ describe("GitHub channel subscriptions", () => {
         channelName: "github",
         event: occurrence.name,
         input: {},
-        sessionId: "s1",
       };
       return githubChannelOnEvent(onEvent)!({
         auth: null,
@@ -278,7 +300,7 @@ describe("GitHub channel subscriptions", () => {
       });
     };
 
-    it("sends the payload as a GitHub message when the author returns true", async () => {
+    it("describes the event and its payload as a GitHub message through describeGitHubEvent", async () => {
       const message = await run(SEND_ALL);
       expect(message).toContain(
         "GitHub event check_suite.completed in Vercel/Eve on pull request #7, sent by octocat.",
@@ -305,17 +327,28 @@ describe("GitHub channel subscriptions", () => {
       expect(message.length).toBeLessThan(8_800);
     });
 
-    it("passes a string through and drops on false or nothing", async () => {
+    it("passes a string through and null to drop the event", async () => {
       expect(await run(() => "custom")).toBe("custom");
-      expect(await run(() => false)).toBe(false);
-      expect(await run(() => undefined)).toBeUndefined();
+      expect(await run(() => null)).toBeNull();
     });
 
     it("lets the author filter on the event name", async () => {
       const allowed = ["check_suite.completed"];
-      const onEvent: GitHubOnEvent = ({ event: seen }) => allowed.includes(seen.name);
+      const onEvent: GitHubOnEvent = ({ event: seen }) =>
+        allowed.includes(seen.name) ? describeGitHubEvent(seen) : null;
       expect(await run(onEvent)).toEqual(expect.any(String));
-      expect(await run(onEvent, { ...event(), name: "push" })).toBe(false);
+      expect(await run(onEvent, { ...event(), name: "push" })).toBeNull();
     });
+  });
+
+  it("hands onSubscription to the compiled channel beside onEvent", () => {
+    const onSubscription = vi.fn();
+    const channel = githubChannel({
+      experimental: { subscriptions: { onEvent: SEND_ALL, onSubscription } },
+      credentials: { installationToken: "ghs_test", webhookSecret: SECRET },
+    });
+    if (!isCompiledChannel(channel)) throw new Error("Expected a CompiledChannel.");
+    expect(channel.onSubscription).toBe(onSubscription);
+    expect(subscriptionCatalogOf(channel.onEvent!)).toBeDefined();
   });
 });
