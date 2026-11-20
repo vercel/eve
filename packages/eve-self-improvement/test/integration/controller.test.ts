@@ -265,3 +265,11 @@ test("private status requires an owner-exclusive direct conversation", async () 
   assert.ok(result && "active" in result);
   assert.equal(result.active!.id, "fixture");
 });
+test("a rejected recovery PR blocks new work even without a paused experiment", async (t) => {
+  t.mock.method(GitHub.prototype, "main", async () => BASE);
+  reset({ ...experiment(), id: "revert-fixture", status: "rejected", candidate: candidate() });
+  const result = await prepare(ctx);
+  assert.equal(result.report!.status, "recovery-blocked");
+  assert.equal(active.experiment!.id, "revert-fixture");
+  assert.equal(active.experiment!.status, "blocked");
+});

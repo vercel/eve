@@ -151,13 +151,13 @@ export async function prepare(
     ) {
       const pending = await db.get<Experiment>("resume:experiment");
       if (
-        pending &&
-        pending.id !== active.experiment.id &&
+        ((pending && pending.id !== active.experiment.id) ||
+          active.experiment.id.startsWith("revert-")) &&
         active.experiment.status !== "shipped"
       ) {
         active.experiment.status = "blocked";
         active.experiment.reason =
-          "Recovery has not shipped; the pending experiment remains paused";
+          "Recovery has not shipped; new experiments and releases remain blocked";
         await save(c, active);
         return {
           action: "done",
