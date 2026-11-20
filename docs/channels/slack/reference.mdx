@@ -1049,6 +1049,8 @@ import { connectSlackCredentials } from "@vercel/connect/eve";
 import { defineSlackRenderer, slackChannel } from "eve/channels/slack";
 
 const feedback = defineSlackRenderer({
+  // Keeps replies streaming; this renderer leaves the reply text as is.
+  experimental: { streamsReplies: true },
   events: {
     async "content.completed"(event, ctx, next) {
       await next(); // eve posts the reply, or uploads a long one as a snippet

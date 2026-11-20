@@ -1168,14 +1168,18 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   });
   const onAnswers = config.onAnswers ?? defaultOnAnswers;
   const renderers = config.renderers ?? [];
-  const nonStreaming = renderers.findIndex((renderer) => !rendererStreamsReplies(renderer));
-  const streaming = config.experimental?.streaming === true && nonStreaming === -1;
-  if (config.experimental?.streaming === true && !streaming) {
-    log.warn(
-      renderers[nonStreaming]?.experimental?.streamsReplies === false
-        ? `Slack reply streaming is off: renderers[${nonStreaming}] sets experimental.streamsReplies to false.`
-        : `Slack reply streaming is off: renderers[${nonStreaming}] handles content.completed. If it never changes the reply text, set experimental: { streamsReplies: true } on it. If it does, make the same change in its content.delta handler too, then set streamsReplies.`,
-    );
+  const nonStreaming = renderers.flatMap((renderer, index) =>
+    rendererStreamsReplies(renderer) ? [] : [index],
+  );
+  const streaming = config.experimental?.streaming === true && nonStreaming.length === 0;
+  if (config.experimental?.streaming === true) {
+    for (const index of nonStreaming) {
+      log.warn(
+        renderers[index]?.experimental?.streamsReplies === false
+          ? `Slack reply streaming is off: renderers[${index}] sets experimental.streamsReplies to false.`
+          : `Slack reply streaming is off: renderers[${index}] handles content.completed. If it never changes the reply text, set experimental: { streamsReplies: true } on it. If it does, make the same change in its content.delta handler too, then set streamsReplies.`,
+      );
+    }
   }
   const interactionCard = composeInteractionCards(renderers);
   const rendering = composeSlackRenderers(renderers, {
