@@ -28,6 +28,29 @@ describe("writeCompiledArtifactsFiles", () => {
     ];
   });
 
+  it("installs the platform before the module map loads authored modules", async () => {
+    const { agentRoot, appRoot } = await createAppRoot("eve-compiled-artifacts-platform-order-", {
+      packageName: "compiled-artifacts-platform-order-test-agent",
+    });
+    await writeFile(
+      join(agentRoot, "agent.ts"),
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+    );
+    await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.\n");
+
+    const generatedArtifacts = await writeCompiledArtifactsFiles({
+      compileResult: await compileAgent({ startPath: appRoot }),
+      defaultWorkflowWorld: "local",
+      outDir: join(appRoot, ".workflow-build"),
+    });
+    const bootstrapSource = await readFile(generatedArtifacts.bootstrapPath, "utf8");
+
+    expect(bootstrapSource.indexOf("/src/platform/install-runtime.ts")).toBeGreaterThan(-1);
+    expect(bootstrapSource.indexOf("/src/platform/install-runtime.ts")).toBeLessThan(
+      bootstrapSource.indexOf("import moduleMap from"),
+    );
+  });
+
   it("writes instrumentation into a dedicated Nitro plugin instead of inlining it", async () => {
     const { agentRoot, appRoot } = await createAppRoot("eve-compiled-artifacts-instrumentation-", {
       packageName: "compiled-artifacts-instrumentation-test-agent",
