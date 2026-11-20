@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { platformContext } from "#platform/context.js";
+import { vercelEnvironmentName } from "#platform/vercel/deployment.js";
 
 const deployment = () => platformContext().deployment;
 
@@ -23,10 +24,34 @@ describe("Vercel platform deployment facts", () => {
   it("names the environment from the target environment before the environment kind", () => {
     vi.stubEnv("VERCEL_TARGET_ENV", " staging ");
     vi.stubEnv("VERCEL_ENV", "preview");
-    expect(deployment().environmentName()).toBe("staging");
+    expect(vercelEnvironmentName()).toBe("staging");
 
     vi.stubEnv("VERCEL_TARGET_ENV", "  ");
-    expect(deployment().environmentName()).toBe("preview");
+    expect(vercelEnvironmentName()).toBe("preview");
+  });
+
+  it("scopes a deployment to its project and environment, and a preview to its branch", () => {
+    vi.stubEnv("VERCEL_PROJECT_ID", "");
+    vi.stubEnv("VERCEL_OIDC_TOKEN", "");
+    expect(deployment().scope()).toBeUndefined();
+
+    vi.stubEnv("VERCEL_PROJECT_ID", "prj_123");
+    vi.stubEnv("VERCEL_TARGET_ENV", "");
+    vi.stubEnv("VERCEL_ENV", "");
+    expect(deployment().scope()).toEqual({
+      environment: "production",
+      id: "prj_123",
+      platform: "vercel",
+      variant: null,
+    });
+
+    vi.stubEnv("VERCEL_ENV", "preview");
+    vi.stubEnv("VERCEL_GIT_COMMIT_REF", "");
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", " dpl_9 ");
+    expect(deployment().scope()?.variant).toBe("dpl_9");
+
+    vi.stubEnv("VERCEL_GIT_COMMIT_REF", "feature-x");
+    expect(deployment().scope()?.variant).toBe("feature-x");
   });
 
   it("counts only vercel dev, not a pulled VERCEL_ENV, as the platform development server", () => {

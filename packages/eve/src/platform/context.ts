@@ -13,10 +13,15 @@ export interface DeploymentBuild {
   readonly gitSha: string | undefined;
 }
 
+export interface DeploymentScope {
+  readonly platform: string;
+  readonly id: string;
+  readonly environment: string;
+  readonly variant: string | null;
+}
+
 export interface PlatformDeployment {
   environmentKind(): DeploymentEnvironmentKind | undefined;
-  environmentName(): string | undefined;
-  projectId(): string | undefined;
   deploymentId(): string | undefined;
   hostedDeploymentId(): string | undefined;
   build(): DeploymentBuild | undefined;
@@ -24,6 +29,7 @@ export interface PlatformDeployment {
   deploymentHost(): string | undefined;
   publicHost(): string | undefined;
   isPlatformDevelopmentServer(): boolean;
+  scope(): DeploymentScope | undefined;
 }
 
 export interface PlatformIdentity {
