@@ -435,7 +435,7 @@ function ciEventId(event: GitHubCiPayload): number {
   return event.workflowRunId;
 }
 
-function isIgnoredInboundComment(
+export function isIgnoredInboundComment(
   body: string,
   author: GitHubUser | undefined,
   botName: string | undefined,

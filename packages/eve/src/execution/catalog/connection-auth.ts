@@ -140,7 +140,7 @@ async function listEventActions(
   } catch (error) {
     if (isConnectionAuthorizationRequiredError(error)) throw error;
     log.warn("failed to discover connection events", { connection: connectionName, error });
-    return actions.recoveryMetadata();
+    return [];
   }
 }
 

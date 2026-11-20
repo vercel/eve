@@ -91,6 +91,65 @@ export default githubChannel({
 
 Subscribe the GitHub App to each event you handle, such as `issues` or `check_suite`. A CI turn replies on the first pull request in `pullRequests`, so return `null` when the list is empty.
 
+## Let sessions subscribe to GitHub events
+
+A session on any channel can subscribe to GitHub webhook events without opening a GitHub thread. Pass `experimental.subscriptions.onEvent` to `githubChannel` to enable subscriptions, and `onSubscribe` to decide who may subscribe to which repository. This API is experimental and can change in any release:
+
+```ts title="agent/channels/github.ts"
+import { githubChannel } from "eve/channels/github";
+import { describeGitHubEvent } from "eve/experimental/channels";
+
+const ALLOWED = ["check_suite.completed", "issue_comment.created"];
+
+export default githubChannel({
+  botName: "my-agent",
+  // Omit this line if the channel should also answer @my-agent comments on GitHub.
+  onComment: () => null,
+  experimental: {
+    subscriptions: {
+      onSubscribe: ({ auth, subscription }) => {
+        const { owner, repo } = subscription.input;
+        if (auth === null || !canRead(auth, `${String(owner)}/${String(repo)}`))
+          throw new Error(`You may not watch ${String(owner)}/${String(repo)}.`);
+      },
+      onEvent: ({ event }) => (ALLOWED.includes(event.name) ? describeGitHubEvent(event) : null),
+    },
+  },
+});
+```
+
+`canRead` stands for your own check of which repositories `auth` may read.
+
+Events use GitHub's webhook name plus `.<action>` when the payload has an `action` field, such as `check_suite.completed`, `issue_comment.created`, `pull_request.closed`, or `push`. `eve__subscribe` accepts GitHub's standard webhook event names, and `onEvent` decides which deliveries reach the session. Subscriptions to events that `onEvent` drops still stay open and invoke `onEvent` on every webhook, so document the supported events in your agent instructions. Subscribe the GitHub App to every webhook event your channel uses.
+
+The model calls `eve__subscribe` with `source: "github"`, an `event` name, `ttlMs` (`120000` for 2 minutes through `31536000000` for 365 days, or `null` until stopped), and an `input` scope. Pass `{ owner, repo }` in lowercase for repository-wide events, or include `pull` for events tied to one pull request (including `check_suite`, `check_run`, and `workflow_run` events that list that PR):
+
+```json
+{
+  "subscription": {
+    "source": "github",
+    "event": "check_suite.completed",
+    "input": { "owner": "acme", "repo": "web", "pull": 42 }
+  },
+  "ttlMs": 3600000
+}
+```
+
+`onEvent({ auth, sessionId, event, subscription })` runs once per matching subscription per webhook delivery:
+
+- Return `describeGitHubEvent(event)` to send eve's default message, which labels the payload as untrusted GitHub data and clips raw JSON at 8,000 characters. The payload contains the raw webhook body (for example, check suite ID, head SHA, and conclusion), not expanded API details such as individual failing check runs.
+- Return any other non-empty string to send your own formatted or enriched message.
+- Return `null` to drop the event.
+
+`event.data` contains `{ delivery, repository, sender, pullRequests, payload }`.
+
+Important defaults and limits:
+
+- Enabling subscriptions does not disable `onComment`. Pass `onComment: () => null` if this channel should only serve subscriptions and never open sessions on `@botName` mentions.
+- Without `onSubscribe`, any session of the agent can subscribe to any repository where the GitHub App is installed, private repositories included. Check `auth` and `subscription.input` in `onSubscribe`, as in the example above, whenever the agent serves people who should not read every installed repository. It throws to deny, or returns `{ input }` to narrow the scope, for example to drop `pull`.
+- Redelivered webhooks with the same `x-github-delivery` ID reach each subscriber once, and multiple sessions can subscribe to the same event and scope.
+- Comment and review events written by the channel's own App (identified by `appSlug` in `credentials`, or `GITHUB_APP_SLUG`) are skipped to prevent reply loops. When no App slug is known, comment and review events from any bot account are skipped. CI events triggered by the bot still deliver.
+
 ## Access the repository
 
 Before the first model call, each turn checks out the relevant ref into the sandbox, so file and shell tools run against the real tree. The installation token never enters the sandbox; GitHub auth is added at the network firewall, which needs a firewall-capable sandbox such as Vercel's. On a pull request, the PR metadata and changed-file patch are already in the agent's context.

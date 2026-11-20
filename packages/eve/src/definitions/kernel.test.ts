@@ -71,6 +71,7 @@ function session(
       graph: { nodesByNodeId: new Map() },
       nodeId: "root",
       resolvedAgent: {
+        channels: [],
         definitions: [
           ...hooks.map((hook) => ({ ...hook, kind: "hook", logicalPath: `hooks/${hook.slug}.ts` })),
           ...instructions.map((fn, index) => ({

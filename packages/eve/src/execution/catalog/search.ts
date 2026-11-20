@@ -231,7 +231,12 @@ async function searchConnection(
   }
   if ("failure" in listing) return { unavailable: { connection: name, error: listing.failure } };
   if ("authorization" in listing) return { candidates: [signInCandidate(registry, connection)] };
-  return { candidates: listing.tools.map((tool) => toolCandidate(connection, tool)) };
+  const actions = registry.getClient(name).eventActions;
+  return {
+    candidates: listing.tools
+      .filter((tool) => actions?.ownsName(tool.name) !== true)
+      .map((tool) => toolCandidate(connection, tool)),
+  };
 }
 
 function entryCandidate(

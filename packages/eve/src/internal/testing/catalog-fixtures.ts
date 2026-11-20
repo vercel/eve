@@ -4,6 +4,7 @@ import { AuthKey, SessionIdKey } from "#context/keys.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import type { StepCatalog } from "#execution/catalog/step-catalog.js";
 import { stepCatalog } from "#definitions/step.js";
+import { eventActionName, isEventAction } from "#runtime/subscriptions/actions.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import { CallbackBaseUrlKey } from "#harness/authorization.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
@@ -97,6 +98,7 @@ export interface CatalogSkillSource {
 export function catalogBundle(
   input: {
     readonly approval?: ApprovalPolicy;
+    readonly channels?: readonly unknown[];
     readonly connections?: readonly ResolvedConnectionDefinition[];
     readonly dynamicSubagents?: readonly string[];
     readonly skills?: readonly CatalogSkillSource[];
@@ -114,6 +116,7 @@ export function catalogBundle(
     moduleMap: undefined as never,
     nodeId: undefined,
     resolvedAgent: {
+      channels: input.channels ?? [],
       config: { approval: input.approval, name: "test-agent" },
       connections: input.connections ?? [],
       definitions: [],
@@ -140,6 +143,7 @@ export type ConnectionListing = "listed" | "sign-in" | Error;
 export interface FakeConnection {
   readonly calls: { readonly input: unknown; readonly tool: string }[];
   readonly client: ConnectionClient;
+  readonly eventCalls: { readonly input: unknown; readonly name: string }[];
   readonly definition: ResolvedConnectionDefinition;
   listing: ConnectionListing;
   readonly signIns: string[];
@@ -148,6 +152,7 @@ export interface FakeConnection {
 export function fakeConnection(input: {
   readonly approval?: ResolvedConnectionDefinition["approval"];
   readonly description?: string;
+  readonly events?: readonly string[];
   readonly listing?: ConnectionListing;
   readonly name: string;
   readonly rejectsToken?: boolean;
@@ -156,7 +161,19 @@ export function fakeConnection(input: {
   readonly tools: readonly ConnectionToolMetadata[];
 }): FakeConnection {
   const calls: FakeConnection["calls"] = [];
+  const eventCalls: FakeConnection["eventCalls"] = [];
   const signIns: string[] = [];
+  const eventTools = (input.events ?? []).map((event): ConnectionToolMetadata => ({
+    description: `Watch ${event}.`,
+    event,
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["arguments", "ttlMs"],
+      properties: { arguments: { type: "object" }, ttlMs: { type: ["integer", "null"] } },
+    },
+    name: eventActionName(event),
+  }));
   const definition: ResolvedConnectionDefinition = {
     approval: input.approval,
     connectionName: input.name,
@@ -167,12 +184,24 @@ export function fakeConnection(input: {
     sourceKind: "module",
     toolCall: input.toolCall,
     url: `https://${input.name}.example.com/mcp`,
+    ...(input.events !== undefined && { experimental_events: {} as never }),
   };
   const connection: FakeConnection = {
     calls,
+    eventCalls,
     client: {
       close: async () => {},
       connect: async () => {},
+      ...(input.events !== undefined && {
+        eventActions: {
+          execute: async (name: string, args: unknown) => {
+            eventCalls.push({ input: args, name });
+            return { id: "subscription-1", status: "active" };
+          },
+          metadata: async () => eventTools,
+          ownsName: isEventAction,
+        },
+      }),
       executeTool: async (tool, args) => {
         calls.push({ input: args, tool });
         return { content: [{ type: "text", text: JSON.stringify({ tool, args }) }] };
@@ -238,6 +267,7 @@ export function connectionTool(
 export async function catalogContext(
   input: {
     readonly approval?: ApprovalPolicy;
+    readonly channels?: readonly unknown[];
     readonly connections?: readonly FakeConnection[];
     readonly dynamicSubagents?: readonly string[];
     readonly session?: { readonly rootSessionId?: string };
@@ -259,6 +289,7 @@ export async function catalogContext(
     fromCompiledBundle(
       catalogBundle({
         approval: input.approval,
+        channels: input.channels,
         connections: input.connections?.map((connection) => connection.definition),
         dynamicSubagents: input.dynamicSubagents,
         skills: input.skills,

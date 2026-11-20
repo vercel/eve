@@ -652,6 +652,7 @@ async function converse(
           listSkillFiles: unsupported("listSkillFiles"),
           readSkill: unsupported("readSkill"),
           params,
+          experimental: { subscriptions: { emit: async () => false } },
           requestIp: null,
           to: unsupported("to"),
           waitUntil: (task) => void pending.push(task),

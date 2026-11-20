@@ -1,6 +1,6 @@
 ---
 title: "Custom Channels"
-description: "Author custom HTTP and WebSocket channels with routes, events, metadata, continuation tokens, and file uploads."
+description: "Author custom HTTP and WebSocket channels with routes, events, subscriptions, metadata, continuation tokens, and file uploads."
 ---
 
 A custom channel connects your own HTTP or WebSocket endpoint to your agent. Each one is a file under `agent/channels/` that default-exports `defineChannel(...)` from `eve/channels`. Use one for an internal webhook, a WebSocket client, or a platform eve has no channel for. A custom channel can host a conversation or pass incoming events to another channel.
@@ -41,6 +41,7 @@ Each route handler receives:
 - `resolveSession(address)` returns the session that currently uses an address.
 - `attachSession(sessionId)` returns a handle for one session ID, without a lookup.
 - `to(channel, target).send(message, options)` hands work to another authored channel.
+- `experimental.subscriptions.emit(event, input, { id, data })` delivers an occurrence to sessions subscribed to that event name and input. See [Let sessions subscribe to events](#let-sessions-subscribe-to-events).
 - `params`, `waitUntil`, and `requestIp` provide request metadata and lifetime control.
 - `describe()`, `invokeTool()`, `listSkillFiles()`, and `readSkill()` describe the agent and run its tools without a conversation. See [Describe the agent and run tools directly](#describe-the-agent-and-run-tools-directly).
 
@@ -418,6 +419,68 @@ Any other URL, or a failed download, reaches the model as a note. The model prov
 Set `uploadPolicy` on `defineChannel` to cap what eve saves for the channel, for example `uploadPolicy: { maxBytes: 10 * 1024 * 1024, allowedMediaTypes: ["image/*", "application/pdf"] }`. eve checks every saved file, including its own downloads, by its actual bytes and detected media type. A violating file reaches the model as a note. Omit `uploadPolicy` to rely on your `fetchFile` checks, with eve's own downloads capped at 25 MB.
 
 See [Inbound attachments](../sandbox#inbound-attachments) for the shared storage, size, and provider-input behavior.
+
+## Let sessions subscribe to events
+
+A channel can let an active session subscribe to future events, such as a build finishing or a webhook arriving. Define `experimental.subscriptions.onEvent`, and optionally `onSubscribe`, on `defineChannel` and call `experimental.subscriptions.emit` from your route handler when an event arrives. This API is experimental and can change in any release.
+
+```ts title="agent/channels/builds.ts"
+import { defineChannel, POST } from "eve/channels";
+
+export default defineChannel({
+  experimental: {
+    subscriptions: {
+      onSubscribe({ auth, subscription }) {
+        if (auth === null) throw new Error("Sign in to watch builds.");
+        if (!canWatch(auth, String(subscription.input.project)))
+          throw new Error(`You may not watch ${String(subscription.input.project)}.`);
+      },
+      onEvent({ event, auth }) {
+        if (auth === null) return null;
+        return `Build ${event.id} (${event.name}): ${JSON.stringify(event.data)}`;
+      },
+    },
+  },
+  routes: [
+    POST("/builds", async (req, { experimental }) => {
+      const build = await req.json();
+      await experimental.subscriptions.emit(
+        `build.${build.status}`,
+        { project: String(build.project).toLowerCase() },
+        { id: build.id, data: { status: build.status } },
+      );
+      return Response.json({ ok: true });
+    }),
+  ],
+});
+```
+
+When at least one channel defines `experimental.subscriptions.onEvent`, or a connection enables `experimental.events`, eve exposes `eve__subscribe`, `eve__subscription_get`, and `eve__subscription_stop` to the root agent. Subagents do not get them. A channel and a connection that both offer subscriptions cannot share a name. `eve__subscribe` takes `{ subscription: { source, event, input }, ttlMs }`, where `source` is a channel name or an [MCP connection](/docs/connections/mcp) name. Subscriptions are durable and outlast the turn that created them.
+
+eve does not publish a catalog of a custom channel's events, so `eve__subscribe` accepts any event name for it. Describe the event names and the `input` the channel expects in the agent's instructions, for example: "Subscribe to the `builds` channel with the event `build.finished` or `build.failed` and an `input` of `{ project }`, with the project name in lowercase."
+
+`canWatch` stands for your own check of what `auth` may watch.
+
+`onSubscribe` runs when the model calls `eve__subscribe`, as the subscribing session, before eve holds the subscription. It receives `{ auth, sessionId, subscription: { channelName, event, input } }`. Throw to deny: the message becomes the tool's error, which the model reads. Return `{ input }` to subscribe to a narrower scope than the model asked for, and return nothing to accept the request. A returned `input` goes through the channel's input schema again.
+
+`onEvent` runs once per matching subscription per occurrence inside the subscriber's context. It receives `{ auth, sessionId, event, subscription }`.
+
+`onEvent` decides what reaches the subscribing session:
+
+- Return a non-empty `string` to queue that message on the session.
+- Return `null` to drop the occurrence for that subscription.
+
+Any other return value, including `undefined`, `false`, `true`, and `""`, fails the delivery with an error that names the channel.
+
+Key behaviors to plan around:
+
+- `eve__subscribe` accepts any `event` name and any JSON object as `input`. A subscription to an event the channel never emits stays open until it expires or the model stops it, so keep names and scopes in the agent's instructions.
+- `emit(event, input, { id, data })` matches subscriptions with the exact same `event` name and canonical `input`. `{ project: "Web" }` and `{ project: "web" }` do not match, so normalize case in `emit` and tell the model the case to use in the agent's instructions. One route call can emit the same event under multiple scopes. `emit` resolves to `true` when at least one subscription matches and `false` when nobody is subscribed, so a webhook with no subscribers still succeeds. It throws when the host cannot hold subscriptions, such as a local run outside a deployed agent.
+- Each `(event, input)` key remembers the last 256 event IDs so redeliveries reach each subscriber once. `ttlMs` accepts `120000` (2 minutes) through `31536000000` (365 days), or `null` until stopped. When the subscribing session ends, the subscription retires automatically on the next delivery.
+- Without `onSubscribe`, any session of the agent can subscribe to any scope the channel emits, and `onEvent` is the only check. Define `onSubscribe` to check `auth` and `subscription.input` whenever a subscriber should not read every scope the channel can emit. `onSubscribe` runs once, when the session subscribes, so `onEvent` is still the place to react to a change in what the subscriber may read.
+- Deliveries are queued (`turnPolicy: "queue"`) under the `auth` snapshot the session held when it subscribed, never the webhook caller's identity. Stored `auth` is not revalidated on each delivery, so check `auth` and `subscription.input` inside `onEvent` whenever a channel can receive events for resources a subscriber should not read.
+- A delivered event never steers a running turn. Even while the subscribing session is waiting on a sign-in, an approval, or a question, the event waits for the turn to end and runs as the next turn.
+- Redeploying updated `onEvent` logic takes effect on the next event, including for existing subscriptions.
 
 ## Cross-channel hand-off
 

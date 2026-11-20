@@ -457,7 +457,7 @@ It never names a deferred entry, so deferred entries stay out of context until `
 
 #### Reserved `eve` names
 
-The tools eve adds itself live in the `eve` namespace: `eve__search`, `eve__tool`, `eve__skill`, `eve__task_wait`, `eve__task_cancel`, and `eve__reply`. No tool, subagent, skill, connection, or extension mount, static or dynamic, may be named `eve` or start with `eve__`. The compiler rejects an authored tool, skill, connection, or mount with such a name, such as `agent/tools/eve__search.ts`. eve rejects an authored subagent when the agent loads, and a dynamic entry when its resolver returns it. Any other name is free, including `search` and `execute`.
+The tools eve adds itself live in the `eve` namespace: `eve__search`, `eve__tool`, `eve__skill`, `eve__task_wait`, `eve__task_cancel`, `eve__reply`, `eve__subscribe`, `eve__subscription_get`, and `eve__subscription_stop`. No tool, subagent, skill, connection, or extension mount, static or dynamic, may be named `eve` or start with `eve__`. The compiler rejects an authored tool, skill, connection, or mount with such a name, such as `agent/tools/eve__search.ts`. eve rejects an authored subagent when the agent loads, and a dynamic entry when its resolver returns it. Any other name is free, including `search` and `execute`.
 
 ### `eve__task_wait` and `eve__task_cancel`
 
@@ -465,6 +465,14 @@ eve adds `eve__task_wait` and `eve__task_cancel` when the agent has a tool that 
 
 - `eve__task_wait({ timeoutSeconds? })` waits until any task has a result, a new message arrives, or `timeoutSeconds` pass. It returns at once when a result is already waiting. The turn stays running, not paused, because `turn.paused` only reports approvals, questions, and other requests for input. Results arrive in a `<task_result>` message right after it returns. Waiting never stops a task.
 - `eve__task_cancel({ taskId })` stops a task's current work and says so. When the task already finished or is an idle [resumable task](/docs/tools/workflows#resumable-tasks-serve), it says the task had no work to stop. An id that names no task fails with `UNKNOWN_TASK`. Cancelling an agent task ends it; other resumable tasks stay available after a cancel.
+
+### `eve__subscribe`, `eve__subscription_get`, and `eve__subscription_stop`
+
+eve adds these three tools to the root agent when a channel defines `experimental.subscriptions.onEvent` or an MCP connection enables `experimental.events`. Subagents do not get them. A channel and a connection that both offer subscriptions cannot share a name.
+
+- `eve__subscribe({ subscription: { source, event, input }, ttlMs })` subscribes the session to future events from a channel or connection. See [Let sessions subscribe to events](/docs/channels/custom#let-sessions-subscribe-to-events) and [MCP connection events](/docs/connections/mcp).
+  Approvals, hooks, and traces see a channel subscription as a call to `eve__subscribe`. A connection subscription runs as the connection's generated `events_subscribe_<hash>` entry, so a connection's approval policy applies to it and not an `eve__subscribe` rule.
+- `eve__subscription_get({ id })` reports a subscription. `eve__subscription_stop({ id })` ends it. For a connection's subscription both run through the connection's approval policy.
 
 Review these tools before production use. Disable, wrap, restrict, or require approval for any tool that can access the filesystem, network, shell, or sensitive data.
 

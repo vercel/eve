@@ -81,7 +81,6 @@ export class McpConnectionClient implements ConnectionClient {
       );
       this.eventActions = {
         ownsName: isEventAction,
-        recoveryMetadata: () => events.recoveryMetadata(),
         metadata: async () => {
           try {
             return await events.metadata();

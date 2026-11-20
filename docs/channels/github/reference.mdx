@@ -68,22 +68,23 @@ The invocation token is plain text, not a GitHub mention, so GitHub may not auto
 
 `githubChannel(config)` takes these options. All are optional.
 
-| Option               | Default                                                                | Description                                                                                                                   |
-| -------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `botName`            | `credentials.appSlug`, then `GITHUB_APP_SLUG`                          | Invocation token without `@`. A string or a lazy resolver.                                                                    |
-| `credentials`        | `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, and `GITHUB_WEBHOOK_SECRET` | From `connectGitHubCredentials(...)`, or `{ appId, privateKey, webhookSecret, appSlug, installationToken, webhookVerifier }`. |
-| `route`              | `/eve/v1/github`                                                       | Webhook path.                                                                                                                 |
-| `api`                | `https://api.github.com` and the global `fetch`                        | `{ apiBaseUrl, fetch }` for GitHub REST calls.                                                                                |
-| `progress`           | `{ reactions: true }`                                                  | Set `reactions: false` to skip the `eyes` reaction when a turn starts.                                                        |
-| `pullRequestContext` | Built-in skip list for generated files                                 | `{ excludedFiles }` adds glob patterns whose patches are left out of PR context.                                              |
-| `turnPolicy`         | `"steer"`                                                              | `"steer"` or `"queue"` for messages that arrive during a turn.                                                                |
-| `onComment`          | Dispatch comments that include the invocation token                    | `(ctx, comment)` hook for issue, pull request, and review comments.                                                           |
-| `onIssue`            | None                                                                   | `(ctx, issue)` hook for `issues` events.                                                                                      |
-| `onPullRequest`      | None                                                                   | `(ctx, pullRequest)` hook for `pull_request` events.                                                                          |
-| `onCheckSuite`       | None                                                                   | `(ctx, checkSuite)` hook for `check_suite` events.                                                                            |
-| `onCheckRun`         | None                                                                   | `(ctx, checkRun)` hook for `check_run` events.                                                                                |
-| `onWorkflowRun`      | None                                                                   | `(ctx, workflowRun)` hook for `workflow_run` events.                                                                          |
-| `events`             | eve's default handlers                                                 | Per-event handler overrides for replies, reactions, and checkout.                                                             |
+| Option                               | Default                                                                | Description                                                                                                                   |
+| ------------------------------------ | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `botName`                            | `credentials.appSlug`, then `GITHUB_APP_SLUG`                          | Invocation token without `@`. A string or a lazy resolver.                                                                    |
+| `credentials`                        | `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, and `GITHUB_WEBHOOK_SECRET` | From `connectGitHubCredentials(...)`, or `{ appId, privateKey, webhookSecret, appSlug, installationToken, webhookVerifier }`. |
+| `route`                              | `/eve/v1/github`                                                       | Webhook path.                                                                                                                 |
+| `api`                                | `https://api.github.com` and the global `fetch`                        | `{ apiBaseUrl, fetch }` for GitHub REST calls.                                                                                |
+| `progress`                           | `{ reactions: true }`                                                  | Set `reactions: false` to skip the `eyes` reaction when a turn starts.                                                        |
+| `pullRequestContext`                 | Built-in skip list for generated files                                 | `{ excludedFiles }` adds glob patterns whose patches are left out of PR context.                                              |
+| `turnPolicy`                         | `"steer"`                                                              | `"steer"` or `"queue"` for messages that arrive during a turn.                                                                |
+| `onComment`                          | Dispatch comments that include the invocation token                    | `(ctx, comment)` hook for issue, pull request, and review comments.                                                           |
+| `onIssue`                            | None                                                                   | `(ctx, issue)` hook for `issues` events.                                                                                      |
+| `onPullRequest`                      | None                                                                   | `(ctx, pullRequest)` hook for `pull_request` events.                                                                          |
+| `onCheckSuite`                       | None                                                                   | `(ctx, checkSuite)` hook for `check_suite` events.                                                                            |
+| `onCheckRun`                         | None                                                                   | `(ctx, checkRun)` hook for `check_run` events.                                                                                |
+| `onWorkflowRun`                      | None                                                                   | `(ctx, workflowRun)` hook for `workflow_run` events.                                                                          |
+| `experimental.subscriptions.onEvent` | None                                                                   | Enables channel event subscriptions and filters or formats each matching webhook occurrence for each subscriber.              |
+| `events`                             | eve's default handlers                                                 | Per-event handler overrides for replies, reactions, and checkout.                                                             |
 
 The channel mounts `POST /eve/v1/github`.
 
@@ -117,6 +118,18 @@ export default githubChannel({
 ```
 
 The CI hooks expose normalized `action`, `status`, `conclusion`, `app.slug`, `headSha`, and `pullRequests` fields, plus `checkSuiteId`, `checkRunId`, or `workflowRunId`. For `workflow_run`, which only GitHub Actions sends, `app.slug` is `"github-actions"`. A CI turn replies on the first PR in `pullRequests`. When the array is empty, the hook still runs but must return `null`, because there is no thread to reply in.
+
+## Subscriptions
+
+Passing `experimental.subscriptions.onEvent` enables durable event subscriptions (`eve__subscribe`, `eve__subscription_get`, and `eve__subscription_stop`) for the GitHub channel. The API is experimental and can change in any release.
+
+- **Event catalog.** Event names follow `<x-github-event>.<payload.action>` when `payload.action` is a string, or `<x-github-event>` otherwise (for example `push`). `eve__subscribe` accepts GitHub's standard webhook event names, and `onEvent` decides which deliveries reach the session. `ping` deliveries and webhooks missing a repository or an identifiable event name are ignored.
+- **Scopes (`input`).** `{ owner, repo }` (both lowercase, matching `^[^A-Z]+$`), plus optional integer `pull >= 1`. Each webhook emits under `{ owner, repo }` and under `{ owner, repo, pull }` for every pull request number found in `pull_request`, an `issue` with `pull_request`, or `pull_requests` on `check_suite`, `check_run`, or `workflow_run`.
+- **Authorization.** Any session of the agent can subscribe to any repository where the GitHub App is installed. Without `experimental.subscriptions.onSubscribe`, `onEvent` is the only check. Define `onSubscribe({ auth, sessionId, subscription })` to check `auth` against `subscription.input.owner` and `.repo` when the session subscribes. It throws to deny and returns `{ input }` to narrow the scope.
+- **Callback input.** `onEvent({ auth, sessionId, event, subscription })`, where `event` has `{ id, name, data }` and `event.data` has `{ delivery, repository, sender, pullRequests, payload }`.
+- **Return value.** A non-empty `string` sends that message, and `describeGitHubEvent(event)` from `eve/experimental/channels` builds the default message with the JSON payload truncated to 8,000 characters and marked as untrusted external data. `null` drops the event, and any other value fails the delivery. Subscriptions to events that `onEvent` drops still stay open and invoke `onEvent` on every webhook, so document the supported events in your agent instructions.
+- **Bot-loop guard.** Comment and review events (`issue_comment`, `pull_request_review_comment`, `pull_request_review`) written by the channel's own App (identified by `appSlug` in `credentials`, or `GITHUB_APP_SLUG`) are skipped; when no App slug is known, comment and review events from any bot account are skipped. CI events triggered by the bot, such as `check_suite.completed`, still deliver.
+- **Interaction with inbound hooks.** Subscriptions run independently of `onComment`, `onIssue`, `onPullRequest`, `onCheckSuite`, `onCheckRun`, and `onWorkflowRun`. `onComment` still dispatches `@botName` mentions by default unless you pass `onComment: () => null`.
 
 ## Delivery
 
