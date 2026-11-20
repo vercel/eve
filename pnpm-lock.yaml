@@ -427,6 +427,15 @@ importers:
       '@eve/agent-browser':
         specifier: workspace:*
         version: link:../../packages/eve-agent-browser
+      '@eve/agent-desktop':
+        specifier: workspace:*
+        version: link:../../packages/eve-agent-desktop
+      '@eve/board':
+        specifier: workspace:*
+        version: link:../../packages/eve-board
+      '@eve/self-improvement':
+        specifier: workspace:*
+        version: link:../../packages/eve-self-improvement
       '@github-tools/eve-extension':
         specifier: ^0.13.0
         version: 0.13.0(471b02bf2346c49ed33b7851daa11515)

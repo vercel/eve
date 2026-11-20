@@ -2236,6 +2236,58 @@ Keep \`CLAUDE_MEM_API_KEY\` in the environment rather than prompts or source con
 
 const extensionPresentations: Record<string, ExtensionPresentation> = {
   ...baseExtensionPresentations,
+  "agent-desktop": {
+    logo: "eve",
+    docsHref: "/docs/extensions#accessibility-based-desktop-tools",
+    keywords: ["desktop automation", "computer use", "accessibility", "Linux"],
+    install: `Install the experimental agent-desktop extension in your eve project:
+
+\`\`\`bash
+eve add extension/agent-desktop
+\`\`\`
+
+Use an Ubuntu 24.04 or later sandbox with apt and root or passwordless sudo.`,
+    quickStart: `The command creates \`agent/extensions/desktop.ts\`. Before using the tools, call \`installAgentDesktop\` from \`@eve/agent-desktop/sandbox\` in your sandbox environment's \`prepare\` callback. Include \`AGENT_DESKTOP_REVALIDATION_KEY\` in the environment options so eve rebuilds the template when desktop dependencies change.
+
+The extension adds \`desktop__launch\`, \`desktop__snapshot\`, and other tools. The tools start the desktop when needed, but do not install dependencies at tool time.`,
+    configure: `Follow the [desktop sandbox setup](/docs/extensions#accessibility-based-desktop-tools) to install the apps the agent should operate. Accessibility actions are headless by default; enable \`headed\` only if the agent should be allowed to move the pointer or change focus.`,
+  },
+  board: {
+    logo: "vercel",
+    docsHref: "/docs/channels/board",
+    keywords: ["Vercel Board", "watchers", "tasks", "threads"],
+    install: `Add the Vercel Board extension to your eve project:
+
+\`\`\`bash
+eve add extension/board
+\`\`\``,
+    quickStart: `The command creates \`agent/extensions/board.ts\`. Deploy to Vercel so the agent can reach the board using the deployment's OIDC token. The agent watches nothing until you ask it to. Tell it which channel to watch and what to do when a message matches.`,
+    configure: `Limit which channels and actions the agent can use with \`can\`. Set \`configurers\` to restrict who can manage watches. See the [Board guide](/docs/channels/board) for access, task queues, and local development.`,
+  },
+  code: {
+    logo: "eve",
+    docsHref: "/docs/code-extension",
+    keywords: ["eve-code", "coding agent", "AGENTS.md", "CLAUDE.md", "coding skills"],
+    install: `Mount the Code extension bundled with eve:
+
+\`\`\`bash
+eve add extension/code
+\`\`\``,
+    quickStart: `The command creates \`agent/extensions/code.ts\`. The extension reads \`AGENTS.md\` or \`CLAUDE.md\` from the sandbox workspace root and adds coding skills such as \`code__investigate\`.`,
+    configure: `To install CLI utilities in the sandbox, use \`installCodeTooling\` from \`eve/extensions/code/sandbox\` in your sandbox environment's \`prepare\` callback. For Vercel authentication or the companion Git extension, see the [Code extension guide](/docs/code-extension).`,
+  },
+  "self-improvement": {
+    logo: "eve",
+    docsHref: "/docs/extensions/self-improvement",
+    keywords: ["Agent Runs", "GitHub", "nightly", "telemetry", "evaluations"],
+    install: `Add Self-Improvement to an eve 1.1 or later project deployed on Vercel:
+
+\`\`\`bash
+eve add extension/self-improvement
+\`\`\``,
+    quickStart: `Replace the example project, repository, owner, and models in \`agent/extensions/self-improvement.ts\`. Follow the [setup guide](/docs/extensions/self-improvement) to configure the telemetry policy, private Vercel Blob storage, and credentials before deploying.`,
+    configure: `The schedule uses UTC. Proposal mode is the default: the extension proposes tested GitHub pull requests without shipping changes. After deploying, use \`self-improvement__doctor\` to check setup and \`self-improvement__status\` to inspect the outcome of the first scheduled run.`,
+  },
   "agent-browser": {
     logo: "agent-browser",
     docsHref: "https://github.com/vercel/eve/tree/main/packages/eve-agent-browser",
