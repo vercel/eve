@@ -27,6 +27,7 @@ import { readVercelProjectLink } from "#internal/vercel/project-link.js";
 import { withVercelOidcProjectResolver } from "#channel/auth/vercel-oidc-project.js";
 import { withLocalDevRequestScope } from "#runtime/local-dev-capability.js";
 import { getWorld } from "#internal/workflow/runtime.js";
+import { currentPlatform } from "#platform/current.js";
 
 const log = createLogger("channel.dispatch");
 
@@ -251,8 +252,8 @@ async function buildRouteArgs(input: {
 async function resolveAcceptedDeploymentId(
   config: NitroArtifactsConfig,
 ): Promise<string | undefined> {
-  const hosted = process.env.VERCEL_DEPLOYMENT_ID?.trim();
-  if (hosted !== undefined && hosted.length > 0) return validateDeploymentId(hosted);
+  const hosted = currentPlatform().deployment.deploymentId();
+  if (hosted !== undefined) return validateDeploymentId(hosted);
 
   if (config.kind === "development" && process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV] === undefined) {
     return undefined;

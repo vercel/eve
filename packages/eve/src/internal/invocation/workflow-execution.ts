@@ -16,6 +16,7 @@ import type {
   AgentInvocationStatus,
 } from "#internal/invocation/agent-invocation.js";
 import { invocationOwnerKey } from "#internal/invocation/metadata.js";
+import { currentPlatform } from "#platform/current.js";
 import {
   invocationContinuationToken,
   readOwnedInvocationRun,
@@ -424,8 +425,7 @@ function publicInvocationFailure(
 
 function vercelDeploymentId(): string | undefined {
   if (process.env.VERCEL !== "1") return undefined;
-  const deploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim();
-  return deploymentId && deploymentId.length > 0 ? deploymentId : undefined;
+  return currentPlatform().deployment.deploymentId();
 }
 
 function conflict(message: string): AgentInvocationMutationResult {

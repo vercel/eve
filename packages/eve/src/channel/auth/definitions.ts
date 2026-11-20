@@ -24,6 +24,7 @@ import {
   type RouteStrategyAuthenticationResult,
 } from "#channel/auth/types.js";
 import { isVercelOidcIssuer } from "#shared/vercel-project.js";
+import { currentPlatform } from "#platform/current.js";
 
 const vercelOidcLog = createLogger("auth.vercel-oidc");
 import {
@@ -719,7 +720,7 @@ function addInvalidBearerTokenError(
  */
 export function placeholderAuth(): AuthFn<Request> {
   return () => {
-    if (process.env.VERCEL_ENV !== "production") {
+    if (currentPlatform().deployment.environmentKind() !== "production") {
       return null;
     }
 
@@ -1076,10 +1077,9 @@ export function vercelOidc(opts: VercelOidcOptions = {}): AuthFn<Request> {
 }
 
 function isLocalDevelopmentVercelOidc(): boolean {
-  if (process.env.VERCEL_ENV === "development") return true;
-  if (process.env.VERCEL_ENV === "preview" || process.env.VERCEL_ENV === "production") {
-    return false;
-  }
+  const environmentKind = currentPlatform().deployment.environmentKind();
+  if (environmentKind === "development") return true;
+  if (environmentKind === "preview" || environmentKind === "production") return false;
   return isEveDevEnvironment();
 }
 

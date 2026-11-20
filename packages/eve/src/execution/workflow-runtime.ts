@@ -32,6 +32,7 @@ import {
 } from "#execution/eve-workflow-attributes.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger } from "#internal/logging.js";
+import { currentPlatform } from "#platform/current.js";
 import { formatCapabilityError } from "#internal/capability-error.js";
 import {
   getWorld,
@@ -515,7 +516,7 @@ export async function startWorkflowOnDeployment<TArgs extends unknown[], TResult
 
 async function resolveCurrentWorkflowDeploymentId(): Promise<string> {
   const deploymentId =
-    process.env.VERCEL_DEPLOYMENT_ID?.trim() || (await (await getWorld()).getDeploymentId());
+    currentPlatform().deployment.deploymentId() ?? (await (await getWorld()).getDeploymentId());
   if (deploymentId.length === 0 || deploymentId === "latest") {
     throw new Error("Workflow runtime could not resolve an exact deployment id.");
   }
