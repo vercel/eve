@@ -20,6 +20,13 @@ function boundBodies<T extends { body: string }>(entries: T[]): T[] {
     })
     .reverse();
 }
+function feedbackDigest(entries: object[]): string {
+  return digest(
+    entries.map((entry) =>
+      Object.fromEntries(Object.entries(entry).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))),
+    ),
+  );
+}
 export function boundFeedback(feedback: ReviewFeedback): ReviewFeedback {
   const comments: ReviewFeedback["comments"] = [];
   let remaining = 20_000;
@@ -32,9 +39,9 @@ export function boundFeedback(feedback: ReviewFeedback): ReviewFeedback {
   }
   const reviews = boundBodies(feedback.reviews),
     threads = boundBodies(feedback.threads);
-  const commentsDigest = feedback.commentsDigest ?? digest(feedback.comments);
-  const reviewsDigest = feedback.reviewsDigest ?? digest(feedback.reviews);
-  const threadsDigest = feedback.threadsDigest ?? digest(feedback.threads);
+  const commentsDigest = feedback.commentsDigest ?? feedbackDigest(feedback.comments);
+  const reviewsDigest = feedback.reviewsDigest ?? feedbackDigest(feedback.reviews);
+  const threadsDigest = feedback.threadsDigest ?? feedbackDigest(feedback.threads);
   const omittedComments =
     (feedback.omittedComments ?? 0) + feedback.comments.length - comments.length;
   return {
@@ -49,9 +56,9 @@ export function boundFeedback(feedback: ReviewFeedback): ReviewFeedback {
     truncated:
       feedback.truncated === true ||
       omittedComments > 0 ||
-      commentsDigest !== digest(comments) ||
-      reviewsDigest !== digest(reviews) ||
-      threadsDigest !== digest(threads),
+      commentsDigest !== feedbackDigest(comments) ||
+      reviewsDigest !== feedbackDigest(reviews) ||
+      threadsDigest !== feedbackDigest(threads),
   };
 }
 

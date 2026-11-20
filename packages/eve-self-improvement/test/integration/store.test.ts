@@ -7,7 +7,7 @@ import { Pool } from "pg";
 import { Store, databaseConnection, type Sql } from "../../extension/lib/store.js";
 import { experiment, observation } from "./fixtures.js";
 import { config, BASE, HEAD } from "./fixtures.js";
-import { GitHub } from "../../extension/lib/providers.js";
+import { boundFeedback, GitHub } from "../../extension/lib/providers.js";
 import { reconcilePublication } from "../../extension/lib/publish.js";
 import { authorizeCoordinator, authorizeAnalyst } from "../../extension/lib/delegation.js";
 
@@ -139,6 +139,48 @@ test("concurrent claims execute only one experiment; releases allow later recove
   const resumed = await db.acquire("resuming-runner");
   assert.equal(resumed!.experiment!.id, "fixture");
   assert.ok(resumed!.lease.fence > winner.lease.fence);
+});
+test("feedback completeness survives Postgres JSONB storage without hiding omitted evidence", async () => {
+  const db = makeStore(),
+    active = (await db.acquire("reviewer"))!;
+  const complete = {
+    comments: [{ id: "comment", body: "Complete warning", url: "https://example.com/comment" }],
+    reviews: [
+      {
+        id: "review",
+        body: "Review warning",
+        state: "COMMENTED",
+        submittedAt: "2026-11-20T00:00:00Z",
+      },
+    ],
+    threads: [
+      {
+        id: "thread",
+        resolved: false,
+        outdated: false,
+        body: "Thread warning",
+        canAutoResolve: false,
+      },
+    ],
+  };
+  for (const truncated of [false, true]) {
+    const raw = structuredClone(complete);
+    if (truncated) raw.reviews[0].body = "Long warning ".repeat(1000);
+    await db.save(active.lease, {
+      ...experiment(),
+      status: "review",
+      feedback: boundFeedback(raw),
+    });
+    const restored = (await db.active())!.experiment!.feedback!;
+    assert.equal(boundFeedback(restored).truncated, truncated);
+    if (!truncated) {
+      assert.deepEqual(restored.comments, complete.comments);
+      assert.deepEqual(restored.reviews, complete.reviews);
+      assert.deepEqual(restored.threads, complete.threads);
+      restored.threads[0].body = "Changed warning";
+      assert.equal(boundFeedback(restored).truncated, true);
+    }
+  }
 });
 test("expired holders cannot save or release a newer fenced claim", async () => {
   const db = makeStore(),
