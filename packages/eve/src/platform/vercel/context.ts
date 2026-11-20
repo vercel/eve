@@ -1,11 +1,21 @@
 import { join } from "node:path";
 
+import { hostCapabilities } from "#platform/capabilities.js";
 import type { PlatformContext } from "#platform/context.js";
 import { vercelDeployment } from "#platform/vercel/deployment.js";
 import { isVercelEnvironment } from "#platform/vercel/environment.js";
 import { vercelIdentity } from "#platform/vercel/identity.js";
 import { vercelWorkspaceTransport } from "#platform/vercel/workspace-transport.js";
 import { toErrorMessage } from "#shared/errors.js";
+
+const ON_VERCEL = hostCapabilities("1", {
+  agentRuns: true,
+  hostedSandbox: true,
+  sandboxCredentialTransforms: true,
+  stopsSandboxesOnExit: true,
+});
+
+const OFF_VERCEL = hostCapabilities("1", { agentRuns: true });
 
 export function createVercelPlatformContext(): PlatformContext {
   return {
@@ -28,10 +38,8 @@ export function createVercelPlatformContext(): PlatformContext {
     },
     deployment: vercelDeployment,
     identity: vercelIdentity,
-    sandbox: {
-      hostedAvailable: isVercelEnvironment,
-      credentialTransforms: isVercelEnvironment,
-      stopsOnExit: isVercelEnvironment,
+    get capabilities() {
+      return isVercelEnvironment() ? ON_VERCEL : OFF_VERCEL;
     },
     telemetry: {
       traceSessionAttribute: () =>

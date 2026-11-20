@@ -6,6 +6,7 @@ import {
 import { createInstrumentationSetupContext } from "#instrumentation/setup-context.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { DEVELOPMENT_WORKER_APP_ROOT_ENV } from "#internal/workflow/development-world-protocol.js";
+import { hasCapability } from "#platform/capabilities.js";
 import { platformContext } from "#platform/context.js";
 import { eveRuntime } from "#runtime/eve-runtime.js";
 import { agentRuns, localTraces } from "#public/instrumentation/otel.js";
@@ -31,8 +32,12 @@ function providerRegistry(): Map<string, InstrumentationProvider> {
 
 export function seedInstrumentationProviders(): void {
   const registry = providerRegistry();
-  const environmentKind = platformContext().deployment.environmentKind();
-  if (environmentKind === "preview" || environmentKind === "production") {
+  const platform = platformContext();
+  const environmentKind = platform.deployment.environmentKind();
+  if (
+    hasCapability(platform, "agentRuns") &&
+    (environmentKind === "preview" || environmentKind === "production")
+  ) {
     registry.set("agent-runs", agentRuns());
   }
   if (process.env[DEVELOPMENT_WORKER_APP_ROOT_ENV] !== undefined) {

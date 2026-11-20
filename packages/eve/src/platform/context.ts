@@ -1,3 +1,4 @@
+import type { HostCapabilities } from "#platform/capabilities.js";
 import { createVercelPlatformContext } from "#platform/vercel/context.js";
 import type { WorkspaceAgentTransport } from "#public/definitions/workspace-agent.js";
 import { eveRuntime } from "#runtime/eve-runtime.js";
@@ -43,12 +44,6 @@ export interface PlatformBuild {
   localSandboxPrewarmFailure(providerName: string, error: unknown): Error | undefined;
 }
 
-export interface PlatformSandbox {
-  hostedAvailable(): boolean;
-  credentialTransforms(): boolean;
-  stopsOnExit(): boolean;
-}
-
 export interface PlatformWorkspace {
   transport(routePath: string): WorkspaceAgentTransport | undefined;
 }
@@ -62,7 +57,7 @@ export interface PlatformContext {
   readonly build: PlatformBuild;
   readonly deployment: PlatformDeployment;
   readonly identity: PlatformIdentity;
-  readonly sandbox: PlatformSandbox;
+  readonly capabilities: HostCapabilities;
   readonly telemetry: PlatformTelemetry;
   readonly workspace: PlatformWorkspace;
 }

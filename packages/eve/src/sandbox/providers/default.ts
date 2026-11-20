@@ -1,5 +1,6 @@
 import { isLinuxDockerDaemonAvailableSync } from "#execution/sandbox/bindings/local.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
+import { hasCapability } from "#platform/capabilities.js";
 import { platformContext } from "#platform/context.js";
 import { hostedSandboxEnvironment } from "#platform/hosted-sandbox.js";
 import type { DockerSandboxEnvironmentOptions } from "#public/sandbox/docker-sandbox.js";
@@ -201,7 +202,7 @@ export const DefaultSandbox: SandboxProvider<
 });
 
 function selectProvider(): SelectedProvider | null {
-  if (platformContext().sandbox.hostedAvailable()) return "vercel";
+  if (hasCapability(platformContext(), "hostedSandbox")) return "vercel";
   if (isLinuxDockerDaemonAvailableSync()) return "docker";
   return isEveDevEnvironment() ? "just-bash" : null;
 }
