@@ -103,8 +103,6 @@ describe("buildConversationItems", () => {
   });
 
   it("renders provider-executed tool results as tool cards after the assistant", () => {
-    // Provider-executed tools (e.g. web_search) never get an execute_tool
-    // span; their outcomes live on the model span's tool_results attribute.
     const spans = weatherTurn().map((s) =>
       s.name === "ai.streamText.doStream"
         ? {
@@ -223,9 +221,6 @@ describe("buildConversationItems", () => {
   });
 
   it("interleaves a subagent's cards between the parent's dispatch and reply", () => {
-    // The parent parks while the child runs: step 1 dispatches, the child
-    // works, step 2 replies with the result. Cards must read in that order,
-    // not with the child appended after the parent's whole turn.
     const turn = span("a".repeat(16), "invoke_agent parent", 0, 0, undefined, {
       "agent.channel.delivery.input": JSON.stringify({ message: "run the subagent" }),
       "agent.turn.id": "turn_0",
@@ -371,8 +366,6 @@ describe("renderConversationItem", () => {
   it("renders the user message as a railed card", () => {
     const user = buildConversationItems(trace(weatherTurn())).find((item) => item.kind === "user")!;
     const lines = renderConversationItem(user, 60, THEME, false, false).map(stripAnsi);
-    // Padded header band around the title, one body padding row, content,
-    // one padding row — every row padded to the full card width.
     expect(lines[0]!.trimEnd()).toBe(" │");
     expect(lines[1]!.trimEnd()).toBe(" │  user");
     expect(lines[2]!.trimEnd()).toBe(" │");
@@ -390,7 +383,6 @@ describe("renderConversationItem", () => {
     const lines = renderConversationItem(assistant, 80, THEME, false, false).map(stripAnsi);
     expect(lines[1]).toContain("assistant");
     expect(lines[1]).toContain("claude-test");
-    // Duration, tokens, and cost are right-aligned at the end of the row.
     expect(lines[1]!.trimEnd()).toMatch(/2s.*↑6\.2K.*↓50$/);
   });
 
@@ -455,7 +447,6 @@ describe("renderConversationItem", () => {
     const tool = items.find((item) => item.kind === "tool")!;
     const lines = renderConversationItem(tool, 60, THEME, false, false).map(stripAnsi);
     expect(lines[1]).toContain("get_weather");
-    // Duration is right-aligned at the end of the title row.
     expect(lines[1]!.trimEnd()).toMatch(/300ms$/);
     expect(lines.some((line) => line.includes("Input:"))).toBe(true);
     expect(lines.some((line) => line.includes('"city": "sf"'))).toBe(true);
@@ -480,7 +471,6 @@ describe("renderConversationItem", () => {
     expect(collapsed).toHaveLength(6);
     expect(collapsed[1]).toContain("system");
     expect(collapsed[1]!.trimEnd()).toMatch(/~9 tokens$/);
-    // Short prompts fit the cap — no fold marker.
     expect(collapsed[1]).not.toContain("▸");
     expect(collapsed[4]).toContain("You are a test assistant. Be brief.");
 
@@ -513,8 +503,6 @@ describe("renderConversationItem", () => {
     const headerIndex = lines.findIndex((line) => line.includes("Thought:"));
     const reasoningIndex = lines.findIndex((line) => line.includes("let me think about this"));
     const answerIndex = lines.findIndex((line) => line.includes("here is my answer"));
-    // Thought: header, a blank railed line, the reasoning, a blank railed
-    // line, the reply.
     expect(headerIndex).toBeGreaterThan(-1);
     expect(lines[headerIndex + 1]!.trim()).toBe("│");
     expect(reasoningIndex).toBe(headerIndex + 2);
@@ -551,17 +539,13 @@ describe("renderConversationItem", () => {
     const themed = createTheme({ color: true, unicode: true });
     const lines = renderConversationItem(assistant, 80, themed, true, false);
     for (const line of lines) {
-      // Bright half-block bar on the left edge, no inverse, no truecolor
-      // surface — the terminal's own background shows through.
       expect(line).toContain("\x1b[97m▌\x1b[39m");
       expect(line).not.toContain("\x1b[7m");
       expect(line).not.toContain("\x1b[48;2;");
     }
-    // The assistant title is bold white.
     expect(lines[1]).toContain("\x1b[97m");
     const unselected = renderConversationItem(assistant, 80, themed, false, false);
     expect(unselected[0]).not.toContain("▌");
-    // Unselected cards carry a dim gutter rail instead.
     expect(unselected[0]).toContain("\x1b[2m│\x1b[22m");
   });
 
@@ -579,25 +563,18 @@ describe("renderConversationItem", () => {
     const items = buildConversationItems(trace(weatherTurn()));
     const assistant = items.find((item) => item.kind === "assistant")!;
     const themed = createTheme({ color: true, unicode: true });
-    // A black background reproduces the viewer's original dark palette.
     const surfaces = deriveTraceViewerSurfaces({ r: 0, g: 0, b: 0 });
     const banded = renderConversationItem(assistant, 60, themed, false, false, surfaces);
-    // Header band rows in near-black, body rows in dark gray.
     for (const line of banded.slice(0, 3)) expect(line).toContain("\x1b[48;2;22;22;22m");
     for (const line of banded.slice(3)) expect(line).toContain("\x1b[48;2;36;36;36m");
-    // The band groups the card — no gutter rail.
     expect(stripAnsi(banded[1]!)).not.toContain("│");
-    // Surfaced and railed layouts occupy the same rows and cells, so scroll,
-    // click, and drag-copy math never depend on the OSC 11 probe's outcome.
     const railed = renderConversationItem(assistant, 60, themed, false, false);
     expect(banded.length).toBe(railed.length);
     for (const [index, line] of banded.entries()) {
       expect(visibleLength(line)).toBe(visibleLength(railed[index]!));
     }
-    // The selection bar still marks the selected card in its left margin.
     const selected = renderConversationItem(assistant, 60, themed, true, false, surfaces);
     expect(selected[0]).toContain("\x1b[38;2;255;255;255m▌\x1b[39m");
-    // Errors swap in the red bands.
     const failed = { ...items.find((item) => item.kind === "tool")!, error: true };
     const errorLines = renderConversationItem(failed, 60, themed, false, false, surfaces);
     expect(errorLines[0]).toContain("\x1b[48;2;69;32;37m");
@@ -610,10 +587,6 @@ describe("renderConversationItem", () => {
     )!;
     const themed = createTheme({ color: true, unicode: true });
     const surfaces = deriveTraceViewerSurfaces({ r: 0, g: 0, b: 0 });
-    // Narrow enough (like a card beside the open drawer) that the styled
-    // title clips, which embeds a full SGR reset mid-row. The band must
-    // re-open after it, or the gap and right-aligned metrics render on the
-    // terminal's default background.
     const title = renderConversationItem(assistant, 46, themed, false, false, surfaces)[1]!;
     expect(stripAnsi(title)).toContain("↓50");
     const afterResets = title.split("\x1b[0m").slice(1);
@@ -630,12 +603,9 @@ describe("renderConversationItem", () => {
     const themed = createTheme({ color: true, unicode: true });
     const light = deriveTraceViewerSurfaces({ r: 255, g: 255, b: 255 });
     const lines = renderConversationItem(assistant, 80, themed, true, false, light);
-    // The title renders in black, not the theme's fixed bright white.
     expect(lines[1]).toContain("\x1b[38;2;0;0;0massistant\x1b[39m");
     expect(lines[1]).not.toContain("\x1b[97m");
-    // The selection bar follows the same primary so it shows on the white canvas.
     for (const line of lines) expect(line).toContain("\x1b[38;2;0;0;0m▌\x1b[39m");
-    // Dark backgrounds keep the bright-white primary.
     const dark = deriveTraceViewerSurfaces({ r: 0, g: 0, b: 0 });
     const darkLines = renderConversationItem(assistant, 80, themed, true, false, dark);
     expect(darkLines[1]).toContain("\x1b[38;2;255;255;255massistant\x1b[39m");

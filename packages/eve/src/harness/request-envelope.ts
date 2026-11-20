@@ -3,7 +3,6 @@ import type { ModelMessage, ToolSet } from "ai";
 import { serializeInputSchema, type ToolSchemaSource } from "#tools/schema.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 
-/** Count only request content outside the durable model-visible history. */
 export async function estimateRequestEnvelope(input: {
   readonly history: readonly ModelMessage[];
   readonly instructions: unknown;

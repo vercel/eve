@@ -50,7 +50,6 @@ type GitHubTurnEvent =
   | GitHubPullRequestReviewCommentEvent
   | GitHubPullRequestWebhookEvent;
 
-/** Dispatches a bot-directed issue or PR timeline comment into the runtime. */
 export async function dispatchIssueComment(input: {
   readonly botName: GitHubBotNameResolver;
   readonly config: GitHubChannelConfig;
@@ -75,7 +74,6 @@ export async function dispatchIssueComment(input: {
   });
 }
 
-/** Dispatches a bot-directed inline pull-request review comment. */
 export async function dispatchPullRequestReviewComment(input: {
   readonly botName: GitHubBotNameResolver;
   readonly config: GitHubChannelConfig;
@@ -100,7 +98,6 @@ export async function dispatchPullRequestReviewComment(input: {
   });
 }
 
-/** Dispatches an opt-in issue webhook event into the runtime. */
 export async function dispatchIssue(input: {
   readonly botName: GitHubBotNameResolver;
   readonly config: GitHubChannelConfig;
@@ -120,7 +117,6 @@ export async function dispatchIssue(input: {
   });
 }
 
-/** Dispatches an opt-in pull-request webhook event into the runtime. */
 export async function dispatchPullRequest(input: {
   readonly botName: GitHubBotNameResolver;
   readonly config: GitHubChannelConfig;
@@ -140,7 +136,6 @@ export async function dispatchPullRequest(input: {
   });
 }
 
-/** Dispatches an opt-in check-suite webhook event into the runtime. */
 export async function dispatchCheckSuite(input: {
   readonly botName: GitHubBotNameResolver;
   readonly config: GitHubChannelConfig;
@@ -156,7 +151,6 @@ export async function dispatchCheckSuite(input: {
   });
 }
 
-/** Dispatches an opt-in check-run webhook event into the runtime. */
 export async function dispatchCheckRun(input: {
   readonly botName: GitHubBotNameResolver;
   readonly config: GitHubChannelConfig;
@@ -172,7 +166,6 @@ export async function dispatchCheckRun(input: {
   });
 }
 
-/** Dispatches an opt-in workflow-run webhook event into the runtime. */
 export async function dispatchWorkflowRun(input: {
   readonly botName: GitHubBotNameResolver;
   readonly config: GitHubChannelConfig;

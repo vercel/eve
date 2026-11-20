@@ -25,7 +25,6 @@ const PEOPLE = {
 } as const;
 let nextChannel = 0;
 const TEAM = "T01";
-/** Where Slack takes a pressed message's `response_url` posts; its path names the message. */
 const RESPONSE_URL_HOST = "hooks.slack.com";
 
 interface SlackText {
@@ -38,7 +37,6 @@ interface SlackOption {
   readonly value: string;
 }
 
-/** The HITL widgets eve renders: one button per option, or one single-click radio/select. */
 interface SlackElement {
   readonly action_id?: string;
   readonly options?: readonly SlackOption[];
@@ -49,12 +47,10 @@ interface SlackElement {
 
 interface PressHandle {
   readonly action: Record<string, unknown>;
-  /** The pressed message's blocks, which Slack echoes in every `block_actions` payload. */
   readonly blocks: readonly unknown[];
   readonly messageTs: string;
 }
 
-/** A post to a pressed message's `response_url`, with the message it names. */
 interface ResponseUrlBody {
   readonly delete_original?: boolean;
   readonly message_ts: string;
@@ -62,18 +58,11 @@ interface ResponseUrlBody {
 
 interface SlackMessageBody {
   readonly blocks?: readonly unknown[];
-  /** Replies post Markdown here, with `text` as the plain fallback. */
   readonly markdown_text?: string;
   readonly text?: string;
   readonly ts?: string;
 }
 
-/**
- * Drives the Slack channel through its Events API and interactivity webhooks,
- * in a public channel thread by default, in a DM, or in a code channel, where
- * people write top-level without mentioning the bot. `config` adds authored
- * channel hooks on top of the fake platform.
- */
 export function slackDriver(
   conversation: Exclude<Surface, "public"> | "code-channel" = "shared",
   config: Pick<SlackChannelConfig, "onAnswers" | "renderers"> = {},
@@ -81,11 +70,9 @@ export function slackDriver(
   const dm = conversation === "private";
   const codeChannel = conversation === "code-channel";
   const surface: Surface = dm ? "private" : "shared";
-  // A fresh channel per driver keeps each test's session apart in the shared workflow world.
   nextChannel += 1;
   const CHANNEL = `${dm ? "D" : codeChannel ? "C_CODE" : "C"}${String(nextChannel).padStart(3, "0")}`;
   let sequence = 0;
-  // Every message is a reply in the thread the first one starts.
   const threadTs = "1700000000.000001";
   let threadStarted = false;
   let restoreFetch: (() => void) | undefined;
@@ -109,7 +96,6 @@ export function slackDriver(
     });
   }
 
-  /** Files a person uploaded, by the `url_private` Slack downloads each from. */
   const uploads = new Map<string, SentFile>();
   function slackFile(file: SentFile) {
     const id = `F${uploads.size + 1}`;
@@ -150,7 +136,6 @@ export function slackDriver(
         },
       };
     }
-    // Everything the bot shows in a code channel posts top-level; Slack has no thread to find.
     if (
       codeChannel &&
       method.startsWith("chat.") &&
@@ -180,7 +165,6 @@ export function slackDriver(
     space: {
       id: `slack:${TEAM}:${CHANNEL}`,
       type: dm ? "direct" : "shared",
-      // The driver's events name a public channel or a DM in `channel_type`.
       visibility: dm ? "private" : "public",
       workspaceId: `slack:${TEAM}`,
     },
@@ -189,8 +173,6 @@ export function slackDriver(
       : ["attachments", "another-person", "buttons", "sign-in-cancel", "text-replies"],
     surface,
     createChannel(record) {
-      // A press's `response_url` is a bare URL the channel posts to with the global `fetch`,
-      // not its Web API client, so route only that host and preserve other fetches.
       const previousFetch = globalThis.fetch;
       globalThis.fetch = async (input, init) => {
         const request = new Request(input, init);
@@ -224,15 +206,11 @@ export function slackDriver(
       const ts = threadStarted ? nextTs() : threadTs;
       const thread = threadStarted && !codeChannel ? { thread_ts: threadTs } : {};
       threadStarted = true;
-      // In a channel the default policy hears only mentions, so a person mentions the bot each
-      // time. On its own line, so the test model's line-based directives still read the message.
-      // A code channel hears every message.
       const event = dm
         ? { channel_type: "im", text, type: "message" }
         : codeChannel
           ? { channel_type: "channel", text, type: "message" }
           : { channel_type: "channel", text: `${text}\n<@${BOT}>`, type: "app_mention" };
-      // A message with uploads is a `file_share` in a DM; a mention carries its files as is.
       const shared: Record<string, unknown> = {};
       if (files.length > 0) {
         shared.files = files.map(slackFile);
@@ -249,8 +227,6 @@ export function slackDriver(
             ts,
             user: PEOPLE[person].id,
           },
-          // Slack names the installation that received the event, which is how eve knows its
-          // own bot user, e.g. to strip that mention from a typed answer.
           authorizations: [
             { is_bot: true, is_enterprise_install: false, team_id: TEAM, user_id: BOT },
           ],
@@ -266,7 +242,6 @@ export function slackDriver(
       if (!isMessageWrite(call) || body.blocks === undefined) return undefined;
       if (!JSON.stringify(body.blocks).includes(prompt)) return undefined;
       const messageTs = messageTsOf(call);
-      // A batch of approvals posts one card per request, each holding its own buttons.
       const card = hitlOptions(
         body.blocks.filter((block) => JSON.stringify(block).includes(prompt)),
         messageTs,
@@ -298,8 +273,6 @@ export function slackDriver(
         actions: [action],
         channel: { id: CHANNEL },
         message: { blocks, ...(!codeChannel && { thread_ts: threadTs }), ts: messageTs },
-        // Slack hands every press a URL that edits or deletes the pressed message, the only
-        // way to take an ephemeral one away. The path names the message so a post finds it.
         response_url: `https://${RESPONSE_URL_HOST}/actions/${TEAM}/${messageTs}/conformance`,
         team: { id: TEAM },
         type: "block_actions",
@@ -324,7 +297,6 @@ export function slackDriver(
   };
 }
 
-/** A message write a person sees; an ephemeral one only they see, such as a private sign-in. */
 function isMessageWrite(call: PlatformCall): boolean {
   return (
     call.method === "chat.postMessage" ||
@@ -333,14 +305,12 @@ function isMessageWrite(call: PlatformCall): boolean {
   );
 }
 
-/** A post's ts comes back from Slack; an update names the ts it rewrites. */
 function messageTsOf(call: PlatformCall): string {
   return call.method === "chat.update"
     ? (call.body as SlackMessageBody).ts!
     : (call.response as { readonly ts: string }).ts;
 }
 
-/** HITL buttons in `blocks`, each pressed as part of the whole message `messageBlocks`. */
 function hitlOptions(
   blocks: readonly unknown[],
   messageTs: string,
@@ -351,7 +321,6 @@ function hitlOptions(
   );
 }
 
-/** HITL widgets, and a sign-in prompt's Cancel, wherever a block nests them, as a renderer can. */
 function hitlElements(value: unknown): SlackElement[] {
   if (Array.isArray(value)) return value.flatMap(hitlElements);
   if (typeof value !== "object" || value === null) return [];
@@ -361,7 +330,6 @@ function hitlElements(value: unknown): SlackElement[] {
   return Object.values(value).flatMap(hitlElements);
 }
 
-/** Every `text` string in Block Kit, wherever a block nests it. */
 function blockTexts(value: unknown): string[] {
   if (Array.isArray(value)) return value.flatMap(blockTexts);
   if (typeof value !== "object" || value === null) return [];

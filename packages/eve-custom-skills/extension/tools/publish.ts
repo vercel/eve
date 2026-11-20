@@ -32,7 +32,6 @@ const { approval, execute } = skillChange({
     const live = planned.head.liveVersion;
     return {
       plan: planned,
-      // Making an earlier version live again is a rollback, which the card and approval rule name.
       ...(live !== null && input.version < live && { action: "rollback" as const }),
       changesLive: true,
       targets: [publishTarget(name, planned)],

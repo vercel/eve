@@ -51,7 +51,6 @@ const DEFINITION_KEYS = [
   "approval",
 ] as const;
 
-// A path-derived name joins file segments with "/"; the rest is what a tool name accepts.
 const SCHEDULE_COLLECTION_ID_PATTERN = /^(?=.{1,64}$)[a-zA-Z0-9_-]+(?:\/[a-zA-Z0-9_-]+)*$/u;
 
 const SCHEDULE_SCOPE_NAME_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/u;

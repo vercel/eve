@@ -14,7 +14,7 @@ test("npm and pnpm pack only the current release without changing the repository
   const manifest = {
     name: "eve",
     version: "1.2.3",
-    packageManager: "pnpm@12.17.0",
+    packageManager: "pnpm@12.21.0",
     repository: {
       type: "git",
       url: "git+https://github.com/vercel/eve.git",
@@ -44,10 +44,14 @@ test("npm and pnpm pack only the current release without changing the repository
   await writeFile(join(root, "dist/CHANGELOG.md"), "Stale notes.\n");
   const pnpmTarball = join(root, "pnpm.tgz");
   execFileSync("pnpm", ["pack", "--out", pnpmTarball], { cwd: root, stdio: "pipe" });
+  // npm adopts an inherited npm_config_user_agent, such as pnpm's when pnpm runs this test.
+  const npmEnv = { ...process.env };
+  delete npmEnv.npm_config_user_agent;
   assert.throws(
     () =>
       execFileSync("npm", ["pack", "--json", "--pack-destination", root], {
         cwd: root,
+        env: npmEnv,
         stdio: "pipe",
       }),
     (error) => {

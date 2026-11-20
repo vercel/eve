@@ -8,7 +8,6 @@ const SOURCE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..")
 const STATIC_IMPORT =
   /^\s*(?:import|export)\s+(type\s+)?([^;]*?)\s+from\s+["']([^"']+)["']|^\s*import\s+["']([^"']+)["']/gmu;
 
-/** Value imports only: type-only imports and specifier lists are erased at build. */
 function staticImports(file: string): string[] {
   const imports: string[] = [];
   for (const [, typeOnly, clause = "", from, sideEffect] of readFileSync(file, "utf8").matchAll(
@@ -25,12 +24,10 @@ function staticImports(file: string): string[] {
   return imports;
 }
 
-/** Every module the file reaches through static value imports, relative to src or bare. */
 function staticGraph(entry: string): Set<string> {
   const reached = new Set<string>();
   const pending = [join(SOURCE_ROOT, entry)];
   for (let file = pending.pop(); file !== undefined; file = pending.pop()) {
-    // Ids use `/` on every platform so they compare with the paths below.
     const id = file.startsWith(SOURCE_ROOT)
       ? relative(SOURCE_ROOT, file).split(sep).join("/")
       : file;
@@ -52,9 +49,6 @@ function staticGraph(entry: string): Set<string> {
 
 const FULL_TUI = ["cli/dev/tui/runner.ts", "client/index.ts", "ai"];
 
-// `eve dev` paints its prompt from startup.ts before the rest of the TUI loads,
-// so one new import here would put the runner and its dependencies back on the
-// prompt's path.
 describe("the eve dev startup prompt's module graph", () => {
   it("stays clear of the full TUI and the model SDK", () => {
     const graph = staticGraph("cli/dev/tui/startup.ts");

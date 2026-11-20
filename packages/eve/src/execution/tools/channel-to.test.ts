@@ -17,7 +17,6 @@ function inbox() {
     adapter: { kind: "channel:inbox" },
     receive,
   };
-  // Only the fields ctx.to() reads.
   const bundle: CompiledRuntimeAgentBundle = {
     compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
     graph: {

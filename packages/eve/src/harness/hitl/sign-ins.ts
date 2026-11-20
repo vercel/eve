@@ -7,18 +7,12 @@ import { activeTurnIdOf, type SessionProjection } from "#protocol/session-projec
 import { interactionOwner } from "#protocol/session-projection/selectors.js";
 import type { InteractionRow, SessionView } from "#protocol/session-projection/tables.js";
 
-// Which sign-in attempts replace which. Pure: the session state that holds them is
-// `requests.ts`'s.
-
-/** The failure `reason` of a sign-in the person declined at the provider (RFC 6749 `access_denied`). */
 export const SIGN_IN_DECLINED = "access_denied";
 
-/** What makes two sign-in attempts the same one. */
 interface SignInIdentity extends Pick<AuthorizationChallenge, "candidateId" | "grant" | "name"> {
   readonly principal?: SignInChallenge["principal"];
 }
 
-/** The pending sign-ins once `challenges` are asked for: each replaces the attempt it supersedes. */
 export function withSignIns(
   previous: readonly AuthorizationChallenge[],
   challenges: readonly AuthorizationChallenge[],
@@ -28,7 +22,6 @@ export function withSignIns(
   return [...previous.filter((challenge) => !superseded.includes(challenge)), ...active];
 }
 
-/** Keeps the last challenge for each sign-in and principal. */
 export function resolveActiveAuthorizationChallenges(
   challenges: readonly AuthorizationChallenge[],
 ): readonly AuthorizationChallenge[] {
@@ -38,7 +31,6 @@ export function resolveActiveAuthorizationChallenges(
   );
 }
 
-/** The attempts in `previous` that `replacements` replace: the same sign-in and principal. */
 export function supersededChallenges(
   previous: readonly AuthorizationChallenge[],
   replacements: readonly AuthorizationChallenge[],
@@ -48,11 +40,6 @@ export function supersededChallenges(
   );
 }
 
-/**
- * The sign-in that rules out asking again for the same grant and principal as `challenge`. In
- * this turn, that is one that ended without being completed, other than a retryable failure or an
- * invalid callback (see `rulesOutReasking`), such as one a new message withdrew.
- */
 export function terminalSignInFailure(
   projection: SessionProjection,
   challenge: SignInIdentity,
@@ -68,7 +55,6 @@ export function terminalSignInFailure(
       rulesOutReasking(row) &&
       sameSignIn(
         {
-          // A responder's sign-in is about their answer: the approval candidate it settles.
           candidateId: "responseId" in row.subject ? row.subject.responseId : undefined,
           grant: signIn.grant,
           name: signIn.name,
@@ -80,11 +66,6 @@ export function terminalSignInFailure(
   });
 }
 
-/**
- * Whether a settled sign-in rules out asking for it again in its turn. Only a completed sign-in,
- * a failure the provider says is worth retrying, and an invalid callback (not the person's
- * answer) leave the turn free to ask again.
- */
 function rulesOutReasking(row: InteractionRow): boolean {
   const { outcome } = row;
   switch (outcome) {
@@ -107,11 +88,6 @@ function rulesOutReasking(row: InteractionRow): boolean {
   }
 }
 
-/**
- * Same scope, or the same grant from another scope, such as two tools and a
- * connection that all use one Vercel Connect connector. Approval sign-ins
- * stay per candidate because each one settles its own approval.
- */
 function sameSignIn(left: SignInIdentity, right: SignInIdentity): boolean {
   const sameGrant =
     left.grant !== undefined &&
@@ -120,12 +96,6 @@ function sameSignIn(left: SignInIdentity, right: SignInIdentity): boolean {
   return (left.name === right.name || sameGrant) && samePrincipal(left.principal, right.principal);
 }
 
-/**
- * Whether one completion serves both relayed sign-ins: the same Vercel Connect grant for the same
- * principal, minted by the same deployment. Connect stores the grant once, and each asker reads it
- * for its own principal, so calling either one's callback completes it. A sign-in without a grant
- * needs the code its own callback carries, so another's answer never completes it.
- */
 export function sameRelayedSignIn(left: SignInChallenge, right: SignInChallenge): boolean {
   return (
     left.grant !== undefined &&
@@ -136,13 +106,6 @@ export function sameRelayedSignIn(left: SignInChallenge, right: SignInChallenge)
   );
 }
 
-/**
- * A sign-in opening with the attempt it waits on: the open one for the same grant and principal
- * the person already has a card for (`sameRelayedSignIn`), other than the ones in `closing`. Its
- * record and callback stay, and the answer to that card completes it too, so it waits only when
- * this session can call its callback (`callsBack`); any other keeps its own card. A
- * responder's sign-in is about its own answer, so it always has its own card.
- */
 export function waitingSignIn(
   view: SessionView,
   data: InteractionOpenedData,
@@ -175,7 +138,6 @@ export function waitingSignIn(
       };
 }
 
-/** Whether this session can call a sign-in's callback, and so complete it from another's answer. */
 export type CallsBack = (row: Pick<InteractionRow, "origin" | "request">) => boolean;
 
 function callbackOrigin(url: string | undefined): string | undefined {
@@ -191,7 +153,6 @@ function samePrincipal(
   return left.type === right.type && left.id === right.id && left.issuer === right.issuer;
 }
 
-/** The key a sign-in callback names its attempt by. */
 export function signInAttemptKey(challenge: AuthorizationChallenge): string {
   return challenge.attemptId ?? challenge.candidateId ?? challenge.name;
 }

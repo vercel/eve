@@ -6,33 +6,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { theme } from "./lib/theme.ts";
 
-/**
- * End-to-end proof that the *packed* eve artifact can open initial onboarding
- * after a consumer-shaped install.
- *
- * Every other smoke test resolves eve's modules inside the workspace, where
- * devDependencies are installed — so a runtime import of an undeclared
- * dependency still resolves and the bug ships. This test packs the built
- * package (`pnpm pack`), installs the tarball into an empty project with npm
- * (which installs only declared dependencies, exactly like a user install),
- * and drives the installed TUI through first-run connection setup with a minimal agent.
- *
- * Regression: eve 0.6.x–0.7.0 imported `oxc-parser` from the `/model` flow
- * while declaring it only as a devDependency. In a scaffolded project the
- * import threw `ERR_MODULE_NOT_FOUND`, which crashed `eve dev` with a silent
- * non-zero exit. This test fails at the harness import or at the menu wait
- * when any runtime dependency of the dist tree is missing from the packed
- * manifest's `dependencies`.
- *
- * Needs no agent server and no model credentials. Network: the consumer
- * `npm install` resolves eve's declared dependencies from the registry.
- */
 const root = dirname(fileURLToPath(import.meta.url));
 const packageRoot = resolve(root, "..", "..");
 
 process.env.EVE_TUI_UNICODE = "1";
 
-/** The harness surface this test uses from the installed package's dist. */
 interface PackedTuiHarness {
   EveTUIRunner: new (options: Record<string, unknown>) => { run(): Promise<void> };
   MockScreen: new (size: { columns: number; rows: number }) => {
@@ -54,7 +32,6 @@ interface PackedTuiHarness {
 void (async () => {
   const consumerRoot = await mkdtemp(join(tmpdir(), "eve-packed-install-"));
   try {
-    // A packed-install smoke must not discover the developer's real model accounts.
     process.env.HOME = consumerRoot;
     process.env.USERPROFILE = consumerRoot;
     process.env.XDG_DATA_HOME = join(consumerRoot, "data");
@@ -68,9 +45,6 @@ void (async () => {
       delete process.env[key];
     const tarballPath = join(consumerRoot, "eve.tgz");
 
-    // `--config.ignore-scripts=true` skips `prepack` (a full rebuild): the
-    // `test:tui` script already built the package, and packing must stay faithful
-    // to it. pnpm still resolves `catalog:` ranges in the packed manifest.
     await exec("pnpm", ["pack", "--config.ignore-scripts=true", "--out", tarballPath], packageRoot);
     console.log(theme.muted("[tui-packed-install] packed eve tarball"));
 
@@ -88,9 +62,6 @@ void (async () => {
       )}\n`,
       "utf8",
     );
-    // `--min-release-age=0` matches eve's own scaffold install (the packed
-    // manifest pins dependency versions younger than typical release-age
-    // cooldown windows).
     await exec(
       "npm",
       ["install", "--min-release-age=0", "--no-audit", "--no-fund", "--loglevel=error"],
@@ -98,8 +69,6 @@ void (async () => {
     );
     console.log(theme.muted("[tui-packed-install] consumer npm install completed"));
 
-    // Login reads the authored model before deciding which connection to reuse.
-    // Match the scaffold's layout while keeping eve's install free of devDependencies.
     const agentRoot = join(consumerRoot, "agent");
     await mkdir(agentRoot);
     await Promise.all([
@@ -110,9 +79,6 @@ void (async () => {
       writeFile(join(agentRoot, "instructions.md"), "Help Alice with her questions.\n"),
     ]);
 
-    // Imported by file URL: the harness is not on the package's `exports`
-    // map, and the point is to load the *installed* module graph — every
-    // bare specifier in it resolves against the consumer's node_modules.
     const harnessPath = join(consumerRoot, "node_modules/eve/dist/src/cli/dev/tui/test/index.js");
     const { EveTUIRunner, MockScreen, MockUserInput, createPromptCommandHandler } = (await import(
       pathToFileURL(harnessPath).href
@@ -122,7 +88,6 @@ void (async () => {
     const screen = new MockScreen({ columns: 100, rows: 40 });
     const input = new MockUserInput();
     const runner = new EveTUIRunner({
-      // `/login` runs before the first chat turn, so no client session exists yet.
       screen,
       userInput: input,
       name: "Packed install model command",
@@ -152,16 +117,11 @@ void (async () => {
     const runPromise = runner.run();
 
     try {
-      // The provider picker paints inside the shared onboarding journey before
-      // the first prompt only when its module graph loads — the exact surface
-      // the oxc-parser regression crashed.
-
       await screen.waitForText("Vercel Account", 15_000);
       await screen.waitForText("Anthropic API Key", 5_000);
       console.log(theme.muted("[tui-packed-install] /login opened connection setup"));
 
       input.send("\x1b");
-      // Cancelling first-run connection setup returns directly to chat.
       await screen.waitForIdlePrompt(5_000);
 
       input.type("/exit");
@@ -171,7 +131,6 @@ void (async () => {
     } catch (error) {
       console.error(`[tui-packed-install] screen at failure:\n${screen.snapshot()}`);
       input.ctrlC();
-      // Bound cleanup so a stalled runner cannot prevent the failure from being reported.
       await withTimeout(runPromise, 2_000, "runner did not unwind after ctrl-C").catch(() => {});
       throw error;
     }
@@ -183,7 +142,6 @@ void (async () => {
   process.exitCode = 1;
 });
 
-/** Runs a command to completion, failing loudly with its combined output. */
 function exec(command: string, args: readonly string[], cwd: string): Promise<void> {
   return new Promise((resolvePromise, rejectPromise) => {
     const child = spawn(command, [...args], { cwd, stdio: ["ignore", "pipe", "pipe"] });

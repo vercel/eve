@@ -18,12 +18,10 @@ const ALIAS_MARKER = "workflow-alias-resolved";
 const WORKFLOW_ASSET_MARKER = "workflow-raw-asset-embedded";
 const STEP_ASSET_MARKER = "step-raw-asset-embedded";
 
-/** The driver code the workflow build writes beside its entrypoint. */
 function readWorkflowCode(buildDir: string): Promise<string> {
   return readFile(join(buildDir, "workflows.code.txt"), "utf8");
 }
 
-/** The production server's bundled modules, joined. */
 async function readServerSources(outputDir: string): Promise<string> {
   const serverFiles = await readdir(join(outputDir, "server"), { recursive: true });
   const sources = await Promise.all(
@@ -77,8 +75,6 @@ export async function deliver() {
         },
       });
       const appRoot = await realpath(app.appRoot);
-      // One build: the server run below drives the aliased workflow, so the
-      // driver code the output embeds already proves the aliases resolved.
       const outputDir = await buildApplication(appRoot, { skipSandboxPrewarm: false });
       const serverSource = await readServerSources(outputDir);
       expect(serverSource).toContain(ALIAS_MARKER);
@@ -146,8 +142,6 @@ export async function deliver() {
     }
   });
 
-  // A workspace member without its own package.json shares the enclosing
-  // package, so its workflow may import modules and assets from outside the app root.
   it.each([
     { layout: "a standalone app", member: "", toPackageRoot: "../.." },
     { layout: "a workspace member", member: "agents/probe/", toPackageRoot: "../../../.." },
@@ -172,12 +166,9 @@ export async function deliver() {
     const outputDir = await buildApplication(appRoot, { skipSandboxPrewarm: false });
     const serverSource = await readServerSources(outputDir);
     expect(serverSource).toContain(STEP_ASSET_MARKER);
-    // The host bundles the driver code as a plain string, so the marker appears in the output.
     expect(serverSource).toContain(WORKFLOW_ASSET_MARKER);
   });
 
-  // The host and workflow bundles leave dependency imports to the host bundler,
-  // but an authored import of an installed package's file is still authored.
   it("embeds ?raw assets from node_modules imported by workflow and step modules", async () => {
     const app = await scenarioApp({
       name: "workflow-dependency-raw-assets",

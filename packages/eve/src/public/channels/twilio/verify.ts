@@ -10,22 +10,25 @@ import {
 /** Twilio auth token, materialized directly or from an async secret provider. */
 export type TwilioAuthToken = string | (() => string | Promise<string>);
 
+/**
+ * Public URL Twilio signed the webhook with, or a function of the request that returns it. Set it
+ * behind a proxy so signature verification matches the URL configured in Twilio.
+ */
 export type TwilioWebhookUrl = string | ((request: Request) => string | Promise<string>);
 
+/**
+ * Inbound Twilio webhook whose signature was verified: the raw form body and its parsed parameters.
+ */
 export interface TwilioVerifiedRequest {
   readonly body: string;
   readonly params: URLSearchParams;
 }
 
-/** Options for verifying Twilio inbound webhooks. */
 export interface TwilioVerifyOptions {
-  /** Auth token used to verify the signature. Defaults to `TWILIO_AUTH_TOKEN`. */
   readonly authToken: TwilioAuthToken | undefined;
-  /** Public URL Twilio signed. Set this when a proxy or tunnel rewrites `request.url`. */
   readonly webhookUrl?: TwilioWebhookUrl;
 }
 
-/** Resolves a Twilio auth token, falling back to `TWILIO_AUTH_TOKEN`. */
 export async function resolveTwilioAuthToken(authToken?: TwilioAuthToken): Promise<string> {
   try {
     return await resolveTwilioCredential(authToken, "TWILIO_AUTH_TOKEN");
@@ -37,12 +40,6 @@ export async function resolveTwilioAuthToken(authToken?: TwilioAuthToken): Promi
   }
 }
 
-/**
- * Verifies an inbound Twilio webhook and returns the raw body plus parsed params.
- *
- * This preserves Eve's existing error messages while delegating signature
- * semantics to the Chat SDK Twilio primitive.
- */
 export async function verifyTwilioRequest(
   request: Request,
   options: TwilioVerifyOptions,
@@ -66,7 +63,6 @@ export async function verifyTwilioRequest(
   }
 }
 
-/** Computes Twilio's HMAC-SHA1 request signature. */
 export function signTwilioRequest(input: {
   readonly authToken: string;
   readonly url: string;
@@ -76,7 +72,6 @@ export function signTwilioRequest(input: {
   return createHmac("sha1", input.authToken).update(base).digest("base64");
 }
 
-/** Builds the string Twilio signs for a webhook request. */
 export function buildTwilioSignatureBase(url: string, params: URLSearchParams): string {
   return twilioSignatureBase(url, params);
 }

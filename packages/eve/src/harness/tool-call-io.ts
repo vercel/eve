@@ -14,22 +14,15 @@ import { isObject } from "#shared/guards.js";
 import type { JsonObject } from "#shared/json.js";
 import { toModelSchema } from "#tools/schema.js";
 
-/** The result of checking one tool call's input the way a model-issued call is checked. */
 export type ToolCallInputCheck =
   | { readonly kind: "valid"; readonly value: JsonObject }
   | {
       readonly kind: "invalid";
-      /** What is wrong with the input, for a caller that reports it in its own words. */
       readonly issues: readonly StandardSchemaV1.Issue[];
       readonly message: string;
     }
   | { readonly kind: "threw"; readonly error: unknown };
 
-/**
- * Checks a tool call's input the way a conversation does: no input (or an
- * empty string) is `{}`, anything else that is not a JSON object is
- * rejected, and the rest must satisfy the schema the model was given.
- */
 export async function checkToolCallInput(
   definition: Pick<HarnessToolDefinition, "inputSchema" | "name">,
   input: unknown,
@@ -43,12 +36,10 @@ export async function checkToolCallInput(
   }
   let result: Awaited<ReturnType<NonNullable<ReturnType<typeof asSchema>["validate"]>>>;
   try {
-    // The schema the model sees; normalizing a malformed one throws like a validator.
     const schema = asSchema(toModelSchema(definition.inputSchema, "input"));
     if (schema.validate === undefined) return { kind: "valid", value };
     result = await schema.validate(value);
   } catch (error) {
-    // A validator that throws failed itself; its message is not a diagnostic of the input.
     return { error, kind: "threw" };
   }
   return result.success
@@ -64,7 +55,6 @@ function invalidInput(toolName: string, error: unknown): ToolCallInputCheck {
   };
 }
 
-/** The schema's own issues; any other failure is reported as one issue. */
 function schemaIssues(error: unknown): readonly StandardSchemaV1.Issue[] {
   const cause = TypeValidationError.isInstance(error) ? error.cause : undefined;
   return Array.isArray(cause) && cause.every(isIssue)
@@ -76,10 +66,6 @@ function isIssue(value: unknown): value is StandardSchemaV1.Issue {
   return isObject(value) && typeof value.message === "string";
 }
 
-/**
- * What the model sees for a tool's output: pending sign-in text, the
- * author's `toModelOutput`, or the output as text or JSON.
- */
 export async function toolCallModelOutput(
   definition: Pick<HarnessToolDefinition, "name" | "toModelOutput">,
   output: unknown,

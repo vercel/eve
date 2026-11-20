@@ -66,7 +66,6 @@ describe("normalizeScheduleCollectionDefinition", () => {
     expect(() => normalizeScheduleCollectionDefinition(definition, "Invalid.")).toThrow(
       '"scopes.personal.approval" cannot be configured when tool is false',
     );
-    // The same scope without approval is a valid code-only definition.
     const { approval: _approval, ...personal } = invalid.scopes.personal;
     expect(() =>
       normalizeScheduleCollectionDefinition(

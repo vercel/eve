@@ -1,5 +1,4 @@
-// Shapes adapted from @ai-sdk/provider-utils 5.0.58 (Apache-2.0).
-// Kept locally so authoring types do not depend on the app's AI SDK version.
+/*! Shapes adapted from @ai-sdk/provider-utils 5.0.58 (Apache-2.0). */
 
 type JSONValue =
   | null

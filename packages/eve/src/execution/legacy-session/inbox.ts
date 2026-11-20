@@ -9,14 +9,17 @@ import {
   sessionCommandHookToken,
   sessionInboxHookToken,
 } from "#execution/session-inbox/address.js";
-import { lookupSessionOwnerHook, resumeRunnableHook } from "#execution/session-inbox/owner.js";
+import {
+  assertRunnableSessionOwner,
+  lookupSessionOwnerHook,
+  resumeRunnableHook,
+} from "#execution/session-inbox/owner.js";
 import { getHookByToken } from "#internal/workflow/runtime.js";
 import { isObject } from "#shared/guards.js";
 
 type Command = DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload;
 type Hook = Awaited<ReturnType<typeof getHookByToken>>;
 
-/** Reported as an inactive session so the channel starts a fresh one. */
 export class UnsupportedLegacySessionError extends Error {
   constructor() {
     super("This session predates eve 0.45 and cannot be continued. Start a new session.");
@@ -24,18 +27,9 @@ export class UnsupportedLegacySessionError extends Error {
   }
 }
 
-/**
- * Oldest driver wire version still accepted. Drivers started before eve 0.45
- * used an unversioned envelope; those sessions report themselves inactive so
- * the channel starts a fresh session instead of misdelivering.
- */
 const MIN_LEGACY_WIRE_VERSION = 1;
 const MAX_LEGACY_WIRE_VERSION = 7;
 
-/**
- * Finds the pre-cutover hook for a logical token. Once that session has been
- * imported, its current-generation inbox owns delivery and `current` is true.
- */
 export async function resolveLegacyInbox(
   token: string,
 ): Promise<{ hook: Hook; sessionId: string; current: boolean }> {
@@ -65,12 +59,12 @@ export async function resumeLegacyInbox(token: string, command: Command) {
       command,
       isObject(metadata) ? metadata.sessionInboxWireVersion : undefined,
     );
+    await assertRunnableSessionOwner({ runId: target.hook.runId, hook: target.hook });
   }
   const hook = await resumeRunnableHook(target.hook.token, payload);
   return { ownerRunId: hook.runId, sessionId: Promise.resolve(target.sessionId) };
 }
 
-/** Frozen producer projection for driver wire versions 1–7; old consumers validate for themselves. */
 export function encodeLegacyCommand(command: Command, declaredVersion: unknown): unknown {
   const version = declaredVersion;
   if (

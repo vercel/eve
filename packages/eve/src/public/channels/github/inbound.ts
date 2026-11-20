@@ -77,7 +77,6 @@ export function githubContinuationToken(input: {
   )}`;
 }
 
-/** Returns true when a comment @mentions the bot and should wake the channel. */
 export function shouldDispatchGitHubComment(input: {
   readonly author?: GitHubUser;
   readonly body: string;
@@ -87,7 +86,6 @@ export function shouldDispatchGitHubComment(input: {
   return extractGitHubCommentTrigger(input) !== null;
 }
 
-/** Extracts and strips the bot `@mention` from a comment body. */
 export function extractGitHubCommentTrigger(input: {
   readonly body: string;
   readonly botName?: string;
@@ -104,7 +102,6 @@ export function extractGitHubCommentTrigger(input: {
   return { kind: "mention", message, token: mention[0] };
 }
 
-/** Parses GitHub webhook headers and body into an eve-owned event shape. */
 export function parseGitHubWebhookEvent(input: {
   readonly body: string;
   readonly contentType?: string;
@@ -178,7 +175,6 @@ function readHeader(headers: Headers, name: string): string | undefined {
   return value && value.length > 0 ? value : undefined;
 }
 
-/** Renders deterministic GitHub metadata for the model-visible turn. */
 export function formatGitHubContextBlock(input: {
   readonly botName?: string;
   readonly commentUrl?: string;

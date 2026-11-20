@@ -1,4 +1,3 @@
-// @linux-only: coordination admission on Workflow
 import { describe, expect, it } from "vitest";
 import { dispatchCoordinationStep } from "#execution/workflow-host/dispatch-step.js";
 import { readDurableSession } from "#execution/durable-session-read.js";
@@ -62,7 +61,6 @@ describe("coordination dispatch", () => {
       const admitted = ["allowed-1", "allowed-2"].map((callId) =>
         admitWorkflowTask({ ...request, callId }, mintClearance(callId)),
       );
-      // A refused task call drops the task its call recorded, so it never counts against the cap.
       const created = createTask(readTaskTable(undefined), {
         callId: "legacy-task",
         kind: "tool",
@@ -150,8 +148,6 @@ describe("coordination dispatch", () => {
     });
 
     await runtime.run(async () => {
-      // An agent the run opens can share the session's sandbox and create it
-      // under the session's key, which the session's own state never records.
       const dispatching = await runUntilSessionEnds('Run deploy_service with service "api"');
       const plain = await runUntilSessionEnds("hello there");
 

@@ -1,4 +1,3 @@
-// @linux-only: tool-stub target names; compiled from memory
 import { expect, it, vi } from "vitest";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { defineTool } from "#tools/definition.js";

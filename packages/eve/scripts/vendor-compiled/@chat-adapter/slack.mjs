@@ -1,17 +1,5 @@
 import { createDeclarationCopier, createOptionalNativeStubPlugin } from "../_shared.mjs";
 
-/**
- * Stub for `@chat-adapter/shared`. The slack adapter re-exports two names
- * (`EncryptedTokenData`, `decodeKey`) from this package but eve never
- * touches them, so we only need declarations precise enough for the
- * upstream `.d.ts` to satisfy `verbatimModuleSyntax`.
- *
- * If a future chat-adapter version starts re-exporting additional names
- * from `@chat-adapter/shared`, this builder needs to learn about them or
- * the stub becomes incomplete — the `unknown` fallback at the bottom
- * keeps the vendor step succeeding so the gap is noticed without
- * breaking the build.
- */
 function buildChatAdapterSharedStub(names, moduleName) {
   const declarations = {
     EncryptedTokenData: `export interface EncryptedTokenData {
@@ -56,13 +44,6 @@ function buildSlackWebApiStub(names, moduleName) {
   return `${lines.join("\n")}\n`;
 }
 
-/**
- * Type declarations are copied verbatim from the installed
- * @chat-adapter/slack version so eve's `SlackAdapter` tracks the real
- * package shape. The chat-typed methods on `SlackAdapter` (post / edit /
- * delete / …) feed directly into the `Thread` interface consumers see
- * via `ctx.thread`.
- */
 export default {
   packageName: "@chat-adapter/slack",
   compiledPath: "@chat-adapter/slack",

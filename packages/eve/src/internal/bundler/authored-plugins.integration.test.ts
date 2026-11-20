@@ -19,10 +19,6 @@ function writePackage(root: string, files: Record<string, string>): void {
   for (const [file, content] of Object.entries(files)) writeFileSync(join(root, file), content);
 }
 
-/**
- * An app whose generated entry imports an installed package by its resolved path, as hosted
- * builds' generated modules do. The package and one of its dependencies import text assets.
- */
 function createHostBundledPackageApp(): { entry: string; packageRoot: string; appRoot: string } {
   const appRoot = realpathSync(mkdtempSync(join(tmpdir(), "eve-host-bundled-assets-")));
   scratchRoots.push(appRoot);
@@ -57,11 +53,6 @@ function createHostBundledPackageApp(): { entry: string; packageRoot: string; ap
   return { appRoot, entry, packageRoot };
 }
 
-/**
- * An app whose generated entry imports a store-installed TypeScript source package by its
- * resolved path, outside the app package as in a workspace's pnpm store. The package resolves
- * `~/*` through its own tsconfig `paths`.
- */
 function createHostBundledAliasApp(): { entry: string; packageRoot: string; appRoot: string } {
   const appRoot = realpathSync(mkdtempSync(join(tmpdir(), "eve-host-bundled-aliases-")));
   const storeRoot = realpathSync(mkdtempSync(join(tmpdir(), "eve-host-bundled-alias-store-")));
@@ -81,21 +72,11 @@ function createHostBundledAliasApp(): { entry: string; packageRoot: string; appR
   return { appRoot, entry, packageRoot };
 }
 
-/**
- * An app whose generated entry imports three host-bundled packages by their resolved paths and
- * one other installed package by name. Two host-bundled packages sit in directories their names
- * do not give away: under a scope, and under an npm alias. The third is linked from outside
- * `node_modules` and loads a module from a directory of its own `node_modules` that names no
- * package. Every package imports a relative module, and the other package imports a further
- * installed package.
- */
 function createInstalledPackagesApp(): {
   appRoot: string;
   entry: string;
   hostBundledPackageRoots: string[];
 } {
-  // The native realpath, which the package scope also takes of its roots: only it expands the
-  // 8.3 short name a Windows temporary directory can arrive as.
   const appRoot = realpathSync.native(mkdtempSync(join(tmpdir(), "eve-installed-packages-")));
   scratchRoots.push(appRoot);
   writeFileSync(join(appRoot, "package.json"), JSON.stringify({ name: "app", type: "module" }));
@@ -143,7 +124,6 @@ function createInstalledPackagesApp(): {
   return { appRoot, entry, hostBundledPackageRoots };
 }
 
-/** Records the importer of every `resolveId` call that reaches a plugin's handler. */
 function recordHandledImporters(plugins: Plugin[], importers: string[]): Plugin[] {
   return plugins.map((plugin) => {
     const hook = plugin.resolveId;

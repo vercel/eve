@@ -79,7 +79,6 @@ describe("startGitInitialization", () => {
     await withGitIdentity(async () => {
       const git = startGitInitialization(projectPath);
       await git.settled();
-      // Windows can't remove a directory that a running Git process uses as its working directory.
       await rm(projectPath, { recursive: true });
     });
 

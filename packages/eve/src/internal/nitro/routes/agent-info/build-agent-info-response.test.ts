@@ -18,7 +18,6 @@ import { defineMemory } from "#public/memory/index.js";
 describe("buildAgentInfoResponse", () => {
   it("keeps the public inspection and health contracts aligned with their validators", () => {
     type ValidatedInfo = ReadonlyDeep<z.output<typeof AgentInfoResultSchema>>;
-    // Flatten interfaces and intersections while preserving keys and modifiers.
     type Shape<T> = T extends object ? { [K in keyof T]: Shape<T[K]> } : T;
     expectTypeOf<Shape<AgentInfoResult>>().toEqualTypeOf<Shape<ValidatedInfo>>();
     expectTypeOf<HealthResult>().toEqualTypeOf<z.output<typeof HealthResultSchema>>();
@@ -167,8 +166,6 @@ describe("buildAgentInfoResponse", () => {
     });
     const model = manifest.config.model;
     if (model === undefined) throw new Error("Expected a static compiled model.");
-    // The shipped BYOK scaffold places the owner's provider key under
-    // `gateway.byok`; a custom provider may carry other credential fields.
     model.providerOptions = {
       gateway: {
         byok: { openai: [{ apiKey: "sk-canary-byok" }] },
@@ -195,7 +192,6 @@ describe("buildAgentInfoResponse", () => {
     expect(serialized).not.toContain("sk-canary-direct");
     expect(serialized).not.toContain("canary-header");
     expect(serialized).not.toContain("sk-canary-unrecognized");
-    // Non-secret options survive for the dev TUI (`gateway.serviceTier`).
     expect(response.agent.model.providerOptions).toEqual({
       gateway: { serviceTier: "priority" },
     });

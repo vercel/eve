@@ -95,11 +95,7 @@ function dependencies(
       }
       return addAgentToProject(merged);
     },
-    // Stubbed to "no visible manager" so assertions do not depend on which
-    // manager launched the test runner itself.
     detectInvokingPackageManager: vi.fn(() => undefined),
-    // Stubbed to "human launch" for the same reason: the runner is often
-    // launched by a coding agent, and these tests assert the human path.
     isCodingAgentLaunch: vi.fn(async () => false),
     now: vi.fn(() => 0),
     detectPackageManager,
@@ -145,7 +141,12 @@ function fakeOnboarding(
   };
 }
 
-/** A host project the dir-mode tests target: package.json plus a pnpm lockfile. */
+async function handedOffRows(deps: ReturnType<typeof dependencies>): Promise<string[]> {
+  const onboarding = await deps.startInitOnboarding.mock.results[0]?.value;
+  const close = onboarding?.close as ReturnType<typeof fakeOnboarding>["close"] | undefined;
+  return (close?.mock.calls[0]?.[0]?.rows ?? []).map(stripAnsi);
+}
+
 async function createHostProject(
   parentDirectory: string,
   packageJson: Record<string, unknown> = { name: "host-app" },
@@ -182,7 +183,6 @@ describe("runInitCommand", () => {
       );
       const output = logger();
       const deps = dependencies();
-      // Without the onboarding screen, the install shows on init's own progress row.
       deps.startInitOnboarding.mockRejectedValue(new Error("terminal UI unavailable"));
       deps.runPackageManagerInstall.mockImplementation(async (_kind, _path, options) => {
         expect(screen.snapshot()).toContain("Installing dependencies");
@@ -218,7 +218,6 @@ describe("runInitCommand", () => {
       const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-chat-"));
       const output = logger();
       const deps = dependencies();
-      // Covers onboarding inside `eve dev`, the fallback when init can't open it during the install.
       deps.startInitOnboarding.mockRejectedValue(new Error("terminal UI unavailable"));
       const screen = new MockScreen({ columns: 100, rows: 30 });
       const input = new MockUserInput();
@@ -356,7 +355,6 @@ describe("runInitCommand", () => {
         expect(screen.rawOutput()).not.toContain("\u001B[3J");
         expect(transcript.match(/☰eve v/gu) ?? []).toHaveLength(startsDevelopment ? 0 : 1);
         expect(deps.spawnPackageManager).toHaveBeenCalledTimes(startsDevelopment ? 1 : 0);
-        // Onboarding during the install opens only where eve dev would start.
         expect(deps.startInitOnboarding).toHaveBeenCalledTimes(startsDevelopment ? 1 : 0);
       } finally {
         for (const [index, key] of properties.entries()) {
@@ -555,7 +553,6 @@ describe("runInitCommand", () => {
     await expect(pathExists(join(projectPath, "app"))).resolves.toBe(false);
     await expect(pathExists(join(projectPath, ".vercel"))).resolves.toBe(false);
     await expect(pathExists(join(projectPath, "vercel.json"))).resolves.toBe(false);
-    // No visible invoking manager: the scaffold stays pnpm-managed.
     await expect(pathExists(join(projectPath, "pnpm-workspace.yaml"))).resolves.toBe(true);
     expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
       "pnpm",
@@ -571,10 +568,8 @@ describe("runInitCommand", () => {
       "--onboarded",
     ]);
     const messages = output.messages.map(stripAnsi);
-    // The onboarding screen shows the install and Git phases instead of init's progress row.
-    expect(messages).toEqual([
-      "",
-      "Creating agent...",
+    expect(messages).toEqual(["", "Creating agent..."]);
+    await expect(handedOffRows(deps)).resolves.toEqual([
       `✓ Created an eve agent in ${projectPath} in 13.8s`,
       "",
     ]);
@@ -698,7 +693,6 @@ describe("runInitCommand", () => {
         projectRoot,
         expect.anything(),
       );
-      // An existing project already has its own setup; eve dev onboards it if needed.
       expect(deps.startInitOnboarding).not.toHaveBeenCalled();
     },
   );
@@ -748,7 +742,7 @@ describe("runInitCommand", () => {
         "dev",
         "--onboarded",
       ]);
-      expect(output.messages.map(stripAnsi).join("\n")).toContain(
+      expect((await handedOffRows(deps)).join("\n")).toContain(
         `Created an eve agent in ${projectPath}`,
       );
     },
@@ -794,8 +788,6 @@ describe("runInitCommand", () => {
       expect(await readFile(join(projectPath, "agent/agent.ts"), "utf8")).toContain(
         DEFAULT_AGENT_MODEL_ID,
       );
-      // The workspace policy is pnpm configuration; a scaffold owned by
-      // another manager must not receive it.
       await expect(pathExists(join(projectPath, "pnpm-workspace.yaml"))).resolves.toBe(false);
       const packageJson: unknown = JSON.parse(
         await readFile(join(projectPath, "package.json"), "utf8"),
@@ -920,10 +912,11 @@ describe("runInitCommand", () => {
     expect(JSON.parse(await readFile(join(workspaceRoot, "package.json"), "utf8"))).toMatchObject({
       engines: { node: "26.x" },
     });
-    expect(output.messages.join("\n")).toContain(
+    const summary = (await handedOffRows(deps)).join("\n");
+    expect(summary).toContain(
       `⚠ Updated workspace root configuration at ${join(workspaceRoot, "pnpm-workspace.yaml")}`,
     );
-    expect(output.messages.join("\n")).toContain(
+    expect(summary).toContain(
       `⚠ Updated workspace root package.json at ${join(workspaceRoot, "package.json")} (Overrode package.json engines.node from "22.x" to "26.x"`,
     );
     expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
@@ -1070,7 +1063,6 @@ describe("runInitCommand", () => {
       expect(rootPackageJson.engines?.node).toBe("26.x");
       expect(rootPackageJson.overrides).toBeUndefined();
       expect(rootPackageJson.resolutions).toBeUndefined();
-      // A workspace's tree isn't eve's alone, so npm still resolves its peers.
       expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
         kind,
         projectPath,
@@ -1118,7 +1110,7 @@ describe("runInitCommand", () => {
     await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
 
     const projectPath = join(parentDirectory, "my-agent");
-    expect(stripAnsi(output.errors.join("\n"))).toContain(
+    expect((await handedOffRows(deps)).join("\n")).toContain(
       `Git initialization failed during commit: commit refused\nThe eve agent was created successfully. Git repository metadata and staged files were preserved at "${projectPath}"; the initial commit is optional.\n\nTo create it later, configure Git identity and run:\n  git -C ${JSON.stringify(projectPath)} commit -m "Initial commit from eve"`,
     );
     expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectPath, [
@@ -1204,9 +1196,6 @@ describe("runInitCommand", () => {
     expect(agentSource).toContain('reasoning: "high"');
     await expect(pathExists(join(projectRoot, "agent/instructions.md"))).resolves.toBe(true);
     await expect(pathExists(join(projectRoot, "agent/channels/eve.ts"))).resolves.toBe(true);
-    // Missing runtime deps are added; ones the project already declares stay.
-    // A node engine is declared so Vercel builds on a supported Node rather
-    // than a stale dashboard pin.
     expect(JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8"))).toMatchObject({
       dependencies: { "@vercel/connect": "0.2.2", ai: "7.0.0", eve: "^0.6.0", zod: "^3.25.0" },
       engines: { node: "26.x" },
@@ -1216,7 +1205,6 @@ describe("runInitCommand", () => {
       projectRoot,
       expect.objectContaining({ skipPeerDependencyResolution: false }),
     );
-    // An existing project's history is its own; only fresh scaffolds get git init.
     expect(deps.startGitInitialization).not.toHaveBeenCalled();
     expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectRoot, [
       "--reporter=silent",
@@ -1400,8 +1388,6 @@ describe("runInitCommand", () => {
       expect(JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8"))).toMatchObject({
         dependencies: { eve: "^0.6.0" },
       });
-      // The workspace policy is pnpm configuration; it must not leak into
-      // projects owned by other managers.
       await expect(pathExists(join(projectRoot, "pnpm-workspace.yaml"))).resolves.toBe(false);
       expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
         kind,
@@ -1550,8 +1536,6 @@ describe("runInitCommand", () => {
       expect.anything(),
     );
     expect(deps.startGitInitialization).toHaveBeenCalledWith(projectPath);
-    // The dev server is handed off as text, never spawned — the dev TUI would
-    // wedge the launching agent. The handoff's content is the unit test's job.
     expect(deps.spawnPackageManager).not.toHaveBeenCalled();
     const messages = stripAnsi(output.messages.join("\n"));
     expect(messages).toContain(`✓ Model ${DEFAULT_AGENT_MODEL_ID} (eve default)`);
@@ -1606,8 +1590,6 @@ describe("runInitCommand", () => {
     const projectPath = join(parentDirectory, "my-agent");
     const output = logger();
     const deps = dependencies();
-    // Git is still setting up when the install fails. Windows can't remove a directory that a
-    // running process uses as its working directory, so cleanup has to wait for Git.
     const gitSetup = Promise.withResolvers<void>();
     const commit = vi.fn<GitInitialization["commit"]>(async () => ({ kind: "initialized" }));
     const settled = vi.fn<GitInitialization["settled"]>(() => gitSetup.promise);
@@ -1689,7 +1671,6 @@ describe("runInitCommand", () => {
     });
     deps.runPackageManagerInstall.mockImplementation(async (_kind, _root, options) => {
       events.push("install");
-      // The onboarding screen owns stdin, so the install must not read it.
       expect(options?.nonInteractive).toBe(true);
       return packageInstallResult();
     });
@@ -1711,7 +1692,6 @@ describe("runInitCommand", () => {
 
     expect(events).toEqual([`onboarding:${projectPath}`, "install", "installed"]);
     expect(onboarding.close).toHaveBeenCalled();
-    // The prompt travels in the environment: Windows shells split argv, and argv shows in `ps`.
     expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectPath, [
       "--reporter=silent",
       "exec",
@@ -1725,17 +1705,19 @@ describe("runInitCommand", () => {
     });
   });
 
-  it("points to /login when onboarding during the install was cancelled", async () => {
+  it("prints the summary in place of the onboarding screen's preamble", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-onboard-cancel-"));
+    const projectPath = join(parentDirectory, "my-agent");
     const output = logger();
     const deps = dependencies();
     deps.startInitOnboarding.mockResolvedValue(fakeOnboarding({ cancelled: true }));
 
     await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
 
-    expect(output.messages.map(stripAnsi)).toContain(
-      "Connect a model with /login when you’re ready.",
-    );
+    const preamble = deps.startInitOnboarding.mock.calls[0]?.[0].preamble?.map(stripAnsi);
+    expect(preamble).toEqual([`○ Creating an eve agent in ${projectPath}`, ""]);
+    const rows = await handedOffRows(deps);
+    expect(rows).toEqual([`✓ Created an eve agent in ${projectPath} in 0ms`, ""]);
     expect(deps.spawnPackageManager.mock.calls[0]?.[2]).toContain("--onboarded");
   });
 
@@ -1789,7 +1771,6 @@ describe("runInitCommand", () => {
       `Cancelled. eve removed the incomplete project at "${projectPath}".`,
     );
     expect(output.errors).toEqual([]);
-    // Like an interrupted CLI, so `eve init my-agent && cd my-agent` stops here.
     expect(process.exitCode).toBe(130);
     expect(deps.spawnPackageManager).not.toHaveBeenCalled();
   });
@@ -1851,7 +1832,6 @@ describe("runInitCommand", () => {
     const run = runInitCommand(logger(), parentDirectory, "my-agent", {}, deps);
     await vi.waitFor(() => expect(deps.runPackageManagerInstall).toHaveBeenCalled());
     await new Promise((resolve) => setTimeout(resolve, 20));
-    // A provider choice can still rewrite agent.ts, so the commit waits for it.
     expect(commit).not.toHaveBeenCalled();
     finished.resolve({ cancelled: false });
     await run;
@@ -2057,7 +2037,6 @@ describe("runInitCommand", () => {
       const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-progress-"));
       const output = logger();
       const deps = dependencies();
-      // Without the onboarding screen, the install shows on init's own progress row.
       deps.startInitOnboarding.mockRejectedValue(new Error("terminal UI unavailable"));
       const screen = new MockScreen({ columns: 80, rows: 10 });
       const snapshots: string[] = [];

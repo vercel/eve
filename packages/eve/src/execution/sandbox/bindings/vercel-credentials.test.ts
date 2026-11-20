@@ -105,8 +105,6 @@ describe("getVercelSandboxCredentials", () => {
       oidc.getVercelOidcToken.mockImplementation(actual.getVercelOidcToken);
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
-      // Model CI without cached OIDC tokens or a Vercel CLI login. Keep the
-      // vendored helper's expiry check and refresh/failure handling real.
       vi.spyOn(fs, "existsSync").mockReturnValue(false);
       vi.spyOn(fs, "readFileSync").mockReturnValue("{}");
       const ambient = oidcToken({ exp: nowSeconds() + secondsLeft });

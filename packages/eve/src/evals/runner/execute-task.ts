@@ -25,27 +25,16 @@ import { EvalRequirementFailed, EvalSkipped } from "#evals/control-flow.js";
 
 const EVAL_TIMEOUT_CLEANUP_TIMEOUT_MS = 5_000;
 
-/**
- * Options for executing one eval's task.
- */
 interface ExecuteTaskOptions {
   readonly client: Client;
   readonly evaluation: EveEval;
-  /** Receives each `t.log` line as it is written (used by `--verbose`). */
   readonly onLog?: (message: string) => void;
-  /** Receives the first trace context observed for each session. */
   readonly onSessionStart?: (event: EvalSessionStartedEvent) => void;
-  /** Shared setup context; stays in the runner process. */
   readonly setupContext?: unknown;
   readonly target: EveEvalTargetHandle;
   readonly timeoutMs?: number;
 }
 
-/**
- * Task result plus the assertions the eval's `test(t)` recorded. `error` is
- * set when the `test` body threw (e.g. a failed `expectOk()` or a bespoke
- * `throw`); the partial run is still captured so recorded assertions report.
- */
 interface ExecuteTaskResult {
   readonly result: EveEvalTaskResult;
   readonly assertions: readonly AssertionResult[];
@@ -53,11 +42,6 @@ interface ExecuteTaskResult {
   readonly skipReason?: string;
 }
 
-/**
- * Executes one eval's `test(t)` against an eve agent target: drives the
- * session(s), captures the run, then finalizes the recorded assertions
- * against the completed task result.
- */
 export async function executeTask(options: ExecuteTaskOptions): Promise<ExecuteTaskResult> {
   const { client, evaluation, target, timeoutMs } = options;
   const signal = timeoutMs !== undefined ? AbortSignal.timeout(timeoutMs) : neverAbortSignal();
@@ -160,11 +144,6 @@ function collectTraceContexts(
   });
 }
 
-/**
- * Each session's facts once. Handles that read the same session, such as a turn watched after
- * the handle that sent it, saw parts of one stream: a call one requested, another settled. Their
- * events merge by position before facts are derived.
- */
 function derivedBySession(
   sessions: readonly EveEvalSessionResult[],
 ): readonly EveEvalSessionResult["derived"][] {
@@ -198,7 +177,6 @@ function derivedBySession(
   });
 }
 
-/** The facts of every session an eval read, each session's handles read as one stream. */
 export function combineDerivedFacts(
   sessions: readonly EveEvalSessionResult[],
 ): EveEvalDerivedFacts {
@@ -219,7 +197,6 @@ export function combineDerivedFacts(
     subagentCalls,
     subagentCallCount: subagentCalls.length,
     interactions,
-    // A session read in several handles is parked only if its merged stream still is.
     parked: derived.some((facts) => facts.parked),
     messageCount: sum(sessions, (session) => session.derived.messageCount),
     reasoningBlockCount: sum(sessions, (session) => session.derived.reasoningBlockCount),
@@ -229,15 +206,6 @@ export function combineDerivedFacts(
   };
 }
 
-/**
- * The eval's usage: each captured session's latest usage, counted once however often the eval
- * captured it, less the sessions another captured session opened, whose spend that session already
- * counts. No usage when a counted session reported none, and no cost when a counted session reported
- * none, so a partial sum never reads as the eval's cost.
- *
- * "Latest" is by time across captures, not capture order: an eval can capture a session again with
- * an earlier snapshot (fewer events) after a fuller capture.
- */
 function evalUsage(sessions: readonly EveEvalSessionResult[]): TokenUsage | undefined {
   const opened = new Set(
     sessions.flatMap((session) =>
@@ -248,8 +216,6 @@ function evalUsage(sessions: readonly EveEvalSessionResult[]): TokenUsage | unde
   );
   const latestById = new Map<string | undefined, { at: number; usage: TokenUsage | undefined }>();
   for (const session of sessions) {
-    // A capture that recorded no usage never replaces one that did; on equal times the later
-    // capture wins.
     const at = lastUsageRecordedAt(session.events) ?? -Infinity;
     const prior = latestById.get(session.sessionId);
     if (prior === undefined || at >= prior.at)
@@ -278,10 +244,6 @@ function selectPrimarySessionId(sessions: readonly EveEvalSessionResult[]): stri
   return sessions.find((session) => session.primary)?.sessionId ?? sessions[0]?.sessionId;
 }
 
-/**
- * Extracts the {@link RuntimeIdentity} from the first `session.started` event
- * in the stream, if present.
- */
 function extractRuntimeIdentity(
   events: readonly SessionStreamEvent[],
 ): RuntimeIdentity | undefined {

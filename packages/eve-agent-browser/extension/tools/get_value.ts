@@ -1,4 +1,4 @@
 import { catalogTool } from "../lib/catalog";
 
-// Outside the `core` profile: found with eve__search instead of listed every turn.
+/** Lets the agent read the current value of an input. Deferred: the agent finds it with tool search. */
 export default catalogTool("get_value", { deferred: true });

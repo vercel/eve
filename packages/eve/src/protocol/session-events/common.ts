@@ -1,6 +1,3 @@
-// Schemas for the values facts share, and the check that ties each schema to its public type.
-// Schemas serve tests and development only; readers never load them.
-
 import { z } from "#compiled/zod/index.js";
 
 import type {
@@ -14,11 +11,6 @@ import type {
   ValueReference,
 } from "./envelope.js";
 
-/**
- * A schema that parses to exactly `T`. Checked at compile time both ways, so the build fails when
- * the two drift apart: a field one has and the other lacks, a field one requires and the other
- * leaves optional, or a value one accepts and the other doesn't.
- */
 export function conforming<T>() {
   return <TSchema extends z.ZodType>(
     schema: TSchema &
@@ -36,19 +28,12 @@ export function conforming<T>() {
 
 type KeysOf<T> = T extends unknown ? keyof T : never;
 
-/** Public types are read-only and parsed values aren't; only the shapes are compared. */
 type DeepReadonly<T> = T extends readonly (infer U)[]
   ? readonly DeepReadonly<U>[]
   : T extends object
     ? { readonly [K in keyof T]: DeepReadonly<T[K]> }
     : T;
 
-/**
- * A string whose values the stream names: it parses open, so a reader keeps what a newer writer
- * sends, and types as the values known today, so a reader's switch keeps a default branch.
- * A plain string, not `z.custom`, so schemas published as JSON Schema (MCP tool output) can
- * still describe it.
- */
 export function known<T extends string>(): z.ZodType<T>;
 export function known(): z.ZodType<string> {
   return z.string();
@@ -141,7 +126,6 @@ export const userPart = conforming<UserPart>()(
   ]),
 );
 
-/** The schema of one fact or progress record's envelope around its payload. */
 export function envelopeOf<TType extends string>(type: TType, data: z.ZodType) {
   return z.object({ data, scope: scope.optional(), type: z.literal(type) });
 }

@@ -13,16 +13,13 @@ import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agen
 
 type ScheduleDispatchBundle = Pick<CompiledRuntimeAgentBundle, "compiledArtifactsSource" | "graph">;
 
-/** Dispatches an at-least-once callback and reports the sessions it started, if any. */
 export async function dispatchScheduledOccurrence(input: {
   readonly bundle: ScheduleDispatchBundle;
-  /** The runtime the occurrence's sessions start in: the host's. */
   readonly runtime: Runtime;
   readonly collection: string;
   readonly definition: DynamicSchedulesDefinition<any, any, any>;
   readonly occurrence: ScheduleOccurrenceIdentity;
   readonly payload: ScheduleCollectionPayload<unknown>;
-  /** The namespace a provider delivered the occurrence from, after `verifyDelivery` checks it. */
   readonly namespace?: string;
   readonly verifyDelivery?: () => Promise<void>;
 }): Promise<void> {
@@ -31,8 +28,6 @@ export async function dispatchScheduledOccurrence(input: {
     displayName: scheduleDisplayName(input.occurrence.name),
   };
   const { provider } = input.definition;
-  // The delivered namespace, or else the stored scope, names where this schedule lives. No
-  // caller is present to authorize, and the callback only reaches the schedule that fired it.
   const providerContext = () =>
     createScheduleProviderContext({
       abortSignal: new AbortController().signal,
@@ -76,16 +71,13 @@ export async function dispatchScheduledOccurrence(input: {
   });
 }
 
-/** Addresses one provider operation to a scope's namespace; its target dispatches occurrences the provider delivers in process. */
 export function createScheduleProviderContext(input: {
   readonly abortSignal: AbortSignal;
   readonly application: string;
   readonly bundle: () => ScheduleDispatchBundle;
   readonly collection: string;
   readonly definition: DynamicSchedulesDefinition<any, any, any>;
-  /** The runtime the occurrences it delivers start their sessions in: the host's. */
   readonly runtime: () => Runtime;
-  /** Overrides the namespace derived from `scope`, for a schedule whose namespace is already known. */
   readonly namespace?: string;
   readonly operationId: string;
   readonly scope: ScheduleScopeValue;

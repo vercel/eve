@@ -5,7 +5,6 @@ import { ANONYMOUS_PRINCIPAL, principalOf } from "#execution/session/principal.j
 
 export type SessionControl = "clear" | "compact" | "expired" | "reset";
 
-/** The delivery a control arrived as: its id, and who sent it. */
 export interface ControlOrigin {
   readonly deliveryId: string;
   readonly auth?: SessionAuthContext | null;
@@ -38,14 +37,8 @@ type QueuedSessionInput = QueuedDelivery | QueuedControl | QueuedAuthorization;
 
 export interface TurnSelection {
   readonly delivery: DeliverHookPayload;
-  /**
-   * True only for a lone, callerless conversational delivery that arrived
-   * while nothing else was pending. Such a delivery may move the session to
-   * the deployment that accepted it.
-   */
   readonly handoffEligible: boolean;
   readonly kind: "turn";
-  /** Sequences of every admission folded into this turn. */
   readonly sequences: readonly number[];
 }
 
@@ -53,11 +46,6 @@ export type SessionInputSelection =
   | TurnSelection
   | { readonly control: SessionControl; readonly kind: "control"; readonly origin?: ControlOrigin };
 
-/**
- * Ordered, admitted session input. Entries are private; callers receive typed
- * admission and selection values. Everything here is rebuilt deterministically
- * on replay.
- */
 export class SessionInputQueue {
   private readonly entries: QueuedSessionInput[] = [];
   private readonly admittedKeys: Set<string>;
@@ -89,7 +77,6 @@ export class SessionInputQueue {
     return this.entries.length;
   }
 
-  /** The sequence the next admission receives; every earlier admission is below it. */
   get nextAdmission(): number {
     return this.nextSequence;
   }
@@ -102,7 +89,6 @@ export class SessionInputQueue {
         this.admittedKeys.delete(this.admittedKeys.values().next().value!);
       }
     }
-    // A real message supersedes any speculative hint.
     this.prewarmDeploymentId = undefined;
     const admission = { delivery, sequence: this.nextSequence++ };
     this.entries.push({ ...admission, kind: "delivery" });
@@ -119,7 +105,6 @@ export class SessionInputQueue {
     this.entries.push(entry);
   }
 
-  /** Keeps one payload per authorization attempt; a repeated callback for the same attempt is dropped. */
   enqueueAuthorization(payloads: readonly DeliverPayload[]): void {
     for (const payload of payloads) {
       const attemptId = authorizationAttemptId(payload);
@@ -139,10 +124,6 @@ export class SessionInputQueue {
     }
   }
 
-  /**
-   * Removes and returns the queued callbacks for `attemptIds` once every one
-   * has arrived, so a turn holding several sign-ins resumes when all are done.
-   */
   takeAuthorizations(attemptIds: ReadonlySet<string>): DeliverPayload[] | undefined {
     const taken = this.entries.filter(
       (entry): entry is QueuedAuthorization =>
@@ -192,8 +173,6 @@ export class SessionInputQueue {
           paused: options?.paused,
         }),
     );
-    // One step reads one sender's messages under one policy, so the turn step knows whose input
-    // it is. Another sender's, or another policy's, messages stay admitted for the next boundary.
     const groupOf = ({ delivery }: QueuedDelivery) => {
       const sender = delivery.auth === undefined ? turn.principal : principalOf(delivery.auth);
       return sender === turn.principal ? sender : `${sender}\n${delivery.principalPolicy ?? ""}`;
@@ -211,14 +190,7 @@ export class SessionInputQueue {
     };
   }
 
-  /**
-   * Takes the next turn or control. Sign-ins end with the turn that raised
-   * them, so a callback still queued between turns is stale and dropped.
-   */
-  takeNext(options?: {
-    /** Sequence of a delivery admitted while nothing else was pending. */
-    readonly freshSequence?: number;
-  }): SessionInputSelection | undefined {
+  takeNext(options?: { readonly freshSequence?: number }): SessionInputSelection | undefined {
     this.retain((entry) => entry.kind !== "authorization");
     const first = this.entries.shift() as QueuedDelivery | QueuedControl | undefined;
     if (first === undefined) return undefined;
@@ -242,11 +214,6 @@ export class SessionInputQueue {
     };
   }
 
-  /**
-   * Consecutive deliveries of one authenticated principal and one delegated
-   * call share a turn, as they would steer it. Claims may change between
-   * them; the turn runs with the latest.
-   */
   private takeFollowingDeliveriesFrom(first: QueuedDelivery): QueuedDelivery[] {
     const principal = principalOf(first.delivery.auth);
     const following: QueuedDelivery[] = [];
@@ -276,39 +243,21 @@ export class SessionInputQueue {
   }
 }
 
-/** The running turn a delivery may steer. */
 export interface SteeringTurn {
-  /** The call id of the delegated caller the turn answers, if any. */
   readonly callerCallId: string | undefined;
   readonly principal: string;
 }
 
 export interface SteeringOptions {
-  /**
-   * The turn waits on its own person for a sign-in or approval, held since
-   * this admission sequence. Their later messages steer even with
-   * `turnPolicy: "queue"`: queued, they would wait for a turn that cannot end
-   * until they act. Earlier ones were sent before the request existed, so
-   * they stay queued and never answer it.
-   */
   readonly heldSince?: number;
-  /** The turn waits on a person: a request or sign-in is open. */
   readonly paused?: boolean;
 }
 
-/**
- * Whether a delivery steers the running turn. The turn's own principal's
- * messages do when `turnPolicy` is `"steer"`; another principal's do only with
- * a `principalPolicy` of `"retain"` or `"adopt"`, an identified sender, and nothing the
- * turn waits on. A held turn counts as paused, so another person's message
- * waits for its caller.
- */
 export function isSteeringDelivery(
   delivery: DeliverHookPayload,
   turn: SteeringTurn,
   options?: { readonly heldOnPerson?: boolean; readonly paused?: boolean },
 ): boolean {
-  // A held turn waits on its person too, so `heldOnPerson` implies `paused`.
   const paused = options?.paused === true || options?.heldOnPerson === true;
   return (
     (options?.heldOnPerson === true || (delivery.turnPolicy ?? "steer") === "steer") &&
@@ -319,7 +268,6 @@ export function isSteeringDelivery(
   );
 }
 
-/** Another person's message that may join a turn under its `principalPolicy`. */
 function joinsAnotherTurn(delivery: DeliverHookPayload): boolean {
   return (
     (delivery.principalPolicy === "retain" || delivery.principalPolicy === "adopt") &&
@@ -328,7 +276,6 @@ function joinsAnotherTurn(delivery: DeliverHookPayload): boolean {
   );
 }
 
-/** A steering delivery with a message for the model, not only answers to requests. */
 export function isSteeringMessage(
   delivery: DeliverHookPayload,
   turn: SteeringTurn,

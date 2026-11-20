@@ -7,7 +7,6 @@ export interface WorkflowProgramToolInput {
   readonly maxSubagents?: number;
 }
 
-/** Static workflow executor used by the provided `workflow` tool. */
 export async function runWorkflowProgramTask(
   input: WorkflowProgramToolInput,
   ctx: WorkflowToolContext,

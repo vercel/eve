@@ -39,23 +39,11 @@ describe("createRuntimeAdapterRegistry", () => {
       expect(registry.adaptersByKind.get(SCHEDULE_ADAPTER_KIND)).toBe(SCHEDULE_ADAPTER);
     });
 
-    // The kind discriminator is locked at the literal "http" because
-    // it is persisted into durable workflow state
-    // (`serializedContext["eve.channel"].kind`). Renaming the value
-    // would break rehydration for every in-flight session started
-    // under any prior build. This assertion exists to make that
-    // contract impossible to silently violate via a refactor.
     it('locks the HTTP framework adapter kind value at the literal "http"', () => {
       expect(HTTP_ADAPTER_KIND).toBe("http");
       expect(HTTP_ADAPTER).toEqual({ kind: "http" });
     });
 
-    // Regression: pre-fix, the runtime threw "Unknown adapter kind:
-    // \"schedule\"" at the first workflow step boundary for every
-    // channel-less schedule (i.e. every markdown schedule, which is
-    // forbidden from declaring a channel). Locks the framework
-    // registration so that rehydrating a serialized schedule adapter
-    // restores its kind and state instead of throwing.
     it("rehydrates a serialized schedule adapter through the framework registry", () => {
       const registry = createRuntimeAdapterRegistry({ channels: [] });
 
@@ -67,9 +55,6 @@ describe("createRuntimeAdapterRegistry", () => {
       expect(rehydrated).toMatchObject({ kind: SCHEDULE_ADAPTER_KIND, state: {} });
     });
 
-    // Mirror of the schedule rehydration regression — proves the
-    // canonical session channel adapter survives a workflow step
-    // boundary round-trip through the durable wire shape.
     it("rehydrates a serialized HTTP adapter through the framework registry", () => {
       const registry = createRuntimeAdapterRegistry({ channels: [] });
 
@@ -88,8 +73,6 @@ describe("createRuntimeAdapterRegistry", () => {
         channels: [makeChannelDefinition({ kind: "http" })],
       });
 
-      // Framework adapter wins — a bare pass-through contributes no
-      // behavior, so the registry keeps the framework entry.
       expect(registry.adaptersByKind.get("http")).toEqual({ kind: "http" });
     });
 
@@ -150,7 +133,6 @@ describe("createRuntimeAdapterRegistry", () => {
     });
 
     it("rejects a route-declared adapter missing a kind field", () => {
-      // Simulate broken authored input that bypasses TypeScript typing.
       const bogusAdapter = {} as ChannelAdapter;
 
       expect(() =>
@@ -163,8 +145,6 @@ describe("createRuntimeAdapterRegistry", () => {
 });
 
 describe("deserializeRuntimeAdapter", () => {
-  // A session serialized under an older seed lacks fields a later deploy added
-  // to the channel's `state`; `context(state)` still promises them.
   it("fills seed fields missing from stored state while stored values win", () => {
     const registry = createRuntimeAdapterRegistry({
       channels: [
@@ -188,8 +168,6 @@ describe("deserializeRuntimeAdapter", () => {
     });
   });
 
-  // Rehydration runs at every step boundary: an explicit `undefined` is a
-  // stored value, but a deleted key looks like a field added to the seed later.
   it("keeps a stored undefined field and restores a deleted one", () => {
     const registry = createRuntimeAdapterRegistry({
       channels: [

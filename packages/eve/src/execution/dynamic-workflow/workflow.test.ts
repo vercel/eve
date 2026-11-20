@@ -20,7 +20,6 @@ const secondPending = {
   id: "interrupt-2",
 };
 const continuation = "signed-continuation";
-/** Each child's reply to the one message a program sends it. */
 const reply = vi.fn();
 const agent = (target: string) => ({
   send: async (message: string) => ({
@@ -163,7 +162,6 @@ describe("runJsProgram", () => {
   });
 
   it("returns a catchable failure for a child reply over 4 MiB of JSON", async () => {
-    // Quotes make each JSON text 4 MiB and 4 MiB + 1 byte.
     const atLimit = "<".repeat(4 * 1024 * 1024 - 2);
     mocks.runWorkflowProgramStep
       .mockResolvedValueOnce({

@@ -7,6 +7,10 @@ import {
   type SandboxTemplateResources,
 } from "#execution/sandbox/prewarm.js";
 import { defineSandboxProvider, type SandboxConnection } from "#sandbox/provider.js";
+import { DefaultSandbox } from "#sandbox/providers/default.js";
+import { DockerSandbox } from "#sandbox/providers/docker.js";
+import { JustBashSandbox } from "#sandbox/providers/just-bash.js";
+import { VercelSandbox } from "#sandbox/providers/vercel.js";
 import {
   getSandboxEnvironmentRuntime,
   type SandboxEnvironmentIdentity,
@@ -16,7 +20,6 @@ import type { SandboxSession } from "#shared/sandbox-session.js";
 
 const HOME_PROBE = `printf '%s\\n' "$HOME"`;
 
-/** A connection that records what eve sends it and answers the `$HOME` probe. */
 function recordingConnection() {
   const files = new Map<string, Uint8Array>();
   const calls: string[] = [];
@@ -43,7 +46,6 @@ function recordingConnection() {
   return { calls, connection, files };
 }
 
-/** Runs the environment's `prepare()` with the context eve builds during `eve build`. */
 async function prepare(
   environment: SandboxEnvironmentIdentity,
   resources: Omit<SandboxTemplateResources, "key"> = {},
@@ -62,7 +64,6 @@ async function prepare(
   );
 }
 
-/** A provider whose `prepare` populates `connection`, passing `mountedAt` through. */
 function bakingProvider(
   connection: SandboxConnection<{ ping(): Promise<string> }>,
   mountedAt?: string,
@@ -104,6 +105,36 @@ describe("defineSandboxProvider", () => {
     expect(received).toEqual([{}, {}, { region: "iad1" }]);
   });
 
+  it("keeps idleTimeoutMs from the provider's environment(), defaults it to five minutes, and rejects invalid values", () => {
+    const received: object[] = [];
+    const provider = defineSandboxProvider({
+      name: "keeping",
+      environment(options: { readonly region?: string }) {
+        received.push(options);
+        return {
+          prepare: async () => null,
+          start: async () => ({ connection: recordingConnection().connection, state: null }),
+          resume: async () => recordingConnection().connection,
+          onSessionEnd: async () => {},
+        };
+      },
+    });
+    const windowOf = (environment: SandboxEnvironmentIdentity) =>
+      getSandboxEnvironmentRuntime(environment).idleTimeoutMs;
+
+    expect([
+      windowOf(provider.environment()),
+      windowOf(provider.environment({ idleTimeoutMs: 0 })),
+      windowOf(provider.environment({ idleTimeoutMs: false, region: "iad1" })),
+    ]).toEqual([300_000, 0, false]);
+    expect(received).toEqual([{}, {}, { region: "iad1" }]);
+    for (const invalid of [-1, Number.NaN, Number.POSITIVE_INFINITY, "5m", true, null]) {
+      expect(() => provider.environment({ idleTimeoutMs: invalid as never })).toThrow(
+        'Sandbox provider "keeping" received idleTimeoutMs',
+      );
+    }
+  });
+
   it("hashes template identities with the workspace, skills, and source revision", async () => {
     const keys: string[] = [];
     const provider = defineSandboxProvider({
@@ -114,7 +145,6 @@ describe("defineSandboxProvider", () => {
           expect(() => ctx.templateKey({ sourceRevision: "mine" })).toThrow(
             'ctx.templateKey() reserves "sourceRevision"',
           );
-          // These would hash like `{}` or overflow the stack, so they reject.
           expect(() => ctx.templateKey({ builtAt: new Date(0) })).toThrow(
             "but identity.builtAt is a Date",
           );
@@ -133,7 +163,6 @@ describe("defineSandboxProvider", () => {
     });
     await prepare(provider.environment());
 
-    // Golden value: if it changes, every custom provider's template keys change with it.
     expect(keys).toEqual(["d02550d7328ec5806580c8cd02c0c2b0b3e9a90bbbec7f552938442d79ffd8e1"]);
   });
 
@@ -225,10 +254,24 @@ describe("public sandbox types", () => {
     void colliding;
   });
 
+  it("accepts idleTimeoutMs on every built-in environment constructor, and only at DefaultSandbox's top level", () => {
+    expectTypeOf(DefaultSandbox.environment).toBeCallableWith({ idleTimeoutMs: 0 });
+    expectTypeOf(VercelSandbox.environment).toBeCallableWith({ idleTimeoutMs: false });
+    expectTypeOf(JustBashSandbox.environment).toBeCallableWith({ idleTimeoutMs: 60_000 });
+    expectTypeOf(DockerSandbox.environment).toBeCallableWith({ idleTimeoutMs: 0 });
+    expectTypeOf(DockerSandbox.dockerfile).toBeCallableWith({ idleTimeoutMs: 0 });
+    expectTypeOf(DockerSandbox.image).toBeCallableWith("alpine:3.21", { idleTimeoutMs: 0 });
+    // @ts-expect-error idleTimeoutMs is a number of milliseconds or false.
+    void (() => VercelSandbox.environment({ idleTimeoutMs: true }));
+    // @ts-expect-error DefaultSandbox takes idleTimeoutMs at the top level.
+    void (() => DefaultSandbox.environment({ docker: { idleTimeoutMs: 0 } }));
+    // @ts-expect-error DefaultSandbox takes idleTimeoutMs at the top level.
+    void (() => DefaultSandbox.environment({ vercel: { idleTimeoutMs: 0 } }));
+    // @ts-expect-error DefaultSandbox takes idleTimeoutMs at the top level.
+    void (() => DefaultSandbox.environment({ justBash: { idleTimeoutMs: 0 } }));
+  });
+
   it("keeps SandboxSession compatible with the AI SDK sandbox members it implements", () => {
-    // AI SDK 7.0.172 added `stat`, `listDirectory`, and `deleteFile`, and
-    // overloads `spawn` so `stdin: true` returns a required `stdin`. eve
-    // sessions do not offer those yet; the remaining members stay compatible.
     expectTypeOf<SandboxSession>().toExtend<
       Omit<
         Experimental_SandboxSession,

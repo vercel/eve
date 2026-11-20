@@ -14,7 +14,7 @@
 
 ## Run locally
 
-Requires Node.js 24, pnpm 10.33.4, and OpenAI and Browserbase API keys.
+Requires Node.js 24, pnpm 12.21.0, and OpenAI and Browserbase API keys.
 
 ```sh
 git clone https://github.com/browserbase/bell-stack.git

@@ -27,6 +27,7 @@ import {
 
 export type { WorkflowToolEntryPoint };
 
+/** What a workflow tool knows about an agent it can call through `ctx.agent`: its description. */
 export interface WorkflowAgentMetadata {
   readonly description: string;
 }
@@ -279,8 +280,6 @@ export type WorkflowToolDefinition<TInput = unknown, TOutput = unknown> =
   | WorkflowServeToolDefinition<TInput, TOutput>;
 
 type Unbranded<T> = T extends unknown ? Omit<T, typeof WORKFLOW_TOOL_BRAND> : never;
-// A generator body's output is its return value, or its last yield when it returns `null` or
-// nothing, so its output type is both.
 type WorkflowReturn<T> =
   T extends AsyncGenerator<infer Yield, infer Return>
     ? Yield | Exclude<Return, null | undefined | void>
@@ -297,8 +296,6 @@ type DefinitionFields<TInput, TOutput> = Omit<
   WorkflowToolDefinitionBase<TInput, TOutput>,
   typeof WORKFLOW_TOOL_BRAND
 >;
-// `TOutput` is the call's output: the `outputSchema`'s output when the definition has one, as the
-// definition `defineWorkflowTool` returns reports it, or else what the body returns.
 type ExecuteDefinition<TInput, TReturn, TOutput = WorkflowReturn<TReturn>> = DefinitionFields<
   TInput,
   TOutput
@@ -316,8 +313,6 @@ type TaskDefinition<TInput, TReturn, TOutput = WorkflowReturn<TReturn>> = Defini
   execute?: never;
   serve?: never;
 };
-// `ctx.reply()` needs the output type before the body is checked, so a serve
-// tool's output comes from its `outputSchema`, not from what `serve` returns.
 type ServeDefinition<TInput, TOutput> = DefinitionFields<TInput, TOutput> & {
   serve(
     receive: WorkflowServeReceive<TInput>,
@@ -337,10 +332,11 @@ type WithInputSchema<TDefinition, TSchema> = Omit<TDefinition, "inputSchema"> & 
   inputSchema: TSchema;
 };
 
-// One overload per entry point and schema form. A single overload per form
-// can't tell which entry point a definition uses: TypeScript neither infers it
-// from the method a definition defines nor contextually types `toModelOutput`
-// through a union of the three shapes.
+/**
+ * Defines a tool whose entry point runs as a durable workflow and must start with
+ * `"use workflow"`. Provide exactly one of `execute`, `task`, or `serve`; see
+ * {@link WorkflowToolDefinition}.
+ */
 export function defineWorkflowTool<
   TInputSchema extends Schema,
   TOutputSchema extends StandardJSONSchemaV1<unknown, unknown>,
@@ -425,7 +421,6 @@ export function isWorkflowToolDefinition(value: unknown): boolean {
   );
 }
 
-/** The entry points a definition defines; a workflow tool defines exactly one. */
 export function readWorkflowToolEntryPoints(definition: object): WorkflowToolEntryPoint[] {
   return WORKFLOW_TOOL_ENTRY_POINTS.filter(
     (entryPoint) => Reflect.get(definition, entryPoint) !== undefined,
@@ -435,7 +430,6 @@ export function readWorkflowToolEntryPoints(definition: object): WorkflowToolEnt
 function assertOneEntryPoint(definition: object): void {
   const defined = readWorkflowToolEntryPoints(definition);
   if (defined.length === 1) return;
-  // Built here rather than at module scope, so loading this module stays off the locale-data path.
   const found =
     defined.length === 0
       ? "none"

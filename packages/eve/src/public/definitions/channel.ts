@@ -16,6 +16,7 @@ import { attachInputText, readInputText } from "#internal/input-text.js";
 import type { ChannelDelivery } from "#shared/channel-delivery.js";
 export type { ChannelDelivery } from "#shared/channel-delivery.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
+import { createBackgroundWork } from "#channel/background-work.js";
 import { mergeUploadPolicy } from "#public/channels/upload-policy.js";
 import {
   CHANNEL_SENTINEL,
@@ -113,45 +114,11 @@ export type {
  */
 export type ChannelMethod = "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS";
 
-/**
- * Method-like discriminator used by compiled channel route entries.
- *
- * WebSocket routes are not HTTP methods, but they still need a stable
- * route key in the compiler manifest and runtime route table.
- */
 export type ChannelRouteMethod = ChannelMethod | "WEBSOCKET";
 
-/**
- * Per-request surface exposed to a route's `fetch` handler. The
- * framework constructs this per request and passes it as the second
- * argument.
- *
- * Framework callback routes use this for request metadata and background work.
- */
 export interface RouteContext {
-  /**
-   * Hands a background promise to the request host so the serverless
-   * invocation stays alive until the promise resolves. Use this when the
-   * route responds to the platform immediately (e.g. a Slack `200 OK`
-   * acknowledgement) but still needs to finish background work.
-   */
   readonly waitUntil: (task: Promise<unknown>) => void;
-  /**
-   * Path parameter values extracted from `[name]` segments in the route's
-   * filesystem path. For `agent/channels/sessions/[sessionId]/stream.ts`
-   * mounted at `GET /sessions/:sessionId/stream`, the matched value lives at
-   * `params.sessionId`.
-   * Empty for routes with no path parameters.
-   */
   readonly params: Readonly<Record<string, string>>;
-  /**
-   * Trusted peer IP for this request, extracted by the host transport
-   * before the route handler runs. `null` when the host can't observe a
-   * peer address (e.g. unit tests calling `route.fetch` directly).
-   *
-   * Pass this to {@link isIpAllowed} from `eve/channels/auth`
-   * when implementing IP allowlisting in a route.
-   */
   readonly requestIp: string | null;
 }
 
@@ -181,10 +148,6 @@ export function disableRoute(): DisabledRouteSentinel {
   return { [DISABLED_ROUTE]: true };
 }
 
-/**
- * Type guard: returns whether `value` is a {@link DisabledRouteSentinel}
- * produced by {@link disableRoute}.
- */
 export function isDisabledRouteSentinel(value: unknown): value is DisabledRouteSentinel {
   return typeof value === "object" && value !== null && Reflect.get(value, DISABLED_ROUTE) === true;
 }
@@ -206,6 +169,25 @@ export interface ChannelEventContext<TChannel = ChannelContinuationOps> extends 
   readonly position: FactPosition;
   /** Immutable observation snapshot of the whole commit the event is in. */
   readonly view: SessionView;
+  /**
+   * Lets the turn go on while `task` settles, instead of waiting for the handler. Use it for a
+   * platform call the turn doesn't depend on, such as a typing or status update.
+   *
+   * eve waits for the task before the step that ran the handler ends (inside a model call, before
+   * that call ends), so the work never outlives the sandbox or session it uses, and changes it
+   * makes to `ctx.channel.state` are saved with the step. `session.ended` is the exception: the
+   * session is over, so nothing is saved after it.
+   *
+   * - A rejection is logged, not thrown.
+   * - eve stops waiting after 30 seconds and logs a warning, and the step goes on without the
+   *   task. Don't count on changes it makes after that: a later save in the same step may keep
+   *   them, or they may be lost.
+   * - Later handlers, hooks, and the model don't wait for the task, so work that must happen in
+   *   order with them belongs in the handler itself.
+   * - Call it while the handler runs. A call after the step ended is logged, and eve doesn't wait
+   *   for that task.
+   */
+  readonly waitUntil: (task: Promise<unknown>) => void;
 }
 
 /**
@@ -233,7 +215,8 @@ export type ChannelCommitHandler<TCtx = void> = (
  * channel streams (`content.delta`, `call.input`, `call.progress`). Each handler receives the
  * event and a {@link ChannelEventContext} whose `channel` is the channel's own context. Handlers
  * run after the event is written, so they observe it and never shape it. `committed` runs once
- * per committed line, after them.
+ * per committed line, after them. The turn waits for each handler; a handler hands work the turn
+ * doesn't depend on to {@link ChannelEventContext.waitUntil}.
  */
 export type ChannelEvents<TCtx = void> = {
   readonly [T in AuthoringEventType]?: ChannelEventHandler<T, TCtx>;
@@ -362,6 +345,7 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
           position,
           scope: _scope,
           view,
+          waitUntil: queue,
           ...platformContext
         } = adapterCtx;
         const channel = {
@@ -370,18 +354,29 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
             return adapterCtx.continuation;
           },
         };
+        const inline = createBackgroundWork();
         const ctx: ChannelEventContext<typeof channel> = {
           ...buildCallbackContext(),
           channel,
           position: position ?? { index: 0, line: 0 },
           view: snapshotOf(view ?? currentView()),
+          waitUntil: queue ?? inline.waitUntilFor(event.type),
         };
-        return (
+        const handled = (
           userHandler as (
             event: SessionEvent,
             ctx: ChannelEventContext<typeof channel>,
           ) => void | Promise<void>
         )(event, ctx);
+        if (queue !== undefined) return handled;
+        return (async () => {
+          try {
+            await handled;
+          } finally {
+            await inline.settle();
+            inline.close();
+          }
+        })();
       };
     }
   }

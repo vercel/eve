@@ -9,8 +9,6 @@ import { useTemporaryAppRoots } from "#internal/testing/use-temporary-app-roots.
 
 const createAppRoot = useTemporaryAppRoots();
 
-// Paths a bundler or asset store would mangle if it handled files by name or
-// as text: Latin-1 bytes, an empty file, URL syntax, and a replaced token.
 const SKILL_FILES = {
   "SKILL.md": "---\ndescription: Kennel handbook.\n---\n\nRead the references.\n",
   "references/latin1.md": Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x0a]),
@@ -29,7 +27,6 @@ interface HostedServer {
 describe("hosted output carries eve-generated data verbatim", () => {
   let handbook: { readonly description: string; readonly bytes: Record<string, string> };
 
-  // One build serves every case; the app root is removed after the first test.
   beforeAll(async () => {
     const { appRoot } = await createAppRoot("eve-generated-host-data-");
     const files: Record<string, string | Buffer> = {

@@ -15,26 +15,14 @@ import { type CompileMetadata } from "#compiler/artifact-contract.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import { summarizeCompilerDiagnostics, type CompilerDiagnostic } from "#compiler/diagnostics.js";
 import type { DevelopmentExtensionSelection } from "#compiler/development-extensions.js";
+import type { AuthoredModuleGraph } from "#internal/authored-module-graph.js";
 
-/**
- * Input for compiling the current authored agent into framework-owned
- * discovery artifacts.
- */
 interface CompileAgentInput {
-  /** Development-only source extensions applied before source composition. */
   developmentExtensions?: DevelopmentExtensionSelection;
-  /**
-   * Optional {@link ProjectSource} used for discovery reads. Defaults to a
-   * disk-backed source so production callers keep their current behaviour.
-   */
   source?: ProjectSource;
   startPath?: string;
 }
 
-/**
- * Result of compiling the current authored agent into framework-owned
- * artifacts.
- */
 export interface CompileAgentResult {
   diagnostics: CompilerDiagnostic[];
   manifest: CompiledAgentManifest;
@@ -43,10 +31,6 @@ export interface CompileAgentResult {
   project: ResolvedDiscoveryProject;
 }
 
-/**
- * Error raised when discovery artifacts were written but discovery still
- * contained errors.
- */
 export class CompileAgentError extends Error {
   readonly result: CompileAgentResult;
 
@@ -72,38 +56,38 @@ export class CompileAgentError extends Error {
   }
 }
 
-/**
- * Runs discovery, writes compiler-owned artifacts, and throws when discovery
- * produced errors.
- */
 export async function compileAgent(input: CompileAgentInput = {}): Promise<CompileAgentResult> {
   const discovered = await discoverAgentForCompilation(input);
   const artifactsRoot = join(discovered.project.appRoot, ".eve");
-  const result = await writeAgentCompilation(discovered, {
+  const { compileResult } = await writeAgentCompilation(discovered, {
     publishedRoot: artifactsRoot,
     writeRoot: artifactsRoot,
   });
 
-  return finishAgentCompilation(result, CompileAgentError.fromDurableArtifacts);
+  return finishAgentCompilation(compileResult, CompileAgentError.fromDurableArtifacts);
 }
 
-/**
- * Compiles an agent into a caller-owned workspace. Artifacts are written to
- * `writeRoot`, while metadata and module maps record paths under the stable
- * `publishedRoot` where the caller will expose them.
- */
 export async function compileAgentInWorkspace(input: {
   readonly artifactLocations: CompilerArtifactLocations;
   readonly developmentExtensions?: DevelopmentExtensionSelection;
   readonly startPath: string;
-}): Promise<CompileAgentResult> {
+}): Promise<{
+  readonly compileResult: CompileAgentResult;
+  readonly moduleGraph: AuthoredModuleGraph;
+}> {
   const discovered = await discoverAgentForCompilation({
     developmentExtensions: input.developmentExtensions,
     startPath: input.startPath,
   });
-  const result = await writeAgentCompilation(discovered, input.artifactLocations);
+  const { compileResult, moduleGraph } = await writeAgentCompilation(
+    discovered,
+    input.artifactLocations,
+  );
 
-  return finishAgentCompilation(result, CompileAgentError.fromTransientArtifacts);
+  return {
+    compileResult: finishAgentCompilation(compileResult, CompileAgentError.fromTransientArtifacts),
+    moduleGraph,
+  };
 }
 
 interface DiscoveredAgentCompilation {
@@ -131,7 +115,10 @@ async function discoverAgentForCompilation(
 async function writeAgentCompilation(
   discovered: DiscoveredAgentCompilation,
   artifactLocations: CompilerArtifactLocations,
-): Promise<CompileAgentResult> {
+): Promise<{
+  readonly compileResult: CompileAgentResult;
+  readonly moduleGraph: AuthoredModuleGraph;
+}> {
   const writtenArtifacts = await writeCompilerArtifacts({
     appRoot: discovered.project.appRoot,
     artifactLocations,
@@ -141,11 +128,14 @@ async function writeAgentCompilation(
   });
 
   return {
-    diagnostics: writtenArtifacts.diagnosticsArtifact.diagnostics,
-    manifest: writtenArtifacts.compiledManifest,
-    metadata: writtenArtifacts.metadata,
-    paths: writtenArtifacts.paths,
-    project: discovered.project,
+    compileResult: {
+      diagnostics: writtenArtifacts.diagnosticsArtifact.diagnostics,
+      manifest: writtenArtifacts.compiledManifest,
+      metadata: writtenArtifacts.metadata,
+      paths: writtenArtifacts.paths,
+      project: discovered.project,
+    },
+    moduleGraph: writtenArtifacts.moduleGraph,
   };
 }
 

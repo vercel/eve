@@ -1,22 +1,4 @@
-/**
- * Clears the registries eve keeps on `globalThis`, so a test file starts in an
- * empty realm.
- *
- * These registries are process-wide on purpose: Workflow's local world and step
- * bundles load their own copies of eve's modules, and every copy must see the
- * same hosts. They also outlive the module reset between test files, so without
- * this a file that installs a durable host decides what the next file in the
- * worker sees, and `installDurableHost` refuses a second, different host.
- *
- * Both tiers run a shared project, whose files reuse one process.
- */
-
-const REALM_KEYS = [
-  // `#execution/hosts.js`
-  Symbol.for("eve.hosts"),
-  // `#instrumentation/runtime-global.js`
-  Symbol.for("eve.instrumentation-runtime"),
-] as const;
+const REALM_KEYS = [Symbol.for("eve.hosts"), Symbol.for("eve.instrumentation-runtime")] as const;
 
 export function resetTestRealm(): void {
   for (const key of REALM_KEYS) {
@@ -24,5 +6,4 @@ export function resetTestRealm(): void {
   }
 }
 
-// Setup files load for every test file, before that file's imports.
 resetTestRealm();

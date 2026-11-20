@@ -10,8 +10,6 @@ import { useScenarioApp } from "#internal/testing/scenario-app.js";
 const runFile = promisify(execFile);
 const scenarioApp = useScenarioApp();
 
-// A packed npm install outside the workspace, where pnpm's hoisting cannot
-// hand Nitro a dependency eve did not declare.
 describe("packed host build", () => {
   it("builds with eve's own Rolldown and leaves the app's dependencies alone", async () => {
     const app = await scenarioApp({
@@ -28,7 +26,6 @@ describe("packed host build", () => {
     const manifestsBefore = await Promise.all(
       manifestFiles.map(async (file) => await readFile(join(app.appRoot, file))),
     );
-    // Nitro installs missing packages silently in CI, so leave CI unset.
     const { CI: _ci, ...env } = process.env;
 
     const { stderr, stdout } = await runFile(

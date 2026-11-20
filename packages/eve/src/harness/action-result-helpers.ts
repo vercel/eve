@@ -16,10 +16,6 @@ type ToolResultOutputCandidate =
   | ToolResultPart["output"]
   | { readonly type: "error-json" | "json"; readonly value: unknown };
 
-/**
- * Coerces framework-owned sentinel values and validates the result payload as
- * JSON without attaching tool-specific context.
- */
 function toJsonValue(value: unknown): JsonValue {
   if (isAuthorizationSignal(value)) {
     return parseJsonValue(
@@ -35,16 +31,6 @@ function toJsonValue(value: unknown): JsonValue {
   return parseJsonValue(value === undefined ? null : value);
 }
 
-/**
- * Builds a `RuntimeToolResultActionResult` from a raw tool output value.
- *
- * This is the single coercion point for `call.settled` projection. Both
- * native tool execution (via {@link createRuntimeToolResultFromStepResult} /
- * {@link createRuntimeToolResultFromMessagePart}) and Workflow child calls
- * funnel through here, so the raw-output-vs-`toModelOutput` decision —
- * always raw — is decided once. The output is validated as JSON here so bad
- * values never reach protocol events or persisted history.
- */
 export function createRuntimeToolResultFromValue(input: {
   readonly callId: string;
   readonly toolName: string;
@@ -67,17 +53,11 @@ export function createRuntimeToolResultFromValue(input: {
   };
 
   if (input.isError !== true) return result;
-  // The output keeps only a thrown error's message; its name lets instrumentation classify the failure.
   return thrown === undefined
     ? { ...result, isError: true }
     : { ...result, errorName: thrown.name, isError: true };
 }
 
-/**
- * Builds a `RuntimeToolResultActionResult` from one AI SDK
- * {@link TypedToolResult}. Used for tool results captured on the AI SDK
- * step result and for `tool-result` parts that arrive on the stream.
- */
 export function createRuntimeToolResultFromStepResult(
   toolResult: TypedToolResult<ToolSet>,
 ): RuntimeToolResultActionResult {
@@ -88,10 +68,6 @@ export function createRuntimeToolResultFromStepResult(
   });
 }
 
-/**
- * Builds a failed `RuntimeToolResultActionResult` from one AI SDK
- * `tool-error` part.
- */
 export function createRuntimeToolResultFromToolError(
   toolError: TypedToolError<ToolSet>,
 ): RuntimeToolResultActionResult {
@@ -103,10 +79,6 @@ export function createRuntimeToolResultFromToolError(
   });
 }
 
-/**
- * Builds the inline tool-result message part that repairs model history after a
- * local tool execution error.
- */
 export function createToolResultMessagePartFromToolError(
   toolError: TypedToolError<ToolSet>,
 ): ToolResultPart {
@@ -118,16 +90,8 @@ export function createToolResultMessagePartFromToolError(
   };
 }
 
-/**
- * Builds a `RuntimeToolResultActionResult` from one tool-result message
- * part as it appears on `step.response.messages`. Used as a fallback when
- * the result is missing from `step.toolResults` (some providers — notably
- * after `tool-output-denied` chunks — surface the result only on the
- * response messages array).
- */
 export function createRuntimeToolResultFromMessagePart(
   part: ToolResultPart,
-  /** The entry the result's call ran, which history names after the catalog tool for a call made through one. */
   toolName: string,
 ): RuntimeToolResultActionResult {
   return createRuntimeToolResultFromValue({

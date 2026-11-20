@@ -10,22 +10,7 @@ const EVE_PACKAGE_NAME_TARBALL_PREFIX = "eve";
 const SCENARIO_CACHE_ROOT = join(tmpdir(), "eve-scenario-cache");
 const PREBUILT_EVE_ENTRY = join(EVE_PACKAGE_ROOT, "dist", "src", "index.js");
 
-/**
- * Vitest `globalSetup` that packs the eve package exactly once before any
- * scenario worker boots. The resulting tarball path is exposed to workers
- * through `process.env.EVE_SCENARIO_EVE_TARBALL_PATH` so
- * `materializeScenarioApp()` can reuse it without rebuilding or packing the
- * shared workspace package in parallel.
- *
- * Scenario CI builds the workspace before Vitest starts. Packing with
- * lifecycle scripts disabled reuses that exact output instead of paying for
- * `prepack` to clean and rebuild it a second time. The tarball directory is
- * run-scoped (`mkdtemp`) so concurrent scenario invocations on one machine
- * cannot clobber each other's shared tarball, and it is removed on teardown.
- */
 export default async function packScenarioTarball(): Promise<() => Promise<void>> {
-  // A config with several scenario projects runs this once per project in one process: the
-  // first packs, and the others reuse its tarball, which its teardown removes.
   const packed = process.env.EVE_SCENARIO_EVE_TARBALL_PATH;
   if (
     packed !== undefined &&

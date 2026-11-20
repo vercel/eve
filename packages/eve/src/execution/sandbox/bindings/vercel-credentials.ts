@@ -31,10 +31,6 @@ export async function getVercelSandboxCredentials(
     return accessToken;
   }
 
-  // Never send `VERCEL_OIDC_TOKEN` as-is: it can expire before it is used, for
-  // example when a build starts long after its environment was issued. The
-  // helper uses the SDK's five-minute refresh buffer so near-expiry tokens
-  // fall back before template builds, not during SDK requests.
   try {
     const oidcToken = await getVercelOidcToken({
       project: projectId,
@@ -50,7 +46,6 @@ export async function getVercelSandboxCredentials(
   }
 }
 
-/** Credentials when eve can resolve them; otherwise `{}` so the SDK falls back to its own resolution. */
 export async function resolveVercelSandboxCredentials(
   createOptions: VercelCreateOptions,
 ): Promise<VercelSandboxCredentials | Record<string, never>> {

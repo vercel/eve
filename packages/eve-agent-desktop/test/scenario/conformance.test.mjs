@@ -1,11 +1,3 @@
-// Every tool is a thin wrapper over one agent-desktop command, so the CLI's
-// argument surface is this package's real contract. Each tool's argv is built
-// here through the shipped code and handed to the real binary: the CLI exits 2
-// only for an argument or parse error, so any nonzero-2 exit means a flag or a
-// flag's spelling drifted away from the CLI this package claims to target.
-//
-// Point AGENT_DESKTOP_BIN (or a `agent-desktop` on PATH) at a built CLI to run
-// it; without one the test skips.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -25,7 +17,6 @@ const available = (() => {
   return spawnSync("sh", ["-c", `command -v ${binary}`]).status === 0;
 })();
 
-/** One valid input per tool. Every tool must appear here; the test below enforces it. */
 const INPUTS = {
   check: { ref: "@s1:e1" },
   clear: { ref: "@s1:e1" },
@@ -89,7 +80,6 @@ const streamOf = (text) =>
     },
   });
 
-/** Run one tool and report the argv it handed the CLI. */
 async function argvFor(name, input) {
   let command;
   const sandbox = {
@@ -114,7 +104,6 @@ async function argvFor(name, input) {
   return [...invocation.matchAll(/'((?:[^']|'"'"')*)'/g)].map((m) => m[1].replaceAll(`'"'"'`, "'"));
 }
 
-/** The CLI's own verdict: exit 2 is an argument or parse error; anything else means the argv parsed. */
 function cliExit(argv) {
   const result = spawnSync(binary, argv.slice(1), { encoding: "utf8", timeout: 30_000 });
   if (result.error) throw result.error;

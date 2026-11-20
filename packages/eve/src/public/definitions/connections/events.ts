@@ -8,6 +8,11 @@ export interface ConnectionEventOrigin {
   readonly subscriptionId: string;
 }
 
+/**
+ * Context passed to every {@link ConnectionEvents} callback: the subscription's origin, the
+ * subscriber's auth, and `attachSession` for sending into the originating session. Use `deliveryId`
+ * to deduplicate side effects, since callbacks can run more than once.
+ */
 export interface ConnectionEventContext {
   readonly origin: ConnectionEventOrigin;
   readonly deliveryId: string;
@@ -17,6 +22,9 @@ export interface ConnectionEventContext {
   readonly attachSession: (sessionId: string) => Session;
 }
 
+/**
+ * One webhook event delivered by an upstream MCP server to {@link ConnectionEvents} `onEvent`.
+ */
 export interface ConnectionEvent {
   readonly eventId: string;
   readonly name: string;

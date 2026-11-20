@@ -95,7 +95,6 @@ function manifest(world?: string): Parameters<typeof createHostRouteTable>[0]["m
   };
 }
 
-/** Serves the rendered routes the way Nitro does: an h3 app over the loaded handler modules. */
 async function serve(input: {
   readonly mode: "development" | "production";
   readonly scheduleRegistrations?: readonly ScheduleRegistration[];
@@ -130,8 +129,6 @@ async function serve(input: {
     },
   );
 
-  // Links the virtual modules as Nitro's bundler does: virtual ids resolve to
-  // earlier virtual modules, and a `text:` import yields the file's text.
   const modules = new Map<string, { default: unknown }>();
   const urls = new Map<string, string>();
   for (const [index, [id, source]] of Object.entries(routes.virtual).entries()) {
@@ -222,11 +219,9 @@ describe("rendered host routes", () => {
     const handlerAt = (route: string, method: string) =>
       routes.handlers.find((entry) => entry.route === route && entry.method === method)?.handler;
 
-    // The router sends HEAD to the GET route, whose guard rejects it.
     expect(methodsAt("/stream")).toEqual(["GET", "POST", "OPTIONS"]);
     expect(methodsAt("/health")).toEqual(["GET", "HEAD"]);
     expect(handlerAt("/health", "HEAD")).not.toBe(handlerAt("/health", "GET"));
-    // WebSocket upgrades arrive as GET.
     expect(methodsAt("/voice")).toEqual(["GET"]);
   });
 
@@ -333,11 +328,9 @@ describe("rendered host routes", () => {
       "0 0 * * *": ["eve.daily", "eve.digest"],
       "0 0 * * 0": "eve.weekly",
     });
-    // The timezone runner invokes the same registered task, but Nitro must not also schedule it in UTC.
     const task = (await host.load(host.routes.tasks["eve.pacific"]!.handler)) as {
       run(event: { name: string }): Promise<unknown>;
     };
-    // The task dispatches eve's own task name, whatever Nitro calls it.
     expect(await task.run({ name: "any-nitro-name" })).toEqual({ result: "ran pacific" });
     expect(routeModules.dispatchScheduleTask).toHaveBeenCalledWith("pacific", artifactsConfig);
   });

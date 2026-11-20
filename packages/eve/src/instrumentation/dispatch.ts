@@ -72,7 +72,6 @@ export function createInstrumentationDispatcher(
       (decision) => decision.action === "record" && decision.recordOutputs,
     );
     const capturesContent = capturesInputs || capturesOutputs;
-    // eve's own providers run serially and apply their own decisions; only authored files count.
     const authored = groups.parallel.map((provider) => decisions.get(provider));
     const authoredCapturesInputs = authored.some(
       (decision) => decision?.action === "record" && decision.recordInputs,
@@ -319,7 +318,6 @@ async function withTimeout(
   }
 }
 
-/** Model calls are attempt-scoped; tool calls and input waits can outlive an attempt. */
 function stateOwner(event: InstrumentationEvent): InstrumentationStateOwner {
   if (
     event.type === "delivery.consumed" ||

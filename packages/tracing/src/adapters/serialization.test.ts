@@ -135,8 +135,6 @@ describe("GenAI message attributes", () => {
     expect(instructions).toBeDefined();
     expect(instructions!.length).toBeLessThanOrEqual(CONTENT_ATTRIBUTE_LIMIT);
     expect(instructions!).toContain("… [truncated]");
-    // A linear 256-character scan would re-encode a near-full candidate
-    // thousands of times; the binary search finishes in milliseconds.
     expect(elapsed).toBeLessThan(2_000);
   });
 
@@ -181,14 +179,11 @@ describe("GenAI message attributes", () => {
   });
 
   it.each([
-    // Each repeat costs 22 JSON bytes (21 raw + the escaped newline), so the
-    // count lands just over the cap once escaped.
     [
       "near the limit",
       "line of instructions\n".repeat(Math.ceil((CONTENT_ATTRIBUTE_LIMIT + 64) / 22)),
     ],
     ["over the limit", "x".repeat(CONTENT_ATTRIBUTE_LIMIT * 2)],
-    // Each repeat costs 4 JSON bytes (the backslash and the newline both escape).
     ["escape-heavy", "\\\n".repeat(Math.ceil((CONTENT_ATTRIBUTE_LIMIT + 64) / 4))],
   ])("keeps %s system instructions as valid capped JSON", (_, instructions) => {
     const attribute = genAiSystemInstructionsAttribute(instructions);

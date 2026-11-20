@@ -69,24 +69,13 @@ async function runGitStage(
   }
 }
 
-/** A repository prepared in the background while the project's files are still being written. */
 export interface GitInitialization {
-  /** Stages and commits the project. Call once every file to record exists, such as the lockfile. */
   commit(): Promise<GitInitResult>;
-  /** Waits for preparation to finish without committing, before a failed project is removed. */
   settled(): Promise<void>;
 }
 
-/**
- * Starts initializing a Git repository now and records the generated files in
- * an initial commit when `commit()` is called. Missing Git and parent
- * repositories are skips. Repository metadata is retained when a later step
- * fails so eve never destroys useful Git state.
- */
 export function startGitInitialization(projectPath: string): GitInitialization {
   const prepared = prepareRepository(projectPath);
-  // `commit()` or `settled()` observes the outcome; this only keeps an early failure from
-  // being reported as unhandled while the install is still running.
   prepared.catch(() => undefined);
   return {
     commit: async () => (await prepared) ?? (await commitInitialFiles(projectPath)),
@@ -96,12 +85,10 @@ export function startGitInitialization(projectPath: string): GitInitialization {
   };
 }
 
-/** Initializes a Git repository and records the generated files in an initial commit. */
 export function tryInitializeGit(projectPath: string): Promise<GitInitResult> {
   return startGitInitialization(projectPath).commit();
 }
 
-/** Resolves undefined once the repository is ready for the initial commit. */
 async function prepareRepository(projectPath: string): Promise<GitInitResult | undefined> {
   const gitPath = join(projectPath, ".git");
   const gitMetadataExists = await stat(gitPath).then(

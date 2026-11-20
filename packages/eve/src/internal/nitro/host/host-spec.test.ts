@@ -28,7 +28,6 @@ interface AgentVariant {
   readonly sandbox?: "just-bash" | "vercel";
   readonly tool?: "ordinary" | "workflow" | "workflow-program";
   readonly websocket?: boolean;
-  /** A dynamic schedule collection on Vercel's provider. */
   readonly dynamicSchedules?: boolean;
 }
 
@@ -111,7 +110,6 @@ async function compileAgent(variant: AgentVariant = {}, name = "weather-agent") 
   return manifest;
 }
 
-/** Adds `child` as an application subagent of `root`. */
 function withSubagent(root: CompiledAgentManifest, child: CompiledAgentManifest) {
   const { kind: _kind, subagents: _subagents, version: _version, ...agent } = child;
   root.subagents = [
@@ -172,8 +170,6 @@ describe("createHostSpec", () => {
     expect(development.runtimePlugins).toEqual([]);
   });
 
-  // The consumer needs vc dev's local Queues API, so an agent with only static schedules must boot
-  // without it.
   it("adds the local schedules consumer under vc dev only for an agent with a Vercel collection", async () => {
     vi.stubEnv("NODE_ENV", "development");
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", undefined);
@@ -270,7 +266,6 @@ describe("createHostSpec", () => {
     expect(externals.checkedExternals).toEqual(
       expect.arrayContaining(["fixture-external", "sharp", "subagent-external"]),
     );
-    // Nitro externalizes without tracing in dev.
     expect(spec(manifest, DEVELOPMENT).externals).toMatchObject({
       checkedExternals: [],
       traceDeps: [],

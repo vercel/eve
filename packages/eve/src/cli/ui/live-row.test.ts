@@ -13,7 +13,6 @@ function makeScreen(columns = 80) {
   return new MockScreen({ columns, rows: 10 });
 }
 
-/** The glyph column carries a lit marker on visible pulse steps, a space otherwise. */
 function lit(screen: MockScreen): boolean {
   return screen.snapshot().trimStart().startsWith("▪");
 }
@@ -107,12 +106,10 @@ describe("startCliLiveRow", () => {
     expect(screen.snapshot()).toBe("  Preparing project...");
 
     progress.update("Installing dependencies", "npm install");
-    // The detail replaces the row in place — one screen line, no stranded row.
     expect(screen.snapshot()).toBe("  Installing dependencies npm install");
 
     const rawAfterUpdate = screen.rawOutput();
     vi.advanceTimersByTime(600);
-    // A silent pulse sequence never repaints, so nothing more is written.
     expect(screen.rawOutput()).toBe(rawAfterUpdate);
 
     progress.stop();
@@ -248,5 +245,26 @@ describe("startCliLiveRow", () => {
         process.env.EVE_LOG_LEVEL = previous;
       }
     }
+  });
+
+  it("leaves a kept row for the next painter to draw over in place", () => {
+    vi.useFakeTimers();
+    const screen = makeScreen();
+    const progress = startCliLiveRow(
+      { log: vi.fn() },
+      { output: screen, elapsed: true, pulseSequence: "11111111" },
+    );
+    progress.update("Creating agent");
+    progress.stop({ keepOnScreen: true });
+    expect(screen.snapshot()).toBe("▪ Creating agent 0s");
+    expect(vi.getTimerCount()).toBe(0);
+
+    const next = startCliLiveRow(
+      { log: vi.fn() },
+      { output: screen, elapsed: true, pulseSequence: "11111111" },
+    );
+    next.update("Installing dependencies");
+    expect(screen.snapshot()).toBe("▪ Installing dependencies 0s");
+    next.stop();
   });
 });

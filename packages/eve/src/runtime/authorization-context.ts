@@ -1,14 +1,17 @@
 import type { SessionAuthContext } from "#channel/types.js";
 import type { ToolAuthOptions, ToolAuthProvider } from "#tools/definition.js";
 import type { AuthorizationDefinition, TokenResult } from "#shared/connection-types.js";
-import { normalizeAuthorizationSpec } from "#shared/validate-authorization.js";
+import {
+  assertAuthKey,
+  normalizeAuthorizationSpec,
+  sanitizeScopeSegment,
+} from "#shared/validate-authorization.js";
 import {
   createAuthorizationExecution,
   type ScopedAuthorization,
 } from "#runtime/connections/scoped-authorization.js";
 import { holdCallerIdentity } from "#runtime/connections/identity-hold.js";
 
-/** Shared getToken/requireAuth capability, independent of the executing tool or workflow. */
 export function createAuthorizationContext(input: {
   readonly scope: string;
   readonly boundResponder?: SessionAuthContext;
@@ -18,7 +21,6 @@ export function createAuthorizationContext(input: {
   const inlineAuthState: InlineAuthState = {};
   const resolve = (provider: ToolAuthProvider, options?: ToolAuthOptions) =>
     buildInlineScopedAuthorization({ ...input, inlineAuthState, provider, options });
-  // An inline provider's scope is eve's own key, so the hold names the tool the model called.
   const hold = (scoped: ScopedAuthorization): void => {
     if (input.boundResponder === undefined && scoped.authorization.principalType === "user") {
       holdCallerIdentity(scoped.scope, undefined, `tool "${input.scope}"`);
@@ -31,10 +33,6 @@ export function createAuthorizationContext(input: {
       hold(scoped);
       return await execution.getToken(scoped);
     },
-    /**
-     * The given responder's stored token, resolved through this execution's
-     * providers; never starts or completes a sign-in.
-     */
     async getResponderToken(
       responder: SessionAuthContext,
       provider: ToolAuthProvider,
@@ -75,7 +73,7 @@ function buildInlineScopedAuthorization(input: {
             provider: input.provider,
             scope: input.scope,
           })
-        : validateInlineAuthKey(input.options.authKey),
+        : assertAuthKey(input.options.authKey, 'ctx.getToken: The "options.authKey" field'),
   };
 }
 
@@ -115,20 +113,6 @@ function deriveInlineScope(input: {
   }
 
   return `${input.scope}__inline_auth`;
-}
-
-function validateInlineAuthKey(authKey: string): string {
-  if (!/^[A-Za-z0-9_.:-]+$/u.test(authKey)) {
-    throw new Error(
-      `ctx.getToken: The "options.authKey" field must contain only letters, digits, "_", "-", ".", or ":".`,
-    );
-  }
-  return authKey;
-}
-
-function sanitizeScopeSegment(value: string): string {
-  const sanitized = value.replace(/[^A-Za-z0-9_.:-]+/gu, "_").replace(/^_+|_+$/gu, "");
-  return sanitized.length > 0 ? sanitized : "provider";
 }
 
 interface InlineAuthState {

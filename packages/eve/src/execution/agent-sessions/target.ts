@@ -21,14 +21,12 @@ const log = createLogger("execution.agent-target");
 
 export type DynamicSubagentSelections = Readonly<Record<string, DurableDynamicSubagentSelection>>;
 
-/** One message to an agent, addressed by its invocation name. */
 export interface AgentActionInput {
   readonly message: MessageContent<string | URL>;
   readonly outputSchema?: JsonObject;
   readonly target: string;
 }
 
-/** Where a new session with an agent starts: in this deployment, or at a remote agent. */
 export type SubagentStartTarget =
   | {
       readonly kind: "local";
@@ -42,10 +40,6 @@ export type SubagentStartTarget =
       readonly dynamicRemoteAgent?: DynamicRemoteAgentConfig;
     };
 
-/**
- * Resolves an agent name against the calling agent's registry, its dynamic
- * selections, and the built-in root copy, as a dispatch request.
- */
 export function resolveAgentAction(input: {
   readonly bundle: CompiledBundle;
   readonly callId: string;
@@ -70,10 +64,6 @@ export function resolveAgentAction(input: {
     : { ...common, kind: "subagent-call", subagentName: definition.name };
 }
 
-/**
- * The names {@link resolveAgentAction} resolves to a remote agent, by its own lookup, so a name
- * a subagent and a dynamic agent share is whichever of them that lookup finds.
- */
 export function remoteAgentNames(
   bundle: CompiledBundle,
   dynamicSelections: DynamicSubagentSelections,
@@ -87,7 +77,6 @@ export function remoteAgentNames(
   );
 }
 
-/** What a call to an agent carries: its message, normalized, and the output it asks for. */
 function agentActionInput(input: AgentActionInput): JsonObject {
   return {
     message: normalizeAgentMessage(input.message),
@@ -117,10 +106,6 @@ function findAgentDefinition(
   return undefined;
 }
 
-/**
- * Plans a fresh child for a dispatch request. A dynamic agent whose selection
- * changed and a root copy outside the root session can't start.
- */
 export function resolveAgentStartTarget(input: {
   readonly action: RuntimeAgentDispatchRequest;
   readonly bundle: CompiledBundle;

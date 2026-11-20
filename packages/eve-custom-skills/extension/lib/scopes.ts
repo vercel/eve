@@ -10,7 +10,6 @@ function attribute(auth: SessionAuthContext | null, key: string): string | undef
   return undefined;
 }
 
-/** Who a session acts for, as a version records it. */
 export function skillAuthor(auth: SessionAuthContext | null): SkillAuthor {
   const principalId = auth?.principalId?.trim() || null;
   const label =
@@ -22,11 +21,6 @@ export function skillAuthor(auth: SessionAuthContext | null): SkillAuthor {
   return { principalId, label };
 }
 
-/**
- * Principals that act for nobody in particular: anonymous callers, and eve's
- * own runtime, such as a schedule that runs as the app. Every such run would
- * share one personal scope, so a skill saved in one would apply to all.
- */
 const IMPERSONAL_PRINCIPAL_TYPES = new Set(["anonymous", "runtime"]);
 
 /**
@@ -41,7 +35,6 @@ export function personalScope(ctx: SkillScopeContext): SkillScope | null {
   }
   return {
     name: "personal",
-    // eve's full principal identity, exact: two principals that differ in any field never share skills.
     key: `user:${JSON.stringify([
       auth.authenticator,
       auth.issuer ?? "",
@@ -75,12 +68,6 @@ export function spaceScope(ctx: SkillScopeContext): SkillScope | null {
 export const defaultScopes: SkillScopeResolver = (ctx) =>
   [personalScope(ctx), spaceScope(ctx)].filter((scope): scope is SkillScope => scope !== null);
 
-/**
- * The scope a tool acts on: the one it names, or else the first scope that
- * isn't shared, since omitting the scope means the caller's own skills. A
- * caller with no personal scope must name a shared one, so a change meant for
- * themselves never lands where everyone sees it.
- */
 export function requireScope(
   scopes: readonly SkillScope[],
   requested: string | undefined,

@@ -666,7 +666,6 @@ describe("bindInstrumentationRuntime", () => {
     expect(telemetry).toMatchObject({ recordInputs: false, recordOutputs: false });
   });
 
-  // AI SDK integrations such as Sentry's read content from the call, not from an eve destination.
   it.each([
     ["public", true],
     ["private", false],

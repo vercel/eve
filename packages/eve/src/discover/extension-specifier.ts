@@ -2,22 +2,6 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/**
- * Statically extracts the extension package specifier a mount file resolves to,
- * without importing the module. Discovery reads only the import that binds the
- * value the mount re-exports, so it can locate the package while honoring the
- * "never import authored modules" invariant.
- *
- * Supported mount forms:
- * - `export { default } from "@acme/crm";`
- * - `import { crm } from "@acme/crm"; export default crm({ ... });`
- * - `import crm from "@acme/crm"; export default crm();`
- * - `import crm from "@acme/crm"; const mount = crm(); export { mount as default };`
- * - `import crm from "@acme/crm"; export { crm as default };`
- *
- * Returns the specifier string, or `null` when the file does not match a
- * recognized mount shape.
- */
 export function parseExtensionMountSpecifier(source: string): string | null {
   const reExport = source.match(/export\s*\{[^}]*\bdefault\b[^}]*\}\s*from\s*['"]([^'"]+)['"]/);
   if (reExport !== null) {
@@ -54,7 +38,6 @@ export function parseExtensionMountSpecifier(source: string): string | null {
   return null;
 }
 
-/** Resolves `export { x as default }` to the factory call or identifier that initializes `x`, or to `x` itself. */
 function emittedMountBinding(source: string): string | undefined {
   const exports = /export\s*\{([^}]*)\}\s*(?:;|$)/g;
   for (const match of source.matchAll(exports)) {

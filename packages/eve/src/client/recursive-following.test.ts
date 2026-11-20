@@ -164,7 +164,6 @@ describe("recursive child observations", () => {
 
   it.each([false, undefined])("does no following unless opted in: %s", async (policy) => {
     const f = fixture([opening("desk")], false);
-    // Also exercise the constructor's omitted default, rather than the fixture default.
     const current =
       policy === undefined
         ? new SessionStore({ initialEvents: prefix([opening("desk")]) })

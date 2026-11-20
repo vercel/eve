@@ -3,10 +3,6 @@ import { isNonEmptyString, isObject } from "#shared/guards.js";
 import type { SessionStateMap } from "#harness/types.js";
 import { readRunningWork, writeRunningWork } from "#harness/running-work.js";
 
-// The workflow runs a turn waits on, by the call each serves: the calls part of the session's
-// record of running work (`running-work.ts`), which also holds its tasks.
-
-/** One workflow tool call the originating turn waits on. */
 export interface BlockingWorkflowToolRun {
   readonly callId: string;
   readonly toolName: string;
@@ -14,8 +10,6 @@ export interface BlockingWorkflowToolRun {
   readonly address: { readonly runId: string; readonly hookToken: string };
 }
 
-// These readers run inside the workflow driver: importing a schema runtime here also
-// embeds it and its source map in every deployed workflow function.
 function isWorkflowToolRun(value: unknown): value is BlockingWorkflowToolRun {
   return (
     isObject(value) &&
@@ -68,7 +62,6 @@ export function getBlockingWorkflowToolRuns(
   return readRuns(state).filter((entry) => turnId === undefined || entry.origin.turnId === turnId);
 }
 
-/** Registration is idempotent by originating turn and call. */
 export function registerWorkflowToolRun<T extends { readonly state?: SessionStateMap }>(
   session: T,
   entry: BlockingWorkflowToolRun,
@@ -93,7 +86,6 @@ export function registerWorkflowToolRun<T extends { readonly state?: SessionStat
   return { ...session, state: writeRuns(session.state, runs) };
 }
 
-/** Removes this turn's waiting calls, or only one of them when `callId` is given. */
 export function removeBlockingWorkflowToolRuns<T extends { readonly state?: SessionStateMap }>(
   session: T,
   turnId: string,
@@ -108,7 +100,6 @@ export function removeBlockingWorkflowToolRuns<T extends { readonly state?: Sess
     : { ...session, state: writeRuns(session.state, remaining) };
 }
 
-/** Results without an originating turn may bind only when exactly one recorded turn owns the call. */
 export function findBlockingWorkflowToolRun(
   state: SessionStateMap | undefined,
   callId: string,
@@ -120,7 +111,6 @@ export function findBlockingWorkflowToolRun(
   return candidates.length === 1 ? candidates[0] : undefined;
 }
 
-/** The turn inbox is shared; a result settles a call only if the turn recorded that run. */
 export function isInboxToolResultFromRecordedWorkflowToolRun(
   state: SessionStateMap | undefined,
   result: RuntimeToolResultActionResult,

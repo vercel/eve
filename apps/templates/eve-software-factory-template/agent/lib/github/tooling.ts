@@ -6,7 +6,7 @@ import type { VercelSandboxSession } from "eve/sandbox/vercel";
 const INSTALL_SCRIPT = [
   "set -e",
   "command -v git >/dev/null",
-  "command -v pnpm >/dev/null 2>&1 || npm install --ignore-scripts -g pnpm@11.25.0 || sudo -n npm install --ignore-scripts -g pnpm@11.25.0",
+  "command -v pnpm >/dev/null 2>&1 || npm install --ignore-scripts -g pnpm@12.21.0 || sudo -n npm install --ignore-scripts -g pnpm@12.21.0",
   "git --version",
   "pnpm --version",
 ].join("\n");

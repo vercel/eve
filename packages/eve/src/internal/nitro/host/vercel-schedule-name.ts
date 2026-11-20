@@ -1,23 +1,11 @@
 import { createHash } from "node:crypto";
 
-/** Vercel allows schedule names of up to 256 characters. */
 export const VERCEL_SCHEDULE_NAME_MAX_LENGTH = 256;
 
 const SAFE_SEGMENT = /^[0-9A-Za-z_-]+$/;
 const UNSAFE_CHARACTERS = /[^0-9A-Za-z_-]+/g;
 const HASH_LENGTH = 8;
 
-/**
- * Names an authored schedule's Nitro task, which Vercel Schedules also uses as
- * the schedule name: `eve.<schedule>`, or `eve.<agent>.<schedule>` when the
- * agent builds as one service of a multi-service project, because those agents
- * share a deployment and its schedule names. `/` in a schedule name becomes
- * `.`, so `billing/sweep` is `eve.billing.sweep`.
- *
- * A part with characters Vercel does not allow, including `.`, keeps them as
- * `.` and gets a hash of its original value, so `a/b` and `a.b` never share a
- * name. A name over Vercel's length limit is cut and gets a hash of the whole.
- */
 export function createVercelScheduleName(input: {
   readonly agentName?: string;
   readonly scheduleId: string;

@@ -2,7 +2,6 @@ import type { SessionAuthContext } from "#channel/types.js";
 import type { ToolModelOutput } from "#tools/model-output.js";
 import type { ErrorInfo } from "#protocol/session-events/envelope.js";
 
-/** Longest {@link InvokeToolOptions.key} `invokeTool` accepts. */
 export const TOOL_SESSION_KEY_MAX_LENGTH = 512;
 
 /** Options for one {@link InvokeToolFn} call. */

@@ -7,7 +7,6 @@ it("keeps the Workflow World installed while the local queue closes", async () =
   const close = world.close?.bind(world);
   world.close = async () => {
     try {
-      // Shutdown can finish pending work that still resolves its stream's World.
       await expect(getWorld()).resolves.toBe(world);
     } finally {
       await close?.();

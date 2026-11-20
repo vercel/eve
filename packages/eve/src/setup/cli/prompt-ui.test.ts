@@ -78,7 +78,6 @@ describe("renderSelectPrompt", () => {
     });
 
     expect(rendered).toContain("<b> › Yes</b><dim> · Create or link a project</dim>");
-    // No check or legacy checkbox glyphs on a single-select row.
     expect(rendered).not.toContain("✓");
     expect(rendered).not.toContain("◻");
     expect(rendered).not.toContain("◼");
@@ -120,9 +119,7 @@ describe("renderSelectPrompt", () => {
       state: "active",
     });
 
-    // The description indents to the option label column.
     expect(rendered).toContain("<b> › No</b>\n│     <dim>Set up locally and wire yourself</dim>");
-    // The non-highlighted option keeps its description hidden.
     expect(rendered).not.toContain("Fastest path to production");
   });
 
@@ -225,10 +222,8 @@ describe("renderMultiselectPrompt", () => {
       state: "active",
     });
 
-    // Cursor row (Web Chat): the pointer. Selected row off-cursor (Slack): a check.
     expect(rendered).toContain(" › Web Chat");
     expect(rendered).toContain("<green>✓</green> Slack");
-    // No key legend: the Submit row carries the confirm affordance.
     expect(rendered).not.toContain("space");
     expect(rendered).not.toContain("to confirm");
   });
@@ -247,10 +242,7 @@ describe("renderMultiselectPrompt", () => {
         state: "active",
       });
 
-    // A blank rail line sets the bold Submit row (with its green check) apart.
     expect(render(0)).toContain("│\n│     <dim><b>Submit</b></dim> <green>✓</green>");
-    // Cursor one past the options sits on the Submit row: the pointer plus a
-    // bright label.
     expect(render(2)).toContain("<b> › <b>Submit</b></b> <green>✓</green>");
     const visible = (text: string) => text.replaceAll(/<[^>]+>/g, "");
     const unselected = visible(render(0))
@@ -291,8 +283,6 @@ describe("renderMultiselectPrompt", () => {
     });
 
     expect(rendered).toContain(" › Web Chat");
-    // A locked row is mandatory rather than user-selected, so both its check
-    // and label stay dim while the reason remains inline.
     expect(rendered).toContain(
       "<dim><green>✓</green></dim> <dim>Terminal UI (always available)</dim>",
     );
@@ -383,7 +373,6 @@ describe("renderSearchableSelect", () => {
     expect(rendered).toContain(" › alpha");
     expect(rendered).toContain("<green>✓</green> beta");
     expect(rendered).toContain("<dim><b>Submit</b></dim> <green>✓</green>");
-    // The Submit row replaces the key legend; only the filter hint remains.
     expect(rendered).toContain("<cyan>type</cyan><dim> to filter</dim>");
     expect(rendered).not.toContain("space");
     expect(rendered).not.toContain("to confirm");
@@ -403,7 +392,6 @@ describe("renderSearchableSelect", () => {
     });
 
     expect(rendered).toContain("<b> › <b>Submit</b></b> <green>✓</green>");
-    // No option row carries the pointer while the cursor sits on Submit.
     expect(rendered).not.toContain(" › alpha");
   });
 
@@ -427,15 +415,12 @@ describe("renderSearchableSelect", () => {
         submitDisplay: "",
       });
 
-    // Default view: only the featured shortlist, with the footer advertising more.
     const initial = render(0);
     expect(initial).toContain("Sonnet");
     expect(initial).toContain("Opus");
     expect(initial).not.toContain("GLM");
     expect(initial).toContain("4 options, showing 1–2");
-    // Scrolling past the shortlist moves the window into the full catalog.
     expect(render(3)).toContain("Grok");
-    // Typing a filter restores the full-size window over the matches.
     expect(render(0, "g")).toContain("GLM");
   });
 

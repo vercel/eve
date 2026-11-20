@@ -12,10 +12,6 @@ export type DurableCompiledArtifactsSource =
 export function serializeDurableCompiledArtifactsSource(
   source: RuntimeCompiledArtifactsSource,
 ): DurableCompiledArtifactsSource {
-  // Only sources whose deliveries install a generation context may store
-  // the logical selector; everything else (custom Worlds in dev, production
-  // disk sources) stores its exact location so replay needs no eve-specific
-  // delivery context.
   if (source.kind === "disk" && source.durableReference === "development-generation") {
     return { kind: "development" };
   }

@@ -11,7 +11,6 @@ import { SessionTraceSeedKey } from "#context/keys.js";
 
 const log = createLogger("harness.prepare-trace-context");
 
-/** Prepares native session/turn tracing before their durable stream events. */
 export interface PrepareTurnTraceContextInput {
   readonly instrumentation?: {
     readonly prepareSessionTrace?: (
@@ -29,7 +28,6 @@ export interface PrepareTurnTraceContextInput {
   readonly sequence: number;
   readonly sessionStarted: boolean;
   readonly traceContext?: TraceContext;
-  /** Omit when preparing the session boundary before the first turn exists. */
   readonly turnId?: string;
 }
 

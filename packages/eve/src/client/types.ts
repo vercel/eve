@@ -54,16 +54,8 @@ export type HeadersValue =
 export type ClientAuth =
   | { readonly basic: { readonly username: string; readonly password: TokenValue } }
   | { readonly bearer: TokenValue }
-  // The client-side mirror of the framework's server `vercelOidc()` channel
-  // auth: one token the client expands into both Vercel deployment-protection
-  // headers (Authorization and {@link VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER}).
   | { readonly vercelOidc: { readonly token: TokenValue } };
 
-/**
- * Vercel header that presents a trusted OIDC token as proof the caller is
- * authorized for a protected deployment. The client emits it alongside
- * `Authorization` for the {@link ClientAuth} `vercelOidc` variant.
- */
 export const VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER = "x-vercel-trusted-oidc-idp-token";
 
 /** Redirect modes supported by the configured fetch implementation. */
@@ -208,30 +200,23 @@ export interface ReconnectOptions {
 
 export type { SessionStreamOptions } from "#shared/session.js";
 
-/** Result of requesting cancellation for a client session's active turn. */
 export type CancelSessionResult = CancelTurnResult;
 
-/** Result of requesting a context clear for a client session. */
 export type ClearResult =
   | {
-      /** Session whose clear request was queued. */
       readonly sessionId: string;
       readonly status: Extract<ClearStatus, "accepted">;
     }
   | {
-      /** The fixed session ID was unknown or no longer active. */
       readonly status: Extract<ClearStatus, "no_active_session">;
     };
 
-/** Result of requesting context compaction for a client session. */
 export type CompactResult =
   | {
-      /** Session whose compaction request was queued. */
       readonly sessionId: string;
       readonly status: Extract<CompactStatus, "accepted">;
     }
   | {
-      /** The fixed session ID was unknown or no longer active. */
       readonly status: Extract<CompactStatus, "no_active_session">;
     };
 

@@ -1,4 +1,3 @@
-// @linux-only: compaction model calls
 import { APICallError, jsonSchema } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -82,10 +81,6 @@ const lookupTool: HarnessToolDefinition = {
   inputSchema: jsonSchema({ type: "object" }),
   name: "lookup",
 };
-/**
- * A tool description no compaction can shrink: over a quarter of a 20k window, yet small enough
- * that a compaction against the window can keep the recent tail.
- */
 const policyTool: HarnessToolDefinition = {
   ...lookupTool,
   description: "Protected policy. ".repeat(1_200),
@@ -95,14 +90,12 @@ const overThresholdAgent = {
   thresholdPercent: 0.25,
 };
 
-/** Runs a turn through its steps. */
 async function untilTurnEnds(kernel: StepFn, session: HarnessSession, message: string) {
   let stepped = await kernel(session, { message });
   while (typeof stepped.next === "function") stepped = await stepped.next(stepped.session);
   return stepped;
 }
 
-/** The user-role text of one model request, in order. */
 function userTexts(prompt: Prompt): string[] {
   return prompt.flatMap((message) =>
     message.role === "user"
@@ -111,7 +104,6 @@ function userTexts(prompt: Prompt): string[] {
   );
 }
 
-/** Manually compacts a short conversation with `model`, as `session.compact()` does. */
 async function compactWith(
   model: MockLanguageModelV3,
   handleEvent: (events: readonly SessionEvent[]) => Promise<void> = async () => {},
@@ -155,7 +147,6 @@ describe("compaction summary call", () => {
       tools: new Map(),
     })(
       {
-        // Small enough that the brief compacts before the turn's first model call.
         compaction: {},
         continuationToken: "http:unresolved-compaction-model",
         history: [
@@ -175,7 +166,6 @@ describe("compaction summary call", () => {
         data: { outcome: "failed", error: { code: "COMPACTION_FAILED" } },
       },
     ]);
-    // No summary run started: the only run requested is the turn's own.
     const owners = events.flatMap((event) =>
       event.type === "model.requested" ? [event.data.owner] : [],
     );
@@ -230,7 +220,6 @@ describe("compaction summary call", () => {
     ]);
   });
 
-  // https://github.com/vercel/eve/issues/5921
   it("compacts against the model's window when the agent alone is over the threshold", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const summaries = vi.fn(async () => summaryStream());
@@ -240,8 +229,6 @@ describe("compaction summary call", () => {
         const system = prompt[0]?.role === "system" ? prompt[0].content : "";
         if (system.includes("CONTEXT CHECKPOINT COMPACTION")) return await summaries();
         turnPrompts.push(prompt);
-        // Measured over the threshold, so the next step would compact again if it measured
-        // against the threshold.
         return turnPrompts.length === 1 ? lookup("Let me check.", 12_000) : answer();
       },
     });
@@ -267,8 +254,6 @@ describe("compaction summary call", () => {
       "Which sources back the second claim?",
     );
 
-    // Both steps send the summary, not the notes, and only the first one summarizes. The window
-    // has room for the recent tail, so it stays word for word beside the summary.
     expect(summaries).toHaveBeenCalledOnce();
     expect(turnPrompts).toHaveLength(2);
     for (const prompt of turnPrompts) {
@@ -316,7 +301,6 @@ describe("compaction summary call", () => {
       tools: new Map([["lookup", policyTool]]),
     });
 
-    // Over the threshold but under the window by eve's estimate, so the provider decides.
     const rejected = await untilTurnEnds(
       kernel,
       {
@@ -348,7 +332,6 @@ describe("compaction summary call", () => {
     expect(events.some((event) => event.type === "session.ended")).toBe(false);
   });
 
-  // https://github.com/vercel/eve/issues/5350
   it("fails the turn and keeps the history when the summary call stays rate limited", async () => {
     vi.spyOn(Math, "random").mockReturnValue(0);
     vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -359,7 +342,6 @@ describe("compaction summary call", () => {
         const system = prompt[0]?.role === "system" ? prompt[0].content : "";
         if (!system.includes("CONTEXT CHECKPOINT COMPACTION")) return await turnCalls();
         throw new APICallError({
-          // eve's retry policy still retries the 429; this skips the AI SDK's slower inner retry.
           isRetryable: false,
           message: "Too Many Requests",
           requestBodyValues: {},
@@ -382,7 +364,6 @@ describe("compaction summary call", () => {
         tools: new Map(),
       })(
         {
-          // Small enough that the long brief compacts before the turn's first model call.
           compaction: {},
           continuationToken: "http:rate-limited-compaction",
           history,
@@ -412,7 +393,6 @@ describe("compaction summary call", () => {
       agent: { model: { contextWindowTokens: 2_000, id: "summary-model" }, thresholdPercent: 0.5 },
       handleEvent: async (publication) => void events.push(...eventsOf(publication)),
       resolveModel: async () => new MockLanguageModelV3({ doStream }),
-      // A tool description no compaction can shrink, over the window by itself.
       tools: new Map([
         [
           "policy_lookup",
@@ -434,7 +414,6 @@ describe("compaction summary call", () => {
       { message: "Please continue." },
     );
 
-    // Nothing could be compacted, so no change opened, and the provider wasn't asked.
     expect(doStream).not.toHaveBeenCalled();
     expect(events.some((event) => event.type.startsWith("context."))).toBe(false);
     expect(events.find((event) => event.type === "turn.settled")).toMatchObject({
@@ -494,7 +473,6 @@ describe("compaction summary call", () => {
       content: "Alice asked for the quarterly report.",
       role: "assistant",
     });
-    // Session limits see the summary call; a manual compaction has no turn to report it.
     expect(sessionUsage(result.session)).toMatchObject({
       inputTokens: 120,
       outputTokens: 8,
@@ -674,8 +652,6 @@ describe("announcements after a compaction during a turn", () => {
         const system = prompt[0]?.role === "system" ? prompt[0].content : "";
         if (system.includes("CONTEXT CHECKPOINT COMPACTION")) return summaryStream();
         requests.push(userTexts(prompt));
-        // A long first reply pushes the second step over the threshold, so compaction runs
-        // between the turn's steps and folds the first announcement into the summary.
         return requests.length === 1
           ? lookup(`Let me check. ${"lorem ipsum ".repeat(1_500)}`)
           : answer();
@@ -689,7 +665,6 @@ describe("announcements after a compaction during a turn", () => {
     };
     const tools: HarnessToolMap = new Map([
       ["lookup", lookupTool],
-      // A deferred tool gives the session a catalog to announce.
       ["refund_invoice", { ...lookupTool, deferred: true, name: "refund_invoice" }],
     ]);
 

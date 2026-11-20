@@ -13,11 +13,6 @@ const ConnectionAuthorizationResolversKey = new ContextKey<AuthorizationResolver
   "eve.connectionAuthorizationResolvers",
 );
 
-/**
- * Resolves and validates the auth provider for the active connection call.
- * Dynamic providers are cached for the execution step so token resolution,
- * interactive OAuth, and eviction all use the same provider instance.
- */
 export async function resolveConnectionAuthorization(
   connection: ResolvedConnectionDefinition,
   ctx?: SessionContext,

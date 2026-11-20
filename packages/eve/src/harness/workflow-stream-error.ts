@@ -1,42 +1,9 @@
 import { isObject } from "#shared/guards.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 
-/**
- * Anchored on the workflow stream transport's own failure message. The
- * runtime's durable-stream HTTP sink throws `Error`s shaped like
- * `"Stream write failed: HTTP 504 (PUT https://…; x-vercel-id=…;
- * x-vercel-error=…): …"` (and the `close` variant) when a flush to the
- * workflow server fails. Matching the literal prefix keeps the predicate
- * narrow so genuine model-call errors — which never carry this
- * signature — are never reclassified.
- *
- * Group 1 is the operation (`write`/`close`), group 2 the HTTP status,
- * group 3 the parenthesized request context (the `PUT <url>` plus any
- * `x-vercel-*` headers the transport appended).
- */
 const WORKFLOW_STREAM_WRITE_ERROR_PATTERN =
   /^Stream (write|close) failed: HTTP (\d+)(?: \(([^)]*)\))?/;
 
-/**
- * Parses a durable event-stream write failure raised by the workflow
- * runtime's stream transport into structured diagnostics, or returns
- * `null` when `error` is not such a failure.
- *
- * The harness emits every runtime event by writing to the workflow's
- * durable `getWritable()` stream, and those writes are flushed to the
- * workflow server over HTTP. Because the stream is consumed inside the
- * harness's model-call try/catch, a failed flush (timeout, 5xx) would
- * otherwise be misattributed to the model. This lets the harness label
- * it as the workflow-infrastructure failure it is and attach the
- * failing endpoint + platform error code as evidence.
- *
- * The returned object carries `operation` (`"write"`/`"close"`) and,
- * when present in the message, `statusCode`, `url` (the `PUT` target),
- * `vercelId` (`x-vercel-id`), and `vercelError` (`x-vercel-error`, e.g.
- * `"FUNCTION_INVOCATION_TIMEOUT"`).
- *
- * Walks the cause chain so a wrapped transport error is still detected.
- */
 export function extractWorkflowStreamWriteErrorDetails(error: unknown): JsonObject | null {
   for (const message of causeChainMessages(error)) {
     const details = parseStreamErrorMessage(message);

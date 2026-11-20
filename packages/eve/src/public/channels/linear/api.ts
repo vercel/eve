@@ -5,9 +5,9 @@ import {
 import { isObject } from "#shared/guards.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 
+/** `fetch`-compatible function used for Linear GraphQL requests. */
 export type LinearFetch = typeof fetch;
 
-/** Shared Agent Session selection for the create-on-issue and create-on-comment mutations. */
 const AGENT_SESSION_FIELDS = `
   fragment AgentSessionFields on AgentSession {
     id
@@ -29,8 +29,15 @@ export interface LinearApiOptions {
   readonly fetch?: LinearFetch;
 }
 
+/**
+ * Signal attached to a Linear Agent Activity, such as asking the user to sign in or select an option.
+ */
 export type LinearAgentActivitySignal = "auth" | "continue" | "select" | "stop";
 
+/**
+ * Content of a Linear Agent Activity: a thought, response, elicitation, or error body, or an action
+ * the agent took with its parameter and optional result.
+ */
 export type LinearAgentActivityContent =
   | {
       readonly body: string;
@@ -43,6 +50,7 @@ export type LinearAgentActivityContent =
       readonly type: "action";
     };
 
+/** Input for emitting an Agent Activity into a Linear Agent Session. */
 export interface LinearAgentActivityCreateInput {
   agentSessionId: string;
   content: LinearAgentActivityContent;
@@ -51,11 +59,13 @@ export interface LinearAgentActivityCreateInput {
   signalMetadata?: JsonObject;
 }
 
+/** Labeled link shown on a Linear Agent Session. */
 export interface LinearExternalUrl {
   label: string;
   url: string;
 }
 
+/** Agent Session fields to update, such as external links and the plan. */
 export interface LinearAgentSessionUpdateInput {
   addedExternalUrls?: readonly LinearExternalUrl[];
   externalLink?: string;
@@ -64,6 +74,9 @@ export interface LinearAgentSessionUpdateInput {
   removedExternalUrls?: readonly string[];
 }
 
+/**
+ * Linear Agent Session as returned by the Linear API, with its issue and comment references.
+ */
 export interface LinearAgentSessionRecord {
   appUserId?: string;
   commentId?: string | null;
@@ -81,6 +94,7 @@ export interface LinearAgentSessionRecord {
   url?: string | null;
 }
 
+/** Agent Activity as returned by the Linear API. */
 export interface LinearAgentActivityRecord {
   content: {
     body?: string;
@@ -93,6 +107,10 @@ export interface LinearAgentActivityRecord {
   updatedAt?: string;
 }
 
+/**
+ * Error thrown when a Linear GraphQL call fails with a non-OK HTTP status, GraphQL errors, or a
+ * response without `data`. `body` holds the parsed response for inspection.
+ */
 export class LinearApiError extends Error {
   readonly body: unknown;
   readonly queryName: string;
@@ -111,6 +129,10 @@ export class LinearApiError extends Error {
   }
 }
 
+/**
+ * Sends an authenticated GraphQL request to Linear and returns its `data`. Throws
+ * {@link LinearApiError} when the request fails.
+ */
 export async function callLinearGraphQL<T>(input: {
   readonly api?: LinearApiOptions;
   readonly credentials?: LinearChannelCredentials;
@@ -206,7 +228,6 @@ export async function updateLinearAgentSession(input: {
   return { success: data.agentSessionUpdate?.success === true };
 }
 
-/** Creates a proactive Agent Session attached to a Linear issue. */
 export async function createLinearAgentSessionOnIssue(input: {
   readonly api?: LinearApiOptions;
   readonly credentials?: LinearChannelCredentials;
@@ -246,7 +267,6 @@ export async function createLinearAgentSessionOnIssue(input: {
   return normalizeAgentSessionRecord(data.agentSessionCreateOnIssue?.agentSession);
 }
 
-/** Creates a proactive Agent Session attached to a Linear root comment. */
 export async function createLinearAgentSessionOnComment(input: {
   readonly api?: LinearApiOptions;
   readonly credentials?: LinearChannelCredentials;
@@ -355,11 +375,6 @@ function normalizeAgentSessionRecord(value: unknown): LinearAgentSessionRecord {
   return record;
 }
 
-/**
- * Reads the `id` from a nested Linear relation selected as `{ id }`. Returns
- * `null` when the relation is present but null (Linear's representation of an
- * absent association), and `undefined` when the field was not returned.
- */
 function relationId(value: unknown): string | null | undefined {
   if (value === null) return null;
   if (isObject(value) && typeof value.id === "string") return value.id;

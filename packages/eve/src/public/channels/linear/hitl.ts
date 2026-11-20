@@ -2,12 +2,10 @@ import { renderTextInteraction } from "#channel/resolve-text.js";
 import type { Interaction } from "#channel/interaction-prompts.js";
 import type { JsonObject } from "#shared/json.js";
 
-/** Renders eve input requests as one user-visible Linear elicitation body. */
 export function renderLinearInteractions(requests: readonly Interaction[]): string {
   return requests.map(renderLinearInteraction).join("\n\n");
 }
 
-/** Builds native Linear select metadata for a single input request with options. */
 export function linearInteractionSignal(requests: readonly Interaction[]): {
   readonly signal?: "select";
   readonly signalMetadata?: JsonObject;

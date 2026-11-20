@@ -8,7 +8,6 @@ import type {
 import { runJsProgram } from "#execution/dynamic-workflow/workflow.js";
 import { installWorkflowSandboxRuntime } from "#internal/nitro/host/workflow-sandbox-runtime.js";
 
-// As eve's host does for agents with a generated-program tool.
 installWorkflowSandboxRuntime();
 
 const continuationSecurity = {
@@ -24,7 +23,6 @@ function program(js: string, maxSubagents = 10): WorkflowProgramInput {
   };
 }
 
-/** Resumes a parked program with one result per pending call, in pending order. */
 function resume(
   outcome: Awaited<ReturnType<typeof runWorkflowProgramStep>>,
   values: readonly WorkflowProgramCallResult[],
@@ -60,7 +58,6 @@ describe("workflow program sandbox", () => {
   });
 
   it("measures values whose encoding run escapes six-fold by their JSON", async () => {
-    // run encodes each `<` as `\u003C`; the quotes bring the JSON text to the limit.
     const atLimit = await runWorkflowProgramStep({
       callId: "escaped-result",
       program: program('return "<".repeat(1_048_574);'),
@@ -75,7 +72,6 @@ describe("workflow program sandbox", () => {
       "Workflow program result is 1048577 bytes of JSON, over the 1048576 byte limit.",
     );
 
-    // `{"target":"researcher","input":{"message":""}}` adds 46 bytes to the message.
     const parked = await runWorkflowProgramStep({
       callId: "escaped-input",
       program: program('return ctx.agent("researcher", { message: "<".repeat(1_048_530) });'),
@@ -104,7 +100,6 @@ try {
   });
 
   it("resumes with a child reply of up to 4 MiB of JSON", async () => {
-    // run encodes this 4 MiB of JSON as about 24 MiB.
     const reply = "<".repeat(4 * 1024 * 1024 - 2);
     const input = program(
       'const reply = await ctx.agent("researcher", { message: "m" }); return reply.length;',
@@ -120,7 +115,6 @@ try {
   });
 
   it("converts a shared-reference result to JSON inside the sandbox", async () => {
-    // The sandbox holds 18 objects; the host only receives their 1.7 MB of JSON text.
     await expect(
       runWorkflowProgramStep({
         callId: "dag-result",
@@ -185,7 +179,6 @@ return Promise.race([
   ctx.agent("reviewer", { message: "b" }),
 ]);`);
     const first = await runWorkflowProgramStep({ callId: "race", program: input });
-    // The losing call is still pending when the race settles on resume.
     await expect(
       runWorkflowProgramStep({
         callId: "race",

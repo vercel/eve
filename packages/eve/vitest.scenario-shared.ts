@@ -1,13 +1,6 @@
 import type { AliasOptions } from "vite";
 import type { TestUserConfig } from "vitest/config";
 
-/**
- * Settings shared by every config that runs scenario files, and the lists
- * that split scenario files by area: `test:scenario` runs eve (`eve dev`,
- * `eve start`, real files and shells), `test:build` builds and packages apps
- * with eve, and `test:public-types` type-checks the published declarations.
- */
-
 export const SCENARIO_ALIASES: AliasOptions = [
   {
     find: /^#compiled\/(.+)\.js$/,
@@ -22,13 +15,9 @@ export const SCENARIO_ALIASES: AliasOptions = [
 export const SCENARIO_TEST_OPTIONS = {
   environment: "node",
   exclude: ["**/node_modules/**"],
-  // Packs the eve tarball once, from the prebuilt dist, before workers fork.
   globalSetup: ["./test/setup/pack-scenario-tarball.ts"],
   server: {
     deps: {
-      // Built app output is self-contained, multi-megabyte JavaScript. Node
-      // loads it as a deployment would; transforming it through Vite costs
-      // seconds per import.
       external: [/[\\/]\.output[\\/]/u, /[\\/]\.vercel[\\/]output[\\/]/u],
     },
   },
@@ -36,14 +25,11 @@ export const SCENARIO_TEST_OPTIONS = {
   testTimeout: 120_000,
 } satisfies TestUserConfig;
 
-/**
- * Builds and dev servers of framework hosts, run by `test:build` as the
- * `framework-builds` project.
- */
 export const FRAMEWORK_SCENARIO_FILES = [
   "test/scenarios/framework-next-build.scenario.test.ts",
   "test/scenarios/framework-nuxt-build.scenario.test.ts",
   "test/scenarios/framework-nuxt-dev.scenario.test.ts",
+  "test/scenarios/framework-solid-build.scenario.test.ts",
   "test/scenarios/framework-sveltekit-build.scenario.test.ts",
   "test/scenarios/framework-tanstack-build.scenario.test.ts",
   "test/scenarios/framework-vite-build.scenario.test.ts",
@@ -54,10 +40,6 @@ export const FRAMEWORK_SCENARIO_FILES = [
   "test/scenarios/web-chat-service-build.scenario.test.ts",
 ];
 
-/**
- * Consumers of the packed eve tarball and the CLI it ships, run by
- * `test:build` as the `packaging` project.
- */
 export const PACKAGING_SCENARIO_FILES = [
   "src/ai/package.scenario.test.ts",
   "src/self-modification/package-consumption.scenario.test.ts",
@@ -69,10 +51,6 @@ export const PACKAGING_SCENARIO_FILES = [
   "test/scenarios/packed-host-build.scenario.test.ts",
 ];
 
-/**
- * `eve build` and the Nitro and Vercel host output it writes, run by
- * `test:build` as the `production-build` project.
- */
 export const PRODUCTION_BUILD_SCENARIO_FILES = [
   "src/internal/external-resources.scenario.test.ts",
   "src/internal/nitro/host/authored-workflow-scope.scenario.test.ts",
@@ -96,7 +74,6 @@ export const PRODUCTION_BUILD_SCENARIO_FILES = [
   "test/scenarios/production-build-isolation.scenario.test.ts",
 ];
 
-/** Type checks of the published declarations, run by `test:public-types`. */
 export const PUBLIC_TYPES_SCENARIO_FILES = [
   "test/scenarios/packed-client-types.scenario.test.ts",
   "test/scenarios/packed-public-types.scenario.test.ts",

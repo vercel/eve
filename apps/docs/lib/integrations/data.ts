@@ -414,6 +414,7 @@ export default linearChannel({
       "nuxt",
       "vue",
       "react",
+      "solid",
     ],
     install: `The eve CLI scaffolds the full Next.js web chat app alongside \`agent/channels/eve.ts\`:
 
@@ -421,7 +422,7 @@ export default linearChannel({
 eve add channel/web
 \`\`\`
 
-To wire it up by hand instead — including into a Svelte, Nuxt, or TanStack Start app you already have — install the framework:
+To wire it up by hand instead — including into a Svelte, Nuxt, Solid, or TanStack Start app you already have — install the framework:
 
 \`\`\`bash
 npm install eve@latest
@@ -444,10 +445,11 @@ Point your frontend at the session routes eve serves (\`/eve/v1/session\`) and s
 - **Nuxt.** Add \`"eve/nuxt"\` to \`modules\` in \`nuxt.config.ts\`; the \`useEveAgent()\` composable from \`eve/vue\` is auto-imported. See the [Nuxt guide](/docs/guides/frontend/nuxt).
 - **Svelte.** Add the \`eveSvelteKit()\` Vite plugin before \`sveltekit()\` in \`vite.config.ts\`, then call \`useEveAgent()\` from \`eve/svelte\`. See the [SvelteKit guide](/docs/guides/frontend/sveltekit).
 - **TanStack Start.** Add the \`eveTanStack()\` Vite plugin to \`vite.config.ts\` next to \`nitro()\`, then call \`useEveAgent()\` from \`eve/react\`. See the [TanStack Start guide](/docs/guides/frontend/tanstack).
+- **Solid.** Add the \`eveVite()\` Vite plugin from \`eve/vite\` to \`vite.config.ts\`, then call \`useEveAgent()\` from \`eve/solid\`. A client-rendered Solid 2 app deploys to Vercel with \`eveVite()\` alone; a server-rendered one also adds \`nitro()\` from \`nitro/vite\`. See the [Solid guide](/docs/guides/frontend/use-eve-agent-solid).
 - **Other Vite apps.** Add the \`eveVite()\` Vite plugin from \`eve/vite\` to \`vite.config.ts\`. See the [Vite guide](/docs/guides/frontend/vite).
 
 On any other stack, wire it up by hand: run the agent as its own service and proxy \`/eve/v1/**\` to it, or pass its origin as \`baseUrl\` to \`useEveAgent()\` and enable \`cors\` on the channel. Server-side code and custom UIs can call the routes through \`Client\` from \`eve/client\`.`,
-    configure: `The eve channel needs no third-party provisioning. Its default auth policy permits local development and verified Vercel OIDC callers, and rejects other production requests. Configure your app's authentication before accepting browser requests in production. Enable \`cors\` only when a browser reaches the channel from another origin. See the [eve channel docs](/docs/channels/eve), the [Frontend guide](/docs/guides/frontend), and the per-framework guides for [Next.js](/docs/guides/frontend/nextjs), [Nuxt](/docs/guides/frontend/nuxt), [SvelteKit](/docs/guides/frontend/sveltekit), and [TanStack Start](/docs/guides/frontend/tanstack).`,
+    configure: `The eve channel needs no third-party provisioning. Its default auth policy permits local development and verified Vercel OIDC callers, and rejects other production requests. Configure your app's authentication before accepting browser requests in production. Enable \`cors\` only when a browser reaches the channel from another origin. See the [eve channel docs](/docs/channels/eve), the [Frontend guide](/docs/guides/frontend), and the per-framework guides for [Next.js](/docs/guides/frontend/nextjs), [Nuxt](/docs/guides/frontend/nuxt), [SvelteKit](/docs/guides/frontend/sveltekit), [Solid](/docs/guides/frontend/use-eve-agent-solid), and [TanStack Start](/docs/guides/frontend/tanstack).`,
   },
   "chat-sdk-gchat": {
     logo: "googlechat",
@@ -1692,6 +1694,55 @@ The directory name supplies the \`nimble\` namespace. The extension adds \`nimbl
 
 \`nimble__agent_start\` creates a billable, non-idempotent Agent API run. The registry requires approval for every call. Retain the returned identifiers for \`nimble__agent_result\` instead of starting a replacement run. See the [Nimble eve guide](https://docs.nimbleway.com/integrations/connectors/vercel-eve) for built-in tool overrides, configuration, data handling, and the complete tool reference.`,
   },
+  "sanity-context": {
+    logo: "sanity",
+    docsHref: "https://www.sanity.io/docs/context/connect-vercel-eve",
+    keywords: ["sanity", "context", "knowledge base", "dataset", "groq", "cms", "content", "mcp"],
+    install: `Install the Sanity Context extension for eve:
+
+\`\`\`bash
+eve add extension/sanity-context
+\`\`\`
+
+The extension requires Node.js 24 or later and eve 1.0.0 or later. It connects the agent to a read-only Sanity Context MCP endpoint so it can answer from your Knowledge Bases and datasets. To query and edit a Sanity project instead, use the [Sanity connection](/integrations/sanity).`,
+    quickStart: `Create a Context MCP endpoint in the Sanity Dashboard, then create an organization API token with the Context permission at the Viewer role. Project tokens are refused. Add both to the agent's environment:
+
+\`\`\`bash title=".env.local"
+SANITY_CONTEXT_MCP_URL=your_mcp_endpoint_url
+SANITY_ORGANIZATION_TOKEN=your_organization_token
+\`\`\`
+
+eve reads the extension's configuration when it builds the agent, so set these variables in the build environment too.
+
+The registry mounts the extension under \`agent/extensions/sanity-context.ts\`:
+
+\`\`\`ts title="agent/extensions/sanity-context.ts"
+import sanityContext from "@sanity/context-eve";
+
+export default sanityContext({
+  url: process.env.SANITY_CONTEXT_MCP_URL!,
+  token: process.env.SANITY_ORGANIZATION_TOKEN!,
+  description: "Describe what this endpoint's content covers.",
+});
+\`\`\`
+
+Replace \`description\` with what the endpoint's content covers. The model reads it to decide when to use the connection. The filename supplies the \`sanity-context\` namespace, so tools are named \`sanity-context__sanity__initial_context\`, \`sanity-context__sanity__groq_query\`, and so on. The extension's instructions tell the agent to load the endpoint's initial context before its first lookup.`,
+    configure: `The tools depend on the endpoint's sources. The agent gets the endpoint's current tools on every run, so source changes in the Context app reach it without a redeploy:
+
+- Knowledge Base sources: \`knowledge_base_search\` and \`knowledge_base_read\`
+- Dataset sources: \`groq_query\`, \`schema_explorer\`, and \`array_field_reader\`
+- Every endpoint: \`initial_context\`, which returns the Knowledge Base outline or dataset schema
+
+All tools are read-only. If Sanity Context rejects the token, the connection's tools fail to load and the run continues without Sanity content. A missing or invalid token returns \`401\`, which eve reports as a connection that requires authorization. A project token, or an organization token without the Context grant, returns \`403\`, which eve reports with the server's error. Keep the token server-side, out of prompts and source control. Tool results contain your content, so anyone who can edit that content can influence what the agent does. See the [Sanity Context guide for eve](https://www.sanity.io/docs/context/connect-vercel-eve) for creating an endpoint and token, inlining the initial context into instructions, and troubleshooting.`,
+    relatedResources: [
+      {
+        title: "Sanity connection",
+        description:
+          "Connect the Sanity MCP server to query and edit documents, inspect schemas, and manage releases in a Sanity project.",
+        href: "/integrations/sanity",
+      },
+    ],
+  },
 };
 
 const memoryPresentations: Record<string, MemoryPresentation> = {
@@ -2185,6 +2236,58 @@ Keep \`CLAUDE_MEM_API_KEY\` in the environment rather than prompts or source con
 
 const extensionPresentations: Record<string, ExtensionPresentation> = {
   ...baseExtensionPresentations,
+  "agent-desktop": {
+    logo: "eve",
+    docsHref: "/docs/extensions#accessibility-based-desktop-tools",
+    keywords: ["desktop automation", "computer use", "accessibility", "Linux"],
+    install: `Install the experimental agent-desktop extension in your eve project:
+
+\`\`\`bash
+eve add extension/agent-desktop
+\`\`\`
+
+Use an Ubuntu 24.04 or later sandbox with apt and root or passwordless sudo.`,
+    quickStart: `The command creates \`agent/extensions/desktop.ts\`. Before using the tools, call \`installAgentDesktop\` from \`@eve/agent-desktop/sandbox\` in your sandbox environment's \`prepare\` callback. Include \`AGENT_DESKTOP_REVALIDATION_KEY\` in the environment options so eve rebuilds the template when desktop dependencies change.
+
+The extension adds \`desktop__launch\`, \`desktop__snapshot\`, and other tools. The tools start the desktop when needed, but do not install dependencies at tool time.`,
+    configure: `Follow the [desktop sandbox setup](/docs/extensions#accessibility-based-desktop-tools) to install the apps the agent should operate. Accessibility actions are headless by default; enable \`headed\` only if the agent should be allowed to move the pointer or change focus.`,
+  },
+  board: {
+    logo: "vercel",
+    docsHref: "/docs/channels/board",
+    keywords: ["Vercel Board", "watchers", "tasks", "threads"],
+    install: `Add the Vercel Board extension to your eve project:
+
+\`\`\`bash
+eve add extension/board
+\`\`\``,
+    quickStart: `The command creates \`agent/extensions/board.ts\`. Deploy to Vercel so the agent can reach the board using the deployment's OIDC token. The agent watches nothing until you ask it to. Tell it which channel to watch and what to do when a message matches.`,
+    configure: `Limit which channels and actions the agent can use with \`can\`. Set \`configurers\` to restrict who can manage watches. See the [Board guide](/docs/channels/board) for access, task queues, and local development.`,
+  },
+  code: {
+    logo: "eve",
+    docsHref: "/docs/code-extension",
+    keywords: ["eve-code", "coding agent", "AGENTS.md", "CLAUDE.md", "coding skills"],
+    install: `Mount the Code extension bundled with eve:
+
+\`\`\`bash
+eve add extension/code
+\`\`\``,
+    quickStart: `The command creates \`agent/extensions/code.ts\`. The extension reads \`AGENTS.md\` or \`CLAUDE.md\` from the sandbox workspace root and adds coding skills such as \`code__investigate\`.`,
+    configure: `To install CLI utilities in the sandbox, use \`installCodeTooling\` from \`eve/extensions/code/sandbox\` in your sandbox environment's \`prepare\` callback. For Vercel authentication or the companion Git extension, see the [Code extension guide](/docs/code-extension).`,
+  },
+  "self-improvement": {
+    logo: "eve",
+    docsHref: "/docs/extensions/self-improvement",
+    keywords: ["Agent Runs", "GitHub", "nightly", "telemetry", "evaluations"],
+    install: `Add Self-Improvement to an eve 1.1 or later project deployed on Vercel:
+
+\`\`\`bash
+eve add extension/self-improvement
+\`\`\``,
+    quickStart: `Replace the example project, repository, owner, and models in \`agent/extensions/self-improvement.ts\`. Follow the [setup guide](/docs/extensions/self-improvement) to configure the telemetry policy, private Vercel Blob storage, and credentials before deploying.`,
+    configure: `The schedule uses UTC. Proposal mode is the default: the extension proposes tested GitHub pull requests without shipping changes. After deploying, use \`self-improvement__doctor\` to check setup and \`self-improvement__status\` to inspect the outcome of the first scheduled run.`,
+  },
   "agent-browser": {
     logo: "agent-browser",
     docsHref: "https://github.com/vercel/eve/tree/main/packages/eve-agent-browser",
@@ -2864,6 +2967,14 @@ vercel env pull
 The MCP method registers the OAuth client automatically. Sign in with a Sanity account that has access to the projects and datasets your agent needs, and copy the returned connector UID into \`connect()\`.
 
 The MCP server can edit and publish content; use [tool filters and approval gates](/docs/connections/mcp#tool-filters) to control these actions.`,
+    relatedResources: [
+      {
+        title: "Sanity Context extension",
+        description:
+          "Answer from your Sanity Knowledge Bases and datasets through a read-only Sanity Context MCP endpoint.",
+        href: "/integrations/sanity-context",
+      },
+    ],
   },
   sentry: {
     logo: "sentry",

@@ -39,7 +39,6 @@ describe("linkVercelProject box", () => {
     const deps = fakeDeps();
     const state = resolvedState();
     state.vercelProject = { kind: "new", project: "my-agent", team: "team" };
-    // A stale, mismatched link from a prior run must not win over the plan.
     state.project = { kind: "linked", projectId: "prj_stale" };
     const box = linkVercelProject({ prompter, deps });
 

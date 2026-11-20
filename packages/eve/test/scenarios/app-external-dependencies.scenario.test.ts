@@ -57,12 +57,6 @@ async function readServerSource(outputDir: string): Promise<string> {
   ).join("\n");
 }
 
-/**
- * Writes an isolated (pnpm-style, nothing hoisted) workspace: `apps/agent`
- * depends on the `packages/backend` source package, which installs
- * `fixture-workspace-external` in its own node_modules. The agent marks it
- * external; with `appDeclaresExternal` the app installs it too.
- */
 async function writeWorkspaceExternalFixture(input: {
   readonly appDeclaresExternal: boolean;
 }): Promise<string> {
@@ -125,11 +119,6 @@ async function writeWorkspaceExternalFixture(input: {
   return appRoot;
 }
 
-/**
- * Copies the build output away from the workspace, so no source installation
- * is reachable, then imports the external in Node by its bare specifier from
- * beside the chunk that imports it, exactly as the bundled module does.
- */
 async function importRelocatedExternal(outputDir: string, specifier: string): Promise<unknown> {
   const relocatedRoot = await createScratchDirectory("eve-workspace-external-relocated-");
   await cp(outputDir, relocatedRoot, { recursive: true });
@@ -142,7 +131,6 @@ async function importRelocatedExternal(outputDir: string, specifier: string): Pr
         .filter((entry) => !join(entry.parentPath, entry.name).includes("/node_modules/"))
         .map(async (entry) => {
           const path = join(entry.parentPath, entry.name);
-          // An import statement, not a mention in the embedded manifest.
           return (await readFile(path, "utf8")).includes(`from "${specifier}"`) ? path : null;
         }),
     )
@@ -216,7 +204,6 @@ describe("configured external dependencies", () => {
         index: 'export const label = "fixture-external-only-dep";\nexport default { label };\n',
       }),
     );
-    // The wrapper installs its own v2 copy of the external beside the root v1 copy.
     await writeFiles(
       join(appRoot, "node_modules", "fixture-external-wrapper"),
       packageFiles({
@@ -300,8 +287,6 @@ describe("configured external dependencies", () => {
 
 describe("workspace package externals", () => {
   it("fails the build when the app cannot resolve an external a workspace package imports", async () => {
-    // Hosted output resolves externals from the app. Building this fixture
-    // used to succeed and then fail at boot with ERR_MODULE_NOT_FOUND.
     const appRoot = await writeWorkspaceExternalFixture({ appDeclaresExternal: false });
 
     const build = buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);

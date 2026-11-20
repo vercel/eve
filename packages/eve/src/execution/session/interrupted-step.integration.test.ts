@@ -1,4 +1,3 @@
-// @linux-only: interrupted step adoption
 import { commitOf } from "#harness/session-machine/commit.js";
 import { expect, it, onTestFinished, vi } from "vitest";
 import { ContextContainer } from "#context/container.js";
@@ -86,7 +85,6 @@ it("fails the turn with a fixed failure, never what a step's last attempt threw"
   });
   expect(JSON.stringify(published)).not.toContain("4242");
   expect(result).toMatchObject({ result: { settled: { isError: true, output: message } } });
-  // The id on the stream finds the failure's log line, which names the error's class only.
   const errorId = (settled!.data as { readonly error: { readonly id: string } }).error.id;
   expect(JSON.stringify(logged.mock.calls)).toContain(errorId);
   expect(JSON.stringify(logged.mock.calls)).toContain("TypeError");

@@ -3,19 +3,10 @@ import { createHash } from "node:crypto";
 import { InvalidSkillContentError, InvalidSkillNameError } from "./errors.ts";
 import type { SkillValidation, SkillValidationInput, SkillValidator } from "./types.ts";
 
-/** Size limits for custom skills. Every field is per scope or per skill. */
 export interface SkillLimits {
-  /** Skills per scope. */
   readonly maxSkills: number;
-  /** Always-on skills per scope. */
   readonly maxAlwaysOn: number;
-  /** Combined always-on instructions per scope, in characters. */
   readonly maxAlwaysOnCharacters: number;
-  /**
-   * A skill name's length. eve caps a loadable skill name at 64 characters,
-   * and custom skills load as `<mount>__<scope prefix><name>`, so leave room
-   * for both.
-   */
   readonly maxNameLength: number;
   readonly maxDescriptionLength: number;
   readonly maxInstructionsLength: number;
@@ -30,7 +21,6 @@ export const DEFAULT_LIMITS: SkillLimits = {
   maxInstructionsLength: 20_000,
 };
 
-/** The largest values a tool input accepts; the configured limits apply on top. */
 export const INPUT_CEILINGS = {
   name: 64,
   description: 2_000,
@@ -46,7 +36,6 @@ export function isRoutingDescription(description: string): boolean {
   return ROUTING_CONDITION.test(description.trim());
 }
 
-/** The extension's own skill names, which a custom skill without a load prefix would shadow. */
 const RESERVED_NAMES = new Set(["manage"]);
 
 export function normalizeSkillName(raw: string, maxLength: number): string {
@@ -108,10 +97,6 @@ export function normalizeSkillContent(input: SkillContent): SkillContent {
   };
 }
 
-/**
- * The checks no validator replaces: required fields, configured sizes, and
- * control characters.
- */
 export function checkSkillLimits(input: SkillContent, limits: SkillLimits): string[] {
   const { description, markdown } = input;
   const errors: string[] = [];
@@ -152,7 +137,6 @@ export const defaultSkillValidator: SkillValidator = (input) => {
   return { errors, warnings };
 };
 
-/** Runs the fixed checks and `validator`, and rejects when either finds an error. */
 export async function validateSkill(
   input: SkillValidationInput,
   limits: SkillLimits,

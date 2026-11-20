@@ -219,7 +219,6 @@ export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentReturn
     return () => {
       mountedRef.current = false;
       clearTimeout(timeout);
-      // Strict Mode and Fast Refresh replay this cleanup and setup in one synchronous commit.
       queueMicrotask(() => {
         if (!mountedRef.current) detachSessionStore(store);
       });

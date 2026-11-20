@@ -59,7 +59,6 @@ describe("applyWorkflowTransform", () => {
       withWorkflowStepAuthorization,
       () => installs++,
     );
-    // Every step bundle registers these steps, so Workflow's host installs with them.
     expect(installs).toBe(1);
 
     await expect(
@@ -74,7 +73,6 @@ describe("applyWorkflowTransform", () => {
 
     const workflow = await applyWorkflowTransform(filename, source, "workflow");
     expect(workflow.code).not.toContain("workflowToolStep");
-    // A workflow body only references the steps; it never loads Workflow's host.
     expect(workflow.code).not.toContain("installWorkflowHost");
     for (const name of registered.keys()) {
       expect(workflow.code).toContain(
@@ -335,10 +333,6 @@ describe("applyWorkflowTransform", () => {
   });
 
   it("strips the @<version> stamp for stable workflow names but not for steps", async () => {
-    // Stable workflow ids must match across deployments so an explicit
-    // deployment target lands on the same registry key. Step ids stay
-    // version-stamped because they are per-deployment internal
-    // identifiers, not cross-deployment routing keys.
     const transformed = await transformWorkflowDirectives({
       filename: "src/execution/workflow-entry.ts",
       mode: "workflow",
@@ -438,7 +432,6 @@ describe("applyWorkflowTransform for authored application modules", () => {
         },
       },
     });
-    // The driver bundle resolves eve source aliases even when the app has no eve dependency.
     expect(transformed.code).toContain(
       'import { workflowToolStep } from "#execution/tools/workflow/step.js";',
     );
@@ -485,7 +478,6 @@ describe("applyWorkflowTransform for authored application modules", () => {
       appRoot,
     );
 
-    // Step registrations are bundled by the app, which resolves eve's package export.
     expect(transformed.code).toContain(
       'import { withWorkflowStepAuthorization, withWorkflowStepScope } from "eve/internal/workflow-step-execution";',
     );

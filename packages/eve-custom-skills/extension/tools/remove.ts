@@ -36,7 +36,6 @@ const { approval, execute } = skillChange({
       scope,
       requested.map(({ name }) => name),
     );
-    // A name now held by a different skill isn't the one the caller read, so it isn't removed.
     const found = requested.flatMap((skill, index) => {
       const state = live[index];
       return state?.id === skill.id ? [{ ...skill, state }] : [];
@@ -64,7 +63,6 @@ const { approval, execute } = skillChange({
 });
 
 export default defineTool({
-  // Rarely needed, so it stays out of the tool list until the model searches for it.
   deferred: true,
   label: {
     start: ({ skills }) => `Deleting ${subject(skills)}`,

@@ -25,7 +25,6 @@ const colors: PromptColors = {
   yellow: identity,
 };
 
-/** A Writable that records every chunk and reports a configurable TTY-ness. */
 class FakeOutput extends Writable {
   readonly chunks: string[] = [];
   readonly isTTY: boolean;
@@ -51,14 +50,12 @@ class FakeOutput extends Writable {
   }
 }
 
-/** Replays the recorded byte stream through a terminal emulator to the on-screen text. */
 function screenOf(output: FakeOutput, columns = 80): string {
   const screen = new MockScreen({ columns, rows: 20 });
   screen.write(output.text());
   return screen.snapshot();
 }
 
-// The animation breathes a single braille cell; non-TTY shows the densest frame.
 const FIRST_FRAME = "⠨";
 const SECOND_FRAME = "⠸";
 const STATIC_FRAME = "⢿";
@@ -80,13 +77,11 @@ describe("createRailLog spinner", () => {
     expect(screenOf(output)).toBe(`│\n${FIRST_FRAME}  Loading Vercel teams...`);
 
     vi.advanceTimersByTime(120);
-    // Redrawn in place, no stranded rows.
     expect(screenOf(output)).toBe(`│\n${SECOND_FRAME}  Loading Vercel teams...`);
 
     spinner.stop();
     expect(screenOf(output)).toBe("");
 
-    // Stop is idempotent and the animation no longer fires.
     const settledText = output.text();
     spinner.stop();
     vi.advanceTimersByTime(800);
@@ -103,13 +98,11 @@ describe("createRailLog spinner", () => {
     log.commandOutput("Progress: resolved 479");
     expect(screenOf(output)).toBe(`│\n${FIRST_FRAME}  Deploying...\n│  Progress: resolved 479`);
 
-    // The next line replaces the preview in place.
     log.commandOutput("Progress: resolved 479, added 101");
     expect(screenOf(output)).toBe(
       `│\n${FIRST_FRAME}  Deploying...\n│  Progress: resolved 479, added 101`,
     );
 
-    // Animation ticks keep the latest preview line visible.
     vi.advanceTimersByTime(120);
     expect(screenOf(output)).toBe(
       `│\n${SECOND_FRAME}  Deploying...\n│  Progress: resolved 479, added 101`,
@@ -143,7 +136,6 @@ describe("createRailLog spinner", () => {
     const log = createRailLog({ colors, output });
 
     log.spinner("Loading projects in vercel-internal-playground...");
-    // Truncated with an ellipsis so the row stays within the 24-column width.
     expect(screenOf(output, 24)).toBe(`│\n${FIRST_FRAME}  Loading projects in…`);
     const drawn = screenOf(output, 24).split("\n")[1] ?? "";
     expect([...drawn].length).toBeLessThanOrEqual(24);
@@ -192,7 +184,6 @@ describe("createRailLog spinner", () => {
     const spinner = log.spinner("Deploying...");
     output.chunks.length = 0;
 
-    // Non-TTY output is append-only: no cursor redraws that would corrupt logs.
     log.commandOutput("Progress: resolved 479");
     expect(output.text()).toBe("│  Progress: resolved 479\n");
     expect(output.text()).not.toContain(ESC);
@@ -207,8 +198,6 @@ describe("createRailLog spinner", () => {
     log.commandOutput("vercel: working");
 
     log.spinner("Loading Vercel teams...");
-    // The committed message stays; the transient command preview is gone, and the
-    // spinner draws beneath it.
     const screen = screenOf(output);
     expect(screen).toContain(`${FIRST_FRAME}  Loading Vercel teams...`);
     expect(screen).toContain("│  Linking project...");
@@ -216,17 +205,15 @@ describe("createRailLog spinner", () => {
   });
 
   test("paints the glyph the same green as the rail so it blends into the border", () => {
-    // The shared `colors` is identity, so tag green and cyan distinctly here to
-    // observe which one the glyph actually uses.
     const tagged: PromptColors = { ...colors, green: (t) => `G(${t})`, cyan: (t) => `C(${t})` };
     const output = new FakeOutput(true);
     const log = createRailLog({ colors: tagged, output });
 
     log.spinner("Loading Vercel teams...");
     const text = output.text();
-    expect(text).toContain("G(│)"); // rail/border is green
-    expect(text).toContain(`G(${FIRST_FRAME})`); // glyph is the same green
-    expect(text).not.toContain("C("); // and never cyan
+    expect(text).toContain("G(│)");
+    expect(text).toContain(`G(${FIRST_FRAME})`);
+    expect(text).not.toContain("C(");
   });
 });
 
@@ -254,7 +241,6 @@ describe("SPINNER_FRAMES breathing invariant", () => {
     const counts = SPINNER_FRAMES.map(dots);
     for (let i = 0; i < counts.length; i++) {
       const next = counts[(i + 1) % counts.length] ?? 0;
-      // A jump larger than one dot is the hard reset that reads as "stopped".
       expect(Math.abs((counts[i] ?? 0) - next)).toBe(1);
     }
   });

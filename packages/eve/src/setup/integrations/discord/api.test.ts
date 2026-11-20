@@ -83,7 +83,6 @@ describe("Discord setup API", () => {
     }
 
     it("turns on the limited intent and keeps the other limited intents set", async () => {
-      // Limited guild members (1 << 15) set, plus an unrelated read-only flag (1 << 23).
       const fetchImpl = discordApp((1 << 15) | (1 << 23));
 
       await expect(enableDiscordMessageContentIntent("bot-token", fetchImpl)).resolves.toBe(true);

@@ -1,20 +1,3 @@
-/**
- * Native Slack Web API surface used by the channel.
- *
- * Exposes two handles to author code via `ctx`:
- *
- * - {@link SlackThread}: operations scoped to the bound thread.
- *   `ctx.thread.post(...)` reads as "post a reply to this thread".
- * - {@link SlackHandle}: Slack identity + raw API escape hatch.
- *   `ctx.slack.request(...)` reads as "raw Slack API call, possibly
- *   not the bound thread".
- *
- * Kept in a thin module so the channel core (`slackChannel.ts`), the
- * interaction handler (`interactions.ts`), and the default event
- * handlers (`defaults.ts`) can all share the same low-level helpers
- * without depending on each other.
- */
-
 import {
   fetchSlackThreadReplies,
   postSlackEphemeral,
@@ -83,7 +66,6 @@ export function slackCodeChannelContinuationToken(channelId: string): string {
   return `code:${channelId}`;
 }
 
-/** The session `slack` is bound to: its code channel, or its thread. */
 export function slackSessionTargetOf(
   slack: Pick<SlackHandle, "channelId" | "codeChannel" | "threadTs">,
 ): SlackSessionTarget {
@@ -92,7 +74,6 @@ export function slackSessionTargetOf(
     : { channelId: slack.channelId, threadTs: slack.threadTs };
 }
 
-/** The continuation token of a thread's or a code channel's session. */
 export function slackSessionToken(target: SlackSessionTarget): string {
   return target.codeChannel === true
     ? slackCodeChannelContinuationToken(target.channelId)
@@ -143,11 +124,6 @@ export async function callSlackApi(input: {
   );
 }
 
-/**
- * Builds the `request(op, body)` Slack API caller installed on every
- * {@link SlackHandle}. Resolves the bot token at call time so rotated
- * credentials are picked up without rebuilding the binding.
- */
 function createSlackRequester(
   api: SlackTransportOptions | undefined,
   botToken: SlackBotToken | undefined,
@@ -410,13 +386,10 @@ export interface SlackWorkspaceHandle {
   request(operation: string, body: unknown): Promise<SlackApiResponse>;
 }
 
-/** Builds the workspace-scoped API handle used by generic event callbacks. */
 export function buildSlackWorkspaceHandle(input: {
   readonly api?: SlackTransportOptions;
   readonly botToken: SlackBotToken | undefined;
-  /** Workspace whose app installation supplies the bot token. */
   readonly installationTeamId?: string;
-  /** Actor/content workspace exposed on the public handle. */
   readonly teamId: string | undefined;
 }): SlackWorkspaceHandle {
   return {
@@ -425,21 +398,13 @@ export function buildSlackWorkspaceHandle(input: {
   };
 }
 
-/**
- * The `{ thread, slack }` pair exposed through `ctx` to every mention
- * handler, interaction handler, and event handler. Returned by
- * {@link buildSlackBinding}.
- */
 interface SlackBinding {
   readonly thread: SlackThread;
   readonly slack: SlackHandle;
 }
 
-/** Replies {@link SlackThread.refresh} loads: the thread's first page. */
 export const THREAD_REFRESH_LIMIT = 50;
-/** Replies per page when paging to a message. */
 const WINDOW_PAGE_SIZE = 200;
-/** Pages read before giving up on reaching a message: 1000 replies. */
 const WINDOW_MAX_PAGES = 5;
 
 type ThreadWindowFetcher = (
@@ -449,13 +414,6 @@ type ThreadWindowFetcher = (
 
 const threadWindowFetchers = new WeakMap<SlackThread, ThreadWindowFetcher>();
 
-/**
- * Fetches the last `size` messages of a thread up to and including the one at
- * `latest`, oldest first, without touching {@link SlackThread.recentMessages}.
- * Slack returns replies oldest first, so this pages forward to `latest`.
- * Returns `undefined` when `latest` sits more than 1000 replies in, or for a
- * thread {@link buildSlackBinding} didn't build.
- */
 export async function fetchSlackThreadWindow(
   thread: SlackThread,
   latest: string,
@@ -464,41 +422,17 @@ export async function fetchSlackThreadWindow(
   return await threadWindowFetchers.get(thread)?.(latest, size);
 }
 
-/**
- * Constructs the `{ thread, slack }` pair.
- *
- * Auto-anchor: when the binding starts without a `threadTs`, the first
- * `chat.postMessage` adopts its own `ts` as the thread root, updating the
- * live `threadTs` and firing `onThreadTsChanged` so the caller can
- * persist the anchor. Ephemerals and upload-only file posts do not
- * anchor.
- *
- * `onPosted` fires after each reply this binding posts into its existing
- * thread, through `thread.post`, `uploadFiles`, or
- * `request("chat.postMessage")`. A post that anchors a new thread is its
- * root, not a reply, so it does not fire.
- */
 export function buildSlackBinding(input: {
-  /** Slack app id used to identify this app's fetched thread replies. */
   readonly api?: SlackTransportOptions;
   readonly appId?: string;
   readonly botToken: SlackBotToken | undefined;
-  /** Slack bot user id used to identify this app's fetched thread replies. */
   readonly botUserId?: string;
   readonly channelId: string;
   readonly threadTs: string;
-  /** Binds the code channel `channelId` as its one session; `threadTs` is ignored. */
   readonly codeChannel?: boolean;
-  /** In a code channel, the thread replies post in instead of top-level. */
   readonly replyThreadTs?: () => string | undefined;
-  /**
-   * Whether `threadTs` already has replies; Slack hides threaded
-   * ephemerals until it does. Defaults to true when `threadTs` is set.
-   */
   readonly threadHasReplies?: boolean;
-  /** Workspace whose app installation supplies the bot token. */
   readonly installationTeamId?: string;
-  /** Actor/content workspace exposed on the public handle. */
   readonly teamId: string | undefined;
   readonly onThreadTsChanged?: (ts: string) => void;
   readonly onPosted?: () => void;
@@ -522,14 +456,12 @@ export function buildSlackBinding(input: {
     return response;
   };
   let messages: readonly SlackThreadMessage[] = [];
-  // A code channel session has no thread: it posts top-level and never anchors one.
   const codeChannel = input.codeChannel === true;
   let currentThreadTs = codeChannel ? "" : input.threadTs;
   const hasSessionThread = () => codeChannel || currentThreadTs !== "";
   let threadHasReplies = input.threadHasReplies ?? hasSessionThread();
   let refreshInFlight: Promise<void> | undefined;
 
-  // A code channel session posts top-level, or in the thread its current turn answers.
   function postThreadTs(): string {
     const replyThreadTs = codeChannel ? input.replyThreadTs?.() : undefined;
     return replyThreadTs || currentThreadTs;
@@ -563,10 +495,7 @@ export function buildSlackBinding(input: {
   function refreshMessages(): Promise<void> {
     if (refreshInFlight !== undefined) return refreshInFlight;
 
-    // Scoped inside the coalescing check so no caller can start an
-    // uncoalesced fetch.
     async function fetchAndReplace(): Promise<void> {
-      // A code channel's history is the whole channel, not one thread.
       if (!input.channelId || !currentThreadTs || codeChannel) {
         messages = [];
         return;
@@ -651,8 +580,6 @@ export function buildSlackBinding(input: {
       const hasStructured = "blocks" in message || "card" in message;
       const shouldPostBeforeFiles = hasStructured || "markdown" in message;
 
-      // text + files: single Slack message with files attached via
-      // files.completeUploadExternal's mrkdwn-only initial_comment.
       if (files.length > 0 && !shouldPostBeforeFiles) {
         const comment = "text" in message ? message.text : undefined;
         const result = await uploadFiles(files, { initialComment: comment });
@@ -673,8 +600,6 @@ export function buildSlackBinding(input: {
       if (hasSessionThread()) threadHasReplies = true;
       handleMessageTs(id);
 
-      // markdown / blocks / card + files: message lands first, then
-      // files upload as a follow-up post in the same thread.
       if (files.length > 0 && shouldPostBeforeFiles) {
         try {
           await uploadFiles(files);
@@ -708,7 +633,6 @@ export function buildSlackBinding(input: {
     },
     async startTyping(status) {
       if (!input.channelId) return;
-      // Slack shows its own working state while a code channel's session processes.
       if (codeChannel) {
         await setSlackCodeChannelStatus(request, input.channelId, status ? "processing" : "active");
         return;
@@ -757,17 +681,6 @@ export function buildSlackBinding(input: {
   return { thread, slack };
 }
 
-/**
- * Coerces the ergonomic bare forms of `SlackThread.post` / `postEphemeral`
- * into the explicit {@link SlackPostInput} discriminated union the
- * implementation works with.
- *
- * - `string` → `{ markdown }` so call sites like `ctx.thread.post(event.message)`
- *   render through Slack's markdown converter.
- * - {@link CardElement} → `{ card }` so call sites like
- *   `ctx.thread.post(Card({...}))` go through the Block Kit converter.
- * - Anything else is assumed to already be a {@link SlackPostInput}.
- */
 function normalizePostInput(message: string | CardElement | SlackPostInput): SlackPostInput {
   if (typeof message === "string") return { markdown: message };
   if (isCardElement(message)) return { card: message };

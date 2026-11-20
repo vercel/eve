@@ -29,14 +29,12 @@ interface GitHubDraftPublisherInput {
   readonly credentialProvider: GitHubCredentialProvider;
   readonly description: string;
   readonly fetch?: typeof fetch;
-  /** Derived by the trusted parent/session lineage, never from model tool input. */
   readonly operationId: string;
   readonly sandbox: Parameters<typeof captureSelfModificationProposal>[0]["sandbox"];
   readonly title: string;
   readonly workspace: PreparedSelfModificationWorkspace;
 }
 
-/** Captures agent-only edits, then publishes one replay-safe draft pull request. */
 export async function publishGitHubDraftPullRequest(
   input: GitHubDraftPublisherInput,
 ): Promise<PublishedSelfModificationProposal> {
@@ -48,8 +46,6 @@ export async function publishGitHubDraftPullRequest(
     workspace: input.workspace,
   });
   const branch = selfModificationBranchName(input.workspace.baseSha, input.operationId);
-  // Deliberately after capture: a model can never obtain a publication credential by
-  // submitting an invalid proposal.
   const token = await input.credentialProvider.resolve({
     capability: "publish",
     repository: repository(input.workspace),
@@ -289,8 +285,6 @@ class GitHubClient {
     branch: string,
     base: string,
   ): Promise<PullRequest | null> {
-    // Do not filter by base: an operation-owned pull request retargeted elsewhere is
-    // a conflict, not permission to create a second pull request from this branch.
     const query = new URLSearchParams({ head: `${repo.owner}:${branch}`, state: "all" });
     const values = await this.request(repo, "GET", `/pulls?${query}`);
     if (!Array.isArray(values)) throw new Error("GitHub returned an invalid pull request list.");

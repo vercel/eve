@@ -13,10 +13,6 @@ import { createReadFileStamp, ReadFileStateKey } from "../src/execution/tools/fi
 
 const HOME_PROBE_COMMAND = `printf '%s\\n' "$HOME"`;
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 function createFakeAccess(files: Record<string, string>): {
   access: SandboxAccess;
   files: Record<string, string>;
@@ -78,10 +74,6 @@ function createFakeAccess(files: Record<string, string>): {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Create new file
-// ---------------------------------------------------------------------------
-
 describe("executeWriteFileOnSandbox", () => {
   it("creates a new file without prior read", async () => {
     const { access, files, session } = createFakeAccess({});
@@ -101,10 +93,6 @@ describe("executeWriteFileOnSandbox", () => {
     expect(result.path).toBe("/workspace/new.ts");
     expect(files["/workspace/new.ts"]).toBe("hello");
   });
-
-  // ---------------------------------------------------------------------------
-  // Overwrite after read
-  // ---------------------------------------------------------------------------
 
   it("overwrites an existing file after prior read", async () => {
     const { access, files, session } = createFakeAccess({
@@ -157,10 +145,6 @@ describe("executeWriteFileOnSandbox", () => {
     expect(files["/workspace/empty.ts"]).toBe("updated");
   });
 
-  // ---------------------------------------------------------------------------
-  // Reject overwrite without prior read
-  // ---------------------------------------------------------------------------
-
   it("rejects overwrite without prior read", async () => {
     const { access, session } = createFakeAccess({
       "/workspace/foo.ts": "original",
@@ -182,16 +166,11 @@ describe("executeWriteFileOnSandbox", () => {
     );
   });
 
-  // ---------------------------------------------------------------------------
-  // Reject overwrite after external modification
-  // ---------------------------------------------------------------------------
-
   it("rejects overwrite after external modification", async () => {
     const { access, session } = createFakeAccess({
       "/workspace/foo.ts": "externally-modified",
     });
 
-    // Stamp was taken when the file had different content
     const stamp = createReadFileStamp({
       content: "original",
       filePath: "/workspace/foo.ts",
@@ -214,10 +193,6 @@ describe("executeWriteFileOnSandbox", () => {
       "File /workspace/foo.ts has been modified since it was last read. Please read the file again before modifying it.",
     );
   });
-
-  // ---------------------------------------------------------------------------
-  // Refreshes stamp after write
-  // ---------------------------------------------------------------------------
 
   it("refreshes stamp after successful write", async () => {
     const { access, session } = createFakeAccess({
@@ -245,13 +220,8 @@ describe("executeWriteFileOnSandbox", () => {
     const state = ctx.require(ReadFileStateKey);
     const newStamp = state.byTarget["/workspace/foo.ts"];
     expect(newStamp).toBeDefined();
-    // The stamp should be for the new content, not the original
     expect(newStamp?.contentHash).not.toBe(stamp.contentHash);
   });
-
-  // ---------------------------------------------------------------------------
-  // Write-after-write (no additional read needed)
-  // ---------------------------------------------------------------------------
 
   it("allows a second write after the first write without another read", async () => {
     const { access, files, session } = createFakeAccess({
@@ -269,7 +239,6 @@ describe("executeWriteFileOnSandbox", () => {
       byTarget: { "/workspace/foo.ts": stamp },
     });
 
-    // First write
     await contextStorage.run(ctx, () =>
       executeWriteFileOnSandbox(session, {
         filePath: "/workspace/foo.ts",
@@ -277,7 +246,6 @@ describe("executeWriteFileOnSandbox", () => {
       }),
     );
 
-    // Second write — should succeed because stamp was refreshed
     const result = (await contextStorage.run(ctx, () =>
       executeWriteFileOnSandbox(session, {
         filePath: "/workspace/foo.ts",
@@ -288,10 +256,6 @@ describe("executeWriteFileOnSandbox", () => {
     expect(result.existed).toBe(true);
     expect(files["/workspace/foo.ts"]).toBe("second update");
   });
-
-  // ---------------------------------------------------------------------------
-  // Path validation
-  // ---------------------------------------------------------------------------
 
   it("shares read-before-write state with the resolved form of a $HOME path", async () => {
     const filePath = "/home/agent/.agents/skills/research/references/catalog.md";
@@ -313,16 +277,7 @@ describe("executeWriteFileOnSandbox", () => {
     expect(files[filePath]).toBe("updated");
   });
 
-  // ---------------------------------------------------------------------------
-  // Path canonicalization
-  // ---------------------------------------------------------------------------
-
   it("absolute-path canonicalization shares stamp", async () => {
-    // Both the read and write executors normalize the model-supplied
-    // path via `normalizeModelPath` before building the target key,
-    // so dot-segment variants collapse to the same canonical key.
-    // Seed the fake file system with both variants so the sandbox
-    // resolves the file regardless of which path the executor passes.
     const { access, files, session } = createFakeAccess({
       "/workspace/foo.ts": "original",
       "/workspace/./foo.ts": "original",
@@ -332,14 +287,10 @@ describe("executeWriteFileOnSandbox", () => {
     ctx.set(SandboxKey, access);
     ctx.set(ReadFileStateKey, { byTarget: {} });
 
-    // Read using a non-canonical path variant — the executor normalizes
-    // internally so the stamp is keyed by the canonical path.
     await contextStorage.run(ctx, () =>
       executeReadFileOnSandbox(session, { filePath: "/workspace/./foo.ts" }),
     );
 
-    // Write using the canonical path — should match the stamp stored
-    // by the read above because both normalize to the same key.
     const result = (await contextStorage.run(ctx, () =>
       executeWriteFileOnSandbox(session, {
         filePath: "/workspace/foo.ts",
@@ -350,10 +301,6 @@ describe("executeWriteFileOnSandbox", () => {
     expect(result.existed).toBe(true);
     expect(files["/workspace/foo.ts"]).toBe("updated");
   });
-
-  // ---------------------------------------------------------------------------
-  // New file stores stamp
-  // ---------------------------------------------------------------------------
 
   it("stores stamp after creating a new file", async () => {
     const { access, session } = createFakeAccess({});

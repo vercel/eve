@@ -118,7 +118,6 @@ class DatadogReporter implements EvalReporter {
     }
     this.#recordKeys = composeDatasetRecordKeys(evaluations);
 
-    // Without credentials, dd-trace datasets never receive ids.
     if (!this.#config.client && (!process.env.DD_API_KEY || !process.env.DD_APP_KEY)) {
       (this.#config.log ?? console.log)(
         "Datadog reporting skipped: set DD_API_KEY and DD_APP_KEY to upload eval results.\n",
@@ -219,7 +218,6 @@ class DatadogReporter implements EvalReporter {
     const newRecords: DatadogDatasetRecordInput[] = [];
     const syncedRecordKeys = new Set<string>();
     for (const result of results) {
-      // Repeated attempts share one dataset record per eval.
       const recordKey = this.#getRecordKey(result.id);
       if (syncedRecordKeys.has(recordKey)) continue;
       syncedRecordKeys.add(recordKey);
@@ -261,7 +259,6 @@ class DatadogReporter implements EvalReporter {
       id: datasetId,
       name: dataset.name(),
     };
-    // An unchanged pulled dataset has no pinned version.
     const datasetVersion = dataset.version() ?? dataset.latestVersion();
     if (datasetVersion !== null) {
       datasetOptions.version = datasetVersion;
@@ -354,7 +351,6 @@ const BUILT_IN_METRIC_LABELS = [
 ] as const;
 const DATASET_RECORD_KEY_METADATA = "eveRecordKey";
 
-// Index-based eval ids shift when cases move, so records are keyed by description.
 function composeDatasetRecordKeys(evaluations: readonly EveEval[]): Map<string, string> {
   const keys = new Map<string, string>();
   const counts = new Map<string, number>();
@@ -563,8 +559,5 @@ function elapsedMs(startedAt: string, completedAt: string): number | undefined {
   const completed = Date.parse(completedAt);
   if (!Number.isFinite(start) || !Number.isFinite(completed)) return undefined;
 
-  // ISO timestamps have millisecond precision, so fast failures can start and
-  // finish in the same millisecond. Datadog Experiment spans require a
-  // positive duration; use the smallest representable duration in these units.
   return Math.max(1, completed - start);
 }

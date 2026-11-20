@@ -17,7 +17,6 @@ import type {
 } from "#public/channels/twilio/twilioChannel.js";
 import type { Interaction } from "#channel/interaction-prompts.js";
 
-/** Default phone-number auth projection for Twilio webhook actors. */
 function defaultTwilioAuth(input: {
   readonly from: string;
   readonly to?: string;
@@ -38,7 +37,6 @@ function defaultTwilioAuth(input: {
   };
 }
 
-/** Default inbound text hook: dispatch with Twilio phone-number auth. */
 export function defaultOnText(
   _ctx: TwilioContext,
   message: TwilioTextMessage,
@@ -52,12 +50,10 @@ export function defaultOnText(
   };
 }
 
-/** Default inbound voice hook: accept the call with configured voice defaults. */
 export function defaultOnVoice(_ctx: TwilioContext, _call: TwilioVoiceCall): TwilioVoiceResult {
   return {};
 }
 
-/** Default inbound voice hook: dispatch with Twilio phone-number auth. */
 export function defaultOnVoiceTranscription(
   _ctx: TwilioContext,
   transcription: TwilioVoiceTranscription,
@@ -87,7 +83,6 @@ function twilioSignIns(channel: TwilioEventContext): SignInSurface {
 export const defaultEvents: TwilioChannelEvents = surfaceEvents<TwilioEventContext>({
   post: (channel, text) => channel.twilio.sendMessage(text),
   restart: "message",
-  // SMS has no buttons, so a reply can only answer the request it sees.
   requests: { showOne: showPrompt },
   signIns: twilioSignIns,
 });

@@ -9,19 +9,12 @@ const log = createLogger("context.serialize");
 const STATE_LAYOUT_KEY = "eve.stateLayout";
 const STATE_LAYOUT_VERSION = 1;
 
-/**
- * Serializes every value in the context to a plain JSON record.
- *
- * Keys with a codec are run through `codec.serialize`; keys without one
- * are stored as-is (they must already be JSON-safe).
- */
 export function serializeContext(ctx: AlsContext): Record<string, unknown> {
   const data: Record<string, unknown> = {};
   for (const [key, value] of ctx.entries()) {
     try {
       data[key.name] = key.codec ? key.codec.serialize(value) : value;
     } catch (error) {
-      // Name the offending key before it surfaces as an opaque failure inside the workflow SDK.
       logError(log, "failed to serialize context key", error, { key: key.name });
       throw error;
     }
@@ -35,12 +28,6 @@ export function serializeContext(ctx: AlsContext): Record<string, unknown> {
   return data;
 }
 
-/**
- * Deserializes a plain JSON record into a fresh context container.
- *
- * Each entry is matched to a registered {@link ContextKey} by name.
- * Unknown entries (no registered key) are dropped with a warning.
- */
 export async function deserializeContext(
   serialized: Record<string, unknown>,
 ): Promise<ContextContainer> {
@@ -57,7 +44,6 @@ export async function deserializeContext(
   ) {
     throw new IncompatibleStateLayoutError();
   }
-  // The agent first: the channel rehydrates from it.
   if (serializedAgent !== undefined) {
     const codec = SessionAgentKey.codec;
     if (codec === undefined) {
@@ -75,7 +61,6 @@ export async function deserializeContext(
     if (name === SessionAgentKey.name || name === STATE_LAYOUT_KEY) continue;
     const key = resolveKey(name);
     if (key === undefined) {
-      // Unregistered key (e.g. renamed): dropping it silently loses data, so warn.
       log.warn("dropping unknown context key during deserialization", { key: name });
       continue;
     }
@@ -89,12 +74,6 @@ export async function deserializeContext(
   return ctx;
 }
 
-/**
- * Admits a context written before mount-scoped state (eve 0.68 and earlier).
- * Extension state moves to the one mount that still defines it. Authored state
- * nothing defines was removed, so the loader drops it as in the current layout.
- * State that several mounts define refuses rather than guessing an owner.
- */
 async function adoptLegacyStateLayout(
   data: Record<string, unknown>,
   bundle: CompiledBundle,
@@ -118,8 +97,6 @@ async function adoptLegacyStateLayout(
       const mounted = mountedStateKeyName(mount.mountId, name.slice(prefix.length));
       return resolveKey(mounted) === undefined ? [] : [mounted];
     });
-    // Authored state cannot use `eve.`, so an unknown framework key means a
-    // checkpoint migration missed it.
     if (owners.length > 1 || (owners.length === 0 && name.startsWith("eve."))) {
       throw new IncompatibleStateLayoutError(name);
     }
@@ -128,7 +105,6 @@ async function adoptLegacyStateLayout(
   return adopted;
 }
 
-/** The `defineState` prefix extensions used before state was scoped to mounts. */
 function legacyPackageStateNamespace(packageName: string): string {
   return (
     packageName
@@ -138,7 +114,6 @@ function legacyPackageStateNamespace(packageName: string): string {
   );
 }
 
-/** A context whose saved state this deployment cannot place; retrying never changes the answer. */
 export class IncompatibleStateLayoutError extends Error {
   constructor(key?: string) {
     super(

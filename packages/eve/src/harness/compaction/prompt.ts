@@ -5,7 +5,6 @@ import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox
 
 export const COMPACTION_CHECKPOINT_MARKER = "Summary of our conversation so far:";
 
-/** Synthetic resumption prompt used when no real user message can be replayed. */
 export const COMPACTION_RESUMPTION_MESSAGE = "Continue.";
 
 const COMPACTION_SYSTEM_PROMPT = `You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff summary for another LLM that will resume the task.
@@ -25,8 +24,6 @@ Make completed work explicit so the next model does not repeat it. Keep complete
 
 Large tool outputs are the main thing to compress: reduce each to the findings the next model needs — what was searched or read, what it established, and the exact identifiers involved — rather than reproducing the output. The next model cannot see the originals, so nothing it would need to act on may be lost.`;
 
-// Fallback cap for conversational text, applied oldest-first only when the
-// rendered transcript exceeds the caller's token budget.
 const DEGRADED_TEXT_LIMIT = 2_000;
 const DEGRADE_SLACK_CHARS = 64;
 
@@ -40,21 +37,11 @@ interface CompactionPrompt {
   readonly system: string;
 }
 
-/** Static prompt text added around checkpoint and conversation content. */
 export const COMPACTION_PROMPT_ENVELOPE = {
   prompt: formatCompactionPrompt({ previousCheckpoint: "", transcript: "" }),
   system: COMPACTION_SYSTEM_PROMPT,
 } satisfies CompactionPrompt;
 
-/**
- * Builds the compaction model input from framework-owned checkpoint state and
- * older messages.
- *
- * Conversational text is rendered verbatim. When `transcriptBudgetTokens` is
- * set and the rendered prompt exceeds it, conversational text is capped at
- * {@link DEGRADED_TEXT_LIMIT} starting from the oldest entries until the
- * prompt fits; the previous checkpoint is never truncated.
- */
 export function createCompactionPrompt(input: {
   readonly messages: readonly ModelMessage[];
   readonly previousCheckpoint: string | undefined;
@@ -76,13 +63,6 @@ export function createCompactionPrompt(input: {
   };
 }
 
-/**
- * Re-renders the oldest entries with degraded (capped) conversational text
- * until the estimated prompt fits the budget. Mutates `entries` in place.
- * Savings are tracked per entry instead of re-estimating the whole prompt per
- * iteration; the UTF-8 byte delta divided by 4 matches the
- * {@link estimateTokens} ruler closely enough for a soft budget.
- */
 function degradeOversizedTranscript(
   input: {
     readonly messages: readonly ModelMessage[];
@@ -109,10 +89,6 @@ function degradeOversizedTranscript(
       continue;
     }
 
-    // Cut only what the budget still needs, never below the floor: a single large
-    // entry (the cut-out middle of an oversized message) keeps as much as fits. The
-    // slack absorbs the estimate's rounding so a sliver of excess does not
-    // reach into the next entry.
     const limit = Math.max(
       DEGRADED_TEXT_LIMIT,
       entry.content.length - Math.ceil(excessTokens * 4) - DEGRADE_SLACK_CHARS,
@@ -188,11 +164,6 @@ function renderCompactionContentPart(
   }
 }
 
-// Raw tool payloads reach the summarizer clipped, not pre-summarized: the
-// checkpoint model decides what matters in a grep result or file read. The
-// transcript limit keeps enough content to judge a payload without letting
-// one result dominate the prompt; the compact limit applies where a one-line
-// rendering is the point — budget-degraded transcript entries.
 export const TRANSCRIPT_PAYLOAD_LIMIT = 2_000;
 const COMPACT_PAYLOAD_LIMIT = 280;
 
@@ -216,10 +187,6 @@ function renderTranscriptToolResult(
   return output ? `Tool ${part.toolName} ${status} ${output}` : `Tool ${part.toolName} ${status}`;
 }
 
-// A `content` tool output carries model-facing parts whose file payloads
-// are base64: stringifying them would fill the payload budget with bytes
-// the summarizer cannot read. File parts render as the same stub used for
-// message file parts; text parts stay raw for the checkpoint model to judge.
 function renderToolResultOutput(value: unknown, limit: number): string {
   const parts = contentToolOutputParts(value);
   if (parts === undefined) {
@@ -232,12 +199,6 @@ function renderToolResultOutput(value: unknown, limit: number): string {
   return capPayload(rendered, limit);
 }
 
-/**
- * The text a tool-result output is measured and clipped by, in history
- * capping and in the summarizer transcript alike: a text or error-text
- * output is its value, any other output its JSON. Sharing it keeps a capped
- * history result whole when the summarizer renders it.
- */
 export function serializeToolResultOutput(output: unknown): string {
   if (output !== null && typeof output === "object") {
     const candidate = output as { readonly type?: unknown; readonly value?: unknown };
@@ -259,12 +220,6 @@ function contentToolOutputParts(value: unknown): readonly unknown[] | undefined 
     : undefined;
 }
 
-/**
- * Replaces the file parts of a `content` tool output with their text stubs,
- * leaving every other output shape untouched. History capping uses this so a
- * capped content output can never carry — or truncate into — a raw payload;
- * the stub matches the one the summarizer transcript renders.
- */
 export function stubContentOutputFileParts(output: unknown): unknown {
   const parts = contentToolOutputParts(output);
   if (parts === undefined) return output;
@@ -300,8 +255,6 @@ function renderContentToolOutputPart(part: unknown, limit: number): string {
   if (candidate.type === "text" && typeof candidate.text === "string") {
     return candidate.text;
   }
-  // "media" is the AI SDK's deprecated spelling of a file part; both carry
-  // an inline payload the summarizer cannot read.
   if (candidate.type === "file" || candidate.type === "media") {
     return renderAttachedFileStub(
       contentFileName(part),
@@ -311,10 +264,6 @@ function renderContentToolOutputPart(part: unknown, limit: number): string {
   return renderPayload(part, limit);
 }
 
-/**
- * Names a content file part in its stub. A staged file names its sandbox
- * path, so the agent can open it again after compaction drops the bytes.
- */
 function contentFileName(part: object): string | undefined {
   const { data, filename } = part as { readonly data?: unknown; readonly filename?: unknown };
   const tagged = data as { readonly type?: unknown; readonly url?: unknown } | undefined;
@@ -334,10 +283,6 @@ function renderPayload(value: unknown, limit: number): string {
   return capPayload(JSON.stringify(value) ?? "", limit);
 }
 
-// One summarized-attachment surface for the checkpoint model, whether the
-// file arrived on a message or inside a content tool output.
-// `renderSandboxRefAsTextPart` in attachment-staging deliberately matches
-// this shape.
 function renderAttachedFileStub(filename: string | undefined, mediaType: string): string {
   return `Attached file ${filename ?? "attachment"} (${mediaType})`;
 }
@@ -346,7 +291,6 @@ function renderConversationText(value: string, limit?: number): string {
   return limit === undefined ? value.trim() : capText(value, limit);
 }
 
-// Providers reject lone surrogates created by cutting an astral character in half.
 export function sliceUtf16Safe(value: string, limit: number): string {
   if (limit <= 0) {
     return "";
@@ -362,16 +306,10 @@ export function sliceUtf16Safe(value: string, limit: number): string {
   return value.slice(0, end);
 }
 
-/**
- * Keeps the head and tail of an oversized tool payload, never exceeding
- * `limit`. Tool output often ends with what matters most: the failing test,
- * the error, or the exit code that `bash` reports last.
- */
 export function clipMiddleUtf16Safe(value: string, limit: number): string {
   if (value.length <= limit) {
     return value;
   }
-  // Sized for the largest possible count so the real marker always fits.
   const kept = limit - elisionMarker(value.length).length;
   const head = sliceUtf16Safe(value, Math.ceil(kept * 0.6));
   let tailStart = value.length - (kept - head.length);

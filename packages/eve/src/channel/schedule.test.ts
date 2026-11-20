@@ -99,7 +99,6 @@ describe("ScheduleDispatcher", () => {
         principalId: "alice",
       },
       sends = 1,
-      // Replaces the default send with the sends a test scripts.
       script?: (
         send: (channelId: string, message: MessageContent) => Promise<unknown>,
       ) => Promise<void>,
@@ -191,7 +190,6 @@ describe("ScheduleDispatcher", () => {
         capabilities: { requestInput: false },
         input: { message: "Summarize the week." },
       });
-      // A send without a key takes one from the occurrence, so the retry reaches the first session.
       expect(started[1]!.continuationToken).toBe(started[0]!.continuationToken);
       expect(started[1]).toMatchObject({
         idempotencyKey: expect.stringMatching(/^eve-occurrence:[0-9a-f]{64}$/u),
@@ -220,7 +218,6 @@ describe("ScheduleDispatcher", () => {
       expect(runtime.dispatchContinuation).not.toHaveBeenCalled();
       const started = vi.mocked(runtime.createSession).mock.calls.map(([value]) => value);
       expect(started).toHaveLength(2);
-      // A retried callback claims the same address, so its start reaches the first session.
       expect(started[1]!.continuationToken).toBe(started[0]!.continuationToken);
       expect(started[1]).toMatchObject({
         idempotencyKey: "exec-1:digest",
@@ -246,7 +243,6 @@ describe("ScheduleDispatcher", () => {
         .mocked(runtime.createSession)
         .mock.calls.map(([value]) => value.continuationToken);
       expect(tokens).toHaveLength(4);
-      // The retry's sends reach the two sessions the first attempt started.
       expect(tokens[2]).toBe(tokens[1]);
       expect(tokens[3]).toBe(tokens[0]);
       expect(new Set(tokens).size).toBe(2);
@@ -268,7 +264,6 @@ describe("ScheduleDispatcher", () => {
       const messages: MessageContent[] = [
         file([1, 2, 3]),
         file([1, 2, 4]),
-        // The same bytes key the same, whichever way the file holds them.
         file([1, 2, 3], (value) => value.buffer.slice(0) as ArrayBuffer),
       ];
       const { dispatcher, input, runtime } = setup(
@@ -454,7 +449,6 @@ describe("ScheduleDispatcher", () => {
         expect(runtime.createSession).toHaveBeenCalledTimes(1);
         const run = vi.mocked(runtime.createSession).mock.calls[0]![0];
         expect(run.auth).toEqual(SCHEDULE_APP_AUTH);
-        // A threadless destination needs a fresh conversation per dispatch.
         expect(run.continuationToken).toMatch(
           /^slack:C0123ABC:[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/,
         );
@@ -510,7 +504,6 @@ describe("ScheduleDispatcher", () => {
         vi.unstubAllEnvs();
       }
     });
-    // https://github.com/vercel/eve/issues/5598
     it("tags to() sends with the Vercel deployment running the schedule", async () => {
       vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_current");
       try {
@@ -556,7 +549,6 @@ describe("ScheduleDispatcher", () => {
         vi.unstubAllEnvs();
       }
     });
-    // the turn a scheduled send starts in a conversation must know a schedule sent it.
     it("marks to() sends into an existing conversation with the schedule", async () => {
       const runtime = createMockRuntime();
       runtime.dispatchContinuation = vi

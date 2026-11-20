@@ -1,35 +1,14 @@
-/**
- * Minimal HTML-to-Markdown conversion for model-facing text.
- *
- * eve converts two kinds of HTML: pages fetched by the web fetch tool and
- * Microsoft Teams message bodies. Both only need readable Markdown for a
- * model, so this covers the common document subset (headings, paragraphs,
- * emphasis, links, images, lists, code, quotes, rules, and simple tables) and
- * renders everything else as its text.
- *
- * Fetched HTML is untrusted and can be megabytes long, so parsing is a single
- * forward pass, every scan resumes past the previous match, and element
- * nesting is capped. Quote and list prefixes stop nesting at a smaller depth,
- * so each output line is prefixed a bounded number of times. Work stays linear
- * in the input size and rendering recursion stays bounded no matter how the
- * markup is shaped.
- */
-
 interface ElementNode {
   readonly name: string;
-  /** Raw attribute source, parsed only for the few elements that need it. */
   readonly attrs: string;
   readonly children: Node[];
-  /** Whether a block element is nested anywhere inside. */
   hasBlock: boolean;
 }
 
 type Node = ElementNode | string;
 
-/** Deeper elements are flattened into their ancestor at the cap. */
 const MAX_DEPTH = 128;
 
-/** Quotes and lists nested deeper than this add no further prefix or indent. */
 const MAX_PREFIX_DEPTH = 8;
 
 const VOID_ELEMENTS = new Set([
@@ -49,7 +28,6 @@ const VOID_ELEMENTS = new Set([
   "wbr",
 ]);
 
-/** Elements dropped with their content, which is skipped as raw text. */
 const SKIPPED_ELEMENTS = new Set([
   "canvas",
   "iframe",
@@ -117,17 +95,9 @@ const BLOCK_ELEMENTS = new Set([
 
 const LIST_ELEMENTS = new Set(["dir", "menu", "ol", "ul"]);
 
-/**
- * Converts an HTML string to Markdown with ATX headings, `-` bullets, fenced
- * code blocks, `*` emphasis, and `---` rules.
- */
 export function convertHtmlToMarkdown(html: string): string {
   return renderBlocks(parseHtml(html).children, 0, []).join("\n\n");
 }
-
-// ---------------------------------------------------------------------------
-// Parsing
-// ---------------------------------------------------------------------------
 
 function parseHtml(html: string): ElementNode {
   const root: ElementNode = { name: "#root", attrs: "", children: [], hasBlock: false };
@@ -144,10 +114,9 @@ function parseHtml(html: string): ElementNode {
     if (open === -1) break;
 
     const next = html.charCodeAt(open + 1);
-    const isTagStart = isAsciiLetter(next) || next === 47; /* / */
-    const isMarkup = next === 33 /* ! */ || next === 63; /* ? */
+    const isTagStart = isAsciiLetter(next) || next === 47;
+    const isMarkup = next === 33 || next === 63;
     if (!isTagStart && !isMarkup) {
-      // A literal `<`, such as `a < b`. Keep it as text.
       pushText(open + 1);
       pos = open + 1;
       continue;
@@ -156,7 +125,6 @@ function parseHtml(html: string): ElementNode {
     pushText(open);
 
     if (isMarkup) {
-      // Comments, doctypes, CDATA, and processing instructions.
       const terminator = html.startsWith("<!--", open) ? "-->" : ">";
       const end = html.indexOf(terminator, open + 2);
       pos = end === -1 ? html.length : end + terminator.length;
@@ -165,7 +133,6 @@ function parseHtml(html: string): ElementNode {
 
     const close = findTagEnd(html, open + 1);
     if (close === -1) {
-      // No complete tag remains, so the rest is text.
       pos = open;
       break;
     }
@@ -188,7 +155,6 @@ function parseHtml(html: string): ElementNode {
 
     const selfClosing = source.charCodeAt(source.length - 1) === 47;
     if (SKIPPED_ELEMENTS.has(name)) {
-      // Foreign elements honor `/>`; HTML elements such as `<script/>` ignore it.
       const foreign = name === "svg" || name === "math";
       if (!(foreign && selfClosing)) pos = skipRawText(html, name, pos);
       continue;
@@ -217,7 +183,6 @@ function isAsciiLetter(code: number): boolean {
   return (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
 }
 
-/** Finds the `>` that ends a tag, ignoring `>` inside quoted attribute values. */
 function findTagEnd(html: string, from: number): number {
   let quote = 0;
   let previous = 0;
@@ -225,7 +190,7 @@ function findTagEnd(html: string, from: number): number {
     const code = html.charCodeAt(i);
     if (quote !== 0) {
       if (code === quote) quote = 0;
-    } else if ((code === 34 || code === 39) && previous === 61 /* = */) {
+    } else if ((code === 34 || code === 39) && previous === 61) {
       quote = code;
     } else if (code === 62) {
       return i;
@@ -235,7 +200,6 @@ function findTagEnd(html: string, from: number): number {
   return -1;
 }
 
-/** Returns the index just past `</name ...>`, or the end of input. */
 function skipRawText(html: string, name: string, from: number): number {
   const pattern = new RegExp(`</${name}(?=[\\s/>])`, "gi");
   pattern.lastIndex = from;
@@ -244,7 +208,6 @@ function skipRawText(html: string, name: string, from: number): number {
   return end === -1 ? html.length : end + 1;
 }
 
-/** Marks open elements as holding block content. Each is marked once, so total work is linear. */
 function markBlockAncestors(stack: ElementNode[]): void {
   for (let i = stack.length - 1; i > 0 && !stack[i]!.hasBlock; i--) {
     stack[i]!.hasBlock = true;
@@ -252,17 +215,14 @@ function markBlockAncestors(stack: ElementNode[]): void {
 }
 
 function closeElement(stack: ElementNode[], name: string): void {
-  // Stack depth is capped, so this search is bounded.
   for (let i = stack.length - 1; i > 0; i--) {
     if (stack[i]!.name === name) {
       stack.length = i;
       return;
     }
   }
-  // A stray closing tag with no open element is ignored.
 }
 
-/** Applies the common HTML auto-closing rules for lists, tables, and paragraphs. */
 function closeImplicitly(stack: ElementNode[], name: string): void {
   if (name === "li") {
     closeWithin(stack, ["li"], LIST_ELEMENTS);
@@ -304,14 +264,6 @@ function readAttribute(attrs: string, wanted: string): string | undefined {
   return undefined;
 }
 
-// ---------------------------------------------------------------------------
-// Rendering
-// ---------------------------------------------------------------------------
-
-/**
- * Appends nodes to `out` as Markdown blocks, grouping runs of inline content
- * into paragraphs. `depth` counts the quotes and list items around the nodes.
- */
 function renderBlocks(nodes: readonly Node[], depth: number, out: string[]): string[] {
   let inline: Node[] = [];
 
@@ -333,11 +285,6 @@ function renderBlocks(nodes: readonly Node[], depth: number, out: string[]): str
   return out;
 }
 
-/**
- * Inline elements that wrap block content, such as custom elements and
- * `<span>`, pass their children through so headings, lists, and code inside
- * keep their structure. Links stay inline to keep their target.
- */
 function rendersAsBlock(node: ElementNode): boolean {
   return BLOCK_ELEMENTS.has(node.name) || (node.hasBlock && node.name !== "a");
 }
@@ -385,17 +332,14 @@ function renderBlockElement(node: ElementNode, depth: number, out: string[]): vo
 
 function renderList(node: ElementNode, depth: number, out: string[]): void {
   const start = node.name === "ol" ? readAttribute(node.attrs, "start") : undefined;
-  // Markdown list numbers have at most nine digits.
   let index = start !== undefined && /^\d{1,9}$/.test(start) ? Number(start) : 1;
   const items: string[] = [];
 
   for (const child of node.children) {
-    // Text between items is usually whitespace; anything else becomes its own item.
     const content = typeof child !== "string" && child.name === "li" ? child.children : [child];
     const marker = node.name === "ol" ? `${index}. ` : "- ";
 
     if (depth >= MAX_PREFIX_DEPTH) {
-      // Too deep to indent further: the item's blocks follow its marker unindented.
       const first = out.length;
       renderBlocks(content, depth, out);
       if (out.length > first) {
@@ -450,8 +394,6 @@ function renderTable(node: ElementNode, depth: number, out: string[]): void {
   };
   visit(node.children);
 
-  // A Markdown table cell holds one line, so layout tables and code tables
-  // render as plain blocks to keep their structure.
   if (rows.some((row) => row.some((cell) => cell.hasBlock))) {
     renderBlocks(node.children, depth, out);
     return;
@@ -478,7 +420,6 @@ function renderTable(node: ElementNode, depth: number, out: string[]): void {
   if (blocks.length > 0) out.push(blocks.join("\n\n"));
 }
 
-/** Renders inline Markdown. Block elements met here contribute their text. */
 function renderInline(nodes: readonly Node[]): string {
   const parts: string[] = [];
   for (const node of nodes) {
@@ -536,7 +477,6 @@ function renderInlineCode(node: ElementNode): string {
   return `${fence}${pad}${text}${pad}${fence}`;
 }
 
-/** Wraps content in Markdown markers, keeping surrounding whitespace outside them. */
 function wrap(content: string, before: string, after = before): string {
   const inner = content.trim();
   if (!inner) return content;
@@ -568,7 +508,6 @@ function textContent(nodes: readonly Node[]): string {
   return parts.join("");
 }
 
-/** Collapses spaces, trims each line, and drops leading and trailing blank lines. */
 function normalizeInline(text: string): string {
   return text
     .split("\n")
@@ -588,12 +527,6 @@ function escapeUrl(url: string): string {
   return url.replace(/[\s()<>]/g, (char) => encodeURIComponent(char));
 }
 
-// ---------------------------------------------------------------------------
-// Entities
-// ---------------------------------------------------------------------------
-
-// A Map, not an object literal: entity names come from untrusted HTML, and
-// `&constructor;` must not resolve to an inherited property.
 const NAMED_ENTITIES = new Map([
   ["amp", "&"],
   ["apos", "'"],

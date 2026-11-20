@@ -26,13 +26,6 @@ import { createLogger, logError } from "#internal/logging.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { Answer } from "#shared/input.js";
 
-// Who may answer an approval. Without a response policy, only the person who asked; with one,
-// whoever the policy allows. An answer a policy gates stays submitted, with who answered beside
-// it, until the policy allows it (admitted) or refuses it (settled): the response row is the
-// answer's state, and the record here is who gave it. The policy runs in the step after the
-// answer arrives, so the answer is recorded before any policy work. The record outlives the
-// policy's allowance until the answer settles, so the approved call can read who approved it.
-
 const UNAUTHENTICATED_FEEDBACK = "Authentication is required to respond to this approval.";
 const INVALID_FEEDBACK = "Respond to this approval with Approve or Cancel.";
 const UNAVAILABLE_REASON =
@@ -46,30 +39,18 @@ const RESPONSE_TTL_MS = 10 * 60_000;
 
 const log = createLogger("harness.hitl");
 
-/** Who answered an approval its tool's response policy hasn't allowed yet. */
 export interface PendingResponder {
   readonly responder: SessionAuthContext;
   readonly expiresAt: number;
-  /** The sign-ins the policy asked the responder for. */
   readonly challenges?: readonly AuthorizationChallenge[];
 }
 
-/** What checking a delivery's answers concluded, by response. */
 export interface ResponderCheck {
-  /** Answers that stand now. */
   readonly admit: readonly string[];
-  /** Answers refused before any policy ran, with why. */
   readonly refused: readonly { readonly responseId?: string; readonly reason: string }[];
-  /** Answers a response policy weighs next step, with who gave each. */
   readonly weigh: Readonly<Record<string, PendingResponder>>;
 }
 
-/**
- * Checks who gave each of a delivery's answers. An approval takes only Approve or Cancel. Without
- * a response policy, it takes only its requester's answer, or anyone's when its requester is
- * anonymous; with one, it records an authenticated responder for the policy to weigh. Other
- * answers stand as they arrive, and an answer the session already holds was checked when it did.
- */
 export function checkResponders(
   view: SessionView,
   delivery: HarnessStepInput | undefined,
@@ -83,8 +64,6 @@ export function checkResponders(
     const { responder: auth, responseId } = response;
     if (seen.has(responseId)) continue;
     seen.add(responseId);
-    // A repeated delivery brings back an answer the session holds: it changes nothing, whoever
-    // carried it, and a response policy already weighs it or has.
     if (view.projection.view.responses[responseId] !== undefined) continue;
     const step = stepForRequest(view, response.interactionId);
     const request = step?.requests.find((asked) => asked.interactionId === response.interactionId);
@@ -99,7 +78,6 @@ export function checkResponders(
     }
     const gated = step.responseAuthRequiredRequestIds?.includes(request.interactionId) === true;
     if (!gated) {
-      // An answer attributed to nobody stays nobody's; only an unattributed one is the caller's.
       const responder = auth !== undefined ? auth : currentResponder();
       const requester = step.requester ?? null;
       if (requester !== null && responder === null) {
@@ -113,8 +91,6 @@ export function checkResponders(
       if (responseId !== undefined) admit.push(responseId);
       continue;
     }
-    // A response policy decides Cancel as well as Approve, so a responder it rejects can
-    // neither approve nor cancel someone else's request.
     if (responseId === undefined) continue;
     const responder = auth !== undefined ? auth : buildCallbackContext().session.auth.current;
     if (responder === null) {
@@ -126,24 +102,15 @@ export function checkResponders(
   return { admit, refused, weigh };
 }
 
-/** What weighing the recorded answers concluded. */
 export interface WeighedResponders extends Transition {
-  /** Responders' sign-ins a policy asked for. */
   readonly challenges: readonly AuthorizationChallenge[];
-  /** Approvals whose tool is gone: no answer can run their call. */
   readonly unavailable: readonly string[];
 }
 
-/**
- * Each recorded answer meets its response policy: allowed, it stands; refused or failed, it
- * settles with why; past its time, it expires. A policy that asks the responder to sign in waits
- * for the callback, then runs again.
- */
 export async function weighResponders(
   view: SessionView,
   input: {
     readonly now: number;
-    /** The entries parked calls run with, which carry the policy. */
     readonly tools: () => Promise<HarnessToolLookup>;
   },
 ): Promise<WeighedResponders> {
@@ -222,10 +189,6 @@ export async function weighResponders(
   });
 }
 
-/**
- * The unweighed answers a later answer from the same responder to the same approval revises, so
- * a response policy runs once per person and approval however many answers they send.
- */
 function revisedAnswers(view: SessionView, now: number): ReadonlySet<string> {
   const tables = view.projection.view;
   const latest = new Map<string, { readonly introducedAt: number; readonly responseId: string }>();
@@ -233,7 +196,6 @@ function revisedAnswers(view: SessionView, now: number): ReadonlySet<string> {
   for (const [responseId, pending] of Object.entries(view.responders)) {
     const row = tables.responses[responseId];
     if (row?.status !== "submitted" || pending.expiresAt <= now) continue;
-    // An answer waiting on its responder's sign-in has met its policy already.
     if ((pending.challenges?.length ?? 0) > 0) continue;
     const { authenticator, issuer, principalId, principalType } = pending.responder;
     const key = JSON.stringify([
@@ -271,14 +233,12 @@ async function weigh(input: {
   try {
     tools = await input.tools();
   } catch (error) {
-    // A resolver or its infrastructure failed: the entry may still exist, so the request waits.
     logError(log, "approval tools could not be restored", error, {
       interactionId: input.request.interactionId,
     });
     return { kind: "failed", reason: TEMPORARILY_UNAVAILABLE_REASON };
   }
   const definition = tools.get(input.request.call.toolName);
-  // Gone from the restored catalog: no response can approve the call, and it can't run.
   if (definition === undefined) return { kind: "unavailable" };
   const { approval } = definition;
   const policy =

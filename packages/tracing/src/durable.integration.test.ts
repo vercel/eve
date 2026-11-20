@@ -58,7 +58,6 @@ describe("durable agent tracing", () => {
     await tool.approval({ requestId: "approval" });
     expect(entries.size).toBe(1);
 
-    // The first worker is lost while Alice reviews the approval.
     const second = worker(checkpointer, exporter);
     const resumedTurn = await second.turn({ agentName: "support", identity, sequence: 0 });
     const resumedAttempt = await resumedTurn.attempt({ stepIndex: 0, attempt: 0 });
@@ -103,7 +102,6 @@ describe("durable agent tracing", () => {
     await turn.complete();
     expect(entries.size).toBe(1);
 
-    // Bob approves the request after the turn has parked.
     const second = worker(checkpointer, exporter);
     expect(await second.resume({ identity: { ...identity, turnId: "other" } })).toBeUndefined();
     const resumed = await second.resume({ identity });
@@ -138,7 +136,6 @@ describe("durable agent tracing", () => {
     await turn.complete();
     expect(entries.size).toBe(1);
 
-    // Alice signs in after the turn has parked and its worker is gone.
     const second = worker(checkpointer, exporter);
     const resumed = (await second.resume({ identity }))!;
     expect(resumed.findApproval("missing")).toBeUndefined();
@@ -153,7 +150,6 @@ describe("durable agent tracing", () => {
     expect(approval!.attributes["agent.approval.kind"]).toBe("sign-in");
     expect(approval!.attributes["agent.approval.outcome"]).toBe("approved");
     expect(approval!.attributes["agent.connection.name"]).toBe("calendar");
-    // Queries scoped to one agent find its sign-ins.
     expect(approval!.attributes["gen_ai.agent.name"]).toBe("support");
     expect(approval!.attributes["gen_ai.tool.call.id"]).toBeUndefined();
     expect(approval!.attributes["agent.turn.id"]).toBe("turn");
@@ -162,8 +158,6 @@ describe("durable agent tracing", () => {
   });
 
   it("keeps one tree when a resume reads a checkpoint this process wrote earlier", async () => {
-    // Eve stores checkpoints in the current context, so a parallel tool call's
-    // context can still hold an older checkpoint this same process wrote.
     const { checkpointer, entries } = memoryCheckpointer();
     let stale: string | undefined;
     let staleReads = 0;
@@ -212,7 +206,6 @@ describe("durable agent tracing", () => {
       .resume({ identity })
       .then(() => turn.attempt({ stepIndex: 0, attempt: 0 }));
     await attempt.tool({ callId: "lookup", name: "lookup" });
-    // Another process writes the checkpoint: its revision is unknown here.
     const other = worker(checkpointer, exporter);
     const elsewhere = (await other.resume({ identity }))!;
     await elsewhere.findTool("lookup")!.complete({ outcome: "completed" });
@@ -220,7 +213,6 @@ describe("durable agent tracing", () => {
 
     const replaced = (await first.resume({ identity }))!;
     expect(replaced.findTool("lookup")).toBeUndefined();
-    // The replaced tree's later changes are not persisted over the newer checkpoint.
     attempt.attributes({ "test.stale": true });
     await first.forceFlush();
     expect(entries.values().next().value).toBe(written);
@@ -232,7 +224,6 @@ describe("durable agent tracing", () => {
     const tracing = worker(checkpointer, exporter);
     const turn = await tracing.turn({ agentName: "support", identity, sequence: 0 });
     const attempt = await turn.attempt({ stepIndex: 0, attempt: 0 });
-    // The SDK runs the tool before the runtime records its dispatch.
     const requestedAt = Date.now() - 60_000;
     const executed = await attempt.tool({
       callId: "lookup",
@@ -335,7 +326,6 @@ describe("content capture after a narrower decision", () => {
   const NO_OUTPUTS = { emit: true, recordInputs: true, recordOutputs: false } as const;
   const NO_INPUTS = { emit: true, recordInputs: false, recordOutputs: true } as const;
   const METADATA = { emit: true, recordInputs: false, recordOutputs: false } as const;
-  // Run ceilings reach nested work through the active context.
   beforeEach(() => {
     context.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
   });
@@ -628,13 +618,10 @@ describe("turn content", () => {
       }),
     );
     await attempt.tool({ callId: "lookup", name: "lookup" });
-    // The turn's copy of the model input lives in its attributes only, so it
-    // does not double the checkpoint or push it into the oversized fallback.
     const saved = JSON.parse([...entries.values()][0]!);
     expect(saved.attributes["gen_ai.input.messages"]).toContain("Alice's long email thread.");
     expect(saved.data.options.attributes?.["gen_ai.input.messages"]).toBeUndefined();
 
-    // Another worker finishes the turn from the checkpoint.
     const second = worker(checkpointer, exporter);
     const resumedTurn = await second.turn({
       agentName: "support",

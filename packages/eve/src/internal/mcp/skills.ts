@@ -27,36 +27,29 @@ import {
 import type { JsonObject } from "#shared/json.js";
 import { mapWithConcurrency } from "#shared/map-with-concurrency.js";
 
-/** SEP-2640 extension identifier. */
 export const MCP_SKILLS_EXTENSION = "io.modelcontextprotocol/skills";
 
-/** SEP-2640 limits a conforming host must accept; skills over them are not served. */
 export const MCP_SKILL_MAX_RESOURCES = 512;
 export const MCP_SKILL_MAX_TOTAL_BYTES = 16 * 1024 * 1024;
 
 const SKILL_URI_PREFIX = "skill://";
 const DIRECTORY_MIME_TYPE = "inode/directory";
-/** Files read concurrently while building one skill entry. */
 const READ_CONCURRENCY = 8;
 
 const log = createLogger("mcp.skills");
 const warned = new Set<string>();
 
-/** Logs why a skill is not served, once per process. */
 function warnOnce(message: string): void {
   if (warned.has(message)) return;
   warned.add(message);
   log.warn(message);
 }
 
-/** The skills the feature serves and where their files are. */
 export interface McpSkillSource {
-  /** The agent's skills as `describe()` lists them. */
   readonly skills: readonly AgentSkillDescription[];
   readonly files: SkillFileSource;
 }
 
-/** One `skills/list` entry. */
 interface McpSkillEntry {
   readonly uri: string;
   readonly frontmatter: JsonObject;
@@ -67,43 +60,9 @@ interface McpSkillEntry {
   }[];
 }
 
-/**
- * An MCP server feature publishing an agent's compiled skills per SEP-2640:
- * `skills/list`, `skills/get`, `resources/list`, `resources/templates/list`,
- * `resources/read`, and `resources/directory/read`, all under `skill://`.
- *
- * The feature owns the server's resource methods. They are set on the
- * low-level server rather than through `McpServer.registerResource`, whose
- * `resources/read` normalizes the URI with `new URL()` (which resolves `..`)
- * before matching.
- *
- * A skill is served whole or not at all, and an unserved skill is absent
- * from every method. It is served when:
- *
- * - its name and every file path are valid `skill://` segments, and exactly
- *   one top-level file is its entry (`SKILL.md` in any case, served as
- *   `SKILL.md`);
- * - it has at most 512 files, none over the 512 KiB skill file cap, and at
- *   most 16 MiB in total;
- * - every file reads, and the served `SKILL.md` frontmatter meets the Agent
- *   Skills format (name rules, description of 1-1024 characters).
- *
- * `SKILL.md` frontmatter that already carries the skill's `name` and a
- * `description` is served byte for byte. Otherwise (flat and module skills,
- * whose materialized `SKILL.md` has no frontmatter, or a package whose `name`
- * differs from its directory) the served document carries rewritten
- * frontmatter, and `frontmatter` and the digest describe that document.
- *
- * Snapshots are keyed by the `skills` array, which `describe()` keeps for
- * as long as the compiled artifacts stay the same, so a skill's files are
- * listed and read once per build: once per process in production, once per
- * recompile under `eve dev`.
- */
 export function createMcpSkillsFeature(source: McpSkillSource): McpServerFeature {
   return {
     capabilities: {
-      // eve never sends `notifications/resources/list_changed`; the SDK
-      // would advertise it for a bare `{}`.
       resources: { listChanged: false },
       extensions: { [MCP_SKILLS_EXTENSION]: { directoryRead: true } },
     },
@@ -122,11 +81,8 @@ interface SkillSnapshot {
   readonly name: string;
   readonly description: string;
   readonly entry: McpSkillEntry;
-  /** The served `SKILL.md`, which can differ from the authored one. */
   readonly document: ServedFile;
-  /** Served files by path, sorted by path. */
   readonly files: ReadonlyMap<string, SnapshotFile>;
-  /** Every directory below the skill root, empty ones included. */
   readonly directories: ReadonlySet<string>;
 }
 
@@ -151,7 +107,6 @@ function createSkillCatalog({ files, skills }: McpSkillSource): SkillCatalog {
     if (pending === undefined) {
       pending = snapshotSkill(files, skill);
       snapshots.set(name, pending);
-      // A thrown listing or read is retried on the next request rather than cached.
       pending.catch(() => snapshots.delete(name));
     }
     return await pending;
@@ -244,8 +199,6 @@ function registerSkillHandlers(
     if (snapshot === undefined || parsed?.path === undefined || file === undefined) {
       throw new ResourceNotFoundError(uri);
     }
-    // Only `SKILL.md` is held in memory; other files are read again, so a
-    // cached snapshot costs its metadata, not every file's bytes.
     const served =
       parsed.path === SKILL_ENTRY_FILE_NAME
         ? snapshot.document
@@ -258,10 +211,6 @@ function registerSkillHandlers(
   });
 }
 
-/**
- * Reads a file the snapshot listed. One removed since then is an unknown
- * resource; any other failure stays an internal error.
- */
 async function readListedFile(
   files: SkillFileSource,
   skill: string,
@@ -278,11 +227,8 @@ async function readListedFile(
   }
 }
 
-// ---------- Snapshots ----------
-
 interface ServedFile {
   readonly bytes: Uint8Array;
-  /** Set when the file is UTF-8 text without NUL bytes. */
   readonly text?: string;
 }
 
@@ -291,7 +237,6 @@ function toServedFile(bytes: Uint8Array): ServedFile {
   return text === undefined ? { bytes } : { bytes, text };
 }
 
-/** Decodes UTF-8 text without NUL bytes; returns `undefined` for anything else. */
 function decodeText(bytes: Uint8Array): string | undefined {
   if (bytes.includes(0)) return undefined;
   try {
@@ -301,10 +246,6 @@ function decodeText(bytes: Uint8Array): string | undefined {
   }
 }
 
-/**
- * The authored paths of a skill keyed by served path, or why it is not
- * served. Decided from the listing alone, before any file is read.
- */
 function servedPaths(
   skill: string,
   files: readonly SkillFileEntry[],
@@ -337,10 +278,6 @@ function servedPaths(
   return paths;
 }
 
-/**
- * Lists a skill once and reads every file to build its entry. `undefined`
- * when it is not served.
- */
 async function snapshotSkill(
   source: SkillFileSource,
   skill: AgentSkillDescription,
@@ -357,9 +294,6 @@ async function snapshotSkill(
   if (typeof paths === "string") return unserved(paths);
 
   const entries = [...paths.entries()].sort(([left], [right]) => comparePaths(left, right));
-  // Only `SkillReadError` is deterministic for this build; anything else
-  // (a transient asset or disk read failure) propagates so the catalog evicts
-  // the pending snapshot and retries on the next request.
   const read = await mapWithConcurrency(entries, READ_CONCURRENCY, async ([, authored]) => {
     try {
       return toServedFile(await source.readFile(skill.name, authored));
@@ -380,8 +314,6 @@ async function snapshotSkill(
     );
   }
   files[entryIndex] = document;
-  // Sizes are checked again on the bytes read: a file can change between
-  // the listing and the read, and the rewritten `SKILL.md` can grow.
   const total = files.reduce((sum, file) => sum + file.bytes.byteLength, 0);
   if (
     total > MCP_SKILL_MAX_TOTAL_BYTES ||
@@ -421,11 +353,6 @@ interface EntryDocument extends ServedFile {
   readonly frontmatter: JsonObject;
 }
 
-/**
- * A skill's `SKILL.md` as served: verbatim when its frontmatter has the
- * skill's `name` and a string `description`, otherwise with frontmatter
- * rewritten to carry both. `undefined` when the result does not conform.
- */
 function entryDocument(skill: AgentSkillDescription, raw: ServedFile): EntryDocument | undefined {
   if (raw.text === undefined) return undefined;
   const parsed = parseFrontmatterJson(raw.text);
@@ -456,7 +383,6 @@ function entryDocument(skill: AgentSkillDescription, raw: ServedFile): EntryDocu
   });
 }
 
-/** Agent Skills `name`: 1-64 lowercase letters, digits, and single inner hyphens. */
 const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 
 function conforming(entry: EntryDocument): EntryDocument | undefined {
@@ -467,11 +393,6 @@ function conforming(entry: EntryDocument): EntryDocument | undefined {
   return entry;
 }
 
-/**
- * Renders frontmatter as YAML with every key and value in JSON form: JSON is
- * valid YAML flow syntax, so every authored field survives without a YAML
- * serializer, and quoting keeps a name like `true` a string.
- */
 function renderFrontmatter(frontmatter: JsonObject): string {
   return Object.entries(frontmatter)
     .map(([key, value]) => {
@@ -488,9 +409,6 @@ function parseFrontmatterJson(
   let file;
   try {
     file = parseFrontmatter(text);
-    // JSON as `JSON.stringify` writes it: non-finite numbers become `null`, and
-    // `JSON.parse` keeps a `__proto__` key as an own property instead of
-    // setting the prototype.
     data = JSON.parse(JSON.stringify(file?.data ?? {}));
   } catch {
     return undefined;
@@ -499,12 +417,10 @@ function parseFrontmatterJson(
   return { content: file?.content ?? text, data: data as JsonObject, present: file !== undefined };
 }
 
-/** Direct children of a directory of a served skill; `undefined` if it is not a directory. */
 function listDirectory(
   snapshot: SkillSnapshot,
   directory: string | undefined,
 ): { uri: string; name: string; mimeType: string }[] | undefined {
-  // The skill root is always a directory; an empty one lists no children.
   if (directory !== undefined && !snapshot.directories.has(directory)) return undefined;
   const prefix = directory === undefined ? "" : `${directory}/`;
   const children: { uri: string; name: string; mimeType: string }[] = [];
@@ -518,14 +434,6 @@ function listDirectory(
   return children.sort((left, right) => comparePaths(left.name, right.name));
 }
 
-// ---------- URIs ----------
-
-/**
- * Parses `skill://<skill>[/<path>]` strictly. Rejected: other schemes, a
- * query or fragment, whitespace, backslashes, empty segments (so `//` and a
- * trailing `/`), `.` and `..` segments (decoded too), percent-encoded `/`,
- * `\`, or NUL, and malformed percent-encoding.
- */
 export function parseSkillUri(
   uri: string,
 ): { readonly skill: string; readonly path?: string } | undefined {
@@ -564,10 +472,7 @@ function skillFileUri(skill: string, path: string): string {
   return `${SKILL_URI_PREFIX}${encodeURIComponent(skill)}/${encodedPath}`;
 }
 
-// ---------- Helpers ----------
-
 function rejectCursor(cursor: unknown): void {
-  // Every list is returned whole, so the server never issues a cursor.
   if (cursor !== undefined) {
     throw new ProtocolError(ProtocolErrorCode.InvalidParams, "Unknown cursor.");
   }
@@ -598,7 +503,6 @@ const MIME_TYPES: ReadonlyMap<string, string> = new Map([
   ["yml", "application/yaml"],
 ]);
 
-/** MIME type by extension; a text file with an unknown extension is `text/plain`. */
 function servedMimeType(path: string, file: ServedFile): string {
   const name = path.slice(path.lastIndexOf("/") + 1);
   const dot = name.lastIndexOf(".");

@@ -12,12 +12,6 @@ export interface PromptQueueState {
   shownPromptId?: string;
 }
 
-/**
- * A `committed` handler that calls `show` with the request a typed reply answers now, each time
- * that request changes. It reads which requests are open from the tables as of the commit, so a
- * request that closed never shows, and one the channel failed to show is tried again at the next
- * commit. `show` returns `false` when it could not show the request.
- */
 export function promptQueue<TChannel extends { state: PromptQueueState }>(
   show: (channel: TChannel, request: Interaction) => Promise<boolean | void>,
 ) {

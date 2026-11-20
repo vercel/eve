@@ -28,22 +28,12 @@ import { toErrorMessage } from "#shared/errors.js";
 import { parseExtensionPackageRoots } from "#shared/extension-package-contract.js";
 import { isPathInsideOrEqual } from "#shared/path-inside.js";
 
-/**
- * A mounted extension package whose authored source lives in the consuming
- * agent's workspace. Dev hosts retain it to scope extension HMR rebuilds.
- */
 export interface WorkspaceExtension {
   readonly config: ExtensionBuildConfig;
-  /** Canonical package root, with workspace links resolved. */
   readonly packageRoot: string;
-  /** Non-source inputs that affect publisher output, such as tsconfig files. */
   readonly buildConfigPaths: readonly string[];
 }
 
-/**
- * Builds mounted source-backed workspace extensions before the consuming agent
- * compiles and returns the inputs needed to scope the next development rebuild.
- */
 export async function prepareDevelopmentWorkspaceExtensions(input: {
   readonly appRoot: string;
   readonly changedPaths?: readonly string[];
@@ -76,15 +66,6 @@ export async function prepareDevelopmentWorkspaceExtensions(input: {
   return extensions;
 }
 
-/**
- * Builds mounted source-backed workspace extensions before a production agent
- * build. Package manager lifecycle hooks such as `prepare` do not reliably run
- * (no-op installs and `--ignore-scripts` skip them), so production builds must
- * not assume an extension's gitignored distribution already exists. Extensions
- * whose distribution is newer than every build input are skipped. Builds hold
- * a per-package lock and recheck freshness under it, so parallel agent builds
- * that share an extension build it once.
- */
 export async function buildWorkspaceExtensions(appRoot: string): Promise<void> {
   const extensions = await discoverWorkspaceExtensions(appRoot);
   await buildInDependencyOrder(extensions, async (extension) => {
@@ -95,7 +76,6 @@ export async function buildWorkspaceExtensions(appRoot: string): Promise<void> {
         await buildExtensionPackage(extension.packageRoot, extension.config);
       });
     } catch (error) {
-      // The message embeds the build error; a cause would print it twice.
       throw new Error(
         `Failed to build workspace extension "${extension.config.packageName}" at ${extension.packageRoot}. Fix the error below, then rebuild the agent, or run \`eve extension build\` in that package directory to build it on its own.\n${toErrorMessage(error)}`,
       );
@@ -103,12 +83,6 @@ export async function buildWorkspaceExtensions(appRoot: string): Promise<void> {
   });
 }
 
-/**
- * Runs `build` for each extension once the builds of the workspace extensions
- * it declares as dependencies succeed, since building an extension reads the
- * distributions of the extensions it mounts. Independent extensions build in
- * parallel.
- */
 async function buildInDependencyOrder(
   extensions: readonly WorkspaceExtension[],
   build: (extension: WorkspaceExtension) => Promise<void>,
@@ -122,7 +96,6 @@ async function buildInDependencyOrder(
   const schedule = (extension: WorkspaceExtension): Promise<void> => {
     let pending = builds.get(extension);
     if (pending !== undefined) return pending;
-    // A dependency cycle has no valid order; break it where it closes.
     if (visiting.has(extension)) return Promise.resolve();
     visiting.add(extension);
     const dependencies = extension.config.runtimeDependencies
@@ -164,9 +137,6 @@ async function discoverWorkspaceExtensions(
     }
   }
 
-  // Building an extension reads the distributions of the workspace extensions
-  // it depends on, so they must be built even when only another extension
-  // mounts them.
   const pending = [...extensionsByPackageRoot.values()];
   for (let extension = pending.pop(); extension !== undefined; extension = pending.pop()) {
     for (const packageName of extension.config.runtimeDependencies) {
@@ -198,7 +168,6 @@ async function isExtensionDistributionCurrent(extension: WorkspaceExtension): Pr
     return false;
   }
 
-  // Directory mtimes are included so deleted or renamed source files count.
   const sourceEntries = await readdir(extension.config.sourceRoot, { recursive: true });
   const inputPaths = [
     extension.config.sourceRoot,
@@ -260,7 +229,6 @@ async function resolveWorkspaceExtension(input: {
   });
 }
 
-/** Resolves a dependency the way Node does from the dependent package's root. */
 async function resolveWorkspaceExtensionDependency(input: {
   readonly dependentRoot: string;
   readonly packageName: string;
@@ -313,9 +281,6 @@ async function readWorkspaceExtension(input: {
     return undefined;
   }
 
-  // A package without its declared source directory ships a prebuilt
-  // distribution; there is nothing to build, so its producer config is not
-  // validated.
   const sourceStat = await stat(input.authoredSourceRoot).catch(() => undefined);
   if (sourceStat?.isDirectory() !== true) {
     return undefined;

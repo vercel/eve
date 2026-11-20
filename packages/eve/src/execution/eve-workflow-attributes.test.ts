@@ -183,11 +183,9 @@ describe("isWorkflowTraceContentVisible", () => {
     ] as const) {
       expect(isWorkflowTraceContentVisible(seed(publicConversation, () => decision))).toBe(false);
     }
-    // Only the author's own OpenTelemetry policy withholds; a caller's unsampled trace does not.
     expect(
       isWorkflowTraceContentVisible(seed(publicConversation, () => ({ emit: false }), false)),
     ).toBe(true);
-    // Agent Runs may redact a private session's spans, so its run data stays hidden.
     expect(
       buildSessionAttributes({ serializedContext: seed(privateConversation, recordAll) }),
     ).toMatchObject({ "$eve.is_trace_content_visible": false });
@@ -332,7 +330,6 @@ describe("deriveSessionTitle", () => {
   });
 
   it("never splits a surrogate pair at the truncation boundary", () => {
-    // (max - 1) leading chars + an emoji that would land on the last slot.
     const leading = "x".repeat(EVE_SESSION_TITLE_MAX_CHARS - 1);
     const title = deriveSessionTitle(`${leading}🚀tail`);
     expect(title).toBe(`${leading}…`);

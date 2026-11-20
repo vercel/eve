@@ -17,24 +17,6 @@ type CompiledConnectionEntry =
   | { readonly kind: "connection"; readonly definition: CompiledConnectionDefinition }
   | { readonly kind: "dynamic"; readonly definition: CompiledDefinition };
 
-/**
- * Compiles one authored connection module into the serializable metadata
- * stored on the compiled agent manifest.
- *
- * The compiled manifest holds only serializable data. The live authored
- * `auth` callback (and, for OpenAPI connections, the `spec` and
- * `operations` filter) is resolved at runtime by re-importing the
- * authored module -- see `runtime/resolve-connection.ts`. Compile-time
- * still imports and validates the module so authoring errors surface
- * during `eve build`.
- *
- * The wire protocol is read from the marker stamped by the `define*`
- * factory and selects which normalizer validates
- * the authored shape. `url` carries the MCP server endpoint for MCP
- * connections and the API base URL for OpenAPI connections, so the rest
- * of the connection pipeline (auth context, tool-result narrowing,
- * runtime resolution) stays protocol-agnostic.
- */
 export async function compileConnectionDefinition(
   _agentRoot: string,
   source: ConnectionSourceRef,
@@ -51,7 +33,6 @@ export async function compileConnectionDefinition(
   const dynamic = dynamicDefinition("connection", source, loaded, source.connectionName);
   if (dynamic !== undefined) return { definition: dynamic, kind: "dynamic" };
 
-  // A connection's own name is the entry that signs the user in to it.
   const reservation = eveNamespaceReservation(source.connectionName);
   if (reservation !== undefined) {
     throw new Error(

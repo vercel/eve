@@ -34,23 +34,13 @@ import { answersDeliveryId } from "#shared/answers-delivery-id.js";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
-/** A message this client sent that eve hasn't consumed yet, or that failed to send. */
 export interface LocalSubmission {
   readonly id: string;
   readonly message: string;
-  /** The open turn a steering message joins, when known. */
   readonly turnId?: string;
   readonly error?: { readonly message: string };
 }
 
-/**
- * One session as a client shows it: the shared tables its stream folds into, with the previews
- * of what is still streaming, and what this client did that the stream hasn't confirmed yet (the
- * messages it sent and the answers it gave). `state` derives the conversation from them.
- *
- * The tables fold in place, so a long session costs each event only what it changes, and `state`
- * rebuilds only the messages of the turns that changed since it was last read.
- */
 export class Conversation {
   readonly view: SessionView = emptySessionView();
   readonly previews: SessionPreviews = emptyPreviews();
@@ -63,7 +53,6 @@ export class Conversation {
   readonly #agents = new Map<string, AgentObservation>();
   #messages = new Map<string, readonly PlacedMessage[]>();
   readonly #users = new Map<string, EveMessage>();
-  /** The earlier conversation each consumed delivery imported, by delivery. */
   readonly #imported = new Map<string, readonly EveMessage[]>();
   readonly #submissionIds = new Map<string, string>();
   #changed: Set<string> | "all" = "all";
@@ -71,7 +60,6 @@ export class Conversation {
   #viewCopy: PublicSessionView | undefined;
   #viewPosition = -1;
 
-  /** Folds one event of the session's stream; false when the tables already hold it. */
   observe(event: SessionStreamEvent): boolean {
     const position = event.meta?.position;
     const through = this.#through;
@@ -103,7 +91,6 @@ export class Conversation {
     return true;
   }
 
-  /** Advances over source lines without recognized facts, after the reader commits the whole line. */
   advancePosition(position: number): void {
     if (this.#uncommitted.length !== 0 || position <= this.view.position) return;
     (this.view as Mutable<SessionView>).position = position;
@@ -111,13 +98,11 @@ export class Conversation {
     this.#viewCopy = undefined;
   }
 
-  /** Forgets a partly received line so a reader replaying from the folded cursor admits it again. */
   discardUncommitted(): void {
     this.#uncommitted = [];
     this.#through = this.#committedThrough;
   }
 
-  /** Projects an answer only until its accepted delivery appears in the view. */
   answer(answers: readonly Answer[]) {
     const entries = answers.map((answer) => ({
       answer,
@@ -144,20 +129,17 @@ export class Conversation {
     return retract;
   }
 
-  /** Keeps the local echo's identity when its durable delivery replaces it. */
   confirmSubmission(id: string, deliveryId: string): void {
     this.#submissionIds.set(deliveryId, id);
     this.#state = undefined;
   }
 
-  /** A pending receipt has not yet identified which durable user row replaces its echo. */
   holdUnconfirmedMessages(hold: boolean): void {
     if (this.#holdUnconfirmedMessages === hold) return;
     this.#holdUnconfirmedMessages = hold;
     this.#state = undefined;
   }
 
-  /** Shows, replaces, or removes the messages this client sent that eve hasn't consumed. */
   setSubmissions(submissions: readonly LocalSubmission[]): void {
     this.#submissions = submissions;
     this.#state = undefined;
@@ -167,13 +149,11 @@ export class Conversation {
     return this.#submissions;
   }
 
-  /** Updates a child observation without mixing its facts into this session's projection. */
   observeAgent(sessionId: string, observation: AgentObservation): void {
     this.#agents.set(sessionId, observation);
     this.#state = undefined;
   }
 
-  /** The conversation as the tables and this client's own state now show it. */
   get state(): ConversationState {
     if (this.#state !== undefined) return this.#state;
     const { previews, view } = this;
@@ -183,7 +163,6 @@ export class Conversation {
         ? undefined
         : new Set([
             ...this.#changed,
-            // An open turn's previews move without naming it.
             ...Object.values(view.turns).flatMap((turn) =>
               turn.status === "running" ? [turn.turnId] : [],
             ),
@@ -221,7 +200,6 @@ export class Conversation {
     this.#state = undefined;
   }
 
-  /** Every interaction, an answer this client sent showing it responded. */
   #interactions(): Readonly<Record<string, Interaction>> {
     const interactions: Record<string, Interaction> = {};
     for (const interactionId of Object.keys(this.view.interactions)) {
@@ -234,13 +212,6 @@ export class Conversation {
     return interactions;
   }
 
-  /**
-   * The messages of each turn in the session's current conversation, oldest first, as the stream
-   * placed them: what people sent it where it consumed them, between the agent's messages, then
-   * what this client sent it that eve hasn't consumed. A turn a clear or another context change
-   * left out of the conversation shows nothing. Messages this client sent for no turn shown come
-   * last.
-   */
   #orderedMessages(): readonly EveMessage[] {
     const turnIds = conversation(this.view).map((turn) => turn.turnId);
     const inConversation = new Set(turnIds);
@@ -294,8 +265,6 @@ export class Conversation {
     }
     const messages: EveMessage[] = [];
     for (const turnId of turnIds) {
-      // On one line, imported history sorts before what people sent, as the model reads them, and
-      // a person's message sorts before the agent's that starts there.
       const placed = [
         ...(imported.get(turnId) ?? []).map((entry) => ({ ...entry, rank: -1 })),
         ...(sent.get(turnId) ?? []).map((entry) => ({ ...entry, rank: 0 })),
@@ -307,7 +276,6 @@ export class Conversation {
     return messages;
   }
 
-  /** The sessions this session's calls opened, as this client follows them. */
   #agentSessions(): ConversationState["agents"] {
     const agents: Record<string, ConversationAgentSession> = {};
     for (const child of Object.values(this.view.children)) {
@@ -349,11 +317,6 @@ export function conversationOf(events: Iterable<SessionStreamEvent>): Conversati
   return conversation.state;
 }
 
-/**
- * The turns whose messages an event may change: the turn its scope or data names, else the turn
- * of the run, part, call, or interaction it names, and for an interaction also the turn of the
- * call it is about, which may be an earlier one.
- */
 function touchedTurns(
   view: SessionView,
   previews: SessionPreviews,

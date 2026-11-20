@@ -27,13 +27,6 @@ async function resolveCatalogVersion(packageName) {
   throw new Error(`Could not find "${packageName}" in catalog at ${workspaceYamlPath}`);
 }
 
-// These tokens are authored in source so scaffold templates can pin the same
-// versions as the package build. The setup scaffold (src/setup/scaffold) is now
-// part of the eve source, so its templates ride into the CLI bundle; this stamp
-// rewrites them in the final bundled output after rolldown has emitted every chunk.
-// Source of truth for the engine range scaffolded projects declare. Fail loudly
-// rather than stamp `undefined` into a generated package.json. Kept in sync with
-// the NODE_ENGINE_TOKEN source in src/setup/scaffold/version-tokens.ts.
 const nodeEngine = packageJson.engines?.node;
 if (typeof nodeEngine !== "string") {
   throw new Error("eve package.json is missing a string engines.node");

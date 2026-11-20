@@ -12,8 +12,6 @@ function inboundGets(server: StatefulMcpServer) {
   return server.requests.filter((request) => request.method === "GET");
 }
 
-// A 2025-era session allows one standalone GET stream. The MCP SDK server
-// answers a second with 409, and stateful gateways drop the session (#4379).
 describe("compiled HttpMCPTransport inbound SSE stream", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -38,9 +36,6 @@ describe("compiled HttpMCPTransport inbound SSE stream", () => {
   it("does not reopen the stream from a reconnect timer once a stream is attached", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout"] });
     const server = createStatefulMcpServer();
-    // The first session GET fails at the network layer, which schedules a
-    // reconnect. The `notifications/initialized` 202 then opens a stream
-    // before that reconnect fires.
     let markDropped!: () => void;
     const dropped = new Promise<void>((resolve) => {
       markDropped = resolve;
@@ -67,7 +62,6 @@ describe("compiled HttpMCPTransport inbound SSE stream", () => {
     const [sessionId] = server.liveSessions;
     try {
       await server.waitForRequest((request) => request.method === "GET" && request.status === 200);
-      // Past every reconnect delay the transport could have scheduled.
       await vi.advanceTimersByTimeAsync(60_000);
     } finally {
       await client.close();

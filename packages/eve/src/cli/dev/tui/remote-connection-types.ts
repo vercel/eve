@@ -20,11 +20,6 @@ interface RemoteRequestFailure {
 
 export type RemoteConnectionState =
   | { readonly state: "checking" }
-  // `info` is best-effort: a connection is ready once auth is satisfied and the
-  // deployment is reachable. Inspection data is absent when the deployment's
-  // `/eve/v1/info` is missing or returns an unrecognized shape (e.g. version
-  // skew); the conversation transport does not depend on it. `warning` says why
-  // inspection is absent when the operator can fix it.
   | { readonly state: "ready"; readonly info?: AgentInfoResult; readonly warning?: string }
   | {
       readonly state: "auth-required";
@@ -46,7 +41,6 @@ export type RemoteConnectionState =
 export interface RemoteConnectionSnapshot {
   readonly target: RemoteDevelopmentTarget;
   readonly connection: RemoteConnectionState;
-  /** Last deployment identity resolved from Vercel for this target. */
   readonly deployment?: ResolvedVercelDeployment;
 }
 
@@ -80,7 +74,6 @@ export interface RemoteConnectionControllerOptions {
   readonly client: Client;
   readonly credentials: DevelopmentCredentialGate;
   readonly target: RemoteDevelopmentTarget;
-  /** Resolves an ambient token only after Vercel proves the exact target origin. */
   readonly resolveOidcToken?: (
     deployment: Pick<ResolvedVercelDeployment, "ownerId" | "projectId">,
   ) => Promise<DevelopmentOidcTokenResolution>;

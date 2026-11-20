@@ -30,8 +30,6 @@ describe("packed client declarations", () => {
       args: ["install", "--ignore-scripts", "--config.minimum-release-age=0"],
       cwd: app,
     });
-    // Deliberately no AI SDK, Zod, or workspace links: these two data contracts
-    // must stand alone even when other eve entries need integration peers.
     await writeFile(
       join(app, "consumer.ts"),
       `

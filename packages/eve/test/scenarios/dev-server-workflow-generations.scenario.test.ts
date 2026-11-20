@@ -134,7 +134,6 @@ describe("eve dev server workflow generations", () => {
           firstTurn,
           `Timed out waiting for the interrupted turn to settle.\n\nstdout:\n${server.stdout()}\n\nstderr:\n${server.stderr()}`,
         );
-        // The crashed call never runs again; the model reads that it may have, and calls again.
         expect(
           firstResult.events.flatMap((event) =>
             event.type === "call.settled" ? [event.data.outcome] : [],
@@ -160,7 +159,6 @@ describe("eve dev server workflow generations", () => {
     DEV_SERVER_SCENARIO_TIMEOUT_MS,
   );
 
-  // These tests only add or remove their own files, so they share one server.
   describe("on a shared server", () => {
     let appRoot: string;
     let cleanupSharedApp: (() => Promise<void>) | undefined;
@@ -183,7 +181,6 @@ describe("eve dev server workflow generations", () => {
       await cleanupSharedApp?.();
     }, DEV_SERVER_SCENARIO_TIMEOUT_MS);
 
-    /** Server output written from now on. */
     function outputFromNow(): () => string {
       const stdoutStart = server.stdout().length;
       const stderrStart = server.stderr().length;
@@ -292,7 +289,6 @@ describe("eve dev server workflow generations", () => {
         );
         await expect(readDevelopmentRevision(server.url)).resolves.toBe(initialRevision);
 
-        // Converges on the latest files, so intermediate watcher rebuilds cannot make it flaky.
         const probeDescription = async () =>
           (await fetchAgentInfo(server.url)).tools.static.find((tool) => tool.name === "env_probe")
             ?.description;

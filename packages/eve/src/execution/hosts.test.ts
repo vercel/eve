@@ -29,7 +29,6 @@ import {
 import type { SessionLineStore } from "#execution/session-line-store.js";
 import { HookNotFoundError } from "#shared/run-errors.js";
 
-/** A store holding fixed lines for every session it's registered for. */
 function fixedStore(records: readonly unknown[]): SessionLineStore {
   const encoder = new TextEncoder();
   return {
@@ -54,10 +53,6 @@ async function readAll(stream: ReadableStream<unknown>): Promise<unknown[]> {
 
 const delivery: DeliverHookPayload = { kind: "deliver", payloads: [{ message: "Hi" }] };
 
-/**
- * What reaches the durable host below, and the attempt and callback base URL of the step it says
- * is running.
- */
 const durable = {
   reached: [] as string[],
   attempt: undefined as number | undefined,
@@ -99,8 +94,6 @@ function durableHost(name: string): DurableHost {
   };
 }
 
-// The registry is process-wide, so each test starts from an empty realm and installs the
-// durable host it needs. What it installs stays until the next test clears the realm.
 describe("the hosts in a realm", () => {
   beforeEach(() => {
     resetTestRealm();
@@ -122,12 +115,10 @@ describe("the hosts in a realm", () => {
 
   it("keeps the first durable host, and refuses a different one", () => {
     installDurableHost(durableHost("durable"));
-    // Another copy of the same host, as a step bundle's copy of eve's modules builds.
     installDurableHost(durableHost("durable"));
     expect(() => installDurableHost(durableHost("other"))).toThrow(
       `This realm's durable host is "durable"; "other" can't replace it.`,
     );
-    // What only a durable host keeps (scheduled runs, event watches) is asked of the one installed.
     expect(installedDurableHost()?.name).toBe("durable");
   });
 
@@ -158,7 +149,6 @@ describe("the hosts in a realm", () => {
         callbackBaseUrl: "http://alice.example",
         deliver,
       });
-      // Outside one of its steps, the durable host calls nobody back.
       expect(sessionSignInCallbacks("session-bob")).toBeUndefined();
       durable.callbackBaseUrl = "https://bob.example";
       expect(sessionSignInCallbacks("session-bob")?.callbackBaseUrl).toBe("https://bob.example");
@@ -174,7 +164,6 @@ describe("the hosts in a realm", () => {
     const route: HostedRoute = {
       deliver: async (token) => {
         if (token === "hook-gone") return "gone";
-        // A session's inbox, held here, by its logical token.
         if (token === sessionInboxHookToken(sessionCommandHookToken("session-alice"))) {
           delivered.push("inbox session-alice");
           return "delivered";
@@ -194,7 +183,6 @@ describe("the hosts in a realm", () => {
       await expect(routedRunEnded("run-held")).resolves.toBe(true);
       await expect(routedRunLive("run-held")).resolves.toBe(false);
       await expect(cancelRoutedRun("run-held", "stop")).resolves.toBe(true);
-      // A run its route says already ended isn't reported as cancelled.
       await expect(cancelRoutedRun("run-held-ended", "stop")).resolves.toBe(false);
       await resumeRoutedSessionInbox({ sessionId: "session-alice" }, delivery);
       expect(delivered).toEqual(["hook-held", "inbox session-alice"]);
@@ -217,7 +205,6 @@ describe("the hosts in a realm", () => {
     installDurableHost(durableHost("durable"));
     await expect(routedRunEnded("run-done")).resolves.toBe(true);
     await expect(routedRunEnded("run-open")).resolves.toBe(false);
-    // A target that's gone has ended; one whose status can't be read is still live.
     await expect(routedRunEnded("run-gone")).resolves.toBe(true);
     await expect(routedRunEnded("run-unreadable")).rejects.toThrow("the World is down");
     await expect(routedRunLive("run-open")).resolves.toBe(true);

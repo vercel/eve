@@ -28,6 +28,10 @@ const MAX_CONCURRENT_TEMPLATES = 3;
 // These values satisfy build-time validation without granting service access.
 // Runtime requests still require the deployment's real configuration.
 const BUILD_ENV_BY_TEMPLATE = {
+  "eve-commerce-platform-template": {
+    DATABASE_URL: "postgresql://compatibility:compatibility@127.0.0.1:1/compatibility",
+    BETTER_AUTH_URL: "http://127.0.0.1:3000",
+  },
   "eve-software-factory-template": {
     FACTORY_REPO: "acme/widgets",
     LINEAR_CONNECTOR: "linear/template-ci",
@@ -55,7 +59,6 @@ const TEMPLATES_BY_EXPECTED_DURATION = [
   "personal-agent-template", // 73s, mostly `nuxt build`
   "eve-chat-template", // 49s, mostly `next build`
   "eve-voice-template", // 31s, mostly `next build`
-  "eve-llm-council-template", // 14s
   "slack-company-brain-template", // 11s, `eve build` only
   "eve-data-agent-template", // 7s, `eve build` only
   "eve-discord-agent-template", // 6s

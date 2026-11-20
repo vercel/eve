@@ -62,40 +62,18 @@ import { discoverScheduleSources } from "#discover/schedules.js";
 import { discoverSkills } from "#discover/skills.js";
 import { stripNpmPackageScope } from "#shared/package-name.js";
 
-/**
- * Input for discovering the authored agent source graph from resolved roots.
- */
 interface DiscoverAgentInput {
   agentRoot: string;
   appRoot: string;
-  /**
-   * Optional {@link ProjectSource} used for all filesystem reads. Defaults
-   * to a disk-backed source so disk callers keep their current behaviour.
-   * Tests that want to run discovery against an in-memory tree pass a
-   * memory-backed source.
-   */
   source?: ProjectSource;
-  /**
-   * Discovery role. `"agent"` (default) resolves mounted extensions and
-   * accepts agent-level config. `"extension"` discovers an extension's own
-   * source tree: it rejects `agent.ts`/`sandbox` (consumer-owned) and does
-   * not resolve further extensions (transitive mounting is a non-goal).
-   */
   role?: "agent" | "extension";
 }
 
-/**
- * Result of discovering one authored agent source graph.
- */
 interface DiscoverAgentResult {
   diagnostics: DiscoverDiagnostic[];
   manifest: AgentSourceManifest;
 }
 
-/**
- * Discovers the current agent's authored source graph without importing authored
- * modules.
- */
 export async function discoverAgent(input: DiscoverAgentInput): Promise<DiscoverAgentResult> {
   const source = input.source ?? createDiskProjectSource();
   const appRoot = resolve(input.appRoot);
@@ -108,10 +86,6 @@ export async function discoverAgent(input: DiscoverAgentInput): Promise<Discover
   });
 }
 
-/**
- * What a root may hold that belongs to the agent consuming an extension. An extension that declares
- * one fails discovery, and the declaration is dropped.
- */
 const CONSUMER_OWNED = [
   {
     code: DISCOVER_EXTENSION_MEMORY_UNSUPPORTED,
@@ -126,11 +100,6 @@ const CONSUMER_OWNED = [
   },
 ] as const;
 
-/**
- * Discovers one agent-shaped root: an agent, a local subagent package, or an extension's source
- * tree. A subagent requires its config module and declares no channels or schedules; an
- * extension declares nothing its consumer owns and mounts no extensions.
- */
 export async function discoverAgentRoot(input: {
   readonly appRoot: string;
   readonly packageName?: string;
@@ -276,8 +245,6 @@ export async function discoverAgentRoot(input: {
     sources = sources.filter((entry) =>
       CONSUMER_OWNED.every(({ kind }) => sourceKindOf(entry.logicalPath) !== kind),
     );
-    // Extensions cannot mount other extensions yet. Fail loudly instead of silently dropping the
-    // nested mount, and reserve the behavior so enabling it later is additive.
     for (const descriptor of mounts) {
       diagnostics.push(
         createDiscoverErrorDiagnostic({
@@ -328,12 +295,6 @@ function createLocalSubagentScheduleDiagnostics(
   );
 }
 
-/**
- * One extension mount discovered under `agent/extensions/`, in either the flat
- * file form (`extensions/crm.ts`) or the directory form
- * (`extensions/crm/extension.ts` with optional override slots).
- */
-/** Resolves extension declarations into their discovered source manifests. */
 export async function resolveExtensionMounts(input: {
   readonly agentRoot: string;
   readonly appRoot: string;
@@ -393,22 +354,11 @@ export async function resolveExtensionMounts(input: {
 }
 
 export interface ExtensionMountDescriptor {
-  /** Mount namespace prefixed onto every composed contribution. */
   readonly namespace: string;
-  /** Module ref for the mount declaration the package specifier is read from. */
   readonly mountRef: ExtensionSourceRef;
-  /**
-   * Absolute path to the mount directory when this is the directory form.
-   * Its override slots are discovered as an agent-shaped source. Absent for
-   * the flat file form.
-   */
   readonly overridesRoot?: string;
 }
 
-/**
- * Discovers extension mount declarations without resolving or inspecting their
- * package distributions. Development uses this before building local mounts.
- */
 export async function discoverExtensionMountDeclarations(input: {
   readonly agentRoot: string;
   readonly source?: ProjectSource;
@@ -442,15 +392,6 @@ export async function discoverExtensionMountDeclarations(input: {
   };
 }
 
-/**
- * Collects extension mounts in both the flat file form and the directory form,
- * validating directory names and rejecting a namespace claimed by both forms.
- *
- * File mounts arrive pre-validated from {@link discoverNamedSourceDirectory}
- * (which, run non-recursively, ignores subdirectories); directory mounts are
- * gathered here by scanning the `extensions/` entries for subdirectories, each
- * of which must hold an `extension.<ext>` declaration.
- */
 async function collectExtensionMounts(input: {
   readonly agentRoot: string;
   readonly fileMounts: readonly ExtensionSourceRef[];
@@ -539,14 +480,6 @@ async function collectExtensionMounts(input: {
   return { diagnostics, mounts };
 }
 
-/**
- * Reads the `name` field from the app root's package.json through `source`
- * and strips the npm scope prefix when present (e.g. `"@org/my-agent"` →
- * `"my-agent"`).
- *
- * Returns `undefined` when the file does not exist, cannot be parsed, or does
- * not contain a non-empty string `name` field.
- */
 async function tryReadPackageJsonName(
   source: ProjectSource,
   appRoot: string,

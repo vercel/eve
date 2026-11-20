@@ -35,9 +35,6 @@ import { buildConversationContext } from "#channel/conversation-context.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
 import { resolveInstrumentationEnvironment } from "#internal/application/dev-environment.js";
 
-/**
- * Builds the bootstrap {@link ContextContainer} for one run.
- */
 export function buildRunContext(input: {
   readonly agent: SessionAgent;
   readonly agentSessionRuntimeOverrides?: AgentSessionRuntimeOverrides;

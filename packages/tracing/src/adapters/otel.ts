@@ -28,7 +28,9 @@ import { withCapture } from "../capture.js";
 type Context = OtelContext;
 const ACTIVE_OPERATION = createContextKey("agent.tracing.active-operation");
 const SUPPRESS_TRACING_KEY = createContextKey("OpenTelemetry SDK Context Key SUPPRESS_TRACING");
+const AGENT_RUNS_SCOPE = "vercel.ai.tracing";
 
+/** Returns `context` with a capture decision that allows or declines recording error content, such as exception messages, for spans started under it. */
 export function withErrorContent<T extends { setValue(key: symbol, value: unknown): T }>(
   context: T,
   allowed: boolean,
@@ -40,6 +42,11 @@ function suppressTracing(context: Context): Context {
   return context.setValue(SUPPRESS_TRACING_KEY, true);
 }
 
+/**
+ * Returns the agent tracing operation active in an OpenTelemetry context, defaulting to the current one,
+ * or `undefined` outside any operation. Use it to read the active span's reference and capture decision
+ * from spans the host runs itself.
+ */
 export function activeTraceOperation(
   host: Pick<Context, "getValue"> = context.active(),
 ): ActiveOperation | undefined {
@@ -81,10 +88,6 @@ function mappedAttributes(
   return mapping?.attributes(span, attributes) ?? attributes;
 }
 
-/**
- * Applied when the host passes no mapping. On Vercel it adds the session ID
- * Agent Runs uses to find a run's spans.
- */
 const DEFAULT_MAPPING: OutputMapping = {
   attributes(_span, attributes) {
     const runId = attributes["agent.run.id"];
@@ -95,12 +98,15 @@ const DEFAULT_MAPPING: OutputMapping = {
   link: (_span, link) => ({ "agent.link.type": link.relationship }),
 };
 
+export const telemetryTracerProviders = new WeakMap<AgentTelemetry, () => TracerProvider>();
+
 function onVercel(): boolean {
   const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
     ?.env;
   return env?.VERCEL_ENV !== undefined;
 }
 
+/** Options for `otelTelemetry`. */
 export interface OtelTelemetryOptions {
   /** Defaults to the global tracer provider. */
   readonly provider?: TracerProvider;
@@ -116,6 +122,7 @@ export interface OtelTelemetryOptions {
   ) => boolean;
   /** Replaces the default mapping, which adds `vercel.session_id` on Vercel. */
   readonly mapping?: OutputMapping;
+  /** Defaults to `vercel.ai.tracing`, a scope Vercel Agent Runs reads. Another name keeps the spans out of Agent Runs. */
   readonly tracerName?: string;
   /** Recorded as the spans' instrumentation scope version. */
   readonly tracerVersion?: string;
@@ -126,38 +133,43 @@ export interface OtelTelemetryOptions {
 
 /** OpenTelemetry implementation of {@link AgentTelemetry}. */
 export function otelTelemetry(options: OtelTelemetryOptions = {}): AgentTelemetry {
-  const provider = options.provider ?? trace.getTracerProvider();
-  const tracer = provider.getTracer(options.tracerName ?? "agent.tracing", options.tracerVersion);
+  const provider = () => options.provider ?? trace.getTracerProvider();
   const mapping = options.mapping ?? DEFAULT_MAPPING;
   const idGenerator = options.idGenerator;
   function lifecycle(method: "forceFlush" | "shutdown"): () => Promise<void> {
     return (
       options[method] ??
       (async () => {
+        const selected = provider();
+        const current =
+          (selected as TracerProvider & { getDelegate?(): TracerProvider }).getDelegate?.() ??
+          selected;
         const callback = (
-          provider as TracerProvider & { forceFlush?(): Promise<void>; shutdown?(): Promise<void> }
+          current as TracerProvider & { forceFlush?(): Promise<void>; shutdown?(): Promise<void> }
         )[method];
         if (callback === undefined)
           throw new Error(`The tracer provider does not support ${method}.`);
-        await callback.call(provider);
+        await callback.call(current);
       })
     );
   }
   function start(span: PreparedSpan, executionContext?: ExecutionContext): SpanWriter {
-    const recorded = tracer.startSpan(
-      span.name,
-      {
-        attributes: mappedAttributes(mapping, span, span.attributes),
-        kind: span.kind === undefined ? undefined : SpanKind[span.kind],
-        root: span.root,
-        startTime: span.startTimeMs,
-        links: span.links?.map((link) => ({
-          context: otelReference(link.context),
-          attributes: mapping?.link(span, link) ?? { "agent.link.type": link.relationship },
-        })),
-      },
-      parentContext(span.root ? undefined : span.parent, executionContext),
-    );
+    const recorded = provider()
+      .getTracer(options.tracerName ?? AGENT_RUNS_SCOPE, options.tracerVersion)
+      .startSpan(
+        span.name,
+        {
+          attributes: mappedAttributes(mapping, span, span.attributes),
+          kind: span.kind === undefined ? undefined : SpanKind[span.kind],
+          root: span.root,
+          startTime: span.startTimeMs,
+          links: span.links?.map((link) => ({
+            context: otelReference(link.context),
+            attributes: mapping?.link(span, link) ?? { "agent.link.type": link.relationship },
+          })),
+        },
+        parentContext(span.root ? undefined : span.parent, executionContext),
+      );
     return {
       reference: portableReference(recorded.spanContext()),
       setAttribute(key, value) {
@@ -179,7 +191,7 @@ export function otelTelemetry(options: OtelTelemetryOptions = {}): AgentTelemetr
       },
     };
   }
-  return {
+  const telemetry: AgentTelemetry = {
     startSpan(span, { reference, context: host } = {}) {
       if (reference === undefined || idGenerator === undefined) return start(span, host);
       const writer = idGenerator.withTraceId(reference.traceId, () =>
@@ -203,7 +215,6 @@ export function otelTelemetry(options: OtelTelemetryOptions = {}): AgentTelemetr
     },
     run(operation, execute, executionContext) {
       let capture = intersectCapture(operation.capture, activeTraceOperation()?.capture);
-      // Retain baggage and host context while replacing the semantic parent span.
       let active = trace.setSpan(
         (executionContext as Context | undefined) ?? context.active(),
         trace.wrapSpanContext(otelReference(operation.reference)),
@@ -233,4 +244,6 @@ export function otelTelemetry(options: OtelTelemetryOptions = {}): AgentTelemetr
     forceFlush: lifecycle("forceFlush"),
     shutdown: lifecycle("shutdown"),
   };
+  telemetryTracerProviders.set(telemetry, provider);
+  return telemetry;
 }

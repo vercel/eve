@@ -1,4 +1,3 @@
-// @linux-only: late provider results
 import { APICallError, jsonSchema, type LanguageModel } from "ai";
 import { convertArrayToReadableStream, MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
@@ -34,11 +33,6 @@ const searchResult: StreamPart = {
   type: "tool-result",
 };
 
-/**
- * A harness whose first response ends with a local call and a server tool call the provider
- * hasn't answered, then serves `later` responses; an error fails its model call. Records the
- * contract violations, the server call's facts, and each request's prompt.
- */
 function deferredHarness(later: (StreamPart[] | Error)[]) {
   const responses: (StreamPart[] | Error)[] = [
     [
@@ -75,7 +69,6 @@ function deferredHarness(later: (StreamPart[] | Error)[]) {
   const runStep = createTestKernel({
     agent: { model: { id: "deferred-result" } },
     handleEvent: async (publication) => {
-      // As the session's writer stores them: an owner's end closes what it still holds.
       const facts = cascade(written, eventsOf(publication));
       for (const fact of facts) foldReceivedEvent(written, { ...fact, meta: { endOfLine: false } });
       violations.push(...checker.check({ at: "2026-10-21T00:00:00.000Z", facts }, position++));
@@ -98,7 +91,6 @@ function deferredHarness(later: (StreamPart[] | Error)[]) {
 
 type Prompt = ReturnType<ReturnType<typeof deferredHarness>["prompts"]>[number];
 
-/** The content parts of every message in a request's prompt. */
 function partsOf(prompt: Prompt) {
   return prompt.flatMap(
     (message): { type: string; toolCallId?: string; providerExecuted?: boolean }[] =>
@@ -106,7 +98,6 @@ function partsOf(prompt: Prompt) {
   );
 }
 
-/** Runs steps from `result` until the turn stops. */
 async function untilStopped(result: StepResult): Promise<StepResult> {
   for (let steps = 0; typeof result.next === "function" && steps < 5; steps += 1) {
     result = await result.next(result.session);
@@ -116,11 +107,6 @@ async function untilStopped(result: StepResult): Promise<StepResult> {
 
 const start = "List the files and find a weather tool.";
 
-/**
- * Runs a turn on {@link deferredHarness} until it stops. A `steer` message reaches the turn right
- * after the first step. Returns the contract violations, the server call's facts, and the last
- * message of each request.
- */
 async function runLateResult(later: StreamPart[][], options: { readonly steer?: string } = {}) {
   const run = deferredHarness(later);
   const first = await run.runStep(run.session, { message: start });
@@ -146,8 +132,6 @@ const reply: StreamPart[] = [
 ];
 
 describe("a provider result that arrives a step late", () => {
-  // Anthropic can end a response with a server tool call it hasn't answered yet, beside a local
-  // call, and open the next response with that call's result.
   it("settles the call the earlier step introduced", async () => {
     const { searchFacts, violations } = await runLateResult([[searchResult, ...reply]]);
 
@@ -155,7 +139,6 @@ describe("a provider result that arrives a step late", () => {
     expect(searchFacts).toEqual(["call.requested", "call.started", "call.settled"]);
   });
 
-  // Once the result arrives, the call keeps it: later requests replay both as the provider's.
   it("leaves the answered call to the provider in later requests", async () => {
     const run = deferredHarness([[searchResult, ...reply], reply]);
     const first = await run.runStep(run.session, { message: start });
@@ -192,8 +175,6 @@ describe("a provider result that arrives a step late", () => {
   });
 });
 
-// A request that adds anything after the local results, while the server call's result is still
-// to come, ends the turn early, and Anthropic rejects it.
 describe("input while a provider result is still to come", () => {
   const steer = "Also check whether it covers Lisbon.";
   const localResult = {
@@ -211,8 +192,6 @@ describe("input while a provider result is still to come", () => {
     expect(requests.map(({ last }) => last)).toEqual([expect.anything(), localResult, steered]);
   });
 
-  // A switched model, or a provider that dropped the call, never sends the result: the next
-  // response still moves history past the local results, so the message reaches the one after it.
   it("releases the message after a response without the result", async () => {
     const { requests } = await runLateResult([reply, reply], { steer });
 
@@ -230,11 +209,7 @@ describe("input while a provider result is still to come", () => {
   });
 });
 
-// A failed or cancelled turn leaves history on the local results with the server call unanswered,
-// and its result can't come once anything else follows them. The next request answers the call
-// instead, so it reads the person's message first and the provider accepts it.
 describe("a provider result that can no longer come", () => {
-  // Fails the turn but keeps the session, as running out of credits does.
   const failure = new APICallError({
     isRetryable: false,
     message: "The account is out of credits.",
@@ -244,7 +219,6 @@ describe("a provider result that can no longer come", () => {
   });
   const followUp = "Alice is back: which files were there?";
 
-  /** Server calls the prompt sends without a result anywhere in it. */
   function danglingServerCalls(prompt: Prompt) {
     const parts = partsOf(prompt);
     const answered = new Set(
@@ -274,8 +248,6 @@ describe("a provider result that can no longer come", () => {
     expect(run.searchFacts).toEqual(["call.requested", "call.started", "call.settled"]);
   });
 
-  // A cancel during the step that waits for the result keeps the held message in history after
-  // the local results, as an interrupted step's retry note follows them.
   it("answers it once a message follows the local results", async () => {
     const steer = "Also check whether it covers Lisbon.";
     const run = deferredHarness([failure, reply]);

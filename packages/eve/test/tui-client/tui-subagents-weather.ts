@@ -7,27 +7,6 @@ import { EveTUIRunner, MockScreen, MockUserInput } from "./lib/tui.ts";
 import { run, type RunOptions } from "./lib/run.ts";
 import { theme } from "./lib/theme.ts";
 
-/**
- * Multi-message subagent smoke driving `e2e/fixtures/agent-subagents-hitl` and its
- * `stock-price` subagent. The subagent emits a pre-tool message
- * ("I'll look up..."), calls `get_stock_price` (which has
- * `approval: once()`), and then emits a post-tool message
- * with the result. This is the real-world flow that broke the earlier
- * stepIndex-keyed implementation, both pre and post messages were
- * landing under `stepIndex: 0` and collapsing into one box.
- *
- * Pass conditions:
- *   1. A `Delegate subagent(stock price)` start line exists.
- *   2. The task panel asks for approval of the child's `get_stock_price`
- *      call, and the approval prompt accepts it.
- *   3. NO parent-level `get_stock_price` tool row exists (proves the
- *      parent-tool suppression for child tool calls removes the stale
- *      block, not just blocks future renders).
- *   4. The task ends on a `✓ subagent(stock price)` line.
- *   5. The parent's final assistant reply (a top-level `▲` section)
- *      contains the price.
- */
-
 const TICKER = "GOOG";
 const PRICE = "178.92";
 process.env.EVE_TUI_UNICODE = "1";
@@ -35,8 +14,6 @@ process.env.EVE_TUI_UNICODE = "1";
 const WEATHER_SMOKE_TARGET: RunOptions = {
   app: "agent-subagents-hitl",
   kind: "local-build",
-  // The spawned server must use the deterministic authored-model adapter;
-  // otherwise this TUI rendering smoke depends on an AI Gateway credential.
   startEnv: { ...process.env, EVE_E2E_MODEL: "mock" },
 };
 
@@ -60,16 +37,11 @@ run(WEATHER_SMOKE_TARGET, async (target) => {
 
   await screen.waitForIdlePrompt(5_000);
 
-  // Delegate explicitly. An implicit prompt ("what is the value of GOOG?")
-  // leaves the choice to the model, which may answer directly instead of
-  // delegating. Explicitly limiting the request to one delegation also keeps
-  // the model from re-checking the fixed fixture result with a second child.
   input.type(
     `Call the stock-price subagent exactly once with message 'Call the get_stock_price tool exactly once with ticker "${TICKER}". After it returns, do not call any tool again; return the result.'. After that single subagent call finishes, do not call any subagent or tool again; include the exact stock price in your final reply.`,
   );
   input.enter();
 
-  // The task's start line appears once the parent delegates.
   await waitForCondition(() => screen.snapshot().includes("Delegate subagent(stock price)"), {
     timeoutMs: 120_000,
     label: "task start line",
@@ -77,9 +49,6 @@ run(WEATHER_SMOKE_TARGET, async (target) => {
   });
   console.log(theme.muted("[tui-weather] task start line appeared"));
 
-  // The task panel names the approval the child waits on, and the TUI
-  // parks on a y/n prompt. Match the question smoke's handshake delay so
-  // the server's resume hook is registered before we reply.
   await waitForCondition(() => screen.snapshot().includes("Approve Get stock price?"), {
     timeoutMs: 120_000,
     label: "approval prompt for get_stock_price",
@@ -96,8 +65,6 @@ run(WEATHER_SMOKE_TARGET, async (target) => {
   });
   console.log(theme.muted("[tui-weather] task end line appeared"));
 
-  // Wait for the parent's follow-up assistant section (top-level `▲`
-  // prose) to echo the price.
   await waitForCondition(() => assistantSectionContains(screen.snapshot(), PRICE), {
     timeoutMs: 120_000,
     label: "parent assistant reply with price",
@@ -106,11 +73,6 @@ run(WEATHER_SMOKE_TARGET, async (target) => {
 
   const finalSnapshot = screen.snapshot();
 
-  // No parent-level tool row for the child's call should remain: a tool
-  // row at the parent level is a status glyph in the indented header cell
-  // (e.g. `  ▪ get_stock_price`). The child's own calls surface only in the
-  // task panel and its end line. Assistant prose lines start with `▲ `, so
-  // they cannot false-positive here.
   const parentToolRowRegex = /^ {0,2}[^\s▲] get_stock_price/mu;
   if (parentToolRowRegex.test(finalSnapshot)) {
     throw new Error(
@@ -123,18 +85,12 @@ run(WEATHER_SMOKE_TARGET, async (target) => {
     throw new Error(`Final screen contains an Error section:\n${finalSnapshot}`);
   }
 
-  // The turn is complete; wait until the runner is back at the prompt so
-  // Two idle Ctrl+C presses exit; mid-stream Ctrl+C cancels cooperatively.
   await screen.waitForIdlePrompt(30_000);
   input.ctrlC();
   input.ctrlC();
   await runPromise;
 });
 
-/**
- * True when a top-level assistant section (a `▲ `-prefixed line and its
- * two-space-indented continuations) contains `needle`.
- */
 function assistantSectionContains(snapshot: string, needle: string): boolean {
   const lines = snapshot.split("\n");
   for (let index = 0; index < lines.length; index += 1) {

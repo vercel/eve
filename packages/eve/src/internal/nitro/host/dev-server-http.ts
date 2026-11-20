@@ -3,11 +3,6 @@ import { Readable } from "node:stream";
 
 import { toErrorMessage } from "#shared/errors.js";
 
-// RFC 9110 hop-by-hop fields. Forwarded to the worker, they describe the
-// client's connection, not the pooled one to the worker: a client's
-// `Connection: close` meeting a response's `Connection: keep-alive` pools a
-// socket the worker already marked closing, so the next request on it gets an
-// empty 400.
 const HOP_BY_HOP_HEADERS = new Set([
   "connection",
   "keep-alive",
@@ -79,9 +74,6 @@ export async function writeResponse(
     return;
   }
 
-  // Flush the headers now so the client can obtain / cancel the response body
-  // avoiding, the accumulation of listeners if the stream has a long delay
-  // before first byte
   response.flushHeaders();
   const body = Readable.fromWeb(webResponse.body as import("node:stream/web").ReadableStream);
   const cancelBody = () => body.destroy(signal.reason as Error | undefined);
@@ -109,9 +101,6 @@ export async function writeResponse(
 
 export function writeRequestError(response: ServerResponse, error: unknown): void {
   if (response.headersSent) {
-    // The status line is already on the wire; ending now would frame the
-    // truncated body as a complete response. Destroying the socket is the
-    // only way to surface the failure to the client mid-stream.
     response.destroy();
     return;
   }

@@ -1,11 +1,11 @@
 ---
 title: "useEveAgent Reference"
-description: "Every value, option, and behavior of useEveAgent, shared by the React, Vue, and Svelte bindings."
+description: "Every value, option, and behavior of useEveAgent, shared by the React, Vue, Svelte, and Solid bindings."
 ---
 
 This page lists every value, option, and behavior of `useEveAgent`. Use it when you need exact behavior. For a guided introduction, start with the [frontend overview](/docs/guides/frontend).
 
-React, [Vue](/docs/guides/frontend/use-eve-agent-vue), and [Svelte](/docs/guides/frontend/use-eve-agent-svelte) share the behavior described here. Their pages cover only how each binding exposes it.
+React, [Vue](/docs/guides/frontend/use-eve-agent-vue), [Svelte](/docs/guides/frontend/use-eve-agent-svelte), and [Solid](/docs/guides/frontend/use-eve-agent-solid) share the behavior described here. Their pages cover only how each binding exposes it.
 
 ## Returned state
 
@@ -51,7 +51,7 @@ About snapshots:
 | `prepareSend`                                       | none         | Adjust each turn just before it is sent, for example to add `clientContext`                      |
 | `onEvent`, `onError`, `onFinish`, `onSessionChange` | none         | See [Lifecycle callbacks](#lifecycle-callbacks)                                                  |
 
-`agent`, `baseUrl`, `session`, `initialEvents`, `initialSession`, `auth`, `headers`, `optimistic`, `followAgents`, and `resume` are read once, when the hook creates its store. Remount the component, for example with `key={chat.id}`, to change them. React reads `prewarm`, `followWhile`, and the callbacks on every render. Vue and Svelte read `prewarm` when the binding is created and `followWhile` from their options object.
+`agent`, `baseUrl`, `session`, `initialEvents`, `initialSession`, `auth`, `headers`, `optimistic`, `followAgents`, and `resume` are read once, when the hook creates its store. Remount the component, for example with `key={chat.id}`, to change them. React reads `prewarm`, `followWhile`, and the callbacks on every render. Vue, Svelte, and Solid read `prewarm` when the binding is created and `followWhile` from their options object.
 
 ## Status
 
@@ -194,13 +194,14 @@ Prewarming creates the session before the first message so the first reply start
 
 - **Default off.** The first send creates the session. Turn it on only after your auth, headers, and any chat-record binding are ready.
 - **React:** `prewarm: true` prepares on mount, after each `newSession()`, and when the option changes from `false` to `true`, including for a restored session.
-- **Vue and Svelte:** the option is read when the binding is created. Call `prewarm()` when typing starts.
+- **Vue, Svelte, and Solid:** the option is read when the binding is created. Call `prewarm()` when typing starts.
 - **Typing bursts:** call `prewarm()` once when a burst begins, with your own cooldown if you retry during long drafts. eve shares concurrent calls; it doesn't watch inputs or poll deployments.
 
 ### What prewarming does
 
 - It starts the workflow and its inbox, then waits before session hooks or dynamic definitions run.
 - It starts the agent's [sandbox](/docs/sandbox) in the background. The first turn doesn't wait for it; only a tool or hook that uses the sandbox does. If startup fails, the first turn that needs the sandbox starts it.
+- A prewarmed sandbox that no message uses stops like any idle sandbox. See [Stop an idle sandbox](/docs/sandbox#stop-an-idle-sandbox).
 - The first message passes through the channel's `onMessage` hook and supplies identity and context for initialization and the first turn.
 - The session timeout starts at creation, so an unused prewarmed session can expire. eve deletes its sandbox when it ends.
 - `prewarm()` resolves when the server accepts creation, without waiting for initialization. The composer stays `"idle"`, and `prepareSend` doesn't run.

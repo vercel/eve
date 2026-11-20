@@ -61,12 +61,6 @@ export async function inlineScreenshot(
 
 const TOO_LARGE = Symbol("too_large");
 
-/**
- * Read the capture as a stream and stop as soon as it passes the inline
- * limit. The sandbox controls the file, so a post-read size check or a
- * separate stat would let it make the host buffer an arbitrarily large file.
- * Cancelling never waits on a sandbox-controlled acknowledgement.
- */
 async function readCapped(
   sandbox: DesktopCall["sandbox"],
   path: string,

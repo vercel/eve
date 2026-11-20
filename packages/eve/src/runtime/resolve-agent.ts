@@ -24,18 +24,12 @@ import type {
 import type { AgentToolExposure, SessionUsageLimit } from "#shared/agent-definition.js";
 import type { ApprovalPolicy } from "#approval/definition.js";
 
-/**
- * Input for resolving one compiled authored agent into a runtime-owned model.
- */
 interface ResolveAgentInput {
   manifest: CompiledAgentNodeManifest | CompiledAgentResources;
   moduleMap: CompiledModuleMap;
   nodeId?: string;
 }
 
-/**
- * Resolves the core authored agent path from compiled artifacts.
- */
 export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAgent> {
   const resolvedSkills = input.manifest.skills.map((skill) => ({
     ...skill,
@@ -120,7 +114,6 @@ interface AgentConfigFunctions {
   readonly sessionUsage?: SessionUsageLimit | false;
 }
 
-/** Loads the authored functions the manifest can only mark: `limits.sessionUsage` and `approval`. */
 async function loadAgentConfigFunctions(
   manifest: CompiledAgentNodeManifest,
   moduleMap: CompiledModuleMap,
@@ -147,7 +140,6 @@ async function loadAgentConfigFunctions(
     definition,
     `Expected the authored agent config export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`,
   );
-  // A gate the manifest promises but the module no longer has would fail open; refuse to start.
   if (approval && authored.approval === undefined) {
     throw new Error(
       `The compiled agent marks an "approval" policy, but "${source.logicalPath}" no longer exports one. Rebuild the agent.`,
@@ -323,11 +315,6 @@ function createResolvedAgentConfig(
   };
 }
 
-/**
- * The names the agent's tool files take, selected or disabled: an eve feature that offers tools
- * under one of them, such as a memory slot's, yields to the file. eve's own built-in tools aren't
- * the agent's files, so a slot named like one still offers its tools beside it.
- */
 function toolFileNames(
   manifest: CompiledAgentNodeManifest | CompiledAgentResources,
 ): ReadonlySet<string> {
@@ -344,7 +331,6 @@ function toolFileNames(
   ]);
 }
 
-/** The names of the tool files that export `disableTool()`. */
 export function disabledToolNames(
   manifest: Pick<CompiledAgentResources, "sourceComposition">,
 ): readonly string[] {

@@ -1,4 +1,3 @@
-// @linux-only: Workflow body API semantics in the VM
 import { describe, expect, it } from "vitest";
 
 import {

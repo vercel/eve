@@ -34,13 +34,11 @@ describe("authored-module cache", () => {
       await compileAgentManifest(
         (await discoverAgent({ agentRoot: app.agentRoot, appRoot: app.appRoot })).manifest,
       );
-      // Compiles start pruning without waiting for it.
       await pruneAuthoredModuleCache();
     };
 
     await compile();
     const firstBundles = await listBundles();
-    // Last used an hour ago: by a process that has since finished, unless a lease says otherwise.
     const hourAgo = new Date(Date.now() - HOUR_MS);
     for (const name of firstBundles) await utimes(join(cacheDirectory, name), hourAgo, hourAgo);
     await writeFile(join(app.agentRoot, "tools", "edited.ts"), tool("second"));
@@ -69,8 +67,6 @@ describe("authored-module cache", () => {
     const whileRunning = await listBundles();
     expect([...firstBundles].every((name) => whileRunning.has(name))).toBe(true);
 
-    // A lease nobody refreshed for longer than the heartbeat expiry belongs to a process that
-    // is gone, even though this pid and host still look alive.
     const staleRefresh = new Date(Date.now() - HOUR_MS);
     await utimes(leasePath, staleRefresh, staleRefresh);
     await pruneAuthoredModuleCache();

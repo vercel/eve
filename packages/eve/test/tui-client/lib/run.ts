@@ -10,13 +10,10 @@ import { theme } from "./theme.ts";
 
 export type RunOptions = LocalTestTargetRequest;
 
-/** Smoke test body invoked once a target is ready. */
 export type RunCallback = (target: TestTarget) => Promise<void>;
 
-/** Cleanup hook for local helpers started by a smoke entrypoint. */
 export type RunCleanup = () => Promise<void> | void;
 
-/** Local smoke environment plus a shared cleanup stack. */
 export interface RunEnvironmentContext {
   readonly environment: LocalTestEnvironment;
 
@@ -24,29 +21,12 @@ export interface RunEnvironmentContext {
   cleanup(cleanup: RunCleanup): void;
 }
 
-/**
- * Orchestrates one smoke test:
- *
- * 1. Resolves the named agent as a local smoke-test target.
- * 2. The local target waits for `/eve/v1/health` and verifies `/eve/v1/info`
- *    identifies the requested app.
- * 3. Invokes `fn` with the resolved target.
- * 4. Tears the server down whether `fn` resolved or threw.
- * 5. Prints any error chain (including upstream `responseBody`s) and
- *    sets `process.exitCode = 1` on failure.
- *
- * Smoke tests should call `run(...)` at the top level of the module.
- */
 export function run(opts: RunOptions, fn: RunCallback): void {
   runEnvironment("smoke test", async ({ target }) => {
     await fn(await target(opts));
   });
 }
 
-/**
- * Orchestrates one smoke entrypoint that needs local helpers or more than one
- * local target. Helpers should register cleanup before starting targets.
- */
 export function runEnvironment(
   name: string,
   fn: (context: RunEnvironmentContext) => Promise<void>,

@@ -17,26 +17,19 @@ export type RegistrySessionOutcome =
       facts: readonly RegistrySetupFact[];
       output: readonly string[];
     }
-  /** Files were added, but the item's setup was cancelled, skipped, or failed. */
   | {
       kind: "incomplete";
       title: string;
-      /** Registry address, used to resume setup without reinstalling. */
       address: string;
       resumeCommand: string;
-      /** Why setup failed; absent when it was cancelled or skipped. */
       reason?: string;
       prerequisite?: SetupPrerequisite;
     }
-  /** User-facing installation error, including any actionable follow-up lines. */
   | { kind: "failed"; title: string; message: string }
-  /** Stopped before anything was written. */
   | { kind: "cancelled"; title: string };
 
 export interface RegistrySessionResult {
-  /** Every item outcome in installation order. */
   outcomes: readonly RegistrySessionOutcome[];
-  /** Setup stopped outside an individual item after preserving settled results. */
   cancelled?: true;
   deployed?: "production";
 }
@@ -57,7 +50,6 @@ interface RegistrySession {
   }): Promise<RegistrySessionResult>;
 }
 
-/** Owns the accumulated output and deployment decision for one `/add` session. */
 export function createRegistrySession(deps: RegistrySessionDeps): RegistrySession {
   const outcomes: RegistrySessionOutcome[] = [];
   let deploymentRequired = false;

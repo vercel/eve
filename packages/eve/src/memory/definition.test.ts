@@ -84,7 +84,6 @@ describe("accumulate", () => {
 
 describe("memoryToolsDefinition", () => {
   it("keeps a memory's tools under the ID of the tool file eve generated for them", () => {
-    // Sessions hold their slot, memos, and the versions parked approvals compare under this ID.
     const definition = memoryToolsDefinition({
       logicalPath: "memory/profile.ts",
       offersTools: true,

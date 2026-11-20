@@ -40,11 +40,6 @@ import { createStepAttempts, type StepFaults } from "./step-attempts.js";
 import { acrossStepBoundary, structuredCloneBoundary, type StepBoundary } from "./step-boundary.js";
 import { createInProcessTimers, type InProcessTimers } from "./timers.js";
 
-// What every runtime of one in-process host shares: its streams, addresses, timers and runs, the
-// sessions running on any of its runtimes, and the route that sends hook tokens it holds here
-// instead of to Workflow. A run's child sessions run on the host's runtime for the child's agent
-// (`runtimeFor`), beside the parent's. Nothing here survives the process.
-
 export const IN_PROCESS_DEPLOYMENT_ID = "in-process";
 
 function unavailable(what: string): never {
@@ -53,10 +48,6 @@ function unavailable(what: string): never {
   );
 }
 
-/**
- * The runtime a turn step's own durable calls start in. A session's runs start through its
- * host's dispatch instead, so nothing here does.
- */
 const NO_STEP_RUNTIME: Runtime = {
   createSession: async () => unavailable("Starting a session from a tool"),
   dispatchContinuation: async () => unavailable("Sending to another session"),
@@ -67,10 +58,6 @@ const NO_STEP_RUNTIME: Runtime = {
   resolveContinuation: async () => unavailable("Resolving another session"),
 };
 
-/**
- * Delivers to an address wherever it's held: a sign-in callback to its asker, where an asker
- * that's gone isn't an error, as on Workflow.
- */
 const deliverRouted: DurableHost["deliver"] = async (to, payload) => {
   if ("hook" in to) return await resumeRoutedHook(to.hook, payload);
   if ("session" in to)
@@ -83,28 +70,11 @@ const deliverRouted: DurableHost["deliver"] = async (to, payload) => {
 };
 
 export interface InProcessHostOptions {
-  /**
-   * How a step's data and a hook's payload cross between their sides. A structured clone by
-   * default; a test that needs a deployment's exact serializer passes Workflow's
-   * (`workflow-host/step-boundary.ts`), which this module never loads itself.
-   */
   readonly stepBoundary?: StepBoundary;
-  /**
-   * The base URL sign-in callbacks reach its sessions at. Without it, a session can't call a
-   * sign-in back, as a Workflow session outside a run can't.
-   */
   readonly callbackBaseUrl?: string;
-  /**
-   * @internal Turn steps that lose their completion, or fail, and run again, as on Workflow.
-   * Only the test hosts in `internal/testing` pass it; production hosts have no faults.
-   */
+  /** @internal */
   readonly stepFaults?: StepFaults;
-  /** How long disposing waits for running turns to park before it resets their sessions: 5s. */
   readonly disposeGraceMs?: number;
-  /**
-   * When sessions and runs read what's delivered, and a session the end of its turn step
-   * (`DeliveryTiming`); at once by default.
-   */
   readonly deliveries?: DeliveryTiming;
 }
 
@@ -113,31 +83,19 @@ export interface InProcessHost {
   readonly lines: MemoryLineStore;
   readonly inboxes: MemoryInboxRegistry;
   readonly runs: InProcessRuns;
-  /** Each running session's end. */
   readonly running: Map<string, Promise<void>>;
-  /** The host a session's loop runs on. */
   readonly sessionHost: SessionHost;
-  /** How many of `sessionId`'s turn steps are running now. */
   stepsRunning(sessionId: string): number;
-  /** Counts `work` as in flight here until it settles; see {@link InProcessHost.idle}. */
   working<T>(work: () => Promise<T>): Promise<T>;
-  /**
-   * Resolves once nothing here is working: no delivery, step or session start is in flight, so
-   * every session and run waits on a message, a person or a timer.
-   */
   idle(): Promise<void>;
-  /** Delivers a command to the session holding `token`. */
   deliverCommand<TCommand extends SessionCommand>(
     token: string,
     command: TCommand,
   ): Promise<SessionCommandResult<TCommand>>;
-  /** Releases `release` when the host is disposed. */
   onDispose(release: () => void): void;
-  /** Stops serving: closes every address, and waits for each session to end. */
   dispose(): Promise<void>;
 }
 
-/** The host every runtime `runtimeFor` returns shares. */
 export function createInProcessHost(
   options: InProcessHostOptions,
   runtimeFor: (config: SessionRuntimeConfig) => Runtime,
@@ -163,8 +121,6 @@ export function createInProcessHost(
     const identified = identifyCommand(command);
     const delivery = await inboxes.deliver(token, identified);
     if (delivery?.kind !== "delivered") return inactiveCommandResult(identified);
-    // A reset answers once the session let go of its addresses, as Workflow's does, so a message
-    // sent after it starts the next session instead of reaching the one that's ending.
     if (identified.kind === "reset") await addressesReleased(inboxes, delivery.owner);
     return activeCommandResult(identified, delivery.owner);
   };
@@ -180,7 +136,6 @@ export function createInProcessHost(
     toolStubs,
   });
 
-  // A child a run opened after its task ended is stopped, best effort, as on Workflow.
   const { stopLate } = agentSessionsOver({
     deliveryId: (kind, sessionId) => `agent-session:late:${createUlid()}:${sessionId}:${kind}`,
     local: {
@@ -202,7 +157,6 @@ export function createInProcessHost(
       : { callbackBaseUrl: options.callbackBaseUrl.replace(/\/$/, ""), deliver: deliverRouted };
   const stepHost: SessionStepHost = {
     createRuntime: () => NO_STEP_RUNTIME,
-    // Attributes belong to a Workflow run; an in-process session has none.
     setAttributes: async () => {},
     toolStubs,
     ...signInCallbacks,
@@ -210,7 +164,6 @@ export function createInProcessHost(
   const runTurnStep = turnStepOn(stepHost);
 
   const applyRunMessages = applyRunMessagesOn({
-    // A remote child can't be opened here, so no run reports one.
     recordRemoteBinding: async () => unavailable("A remote agent"),
     stopLate,
   });
@@ -219,18 +172,12 @@ export function createInProcessHost(
     toolStubs,
     applyRunMessages: (input) => work.count(() => applyRunMessages(input)),
     dispatchRuns: (input) => work.count(() => dispatchRuns(input)),
-    /**
-     * One turn step, whose data crosses the host's step boundary each way as it would a
-     * deployment's serializer. Its stream and signals are services, which cross as they are.
-     */
     runTurnStep: (input) =>
       work.count(async () => {
         const { abortSignal, sessionWritable, steeringSignal, ...data } = input;
         const { sessionId } = input.sessionState;
         steps.set(sessionId, (steps.get(sessionId) ?? 0) + 1);
         try {
-          // Each attempt receives its own copy of the input and its own writable, as each of a
-          // Workflow step's does.
           const result = await attempts.run(
             {
               name: "turnStep",
@@ -250,8 +197,6 @@ export function createInProcessHost(
           const left = (steps.get(sessionId) ?? 1) - 1;
           if (left === 0) steps.delete(sessionId);
           else steps.set(sessionId, left);
-          // On Workflow, a session reads a step's end when its run next replays, with every hook
-          // payload that arrived by then. With batched deliveries, so does this one.
           await inboxes.heard();
         }
       }),
@@ -261,15 +206,12 @@ export function createInProcessHost(
   releases.push(
     registerHost({
       async deliver(token, payload) {
-        // A session's addresses are named here by their logical tokens; a sign-in callback's URL
-        // carries the physical one (`eve:inbox:...`).
         const delivery = await inboxes.deliver(logicalSessionInboxToken(token) ?? token, payload);
         return delivery?.kind;
       },
       runEnded: (runId) => runs.runEnded(runId),
       cancelRun: (runId, reason) => runs.cancelRun(runId, reason),
       stepAttempt: () => attempts.current(),
-      // A session's steps outside its turn steps, such as relaying a child's sign-in, call back.
       signInCallbacks: (sessionId) => (running.has(sessionId) ? signInCallbacks : undefined),
     }),
   );
@@ -289,12 +231,7 @@ export function createInProcessHost(
       releases.push(release);
     },
     async dispose() {
-      // Runs end first, while their sessions still listen, so each session hears its runs' ends
-      // instead of waiting out a run that can no longer reach it.
       await runs.stopAll("The in-process host is stopping.");
-      // A turn still running gets a grace to park, as a server's shutdown gives its requests.
-      // One that never does, such as a turn whose runs ended and that keeps calling its model, is
-      // reset: closing its addresses wouldn't stop it.
       if (!(await restsWithin(work, options.disposeGraceMs ?? DISPOSE_GRACE_MS))) {
         await Promise.all(
           [...running.keys()].map((sessionId) =>
@@ -315,10 +252,8 @@ export function createInProcessHost(
   };
 }
 
-/** How long disposing waits for running turns to park before it resets their sessions. */
 const DISPOSE_GRACE_MS = 5_000;
 
-/** Whether the host comes to rest within `ms`. */
 async function restsWithin(
   work: ReturnType<typeof createWorkCounter>,
   ms: number,
@@ -336,7 +271,6 @@ async function restsWithin(
   }
 }
 
-/** Work in flight on a host, and a wait for none to be. */
 function createWorkCounter() {
   let inFlight = 0;
   const waiters = new Set<() => void>();
@@ -354,7 +288,6 @@ function createWorkCounter() {
       }
     },
     async idle(): Promise<void> {
-      // Rest must hold across macrotasks: what settled work starts next is in flight by then.
       for (let quiet = 0; quiet < 3;) {
         if (inFlight > 0) {
           quiet = 0;
@@ -367,14 +300,8 @@ function createWorkCounter() {
   };
 }
 
-/** How long a reset waits for its session's addresses, as Workflow's ingress does. */
 const RESET_RELEASE_TIMEOUT_MS = 30_000;
 
-/**
- * Resolves once `owner` holds no address, as Workflow's reset waits for the session's hooks
- * (`waitForSessionHooksRelease`): before the session finishes ending, so a successor can start
- * while the old one still writes its end. One that never lets go fails instead of hanging.
- */
 async function addressesReleased(inboxes: MemoryInboxRegistry, owner: string): Promise<void> {
   const deadline = Date.now() + RESET_RELEASE_TIMEOUT_MS;
   while (inboxes.holdsAny(owner)) {

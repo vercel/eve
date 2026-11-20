@@ -126,8 +126,6 @@ describe("discoverSandboxSource (memory)", () => {
   it("reports DISCOVER_SANDBOX_FOLDER_EMPTY when sandbox/ has no module or workspace/", async () => {
     const project = buildMemoryAgentProject({
       agentFiles: {
-        // Drop a stray file that does not match sandbox.<ext> so the folder is
-        // not empty but still has nothing the framework can load.
         "sandbox/README.md": "ignored",
       },
     });

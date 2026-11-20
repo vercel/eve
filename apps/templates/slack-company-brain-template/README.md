@@ -12,269 +12,65 @@ specialists (subagents).
 
 ```text
 agent/
-  agent.ts                       # model selection
-  instructions.md                # grounding, source routing, and Slack style
-  instructions/github.ts         # how to connect GitHub; delete once connected
-  instructions/notion.ts         # how to connect Notion; delete once connected
-  instructions/linear.ts         # how to connect Linear; delete once connected
-  instructions/pagerduty.ts      # how to connect PagerDuty; delete once connected
-  connections/notion.ts          # Notion wiki, on once its connector exists
-  connections/linear.ts          # Linear issues and projects, on once its connector exists
-  connections/pagerduty.ts       # on-call and incidents, on once its connector exists
-  channels/slack.ts              # mentions, DMs, followed threads, workspace gate
-  extensions/code.ts             # eve's code extension: work with files and code in a sandbox
-  extensions/git.ts              # eve's git extension: GitHub access and pull requests
-  extensions/skills.ts           # skills people teach the agent, for themselves or a channel
-  memory/personal.ts             # private notes per person, in DMs and outside Slack
-  memory/channel.ts              # shared notes per Slack channel
-  schedules/tasks.ts             # schedules people create by asking in Slack
+  agent.ts                  # model selection
+  instructions.md           # grounding, citations, source routing, and Slack style
+  instructions/
+    [connection].ts         # how to connect each source; delete once connected
+  channels/
+    eve.ts                  # HTTP API access, with tool stubs for local evals
+    slack.ts                # mentions, DMs, followed threads, workspace gate
+  connections/
+    [connection].ts         # Notion, Linear, and PagerDuty, each on once its connector exists
+  extensions/
+    code.ts                 # eve's code extension: files and code in a sandbox
+    git.ts                  # eve's git extension: GitHub access and pull requests
+    skills.ts               # skills people teach the agent, for themselves or a channel
+  memory/[slot].ts          # private notes per person and shared notes per Slack channel
+  schedules/tasks.ts        # schedules people create by asking in Slack
   skills/company-context/SKILL.md # fill in your teams, glossary, and sources
-  tools/no_reply.ts              # lets the agent stay quiet in followed threads
-  tools/search_slack.ts          # searches public Slack channels
-  tools/read_slack_conversation.ts # reads a public channel or thread
-  sandbox.ts                     # Vercel Sandbox with coding tools installed
-  lib/slack.ts                   # shared Slack credentials and workspace check
-  lib/connect.ts                 # connector detection and setup notes
-  lib/github.ts                  # GitHub connector and firewall credential broker
-  lib/conversation.ts            # tells private conversations from shared channels
+  tools/
+    no_reply.ts             # lets the agent stay quiet in followed threads
+    post_slack_file.ts      # posts a sandbox file, such as a chart or CSV, in the thread
+    read_slack_conversation.ts # reads a public channel or thread
+    search_slack.ts         # searches public Slack channels
+  lib/
+    connect.ts              # connector detection and setup notes
+    conversation.ts         # tells private conversations from shared channels
+    github.ts               # GitHub connector and firewall credential broker
+    slack.ts                # shared Slack credentials and workspace check
+  sandbox.ts                # Vercel Sandbox with coding tools installed
+evals/                      # checks for answer length, citations, and thread replies
 ```
 
-- **Grounded answers.** The instructions tell the agent to answer
-  company-specific questions only from sources it retrieved, link the source
-  inline, and say when nothing answers the question.
-- **Thread context.** Each mention also sees the replies posted since the agent
-  last spoke, with sender names.
-- **Followed threads.** Once someone brings the agent into a thread, it sees
-  later replies without a mention and answers only when a reply is meant for
-  it. Otherwise it calls `no_reply` and leaves no trace. Top-level channel
-  messages still need a mention. This needs extra Slack events; see
-  [Get started](#get-started).
-- **Slack search.** `search_slack` uses Slack's
+- **Evidence-based answers.** `instructions.md` has the agent answer
+  company-specific questions only from sources it retrieved and cite them
+  inline. `skills/company-context` is a stub to fill in with your teams,
+  glossary, and sources.
+- **Natural Slack behavior.** `channels/slack.ts` follows threads the agent is
+  already in without a mention, and calls `no_reply` when a reply isn't for it.
+  This needs extra Slack events; see [Get started](#get-started).
+- **Slack search.** `tools/search_slack.ts` uses Slack's
   [Real-time Search API](https://docs.slack.dev/apis/web-api/real-time-search-api)
-  to find relevant messages in public channels, best match first, with
-  permalinks the agent cites, and `read_slack_conversation` reads a match's
-  thread or a named channel. See [Slack search](#slack-search).
-- **Workspace gate.** Workspace guests (multi- and single-channel) and
-  deactivated accounts can't start a conversation or answer approvals and
-  questions. The agent reads Slack with the bot's access, which reaches
-  channels a guest can't see. With `SLACK_TEAM_ID` set, people from other
-  companies in Slack Connect channels can't either.
-- **Memory.** Two [file memory](https://eve.dev/docs/memory/file) slots: a
-  private one per person, and a shared one per Slack channel. See
-  [Memory](#memory).
-- **Custom skills.** People teach the agent their own skills by asking, such
-  as a release checklist or how they like standup notes. Personal skills
-  follow their owner everywhere; channel skills apply to everyone in a Slack
-  channel. See [Custom skills](#custom-skills).
-- **Scheduled tasks.** People can ask for recurring or one-time work, such as
-  "every Monday at 9, summarize last week's open questions here". Results post
-  in the conversation where the schedule was created. See
-  [Scheduled tasks](#scheduled-tasks).
-- **Code and files.** The [code extension](https://eve.dev/docs/code-extension)
-  lets the agent run scripts, analyze attached files such as CSVs or logs, and
-  read or write code in a sandbox.
-- **GitHub.** With a GitHub connector, the [git extension](https://eve.dev/docs/code-extension#publish-with-the-git-extension)
-  adds a `git__gh` tool for reading repositories, issues, and pull requests the
-  connector's GitHub App is installed on, and a `pr` skill for opening draft
-  pull requests. See
-  [Connect GitHub](#connect-github).
-- **Built-in eve Slack behavior.** Threads are sessions, the thread status shows
-  progress, and approvals and questions appear as buttons.
-
-## Get started
-
-```bash
-pnpm install
-vercel link                       # link a Vercel project
-vercel connect create slack --name company-brain --triggers --trigger-path /eve/v1/slack
-cp -n .env.example .env.local     # then set SLACK_CONNECTOR and SLACK_TEAM_ID
-pnpm exec eve integration setup file-memory  # private Blob store for memory
-vercel env pull                   # Vercel credentials for AI Gateway, sandbox, and memory
-pnpm dev
-```
-
-`vercel connect create` creates the Slack app through Vercel Connect and
-forwards its events to the linked project. Put the connector UID it prints in
-`SLACK_CONNECTOR`. `cp -n` leaves an existing `.env.local` alone; add the
-variables to it yourself in that case. Set `SLACK_CONNECTOR` and
-`SLACK_TEAM_ID` in the Vercel project's environment too, then deploy:
-
-```bash
-pnpm exec eve deploy
-```
-
-To follow threads without a mention, the Slack app also needs the
-`message.channels` event and `channels:history` scope (and `message.groups` and
-`groups:history` for private channels). With Vercel Connect, add them in the
-connector's **Advanced** settings under **Trigger Event Types** and **Bot
-Scopes**. Without them, people mention the agent for each follow-up.
-
-For Slack search and reading channels, also add the `search:read.public` and
-`channels:read` bot scopes the same way.
-
-Invite the app to a channel and mention it. Model calls use AI Gateway through
-the linked project, or `AI_GATEWAY_API_KEY` in `.env.local`.
-
-## Slack search
-
-`agent/tools/search_slack.ts` calls Slack's `assistant.search.context` with the
-app's bot token. It searches public channels only, even ones the agent hasn't
-joined, and never private channels or DMs.
-
-Slack only allows this with the short-lived `action_token` from the message
-that started the turn, so search works in turns started by a mention or DM. It
-doesn't work in scheduled tasks, followed-thread replies without a mention, or
-non-Slack channels, and the token expires a few minutes after the message. The
-tool tells the agent when search is unavailable so it reports the gap instead
-of claiming nothing was found.
-
-`agent/tools/read_slack_conversation.ts` reads one public channel's recent
-messages, or one thread, with the bot token. It needs no action token, so it
-also works in scheduled tasks, but Slack only lets the bot read channels it has
-been invited to. It refuses private channels and DMs.
-
-The Slack channel's `defaultSlackAuth` copies the token into each turn's auth
-as the `action_token` attribute.
-
-## Memory
-
-The agent keeps two kinds of notes, each a small document it edits with save
-and remove tools:
-
-| Slot       | Shared by                   | Available in                                    |
-| ---------- | --------------------------- | ----------------------------------------------- |
-| `personal` | One person                  | Slack DMs and non-Slack channels, such as `eve` |
-| `channel`  | Everyone in a Slack channel | That channel's threads                          |
-
-Personal memory is off in shared conversations, including group DMs, so notes
-about one person never show up in a thread other people read. Channel memory
-is off in DMs. Scopes come from the trusted Slack session in
-`lib/conversation.ts`, never from the model. Personal memory follows the
-signed-in identity, so someone's Slack DMs and their `eve` sessions keep
-separate notes.
-
-On Vercel, memory is stored in a private Vercel Blob store. The Deploy with
-Vercel button creates one. Otherwise, run
-`pnpm exec eve integration setup file-memory` once to create it and connect it to the
-project, then redeploy. Without it, memory on Vercel reports an error that
-points to that command. Under `eve dev`, memory lives in process memory and resets on
-restart.
-
-To change what gets remembered, edit the slot descriptions in `agent/memory/`
-and the Memory section of `agent/instructions.md`. To search many records
-instead of keeping a small document, swap `fileMemory()` for another
-[provider](https://eve.dev/docs/memory#choose-a-provider) without changing the
-scopes.
-
-## Custom skills
-
-`agent/extensions/skills.ts` mounts eve's experimental
-[custom skills extension](https://eve.dev/docs/experimental/custom-skills).
-People save skills by asking, and each applies from their next message:
-
-> @brain from now on, when I ask for standup notes, use three bullets:
-> yesterday, today, blockers
->
-> @brain save a skill for this channel: when someone asks how to request
-> access, point them to the IT form and ask which system they need
->
-> @brain what skills do I have?
-
-| Scope      | Applies to                                 | Goes live                                     |
-| ---------- | ------------------------------------------ | --------------------------------------------- |
-| `personal` | The person who saved it, in every thread   | First version at once; later ones on approval |
-| `channel`  | Everyone in that Slack channel or group DM | After someone other than the author approves  |
-
-Every save is a version. Later saves stay drafts until someone publishes them,
-and publishing an earlier version rolls back. Approvals appear as Slack
-buttons, and only workspace members who pass the channel gate can answer them.
-A skill can apply on every turn (`always`, such as a tone), load when relevant
-(`on-demand`), or stay hidden until the agent searches for it (`deferred`).
-
-Scopes come from the trusted Slack session, never from the model. Personal
-skills shape the agent's replies in shared threads too, so other people in the
-thread see their effects. Scheduled tasks run as their creator and get the
-creator's personal skills.
-
-Skills live in the same private Blob store as [memory](#memory), under
-`company-brain/skills`, and reset on restart under `eve dev`. To make channel
-skills admin-only, add company-wide read-only skills, or keep skills in your
-own database, see the extension's
-[docs](https://eve.dev/docs/experimental/custom-skills#scopes).
-
-## Connect GitHub
-
-GitHub is optional. Without it, the agent still runs code in its sandbox but
-has no GitHub credentials, and it tells people who ask how to connect GitHub
-(`agent/instructions/github.ts`). To connect it, create a Vercel Connect GitHub
-connector from the linked project:
-
-```bash
-vercel connect create github --name company-brain
-```
-
-The name matters: it gives the connector the UID `github/company-brain`, which
-the agent looks for, and the CLI attaches it to the linked project.
-
-Install its GitHub App on the repositories the agent may use, from the Connect
-dashboard. The agent can reach only those repositories. The agent notices the
-connector within a few minutes, without a redeploy. To limit access to
-repositories owned by one organization or user, for an app installed on more
-than one account, set `GITHUB_ORG` in `.env.local` and the Vercel project and
-redeploy.
-
-Once GitHub works, delete `agent/instructions/github.ts`. It only tells the
-agent how to point people to this setup.
-
-Each `gh` command gets a GitHub App token scoped to one repository. The sandbox
-only sees a placeholder; `lib/github.ts` swaps in the real token at the sandbox
-firewall for that command and removes it afterward. The `authorize` callback in
-`agent/extensions/git.ts` is the only access check: it allows Slack users in
-your workspace, including their scheduled tasks, and, with `GITHUB_ORG` set,
-only repositories that account owns. Tighten it if not everyone who can reach the agent should open
-pull requests.
-
-## Scheduled tasks
-
-`agent/schedules/tasks.ts` uses eve's experimental
-[dynamic schedules](https://eve.dev/docs/experimental/dynamic-schedules). It
-gives the agent `schedule__tasks__create`, `list`, `update`, `delete`, and
-related tools, so people manage schedules by asking:
-
-> @brain every weekday at 9am Pacific, post a summary of yesterday's open
-> questions in this channel
->
-> @brain remind me in this thread in 2 hours to check the deploy
->
-> @brain what schedules do I have?
-
-How it works:
-
-- **Where results go.** `preparePayload` saves the Slack conversation the
-  request came from (and the thread, for "reply here" requests) from the trusted
-  Slack session. The model can't choose another destination. Create a schedule
-  from a DM to get results in that DM.
-- **Who it runs as.** Each run is a new session that runs as the person who
-  created the schedule, so per-person connections use their access. Before each
-  run, `auth` checks with Slack that the account is still an active full
-  member, not a guest, and, with `SLACK_TEAM_ID` set, still in your workspace.
-  For a private channel or group DM, it also checks that the creator is still
-  in it. That check needs the `groups:read` and `mpim:read` bot scopes. When a
-  check fails, that run is skipped without a retry; when Slack can't be
-  reached, the run is retried.
-- **Who can manage it.** Each person sees and changes only their own schedules.
-  Creating or changing one asks for approval in Slack first. Set `approval` in
-  the definition to change that.
-- **No one is present.** Scheduled runs can't wait for questions or approvals,
-  so the task text has to be complete, and tools that need approval can't wait for it.
-
-On Vercel, Vercel Schedules stores and fires schedules. Preview and production
-schedules are separate. Under `eve dev` schedules are stored in memory and never
-fire on their own; ask the agent to run one now (`invoke`) to test it.
-
-To add another kind of schedule, such as one that always posts to a fixed team
-channel, add another file under `agent/schedules/` with its own `inputSchema`
-and `preparePayload`.
+  to search public channels, and `tools/read_slack_conversation.ts` reads a
+  public channel or thread the bot is in.
+- **Memory.** Two [file memory](https://eve.dev/docs/memory/file) slots:
+  `personal`, per person and only in private conversations, and `channel`, one
+  shared document per Slack channel. See [Memory](#memory).
+- **Custom skills.** `extensions/skills.ts` lets people teach the agent their
+  own skills by asking. Personal skills follow their owner everywhere; channel
+  skills apply to everyone in a Slack channel. See
+  [Custom skills](#custom-skills).
+- **User-defined workflows.** `schedules/tasks.ts` lets people ask for recurring
+  or one-time tasks. See [Scheduled tasks](#scheduled-tasks).
+- **Code and GitHub.** The [code extension](https://eve.dev/docs/code-extension)
+  and [git extension](https://eve.dev/docs/code-extension#publish-with-the-git-extension)
+  run in a Vercel Sandbox, with GitHub App tokens scoped to one repository per
+  command. `tools/post_slack_file.ts` posts files the agent makes, such as a
+  chart or CSV, back in the thread. See [Connect GitHub](#connect-github).
+- **Optional custom connections.** The agent tells people how to connect
+  Notion, Linear, PagerDuty, and GitHub until each one works. Add your own
+  sources as connections, tools, or subagents. See
+  [Grow the brain](#grow-the-brain).
 
 ## Grow the brain
 
@@ -411,29 +207,207 @@ carries. The Slack docs cover common next steps:
 - [Customize rendering](https://eve.dev/docs/channels/slack#customize-rendering)
   of replies and approval cards.
 
-## Before you roll it out
+## Get started
 
-- **Shared threads are public to their members.** Anything the agent retrieves
-  can appear in a thread other people read. Prefer per-person auth for
-  connections, and use app-scoped auth only for content everyone may see.
-- **Set `SLACK_TEAM_ID`.** Without it, full members of other workspaces in
-  Slack Connect channels can start a conversation or answer an approval.
-  Workspace guests are always refused.
-- **The sandbox has open egress.** Like eve's coding agent template, code the
-  agent runs can reach any host; only GitHub credentials are held back at the
-  firewall. Don't put other credentials in the sandbox, and narrow the network
-  policy in `agent/sandbox.ts` and `lib/github.ts` if you need to restrict
-  egress. See [Sandbox](https://eve.dev/docs/sandbox).
-- **Channel memory is shared.** Anyone who can reach the agent in a channel
-  benefits from, and can add to, that channel's notes. Review the channel
-  memory description if your channels hold sensitive discussions.
-- **Channel skills change everyone's answers.** A channel skill joins the
-  prompt for everyone in that channel, so it needs a second person to approve
-  it. To limit channel skills to admins, set `approval.request` in
-  `agent/extensions/skills.ts`.
-- **Keep checks in sensitive tools.** The channel gate decides who can start a
-  turn or answer an approval. A tool that reads or changes sensitive data should check
-  `ctx.session.auth` itself.
+The easiest way to start is [Deploy with Vercel](https://vercel.com/new/clone?connect=%5B%7B%22type%22%3A%22slack%22%2C%22env%22%3A%22SLACK_CONNECTOR%22%2C%22triggers%22%3Atrue%2C%22triggerPath%22%3A%22%2Feve%2Fv1%2Fslack%22%7D%5D&stores=%5B%7B%22type%22%3A%22blob%22%2C%22access%22%3A%22private%22%7D%5D&project-name=slack-company-brain&repository-name=slack-company-brain&repository-url=https%3A%2F%2Fgithub.com%2Fvercel%2Feve%2Ftree%2Fmain%2Fapps%2Ftemplates%2Fslack-company-brain-template). It creates
+the Vercel project, the Slack connector, and the memory Blob store for you. To
+set it up by hand instead:
+
+```bash
+pnpm install
+vercel link                       # link a Vercel project
+vercel connect create slack --name company-brain --triggers --trigger-path /eve/v1/slack
+cp -n .env.example .env.local     # then set SLACK_CONNECTOR and SLACK_TEAM_ID
+pnpm exec eve integration setup file-memory  # private Blob store for memory
+vercel env pull                   # Vercel credentials for AI Gateway, sandbox, and memory
+pnpm dev
+```
+
+`vercel connect create` creates the Slack app through Vercel Connect and
+forwards its events to the linked project. Put the connector UID it prints in
+`SLACK_CONNECTOR`. `cp -n` leaves an existing `.env.local` alone; add the
+variables to it yourself in that case. Set `SLACK_CONNECTOR` and
+`SLACK_TEAM_ID` in the Vercel project's environment too, then deploy:
+
+```bash
+pnpm exec eve deploy
+```
+
+Either way, finish with the steps below. The button sets neither
+`SLACK_TEAM_ID` nor the extra Slack events and scopes. Set `SLACK_TEAM_ID` in
+the Vercel project's environment and redeploy.
+
+To follow threads without a mention, the Slack app also needs the
+`message.channels` event and `channels:history` scope (and `message.groups` and
+`groups:history` for private channels). With Vercel Connect, add them in the
+connector's **Advanced** settings under **Trigger Event Types** and **Bot
+Scopes**. Without them, people mention the agent for each follow-up.
+
+For Slack search and reading channels, also add the `search:read.public` and
+`channels:read` bot scopes the same way. To read files people attach and post
+files back, add `files:read` and `files:write`.
+
+Invite the app to a channel and mention it. Model calls use AI Gateway through
+the linked project, or `AI_GATEWAY_API_KEY` in `.env.local`.
+
+## Memory
+
+The agent keeps two kinds of notes, each a small document it edits with save
+and remove tools:
+
+| Slot       | Shared by                   | Available in                                    |
+| ---------- | --------------------------- | ----------------------------------------------- |
+| `personal` | One person                  | Slack DMs and non-Slack channels, such as `eve` |
+| `channel`  | Everyone in a Slack channel | That channel's threads                          |
+
+Personal memory is off in shared conversations, including group DMs, so notes
+about one person never show up in a thread other people read. Channel memory
+is off in DMs. Scopes come from the trusted Slack session in
+`lib/conversation.ts`, never from the model. Personal memory follows the
+signed-in identity, so someone's Slack DMs and their `eve` sessions keep
+separate notes.
+
+On Vercel, memory is stored in a private Vercel Blob store. The Deploy with
+Vercel button creates one. Otherwise, run
+`pnpm exec eve integration setup file-memory` once to create it and connect it to the
+project, then redeploy. Without it, memory on Vercel reports an error that
+points to that command. Under `eve dev`, memory lives in process memory and resets on
+restart.
+
+To change what gets remembered, edit the slot descriptions in `agent/memory/`
+and the Memory section of `agent/instructions.md`. To search many records
+instead of keeping a small document, swap `fileMemory()` for another
+[provider](https://eve.dev/docs/memory#choose-a-provider) without changing the
+scopes.
+
+## Custom skills
+
+`agent/extensions/skills.ts` mounts eve's experimental
+[custom skills extension](https://eve.dev/docs/experimental/custom-skills).
+People save skills by asking, and each applies from their next message:
+
+> @brain from now on, when I ask for standup notes, use three bullets:
+> yesterday, today, blockers
+>
+> @brain save a skill for this channel: when someone asks how to request
+> access, point them to the IT form and ask which system they need
+>
+> @brain what skills do I have?
+
+| Scope      | Applies to                                 | Goes live                                     |
+| ---------- | ------------------------------------------ | --------------------------------------------- |
+| `personal` | The person who saved it, in every thread   | First version at once; later ones on approval |
+| `channel`  | Everyone in that Slack channel or group DM | After the author approves                     |
+
+Every save is a version. Later saves stay drafts until someone publishes them,
+and publishing an earlier version rolls back. Approvals appear as Slack
+buttons, and only workspace members who pass the channel gate can answer them.
+A skill can apply on every turn (`always`, such as a tone), load when relevant
+(`on-demand`), or stay hidden until the agent searches for it (`deferred`).
+
+Scopes come from the trusted Slack session, never from the model. Personal
+skills shape the agent's replies in shared threads too, so other people in the
+thread see their effects. Scheduled tasks run as their creator and get the
+creator's personal skills.
+
+Skills live in the same private Blob store as [memory](#memory), under
+`company-brain/skills`, and reset on restart under `eve dev`. To make channel
+skills admin-only, add company-wide read-only skills, or keep skills in your
+own database, see the extension's
+[docs](https://eve.dev/docs/experimental/custom-skills#scopes).
+
+## Connect GitHub
+
+GitHub is optional. Without it, the agent still runs code in its sandbox but
+has no GitHub credentials, and it tells people who ask how to connect GitHub
+(`agent/instructions/github.ts`). To connect it, create a Vercel Connect GitHub
+connector from the linked project:
+
+```bash
+vercel connect create github --name company-brain
+```
+
+The name matters: it gives the connector the UID `github/company-brain`, which
+the agent looks for, and the CLI attaches it to the linked project.
+
+Install its GitHub App on the repositories the agent may use, from the Connect
+dashboard. The agent can reach only those repositories. The agent notices the
+connector within a few minutes, without a redeploy. To limit access to
+repositories owned by one organization or user, for an app installed on more
+than one account, set `GITHUB_ORG` in `.env.local` and the Vercel project and
+redeploy.
+
+Once GitHub works, delete `agent/instructions/github.ts`. It only tells the
+agent how to point people to this setup.
+
+Each `gh` command gets a GitHub App token scoped to one repository. The sandbox
+only sees a placeholder; `lib/github.ts` swaps in the real token at the sandbox
+firewall for that command and removes it afterward. The `authorize` callback in
+`agent/extensions/git.ts` is the only access check: it allows Slack users in
+your workspace, including their scheduled tasks, and, with `GITHUB_ORG` set,
+only repositories that account owns. Tighten it if not everyone who can reach the agent should open
+pull requests.
+
+## Scheduled tasks
+
+`agent/schedules/tasks.ts` uses eve's experimental
+[dynamic schedules](https://eve.dev/docs/experimental/dynamic-schedules). It
+gives the agent `schedule__tasks__create`, `list`, `update`, `delete`, and
+related tools, so people manage schedules by asking:
+
+> @brain every weekday at 9am Pacific, post a summary of yesterday's open
+> questions in this channel
+>
+> @brain remind me in this thread in 2 hours to check the deploy
+>
+> @brain what schedules do I have?
+
+How it works:
+
+- **Where results go.** `preparePayload` saves the Slack conversation the
+  request came from (and the thread, for "reply here" requests) from the trusted
+  Slack session. The model can't choose another destination. Create a schedule
+  from a DM to get results in that DM.
+- **Who it runs as.** Each run is a new session that runs as the person who
+  created the schedule, so per-person connections use their access. Before each
+  run, `auth` checks with Slack that the account is still an active full
+  member, not a guest, and, with `SLACK_TEAM_ID` set, still in your workspace.
+  For a private channel or group DM, it also checks that the creator is still
+  in it. That check needs the `groups:read` and `mpim:read` bot scopes. When a
+  check fails, that run is skipped without a retry; when Slack can't be
+  reached, the run is retried.
+- **Who can manage it.** Each person sees and changes only their own schedules.
+  Creating or changing one asks for approval in Slack first. Set `approval` in
+  the definition to change that.
+- **No one is present.** Scheduled runs can't wait for questions or approvals,
+  so the task text has to be complete, and tools that need approval can't wait for it.
+
+On Vercel, Vercel Schedules stores and fires schedules. Preview and production
+schedules are separate. Under `eve dev` schedules are stored in memory and never
+fire on their own; ask the agent to run one now (`invoke`) to test it.
+
+To add another kind of schedule, such as one that always posts to a fixed team
+channel, add another file under `agent/schedules/` with its own `inputSchema`
+and `preparePayload`.
+
+## Evals
+
+`evals/` checks the reply behavior in `agent/instructions.md`: answer length,
+inline citations, sources that disagree or fail, when to reply in a followed
+thread, when a scheduled run stays quiet, and posting files. The evals call
+the real model and replace the Slack tools with fixed results, so they need
+only AI Gateway access:
+
+```bash
+pnpm eval              # every eval
+pnpm eval grounding    # one directory
+pnpm eval --repeat 3   # results vary between runs; repeat before trusting a change
+```
+
+They run over eve's HTTP API, not Slack, so `evals/lib/slack.ts` builds
+messages in the format the Slack channel gives the model, and the message a
+scheduled run sends. When you change the instructions, add a case under
+`evals/` for the behavior you changed. See [Evals](https://eve.dev/docs/evals).
 
 ## Learn more
 

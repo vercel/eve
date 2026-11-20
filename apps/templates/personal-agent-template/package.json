@@ -46,7 +46,7 @@
     "chat-adapter-sendblue": "^0.2.0",
     "drizzle-kit": "^0.31.10",
     "drizzle-orm": "^0.45.2",
-    "eve": "^1.0.0",
+    "eve": "1.2.0",
     "maska": "^3.2.0",
     "nuxt": "4.6.4",
     "shiki": "^4.6.0",
@@ -68,5 +68,5 @@
   "engines": {
     "node": "26.x"
   },
-  "packageManager": "pnpm@12.17.0"
+  "packageManager": "pnpm@12.21.0"
 }

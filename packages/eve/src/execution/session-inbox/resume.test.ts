@@ -23,10 +23,8 @@ vi.mock("#internal/workflow/runtime.js", () => ({
   resumeHook: (...args: unknown[]) => resumeHookMock(...args),
 }));
 
-/** Vercel-shaped: owners run on their own deployment, so ingress resumes by token without a lookup. */
 const vercelWorld = { capabilities: { deploymentAffinity: true } };
 
-/** A World without deployment affinity; owner runs record `ownerEveVersion`. */
 function singleDeploymentWorld(ownerEveVersion: string | undefined) {
   return {
     runs: {
@@ -168,7 +166,6 @@ describe("session inbox resume", () => {
       runs: { get: vi.fn(async (runId: string) => ({ attributes: {}, runId })) },
     });
     const keyFailure = runKeyFailure(reason);
-    // Sealed to the run's public key, the command is accepted without the deployment's key.
     resumeHookMock.mockResolvedValue({
       runId: "owner-2",
       get metadata() {
@@ -190,7 +187,6 @@ describe("session inbox resume", () => {
   });
 
   it("delivers to the live replacement of an owner whose deployment was deleted", async () => {
-    // Bob's message replaced the owner after Alice's resume failed against it.
     resumeHookMock
       .mockRejectedValueOnce(runKeyFailure("Deployment not found."))
       .mockResolvedValueOnce(sessionHook("replacement", "channel:alias", { sessionId: "fresh" }));
@@ -237,6 +233,50 @@ describe("session inbox resume", () => {
     expect(resumeHookMock).not.toHaveBeenCalled();
   });
 
+  it("refuses a pre-1.0 owner reached through its legacy inbox address", async () => {
+    getWorldMock.mockResolvedValue(singleDeploymentWorld("0.50.0"));
+    getHookByTokenMock.mockImplementation(async (token: string) => {
+      if (token.startsWith(sessionInboxHookToken(""))) throw new HookNotFoundError(token);
+      return sessionHook("wrun_pre_v1", token, { sessionInboxWireVersion: 7 });
+    });
+    resumeHookMock.mockImplementation(async (token: string) => {
+      if (token.startsWith(sessionInboxHookToken(""))) throw new HookNotFoundError(token);
+      return sessionHook("wrun_pre_v1", token, { sessionInboxWireVersion: 7 });
+    });
+
+    const refusal = await resumeSessionInbox("slack:C1:1700000000.000100", {
+      kind: "send",
+      payload: { message: "Alice follows up after the upgrade." },
+    }).catch((error: unknown) => error);
+
+    expect(refusal).toBeInstanceOf(StrandedSessionOwnerError);
+    expect(refusal).toMatchObject({ eveVersion: "0.50.0", ownerRunId: "wrun_pre_v1" });
+    expect(resumeHookMock).not.toHaveBeenCalledWith(
+      "slack:C1:1700000000.000100",
+      expect.anything(),
+    );
+  });
+
+  it("treats a pre-0.45 owner reached through its legacy inbox address as not found", async () => {
+    const world = singleDeploymentWorld("0.40.0");
+    getWorldMock.mockResolvedValue(world);
+    getHookByTokenMock.mockImplementation(async (token: string) => {
+      if (token.startsWith(sessionInboxHookToken(""))) throw new HookNotFoundError(token);
+      return sessionHook("wrun_pre_v045", token, {});
+    });
+    resumeHookMock.mockImplementation(async (token: string) => {
+      throw new HookNotFoundError(token);
+    });
+
+    const refusal = await resumeSessionInbox("slack:C1:1600000000.000100", {
+      kind: "send",
+      payload: { message: "Alice follows up on an old thread." },
+    }).catch((error: unknown) => error);
+
+    expect(HookNotFoundError.is(refusal)).toBe(true);
+    expect(world.runs.get).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["retires a dormant eve dev run another eve version built", "0.0.1", true],
     ["keeps a dormant eve dev run this eve version built", undefined, false],
@@ -244,7 +284,6 @@ describe("session inbox resume", () => {
     getWorldMock.mockResolvedValue(
       singleDeploymentWorld(ownerEveVersion ?? resolveInstalledPackageInfo().version),
     );
-    // The `eve dev` World refuses every hook lookup for a dormant run, including the resume's own.
     const dormant = async (token: string) => {
       if (!token.startsWith(sessionInboxHookToken(""))) throw new HookNotFoundError(token);
       throw new DevelopmentRunUnavailableError({ availability: "dormant", runId: "owner-1" });
@@ -257,7 +296,6 @@ describe("session inbox resume", () => {
       { kind: "send", payload: { message: "Bob checks in." } },
     ).catch((error: unknown) => error);
 
-    // A same-version dormant run may resume with `eve dev --resume`, so it is never ended.
     expect(refusal).toBeInstanceOf(
       stranded ? StrandedSessionOwnerError : DevelopmentRunUnavailableError,
     );
@@ -265,7 +303,6 @@ describe("session inbox resume", () => {
   });
 });
 
-/** The error Vercel's World throws when a run's payload key lookup fails with a 404. */
 function runKeyFailure(reason: string) {
   return Object.assign(
     new Error(
@@ -277,7 +314,6 @@ function runKeyFailure(reason: string) {
 
 describe("remembering a continuation's owner", () => {
   const guardedWorld = { capabilities: { deploymentAffinity: true, resolvedHookResume: true } };
-  /** A hook a handle could carry: its run's public key routes a resume without a lookup. */
   function routableHook(runId: string, token: string, sessionId: string) {
     return {
       createdAt: new Date("2026-11-01T00:00:00Z"),
@@ -303,7 +339,6 @@ describe("remembering a continuation's owner", () => {
     const { metadata: _metadata, ...descriptor } = routableHook("owner-1", token, "session-1");
     resumeHookMock
       .mockResolvedValueOnce(routableHook("owner-1", token, "session-1"))
-      // Resuming a remembered descriptor returns a hook without metadata.
       .mockResolvedValueOnce({ ...descriptor, metadata: Promise.resolve(undefined) });
     for (let attempt = 0; attempt < 2; attempt++) {
       await expect((await resumeSessionInbox("slack:remembered", send)).sessionId).resolves.toBe(

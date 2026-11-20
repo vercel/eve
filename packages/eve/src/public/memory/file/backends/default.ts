@@ -9,7 +9,6 @@ interface VercelBlobCredentials {
   readonly token?: string;
 }
 
-/** Environment probe behind the default backend selection. */
 interface DefaultFileMemoryBackendProbes {
   readonly vercelBlobCredentials: () => VercelBlobCredentials | undefined;
   readonly isEveDevelopment: () => boolean;
@@ -24,11 +23,6 @@ const ENVIRONMENT_PROBES: DefaultFileMemoryBackendProbes = {
 };
 const DEVELOPMENT_BACKEND = inMemory();
 
-/**
- * Selects private Vercel Blob storage on configured Vercel deployments and a
- * shared process-local backend during `eve dev`. All other environments must
- * provide a backend. Selection is deferred and cached per provider instance.
- */
 export function defaultFileMemoryBackend(): MemoryDocumentBackend {
   return lazyBackend(() => selectDefaultFileMemoryBackend(ENVIRONMENT_PROBES));
 }
@@ -57,7 +51,6 @@ function credentialsFromEnvironment(
   prefix: "BLOB" | "EVE_MEMORY_BLOB",
 ): VercelBlobCredentials | undefined {
   const storeId = environmentValue(`${prefix}_STORE_ID`);
-  // Let the Blob SDK resolve and refresh the current environment or request-scoped OIDC token.
   if (storeId !== undefined) return { storeId };
 
   const token = environmentValue(`${prefix}_READ_WRITE_TOKEN`);

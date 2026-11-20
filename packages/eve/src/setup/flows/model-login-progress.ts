@@ -6,7 +6,6 @@ const log = createLogger("setup.model-login");
 
 type LoginStage = "source_inspection" | "gateway_catalog" | "authentication" | "activation";
 
-/** Fixed stage names and durations only: no credentials, team names, or provider responses. */
 export async function measureLoginStage<T>(stage: LoginStage, task: () => Promise<T>): Promise<T> {
   const started = performance.now();
   try {
@@ -16,7 +15,6 @@ export async function measureLoginStage<T>(stage: LoginStage, task: () => Promis
   }
 }
 
-/** Avoid painting a loading phase for quick local work. */
 export function withLoginProgress<T>(
   prompter: Prompter,
   message: string,

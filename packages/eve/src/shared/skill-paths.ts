@@ -7,22 +7,12 @@ export const MODEL_SKILL_ROOT = `${MODEL_HOME_ROOT}/.agents/skills`;
 const HOME_PROBE_COMMAND = `printf '%s\\n' "$HOME"`;
 const sandboxHomeCache = new WeakMap<SandboxSession, Promise<string | null>>();
 
-/**
- * Resolves where skills live in the sandbox: under the probed home when it has
- * one, and under `skills/` in the workspace root when it does not.
- */
 export async function resolveSandboxSkillRoot(input: {
   readonly sandbox: SandboxSession;
 }): Promise<string> {
   return await resolveSandboxModelPath({ path: MODEL_SKILL_ROOT, sandbox: input.sandbox });
 }
 
-/**
- * Resolves a leading `$HOME` in a model-supplied sandbox path without
- * evaluating any other shell syntax. Skill paths fall back to `skills/` in
- * the workspace root when the sandbox does not expose a usable home
- * directory.
- */
 export async function resolveSandboxModelPath(input: {
   readonly path: string;
   readonly sandbox: SandboxSession;

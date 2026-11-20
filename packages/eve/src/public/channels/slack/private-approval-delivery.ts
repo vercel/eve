@@ -13,19 +13,13 @@ import {
 const log = createLogger("slack.private-approval-delivery");
 type PrivateApprovalSlack = Pick<SlackHandle, "channelId" | "request" | "threadTs">;
 
-/** Where a private request's messages landed. */
 export interface PrivateInteractionDelivery {
   readonly channelId: string;
   readonly ts: string;
   readonly detailsTs?: string;
-  /** The controls blocks posted: the rendered ones, or eve's default if Slack rejected them. */
   readonly blocks: readonly BlockKitBlock[];
 }
 
-/**
- * Posts one rendered request to `reviewer`'s DM: a permalink to the thread, its details, then
- * its controls. A failure deletes what it posted, so a reviewer never sees half a request.
- */
 export async function deliverPrivateInteraction(input: {
   readonly previewMessageTs: string;
   readonly card: RenderedRequestCard;
@@ -88,11 +82,6 @@ export async function deliverPrivateInteraction(input: {
   }
 }
 
-/**
- * Posts one rendered request as an ephemeral message only `reviewer` sees in the session's
- * thread. Details and controls go in one message: Slack can't edit or delete an ephemeral, so a
- * separate details message could never be retired.
- */
 export async function deliverEphemeralInteraction(input: {
   readonly card: RenderedRequestCard;
   readonly channelId: string;
@@ -137,7 +126,6 @@ async function postMessage(
 ): Promise<string> {
   const response = await slack.request("chat.postMessage", body);
   if (response.ok !== true || typeof response.ts !== "string" || response.ts.length === 0) {
-    // `response` carries Slack's error code, which decides whether eve's default is worth sending.
     throw Object.assign(
       new Error(`Slack chat.postMessage failed: ${response.error ?? "unknown_error"}`),
       { response },

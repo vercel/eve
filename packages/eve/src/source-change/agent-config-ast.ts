@@ -1,12 +1,5 @@
 import { parseWithRolldownAst } from "#internal/bundler/rolldown.js";
 
-/**
- * The AST plumbing shared by the agent-config source editors: the loose
- * Rolldown node shapes, the parse-and-locate-`defineAgent({ ... })` pipeline,
- * and the string-splicing helpers. Editors own their edit policies; this
- * module owns how an agent config is read.
- */
-
 export type Program = { readonly body?: readonly AstNode[] };
 
 export type AstNode = {
@@ -53,7 +46,6 @@ type ParsedAgentObject =
   | { readonly kind: "ok"; readonly object: ObjectExpression; readonly program: Program }
   | { readonly kind: "bail"; readonly reason: string; readonly line: number };
 
-/** Parses a source and locates the `export default defineAgent({ ... })` object. */
 export async function parseAgentObject(sourceText: string): Promise<ParsedAgentObject> {
   let parsed: ParsedSource;
   try {
@@ -82,13 +74,6 @@ export async function parseAgentObject(sourceText: string): Promise<ParsedAgentO
     : { kind: "ok", object, program: parsed.program ?? parsed };
 }
 
-/**
- * The write-guard invariant: an edited source must still parse and still
- * carry the `defineAgent({ ... })` object. Returns the failure reason, or
- * undefined when the source is sound. Callers bail instead of writing, so an
- * editor bug degrades to a "change it by hand" message rather than a broken
- * agent.ts.
- */
 export async function checkAgentConfigSource(sourceText: string): Promise<string | undefined> {
   const parsed = await parseAgentObject(sourceText);
   return parsed.kind === "bail" ? parsed.reason : undefined;
@@ -120,7 +105,6 @@ function findDefineAgentObject(program: Program): ObjectExpression | undefined {
   return undefined;
 }
 
-/** Strips `as`, `satisfies`, and parentheses to reach the underlying expression. */
 export function unwrapExpression(expression: AstNode): AstNode {
   let node = expression;
   while (

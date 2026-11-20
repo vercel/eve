@@ -174,7 +174,6 @@ describe("handleA2aJsonRpc", () => {
     const send = (contentType?: string) =>
       handleA2aJsonRpc(
         new Request("http://127.0.0.1/eve/v1/a2a", {
-          // Bytes, so an absent header stays absent (a string body implies text/plain).
           body: new TextEncoder().encode(JSON.stringify(message)),
           headers: {
             "a2a-version": "1.0",

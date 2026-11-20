@@ -31,28 +31,18 @@ import { webChatDriver } from "#internal/testing/channel-conformance/web-chat-dr
 
 export interface BrokenCell {
   readonly reason: string;
-  /** Matches the error this rule fails with today. */
   readonly symptom: RegExp;
 }
 
 export interface ConformanceChannel {
   readonly driver: () => ChannelDriver | ClientDriver;
-  /**
-   * A DM column beside the channel's shared-thread column. It runs only rules
-   * whose behavior varies by conversation; the shared column covers the rest.
-   */
   readonly dm?: true;
   readonly broken?: Partial<Record<ContractRuleName, BrokenCell>>;
-  /** Rules this client deliberately doesn't offer, with why, beyond what its capabilities rule out. */
   readonly unsupported?: Partial<Record<ContractRuleName, string>>;
 }
 
 const SIGN_IN_NOT_SHOWN = /Timed out waiting for the bot to show/u;
 
-/**
- * Rules a group declines: its sign-in shows a link-free status, since the challenge is a credential only its person
- * may read, and the channel has no private place to send it without the person acting first.
- */
 function signInKeptPrivate(
   reason: string,
   ...rules: ContractRuleName[]
@@ -66,10 +56,6 @@ const SIGN_IN_SHOWN_RULES = [
   "a sign-in without a link shows its instructions",
 ] as const satisfies readonly ContractRuleName[];
 
-/**
- * Linq's group sign-in can't reach the person privately: its `openDM` needs a phone
- * handle, and a message names its sender only by the handle's opaque id.
- */
 const LINQ_SIGN_IN_NOT_PRIVATE = Object.fromEntries(
   [
     "a sign-in names the service and shows its sign-in link",
@@ -88,7 +74,6 @@ const LINQ_SIGN_IN_NOT_PRIVATE = Object.fromEntries(
 
 const SIGN_IN_COMPLETED_RULE = "completing a sign-in stops showing its link and code";
 
-/** The challenge a person was shown stays on screen after they finish signing in. */
 function signInLingers(reason: string): Partial<Record<ContractRuleName, BrokenCell>> {
   return {
     [SIGN_IN_COMPLETED_RULE]: {
@@ -102,7 +87,6 @@ const SIGN_IN_LINGERS = signInLingers(
   "the challenge message stays as it was sent after the sign-in completes",
 );
 
-/** Slack's sign-in prompt is ephemeral, which only a press's `response_url` can delete. */
 const SLACK_SIGN_IN_LINGERS = signInLingers(
   "the private prompt is ephemeral, and nothing deletes it when the sign-in completes; only a press's response_url can",
 );
@@ -148,18 +132,6 @@ const TUI_SINGLE_PERSON = "one person answers at their own terminal; there's nob
 const WEB_CHAT_SINGLE_PERSON =
   "one person answers in their own browser tab; there's nobody else to tell";
 
-/**
- * Every first-party channel's and client's place in the channel contract, keyed by
- * the directory whose `conformance.integration.test.ts` runs it (`web-chat`
- * runs from `test/browser`, since it needs a browser). Each cell is one of:
- *
- * - must pass;
- * - not supported: the platform lacks a capability the rule requires, or the
- *   entry declines the rule as `unsupported` (skipped);
- * - broken: the channel should pass but doesn't yet. The cell passes only when
- *   the rule fails with the recorded `symptom`, so a fix or an unrelated
- *   failure (such as harness breakage) both turn it red.
- */
 const channelConformance = {
   "chat-sdk": [
     {
@@ -312,7 +284,6 @@ const channelConformance = {
         "approving by text names who approved on the approval": WEB_CHAT_SINGLE_PERSON,
         "pressing an option names who answered on the question": WEB_CHAT_SINGLE_PERSON,
         "answering a question by text names who answered on the question": WEB_CHAT_SINGLE_PERSON,
-        // Flaky rather than failing, so it can't be recorded as broken: see the reason.
         "text replies answer two pending approvals one at a time, in the order shown":
           "a reply sent while approvals wait goes out as a steering message, which sometimes restarts the turn instead of answering",
       },
@@ -320,13 +291,8 @@ const channelConformance = {
   ],
 } satisfies Record<string, readonly ConformanceChannel[]>;
 
-/**
- * A broken cell fails with its symptom, often a wait that never ends, so it gets
- * a short wait. Real platform calls arrive in well under a second once warm.
- */
 const BROKEN_WAIT_TIMEOUT_MS = 3_000;
 
-/** How one channel or client stands on one rule. */
 type Cell =
   | { readonly kind: "pass" }
   | { readonly kind: "unsupported"; readonly reason: string }
@@ -371,55 +337,29 @@ function cellOf(entry: ConformanceChannel, rule: (typeof channelContract)[number
   return broken === undefined ? { kind: "pass" } : { kind: "broken", broken };
 }
 
-/**
- * Why `rule` doesn't run on the in-process host yet: what it needs that an in-process session
- * doesn't have. `undefined` for a rule that runs on both hosts.
- */
 function inProcessGap(rule: string): string | undefined {
   if (rule.includes("run ended"))
     return "it cancels the session's Workflow run, which an in-process session doesn't have";
   return undefined;
 }
 
-/**
- * The channel whose whole contract also runs on Workflow. Every channel's runs in process; on
- * Workflow, the others run only the rules the in-process host can't (`inProcessGap`), so each
- * rule still runs somewhere, and Workflow keeps one channel end to end.
- *
- * Web chat's budget-prompt rules can still time out on Workflow: a typed answer and the message
- * behind it can be joined into one input while the prompt is open (vercel/eve#6307). In process
- * the two rarely queue together, which hides the bug rather than fixing it.
- */
 const WORKFLOW_CHANNEL = "web-chat";
 
-/** Whether `rule` of `channel` runs on `host`. */
 function runsOn(host: ConformanceHostKind, channel: string | undefined, rule: string): boolean {
   if (host === "in-process") return true;
   return channel === WORKFLOW_CHANNEL || inProcessGap(rule) !== undefined;
 }
 
-/** The hosts each channel's contract runs on. */
 const HOSTS: readonly ConformanceHostKind[] = ["in-process", "workflow"];
 
-/**
- * Declares the channel contract cells for one channel directory. Each channel gets
- * its own test file because conversations can't overlap within a process, and
- * separate files let vitest run channels in parallel workers.
- */
 export function describeChannelConformance(channel: keyof typeof channelConformance): void {
   describeConformance(channelConformance[channel], channel);
 }
 
-/**
- * Holds each driver to the contract, for a channel outside eve's own table such
- * as a workspace package's. `channel` names a table entry, which decides the
- * hosts its rules run on; other channels run in process.
- */
 export function describeConformance(
   entries: readonly ConformanceChannel[],
   channel?: string,
 ): void {
-  // A client that keeps a browser between cells releases it after the file's last cell.
   afterAll(async () => {
     for (const entry of entries) await entry.driver().dispose?.();
   });
@@ -459,11 +399,6 @@ export function describeConformance(
 
 const MATRIX_SYMBOLS = { broken: "❌", pass: "✅", unsupported: "—" } as const;
 
-/**
- * Renders every channel's and client's cell for every rule as Markdown. The
- * suite holds each cell to what this table says, so the rendered matrix is
- * current whenever the suite passes.
- */
 export function renderConformanceMatrix(): string {
   const all = Object.values(channelConformance).flatMap(
     (group): readonly ConformanceChannel[] => group,
@@ -471,8 +406,6 @@ export function renderConformanceMatrix(): string {
   const nameOf = (entry: ConformanceChannel) => entry.driver().name;
   const dmOf = (entry: ConformanceChannel) =>
     all.filter((dm) => dm.dm === true && nameOf(dm) === `${nameOf(entry)}-dm`);
-  // The TUI and web chat, then Chat SDK's bridges, then channels with a DM column,
-  // then the rest. Each DM column sits right after its channel's shared-thread column.
   const group = (entry: ConformanceChannel) => {
     if (nameOf(entry) === "tui") return 0;
     if (nameOf(entry) === "web chat") return 1;
@@ -485,12 +418,8 @@ export function renderConformanceMatrix(): string {
     .flatMap((entry) => [entry, ...dmOf(entry)]);
   const escape = (text: string) => text.replaceAll("|", "\\|");
   const row = (cells: readonly string[]) => `| ${cells.join(" | ")} |`;
-  // One note per distinct reason, numbered in reading order, so every cell
-  // sharing a cause links to the same note. Plain anchors rather than Markdown
-  // footnotes, which GitHub renders with links back up to every citing cell.
   const notes = new Map<string, number>();
   const shown = (entry: ConformanceChannel, rule: (typeof channelContract)[number]) => {
-    // A DM column leaves blank what only the shared-thread column runs.
     if (entry.dm === true && !variesByConversation(rule)) return "";
     const cell = cellOf(entry, rule);
     if (cell.kind === "pass") return MATRIX_SYMBOLS.pass;
@@ -499,7 +428,6 @@ export function renderConformanceMatrix(): string {
     const index = notes.get(note)!;
     return `${MATRIX_SYMBOLS[cell.kind]}<sup>[${index}](#note-${index})</sup>`;
   };
-  // One table per section, each repeating the column header so it reads on its own.
   const tables = channelContractSections.flatMap((section) => [
     `## ${section.title}`,
     "",
@@ -507,7 +435,6 @@ export function renderConformanceMatrix(): string {
     row(["---", ...entries.map(() => ":---:")]),
     ...section.rules.map((rule) =>
       row([
-        // Non-breaking spaces keep each rule on one line; GitHub scrolls the table instead.
         escape(rule.rule).replaceAll(" ", "\u00a0"),
         ...entries.map((entry) => shown(entry, rule)),
       ]),

@@ -129,7 +129,6 @@ function appendPolicyEntries(
   lines.splice(range.end, 0, ...insertion);
 }
 
-/** Applies one explicit pnpm build policy while preserving unrelated workspace settings. */
 export function withPnpmBuildPolicy(
   source: string,
   packages: readonly string[],
@@ -149,7 +148,6 @@ export function withPnpmBuildPolicy(
   return `${lines.join("\n")}\n`;
 }
 
-/** Adds optional-package defaults without replacing the application's explicit decisions. */
 export function withPnpmOptionalDependencyDefaults(
   source: string,
   packages: readonly string[],
@@ -165,7 +163,6 @@ export function withPnpmOptionalDependencyDefaults(
   return missing.length === 0 ? source : withPnpmBuildPolicy(source, missing, "ignore-optional");
 }
 
-/** Prepares defaults in the owning workspace before installing an optional engine. */
 export async function ensurePnpmOptionalDependencyDefaults(
   appRoot: string,
   packages: readonly string[],
@@ -197,7 +194,6 @@ async function owningPnpmWorkspaceRoot(appRoot: string): Promise<string> {
   return findClaimingAncestorPnpmWorkspaceRoot(appRoot) ?? appRoot;
 }
 
-/** Resolves whether every package already has an explicit non-blocking pnpm policy. */
 export async function inspectPnpmBuildPolicy(
   appRoot: string,
   packages: readonly string[],
@@ -217,7 +213,6 @@ export async function inspectPnpmBuildPolicy(
   };
 }
 
-/** Persists the policy selected before the registry installation transaction begins. */
 export async function applyPnpmBuildPolicy(
   context: PnpmBuildPolicyContext,
   action: PnpmBuildPolicyAction,

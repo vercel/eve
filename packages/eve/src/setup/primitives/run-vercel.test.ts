@@ -17,10 +17,6 @@ vi.mock("node:child_process", () => ({
 
 const mockedSpawn = vi.mocked(spawn);
 
-/**
- * The fake child covers only the surface run-vercel touches: stdout/stderr
- * streams, close/error events, and a spyable `kill`.
- */
 type ChildProcessDouble = ChildProcess & {
   stdin: PassThrough;
   stdout: PassThrough;
@@ -37,7 +33,6 @@ function createChildProcess(): ChildProcessDouble {
   return child;
 }
 
-/** Wires the fake child into the mocked `spawn`. */
 function mockSpawnReturn(child: ChildProcessDouble): void {
   mockedSpawn.mockReturnValue(child as ReturnType<typeof spawn>);
 }
@@ -236,7 +231,6 @@ describe("timeoutMs", () => {
         onOutput,
         timeoutMs: 1_000,
       });
-      // The child never exits: the OAuth hand-off was abandoned.
       vi.advanceTimersByTime(1_000);
 
       await expect(result).resolves.toEqual({ ok: false, stdout: "" });
@@ -246,11 +240,9 @@ describe("timeoutMs", () => {
         text: "vercel connect create slack timed out after 1s and was aborted.",
       });
 
-      // A child that ignores SIGTERM gets SIGKILL after the grace period.
       vi.advanceTimersByTime(5_000);
       expect(child.kill).toHaveBeenCalledWith("SIGKILL");
 
-      // A late kill-driven exit must not inject a second, stale diagnostic.
       child.emit("close", 1);
       expect(onOutput).not.toHaveBeenCalledWith({
         stream: "stderr",
@@ -272,7 +264,6 @@ describe("timeoutMs", () => {
         timeoutMs: 1_000,
       });
       vi.advanceTimersByTime(1_000);
-      // The signal-kill close (code null) must not flip the settled failure.
       child.emit("close", null);
 
       await expect(result).resolves.toEqual({
@@ -328,8 +319,6 @@ describe("captureVercel", () => {
     const child = createChildProcess();
     mockSpawnReturn(child);
 
-    // The project parent does not exist until scaffold; account lookups must not
-    // ENOENT on a missing cwd.
     const result = captureVercel(["whoami"], { cwd: "/tmp/eve-smoke-missing-xyz/my-agent" });
     child.stdout.emit("data", Buffer.from("rconti\n"));
     child.emit("close", 0);
@@ -359,7 +348,6 @@ describe("captureVercel", () => {
         message: "vercel whoami exited with code 1.",
       },
     });
-    // stderr is always piped so the reason survives without a live renderer.
     expectSpawnedVercel(["whoami"], { stdio: ["ignore", "pipe", "pipe"] });
   });
 
@@ -367,8 +355,6 @@ describe("captureVercel", () => {
     const child = createChildProcess();
     mockSpawnReturn(child);
 
-    // Ctrl-C reaches the whole process group: the CLI dies without a status
-    // code, so its stdout is truncated and cannot be parsed as a result.
     const result = captureVercel(["connect", "list", "-F", "json"], { cwd: "/tmp/eve-agent" });
     child.emit("close", null);
 

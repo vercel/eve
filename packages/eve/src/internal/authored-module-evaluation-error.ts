@@ -12,7 +12,6 @@ interface InstalledPackageLocation {
   readonly root: string;
 }
 
-/** Adds authored-module and installed-package context to Node evaluation failures. */
 export function createAuthoredModuleEvaluationError(modulePath: string, cause: unknown): Error {
   const details = describeInstalledPackageLoadFailure(cause);
 
@@ -67,9 +66,7 @@ function findExistingModulePath(path: string): string | undefined {
     const candidate = `${path}${extension}`;
     try {
       if (statSync(candidate).isFile()) return candidate;
-    } catch {
-      // Try the next Node JavaScript extension.
-    }
+    } catch {}
   }
 
   return undefined;

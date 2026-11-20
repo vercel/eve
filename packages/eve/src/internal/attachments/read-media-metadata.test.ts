@@ -14,7 +14,6 @@ function gifBytes(width: number, height: number): Buffer {
 }
 
 function jpegBytes(width: number, height: number): Buffer {
-  // SOI, an APP0 segment the reader must skip, then SOF0 with the frame size.
   const app0 = Buffer.from([0xff, 0xe0, 0x00, 0x10, ...Buffer.alloc(14)]);
   const sof0 = Buffer.alloc(19);
   sof0.writeUInt16BE(0xffc0, 0);
@@ -44,8 +43,6 @@ function webpBytes(chunk: "VP8 " | "VP8L" | "VP8X", width: number, height: numbe
   return bytes;
 }
 
-// PDF 1.5+ writers such as pdf-lib and most scanners store page objects in
-// FlateDecode object streams, so `/Type /Page` never appears in the raw bytes.
 function objectStreamPdf(objects: Buffer): Buffer {
   return Buffer.concat([
     Buffer.from(
@@ -93,8 +90,6 @@ describe("readMediaMetadata", () => {
   });
 
   it("inflates each object stream once however many markers precede it", () => {
-    // Rescanning from every marker would make crafted files quadratically slow;
-    // here it would also count the one page twice.
     const pdf = Buffer.concat([
       Buffer.from("%PDF-1.5\n<< /Type /ObjStm /Type /ObjStm >>\nstream\n", "latin1"),
       deflateSync("<< /Type /Page >>"),

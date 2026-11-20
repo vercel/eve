@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -622,7 +623,6 @@ describe("eve dev --input", () => {
           );
           try {
             await vi.waitFor(() => expect(startDevelopmentTuiStartup).toHaveBeenCalledOnce());
-            // Onboarding opens on the startup screen while the host is still starting.
             if (onboard)
               await vi.waitFor(() => expect(runStartupOnboarding).toHaveBeenCalledOnce());
             expect(runDevelopmentTui).not.toHaveBeenCalled();
@@ -752,7 +752,6 @@ describe("eve dev --input", () => {
       await withInteractiveTerminal(async () => {
         const run = runCli(["dev", "--onboard"], { error: () => {}, log: () => {} }, { startHost });
         await screen.opened();
-        // Let the started handle reach the code that would stop onboarding.
         await new Promise((resolve) => setTimeout(resolve, 20));
         expect(screen.onboardingSignal()?.aborted).toBe(false);
         screen.finishOnboarding();
@@ -822,7 +821,6 @@ describe("eve dev --input", () => {
       });
 
       expect(screen.onboardingSignal()?.aborted).toBe(true);
-      // The full UI never ran to report how onboarding ended, so eve dev does.
       expect(telemetry.trackSetupTerminal).toHaveBeenCalledExactlyOnceWith({
         flow: "onboarding",
         step: "model_provider",
@@ -1502,12 +1500,37 @@ describe("eve dev boot progress", () => {
     expect(tuiReporter).toBe(hostReporter);
     expect(writes.join("")).toContain("Starting your agent");
     expect(writes.join("")).not.toContain("compiling agent");
-    // Replaying every write through a terminal emulator: the boot progress row
-    // is erased, leaving a clean screen for the error to print onto.
     const screen = new MockScreen({ columns: 80, rows: 10 });
     screen.write(writes.join(""));
     expect(screen.snapshot()).toBe("");
     expect(close).toHaveBeenCalledOnce();
+  });
+});
+
+describe("eve dev --no-ui ready signal", () => {
+  it("prints the ready line last, after the server finished starting", async () => {
+    const logger = { error: vi.fn(), log: vi.fn() };
+    let started = false;
+    const startHost = vi.fn(() => ({
+      start: async () => {
+        expect(logger.log).not.toHaveBeenCalledWith(expect.stringContaining("ready at"));
+        started = true;
+        return {
+          kind: "started" as const,
+          appRoot: "/canonical/app",
+          url: "http://127.0.0.1:2000",
+        };
+      },
+      close: async () => {},
+      wait: async () => {},
+    }));
+
+    await runCli(["dev"], logger, { startHost });
+
+    expect(started).toBe(true);
+    const lines = logger.log.mock.calls.map(([line]) => stripVTControlCharacters(String(line)));
+    expect(lines.at(-1)).toBe("[DEV] ready at http://127.0.0.1:2000");
+    expect(lines).toContainEqual(expect.stringContaining("not a TTY"));
   });
 });
 
@@ -1667,8 +1690,6 @@ describe("resolveTuiDisplayOptions", () => {
   it("defaults tools and reasoning to auto-collapsed with stderr logs visible", () => {
     expect(resolveTuiDisplayOptions({})).toEqual({
       logs: "error",
-      // Collapsed reasoning is the fixed thinking line; `--show-reasoning full`
-      // restores the streaming transcript trace.
       reasoning: "auto-collapsed",
       tools: "auto-collapsed",
     });

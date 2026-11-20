@@ -16,19 +16,14 @@ import {
   resolveAuthoredPackageRoot,
 } from "#internal/authored-package-boundary.js";
 import { buildWithRolldown } from "#internal/bundler/rolldown.js";
+import { toErrorMessage } from "#shared/errors.js";
 
-/**
- * Bundles a compile's application modules as one code-split graph per set of
- * external dependencies, so a module they share is evaluated once, as in the
- * runtime module map. A module bundled on its own evaluates a private copy of
- * everything it imports.
- */
 export interface AuthoredModuleGraph {
-  /** Returns the graph entry file for `modulePath`, or `undefined` to bundle it alone. */
   entryPath(
     modulePath: string,
     externalDependencies: readonly string[],
   ): Promise<string | undefined>;
+  warnIfBundledPerModule(): void;
 }
 
 export function createAuthoredModuleGraph(
@@ -39,21 +34,38 @@ export function createAuthoredModuleGraph(
     (modulePath) => AUTHORED_BUNDLED_MODULE_EXTENSION.test(modulePath),
   );
   const builds = new Map<string, Promise<ReadonlyMap<string, string> | undefined>>();
+  const failures = new Map<string, unknown>();
+  let reportedFailure = false;
   return {
     async entryPath(modulePath, externalDependencies) {
-      const externals = normalizeExternalDependencies(externalDependencies);
-      const key = externals.join("\0");
+      const key = externalDependenciesKey(externalDependencies);
       let build = builds.get(key);
       if (build === undefined) {
-        // Modules fall back to their own bundle, which reports any bundling error.
-        build = writeAuthoredModuleGraph(entries, externals, options.appRoot).catch(
-          () => undefined,
-        );
+        build = writeAuthoredModuleGraph(
+          entries,
+          normalizeExternalDependencies(externalDependencies),
+          options.appRoot,
+        ).catch((error: unknown) => {
+          failures.set(key, error);
+          return undefined;
+        });
         builds.set(key, build);
       }
       return (await build)?.get(resolve(modulePath));
     },
+    warnIfBundledPerModule() {
+      if (reportedFailure || failures.size === 0) return;
+      reportedFailure = true;
+      const [failure] = failures.values();
+      console.warn(
+        `eve: could not bundle ${entries.length} authored modules as one graph, so each module was bundled and evaluated on its own. Build memory then grows with the number of modules. Cause: ${toErrorMessage(failure)}`,
+      );
+    },
   };
+}
+
+function externalDependenciesKey(externalDependencies: readonly string[]): string {
+  return normalizeExternalDependencies(externalDependencies).join("\0");
 }
 
 async function writeAuthoredModuleGraph(
@@ -70,7 +82,6 @@ async function writeAuthoredModuleGraph(
       .map((modulePath, index) => [`entry-${index}`, modulePath]),
   );
   const sourcemap = evaluatedBundleSourcemap();
-  // The content hash ignores inline maps, so cached chunks with and without one need distinct names.
   const fileName = sourcemap === false ? "[name]-[hash].mjs" : "[name]-[hash]-mapped.mjs";
   const result = await buildWithRolldown({
     ...createAuthoredModuleBuildOptions({
@@ -82,7 +93,6 @@ async function writeAuthoredModuleGraph(
       plugins: [createAuthoredWorkflowDirectivePlugin({ appRoot: appRoot ?? packageRoot })],
     }),
     input: Object.fromEntries(inputs),
-    // Each entry chunk must expose exactly its module's exports.
     preserveEntrySignatures: "strict",
     write: false,
     output: {
@@ -92,15 +102,12 @@ async function writeAuthoredModuleGraph(
       entryFileNames: fileName,
       format: "esm",
       sourcemap,
-      // Shared chunks can import each other even when the source graph is
-      // acyclic; strict order keeps top-level evaluation in source order.
       strictExecutionOrder: true,
     },
   });
   const directoryPath = join(packageRoot, AUTHORED_MODULE_BUNDLE_DIRECTORY_PATH);
   for (const item of result.output) {
     if (item.type !== "chunk") continue;
-    // File names carry a content hash, so an existing file already has this content.
     const filePath = writeAuthoredModuleCacheFile(directoryPath, item.fileName, item.code);
     const modulePath = item.isEntry ? inputs.get(item.name) : undefined;
     if (modulePath !== undefined) entryPaths.set(modulePath, filePath);

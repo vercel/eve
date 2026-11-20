@@ -72,7 +72,6 @@ describe("createChannelAddress", () => {
         turnPolicy: "steer",
       },
       continuationToken: "slack:C1:T1",
-      // Fresh creation inputs, used only if the owner's deployment was retired.
       successor: expect.objectContaining({
         adapter: { kind: "slack", state: {} },
         channelName: "slack",
@@ -249,7 +248,6 @@ describe("createChannelAddress", () => {
 
     expect(delivery.sessionId).toBe("sess_started");
     expect(runtime.dispatchContinuation).not.toHaveBeenCalled();
-    // The start carries the send, so a start that finds the address taken delivers it to the owner.
     expect(runtime.createSession).toHaveBeenCalledWith(
       expect.objectContaining({
         continuationConflictCommand: expect.objectContaining({ kind: "send" }),
@@ -307,7 +305,6 @@ describe("createChannelAddress", () => {
       expect.objectContaining({ continuationToken: "app:conversation:1", input: { history } }),
     );
 
-    // A concurrent send() or create() claimed the address first; this run's history never landed.
     await expect(
       create(undefined, { claimedContinuation: false, sessionId: "sess_other" }),
     ).resolves.toMatchObject({ created: false, sessionId: "sess_other" });

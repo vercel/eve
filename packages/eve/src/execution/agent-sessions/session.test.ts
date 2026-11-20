@@ -12,32 +12,23 @@ import type {
   WorkflowToolRunRef,
 } from "#execution/tools/workflow/messages.js";
 
-/** A delivery step the test lets land (be admitted by the child) when it chooses. */
 interface PendingDelivery {
   readonly input: { readonly auth: SessionAuth; readonly replyTo: string };
   readonly admit: () => void;
 }
 
 const mocks = vi.hoisted(() => {
-  /** Reply hooks by token; the child resumes one when its turn ends. */
   const hooks = new Map<string, { push: (value: unknown) => void }>();
   let tokens = 0;
   return {
     hooks,
-    /** Reply tokens in the order the child admitted their messages. */
     admitted: [] as string[],
-    /** Delivery steps that have not landed yet, oldest first. */
     pending: [] as PendingDelivery[],
-    /**
-     * The step that names a remote reply hook. Every second name takes longer, as a step started
-     * later may end first: replies must still follow the order their messages were sent.
-     */
     createRemoteReplyToken: vi.fn(async () => {
       const index = tokens++;
       if (index % 2 === 1) await new Promise((resolve) => setTimeout(resolve, 0));
       return `reply-${String(index)}`;
     }),
-    /** A hook under the token it is given, or under the next one when the host leaves it unnamed. */
     createHook: (options?: { readonly token?: string }) => {
       const token = options?.token ?? `reply-${String(tokens++)}`;
       const queue: unknown[] = [];
@@ -83,7 +74,6 @@ vi.mock("#execution/agent-sessions/steps.js", () => ({
   cancelAgentSessionTurnStep: vi.fn(async () => {}),
   endAgentSessionsStep: vi.fn(async () => {}),
   stopLateAgentSessionStep: vi.fn(async () => {}),
-  // The opening message is admitted as the session opens.
   openAgentSessionStep: vi.fn(async (input: { readonly replyTo: string }) => {
     mocks.admitted.push(input.replyTo);
     return {
@@ -91,7 +81,6 @@ vi.mock("#execution/agent-sessions/steps.js", () => ({
       deliveryId: `delivery-${input.replyTo}`,
     };
   }),
-  // A later message is admitted only when its step lands, which the test controls.
   sendAgentSessionMessageStep: vi.fn(
     (input: { readonly auth: SessionAuth; readonly replyTo: string }) =>
       new Promise((resolve) => {
@@ -113,7 +102,6 @@ function auth(principalId: string): SessionAuth {
   };
 }
 
-/** The remote agents the calls a test's run serves list, or `undefined` for calls without a list. */
 let remoteAgents: readonly string[] | undefined = [];
 
 function agentContext(callId: string): AgentSessionContext {
@@ -134,7 +122,6 @@ function agentContext(callId: string): AgentSessionContext {
   };
 }
 
-/** A serve run whose `auth`, `from`, and `agentContext` follow the call it serves now. */
 function serveRun() {
   const sent: WorkflowToolRunMessage[] = [];
   let current = { auth: auth("alice"), callId: "call-1" };
@@ -176,7 +163,6 @@ function serveRun() {
   };
 }
 
-/** The child ends its turn, which read every admitted message, replying to the last it read. */
 function endChildTurn(output: string): void {
   const latest = mocks.admitted.at(-1);
   if (latest === undefined) throw new Error("The child admitted no message.");
@@ -200,12 +186,10 @@ function endChildTurn(output: string): void {
   mocks.hooks.get(latest)?.push(payload);
 }
 
-/** Lands the newest pending delivery first, as asynchronous steps may, until none remain. */
 async function landNewestFirst(): Promise<void> {
   await vi.waitFor(() => expect(mocks.pending.length).toBeGreaterThan(0));
   while (mocks.pending.length > 0) {
     mocks.pending.pop()?.admit();
-    // Let a queued delivery start before deciding which pending step lands next.
     for (let tick = 0; tick < 10; tick += 1) await Promise.resolve();
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
@@ -246,9 +230,7 @@ describe.each([
       { reply: "reviewed all three", status: "completed" },
       { reply: "reviewed all three", status: "completed" },
     ]);
-    // The child admitted the messages in the order they were sent.
     expect(mocks.admitted).toEqual(["reply-0", "reply-1", "reply-2"]);
-    // Only a remote agent's reply hook takes a step to name.
     expect(mocks.createRemoteReplyToken).toHaveBeenCalledTimes(remote ? 3 : 0);
   });
 
@@ -257,7 +239,6 @@ describe.each([
     const reviewer = sessions.open("reviewer");
     await reviewer.send("Alice opens the review.");
     const alices = reviewer.send("Alice adds a checklist.");
-    // The task now serves Bob's call before Alice's queued message is delivered.
     serve("call-2", "bob");
     const bobs = reviewer.send("Bob adds a rollout note.");
     await landNewestFirst();
@@ -289,8 +270,6 @@ it("keeps naming reply hooks by the step once a call found the agent remote", as
   const { sessions, serve } = serveRun();
   const reviewer = sessions.open("reviewer");
   await reviewer.send("Alice opens the review.");
-  // A dynamic remote agent is the calling turn's selection. Bob's turn didn't make it, but the
-  // session Alice's call opened is still the remote one.
   remoteAgents = [];
   serve("call-2", "bob");
   const bobs = reviewer.send("Bob adds a rollout note.");
@@ -301,7 +280,6 @@ it("keeps naming reply hooks by the step once a call found the agent remote", as
 });
 
 it("names the reply hook by the step for a call that doesn't say which agents are remote", async () => {
-  // A session on an eve from before the list dispatched this call to a task this build runs.
   remoteAgents = undefined;
   const { sessions } = serveRun();
 

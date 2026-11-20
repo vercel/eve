@@ -13,34 +13,22 @@ import type {
 } from "#evals/types.js";
 
 export interface DeriveRunFactsOptions {
-  /** Session id stamped onto every derived tool call, skill load, and subagent call. */
   readonly sessionId?: string;
-  /** Session events through this turn: cumulative usage and reusable task/child metadata. */
   readonly usageEvents?: readonly SessionStreamEvent[];
 }
 
-/**
- * What a segment of a session's events did: its tool calls, skill loads and subagent calls, the
- * requests it opened, its content and models, read from the session's tables as the segment
- * leaves them. A call counts when the segment requested or settled it, as an approved call
- * requested in an earlier segment is; a subagent call when the segment started it on its task.
- */
 export function deriveRunFacts(
   events: readonly SessionStreamEvent[],
   options?: DeriveRunFactsOptions,
 ): EveEvalDerivedFacts {
   const sessionId = options?.sessionId;
   const view = emptySessionView();
-  // Readers of one session, such as a turn's and a steering message's, record its lines in the
-  // order each read them; the fold skips a line behind the last it read, so it reads them in
-  // stream order.
   const folded = [...(options?.usageEvents ?? events)].sort(
     (a, b) =>
       a.meta.position.line - b.meta.position.line || a.meta.position.index - b.meta.position.index,
   );
   for (const event of folded) foldReceivedEvent(view, event);
 
-  // The turn each call happened in, in the order the segment first reports it.
   const callTurns = new Map<string, number>();
   const agentCalls = new Map<string, number>();
   const interactions: Interaction[] = [];
@@ -92,7 +80,6 @@ export function deriveRunFacts(
     }
   }
 
-  // A settled call's status is its outcome, and its output the one it carries or shares.
   const settled = (row: CallRow) =>
     row.status === "settled"
       ? { output: callOutputSource(view, row.callId)?.output, status: row.outcome ?? "failed" }
@@ -106,7 +93,6 @@ export function deriveRunFacts(
       skillLoads.push({ sessionId, skill: row.capability.name, turnIndex, ...settled(row) });
       continue;
     }
-    // Every other call is a tool the model called by name: a tool, an agent or a task control.
     const input = isJsonObjectValue(row.input) ? row.input : {};
     toolCalls.push({
       callId,
@@ -169,7 +155,6 @@ export function createEmptyDerivedFacts(): EveEvalDerivedFacts {
   };
 }
 
-/** The explicit pause says whether the turn is waiting on a person rather than background work. */
 function endedParkedOnInput(events: readonly SessionStreamEvent[]): boolean {
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i];

@@ -36,7 +36,6 @@ export interface SlackSessionOperations {
   resolveSession(): ReturnType<ChannelResolveSession>;
 }
 
-/** Binds Slack state and default auth needed only when a message creates a session. */
 export function bindSlackSessionOperations(input: {
   readonly address: string;
   readonly defaultAuth: SessionAuthContext | null;
@@ -81,11 +80,6 @@ export function bindSlackSessionOperations(input: {
   };
 }
 
-/**
- * Stamps the verified Slack user behind an input response, so `deliver` can map
- * a custom-auth responder's principal to them. The verified user wins over any
- * caller-supplied value.
- */
 export function withSlackResponder(
   state: Partial<SlackChannelState> | undefined,
   slackUserId: string | null | undefined,

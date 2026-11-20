@@ -1,17 +1,3 @@
-/**
- * Build-time catalog of known eve connections. Each entry drives both the
- * `eve connections add` picker and the per-entry scaffold template.
- *
- * Connection *identity* (slug, label, transport, description) is owned by
- * `@eve/catalog`, the cross-surface source of truth shared with the
- * docs gallery. This module overlays the scaffolder-only concern — the Connect
- * auth spec to emit — and shapes the result into {@link ConnectionCatalogEntry}.
- *
- * Phase 1 ships MCP-only scaffolding plus a "custom" escape hatch. OpenAPI
- * entries can be scaffolded later by widening {@link SUPPORTED_PROTOCOLS}, with
- * no command-surface change.
- */
-
 import {
   type ConnectionIdentity,
   type ConnectionProtocol,
@@ -19,42 +5,21 @@ import {
   connectionProtocols,
 } from "#compiled/@eve/catalog/index.js";
 
-/** Wire protocol a connection speaks at runtime. */
 export type { ConnectionProtocol };
 
-/** Protocols the scaffolder can currently emit. */
 export const SUPPORTED_PROTOCOLS: readonly ConnectionProtocol[] = ["mcp"];
 
-/** Maps an outgoing request header to the environment variable that supplies it. */
 export interface EnvHeader {
-  /** Header sent to the connection endpoint (e.g. `DD-API-KEY`). */
   header: string;
-  /** Environment variable that holds the value (e.g. `DD_API_KEY`). */
   envVar: string;
 }
 
-/** How a scaffolded connection authenticates to its endpoint. */
 export type ConnectionAuthSpec =
-  /**
-   * Vercel Connect-managed OAuth via `connect(<connector>)`.
-   *
-   * `connector` is the value written into the generated `connect("…")` call.
-   * It starts as a placeholder and is rewritten to the real connector UID once
-   * the connector is provisioned (see {@link service}). `service` is the
-   * managed-connector identifier passed to `vercel connect create <service>`
-   * (e.g. `mcp.linear.app`); when omitted, eve falls back to the MCP endpoint
-   * host. It is distinct from the connector UID, which Vercel assigns when the
-   * connector is created or listed.
-   */
   | { kind: "connect"; connector: string; service?: string }
-  /** Static bearer token read from a single environment variable. */
   | { kind: "bearer-env"; envVar: string }
-  /** Static credentials passed as one or more request headers. */
   | { kind: "header"; headers: readonly EnvHeader[] }
-  /** No auth (public or locally-trusted endpoints). */
   | { kind: "none" };
 
-/** Per-protocol endpoint configuration. */
 export interface McpEndpoint {
   url: string;
 }
@@ -64,27 +29,17 @@ export interface OpenApiEndpoint {
   baseUrl?: string;
 }
 
-/** A known connection the picker can scaffold without further input. */
 export interface ConnectionCatalogEntry {
-  /** File name + runtime connection name (e.g. `linear`). */
   slug: string;
-  /** Human label shown in the picker (e.g. `Linear`). */
   label: string;
-  /** Short qualifier shown next to the label (e.g. `OAuth via Connect`). */
   hint?: string;
-  /** Protocols this service supports. */
   protocols: readonly ConnectionProtocol[];
-  /** Description written into the generated definition. */
   description: string;
-  /** MCP endpoint, present iff `"mcp"` is in {@link protocols}. */
   mcp?: McpEndpoint;
-  /** OpenAPI endpoint, present iff `"openapi"` is in {@link protocols}. */
   openapi?: OpenApiEndpoint;
-  /** Authentication strategy emitted into the template. */
   auth: ConnectionAuthSpec;
 }
 
-/** Free-form connection supplied through the custom picker option. */
 export interface CustomConnectionInput {
   slug: string;
   description: string;
@@ -94,18 +49,8 @@ export interface CustomConnectionInput {
   auth?: ConnectionAuthSpec;
 }
 
-/** Sentinel picker value for the "Custom connection" option. */
 export const CUSTOM_CONNECTION_SLUG = "custom";
 
-/**
- * Scaffolder-only auth overlay, keyed by catalog slug. Identity comes from
- * `@eve/catalog`; this map says how each curated connection authenticates
- * when the scaffolder emits its template. Every connection in the catalog must
- * have an entry here — {@link buildCatalogEntry} throws otherwise.
- */
-// The service is Vercel's managed provider identifier, not the MCP endpoint
-// URL. Keep these provider-owned keys explicit instead of deriving them from
-// the endpoint path.
 const CONNECTION_AUTH: Readonly<Record<string, ConnectionAuthSpec>> = {
   "browser-use": {
     kind: "header",
@@ -139,9 +84,6 @@ function buildCatalogEntry(
   return entry;
 }
 
-// Gallery-only connections (`surfaces.scaffoldable: false`) live in the shared
-// catalog for the docs directory but have no scaffolder auth overlay, so they
-// must not reach `buildCatalogEntry`.
 export const CONNECTION_CATALOG: readonly ConnectionCatalogEntry[] = connectionEntries()
   .filter((entry) => entry.surfaces.scaffoldable)
   .map((entry) => {
@@ -153,21 +95,14 @@ export const CONNECTION_CATALOG: readonly ConnectionCatalogEntry[] = connectionE
 
 const CATALOG_BY_SLUG = new Map(CONNECTION_CATALOG.map((entry) => [entry.slug, entry]));
 
-/** Returns the catalog entry for a slug, or `undefined` when not curated. */
 export function getCatalogEntry(slug: string): ConnectionCatalogEntry | undefined {
   return CATALOG_BY_SLUG.get(slug);
 }
 
-/** All curated connection slugs, in catalog order. */
 export function catalogSlugs(): string[] {
   return CONNECTION_CATALOG.map((entry) => entry.slug);
 }
 
-/**
- * Effective protocols for an entry: the intersection of what the scaffolder
- * supports and what the entry declares. Custom inputs use the full supported
- * set when they declare no protocols.
- */
 export function effectiveProtocols(
   declared: readonly ConnectionProtocol[] | undefined,
 ): ConnectionProtocol[] {
@@ -176,22 +111,12 @@ export function effectiveProtocols(
   return SUPPORTED_PROTOCOLS.filter((protocol) => declaredSet.includes(protocol));
 }
 
-/**
- * Connection filename charset. Must mirror the framework's discovery grammar
- * (`CONNECTION_SLUG_PATTERN` in `eve/src/discover/grammar.ts`): a lowercase
- * letter followed by lowercase letters, digits, and dashes, up to 64
- * characters. Underscores and leading digits are rejected so the scaffolder
- * never writes a connection file that `eve build` would later refuse to
- * discover.
- */
 const CONNECTION_SLUG_PATTERN = /^[a-z][a-z0-9-]{0,63}$/;
 
-/** True when a slug is a valid filesystem-derived connection name. */
 export function isValidConnectionSlug(slug: string): boolean {
   return CONNECTION_SLUG_PATTERN.test(slug);
 }
 
-/** Returns the endpoint block required for a protocol, or `null` when missing. */
 export function endpointForProtocol(
   entry: Pick<ConnectionCatalogEntry, "mcp" | "openapi">,
   protocol: ConnectionProtocol,

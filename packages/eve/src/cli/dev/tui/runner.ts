@@ -110,31 +110,18 @@ const idleChatGptAuthPollMs = 5_000;
 
 export type AgentTUISessionOptions = {
   title?: string;
-  /**
-   * Text to seed the composer's draft with before the user types. Set by the
-   * runner for the first prompt when `eve dev --input` is used.
-   */
   initialDraft?: string;
-  /** Closes the composer without discarding its draft. */
   signal?: AbortSignal;
 };
 
-/** One user action from the composer. */
 export type AgentTUIInput =
-  /** A message or slash command. Messages sent while work runs steer it. */
   | { type: "submit"; text: string }
-  /** `Esc` or `Ctrl+C` while work runs. */
   | { type: "cancel" }
-  /** `Ctrl+C` again while cancellation is pending: stop following the turn. */
   | { type: "interrupt" };
 
-/** Where a prompt sits among the requests being answered, and who asked, when that helps. */
 export type AgentTUIInputContext = {
-  /** 1-based position among the requests answered in a row; the total grows as more arrive. */
   position?: { index: number; total: number };
-  /** The task that asked, named as its transcript lines are. */
   requester?: string;
-  /** The task whose run asked; the renderer names it as its task lines do. */
   taskId?: string;
 };
 
@@ -142,7 +129,6 @@ export type AgentTUIToolApprovalRequest = {
   approvalId: string;
   toolCallId: string;
   toolName: string;
-  /** The server's question for this approval, such as `Approve Deploy release?`. */
   prompt: string;
   input: unknown;
   context?: AgentTUIInputContext;
@@ -165,7 +151,6 @@ export type AgentTUIInputQuestion = {
   prompt: string;
   display: "select" | "text";
   options?: ReadonlyArray<AgentTUIInputOption>;
-  /** The option the cursor starts on. */
   initialOptionId?: string;
   allowFreeform?: boolean;
   context?: AgentTUIInputContext;
@@ -184,67 +169,22 @@ export type AgentTUIAgentHeader = {
 };
 
 export type AgentTUIRenderer = {
-  /**
-   * Commits the startup card to the transcript before the first prompt and
-   * refreshes it after local dev artifact changes. Optional — renderers
-   * without a header simply skip it.
-   */
   renderAgentHeader?(header: AgentTUIAgentHeader): void;
-  /** Keeps preliminary connection diagnostics out of the startup presentation. */
   setStartupPhase?(phase: "starting" | "connecting" | "updating" | undefined): void;
-  /**
-   * Commits a single informational line to the transcript. Used for session
-   * recovery and slash-command results. Optional.
-   */
   renderNotice?(text: string): void;
-  /**
-   * Puts back a message whose turn was cancelled from outside this prompt, such as `/cancel` from
-   * another client, when the composer is empty. Optional.
-   */
   restoreDraft?(text: string): void;
-  /**
-   * Commits the session boundary (`┌── Session restarted, clear context.`)
-   * when a dead session is replaced mid-conversation. The old conversation's
-   * transcript settles as shown; the next `renderConversation` starts fresh.
-   * Optional; renderers without it get the plain notice.
-   */
   renderSessionBoundary?(): void;
-  /**
-   * Commits one development sandbox lifecycle line to the transcript.
-   * Optional so non-terminal renderers can ignore local prewarm progress.
-   */
   renderSetupWarning?(text: string): void;
-  /** Clears the setup attention line once its issue is resolved. */
   clearSetupWarning?(): void;
-  /** Commits the startup `/deploy` invocation to the transcript. */
   renderCommandInvocation?(text: string): void;
   finishCommand?(outcome: CommandPresentation): void;
   choosePromptCommand?(commands: readonly PromptCommandSpec[]): Promise<string | undefined>;
   showInfoPanel?(text: string): Promise<void>;
   readonly setupFlow?: SetupFlowRenderer;
-  /**
-   * The renderer's full-screen local trace viewer, opened by `/traces`.
-   * The returned promise resolves when the user closes the viewer.
-   */
   readonly traceViewer?: TraceViewerRenderer;
-  /**
-   * Reads the next composer action. Resolves `undefined` when `signal`
-   * aborts and rejects with an interrupt when the user leaves.
-   */
   readInput?(options?: AgentTUISessionOptions): Promise<AgentTUIInput | undefined>;
-  /** Draws the session's transcript from one conversation snapshot. */
   renderConversation?(view: AgentTUIConversationView): void;
-  /** Commits one error block, such as a message the session did not accept. */
   renderError?(title: string, message: string): void;
-  /**
-   * Reports the server session id backing the conversation — pushed by the
-   * runner once a send is accepted, and overwritten when a later session's
-   * turn is accepted. Deliberately sticky across `/new` and interrupt
-   * recovery: the terminal renderer echoes the LAST session this TUI talked
-   * to in the parting line on exit, so an interrupted conversation (whose
-   * replacement session never ran a turn) can still be found again
-   * (`eve logs`, the session store). Optional.
-   */
   setSessionId?(sessionId: string): void;
   readToolApproval?(
     request: AgentTUIToolApprovalRequest,
@@ -254,43 +194,12 @@ export type AgentTUIRenderer = {
     question: AgentTUIInputQuestion,
     options?: AgentTUISessionOptions,
   ): Promise<AgentTUIInputQuestionResponse | undefined>;
-  /**
-   * The log display mode currently in effect. Paired with
-   * {@link setLogDisplayMode}; both are absent on renderers that do not
-   * capture process output.
-   */
   logDisplayMode?(): LogDisplayMode;
-  /**
-   * Switches which captured log sources (stdout/stderr) the transcript
-   * shows. Captured output is buffered regardless of mode, so a change
-   * applies retroactively: hiding removes already-rendered log lines from
-   * the transcript and showing restores buffered ones at their original
-   * positions. Used by the `/loglevel` command.
-   */
   setLogDisplayMode?(mode: LogDisplayMode): void;
-  /**
-   * Commits any delayed local dev build errors immediately before dispatching
-   * a user prompt. Renderers without process-log capture ignore it.
-   */
   flushDelayedDevBuildErrors?(): void;
-  /**
-   * Sets the workspace-scoped Vercel segment of the persistent bottom
-   * status line. Pushed by the runner at startup and after Vercel-related
-   * setup outcomes. Renderers without a status line ignore it.
-   */
   setVercelStatus?(status: VercelStatusSnapshot): void;
-  /** Sets the remote deployment badge and its current connection/authentication state. */
   setRemoteConnectionStatus?(status: RemoteConnectionSnapshot): void;
-  /**
-   * Clears the rendered transcript and resets per-conversation display
-   * state, leaving the UI interactive on a fresh screen. Used by the
-   * `/new` command to start a new session with a clean slate.
-   */
   reset?(): void;
-  /**
-   * Tears down interactive mode and restores the terminal when the runner's
-   * lifecycle ends.
-   */
   shutdown?(): void;
   requestInterrupt?(): void;
   exitRequested?(): boolean;
@@ -299,31 +208,22 @@ export type AgentTUIRenderer = {
 export interface PromptCommandHandlerContext {
   readonly renderer: AgentTUIRenderer;
   readonly title: string;
-  /** Provider entry authorized by confirmed boot-time model-access evidence. */
   readonly initialModelStep?: "provider";
   readonly onOnboardingScreen?: (input: OnboardingScreenEvent) => void;
-  /** Live ChatGPT identity shown only inside model configuration UI. */
   readonly chatGptAccountLabel?: string;
-  /** Settles runtime changes before the setup panel releases the screen. */
   readonly settleOutcome?: (outcome: PromptCommandOutcome) => Promise<PromptCommandOutcome>;
   readonly withExclusiveTerminal?: <T>(task: () => Promise<T>) => Promise<T>;
   readonly disabledConnectionReasons?: Readonly<Record<string, string>>;
 }
 
-/** One atomic transcript decision for an invocation, including no-output commands. */
 export type CommandPresentation =
   | { kind: "dismiss" }
   | { kind: "result"; message?: string; summary?: string };
 
-/** What one handled slash command leaves behind for the runner to apply. */
 export interface PromptCommandOutcome {
-  /** Outcome line rendered under the echoed command; absent renders nothing. */
   message?: string;
-  /** The command failed; completed and cancelled commands share the normal settled presentation. */
   failed?: true;
-  /** Replaces the echoed invocation once the command settles. */
   summary?: string;
-  /** Post-command work after setup settles. */
   effect?: VercelStatusEffect | ModelAccessChange;
   cancelled?: true;
 }
@@ -340,91 +240,55 @@ type TuiStartup = {
 };
 
 export type EveTUIRunnerOptions = TuiDisplayOptions & {
-  /** Production TUI probe injected by the launcher; omitted in hermetic runners. */
   probeMcpConnection?: McpConnectionProbe;
-  /** Configured client for the conversation's sessions and their subagent streams. */
   client: Client;
   renderer?: AgentTUIRenderer;
   screen?: TerminalOutput;
   userInput?: TerminalInput;
-  /**
-   * Formats a session error (a failed send — e.g. a transport failure or a
-   * Vercel Deployment Protection challenge) into the text rendered in the
-   * inline error region. Defaults to the error's message. Callers that know
-   * about transport-specific challenges (the `eve dev` glue) inject a richer
-   * formatter here.
-   */
   formatTransportError?: (error: unknown) => string;
-  /**
-   * Local `eve dev` server URL. When present, normal prompts refresh the
-   * runtime artifacts after HMR so the next prompt uses the latest authored
-   * artifacts while retaining its logical session.
-   */
   serverUrl?: string;
-  /** Absolute local application root; omitted for remote `--url` sessions. */
   appRoot?: string;
-  /** Seeds the editable prompt buffer for the first prompt. */
   initialInput?: string;
-  /** Explicit fresh-agent onboarding handoff from `eve init`. */
   onboard?: boolean;
-  /** Onboarding that already ran on the startup screen; the runner settles its outcome. */
   startupOnboarding?: StartupOnboardingResult;
-  /** Reports timestamped steps and terminal result for fresh-agent onboarding. */
   onOnboardingStep?: (input: EveCliSetupStepEvent) => void;
   onOnboardingTerminal?: (input: EveCliSetupTerminalEvent) => void;
-  /** Handles non-core slash commands without adding feature branches to the runner. */
   promptCommandHandler?: PromptCommandHandler;
-  /** Commands shown in discovery for this local or remote session. */
   availablePromptCommands?: readonly PromptCommandSpec[];
-  /** Catalog entries available to inline `/model`, `/add`, and `/login` completion. */
   argumentSuggestions?: (
     command: ArgumentTypeaheadCommand,
   ) => Promise<readonly PromptArgumentSuggestion[]>;
-  /** Gives setup subprocesses exclusive terminal and development-host ownership. */
   withExclusiveTerminal?: <T>(task: () => Promise<T>) => Promise<T>;
-  /** Remote target and mutable OIDC token source, when connected through `--url`. */
   remote?: {
     readonly target: RemoteDevelopmentTarget;
     readonly credentials: DevelopmentCredentialGate;
     readonly resolveOidcToken: NonNullable<RemoteConnectionControllerOptions["resolveOidcToken"]>;
     readonly resolveDeployment: NonNullable<RemoteConnectionControllerOptions["resolveDeployment"]>;
-    /** Test seam for consented deployment access repair. */
     readonly runAuthFlow?: RemoteAuthFlow;
   };
-  /** Boot-time installation-state checks; defaults to the built-ins. */
   bootDetections?: readonly BootDetection[];
-  /** Test seam for the status line's Vercel link probe; defaults to the real one. */
   detectProjectIdentity?: typeof detectProjectIdentity;
-  /** Test seam for `/info`; defaults to the filesystem application inspector. */
   inspectApplication?: typeof inspectApplication;
-  /** Test seam for the off-critical-path boot login probe; defaults to the real one. */
   getVercelAuthStatus?: typeof getVercelAuthStatus;
-  /** Reports phases from this runner's initial local-dev connection. */
   onBootProgress?: DevBootProgressReporter;
-  /** Parent-owned diagnostics recorder; omitted for remote and test renderers. */
   diagnostics?: DevDiagnostics;
   lifecycle?: CommandLifecycle;
-  /** Editing-only startup state retained until the final agent header is ready to paint. */
   startup?: TuiStartup;
 };
 
-/** The attention-line issue for a Vercel auth state, or undefined when nothing's wrong. */
 function authIssueForStatus(status: VercelAuthStatus): SetupIssue | undefined {
   if (status === "logged-out") return LOGIN_SETUP_ISSUE;
   if (status === "cli-missing") return CLI_MISSING_SETUP_ISSUE;
   return undefined;
 }
 
-/** A turn waiting on a person is open while the store is idle, so it still takes steering and Stop. */
 function hasOpenTurn(snapshot: SessionStore["snapshot"]): boolean {
   return activeTurn(snapshot.view) !== undefined;
 }
 
 export class EveTUIRunner {
   readonly #client: Client;
-  /** Owns the conversation's sessions, root stream, turns, and subagent streams. */
   readonly #store: SessionStore;
-  /** The terminal's presentation facts, folded from the store's events. */
   readonly #renderer: AgentTUIRenderer;
   readonly #diagnostics?: DevDiagnostics;
   readonly #name: string;
@@ -432,11 +296,9 @@ export class EveTUIRunner {
   readonly #runtimeArtifacts?: DevelopmentRuntimeArtifactRefresher;
   readonly #serverUrl?: string;
   readonly #appRoot?: string;
-  /** Seeds the first prompt's editable buffer. */
   readonly #initialInput?: string;
   readonly #startup?: TuiStartup;
   #startupPrompt?: string;
-  /** Explicit fresh-agent onboarding handoff from `eve init`. */
   readonly #onboard: boolean;
   readonly #startupOnboarding: StartupOnboardingResult | undefined;
   #reportedFirstResponse = false;
@@ -452,52 +314,27 @@ export class EveTUIRunner {
   readonly #getVercelAuthStatus: typeof getVercelAuthStatus;
   readonly #inspectApplication: typeof inspectApplication;
   #onBootProgress?: DevBootProgressReporter;
-  /** Set when the run loop unwinds, so a late boot login probe cannot paint into a torn-down terminal. */
   #disposed = false;
-  /** The message this TUI last sent, until its turn settles. */
   #sentMessage?: { readonly text: string; deliveryId?: string };
-  /** Whether this TUI asked to cancel the turn of {@link #sentMessage}. */
   #cancelRequested = false;
-  /** Aborts the off-critical-path boot auth probe when the run loop unwinds. */
   readonly #authProbeAbort = new AbortController();
-  /**
-   * Set once a setup command changes Vercel state (any status-line effect), so
-   * a slow boot login probe that resolves afterward cannot paint a stale
-   * "not logged in" hint over a session the user has since logged into.
-   */
   #authHintStale = false;
   #setupAttentionRevision = 0;
   #agentInfoRevision = 0;
-  /** Cheap-and-local boot detection issues, cached so the auth probe can re-combine. */
   #bootIssues: SetupIssue[] = [];
-  /** The current Vercel auth issue (login / CLI-missing), or undefined when fine. */
   #authIssue: SetupIssue | undefined;
-  /**
-   * Vercel segment of the status line (link identity + session-scoped
-   * pending-deploy flag). Only local sessions carry one — a remote `--url`
-   * session has no workspace to be linked.
-   */
   readonly #vercelStatus?: VercelStatusTracker;
   readonly #mcpConnectionStatus?: McpConnectionStatusTracker;
   #agentInfo?: AgentInfoResult;
-  /** Closes the composer when something else needs the keyboard. */
   #inputController?: AbortController;
-  /** Questions the user skipped; they stay open for the server to resolve. */
   readonly #dismissedInputs = new Set<string>();
-  /** Questions answered here that stay open until the session settles them. */
   readonly #answeredInputs = new Set<string>();
-  /** Registry setups queued by tool results from the self-modification subagent. */
   readonly #pendingRegistrySetups: string[] = [];
   #activeRegistrySetup?: string;
-  /** Tool calls whose registry handoff was already queued. */
   readonly #handledHandoffs = new Set<string>();
-  /** The last session error shown, so each renders once. */
   #reportedError?: Error;
-  /** Failure cascades already recorded in diagnostics this turn. */
-  /** How many of the session's failures the diagnostics log already has. */
   #recordedFailures = 0;
   readonly #recordedAgentToolFailures = new Set<string>();
-  /** Calls' names from their requests: a call can settle in the commit that requests it. */
   readonly #callNames = new Map<string, string>();
   readonly #lifecycle?: CommandLifecycle;
 
@@ -570,11 +407,6 @@ export class EveTUIRunner {
     }
   }
 
-  /**
-   * Fetches the agent inspection payload (best-effort) and renders the startup
-   * header. Never throws: a missing or unauthorized `/eve/v1/info` simply
-   * yields a header without the agent's configuration detail.
-   */
   async #loadInitialAgentInfo(): Promise<void> {
     const serverUrl = this.#serverUrl;
     if (serverUrl === undefined) {
@@ -653,10 +485,7 @@ export class EveTUIRunner {
       this.#inputController?.abort();
       unsubscribe();
       detachSessionStore(this.#store);
-      // Restore captured stdout/stderr before a fatal error reaches the CLI.
       this.#renderer.shutdown?.();
-      // Drops any in-flight link probe so a late resolution cannot paint
-      // into a torn-down terminal.
       this.#vercelStatus?.dispose();
       this.#mcpConnectionStatus?.dispose();
       this.#remoteConnection?.dispose();
@@ -668,8 +497,6 @@ export class EveTUIRunner {
     let prompt: string | undefined;
     this.#renderer.setStartupPhase?.("starting");
     await this.#loadInitialAgentInfo();
-    // Fire-and-forget: the link identity is network-bound to resolve, and the
-    // first prompt must not wait on it. The segment appears when it lands.
     this.#vercelStatus?.refreshIdentity();
     this.#mcpConnectionStatus?.refresh();
 
@@ -711,6 +538,7 @@ export class EveTUIRunner {
       this.#renderer.setStartupPhase?.("connecting");
       startupOutcome = await this.#runInitialAgentOnboarding(title);
     }
+    if (this.#startupOnboarding?.reported === true) await this.#renderSetupIssues(this.#agentInfo);
 
     let initialDraft = this.#finishStartup();
     if (startupOutcome?.cancelled || startupOutcome?.failed) {
@@ -727,19 +555,15 @@ export class EveTUIRunner {
         this.#finishCommand({ kind: "result", message: startupOutcome.message });
     }
 
-    // One loop for everything that takes the keyboard. The store streams the
-    // session throughout, so the composer stays open while work runs.
     while (this.#lifecycle?.signal.aborted !== true && this.#renderer.exitRequested?.() !== true) {
       if (this.#sessionFailed()) {
         this.#replaceSession();
         continue;
       }
-      // Answering first lets the agent continue while setup owns the terminal.
       if (this.#answerableInputs().length > 0) {
         await this.#answerInputs(title);
         continue;
       }
-      // Setup takes the terminal, so it waits for the session to settle.
       const registrySetup = isWorking(this.#store.snapshot.status)
         ? undefined
         : this.#pendingRegistrySetups.shift();
@@ -781,7 +605,6 @@ export class EveTUIRunner {
     }
   }
 
-  /** Runs one slash command; returns `"exit"` or a draft for the next prompt. */
   async #runCommand(
     command: PromptCommand,
     title: string,
@@ -819,8 +642,6 @@ export class EveTUIRunner {
           invoke: () => this.#store.clear(),
         });
         return;
-      // Help renders locally; unlike extension commands it must work even
-      // without a prompt-command handler (e.g. remote --url sessions).
       case "help": {
         if (this.#renderer.choosePromptCommand === undefined) {
           this.#finishCommand({
@@ -835,8 +656,6 @@ export class EveTUIRunner {
       case "info":
         await this.#showApplicationInfo();
         return;
-      // Like /help, /loglevel renders locally: it adjusts the renderer's own
-      // log filter, so it works without a prompt-command handler.
       case "loglevel": {
         const outcome = this.#applyLogLevelCommand(command.argument);
         const error =
@@ -847,8 +666,6 @@ export class EveTUIRunner {
         );
         return;
       }
-      // /traces is renderer-local too: the viewer reads the local spool from
-      // disk and owns the screen until the user closes it.
       case "traces":
         await this.#openTraceViewer(command.argument);
         return;
@@ -858,7 +675,6 @@ export class EveTUIRunner {
     }
   }
 
-  /** Sends a message; while work runs it steers the active turn instead. */
   #submitMessage(message: string): void {
     const snapshot = this.#store.snapshot;
     const steering = hasOpenTurn(snapshot);
@@ -882,9 +698,7 @@ export class EveTUIRunner {
       });
   }
 
-  /** Refreshes local dev artifacts so a new turn runs the latest authored code. */
   async #prepareSend(input: SendTurnPayload): Promise<SendTurnPayload> {
-    // A steered message joins the running turn, which keeps its artifacts.
     if (input.turnPolicy === "steer") return input;
     if (this.#runtimeArtifacts !== undefined) {
       await this.#runtimeArtifacts.refresh({
@@ -922,7 +736,6 @@ export class EveTUIRunner {
     return tuiSessionData(this.#store.snapshot).sessionFailed;
   }
 
-  /** A turn cancelled from outside this prompt hands its message back instead of losing it. */
   #restoreCancelledMessage(conversation: ConversationState): void {
     const sent = this.#sentMessage;
     if (sent?.deliveryId === undefined) return;
@@ -932,7 +745,6 @@ export class EveTUIRunner {
     if (turn === undefined || turn.status === "running") return;
     const status = turn.outcome;
     this.#sentMessage = undefined;
-    // A failure cancels its turn too; the failure shows, and the message isn't handed back.
     if (
       status === "cancelled" &&
       !this.#cancelRequested &&
@@ -941,12 +753,10 @@ export class EveTUIRunner {
       this.#renderer.restoreDraft?.(sent.text);
   }
 
-  /** Session failures render from the conversation; other errors get one block each. */
   #reportSessionError(error: Error | undefined, sessionFailed: boolean): void {
     if (error === undefined || error === this.#reportedError) return;
     this.#reportedError = error;
     if (sessionFailed) return;
-    // A stranded session is a property of that session, not of the connection.
     if (!this.#renderStrandedSession(error)) {
       this.#remoteConnection?.reportFailure(error);
       this.#renderer.renderError?.("Error", this.#formatTransportError(error));
@@ -965,7 +775,6 @@ export class EveTUIRunner {
     });
   }
 
-  /** Renders a stranded-session notice; false when `error` is anything else. */
   #renderStrandedSession(error: unknown): boolean {
     const notice = this.#strandedSessionNotice(error);
     if (notice === undefined) return false;
@@ -985,9 +794,7 @@ export class EveTUIRunner {
     this.#onOnboardingStep?.({ flow: "onboarding", step: "first_response" });
   }
 
-  /** Open requests the user can answer now, including while other work runs. */
   #answerableInputs(): readonly Interaction[] {
-    // A sign-in completes by its callback, not an answer typed here.
     return openInteractions(this.#store.snapshot.view).filter(
       (input) =>
         input.request.kind !== "sign-in" &&
@@ -996,10 +803,6 @@ export class EveTUIRunner {
     );
   }
 
-  /**
-   * Prompts for open requests one at a time and sends each answer as it is given, so an agent
-   * waiting on one answer resumes without waiting for the rest.
-   */
   async #answerInputs(title: string): Promise<void> {
     for (let answered = 0; ; answered += 1) {
       const inputs = this.#answerableInputs();
@@ -1008,8 +811,6 @@ export class EveTUIRunner {
       const context = inputContext(input, answered + 1, answered + inputs.length);
       const response = await this.#readAnswer(input, context, title);
       if (response === undefined) {
-        // A skipped question stays open; the server decides whether the
-        // user's next message answers, dismisses, or leaves it.
         this.#dismissedInputs.add(input.interactionId);
         continue;
       }
@@ -1059,11 +860,6 @@ export class EveTUIRunner {
     } satisfies Answer;
   }
 
-  /**
-   * Starts a fresh session after the current one ended or was abandoned. The
-   * transcript stays on screen; server-side context is gone with the old
-   * session.
-   */
   #replaceSession(notice?: string): void {
     if (this.#renderer.renderSessionBoundary !== undefined) {
       this.#renderer.renderSessionBoundary();
@@ -1090,7 +886,6 @@ export class EveTUIRunner {
     this.#runtimeArtifacts?.clear();
   }
 
-  /** Cancels the running turn without holding the composer; the store waits for its turn ID. */
   #cancelTurn(): void {
     this.#cancelRequested = true;
     void this.#store.cancel().catch((error: unknown) => {
@@ -1098,7 +893,6 @@ export class EveTUIRunner {
     });
   }
 
-  /** Runs a session mutation and gives every control command one completion policy. */
   async #runSessionCommand(input: {
     readonly absent: string;
     readonly accepted: string;
@@ -1122,7 +916,6 @@ export class EveTUIRunner {
     }
   }
 
-  /** Retires the durable session before clearing the local conversation view. */
   async #resetSession(): Promise<void> {
     try {
       if (this.#store.snapshot.session !== undefined) await (await this.#store.end()).result();
@@ -1139,11 +932,6 @@ export class EveTUIRunner {
     this.#finishCommand({ kind: "dismiss" });
   }
 
-  /**
-   * Reads the composer, closing it when a request or setup needs the keyboard.
-   * Resolves `undefined` only for that runner-owned close; a renderer that
-   * ends input on its own ends the session.
-   */
   async #readInput(options: AgentTUISessionOptions): Promise<AgentTUIInput | undefined> {
     if (!this.#renderer.readInput) {
       throw new Error("The renderer does not support prompt input.");
@@ -1161,7 +949,6 @@ export class EveTUIRunner {
     }
   }
 
-  /** Polls local dev artifacts while the composer is open, so HMR stays current. */
   async #withIdleRefresh<T>(prompt: Promise<T>): Promise<T> {
     const runtimeArtifacts = this.#runtimeArtifacts;
     if (runtimeArtifacts === undefined) {
@@ -1236,7 +1023,6 @@ export class EveTUIRunner {
     }
   }
 
-  /** Queues setup for registry items whose install needs the terminal. */
   #queueRegistryHandoffs(conversation: ConversationState): void {
     if (this.#appRoot === undefined) return;
     for (const { callId, address } of registryHandoffs(conversation)) {
@@ -1268,13 +1054,9 @@ export class EveTUIRunner {
     this.#bootIssues = await detectSetupIssues(context, this.#bootDetections);
     if (this.#renderer.renderSetupWarning === undefined) return;
     this.#paintSetupAttention();
-    // Login state is a `vercel whoami` round-trip — too costly for the
-    // cheap-and-local boot detections above — so it rides its own probe off
-    // the critical path and never delays the first prompt.
     this.#probeAuthIssue();
   }
 
-  /** Repaints the attention line from the cached detection + auth issues, or clears it. */
   #paintSetupAttention(): void {
     if (this.#startupActive) return;
     const issues = orderedSetupIssues(this.#bootIssues, this.#authIssue);
@@ -1285,7 +1067,6 @@ export class EveTUIRunner {
     }
   }
 
-  /** Checks Vercel auth after boot without delaying the first prompt. */
   async #probeAuthIssue(): Promise<void> {
     const appRoot = this.#appRoot;
     if (appRoot === undefined || process.env.EVE_MODEL_CONNECTION !== "ai-gateway-project") return;
@@ -1300,12 +1081,6 @@ export class EveTUIRunner {
     this.#paintSetupAttention();
   }
 
-  /**
-   * Re-evaluates the attention line after a setup command changed local state,
-   * so a fixed issue clears (e.g. the `not logged in · /deploy` line disappears
-   * once `/deploy` succeeds) instead of lingering stale. Authoritative: unlike
-   * the boot probe it re-reads detections and auth and is not stale-guarded.
-   */
   async #refreshSetupAttention(info: AgentInfoResult | undefined): Promise<void> {
     const appRoot = this.#appRoot;
     if (appRoot === undefined) return;
@@ -1443,7 +1218,6 @@ export class EveTUIRunner {
     } else if (this.#startupOnboarding.reported === true) {
       return undefined;
     } else {
-      // The startup screen already reported `model_provider`; report the rest once settled.
       const pending = this.#startupOnboarding.outcome;
       outcome = pending && (await this.#settleCommandOutcome(pending));
     }
@@ -1470,11 +1244,6 @@ export class EveTUIRunner {
     });
   }
 
-  /**
-   * Opens the renderer's trace viewer on the local spool. The viewer owns the
-   * screen until the user closes it; sessions without the capability (or
-   * without a local app root) get a one-line notice instead.
-   */
   async #openTraceViewer(argument: string): Promise<void> {
     if (this.#appRoot === undefined || this.#renderer.traceViewer === undefined) {
       this.#finishCommand({
@@ -1518,11 +1287,6 @@ export class EveTUIRunner {
     }
   }
 
-  /**
-   * Applies `/loglevel [none|error|warn|debug|all]` against the renderer's buffered
-   * log filter and returns the one-line outcome. A bare `/loglevel` reports
-   * the current mode instead of changing it.
-   */
   #applyLogLevelCommand(argument: string): string {
     const renderer = this.#renderer;
     if (renderer.logDisplayMode === undefined || renderer.setLogDisplayMode === undefined) {
@@ -1556,7 +1320,6 @@ export class EveTUIRunner {
   async #refreshModelAccess(effect: ModelAccessChange): Promise<void> {
     const appRoot = this.#appRoot;
     if (appRoot === undefined) return;
-    // Invalidate inspections started before this selection, including watcher notifications.
     ++this.#agentInfoRevision;
     ++this.#setupAttentionRevision;
     await loadDevelopmentEnvironmentFiles(appRoot);
@@ -1599,7 +1362,6 @@ export class EveTUIRunner {
     void this.#refreshAgentInfo(true);
   }
 
-  /** Agents' own tool failures reach the diagnostics log whatever the subagent display mode. */
   #recordAgentToolFailures(conversation: ConversationState): void {
     const diagnostics = this.#diagnostics;
     if (diagnostics === undefined) return;
@@ -1620,7 +1382,6 @@ export class EveTUIRunner {
     }
   }
 
-  /** Records session activity that the diagnostics log keeps regardless of display. */
   #recordDiagnostics(event: SessionStreamEvent): void {
     const diagnostics = this.#diagnostics;
     if (diagnostics === undefined) return;
@@ -1647,7 +1408,6 @@ export class EveTUIRunner {
         }
         break;
       }
-      // A reusable body's failure can arrive after it already replied to every call.
       case "task.ended":
         if (event.data.outcome === "failed") {
           diagnostics.append({
@@ -1667,7 +1427,6 @@ export class EveTUIRunner {
     }
   }
 
-  /** Logs each failure the session shows once, as it appears. A reset session starts over. */
   #recordFailures(failures: readonly TuiFailure[]): void {
     if (failures.length < this.#recordedFailures) this.#recordedFailures = 0;
     for (const { error } of failures.slice(this.#recordedFailures)) {
@@ -1688,9 +1447,6 @@ function createRenderer(options: EveTUIRunnerOptions): AgentTUIRenderer {
     return options.renderer;
   }
 
-  // `TerminalRenderer` defaults every omitted field, so explicit `undefined`s
-  // are equivalent to leaving them out. Omitted input/output fall back to the
-  // real process stdio.
   return new TerminalRenderer({
     tools: options.tools,
     reasoning: options.reasoning,
@@ -1722,7 +1478,6 @@ function formatAgentUpdateNotice(
   return "Agent updated.";
 }
 
-/** Tool results in the conversation that hand a registry install to the terminal. */
 function registryHandoffs(
   conversation: ConversationState,
 ): Array<{ readonly callId: string; readonly address: string }> {
@@ -1744,7 +1499,6 @@ function registryHandoffs(
   return handoffs;
 }
 
-/** Returns the registry address carried by a packaged self-modification terminal handoff. */
 export function registryHandoffAddress(
   subagentName: string,
   toolName: string | undefined,

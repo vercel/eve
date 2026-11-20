@@ -1,7 +1,6 @@
 import { formatSlackLink } from "#compiled/@chat-adapter/slack/format.js";
 import { isObject } from "#shared/guards.js";
 
-/** Derives inbound mrkdwn from top-level text plus Block Kit and legacy attachments. */
 export function resolveSlackInboundMrkdwn(text: string, raw: Record<string, unknown>): string {
   try {
     return resolveSlackInboundMrkdwnUnsafe(text, raw);
@@ -71,7 +70,6 @@ function extractBlockKitLines(blocks: unknown): string[] {
         appendTextObjectLine(lines, block.title);
         appendTextObjectLine(lines, block.description);
         break;
-      // The markdown block carries a raw markdown string, not a text object.
       case "markdown":
         if (typeof block.text === "string" && block.text.length > 0) {
           lines.push(block.text);
@@ -145,9 +143,6 @@ function extractLegacyAttachmentLines(legacyAttachments: unknown): string[] {
     }
     lines.push(...extractBlockKitLines(attachment.blocks));
     lines.push(...extractSlackMessageUnfurlLines(attachment.message_blocks));
-    // Fallback is per-attachment and only when this attachment has no other
-    // visible fields; nested blocks count, and earlier attachments must not
-    // suppress a later fallback.
     if (
       lines.length === attachmentStart &&
       typeof attachment.fallback === "string" &&
@@ -244,7 +239,6 @@ function tableCellToPlain(cell: unknown): string {
   return "";
 }
 
-// Bracketed so the model can tell interactive controls apart from body copy.
 function appendActionsLine(lines: string[], elements: unknown): void {
   if (!Array.isArray(elements)) return;
   const labels = elements
@@ -320,8 +314,6 @@ function richTextInlineToPlain(elements: unknown): string {
       case "emoji":
         if (typeof element.name === "string") parts.push(`:${element.name}:`);
         break;
-      // Mentions become mrkdwn tokens so slackMrkdwnToGfm renders them the
-      // same way it renders mentions in top-level text.
       case "user":
         if (typeof element.user_id === "string") parts.push(`<@${element.user_id}>`);
         break;
@@ -355,7 +347,6 @@ function richTextListToPlain(list: Record<string, unknown>): string {
     .join("\n");
 }
 
-/** Reads the `text` string from a Slack composition text object (`{ text: "..." }`). */
 export function readSlackTextObject(textObject: unknown): string {
   if (!isObject(textObject)) return "";
   return typeof textObject.text === "string" ? textObject.text : "";

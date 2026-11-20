@@ -97,7 +97,6 @@ export function createChatGptCredentialStore(
       ...(typeof value.accountId === "string" && { accountId: value.accountId }),
       ...(typeof value.accountLabel === "string" && { accountLabel: value.accountLabel }),
     };
-    // Rotation in another process does not invalidate this process's live access token.
     const credentials =
       cached?.sessionId === value.sessionId
         ? {
@@ -160,7 +159,6 @@ export function createChatGptCredentialStore(
           break;
         } catch (error) {
           if (!isErrnoCode(error, "EEXIST")) throw error;
-          // Native reads/writes can each wait two minutes for OS prompts, plus OAuth refresh.
           const info = await stat(lockPath).catch((error: unknown) => {
             if (isErrnoCode(error, "ENOENT")) return undefined;
             throw error;

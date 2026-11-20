@@ -1,7 +1,6 @@
 import { formatError } from "#internal/logging.js";
 import type { JsonObject } from "#shared/json.js";
 
-/** Keeps transport diagnostics without persisting known capability values or URL encodings. */
 export function formatCapabilityError(
   error: unknown,
   capabilities: readonly (string | undefined)[],

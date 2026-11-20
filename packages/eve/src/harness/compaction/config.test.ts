@@ -44,9 +44,6 @@ describe("compactionConfig", () => {
   });
 
   it("counts the prompt with the step model's own measurement after the session switched models", () => {
-    // Tokenizers differ: model A counts the same history well above model B. A turn on A must
-    // not judge the history by B's smaller count, or the threshold is first crossed by A's
-    // own step and the history is rewritten in the middle of the turn.
     const bulk = (text: string) => ({ content: text.repeat(48_000), role: "user" as const });
     const messages = [
       ...["a", "b", "c", "d"].map((text) => ({ content: text, role: "user" as const })),
@@ -72,7 +69,6 @@ describe("compactionConfig", () => {
     const prompt = { messages, requestEnvelopeTokens: 0 };
     expect(shouldCompact(messages, compactionConfig(on("provider/model-b"), prompt))).toBe(false);
     expect(shouldCompact(messages, compactionConfig(on("provider/model-a"), prompt))).toBe(true);
-    // A model that never measured this history keeps the latest measurement.
     expect(compactionConfig(on("provider/model-c"))).toMatchObject({
       lastKnownInputTokens: 145_000,
       lastKnownPromptMessageCount: 6,
@@ -105,7 +101,6 @@ describe("compactionConfig", () => {
       { messages, requestEnvelopeTokens: 100_000 },
     );
 
-    // A's larger raw count grows to 200k, but B's smaller envelope leaves a 244k count.
     expect(config).toMatchObject({
       lastKnownInputTokens: 145_000,
       lastKnownPromptMessageCount: 1,

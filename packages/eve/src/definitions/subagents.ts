@@ -24,10 +24,6 @@ import { authoredEvaluate, type Definition } from "./definition.js";
 
 type Selection = Exclude<DurableDynamicSubagentSelection, null>;
 
-/**
- * A dynamic `subagents/<name>/agent.ts`: `defineAgent(...)`, `defineRemoteAgent(...)`, or `null`. It
- * keeps the selection, and offers the model a tool for it unless its `tool` is `false`.
- */
 export function subagentDefinition(resolver: ResolvedDynamicSubagentResolver): Definition {
   const id = `subagent:${resolver.nodeId}`;
   const evaluate = authoredEvaluate(resolver.evaluate);
@@ -39,7 +35,6 @@ export function subagentDefinition(resolver: ResolvedDynamicSubagentResolver): D
           if (result === null || result === undefined) return null;
           const { credentials, selection } = await selectionOf(evaluation.ctx, resolver, result);
           const value = parseJsonValue(JSON.parse(JSON.stringify(selection)));
-          // Credentials are code: the slot keeps the record they're rendered from, not them.
           return credentials === undefined ? { value } : { live: credentials, value };
         });
         const tool = subagentTool(ctx.container, id, kept?.value ?? null);
@@ -55,10 +50,6 @@ export function subagentDefinition(resolver: ResolvedDynamicSubagentResolver): D
   };
 }
 
-/**
- * The dynamic subagents the session's slots select, by node id. A remote agent with credentials
- * carries the binding a child opened now keeps, from which they're built again.
- */
 export function readDynamicSubagentSelections(
   ctx: ContextReader,
 ): Readonly<Record<string, Selection>> {
@@ -75,7 +66,6 @@ export function readDynamicSubagentSelections(
   return selections;
 }
 
-/** The model-visible tool of a selected dynamic subagent. */
 function subagentTool(
   ctx: ContextReader,
   id: string,
@@ -147,10 +137,6 @@ async function selectionOf(
   return { selection: { agentConfig, kind: "subagent", prepared } };
 }
 
-/**
- * No dynamic subagent may take a name in eve's namespace. One the model can call can't take a
- * tool's name either; with `tool: false` it can, since a same-named authored tool then wraps it.
- */
 function assertToolNameAvailable(
   ctx: ContextContainer,
   resolver: ResolvedDynamicSubagentResolver,

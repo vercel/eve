@@ -5,20 +5,8 @@ import { createLogger, logError } from "#internal/logging.js";
 
 const log = createLogger("channel.forwarded-principal");
 
-/**
- * Attribute key the receiving deployment stamps onto accepted forwarded
- * principal contexts. Holds the verified transport forwarder's `principalId`,
- * always overwriting any sender-supplied value — a forwarder must not be able
- * to falsify the audit trail. On multi-hop chains the attribute names the
- * most recent hop only.
- */
 export const FORWARDED_BY_ATTRIBUTE = "eve:forwarded-by";
 
-/**
- * Wire shape of the session-request `forwardedPrincipal` body field: the
- * dispatching turn's session principals, asserted by a trusted forwarder.
- * Only principal metadata crosses the wire — never tokens or credentials.
- */
 export interface ForwardedPrincipal {
   readonly current: SessionAuthContext;
   readonly initiator?: SessionAuthContext;
@@ -66,12 +54,6 @@ type ForwardedPrincipalParseResult =
       readonly ok: false;
     };
 
-/**
- * A session route's effective principals after the forwarded
- * principal gate: the transport principal untouched when the body carries no
- * assertion, or the stamped forwarded contexts once a trusted forwarder's
- * assertion is accepted.
- */
 type ResolvedForwardedPrincipal =
   | {
       readonly accepted: false;
@@ -85,11 +67,6 @@ type ResolvedForwardedPrincipal =
 
 const attributeValueSchema = z.union([z.string(), z.array(z.string()).readonly()]);
 
-// Strict on keys, deliberately open on `authenticator` / `principalType`
-// values: forwarded principals originate from arbitrary channel auth on the
-// sending deployment (e.g. `authenticator: "slack-webhook"`), so the wire
-// schema must mirror the open public `SessionAuthContext` interface — not the
-// narrower runtime enums in `runtime/sessions/auth.ts`.
 const forwardedPrincipalContextSchema = z
   .object({
     attributes: z.record(z.string(), attributeValueSchema).readonly(),
@@ -108,15 +85,6 @@ const forwardedPrincipalSchema = z
   })
   .strict();
 
-/**
- * Gates the `forwardedPrincipal` body field and resolves the
- * effective session principals. Returns the failure `Response` on rejection:
- * 403 when the channel accepts no forwarded principal or the predicate
- * refuses the forwarder or what it asserts, 400 on a malformed payload, 500
- * when the authored predicate throws. Accepted contexts are stamped with
- * {@link FORWARDED_BY_ATTRIBUTE} before they are returned, so a custom
- * `onMessage` always sees the transport forwarder on the replaced principal.
- */
 export async function resolveForwardedPrincipal(input: {
   readonly trustedForwarders: TrustedForwarders | undefined;
   readonly forwarder: SessionAuthContext;
@@ -167,11 +135,6 @@ export async function resolveForwardedPrincipal(input: {
   return { accepted: true, auth: current, initiatorAuth: initiator };
 }
 
-/**
- * Parses the `forwardedPrincipal` body field against the
- * strict wire schema. Mirrors `parseSessionCallback` for `callback`: strict
- * keys, formatted error strings, and no exceptions.
- */
 export function parseForwardedPrincipal(value: unknown): ForwardedPrincipalParseResult {
   const parsed = forwardedPrincipalSchema.safeParse(value);
   if (parsed.success) {
@@ -192,13 +155,6 @@ export function parseForwardedPrincipal(value: unknown): ForwardedPrincipalParse
   };
 }
 
-/**
- * Returns a copy of `context` with {@link FORWARDED_BY_ATTRIBUTE} set to the
- * verified transport forwarder's `principalId`, overwriting any
- * sender-supplied value. Attributes never affect Connect token-cache keying
- * (`principalKey` reads only issuer + id), so stamping is purely an audit
- * trail.
- */
 export function stampForwardedBy(
   context: SessionAuthContext,
   forwardedBy: string,

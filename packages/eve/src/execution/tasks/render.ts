@@ -3,8 +3,6 @@ import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
 import { TASK_CANCEL_TOOL_NAME, TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 import { formatDuration } from "#shared/format-duration.js";
 
-// Every string the model reads about tasks lives in this file.
-
 export const TASK_WAIT_DESCRIPTION = `Call ${TASK_WAIT_TOOL_NAME} sparingly, only when you deliberately want to withhold a message from the user while waiting for a task result. Tasks keep running and their results reach you without calling ${TASK_WAIT_TOOL_NAME}. If the user should hear from you now, reply instead. Wait silently until any of your tasks has a result, a new message arrives, or timeoutSeconds pass. It returns after the first result, which follows in a <task_result> message; wait again only if you still want to withhold a reply until another result arrives. Waiting never stops a task.`;
 
 export const TASK_WAIT_TIMEOUT_DESCRIPTION =
@@ -29,7 +27,6 @@ const TASK_SYSTEM_BLOCK_CLOSING = [
   `- To correct or continue an agent, or any task that accepts more input, call its tool again with its taskId. A new message never stops your tasks: answer it if it asks you something, decide whether it changes the work, then keep each task, correct an agent by taskId, or stop a task with ${TASK_CANCEL_TOOL_NAME}.`,
 ];
 
-/** The task block for a session a person reads, where a reply before a result is posted. */
 export const TASK_SYSTEM_BLOCK = [
   ...TASK_SYSTEM_BLOCK_OPENING,
   `- If you have nothing to tell the person until a result arrives, call ${TASK_WAIT_TOOL_NAME}. Start every independent task first, then wait.`,
@@ -37,41 +34,30 @@ export const TASK_SYSTEM_BLOCK = [
   ...TASK_SYSTEM_BLOCK_CLOSING,
 ].join("\n");
 
-/**
- * The task block for a child or schedule session, whose caller reads only the final reply: a held
- * turn's text there is narration.
- */
 export const FINAL_REPLY_TASK_SYSTEM_BLOCK = [
   ...TASK_SYSTEM_BLOCK_OPENING,
   `- Only your final reply reaches your caller. While tasks work, call ${TASK_WAIT_TOOL_NAME} instead of replying. Start every independent task first, then wait.`,
   ...TASK_SYSTEM_BLOCK_CLOSING,
 ].join("\n");
 
-/** Appended to a `serve` tool's description. */
 export const SERVE_TOOL_DESCRIPTION =
   "To send this task more input, call this tool again with its taskId; without taskId, each call starts a new task.";
 
-/** Appended to an agent tool's description, in place of the `serve` tool sentence. */
 export const AGENT_SERVE_TOOL_DESCRIPTION =
   "It does not see this conversation, so put everything it needs in message. To correct or continue an agent task, call this tool again with its taskId; without taskId, each call starts a new agent.";
 
-/** Describes the `taskId` eve adds to a `serve` tool's model input. */
 export const TASK_ID_INPUT_DESCRIPTION = `The id of a task this tool started, ${TASK_ID_SOURCE}, to send it this input. Omit it to start a new task.`;
 
-/** Labels the `context.state` note that lists the turn's tasks. */
 export const TASKS_NOTE_LABEL = "[Tasks]";
 
-/** Opens every block of a `task.result` message. */
 export const TASK_RESULT_TAG = "<task_result";
 
-/** The failure a task reports when its record could not be decoded. */
 export const UNREADABLE_TASK_ERROR = "The task's state could not be read.";
 
 const TASK_RESULTS_MAX_BYTES = 50 * 1024;
 const TASK_RESULTS_MAX_LINES = 2_000;
 const TRUNCATED_MARKER = "[truncated]";
 
-/** The receipt for a call that starts a task; a resumable task's says how to reach it again. */
 export function renderTaskReceipt(task: {
   readonly id: string;
   readonly resumable: boolean;
@@ -82,7 +68,6 @@ export function renderTaskReceipt(task: {
   return `${started} To send it another message, call ${task.tool} again with taskId ${task.id}.`;
 }
 
-/** The receipt for a call that reaches a resumable task by its `taskId`. */
 export function renderTaskSentReceipt(taskId: string): string {
   return `Sent to task ${taskId}. Its reply will arrive in a <task_result> message.`;
 }
@@ -95,7 +80,6 @@ export function renderUnknownCancelTaskError(taskId: string): string {
   return `No task "${taskId}" is in this session. Copy an id from a "Started task" receipt or the [Tasks] note.`;
 }
 
-/** What the model reads when `eve__task_cancel` answers. */
 export function renderTaskCancelResult(taskId: string, result: TaskCancelResult): string {
   if (result.status === "already_finished") return `${taskId} had no work to stop.`;
   if (!result.resumable) return `Stopped ${taskId}; it won't report back.`;
@@ -110,7 +94,6 @@ export function renderFinalOutputWhileWorkingError(workingIds: readonly string[]
   return `You can't give your final reply while tasks you started are working (${workingIds.join(", ")}). Wait for their results with ${TASK_WAIT_TOOL_NAME}, or stop a task with ${TASK_CANCEL_TOOL_NAME}, then call ${REPLY_TOOL_NAME}.`;
 }
 
-/** What the model reads when `eve__task_wait` returns after waiting `waitedMs`. */
 export function renderTaskWaitResult(result: TaskWaitResult, waitedMs: number): string {
   switch (result.status) {
     case "settled":
@@ -160,7 +143,6 @@ function interruptChoices(workingCount: number): string {
   return `${keep}, call an agent again with its taskId to correct it, or stop a task with ${TASK_CANCEL_TOOL_NAME}.`;
 }
 
-/** One `<task_result>` block of a `task.result` message. */
 export interface TaskResultBlock {
   readonly body: string;
   readonly status: "completed" | "failed";
@@ -168,10 +150,6 @@ export interface TaskResultBlock {
   readonly tool: string;
 }
 
-/**
- * The `task.result` message: one `<task_result>` block per result. All
- * bodies share one size budget; a body past it is cut and marked.
- */
 export function renderTaskResults(results: readonly TaskResultBlock[]): string {
   const budget = { bytes: TASK_RESULTS_MAX_BYTES, lines: TASK_RESULTS_MAX_LINES };
   return results
@@ -188,10 +166,6 @@ const TASK_RESULT_BLOCK = new RegExp(
   "g",
 );
 
-/**
- * The blocks of a `task.result` message, in order, as a deterministic mock
- * model reads them back; empty for any other text.
- */
 export function readTaskResults(message: string): TaskResultBlock[] {
   return [...message.matchAll(TASK_RESULT_BLOCK)].map(([, taskId, tool, status, body]) => ({
     body: body!.replaceAll("<\\/task_result", "</task_result"),
@@ -222,7 +196,6 @@ function fitToBudget(body: string, budget: { bytes: number; lines: number }): st
   return kept.join("\n");
 }
 
-/** The longest prefix of `text` within `maxBytes` of UTF-8, without splitting a character. */
 function cutToBytes(encoder: TextEncoder, text: string, maxBytes: number): string {
   if (maxBytes <= 0) return "";
   const { read } = encoder.encodeInto(text, new Uint8Array(maxBytes));
@@ -233,7 +206,6 @@ function escapeTaskResultBody(body: string): string {
   return body.replaceAll("</task_result", "<\\/task_result");
 }
 
-/** The text of a tool's `toModelOutput` result, or of a raw output without one. */
 export function renderModelOutputText(output: unknown): string {
   if (typeof output === "string") return output;
   if (isModelOutput(output)) {
@@ -268,13 +240,11 @@ function isModelOutput(
   return (type === "text" || type === "json" || type === "content") && "value" in value;
 }
 
-/** A task as the `[Tasks]` note lists it. */
 export interface ListedTask {
   readonly id: string;
   readonly tool: string;
 }
 
-/** The `[Tasks]` note: working tasks, then idle resumable tasks when there are any. */
 export function renderTasksNote(input: {
   readonly idle: readonly ListedTask[];
   readonly working: readonly ListedTask[];

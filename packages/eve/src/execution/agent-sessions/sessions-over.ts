@@ -22,43 +22,30 @@ import type { RunAgentSessions } from "#execution/run-host.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { agentDelegation } from "#tracing/eve/delegation.js";
 
-// The agent sessions a run opens, on any host: the one place that tells a local session from a
-// remote one, says why a session can't take a message, and keeps ending and cancelling best
-// effort. A host supplies how it starts and commands its local sessions, how it names
-// deliveries, and whether it reaches remote agents.
-
 const log = createLogger("execution.agent-sessions");
 
-/** How a host starts and commands the local sessions its runs open. */
 export interface LocalAgentSessions {
-  /** Starts the child `prepared` describes, for the call whose `context` opens it as `key`. */
   start(
     prepared: PreparedLocalAgentSession,
     opening: { readonly context: AgentSessionContext; readonly key: string },
   ): Promise<StartedAgentSession>;
-  /** Sends `command` to a session the run opened. */
   command<TCommand extends SessionCommand>(
     session: LocalAgentSession,
     command: TCommand,
   ): Promise<SessionCommandResult<TCommand>>;
-  /** Sends `command` to a session that may still be booting, without waiting for it. */
   commandLate(sessionId: string, command: SessionCommand): Promise<void>;
 }
 
-/** How a host reaches remote agents: where eve's callback route is served, for their replies. */
 export interface RemoteAgentAccess {
   callbackBaseUrl(): string;
 }
 
 export interface AgentSessionsHost {
   readonly local: LocalAgentSessions;
-  /** Absent on a host that can't reach remote agents, which refuses one with why. */
   readonly remote: RemoteAgentAccess | undefined;
-  /** Names one delivery to a session, so a retry of the call that sends it repeats it. */
   deliveryId(kind: "cancel" | "reset" | "send", sessionId: string): string;
 }
 
-/** The agent sessions of a run on the host `host` describes. */
 export function agentSessionsOver(host: AgentSessionsHost): RunAgentSessions {
   const { local } = host;
   const remoteAccess = (name: string): RemoteAgentAccess => {

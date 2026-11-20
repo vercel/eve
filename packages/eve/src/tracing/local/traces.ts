@@ -11,45 +11,17 @@ import {
   type SpanExportPolicy,
 } from "#tracing/eve/span-export-policy.js";
 
-/**
- * The local spool, as a span processor.
- *
- * Session liveness and retention live in here rather than in the runtime that
- * installs it, so nothing an author puts in the same `spanProcessors` list can
- * see them — and eve's accept filter never reaches an author's exporters.
- */
 export interface LocalTracesProcessor extends SpanProcessor {
-  /**
-   * Settles pending writes and releases this conversation's active traces.
-   */
   releaseConversation(conversationId: string): Promise<boolean>;
 }
 
-/**
- * Reports whether a processor tracks which conversation owns which trace, so
- * eve can tell it when that conversation is done.
- *
- * Anything standing between eve and the spool has to answer for the spool, so
- * this is the check a wrapper uses to decide whether it must forward the call.
- *
- * @internal
- */
+/** @internal */
 export function hasConversationRelease(
   processor: SpanProcessor,
 ): processor is LocalTracesProcessor {
   return typeof (processor as Partial<LocalTracesProcessor>).releaseConversation === "function";
 }
 
-/**
- * Writes the OTLP/JSON spool under `.eve/traces/v1`.
- *
- * `EVE_TRACES=off` removes the writer but keeps the processor: eve still has
- * to observe spans to track which session owns which trace.
- *
- * Internal because of `releaseConversation`, which eve's runtime drives off session
- * lifecycle. The authored surface is `localTraces()`, which wraps this in an
- * `OtelIntegration`.
- */
 export function createLocalTracesProcessor(
   input: { readonly appRoot?: string } = {},
 ): LocalTracesProcessor {
@@ -72,8 +44,6 @@ export function createLocalTracesProcessor(
     });
   };
 
-  // Startup sweep: a store left oversized by a killed dev server is bounded
-  // before this worker adds to it.
   requestPrune();
 
   const forceFlush = async (): Promise<void> => {
@@ -85,9 +55,6 @@ export function createLocalTracesProcessor(
     onEnd: (span) => processor.onEnd(span),
     onStart: (span, parentContext) => processor.onStart(span, parentContext),
     async releaseConversation(conversationId) {
-      // Settle pending segment writes before dropping liveness: a sweep already
-      // running reads the same live set, so releasing first would expose the
-      // trace to eviction while it is still being written.
       await forceFlush();
       if (!processor.releaseConversation(conversationId)) return false;
       requestPrune();
@@ -97,7 +64,7 @@ export function createLocalTracesProcessor(
   };
 }
 
-/** Applies the local content environment override before authored policies. @internal */
+/** @internal */
 export function resolveLocalTracesExportPolicy(
   exportPolicy?: SpanExportPolicy | readonly SpanExportPolicy[],
 ): SpanExportPolicy | readonly SpanExportPolicy[] | undefined {
@@ -108,7 +75,6 @@ export function resolveLocalTracesExportPolicy(
   ];
 }
 
-/** A production-authored `localTraces()` has no local development store. */
 function inertLocalTracesProcessor(): LocalTracesProcessor {
   return {
     forceFlush: async () => undefined,

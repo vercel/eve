@@ -13,8 +13,6 @@ import {
 
 const USER = { type: "user" as const, id: "U123", issuer: "https://slack.com" };
 const CONNECTION = { url: "" };
-// Connect matches a user grant to the exact details it was consented with, so
-// repository details would require a separate sign-in for every repository.
 const PARAMS: ConnectTokenParams = {
   subject: { type: "user", id: "U123", issuer: "https://slack.com" },
 };
@@ -124,7 +122,6 @@ test("maps Connect errors to eve authorization errors", async () => {
       callbackUrl: "https://agent.example/callback",
       callback: { params: {}, method: "GET" },
     }),
-    // The sign-in card shows this message, so it tells the person what to do next.
     { name: "ConnectionAuthorizationFailedError", message: /Ask again for a new sign-in link/ },
   );
 

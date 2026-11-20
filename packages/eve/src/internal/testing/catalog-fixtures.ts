@@ -1,9 +1,3 @@
-/**
- * Building blocks for tests of the step catalog: agent entries of each kind,
- * a session bundle with skills, in-memory connections, and a session context
- * that holds them.
- */
-
 import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey, SessionIdKey } from "#context/keys.js";
@@ -29,7 +23,6 @@ import { toInputSchema } from "#tools/schema.js";
 
 const OBJECT_SCHEMA: JsonObject = { type: "object", additionalProperties: false };
 
-/** A tool with an inline `execute` that echoes its name and input. */
 export function inlineTool(
   name: string,
   overrides: Partial<HarnessToolDefinition> & { readonly schema?: JsonObject } = {},
@@ -44,7 +37,6 @@ export function inlineTool(
   };
 }
 
-/** A workflow tool; `task` runs each call as a background task. */
 export function workflowTool(
   name: string,
   entryPoint: "execute" | "task" = "execute",
@@ -67,7 +59,6 @@ export function workflowTool(
   };
 }
 
-/** A declared subagent; every call to it starts a child session. */
 export function subagentTool(
   name: string,
   overrides: Partial<HarnessToolDefinition> = {},
@@ -103,12 +94,9 @@ export interface CatalogSkillSource {
   readonly name: string;
 }
 
-/** The parts of a session bundle the catalog reads: authored skills and dynamic subagent resolvers. */
 export function catalogBundle(
   input: {
-    /** The agent's `approval` from `agent.ts`. */
     readonly approval?: ApprovalPolicy;
-    /** The connections the agent declares. */
     readonly connections?: readonly ResolvedConnectionDefinition[];
     readonly dynamicSubagents?: readonly string[];
     readonly skills?: readonly CatalogSkillSource[];
@@ -117,7 +105,6 @@ export function catalogBundle(
   return {
     adapterRegistry: undefined as never,
     compiledArtifactsSource: undefined as never,
-    // The root session: its agent is the graph's root node.
     graph: {
       nodesByNodeId: new Map([
         [ROOT_RUNTIME_AGENT_NODE_ID, { agent: { config: { approval: input.approval } } }],
@@ -148,23 +135,16 @@ export function catalogBundle(
   };
 }
 
-/** How a fake connection answers a request to list its tools. */
 export type ConnectionListing = "listed" | "sign-in" | Error;
 
 export interface FakeConnection {
-  /** Each tool call the connection received, in order. */
   readonly calls: { readonly input: unknown; readonly tool: string }[];
   readonly client: ConnectionClient;
   readonly definition: ResolvedConnectionDefinition;
   listing: ConnectionListing;
-  /** Callback URLs of the interactive sign-ins it started, in order. */
   readonly signIns: string[];
 }
 
-/**
- * An in-memory connection. With `signIn`, it supports interactive sign-in and
- * lists its tools once a sign-in completes, unless it `rejectsToken`.
- */
 export function fakeConnection(input: {
   readonly approval?: ResolvedConnectionDefinition["approval"];
   readonly description?: string;
@@ -232,7 +212,6 @@ export function fakeConnection(input: {
   return connection;
 }
 
-/** A registry over `connections`; the array may change to model dynamic connections. */
 export function connectionRegistry(connections: readonly FakeConnection[]): ConnectionRegistry {
   const find = (name: string) => {
     const connection = connections.find((entry) => entry.definition.connectionName === name);
@@ -248,7 +227,6 @@ export function connectionRegistry(connections: readonly FakeConnection[]): Conn
   };
 }
 
-/** Connection tool metadata with a JSON Schema input. */
 export function connectionTool(
   name: string,
   inputSchema: JsonObject = { type: "object", properties: {} },
@@ -257,10 +235,6 @@ export function connectionTool(
   return { description, inputSchema, name };
 }
 
-/**
- * Alice's session with `tools`, `skills`, and `connections`, and the step
- * catalog built from it. `run` runs code inside the session's context.
- */
 export async function catalogContext(
   input: {
     readonly approval?: ApprovalPolicy;
@@ -303,13 +277,8 @@ export async function catalogContext(
   return { catalog, ctx, run: <T>(fn: () => T) => contextStorage.run(ctx, fn) };
 }
 
-/** Names in eve's namespace, which nothing authored or dynamic may take. */
 export const EVE_NAMESPACE_NAMES = ["eve", "eve__search", "eve__anything"];
 
-/**
- * Names outside eve's namespace: the built-in tools' former names, which are
- * free again, and names that only contain "eve".
- */
 export const NAMES_OUTSIDE_EVE_NAMESPACE = [
   "search",
   "execute",
@@ -321,10 +290,8 @@ export const NAMES_OUTSIDE_EVE_NAMESPACE = [
   "my__eve__x",
 ];
 
-/** How every reserved-name error explains the rule. */
 export const EVE_NAMESPACE_RESERVATION = 'eve reserves the "eve" namespace for its built-in tools';
 
-/** The catalog eve's own harness gives a step with `agentTools` in `ctx`. */
 export async function nativeCatalog(input: {
   readonly agentTools: HarnessToolMap;
   readonly ctx: ContextContainer;

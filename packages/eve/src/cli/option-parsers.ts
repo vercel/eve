@@ -9,7 +9,6 @@ import type {
   TerminalPartDisplayMode,
 } from "#cli/dev/tui/types.js";
 
-/** Parses a TCP port accepted by the CLI. */
 export function parsePortOption(value: string): number {
   if (!/^-?\d+$/.test(value)) {
     throw new InvalidArgumentError(`Expected a numeric port, received "${value}".`);
@@ -26,7 +25,6 @@ export function parsePortOption(value: string): number {
 const DISPLAY_MODES = new Set(["full", "collapsed", "auto-collapsed", "hidden"]);
 const STATS_MODES = new Set(["tokens", "tokensPerSecond"]);
 
-/** Parses a terminal part display mode. */
 export function parseDisplayMode(value: string): TerminalPartDisplayMode {
   if (!DISPLAY_MODES.has(value)) {
     throw new InvalidArgumentError(
@@ -39,7 +37,6 @@ export function parseDisplayMode(value: string): TerminalPartDisplayMode {
 
 const SUBAGENT_DISPLAY_MODES = new Set(["full", "collapsed", "hidden"]);
 
-/** Parses a subagent task display mode. */
 export function parseSubagentDisplayMode(value: string): SubagentDisplayMode {
   if (!SUBAGENT_DISPLAY_MODES.has(value)) {
     throw new InvalidArgumentError(
@@ -50,7 +47,6 @@ export function parseSubagentDisplayMode(value: string): SubagentDisplayMode {
   return value as SubagentDisplayMode;
 }
 
-/** Parses an assistant response statistics mode. */
 export function parseStatsMode(value: string): AssistantResponseStatsMode {
   if (!STATS_MODES.has(value)) {
     throw new InvalidArgumentError(
@@ -61,7 +57,6 @@ export function parseStatsMode(value: string): AssistantResponseStatsMode {
   return value as AssistantResponseStatsMode;
 }
 
-/** Parses a server log display mode. */
 export function parseLogsMode(value: string): LogDisplayMode {
   const mode = parseLogDisplayMode(value);
   if (mode === undefined) {
@@ -73,7 +68,6 @@ export function parseLogsMode(value: string): LogDisplayMode {
   return mode;
 }
 
-/** Parses a positive model context-window size. */
 export function parseContextSizeOption(value: string): number {
   const size = Number(value);
   if (!Number.isFinite(size) || size <= 0) {
@@ -88,7 +82,6 @@ const REASONING_VALUES: readonly AgentReasoningDefinition[] = [
   ...ALL_REASONING_LEVELS,
 ];
 
-/** Parses an authored model reasoning effort. */
 export function parseAgentNamesOption(value: string): string[] {
   const names = value.split(",").map((name) => name.trim());
   if (names.length === 0 || names.some((name) => name === "")) {

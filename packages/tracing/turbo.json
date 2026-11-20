@@ -10,7 +10,8 @@
         "$TURBO_ROOT$/scripts/copy-package-license.mjs",
         "$TURBO_ROOT$/LICENSE",
         "$TURBO_ROOT$/NOTICE"
-      ]
+      ],
+      "tags": ["ci"]
     }
   }
 }

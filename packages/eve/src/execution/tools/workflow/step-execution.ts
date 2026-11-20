@@ -39,7 +39,6 @@ import {
 
 const log = createLogger("workflow-step");
 
-/** Keeps token capabilities and bearer values inside the executing step. */
 export function withWorkflowStepAuthorization(execute: (...args: never[]) => unknown) {
   const wrapped = async function (
     this: unknown,
@@ -75,10 +74,6 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
         ask: () => unavailableInStep("ctx.ask()", "Call ctx.ask() in the workflow body."),
         getSandbox: (async (environment?: SandboxEnvironmentIdentity) => {
           const access = await sandbox.open();
-          // The step imports its own copy of the module that declares the
-          // environment, so it can't match by identity. An agent has one
-          // sandbox definition, and the argument only narrows the type, so
-          // the provider is enough.
           if (environment !== undefined && access.environment?.provider !== environment.provider) {
             throw fatal(
               'ctx.getSandbox() in a "use step" function received a sandbox environment the session\'s sandbox does not use. ' +
@@ -116,7 +111,6 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
           ),
         );
       } catch (error) {
-        // The Workflow SDK recognizes fatal=true; preserve eve's classified error fields.
         if (isConnectionAuthorizationFailedError(error) && !error.retryable) {
           Object.assign(error, { fatal: true });
         }
@@ -128,20 +122,16 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
       const authorized = input.authorizationResults
         .filter((result) => !remaining.includes(result))
         .map((result) => result.attemptId);
-      // The result crosses the step boundary, so it carries the challenges, not the in-process
-      // signal whose brand can't be serialized.
       return isAuthorizationSignal(output)
         ? { kind: "authorization-required", challenges: output.challenges, authorized }
         : { kind: "result", output, authorized };
     };
     return contextStorage.run(context, () => withModelCall(run));
   };
-  // The SDK reads retry policy from the registered function at execution time.
   Object.defineProperty(wrapped, "maxRetries", { get: () => Reflect.get(execute, "maxRetries") });
   return wrapped;
 }
 
-/** Runs a workflow tool's `"use step"` function that its caller invoked without the tool context. */
 export function withWorkflowStepScope(execute: (...args: never[]) => unknown) {
   const wrapped = function (this: unknown, ...args: unknown[]): unknown {
     return runInWorkflowStep(() => Reflect.apply(execute, this, args));
@@ -150,11 +140,8 @@ export function withWorkflowStepScope(execute: (...args: never[]) => unknown) {
   return wrapped;
 }
 
-/** Loads the agent that owns the tool, the first time a step needs it. */
 function stepAgentLoader(input: WorkflowStepContext): () => Promise<SessionAgent> {
   const reference = ownerReference(input.sandbox);
-  // The step's own context replaces the delivery's, which carries the
-  // development generation a development source resolves to.
   const delivery = contextStorage.getStore();
   return async () =>
     delivery === undefined
@@ -162,17 +149,6 @@ function stepAgentLoader(input: WorkflowStepContext): () => Promise<SessionAgent
       : await contextStorage.run(delivery, () => resolveSessionAgent(reference));
 }
 
-/**
- * The calling session's sandbox, opened on the step's first `ctx.getSandbox()`
- * under the key of the session that owns it, and closed when the step ends.
- * Recorded state, when the call captured it, resumes the sandbox; without
- * it, or when that sandbox is gone, the provider's `start` upserts it by that
- * key with the owner's sandbox definition, so the session finds the same
- * sandbox and its session-end cleanup removes it. The step never owns the
- * sandbox: the session's turns may be using it, so the step can neither stop
- * nor delete it.
- * A step that never asks for it loads nothing.
- */
 function openStepSandbox(input: WorkflowStepContext, loadAgent: () => Promise<SessionAgent>) {
   const { sessionId, state } = input.sandbox;
   let opening: Promise<EnsuredSandboxAccess> | undefined;
@@ -244,7 +220,6 @@ function unavailableInStep(capability: string, guidance: string): never {
   throw fatal(`${capability} is unavailable inside a "use step" function. ${guidance}`);
 }
 
-/** A misuse a retry would repeat, which the Workflow SDK fails without retrying. */
 function fatal(message: string): Error {
   return Object.assign(new Error(message), { fatal: true });
 }

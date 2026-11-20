@@ -10,10 +10,6 @@ interface Plugin {
   readonly transform?: (code: string, id: string) => unknown;
 }
 
-/**
- * Vitest plugin that applies Workflow's client transform and installs the
- * package-local workflow test world.
- */
 export function workflow(): Plugin[] {
   return [
     createWorkflowTransformPlugin(),

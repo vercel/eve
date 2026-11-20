@@ -39,29 +39,16 @@ import type { ResolvedChannelDefinition } from "#runtime/types.js";
 
 export { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
 
-/**
- * Durable adapter kind used when a schedule fires without targeting a
- * channel — the markdown form, and the synthesized run the dispatcher
- * builds for it.
- *
- * Framework-owned — authored code never constructs a schedule adapter
- * directly. Registered in `FRAMEWORK_ADAPTERS`.
- */
 export const SCHEDULE_ADAPTER_KIND = "schedule";
 
 export const SCHEDULE_ADAPTER: ChannelAdapter = {
   kind: SCHEDULE_ADAPTER_KIND,
 };
-/**
- * Loaded shape of one schedule for the dispatcher. Either `run` is
- * defined (authored handler) or `markdown` is defined (fire-and-forget).
- */
 export interface ScheduleDispatchInput {
   readonly scheduleId: string;
   readonly run?: ScheduleRunHandler;
   readonly markdown?: string;
 }
-/** Sessions started by dispatch and background work registered by the handler. */
 export interface ScheduleDispatchResult {
   readonly sessions: readonly Delivery[];
   readonly waitUntilTasks: readonly Promise<unknown>[];
@@ -75,25 +62,6 @@ export interface ScheduleCollectionDispatchInput {
   readonly verifyDelivery?: () => Promise<void>;
 }
 
-/**
- * Dispatches scheduled task execution.
- *
- * For handler schedules: builds {@link ScheduleHandlerArgs} against the
- * request-scoped channel bundle and invokes the author's `run`. The
- * author owns control flow — `args.to(channel, target).send(…)` hands work off
- * to a channel; `args.waitUntil(promise)` extends the task lifetime
- * so the dispatcher awaits in-flight work before settling.
- *
- * For markdown schedules: synthesizes a channel-less run that starts a
- * session with {@link SCHEDULE_ADAPTER} and the markdown body as the
- * message.
- *
- * Returns a {@link ScheduleDispatchResult} carrying any sessions the
- * handler started (for telemetry / task-result observability) and the
- * `waitUntil` promises the handler registered. Dynamic schedule callbacks resolve
- * creator auth and await their registered work before returning; their channel
- * sends start fresh, unattended sessions rather than resume a conversation.
- */
 export class ScheduleDispatcher {
   private readonly runtime: Runtime;
   private readonly channels: readonly ResolvedChannelDefinition[];
@@ -141,18 +109,12 @@ export class ScheduleDispatcher {
     scope.set(AuthKey, auth);
     scope.set(OccurrenceIdKey, occurrence.executionId);
     scope.set(ScheduleInstanceKey, occurrence.name);
-    // A scheduled send must not steer a conversation it didn't start, so it never reaches the
-    // channel's address. A keyed send gets an address of its own, scoped to this schedule, so a
-    // retried callback reaches the session its first attempt started.
     const scheduledToken = (channelToken: string | undefined, key: string | undefined) =>
       key === undefined
         ? `eve-scheduled-send:${randomUUID()}`
         : `eve-scheduled-send:${createHash("sha256")
             .update(JSON.stringify([occurrence.scheduleId, channelToken, key]))
             .digest("hex")}`;
-    // A send without a key takes one from the occurrence and its message, so a retried callback
-    // reaches the sessions its first attempt started. Repeats of one message to one target are
-    // counted apart, so a fan-out keeps its keys whatever order it reaches its targets in.
     const repeats = new Map<unknown, Map<string, number>>();
     const occurrenceKey = (channel: unknown, target: unknown, message: MessageContent): string => {
       const digest = messageDigest(message);
@@ -178,9 +140,6 @@ export class ScheduleDispatcher {
       const runtime: Runtime = {
         ...this.runtime,
         resolveContinuation: async () => undefined,
-        // A keyed address is this schedule's own, so only a session a retried callback started
-        // can own it. The start claims the address, finds that session itself, and delivers
-        // there, so a send never looks up an owner that is usually absent.
         dispatchContinuation: async <TCommand extends SessionCommand>(
           delivery: DispatchContinuationInput<TCommand>,
         ) => {
@@ -229,8 +188,6 @@ export class ScheduleDispatcher {
   } {
     const sessions: Delivery[] = [];
     const waitUntilTasks: Promise<unknown>[] = [];
-    // On Vercel, the deployment serving the schedule accepts its sends, so a
-    // session they continue hands off to it like one a route reaches.
     const toChannel = createCrossChannelToFn(runtime, toCrossChannelTargets(this.channels), {
       acceptedDeploymentId: process.env.VERCEL_DEPLOYMENT_ID?.trim() || undefined,
     });
@@ -275,10 +232,8 @@ export class ScheduleDispatcher {
   }
 }
 
-/** Fingerprints what a send carries. File bytes are hashed as they are, not serialized first. */
 function messageDigest(message: MessageContent): string {
   const hash = createHash("sha256");
-  // Length-prefixed, so two fields can't read as one.
   const field = (value: string | Uint8Array) => {
     hash.update(`${typeof value === "string" ? Buffer.byteLength(value) : value.byteLength}:`);
     hash.update(value);
@@ -308,11 +263,6 @@ function messageDigest(message: MessageContent): string {
   return hash.digest("hex");
 }
 
-/**
- * Turns what `auth` returned into the session auth of the stored creator. What `auth` returns
- * is its decision, so a denial or a wrong shape fails the occurrence without a retry; only an
- * error it throws is retried.
- */
 function resolveCreatorAuth(
   resolved: Awaited<ReturnType<DynamicSchedulesDefinition["auth"]>>,
   principal: SchedulePrincipalReference,
@@ -350,11 +300,6 @@ function resolveCreatorAuth(
   return auth;
 }
 
-/**
- * Convenience: extract a `run` function from one loaded schedule module
- * value, or throw with the file path so misconfigured modules fail
- * obviously instead of crashing deep inside the dispatcher.
- */
 export function expectScheduleRun(
   value: unknown,
   logicalPath: string,

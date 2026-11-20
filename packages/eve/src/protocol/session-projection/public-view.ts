@@ -72,12 +72,14 @@ export function position(view: SessionView): number {
   return sessionTables(view).position;
 }
 
+/** The session's lifecycle status, outcome, runtime identity, and parent. */
 export function session(view: SessionView): SessionObservation {
   const { status, outcome, error, runtime, parent, startedAt, endedAt } =
     sessionTables(view).session;
   return frozen({ status, outcome, error, runtime, parent, startedAt, endedAt });
 }
 
+/** One turn by id, or `undefined` when the view does not hold it. */
 export function turn(view: SessionView, turnId: string): TurnObservation | undefined {
   const row = sessionTables(view).turns[turnId];
   if (row === undefined) return undefined;
@@ -90,17 +92,22 @@ export function turns(view: SessionView): readonly TurnObservation[] {
   return frozen(Object.keys(sessionTables(view).turns).flatMap((id) => turn(view, id) ?? []));
 }
 
+/**
+ * The latest turn while it is still running, or `undefined` when none is or the session has ended.
+ */
 export function activeTurn(view: SessionView): TurnObservation | undefined {
   const row = selectors.activeTurn(sessionTables(view));
   return row === undefined ? undefined : turn(view, row.turnId);
 }
 
+/** Turns on the selected conversation branch, oldest first. */
 export function conversation(view: SessionView): readonly TurnObservation[] {
   return frozen(
     selectors.conversation(sessionTables(view)).flatMap((row) => turn(view, row.turnId) ?? []),
   );
 }
 
+/** One call by id with its display state, label, owner, and committed input and output. */
 export function call(view: SessionView, callId: string): CallObservation | undefined {
   const tables = sessionTables(view);
   const row = tables.calls[callId];
@@ -135,6 +142,7 @@ export function call(view: SessionView, callId: string): CallObservation | undef
   );
 }
 
+/** Calls matching a {@link CallFilter}, or every call when no filter is given. */
 export function calls(view: SessionView, filter: CallFilter = {}): readonly CallObservation[] {
   return frozen(
     Object.keys(sessionTables(view).calls).flatMap((id) => {
@@ -151,6 +159,7 @@ export function calls(view: SessionView, filter: CallFilter = {}): readonly Call
   );
 }
 
+/** Where a call stands, for a display; `undefined` when the view does not hold it. */
 export function callState(view: SessionView, callId: string): selectors.CallState | undefined {
   return selectors.callState(sessionTables(view), callId);
 }
@@ -169,21 +178,31 @@ export function callLabel(
   return "capability" in value ? selectors.callLabel(value, preview) : value.label;
 }
 
+/**
+ * The call that holds a call's output: the call itself, or the call it took its output from when
+ * it completed with another call's output.
+ */
 export function callOutputSource(view: SessionView, callId: string): CallObservation | undefined {
   const source = selectors.callOutputSource(sessionTables(view), callId);
   return source === undefined ? undefined : call(view, source.callId);
 }
 
+/** One interaction, such as an approval or question, by id. */
 export function interaction(view: SessionView, interactionId: string): Interaction | undefined {
   return frozen(showInteraction(sessionTables(view), interactionId));
 }
 
+/** Every interaction in the session, open or settled. */
 export function interactions(view: SessionView): readonly Interaction[] {
   return frozen(
     Object.keys(sessionTables(view).interactions).flatMap((id) => interaction(view, id) ?? []),
   );
 }
 
+/**
+ * Interactions still awaiting an answer, oldest first, optionally narrowed by request kind or by
+ * the call, task, turn, or other subject they concern. Empty once the session has ended.
+ */
 export function openInteractions(
   view: SessionView,
   filter: { readonly kind?: string; readonly about?: InteractionSubject } = {},
@@ -205,6 +224,7 @@ export function nextPrompt(view: SessionView): Interaction | undefined {
   return row === undefined ? undefined : interaction(view, row.interactionId);
 }
 
+/** One delivered message by id. */
 export function delivery(view: SessionView, deliveryId: string): DeliveryObservation | undefined {
   const row = sessionTables(view).deliveries[deliveryId];
   if (row === undefined) return undefined;
@@ -223,6 +243,7 @@ export function delivery(view: SessionView, deliveryId: string): DeliveryObserva
   });
 }
 
+/** Delivered messages, optionally only those consumed by one turn. */
 export function deliveries(
   view: SessionView,
   filter: { readonly turnId?: string } = {},
@@ -237,12 +258,16 @@ export function deliveries(
   );
 }
 
+/**
+ * Admitted messages that no turn has consumed yet, oldest first. Empty once the session has ended.
+ */
 export function queue(view: SessionView): readonly DeliveryObservation[] {
   return frozen(
     selectors.queue(sessionTables(view)).flatMap((row) => delivery(view, row.deliveryId) ?? []),
   );
 }
 
+/** One background task by id. */
 export function task(view: SessionView, taskId: string): TaskObservation | undefined {
   const row = sessionTables(view).tasks[taskId];
   if (row === undefined) return undefined;
@@ -261,6 +286,10 @@ export function task(view: SessionView, taskId: string): TaskObservation | undef
   });
 }
 
+/**
+ * Background tasks, optionally by status: `working` while a call inside them runs, `idle` while
+ * running with no call in flight, or `ended`.
+ */
 export function tasks(
   view: SessionView,
   filter: { readonly status?: "working" | "idle" | "ended" } = {},
@@ -270,6 +299,7 @@ export function tasks(
   );
 }
 
+/** Model runs, optionally only those of one turn. */
 export function runs(
   view: SessionView,
   filter: { readonly turnId?: string } = {},
@@ -288,6 +318,7 @@ export function runs(
   );
 }
 
+/** One committed content part by id. */
 export function part(view: SessionView, partId: string): ContentObservation | undefined {
   const tables = sessionTables(view);
   const row = tables.parts[partId];
@@ -310,6 +341,7 @@ export function part(view: SessionView, partId: string): ContentObservation | un
   });
 }
 
+/** Committed content parts, optionally narrowed by model run, turn, or kind. */
 export function parts(
   view: SessionView,
   filter: { readonly runId?: string; readonly turnId?: string; readonly kind?: string } = {},
@@ -326,12 +358,14 @@ export function parts(
   );
 }
 
+/** The content parts that make up a turn's reply, in order. */
 export function reply(view: SessionView, turnId: string): readonly ContentObservation[] {
   return frozen(
     selectors.reply(sessionTables(view), turnId).flatMap((row) => part(view, row.partId) ?? []),
   );
 }
 
+/** Child agent sessions linked to this session, with the call that started each when known. */
 export function children(view: SessionView): readonly ChildObservation[] {
   const tables = sessionTables(view);
   return frozen(
@@ -344,19 +378,32 @@ export function children(view: SessionView): readonly ChildObservation[] {
   );
 }
 
+/** Token usage accumulated across the session. */
 export function usage(view: SessionView): SessionUsage {
   const { total, byKind } = sessionTables(view).usage;
   return frozen({ total, byKind });
 }
 
+/**
+ * The error that failed the given turn, or else the session's failure; `undefined` when neither
+ * failed.
+ */
 export function failure(view: SessionView, turnId?: string): ErrorInfo | undefined {
   return frozen(selectors.failure(sessionTables(view), turnId));
 }
 
+/**
+ * Whether the session has nothing in progress: no turn working, queued message, running change,
+ * or working task. A turn waiting only on an interaction counts as idle.
+ */
 export function idle(view: SessionView): boolean {
   return selectors.idle(sessionTables(view));
 }
 
+/**
+ * What an unsettled turn is waiting on; `undefined` when the turn has settled or the session has
+ * ended.
+ */
 export function waiting(view: SessionView, turnId: string): Waiting | undefined {
   const found = selectors.waiting(sessionTables(view), turnId);
   if (found === undefined) return undefined;
@@ -373,6 +420,7 @@ export function waiting(view: SessionView, turnId: string): Waiting | undefined 
   });
 }
 
+/** What the agent is doing now, for the active turn or the given one. */
 export function activity(view: SessionView, filter: { readonly turnId?: string } = {}): Activity {
   const found = selectors.activity(sessionTables(view), filter);
   if (found.kind === "waiting-on-interaction")
@@ -385,6 +433,7 @@ export function activity(view: SessionView, filter: { readonly turnId?: string }
   return frozen(found);
 }
 
+/** Uncommitted streaming input and progress for a call, while it is still being produced. */
 export function callPreview(view: SessionView, callId: string): CallPreviewObservation | undefined {
   const preview = snapshotState(view).previews.calls[callId];
   if (preview === undefined) return undefined;
@@ -392,6 +441,7 @@ export function callPreview(view: SessionView, callId: string): CallPreviewObser
   return frozen({ callId, input, output, label });
 }
 
+/** Uncommitted text streaming into content parts, optionally only for one model run. */
 export function contentPreviews(
   view: SessionView,
   filter: { readonly runId?: string } = {},

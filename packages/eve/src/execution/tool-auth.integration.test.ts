@@ -1,4 +1,3 @@
-// @linux-only: tool authorization logic
 import { describe, expect, it } from "vitest";
 
 import {
@@ -24,13 +23,6 @@ import type {
 } from "#shared/connection-types.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 
-/**
- * Integration coverage for tool-hosted authorization: the
- * {@link createToolExecuteWithAuth} wrapper drives token resolution,
- * the per-step cache, the park-on-`Required` flow, callback completion
- * on resume, and the loop guard — all scoped by the tool's name.
- */
-
 const REQUIRED_ERROR = "ConnectionAuthorizationRequiredError";
 
 function requiredError(): Error {
@@ -39,12 +31,6 @@ function requiredError(): Error {
   return err;
 }
 
-/**
- * Seeds an authenticated user principal and a session id on the active
- * context so `principalType: "user"` strategies resolve a principal and
- * `getHookUrl` can mint a callback URL. Mirrors what the runtime
- * projects from the channel session.
- */
 function seedUserPrincipal(): void {
   const ctx = loadContext();
   ctx.set(SessionIdKey, "session_auth");
@@ -225,7 +211,6 @@ describe("tool-hosted authorization", () => {
 
     const result = await runtime.runAsSession(undefined, async () => runtime.executeTool(tool, {}));
 
-    // Both reads return the same cached token; getToken ran once.
     expect(result).toEqual({ first: "tok-1", second: "tok-1" });
     expect(calls).toBe(1);
   });
@@ -241,7 +226,6 @@ describe("tool-hosted authorization", () => {
 
     const result = await runtime.runAsSession(undefined, async () => runtime.executeTool(tool, {}));
 
-    // The test harness dispatches every executeTool call as "call_test".
     expect(result).toEqual({ callId: "call_test", toolName: "observe_call_metadata" });
   });
 
@@ -488,7 +472,6 @@ describe("tool-hosted authorization", () => {
 
     expect(isAuthorizationSignal(result)).toBe(true);
     if (!isAuthorizationSignal(result)) throw new Error("expected signal");
-    // Identity stays the path-derived scope; only the presentation name changes.
     expect(result.challenges[0]).toMatchObject({
       name: "sfdc_lookup__inline_auth",
       challenge: { displayName: "Salesforce", url: "https://idp.example/auth" },
@@ -565,9 +548,6 @@ describe("tool-hosted authorization", () => {
     const auth: AuthorizationDefinition = {
       principalType: "user",
       async getToken(): Promise<TokenResult> {
-        // Without a cached token this strategy would require auth; the
-        // resume path must satisfy getToken from the freshly minted
-        // token cached by completeAuthorization.
         throw requiredError();
       },
       async startAuthorization() {
@@ -713,8 +693,6 @@ describe("tool-hosted authorization", () => {
     const tool = authoredTool({
       name: "list_groups",
       async execute(_input, ctx) {
-        // The token resolves, but the downstream service rejects it —
-        // the tool re-signals Required the same turn it signed in.
         await ctx.getToken(auth);
         ctx.requireAuth(auth);
       },
@@ -810,8 +788,6 @@ describe("tool-hosted authorization", () => {
 
     const tokens = await runtime.runAsSession({ sessionId: "session_evict" }, async () => {
       seedUserPrincipal();
-      // First resolve caches tok-1; eviction drops it so the next resolve
-      // re-fetches (tok-2); the resolve after that is served from cache.
       const first = await resolveScopedToken(scoped);
       await evictScopedToken(scoped);
       const second = await resolveScopedToken(scoped);
@@ -831,8 +807,6 @@ describe("tool-hosted authorization", () => {
         return { token: "tok" };
       },
       evict({ principal }) {
-        // A Connect-backed strategy would purge its in-process token
-        // cache for this principal here; we just record the call.
         evicted.push(principal);
       },
     };
@@ -870,9 +844,6 @@ describe("tool-hosted authorization", () => {
     });
     const runtime = await createTestRuntime({ tools: [tool] });
 
-    // No CallbackBaseUrlKey set → getHookUrl returns undefined → no park
-    // signal. The interactive path must NOT leak the raw Required into the
-    // model; it surfaces a classified, terminal authorization failure.
     const err = await runtime
       .runAsSession({ sessionId: "session_no_url" }, async () => {
         seedUserPrincipal();
@@ -902,8 +873,6 @@ describe("tool-hosted authorization", () => {
     });
     const runtime = await createTestRuntime({ tools: [tool] });
 
-    // Non-interactive strategies have no consent flow to park on, so the
-    // model should see the original failure.
     await expect(
       runtime.runAsSession({ sessionId: "session_noninteractive" }, async () => {
         seedUserPrincipal();
@@ -1063,7 +1032,6 @@ describe("tool-hosted authorization", () => {
 
     const outcome = runtime.runAsSession({ sessionId: "session_approver_token" }, async () => {
       seedUserPrincipal();
-      // An interactive sign-in is possible here; the approver's lookup must still not start one.
       loadContext().set(CallbackBaseUrlKey, "https://app.example");
       return await execute(
         {},

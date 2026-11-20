@@ -1,4 +1,3 @@
-// @linux-only: client redirect policy
 import { createServer, type Server } from "node:http";
 
 import { describe, expect, it } from "vitest";

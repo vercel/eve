@@ -97,8 +97,6 @@ describe("resolveWebSearchBackend", () => {
     ["openai/gpt-5.4", { provider: "native" }, "openai"],
     ["anthropic/claude-opus-4.6", { provider: "native" }, "anthropic"],
     ["google/gemini-3-flash", { provider: "native" }, "google"],
-    // Native search would drop a pre-Gemini 3 model's other tools; models without one use the
-    // fallback, if any.
     ["google/gemini-2.5-flash", { provider: "native" }, null],
     ["xai/grok-4", { provider: "native" }, null],
     ["xai/grok-4", { fallback: "parallel", provider: "native" }, "parallel"],

@@ -24,7 +24,7 @@
     "@vercel/blob": "2.4.0",
     "@vercel/connect": "2.9.2",
     "ai": "^7.0.173",
-    "eve": "^1.0.0",
+    "eve": "1.2.0",
     "zod": "4.6.7"
   },
   "devDependencies": {
@@ -34,7 +34,7 @@
     "typescript": "7.0.2",
     "ultracite": "^7.10.5"
   },
-  "packageManager": "pnpm@11.7.0",
+  "packageManager": "pnpm@12.21.0",
   "engines": {
     "node": ">=24"
   }

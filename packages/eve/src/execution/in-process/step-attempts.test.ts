@@ -3,10 +3,8 @@ import { isRetriedStep, registerHost } from "#execution/hosts.js";
 import { NonRetryableError } from "#shared/run-errors.js";
 import { createStepAttempts, type StepFaults } from "./step-attempts.js";
 
-/** Runs a step through `faults`, recording each attempt and what it reads as it enters. */
 async function runStep(
   faults: StepFaults | undefined,
-  /** What attempt `attempt` throws, if anything. */
   throws: (attempt: number) => unknown = () => undefined,
 ) {
   const attempts = createStepAttempts(faults);
@@ -111,7 +109,6 @@ describe("in-process step attempts", () => {
     await writer.write(new Uint8Array([1]));
     await expect(writer.write(new Uint8Array([2]))).rejects.toThrow("unavailable");
     await expect(writer.write(new Uint8Array([3]))).rejects.toThrow("unavailable");
-    // The next attempt writes through a stream of its own.
     const retry = attempts.writable({ ...step, attempt: 2 }, stream).getWriter();
     await retry.write(new Uint8Array([4]));
     expect(written).toEqual([1, 4]);

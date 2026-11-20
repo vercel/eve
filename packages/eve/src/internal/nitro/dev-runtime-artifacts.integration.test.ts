@@ -16,6 +16,7 @@ import { describe, expect, it } from "vitest";
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
 import { compileAgent } from "#compiler/compile-agent.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
+import { createWorld } from "#compiled/@workflow/world-local/index.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
@@ -211,7 +212,7 @@ describe("development runtime artifact snapshots", () => {
     await mkdir(join(appRoot, "node_modules", "heavy-package"), { recursive: true });
     await mkdir(join(appRoot, ".next", "cache"), { recursive: true });
     await mkdir(join(appRoot, ".generated", "compiled"), { recursive: true });
-    await mkdir(join(appRoot, ".workflow-data", "streams"), { recursive: true });
+    await mkdir(join(appRoot, ".workflow-data"), { recursive: true });
     await mkdir(join(appRoot, ".workflow-vitest"), { recursive: true });
     await mkdir(join(appRoot, "build"), { recursive: true });
     await mkdir(join(appRoot, "dist"), { recursive: true });
@@ -225,7 +226,7 @@ describe("development runtime artifact snapshots", () => {
     await writeFile(join(appRoot, "node_modules", "heavy-package", "index.js"), "export {}\n");
     await writeFile(join(appRoot, ".next", "cache", "webpack.bin"), "cache\n");
     await writeFile(join(appRoot, ".generated", "compiled", "bundle.js"), "generated\n");
-    await writeFile(join(appRoot, ".workflow-data", "streams", "events.bin"), "events\n");
+    await writeFile(join(appRoot, ".workflow-data", "world.db"), "");
     await writeFile(join(appRoot, ".workflow-vitest", "steps.mjs"), "export {}\n");
     await writeFile(join(appRoot, "build", "server.js"), "build\n");
     await writeFile(join(appRoot, "dist", "index.js"), "dist\n");
@@ -298,7 +299,6 @@ describe("development runtime artifact snapshots", () => {
     );
   });
 
-  // https://github.com/vercel/eve/issues/1151 — hoisting-workspace expression.
   it("mounts declared dependencies hoisted above the app root into source snapshots", async () => {
     const workspaceRoot = await createScratchDirectory("eve-dev-runtime-hoisted-dependency-");
     const appRoot = join(workspaceRoot, "agents", "support");
@@ -335,13 +335,6 @@ describe("development runtime artifact snapshots", () => {
       project: { appRoot },
     } as CompileAgentResult);
 
-    // The compiled module map imports the dependency relative to the app's
-    // compile directory, escaping the app root toward the install location
-    // (`../../../../node_modules/@acme/extension/...`). Any correct snapshot
-    // must materialize the package somewhere inside the snapshot where that
-    // resolution can land: either mirroring the hoisted location relative to
-    // the snapshot source root, or flattened into the app root's own
-    // node_modules.
     const acceptableMountLocations = [
       join(snapshot.runtimeAppRoot, "node_modules", "@acme", "extension"),
       join(snapshot.runtimeAppRoot, "..", "..", "node_modules", "@acme", "extension"),
@@ -349,9 +342,6 @@ describe("development runtime artifact snapshots", () => {
     expect(acceptableMountLocations.some((location) => existsSync(location))).toBe(true);
   });
 
-  // https://github.com/vercel/eve/issues/1151 — withEve bare-agent-dir expression:
-  // the agent root has no package.json of its own; the host app owns the
-  // dependency declaration and the install.
   it("mounts host-declared dependencies for bare agent roots without a package.json", async () => {
     const hostRoot = await createScratchDirectory("eve-dev-runtime-bare-agent-dependency-");
     const appRoot = join(hostRoot, "agents", "research");
@@ -361,8 +351,6 @@ describe("development runtime artifact snapshots", () => {
     await mkdir(appRoot, { recursive: true });
     await mkdir(hostPackageRoot, { recursive: true });
     await mkdir(compileDirectoryPath, { recursive: true });
-    // The host boundary is a real workspace root marker so the snapshot's
-    // source-root walk resolves to it, exactly like a withEve app.
     await writeFile(join(hostRoot, "pnpm-workspace.yaml"), "packages: []\n");
     await writeFile(
       join(hostRoot, "package.json"),
@@ -594,12 +582,12 @@ describe("development runtime artifact snapshots", () => {
         sourceRoot: appRoot,
       }),
     });
-    const runsDirectory = join(resolveLocalWorkflowWorldDataDirectory(appRoot), "default", "runs");
-    await mkdir(runsDirectory, { recursive: true });
-    await writeFile(
-      join(runsDirectory, "active-turn.json"),
-      `${JSON.stringify({ snapshotRoot: retiredSnapshotRoot, status: "running" })}\n`,
-    );
+    const world = createWorld({ dataDir: resolveLocalWorkflowWorldDataDirectory(appRoot) });
+    await world.events.create(null, {
+      eventType: "run_created",
+      eventData: { deploymentId: "retired", input: [], workflowName: "turn" },
+    });
+    await world.close?.();
 
     await pruneDevelopmentRuntimeArtifactsSnapshots({
       appRoot,
@@ -864,8 +852,6 @@ describe("development runtime artifact snapshots", () => {
 
     await writeFile(join(packageRoot, "dist", "index.js"), 'export const message = "live";\n');
 
-    // Workspace dependency packages are mounted in place like installed
-    // dependencies instead of being copied into the snapshot.
     expect(existsSync(join(snapshot.snapshotSourceRoot, "packages"))).toBe(false);
     const snapshotMountPath = join(snapshot.runtimeAppRoot, "node_modules", "@repo", "message");
     await expect(lstat(snapshotMountPath).then((stats) => stats.isSymbolicLink())).resolves.toBe(

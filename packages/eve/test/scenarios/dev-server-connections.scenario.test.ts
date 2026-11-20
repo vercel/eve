@@ -26,8 +26,6 @@ import {
   withinDeadline,
 } from "#internal/testing/dev-server-harness.js";
 
-// One app serves every test: the transactional channel's worker id and
-// instrumentation marker, a held stream, a WebSocket, and an env marker.
 const CONNECTIONS_DESCRIPTOR: ScenarioAppDescriptor = {
   ...TRANSACTIONAL_REBUILD_DESCRIPTOR,
   files: {
@@ -167,7 +165,6 @@ async function waitForWebSocketEvent<T>(
   });
 }
 
-// Each test only checks changes it makes, so the tests share one server.
 describe("eve dev server live connections", () => {
   let appRoot: string;
   let cleanupApp: (() => Promise<void>) | undefined;
@@ -190,7 +187,6 @@ describe("eve dev server live connections", () => {
     await cleanupApp?.();
   }, DEV_SERVER_SCENARIO_TIMEOUT_MS);
 
-  /** Server output written from now on. */
   function outputFromNow(): () => string {
     const stdoutStart = server.stdout().length;
     const stderrStart = server.stderr().length;
@@ -219,8 +215,6 @@ describe("eve dev server live connections", () => {
       );
       expect(new TextDecoder().decode(firstChunk.value)).toBe("first\n");
 
-      // The parent-owned control route must answer continuously through
-      // candidate preparation and promotion, not merely at spot checks.
       const revisionFailures: string[] = [];
       let stopRevisionPolling = false;
       const revisionPoller = (async () => {

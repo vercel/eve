@@ -12,14 +12,22 @@ import { encodeLine } from "#protocol/session-events/envelope.js";
 
 import { readDevSessionEvents } from "./logs-events.js";
 
-// It reads the runs `eve dev`'s local Workflow world stores, so it stays on Workflow.
 describe("readDevSessionEvents", () => {
   const roots: string[] = [];
+  const worlds: ReturnType<typeof createWorld>[] = [];
 
   afterEach(async () => {
+    await Promise.all(worlds.map((world) => world.close?.()));
+    worlds.length = 0;
     await Promise.all(roots.map((root) => rm(root, { recursive: true, force: true })));
     roots.length = 0;
   });
+
+  function openWorld(root: string): ReturnType<typeof createWorld> {
+    const world = createWorld({ dataDir: resolveLocalWorkflowWorldDataDirectory(root) });
+    worlds.push(world);
+    return world;
+  }
 
   it("returns an empty list without creating a store when none exists", async () => {
     const root = await mkdtemp(join(tmpdir(), "eve-logs-events-"));
@@ -39,11 +47,9 @@ describe("readDevSessionEvents", () => {
   });
 
   it("skips runs without session streams via the listStreams prefilter", async () => {
-    // A run with no session stream contributes nothing and costs a directory
-    // listing, not an idle-timeout wait.
     const root = await mkdtemp(join(tmpdir(), "eve-logs-events-"));
     roots.push(root);
-    const world = createWorld({ dataDir: resolveLocalWorkflowWorldDataDirectory(root) });
+    const world = openWorld(root);
     await world.events.create(null, {
       eventType: "run_created",
       eventData: {
@@ -60,7 +66,6 @@ describe("readDevSessionEvents", () => {
     });
 
     expect(events).toEqual([]);
-    // The prefilter answers from storage; no stream is ever opened.
     expect(Date.now() - startedAt).toBeLessThan(2_000);
   });
 
@@ -68,7 +73,7 @@ describe("readDevSessionEvents", () => {
     const logs = captureLogRecords();
     const root = await mkdtemp(join(tmpdir(), "eve-logs-events-"));
     roots.push(root);
-    const world = createWorld({ dataDir: resolveLocalWorkflowWorldDataDirectory(root) });
+    const world = openWorld(root);
     setWorld(world);
     const at = new Date().toISOString();
     const startRun = async (lines: readonly string[]) => {
@@ -77,8 +82,6 @@ describe("readDevSessionEvents", () => {
         eventData: { deploymentId: "dpl_test", workflowName: "sessionWorkflow", input: [] },
       });
       const runId = created.run!.runId;
-      // `close()` settles before the background pipe lands chunks in the
-      // world; `ops` settles once they are durable.
       const ops: Promise<unknown>[] = [];
       const writer = getRun(runId).getWritable<Uint8Array>({ ops }).getWriter();
       for (const line of lines) await writer.write(new TextEncoder().encode(line));
@@ -86,7 +89,6 @@ describe("readDevSessionEvents", () => {
       await Promise.all(ops);
       return runId;
     };
-    // A stranded reset appends a v27 line after the history an earlier eve recorded.
     const legacyRunId = await startRun([
       `${JSON.stringify({ data: {}, meta: { at, id: "evt_0" }, type: "session.started" })}\n`,
       encodeLine({ at, facts: [{ data: { outcome: "failed" }, type: "session.ended" }] }),

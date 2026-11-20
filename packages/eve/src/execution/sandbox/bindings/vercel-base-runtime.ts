@@ -1,3 +1,4 @@
+import { createVercelTimeout } from "#execution/sandbox/bindings/vercel-timeout.js";
 import { buildDockerBaseSetupScript } from "#execution/sandbox/bindings/docker-base-setup.js";
 import type { VercelSandboxCreateParams } from "#execution/sandbox/bindings/vercel-create-sdk.js";
 import type {
@@ -6,14 +7,18 @@ import type {
 } from "#execution/sandbox/bindings/vercel-sdk-types.js";
 import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
 
-/**
- * Prepares a fresh Vercel sandbox for use by the framework.
- */
 export async function ensureVercelSandboxBaseRuntime(sandbox: VercelSandbox): Promise<void> {
-  await runSandboxInitializationStep(sandbox, {
-    failureMessage: "Failed to initialize Vercel sandbox base runtime.",
-    script: buildDockerBaseSetupScript(),
-  });
+  const timeout = createVercelTimeout(sandbox);
+  try {
+    await timeout.run(() =>
+      runSandboxInitializationStep(sandbox, {
+        failureMessage: "Failed to initialize Vercel sandbox base runtime.",
+        script: buildDockerBaseSetupScript(),
+      }),
+    );
+  } finally {
+    await timeout.close();
+  }
 }
 
 export async function applyInitialVercelNetworkPolicy(
@@ -39,7 +44,6 @@ export function createVercelNetworkPolicySetter(
   };
 }
 
-/** eve's policy is the SDK's shape with readonly members, and the SDK never mutates it. */
 export function toVercelNetworkPolicy(
   policy: SandboxNetworkPolicy,
 ): NonNullable<VercelCreateOptions["networkPolicy"]> {

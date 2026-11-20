@@ -8,13 +8,6 @@ import { isLoopbackHostname } from "#shared/network-address.js";
 export const DEVELOPMENT_CLIENT_ADDRESS_HEADER = "x-eve-dev-client-address";
 export const DEVELOPMENT_CLIENT_ADDRESS_SIGNATURE_HEADER = "x-eve-dev-client-address-signature";
 
-/**
- * Stamps the accepted socket's peer address onto a request bound for the
- * dev worker. Public copies of the metadata headers are dropped first, and
- * the value is signed with the per-process dev transport secret: the
- * worker's own HTTP port is reachable by other local processes, so an
- * unsigned header could be forged by anything that discovers it.
- */
 export function stampDevelopmentClientAddress(
   headers: Headers | IncomingHttpHeaders,
   address: string | undefined,
@@ -38,11 +31,6 @@ export function stampDevelopmentClientAddress(
   );
 }
 
-/**
- * Returns the parent-stamped client address when its signature verifies,
- * `undefined` otherwise. Callers fall back to the socket peer, which in the
- * proxied dev topology is the parent's loopback hop.
- */
 export function readTrustedDevelopmentClientAddress(
   headers: Headers,
   secret: string | undefined,
@@ -56,11 +44,6 @@ export function readTrustedDevelopmentClientAddress(
     : undefined;
 }
 
-/**
- * Where the dev listener saw a request come from: `"local"` for this machine,
- * `"remote"` for another one, or `undefined` when the request carries no
- * verified stamp, as outside `eve dev`.
- */
 export function readTrustedDevelopmentPeer(headers: Headers): "local" | "remote" | undefined {
   const address = readTrustedDevelopmentClientAddress(
     headers,
@@ -70,11 +53,6 @@ export function readTrustedDevelopmentPeer(headers: Headers): "local" | "remote"
   return isLocalMachineAddress(address) ? "local" : "remote";
 }
 
-/**
- * Whether a socket peer address or URL host name belongs to this machine. With `--host` bound
- * to a LAN address, the developer's own clients connect from that address
- * rather than loopback.
- */
 export function isLocalMachineAddress(address: string): boolean {
   if (isLoopbackHostname(address)) return true;
   const unmapped = address
@@ -86,7 +64,6 @@ export function isLocalMachineAddress(address: string): boolean {
   );
 }
 
-/** Verifies parent-stamped client provenance carried beyond the original request. */
 export function isTrustedDevelopmentClientAddress(
   address: string,
   signature: string,
@@ -101,10 +78,6 @@ export function isTrustedDevelopmentClientAddress(
   );
 }
 
-/**
- * Constant-time string comparison over fixed-length digests, so neither the
- * length nor the content of a secret comparison leaks through timing.
- */
 export function timingSafeEqualStrings(a: string, b: string): boolean {
   const digestA = createHash("sha256").update(a).digest();
   const digestB = createHash("sha256").update(b).digest();

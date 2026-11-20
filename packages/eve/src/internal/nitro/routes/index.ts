@@ -1,8 +1,3 @@
-/**
- * Public docs URL surfaced from the barebones home page. Kept in source
- * so the deployment output is a fully static, build-time-baked HTML
- * response that performs no runtime resolution.
- */
 const EVE_DOCS_URL = "https://eve.dev/docs";
 
 const AGENT_NAME_PLACEHOLDER = "{{AGENT_NAME}}";
@@ -26,12 +21,6 @@ const CHECK_ICON_SVG = `<svg aria-hidden="true" class="check-icon" fill="none" s
     <polyline points="20 6 9 17 4 12"></polyline>
   </svg>`;
 
-/**
- * Inline copy-button behavior. Reads the command straight from the rendered
- * `.terminal-cmd` node so we never re-serialize (and thus never risk
- * double-escaping) the value into a script string. It touches no request
- * state and loads nothing external, so it cannot leak the deployment origin.
- */
 const COPY_SCRIPT = `<script>
 (function () {
   var button = document.querySelector(".terminal-copy");
@@ -55,24 +44,6 @@ const COPY_SCRIPT = `<script>
 })();
 </script>`;
 
-/**
- * Barebones HTML served at `GET /`.
- *
- * Reveals only the deployed agent's display name — no model, no instructions,
- * no list of skills or schedules, no API endpoint paths. Inspection JSON
- * (model id, instructions, tools, skills, etc.) lives behind the resolved eve
- * channel auth policy at `/eve/v1/info`.
- *
- * The page loads zero external assets — no fonts, no images, no
- * analytics beacons, and no external scripts — so it cannot leak the
- * deployment's origin to a third party simply by being visited. The only
- * script is an inline copy-button handler that reads local DOM state.
- *
- * `{{DEPLOYMENT_URL}}` is the only request-time substitution: the page
- * echoes the visitor's own request origin back into the `$ eve dev …`
- * hint so they can copy-paste it without typing the URL by hand. We
- * don't read any other request state.
- */
 const HOME_PAGE_HTML_TEMPLATE = `<!doctype html>
 <html lang="en">
 <head>
@@ -311,17 +282,6 @@ function pickFirstForwardedValue(value: string | null): string | undefined {
   return first;
 }
 
-/**
- * Resolves the public origin a visitor is using to reach the deployment.
- *
- * Prefers the `x-forwarded-host` / `x-forwarded-proto` headers set by
- * Vercel's edge so the rendered URL matches the address the visitor
- * actually typed (including custom domains), then falls back to the
- * `host` header, then to `request.url` for local `eve dev` runs that
- * skip the proxy chain. Comma-separated forwarded values are split and
- * the first hop is used — that is the public-facing entry, the rest are
- * internal forwarder hostnames.
- */
 function resolveDeploymentUrl(request: Request): string {
   const headers = request.headers;
   const requestUrl = new URL(request.url);
@@ -332,7 +292,6 @@ function resolveDeploymentUrl(request: Request): string {
   return `${proto}://${host}`;
 }
 
-/** Render the shared lightweight deployment status page. */
 export function buildHomePageHtml(input: {
   readonly name: string;
   readonly statusDetail: string;
@@ -353,11 +312,6 @@ export function buildHomePageHtml(input: {
     .replace(TERMINAL_PLACEHOLDER, () => terminal);
 }
 
-/**
- * Builds the barebones home page response for one request. Exposed
- * for tests so callers can supply a real {@link Request}; production
- * traffic flows through the Nitro {@link H3Event} default export.
- */
 export function buildHomePageResponse(
   input: {
     readonly agentName: string;

@@ -15,8 +15,6 @@ interface Snapshot {
   readonly pending: readonly ReceivedEvent[];
 }
 
-// Channels and clients may load independent eve bundles in one process. Like live projections,
-// their snapshot registry must be shared without putting table references on public objects.
 const KEY = Symbol.for("eve.session-view-registry.v1");
 type Shared = typeof globalThis & { [KEY]?: WeakMap<SessionView, Snapshot> };
 const snapshots = ((globalThis as Shared)[KEY] ??= new WeakMap());
@@ -51,7 +49,6 @@ function table<TRow extends object>(
   );
 }
 
-/** Internal publication boundary; rows are replaced by the fold and cloned at most once. */
 export function snapshotOf(
   view: Tables,
   previews: SessionPreviews = emptyPreviews(),
@@ -90,7 +87,6 @@ export function snapshotState(view: SessionView): Snapshot {
   return state;
 }
 
-/** Private access for execution and built-in renderers, never exported by a public entry. */
 export function sessionTables(view: SessionView): Tables {
   return snapshotState(view).tables;
 }

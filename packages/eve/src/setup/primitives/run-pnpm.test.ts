@@ -379,7 +379,6 @@ describe("spawnPnpm", () => {
     error.name = "AbortError";
     child.emit("error", error);
     await new Promise((resolve) => setTimeout(resolve, 0));
-    // Cleanup after an abort must not race a package manager that is still writing files.
     expect(settled).toBe(false);
 
     child.emit("close", null, "SIGTERM");

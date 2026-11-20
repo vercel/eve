@@ -9,22 +9,9 @@ import {
   isSandboxRefUrl,
 } from "#internal/attachments/sandbox-refs.js";
 
-// Enough base64 to cover image headers, including a JPEG's EXIF block.
 const HEADER_BASE64_CHARS = 96 * 1024;
 const REMOTE_URL = /^https?:\/\//i;
 
-/**
- * Rough token estimate: serialized JSON UTF-8 bytes / 4, with file parts
- * counted at what providers bill for media instead of their base64 length.
- * Bytes, not string length: a CJK character is one UTF-16 unit but about one
- * token, and its three UTF-8 bytes track that cost far better. Good enough
- * for deciding whether compaction is needed; the real token count comes back
- * from the model each step via
- * `CompactionConfig.lastKnownInputTokens`.
- *
- * Accepts any JSON-serializable value so callers can apply the same heuristic
- * to whole message arrays or individual content parts on one consistent ruler.
- */
 export function estimateTokens(value: unknown): number {
   let mediaTokens = 0;
   const serialized = JSON.stringify(value, (_key, candidate: unknown) => {
@@ -37,14 +24,9 @@ export function estimateTokens(value: unknown): number {
     };
     return { mediaType, type };
   });
-  // Whole tokens: the count reaches events, which carry integers.
   return Math.ceil(Buffer.byteLength(serialized ?? "") / 4) + mediaTokens;
 }
 
-/**
- * Media tokens for a message file part or a `content` tool-output file part,
- * or `undefined` when the value is not one or renders as plain text.
- */
 function estimateFilePartTokens(value: unknown): number | undefined {
   if (value === null || typeof value !== "object") return undefined;
   const part = value as {
@@ -85,7 +67,6 @@ function estimateFileDataTokens(data: unknown, mediaType: string): number | unde
   return estimateInlineTokens(data, mediaType);
 }
 
-/** Attachments that render as their label alone stay text. */
 function estimateSandboxRefTokens(url: URL): number | undefined {
   const ref = decodeSandboxRef(url);
   return inlinesSandboxRefAsBytes(ref) ? estimateMediaTokens(ref) : undefined;
@@ -103,7 +84,6 @@ function isTaggedFileData(
   );
 }
 
-/** Providers fetch remote files themselves; only images have a known cost. */
 function estimateRemoteTokens(mediaType: string): number | undefined {
   return mediaType.startsWith("image/") ? estimateMediaTokens({ mediaType, size: 0 }) : undefined;
 }
@@ -126,8 +106,6 @@ function base64Header(base64: string): Uint8Array {
   return Buffer.from(base64.slice(0, HEADER_BASE64_CHARS), "base64");
 }
 
-// Only image dimensions come from a header; page counts need the whole
-// payload, so inline PDFs fall back to their size.
 function withHeaderMetadata(header: Uint8Array, mediaType: string, size: number): MediaMetadata {
   if (!mediaType.startsWith("image/")) return { mediaType, size };
   return { ...readImageDimensions(header), mediaType, size };

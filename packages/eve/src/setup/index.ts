@@ -1,4 +1,3 @@
-// Public setup primitives shared by CLI flows and external setup tooling.
 export { type OutputSink, type SetupBox, WizardCancelledError } from "./step.js";
 export { InteractionRequired } from "./ask.js";
 export {

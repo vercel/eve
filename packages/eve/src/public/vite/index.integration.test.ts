@@ -25,7 +25,6 @@ describe("eveVite", () => {
       mkdir(join(root, "agents", "support", "agent"), { recursive: true }),
       mkdir(join(root, "agents", "research", "agent"), { recursive: true }),
     ]);
-    // Members resolve in name order: research, then support.
     resolveSharedEveDevServerMock
       .mockResolvedValueOnce({ origin: "http://127.0.0.1:4002" })
       .mockResolvedValueOnce({ origin: "http://127.0.0.1:4001" });

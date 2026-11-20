@@ -4,14 +4,6 @@ const EVE_NUXT_PRODUCTION_ORIGIN_ENV = "EVE_NUXT_PRODUCTION_ORIGIN";
 const EVE_NUXT_PRODUCTION_PORT_ENV = "EVE_NUXT_PRODUCTION_PORT";
 const DEFAULT_EVE_NUXT_PRODUCTION_PORT = 4274;
 
-/**
- * Resolve where one eve agent's routes proxy to in non-Vercel production.
- * An explicit override (`EVE_NUXT_PRODUCTION_ORIGIN`) is one host that mounts
- * every agent under its own public prefix (`/eve/v1` or `/eve/<name>/v1`), as
- * with `withEve`. Otherwise each agent runs as its own local server serving
- * `/eve/v1`, so workspace members take the next port from the base. On Vercel
- * the module routes at the edge through a Build Output service instead.
- */
 export function resolveProductionTarget(input: {
   readonly portOffset: number;
   readonly publicPrefix: string;

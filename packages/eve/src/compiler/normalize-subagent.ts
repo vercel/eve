@@ -31,9 +31,6 @@ export type NormalizedSubagentConfig =
     };
 
 export function normalizeSubagentConfig(value: unknown, message: string): NormalizedSubagentConfig {
-  // A dynamic subagent chooses the whole subagent: its description, or whether there is one. A
-  // subagent the parent always sees, with a model chosen per session, is a defineAgent() whose
-  // model field is dynamic.
   if (isDynamicSentinel(value)) {
     assertDynamicSentinelKeys(value, message);
     return { kind: "dynamic" };

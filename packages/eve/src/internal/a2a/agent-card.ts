@@ -39,13 +39,11 @@ export interface BuildAgentCardInput {
   readonly described: AgentDescription;
   readonly endpointUrl: string;
   readonly eveVersion: string;
-  /** Media types the channel accepts as file parts, from its upload policy. */
   readonly fileInputModes: readonly string[];
   readonly security: CardSecurity;
   readonly options: A2aAgentCardOptions | undefined;
 }
 
-/** What the route's auth policy tells a client before it has credentials. */
 export interface CardSecurity {
   readonly challenges: readonly UnauthorizedChallenge[];
   readonly oauth: OAuthResourceOptions | undefined;
@@ -86,7 +84,6 @@ export function buildAgentCard(input: BuildAgentCardInput): Record<string, JsonV
       },
     ],
     version: options?.version ?? input.eveVersion,
-    // Undefined fields drop out when the card serializes.
     documentationUrl: options?.documentationUrl,
     iconUrl: options?.iconUrl,
     provider: options?.provider,
@@ -95,11 +92,6 @@ export function buildAgentCard(input: BuildAgentCardInput): Record<string, JsonV
   return JSON.parse(JSON.stringify(card)) as Record<string, JsonValue>;
 }
 
-/**
- * `securitySchemes` and `securityRequirements` from the auth policy: one HTTP scheme per challenge
- * its strategies declare, any one of which satisfies the route. A policy that declares none, such
- * as `none()` or a custom `AuthFn`, advertises none: the card says only what the policy states.
- */
 function securityFields(input: BuildAgentCardInput): Record<string, JsonValue> {
   const { options, security } = input;
   if (options?.securitySchemes !== undefined) {
@@ -128,18 +120,8 @@ function securityFields(input: BuildAgentCardInput): Record<string, JsonValue> {
   return { securityRequirements, securitySchemes };
 }
 
-/**
- * When this module loaded: the most recent time the card could have changed, since the card is
- * built from configuration a deployment fixes. Instances that loaded later report a later time,
- * which only costs a client a refetch.
- */
 const CARD_LOADED_AT = new Date(Math.floor(Date.now() / 1000) * 1000);
 
-/**
- * The card as a cacheable response (spec 8.6): a strong `ETag` over its exact bytes, which a
- * matching `If-None-Match` answers with `304`, plus `Last-Modified`, which `If-Modified-Since`
- * consults only when the request has no `If-None-Match` (RFC 9110 13.2.2).
- */
 export async function agentCardResponse(
   request: Request,
   card: unknown,

@@ -25,15 +25,14 @@ const EVE_CATALOG_FINGERPRINT_FILES = [
 ] as const;
 const COMPILED_VENDOR_ROOT = join(EVE_PACKAGE_ROOT, ".generated", "compiled");
 const DIST_SOURCE_ROOT = join(EVE_PACKAGE_ROOT, "dist", "src");
-// Package entry points that app bundlers compile for the browser.
 const BROWSER_ENTRY_FILES = [
   "client/index.js",
   "react/index.js",
+  "solid/index.js",
   "svelte/index.js",
   "vue/index.js",
 ] as const;
 
-/** The version of `name` that `from` resolves, for packages that do not export their manifest. */
 function installedVersion(name: string, from: string): string {
   let directory = dirname(createRequire(from).resolve(name));
   for (;;) {
@@ -62,8 +61,6 @@ function containsSourceMapComment(source: string): boolean {
   return /(?:^|\n)\s*\/\/# sourceMappingURL=/u.test(source);
 }
 
-// Resolves an import in the published dist tree the way the package `imports`
-// map does. Bare specifiers are app-provided peers (`react`, `vue`, ...).
 function resolveDistImport(importer: string, specifier: string): string | undefined {
   if (specifier.startsWith("#compiled/")) {
     return join(DIST_SOURCE_ROOT, "compiled", specifier.slice("#compiled/".length));
@@ -201,8 +198,6 @@ type Note = 'request from "./not-an-import"';`,
   });
 
   it("leaves Zod's process-global configuration to the app", async () => {
-    // Every Zod copy in a process shares `globalThis.__zod_globalConfig`, so a
-    // vendored side effect there would rewrite the app's own schemas too.
     const zodUrl = pathToFileURL(join(COMPILED_VENDOR_ROOT, "zod", "index.js")).href;
     const { z } = await import(zodUrl);
     const schema = z.object({ id: z.string() });
@@ -337,11 +332,6 @@ type Note = 'request from "./not-an-import"';`,
   });
 
   it("keeps class expressions out of shared declarations in browser modules", async () => {
-    // webpack before 5.90 credits the declarators after `var a = class {}, b = f()`
-    // to the class. When the class is unused it drops the `f` import binding but
-    // keeps the call, so the bundle throws `f is not defined` (#5037).
-    // Walk every published module a browser entry reaches: eve's own code and
-    // the vendored chunks alike.
     const visited = new Set<string>();
     const pending = BROWSER_ENTRY_FILES.map((entry) => join(DIST_SOURCE_ROOT, entry));
     const joinedClasses: string[] = [];

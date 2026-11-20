@@ -32,11 +32,8 @@ export async function openCodeChannel(
   message: string,
   options: SlackOpenCodeChannelOptions = {},
 ): Promise<SlackCodeChannelOpenResult> {
-  // The Slack channel's metadata names the conversation and the message that
-  // triggered the turn, whatever auth the session runs as.
   const { channelId, codeChannel, installationTeamId, threadTs, triggeringMessageTs } =
     ctx.channel.metadata ?? {};
-  // Slack doesn't open a code channel from inside one.
   if (codeChannel === true) return unavailable("This conversation is already a code channel.");
   if (typeof channelId !== "string" || typeof threadTs !== "string") {
     return unavailable("This conversation is not a Slack message.");
@@ -45,7 +42,6 @@ export async function openCodeChannel(
   const delivery = await ctx
     .to(slack, {
       channelId,
-      // Slack checks this session is the origin thread's before creating anything.
       codeChannel: {
         ...(options.name !== undefined && { name: options.name }),
         originThreadTs: threadTs,
@@ -56,7 +52,6 @@ export async function openCodeChannel(
     .send(message, {
       auth: ctx.session.auth.current,
       history: textHistory(ctx.messages),
-      // Call ids repeat across sessions, and the key also picks the code channel's session.
       idempotencyKey: `${ctx.session.id}:${ctx.callId}`,
     });
   return { sessionId: delivery.sessionId, status: "opened" };
@@ -66,7 +61,6 @@ function unavailable(reason: string): SlackCodeChannelOpenResult {
   return { reason, status: "unavailable" };
 }
 
-/** The text of the conversation's user and assistant messages; tool calls and files drop out. */
 function textHistory(messages: ToolContext["messages"]): SessionHistoryMessage[] {
   return messages.flatMap((entry) => {
     if (entry.role !== "user" && entry.role !== "assistant") return [];

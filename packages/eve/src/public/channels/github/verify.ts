@@ -27,20 +27,11 @@ const log = createLogger("github.verify");
  */
 export type GitHubWebhookVerifier = (request: Request, body: string) => unknown | Promise<unknown>;
 
-/** Options for {@link verifyGitHubRequest}. */
 interface GitHubVerifyOptions {
   readonly webhookSecret?: GitHubWebhookSecret;
   readonly webhookVerifier?: GitHubWebhookVerifier;
 }
 
-/**
- * Verifies a GitHub webhook request and returns its raw body. The raw body is
- * required because GitHub signs the exact bytes it delivered.
- *
- * When a {@link GitHubWebhookVerifier} is supplied, it replaces the built-in
- * HMAC check: GitHub's webhook secret is never read and the verifier owns the
- * accept/reject decision.
- */
 export async function verifyGitHubRequest(
   request: Request,
   options: GitHubVerifyOptions,
@@ -67,7 +58,6 @@ export async function verifyGitHubRequest(
   return body;
 }
 
-/** Signs a raw GitHub webhook body for tests and local fixtures. */
 export function signGitHubWebhookBody(body: string, secret: string): string {
   return `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`;
 }

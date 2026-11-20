@@ -1,6 +1,5 @@
 import { defineTool, type ToolContext } from "eve/tools";
 
-/** Registry categories an integration search can be narrowed to. */
 const CATEGORIES = ["channel", "connection", "extension", "instrumentation", "memory"] as const;
 
 type Category = (typeof CATEGORIES)[number];
@@ -11,12 +10,7 @@ const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 25;
 const MIN_RELATIVE_SCORE = 0.4;
 const FETCH_TIMEOUT_MS = 10_000;
-/**
- * The catalog changes when eve releases, not between turns, so one fetch can
- * serve a whole conversation. A stale-tolerant read is correct here.
- */
 const CACHE_TTL_MS = 5 * 60_000;
-/** The sandbox mounts the authored `agent/` directory here in development. */
 const AUTHORED_SOURCE_MOUNT = "/source";
 const AUTHORED_PREFIX = "agent/";
 const SELF_MODIFICATION_MOUNT = "agent/extensions/self-modification";
@@ -89,24 +83,18 @@ const outputSchema = {
   required: ["items", "errors", "total", "hasMore"],
 } as const;
 
-/** One catalog entry, narrowed from the published registry index. */
 export interface CatalogEntry {
   readonly address: string;
   readonly title: string;
   readonly description?: string;
   readonly category?: Category;
   readonly requires?: string;
-  /** Authored path this item installs, used to detect an existing install. */
   readonly authoredTarget?: string;
-  /** Whether `meta.eve.setup` declares one or more setup commands. */
   readonly declaresSetup?: boolean;
-  /** Whether any file would replace the self-modification extension mount. */
   readonly selfModificationMount?: boolean;
-  /** Names of environment variables the item declares. */
   readonly envVars?: readonly string[];
 }
 
-/** One row returned to the model. */
 export interface FoundIntegration {
   readonly address: string;
   readonly title: string;
@@ -128,13 +116,6 @@ function isCategory(value: string): value is Category {
   return (CATEGORIES as readonly string[]).includes(value);
 }
 
-/**
- * Derives the category from the item address.
- *
- * eve registry addresses carry their category as the leading path segment.
- * Package-scoped items such as `eve/self-modification` have no recognized
- * category, so the field stays absent rather than being guessed.
- */
 function categoryOf(address: string): Category | undefined {
   const segment = address.split("/")[0];
   return segment !== undefined && address.includes("/") && isCategory(segment)
@@ -142,10 +123,6 @@ function categoryOf(address: string): Category | undefined {
     : undefined;
 }
 
-/**
- * Falls back to a readable title for an item that publishes none, matching how
- * the eve CLI labels catalog rows.
- */
 function titleFromAddress(address: string): string {
   const slug = address.split("/").at(-1) ?? address;
   return slug
@@ -154,14 +131,6 @@ function titleFromAddress(address: string): string {
     .join(" ");
 }
 
-/**
- * Reads the eve-owned metadata block from one index entry.
- *
- * `meta.eve` is eve's own registry contract, described by the schemas in the
- * CLI's `registry-metadata.ts`. This reads the two fields the subagent needs
- * and ignores the rest, so an added field degrades to an absent value here
- * instead of a parse failure.
- */
 function eveMetadata(entry: Record<string, unknown>): Record<string, unknown> {
   const meta = entry.meta;
   if (!isRecord(meta)) return {};
@@ -175,7 +144,6 @@ function targetsSelfModificationMount(target: string): boolean {
   );
 }
 
-/** First authored file the item installs; identifies an existing install. */
 function authoredTargetOf(entry: Record<string, unknown>): string | undefined {
   const files = entry.files;
   if (!Array.isArray(files)) return undefined;
@@ -197,18 +165,11 @@ function targetsSelfModificationMountOf(entry: Record<string, unknown>): boolean
   );
 }
 
-/** Names of environment variables the item declares, used to report unset ones after install. */
 function declaredEnvVars(entry: Record<string, unknown>): readonly string[] {
   const envVars = entry.envVars;
   return isRecord(envVars) ? Object.keys(envVars) : [];
 }
 
-/**
- * Narrows the published registry index into catalog entries.
- *
- * Unreadable entries are skipped rather than failing the whole search: the
- * index is owned by the registry and may carry fields this version predates.
- */
 export function parseRegistryIndex(value: unknown): readonly CatalogEntry[] {
   if (!isRecord(value) || !Array.isArray(value.items)) return [];
   const entries: CatalogEntry[] = [];
@@ -251,11 +212,6 @@ export function parseRegistryIndex(value: unknown): readonly CatalogEntry[] {
   return entries;
 }
 
-/**
- * Filters and bounds catalog entries for one search.
- *
- * Category filters match the leading segment of each registry address.
- */
 export function selectIntegrations(input: {
   readonly category?: Category;
   readonly entries: readonly CatalogEntry[];
@@ -352,16 +308,6 @@ function matchesCategory(entry: CatalogEntry, category: Category): boolean {
   return entry.category === category;
 }
 
-/**
- * Resolves the registry index URL, honoring the same development override the
- * eve CLI reads.
- *
- * The override decides which registry the agent trusts, so it enforces the same
- * rules as `resolveOfficialRegistryUrl` in eve's registry command: HTTP(S) only,
- * no embedded credentials, no query or fragment. The rules are restated here
- * rather than imported because that module reaches the registry client, which
- * has no place in an agent runtime.
- */
 export function officialRegistryIndexUrl(): string {
   return `${DEFAULT_REGISTRY_BASE}${INDEX_PATH}`;
 }
@@ -397,7 +343,6 @@ interface CachedIndex {
 
 let cache: CachedIndex | undefined;
 
-/** Clears the module-level index cache. Test seam. */
 export function clearRegistryIndexCache(): void {
   cache = undefined;
 }
@@ -431,15 +376,6 @@ export async function loadRegistryIndex(input: {
   return entries;
 }
 
-/**
- * Annotates each row with whether the authored tree already holds its file.
- *
- * Development mounts the authored `agent/` directory at `/source`, so
- * `agent/channels/slack.ts` is `/source/channels/slack.ts`. eve derives every
- * integration name from its path, so a present file is an exact answer rather
- * than a heuristic. The field is left absent — never `false` — when the source
- * cannot be read, so "unknown" is not reported as "not installed".
- */
 async function annotateInstalled(input: {
   readonly ctx: Pick<ToolContext, "getSandbox">;
   readonly entries: readonly CatalogEntry[];

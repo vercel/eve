@@ -7,12 +7,6 @@ interface ProjectCommandLogger {
   log(message: string): void;
 }
 
-/**
- * Resolves standalone projects without using application discovery, which
- * deliberately selects an individual agent and cannot represent a workspace
- * root. Workspace members remain unchanged so the command can explain that
- * deployment and linking belong at the workspace root.
- */
 function projectCommand(command: Command, applicationContext: CliApplicationContext): Command {
   return command.hook("preAction", async () => {
     const context = await findEveProjectContext(applicationContext.root);
@@ -20,7 +14,6 @@ function projectCommand(command: Command, applicationContext: CliApplicationCont
   });
 }
 
-/** Registers project-level Vercel commands without eagerly loading their flows. */
 export function registerProjectCommands(input: {
   program: Command;
   logger: ProjectCommandLogger;

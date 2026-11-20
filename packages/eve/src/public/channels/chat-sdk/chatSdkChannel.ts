@@ -68,7 +68,6 @@ const DEFAULT_ROUTE = "/eve/v1";
 const DEFAULT_INPUT_ACTION_PREFIX = "eve_input:";
 const DEFAULT_STREAMING_EDIT_INTERVAL_MS = 1_000;
 const MAX_TYPING_STATUS = 80;
-/** How the undelivered-reply notice and model note name a Chat SDK surface. */
 const SURFACE_NAME = "this chat";
 
 type ChatSdkAdapters = Record<string, Adapter>;
@@ -350,8 +349,6 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
       },
       log,
     );
-    // Chat SDK stops its action handlers at a throw, as it did before inactive
-    // presses were told apart from other failures.
     if (answer.outcome === "failed") throw answer.error;
     if (answer.outcome === "delivered") return;
     await Promise.all([
@@ -381,9 +378,6 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
         thread: threadFromState(bot, state),
       };
     },
-    // Register both methods on each adapter's webhook path. Providers such as X
-    // verify ownership with a GET challenge (CRC) and deliver events via POST;
-    // the adapter dispatches on request.method, so one handler serves both.
     routes: adapterNames(config.adapters).flatMap((adapterName) => {
       const path = routeForAdapter(adapterName, config);
       const handler = async (
@@ -406,7 +400,6 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
     }),
     async receive({ message, target, ...send }, { from }) {
       const thread = serializeReceiveTarget(bot, target);
-      // A thread ID alone can't say whether it is a DM unless the adapter can tell.
       const spaceUnknown =
         target.thread === undefined && bot.getAdapter(thread.adapterName).isDM === undefined;
       return from(thread.id).send(message, {
@@ -414,7 +407,6 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
         state: { thread, ...(spaceUnknown && { spaceUnknown: true }) },
       });
     },
-    // `session.auth.current` is the caller of this delivery.
     deliver(
       payload,
       channel: ChatSdkChannelContext<TAdapters> & { readonly session: ChannelContext["session"] },
@@ -453,7 +445,6 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
     if (!channel.thread) return false;
     const posted = await channel.thread.post(renderInteractions([request], inputActionPrefix));
     if (!posted.id) return;
-    // Tracked even without edit support, so an answer can name the card it is on.
     channel.state.pendingInputCards = {
       ...channel.state.pendingInputCards,
       [posted.id]: { requests: [request], resolved: {} },
@@ -519,14 +510,12 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
         await safeStartTyping(channel.thread, truncate(buffered));
         return;
       }
-      // eve's own task controls, and tools that set `label: false`, stay out of view.
       if (!showsActivity(data.capability)) return;
       const label = callLabel(data);
       await safeStartTyping(channel.thread, truncate(`${label}...`));
     },
     async "content.delta"({ data }, { channel }) {
       if (!channel.thread || !canStream(channel)) return;
-      // Only text streams: a part announces its kind with its first delta.
       const streaming = channel.state.streamPartId === data.partId;
       if (data.kind === undefined ? !streaming : data.kind !== "text") return;
       const currentText = streaming ? channel.state.streamText : null;
@@ -550,12 +539,9 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
         channel.state.lastEditAtMs = Date.now();
       } catch (error) {
         if (!isNotImplemented(error)) throw error;
-        // Keep the anchor: completion must not post the reply beside it.
         channel.state.editSupported = false;
       }
     },
-    // Some adapters show only text, where a reply can answer only the request
-    // it sees, so cards post one at a time.
     async "interaction.opened"(event, ctx) {
       const { data } = event;
       const { channel } = ctx;
@@ -563,7 +549,6 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
       if (signIns !== undefined)
         await showSignIn(sessionTables(ctx.view), data.interactionId, signIns);
     },
-    // Covers every way a request ends: a press, a typed answer, or a withdrawal.
     async "interaction.settled"(event, ctx) {
       const { data } = event;
       const { channel } = ctx;
@@ -579,10 +564,6 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
       const text = typeof data.value === "string" ? data.value : "";
       if (contentPhase(data.phase) === "narration") {
         channel.state.pendingToolCallMessage = text ? (firstNonEmptyLine(text) ?? null) : null;
-        // Finalize the streamed anchor so it shows the complete pre-tool-call
-        // text rather than the last throttled edit. Pass `false` so nothing new
-        // is posted when nothing was streamed — intermediate tool-call narration
-        // must not become a standalone message on non-streaming surfaces.
         if (text) {
           try {
             await finalizeStreamedMessage(channel, text, false);
@@ -625,11 +606,6 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
   };
 }
 
-/**
- * Posts a typing indicator without failing the turn when the adapter does not
- * support one. Swallows {@link isNotImplemented} errors (e.g. email adapters)
- * and rethrows anything else.
- */
 async function safeStartTyping(thread: Thread | null, status?: string): Promise<void> {
   if (!thread) return;
   try {
@@ -639,19 +615,10 @@ async function safeStartTyping(thread: Thread | null, status?: string): Promise<
   }
 }
 
-/**
- * Edits a previously posted message in place via the adapter. Rendered as
- * markdown so streamed edits match the completed-message formatting.
- */
 async function editMessage(thread: Thread, messageId: string, markdown: string): Promise<void> {
   await thread.adapter.editMessage(thread.id, messageId, { markdown });
 }
 
-/**
- * Replaces a pressed request card with only `label`. The session that held the
- * request is gone and a press carries no prompt text, so the prompt can't be
- * kept; what matters is that the buttons stop being offered.
- */
 async function retireInputCard(
   thread: Pick<Thread, "adapter" | "id">,
   messageId: string,
@@ -664,16 +631,6 @@ async function retireInputCard(
   }
 }
 
-/**
- * Shows a completed assistant message and clears the stream. With a streamed
- * anchor, edits it to the complete text unless it already shows it; the
- * anchor is the reply, so a failed edit throws rather than posting the reply
- * beside it, and an edit {@link isNotImplemented} also disables edits for the
- * session. Without an anchor, posts the message when `postWhenNoAnchor` is
- * `true` (a final reply on a non-streaming surface); when `false`, leaves the
- * surface untouched so intermediate tool-call narration does not become a
- * standalone message.
- */
 async function finalizeStreamedMessage(
   channel: ChatSdkChannelContext,
   message: string,
@@ -696,12 +653,10 @@ async function finalizeStreamedMessage(
   }
 }
 
-/** Whether streamed edits are enabled and still supported by the adapter. */
 function canStream(channel: ChatSdkChannelContext): boolean {
   return channel.streaming && channel.state.editSupported !== false;
 }
 
-/** Resets the streaming anchor so the next step starts a fresh message. */
 function clearStream(state: ChatSdkChannelState): void {
   state.anchorMessageId = null;
   state.lastEditAtMs = null;
@@ -710,7 +665,6 @@ function clearStream(state: ChatSdkChannelState): void {
   state.shownText = null;
 }
 
-/** First non-blank line of `text`, used as a compact typing status. */
 function firstNonEmptyLine(text: string): string | undefined {
   for (const line of text.split(/\r?\n/u)) {
     const trimmed = line.trim();
@@ -719,7 +673,6 @@ function firstNonEmptyLine(text: string): string | undefined {
   return undefined;
 }
 
-/** Caps `text` at `max` characters with a trailing ellipsis. */
 function truncate(text: string, max = MAX_TYPING_STATUS): string {
   return text.length <= max ? text : `${text.slice(0, max - 1)}\u2026`;
 }
@@ -757,11 +710,6 @@ async function bridgeRespond<TAdapters extends ChatSdkAdapters>(
   });
 }
 
-/**
- * Records the author of the delivery's message as the Chat SDK user behind its
- * caller. A principal several people send as, such as tenant auth, names no one
- * person, so it records `null` rather than whoever spoke last.
- */
 function recordPrincipalUser(
   state: ChatSdkChannelState,
   caller: SessionAuthContext | null,
@@ -779,10 +727,6 @@ function recordPrincipalUser(
   };
 }
 
-/**
- * Records the delivery's message as the thread's latest. Session state keeps
- * the thread from the first delivery, so its `currentMessage` goes stale.
- */
 function recordLatestMessage(
   state: ChatSdkChannelState,
   payload: ChannelDelivery<ChatSdkChannelState>,
@@ -792,14 +736,11 @@ function recordLatestMessage(
   state.latestMessageId = message.id;
 }
 
-/** Channel state a delivery carries. `inputAnswer` and `responderName` live only on the delivery. */
 interface ChatSdkDeliveryState extends ChatSdkChannelState {
   inputAnswer?: ChatSdkInputAnswer;
-  /** The name of the person who pressed, for a press's delivery. */
   responderName?: string;
 }
 
-/** How a Chat SDK user is named on a card everyone in the thread reads. */
 function chatSdkUserName(user: {
   readonly fullName?: string;
   readonly userName?: string;
@@ -807,11 +748,6 @@ function chatSdkUserName(user: {
   return user.fullName || user.userName || undefined;
 }
 
-/**
- * Records the name of whoever sent a delivery, the message's author or the
- * presser, as the person behind its caller, so a card the delivery answers can
- * name them.
- */
 function recordPrincipalName(
   state: ChatSdkChannelState,
   caller: SessionAuthContext | null,
@@ -830,11 +766,6 @@ function recordPrincipalName(
   state.namesByPrincipal = { ...state.namesByPrincipal, [caller.principalId]: name };
 }
 
-/**
- * The response for a delivery's `inputAnswer`, when its card still waits on a
- * request that offers the option. Matching the card keeps an answer meant for
- * one prompt from settling a different request.
- */
 function resolveInputAnswer(
   state: ChatSdkChannelState,
   payload: ChannelDelivery<ChatSdkChannelState>,
@@ -867,18 +798,12 @@ function initialState(): ChatSdkChannelState {
   return { pendingAuthMessageIds: {}, thread: null };
 }
 
-/**
- * Downloads an attachment `messageContentOf` deferred to the step: rebuilds
- * the download with the adapter's `rehydrateAttachment`, since the message's
- * own `fetchData` didn't survive the queue.
- */
 async function fetchAttachment<TAdapters extends ChatSdkAdapters>(
   bot: Chat<TAdapters>,
   url: string,
 ): Promise<FetchFileResult | null> {
   const ref = parseChatSdkFileRef(new URL(url));
   if (ref === null) return null;
-  // The step may run where the webhook didn't, so the adapters may not be initialized yet.
   await bot.initialize();
   const rehydrated = bot.getAdapter(ref.adapter).rehydrateAttachment?.(ref.attachment);
   if (rehydrated?.fetchData === undefined) {

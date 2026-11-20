@@ -7,8 +7,15 @@
  */
 
 export type LinearAccessToken = string | (() => string | Promise<string>);
+/**
+ * Linear webhook signing secret, as a string or a function that resolves it at request time.
+ * Falls back to `LINEAR_WEBHOOK_SECRET` when omitted.
+ */
 export type LinearWebhookSecret = string | (() => string | Promise<string>);
 
+/**
+ * Credentials the Linear channel uses to verify inbound webhooks and call Linear's GraphQL API.
+ */
 export interface LinearChannelCredentials {
   /**
    * OAuth app-token or API key used for Linear GraphQL calls. For the Agent

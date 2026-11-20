@@ -37,6 +37,10 @@ export interface FetchFileContext {
   readonly session: ChannelContext["session"];
 }
 
+/**
+ * A channel's `fetchFile` hook: resolves a file URL from a message to its bytes, or returns
+ * `null` when the URL is not the channel's so eve falls back to its own handling.
+ */
 export type FetchFileFunction = (
   url: string,
   context?: FetchFileContext,

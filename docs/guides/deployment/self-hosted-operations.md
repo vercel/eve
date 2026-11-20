@@ -82,7 +82,7 @@ To have Next.js start the built agent processes and provide the browser-facing p
 
 The Workflow world holds every session's history. Back it up with the rest of your application data:
 
-- **Local world:** back up the `.eve/.workflow-data` directory.
+- **Local world:** stop `eve start` and copy the `.eve/.workflow-data` directory, or copy its live `world.db` with SQLite's `.backup` command.
 - **Postgres world:** back up the database. The Postgres world keeps the records of finished runs until you delete them.
 
 eve can ask the world to delete a run's inputs, outputs, and stream contents when the run ends. See [Run data retention](../../agent-config#run-data-retention) for the default policy and the override.

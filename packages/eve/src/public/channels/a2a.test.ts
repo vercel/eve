@@ -112,7 +112,6 @@ describe("a2aChannel", () => {
       });
     const forwarded = a2aChannel({ auth: none(), plainHttp: "forwarded-https" });
     expect((await handler(forwarded, "POST")(plain(), routeArgs())).status).toBe(403);
-    // Past the guard, an empty body is the JSON-RPC layer's to refuse.
     const proxied = await handler(forwarded, "POST")(
       plain({ "x-forwarded-proto": "https" }),
       routeArgs(),

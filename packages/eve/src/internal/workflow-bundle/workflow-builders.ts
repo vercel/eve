@@ -82,8 +82,6 @@ export async function applyWorkflowTransform(
       mode === false
         ? undefined
         : await prepareAuthoredWorkflowDirectives({ filePath: absolutePath, source });
-    // Ids derive from the app root so the driver bundle (built from eve's
-    // package directory) and the server bundle (built from the app) agree.
     return transformWorkflowDirectives({
       authored: true,
       authorizeSteps: true,
@@ -97,7 +95,6 @@ export async function applyWorkflowTransform(
   }
 
   return transformWorkflowDirectives({
-    // The test harness authors workflow tools inside eve's own package.
     authorizeSteps: isPackageTestFixtureModule(absoluteFilename),
     filename,
     mode,
@@ -113,14 +110,11 @@ function isPackageTestFixtureModule(absolutePath: string): boolean {
 }
 
 export function isAuthoredApplicationModule(absolutePath: string, appRoot: string): boolean {
-  // Bundler virtual ids such as `\0rolldown/runtime.js` would otherwise resolve against the cwd.
   if (!isAbsolute(absolutePath)) return false;
   const normalizedRoot = toRealPath(appRoot).replace(/\\/g, "/").replace(/\/$/, "");
   const normalizedPath = toRealPath(absolutePath).replace(/\\/g, "/");
   if (isInNodeModules(normalizedPath)) return false;
   if (!normalizedPath.startsWith(`${normalizedRoot}/`)) {
-    // An app root without its own package.json, such as a workspace member,
-    // shares the enclosing package, so that package's other modules are application code.
     const appPackageRoot = findPackageRoot(normalizedRoot);
     if (appPackageRoot === null || findPackageRoot(dirname(normalizedPath)) !== appPackageRoot) {
       return false;
@@ -153,8 +147,6 @@ function findPackageRoot(directory: string): string | null {
   return packageRoot;
 }
 
-// Bundlers hand back real paths while configuration carries the spelled
-// path (for example macOS `/var` → `/private/var`); compare like with like.
 function toRealPath(path: string): string {
   try {
     return realpathSync(path);
@@ -249,10 +241,6 @@ function resolveModuleSpecifier(
   }
 
   const subpath = resolveExportSubpath(filePath, pkg);
-  // The default specifier is version-stamped for normal workflow/step
-  // ids; the stable variant drops the `@<pkg.version>` suffix so
-  // {@link STABLE_WORKFLOW_NAMES} functions emit cross-deployment
-  // routable ids.
   const base = subpath ? `${pkg.name}${subpath}` : pkg.name;
 
   return {
@@ -303,9 +291,7 @@ function findPackageJson(filePath: string): PackageInfo | null {
           }
           return result;
         }
-      } catch {
-        // Continue searching ancestors.
-      }
+      } catch {}
     }
 
     dir = dirname(dir);
@@ -409,9 +395,7 @@ function getProjectDependencies(projectRoot: string): Set<string> {
           }
         }
       }
-    } catch {
-      // Ignore invalid package metadata.
-    }
+    } catch {}
   }
 
   projectDepsCache.set(projectRoot, deps);

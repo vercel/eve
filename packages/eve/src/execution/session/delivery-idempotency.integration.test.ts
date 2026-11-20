@@ -1,4 +1,3 @@
-// @linux-only: delivery dedup on Workflow; in-memory schedules
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createChannelOperations } from "#channel/channel-operations.js";
 import { createCrossChannelToFn, toCrossChannelTargets } from "#channel/cross-channel-receive.js";
@@ -69,7 +68,6 @@ describe("delivery idempotency", () => {
           initial.map((receipt) => receipt.result({ signal: AbortSignal.timeout(5_000) })),
         );
         expect(firstResults.map((result) => result.outcome).sort()).toEqual(["handled", "ignored"]);
-        // Each hook resume replays the owner from its recorded history.
         expect((await (await send()).result({ signal: AbortSignal.timeout(5_000) })).outcome).toBe(
           "ignored",
         );
@@ -130,7 +128,6 @@ describe("delivery idempotency", () => {
         channelName: "test",
         runtime,
       }).from(crypto.randomUUID());
-      // Alice and Bob write into a new thread at the same moment.
       const [alice, bob] = await Promise.all([
         address.send("Alice asks for the report.", { auth: null, turnPolicy: "queue" }),
         address.send("Bob asks for the summary.", { auth: null, turnPolicy: "queue" }),
@@ -168,7 +165,6 @@ describe("delivery idempotency", () => {
       const runtime = createWorkflowRuntime({
         compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       });
-      // Alice starts a chat and presses stop before the session has booted.
       const started = await runtime.createSession({
         adapter: { kind: "http" },
         auth: null,
@@ -182,7 +178,6 @@ describe("delivery idempotency", () => {
             sessionId: started.sessionId,
           }),
         ).resolves.toMatchObject({ sessionId: started.sessionId, status: "accepted" });
-        // Whether it stops the turn depends on whether the turn is still running when it is read.
         await stream.nextUntil(
           (event) =>
             event.type === "delivery.admitted" &&
@@ -231,7 +226,6 @@ describe("delivery idempotency", () => {
       try {
         await stream.nextTurn();
         await waitForParkedTurnStep(started.sessionId);
-        // A parent's retried continue step: the same key, so the route names the same delivery.
         const idempotencyKey = "agent-session:run_0:step_3:child:send";
         const deliveryId = await deliveryIdForIdempotencyKey(idempotencyKey);
         const fixed = createSession(started.sessionId, runtime);
@@ -254,7 +248,6 @@ describe("delivery idempotency", () => {
               (await receipt.result({ signal: AbortSignal.timeout(5_000) })).outcome,
           ),
         );
-        // One delivery, read once: both receipts are it, and neither is a duplicate's.
         expect(outcomes).toEqual(["handled", "handled"]);
         await fixed.end();
         completed = true;
@@ -314,15 +307,12 @@ describe("delivery idempotency", () => {
         const { graph } = await getCompiledRuntimeAgentBundle({ compiledArtifactsSource });
         const to = createCrossChannelToFn(runtime, toCrossChannelTargets(graph.root.channels));
         const slack = graph.root.channels.find((channel) => channel.name === "slack")!.definition!;
-        // A webhook handler retrying after a timeout sends the same provider event again.
         const send = () =>
           to(slack, { channelId: "C_OPS" }).send("Alice opened incident 42.", {
             auth: null,
             idempotencyKey: `pagerduty:incident-42:${timing}`,
           });
 
-        // A timeout retry can arrive before the first send has posted to Slack, or after the
-        // session has posted and moved to its thread's address.
         const racing = timing === "racing" ? await Promise.all([send(), send()]) : undefined;
         const first = racing?.[0] ?? (await send());
         const stream = captureTurnEvents(getRun(first.sessionId));
@@ -338,8 +328,6 @@ describe("delivery idempotency", () => {
             ),
           );
           expect(outcomes.sort()).toEqual(["handled", "ignored"]);
-          // The session reads its inbox in order, so a redelivered message would start a turn
-          // before this one.
           await createSession(first.sessionId, runtime).send("Bob is on it.", {
             auth: null,
             turnPolicy: "queue",
@@ -438,7 +426,6 @@ describe("delivery idempotency", () => {
       try {
         await stream.nextTurn();
         await waitForParkedTurnStep(first.sessionId);
-        // The provider redelivers the occurrence after the first attempt timed out.
         const retry = await trigger("weekly");
         expect(retry.sessionId).toBe(first.sessionId);
         expect(other.sessionId).not.toBe(first.sessionId);

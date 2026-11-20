@@ -5,7 +5,6 @@ import type { ToolStub } from "#tool-stubs/types.js";
 
 export class InvalidToolStubTargetError extends Error {}
 
-/** Check compiled tools without running dynamic resolvers or contacting connections. */
 export function validateToolStubTargets(
   rules: readonly ToolStub[],
   graph: ResolvedAgentGraphBundle,

@@ -25,6 +25,7 @@
     "fmt": "oxfmt",
     "guard:fixtures": "node ./scripts/guard-test-fixtures.mjs",
     "guard:invariants": "node ./scripts/guard-invariants.mjs",
+    "guard:docs-budget": "node ./scripts/check-docs-budget.mjs",
     "lint": "oxlint --fix",
     "prepare": "node ./scripts/install-git-hooks.mjs",
     "release": "pnpm build && node ./scripts/assert-changeset-publish-packages.mjs && changeset publish",
@@ -38,6 +39,7 @@
     "test:integration": "turbo run test:integration",
     "test:public-types": "turbo run test:public-types --filter=eve",
     "test:scenario": "turbo run test:scenario",
+    "test:scripts": "node --test .github/scripts/*.test.mjs scripts/hitl-state-readers.test.mjs scripts/changeset-format.test.mjs scripts/package-changelog.test.mjs scripts/public-exports.test.mjs",
     "test:tui": "turbo run test:tui --filter=eve",
     "test:unit": "turbo run test:unit",
     "typecheck": "turbo run typecheck",
@@ -59,5 +61,5 @@
   "engines": {
     "node": ">=24"
   },
-  "packageManager": "pnpm@12.17.0"
+  "packageManager": "pnpm@12.21.0"
 }

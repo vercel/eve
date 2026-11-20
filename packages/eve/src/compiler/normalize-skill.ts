@@ -12,17 +12,10 @@ import {
   type SourceDefinitionCompileOptions,
 } from "#compiler/normalize-helpers.js";
 
-/**
- * Compiled skill entry produced from one authored `skills/*` file.
- *
- * Either a real skill definition or a dynamic skill resolver that
- * produces skills at runtime.
- */
 type CompiledSkillEntry =
   | { readonly kind: "skill"; readonly definition: CompiledSkillDefinition }
   | { readonly kind: "dynamic"; readonly definition: CompiledDefinition };
 
-/** Throws when an authored skill takes a name in eve's namespace. */
 export function assertSkillNameAvailable(skill: {
   readonly logicalPath: string;
   readonly name: string;
@@ -35,11 +28,6 @@ export function assertSkillNameAvailable(skill: {
   }
 }
 
-/**
- * Compiles one authored skill source (markdown, module, or skill
- * package directory) into the normalized shape stored on the compiled
- * agent manifest.
- */
 export async function compileSkillSource(
   _agentRoot: string,
   source: SkillSourceRef,
@@ -77,7 +65,6 @@ export async function compileSkillSource(
     };
   }
 
-  // Module-backed skill — load the export and check for DynamicSentinel.
   const loadOptions = requireModuleBackedDefinitionLoadOptions(options, source.logicalPath);
   const exportValue = await loadModuleBackedDefinition({
     binding: loadOptions.binding,

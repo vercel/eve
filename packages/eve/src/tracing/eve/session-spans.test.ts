@@ -39,10 +39,6 @@ import { createAgentOtelInstrumentation } from "#tracing/eve/agent-otel-provider
 import { isOtelDeclaration, type TraceCapturePolicy } from "#tracing/eve/otel-declaration.js";
 import { eveOutputMapping } from "#tracing/eve/profile.js";
 
-/**
- * The spans a session exports, from its committed lines through eve's own OTel provider: the
- * path production takes, with no hand-built instrumentation events in between.
- */
 function session(
   tracePolicy: TraceCapturePolicy = () => ({ emit: true, recordInputs: true, recordOutputs: true }),
   deliveryInput?: DeliverHookPayload,
@@ -106,12 +102,9 @@ function session(
   const relayHandle = handleFor(true);
   return {
     commit: (...facts: SessionEvent[]) => contextStorage.run(ctx, () => handle(commitOf(facts))),
-    /** Commits as a step that relays an exchange for a child session or a workflow run. */
     relay: (...facts: SessionEvent[]) =>
       contextStorage.run(ctx, () => relayHandle(commitOf(facts))),
-    /** Runs a tool's `execute` the way the AI SDK bridge does, inside its call's span. */
     runTool: otel.runInContext,
-    /** Runs a compaction's summary call for the turn, as its run outside any step reports it. */
     async summarize(summary: string) {
       const scope = attemptScopeOf(
         { channelAudience: audience, functionId: "weather", sessionId: "s", ...child },
@@ -194,7 +187,6 @@ const approval = (callId: string): SessionEvent =>
 const turnSettled = (data: Record<string, unknown>): SessionEvent =>
   ({ data: { turnId: "turn_0", ...data }, scope: turn, type: "turn.settled" }) as SessionEvent;
 
-/** Each span as `name outcome`, indented under its parent; `!` marks an error status. */
 function tree(spans: readonly ReadableSpan[]): string[] {
   const ids = new Set(spans.map((span) => span.spanContext().spanId));
   const children = new Map<string | undefined, ReadableSpan[]>();
@@ -448,7 +440,6 @@ describe("a session's spans, from its committed lines", () => {
         "invoke_agent weather completed",
         "  agent.approval approved",
       ]);
-      // Public scopes name a model run, and none has started.
       expect(heard).toEqual([]);
     },
   );
@@ -456,7 +447,6 @@ describe("a session's spans, from its committed lines", () => {
   it.each([
     ["a failure's reason code", "failed", "access_denied", "access_denied"],
     ["a failure's error message", "failed", "Calendar said: token abc123 is invalid", undefined],
-    // Alice sent a new message, so the sign-in ended without anyone refusing it.
     ["a withdrawal's reason", "withdrawn", "superseded-by-message", undefined],
   ])("records an authorization reason for %s", async (_, outcome, reason, recorded) => {
     const { commit, spans } = session();
@@ -501,7 +491,6 @@ describe("a session's spans, from its committed lines", () => {
     );
     await commit(...opening);
     await commit(requested("call_gh", "code__gh"));
-    // A turn a schedule started can't ask Alice to sign in, so the call fails without a prompt.
     const refused = new ConnectionAuthorizationFailedError("github", {
       message: "Alice has no GitHub token in this run.",
       reason: "sign_in_unavailable",
@@ -610,13 +599,67 @@ describe("a session's spans, from its committed lines", () => {
     },
   );
 
+  it("names the task an agent call started or continued, but not the child session", async () => {
+    const { commit, spans } = session(() => ({
+      emit: true,
+      recordInputs: false,
+      recordOutputs: false,
+    }));
+    const agentCall = (callId: string) =>
+      ({
+        data: {
+          callId,
+          capability: { kind: "agent", name: "billing", remote: true },
+          input: {},
+          owner: run,
+        },
+        scope: run,
+        type: "call.requested",
+      }) as SessionEvent;
+    const started = (callId: string) =>
+      ({ data: { callId, taskId: "task_1" }, scope: run, type: "call.started" }) as SessionEvent;
+    const sent = (callId: string) =>
+      ({
+        data: { callId, childDeliveryId: `d_${callId}`, sessionId: "child_billing" },
+        type: "child.sent",
+      }) as SessionEvent;
+    await commit(...opening);
+    await commit(agentCall("call_start"), started("call_start"));
+    await commit(
+      {
+        data: {
+          name: "billing",
+          owner: { callId: "call_start" },
+          sessionId: "child_billing",
+          stream: "s",
+        },
+        type: "child.opened",
+      } as SessionEvent,
+      sent("call_start"),
+    );
+    await commit(settled("call_start", { outcome: "completed", output: "started" }));
+    await commit(agentCall("call_again"), started("call_again"));
+    await commit(sent("call_again"));
+    await commit(settled("call_again", { outcome: "completed", output: "sent" }));
+    await commit(turnSettled({ outcome: "completed" }));
+
+    const exported = await spans();
+    expect(
+      exported
+        .filter((span) => span.attributes["agent.action.kind"] === "remote-agent-call")
+        .map((span) => [span.attributes["gen_ai.tool.call.id"], span.attributes["agent.task.id"]]),
+    ).toEqual([
+      ["call_start", "task_1"],
+      ["call_again", "task_1"],
+    ]);
+    expect(JSON.stringify(exported.map((span) => span.attributes))).not.toContain("child_billing");
+  });
+
   it("records who approved a call on its approval and tool spans, the id only as the turn's principal", async () => {
     for (const { audience, records, id, outcome = "accepted" } of [
       { audience: "public", records: true, id: "slack:T1:U2" },
       { audience: "public", records: false, id: undefined },
-      // An explicit policy records a private conversation's content, but never principal ids.
       { audience: "private", records: true, id: undefined },
-      // A denied call never runs, so only its approval names who denied it.
       { audience: "public", records: true, id: "slack:T1:U2", outcome: "declined" },
     ] as const) {
       const { commit, spans } = session(
@@ -680,7 +723,6 @@ describe("a session's spans, from its committed lines", () => {
     const exported = await spans();
     expect(tree(exported)).toEqual([
       "invoke_agent weather cancelled",
-      // The cancel stopped the step on purpose, so it ends without an error (#5025).
       "  agent.step",
       "    execute_tool weather failed !",
       "    execute_tool deploy cancelled !",
@@ -715,7 +757,6 @@ describe("a session's spans, from its committed lines", () => {
       "gen_ai.usage.input_tokens": 1200,
       "gen_ai.usage.output_tokens": 80,
     });
-    // The summary's prompt and reply are not the conversation's, so the turn doesn't take them.
     const invocation = exported.find((span) => span.name === "invoke_agent weather");
     expect(invocation?.attributes["gen_ai.input.messages"]).toBeUndefined();
     expect(invocation?.attributes["gen_ai.output.messages"]).toBeUndefined();
@@ -754,8 +795,6 @@ describe("a session's spans, from its committed lines", () => {
   it.each(["production", "preview"] as const)(
     "openinstinct exports metadata, not private profile or conversation bodies in %s",
     async (environment) => {
-      // Widen only for TypeScript: the standalone template is outside this package's rootDir.
-      // Vite sees a literal import after stripping the type assertion.
       const authored: { default: unknown } = await import(
         "../../../../../apps/templates/openinstinct/agent/instrumentation/otel.ts" as string
       );
@@ -814,7 +853,6 @@ describe("a session's spans, from its committed lines", () => {
 
 describe("a child session's turn span", () => {
   const caller = { spanId: "c".repeat(16), traceFlags: 1, traceId: "a".repeat(32) };
-  // A propagated traceparent arrives as a remote span context.
   const remoteCaller = { ...caller, isRemote: true };
   const parentLineage = {
     callId: "call_ask",

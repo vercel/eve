@@ -1,7 +1,6 @@
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
 import type { SessionCommand, SessionCommandResult } from "#channel/types.js";
 
-/** Assign the delivery before accepting it, so replay and the sender name the same facts. */
 export function identifyCommand<T extends SessionCommand>(command: T): T {
   if (command.kind !== "send" || command.delivery !== undefined) return command;
   const channel =
@@ -20,7 +19,6 @@ export function identifyCommand<T extends SessionCommand>(command: T): T {
   };
 }
 
-/** What a sender hears when the session `sessionId` accepted `command`. */
 export function activeCommandResult<TCommand extends SessionCommand>(
   command: TCommand,
   sessionId: string,
@@ -34,7 +32,6 @@ export function activeCommandResult<TCommand extends SessionCommand>(
   return result as SessionCommandResult<TCommand>;
 }
 
-/** What a sender hears when no session was there to accept `command`. */
 export function inactiveCommandResult<TCommand extends SessionCommand>(
   command: TCommand,
 ): SessionCommandResult<TCommand> {

@@ -14,10 +14,6 @@ type ChannelSpaceSource = {
   readonly instrumentation?: { readonly space?: ChannelSpaceProjector };
 };
 
-/**
- * The space the adapter's channel reports for its current state. A missing,
- * throwing, asynchronous, or malformed projection reports none.
- */
 export function resolveSpace(adapter: ChannelSpaceSource): ConversationSpace | undefined {
   const project = adapter.instrumentation?.space;
   if (project === undefined) return undefined;

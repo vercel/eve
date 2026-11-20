@@ -88,7 +88,6 @@ export interface InstrumentationStepScope<TSession> {
       | "sessionId"
     >,
   ) => HandleEventFn | undefined;
-  /** The AI SDK telemetry for one attempt; the attempt's start and end come from its facts. */
   readonly prepareAttempt: (
     input: AttemptPlace & {
       readonly isFrameworkTool?: (name: string) => boolean;
@@ -123,7 +122,6 @@ export interface BoundInstrumentationSession {
   readonly sessionId: string;
 }
 
-/** Process-wide runtime consumed by every harness execution surface. */
 export interface InstrumentationRuntime {
   readonly forceFlush: () => Promise<void>;
   readonly hooks: InstrumentationHooks;
@@ -140,17 +138,14 @@ export interface InstrumentationRuntime {
     sessionId: string,
     turnId: string,
   ) => Promise<InstrumentationTraceContext | undefined>;
-  /** Traces one decision model call when eve owns agent spans. */
   readonly decision?: AgentRun["decision"];
   otelSettings: OtelHarnessSettings | undefined;
   readonly runtimeContextResolvers?: readonly RuntimeContextResolver[];
   readonly runInContext: InstrumentationContextRunner;
-  /** Whether the installed OTel sampler would record a trace with this id. */
   readonly samplesTrace?: (traceId: string, operation?: AgentSamplingOperation) => boolean;
   readonly shutdown: () => Promise<void>;
 }
 
-/** Worker-bound instrumentation operations consumed by one session execution. */
 export interface SessionInstrumentation {
   readonly installAiSdkWarningLogger: () => void;
   readonly runStep: <TSession extends InstrumentedStepSession, TResult>(
@@ -233,7 +228,6 @@ export function bindInstrumentationRuntime(
       session: {
         agentName: boundSession.agentName,
         channelAudience: sessionContext.conversation.audience,
-        // OTel stores the normalized conversation kind; `$eve.trigger` retains the raw adapter kind.
         channelKind: sessionContext.conversation.channel.kind,
         channelType: sessionContext.instrumentation?.channelType,
         parentLineage: sessionContext.parentLineage,
@@ -357,8 +351,6 @@ export function bindInstrumentationRuntime(
               ? effectiveDecision.recordOutputs
               : defaultContent.recordOutputs),
         };
-        // eve's AI SDK OpenTelemetry integration is on the call only when eve does not own agent
-        // spans; it keeps the OpenTelemetry decision.
         const aiSdkContent =
           settings !== undefined && !executionRuntime.ownsAgentSpans
             ? content

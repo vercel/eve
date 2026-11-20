@@ -11,10 +11,6 @@ import type { Step } from "#harness/step/context.js";
 import { buildToolSetWithProviderTools } from "#harness/tools.js";
 import { toModelSchema } from "#tools/schema.js";
 
-/**
- * Assembles the tools one model call offers: the catalog's listed entries with provider tools in
- * place, and `eve__reply` when the turn asks for a structured result.
- */
 export async function prepareModelTools(
   step: Step,
   input: {
@@ -30,7 +26,6 @@ export async function prepareModelTools(
     profile,
     tools: catalog.advertised,
   });
-  // The caller's contract, not the agent's: offered whichever tools the agent's definitions give.
   if (step.session.outputSchema !== undefined) {
     modelTools[REPLY_TOOL_NAME] = buildFinalOutputTool(step.session.outputSchema);
   }
@@ -39,8 +34,6 @@ export async function prepareModelTools(
     ? applyLastToolCacheBreakpoint(modelTools, profile.anthropicCache)
     : modelTools;
   for (const tool of Object.values(effectiveTools)) {
-    // Whatever produced this tool, the AI SDK must only receive its own
-    // schema type; see toModelSchema.
     tool.inputSchema = toModelSchema(tool.inputSchema, "input");
     if (tool.outputSchema !== undefined) {
       tool.outputSchema = toModelSchema(tool.outputSchema, "output");
@@ -49,7 +42,6 @@ export async function prepareModelTools(
   return effectiveTools;
 }
 
-/** The entries that can end the turn, with their `endsTurn` option, when `endsTurn` applies. */
 export function endsTurnTools(catalog: StepCatalog, applies: boolean): EndsTurnTools {
   if (!applies) return new Map();
   return new Map(
@@ -61,7 +53,6 @@ export function endsTurnTools(catalog: StepCatalog, applies: boolean): EndsTurnT
   );
 }
 
-/** The names of the entries eve provides, which tracing marks as framework tools. */
 export function frameworkToolNames(catalog: StepCatalog): ReadonlySet<string> {
   return new Set(
     [

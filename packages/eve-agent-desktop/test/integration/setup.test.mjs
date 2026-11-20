@@ -16,7 +16,6 @@ function result(stdout = "", exitCode = 0) {
   };
 }
 
-/** A sandbox from a prepared template whose desktop is not running yet. */
 function coldSandbox() {
   const starting = Promise.withResolvers();
   const continueStart = Promise.withResolvers();
@@ -28,7 +27,6 @@ function coldSandbox() {
       }
       if (command.startsWith("xdpyinfo")) return result("", state.desktopUp ? 0 : 1);
       if (command.includes("setsid -f Xvfb")) {
-        // A second concurrent start would race dbus-launch and overwrite the session-bus address.
         if (state.starting) return result("display already starting", 1);
         state.starts++;
         state.starting = true;

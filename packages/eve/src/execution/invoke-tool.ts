@@ -48,26 +48,18 @@ import type { ToolModelOutput } from "#tools/model-output.js";
 
 const log = createLogger("invoke-tool");
 
-/** What `invokeTool` needs from the agent: its static tools and sandbox. */
 export interface InvokeToolRuntime {
-  /** Present in a deployed agent so framework helpers can reach the compiled graph. */
   readonly bundle?: CompiledRuntimeAgentBundle;
-  /** Base URL for framework callbacks, such as the page a sign-in lands on. */
   readonly callbackBaseUrl: string;
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
-  /** The root node's compiled tools and source bindings, which decide invocability. */
   readonly manifest: InvokeToolManifest;
   readonly nodeId: string;
-  /** The agent's name, for trace policy and `gen_ai.agent.name`. */
   readonly agentName: string;
-  /** The channel the call arrived on, for trace policy and span attributes. */
   readonly origin?: InvokeToolTraceOrigin;
   readonly sandboxRegistry: RuntimeSandboxRegistry;
-  /** Static tools only: dynamic resolvers never run outside a turn. */
   readonly tools: HarnessToolMap;
 }
 
-/** The part of a compiled manifest `invokeTool` reads to decide invocability. */
 export interface InvokeToolManifest extends CompiledToolBindings {
   readonly tools: readonly Pick<
     CompiledToolDefinition,
@@ -75,13 +67,10 @@ export interface InvokeToolManifest extends CompiledToolBindings {
   >[];
 }
 
-/** Why a compiled tool cannot run outside a turn, or `undefined` when it can. */
 function ineligibility(
   manifest: InvokeToolManifest,
   tool: InvokeToolManifest["tools"][number],
 ): string | undefined {
-  // `isInvocableCompiledTool` is the one rule, shared with `describe()`; the
-  // reason below only words the refusal.
   if (isInvocableCompiledTool(manifest, tool)) return undefined;
   if (compiledToolOwner(manifest, tool).kind === "framework") {
     return "it is a framework tool, which needs a conversation";
@@ -92,14 +81,6 @@ function ineligibility(
   return "it has no server-side execute";
 }
 
-/**
- * Runs one tool outside a turn; see `InvokeToolFn` for the contract. A call
- * without a key gets a fresh session id, so nothing it opens is shared with
- * another call. A keyed call derives its session id from the caller and key.
- * Either way the session's authored state is call-scoped: tool sessions keep
- * only their sandbox. An anonymous caller is denied a keyed call: with one
- * shared principal, the key alone would name the session.
- */
 export async function invokeTool(
   runtime: InvokeToolRuntime,
   name: string,
@@ -134,8 +115,6 @@ export async function invokeTool(
       const key = options.key;
       const keyProblem = key === undefined ? undefined : validateToolSessionKey(key);
       if (keyProblem !== undefined) return failed(keyProblem, "INVALID_INPUT");
-      // `none()` gives every caller one principal, so a key would be a shared secret
-      // that opens the same sandbox to anyone who guesses it.
       if (key !== undefined && isAnonymousPrincipal(options.auth)) {
         return rejected(
           "Tool sessions need an authenticated caller: an anonymous caller cannot send a key. " +
@@ -217,13 +196,6 @@ interface CallSandbox {
   release(): Promise<void>;
 }
 
-/**
- * A keyed session's sandbox: found or created on the first `ctx.getSandbox()`
- * through the provider's `start`, an upsert on the session id, and kept after
- * the call. Concurrent first calls in this process share one start. The call
- * does not own the sandbox, so a failed start never deletes it, and release
- * only closes this call's connection: an overlapping call keeps its own.
- */
 async function keyedSandbox(runtime: InvokeToolRuntime, sessionId: string): Promise<CallSandbox> {
   const access = await ensureSandboxAccess({
     compiledArtifactsSource: runtime.compiledArtifactsSource,
@@ -237,11 +209,6 @@ async function keyedSandbox(runtime: InvokeToolRuntime, sessionId: string): Prom
   return { access, release: () => access.release() };
 }
 
-/**
- * The call's sandbox: opened on the first `ctx.getSandbox()`, removed after
- * the call through the provider's session-end cleanup, which also reaches a
- * start still in flight or one whose initialization failed.
- */
 async function callSandbox(runtime: InvokeToolRuntime, sessionId: string): Promise<CallSandbox> {
   const access = await ensureSandboxAccess({
     compiledArtifactsSource: runtime.compiledArtifactsSource,
@@ -251,8 +218,6 @@ async function callSandbox(runtime: InvokeToolRuntime, sessionId: string): Promi
     sessionId,
     state: null,
   });
-  // This unkeyed access has no other opener or checkpoint: no request means no
-  // sandbox. Once requested, cleanup must cover failed or still-running starts.
   let requested = false;
   return {
     access: {
@@ -279,14 +244,12 @@ function createCallContext(input: {
   context.set(AuthKey, input.auth);
   context.set(InitiatorAuthKey, input.initiator);
   context.set(SessionIdKey, input.sessionId);
-  // No turn exists; the stand-in names the call, as sandbox setup outside a turn does.
   context.setVirtualContext(SessionKey, {
     auth: { current: input.auth, initiator: input.initiator },
     sessionId: input.sessionId,
     turn: { id: input.callId, sequence: 0 },
   });
   context.set(CallbackBaseUrlKey, input.callbackBaseUrl.replace(/\/$/, ""));
-  // Sign-in callbacks have no parked run to resume; the URL is only a landing page.
   context.setVirtualContext(AuthorizationHookKey, `invoke-tool:${input.callId}`);
   return context;
 }
@@ -326,12 +289,10 @@ async function runCall(input: {
     messages: [],
     toolCallId: callId,
   };
-  // `execute` and output serialization are one step, as in a conversation's wrapped execute.
   await observer.executing(input.input);
   let output: unknown;
   let json: unknown;
   let returned = false;
-  // Started after the start event's handlers, and read once when execute settles.
   const startedAt = performance.now();
   const elapsed = () => performance.now() - startedAt;
   let durationMs: number;
@@ -402,12 +363,7 @@ function failed(message: string, code = "TOOL_FAILED"): InvokeToolResult {
   return { outcome: "failed", error: { code, message } };
 }
 
-/**
- * Logs the error under a fresh id and returns that id with a generic message:
- * an unexpected error's text can carry paths, hosts, or secrets.
- */
 function failedFromError(error: unknown, toolName: string, what: string): InvokeToolResult {
-  // Off every span: the tool span records the failure itself, under its content decision.
   const errorId = otelContext.with(trace.deleteSpan(otelContext.active()), () =>
     logError(log, `invokeTool ${what}`, error, { toolName }),
   );

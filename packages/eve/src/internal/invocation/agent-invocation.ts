@@ -2,14 +2,12 @@ import type { Interaction } from "#protocol/session-projection/reader.js";
 import type { JsonValue } from "#shared/json.js";
 import type { RequestStatus } from "#protocol/session-projection/request-status.js";
 
-/** An interaction projected for JSON, without a sign-in's private callback URL. */
 export type AgentInvocationInteraction = Omit<Interaction, "request"> & {
   readonly request: Omit<Interaction["request"], "signIn"> & {
     readonly signIn?: Omit<NonNullable<Interaction["request"]["signIn"]>, "callbackUrl">;
   };
 };
 
-/** Open interactions by `interactionId`. */
 export type AgentInvocationInteractions = Readonly<Record<string, AgentInvocationInteraction>>;
 
 interface AgentInvocationBase {
@@ -24,13 +22,11 @@ export type AgentInvocation =
       readonly status: "working";
       readonly pollAfterMs: number;
       readonly result?: JsonValue;
-      /** What the agent is doing right now, such as the label of a running tool call. */
       readonly statusMessage?: string;
     })
   | (AgentInvocationBase & {
       readonly status: "awaiting-input";
       readonly interactions: AgentInvocationInteractions;
-      /** Sign-ins complete elsewhere; polling observes their settlement. */
       readonly pollAfterMs?: number;
       readonly result?: JsonValue;
     })

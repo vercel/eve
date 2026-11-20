@@ -54,9 +54,6 @@ const sessionCallbackSchema = z
       });
     }
 
-    // SSRF guard: the framework POSTs to this URL when delegated work settles,
-    // so reject blocked IP-literal and localhost hosts up front. The callback
-    // transport also checks every resolved address at connect time.
     if (isBlockedDestinationHost(url.hostname, { allowLoopback: isLocalDevelopmentServer() })) {
       ctx.addIssue({
         code: "custom",
@@ -81,10 +78,6 @@ export function parseSessionCallback(value: unknown): SessionCallbackParseResult
 }
 
 function readCallbackUrlToken(url: URL): string | null {
-  // The callback route may be mounted behind a public route prefix (e.g.
-  // `/eve/<name>/v1/callback/<token>`), so locate the route
-  // suffix instead of anchoring at the path start. `tokenPrefix` begins
-  // with `/`, so a match is always segment-aligned.
   const tokenPrefix = createEveCallbackRoutePath("");
   const pathname = normalizePublicEveRoutePath(url.pathname);
   const prefixIndex = pathname.lastIndexOf(tokenPrefix);

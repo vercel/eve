@@ -61,12 +61,9 @@ interface EveSessionTracing {
     event: InstrumentationTurnStartedEvent,
   ) => Promise<InstrumentationTraceSeed>;
   readTurnTraceContext(sessionId: string, turnId: string): Promise<SpanContext | undefined>;
-  /** Hydrates a turn this process or an earlier one started. */
   turnFor(sessionId: string, turnId: string, context?: Context): Promise<TurnOperation | undefined>;
-  /** Whether the trace policy dropped this turn, so its work must not record spans. */
   dropped(sessionId: string, turnId: string): Promise<boolean>;
   turnSettled(event: InstrumentationTurnSettledEvent): Promise<void>;
-  /** Ends a turn the session's end left open, failed when the session failed. */
   sessionEnded(event: InstrumentationSessionEndedEvent): Promise<void>;
 }
 
@@ -143,7 +140,6 @@ export function createEveSessionTracing(input: EveSessionTracingInput): EveSessi
     const useInitialContext = event.sequence === 0;
     const caller = useInitialContext ? event.parentTraceContext : undefined;
     const emit = session.decision?.action === "record";
-    // A local caller's first child turn joins the caller's trace beneath its call.
     const nested = caller !== undefined && !("isRemote" in caller && caller.isRemote === true);
     const reserved = useInitialContext
       ? {
@@ -191,7 +187,6 @@ export function createEveSessionTracing(input: EveSessionTracingInput): EveSessi
     return portableSpanContext(turn.context, session.decision);
   };
 
-  /** Ends the turn's span with how the turn ended, or with no outcome when nothing said. */
   async function endTurn(
     sessionId: string,
     turnId: string,
@@ -229,7 +224,6 @@ export function createEveSessionTracing(input: EveSessionTracingInput): EveSessi
     async turnSettled(event) {
       const ctx = contextStorage.getStore();
       const view = ctx === undefined ? undefined : enteredView(ctx);
-      // The same commit's session end carries the provider-filtered failure after its cascade.
       if (
         view?.session.status === "ended" &&
         view.session.outcome === "failed" &&
@@ -249,7 +243,6 @@ export function createEveSessionTracing(input: EveSessionTracingInput): EveSessi
   };
 }
 
-/** Spans this process starts inherit the operation's audience and trace correlation. */
 function hostContext(
   audience: ChannelAudience | undefined,
   operation: {
@@ -263,7 +256,6 @@ function hostContext(
 
 function activationLinks(turn: AgentTurnTraceState): TraceLink[] | undefined {
   const links: TraceLink[] = [];
-  // A local caller is the turn's parent; only a remote one is linked.
   if (turn.caller?.isRemote === true)
     links.push({ context: turn.caller, relationship: "agent.dispatch" });
   if (turn.channelDelivery?.requestTraceContext !== undefined)
@@ -339,8 +331,6 @@ function resolveSessionTraceDecision(
   if (event.agentName === undefined) {
     return policy === undefined ? resolveTracePolicyDecision(true, content) : { action: "drop" };
   }
-  // The tool loop can evaluate the same policy before this first-session
-  // preparation path; the persisted decision removes that window on replay.
   return resolveTracePolicy(policy, {
     agentName: event.agentName,
     audience,

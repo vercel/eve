@@ -3,27 +3,8 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { Client } from "eve/client";
 import { EveTUIRunner, MockScreen, MockUserInput } from "./lib/tui.ts";
 
-// Note: the apps/fixtures/agent-tui-client's echo-marker subagent is the source of every child
-// stream event the TUI observes here. The smoke validates the full pipeline:
-// parent task.started → start line → agent.started → child session subscription → task
-// panel activity → parent task.settled → end line.
-
 import { run } from "./lib/run.ts";
 import { theme } from "./lib/theme.ts";
-
-/**
- * End-to-end proof that the TUI surfaces an agent task as a start line, a
- * task-panel row while it works, and an end line. This smoke test drives
- * the task path against the `echo-marker` fixture:
- *
- *   1. Start the apps/fixtures/agent-tui-client server.
- *   2. Boot an `EveTUIRunner` with a mock terminal.
- *   3. Type the same delegation prompt the non-TUI subagent smoke uses.
- *   4. Wait for the `Delegate subagent(echo marker)` start line to appear.
- *   5. Wait for the `✓ subagent(echo marker)` end line once the task settles.
- *   6. Verify the parent assistant message contains the token. The
- *      rendering side-channel must not have broken the harness path.
- */
 
 const SUBAGENT_TOKEN = "SUBAGENT_TOKEN=echo-marker-9F2X";
 process.env.EVE_TUI_UNICODE = "1";
@@ -59,10 +40,6 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
   await screen.waitForText("✓ subagent(echo marker)", 90_000);
   console.log(theme.muted("[tui-subagents] task end line appeared"));
 
-  // The verbatim echo must land in a top-level `▲`-prefixed assistant
-  // section: the parent read the child's result. Whether the model also
-  // emits a pre-delegation message is model-dependent, so the section count
-  // is not asserted.
   await waitForCondition(() => assistantSectionContains(screen.snapshot(), SUBAGENT_TOKEN), {
     timeoutMs: 120_000,
     label: "parent assistant section containing the token",
@@ -71,7 +48,6 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
   console.log(theme.muted("[tui-subagents] parent assistant reply rendered with token"));
 
   const finalSnapshot = screen.snapshot();
-  // The model's own task bookkeeping never reaches the transcript.
   for (const internal of ["eve__task_wait", "eve__task_cancel", "<task_result"]) {
     if (finalSnapshot.includes(internal)) {
       throw new Error(`Final screen shows internal task text "${internal}":\n${finalSnapshot}`);
@@ -81,18 +57,12 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
     throw new Error(`Final screen contains an Error section:\n${finalSnapshot}`);
   }
 
-  // The turn is complete; wait until the runner is back at the prompt so
-  // Two idle Ctrl+C presses exit; mid-stream Ctrl+C cancels cooperatively.
   await screen.waitForIdlePrompt(30_000);
   input.ctrlC();
   input.ctrlC();
   await runPromise;
 });
 
-/**
- * True when a top-level assistant section (a `▲ `-prefixed line and its
- * two-space-indented continuations) contains `needle`.
- */
 function assistantSectionContains(snapshot: string, needle: string): boolean {
   const lines = snapshot.split("\n");
   for (let index = 0; index < lines.length; index += 1) {

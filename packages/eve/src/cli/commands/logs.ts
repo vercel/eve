@@ -16,21 +16,13 @@ const LOG_DIRECTORY_SEGMENTS = [".eve", "logs"] as const;
 const LOG_DISPLAY_DIRECTORY = LOG_DIRECTORY_SEGMENTS.join("/");
 const LOG_ID_PATTERN = /^dev-(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z)-\d+\.log$/;
 
-/** One `eve dev` diagnostic log file under `.eve/logs`. */
 export interface DevDiagnosticLogEntry {
-  /** Stable reference: the file name without the `.log` extension. */
   readonly id: string;
   readonly path: string;
-  /** Process start time encoded in the file name, when parseable. */
   readonly startedAt: Date | undefined;
   readonly sizeBytes: number;
 }
 
-/**
- * Lists `eve dev` diagnostic logs for an app root, most recent first. The
- * sortable timestamp prefix in each file name provides the ordering; a missing
- * log directory yields an empty list.
- */
 export async function listDevDiagnosticLogs(appRoot: string): Promise<DevDiagnosticLogEntry[]> {
   const directory = join(appRoot, ...LOG_DIRECTORY_SEGMENTS);
   let names: string[];
@@ -66,11 +58,6 @@ function parseStartedAt(fileName: string): Date | undefined {
   return Number.isNaN(parsed.getTime()) ? undefined : parsed;
 }
 
-/**
- * Resolves a user-supplied log reference to one entry. Accepts the full id,
- * the file name, the transcript's `.eve/logs/...` path, or any unambiguous
- * prefix of the id (with or without the `dev-` lead).
- */
 export function resolveDevDiagnosticLog(
   logs: readonly DevDiagnosticLogEntry[],
   reference: string,
@@ -99,29 +86,13 @@ export function resolveDevDiagnosticLog(
   );
 }
 
-/** Options accepted by {@link runLogsShowCommand}. */
 export interface LogsShowCommandOptions {
-  /** Prepend the log's environment dump (the same-instance `.dump` sibling). */
   dump?: boolean;
-  /** Interleave session events resolved from the local workflow store. */
   events?: boolean;
-  /** Injectable event reader and clock; defaults to the real store and `Date.now`. */
   readEvents?: (appRoot: string, window: DevSessionEventWindow) => Promise<DevSessionEventLine[]>;
   now?: () => Date;
 }
 
-/**
- * `eve logs [logid]`: prints one diagnostic log to stdout — the most recent
- * when `logid` is omitted. The output carries nothing but records (no
- * resolved-path banner, no progress notes on either stream), so
- * `eve logs 2>&1 | jq` always parses; discover ids and paths with
- * `eve logs list`. With `--dump`, the log's environment dump (a JSON
- * document) is prepended to the JSONL log body, forming one
- * self-contained, parseable report. With `--events`, session events are
- * resolved from the local workflow store at query time — never duplicated
- * into the log at capture time — and interleaved by timestamp as
- * `source: "event"` records.
- */
 export async function runLogsShowCommand(
   logger: CliLogsLogger,
   appRoot: string,
@@ -160,23 +131,12 @@ export async function runLogsShowCommand(
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
   if (dumpContent === undefined) {
-    // No dump for this log (older instance, or the write failed): print the
-    // log alone, silently — same output as without the flag.
     logger.log(content.trimEnd());
     return;
   }
-  // A JSON document followed by JSON Lines is one valid JSON value stream,
-  // so the combined output stays parseable end to end (`... | jq -c .`).
   logger.log(`${dumpContent.trimEnd()}\n${content.trimEnd()}`);
 }
 
-/**
- * The wall-clock window one diagnostic log covers: its encoded start time
- * through the next log's start (logs are per-process and MRU-sorted), or
- * `now` for the most recent log. The store does not attribute runs to
- * processes, so window selection is by time; concurrent `eve dev`
- * processes will see each other's events.
- */
 function eventWindowForLog(
   logs: readonly DevDiagnosticLogEntry[],
   entry: DevDiagnosticLogEntry,
@@ -190,11 +150,6 @@ function eventWindowForLog(
   };
 }
 
-/**
- * Interleaves event lines into the JSONL log by each record's `at`. Log
- * lines keep their relative order; an unparseable line inherits its
- * predecessor's timestamp so it cannot drift.
- */
 function mergeLogWithEvents(content: string, events: readonly DevSessionEventLine[]): string {
   const logLines: { at: string; line: string }[] = [];
   let lastAt = "";
@@ -203,9 +158,7 @@ function mergeLogWithEvents(content: string, events: readonly DevSessionEventLin
     try {
       const at = (JSON.parse(line) as { at?: unknown }).at;
       if (typeof at === "string") lastAt = at;
-    } catch {
-      // Keep position relative to the previous record.
-    }
+    } catch {}
     logLines.push({ at: lastAt, line });
   }
 
@@ -227,13 +180,10 @@ function mergeLogWithEvents(content: string, events: readonly DevSessionEventLin
   return `${merged.join("\n")}\n`;
 }
 
-/** Options accepted by {@link runLogsListCommand}. */
 export interface LogsListCommandOptions {
-  /** Emit a machine-readable JSON array instead of the human listing. */
   json?: boolean;
 }
 
-/** Machine-readable row emitted by `eve logs list --json`. */
 export interface DevDiagnosticLogJson {
   id: string;
   path: string;
@@ -241,7 +191,6 @@ export interface DevDiagnosticLogJson {
   sizeBytes: number;
 }
 
-/** `eve logs list`: lists diagnostic logs, most recent first. */
 export async function runLogsListCommand(
   logger: CliLogsLogger,
   appRoot: string,

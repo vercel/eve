@@ -33,10 +33,6 @@ export class SessionStrandedError extends Error {
   }
 }
 
-/**
- * One actionable sentence pair that names the cause, the version, and the
- * next step. `nextStep` replaces the default recovery instruction.
- */
 export function describeStrandedSession(owner: StrandedSessionOwner, nextStep?: string): string {
   const builtBy =
     owner.eveVersion === undefined

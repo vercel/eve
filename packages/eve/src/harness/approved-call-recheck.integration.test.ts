@@ -1,4 +1,3 @@
-// @linux-only: approval recheck (AI SDK)
 import { jsonSchema } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
@@ -33,7 +32,6 @@ function workflow(
   };
 }
 
-/** A harness whose model calls `tool` once, then replies; its events fold into one projection. */
 function setup(
   tool: HarnessToolDefinition,
   options: {
@@ -59,7 +57,6 @@ function setup(
   const config: TestKernelConfig = {
     agent: { model: { id: "approval-model" } },
     capabilities: { requestInput: true },
-    // Each publication commits as one line, as the session's sink writes it.
     handleEvent: async (publication) => {
       recorder.record(eventsOf(publication));
       events.push(...eventsOf(publication));
@@ -153,7 +150,6 @@ describe("approved call recheck (real AI SDK)", () => {
           execute,
           approval: async (context) => {
             if (context.callId !== "first" || policy === "once") return perTool(context);
-            // A policy that consults once() but returns another branch's prompt offers no grant.
             if (policy === "consulted") await perTool(context);
             return ask(context);
           },
@@ -408,7 +404,6 @@ describe("approved call recheck (real AI SDK)", () => {
       const request = fixture.events.find((event) => event.type === "interaction.opened");
       expect(request?.type === "interaction.opened" && request.data.request.kind).toBe("approval");
 
-      // A freeze begins for the requester after she asked, before anyone approves.
       frozen = true;
       const start = fixture.events.length;
       const approved = await fixture.step(initial.session, {
@@ -422,7 +417,6 @@ describe("approved call recheck (real AI SDK)", () => {
         ],
       });
 
-      // The recheck runs as the requester, and its denial means execution never starts.
       expect(execute).not.toHaveBeenCalled();
       expect(runtimeWait(approved.session.state)).toBeUndefined();
       expect(policy.mock.calls.at(-1)?.[0].session.auth.current?.principalId).toBe("user-1");
@@ -462,7 +456,6 @@ describe("approved call recheck (real AI SDK)", () => {
       const initial = await fixture.step(fixture.session, { message: "Deploy Alice's release." });
       const request = fixture.events.find((event) => event.type === "interaction.opened");
 
-      // Bob changes the release target while Alice's approval waits.
       (tool as { version: string }).version = "changed";
       const start = fixture.events.length;
       const approved = await fixture.step(initial.session, {

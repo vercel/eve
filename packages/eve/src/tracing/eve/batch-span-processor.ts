@@ -1,11 +1,8 @@
 import { TraceFlags, context, createContextKey } from "#compiled/@opentelemetry/api/index.js";
 import type { SpanExporter, SpanProcessor } from "./otel-configuration.js";
 
-// This is the Symbol.for-backed key used by @opentelemetry/core's
-// suppressTracing(), without pulling that package into eve's runtime.
 const SUPPRESS_TRACING_KEY = createContextKey("OpenTelemetry SDK Context Key SUPPRESS_TRACING");
 
-/** The OpenTelemetry specification's defaults for a batching processor. */
 const DEFAULTS = {
   exportTimeoutMillis: 30_000,
   maxExportBatchSize: 512,
@@ -13,7 +10,6 @@ const DEFAULTS = {
   scheduledDelayMillis: 5_000,
 } as const;
 
-/** Exposed for tests; authors get the defaults. */
 interface BatchSpanProcessorOptions {
   readonly diagnostic?: (
     message: string,
@@ -25,17 +21,6 @@ interface BatchSpanProcessorOptions {
   readonly scheduledDelayMillis?: number;
 }
 
-/**
- * Buffers ended spans and hands them to one exporter in batches.
- *
- * eve owns this rather than taking `@opentelemetry/sdk-trace-base` as a runtime
- * dependency: an exporter needs exactly one thing done for it, and the
- * dependency would arrive with the whole SDK behind it.
- *
- * A full queue drops the newest span rather than growing without bound. An
- * exporter that has stopped draining is already losing telemetry; taking the
- * agent's memory with it would turn that into an outage.
- */
 export function batchSpanProcessor(
   exporter: SpanExporter,
   options: BatchSpanProcessorOptions = {},
@@ -52,8 +37,6 @@ export function batchSpanProcessor(
 
   let buffer: unknown[] = [];
   let timer: ReturnType<typeof setTimeout> | undefined;
-  // Exports are chained rather than raced so a flush cannot interleave two
-  // batches into the same exporter.
   let pending: Promise<void> = Promise.resolve();
   let stopped = false;
 
@@ -69,8 +52,6 @@ export function batchSpanProcessor(
       timer = undefined;
       void drain();
     }, scheduledDelayMillis);
-    // Buffered spans must not be the reason a process stays alive; `shutdown`
-    // is what settles them.
     timer.unref?.();
   }
 
@@ -96,8 +77,6 @@ export function batchSpanProcessor(
         }
       });
     } catch (error: unknown) {
-      // A destination that cannot take spans is not a reason to fail the turn
-      // that produced them.
       report("span export failed", { error });
     }
   }

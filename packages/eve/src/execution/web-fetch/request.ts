@@ -12,20 +12,12 @@ const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const MAX_REDIRECTS = 10;
 const WEB_FETCH_DESTINATION_POLICY = { allowLoopback: false } as const;
 
-/** Options for an SSRF-safe HTTPS request. */
 interface PublicUrlRequestOptions {
   readonly headers: Readonly<Record<string, string>>;
   readonly maxResponseSize: number;
   readonly signal: AbortSignal;
 }
 
-/**
- * Requests an untrusted HTTPS URL while preventing access to non-public
- * network destinations.
- *
- * The socket lookup rejects the hostname if any resolved address is non-public
- * and connects using those exact results.
- */
 export async function requestPublicUrl(
   urlText: string,
   options: PublicUrlRequestOptions,

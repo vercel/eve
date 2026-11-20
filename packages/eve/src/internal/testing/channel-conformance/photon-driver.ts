@@ -23,19 +23,11 @@ interface ContentBuilder {
   build(): Promise<SpectrumContent>;
 }
 
-/**
- * Drives the real Photon iMessage adapter through a signed Spectrum webhook in
- * a direct chat. spectrum-ts sends over gRPC rather than `fetch`, so the driver
- * replaces the adapter's Space lookup with a fake Space that records each
- * send; everything above it (webhook verification, parsing, outbound
- * rendering, read receipts) is Photon's own code.
- */
 export function photonDriver(): ChannelDriver {
   nextChat += 1;
   const chatGuid = `iMessage;-;${PERSON}${nextChat}`;
   let sequence = 0;
   let restore: (() => void) | undefined;
-  /** Files a person sent, by the attachment id the webhook lists each under. */
   const uploads = new Map<string, SentFile>();
 
   function webhook(text: string, files: readonly SentFile[] = []): Request {
@@ -44,7 +36,6 @@ export function photonDriver(): ChannelDriver {
       files.length === 0
         ? { text, type: "text" }
         : {
-            // A message with files arrives as a group: its text, then one attachment per file.
             items: [
               { content: { text, type: "text" } },
               ...files.map((file, index) => {
@@ -109,7 +100,6 @@ export function photonDriver(): ChannelDriver {
     capabilities: ["attachments", "text-replies"],
     surface: "private",
     createChannel(record) {
-      /** Records a send as a new message, or an edit as the message `edited` it rewrites. */
       async function recordSend(method: string, builder: ContentBuilder, edited?: string) {
         sequence += 1;
         const id = edited ?? `photon-posted-${sequence}`;
@@ -130,8 +120,6 @@ export function photonDriver(): ChannelDriver {
         startTyping: async () => {},
         stopTyping: async () => {},
       };
-      // The webhook never carries a file's bytes; eve fetches each by id through
-      // iMessage's `getAttachment`, which this app's iMessage runtime serves.
       const app = {
         __internal: {
           platforms: new Map([
@@ -147,8 +135,6 @@ export function photonDriver(): ChannelDriver {
           ]),
         },
       };
-      // The channel builds its adapter internally, so patch the prototype's
-      // private seams to spectrum-ts: building the app and looking up a Space.
       const fakes = {
         async ensureApp(this: { app: unknown }) {
           this.app = app;

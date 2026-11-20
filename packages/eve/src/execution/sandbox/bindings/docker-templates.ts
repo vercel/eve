@@ -13,22 +13,8 @@ import {
 } from "#execution/sandbox/bindings/local-template-prune.js";
 import { resolveSandboxCacheDirectory } from "#internal/application/paths.js";
 
-/**
- * Local image repository holding prewarmed sandbox template images.
- * One tag per template key; sessions run containers from these images.
- */
 export const DOCKER_TEMPLATE_IMAGE_REPOSITORY = "eve-sandbox-template";
 
-/**
- * Removes stale Docker sandbox template images for one application.
- *
- * Template usage is tracked through per-app marker files (touched on
- * prewarm and session create) because Docker images carry only an
- * immutable creation time. Markers beyond the retain count and recency
- * window get their image untagged; the marker is kept when `rmi` fails
- * (for example while a session container still references the image)
- * so the template stays managed.
- */
 export async function pruneDockerSandboxTemplates(input: {
   readonly appRoot: string;
   readonly dockerCli?: DockerCli;
@@ -94,9 +80,6 @@ function dockerTemplateImageTag(input: {
   readonly optionsHash: string;
   readonly templateKey: string;
 }): string {
-  // Docker repository tags are case-sensitive but repositories must be
-  // lowercase; template keys are already lowercase hash material, the
-  // lowering is defensive.
   return `${input.templateKey.toLowerCase()}-${input.optionsHash}`;
 }
 
@@ -149,11 +132,16 @@ export async function commitDockerTemplateImage(input: {
     return "committed";
   }
 
-  // Template image tags are daemon-scoped while preparation locks are
-  // app-scoped. Accept only the loser of that exact publication race.
-  const publishedByPeer =
-    /already(?:\s*|-)?exists/iu.test(`${result.stderr}\n${result.stdout}`) &&
-    (await dockerImageExists(input.cli, input.imageReference));
+  let publishedByPeer = false;
+  if (/already(?:\s*|-)?exists/iu.test(`${result.stderr}\n${result.stdout}`)) {
+    for (const delayMs of [0, 25, 50, 100, 200, 400, 800]) {
+      if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
+      if (await dockerImageExists(input.cli, input.imageReference)) {
+        publishedByPeer = true;
+        break;
+      }
+    }
+  }
   if (!publishedByPeer) {
     expectDockerSuccess(result, `commit sandbox template image "${input.imageReference}"`);
   }

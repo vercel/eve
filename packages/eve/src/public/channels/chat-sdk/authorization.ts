@@ -10,7 +10,6 @@ type SignInChannel = Parameters<
   NonNullable<ChatSdkChannelEvents["interaction.opened"]>
 >[1]["channel"];
 
-/** A Chat SDK thread as a sign-in shows on it: a DM is private; elsewhere the challenge goes to the person alone. */
 export function chatSdkSignIns(channel: SignInChannel): SignInSurface | undefined {
   const { thread } = channel;
   if (!thread) return undefined;
@@ -48,10 +47,6 @@ export function chatSdkSignIns(channel: SignInChannel): SignInSurface | undefine
   };
 }
 
-/**
- * Shows `markdown` to `userId` alone: natively where the adapter can, else in a
- * DM. False when the adapter can do neither or the send fails.
- */
 async function postPrivately(thread: Thread, userId: string, markdown: string): Promise<boolean> {
   try {
     return (await thread.postEphemeral(userId, { markdown }, { fallbackToDM: true })) !== null;

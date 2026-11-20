@@ -24,7 +24,6 @@ interface AssembledEveVercelServices {
   readonly services: Readonly<Record<string, VercelServiceConfig>>;
 }
 
-/** Merge eve agents into one Vercel service graph. */
 export function assembleEveVercelServices(input: {
   readonly agents: readonly EveVercelServiceTarget[];
   readonly routes?: readonly VercelRouteConfig[];

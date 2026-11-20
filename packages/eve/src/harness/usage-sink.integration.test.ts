@@ -1,4 +1,3 @@
-// @linux-only: usage accounting
 import type { LanguageModelV4CallOptions } from "@ai-sdk/provider";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
@@ -18,8 +17,6 @@ import {
 } from "#public/definitions/instructions.js";
 import { defineDynamic } from "#public/definitions/model.js";
 import { defineTool } from "#tools/definition.js";
-
-// Model calls a session's own code makes, outside eve's model steps, count as the session's usage.
 
 describe("usage a session's code records", () => {
   it("counts against the tool call that spent it, and ownerless from a dynamic value", async () => {
@@ -45,7 +42,6 @@ describe("usage a session's code records", () => {
           loadNamespace: async () => ({
             default: defineTool({
               description: "Summarize Alice's notes with a model of its own.",
-              // A streaming tool: its usage still belongs to its call while it iterates.
               execute: async function* () {
                 yield { summary: "One note." };
                 await recordUsage({ inputTokens: 40, outputTokens: 8 });
@@ -66,8 +62,6 @@ describe("usage a session's code records", () => {
           logicalPath: "instructions/brief.ts",
         },
         {
-          // A hook runs inside the reaction its fact started; recording must not wait on it. The
-          // tool's progress is published inside its call, and the hook's usage still isn't the call's.
           loadNamespace: async () => ({
             default: defineHook({
               events: {

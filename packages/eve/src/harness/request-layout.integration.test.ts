@@ -1,4 +1,3 @@
-// @linux-only: model request assembly; compiled from memory
 import { MockLanguageModelV4 } from "ai/test";
 import type { LanguageModelV4CallOptions } from "@ai-sdk/provider";
 import { describe, expect, it } from "vitest";
@@ -22,11 +21,6 @@ import { always } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
 import { attachToolBehavior, readToolBehavior } from "#tools/behavior.js";
 import { agent as agentTool } from "#tools/framework/agent.js";
-
-// What eve sends the model, and what a session stores, for representative agents: the oracle for
-// changes to how a model call is assembled. These compare normalized prompts and tool names,
-// not full provider requests or object key order; stored state records the checkpoint shape.
-// Run with `-u` to accept a deliberate change, and review the golden diff.
 
 type Respond = (
   options: LanguageModelV4CallOptions,
@@ -69,14 +63,9 @@ const dynamicModel = (model: unknown) =>
     model: defineDynamic(() => ({ model, modelContextWindowTokens: 200_000 })),
   } as never);
 
-/**
- * Replaces generated values with stable placeholders, numbered by first appearance, so two runs
- * compare equal: ids, times, digests, durations.
- */
 function normalize(value: unknown): unknown {
   const seen = new Map<string, string>();
   const placeholder = (kind: string, raw: string) => {
-    // Times collide within a millisecond, so numbering them would vary run to run.
     if (kind === "time") return "<time>";
     const key = `${kind}:${raw}`;
     if (!seen.has(key))
@@ -118,7 +107,6 @@ function normalize(value: unknown): unknown {
   return visit(value, "");
 }
 
-/** The state the session's last turn step stored, with generated values replaced. */
 async function storedState(sessionId: string): Promise<unknown> {
   return normalize(await readStoredTurnState(sessionId));
 }
@@ -321,7 +309,6 @@ describe("what eve sends the model", () => {
                 ...agentTool,
                 toModelOutput: (output: unknown) => {
                   projections.push(output);
-                  // A second projection of this delivery would produce different prompt text.
                   return {
                     type: "text" as const,
                     value:
@@ -341,7 +328,6 @@ describe("what eve sends the model", () => {
         ],
       });
       await test.run(async () => {
-        // Background tasks run as durable runs, which only the Workflow host offers.
         const runtime = createWorkflowRuntime({
           compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
         });

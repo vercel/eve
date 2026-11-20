@@ -66,12 +66,10 @@ const FRAMEWORK_INTEGRATION_IGNORED_DIRECTORIES = new Set([
 ]);
 
 export interface CreatedProjectFrameworkOptions extends VercelProjectOperationOptions {
-  /** Detects whether project sources already use the eve integration for a host framework. */
   detectFrameworkIntegrationImport?: (
     projectRoot: string,
     importSpecifier: string,
   ) => Promise<boolean>;
-  /** Never prompt; ambiguous host framework detections fall back to the eve preset. */
   headless?: boolean;
 }
 
@@ -233,17 +231,6 @@ function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/**
- * Best-effort alignment of a linked Vercel project's Framework Preset with the
- * host framework the project declares on disk (e.g. Next.js).
- *
- * A project created as a standalone eve agent keeps the `eve` preset; adding a
- * host framework via `eve add channel/web` leaves it stale, so the deploy would
- * build the agent instead of the host app. Since that command already deploys on
- * the user's behalf, this switches the preset directly (no prompt) and notes the
- * change. No host framework, an unlinked directory, or an already-correct preset
- * is a no-op; a Vercel API failure warns rather than aborting the deploy.
- */
 export async function syncHostFrameworkPreset(
   prompter: { log: Pick<ChannelSetupLog, "info" | "warning"> },
   projectRoot: string,
@@ -262,8 +249,6 @@ export async function syncHostFrameworkPreset(
   try {
     current = await fetchProjectFramework(projectRoot, link.orgId, link.projectId, options);
   } catch (error) {
-    // A cancel isn't an API failure — let it propagate; anything else is
-    // best-effort, so warn and skip instead of aborting the deploy.
     if (options.signal?.aborted) throw error;
     prompter.log.warning(
       `Could not check this Vercel project's Framework Preset (${describeError(error)}). If it is not already ${label}, set it under Project Settings → Build and Deployment → Framework Settings before deploying.`,
@@ -306,7 +291,6 @@ export async function ensureCreatedProjectFramework(
   options: CreatedProjectFrameworkOptions,
 ): Promise<void> {
   const framework = await fetchProjectFramework(projectRoot, team, projectId, options);
-  // vercel.ts owns the service graph; a detected Next.js dependency is only a peer service.
   if ((await resolveVercelHostFrameworkPreset(projectRoot)) === "services") {
     if (framework !== "services") {
       await setProjectFramework(projectRoot, team, projectId, "services", onOutput, options);

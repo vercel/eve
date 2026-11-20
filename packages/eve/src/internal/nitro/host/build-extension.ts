@@ -25,18 +25,8 @@ import {
 export { tryReadExtensionBuildConfig };
 export type { ExtensionBuildConfig };
 
-/**
- * Prefix of the per-build staging directory created inside the extension
- * package. It must share a filesystem with the output directory so the final
- * swap is a rename.
- */
 export const EXTENSION_BUILD_STAGING_DIRECTORY_PREFIX = ".eve-extension-build-";
 
-/**
- * Builds a dist-only extension package. Authored modules are transformed as a
- * path-preserving graph, declarations and assets are emitted beside them, and
- * compatibility-only metadata is written at the agent-shaped dist root.
- */
 export async function buildExtensionPackage(
   rootDir: string,
   config: ExtensionBuildConfig,
@@ -87,8 +77,6 @@ export async function buildExtensionPackage(
       stagedOutDir,
       transactionRoot,
     });
-    // Rewrite package.json before stamping the manifest: production builds treat
-    // a package.json newer than the manifest as a stale distribution.
     await ensureExtensionExports(appRoot, config.outDir);
     await writeExtensionCompatibilityManifest(stagedDistRoot, {
       kind: EXTENSION_COMPATIBILITY_MANIFEST_KIND,
@@ -102,8 +90,6 @@ export async function buildExtensionPackage(
     await replaceExtensionBuildOutput({ outDir: config.outDir, stagedOutDir, transactionRoot });
     return config.outDir;
   } catch (error) {
-    // The transaction root holds the only copy of the prior dist when the
-    // restore rename failed; deleting it would destroy the last good output.
     preserveTransactionRoot = error instanceof ExtensionOutputRestoreError;
     throw error;
   } finally {

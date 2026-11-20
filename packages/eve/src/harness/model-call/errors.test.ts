@@ -22,21 +22,12 @@ const cyberPolicyBody = {
   type: "invalid_request",
 };
 
-/**
- * Builds the shape `ai@7.0.0-canary.169+` rejects with when a model
- * stream closes after metadata without output (vercel/ai#15938),
- * matched by name like the real error after `toError` coercion.
- */
 function noOutputGeneratedError(): Error {
   const error = new Error("No output generated. The model stream ended without a finish chunk.");
   error.name = "AI_NoOutputGeneratedError";
   return error;
 }
 
-/**
- * Builds a fake `GatewayAuthenticationError` shape matching what
- * `@ai-sdk/gateway` produces, without importing the upstream class.
- */
 function gatewayAuthError(message: string): Error {
   const error = new Error(message);
   error.name = "GatewayAuthenticationError";
@@ -114,8 +105,6 @@ describe("isNoOutputGeneratedError", () => {
   });
 
   it("matches a prototype-stripped plain-object shape", () => {
-    // toError copies `name` onto a fresh Error for structured-clone
-    // survivors; the raw plain object must match too.
     expect(
       isNoOutputGeneratedError({
         message: "No output generated.",
@@ -173,15 +162,8 @@ describe("normalizeModelStreamError", () => {
   });
 });
 
-/**
- * Classification is the only behavior this module owns. Error
- * rendering (details payload, OTel span exceptions) is covered in
- * `src/internal/logging.test.ts`.
- */
 describe("classifyModelCallError", () => {
   it("returns recoverable for an empty model response, never retry", () => {
-    // "retry" would re-run executeModelCall against step hooks whose
-    // one-shot stepResult promise already resolved with the empty result.
     expect(classifyModelCallError(new EmptyModelResponseError())).toBe("recoverable");
   });
 
@@ -216,8 +198,6 @@ describe("classifyModelCallError", () => {
   });
 
   it("returns retry for an AI Gateway stream timeout payload", () => {
-    // The gateway aborts a long stream with a plain payload keyed on
-    // `code`; the harness wraps it through normalizeModelStreamError.
     const payload = {
       code: "gateway_stream_timeout",
       message: "Stream exceeded maximum duration before function timeout",
@@ -238,7 +218,6 @@ describe("classifyModelCallError", () => {
   });
 
   it("does not retry invalid provider options that wrap a validation error", () => {
-    // The shape `parseProviderOptions` throws from a provider adapter's `doStream`.
     const error = Object.assign(
       new Error("invalid openai provider options", {
         cause: new TypeValidationError({ cause: new Error("Invalid input"), value: {} }),
@@ -297,7 +276,6 @@ describe("classifyModelCallError", () => {
     ).toBe("recoverable");
   });
 
-  // Issue #5427: the gateway reuses `insufficient_funds` when it only throttled the balance check.
   it("retries an AI Gateway 402 that asks to retry shortly instead of reporting exhausted credits", () => {
     const err = gatewayModelCallError({
       gatewayName: "GatewayInternalServerError",
@@ -338,8 +316,6 @@ describe("classifyModelCallError", () => {
     expect(classifyModelCallError(err)).toBe("terminal");
   });
 
-  // `@ai-sdk/openai` keeps the provider code only in the body: in `data` for an error frame
-  // received before any output, and in the response body for an HTTP 400.
   it.each([
     { title: "an error frame before any output", body: { type: "error", error: cyberPolicyBody } },
     { title: "an HTTP 400", body: { error: cyberPolicyBody } },
@@ -357,7 +333,6 @@ describe("classifyModelCallError", () => {
     expect(classifyModelCallError(err)).toBe("recoverable");
   });
 
-  // The session stays open: a later message can fit once compaction or a smaller agent makes room.
   it.each([
     {
       title: "Anthropic's 400",
@@ -421,8 +396,6 @@ describe("classifyModelCallError", () => {
 
     expect(classifyModelCallError(new TypeError("terminated"))).toBe("retry");
 
-    // The old substring policy is gone: prose that merely mentions a
-    // network token no longer forces a retry loop.
     expect(classifyModelCallError(new Error("network configuration invalid"))).toBe("recoverable");
     expect(classifyModelCallError(new Error("provider terminated the request"))).toBe(
       "recoverable",
@@ -531,9 +504,6 @@ describe("extractUpstreamRejectionMessage", () => {
   });
 
   it("keeps the generic framing for transient upstream failures", () => {
-    // A 503/429 that exhausts retries is an availability problem, not a
-    // request rejection; summarizing it as "rejected" sends users to debug
-    // their configuration.
     const summary = extractUpstreamRejectionMessage(
       gatewayModelCallError({
         gatewayName: "GatewayInternalServerError",
@@ -549,13 +519,6 @@ describe("extractUpstreamRejectionMessage", () => {
   });
 });
 
-/**
- * Builds a realistic AI Gateway 400 error for a request that fanned out
- * across multiple providers — Anthropic primary 503, then fallbacks
- * rejecting the provider-specific `web_search_20250305` tool. The shape
- * mirrors what the gateway returns in `data.providerMetadata.gateway.routing`
- * and its `responseBody`.
- */
 function gatewayProviderToolFailure(input: {
   readonly unsupportedTypes: readonly string[];
   readonly omitData?: boolean;
@@ -614,10 +577,7 @@ function gatewayProviderToolFailure(input: {
   const fullResponseBody = JSON.stringify(responseBodyValue);
   const responseBody =
     input.truncateResponseBody === true
-      ? // Truncate AFTER the upstream error phrase but before the JSON
-        // is complete so `JSON.parse` fails and the raw-string fallback
-        // is exercised.
-        `${fullResponseBody.slice(0, fullResponseBody.indexOf("is not supported") + 30)}...<truncated>`
+      ? `${fullResponseBody.slice(0, fullResponseBody.indexOf("is not supported") + 30)}...<truncated>`
       : fullResponseBody;
 
   const upstream = Object.assign(new Error("[object Object]"), {
@@ -683,10 +643,6 @@ describe("extractUnsupportedProviderToolTypes", () => {
   });
 
   it("recovers the tool type from a truncated responseBody via raw string scan", () => {
-    // The `data` field is the structured projection. When `data` is
-    // absent and the responseBody is truncated mid-JSON (as happens for
-    // some gateway error shapes), we still want the upstream tool type
-    // to be discoverable so recovery can run.
     const error = gatewayProviderToolFailure({
       unsupportedTypes: ["web_search_20250305"],
       omitData: true,
@@ -728,8 +684,6 @@ describe("extractUnsupportedProviderToolTypes", () => {
   });
 
   it("returns empty for non-tool 'not supported' phrasing", () => {
-    // We anchor on the literal "tool type 'X' is not supported" phrasing
-    // to avoid sweeping in unrelated rejection messages.
     const upstream = Object.assign(new Error("[object Object]"), {
       responseBody: '{"error":{"message":"streaming is not supported for this model"}}',
       statusCode: 400,
@@ -743,7 +697,6 @@ describe("extractUnsupportedProviderToolTypes", () => {
   });
 
   it("returns the include value an OpenAI-compatible endpoint rejected", () => {
-    // Bedrock Mantle's response when the request carries OpenAI web search.
     const body = {
       error: {
         code: "invalid_value",
@@ -779,7 +732,6 @@ describe("extractUnsupportedProviderToolTypes", () => {
   });
 
   it("returns OpenAI's web search type when AI Gateway routed it to a host without web search", () => {
-    // AI Gateway's response for OpenAI web search routed to Bedrock.
     const body = {
       error: {
         message: "web search is not supported for this request",

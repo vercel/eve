@@ -11,7 +11,6 @@ describe("recallChannel listening", () => {
     await withChannelConversation(
       recallDriver({
         overheard: (text) => text === ASIDE,
-        // The default: chat, and speech that names the bot.
         shouldRespond: ({ event, line, transcript }) => {
           heard.push(transcript);
           return event.type === "chat" || line.includes("Eve");
@@ -21,7 +20,6 @@ describe("recallChannel listening", () => {
         await conversation.say('Use deploy_release to ship release "v2.4".');
         await conversation.waitForQuestion("Deploy release v2.4 to production?");
 
-        // The requester's own message would cancel the approval if it started a turn.
         await conversation.say(ASIDE);
         await conversation.waitForRest();
         expect(await conversation.replyCount()).toBe(0);
@@ -30,7 +28,6 @@ describe("recallChannel listening", () => {
         expect(await conversation.waitForToolResult("deploy_release")).toEqual({ deployed: true });
         await conversation.waitForRest();
 
-        // What it heard while the approval was open reaches its next turn.
         await conversation.say("What did I miss?");
         await conversation.waitForReplyTo("What did I miss?");
         expect(heard.at(-1)).toEqual([`Alice: ${ASIDE}`]);

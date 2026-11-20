@@ -16,7 +16,6 @@ async function discoverDeclarationFiles({ distDir }) {
     .map((file) => ({ source: file, output: file }));
 }
 
-/** Copy the complete stable Sandbox declaration tree for public types and runtime loading. */
 export default {
   packageName: "@vercel/sandbox",
   packageJsonName: "@vercel/sandbox",

@@ -70,7 +70,6 @@ describe("dynamic tools", () => {
         defineWorkflowTool({
           description: "Deploy.",
           inputSchema: { properties: { taskId: { type: "string" } }, type: "object" },
-          // What the build leaves on a compiled entry point.
           serve: Object.assign(async () => null, { workflowId: "workflow//./tools/search//serve" }),
         }),
       {},

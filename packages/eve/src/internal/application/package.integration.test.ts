@@ -9,8 +9,6 @@ import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roo
 
 const createScratchDirectory = useTemporaryDirectories();
 
-// Matches how the resolver canonicalizes paths. Windows temporary roots often
-// arrive as 8.3 short names, which only the native realpath expands.
 function canonicalize(path: string): string {
   return realpathSync.native(path);
 }

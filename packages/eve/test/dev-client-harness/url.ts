@@ -11,11 +11,6 @@ function createDevelopmentServerBaseUrl(serverUrl: string): URL {
   return url;
 }
 
-/**
- * Resolves one eve route against the configured development server URL.
- *
- * Test-only helper.
- */
 export function resolveDevelopmentServerRouteUrl(input: {
   routePath: string;
   serverUrl: string;
@@ -26,13 +21,6 @@ export function resolveDevelopmentServerRouteUrl(input: {
   );
 }
 
-/**
- * Resolves one server-provided resource reference against the configured
- * development server URL. Absolute resource URLs are returned untouched;
- * relative routes are resolved against the development server base.
- *
- * Test-only helper.
- */
 export function resolveDevelopmentServerResourceUrl(input: {
   resource: string;
   serverUrl: string;

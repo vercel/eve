@@ -1,4 +1,3 @@
-// @linux-only: compaction threshold math
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
 
@@ -21,10 +20,8 @@ async function eventTypes(runtime: Runtime, sessionId: string): Promise<string[]
   return types;
 }
 
-// About 140k tokens: over the threshold of a 150k window, well under a 1M one's.
 const NOTES = "Alice's notes on the quarterly release. ".repeat(14_000);
 
-/** How many compactions Alice's two turns start, for an agent whose model has `window`. */
 async function compactions(input: { readonly dynamic: boolean; readonly window: number }) {
   const model = markMockModel(
     new MockLanguageModelV4({
@@ -59,7 +56,6 @@ async function compactions(input: { readonly dynamic: boolean; readonly window: 
       const types = await eventTypes(runtime, first.sessionId);
       return types.filter((type) => type === "context.started").length;
     } finally {
-      // It holds a process-wide route and live sessions until it's disposed.
       await runtime.dispose();
     }
   });

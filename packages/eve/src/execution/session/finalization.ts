@@ -23,7 +23,6 @@ import { storedProjection } from "#harness/session-machine/view.js";
 import { sessionUsage, takeSessionUsageDelta } from "#harness/session-usage.js";
 import { notifyTurnCallerStep } from "#subagents/parent-notification.js";
 
-/** The three ways a session ends. `done` already emitted its terminal event inside the turn. */
 export type SessionTerminalOutcome =
   | { readonly kind: "done"; readonly action: TurnOutcome & { readonly kind: "done" } }
   | {
@@ -42,7 +41,6 @@ interface SessionFinalizationContext {
   readonly sessionWritable: WritableStream<Uint8Array>;
 }
 
-/** Whether the session may have runs to stop; the step reports state it can't read. */
 function mayHaveLiveRuns(sessionState: DurableSessionState): boolean {
   try {
     return liveRuns(sessionState.snapshot?.session?.state).length > 0;
@@ -51,18 +49,12 @@ function mayHaveLiveRuns(sessionState: DurableSessionState): boolean {
   }
 }
 
-/**
- * Terminates descendants, emits the terminal protocol event when the turn has
- * not already done so, then settles the parked caller waiting on this session.
- */
 export async function finalizeSession(
   outcome: SessionTerminalOutcome,
   context: SessionFinalizationContext,
 ): Promise<WorkflowEntryResult> {
   const { serializedContext, sessionState } = context.cursor;
-  // Most sessions end with no run to stop, so the step that would find nothing is skipped.
   if (sessionState !== undefined && mayHaveLiveRuns(sessionState)) {
-    // Best effort: a failed teardown must not keep the session from ending and closing its stream.
     try {
       await terminateChildSessionsStep({ sessionState });
     } catch (error) {
@@ -114,7 +106,6 @@ export async function finalizeSession(
       usage,
     });
   } else {
-    // The turn published the session's end; the run still closes the stream.
     await closeSessionStreamStep({ sessionWritable: context.sessionWritable });
   }
 

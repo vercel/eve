@@ -17,6 +17,10 @@ export type {
   GitHubAuthorizeRequest,
   GitHubUserAuthorizeRequest,
 } from "./lib/github-shell.ts";
+/**
+ * Callback that installs GitHub credential header rules into the sandbox's network policy for one command, then receives `null` to remove them.
+ * It must preserve the consumer's other network rules.
+ */
 export type GitHubLeaseBroker = GitHubConfig["broker"];
 export type { GitHubAttribution } from "./lib/github-shell.ts";
 
@@ -32,6 +36,10 @@ const githubBase = {
   attribution: fn<GitHubAttribution>().optional(),
 };
 
+/**
+ * Adds GitHub support to an agent: GitHub instructions and a `pr` skill.
+ * With `github` config, it also adds the Connect-brokered `gh` tool and signed commits; without it, the agent uses the `gh` and `git` CLIs from its own shell.
+ */
 export default defineExtension({
   config: z.object({
     /**

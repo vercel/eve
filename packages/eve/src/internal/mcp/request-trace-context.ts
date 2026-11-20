@@ -8,22 +8,11 @@ import {
 
 import { isObject } from "#shared/guards.js";
 
-/** W3C caps `tracestate` at 512 characters; a longer value is dropped whole. */
 const MAX_TRACESTATE_LENGTH = 512;
 const TRACEPARENT = /^00-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$/;
 const ZERO_TRACE_ID = "0".repeat(32);
 const ZERO_SPAN_ID = "0".repeat(16);
 
-/**
- * Adopts the W3C trace context an MCP client sends in a request's
- * `params._meta` as the parent of everything the request runs.
- *
- * Only `traceparent` and `tracestate` are read, and each is validated and
- * bounded; anything malformed leaves `parent` as it was. `baggage` is never
- * read: an MCP caller cannot choose eve's audience, session lineage, or
- * content capture by sending it. Every other value already on `parent`,
- * error-content policy included, is kept.
- */
 export function withMcpRequestTraceContext(parent: Context, body: unknown): Context {
   if (!isObject(body) || Array.isArray(body) || !isObject(body.params)) return parent;
   const meta = body.params._meta;

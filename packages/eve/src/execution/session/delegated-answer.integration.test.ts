@@ -1,4 +1,3 @@
-// @linux-only: delegated approval guard
 import { describe, expect, it } from "vitest";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
@@ -91,7 +90,6 @@ describe("delegated agent approval answers", () => {
           }),
         ).resolves.toMatchObject({ sessionId: child.runId, status: "accepted" });
 
-        // The parent's message steers the held turn, so it withdraws the approval instead of answering it.
         const resumed = await withTimeout(stream.nextTurn(), "delegated approval answer");
         const outcomes = filterEventsByType(resumed, "interaction.settled")
           .filter(({ data }) => data.interactionId === approval!.data.interactionId)

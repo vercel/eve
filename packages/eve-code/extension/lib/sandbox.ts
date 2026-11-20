@@ -1,4 +1,3 @@
-/** Consumer-facing helpers exported as `eve/extensions/code/sandbox`. */
 import type { SandboxSession } from "eve/sandbox";
 
 import { commandFailureDetail } from "./command-failure.ts";
@@ -12,7 +11,6 @@ import {
 
 type ToolingSandbox = Pick<SandboxSession, "resolvePath" | "run" | "writeTextFile">;
 
-/** Include in the consumer's sandbox `revalidationKey` so cached templates rebuild when the tooling changes. */
 export const CODE_TOOLING_REVALIDATION_KEY = `eve-code-tooling:4:${GH_SIGNED_COMMIT_VERSION}`;
 
 /** Install CLI wrappers and signed commits. */

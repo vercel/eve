@@ -27,7 +27,6 @@ export async function prewarmClientSession(input: {
   readonly sessionId: string;
   readonly signal?: AbortSignal;
 }): Promise<PrewarmSessionResult> {
-  // An empty body is the route's preparation request; any field makes it an input delivery.
   const response = await fetch(
     createClientUrl(input.context.baseUrl, createEveSessionRoutePath(input.sessionId)),
     {
@@ -65,8 +64,6 @@ export async function sendClientControl(input: {
   };
 }): Promise<DeliveryReceipt> {
   const { signal, turnId, reason } = input.options ?? {};
-  // Controls reject unknown fields, and option objects passed by variable skip
-  // excess-property checks, so each body carries only its own control fields.
   const body = input.kind === "cancel" ? { turnId } : input.kind === "end" ? { reason } : {};
   const headers = await input.context.resolveHeaders();
   headers.set("content-type", "application/json");

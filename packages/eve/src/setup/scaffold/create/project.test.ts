@@ -31,9 +31,6 @@ describe("byok provider derivation", () => {
   });
 
   it("keeps generated source valid for hostile provider prefixes", () => {
-    // The slug is injected into agent.ts and the env var into process.env.<x>:
-    // characters outside the slug alphabet are dropped, and a leading digit is
-    // prefixed so the property access stays parseable.
     expect(modelProviderSlug('we"ird lab/model')).toBe("weirdlab");
     expect(byokProviderEnvVar("01ai/model")).toBe("_01AI_API_KEY");
   });

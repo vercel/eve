@@ -6,23 +6,12 @@ import { buildSingleRolldownChunk } from "#internal/bundler/rolldown.js";
 
 const ENTRY = "\0eve-test-entry";
 
-/** A module id as the filesystem identifies it: drive-qualified and case-insensitive on Windows. */
 function fileKey(id: string): string {
   if (!isAbsolute(id)) return id;
   const path = resolve(id).replaceAll("\\", "/");
   return process.platform === "win32" ? path.toLowerCase() : path;
 }
 
-/**
- * Bundles an entry through `plugins` with real Rolldown, so hook filters, hook
- * order, and tree-shaking behave as in a host build. The entry imports
- * `imports` for their side effects only and re-exports everything from
- * `reexports`. Modules no plugin provides load from `files` (empty when
- * absent), relative imports resolve against their importer, and any other
- * specifier stays external as `unresolved:<specifier>`. With `sideEffectFree`,
- * modules no plugin resolves are side-effect free, as Nitro's virtual modules
- * and many packages are, so only a plugin can keep their top-level code.
- */
 export async function bundleThroughPlugins(input: {
   readonly plugins: readonly RolldownPluginOption[];
   readonly imports?: readonly string[];

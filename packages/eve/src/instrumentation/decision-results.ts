@@ -1,9 +1,5 @@
 import type { DecisionQuestion } from "#ai/decision-types.js";
 
-/**
- * One question's result in the OpenTelemetry GenAI `gen_ai.decision.results` shape, identified by
- * its position in the request.
- */
 export type DecisionResultRecord =
   | { question_index: number; question_name: string; type: "predicate"; probability: number }
   | {
@@ -22,11 +18,6 @@ export type DecisionResultRecord =
     }
   | { question_index: number; question_name: string; type: "refusal" };
 
-/**
- * Maps answers, or the questions a model refused, to `gen_ai.decision.results`. Only returned
- * answers are recorded, and an omitted answer keeps the other questions' indices. A score whose
- * scale isn't all text labels is omitted, because its value can't be read without the scale.
- */
 export function decisionResults(
   questions: Readonly<Record<string, DecisionQuestion>>,
   outcome:

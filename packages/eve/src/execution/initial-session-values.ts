@@ -5,15 +5,8 @@ import { withPendingHistory } from "#execution/session/pending-history.js";
 import type { JsonObject } from "#shared/json.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 
-/**
- * A new session's initial durable state and history. It imports nothing the workflow bundle can't
- * hold, so a root session's workflow body computes it without a step, and `createSessionStep`
- * returns it after checking a subagent node. A new session relays no input requests, so it needs
- * no HITL state read.
- */
 export function createInitialSessionValues(input: {
   readonly continuationToken: string;
-  /** History from `create()`, held until the first message's turn adds it. */
   readonly history?: readonly SessionHistoryMessage[];
   readonly outputSchema?: JsonObject;
   readonly rootSessionId?: string;

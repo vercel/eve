@@ -12,10 +12,6 @@ import { authoredEvaluate, type Definition, section, SECTION_ORDER } from "./def
 
 type Instruction = { readonly role: "system" | "user"; readonly content: string };
 
-/**
- * The agent's static instructions: its system instructions as one block of eve's default prompt,
- * and its user instructions announced, as dynamic ones are.
- */
 export const instructions: Definition = {
   contribute: ({ container }) => ({
     announcements: () =>
@@ -38,7 +34,6 @@ export const instructions: Definition = {
   label: "the agent's instructions",
 };
 
-/** What the agent's workspace holds, where it has one. */
 export const workspace: Definition = {
   contribute: ({ container }) => ({
     system: () => {
@@ -53,11 +48,6 @@ export const workspace: Definition = {
   label: "the agent's workspace",
 };
 
-/**
- * A `defineDynamic()` in `agent/instructions/`. A system instruction is a part of the system
- * prompt of its own while its definition returns it; a user instruction is announced: it joins the
- * conversation when its content changes, and stays there.
- */
 export function instructionsDefinition(
   resolver: ResolvedDynamicDefinition<"instructions">,
 ): Definition {
@@ -117,10 +107,6 @@ function instructionOf(
   return content.length === 0 ? null : { content, role: normalized.role ?? "system" };
 }
 
-/**
- * A user instruction, announced under its digest, which the same content repeats. Without content
- * the key forgets it, so the same content returned later joins again.
- */
 function userInstruction(content: string | undefined, digest: string): Announcement {
   return {
     initial: "",
@@ -130,7 +116,6 @@ function userInstruction(content: string | undefined, digest: string): Announcem
   };
 }
 
-/** The agent's static user instructions, each under its announcement's key. */
 export function staticUserInstructions(
   container: Pick<AlsContext, "get">,
 ): readonly { readonly key: string; readonly content: string }[] {

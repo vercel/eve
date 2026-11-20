@@ -1,0 +1,27 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "ci": {
+    "tasks": [
+      {
+        "name": "typecheck",
+        "env": {
+          "EVE_TELEMETRY_DISABLED": {
+            "constant": {
+              "value": "1"
+            }
+          }
+        }
+      },
+      {
+        "name": "test:public-types",
+        "env": {
+          "EVE_TELEMETRY_DISABLED": {
+            "constant": {
+              "value": "1"
+            }
+          }
+        }
+      }
+    ]
+  }
+}

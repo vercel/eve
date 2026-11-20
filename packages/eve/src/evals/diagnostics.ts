@@ -1,6 +1,5 @@
 const DEFAULT_VALUE_LENGTH = 160;
 
-/** Adds an optional user label without replacing the assertion's stable family name. */
 export function formatAssertionName(name: string, label: string): string {
   const normalized = label.trim();
   if (normalized.length === 0) {
@@ -9,7 +8,6 @@ export function formatAssertionName(name: string, label: string): string {
   return `${name} [${normalized}]`;
 }
 
-/** Formats an assertion value for a compact human-readable diagnostic. */
 export function formatDiagnosticValue(value: unknown, maxLength = DEFAULT_VALUE_LENGTH): string {
   let text: string;
   try {
@@ -20,7 +18,6 @@ export function formatDiagnosticValue(value: unknown, maxLength = DEFAULT_VALUE_
   return truncateDiagnostic(text, maxLength);
 }
 
-/** Converts arbitrary assertion evidence into an artifact-safe JSON value. */
 export function toDiagnosticMetadataValue(value: unknown): unknown {
   const ancestors: object[] = [];
   try {
@@ -31,7 +28,6 @@ export function toDiagnosticMetadataValue(value: unknown): unknown {
         return { name: current.name, message: current.message, stack: current.stack };
       }
       if (current !== null && typeof current === "object") {
-        // Shared references are valid; only objects on the active traversal path are circular.
         while (ancestors.length > 0 && ancestors.at(-1) !== this) {
           ancestors.pop();
         }
@@ -46,7 +42,6 @@ export function toDiagnosticMetadataValue(value: unknown): unknown {
   }
 }
 
-/** Bounds diagnostic text while leaving full structured evidence in metadata. */
 export function truncateDiagnostic(text: string, maxLength: number): string {
   return text.length <= maxLength ? text : `${text.slice(0, maxLength)}…`;
 }

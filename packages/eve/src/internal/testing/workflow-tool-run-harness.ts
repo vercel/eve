@@ -37,17 +37,11 @@ export function buildWorkflowToolSerializedContext(input: {
   };
 }
 
-/**
- * Registers one fixture workflow as an authored tool. The fixture module
- * passed through the test tier's client transform, so `execute` is the stub
- * the real pipeline produces: a function carrying its `workflowId`.
- */
 export async function createWorkflowToolRuntime(input: {
   readonly agentName: string;
   readonly endsTurn?: WorkflowExecuteToolDefinition["endsTurn"];
   readonly execute: (...args: never[]) => unknown;
   readonly inputSchema?: ResolvedToolDefinition["inputSchema"];
-  /** Other authored modules, such as hooks, compiled next to the tool. */
   readonly modules?: readonly ProgrammaticAgentModule[];
   readonly toolName: string;
 }): Promise<TestRuntime> {
@@ -70,7 +64,6 @@ export async function createWorkflowToolRuntime(input: {
   });
 }
 
-/** Polls one run until it reaches a terminal status, returning that status. */
 export async function waitForWorkflowToolRunTerminal(
   runId: string,
   timeout = 15_000,

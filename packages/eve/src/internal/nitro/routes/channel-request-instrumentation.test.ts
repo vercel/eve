@@ -15,9 +15,6 @@ import { createInstrumentationHooks } from "#instrumentation/lifecycle.js";
 import { registerInstrumentationRuntime } from "#instrumentation/runtime.js";
 import { traceChannelRequest } from "#internal/nitro/routes/channel-request-instrumentation.js";
 
-// These tests run through the bundled `@vercel/otel` registration (its composite
-// span processor) with a diag logger, so a span ended twice is observable. A plain
-// `BasicTracerProvider` silently ignores a second `end()`.
 const DOUBLE_END = "You can only call end() on a span once";
 
 describe("traceChannelRequest span lifetime", () => {
@@ -71,13 +68,9 @@ describe("traceChannelRequest span lifetime", () => {
 
   const tick = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-  // The request span ends when the body's pipe settles, a microtask after the reader sees it close.
   const requestSpans = () =>
     exporter.getFinishedSpans().filter((span) => span.name === "agent.channel.request");
 
-  // https://github.com/vercel/eve/issues/4256: the stream route's run lookup and
-  // `workflow.stream.read.connect` start while the lazy body is read and end
-  // out of order.
   it("ends overlapping spans started while the body is read exactly once", async () => {
     const response = await trace(
       () =>

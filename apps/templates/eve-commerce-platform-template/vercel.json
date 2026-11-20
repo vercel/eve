@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "pnpm build:vercel",
+  "installCommand": "pnpm install --frozen-lockfile",
+  "routes": [
+    {
+      "src": "^/agentcard/webhooks$",
+      "destination": { "type": "service", "service": "eve" }
+    }
+  ]
+}

@@ -1,4 +1,3 @@
-// @linux-only: schedule operation schemas
 import { describe, expect, it, vi } from "vitest";
 import { installWorkflowHost } from "#execution/workflow-host/host.js";
 import {
@@ -30,7 +29,6 @@ import { serializeInputSchema } from "#tools/schema.js";
 import type { ToolDefinition } from "#tools/definition.js";
 import type { ScheduleOccurrenceEvent, ScheduleRecord } from "#public/schedules/subscription.js";
 
-// An occurrence runs on Workflow, the durable host a step bundle installs; this realm loads none.
 installWorkflowHost();
 
 const alice = {
@@ -224,7 +222,6 @@ describe("schedule creation and invocation", () => {
       description: "Schedule a task that runs unattended.",
       inputSchema: z.object({ task: z.string() }).strict(),
       provider,
-      // One preparation for every scope, told which scope it acts for.
       preparePayload: (input, context) => ({ task: input.task, target: context.scopeName }),
       scopes: {
         personal: byPrincipal,
@@ -234,7 +231,6 @@ describe("schedule creation and invocation", () => {
           resolve: () => ["channel", "C1"],
           approval: {
             list: () => "user-approval",
-            // A request-only policy object gates no responses, as for one collection.
             enable: { request: () => "user-approval" },
             delete: {
               request: () => "user-approval",
@@ -270,7 +266,6 @@ describe("schedule creation and invocation", () => {
     await app.runAsSession(undefined, async () => {
       await bindCaller();
       const bundle = requireCompiledBundle(loadContext());
-      // The agent offers the definition's one slot, built from the scopes it resolved.
       const slots = (await agentContentsOf(bundle)).files.scheduleTools.map(
         (definition) => definition.id,
       );
@@ -335,7 +330,6 @@ describe("schedule creation and invocation", () => {
           callId: scope,
         } as never)) as ScheduleRecord;
       }
-      // Each call reached its own scope: its stored collection, namespace, and prepared payload.
       expect(
         created.mock.calls.map(([context, schedule]) => [
           context.collection,
@@ -348,8 +342,6 @@ describe("schedule creation and invocation", () => {
       ]);
       expect(new Set(created.mock.calls.map(([context]) => context.namespace)).size).toBe(2);
 
-      // The channel's response policy gates the shared tool. The personal scope sets none, so
-      // it keeps the default: only the requester answers, whoever else is in the conversation.
       const bob = { ...alice, principalId: "bob" };
       const answer = (
         toolInput: unknown,
@@ -376,11 +368,9 @@ describe("schedule creation and invocation", () => {
       await expect(response(answer(input("personal"), alice, alice))).resolves.toEqual({
         status: "allowed",
       });
-      // An anonymous request has no requester to match, as without a response policy.
       await expect(response(answer(input("personal"), null, bob))).resolves.toEqual({
         status: "allowed",
       });
-      // The same holds for an operation without a prepared write.
       const deleteResponse = (tools.schedule__workflows__delete!.approval as ApprovalConfiguration)
         .response!;
       const named = (scope: string) => ({ scope, name: records[scope]!.name });
@@ -414,7 +404,6 @@ describe("schedule creation and invocation", () => {
         awaitsPerson: true,
       });
 
-      // A remembered approval stays with the scope it was given for.
       const invoke = tools.schedule__workflows__invoke!;
       const invokePolicy = resolveApprovalPolicy(invoke.approval!) as ApprovalPolicy;
       const invoked = (scope: string) => ({ scope, name: records[scope]!.name });
@@ -433,7 +422,6 @@ describe("schedule creation and invocation", () => {
         await evaluateApproval(invokePolicy, invokeContext("channel"), { memory }),
       ).toMatchObject({ denied: false, awaitsPerson: true });
 
-      // An occurrence runs its scope's `run`, or the definition's when the scope has none.
       await invoke.execute(invoked("personal"), {} as never);
       await invoke.execute(invoked("channel"), {} as never);
       expect(ran).toEqual([
@@ -441,12 +429,10 @@ describe("schedule creation and invocation", () => {
         "channel run: Send the channel digest",
       ]);
 
-      // A queue delivery names the stored collection and gets that scope's definition.
       await expect(loadScheduleCollectionDefinition(bundle, "team-workflows")).resolves.toBe(
         resolved[1]!.definition,
       );
 
-      // Code reaches a scope through the client by naming it.
       await expect(
         (await schedules(workflows, { scope: "channel" })).list(),
       ).resolves.toMatchObject({ data: [{ name: records.channel!.name }] });

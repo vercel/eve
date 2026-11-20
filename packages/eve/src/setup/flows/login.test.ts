@@ -8,7 +8,6 @@ import { runLoginFlow, type LoginFlowDeps } from "./login.js";
 
 const APP_ROOT = "/app/my-agent";
 
-/** Auth probe that returns the given sequence of results across successive calls. */
 function authProbe(...results: VercelAuthStatus[]): LoginFlowDeps["getVercelAuthStatus"] {
   let call = 0;
   return vi.fn(async () => results[Math.min(call++, results.length - 1)] ?? "logged-out");
@@ -18,8 +17,6 @@ function run(deps: Partial<LoginFlowDeps>, runVercelLogin?: LoginFlowDeps["runVe
   const { prompter } = createFakePrompter({});
   const merged: Partial<LoginFlowDeps> = { ...deps };
   if (runVercelLogin !== undefined) merged.runVercelLogin = runVercelLogin;
-  // No `awaitChoice` on the fake prompter → the headless branch runs the login
-  // subprocess to completion behind a spinner.
   return runLoginFlow({ appRoot: APP_ROOT, prompter, deps: merged });
 }
 
@@ -51,7 +48,6 @@ describe("runLoginFlow", () => {
 
   it("runs vercel login and confirms with a re-probe on success", async () => {
     const runVercelLogin = vi.fn<LoginFlowDeps["runVercelLogin"]>(async () => true);
-    // First probe: logged out; second probe (after login): logged in.
     await expect(
       run({ getVercelAuthStatus: authProbe("logged-out", "authenticated") }, runVercelLogin),
     ).resolves.toEqual({ kind: "logged-in" });
@@ -115,13 +111,10 @@ describe("runLoginFlow", () => {
 
   it("cancels and aborts the subprocess when the user stops waiting", async () => {
     const { prompter: base } = createFakePrompter({});
-    // An interactive prompter whose Cancel resolves immediately, so the choice
-    // wins the race against the still-running login subprocess.
     const prompter: Prompter = {
       ...base,
       awaitChoice: () => ({ choice: Promise.resolve("cancel"), close: () => {} }),
     };
-    // The login subprocess hangs until its signal aborts (the browser wait).
     const runVercelLogin = vi.fn<LoginFlowDeps["runVercelLogin"]>(
       ({ signal }) =>
         new Promise<boolean>((resolve) => {
@@ -137,7 +130,6 @@ describe("runLoginFlow", () => {
       }),
     ).resolves.toEqual({ kind: "cancelled" });
     expect(runVercelLogin).toHaveBeenCalledOnce();
-    // The subprocess was handed an abort signal that fired on Cancel.
     expect(runVercelLogin.mock.calls[0]?.[0].signal?.aborted).toBe(true);
   });
 });

@@ -7,16 +7,11 @@ import type { Prompter } from "../prompter.js";
 import { withSpinner } from "../with-spinner.js";
 
 export type InstallVercelCliResult =
-  /** The CLI is already resolvable; nothing to do. */
   | { kind: "already" }
-  /** The package manager installed it and it now resolves. */
   | { kind: "installed" }
-  /** The install exited non-zero, or the CLI still isn't on PATH afterward. */
   | { kind: "failed"; reason?: string }
-  /** The user interrupted (Ctrl-C / Esc) before the install finished. */
   | { kind: "cancelled" };
 
-/** Injected for tests; defaults to the real probe, detection, and install. */
 export interface InstallVercelCliDeps {
   getVercelAuthStatus: typeof getVercelAuthStatus;
   detectPackageManager: typeof detectPackageManager;
@@ -31,7 +26,6 @@ const defaultDeps: InstallVercelCliDeps = {
   spawnPackageManager,
 };
 
-/** The global-install argv per package manager (`vercel@latest`, account-wide). */
 function globalInstallArguments(kind: PackageManagerKind): string[] {
   switch (kind) {
     case "npm":
@@ -46,7 +40,6 @@ function globalInstallArguments(kind: PackageManagerKind): string[] {
 
 const MAX_UPGRADE_FAILURE_LENGTH = 240;
 
-/** Picks one useful stderr line without exposing a whole stack trace in the TUI outcome. */
 function summarizeUpgradeFailure(stderr: readonly string[]): string | undefined {
   const lines = stderr
     .map((line) => line.trim().replace(/\s+/gu, " "))
@@ -66,20 +59,9 @@ function summarizeUpgradeFailure(stderr: readonly string[]): string | undefined 
     : `${detail.slice(0, MAX_UPGRADE_FAILURE_LENGTH - 1)}…`;
 }
 
-/**
- * Prepares the Vercel CLI during deployment. Short-circuits when the CLI
- * already resolves; otherwise runs a
- * global install with the project's package manager, streaming output to the
- * rail, then re-probes. A global install can exit clean yet leave the binary
- * off PATH (pnpm/yarn global bins commonly aren't), so success is confirmed by
- * the re-probe, not the exit code alone. `upgrade` invokes the active Vercel
- * CLI's native upgrader so it can update the installation that owns that
- * executable, independent of the project's package manager.
- */
 export async function runInstallVercelCliFlow(input: {
   appRoot: string;
   prompter: Prompter;
-  /** Reinstall the latest CLI even when an existing binary resolves. */
   upgrade?: boolean;
   signal?: AbortSignal;
   deps?: Partial<InstallVercelCliDeps>;
@@ -127,8 +109,6 @@ export async function runInstallVercelCliFlow(input: {
           {
             onOutput,
             signal,
-            // A global install never prompts; closing stdin keeps it from contending
-            // with the TUI's raw-mode key consumer.
             nonInteractive: true,
           },
         ),

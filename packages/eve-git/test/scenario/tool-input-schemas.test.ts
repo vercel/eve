@@ -9,9 +9,6 @@ import extension from "../../extension/extension.ts";
 
 const toolsDir = new URL("../../extension/tools/", import.meta.url);
 
-// Claude rejects the whole model request when any advertised tool's input schema has a root
-// union, even if that tool is never called. Every eve-git tool must serialize to an object root.
-// Dynamic tools are resolved with every optional capability configured so none is skipped.
 test("every extension tool advertises an object-root input schema without root unions", async () => {
   const files = (await readdir(toolsDir)).filter(
     (file) => file.endsWith(".ts") && !file.endsWith(".test.ts"),
@@ -34,7 +31,6 @@ test("every extension tool advertises an object-root input schema without root u
   }
 });
 
-// A defineDynamic() value is opaque; eve keeps its function under this cross-instance brand.
 const DYNAMIC_SENTINEL = Symbol.for("eve.dynamic");
 
 type ToolModule =

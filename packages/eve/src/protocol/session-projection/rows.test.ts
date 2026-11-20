@@ -4,10 +4,6 @@ import type { FactOf } from "#protocol/session-events/facts.js";
 import type { TableName } from "#protocol/session-projection/fold.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 
-/**
- * The fields of a lifecycle fact its row doesn't declare, besides those the fold renames or omits:
- * any left, the fold would copy onto the row without its type saying so.
- */
 type Undeclared<T extends FactOf<any>["type"], K extends TableName, Renamed = never> = Exclude<
   keyof FactOf<T>["data"],
   keyof SessionView[K][keyof SessionView[K]] | Renamed

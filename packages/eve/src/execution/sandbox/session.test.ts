@@ -16,7 +16,6 @@ function syntheticProcess(input: { exitCode?: number; stdout?: string }): Sandbo
   };
 }
 
-/** A connection over an in-memory file map; every primitive is a spy. */
 function memoryConnection(initial: Record<string, string> = {}) {
   const files = new Map(Object.entries(initial).map(([path, text]) => [path, Buffer.from(text)]));
   const connection = {

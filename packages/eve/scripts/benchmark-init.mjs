@@ -6,41 +6,6 @@ import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { stripVTControlCharacters } from "node:util";
 
-// What someone new waits through from the getting-started command,
-// `npx eve@latest init my-agent`, to a running agent. Packs the built package
-// directory the way pkg.eve.dev does (`pnpm pack`), then, per run, runs
-// `npx --package <tarball> -- eve init my-agent` in an empty directory with an
-// empty npm cache and an empty home directory, in a pseudo-terminal so init takes the interactive path
-// the docs describe: it scaffolds the project, installs its dependencies,
-// initializes Git, and opens the terminal UI (`eve dev --onboard`). The
-// project's own `eve` dependency points at the same tarball
-// (EVE_INIT_PACKAGE_SPEC), since the commit under test isn't on npm.
-//
-// Every run is cold: npx downloads eve's dependencies, and the project
-// install reuses that cache, as it would for a first-time user. Dependencies
-// resolve from the registry on the day the job runs, so a dependency release
-// can move these timings with no eve change (as for the package probe).
-//
-// Per run, each timed from spawning npx except installMs, an interval:
-//   downloadMs       eve's first progress line ("Creating agent"): npx
-//                    downloading eve's dependencies, installing them with
-//                    eve, and the CLI starting; eve itself is the local
-//                    tarball, so its own download isn't included
-//   installMs        "Installing dependencies" to "Initializing Git": eve's
-//                    own install of the new project
-//   createdMs        "Created an eve agent": scaffold, install, and Git done
-//   promptVisibleMs  the terminal UI's first frame showing the prompt
-//   readyMs          the dev server's first /eve/v1/info 200 (PORT pins the
-//                    port it binds)
-//
-// Timing stops at ready. Onboarding then asks the person to connect a model
-// provider (there are no credentials here), which no run waits on.
-//
-// One JSON object per line: a header, then one result per run. Each run's
-// terminal output is kept as init-<run>.log in <log-dir> (default: the
-// header's `root`).
-//
-// Usage: node packages/eve/scripts/benchmark-init.mjs <package-dir> [runs] [log-dir]
 const packageRoot = resolve(process.argv[2] ?? "packages/eve");
 const runs = Number(process.argv[3] ?? 3);
 if (!Number.isInteger(runs) || runs < 1) throw new Error("Expected a positive run count.");
@@ -57,13 +22,8 @@ const MARKERS = {
 };
 const PROBE_TIMEOUT_MS = 5000;
 const PROBE_INTERVAL_MS = 20;
-// The prompt normally draws before the server is ready; this long after ready,
-// it isn't coming, and waiting on would only run into RUN_TIMEOUT_MS.
 const PROMPT_GRACE_MS = 30_000;
 const LOG_TAIL_CHARS = 2000;
-// Coding-agent markers @vercel/detect-agent (1.2.7) reads: init takes a
-// non-interactive path when it thinks an agent launched it. It also checks for
-// /opt/.devin, which no environment variable can hide.
 const AGENT_ENV = [
   "AI_AGENT",
   "ANTIGRAVITY_AGENT",
@@ -94,7 +54,6 @@ const baseEnv = {
   ...process.env,
   EVE_TELEMETRY_DISABLED: "1",
   EVE_INIT_PACKAGE_SPEC: `file:${tarball}`,
-  // Runners have no Git identity; without one init's commit fails (and says so).
   GIT_AUTHOR_NAME: "eve benchmark",
   GIT_AUTHOR_EMAIL: "benchmark@eve.invalid",
   GIT_COMMITTER_NAME: "eve benchmark",
@@ -104,9 +63,6 @@ const baseEnv = {
   npm_config_audit: "false",
   TERM: "xterm-256color",
 };
-// A first-time user has no credentials; dropping them keeps runs comparable.
-// Saved ones (eve's and the Vercel CLI's) live under the home directory, which
-// each run replaces. CI turns off init's animated progress, which a person sees.
 for (const name of [
   ...AGENT_ENV,
   "CI",
@@ -120,7 +76,6 @@ for (const name of [
   "VERCEL_OIDC_TOKEN",
 ])
   delete baseEnv[name];
-// Applied per run only, so packing (a workspace build) keeps the real home.
 const HOME_ENV = [
   "XDG_CONFIG_HOME",
   "XDG_DATA_HOME",
@@ -164,7 +119,6 @@ for (let run = 1; run <= runs; run++) {
   );
   child.stdout.setEncoding("utf8");
   child.stderr.setEncoding("utf8");
-  // Writing Ctrl-C at teardown can race `script` exiting (EPIPE).
   child.stdin.on("error", () => {});
   let promptSeen;
   const promptVisible = new Promise((resolvePrompt) => {
@@ -183,7 +137,6 @@ for (let run = 1; run <= runs; run++) {
         if (name === "created") createdSeen();
       }
     }
-    // The prompt counts only once init has handed off to the terminal UI.
     if (
       seen.created !== undefined &&
       seen.prompt === undefined &&
@@ -213,8 +166,6 @@ for (let run = 1; run <= runs; run++) {
         return undefined;
       },
     );
-    // A clean exit before ready is init's coding-agent path, which never runs
-    // `eve dev`: not the path this measures.
     if (readyMs === undefined && child.exitCode === 0)
       throw new Error(
         `eve init exited after creating the project instead of starting eve dev, as it does when it detects a coding agent; unset that agent's environment variable:\n${tail(log)}`,
@@ -243,7 +194,6 @@ for (let run = 1; run <= runs; run++) {
     results.push(result);
     console.log(JSON.stringify(result));
   } catch (error) {
-    // One failed run is recorded as missing; the others still count.
     console.error(`init run ${run} failed: ${error?.message ?? error}`);
   } finally {
     clearTimeout(timeout);
@@ -252,14 +202,12 @@ for (let run = 1; run <= runs; run++) {
     await exited;
     clearTimeout(killer);
     await writeFile(join(logDir, `init-${run}.log`), log);
-    // The next run starts from nothing; only the tarball and logs are kept.
     await rm(dir, { recursive: true, force: true });
     await rm(cache, { recursive: true, force: true });
     await rm(home, { recursive: true, force: true });
   }
 }
 
-// A summary for reading locally; records read only the per-run lines.
 const median = (values) => {
   const sorted = values.filter((v) => typeof v === "number").sort((a, b) => a - b);
   return sorted.length === 0 ? undefined : sorted[Math.floor(sorted.length / 2)];
@@ -288,12 +236,10 @@ function output(command, args, options) {
   });
 }
 
-/** The end of a run's terminal output, readable in a CI log. */
 function tail(log) {
   return stripVTControlCharacters(log).slice(-LOG_TAIL_CHARS);
 }
 
-/** Resolves when a probe of `path` first answers 200 with JSON; overlapping probes, as in benchmark-startup.mjs. */
 function waitReady(child, port, path, start) {
   const outstanding = new AbortController();
   return new Promise((resolveReady, reject) => {
@@ -320,16 +266,13 @@ function waitReady(child, port, path, start) {
           JSON.parse(body);
           finish(() => resolveReady());
         }
-      } catch {
-        // Not up yet.
-      }
+      } catch {}
     };
     timer = setInterval(probe, PROBE_INTERVAL_MS);
     void probe();
   });
 }
 
-/** Spawns `argv` in a fixed-size pseudo-terminal through `script`, as benchmark-startup.mjs does. */
 function spawnInTerminal(argv, options) {
   const quote = (value) => `'${String(value).replaceAll("'", `'\\''`)}'`;
   const command = `stty cols 120 rows 40; exec ${argv.map(quote).join(" ")}`;

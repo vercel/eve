@@ -36,7 +36,6 @@ interface PackageLocation {
 }
 
 function resolveCurrentModulePath(): string {
-  // In ESM this can read a global, such as the "[eval]" Node sets under `node -e`.
   if (typeof __filename === "string" && isAbsolute(__filename)) {
     return __filename;
   }
@@ -63,8 +62,6 @@ function resolveCurrentModulePathFromStack(): string {
   }
 }
 
-// Not named `require`: bundles inline this module, and a top-level `require`
-// binding makes the Node ESM compatibility banner re-parse the whole chunk.
 const packageRequire = createRequire(resolveCurrentModulePath());
 
 function tryResolveVerifiedPackageRoot(packageJsonPath: string): string | undefined {
@@ -126,8 +123,6 @@ function tryResolveDirectBuildLocation(currentModulePath: string): PackageLocati
 }
 
 function isSourceCheckout(packageRoot: string): boolean {
-  // Published packages exclude `src`, so this marker distinguishes a checkout
-  // without depending on how its parent directories are named.
   return existsSync(join(packageRoot, "src", "internal", "application", "package.ts"));
 }
 
@@ -173,13 +168,6 @@ function resolveSelfPackageJsonPath(currentModulePath: string): string {
   return createRequire(currentModulePath).resolve(`${EVE_PACKAGE_NAME}/package.json`);
 }
 
-/**
- * Resolves eve's package location relative to an executing module.
- *
- * Direct source and build executions retain their package-local behavior.
- * Bundled executions resolve the installed eve manifest through Node's module
- * resolver instead of treating the bundle owner's manifest as eve's.
- */
 export function resolvePackageLocationFromModulePath(
   currentModulePath: string,
   resolvePackageJsonPath: (currentModulePath: string) => string = resolveSelfPackageJsonPath,
@@ -210,10 +198,7 @@ export function resolvePackageLocationFromModulePath(
     if (resolvedLocation !== undefined) {
       return resolvedLocation;
     }
-  } catch {
-    // A verified package root surrounding the current module remains a safe
-    // fallback when module resolution is unavailable in generated output.
-  }
+  } catch {}
 
   const fallbackLocation =
     nearestPackageRoot === undefined ? undefined : tryCreatePackageLocation(nearestPackageRoot);
@@ -234,9 +219,6 @@ function resolvePackageBuildRoot(): string | null {
   return resolvePackageLocation().packageBuildRoot;
 }
 
-/**
- * Resolves the installed eve package root.
- */
 export function resolvePackageRoot(): string {
   return resolvePackageLocation().packageRoot;
 }
@@ -272,13 +254,6 @@ function rewriteSourceFilePathForBuild(relativeSourcePath: string): string {
   return relativeSourcePath.replace(/\.[cm]?tsx?$/, ".js");
 }
 
-/**
- * Resolves one package-owned source file from the currently executing eve installation.
- *
- * Source checkouts use `src/...` paths so local tests exercise live source files.
- * Installed or built package executions use `dist/src/...` so published builds do
- * not depend on unpublished TypeScript sources.
- */
 export function resolvePackageSourceFilePath(relativeSourcePath: string): string {
   const packageBuildRoot = resolvePackageBuildRoot();
 
@@ -289,9 +264,6 @@ export function resolvePackageSourceFilePath(relativeSourcePath: string): string
   return join(resolvePackageRoot(), relativeSourcePath);
 }
 
-/**
- * Resolves one package-owned source directory from the currently executing eve installation.
- */
 export function resolvePackageSourceDirectoryPath(relativeSourcePath: string): string {
   const packageBuildRoot = resolvePackageBuildRoot();
 
@@ -342,9 +314,6 @@ function resolveSourceCheckoutExport(packageRoot: string, specifier: string): st
   }
 }
 
-/**
- * Resolves one vendored compiled asset from the current eve installation.
- */
 export function resolvePackageCompiledFilePath(relativeCompiledPath: string): string {
   const packageBuildRoot = resolvePackageBuildRoot();
 
@@ -402,9 +371,6 @@ function tryResolveSelfPackageInfo(): InstalledPackageInfo | undefined {
   }
 }
 
-/**
- * Resolves eve's package identity from local or build-stamped metadata.
- */
 export function resolveInstalledPackageInfo(): InstalledPackageInfo {
   if (cachedPackageInfo) {
     return cachedPackageInfo;
@@ -428,9 +394,6 @@ export function resolveInstalledPackageInfo(): InstalledPackageInfo {
     return cachedPackageInfo;
   }
 
-  // Only source builds are unstamped, such as a workspace app bundled through
-  // the `eve-source` condition. Published packages are always stamped, so
-  // serverless output never reaches this module-resolution probe.
   cachedPackageInfo = tryResolveSelfPackageInfo() ?? {
     name: EVE_PACKAGE_NAME,
     version: "0.0.0",
@@ -463,17 +426,6 @@ function readWorkflowVersionFromManifest(value: unknown): string | undefined {
   return undefined;
 }
 
-/**
- * Resolves the `@workflow/core` version this eve release bundles, read from
- * eve's own `package.json`.
- *
- * This is the single source of truth for the `@workflow/*` line eve targets, so
- * compatibility checks never hardcode a version. eve's `package.json` is
- * published with its `devDependencies` intact even though those packages are
- * vendored, so the entry is readable from an installed eve as well as a source
- * checkout. Returns `undefined` when the entry cannot be read so callers can
- * no-op rather than fail.
- */
 export function resolveExpectedWorkflowVersion(): string | undefined {
   const packageRoot = tryResolvePackageRoot();
 
@@ -482,9 +434,7 @@ export function resolveExpectedWorkflowVersion(): string | undefined {
       return readWorkflowVersionFromManifest(
         JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")),
       );
-    } catch {
-      // Fall through to module-resolution lookup below.
-    }
+    } catch {}
   }
 
   try {
@@ -496,13 +446,6 @@ export function resolveExpectedWorkflowVersion(): string | undefined {
   }
 }
 
-/**
- * Resolves a Workflow runtime module from eve's narrowed Workflow dependencies.
- *
- * Older Workflow builder output still uses `workflow/*` specifiers. eve maps
- * those historical specifiers to the smaller `@workflow/*` packages it actually
- * needs, plus an eve-owned builtins module for response body step helpers.
- */
 export function resolveWorkflowModulePath(specifier: string): string {
   const source = WORKFLOW_SOURCE_MODULE_ALIASES[specifier];
   if (source !== undefined) return resolvePackageSourceFilePath(source);

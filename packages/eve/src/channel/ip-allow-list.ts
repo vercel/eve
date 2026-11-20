@@ -8,9 +8,6 @@ export interface RuntimeIpAllowList {
   readonly entries: readonly string[];
 }
 
-/**
- * Parses exact IP and CIDR entries into a reusable runtime-owned allowlist.
- */
 export function createRuntimeIpAllowList(entries: readonly string[]): RuntimeIpAllowList {
   const blockList = new BlockList();
 
@@ -53,10 +50,6 @@ export function createRuntimeIpAllowList(entries: readonly string[]): RuntimeIpA
   };
 }
 
-/**
- * Returns whether the normalized request IP matches at least one allowlist
- * entry.
- */
 export function isRuntimeIpAllowed(address: string, allowList: RuntimeIpAllowList): boolean {
   const normalizedAddress = normalizeIpAddress(address);
   const family = getIpFamily(normalizedAddress);

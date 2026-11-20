@@ -79,7 +79,6 @@ export interface Configuration {
   readonly traceSampler?: SamplerOrName;
 }
 
-/** Resolved process-wide settings. Hosts discover and merge their own declarations. */
 export interface OtelConfiguration {
   readonly instrumentations?: readonly unknown[];
   readonly metricReaders?: readonly MetricReader[];

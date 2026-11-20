@@ -1,77 +1,39 @@
-/**
- * Shared identity for eve integrations. This package is the single source of
- * truth for *which* integrations exist (channels, connections, extensions, and
- * instrumentation providers) and how a connection is wired (transport +
- * model-facing description).
- *
- * Surface-specific concerns live with their consumer, keyed by {@link
- * IntegrationEntry.slug}: the scaffolder (eve) overlays the
- * Connect auth spec it emits, and the docs gallery overlays presentation
- * (logo, keywords, auth modes, hand-authored markdown). Neither re-declares the
- * identity below.
- *
- * Everything lives in this one module on purpose. The catalog is consumed
- * directly from source by both NodeNext tooling (`tsc` in eve,
- * which requires explicit `.js` import extensions) and Turbopack (the docs app,
- * which cannot resolve `.js` specifiers back to `.ts`). A single file with no
- * relative imports is the only shape that satisfies both without per-consumer
- * resolver configuration.
- */
-
-/** Surface an integration targets. Extend as new kinds are catalogued. */
 export type IntegrationKind = "channel" | "connection" | "extension" | "instrumentation" | "memory";
 
-/** Wire protocol a connection speaks at runtime. */
 export type ConnectionProtocol = "mcp" | "openapi";
 
-/** MCP transport: a single server URL, with optional static headers. */
 export interface McpTransport {
   url: string;
-  /** Static, non-secret headers sent on every request (literal values). */
   headers?: Record<string, string>;
 }
 
-/** OpenAPI transport: a spec document plus the API base URL. */
 export interface OpenApiTransport {
   spec: string;
   baseUrl: string;
-  /** Static, non-secret headers sent on every request (literal values). */
   headers?: Record<string, string>;
 }
 
-/** Transport + description identity for a connection; protocols are derived. */
 export interface ConnectionIdentity {
-  /** Model-facing description written into the generated definition. */
   description: string;
   mcp?: McpTransport;
   openapi?: OpenApiTransport;
 }
 
-/** Which eve surfaces an integration is available on today. */
 export interface IntegrationSurfaces {
-  /** eve's interactive setup flow can provision and scaffold this integration. */
   scaffoldable: boolean;
-  /** Available as an `eve add` registry item. */
   registry: boolean;
-  /** Listed in the docs integrations gallery. */
   gallery: boolean;
 }
 
-/** Canonical identity for one integration, shared across every surface. */
 export interface IntegrationEntry {
-  /** Filename + lookup key + runtime name (e.g. `linear`). Derived once. */
   slug: string;
-  /** Human label (e.g. `Linear`). */
   name: string;
   kind: IntegrationKind;
-  /** One-line summary; reused by docs gallery cards and CLI hints. */
   tagline: string;
   surfaces: IntegrationSurfaces;
-  /** Present only for `kind: "connection"`. */
   connection?: ConnectionIdentity;
 }
 
-/** Protocols a connection speaks, derived from its declared transports. */
 export function connectionProtocols(connection: ConnectionIdentity): ConnectionProtocol[] {
   return [
     connection.mcp ? ("mcp" as const) : null,
@@ -79,11 +41,6 @@ export function connectionProtocols(connection: ConnectionIdentity): ConnectionP
   ].filter((protocol): protocol is ConnectionProtocol => protocol !== null);
 }
 
-/**
- * The canonical set of eve integrations. Order is display order. Each entry
- * carries only shared identity; the scaffolder and docs overlay their own
- * surface-specific data keyed by {@link IntegrationEntry.slug}.
- */
 export const INTEGRATIONS: readonly IntegrationEntry[] = [
   {
     slug: "eve",
@@ -291,6 +248,36 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
+    slug: "agent-desktop",
+    name: "agent-desktop",
+    kind: "extension",
+    tagline:
+      "Operate native Linux desktop apps through their accessibility trees in an eve sandbox.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+  },
+  {
+    slug: "board",
+    name: "Vercel Board",
+    kind: "extension",
+    tagline: "Let an eve agent watch board channels, reply in threads, and claim tasks.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+  },
+  {
+    slug: "code",
+    name: "Code",
+    kind: "extension",
+    tagline: "Add project instructions, coding skills, and sandbox tooling to an eve agent.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+  },
+  {
+    slug: "self-improvement",
+    name: "Self-Improvement",
+    kind: "extension",
+    tagline:
+      "Review agent outcomes on a schedule and propose tested improvements as GitHub pull requests.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+  },
+  {
     slug: "blitzreels",
     name: "BlitzReels",
     kind: "extension",
@@ -345,6 +332,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     kind: "extension",
     tagline:
       "Let your eve agent use the Internet with KERNEL browser infra, o11y, and stealth. Integrated natively with Vercel Connect and AI Gateway.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+  },
+  {
+    slug: "sanity-context",
+    name: "Sanity Context",
+    kind: "extension",
+    tagline: "Answer from your Sanity content.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
@@ -1021,9 +1015,6 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
       mcp: { url: "https://mcp-server.zomato.com/mcp" },
     },
   },
-  // Instrumentation providers are OpenTelemetry backends configured in
-  // `agent/instrumentation.ts`. Slugs stay unique across the whole catalog, so
-  // providers that also ship a connection carry an `-instrumentation` suffix.
   {
     slug: "braintrust",
     name: "Braintrust",
@@ -1091,37 +1082,30 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
 
 const BY_SLUG = new Map(INTEGRATIONS.map((entry) => [entry.slug, entry]));
 
-/** Returns the catalog entry for a slug, or `undefined` when not catalogued. */
 export function getIntegrationEntry(slug: string): IntegrationEntry | undefined {
   return BY_SLUG.get(slug);
 }
 
-/** All entries of a kind, in catalog order. */
 export function integrationsByKind(kind: IntegrationKind): IntegrationEntry[] {
   return INTEGRATIONS.filter((entry) => entry.kind === kind);
 }
 
-/** All connection entries, in catalog order. */
 export function connectionEntries(): IntegrationEntry[] {
   return integrationsByKind("connection");
 }
 
-/** All channel entries, in catalog order. */
 export function channelEntries(): IntegrationEntry[] {
   return integrationsByKind("channel");
 }
 
-/** All extension entries, in catalog order. */
 export function extensionEntries(): IntegrationEntry[] {
   return integrationsByKind("extension");
 }
 
-/** All instrumentation entries, in catalog order. */
 export function instrumentationEntries(): IntegrationEntry[] {
   return integrationsByKind("instrumentation");
 }
 
-/** All memory provider entries, in catalog order. */
 export function memoryEntries(): IntegrationEntry[] {
   return integrationsByKind("memory");
 }

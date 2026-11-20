@@ -5,7 +5,6 @@ import type { Dispatcher1Wrapper } from "undici";
 
 import { isBlockedDestinationHost } from "#shared/network-address.js";
 
-/** Rejection for a destination that the {@link PublicDestinationPolicy} blocks. */
 export class UnsafeDestinationError extends Error {
   constructor(
     message = "URL must not target localhost, private, link-local, or reserved IP addresses.",
@@ -15,9 +14,7 @@ export class UnsafeDestinationError extends Error {
   }
 }
 
-/** Destination policy for a framework request to an untrusted URL. */
 export interface PublicDestinationPolicy {
-  /** Permits loopback destinations, such as callbacks between local development servers. */
   readonly allowLoopback: boolean;
 }
 
@@ -25,21 +22,12 @@ type DispatcherRequestInit = Omit<RequestInit, "dispatcher"> & {
   readonly dispatcher: Dispatcher1Wrapper;
 };
 
-/**
- * Rejects IP-literal and `localhost` hostnames the policy blocks. Socket
- * lookups never run for IP literals, so this check must precede the request.
- */
 export function assertPublicHostname(hostname: string, policy: PublicDestinationPolicy): void {
   if (isBlockedDestinationHost(hostname, policy)) {
     throw new UnsafeDestinationError();
   }
 }
 
-/**
- * Creates a dispatcher whose socket lookup rejects a hostname when any
- * resolved address is blocked, then connects using those exact results so DNS
- * cannot change between validation and connection.
- */
 export async function createPublicDispatcher(
   policy: PublicDestinationPolicy,
 ): Promise<Dispatcher1Wrapper> {
@@ -47,7 +35,6 @@ export async function createPublicDispatcher(
   return new Dispatcher1Wrapper(new Agent({ connect: { lookup: createPublicLookup(policy) } }));
 }
 
-/** Finds the policy rejection in an error, including one fetch wrapped from the socket lookup. */
 export function findUnsafeDestinationError(error: unknown): UnsafeDestinationError | undefined {
   if (error instanceof UnsafeDestinationError) return error;
   return error instanceof Error && error.cause instanceof UnsafeDestinationError
@@ -56,8 +43,6 @@ export function findUnsafeDestinationError(error: unknown): UnsafeDestinationErr
 }
 
 export function fetchWithDispatcher(url: string | URL, init: DispatcherRequestInit) {
-  // Node's fetch types describe its bundled undici version, while the wrapper
-  // adapts the installed undici dispatcher to that runtime protocol.
   const fetchWithUndici = fetch as typeof fetch &
     ((input: string | URL, init: DispatcherRequestInit) => Promise<Response>);
   return fetchWithUndici(url, init);
@@ -101,10 +86,6 @@ function createPublicLookup(policy: PublicDestinationPolicy): LookupFunction {
   };
 }
 
-/**
- * Buffers a response from an untrusted host, rejecting a declared or streamed
- * body over `maxResponseSize` bytes, so its connection can close.
- */
 export async function readBoundedResponse(
   response: Response,
   maxResponseSize: number,
@@ -175,9 +156,7 @@ async function readBoundedBody(response: Response, maxResponseSize: number): Pro
 export async function cancelResponseBody(response: Response): Promise<void> {
   try {
     await response.body?.cancel();
-  } catch {
-    // The connection will still be closed with its per-request dispatcher.
-  }
+  } catch {}
 }
 
 export class ResponseTooLargeError extends Error {

@@ -4,7 +4,6 @@ import type { RememberRequest } from "#approval/evaluation.js";
 
 export type NormalizedApprovalStatus = Exclude<ApprovalStatus, boolean>;
 
-/** Normalize legacy predicates and reject malformed JavaScript policy returns before execution. */
 export function normalizeApprovalStatus(value: unknown): NormalizedApprovalStatus {
   if (value === undefined) return undefined;
   if (value === false) return "not-applicable";

@@ -79,18 +79,11 @@ describe("parseNdjsonStream", () => {
     expect(values).toEqual([{ i: 2 }]);
   });
 
-  // Regression guard for the parked-session streaming leak: a parked
-  // (`session.waiting`) durable run never closes its event stream, so the
-  // world-local streamer keeps a filesystem poll alive until its reader is
-  // cancelled. Cancelling the parsed stream must forward the cancel to the
-  // source — otherwise the poll leaks for the life of the dev server and
-  // degrades streaming for every other session.
   it("forwards cancellation to a source that never reaches EOF", async () => {
     let cancelledReason: unknown = Symbol("not-cancelled");
 
     const source = new ReadableStream<Uint8Array>({
       start(controller) {
-        // Emit one line, then stay open forever (the parked-run shape).
         controller.enqueue(encoder.encode('{"i":0}\n'));
       },
       cancel(reason) {

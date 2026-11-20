@@ -16,7 +16,6 @@ const tokenUsageSchema = z.object({
   outputTokens: z.number().int().nonnegative(),
 });
 
-/** Current schema for provider-reported token usage and model token cost. */
 export const tokenUsageWithCostSchema = tokenUsageSchema.extend({
   costUsd: z.number().finite().nonnegative().optional(),
 }) satisfies z.ZodType<TokenUsage>;

@@ -1,4 +1,3 @@
-// @linux-only: non-turn step retry adoption
 import { expect, it, onTestFinished } from "vitest";
 import { registerHost, registerSessionLineStore } from "#execution/hosts.js";
 import { createMemoryLineStore } from "#execution/in-process/line-store.js";
@@ -25,15 +24,8 @@ import { defineMcpClientConnection } from "#public/definitions/connections/mcp.j
 import { loadContext } from "#context/container.js";
 import { ConnectionRegistryKey } from "#context/providers/connection.js";
 
-// Non-turn session steps that lose their completion, or throw, and run again. Each test runs
-// the attempts a durable host would, in process: what an attempt wrote stays on the session's
-// stream, and the next attempt gets its own writable onto it and enters as a retry. The
-// in-process host runs a session's non-turn steps inline, without attempts, so these drive the
-// steps themselves.
-
 let nextSession = 0;
 
-/** A session's stream in memory, and a runner for the attempts of its steps. */
 function sessionSteps() {
   const sessionId = `session-nonturn-${++nextSession}`;
   const lines = createMemoryLineStore();
@@ -52,7 +44,6 @@ function sessionSteps() {
     for (const release of releases) release();
   });
   let closes = 0;
-  /** A writable of the attempt's own onto the session's stream, as each Workflow step gets. */
   const writable = () => {
     const withWriter = async (
       use: (writer: WritableStreamDefaultWriter<Uint8Array>) => Promise<void>,
@@ -75,14 +66,12 @@ function sessionSteps() {
   return {
     sessionId,
     closes: () => closes,
-    /** Runs attempt `attempt` of a step; what it returns crosses as a copy. */
     async run<T>(attempt: number, body: (step: TestStepAttempt) => Promise<T>): Promise<T> {
       const result = await attempts.enter(attempt, () =>
         body({ attempt, sessionId, sessionWritable: writable() }),
       );
       return structuredClone(result);
     },
-    /** Each event on the stream, as type and line. */
     async lines() {
       const events = [];
       for await (const event of streamSessionEvents(sessionId, { follow: false })) {
@@ -198,7 +187,6 @@ it("runs a step again after a transient failure when nothing was published", asy
   });
 });
 
-/** Starts a turn, then ends the session from the checkpoint before it: a stale one. */
 async function endFromStaleCheckpoint(
   session: ReturnType<typeof sessionSteps>,
   options: { readonly providers?: true | "unreadable"; readonly loseTerminal?: true } = {},
@@ -261,7 +249,6 @@ it("adopts a terminal after its step checkpoint is lost", async () => {
   });
   await runtime.run(async () => {
     const session = sessionSteps();
-    // The retry closes the stream again, which the closed stream refuses.
     await endFromStaleCheckpoint(session, { loseTerminal: true });
     expect(session.closes()).toBeGreaterThanOrEqual(2);
     const events = await session.lines();

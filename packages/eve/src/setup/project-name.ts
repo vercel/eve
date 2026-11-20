@@ -2,7 +2,6 @@ const PROJECT_NAME_REGEX = /^(?!.*---)[a-z0-9-_.]+$/;
 export const PROJECT_NAME_ERROR =
   "Project name can only contain up to 100 lowercase letters, digits, and the characters '.', '_', '-'.";
 
-/** Returns an error message when a project name is not a safe single path segment. */
 export function validateProjectName(value: string): string | undefined {
   const trimmed = value.trim();
   if (trimmed.length === 0) return "Project name cannot be empty.";
@@ -11,7 +10,6 @@ export function validateProjectName(value: string): string | undefined {
   return undefined;
 }
 
-/** Parses and normalizes a project name at an external input boundary. */
 export function parseProjectName(value: string): string {
   const trimmed = value.trim();
   const validationError = validateProjectName(trimmed);

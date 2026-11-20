@@ -1,24 +1,14 @@
 const SRVX_START_FAILURE_MARKER = "[srvx] Failed to start server:";
 
-/** A built eve server failed to start because another process listens on its port. */
 export class BuiltServerPortInUseError extends Error {
   override readonly name = "BuiltServerPortInUseError";
 }
 
-/**
- * Detects a built eve server that reported a failed start in `output`.
- *
- * srvx only logs a failed bind and sets `process.exitCode`, so the process can
- * stay alive without serving anything. Callers must treat this output as fatal
- * and stop the process themselves.
- */
 export function readBuiltServerStartFailure(
   output: string,
   listen: { readonly host: string; readonly port: number | string; readonly retryHint: string },
 ): Error | undefined {
   const failureIndex = output.indexOf(SRVX_START_FAILURE_MARKER);
-  // The error code is on the marker line; wait for the line to end so a
-  // partial read is not misclassified.
   const failureLineEnd = failureIndex === -1 ? -1 : output.indexOf("\n", failureIndex);
 
   if (failureLineEnd === -1) {

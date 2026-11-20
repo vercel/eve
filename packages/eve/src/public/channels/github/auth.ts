@@ -78,7 +78,6 @@ interface CachedInstallationToken {
 const installationTokenCache = new Map<string, CachedInstallationToken>();
 const TOKEN_REFRESH_SKEW_MS = 60_000;
 
-/** Resolves a GitHub App id, falling back to `GITHUB_APP_ID`. */
 export async function resolveGitHubAppId(appId?: GitHubAppId): Promise<string> {
   const source = appId ?? process.env.GITHUB_APP_ID;
   if (source === undefined || source === "") {
@@ -88,7 +87,6 @@ export async function resolveGitHubAppId(appId?: GitHubAppId): Promise<string> {
   return String(value);
 }
 
-/** Resolves and normalizes a GitHub App private key. */
 export async function resolveGitHubPrivateKey(privateKey?: GitHubPrivateKey): Promise<string> {
   const source = privateKey ?? process.env.GITHUB_APP_PRIVATE_KEY;
   if (!source) {
@@ -98,7 +96,6 @@ export async function resolveGitHubPrivateKey(privateKey?: GitHubPrivateKey): Pr
   return normalizeGitHubPrivateKey(value);
 }
 
-/** Resolves a GitHub webhook secret, falling back to `GITHUB_WEBHOOK_SECRET`. */
 export async function resolveGitHubWebhookSecret(
   webhookSecret?: GitHubWebhookSecret,
 ): Promise<string> {
@@ -109,15 +106,8 @@ export async function resolveGitHubWebhookSecret(
   return typeof source === "function" ? await source() : source;
 }
 
-/** The channel's lazily resolved bot name, shared by dispatch and defaults. */
 export type GitHubBotNameResolver = () => Promise<string | undefined>;
 
-/**
- * Creates the channel's `botName` resolver: explicit config first, then the
- * credentials' `appSlug`, then `GITHUB_APP_SLUG`. A fulfilled name is cached
- * for the channel's lifetime; a rejection is logged and retried on the next
- * event, so one failed delivery cannot pin the channel to a missing name.
- */
 export function createGitHubBotNameResolver(input: {
   readonly botName?: GitHubBotName;
   readonly credentials?: GitHubChannelCredentials;
@@ -150,12 +140,10 @@ function normalizeBotName(value: string): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-/** Converts hosted-platform escaped newlines back into PEM newlines. */
 export function normalizeGitHubPrivateKey(privateKey: string): string {
   return privateKey.replace(/\\n/gu, "\n");
 }
 
-/** Creates a short-lived RS256 GitHub App JWT. */
 export async function createGitHubAppJwt(input: {
   readonly appId?: GitHubAppId;
   readonly now?: Date;
@@ -175,10 +163,6 @@ export async function createGitHubAppJwt(input: {
   return `${signingInput}.${signature}`;
 }
 
-/**
- * Resolves an installation access token by minting and caching a GitHub App
- * installation token in process memory.
- */
 export async function resolveGitHubInstallationToken(input: {
   readonly api?: GitHubAuthApiOptions;
   readonly credentials?: GitHubChannelCredentials;
@@ -203,10 +187,6 @@ export async function resolveGitHubInstallationToken(input: {
   });
 }
 
-/**
- * Exchanges a GitHub App JWT for an installation access token, cached until
- * shortly before GitHub's reported expiry.
- */
 export async function createGitHubInstallationToken(input: {
   readonly api?: GitHubAuthApiOptions;
   readonly appId?: GitHubAppId;

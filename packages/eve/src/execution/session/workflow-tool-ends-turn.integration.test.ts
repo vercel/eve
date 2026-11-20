@@ -16,10 +16,6 @@ import {
 import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
 import type { WorkflowExecuteToolDefinition } from "#tools/workflow-definition.js";
 
-/**
- * Runs one turn whose model calls an `execute` workflow tool, and returns the turn's events. With
- * `steer`, that message arrives while the call runs.
- */
 async function runDeployTool(
   agentName: string,
   endsTurn: WorkflowExecuteToolDefinition["endsTurn"],

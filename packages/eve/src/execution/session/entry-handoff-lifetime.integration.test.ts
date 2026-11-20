@@ -1,4 +1,3 @@
-// @linux-only: idle window across compaction handoff
 import { afterEach, expect, it, vi } from "vitest";
 import { hydrateStepReturnValue, hydrateWorkflowArguments } from "@workflow/core/serialization";
 import { workflowEntry } from "#execution/session/entry.js";
@@ -28,7 +27,6 @@ it("restarts the idle window across a compaction handoff", async () => {
     vi.spyOn(world.events, "create").mockImplementation(async (...args) => {
       if (delayFirstStart && args[1].eventType === "run_started") {
         delayFirstStart = false;
-        // Separate the optimistic start time from the persisted replay timestamp.
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
       return createEvent(...args);

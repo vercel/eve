@@ -5,16 +5,12 @@ import {
 import { parseWorkflowSourceAst } from "#internal/workflow-bundle/workflow-source-ast.js";
 import { WORKFLOW_TOOL_ENTRY_POINTS } from "#tools/workflow-entry-point.js";
 
-// Built when an error needs it: the first `Intl` formatter in a process loads locale data, which
-// would otherwise add to every cold start.
 function formatEntryPointMethods(): string {
   return new Intl.ListFormat("en", { type: "disjunction" }).format(
     WORKFLOW_TOOL_ENTRY_POINTS.map((name) => `"${name}"`),
   );
 }
 
-// Earlier eve releases exported these helpers from `eve/workflow`; name the replacement instead
-// of surfacing a generic missing-export error.
 const REMOVED_WORKFLOW_HELPERS = new Set(["agent", "ask"]);
 
 type AstNode = {
@@ -57,13 +53,10 @@ interface DirectiveFunctionNode {
   readonly fn: AstNode;
 }
 
-/** A workflow tool's inline entry-point method: its property and function. */
 interface EntryPointMethod {
   readonly fn: AstNode;
-  /** The top-level function eve hoists the method to. */
   readonly hoistedName: string;
   readonly name: string;
-  /** Whose method it is, for errors: `the default export` or `"escalate"`. */
   readonly owner: string;
   readonly property: AstNode;
 }
@@ -74,13 +67,6 @@ export interface AuthoredWorkflowDirectiveSource {
   readonly source: string;
 }
 
-/**
- * The directive transform understands one shape: a top-level `async function`
- * whose first statement is the directive. A marked `defineWorkflowTool` entry
- * point (`execute` or `task`) is hoisted into that shape here; every other
- * placement is a build error, because an ignored directive would run side
- * effects inline in a replayed body.
- */
 export async function prepareAuthoredWorkflowDirectives(input: {
   readonly filePath: string;
   readonly source: string;
@@ -190,7 +176,6 @@ export async function prepareAuthoredWorkflowDirectives(input: {
     }
   }
 
-  // defineWorkflowTool() accepts one entry point, so each tool hoists at most one.
   const hoisted = entryPoints.filter((entryPoint) =>
     found.some((entry) => entry.fn === entryPoint.fn),
   );
@@ -218,12 +203,6 @@ export async function prepareAuthoredWorkflowDirectives(input: {
   };
 }
 
-/**
- * The build compiles a default-exported workflow tool and checks its entry point. Any other
- * `defineWorkflowTool()`, such as one a `defineDynamic()` returns, is only checked when the tool is
- * offered, so its entry point is checked here: an inline function, or a top-level one the module
- * declares, must start with "use workflow". An imported entry point is left to that later check.
- */
 function assertWorkflowToolEntryPoints(
   filePath: string,
   body: readonly AstNode[],
@@ -247,7 +226,6 @@ function assertWorkflowToolEntryPoints(
       const fn = localFunction(body, value);
       if (fn === undefined) continue;
       const directive = readLeadingDirective(fn);
-      // An inline method's directive is checked where it sits, with the module's other directives.
       if (directive === "use workflow" || (directive !== undefined && fn === value)) continue;
       throw new Error(
         `The "${name}" of a defineWorkflowTool() in "${filePath}" is ${fn.type === "FunctionDeclaration" ? `the function "${fn.id?.name}"` : describeFunction(fn)} without "use workflow", so it can't run as a workflow. ` +
@@ -262,7 +240,6 @@ interface WorkflowToolDefiners {
   readonly namespaces: ReadonlySet<string>;
 }
 
-/** The local names `defineWorkflowTool` is imported under, directly or through a namespace. */
 function workflowToolDefiners(body: readonly AstNode[]): WorkflowToolDefiners {
   const names = new Set<string>();
   const namespaces = new Set<string>();
@@ -298,7 +275,6 @@ function isWorkflowToolDefiner(
   );
 }
 
-/** The function an entry point is: inline, or a top-level declaration it names. */
 function localFunction(body: readonly AstNode[], value: AstNode | undefined): AstNode | undefined {
   if (value === undefined) return undefined;
   if (isFunctionLike(value)) return value;
@@ -320,7 +296,6 @@ function localFunction(body: readonly AstNode[], value: AstNode | undefined): As
   return undefined;
 }
 
-/** Looks through type assertions and parentheses, which don't change the value. */
 function unwrapExpression(value: unknown): AstNode | undefined {
   let node = isAstNode(value) ? value : undefined;
   while (
@@ -343,10 +318,6 @@ function findDefaultExportEntryPoints(body: readonly AstNode[]): EntryPointMetho
   return inlineEntryPoints(definition ?? undefined, "the default export", (name) => name);
 }
 
-/**
- * A `defineWorkflowTool()` a top-level const holds, so a `defineDynamic()` can return it. Its
- * method hoists to a function named after the const, which keeps two tools in one module apart.
- */
 function findTopLevelToolEntryPoints(
   body: readonly AstNode[],
   definers: WorkflowToolDefiners,
@@ -389,7 +360,6 @@ function inlineEntryPoints(
   return methods;
 }
 
-/** The entry point `fn` is, when it's inline in a `defineWorkflowTool()` eve doesn't hoist. */
 function nestedToolEntryPoint(
   program: AstNode,
   definers: WorkflowToolDefiners,
@@ -410,7 +380,6 @@ function nestedToolEntryPoint(
   return found;
 }
 
-/** Hoists each method to a top-level declaration, rewriting from the end so ranges stay valid. */
 function hoistEntryPointMethods(source: string, methods: readonly EntryPointMethod[]): string {
   const ordered = [...methods].sort((a, b) => (b.property.start ?? 0) - (a.property.start ?? 0));
   let rewritten = source;
@@ -532,7 +501,6 @@ function isFunctionLike(node: AstNode): boolean {
   );
 }
 
-/** The source-module name of an import or re-export specifier. */
 function specifierName(specifier: AstNode): unknown {
   const name = specifier.type === "ImportSpecifier" ? specifier.imported : specifier.local;
   return name?.name ?? name?.value;

@@ -15,11 +15,6 @@ import {
 import type { WorkflowManifest } from "#internal/workflow-bundle/workflow-builders.js";
 import { atomicWriteFile } from "#shared/atomic-write-file.js";
 
-/**
- * Bundles step registrations for the Vitest workflow world. Hosted builds let
- * Nitro bundle the raw `steps.mjs` entrypoint; tests load it directly, so the
- * step-mode transform has to be applied here.
- */
 export async function bundleWorkflowStepRegistrations(input: {
   builtinsPath: string;
   discoveredEntries: WorkflowBundleDiscoveredEntries;
@@ -43,10 +38,6 @@ export async function bundleWorkflowStepRegistrations(input: {
   const chunk = await buildSingleRolldownChunk(`step registrations bundle for "${input.outfile}"`, {
     cwd: input.workingDir,
     input: WORKFLOW_VIRTUAL_ENTRY_ID,
-    // Optional runtime packages (the just-bash sandbox engine and its
-    // native codecs) resolve lazily against the application install at
-    // run time; inlining them would drag platform-specific `.node`
-    // binaries into the step bundle.
     external: isWorkflowStepExternalPackage,
     platform: "node",
     plugins: [
@@ -86,13 +77,6 @@ export async function bundleWorkflowStepRegistrations(input: {
   await atomicWriteFile(input.outfile, chunk.code);
 }
 
-// just-bash is an optional peer dependency (the opt-in local sandbox engine)
-// loaded lazily from the application's install, and it exposes native
-// optional codecs for xz/zstd support. Step bundles must neither fail
-// resolving an absent optional install nor inline platform `.node` artifacts.
-// eve loads its own Rolldown lazily, and inlining it would also put an
-// `import.meta.env` read in the bundle, which makes Vitest scan the whole
-// bundle and overflow its tokenizer.
 const WORKFLOW_STEP_EXTERNAL_PACKAGES = [
   "@mongodb-js/zstd",
   "just-bash",

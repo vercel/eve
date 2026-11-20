@@ -15,7 +15,6 @@ describe("truncateForTag", () => {
   });
 
   it("treats the byte budget as bytes, not code units", () => {
-    // U+1F680 (🚀) encodes to 4 UTF-8 bytes via a surrogate pair (length 2).
     const rocket = "🚀";
     const padded = `${rocket.repeat(2)}xx`;
     const truncated = truncateForTag(padded, 8);

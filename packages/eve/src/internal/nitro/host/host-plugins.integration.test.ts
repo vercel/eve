@@ -48,7 +48,6 @@ function plugins(overrides: Partial<HostPluginsInput> = {}): Plugin[] {
   );
 }
 
-/** Asserts each `[before, after]` plugin pair keeps its relative order. */
 function expectOrder(names: readonly string[], pairs: readonly (readonly [string, string])[]) {
   for (const [before, after] of pairs) {
     expect(names.indexOf(before), `${before} in ${names.join(", ")}`).toBeGreaterThanOrEqual(0);
@@ -138,8 +137,6 @@ describe("createHostPlugins", () => {
     });
     const builtins = resolveWorkflowModulePath("workflow/internal/builtins");
     const marker = (name: string) => `globalThis.marker = ${JSON.stringify(`${name} kept`)};\n`;
-    // Unclaimed modules are side-effect free, so the bundle drops every module
-    // the plugin does not keep.
     const code = await bundleThroughPlugins({
       files: {
         [`${WORKFLOW_DIR}/steps.mjs`]: [
@@ -190,7 +187,6 @@ describe("createHostPlugins", () => {
     ).href;
 
     expect(await bundle(true, eveModule)).toContain(JSON.stringify(nativeUrl));
-    // Other packages' `#compiled` imports and production hosts keep normal resolution.
     expect(await bundle(true, appModule)).toContain("unresolved:#compiled/zod/index.js");
     expect(await bundle(true, nestedDependency)).toContain("unresolved:#compiled/zod/index.js");
     expect(await bundle(false, eveModule)).toContain("unresolved:#compiled/zod/index.js");

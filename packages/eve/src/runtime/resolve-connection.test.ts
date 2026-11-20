@@ -55,7 +55,6 @@ describe("resolveConnectionDefinition", () => {
     expect(resolved.toolCall).toBe(toolCall);
   });
 
-  // #5630
   it("keeps an object-form approval with its response policy", async () => {
     const approval = {
       request: () => "user-approval" as const,
@@ -125,7 +124,6 @@ describe("toolResultFrom identity for connections sharing a host (#202)", () => 
       );
     }
 
-    // A hook bundled separately imports its own instance of each connection module.
     const jira = defineJira();
     const confluence = defineConfluence();
     const result = (name: string) =>

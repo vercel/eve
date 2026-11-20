@@ -1,4 +1,3 @@
-// @linux-only: imported history
 import { MockLanguageModelV3 } from "ai/test";
 import { expect, it } from "vitest";
 
@@ -36,7 +35,6 @@ const model = () =>
     }),
   });
 
-/** A delivery the session admitted, carrying a message and the history it brought. */
 function delivered(
   session: HarnessSession,
   deliveryId: string,

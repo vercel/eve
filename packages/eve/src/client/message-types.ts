@@ -23,6 +23,10 @@ export interface EveMessage {
   readonly role: "assistant" | "user";
 }
 
+/**
+ * Client-side state attached to an {@link EveMessage}, such as its status, turn, and structured
+ * turn result.
+ */
 export interface EveMessageMetadata {
   /** App-owned identifier on a message imported through session history. */
   readonly historyId?: string;

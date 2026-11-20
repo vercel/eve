@@ -1,4 +1,3 @@
-/** Experimental dynamic schedules. APIs may change without notice. */
 export { schedules } from "#public/experimental/schedules/client.js";
 export {
   defineDynamicSchedules,

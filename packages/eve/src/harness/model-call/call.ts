@@ -28,6 +28,7 @@ import {
   ContentFilteredModelResponseError,
   EmptyModelResponseError,
   ModelStreamStalledError,
+  rejectsCredential,
 } from "#harness/model-call/errors.js";
 import { type ModelProfile, resolveModelProfile } from "#harness/model-profile.js";
 import { awaitsProviderToolResult } from "#harness/provider-tool-history.js";
@@ -85,14 +86,8 @@ const environment = process.env.NODE_ENV ?? "unknown";
 
 const log = createLogger("harness.tool-loop");
 
-/**
- * How long a model stream may go without output before the AI SDK abandons it and the
- * call retries. Generous because reasoning can stay silent for minutes; tool execution
- * does not count. Without it, a stream that stalls without closing holds the turn forever.
- */
 const MODEL_OUTPUT_TIMEOUT_MS = 10 * 60_000;
 
-/** How one attempt differs from the step's first: what recovery and retries change. */
 export interface ModelCallOptions {
   readonly disabledProviderTools?: ReadonlySet<string>;
   readonly extraSystemNote?: string;
@@ -100,52 +95,31 @@ export interface ModelCallOptions {
   readonly trailingUserNote?: string;
 }
 
-/** What a model step's caller needs from the step. */
 interface ModelCallerInput {
-  /** The step's catalog: what the model can call, and what each call runs. */
   readonly catalog: StepCatalog;
   readonly model: LanguageModel;
   readonly generation: GenerationSteering;
   readonly turnMessages: readonly HarnessModelMessage[];
   readonly approvalMemory: ApprovalMemory;
-  /** The prompt as the step started it, projected for the model. */
   readonly projectedMessages: HarnessModelMessage[];
-  /** Requests a run to replace one an attempt gave up. */
   readonly newRun: () => Promise<void>;
-  /** Starts an attempt at the run as its provider call begins, once any compaction settled. */
+  readonly renewCredential?: (rejection: unknown) => Promise<void>;
   readonly startRun: (attempt: number) => Promise<void>;
 }
 
-/**
- * Calls the model for one step. Each attempt rebuilds the tools, the request, and the agent, so an
- * earlier stream can't resolve a retry's one-shot step hooks with stale partial output. An attempt
- * may first compact the prompt, which rewrites the durable messages the step later commits.
- */
 export class ModelCaller {
   readonly profile: ModelProfile;
   private readonly attributionHeaders: Record<string, string> | undefined;
-  /** The prompt as the model reads it, projected for its history view. */
   private projectedMessages: HarnessModelMessage[];
-  /** The step's announcements go before the first of these the prompt has. */
   private turnMessages: readonly HarnessModelMessage[];
-  /** The latest attempt's request; its history is what the step commits. */
   request: RequestMessages;
-  /** The messages the latest attempt sent, after attachments were hydrated. */
   modelMessages: ModelMessage[] = [];
   requestEnvelopeTokens = 0;
-  /** The step's system prompt, from its harness's plan. */
   private system: string | readonly string[] = "";
-  /**
-   * What the latest attempt's answer spent, until the step keeps it. The provider billed an answer
-   * eve discards, so a retry, a failure, or steering records it against the run.
-   */
   private unkeptUsage: Usage | undefined;
   private compactionFailure: { readonly error: unknown } | undefined;
-  /** Tries at this model step, across the runs a retry after output replaced. */
   private attemptIndex = 0;
-  /** The attempt the stream last heard start, until it hears how it ended. */
   private started: number | undefined;
-  /** The latest attempt published output, so retrying it gives its run up. */
   private acceptedOutput = false;
 
   private readonly step: Step;
@@ -171,11 +145,9 @@ export class ModelCaller {
     };
   }
 
-  /** Calls the model, retrying transient failures. */
   async call(): Promise<HarnessStepResult> {
     let options: ModelCallOptions = {};
     const diagnostics = {
-      // A summary that failed already settled the compaction; another attempt can't redo it.
       policies: [() => (this.compactionFailure === undefined ? ALLOW_RETRY : STOP_RETRY)],
       onRetry: (error: unknown) => this.prepareRetry(error),
       sessionId: this.step.session.sessionId,
@@ -193,6 +165,12 @@ export class ModelCaller {
         if (this.compactionFailure !== undefined) throw this.compactionFailure.error;
         throwIfTurnAborted(this.step.config.abortSignal);
         this.input.generation.check();
+        const { renewCredential } = this.input;
+        if (renewCredential !== undefined && rejectsCredential(error)) {
+          await renewCredential(error);
+          await this.prepareRetry(error);
+          continue;
+        }
         const recovery = recoverModelCall(error, options, diagnostics);
         if (recovery === undefined) throw error;
         await this.prepareRetry(error);
@@ -201,11 +179,6 @@ export class ModelCaller {
     }
   }
 
-  /**
-   * Once a failed attempt will be tried again. One that published output gives its run up for a
-   * new one: the calls it announced settle `abandoned`, since eve can't tell whether they ran. One
-   * that published nothing retries in the same run, and the stream hears why.
-   */
   private async prepareRetry(error: unknown): Promise<void> {
     const { step } = this;
     const runId = step.position().runId;
@@ -223,12 +196,6 @@ export class ModelCaller {
     await step.apply(retryRun({ attempt, error: modelCallErrorInfo(error), runId, usage }));
   }
 
-  /**
-   * A failed compaction fails the step, whatever recovery the call attempted. One that can't fit
-   * the request in the model's window reports its message; any other failure is reported like a
-   * failed model call, since its summary call already retried. Rethrowing would make the workflow
-   * replay the step and then end the session.
-   */
   async failIfCompactionFailed(): Promise<StepResult | undefined> {
     if (this.compactionFailure === undefined) return undefined;
     const { error } = this.compactionFailure;
@@ -238,35 +205,39 @@ export class ModelCaller {
     return reportModelCallFailure(this.step, error);
   }
 
-  /** Steering interrupted the call: the step ends with what it committed, and runs again. */
-  async steered(): Promise<StepResult> {
-    const { step } = this;
-    throwIfTurnAborted(step.config.abortSignal);
+  async abandon(): Promise<readonly ModelMessage[]> {
     this.input.generation.end();
-    // The cut response never reaches history, so the calls it announced never run, even once its
-    // response ended and only their approvals were being decided.
-    step.ctx.set(HistoryStateKey, this.request.historyState);
-    const runId = step.position().runId;
-    if (runId !== undefined) {
-      await step.apply(
-        discardAttempt(step.view(), { ending: "steered", runId, usage: this.takeUnkeptUsage() }),
-      );
-    }
+    return await this.discard("retried");
+  }
+
+  async steered(): Promise<StepResult> {
+    throwIfTurnAborted(this.step.config.abortSignal);
+    this.input.generation.end();
     return {
-      next: step.runStep,
-      session: changeHistory(step.session, { extend: this.request.history }),
+      next: this.step.runStep,
+      session: changeHistory(this.step.session, { extend: await this.discard("steered") }),
       steered: true,
     };
   }
 
-  /** What the latest attempt's discarded answer spent, which its run's next fact records. */
+  private async discard(ending: "retried" | "steered"): Promise<readonly ModelMessage[]> {
+    const { step } = this;
+    step.ctx.set(HistoryStateKey, this.request.historyState);
+    const runId = step.position().runId;
+    if (runId !== undefined) {
+      await step.apply(
+        discardAttempt(step.view(), { ending, runId, usage: this.takeUnkeptUsage() }),
+      );
+    }
+    return this.request.history;
+  }
+
   takeUnkeptUsage(): Usage | undefined {
     const usage = this.unkeptUsage;
     this.unkeptUsage = undefined;
     return usage;
   }
 
-  /** The call's system prompt and messages, from the step's harness. */
   private async buildRequest(): Promise<void> {
     const { prompt, step } = this;
     const call = {
@@ -287,12 +258,6 @@ export class ModelCaller {
     };
   }
 
-  /**
-   * The call's instructions and messages, with the attempt's notes. A trailing user note keeps the
-   * provider's cached prefix valid, and the step commits its prompt messages, so the note exists
-   * only on this call's request. It would end the request on a user message, which a provider
-   * tool's pending result must not follow, so then it joins the system note.
-   */
   private framing(options: ModelCallOptions, messages: readonly ModelMessage[]) {
     const note = options.trailingUserNote;
     const asSystem = note !== undefined && awaitsProviderToolResult(messages);
@@ -324,7 +289,6 @@ export class ModelCaller {
     return tools;
   }
 
-  /** Asks for the history this call reads, then rebuilds what depends on it. */
   private async compact(options: ModelCallOptions, tools: ToolSet): Promise<ToolSet> {
     const { step, prompt } = this;
     let compacted: HarnessModelMessage[] | undefined;
@@ -332,6 +296,7 @@ export class ModelCaller {
       compacted = await historyBeforeCall(step, {
         messages: prompt.messages,
         model: this.input.model,
+        renew: this.input.renewCredential,
         promptMessages: withClientContext(prompt),
         requestEnvelopeTokens: this.requestEnvelopeTokens,
       });
@@ -341,9 +306,6 @@ export class ModelCaller {
     }
     if (compacted === undefined) return tools;
     compactPrompt(step, prompt, compacted);
-    // This request announces again what the compaction dropped. A step that continues from tool
-    // results has no input of its own, so the announcement goes before the turn's input, not after
-    // those results where the model reads it as the newest message.
     const turnInput = compactedTurnInput(prompt.messages);
     this.turnMessages =
       turnInput === undefined ? this.input.turnMessages : [...this.input.turnMessages, turnInput];
@@ -358,15 +320,12 @@ export class ModelCaller {
     const attemptIndex = this.attemptIndex++;
     await this.input.startRun(attemptIndex);
     this.started = attemptIndex;
-    // New announcements join durable history, so they must not inflate the
-    // envelope baseline and hide instruction growth on the next step.
     this.requestEnvelopeTokens = Math.max(
       0,
       this.requestEnvelopeTokens -
         (estimateTokens(this.request.history) - estimateTokens(this.prompt.messages)),
     );
     generation.begin();
-    // Hydrate `eve-sandbox:` file refs for this call only; history keeps the refs.
     this.modelMessages = await hydrateSandboxAttachments(this.request.nonSystemMessages);
     if (this.profile.filesOutsideToolResults) {
       this.modelMessages = moveToolResultFilesToUserMessages(this.modelMessages);
@@ -380,7 +339,6 @@ export class ModelCaller {
         modelInput: { instructions, messages: this.modelMessages },
         session: step.session,
       }) ?? {};
-    // Label a reissued call's telemetry; otherwise a retry shows only as a second span.
     if (options.retryReason) runtimeContext["eve.retry.reason"] = options.retryReason;
 
     const position = step.position();
@@ -420,11 +378,8 @@ export class ModelCaller {
           usage: event.usage,
         });
       },
-      // Replaces the AI SDK's default `console.error`; the harness reports failures as events.
       onError(event: { error: unknown }) {
         if (generation.interrupted) return;
-        // A recognized configuration failure skips the raw dump: its stack points at the
-        // harness, not the fix, and the failure path logs a one-line summary.
         if (summarizeKnownError(event.error)?.tags.includes("config") === true) return;
         logError(log, "tool-loop stream error", event.error);
       },
@@ -443,10 +398,8 @@ export class ModelCaller {
     try {
       return await this.stream(agent, callMessages, hooks.stepResult, attempt?.telemetry);
     } catch (error) {
-      // An aborted write is not a stalled model stream, and steering can't claim a dead stream.
       throwIfSessionStreamDead(error);
       generation.check();
-      // Only the output timeout above aborts the stream without aborting our signal.
       if (isAbortError(error) && !generation.signal.aborted) {
         throw new ModelStreamStalledError({ cause: error });
       }
@@ -454,10 +407,6 @@ export class ModelCaller {
     }
   }
 
-  /**
-   * Streams the call, publishing its content as it arrives. `telemetry` is the attempt's, so the
-   * calls it runs are traced inside it, as the AI SDK traced the calls it ran.
-   */
   private async stream(
     agent: ToolLoopAgent,
     messages: ModelMessage[],
@@ -468,7 +417,6 @@ export class ModelCaller {
     const { catalog, generation } = this.input;
     const excludedActionToolNames = new Set([REPLY_TOOL_NAME]);
     const streamResult = await agent.stream({ abortSignal: generation.signal, messages });
-    // Anything the attempt publishes ties a retry to a new run.
     const publish: typeof step.publish = async (publication, published) => {
       this.acceptedOutput = true;
       await step.publish(publication, published);
@@ -504,7 +452,6 @@ export class ModelCaller {
       telemetry,
     });
     const notRun = answerSkippedToolCalls(stepResult, catalog, invalidInputToolCallIds);
-    // The run's settlement records the kept answer's usage.
     this.unkeptUsage = undefined;
     await emitStepActions(step.publish, step.position(), stepResult, notRun);
     return withCallResults({
@@ -516,10 +463,6 @@ export class ModelCaller {
     });
   }
 
-  /**
-   * Runs the response's local calls, unless it ended early: then neither they nor its workflow
-   * calls run, and `answerSkippedToolCalls` tells the model so.
-   */
   private async runInlineCalls(
     stepResult: HarnessStepResult,
     messages: readonly ModelMessage[],
@@ -543,16 +486,10 @@ export class ModelCaller {
       toolCalls: (stepResult.toolCalls ?? []) as TypedToolCall<ToolSet>[],
       tools: this.input.catalog,
     });
-    // A cancelled turn settles its calls itself, so whatever a cut call returned is dropped.
     throwIfTurnAborted(step.config.abortSignal);
     return results;
   }
 }
-
-/**
- * A filtered response fails the step. A successful empty `stop` is usable only
- * when no delegated caller needs a reply.
- */
 
 function assertUsableResponse(
   stepResult: HarnessStepResult,
@@ -574,7 +511,6 @@ function assertUsableResponse(
   }
 }
 
-/** An aborted stream surfaces as `AbortError`; an aborted provider fetch rejects with the reason. */
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError");
 }

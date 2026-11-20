@@ -2,29 +2,24 @@ import type { SessionAuthContext } from "#channel/types.js";
 import type { SlackChannelState } from "#public/channels/slack/slackChannel.js";
 
 interface SlackAuthContextInput {
-  /** Slack's per-message `action_token`, when the message carried one. */
   readonly actionToken?: string;
   readonly channelId: string;
   readonly email?: string;
   readonly fullName?: string;
-  /** Workspace whose app installation received the event. Keys the principal when known. */
   readonly installationTeamId?: string | null;
   readonly isBot?: boolean;
   readonly teamId?: string | null;
-  /** Thread root ts; omit it in a code channel, which is one session across its threads. */
   readonly threadTs?: string;
   readonly userId: string;
   readonly userName?: string;
 }
 
-/** Returns the Slack user id carried by a Slack-derived auth context. */
 export function slackUserIdFromAuthContext(auth: SessionAuthContext | null): string | undefined {
   if (auth?.authenticator !== "slack-webhook") return undefined;
   const userId = auth.attributes.user_id;
   return typeof userId === "string" && userId.length > 0 ? userId : undefined;
 }
 
-/** Returns the Slack user recorded for a principal, if one has been seen in this thread. */
 export function slackUserIdForPrincipal(
   state: Pick<SlackChannelState, "slackUsersByPrincipal">,
   principalId: string | undefined,
@@ -32,15 +27,8 @@ export function slackUserIdForPrincipal(
   return principalId === undefined ? undefined : state.slackUsersByPrincipal?.[principalId];
 }
 
-/**
- * Builds the Slack-derived session auth context used by inbound
- * messages and signed interactivity callbacks.
- */
 export function buildSlackAuthContext(input: SlackAuthContextInput): SessionAuthContext {
   const isBot = input.isBot === true;
-  // Messages and button clicks report different team fields for Slack Connect
-  // and Enterprise Grid users. The installation team is the same on both, so
-  // one person keeps one principal (and one connection grant) per thread.
   const identityTeamId = input.installationTeamId || input.teamId;
   const principalId = identityTeamId
     ? isBot

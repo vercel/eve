@@ -42,7 +42,6 @@ function signInRow(interactionId: string, asker?: string, waitsOn?: string): Int
   };
 }
 
-/** A parent whose own card `shown` has two children's sign-ins waiting on it. */
 function parentStep() {
   const rows = [
     signInRow("shown"),

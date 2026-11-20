@@ -3,11 +3,6 @@ import { join } from "node:path";
 
 const OWNER_FILE_NAME = "owner.json";
 
-/**
- * Creates the per-run state directory for the server `eve eval` starts, after
- * removing directories left by eval runs whose process died before cleanup
- * (Ctrl-C, CI timeouts, crashes). Directories of live concurrent runs stay.
- */
 export async function createEvalStateDirectory(appRoot: string, runId: string): Promise<string> {
   const parent = join(appRoot, ".eve", "eval-servers");
   await removeAbandonedEvalStateDirectories(parent);
@@ -18,7 +13,6 @@ export async function createEvalStateDirectory(appRoot: string, runId: string): 
 }
 
 export async function removeEvalStateDirectory(directory: string): Promise<void> {
-  // Retries absorb Windows EBUSY/EPERM while worker processes release handles.
   await rm(directory, { force: true, recursive: true, maxRetries: 5, retryDelay: 100 });
 }
 
@@ -33,7 +27,6 @@ async function removeAbandonedEvalStateDirectories(parent: string): Promise<void
     names.map(async (name) => {
       const directory = join(parent, name);
       const pid = await readOwnerPid(directory);
-      // A missing owner file may belong to a run that is still creating it.
       if (pid === undefined || isProcessAlive(pid)) return;
       await removeEvalStateDirectory(directory).catch(() => {});
     }),

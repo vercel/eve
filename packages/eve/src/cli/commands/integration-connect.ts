@@ -51,7 +51,6 @@ const defaultDependencies: IntegrationConnectDependencies = {
   updateConnectionConnectorUid,
 };
 
-/** Configures the Vercel Connect connector referenced by an installed connection item. */
 export async function runIntegrationConnect(input: {
   appRoot: string;
   slug: string;
@@ -70,9 +69,6 @@ export async function runIntegrationConnect(input: {
 
   let project = await dependencies.readProjectLink(input.appRoot);
   if (project !== undefined) {
-    // An existing link skips project provisioning and its login check, so
-    // verify the CLI session here: otherwise a logged-out CLI surfaces only as
-    // an opaque `vercel connect` exit code instead of the `vercel login` action.
     await dependencies.requireAuth(input.appRoot, nonInteractive ? undefined : prompter, {
       signal,
     });
@@ -131,7 +127,6 @@ export async function runIntegrationConnect(input: {
   prompter.outro(`Connection ${input.slug} set up.`);
 }
 
-/** CLI adapter for the hidden integration command used by trusted registry items. */
 export async function runIntegrationConnectCommand(
   logger: RegistryCommandLogger,
   appRoot: string,

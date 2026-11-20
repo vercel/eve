@@ -1,5 +1,25 @@
 # @vercel/agent-runs
 
+## 1.1.0
+
+Released 2026-11-19 · [Compare with 1.0.2](https://github.com/vercel/eve/compare/%40vercel%2Fagent-runs%401.0.2...%40vercel%2Fagent-runs%401.1.0)
+
+### Features
+
+- `otelTelemetry()` writes spans under the `vercel.ai.tracing` instrumentation scope by default, which Vercel Agent Runs reads; pass `tracerName` to use another scope. ([#6617](https://github.com/vercel/eve/pull/6617))
+
+## 1.0.2
+
+Released 2026-11-18 · [Compare with 1.0.1](https://github.com/vercel/eve/compare/%40vercel%2Fagent-runs%401.0.1...%40vercel%2Fagent-runs%401.0.2)
+
+## 1.0.1
+
+Released 2026-11-16 · [Compare with 1.0.0](https://github.com/vercel/eve/compare/%40vercel%2Fagent-runs%401.0.0...%40vercel%2Fagent-runs%401.0.1)
+
+### Bug Fixes
+
+- Keep the changelog URL in the package README from overflowing into the npm sidebar. ([#6517](https://github.com/vercel/eve/pull/6517))
+
 ## 1.0.0
 
 Released 2026-11-15 · [Compare with 0.0.4](https://github.com/vercel/eve/compare/%40vercel%2Fagent-runs%400.0.4...%40vercel%2Fagent-runs%401.0.0)

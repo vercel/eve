@@ -106,7 +106,6 @@ it("emits every persisted report before the terminal outcome", async () => {
     reader: createChannelReader(
       "workflow",
       (async function* () {
-        // The body settles before the persisted report reaches its owner.
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
         yield [report];
       })(),
@@ -237,7 +236,6 @@ it("preserves the pending inbox read across cancellation and drains the report b
   );
 });
 
-/** A relay that hands the session each message in turn; owner.test covers batching. */
 function relayThrough(deliver: (message: never) => unknown) {
   return async (messages: readonly WorkflowToolRunMessage[]): Promise<void> => {
     for (const message of messages) await deliver(message as never);
@@ -390,7 +388,6 @@ it("reports a task started once its control hook is registered, without holding 
       return true;
     },
   });
-  // The body sends a message at once; the session must hear started before it.
   mocks.openWorkflowToolRunOwnerInbox.mockReturnValue({
     owner: { send: vi.fn(), sent: 1 },
     reader: createChannelReader(
@@ -412,7 +409,6 @@ it("reports a task started once its control hook is registered, without holding 
 
   registered.resolve();
   await vi.waitFor(() => expect(delivered).toEqual(["started"]));
-  // The body started while started was still on its way.
   expect(mocks.runBody).toHaveBeenCalledOnce();
 
   startedDelivered.resolve();
@@ -479,7 +475,6 @@ it("reports a duplicate task start as started without starting its body", async 
   await workflowToolRunWorkflow({ ...input, entry: { entryPoint: "task", taskId: "task-1" } });
 
   expect(mocks.runBody).not.toHaveBeenCalled();
-  // The session may have recorded this run; its started releases the held commands to the hook.
   expect(mocks.deliver).toHaveBeenCalledExactlyOnceWith(
     "parent",
     expect.objectContaining({ kind: "started" }),

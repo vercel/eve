@@ -18,7 +18,6 @@ function context(overrides: Partial<BootDetectionContext> = {}): BootDetectionCo
 
 type AgentInfo = NonNullable<BootDetectionContext["info"]>;
 
-/** A minimal but fully-typed `/eve/v1/info` payload carrying a routing decision. */
 function infoWithRouting(
   routing: AgentInfo["agent"]["model"]["routing"],
   endpoint?: AgentInfo["agent"]["model"]["endpoint"],
@@ -96,7 +95,6 @@ describe("BOOT_DETECTIONS", () => {
 
   it("stays quiet for an external-provider model — gateway linking/credentials don't apply", async () => {
     const info = infoWithRouting({ kind: "external", provider: "anthropic" });
-    // No gateway env credentials and the unlinked appRoot would otherwise flag.
     expect(await detectSetupIssues(context({ info }))).toEqual([]);
   });
 
@@ -164,8 +162,6 @@ describe("formatSetupIssuesLine", () => {
   });
 
   it("formats the logged-out hint, which is not a boot detection", () => {
-    // Confirming login is a `vercel whoami` subprocess, so the hint lives
-    // outside the cheap-and-local BOOT_DETECTIONS and is rendered by the runner.
     expect(BOOT_DETECTIONS.some((detection) => detection.id === "login")).toBe(false);
     expect(formatSetupIssuesLine([LOGIN_SETUP_ISSUE])).toBe(
       "1 setup issue: not logged in · /deploy",

@@ -20,10 +20,8 @@ import {
 
 const log = createLogger("telegram.attachments");
 
-/** URL protocol used by the channel to defer Telegram file downloads to `fetchFile`. */
 export const TELEGRAM_FILE_URL_PROTOCOL = "telegram-file:";
 
-/** Emits one {@link MessageFilePart} per supported Telegram attachment. */
 export function collectTelegramFileParts(
   attachments: readonly TelegramAttachment[],
   policy: UploadPolicy,
@@ -48,7 +46,6 @@ export function collectTelegramFileParts(
   return parts;
 }
 
-/** Combines text/caption + file parts into the {@link MessageContent} shape the harness expects. */
 export function buildTelegramTurnMessage(
   message: Pick<TelegramMessage, "caption" | "text">,
   fileParts: readonly MessageFilePart[],
@@ -60,11 +57,6 @@ export function buildTelegramTurnMessage(
   return [textPart, ...fileParts];
 }
 
-/**
- * Creates a `fetchFile` function for `telegram-file:` URLs. The returned
- * function resolves to `null` for unrecognized URLs and throws on HTTP errors
- * or upload-policy violations.
- */
 export function createTelegramFetchFile(input: {
   readonly api?: Omit<TelegramApiOptions, "credentials">;
   readonly credentials?: TelegramApiOptions["credentials"];
@@ -96,8 +88,6 @@ export function createTelegramFetchFile(input: {
     }
 
     const bytes = await readLimitedBytes(response, maxBytesOf(input.policy), "telegram");
-    // Telegram's file endpoint serves everything as `application/octet-stream`,
-    // so the type the message declared is the only real one (#1217).
     const mediaType =
       ref.mediaType ?? response.headers.get("content-type") ?? "application/octet-stream";
     const result: FetchFileResult = {
@@ -126,11 +116,6 @@ export function createTelegramFetchFile(input: {
   };
 }
 
-/**
- * Builds a `telegram-file:` URL (fileId in the path, optional `filename` and
- * `mediaType` query params) that defers the download to the channel's
- * `fetchFile`. {@link createTelegramFetchFile} parses it back.
- */
 export function createTelegramFileUrl(input: {
   readonly fileId: string;
   readonly filename?: string;

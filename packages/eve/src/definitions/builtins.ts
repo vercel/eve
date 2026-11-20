@@ -10,10 +10,6 @@ import {
   type ToolEntry,
 } from "./definition.js";
 
-/**
- * What eve adds for its own features, seeing everything the agent declares: the task tools and
- * their note when the session offers tasks.
- */
 export const builtins: Definition = {
   contribute: ({ container, step }) => ({
     arrange: (draft) => {
@@ -66,10 +62,6 @@ export const builtins: Definition = {
   label: "eve's builtins",
 };
 
-/**
- * A dynamic tool can stop being offered while a task it started still runs; the task tools stay
- * so the model can still wait for or cancel that task.
- */
 function hasRunningTask(step: StepInfo): boolean {
   const tasks = step.view?.().projection.view.tasks ?? {};
   return Object.values(tasks).some((task) => task.status === "running");

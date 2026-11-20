@@ -79,7 +79,6 @@ function capability(overrides: Partial<LocalDevCapability> = {}): LocalDevCapabi
   };
 }
 
-/** A child process that emits the given output and exit code. */
 function fakeSpawn(input: { code: number; output: string }) {
   const calls: { command: string; args: readonly string[]; options: unknown }[] = [];
   const spawn = vi.fn((command: string, args: readonly string[], options: unknown) => {
@@ -126,7 +125,6 @@ beforeEach(() => {
     "fetch",
     vi.fn(async () => new Response(JSON.stringify(INDEX), { status: 200 })),
   );
-  // The eve bin is resolved from the app's own dependency graph, never PATH.
   findPackageJSON.mockReturnValue(`${APP_ROOT}/node_modules/eve/package.json`);
   readFile.mockResolvedValue(JSON.stringify({ name: "eve", bin: { eve: "./bin/eve.js" } }));
 });

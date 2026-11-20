@@ -27,7 +27,6 @@ const chatUser: SessionAuthContext = {
   principalType: "user",
 };
 
-/** The context a subagent's function reads, with the parent's model and principal. */
 const contextWith = (
   model = "openai/gpt-6-luna-fast",
   current: SessionAuthContext | null = localDeveloper,

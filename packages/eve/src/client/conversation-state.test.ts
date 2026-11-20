@@ -17,7 +17,6 @@ function fold(events: readonly SessionEvent[]): ConversationState {
   return conversation.state;
 }
 
-/** A child turn that consumes `deliveryIds` and settles, or keeps working. */
 function childTurn(turnId: string, deliveryIds: readonly string[], settled = true): SessionEvent[] {
   return [
     ...deliveryIds.map((deliveryId): SessionEvent => ({
@@ -50,7 +49,6 @@ function childTurn(turnId: string, deliveryIds: readonly string[], settled = tru
   ];
 }
 
-/** A parent that opened `child` and recorded which call sent each delivery. */
 function parent(sent: Readonly<Record<string, string>>, observation: AgentObservation) {
   const state = fold([
     {

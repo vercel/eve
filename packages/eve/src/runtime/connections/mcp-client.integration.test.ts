@@ -1,4 +1,3 @@
-// @linux-only: MCP protocol over loopback HTTP
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -80,7 +79,6 @@ describe.each(["static", "dynamic"] as const)(
       initializeProtocolVersion = "2025-11-25";
       callResult = { content: [{ type: "text", text: "fixture-user" }] };
 
-      // Replace only HTTP I/O: eve's connection, bundled SDK, and protocol parsing stay real.
       vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
         const request = new Request(input, init);
         expect(request.url).toBe("https://mcp.example.com/mcp");

@@ -1,4 +1,3 @@
-// @linux-only: tool stubs through eve__tool
 import { mintClearance } from "#harness/clearance.js";
 import { describe, expect, it } from "vitest";
 
@@ -18,7 +17,6 @@ import { CALL_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 import type { ToolStub } from "#tool-stubs/types.js";
 
-/** The last value a tool execution produced, as eve records it. */
 async function settle(output: unknown): Promise<unknown> {
   if (!isAsyncIterable(output)) return await output;
   let last: unknown;
@@ -55,7 +53,6 @@ describe("tool stubs through eve__tool", () => {
     });
     const runtime = await createTestRuntime();
     await runtime.run(async () => {
-      // The in-process host's stubs, served as they are while a stubbed root session runs.
       const toolStubs = createInProcessToolStubs();
       const sessionId = "catalog-stub-session";
       const scope = { rootSessionId: sessionId, rules, token: "catalog-stub-playback" };
@@ -84,7 +81,6 @@ describe("tool stubs through eve__tool", () => {
         });
         ctx.set(ToolStubsKey, scope);
         ctx.setVirtualContext(ToolStubPlaybackKey, toolStubPlayback(toolStubs, scope));
-        // eve runs an eve__tool call as the call to the entry it resolves to.
         const call = (toolCallId: string, input: Record<string, unknown>) =>
           inSession(async () => {
             const resolved = catalog.resolve({ input, toolName: CALL_TOOL_NAME });

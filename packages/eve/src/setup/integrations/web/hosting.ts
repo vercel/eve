@@ -10,7 +10,6 @@ export interface WebChatHostingDeps {
   detectPackageManager: typeof detectPackageManager;
   pathExists: typeof pathExists;
   readTextFile(path: string): Promise<string>;
-  /** Defaults to a forced `rm`. */
   removeFile?(path: string): Promise<void>;
   resolveEveProjectContext: typeof resolveEveProjectContext;
   writeTextFile: typeof writeTextFile;
@@ -70,7 +69,6 @@ export function runScriptCommand(packageManager: PackageManagerKind, script: str
 export interface WebChatProject {
   environmentRoot: string;
   agentAppRoot: string;
-  /** Set for a workspace member so the chat app targets it by name. */
   agentName?: string;
 }
 
@@ -95,7 +93,6 @@ export async function resolveWebChatProject(
 
 type FileOwnership = "absent" | "installer" | "authored";
 
-/** Whether `path` is absent, holds one of the `allowed` sources the installer writes, or is authored. */
 async function readFileOwnership(
   path: string,
   allowed: readonly string[],
@@ -140,19 +137,12 @@ export interface WebChatHostingInput {
   project: WebChatProject;
   webRoot: string;
   force?: boolean;
-  /** Whether to write the default channel when it is absent (or forced). */
   writeChannel: boolean;
-  /** The web app's framework config, e.g. `next.config.ts`. */
   hostConfig: { path: string; source: string; owned: readonly string[] };
   vercelServices: boolean;
-  /** The installer's `vercel.ts`, followed by any it wrote in earlier releases. */
   vercelConfigs: readonly [string, ...string[]];
 }
 
-/**
- * Checks every file Web Chat hosting would overwrite or remove, then returns
- * the writer, so an authored file fails setup before anything is written.
- */
 export async function prepareWebChatHosting(
   input: WebChatHostingInput,
   deps: WebChatHostingDeps,
@@ -164,8 +154,6 @@ export async function prepareWebChatHosting(
     hostConfig.path,
     await readFileOwnership(hostConfig.path, hostConfig.owned, deps),
   );
-  // Framework hosting leaves an authored vercel.ts (e.g. crons) alone and only
-  // removes one the installer wrote for Vercel services.
   const vercelTsOwnership = await readFileOwnership(vercelTsPath, input.vercelConfigs, deps);
   if (input.vercelServices) {
     assertNotAuthored(vercelTsPath, vercelTsOwnership);
@@ -194,8 +182,6 @@ export async function prepareWebChatHosting(
         }
       });
     } else if (vercelTsOwnership === "installer") {
-      // A leftover services config keeps the root preset at "services", so Vercel
-      // would route eve through both the services config and the framework host.
       await (deps.removeFile ?? removeFile)(vercelTsPath);
       await updatePeerServiceScripts(project.environmentRoot, deps, (scripts) => {
         for (const name of ["dev:eve", "dev:all"] as const) {

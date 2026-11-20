@@ -10,7 +10,6 @@ export { VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER } from "#client/types.js";
 const EVE_ROUTE_PREFIX_WITH_SEPARATOR = `${EVE_ROUTE_PREFIX}/`;
 export const VERCEL_OIDC_TOKEN_HEADER = "x-vercel-oidc-token";
 
-/** Header values accepted by the test-only development client harness. */
 export type DevelopmentRequestHeaders =
   | Headers
   | ReadonlyArray<readonly [string, string]>
@@ -18,10 +17,6 @@ export type DevelopmentRequestHeaders =
 
 type MutableDevelopmentRequestHeaders = Headers | Array<[string, string]> | Record<string, string>;
 
-/**
- * Test-harness credential behavior for live Vercel fixtures. Production
- * development clients require an authorized `DevelopmentCredentialGate`.
- */
 export async function createDevelopmentRequestHeadersAsync(input: {
   readonly headers?: DevelopmentRequestHeaders;
   readonly resourceUrl: URL;
@@ -46,9 +41,7 @@ async function resolveTestOidcToken(): Promise<string> {
   try {
     const token = (await getVercelOidcToken()).trim();
     if (token.length > 0) return token;
-  } catch {
-    // Fall through to the fixture environment.
-  }
+  } catch {}
   return process.env.VERCEL_OIDC_TOKEN?.trim() ?? "";
 }
 

@@ -5,14 +5,12 @@ import { CALL_TOOL_NAME, SEARCH_TOOL_NAME, SKILL_TOOL_NAME } from "#protocol/cat
 import { compareCodeUnits } from "./rank.js";
 import type { Callable } from "./step-catalog.js";
 
-/** What the listing reads of what a step can run. */
 type Listed = Pick<Callable, "connections" | "deferred" | "entries" | "skills">;
 
 const ANNOUNCEMENT_KEY = "catalog";
 const MAX_LISTED_NAMESPACES = 20;
 const MAX_LISTED_CONNECTIONS = 20;
 
-/** The kinds of deferred entries, as the header names them. */
 type Kind = "tools" | "agents" | "skills";
 
 interface ListedConnection {
@@ -20,30 +18,17 @@ interface ListedConnection {
   readonly name: string;
 }
 
-/** A list cut at its cap; `more` says it was cut. */
 interface Capped<T> {
   readonly items: readonly T[];
   readonly more: boolean;
 }
 
-/**
- * Exactly what the listing says, which is what gets recorded. It names no
- * deferred entry, so deferring keeps entries out of context and the listing
- * doesn't grow with the catalog. It counts nothing, so a dynamic resolver
- * adding or dropping an entry doesn't append a message.
- */
 interface CatalogListing {
   readonly connections: Capped<ListedConnection>;
   readonly kinds: readonly Kind[];
   readonly namespaces: Capped<string>;
 }
 
-/**
- * Announces the catalog: the kinds of deferred entries, their namespaces, and
- * the connections, then the whole listing again whenever that changes.
- * Connection tools stay unlisted, since listing them needs a network call and
- * maybe a sign-in. An empty catalog the model never heard of has nothing to announce.
- */
 export function catalogAnnouncements(catalog: Listed): Readonly<Record<string, Announcement>> {
   const current = listCatalog(catalog);
   const reachable = reachableNames(catalog);
@@ -61,12 +46,9 @@ function listCatalog(catalog: Listed): CatalogListing {
   const kinds: Kind[] = [];
   if (deferred.some((definition) => !isAgentTool(definition))) kinds.push("tools");
   if (deferred.some(isAgentTool)) kinds.push("agents");
-  // Skills that aren't deferred are announced with their descriptions elsewhere.
   if ([...catalog.skills.values()].some(({ deferred }) => deferred)) {
     kinds.push("skills");
   }
-  // The largest namespaces make the cut, rendered by name, so an entry joining or leaving one
-  // only changes the text when it moves a namespace across the cap.
   const namespaces = capped(
     [...namespaceCounts(catalog)]
       .sort(([a, aCount], [b, bCount]) => bCount - aCount || compareCodeUnits(a, b))
@@ -87,13 +69,11 @@ const EMPTY_LISTING = JSON.stringify(
   listCatalog({ connections: [], deferred: new Map(), entries: new Map(), skills: new Map() }),
 );
 
-/** How many deferred entries each namespace holds. */
 function namespaceCounts(catalog: Listed): ReadonlyMap<string, number> {
   const connections = new Set(catalog.connections.map(({ connectionName }) => connectionName));
   const counts = new Map<string, number>();
   for (const name of deferredNames(catalog)) {
     const namespace = namespaceOf(name);
-    // Only a skill can share a connection's name, since connection ownership doesn't cover skills.
     if (namespace !== "" && !connections.has(namespace)) {
       counts.set(namespace, (counts.get(namespace) ?? 0) + 1);
     }
@@ -101,11 +81,6 @@ function namespaceCounts(catalog: Listed): ReadonlyMap<string, number> {
   return counts;
 }
 
-/**
- * The namespaces and connections the session can still reach, deferred or
- * not: a namespace past the cap, or whose entries stopped being deferred, is
- * not gone.
- */
 function reachableNames(catalog: Listed): ReadonlySet<string> {
   return new Set([
     ...[...catalog.entries.keys(), ...catalog.skills.keys()].map(namespaceOf),
@@ -113,7 +88,6 @@ function reachableNames(catalog: Listed): ReadonlySet<string> {
   ]);
 }
 
-/** A name's first `__` segment, or "" when it has none. */
 function namespaceOf(name: string): string {
   return name.slice(0, Math.max(0, name.indexOf("__")));
 }
@@ -175,7 +149,6 @@ function renderListing({ connections, kinds, namespaces }: CatalogListing): stri
   return lines.join("\n");
 }
 
-/** "a", "a and b", or "a, b, and c". */
 function joinWords(words: readonly string[]): string {
   return words.length <= 2
     ? words.join(" and ")
@@ -192,7 +165,6 @@ function isEmpty(listing: CatalogListing): boolean {
   return listing.kinds.length === 0 && listing.connections.items.length === 0;
 }
 
-/** The recorded listing; a value that isn't JSON counts as none. */
 function parseListing(value: string | undefined): CatalogListing | undefined {
   if (value === undefined) return undefined;
   try {

@@ -107,6 +107,7 @@ const defaultDependencies: InitCommandDependencies = {
 };
 
 const CURRENT_DIRECTORY_PROJECT_NAME = ".";
+const SHOW_CURSOR = "\x1b[?25h";
 export const EVE_INIT_PACKAGE_SPEC_ENV = "EVE_INIT_PACKAGE_SPEC";
 
 const initLog = createLogger("init");
@@ -200,7 +201,6 @@ async function scaffoldProject(
     throw new Error(`Cannot create project because "${projectPath}" already exists.`);
   }
 
-  // A fresh nested target such as `apps/my-agent` may name parents that do not exist yet.
   await mkdir(parentPath, { recursive: true });
   const stagingDirectory =
     createInPlace && overwriteExisting ? undefined : await mkdtemp(join(parentPath, ".eve-init-"));
@@ -282,7 +282,6 @@ async function runInitSteps(input: {
   interactive: boolean;
   trackStep?: (step: EveCliSetupStep) => void;
   trackTerminal?: InitTerminalTracker;
-  /** Opens onboarding once a fresh project exists, so it runs during the install. */
   startOnboarding?: (projectPath: string) => Promise<InitOnboarding | undefined>;
 }): Promise<InitResult> {
   const {
@@ -405,16 +404,14 @@ async function runInitSteps(input: {
       progress = startCliLiveRow(logger, progressOptions);
     }
 
-    // Git setup doesn't read node_modules, so only the initial commit waits for the install.
     let git: GitInitialization | undefined;
     if (project.kind === "created") {
       initLog.debug("starting git repository setup");
       git = dependencies.startGitInitialization(project.projectPath);
     }
     if (project.kind === "created" && startOnboarding !== undefined) {
-      progress.stop();
+      progress.stop({ keepOnScreen: true });
       onboarding = await startOnboarding(project.projectPath);
-      // The terminal UI owns the screen and shows the install on its status line.
       progress =
         onboarding === undefined
           ? startCliLiveRow(logger, progressOptions)
@@ -441,16 +438,12 @@ async function runInitSteps(input: {
     };
     if (onboarding !== undefined) {
       installOptions.signal = onboarding.interrupted;
-      // The onboarding screen owns the keyboard; a prompt from the install would be invisible.
       installOptions.nonInteractive = true;
     }
     const installResult = await dependencies
       .runPackageManagerInstall(project.packageManager, project.projectPath, installOptions)
-      // A failed or cancelled project is removed next, so Git must not still be running in it. On
-      // success this costs nothing: the commit waits for the same setup.
       .finally(() => git?.settled());
     const installElapsedMs = dependencies.now() - installStartedAt;
-    // A Ctrl-C that lands after a finished install keeps the project; init stops before eve dev.
     if (
       onboarding?.interrupted.aborted === true &&
       !packageManagerInstallSucceeded(installResult)
@@ -523,10 +516,8 @@ async function runInitSteps(input: {
     initLog.debug("dependencies installed", { ms: installElapsedMs });
 
     if (project.kind === "created") {
-      // Every created project starts Git setup above; this only narrows the type.
       if (git === undefined) throw new Error("Git setup was not started for the new project.");
       onboarding?.setInstalling(false);
-      // Onboarding can still rewrite agent.ts; waiting keeps the initial commit deterministic.
       await onboarding?.finished;
       activeInitStep = "initialize_git";
       trackStep?.(activeInitStep);
@@ -580,11 +571,14 @@ export async function runInitCommand(
   trackStep?.("resolve_target");
   let result: InitResult;
   let onboarding: InitOnboarding | undefined;
-  // A person signs in during the install instead of after it; `eve dev` then starts connected.
   const startOnboarding = startDevelopment
     ? async (projectPath: string) => {
         onboarding = await dependencies
-          .startInitOnboarding({ projectPath, telemetry: onboardingTelemetry })
+          .startInitOnboarding({
+            projectPath,
+            preamble: [initProgressLine(projectPath), ""],
+            telemetry: onboardingTelemetry,
+          })
           .catch((error: unknown) => {
             initLog.debug("onboarding could not open; eve dev will run it", { error });
             return undefined;
@@ -623,7 +617,6 @@ export async function runInitCommand(
   } catch (error) {
     await onboarding?.close();
     if (error instanceof WizardCancelledError) {
-      // An interrupt during onboarding is tracked at the step it stopped, and exits like SIGINT.
       if (onboarding?.interrupted.aborted === true) process.exitCode = 130;
       else trackTerminal?.("resolve_target", "cancelled");
       return;
@@ -635,38 +628,55 @@ export async function runInitCommand(
   }
 
   trackStep?.("handoff");
-  let onboardingCancelled = false;
   let carriedInput: InitCarriedInput = {};
-  if (onboarding !== undefined) {
-    onboardingCancelled = (await onboarding.finished).cancelled;
-    carriedInput = await onboarding.close();
-  }
-  const interrupted = onboarding?.interrupted.aborted === true;
+  const summary: { readonly text: string; readonly error?: true }[] = [];
   if (result.kind === "created") {
-    logger.log(
-      `${pc.green("✓")} Created an ${EVE_WORDMARK} agent in ${pc.bold(result.projectPath)} ${pc.dim(`in ${formatElapsed(result.elapsedMs)}`)}`,
-    );
+    summary.push({
+      text: `${pc.green("✓")} Created an ${EVE_WORDMARK} agent in ${pc.bold(result.projectPath)} ${pc.dim(`in ${formatElapsed(result.elapsedMs)}`)}`,
+    });
     for (const mutation of result.workspaceRootMutations) {
-      logger.log(pc.yellow(`⚠ ${formatWorkspaceRootMutationWarning(mutation)}`));
+      summary.push({ text: pc.yellow(`⚠ ${formatWorkspaceRootMutationWarning(mutation)}`) });
     }
   } else {
-    logger.log(
-      `${pc.green("✓")} Added an ${EVE_WORDMARK} agent to ${pc.bold(result.projectPath)} ${pc.dim(`in ${formatElapsed(result.elapsedMs)}`)}`,
-    );
+    summary.push({
+      text: `${pc.green("✓")} Added an ${EVE_WORDMARK} agent to ${pc.bold(result.projectPath)} ${pc.dim(`in ${formatElapsed(result.elapsedMs)}`)}`,
+    });
   }
 
   if (result.kind === "created" && result.gitResult.kind === "failed") {
-    logger.error(
-      pc.yellow(
+    summary.push({
+      error: true,
+      text: pc.yellow(
         `Git initialization failed during ${result.gitResult.stage}: ${result.gitResult.reason}`,
       ),
-    );
+    });
     if (result.gitResult.stage === "commit") {
-      logger.error(
-        pc.yellow(
+      summary.push({
+        error: true,
+        text: pc.yellow(
           `The eve agent was created successfully. Git repository metadata and staged files were preserved at "${result.projectPath}"; the initial commit is optional.\n\nTo create it later, configure Git identity and run:\n  git -C ${JSON.stringify(result.projectPath)} commit -m "Initial commit from eve"`,
         ),
-      );
+      });
+    }
+  }
+
+  let handedOff = false;
+  if (onboarding !== undefined) {
+    await onboarding.finished;
+    if (onboarding.interrupted.aborted) {
+      carriedInput = await onboarding.close();
+    } else {
+      summary.push({ text: "" });
+      const rows = summary.flatMap(({ text }) => text.split("\n"));
+      carriedInput = await onboarding.close({ rows });
+      handedOff = true;
+    }
+  }
+  const interrupted = onboarding?.interrupted.aborted === true;
+  if (!handedOff) {
+    for (const { text, error } of summary) {
+      if (error) logger.error(text);
+      else logger.log(text);
     }
   }
 
@@ -701,8 +711,6 @@ export async function runInitCommand(
     return;
   }
 
-  // Strictly the eve binary, never the project's dev script, which in an
-  // existing app may start unrelated processes.
   const freshScaffold = result.kind === "created";
   const devArguments = [
     ...(result.packageManager === "pnpm" ? ["--reporter=silent"] : []),
@@ -713,19 +721,24 @@ export async function runInitCommand(
   if (carriedInput.queued !== undefined) {
     process.env[EVE_INIT_QUEUED_INPUT_ENV] = JSON.stringify(carriedInput.queued);
   }
-  if (onboardingCancelled) logger.log(pc.dim("Connect a model with /login when you’re ready."));
-  logger.log("");
-  if (
-    !resultSucceeded(
-      await dependencies.spawnPackageManager(
-        result.packageManager,
-        result.projectPath,
-        devArguments,
-      ),
-    )
-  ) {
+  if (!handedOff) logger.log("");
+  let devResult: Awaited<ReturnType<typeof dependencies.spawnPackageManager>>;
+  try {
+    devResult = await dependencies.spawnPackageManager(
+      result.packageManager,
+      result.projectPath,
+      devArguments,
+    );
+  } finally {
+    if (handedOff) process.stdout.write(SHOW_CURSOR);
+  }
+  if (!resultSucceeded(devResult)) {
     throw new Error(`Development server exited unsuccessfully in "${result.projectPath}".`);
   }
+}
+
+function initProgressLine(projectPath: string): string {
+  return pc.dim(`○ Creating an eve agent in ${projectPath}`);
 }
 
 function resolveInitEvePackageOverride(): EvePackageContract | undefined {

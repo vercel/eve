@@ -25,14 +25,6 @@ describe("createExtensionNameDiagnostic", () => {
   });
 });
 
-/**
- * Direct coverage for the unified discovery helper. The channels, tools,
- * hooks, lib, instructions layer, and schedule slots are exercised end-to-end
- * through `discoverAgent` in `agent.integration.test.ts`; this file pins
- * the helper's API contract for the recursive-walk shape, the
- * missing-directory shape, the markdown-or-module fork, and the slot
- * collision behavior.
- */
 describe("discoverNamedSourceDirectory", () => {
   it("walks recursively and emits modules in depth-first, alphabetical order", async () => {
     const project = buildMemoryAgentProject({

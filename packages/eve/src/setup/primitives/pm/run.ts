@@ -21,15 +21,10 @@ import {
 } from "./pnpm.js";
 import type { PackageManagerInstallOptions } from "./types.js";
 
-/** Output routing options for setup-owned package manager commands. */
 export interface RunPackageManagerOptions {
-  /** Streams raw command output to a parent-owned local renderer. */
   onOutput?: ProcessOutputHandler;
-  /** Aborts the package-manager subprocess when setup is interrupted. */
   signal?: AbortSignal;
-  /** Retains bounded stdout for a caller that must interpret a command's output. */
   captureStdout?: boolean;
-  /** Closes stdin so the child cannot contend with a parent-owned TUI. */
   nonInteractive?: boolean;
 }
 
@@ -40,7 +35,6 @@ function abortedTermination(signal: AbortSignal | undefined): PackageManagerProc
     : { kind: "aborted", reason: reason instanceof Error ? reason.message : String(reason) };
 }
 
-/** Runs one package-manager command and returns its complete process evidence. */
 export function spawnPackageManager(
   kind: PackageManagerKind,
   projectRoot: string,
@@ -107,7 +101,6 @@ export function spawnPackageManager(
 
     child.on("error", (error: NodeJS.ErrnoException) => {
       if (options.signal?.aborted === true || error.name === "AbortError") {
-        // A running child still owes `close`; settling now would disarm its SIGKILL backstop.
         if (child.pid === undefined) settle(abortedTermination(options.signal));
       } else {
         settle({ kind: "spawn-error", code: error.code, message: error.message });
@@ -147,7 +140,6 @@ export function packageManagerInstallSucceeded(result: PackageManagerInstallResu
   return result.kind === "installed" && resultSucceeded(result.result);
 }
 
-/** Returns an actionable explanation when a package-manager command produced no output. */
 export function packageManagerInstallFailureMessage(
   result: PackageManagerInstallResult,
 ): string | undefined {
@@ -162,7 +154,6 @@ export function packageManagerInstallFailureMessage(
   return undefined;
 }
 
-/** Installs project dependencies and keeps workspace-probe evidence distinct. */
 export async function runPackageManagerInstall(
   kind: PackageManagerKind,
   projectRoot: string,
@@ -207,7 +198,6 @@ export async function runPackageManagerInstall(
     strategy.installArguments(installOptions),
     firstAttemptOptions,
   );
-  // pnpm 11 accepts --yes; pnpm 9 and 10 reject it before starting the install.
   if (!resultSucceeded(result) && autoApproveRejected) {
     result = await spawnPackageManager(
       kind,
@@ -219,7 +209,6 @@ export async function runPackageManagerInstall(
   return { kind: "installed", result };
 }
 
-/** The argv that runs the locally installed eve binary's `dev` command. */
 export function eveDevArguments(kind: PackageManagerKind): readonly string[] {
   return getPackageManagerStrategy(kind).devArguments();
 }

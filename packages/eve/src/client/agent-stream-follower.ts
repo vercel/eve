@@ -41,7 +41,6 @@ interface Node {
   idleReads: number;
 }
 
-/** One bounded scheduler and projection registry for the root's entire observed descendant graph. */
 export class AgentStreamFollower {
   readonly #root: Node;
   readonly #nodes = new Set<Node>();
@@ -75,7 +74,6 @@ export class AgentStreamFollower {
     this.reconcile();
   }
 
-  /** Discovery sees committed projections, never a partially received opening. */
   reconcile(): void {
     if (!this.#active) return;
     this.#discover(this.#root);
@@ -227,7 +225,6 @@ export class AgentStreamFollower {
     const before = conversation.view.position;
     void (async () => {
       try {
-        // Retry waits belong to the scheduler, so a disconnected child releases its request slot.
         const reader = node.reader as ClientAgentSession;
         let reachedTail = false;
         for await (const { event } of reader.follow(

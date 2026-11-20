@@ -225,7 +225,7 @@ describe("summarizeKnownError (catalog table)", () => {
     },
     {
       title: "workflow store version mismatch",
-      error: named("DataDirVersionError", "data dir was created by a newer version"),
+      error: named("NewerSchemaError", "database was written by a newer version"),
       id: "workflow-store-version-mismatch",
     },
     {
@@ -358,8 +358,8 @@ describe("summarizeKnownError (catalog table)", () => {
 
   it("matches plain-object throwables that crossed a workflow step boundary", () => {
     const summary = summarizeKnownError({
-      name: "DataDirVersionError",
-      message: "created by a newer version",
+      name: "NewerSchemaError",
+      message: "written by a newer version",
     });
     expect(summary?.id).toBe("workflow-store-version-mismatch");
   });
@@ -407,11 +407,7 @@ describe("rule engine", () => {
   });
 
   it("allOf requires all predicates on the same link", () => {
-    const signals = extractErrorSignals(
-      // `name` matches the outer link, `message` only the inner one — no
-      // single link satisfies both.
-      named("Split", "outer", { cause: new Error("target") }),
-    );
+    const signals = extractErrorSignals(named("Split", "outer", { cause: new Error("target") }));
     const rule = {
       id: "x",
       name: "x",

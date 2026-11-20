@@ -47,7 +47,6 @@ const mockedRunVercel = vi.mocked(runVercel);
 const mockedConfigureTraceSampling = vi.mocked(configureTraceSampling);
 const mockedReadProjectLink = vi.mocked(readProjectLink);
 
-/** Wraps stdout as a successful capture result for the mocked `captureVercel`. */
 const captured = (value: unknown): VercelCaptureResult => ({
   ok: true,
   stdout: typeof value === "string" ? value : JSON.stringify(value),
@@ -63,7 +62,6 @@ const failedCapture = (stdout: string, stderr = ""): VercelCaptureResult => ({
   },
 });
 
-/** Minimal prompter whose spinner and one chosen select can be observed. */
 function createSpyPrompter(overrides: {
   spinner?: NonNullable<Prompter["log"]["spinner"]>;
   single?: (opts: SingleSelectOptions<PrompterValue>) => PrompterValue | Promise<PrompterValue>;
@@ -199,7 +197,6 @@ describe("pickTeam", () => {
     const prompter = createSpyPrompter({ spinner, single: async () => "team-b" });
 
     await expect(pickTeam(prompter, "/tmp/eve-agent", undefined)).resolves.toBe("team-b");
-    // The copy is randomized per run; assert pool membership, not one phrasing.
     expect(WHIMSY_POOLS.teams).toContain(spinner.mock.calls[0]?.[0]);
     expect(stop).toHaveBeenCalledTimes(1);
   });
@@ -229,7 +226,6 @@ describe("pickProject", () => {
       project: { projectId: "prj_p1", projectName: "p1" },
       team: "team-a",
     });
-    // Randomized copy: the team name must still anchor the step.
     expect(spinner.mock.calls[0]?.[0]).toContain("team-a");
     expect(stop).toHaveBeenCalledTimes(1);
   });
@@ -244,7 +240,6 @@ describe("pickProject", () => {
       }),
     );
     const single = vi.fn().mockImplementationOnce((options) => {
-      // The match floats to the top, carries the marker, and holds the cursor.
       expect(options.options[0]).toEqual({
         value: "prj_mine",
         label: "my-agent",
@@ -262,7 +257,6 @@ describe("pickProject", () => {
       project: { projectId: "prj_mine", projectName: "my-agent" },
       team: "team-a",
     });
-    // The recents already held the match: no extra lookup round trip.
     expect(mockedCaptureVercel).toHaveBeenCalledTimes(1);
   });
 
@@ -529,8 +523,6 @@ describe("pickNewProjectName", () => {
     await expect(
       pickNewProjectName(prompter, "/tmp/eve-agent", "team-a", "my-agent"),
     ).resolves.toBe("my-agent-2");
-    // The collision rides the question as a notice (gone once a free name
-    // lands), not a persistent log line.
     expect(text).toHaveBeenCalledWith(
       expect.objectContaining({
         message: "New project name",
@@ -1100,7 +1092,6 @@ describe("linkProject", () => {
   });
 });
 
-/** Stubs the `vercel` CLI lookups the provisioning prompts perform. */
 function stubVercel(responses: {
   whoami?: string;
   teams?: { name: string; slug: string; current: boolean }[];
@@ -1151,10 +1142,6 @@ function stubVercel(responses: {
   });
 }
 
-/**
- * A prompter that answers from queued values and records each select message.
- * `selects` answers both plain and searchable single-selects, in call order.
- */
 function answeringPrompter(answers: { selects?: PrompterValue[]; texts?: string[] }): {
   prompter: Prompter;
   selectMessages: string[];

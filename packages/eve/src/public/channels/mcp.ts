@@ -59,6 +59,10 @@ import {
   readRouteSessionCreator,
   readSkillFileSource,
 } from "#internal/nitro/routes/channel-route-context.js";
+/**
+ * Options for {@link mcpChannel}: the required route auth, the route path, and which of the agent's
+ * `agent_*` tools, tools, and skills to publish.
+ */
 export interface McpChannelConfig {
   /** Existing eve route-auth policy. Use `none()` for explicit public access. */
   readonly auth: AuthFn<Request> | readonly AuthFn<Request>[];
@@ -461,7 +465,6 @@ async function handleMcpRequest(
         auth.authenticator === "none" && auth.principalType === "anonymous",
       )
     : [];
-  // One `describe()` serves both the published tools and the skill catalog.
   const described = publish.tools || publish.skills ? await args.describe() : undefined;
   const publishedTools =
     publish.tools && described !== undefined
@@ -474,7 +477,6 @@ async function handleMcpRequest(
       : [];
   const features: McpServerFeature[] = [];
   if (publish.tools) {
-    // Advertised only; published tools read the key from each call's `_meta`.
     features.push({
       capabilities: { extensions: { [MCP_TOOL_SESSIONS_EXTENSION]: {} } },
       register() {},
@@ -497,11 +499,6 @@ async function handleMcpRequest(
   })(request);
 }
 
-/**
- * Hosted MCP clients receive this once per connection (legacy `initialize`)
- * or per discovery (`server/discover`). Keep it short: clients truncate or
- * drop long instructions, and the details live in each tool description.
- */
 const MCP_SERVER_INSTRUCTIONS = [
   "Each invocation is one durable agent task.",
   "Call agent_start once per task and keep the returned invocationId.",
@@ -643,8 +640,6 @@ function createInvocationTools(
   return tools;
 }
 
-// Unknown, expired, and foreign-principal invocations all read as not found
-// so the response never confirms that another caller's invocation exists.
 const INVOCATION_NOT_FOUND =
   "Invocation not found. It may have expired or belong to another caller.";
 
@@ -680,10 +675,6 @@ function invocationResult(invocation: AgentInvocation): McpCallToolResult {
   };
 }
 
-// Bounds on caller-supplied text. The transport already caps the whole body
-// at MCP_REQUEST_BODY_MAX_BYTES; these keep individual durable fields sane.
-// Text bounds are UTF-8 bytes, matching the transport cap and the docs;
-// string.length undercounts multibyte input by up to 3x.
 const MAX_MESSAGE_BYTES = 64 * 1_024;
 const MAX_RESPONSE_TEXT_BYTES = 16 * 1_024;
 const MAX_ID_CHARS = 256;

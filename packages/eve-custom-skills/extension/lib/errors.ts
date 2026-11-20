@@ -16,7 +16,6 @@ export class SkillStorageNotConfiguredError extends SkillLifecycleError {
 
 export class SkillScopeUnavailableError extends SkillLifecycleError {}
 
-/** A stored document doesn't parse; the repository logs which one. */
 export class SkillStorageCorruptError extends SkillLifecycleError {
   constructor() {
     super(
@@ -48,7 +47,6 @@ export class SkillVersionNotFoundError extends SkillLifecycleError {
 
 export class InvalidSkillTransitionError extends SkillLifecycleError {}
 
-/** The approval rule refused the change, or the scope is read-only. */
 export class SkillChangeRefusedError extends SkillLifecycleError {}
 
 /**

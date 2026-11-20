@@ -44,7 +44,6 @@ function stubStore(traces: readonly LocalTrace[]): TraceStore & { reads: string[
   return {
     reads,
     async list() {
-      // Newest activity first, mirroring the real store's ordering.
       return traces.map((entry, index) => ({
         traceId: entry.traceId,
         lastActivityMs: traces.length - index,
@@ -123,8 +122,6 @@ describe("TraceViewerSession drag copy", () => {
       const last = frames[frames.length - 1]?.join("\n") ?? "";
       if (!last.includes("copy me please")) throw new Error("no conversation frame yet");
     });
-    // Drag across the user card's text row (three header rows, then the
-    // card's band, title, band, and padding rows): press, motion, release.
     session.handleKey({ type: "mouse", action: "press", button: 0, x: 1, y: 8 });
     session.handleKey({ type: "mouse", action: "press", button: 32, x: 40, y: 8 });
     session.handleKey({ type: "mouse", action: "release", button: 0, x: 40, y: 8 });
@@ -132,9 +129,6 @@ describe("TraceViewerSession drag copy", () => {
     expect(copied[0]).toContain("copy me please");
     expect(frames[frames.length - 1]!.join("\n")).toContain("Copied to clipboard");
 
-    // A drag over the open drawer copies drawer text: at width 80 the
-    // drawer starts right of the conversation's 46 columns, and detail
-    // line 1 carries the selected span's name.
     session.handleKey({ type: "enter" });
     session.handleKey({ type: "mouse", action: "press", button: 0, x: 49, y: 5 });
     session.handleKey({ type: "mouse", action: "press", button: 32, x: 75, y: 5 });
@@ -182,7 +176,6 @@ describe("TraceViewerSession background surfaces", () => {
       const last = frames[frames.length - 1]?.join("\n") ?? "";
       if (!last.includes("reply")) throw new Error("no conversation frame yet");
     });
-    // Before the terminal answers the probe: rail rendering, no truecolor.
     expect(frames[frames.length - 1]!.join("\n")).not.toContain("\x1b[48;2;");
     session.setTerminalBackground({ r: 0, g: 0, b: 0 });
     const surfaced = frames[frames.length - 1]!.join("\n");
@@ -235,8 +228,6 @@ describe("TraceViewerSession background surfaces", () => {
 
 describe("TraceViewerSession session preference", () => {
   it("opens on the trace containing the current session, not the newest", async () => {
-    // Trace ids are provider-generated, so the session's trace is found by
-    // matching conversation IDs — here the session lives in the older trace.
     const store = stubStore([
       trace("a".repeat(32), ["session-other"]),
       trace("b".repeat(32), ["session-mine"]),

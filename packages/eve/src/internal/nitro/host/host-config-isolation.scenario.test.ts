@@ -18,7 +18,6 @@ describe("host configuration isolation", () => {
         "agent/agent.ts":
           'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
         "agent/instructions.md": "Answer briefly.",
-        // Each config source breaks eve's host build if Nitro merges it.
         "nitro.config.ts": [
           "export default {",
           "  hooks: {",
@@ -29,7 +28,6 @@ describe("host configuration isolation", () => {
           "};",
         ].join("\n"),
         ".nitrorc": "preset=eve-unknown-preset\n",
-        // Either file would answer requests no eve route matches.
         "server.ts": 'export default { fetch: () => new Response("app server entry") };\n',
         "index.html": "<html><body>app renderer template</body></html>\n",
       },

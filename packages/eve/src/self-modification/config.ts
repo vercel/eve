@@ -18,7 +18,6 @@ export interface ResolvedSelfModificationConfig {
   readonly localEnabled: boolean;
 }
 
-/** Defines the local self-modification policy. */
 export function defineSelfModificationConfig(
   config: SelfModificationConfig = {},
 ): SelfModificationConfig {

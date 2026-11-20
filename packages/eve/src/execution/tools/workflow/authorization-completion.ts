@@ -10,7 +10,6 @@ import {
   type ScopedAuthorization,
 } from "#runtime/connections/scoped-authorization.js";
 
-/** Record successful completion before returning to authored code. */
 export async function completeWorkflowStepAuthorization(
   scoped: ScopedAuthorization,
 ): Promise<boolean> {
@@ -28,8 +27,6 @@ export async function completeWorkflowStepAuthorization(
     try {
       if ((await stream.getTailIndex()) >= 0) {
         consumeAuthorizationResult(scoped.scope, scoped.instanceId);
-        // The shared execution resolves the token through the provider's store and retains
-        // its fresh-token rejection guard. No bearer is stored in this completion stream.
         return true;
       }
     } finally {

@@ -1,10 +1,3 @@
-/**
- * A long-running relay that holds a Discord Gateway connection and forwards
- * message dispatches to an eve agent's `discordChannel({ gateway })` route.
- * Run it in a process that stays up, such as a Vercel Daemon; it does not
- * belong in the agent itself.
- */
-
 import { createLogger } from "#internal/logging.js";
 import { type OutboundAuthFn, vercelOidc } from "#public/agents/auth.js";
 import {
@@ -26,7 +19,6 @@ const GUILD_MESSAGES_INTENT = 1 << 9;
 const DIRECT_MESSAGES_INTENT = 1 << 12;
 const MESSAGE_CONTENT_INTENT = 1 << 15;
 
-// Vercel Daemons get 10 seconds between SIGTERM and SIGKILL by default.
 const SHUTDOWN_DRAIN_MS = 8_000;
 
 /** Options for {@link runDiscordGatewayRelay}. */

@@ -15,7 +15,7 @@ Authored channels also use channel-local continuation tokens. A token addresses 
 
 A session completes after 30 idle days by default. Set `limits.sessionTimeoutMs` in `agent.ts` to change the window, or `false` to disable it. The idle window restarts each time a turn ends. A session never expires while a turn is open. At expiration, eve emits `session.ended` with `outcome: "completed"` and releases the session's channel addresses. The next qualifying channel message then starts a fresh session. Stored data follows the session's [run-data retention policy](../agent-config#run-data-retention). Outside development, the default policy requests deletion when private and unknown-audience sessions end, if the Workflow world supports deletion. See [Agent config](../agent-config#runtime-limits).
 
-React, Vue, and Svelte apps use [`useEveAgent()`](/docs/guides/frontend) instead of calling these routes directly. Next.js and Nuxt apps can proxy them to the eve runtime from the same origin.
+React, Vue, Svelte, and Solid apps use [`useEveAgent()`](/docs/guides/frontend) instead of calling these routes directly. Next.js and Nuxt apps can proxy them to the eve runtime from the same origin.
 
 ## Start a session
 
@@ -421,7 +421,7 @@ The info route belongs to the selected `channels/eve.ts` source and checks its a
 Each new event line goes through these stages in order:
 
 1. **Write**: the line is written to the stream.
-2. **Channel handler**: the channel's event handler runs for each event and can update adapter state. eve then re-evaluates the channel's `metadata(state)`.
+2. **Channel handler**: the channel's event handler runs for each event and can update adapter state. eve then re-evaluates the channel's `metadata(state)`. Work a handler passes to `ctx.waitUntil()` continues in the background, and eve waits for it, for up to 30 seconds, before the step that ran the handler ends. See [Run platform calls in the background](../channels/custom#run-platform-calls-in-the-background).
 3. **Hooks**: authored [hooks](../guides/hooks) subscribed to each event fire.
 4. **Intents**: eve acts on cancellation requests queued by `ctx.cancel()`.
 

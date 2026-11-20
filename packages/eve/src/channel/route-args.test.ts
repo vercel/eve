@@ -11,7 +11,6 @@ import {
   readSkillFileSource,
 } from "#internal/nitro/routes/channel-route-context.js";
 
-/** A runtime whose only member in use is `createSession`. */
 function runtimeWith(createSession: Runtime["createSession"]): Runtime {
   return new Proxy<Runtime>(Object.create(null), {
     get: (_target, key) =>

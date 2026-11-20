@@ -33,8 +33,6 @@ describe("resolveVerifiedRemoteDevelopmentClient", () => {
       workspaceRoot: "/workspace",
     });
     expect(options.redirect).toBe("manual");
-    // The OIDC token rides the higher-level vercelOidc auth; the client expands
-    // it into the Authorization + trusted-OIDC headers (covered in client.test.ts).
     if (options.auth === undefined || !("vercelOidc" in options.auth)) {
       throw new Error("Expected vercelOidc auth.");
     }

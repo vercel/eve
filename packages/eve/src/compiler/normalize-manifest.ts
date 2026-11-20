@@ -122,6 +122,16 @@ export async function compileAgentManifest(
   manifest: AgentSourceManifest,
   options: CompileAgentManifestOptions = {},
 ): Promise<CompiledAgentManifest> {
+  return (await compileAgentManifestWithModuleGraph(manifest, options)).manifest;
+}
+
+export async function compileAgentManifestWithModuleGraph(
+  manifest: AgentSourceManifest,
+  options: CompileAgentManifestOptions = {},
+): Promise<{
+  readonly manifest: CompiledAgentManifest;
+  readonly moduleGraph: AuthoredModuleGraph;
+}> {
   const registries = [frameworkAgentSourceRegistry, ...(options.sourceRegistries ?? [])];
   assertUniqueRegistryIds(registries);
   const context: ManifestCompileContext = {
@@ -135,14 +145,11 @@ export async function compileAgentManifest(
     nodeId: ROOT_COMPILED_AGENT_NODE_ID,
     selection: options.developmentExtensions ?? noDevelopmentExtensions(),
   });
-  const compiler = new AgentGraphCompiler(
-    context,
-    registries,
-    diagnostics,
-    createAuthoredModuleGraph(listApplicationModulePaths(developmentExtensions.manifest), {
-      appRoot: manifest.appRoot,
-    }),
+  const moduleGraph = createAuthoredModuleGraph(
+    listApplicationModulePaths(developmentExtensions.manifest),
+    { appRoot: manifest.appRoot },
   );
+  const compiler = new AgentGraphCompiler(context, registries, diagnostics, moduleGraph);
   const root = await compiler.compileStaticNode({
     developmentExtensionCandidates: developmentExtensions.candidates,
     inheritedExternalDependencies: [],
@@ -161,9 +168,9 @@ export async function compileAgentManifest(
     diagnosticsSummary,
     subagents,
   });
-  // In the background, so pruning never delays a compile.
   void pruneAuthoredModuleCache();
-  return compiled;
+  moduleGraph.warnIfBundledPerModule();
+  return { manifest: compiled, moduleGraph };
 }
 
 class AgentGraphCompiler {
@@ -473,7 +480,6 @@ class AgentGraphCompiler {
 
     const isSchedule = (candidate: AgentSourceCandidate) =>
       state.sourcesBySourceId.get(candidate.sourceId)?.kind === "schedule";
-    // Schedules compile first: a tool file disables a collection's tools by the collection's name.
     for (const candidate of [
       ...state.orderedCandidates.filter(isSchedule),
       ...state.orderedCandidates.filter((candidate) => !isSchedule(candidate)),

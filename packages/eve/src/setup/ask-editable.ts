@@ -29,7 +29,6 @@ function selectedValue<T>(question: EditableSelectQuestion<T>, id: unknown): T {
   throw new Error(`Invalid answer for "${question.key}": ${String(id)}. Expected one of: ${ids}.`);
 }
 
-/** Renders the specialized one-row editable select through a terminal prompter. */
 export async function renderEditableQuestion<T>(
   prompter: Prompter,
   question: EditableSelectQuestion<T>,

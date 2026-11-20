@@ -8,8 +8,6 @@ interface Snapshot {
   readonly contents?: Buffer;
 }
 
-// Package-manager state under node_modules is disposable and deliberately not
-// restored; manifests and lock/policy files remain the source of truth on retry.
 const PROJECT_INSTALL_FILES = [
   "package.json",
   "pnpm-lock.yaml",

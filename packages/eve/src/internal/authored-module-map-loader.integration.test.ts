@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { compileAgent } from "#compiler/compile-agent.js";
+import { join } from "node:path";
+
+import { compileAgent, compileAgentInWorkspace } from "#compiler/compile-agent.js";
 import { EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION } from "#compiler/extension-compatibility.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { loadCompiledModuleMapFromAuthoredSource } from "#internal/authored-module-map-loader.js";
@@ -8,7 +10,6 @@ import { useTemporaryAppRoots } from "#internal/testing/use-temporary-app-roots.
 import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
 
-// Some NFS and FUSE mounts reject hard links with Linux ENOTSUPP (524), which Node cannot name.
 vi.mock("node:fs/promises", async (importOriginal) => ({
   ...(await importOriginal<typeof import("node:fs/promises")>()),
   link: async () => {
@@ -52,4 +53,102 @@ describe("loadCompiledModuleMapFromAuthoredSource", () => {
       name: "crm",
     });
   });
+
+  it("reuses the compile's evaluation of modules that several tools share", async () => {
+    const app = await createAppRoot("eve-shared-module-graph-", {
+      files: sharedModuleAppFiles("__eveCompileGraphEvaluations"),
+    });
+    const { compileResult, moduleGraph } = await compileAgentInWorkspace({
+      artifactLocations: {
+        publishedRoot: join(app.appRoot, ".eve"),
+        writeRoot: join(app.appRoot, ".eve"),
+      },
+      startPath: app.appRoot,
+    });
+    const compiledArtifactsSource = createDiskRuntimeCompiledArtifactsSource(app.appRoot);
+    const evaluationsAfterCompile = sharedModuleEvaluations("__eveCompileGraphEvaluations");
+
+    const moduleMap = await loadCompiledModuleMapFromAuthoredSource({
+      compiledArtifactsSource,
+      moduleGraph,
+    });
+
+    expect(() => structuredClone(compileResult)).not.toThrow();
+    expect(evaluationsAfterCompile).toBe(1);
+    expect(sharedModuleEvaluations("__eveCompileGraphEvaluations")).toBe(1);
+    expect(Object.keys(moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]!.modules)).toEqual(
+      expect.arrayContaining(["tools/one.mjs", "tools/two.mjs", "tools/three.mjs"]),
+    );
+  });
+
+  it("evaluates a shared module at most once with a shared graph and no compile graph", async () => {
+    const app = await createAppRoot("eve-shared-module-graph-", {
+      files: sharedModuleAppFiles("__eveSharedGraphEvaluations"),
+    });
+    await compileAgent({ startPath: app.appRoot });
+    const compiledArtifactsSource = createDiskRuntimeCompiledArtifactsSource(app.appRoot);
+    const evaluationsAfterCompile = sharedModuleEvaluations("__eveSharedGraphEvaluations");
+
+    await loadCompiledModuleMapFromAuthoredSource({
+      compiledArtifactsSource,
+      moduleGraph: "shared",
+    });
+
+    expect(
+      sharedModuleEvaluations("__eveSharedGraphEvaluations") - evaluationsAfterCompile,
+    ).toBeLessThanOrEqual(1);
+  });
+
+  it("reports a module that doesn't parse without a graph warning", async () => {
+    const app = await createAppRoot("eve-shared-module-graph-", {
+      files: {
+        ...sharedModuleAppFiles("__eveBrokenModuleEvaluations"),
+        "agent/tools/broken.mjs": "export default {",
+      },
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await expect(compileAgent({ startPath: app.appRoot })).rejects.toThrow("tools/broken.mjs");
+
+    expect(warn.mock.calls.flat().join("\n")).not.toContain("could not bundle");
+    warn.mockRestore();
+  });
+
+  it("evaluates a shared module once per tool without a graph", async () => {
+    const app = await createAppRoot("eve-shared-module-graph-", {
+      files: sharedModuleAppFiles("__evePerModuleEvaluations"),
+    });
+    await compileAgent({ startPath: app.appRoot });
+    const compiledArtifactsSource = createDiskRuntimeCompiledArtifactsSource(app.appRoot);
+    const evaluationsAfterCompile = sharedModuleEvaluations("__evePerModuleEvaluations");
+
+    await loadCompiledModuleMapFromAuthoredSource({ compiledArtifactsSource });
+
+    expect(sharedModuleEvaluations("__evePerModuleEvaluations") - evaluationsAfterCompile).toBe(3);
+  });
 });
+
+function sharedModuleAppFiles(counter: string): Record<string, string> {
+  const tool = (name: string) =>
+    [
+      'import { defineTool } from "eve/tools";',
+      'import { lookup } from "../lib/shared.mjs";',
+      `export default defineTool({ description: "${name}", inputSchema: { type: "object", properties: {} }, execute: async () => lookup("${name}") });`,
+    ].join("\n");
+  return {
+    "agent/agent.mjs":
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
+    "agent/instructions.md": "Work with the available tools.",
+    "agent/lib/shared.mjs": [
+      `globalThis.${counter} = (globalThis.${counter} ?? 0) + 1;`,
+      "export function lookup(name) { return name; }",
+    ].join("\n"),
+    "agent/tools/one.mjs": tool("one"),
+    "agent/tools/two.mjs": tool("two"),
+    "agent/tools/three.mjs": tool("three"),
+  };
+}
+
+function sharedModuleEvaluations(counter: string): number {
+  return ((globalThis as Record<string, unknown>)[counter] as number | undefined) ?? 0;
+}

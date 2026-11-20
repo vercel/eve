@@ -18,7 +18,6 @@ vi.mock("#internal/logging.js", () => ({
   logError: vi.fn(),
 }));
 
-// Workflow is this realm's durable host, as `createWorkflowRuntime` makes it in a deployment.
 installWorkflowHost();
 
 const world = {} as Awaited<ReturnType<typeof getWorld>>;

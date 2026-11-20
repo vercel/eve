@@ -1,7 +1,3 @@
-/**
- * Instrumentation authoring helpers for `agent/instrumentation/`.
- */
-
 import type { SessionAuthContext, SessionParent } from "#channel/types.js";
 import type { InstrumentationChannel } from "#public/channels/index.js";
 import type { JsonObject } from "#shared/json.js";

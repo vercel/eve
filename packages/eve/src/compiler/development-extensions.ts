@@ -29,8 +29,6 @@ export interface DevelopmentExtensionSelection {
   readonly enabled: readonly DevelopmentExtensionId[];
 }
 
-// Hosted bundles can retain compiler modules, so package-owned paths must stay unresolved
-// until a development extension is actually selected.
 let bundledExtensionById: ReadonlyMap<string, BundledExtensionMount> | undefined;
 let developmentSourceRegistry: AgentSourceRegistry | undefined;
 
@@ -55,7 +53,6 @@ function getBundledExtensionById(): ReadonlyMap<string, BundledExtensionMount> {
   return bundledExtensionById;
 }
 
-/** Returns the registry used only by generated local-development module maps. */
 export function getDevelopmentExtensionSourceRegistry(): AgentSourceRegistry {
   developmentSourceRegistry ??= createAgentSourceRegistry([], {
     extensionDeclarations: [...getBundledExtensionById().values()].map(
@@ -77,7 +74,6 @@ export function noDevelopmentExtensions(): DevelopmentExtensionSelection {
   return { enabled: NO_DEVELOPMENT_EXTENSION_IDS };
 }
 
-/** Discovers selected bundled extensions and creates their root mount candidates. */
 export async function prepareDevelopmentExtensions(input: {
   readonly diagnostics: CompilerDiagnostic[];
   readonly manifest: AgentSourceManifest;

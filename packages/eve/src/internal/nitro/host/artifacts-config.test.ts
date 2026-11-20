@@ -30,8 +30,6 @@ describe("development artifacts durable strategy", () => {
       configuredWorld: "@workflow/world-postgres",
     });
 
-    // A custom World's deliveries never install eve's generation context,
-    // so the durable payload must be resolvable without it.
     const source = resolveNitroCompiledArtifactsSource(config);
     const durable = serializeDurableCompiledArtifactsSource(source);
     expect(durable).toBe(source);

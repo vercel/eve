@@ -23,7 +23,6 @@ const VERCEL_DEPLOY_ENV: Readonly<Record<string, string>> = {
   VERCEL_USE_EXPERIMENTAL_FRAMEWORKS: "1",
 };
 
-/** Injected for tests; defaults to the real subprocess primitives. */
 export interface DeployProjectDeps {
   runVercel: typeof runVercel;
   detectPackageManager: typeof detectPackageManager;
@@ -33,61 +32,23 @@ export interface DeployProjectDeps {
 }
 
 interface DeployProjectOptions {
-  /** Deploy progress and command output stream through this log (rail styling preserved). */
   prompter: { log: ChannelSetupLog };
-  /** Skip the post-channel Vercel deployment entirely (`--no-deploy`). */
   skip?: boolean;
-  /**
-   * Run even without a planned or detected project, linking interactively from
-   * inside `perform` (the `eve add channel/slack` composition; onboarding always has
-   * a plan or skips deploy with the channels).
-   */
   ensureLinkedProject?: "interactive-vercel-link";
-  /**
-   * Headless mode: gates interactive `vercel` commands inside `perform`. The box
-   * asks no questions, so the dispatch decision the gather faces used to encode
-   * comes from the composition site (the same place that picks the asker base),
-   * not from a prompt.
-   */
   headless?: boolean;
   deps?: DeployProjectDeps;
 }
 
-/**
- * What `perform` consumes. The headless flag gates interactive `vercel`
- * commands inside `perform`; it is fixed at composition time (the box prompts
- * for nothing) and passed straight through {@link DeployProjectOptions.headless}.
- */
 interface DeployProjectInput {
   headless: boolean;
 }
 
-/** The deploy facts `apply` records: the (re)deployed project and the cleared flags. */
 interface DeployProjectPayload {
   project: ProjectResolution;
   deploymentPending: boolean;
   deploymentDependenciesInstalled: boolean;
 }
 
-/**
- * THE DEPLOY BOX. Owns the post-channel `vercel deploy --prod` once channel
- * setup has marked deployment work pending: dependency install (once per
- * state), aligning the Vercel Framework Preset with the host framework on disk,
- * the production deploy, the env pull, and the deployment probe.
- *
- * The project was linked up front by the link box, so `perform` reuses
- * `state.project` and never triggers a second interactive `vercel link` (the
- * #1020 deadlock). When no resolution exists (no link box ran, e.g. the
- * `eve add channel/slack` composition), it falls back to the interactive bare
- * `vercel link`, or throws {@link HumanActionRequiredError} headlessly.
- *
- * Once the project is linked, {@link syncHostFrameworkPreset} runs before the
- * deploy so a project that gained a host framework (e.g. a web channel) builds
- * the host app instead of the stale `eve` agent preset. It is a no-op for a
- * plain agent (no host framework on disk) or an already-correct preset, so
- * every deploy surface — `eve add channel/slack`, the dev TUI `/deploy`, onboarding —
- * gets the reconcile without composing a separate box.
- */
 export function deployProject(
   options: DeployProjectOptions,
 ): SetupBox<SetupState, DeployProjectInput, DeployProjectPayload> {
@@ -108,8 +69,6 @@ export function deployProject(
     },
 
     async gather(): Promise<DeployProjectInput> {
-      // No questions: the deploy decision is the shouldRun gate, and the headless
-      // dispatch is a composition-time fact, so one gather serves every mode.
       return { headless: options.headless ?? false };
     },
 
@@ -127,9 +86,6 @@ export function deployProject(
             reason: "Deployment needs this directory linked to a Vercel project.",
           });
         }
-        // No onOutput: `vercel link` (without --project) is interactive, so it must
-        // own the terminal. Piping its prompt through the rail renderer line-buffers
-        // the unterminated question and deadlocks the CLI waiting on hidden input.
         log.message("Linking this directory to a Vercel project before deployment...");
         if (!(await deps.runVercel(["link"], { cwd: projectPath, signal }))) {
           signal?.throwIfAborted();
@@ -144,11 +100,6 @@ export function deployProject(
         }
       }
 
-      // The directory is now linked, so align the project's Framework Preset with
-      // the host framework on disk before deploying — deploy is deliberately the
-      // only place this server-side setting is touched, so a local integration add
-      // never mutates deployed settings unless the user is actively deploying.
-      // Best-effort and a no-op for a plain agent or an already-correct preset.
       await deps.syncHostFrameworkPreset(
         options.prompter,
         projectPath,
@@ -170,10 +121,6 @@ export function deployProject(
         }
       }
 
-      // `--yes` in both modes: setup already made the deploy decision, and fresh
-      // Vercel projects may still need the CLI to skip deployment-setting
-      // confirmation before the deployments API accepts the first production
-      // deploy.
       const deployArgs = [
         "deploy",
         "--prod",
@@ -192,9 +139,6 @@ export function deployProject(
       );
       signal?.throwIfAborted();
       if (!success) {
-        // Commit the captured `vercel deploy --prod` transcript (the rail keeps it
-        // transient until a warning/error settles it) so the build failure is
-        // visible instead of just the exit code.
         log.error(
           "`vercel deploy --prod` failed. Check the build logs above for the first error, then retry. To retrieve the logs again, run `vercel inspect <deployment-url> --logs` from this project.",
         );

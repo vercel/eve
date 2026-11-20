@@ -41,18 +41,12 @@ import { activeTurnIdOf } from "#protocol/session-projection.js";
 
 const log = createLogger("execution.interrupted-step");
 
-/** What an interrupted earlier attempt of a turn step published past the step's checkpoint. */
 export interface InterruptedAttempt {
-  /** The first line it wrote. */
   readonly since: number;
   readonly calls: ReadonlyMap<string, InterruptedCall>;
-  /** The interactions it settled, such as approvals it applied. */
   readonly settledInteractions: ReadonlySet<string>;
-  /** It ended the session. */
   readonly sessionEnded: SessionOutcome | undefined;
-  /** It cleared the history. */
   readonly cleared: boolean;
-  /** It settled a turn: the last one, with the reply's text. */
   readonly settledTurn?: { readonly failed: boolean; readonly text?: string };
 }
 
@@ -115,20 +109,6 @@ export function readInterruptedAttempt(
   return { calls, cleared, sessionEnded, settledInteractions, settledTurn, since };
 }
 
-/**
- * Recovers a turn step whose earlier attempt published past the checkpoint. The orphaned lines
- * are already folded into the step's projection, so what the step writes follows them.
- *
- * What the attempt left open closes as superseded, and the step runs again from its checkpoint:
- * the calls the attempt started never run again, and the model reads which may have run. When
- * the attempt ended the session or settled its turn, nothing is left to run. The ending keeps
- * its outcome and recorded reply output; a settled turn keeps its input and reply in history.
- * A step that failed every attempt (`failed`) fails the turn with the error its last attempt
- * threw instead, and a turn interrupted too often fails too.
- *
- * Returns the step's result when it ends here, or the session the step runs on with. Its own
- * new facts use normal reactions; facts already recorded are only adopted.
- */
 export async function recoverInterruptedStep(input: {
   readonly attempt: InterruptedAttempt;
   readonly ctx: ContextContainer;
@@ -138,17 +118,11 @@ export async function recoverInterruptedStep(input: {
   ) => Promise<HarnessSession>;
   readonly session: HarnessSession;
   readonly stepInput: HarnessStepInput | undefined;
-  /** Admission facts no attempt wrote, which a step that ends here must still write. */
   readonly admission: Commit;
-  /** The control the step applies, with the delivery it arrived as. */
   readonly control?: {
     readonly kind: "clear" | "compact";
     readonly delivery?: ControlDelivery;
   };
-  /**
-   * The error the step's last attempt threw, when every attempt failed; `stopped` when the turn
-   * was cancelled meanwhile.
-   */
   readonly failed?: { readonly error: { readonly name?: string }; readonly stopped?: true };
 }): Promise<
   | { readonly result: DurableStepResult }
@@ -160,7 +134,6 @@ export async function recoverInterruptedStep(input: {
     session = await input.publish(publication, session);
   };
   const view = () => sessionView(currentProjection(ctx), session.state);
-  /** Closes, as superseded, what `which` selects of the open work the attempt introduced. */
   const closeAttempt = async (which: (ref: Ref, row: OpenRow) => boolean) => {
     const tables = currentProjection(ctx).view;
     const closures = supersede(
@@ -201,8 +174,6 @@ export async function recoverInterruptedStep(input: {
     await closeAttempt(
       ({ family }, row) => (family === "run" || family === "change") && introduced(row),
     );
-    // A control applies once: a clear the attempt finished empties history now, and a control
-    // it left unsettled settles failed rather than run again.
     if (attempt.cleared) {
       session = saveTransition(session, clearedByAttempt(view()));
     }
@@ -219,7 +190,6 @@ export async function recoverInterruptedStep(input: {
 
   const { settledTurn } = attempt;
   if (settledTurn !== undefined && activeTurnIdOf(currentProjection(ctx)) === undefined) {
-    // The checkpoint predates the step, so the history its input imported is not in it yet.
     session = changeHistory(session, {
       append: createImportedHistoryMessages(input.stepInput?.history ?? []),
     });
@@ -236,8 +206,6 @@ export async function recoverInterruptedStep(input: {
     });
   }
 
-  // A step whose answers the attempt applied, or whose calls it started, stops, and what it
-  // still asks closes with it. Tasks keep working, and requests relayed for them stay.
   const stop = stopInterruptedSteps(view(), attempt);
   const asked = new Set(
     view()
@@ -265,11 +233,8 @@ export async function recoverInterruptedStep(input: {
   session = saveTransition(session, stop);
   const note = interruptedAttemptNote(attempt.calls);
   if (note !== undefined) session = changeHistory(session, { append: [note] });
-  // A turn stopped while its step kept failing goes on to its cancel, which settles it
-  // `cancelled` and keeps its input in history as any cancel before the model read it does.
   const stopped = input.failed?.stopped === true;
   if (stopped || (input.failed === undefined && interruptions <= MAX_TURN_INTERRUPTIONS)) {
-    // The answers the attempt applied leave the input.
     const { settledInteractions } = attempt;
     const answers = input.stepInput?.answers?.filter(
       (answer) => !settledInteractions.has(answer.interactionId),
@@ -281,7 +246,6 @@ export async function recoverInterruptedStep(input: {
     };
   }
 
-  // The turn fails with its input kept, as if the step had stopped where it began.
   if (input.admission.length > 0) await publish(input.admission);
   const deliveries = (input.stepInput?.deliveries ?? []).filter(
     ({ deliveryId }) => currentProjection(ctx).view.deliveries[deliveryId]?.status === "admitted",
@@ -290,8 +254,6 @@ export async function recoverInterruptedStep(input: {
   const failing = activeTurnIdOf(currentProjection(ctx));
   if (failing === undefined) return finish({ next: null, session });
   session = await preserveStoppedTurnMessage(ctx, session, input.stepInput);
-  // What the step threw can carry request content, so neither the turn nor the log carries it:
-  // the turn reports a fixed failure, and the log only the error's class under the same id.
   const failure =
     input.failed === undefined
       ? {
@@ -315,7 +277,6 @@ export async function recoverInterruptedStep(input: {
   return finish({ next: null, session, settledTurn: { isError: true, output: failure.message } });
 }
 
-/** What closing reads of an open row. */
 interface OpenRow {
   readonly introducedAt: number;
   readonly taskId?: string;
@@ -323,7 +284,6 @@ interface OpenRow {
 
 const INTERRUPTIONS_STATE_KEY = "eve.turn-interruptions";
 
-/** How many interrupted steps one turn runs again before it fails. */
 export const MAX_TURN_INTERRUPTIONS = 3;
 
 function turnInterruptions(state: SessionStateMap | undefined, turnId: string): number {

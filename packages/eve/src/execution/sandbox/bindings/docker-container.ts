@@ -9,12 +9,8 @@ import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
 
 export const DOCKER_SANDBOX_LABEL = "eve.sandbox";
 
-/** Where a template build container mounts the read-only workspace and skill resources. */
 export const DOCKER_RESOURCES_MOUNT_PATH = "/eve/resources";
 
-// PID 1 must outlive every exec'd command; the largest portable sleep
-// argument keeps the container alive without depending on GNU
-// `sleep infinity` being present in the image.
 const DOCKER_KEEPALIVE_ARGS = ["-c", "sleep 2147483647"] as const;
 
 export async function startDockerContainer(input: {

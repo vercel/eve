@@ -11,7 +11,6 @@ type AgentToolModelsCarrier = {
   readonly [AGENT_TOOL_MODELS]?: ReadonlyMap<string, NormalizedModelOption>;
 };
 
-/** Validates `agent({ models })` and returns each option by key, in authored order. */
 export function parseAgentToolModels(models: unknown): ReadonlyMap<string, NormalizedModelOption> {
   if (!isModelOptions(models)) {
     throw new TypeError(
@@ -25,7 +24,6 @@ export function parseAgentToolModels(models: unknown): ReadonlyMap<string, Norma
   return new Map(options.map((option) => [option.key, option]));
 }
 
-/** Keeps the parsed models on the tool definition, where the runtime reads them by key. */
 export function attachAgentToolModels<TDefinition extends object>(
   definition: TDefinition,
   models: ReadonlyMap<string, NormalizedModelOption>,
@@ -39,7 +37,6 @@ export function attachAgentToolModels<TDefinition extends object>(
   return definition;
 }
 
-/** The models an `agent({ models })` definition offers, or `undefined` for any other value. */
 export function readAgentToolModels(
   value: unknown,
 ): ReadonlyMap<string, NormalizedModelOption> | undefined {

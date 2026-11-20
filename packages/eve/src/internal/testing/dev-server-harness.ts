@@ -12,9 +12,6 @@ import {
 } from "#protocol/routes.js";
 import type { AgentInfoResponse } from "#internal/nitro/routes/agent-info/build-agent-info-response.js";
 
-/**
- * Handle to a spawned `eve dev --no-ui` process serving a scenario app.
- */
 export interface RunningEveDev {
   crash(): Promise<void>;
   readonly stderr: () => string;
@@ -36,7 +33,6 @@ export interface StartEveDevOptions {
   readonly defaultExtensions?: boolean;
   readonly resume?: boolean;
   readonly env?: Readonly<Record<string, string | undefined>>;
-  /** Runtime executing the CLI. Defaults to the current Node executable. */
   readonly runtime?: "bun" | "node";
 }
 
@@ -77,12 +73,6 @@ export async function signalEveDevDuringStartup(
   return { durationMs: Date.now() - startedAt, forcedKill };
 }
 
-/**
- * Spawns `eve dev --no-ui` for the app and resolves once the server URL is
- * printed and the state record exists. `NODE_ENV=test` activates the
- * deterministic mock-model adapter so streamed turns complete without model
- * credentials.
- */
 export async function startEveDev(
   appRoot: string,
   options: StartEveDevOptions = {},
@@ -178,10 +168,6 @@ export async function stopChildProcess(child: ChildProcess): Promise<void> {
   });
 }
 
-/**
- * Spawns `eve dev` and resolves with the process exit for flows that expect
- * startup to fail (e.g. unsupported runtimes).
- */
 export async function runEveDevToExit(
   appRoot: string,
   options: StartEveDevOptions = {},
@@ -236,7 +222,6 @@ function spawnEveDev(
   });
 }
 
-/** Reports whether `bun` is runnable on this machine. */
 export function isBunAvailable(): boolean {
   try {
     return spawnSync("bun", ["--version"], { stdio: "ignore" }).status === 0;
@@ -253,10 +238,6 @@ export function hasUnsupportedWindowsEsmImport(text: string): boolean {
   );
 }
 
-/**
- * Matches output signatures that mean the dev server broke: reset sockets,
- * unresolved generated imports, or a pruned module-map loader.
- */
 export function hasKnownDevServerFailure(text: string): boolean {
   return (
     hasUnsupportedWindowsEsmImport(text) ||
@@ -340,7 +321,6 @@ export async function waitForPath(path: string, timeoutMs: number = 60_000): Pro
   });
 }
 
-/** Reserve a loopback port and release it, so a server can bind it next. */
 export async function findFreePort(): Promise<number> {
   const server = createNetServer();
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -352,7 +332,6 @@ export async function findFreePort(): Promise<number> {
   return address.port;
 }
 
-/** Fetch a URL for readiness polling, treating a refused connection as "not yet". */
 export async function fetchStatus(url: string): Promise<number | undefined> {
   try {
     const response = await fetch(url);
@@ -421,7 +400,7 @@ function stripAnsi(text: string): string {
 }
 
 function parseServerUrl(stdout: string): string | undefined {
-  const match = /server listening at (https?:\/\/\S+)/.exec(stripAnsi(stdout));
+  const match = /\[DEV\] ready at (https?:\/\/\S+)/.exec(stripAnsi(stdout));
 
   return match?.[1];
 }
@@ -522,10 +501,6 @@ async function waitForServerUrl(input: {
   });
 }
 
-/**
- * Issues one GET through the provided keep-alive agent and reports the local
- * port so callers can assert connection reuse across worker replacements.
- */
 export async function requestWithAgent(
   url: string,
   agent: Agent,

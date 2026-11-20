@@ -1,8 +1,3 @@
-/**
- * Instructions prompt authoring helpers for `agent/instructions.ts`
- * and `agent/instructions/*.ts` files.
- */
-
 export {
   defineDynamic,
   defineInstructions,

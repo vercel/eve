@@ -26,8 +26,6 @@ describe("sanitizePastedText", () => {
   });
 
   it("drops C1 control bytes that terminals read as control introducers", () => {
-    // 0x9b is single-byte CSI, 0x9d is OSC: leaving them in would let a paste
-    // smuggle in an escape sequence.
     expect(sanitizePastedText("abc")).toBe("abc");
   });
 });
@@ -126,8 +124,6 @@ describe("nextKey", () => {
   });
 
   it("sanitizes the paste payload as it decodes, not just at insert time", () => {
-    // A hostile frame carrying ESC and a bell must come out stripped, pinning
-    // the sanitize call on the decode path itself.
     const buffer = "\x1b[200~a\x1b[31mb\x07c\x1b[201~";
     expect(nextKey(buffer)).toEqual({
       key: { type: "text", value: "a[31mbc", framing: "bracketed-paste" },
@@ -189,7 +185,6 @@ describe("nextKey", () => {
   it("waits for an OSC terminator that is still arriving", () => {
     expect(nextKey("\x1b]")).toEqual({ consumed: 0, incomplete: true });
     expect(nextKey("\x1b]11;rgb:1e1e")).toEqual({ consumed: 0, incomplete: true });
-    // A trailing ESC may be the start of the ST terminator.
     expect(nextKey("\x1b]11;rgb:1e1e/2a2a/3b3b\x1b")).toEqual({ consumed: 0, incomplete: true });
   });
 });
@@ -285,8 +280,6 @@ describe("takeUntil", () => {
     expect(consumed).toEqual([]);
     expect(returned).toBe(true);
 
-    // The abandoned in-flight pull settles late (e.g. once the runner aborts
-    // the underlying stream); it must not become an unhandled rejection.
     rejectNext(new Error("aborted"));
     await new Promise((resolve) => setImmediate(resolve));
   });
@@ -300,7 +293,7 @@ describe("takeUntil", () => {
     async function* source(): AsyncGenerator<number> {
       try {
         yield 1;
-        await gate; // hangs the second pull like a pending network read
+        await gate;
         yield 2;
       } finally {
         cleaned = true;
@@ -320,12 +313,8 @@ describe("takeUntil", () => {
     stop();
     await consume;
     expect(consumed).toEqual([1]);
-    // `return()` queues behind the in-flight pull — cleanup cannot run yet.
     expect(cleaned).toBe(false);
 
-    // The caller aborting the underlying stream settles the pull (mirrors the
-    // renderer firing `result.abort()` on lifecycle interruption); only then
-    // does the generator's cleanup run.
     rejectPull(new Error("aborted"));
     await new Promise((resolve) => setImmediate(resolve));
     expect(cleaned).toBe(true);

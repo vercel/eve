@@ -4,41 +4,24 @@ import { displayName, displayTitle } from "#protocol/session-projection/display-
 import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
 import { summarizeToolArgs, summarizeToolResult } from "./tool-format.js";
 
-/** Renderer-ready copy derived from a tool call without owning its lifecycle. */
 interface ToolPresentation {
   readonly title: string;
   readonly subtitle: string;
   readonly summarizeResult: (output: unknown) => string | undefined;
   readonly group?: ToolGroupPresentation;
-  /** Past-tense title used once the call settles successfully. */
   readonly doneTitle?: string;
-  /** Salient body lines shown behind the `│` rail under the header. */
   readonly detail?: readonly ToolDetailLine[];
-  /** When true, `detail` stays visible after the call settles (writes). */
   readonly keepDetailWhenDone?: boolean;
 }
 
-/**
- * Renderer-owned knowledge a presentation may fold in: what a write replaced
- * (from the session's file-content cache) and whether the file existed (from
- * the call's result, once it arrives).
- */
 export interface ToolPresentationContext {
   readonly previousContent?: string;
   readonly existed?: boolean;
-  /**
-   * True when the tool dispatches a named subagent (each subagent exposes a
-   * tool bearing its own name). The presentation reads as a delegation —
-   * `Delegate subagent(stock price)` — instead of a generic tool call.
-   */
   readonly isSubagent?: boolean;
-  /** The tool's own `label.start` copy, used when eve has no copy of its own for the tool. */
   readonly label?: string;
-  /** The tool's own `label.complete` copy, shown once the call succeeds. */
   readonly completeLabel?: string;
 }
 
-/** Copy needed to aggregate equivalent calls without merging their state. */
 export interface ToolGroupPresentation {
   readonly verb: string;
   readonly pastVerb: string;
@@ -47,31 +30,19 @@ export interface ToolGroupPresentation {
   readonly item: string;
 }
 
-/** Semantic activity copy for one builtin tool with a single telling argument. */
 interface BuiltinToolCopy {
   readonly verb: string;
   readonly pastVerb: string;
   readonly argKey: string;
-  /**
-   * Tool-specific extraction for provider-managed input shapes the plain
-   * `argKey` lookup can't reach (alternate key names, nested objects).
-   * Runs after `argKey` misses.
-   */
   readonly extractItem?: (input: unknown) => string | undefined;
   readonly singularNoun: string;
   readonly pluralNoun: string;
 }
 
-/** Copy shared by the full presenters and their preparing placeholders. */
 const WRITE_FILE_VERB = "Write";
 const DELEGATE_VERB = "Delegate";
 const REPLY_TITLE = "Reply";
 
-/**
- * Builtin tools whose calls read as one verb plus one argument. Runs group
- * by tool name; equal copy across two tools only merges their entries in a
- * completed section's counted summary, which reads fine.
- */
 const BUILTIN_TOOL_COPY: Readonly<Record<string, BuiltinToolCopy>> = {
   agent: {
     verb: "Delegate",
@@ -126,9 +97,6 @@ const BUILTIN_TOOL_COPY: Readonly<Record<string, BuiltinToolCopy>> = {
     verb: "Search",
     pastVerb: "Searched",
     argKey: "query",
-    // Provider-managed variants disagree on the argument shape: some send
-    // an `objective`/`search_query` pair instead of Anthropic's `query`,
-    // and OpenAI nests it under `action`.
     extractItem: (input) =>
       salientArg(input, "objective") ??
       salientArg(input, "search_query") ??
@@ -139,12 +107,6 @@ const BUILTIN_TOOL_COPY: Readonly<Record<string, BuiltinToolCopy>> = {
   },
 };
 
-/**
- * A write is never aggregated: each written file keeps its own block, and the
- * written content stays visible after the call settles — the change itself is
- * the story, unlike other builtin outputs. Lines arrive uncapped; the block
- * renderer windows them so a large generated file cannot flood the transcript.
- */
 function presentWriteFileTool(
   toolName: string,
   input: unknown,
@@ -159,8 +121,6 @@ function presentWriteFileTool(
     };
   }
 
-  // Diff on raw content; model-controlled text loses its terminal controls
-  // only at the display boundary so the comparison stays exact.
   const detail = diffWriteDetail(context?.previousContent, write.content, context?.existed).map(
     (line) => (line.kind === "gap" ? line : { ...line, text: stripTerminalControls(line.text) }),
   );
@@ -175,11 +135,6 @@ function presentWriteFileTool(
   };
 }
 
-/**
- * Extracts a write tool call's full-replacement payload. Exported so the
- * renderer can feed its file-content cache from the same contract the
- * presentation reads.
- */
 export function readWriteFileInput(
   toolName: string,
   input: unknown,
@@ -194,10 +149,6 @@ export function readWriteFileInput(
   return { path, content };
 }
 
-/**
- * Turns known tool contracts into concise activity copy. Unknown or malformed
- * calls keep the generic formatter, so presentation can never break execution.
- */
 export function presentTool(
   toolName: string,
   input: unknown,
@@ -206,9 +157,6 @@ export function presentTool(
   const baseName = toolBaseName(toolName);
   if (baseName === "write_file") return presentWriteFileTool(toolName, input, context);
   if (context?.isSubagent === true) {
-    // Named subagent dispatch: the tool name is the delegation target; the
-    // message rides as the quiet subtitle. The row is transient — the
-    // task's start line replaces it once the call becomes a task.
     const name = isSelfModificationAgent(toolName)
       ? agentDisplayName(toolName)
       : agentTaskLabel(agentDisplayName(toolName));
@@ -220,8 +168,6 @@ export function presentTool(
     };
   }
   if (baseName === REPLY_TOOL_NAME) {
-    // Structured-output terminal signal: its input is the
-    // structured result itself, kept behind the expanded `--show-tools full` view.
     return { title: REPLY_TITLE, subtitle: "", summarizeResult: () => undefined };
   }
 
@@ -233,8 +179,6 @@ export function presentTool(
         title: `${copy.verb} ${item}`,
         doneTitle: `${copy.pastVerb} ${item}`,
         subtitle: "",
-        // The salient argument is the story; builtin outputs (page content,
-        // file bodies, stdout) stay behind the expanded `--show-tools full` view.
         summarizeResult: () => undefined,
         group: {
           verb: copy.verb,
@@ -248,7 +192,6 @@ export function presentTool(
   }
 
   if (context?.label !== undefined) {
-    // Authored activity copy replaces the raw name and argument dump.
     const presentation = {
       title: context.label,
       subtitle: "",
@@ -266,61 +209,32 @@ export function presentTool(
   };
 }
 
-/**
- * A person's name for a tool with no copy of its own: `linear__list_issues` →
- * `List issues`.
- */
 export function toolDisplayTitle(toolName: string): string {
   return displayTitle(toolBaseName(toolName));
 }
 
-/**
- * The bundled self-modification subagent's compiled name: its extension
- * namespace joined to `subagents/agent` by the compiler's `__` rule.
- */
 export const SELF_MODIFICATION_AGENT_NAME = "self-modification__agent";
 
-/**
- * Tool names that read poorly to a person. The generic self-delegation tool is
- * literally named `agent`, and the self-modification subagent carries its
- * extension namespace.
- */
 const AGENT_DISPLAY_NAMES: ReadonlyMap<string, string> = new Map([
   ["agent", "subagent"],
   [SELF_MODIFICATION_AGENT_NAME, "agent editor"],
 ]);
 
-/** True for the bundled self-modification subagent's dispatch tool. */
 export function isSelfModificationAgent(toolName: string): boolean {
   return toolBaseName(toolName) === SELF_MODIFICATION_AGENT_NAME;
 }
 
-/**
- * The name an agent task goes by in the delegate row, task line, and task
- * panel, from its {@link agentDisplayName} and any `:N` ordinal.
- */
 export function agentTaskLabel(name: string): string {
   return /^subagent(?::\d+)?$/u.test(name) || name.startsWith("agent editor")
     ? name
     : `subagent(${name})`;
 }
 
-/**
- * A person's name for the agent a tool dispatches: `crm__researcher` →
- * `researcher`. An extension's own subagent compiles to `<extension>__agent`, so
- * the extension names it.
- */
 export function agentDisplayName(toolName: string): string {
   const baseName = toolBaseName(toolName);
   return AGENT_DISPLAY_NAMES.get(baseName) ?? displayName(baseName.replace(/(?<=.)__agent$/u, ""));
 }
 
-/**
- * Placeholder copy for a call whose input is still streaming from the model
- * (`action.input.appended`). Known tools lead with their activity verb so the
- * row already reads as intent (`Fetch …`); unknown tools lead with their name.
- * The full presentation replaces this once the input arrives.
- */
 export function presentPreparingTool(
   toolName: string,
   context?: ToolPresentationContext,
@@ -330,8 +244,6 @@ export function presentPreparingTool(
     return { title: REPLY_TITLE, subtitle: "", summarizeResult: () => undefined };
   }
   if (context?.isSubagent === true) {
-    // A named subagent's tool carries the delegation target in its name —
-    // showable before the message finishes streaming.
     return {
       title: `${DELEGATE_VERB} ${agentTaskLabel(agentDisplayName(toolName))} …`,
       subtitle: "",
@@ -346,27 +258,14 @@ export function presentPreparingTool(
   };
 }
 
-/**
- * Tools whose whole story renders through a dedicated surface — the question
- * overlay — instead of a transcript tool block. Both the preparing
- * announcement and the full call must agree on this set, or a panel-routed
- * tool ghosts as a preparing block.
- */
 export function isPanelRoutedTool(toolName: string): boolean {
   return toolBaseName(toolName) === "ask_question";
 }
 
-/** The tool's short name with any connection/server namespace stripped. */
 export function toolBaseName(toolName: string): string {
   return toolName.split(/[.:/]/u).at(-1) ?? toolName;
 }
 
-/**
- * OpenAI's provider-managed web search nests its argument under `action`
- * (`search` carries `query`/`queries`, `openPage` a `url`, `findInPage` a
- * `pattern`); Anthropic's sends a top-level `query`, which the plain
- * `argKey` lookup already covers.
- */
 function webSearchActionArg(input: unknown): string | undefined {
   if (input === null || typeof input !== "object" || Array.isArray(input)) return undefined;
   const action = (input as Record<string, unknown>)["action"];
@@ -388,11 +287,6 @@ function webSearchActionArg(input: unknown): string | undefined {
   return undefined;
 }
 
-/**
- * The one argument worth rendering, reduced to a single safe line. `group.item`
- * renders verbatim in aggregated rows, so a model-controlled value must lose
- * its terminal controls here, not at the render call sites.
- */
 function salientArg(input: unknown, key: string): string | undefined {
   if (input === null || typeof input !== "object" || Array.isArray(input)) return undefined;
   const value = (input as Record<string, unknown>)[key];
@@ -400,7 +294,6 @@ function salientArg(input: unknown, key: string): string | undefined {
   return salientLine(value);
 }
 
-/** Reduces a model-controlled string to its first non-empty, control-free line. */
 function salientLine(value: string): string | undefined {
   const line = stripTerminalControls(value)
     .split(/\r?\n/u)

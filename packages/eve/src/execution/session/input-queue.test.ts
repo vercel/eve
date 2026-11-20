@@ -98,9 +98,7 @@ describe("SessionInputQueue", () => {
     const queuedByBob = send("Invite the design team too.", bob, "queue");
     const admitted = new Set([fromBob, fromAlice, unauthenticated, queuedByBob]);
 
-    // A delivery without auth acts as the session's current identity, which is the turn's.
     expect(queue.takeSteering(admitted, turn)?.sequences).toEqual([fromAlice, unauthenticated]);
-    // A turn held on Alice lets her queued messages steer it, but never Bob's.
     expect(queue.takeSteering(admitted, turn, { heldSince: 0 })).toBeUndefined();
     expect(queue.takeNext()).toMatchObject({
       delivery: { auth: bob },
@@ -135,14 +133,12 @@ describe("SessionInputQueue", () => {
     const matchingByBob = send(retaining, "And book a room.", bob);
     const admitted = new Set([retainedByBob, matchingByBob]);
     expect(retaining.takeSteering(admitted, turn)?.sequences).toEqual([retainedByBob]);
-    // Without `retain` his message still waits for the turn to end.
     expect(retaining.takeSteering(admitted, turn)).toBeUndefined();
 
     const paused = new SessionInputQueue([]);
     const whilePaused = send(paused, "Actually include everyone.", bob, true);
     const pausedAdmitted = new Set([whilePaused]);
     expect(paused.takeSteering(pausedAdmitted, turn, { paused: true })).toBeUndefined();
-    // It joins when the turn resumes.
     expect(paused.takeSteering(pausedAdmitted, turn)?.sequences).toEqual([whilePaused]);
 
     const anonymous = new SessionInputQueue([]);
@@ -153,7 +149,6 @@ describe("SessionInputQueue", () => {
     const fromAlice = send(both, "Also cover the launch date.", alice);
     const afterAlice = send(both, "Actually include everyone.", bob, true);
     const bothAdmitted = new Set([fromAlice, afterAlice]);
-    // One step reads one sender, so the other's message waits for the next boundary.
     expect(both.takeSteering(bothAdmitted, turn)?.sequences).toEqual([fromAlice]);
     expect(both.takeSteering(bothAdmitted, turn)?.sequences).toEqual([afterAlice]);
   });
@@ -208,7 +203,6 @@ describe("SessionInputQueue", () => {
       principalPolicy: "adopt",
     });
     const policyAdmitted = new Set([retainedByBob, adoptedByBob]);
-    // One person's two policies never share a step: the second leaves its own turn.
     expect(policies.takeSteering(policyAdmitted, turn)?.sequences).toEqual([retainedByBob]);
     expect(policies.takeSteering(policyAdmitted, turn)?.sequences).toEqual([adoptedByBob]);
 
@@ -216,14 +210,12 @@ describe("SessionInputQueue", () => {
     const firstWithout = send(merged, "Also cover the launch date.", alice);
     const secondWith = send(merged, "Actually include everyone.", alice, { steeredBy: [bob] });
     const batched = merged.takeSteering(new Set([firstWithout, secondWith]), turn)?.delivery;
-    // The later message's list wins, even when it is the only one that carries one.
     expect(batched?.steeredBy).toEqual([bob]);
 
     const reverse = new SessionInputQueue([]);
     const firstWith = send(reverse, "Actually include everyone.", alice, { steeredBy: [bob] });
     const secondWithout = send(reverse, "Also cover the launch date.", alice);
     const emptied = reverse.takeSteering(new Set([firstWith, secondWithout]), turn)?.delivery;
-    // An earlier message's list must not survive the merge; a parent that omits it means empty.
     expect(emptied && "steeredBy" in emptied).toBe(false);
   });
 
@@ -237,12 +229,9 @@ describe("SessionInputQueue", () => {
     const bob = { ...alice, principalId: "BOB" };
     const steered = [bob];
 
-    // Input without a sender could be anyone's, so it cannot release the caller's hold.
     expect(steeredByAfter(steered, alice, undefined)).toBe(steered);
     expect(steeredByAfter(steered, alice, null)).toBe(steered);
-    // Only the caller's own message releases it.
     expect(steeredByAfter(steered, alice, alice)).toEqual([]);
-    // Anyone else is listed once, so a repeat leaves the list alone.
     expect(steeredByAfter(steered, alice, bob)).toBe(steered);
     expect(steeredByAfter([], alice, bob)).toEqual([bob]);
   });

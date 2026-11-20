@@ -12,11 +12,6 @@ import type {
 } from "#public/channels/slack/interactions.js";
 import { truncate as truncateWithEllipsis } from "#public/channels/text.js";
 
-/**
- * What a settled card shows in place of its controls: the line that replaces
- * them, the notification text of the update, such as `Answered: Saturday` or
- * `No longer active`, and who answered when the card credits someone.
- */
 export interface SettledCard {
   readonly label: string;
   readonly text: string;
@@ -86,11 +81,6 @@ function actionsContainActionId(actions: unknown, actionId: string): boolean {
   return actions.some((element) => isObjectRecord(element) && element.action_id === actionId);
 }
 
-/**
- * Retires an answered `card` or approval `container` in place: same single block, buttons
- * replaced by the answer. A container keeps its title and input preview as the record of what
- * was decided.
- */
 export function answeredBlocksFromActionBlock(input: {
   readonly answerLabel: string;
   readonly block: unknown;
@@ -163,7 +153,6 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-/** Replaces a pressed HITL card's controls with `card`. */
 export async function settleHitlCard(
   interaction: ParsedBlockActionsPayload,
   deps: InteractionHandlerDeps,
@@ -188,14 +177,12 @@ export async function settleHitlCard(
   });
 }
 
-/** Replaces a freeform card's controls with `card`. */
 export async function settleFreeformCard(input: {
   readonly card: SettledCard;
   readonly channelId: string;
   readonly deps: InteractionHandlerDeps;
   readonly installationTeamId?: string;
   readonly messageTs: string;
-  /** The `response_url` of the click that opened the modal, when the card was ephemeral. */
   readonly responseUrl?: string;
   readonly threadTs?: string;
 }): Promise<void> {
@@ -220,13 +207,10 @@ async function updateSettledCard(input: {
   readonly threadTs?: string | undefined;
 }): Promise<void> {
   if (input.responseUrl !== undefined) {
-    // Slack's own host, so the transport's `fetch`, confined to the configured bases, stays out.
     await sendSlackResponseUrl(input.responseUrl, {
       blocks: input.blocks,
       replaceOriginal: true,
       text: input.card.text,
-      // Without it, Slack also shows a threaded ephemeral's replacement at the top of the channel.
-      // A card outside a thread reports its own `ts` as its thread, so it stays top-level.
       ...(input.threadTs && input.threadTs !== input.messageTs && { threadTs: input.threadTs }),
     });
     return;

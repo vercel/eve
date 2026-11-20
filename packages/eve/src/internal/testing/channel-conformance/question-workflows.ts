@@ -6,11 +6,6 @@ export const DAY_PROMPT = "Which day works for the review?";
 export const TIME_PROMPT = "Which time works for the review?";
 export const RETRO_PROMPT = "Which day suits the retro?";
 
-/**
- * Asks two questions at once, so both are pending together. The test tier's
- * bundler registers its `"use workflow"` twin, as it would an app's tool; the
- * in-process host runs this plain body.
- */
 async function askDayAndTime(
   _input: unknown,
   ctx: WorkflowToolContext,
@@ -31,10 +26,6 @@ export async function askDayAndTimeWorkflow(
   return await askDayAndTime(input, ctx);
 }
 
-/**
- * Asks one question that takes no free text, so a message that matches no option
- * steers the turn instead of answering it.
- */
 async function askRetroDay(
   _input: unknown,
   ctx: WorkflowToolContext,
@@ -56,10 +47,6 @@ export async function askRetroDayWorkflow(
   return await askRetroDay(input, ctx);
 }
 
-/**
- * The bodies above as a host without Workflow runs them, under their workflows' ids. Read when a
- * host needs them: Workflow's transform stamps the ids after this module's body has run.
- */
 export function questionWorkflowBodies(): readonly WorkflowBody[] {
   return [
     stampedWorkflowBody(askDayAndTimeWorkflow, askDayAndTime),

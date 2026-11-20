@@ -28,14 +28,12 @@ describe("eve/workflow", () => {
     expectTypeOf(sdk.FatalError).toExtend<typeof workflow.FatalError>();
     expectTypeOf(sdk.RetryableError).toExtend<typeof workflow.RetryableError>();
 
-    // createHook is cast only because JSON metadata uses readonly arrays.
     expectTypeOf(sdk.createHook<number>).returns.toExtend<workflow.WorkflowHook<number>>();
     expectTypeOf(sdk.createHook).toBeCallableWith({
       token: "approval",
       metadata: { sessionId: "s", tags: ["a"] },
     });
 
-    // sleep is cast only because the SDK splits the union into overloads.
     expectTypeOf(sdk.sleep).toBeCallableWith("1h");
     expectTypeOf(sdk.sleep).toBeCallableWith(1_000);
     expectTypeOf(sdk.sleep).toBeCallableWith(new Date());
@@ -88,7 +86,6 @@ describe("eve/workflow/api", () => {
     async function durable(input: string): Promise<number> {
       return input.length;
     }
-    // Type-checked only; calling start needs a running World.
     const calls = () => {
       expectTypeOf(api.start(durable, ["x"])).resolves.toEqualTypeOf<api.WorkflowRun<number>>();
       // @ts-expect-error Deployment, world, and queue options are not part of eve's start.

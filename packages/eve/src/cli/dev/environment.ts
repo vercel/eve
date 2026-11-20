@@ -6,7 +6,7 @@ import {
   readDevelopmentEnvironmentValues,
 } from "#shared/development-env-files.js";
 import { MODEL_CONNECTION_ENV } from "#shared/model-helper.js";
-import { readProviderSettingsSync } from "#setup/provider-settings.js";
+import { readProviderSettingsSync } from "#shared/provider-settings.js";
 
 interface DevelopmentEnvironmentLoader {
   readonly environmentRoot: string;
@@ -21,24 +21,12 @@ export interface DevelopmentEnvironmentReload {
 
 const developmentEnvironmentLoaders = new Map<string, DevelopmentEnvironmentLoader>();
 
-/**
- * Returns the local development environment files eve loads from an
- * application root, ordered from highest to lowest precedence.
- */
 export function getDevelopmentEnvironmentFilePaths(appRoot: string): string[] {
   return DEVELOPMENT_ENV_FILE_NAMES.map((fileName) =>
     join(getDevelopmentEnvironmentLoader(appRoot).environmentRoot, fileName),
   );
 }
 
-/**
- * Loads or reloads local development environment files from the application
- * root.
- *
- * Variables that existed before the first load keep parent-process
- * precedence. Variables supplied by env files are refreshed on subsequent
- * reloads so dev-mode file watching can pick up changed values.
- */
 export async function loadDevelopmentEnvironmentFiles(appRoot: string): Promise<void> {
   const resolvedAppRoot = resolve(appRoot);
   const environmentRoot = await findEveProjectRoot(resolvedAppRoot);
@@ -88,8 +76,6 @@ function createDevelopmentEnvironmentLoader(environmentRoot: string): Developmen
   const stageReload = (): DevelopmentEnvironmentReload => {
     const previousManagedValues = new Map(managedValues);
     const nextValues = readDevelopmentEnvironmentValues(environmentRoot);
-    // `/login` saves the connection beside the env files: at the workspace
-    // root, not in the member directory.
     const settings = readProviderSettingsSync(environmentRoot);
     const affectedKeys = new Set([
       ...managedValues.keys(),

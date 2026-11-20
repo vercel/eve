@@ -56,7 +56,6 @@ export interface PreparedScheduleUpdate<TPrepared = unknown> {
 
 export type PreparedScheduleWrite = PreparedScheduleCreate | PreparedScheduleUpdate;
 
-/** Internal preparation capabilities used by generated write approval. */
 export interface ScheduleCollectionClient<TInput, TPrepared> extends ScheduleClient<TInput> {
   prepareCreate(input: ScheduleClientCreate<unknown>): Promise<PreparedScheduleCreate<TPrepared>>;
   create(
@@ -80,7 +79,6 @@ function noScheduledRuns(): never {
   );
 }
 
-/** Without a durable host, an occurrence that starts a session is refused, saying why. */
 const NO_SCHEDULED_RUNS: Runtime = {
   createSession: async () => noScheduledRuns(),
   dispatchContinuation: async () => noScheduledRuns(),
@@ -112,7 +110,6 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
     operation: NonNullable<ScheduleScopeContext["operation"]>,
     name?: string,
   ): Promise<{ scope: ScheduleScopeValue; provider: ScheduleProviderContext }> => {
-    // A schedule binds its creator to work that outlives the turn.
     if (steeredModelCall()) throw new Error(turnSteeredMessage("dynamic schedules"));
     const context = contextFor(operation, name);
     const scope =
@@ -148,7 +145,6 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
     if (creator === null)
       throw new Error("Writing a schedule payload requires an authenticated principal.");
     const validated = await validateSchedulePayload<TPayload>(definition.inputSchema, value);
-    // Definitions without preparation default TPrepared to the validated input type.
     const preparedPayload = (
       definition.preparePayload === undefined
         ? validated
@@ -166,7 +162,6 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
     }).envelope;
   };
 
-  // eve's own rules first, whatever the provider checks; then what only the provider knows.
   const validateTiming = async (timing: ScheduleTiming): Promise<void> => {
     const expression = resolveScheduleTiming(timing);
     await definition.provider.validateExpression?.(expression);
@@ -205,7 +200,6 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
 
   const prepareCreation = async (input: ScheduleClientCreate<unknown>) => {
     const displayName = validateScheduleName(input.name);
-    // Validate timing before preparation; relative delays are resolved again at the write boundary.
     await validateTiming(input.expression);
     const { scope, provider } = await resolveNamespace("create", displayName);
     const prepared = snapshotPreparedWrite({

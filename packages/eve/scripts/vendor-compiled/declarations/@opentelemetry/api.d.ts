@@ -76,11 +76,6 @@ export declare const context: {
   with<T>(context: Context, fn: () => T): T;
 };
 
-/**
- * Reads carrier values during context extraction. `Carrier` is the
- * transport-specific container (e.g. a `Headers` instance for inbound
- * HTTP requests).
- */
 export interface TextMapGetter<Carrier = unknown> {
   get(carrier: Carrier, key: string): string | string[] | undefined;
   keys(carrier: Carrier): string[];
@@ -139,11 +134,6 @@ export interface Meter {
 
 export declare const metrics: {
   getMeter(name: string, version?: string): Meter;
-  /**
-   * The globally registered meter provider, shared across API copies. The
-   * instance comes from whichever metrics SDK registered it, so callers must
-   * feature-detect lifecycle methods before invoking them.
-   */
   getMeterProvider(): unknown;
 };
 

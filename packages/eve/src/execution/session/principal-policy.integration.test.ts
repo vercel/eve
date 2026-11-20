@@ -33,7 +33,6 @@ const userAuth: AuthorizationDefinition = {
   }),
 };
 
-// Holds Alice's turn open, inside a call, until the test releases it.
 const scriptedModel = markMockModel(
   new MockLanguageModelV4({
     doStream: async ({ prompt }) => {
@@ -108,7 +107,6 @@ interface SessionRun {
 }
 
 interface SteeringRun extends SessionRun {
-  /** Approves the request with `interactionId` as `approver`. */
   readonly answer: (
     approver: User | null,
     interactionId: string,
@@ -118,15 +116,12 @@ interface SteeringRun extends SessionRun {
 }
 
 interface ApprovalTaskRun extends SessionRun {
-  /** Answers the request with `interactionId` as `approver`, without reading ahead. */
   readonly answer: (approver: User, interactionId: string) => Promise<void>;
-  /** Releases the child's gated call. */
   readonly releaseChild: () => void;
 }
 
 type Modules = NonNullable<Parameters<typeof createTestRuntime>[0]>["modules"];
 
-/** Answers the request with `interactionId` as `approver`, on `commandInbox`. */
 async function answerAs(
   commandInbox: string,
   approver: User | null,
@@ -140,7 +135,6 @@ async function answerAs(
   });
 }
 
-/** Starts an ALICE session with `input` and hands `body` its stream and inbox. */
 async function withSession(
   name: string,
   input: {
@@ -207,10 +201,6 @@ async function withSession(
   });
 }
 
-/**
- * A gated tool that keeps each call running until the test releases that call. `gates` holds one
- * gate per call, in call order.
- */
 function holdOpenTool(gates: readonly Promise<void>[]) {
   const pending = [...gates];
   return {
@@ -228,7 +218,6 @@ function holdOpenTool(gates: readonly Promise<void>[]) {
   };
 }
 
-/** Records the identity and token each `report_access` call may use. */
 function reportAccessTool(
   reports: AccessReport[],
   options: { readonly approval?: Approval; readonly uncaught?: boolean } = {},
@@ -266,17 +255,11 @@ function reportAccessTool(
   };
 }
 
-/**
- * Starts a session where Alice asks for hold_open, and hands `body` the run. The model calls
- * hold_open, then report_access once per user message after the first, then replies.
- * `options.holds` gates that many hold_open calls, released in order by `run.release()`.
- */
 async function withSteeringRun(
   name: string,
   body: (run: SteeringRun) => Promise<void>,
   options: {
     readonly approval?: Approval;
-    /** How many hold_open calls the test releases, in order. Defaults to one. */
     readonly holds?: number;
     readonly model?: MockLanguageModelV4;
     readonly uncaught?: boolean;
@@ -318,10 +301,6 @@ async function withSteeringRun(
   return { reports };
 }
 
-/**
- * Starts a session where Alice's turn calls connect_account, which opens her sign-in until its
- * callback completes.
- */
 async function withSignInRun(
   body: (run: SessionRun & { readonly tokens: string[] }) => Promise<void>,
 ) {
@@ -403,10 +382,6 @@ async function withSignInRun(
   );
 }
 
-/**
- * Starts a session whose parent delegates to a local child after hold_open, and hands `body` the
- * run plus what the child's report_access read.
- */
 async function withSubagentRun(
   body: (run: SessionRun & { readonly reports: AccessReport[] }) => Promise<void>,
 ) {
@@ -470,11 +445,6 @@ async function withSubagentRun(
   );
 }
 
-/**
- * Starts a session whose parent starts a local child held inside `hold_open`, then calls the
- * approval-gated `publish_notes` before `eve__task_wait`. The child stays held until the test
- * releases it.
- */
 async function withApprovalTaskRun(body: (run: ApprovalTaskRun) => Promise<void>) {
   let releaseChild!: () => void;
   const childGate = new Promise<void>((resolve) => {
@@ -516,7 +486,6 @@ async function withApprovalTaskRun(body: (run: ApprovalTaskRun) => Promise<void>
         }
         const waits = results.filter((name) => name === "eve__task_wait").length;
         const joined = prompt.filter((message) => message.role === "user").length > 1;
-        // A wait the turn had to abandon for a joining message is asked again.
         if (waits === 0 || (joined && waits === 1)) {
           return toolCallStreamResult({
             input: "{}",
@@ -577,8 +546,6 @@ function textOfDelivery(event: Extract<SessionEvent, { type: "delivery.consumed"
 
 describe("principal policy", () => {
   it("the identity hold lasts until the caller's own message in the same turn", async () => {
-    // hold_open, report_access, hold_open, report_access, reply: Bob's message holds the first
-    // report, and the second hold_open keeps Alice from speaking until that held call has run.
     const model = markMockModel(
       new MockLanguageModelV4({
         doStream: async ({ prompt }) => {
@@ -631,7 +598,6 @@ describe("principal policy", () => {
         const started = await run.nextUntil("hold_open started", holdOpenStarted(holdOpenCalls));
         await run.send(BOB, "Actually include everyone.", "retain");
         run.release();
-        // The second hold_open starts only after the held report_access settled.
         const held = await run.nextUntil("hold_open started again", holdOpenStarted(holdOpenCalls));
         await run.send(ALICE, "Go ahead.");
         run.release();
@@ -701,8 +667,6 @@ describe("principal policy", () => {
     });
   }, 60_000);
 
-  // The other cases catch turn_steered inside the tool, so only this one proves the failure
-  // reaches the model.
   it("a held call fails as a tool error the model reads, and the turn goes on", async () => {
     const holdOpenCalls = new Set<string>();
     await withSteeringRun(
@@ -858,7 +822,6 @@ describe("principal policy", () => {
       );
       expect(signedInAt).toBeGreaterThanOrEqual(0);
       expect(consumedAt).toBeGreaterThan(signedInAt);
-      // The model replies right after the sign-in, so Alice's turn ends and Bob's message starts his own.
       const turns = filterEventsByType(events, "turn.started");
       expect(turns).toHaveLength(2);
       expect(signIn.scope?.turnId).toBe(turns[0]!.data.turnId);
@@ -869,7 +832,6 @@ describe("principal policy", () => {
     });
   }, 60_000);
 
-  // The list is handed to child sessions by hand, so nothing else would notice if that stopped.
   it("a steered turn's local subagent is held too", async () => {
     const holdOpenCalls = new Set<string>();
     await withSubagentRun(async (run) => {
@@ -892,7 +854,6 @@ describe("principal policy", () => {
   }, 60_000);
 
   it("the caller's message sent after another person's is read in the same turn", async () => {
-    // Replies with the user messages it was given, so the reply shows what one turn read.
     const model = markMockModel(
       new MockLanguageModelV4({
         doStream: async ({ prompt }) => {
@@ -949,7 +910,6 @@ describe("principal policy", () => {
 
       await run.send(BOB, "Bob joins.", "retain");
       await run.answer(ALICE, approval.data.interactionId);
-      // The child is still held, so only the turn's own wait can read Bob's message here.
       const read = await run.nextUntil(
         "bob's message read in the wait",
         (event) =>

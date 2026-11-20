@@ -10,16 +10,11 @@ interface SpanLike {
   readonly spanContext: () => { readonly spanId?: string; readonly traceId: string };
 }
 
-/** Routes spans from agent-owned traces to provider-neutral child processors. */
 export class AgentTraceSpanProcessor implements SpanProcessor {
   readonly #children: readonly SpanProcessor[];
   readonly #ownedTraceIds = new Set<string>();
   readonly #completedTraceIds = new Set<string>();
   readonly #rememberedTraceIds = new Set<string>();
-  /**
-   * Open direct tool calls per trace they claimed. Several calls can share
-   * one caller trace, so the trace completes when the last one ends.
-   */
   readonly #directCalls = new Map<string, Set<string>>();
   readonly #traceOwnership = new Map<
     string,
@@ -73,12 +68,10 @@ export class AgentTraceSpanProcessor implements SpanProcessor {
     if (isDirectToolCallSpan(span)) this.#endDirectCall(span);
   }
 
-  /** Trace IDs protected by an unfinished activation or pending final writes. */
   activeTraceIds(): ReadonlySet<string> {
     return this.#ownedTraceIds;
   }
 
-  /** Called only after writes drain; recently completed IDs still accept late descendants. */
   releaseCompletedTraces(): boolean {
     if (this.#completedTraceIds.size === 0) return false;
     for (const traceId of this.#completedTraceIds) {
@@ -94,7 +87,6 @@ export class AgentTraceSpanProcessor implements SpanProcessor {
     return true;
   }
 
-  /** Releases only traces owned by this conversation. */
   releaseConversation(conversationId: string): boolean {
     let released = false;
     for (const [traceId, ownership] of this.#traceOwnership) {
@@ -112,11 +104,6 @@ export class AgentTraceSpanProcessor implements SpanProcessor {
     await Promise.all(this.#children.map((child) => child.shutdown()));
   }
 
-  /**
-   * Claims the trace for a direct call. A trace a conversation already owns
-   * stays the conversation's to release; otherwise the call owns it, even
-   * when an earlier call on the same caller trace already released it.
-   */
   #startDirectCall(span: SpanLike): void {
     const { spanId, traceId } = span.spanContext();
     if (spanId === undefined) return;
@@ -140,7 +127,6 @@ export class AgentTraceSpanProcessor implements SpanProcessor {
     this.#directCalls.set(traceId, new Set([spanId]));
   }
 
-  /** The last open direct call on a trace completes it, like an activation. */
   #endDirectCall(span: SpanLike): void {
     const { spanId, traceId } = span.spanContext();
     const open = this.#directCalls.get(traceId);

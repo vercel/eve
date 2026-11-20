@@ -84,7 +84,6 @@ function scheduleCollection(
     auth: () => null,
     run: async () => {},
   };
-  // The compiler reads `scopes` from the value; these tests don't need it in the type.
   return defineDynamicSchedules({ ...shared, ...options } as typeof shared);
 }
 
@@ -694,7 +693,6 @@ describe("compileAgentManifest source graph", () => {
         expect.objectContaining({ name: "workflows/personal", offersTools: true }),
         expect.objectContaining({ name: "team-workflows", offersTools: true }),
       ]);
-      // Each scope resolves to its own definition, with only its own resolver.
       const [personal, channel] = offered.resolved.map((collection) => collection.definition);
       expect(personal).not.toBe(channel);
       expect(personal!.scopes).toBeUndefined();
@@ -960,7 +958,6 @@ describe("compileAgentManifest source graph", () => {
       sourceRegistries: [sourceRegistry],
     });
 
-    // One read lists the module graph's entries; the other is the projection.
     expect(toolSourceIterations).toBe(2);
     expect(compiled.config.build?.externalDependencies).toEqual(["sharp"]);
   });
@@ -1408,7 +1405,6 @@ describe("compileAgentManifest source graph", () => {
       }),
     ).rejects.toThrow('Subagent "subagents/child" must define a non-empty description.');
 
-    // One read lists the module graph's entries; the other is the projection.
     expect(toolSourceIterations).toBe(2);
   });
 

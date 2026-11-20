@@ -8,19 +8,13 @@ import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { workflowToolStubs } from "#execution/workflow-host/tool-stubs.js";
 import { setEveAttributes } from "#runtime/attributes/emit.js";
 
-/**
- * The Workflow host of a turn step: its run's callback URL, attributes, runtime, stubs, and sign-in
- * callbacks, which reach their askers' runs.
- */
 function workflowStepHost(): SessionStepHost {
   let callbackBaseUrl: string | undefined;
   try {
     const metadata = getWorkflowMetadata();
     if (typeof metadata.url === "string")
       callbackBaseUrl = resolveWorkflowCallbackBaseUrl(metadata.url);
-  } catch {
-    // Outside a workflow context (e.g. tests) — getHookUrl will return undefined.
-  }
+  } catch {}
   return {
     callbackBaseUrl,
     createRuntime: createWorkflowRuntime,
@@ -30,7 +24,6 @@ function workflowStepHost(): SessionStepHost {
   };
 }
 
-/** Runs a bounded batch of harness model steps inside one durable `"use step"` boundary. */
 export async function turnStep(input: TurnStepInput): Promise<TurnStepResult> {
   "use step";
   if (input.handover !== undefined) {

@@ -21,10 +21,6 @@ const turn = { turnId: "turn_0" };
 const scope = (runId: string) => ({ runId, turnId: "turn_0" });
 const overloaded = { code: "MODEL_CALL_FAILED", message: "Overloaded" };
 
-/**
- * Publishes each commit as the writer does, closing what its owners' ends hold, and collects what
- * instrumentation hears.
- */
 function session(
   options: {
     readonly audience?: ChannelAudience;
@@ -138,7 +134,6 @@ describe("step attempts from the stream", () => {
     ]);
   });
 
-  // A cancel stops the model call on purpose, so its attempt is cancelled, not failed (#5025).
   it("hears what a turn's end closes with it, as the writer commits it", async () => {
     const { commit, heard } = session();
     await commit(...opening);
@@ -394,7 +389,6 @@ describe("calls", () => {
       expect(completed).toMatchObject({
         output: capturesContent ? { temperature: 4 } : undefined,
       });
-      // The failure's code reaches every provider; its message is content.
       expect(failed).toMatchObject({ errorCode: "TOOL_FAILED", outcome: "failed" });
       if (capturesContent) expect(failed).toHaveProperty("error.name", "QuotaError");
       expect(failed && "error" in failed ? failed.error : undefined).toEqual(
@@ -406,7 +400,6 @@ describe("calls", () => {
   });
 
   it("settles a retried attempt's calls under that attempt, before its replacement run's", async () => {
-    // An attempt that announced calls gives its run up; eve can't tell whether they ran.
     const { commit, heard } = session();
     await commit(...opening);
     await commit(started("run_0", 0));

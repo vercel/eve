@@ -8,7 +8,6 @@ import { startEveDev, type RunningEveDev } from "#internal/testing/dev-server-ha
 import { encodeTaskId } from "#internal/a2a/ids.js";
 import { requiredRecord, requiredString } from "#internal/testing/scenario-values.js";
 
-/** A production build that runs the scenario's own `mockModel`. */
 const SCENARIO_ENV = { EVE_MOCK_AUTHORED_MODELS: "", NODE_ENV: "production" };
 
 const SETUP_TIMEOUT_MS = 360_000;
@@ -158,8 +157,6 @@ describe("A2A channel", () => {
       });
       expect(anonymous.status).toBe(401);
 
-      // The protocol's own refusals are unit-tested (json-rpc.test.ts); these need the server:
-      // the version header reaching the handler, the ownership lookup, and the upload policy.
       expect(rpcErrorCode(await rpc("alice", "GetTask", { id: "x" }, { version: null }))).toBe(
         -32009,
       );
@@ -187,8 +184,6 @@ describe("A2A channel", () => {
         message: { role: "ROLE_AGENT" },
         state: "TASK_STATE_INPUT_REQUIRED",
       });
-      // The prompt is plain text any client can read and answer; eve's interaction JSON stays
-      // off the wire.
       const promptParts = requiredRecord(requiredRecord(task.status, "status").message, "message")
         .parts as Record<string, unknown>[];
       expect(promptParts).toHaveLength(1);
@@ -197,7 +192,6 @@ describe("A2A channel", () => {
       const taskId = requiredString(task.id, "task.id");
       const contextId = requiredString(task.contextId, "task.contextId");
 
-      // Another principal can't see the task or use the context.
       expect(rpcErrorCode(await rpc("bob", "GetTask", { id: taskId }))).toBe(-32001);
       expect(
         rpcErrorCode(
@@ -205,14 +199,11 @@ describe("A2A channel", () => {
         ),
       ).toBe(-32602);
 
-      // A task ID decodes to any delivery: one that names no A2A message is no task, even in a
-      // context the caller owns.
       const phantom = encodeTaskId({ deliveryId: "not-an-a2a-message", sessionId: contextId });
       for (const method of ["GetTask", "SubscribeToTask", "CancelTask"]) {
         expect(rpcErrorCode(await rpc("alice", method, { id: phantom }))).toBe(-32001);
       }
 
-      // A typed answer on the same task resumes it.
       const done = await sendTask("alice", {
         message: { ...userMessage("ask-2", "Yes"), contextId, taskId },
       });
@@ -223,7 +214,6 @@ describe("A2A channel", () => {
         status: { state: "TASK_STATE_COMPLETED" },
       });
 
-      // A retried messageId is the same task, even now that it is terminal.
       const retried = await sendTask("alice", {
         message: { ...userMessage("ask-2", "Yes"), contextId, taskId },
       });
@@ -234,7 +224,6 @@ describe("A2A channel", () => {
       });
       expect(retriedFirst.id).toBe(taskId);
 
-      // A terminal task takes no new messages, and can't be cancelled.
       expect(
         rpcErrorCode(
           await rpc("alice", "SendMessage", {
@@ -244,9 +233,7 @@ describe("A2A channel", () => {
       ).toBe(-32004);
       expect(rpcErrorCode(await rpc("alice", "CancelTask", { id: taskId }))).toBe(-32002);
 
-      // History holds the task's user messages.
       const read = requiredRecord((await rpc("alice", "GetTask", { id: taskId })).result, "task");
-      // History echoes the client's message IDs.
       expect((read.history as { messageId: string }[]).map((m) => m.messageId)).toEqual([
         "ask-1",
         "ask-2",
@@ -270,7 +257,6 @@ describe("A2A channel", () => {
         status: { state: "TASK_STATE_COMPLETED" },
       });
 
-      // A follow-up in the context is a second task; a retry of it is the same task.
       const second = await sendTask("alice", {
         message: { ...userMessage("x-4", "Another question"), contextId },
       });
@@ -314,8 +300,6 @@ describe("A2A channel", () => {
   it(
     "never lets one anonymous caller's messageId reach another's context",
     async () => {
-      // none() gives every caller one principal, so the same messageId from two anonymous
-      // callers must start two contexts rather than hand the second the first one's task.
       const first = await sendTask("anonymous", { message: userMessage("anon-1", "A2A-ECHO one") });
       const second = await sendTask("anonymous", {
         message: userMessage("anon-1", "A2A-ECHO two"),
@@ -323,7 +307,6 @@ describe("A2A channel", () => {
       expect(second.contextId).not.toBe(first.contextId);
       expect(second.id).not.toBe(first.id);
       expect(second).toMatchObject({ artifacts: [{ parts: [{ text: "ECHO:A2A-ECHO two" }] }] });
-      // Nor does a returnImmediately send, which answers with whatever task the ID resolved to.
       const third = await sendTask("anonymous", {
         configuration: { returnImmediately: true },
         message: userMessage("anon-1", "A2A-ECHO three"),
@@ -331,7 +314,6 @@ describe("A2A channel", () => {
       expect([first.contextId, second.contextId]).not.toContain(third.contextId);
       expect(JSON.stringify(third)).not.toContain("A2A-ECHO one");
 
-      // Inside a context the caller holds, a retry is still the same task.
       const contextId = requiredString(first.contextId, "contextId");
       const followUp = { ...userMessage("anon-2", "A2A-ECHO three"), contextId };
       const task = await sendTask("anonymous", { message: followUp });
@@ -352,13 +334,10 @@ describe("A2A channel", () => {
       );
       expect(started).not.toHaveProperty("history");
       const streamed = await streamEvents("alice", "SubscribeToTask", { id: started.id }).catch(
-        // The task may already be terminal, which SubscribeToTask refuses.
         () => undefined,
       );
       const read = requiredRecord((await rpc("alice", "GetTask", { id: started.id })).result, "t");
       expect(read).toMatchObject({ status: { state: "TASK_STATE_COMPLETED" } });
-      // Either way the stream ends on the terminal state: as an update, or as the first snapshot
-      // when the task finished between the subscribe check and the first read.
       if (streamed !== undefined) {
         const last = streamed.at(-1) as { statusUpdate?: { status: { state: string } } };
         expect(last.statusUpdate?.status.state ?? taskState(last)).toBe("TASK_STATE_COMPLETED");
@@ -381,14 +360,12 @@ describe("A2A channel", () => {
         message: userMessage("f-1", "Trigger A2A-FAILURE-PROBE."),
       });
       expect(failed.status).toMatchObject({ state: "TASK_STATE_FAILED" });
-      // Only the error's first line reaches the caller: no upstream page, no stack frames.
       const failure = statusText(failed);
       expect(failure).toContain("A2A-FAILURE-PROBE: provider rejected the request.");
       expect(failure).not.toContain("edge-internal");
       expect(failure).not.toContain("\n");
       expect(JSON.stringify(failed)).not.toMatch(/\n\s+at /);
 
-      // The channel's failureText decides what a failure says.
       const custom = await sendTask("alice", {
         message: userMessage("f-2", "Trigger A2A-CUSTOM-FAILURE."),
       });
@@ -402,8 +379,6 @@ describe("A2A channel", () => {
   it(
     "streams a task to completion, and to input-required then through a subscription",
     async () => {
-      // A slow reply, so the first snapshot always precedes completion: a reply that finishes
-      // first streams as one terminal task instead, which the spec also allows.
       const quick = await streamEvents("alice", "SendStreamingMessage", {
         message: userMessage("s-1", "A2A-SLOW stream"),
       });
@@ -429,7 +404,6 @@ describe("A2A channel", () => {
       const first = requiredRecord(interrupted[0]?.task, "task");
 
       const subscription = streamEvents("alice", "SubscribeToTask", { id: first.id });
-      // Let the subscription open before the answer lands; it must report the change either way.
       await new Promise((resolve) => setTimeout(resolve, 500));
       await sendTask("alice", {
         message: {
@@ -461,13 +435,10 @@ describe("A2A channel", () => {
           message: { ...userMessage(messageId, text), contextId },
         });
 
-      // While a task waits on its person, a new one is refused rather than answering or
-      // steering it, and the waiting task is untouched.
       expect(rpcErrorCode(await newTask("q-2", "A2A-ECHO too soon"))).toBe(-32004);
       expect(await readTask("alice", asked.id)).toMatchObject({
         status: { state: "TASK_STATE_INPUT_REQUIRED" },
       });
-      // A retry of a message that already arrived is still its task.
       const retried = await sendTask("alice", {
         configuration: { returnImmediately: true },
         message: { ...userMessage("q-1", "A2A-ASK"), contextId },
@@ -478,7 +449,6 @@ describe("A2A channel", () => {
         message: { ...userMessage("q-3", "Yes"), contextId, taskId: asked.id },
       });
 
-      // A context's first task, returned at once, already blocks the next.
       const fresh = await sendTask("alice", {
         configuration: { returnImmediately: true },
         message: userMessage("q-7", "A2A-SLOW fresh"),
@@ -489,7 +459,6 @@ describe("A2A channel", () => {
       });
       expect(rpcErrorCode(early)).toBe(-32004);
 
-      // A working task blocks a new one too; once it finishes, the next one runs.
       const slow = taskOf(await newTask("q-4", "A2A-SLOW"));
       expect(rpcErrorCode(await newTask("q-5", "A2A-ECHO still too soon"))).toBe(-32004);
       expect(await waitForTerminal("alice", slow.id)).toMatchObject({
@@ -659,7 +628,6 @@ function taskState(event: Record<string, unknown> | undefined): unknown {
   return task?.status?.state;
 }
 
-/** Reads an SSE response to its end: one JSON-RPC result per event. */
 async function streamEvents(
   principal: string,
   method: string,

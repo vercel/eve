@@ -34,8 +34,6 @@ describe("ContextKey", () => {
       codec: { deserialize: (data) => data as number, serialize: (value) => value },
     });
 
-    // A codec-less key under the same name would win the registry and silently
-    // break serialization for the codec-carrying key.
     expect(() => new ContextKey<number>("test.collision.codec")).toThrow(/collision/);
   });
 

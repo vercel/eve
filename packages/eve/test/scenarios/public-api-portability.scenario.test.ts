@@ -248,8 +248,6 @@ export default defineMemory({
 describe("public API declaration portability", () => {
   let emittedDistRoot: string;
 
-  // A file's declarations do not depend on the other roots in the program, so
-  // one emit serves every case. Each case still gets its own export map.
   beforeAll(async () => {
     emittedDistRoot = await emitPublicDeclarations(
       [...new Set(PORTABILITY_CASES.flatMap((testCase) => testCase.include))],
@@ -268,7 +266,6 @@ describe("public API declaration portability", () => {
   }
 });
 
-/** Emits declarations for `include` and eve's compiled vendor types, and returns the `dist` root. */
 async function emitPublicDeclarations(
   include: readonly string[],
   scratchRoot: string,
@@ -332,7 +329,6 @@ async function expectPortableFixtureToTypecheck(
       2,
     )}\n`,
   );
-  // A real copy, not a link: TypeScript names declarations by their real path.
   await cp(emittedDistRoot, join(emittedPackageRoot, "dist"), { recursive: true });
 
   await mkdir(appRoot, { recursive: true });

@@ -1,4 +1,3 @@
-// @linux-only: trace-session identity literals
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
@@ -7,8 +6,6 @@ describe("trace-session producers", () => {
     "requires explicit trace-session fields in %s identity literals",
     async (file) => {
       const source = await readFile(new URL(file, import.meta.url), "utf8");
-      // Allow one level of nested object literals, as event producers nest
-      // delivery and input projections beside the identity fields.
       const body = String.raw`(?:[^{}]|\{[^{}]*\})*`;
       const identityLiterals = (
         source.match(

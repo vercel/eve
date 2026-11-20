@@ -1,7 +1,3 @@
-// Selectors over the shared fold: the questions readers ask, with fallbacks for open values, so
-// no reader re-derives a lifecycle. They read only the tables, so they work in observers, in
-// clients, and through the session handle on the server.
-
 import type { ErrorInfo } from "#protocol/session-events/envelope.js";
 import { displayTitle } from "#protocol/session-projection/display-name.js";
 import {
@@ -28,7 +24,6 @@ import type {
   TurnRow,
 } from "./tables.js";
 
-/** The turn that is running or paused, if any. */
 export function activeTurn(view: SessionView): TurnRow | undefined {
   if (view.session.status === "ended") return undefined;
   const latest = view.session.latestTurnId;
@@ -36,11 +31,6 @@ export function activeTurn(view: SessionView): TurnRow | undefined {
   return row !== undefined && row.status !== "settled" ? row : undefined;
 }
 
-/**
- * The conversation as the model last saw it: the selected turn and the turns it follows back,
- * oldest first. The selected turn is the newest, unless a later context change chose another;
- * a clear selects none. A turn not retained here ends the walk.
- */
 export function conversation(view: SessionView): readonly TurnRow[] {
   const selection = view.selection;
   const start = selection === undefined ? view.session.latestTurnId : selection?.turnId;
@@ -57,7 +47,6 @@ export function conversation(view: SessionView): readonly TurnRow[] {
   return turns.reverse();
 }
 
-/** The content parts that answer a turn, in order. */
 export function reply(view: SessionView, turnId: string): readonly PartRow[] {
   const ids = view.turns[turnId]?.reply ?? [];
   return ids.flatMap((partId) => {
@@ -66,7 +55,6 @@ export function reply(view: SessionView, turnId: string): readonly PartRow[] {
   });
 }
 
-/** A turn's reply as text: its text parts, one per line. */
 export function replyText(view: SessionView, turnId: string): string | undefined {
   const text = reply(view, turnId).flatMap((part) =>
     part.kind === "text" && typeof part.value === "string" ? [part.value] : [],
@@ -74,10 +62,6 @@ export function replyText(view: SessionView, turnId: string): string | undefined
   return text.length === 0 ? undefined : text.join("\n");
 }
 
-/**
- * The interactions each commit opened, oldest first: one batch is asked, and answered, together.
- * Sign-ins are connection work, not questions, and stay out unless asked for.
- */
 export function interactionBatches(
   view: SessionView,
   options: { readonly signIns?: boolean } = {},
@@ -93,7 +77,6 @@ export function interactionBatches(
   return [...batches.values()];
 }
 
-/** Why a turn failed, or why the session did. */
 export function failure(view: SessionView, turnId?: string): ErrorInfo | undefined {
   const row = turnId === undefined ? undefined : view.turns[turnId];
   if (row?.outcome === "failed")
@@ -104,7 +87,6 @@ export function failure(view: SessionView, turnId?: string): ErrorInfo | undefin
   return undefined;
 }
 
-/** The call carrying a shared result. A reply stores its value once, not once per recipient. */
 export function callOutputSource(view: SessionView, callId: string): CallRow | undefined {
   const seen = new Set<string>();
   let row = view.calls[callId];
@@ -116,7 +98,6 @@ export function callOutputSource(view: SessionView, callId: string): CallRow | u
   return undefined;
 }
 
-/** True while any call the task serves is unsettled. Idle tasks don't hold the session open. */
 export function isWorking(view: SessionView, taskId: string): boolean {
   if (view.session.status === "ended" || view.tasks[taskId]?.status !== "running") return false;
   return Object.values(view.calls).some(
@@ -124,7 +105,6 @@ export function isWorking(view: SessionView, taskId: string): boolean {
   );
 }
 
-/** Tasks, optionally only the working or the idle ones. */
 export function tasks(
   view: SessionView,
   filter: { readonly status?: "working" | "idle" | "ended" } = {},
@@ -143,7 +123,6 @@ export function tasks(
   });
 }
 
-/** Open interactions, oldest first; `about` includes interactions holding the entity's work. */
 export function openInteractions(
   view: SessionView,
   filter: { readonly kind?: string; readonly about?: InteractionSubject } = {},
@@ -170,10 +149,6 @@ export function openInteractions(
     .sort((a, b) => a.introducedAt - b.introducedAt);
 }
 
-/**
- * Open interactions that hold an admitted answer: answered for now, waiting for the rest of
- * their batch to be decided. A typed reply moves on to the next request past them.
- */
 export function answeredInteractionIds(view: SessionView): ReadonlySet<string> {
   return new Set(
     Object.values(view.responses)
@@ -182,7 +157,6 @@ export function answeredInteractionIds(view: SessionView): ReadonlySet<string> {
   );
 }
 
-/** Deliveries admitted but not yet consumed or settled, in arrival order. */
 export function queue(view: SessionView): readonly DeliveryRow[] {
   if (view.session.status === "ended") return [];
   return Object.values(view.deliveries)
@@ -190,11 +164,6 @@ export function queue(view: SessionView): readonly DeliveryRow[] {
     .sort((a, b) => a.introducedAt - b.introducedAt);
 }
 
-/**
- * True when nothing is happening and nothing will until another delivery arrives: no turn the
- * session works on or that waits on work, no working task, no open context change, and no queued
- * delivery. A turn waiting only on interactions is idle. An ended session is idle.
- */
 export function idle(view: SessionView): boolean {
   if (view.session.status === "ended") return true;
   const active = activeTurn(view);
@@ -204,35 +173,17 @@ export function idle(view: SessionView): boolean {
   return !Object.keys(view.tasks).some((taskId) => isWorking(view, taskId));
 }
 
-/** What an open turn waits on, when the session can do nothing more for it by itself. */
 export type Waiting =
   | { readonly on: "session" }
   | { readonly on: "interaction"; readonly interactions: readonly InteractionRow[] }
   | { readonly on: "work"; readonly calls: readonly CallRow[]; readonly tasks: readonly TaskRow[] };
 
-/**
- * What an open turn waits on, read from the tables; `undefined` only for absent or settled turns.
- * `session` means the session can make progress by itself.
- *
- * The session works on a turn while it has a model run open, a context change running, an
- * answer it hasn't weighed, or a delivery the turn consumed after it last requested a run or
- * asked someone. Otherwise the
- * turn waits on an interaction while any unanswered interaction under it is open, and on work while
- * calls it made run, such as a workflow tool's run or a task it waits for. With neither, the
- * session has something to do: start or ask about requested calls, call the model, or end the
- * turn. So `session` means the session can make progress on this turn by itself.
- *
- * Rules of the stream make this exact at every line: anything that needs an answer is an
- * interaction; the line that makes a model call necessary requests the run; and every call
- * another run serves names its task when it starts.
- */
 export function waiting(view: SessionView, turnId: string): Waiting | undefined {
   if (view.session.status === "ended") return undefined;
   const row = view.turns[turnId];
   if (row === undefined || row.status === "settled") return undefined;
   const open = openWork(view, { turnId });
   if (open.runs.length > 0 || open.changes.length > 0) return { on: "session" };
-  // An answer the session hasn't weighed is its work, unless its responder must sign in first.
   const signingIn = new Set(
     open.interactions.flatMap((row) =>
       "responseId" in row.subject ? [row.subject.responseId] : [],
@@ -244,8 +195,6 @@ export function waiting(view: SessionView, turnId: string): Waiting | undefined 
     )
   )
     return { on: "session" };
-  // Input consumed after the session last requested a model, asked someone, or weighed an
-  // answer is still its work. A forwarded answer admitted by its asker has already been read.
   const decided = Math.max(
     -1,
     ...Object.values(view.runs)
@@ -279,7 +228,6 @@ export function waiting(view: SessionView, turnId: string): Waiting | undefined 
           ? []
           : [
               ...("callId" in row.subject ? [row.subject.callId] : []),
-              // A question a call's run relayed names the call it came from.
               ...(row.origin?.call === undefined ? [] : [row.origin.call.callId]),
             ],
       ),
@@ -289,15 +237,8 @@ export function waiting(view: SessionView, turnId: string): Waiting | undefined 
   const turnCalls = Object.values(view.calls).filter(
     (entry) => entry.status !== "settled" && callTurn(view, entry) === turnId,
   );
-  // Calls in flight, which tasks serve; and calls only requested, which the session starts or
-  // asks about: at once once approved, otherwise when nothing runs, as an approval deferred
-  // behind running calls is.
-  // A running call stays in flight while someone is asked about it, as a child's relayed
-  // question is; only a requested call can wait on its approval.
   const calls = turnCalls.filter((entry) => entry.status === "running");
   const answered = answeredInteractionIds(view);
-  // A sign-in the turn waits on holds the calls it stopped: they stay open, and run once it
-  // calls back.
   const signInHolds = interactions.some(
     (row) =>
       row.status === "open" &&
@@ -306,8 +247,6 @@ export function waiting(view: SessionView, turnId: string): Waiting | undefined 
       row.subject.turnId === turnId &&
       !answered.has(row.interactionId),
   );
-  // A running call no task serves runs in the session itself, which commits again once it ends,
-  // unless it opened an interaction: then it waits on that answer.
   if (
     !signInHolds &&
     calls.some(
@@ -322,7 +261,6 @@ export function waiting(view: SessionView, turnId: string): Waiting | undefined 
     (entry) => entry.status === "requested" && !asked.has(entry.callId),
   );
   if (pending.some((entry) => approved.has(entry.callId))) return { on: "session" };
-  // The session answers a task cancel itself, at once, even while the task asks someone.
   if (
     pending.some(
       (entry) =>
@@ -331,12 +269,6 @@ export function waiting(view: SessionView, turnId: string): Waiting | undefined 
   )
     return { on: "session" };
   if (pending.length > 0 && calls.length === 0) return { on: "session" };
-  // An interaction already answered, such as one of a batch still waiting for the rest or one
-  // forwarded to the child that asked it, doesn't wait on an answer. A request relayed from a
-  // task this turn's call started belongs to the task, but the turn still waits on its interaction.
-  // A question about a call that already ended, such as a cancelled stretch's before its run
-  // withdraws it, holds nothing. A sign-in that waited on a card already settled has its answer:
-  // its asker heard back with that card and settles it as it resumes.
   const interactionsWaiting = openInteractions(view).filter(
     (entry) =>
       !answered.has(entry.interactionId) &&
@@ -348,7 +280,6 @@ export function waiting(view: SessionView, turnId: string): Waiting | undefined 
     return { interactions: interactionsWaiting, on: "interaction" };
   if (calls.length > 0) {
     const taskIds = new Set(calls.flatMap((call) => call.taskId ?? []));
-    // A parked task wait holds every working task, not just the task tool call itself.
     if (calls.some((call) => call.capability.name === "eve__task_wait"))
       for (const task of tasks(view, { status: "working" })) taskIds.add(task.taskId);
     return {
@@ -360,13 +291,11 @@ export function waiting(view: SessionView, turnId: string): Waiting | undefined 
   return { on: "session" };
 }
 
-/** Whether `row` is a sign-in that waited on another's card (`waitsOn`), and that card settled. */
 function heardBack(view: SessionView, row: InteractionRow): boolean {
   const shown = row.request.signIn?.waitsOn;
   return shown !== undefined && view.interactions[shown]?.status === "settled";
 }
 
-/** The approval this session asked about a call itself, not one relayed from elsewhere. */
 export function ownApproval(view: SessionView, callId: string): InteractionRow | undefined {
   let found: InteractionRow | undefined;
   for (const row of Object.values(view.interactions)) {
@@ -397,7 +326,6 @@ export type CallState =
   | "rejected"
   | "cancelled";
 
-/** Where a call stands; `undefined` for a call the tables don't hold. */
 export function callState(view: SessionView, callId: string): CallState | undefined {
   const row = view.calls[callId];
   if (row === undefined) return undefined;
@@ -425,11 +353,6 @@ export function callState(view: SessionView, callId: string): CallState | undefi
   return row.status === "requested" ? "requested" : "running";
 }
 
-/**
- * A call's label: the one its tool gave its result or, while it runs, its latest progress; else
- * its capability's label, else its name as a title (`linear__list_issues` → `List issues`). A
- * `call.requested`'s data reads as its call's row did then.
- */
 export function callLabel(
   row: Pick<CallRow, "capability"> & Partial<Pick<CallRow, "status" | "label">>,
   preview?: { readonly label?: string },
@@ -450,7 +373,6 @@ export function showsActivity(call: Pick<Capability, "kind" | "hidden">): boolea
   return call.kind !== "control" && call.hidden !== true;
 }
 
-/** What the session is doing right now, for status lines. */
 export type Activity =
   | { readonly kind: "idle" }
   | { readonly kind: "thinking" }
@@ -459,7 +381,6 @@ export type Activity =
   | { readonly kind: "waiting-on-tasks"; readonly tasks: readonly TaskRow[] }
   | { readonly kind: "compacting" };
 
-/** What the session, or one turn, is doing right now. */
 export function activity(view: SessionView, filter: { readonly turnId?: string } = {}): Activity {
   const row = filter.turnId === undefined ? activeTurn(view) : view.turns[filter.turnId];
   const compacting = Object.values(view.changes).some(
@@ -484,9 +405,6 @@ export function activity(view: SessionView, filter: { readonly turnId?: string }
     if (shown.length === 0 && waits.calls.length > 0) return { kind: "thinking" };
     return { kind: "calling", names: shown.map((entry) => callLabel(entry)) };
   }
-  // A run stays open while the calls it made run in its step: a started call no task serves is
-  // the turn's activity. A call only requested, such as an agent call before its task starts or
-  // one a dropped response streamed, isn't running yet.
   const running = Object.values(view.calls).filter(
     (entry) =>
       entry.status === "running" &&
@@ -499,16 +417,11 @@ export function activity(view: SessionView, filter: { readonly turnId?: string }
   return { kind: "thinking" };
 }
 
-/** The run that made a call, directly or through the calls it was made inside. */
 export function callRun(view: SessionView, entry: CallRow): string | undefined {
   const owner = callOwnerRoot(view, entry);
   return owner !== undefined && "runId" in owner ? owner.runId : undefined;
 }
 
-/**
- * What made a call in the end: past the calls it runs inside, the run or turn that made the
- * outermost one. `undefined` when the chain breaks or loops.
- */
 function callOwnerRoot(view: SessionView, entry: CallRow): CallOwner | undefined {
   const seen = new Set<string>();
   let current: CallRow | undefined = entry;
@@ -520,7 +433,6 @@ function callOwnerRoot(view: SessionView, entry: CallRow): CallOwner | undefined
   return undefined;
 }
 
-/** The turn a call belongs to: the turn of the run that made it, or the turn that made it. */
 export function callTurn(view: SessionView, entry: CallRow): string | undefined {
   const owner = callOwnerRoot(view, entry);
   if (owner === undefined) return undefined;
@@ -529,22 +441,18 @@ export function callTurn(view: SessionView, entry: CallRow): string | undefined 
   return view.runs[owner.runId] === undefined ? undefined : runTurn(view, owner.runId);
 }
 
-/** The task serving a call, directly or through a call it was made inside. */
 export function callTask(view: SessionView, entry: CallRow): string | undefined {
   return ownerOf(view, { family: "call", id: entry.callId }, "task");
 }
 
-/** The turn a run belongs to: the turn that requested it, or the turn its context change is in. */
 export function runTurn(view: SessionView, runId: string): string | undefined {
   return ownerOf(view, { family: "run", id: runId }, "turn");
 }
 
-/** The turn a part belongs to: its run's, or the turn that wrote it when no run did. */
 export function partTurn(view: SessionView, row: PartRow): string | undefined {
   return row.runId === undefined ? row.turnId : runTurn(view, row.runId);
 }
 
-/** What an owner leaves open: the entities that still need a terminal fact. */
 export interface OpenWork {
   readonly calls: readonly CallRow[];
   readonly runs: readonly RunRow[];
@@ -555,7 +463,6 @@ export interface OpenWork {
   readonly responses: readonly ResponseRow[];
 }
 
-/** Where an interaction belongs: what its subject belongs to, through calls and responses. */
 export interface InteractionOwner {
   readonly turnId?: string;
   readonly taskId?: string;
@@ -563,7 +470,6 @@ export interface InteractionOwner {
   readonly changeId?: string;
 }
 
-/** The owner an interaction closes with: its turn, its task, or the run that made its call. */
 export function interactionOwner(view: SessionView, entry: InteractionRow): InteractionOwner {
   const ref: Ref = { family: "interaction", id: entry.interactionId };
   const owner: { -readonly [K in keyof InteractionOwner]: InteractionOwner[K] } = {};
@@ -574,17 +480,6 @@ export function interactionOwner(view: SessionView, entry: InteractionRow): Inte
   return owner;
 }
 
-/**
- * The work still open under an owner, by ownership:
- *
- * - a run: the run and the calls it made, directly or inside other calls;
- * - a context change: the change, its runs, and their calls;
- * - a turn: its runs and their calls, the context changes inside it, and the deliveries it
- *   consumed. A task's calls belong to the task, so they survive closure of their run or turn;
- * - the session: everything.
- *
- * The turn and session rows themselves aren't included: their own terminal facts close them.
- */
 export function openWork(
   view: SessionView,
   owner:
@@ -594,7 +489,6 @@ export function openWork(
     | { readonly taskId: string }
     | { readonly session: true },
 ): OpenWork {
-  // A retired owner may publish only its session end; historical rows do not remain actionable.
   if (view.session.status === "ended")
     return {
       calls: [],
@@ -607,15 +501,12 @@ export function openWork(
     };
   const ref = "session" in owner ? "session" : refOf(owner)!;
   const open = openUnder(view, ref);
-  // A run, change, or task leaves itself open too; a turn's own fact closes it.
   if (ref !== "session" && ref.family !== "turn" && isOpen(view, ref)) open.push(ref);
   const rows = <F extends Family>(family: F) =>
     open.flatMap((entry) => {
       const row = entry.family === family ? rowOf(view, family, entry.id) : undefined;
       return row === undefined ? [] : [row];
     });
-  // A turn's deliveries: those it consumed, and answers to its interactions it hasn't, such as
-  // one answer of a batch still waiting for the rest.
   const answering = new Set(
     ref !== "session" && ref.family === "turn"
       ? Object.values(view.responses).flatMap((response) =>
@@ -642,7 +533,6 @@ export function openWork(
   };
 }
 
-/** The turn an interaction is about, directly or through its call. */
 export function subjectTurn(view: SessionView, entry: InteractionRow): string | undefined {
   const { subject } = entry;
   if ("turnId" in subject) return subject.turnId;

@@ -3,7 +3,6 @@ import { parseJsonObject, type JsonObject, type JsonValue } from "#shared/json.j
 export const DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS = 100;
 export const MAX_WORKFLOW_PROGRAM_MAX_SUBAGENTS = 128;
 export const WORKFLOW_PROGRAM_BRIDGE_REQUEST_LIMIT = 256;
-/** Size limit for the JSON text of each child reply a `ctx.agent()` call resolves to. */
 export const WORKFLOW_PROGRAM_MAX_AGENT_OUTPUT_BYTES = 4 * 1024 * 1024;
 
 export interface WorkflowProgramContinuationSecurity {
@@ -11,7 +10,6 @@ export interface WorkflowProgramContinuationSecurity {
   readonly signingKey: string;
 }
 
-/** Internal durable input pinned for one generated program run. */
 export interface WorkflowProgramInput {
   readonly continuationSecurity: WorkflowProgramContinuationSecurity;
   readonly js: string;
@@ -28,7 +26,6 @@ export interface WorkflowProgramAgentCall {
   readonly target: string;
 }
 
-/** One parked `ctx.agent()` call, keyed by its sandbox interruption id. */
 export interface WorkflowProgramPendingCall {
   readonly call: WorkflowProgramAgentCall;
   readonly id: string;

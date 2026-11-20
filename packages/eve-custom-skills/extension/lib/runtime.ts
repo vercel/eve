@@ -24,12 +24,10 @@ function repositoryFor(config: Config): SkillRepository | null {
   return backend ? documentRepository({ backend, namespace: config.namespace }) : null;
 }
 
-/** This mount's config. Each mount binds its own, even when two mount this extension. */
 export function skillConfig(): Config {
   return extension.config;
 }
 
-/** The lifecycle bound to this mount's config, or null when storage is missing. */
 export function skillLifecycle(): SkillLifecycle | null {
   const config = skillConfig();
   if (!lifecycles.has(config)) {
@@ -52,7 +50,12 @@ export function requireSkillLifecycle(): SkillLifecycle {
 
 export async function skillScopes(ctx: SkillScopeContext): Promise<readonly SkillScope[]> {
   const scopes = await (skillConfig().scopes ?? defaultScopes)({
-    session: { id: ctx.session.id, auth: ctx.session.auth },
+    session: {
+      id: ctx.session.id,
+      auth: ctx.session.auth,
+      ...(ctx.session.parent !== undefined && { parent: ctx.session.parent }),
+    },
+    ...(ctx.turn !== undefined && { turn: { id: ctx.turn.id } }),
     ...(ctx.conversation !== undefined && { conversation: ctx.conversation }),
   });
   const names = new Set<string>();
@@ -81,7 +84,6 @@ export async function skillScopes(ctx: SkillScopeContext): Promise<readonly Skil
 export interface ScopeSkills {
   readonly scope: SkillScope;
   readonly skills: readonly StoredSkill[];
-  /** The scope's skills couldn't be read this turn, such as during a storage outage. */
   readonly unavailable?: true;
 }
 
@@ -92,8 +94,6 @@ async function readTurnSkills(
   lifecycle: SkillLifecycle,
   scopes: readonly SkillScope[],
 ): Promise<ScopeSkills[]> {
-  // One scope's storage failing, such as a Blob outage or a corrupt catalog, skips that
-  // scope's skills for the turn instead of failing the turn.
   return Promise.all(
     scopes.map(async (scope): Promise<ScopeSkills> => {
       try {
@@ -109,24 +109,16 @@ async function readTurnSkills(
   );
 }
 
-/**
- * The live skills for this turn, by scope in precedence order. The skill and
- * instruction resolvers both run before every model call; this shares one
- * read per turn, mount, and scope set between them. A scope whose skills can't
- * be read is marked `unavailable` for the turn, and the next turn reads again.
- */
-export async function loadTurnSkills(
-  ctx: SkillScopeContext & { readonly turnId?: string },
-): Promise<ScopeSkills[]> {
+export async function loadTurnSkills(ctx: SkillScopeContext): Promise<ScopeSkills[]> {
   const lifecycle = skillLifecycle();
   if (!lifecycle) return [];
   const scopes = await skillScopes(ctx);
   if (scopes.length === 0) return [];
-  if (!ctx.turnId) return readTurnSkills(lifecycle, scopes);
+  if (!ctx.turn) return readTurnSkills(lifecycle, scopes);
 
   let cache = turnCaches.get(lifecycle);
   if (!cache) turnCaches.set(lifecycle, (cache = new Map()));
-  const key = JSON.stringify([ctx.session.id, ctx.turnId, scopes.map(({ key }) => key)]);
+  const key = JSON.stringify([ctx.session.id, ctx.turn.id, scopes.map(({ key }) => key)]);
   const cached = cache.get(key);
   if (cached) return cached;
   const pending = readTurnSkills(lifecycle, scopes);

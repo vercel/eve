@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { desktopTool, flag, ref } from "../lib/tool";
 
+/** Lets the agent read one property of an element, such as its text, value, title, bounds, role, or states. */
 export default desktopTool({
   description:
     "Read one property of an element: text (what a person reads), value, title, bounds, role, or states.",

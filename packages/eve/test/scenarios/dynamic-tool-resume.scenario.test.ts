@@ -180,10 +180,6 @@ async function readExecuteMarker(appRoot: string, key: string): Promise<ExecuteM
   ) as ExecuteMarker;
 }
 
-// One crash and `--resume` of `eve dev` with approvals parked on dynamic tools, in two sessions.
-// The fresh process renders the approved calls' tools again and runs every callback phase there
-// (cold replay), and a module edited while they were parked still runs the generation that
-// created each approval, under its own tool identity (source edit).
 describe("dynamic tools across an eve dev crash and resume", () => {
   it(
     "renders parked approvals' tools again in the fresh process, on the generation that created them",
@@ -198,7 +194,6 @@ describe("dynamic tools across an eve dev crash and resume", () => {
 
       try {
         const client = new Client({ baseUrl: server.url });
-        /** Opens a session and parks it on two approvals. */
         const park = async (message: string) => {
           const created = await client.sessions.create({ message: "Hello." });
           await expect(created.delivery.result()).resolves.toMatchObject({
@@ -227,10 +222,6 @@ describe("dynamic tools across an eve dev crash and resume", () => {
           .split("\n");
         expect(resolverRunsBeforeRestart.length).toBeGreaterThan(0);
 
-        // Edit the callback module while approvals are parked: pad the top of
-        // the file (shifting every byte offset below — the old identity scheme
-        // resolved parked calls by those offsets) and bump the built-in
-        // constant so the edited body is observable.
         await writeFile(
           join(app.appRoot, "agent", "lib", "editable-factory.ts"),
           "// padding line\n// another padding line\n\n" + editableFactorySource(2),
@@ -276,15 +267,11 @@ describe("dynamic tools across an eve dev crash and resume", () => {
           expect(response.pid).not.toBe(firstRequest.pid);
           expect(execute.pid).toBe(response.pid);
           expect(execute.serviceCreatedInPid).toBe(execute.pid);
-          // The call's input was validated when the model made it; the code that runs it is the
-          // fresh process's own, rendered there.
           expect(execute.label).toBe("STRUCTURED-OUTPUT:original");
           expect(execute.suffix).toBe(":changed");
           expect(projection.pid).toBe(execute.pid);
         }
 
-        // The fresh process has no live tools, so it renders them again from what the session
-        // recorded: callbacks are code, never snapshotted.
         const resolverRunsAfterRestart = (
           await readFile(join(app.appRoot, ".dynamic-resolver-runs"), "utf8")
         )
@@ -299,9 +286,6 @@ describe("dynamic tools across an eve dev crash and resume", () => {
         expect(rendersAfterRestart.length).toBeGreaterThan(0);
         expect(rendersAfterRestart.every((pid) => pid !== String(firstRequest.pid))).toBe(true);
 
-        // Pending approvals make the session ineligible for deployment
-        // handoff. Each parked call must run its own tool — never the other
-        // one — using the generation that created the approval.
         const alpha = await readExecuteMarker(app.appRoot, "alpha");
         const beta = await readExecuteMarker(app.appRoot, "beta");
         expect(alpha).toMatchObject({ build: 1, key: "alpha", version: "v1" });

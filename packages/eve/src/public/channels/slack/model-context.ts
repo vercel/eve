@@ -11,24 +11,15 @@ interface SlackModelMessageInput {
   readonly content: string;
   readonly isMentioned?: boolean;
   readonly senderId?: string;
-  /** Present only with `messageContext.users`. */
   readonly senderInfo?: SlackUserInfo;
   readonly senderType: "agent" | "bot" | "unknown" | "user";
   readonly teamId?: string;
   readonly threadTs: string;
   readonly ts: string;
-  /** Lines of the `<edit>` and `<diff>` blocks; present only for an edited message. */
   readonly editLines?: readonly string[];
-  /** App-written text from the message hook's result, rendered as a `<guidance>` block. */
   readonly guidance?: string;
 }
 
-/**
- * Renders one Slack message with its metadata grouped into `<sender>`,
- * `<bot>`, and `<thread>` blocks of the same model-visible message. Slack user
- * ids are stable and require no profile lookup, so they remain the canonical
- * speaker identity; looked-up profile fields only add to them.
- */
 function formatSlackModelMessage(input: SlackModelMessageInput): string {
   const info = input.senderInfo;
   const botLines = [
@@ -62,22 +53,17 @@ function formatSlackModelMessage(input: SlackModelMessageInput): string {
   ].join("\n");
 }
 
-// Profile fields are user-controlled; keep them from forging extra metadata lines.
 function oneLine(value: string): string {
   return neutralizeBlockTags(value.replace(/[\r\n]+/gu, " "));
 }
 
-// Slack sends `&lt;` for a typed `<`, and the mrkdwn conversion decodes it, so message text could
-// otherwise close `<content>` and open a block that reads as eve's own, such as `<guidance>`.
 const BLOCK_TAG =
   /<(?=\s*\/?\s*(?:slack_message_edit|slack_message|slack_thread_context|sender|bot|thread|edit|diff|guidance|content)\b)/giu;
 
-/** Encodes the `<` of eve's block tags, leaving other text and `<@U123>` mentions as they are. */
 function neutralizeBlockTags(value: string): string {
   return value.replace(BLOCK_TAG, "&lt;");
 }
 
-/** Renders the triggering inbound Slack message as one attributed block. */
 export function formatSlackInboundMessage(
   context: SlackInboundContext,
   message: InboundMessageInput,
@@ -85,12 +71,6 @@ export function formatSlackInboundMessage(
   return formatSlackModelMessage(inboundModelMessage(context, message));
 }
 
-/**
- * Renders an edited Slack message as a `<slack_message_edit>` block: the line
- * changes in `<diff>`, and the full edited text in `<content>`. Without the
- * previous text, or when the message is too long to compare, `<edit>` says why
- * there is no diff, so the model still reads it as an edit.
- */
 export function formatSlackInboundMessageEdit(
   context: SlackInboundContext,
   edit: InboundMessageInput & {
@@ -123,7 +103,6 @@ export function formatSlackInboundMessageEdit(
 interface InboundMessageInput {
   readonly text: string;
   readonly ts: string;
-  /** Trusted text from the message hook; never user-controlled. */
   readonly guidance?: string;
 }
 
@@ -151,11 +130,6 @@ function inboundModelMessage(
   };
 }
 
-/**
- * The lines an edit removed (`-`) and added (`+`), in message order.
- * `<content>` carries the unchanged lines. Returns `undefined` when the
- * message is too long to compare.
- */
 function changedLines(before: string, after: string): string | undefined {
   return diffLines(before.split("\n"), after.split("\n"))
     ?.flatMap(({ kind, text }) =>
@@ -181,10 +155,6 @@ function slackModelContent(input: string): string {
   return markdown;
 }
 
-/**
- * Renders fetched Slack replies as explicitly attributed background context.
- * Returns `undefined` when there are no messages to add to the turn.
- */
 export function formatSlackThreadContext(
   messages: readonly SlackThreadMessage[],
   users?: ReadonlyMap<string, SlackUserInfo>,
@@ -219,11 +189,6 @@ function slackThreadSenderType(message: SlackThreadMessage): SlackModelMessageIn
   return "unknown";
 }
 
-/**
- * Maps fetched thread replies to seeded session history. This app's own replies become assistant
- * turns; everyone else stays an attributed user message. Slack shows rendered output, so assistant
- * turns approximate what the model said.
- */
 export function slackThreadSessionHistory(
   messages: readonly SlackThreadMessage[],
   users?: ReadonlyMap<string, SlackUserInfo>,

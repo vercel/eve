@@ -1,4 +1,3 @@
-// @linux-only: built-in extension mount; virtual paths, compiled from memory
 import { describe, expect, it } from "vitest";
 import { compiledOf } from "#compiler/manifest.js";
 

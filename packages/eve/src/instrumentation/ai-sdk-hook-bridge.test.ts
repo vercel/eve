@@ -599,8 +599,6 @@ describe("createAiSdkHookBridge", () => {
       },
       expect.anything(),
     );
-    // An unrecognized part kind is dropped rather than forwarded, so widening
-    // InstrumentationContentPart is what makes a new kind reachable.
     expect(after).toHaveBeenCalledExactlyOnceWith(
       {
         outcome: "completed",
@@ -718,8 +716,6 @@ describe("createAiSdkHookBridge", () => {
 
     expect(modelStarted.mock.calls[0]?.[0].input).toBeUndefined();
     expect(modelCompleted.mock.calls[0]?.[0].content).toBeUndefined();
-    // Structure survives: usage, the finish reason, and the tool's identity are
-    // not what was said.
     expect(modelCompleted.mock.calls[0]?.[0].finishReason).toBe("stop");
     expect(run.mock.calls[0]?.[0]).toMatchObject({
       type: "tool.call",
@@ -795,8 +791,6 @@ describe("createAiSdkHookBridge", () => {
     ]);
     const bridge = createAiSdkHookBridge(scope, hooks);
 
-    // No onLanguageModelCallStart, so the bridge holds no id and publishes
-    // nothing — the handler must not run against empty state.
     await Reflect.apply(bridge.onLanguageModelCallEnd!, bridge, [
       {
         callId: "call-1",

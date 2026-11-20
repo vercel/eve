@@ -1,16 +1,13 @@
 import type { ProcessOutputHandler } from "#setup/primitives/process-output.js";
 import { runVercel, type RunVercelOptions } from "#setup/primitives/run-vercel.js";
 
-/** Maximum time allowed for a Vercel Connect mutation. */
 export const CONNECT_MUTATION_TIMEOUT_MS = 2 * 60_000;
 
-/** Outcome of replacing a connector's trigger destination. */
 export type ConnectTriggerAttachmentResult =
   | { state: "attached" }
   | { state: "detach-failed" }
   | { state: "attach-failed" };
 
-/** Inputs required to replace a Vercel Connect connector's trigger destination. */
 interface ReplaceConnectTriggerOptions {
   connectorUid: string;
   projectRoot: string;
@@ -23,11 +20,6 @@ interface ReplaceConnectTriggerOptions {
   deps?: { runVercel: (args: string[], options: RunVercelOptions) => Promise<boolean> };
 }
 
-/**
- * Replaces a connector's existing trigger destination with one route on an eve
- * project. Detaching first prevents Connect from retaining a pathless default
- * destination created during connector provisioning.
- */
 export async function replaceConnectTrigger(
   options: ReplaceConnectTriggerOptions,
 ): Promise<ConnectTriggerAttachmentResult> {

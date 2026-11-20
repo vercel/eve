@@ -6,14 +6,13 @@ import {
   defineSandboxProvider,
   SandboxSessionGoneError,
   type SandboxConnection,
+  type SandboxIdleTimeoutOption,
   type SandboxJson,
   type SandboxProvider,
   type SandboxProviderImplementation,
-  type SandboxSessionContext,
-  type SandboxSessionEndOptions,
 } from "#public/sandbox/provider.js";
 import type { VercelSandboxCreateOptions } from "#public/sandbox/vercel-sandbox.js";
-import { withAdoptedSandboxSessionStates, withSessionEndArtifact } from "#sandbox/state.js";
+import { withAdoptedSandboxSessionStates, withRecordedSandboxProvider } from "#sandbox/state.js";
 import { DockerSandbox } from "#sandbox/providers/docker.js";
 import { JustBashSandbox } from "#sandbox/providers/just-bash.js";
 import { VercelSandbox } from "#sandbox/providers/vercel.js";
@@ -25,8 +24,13 @@ import type {
 } from "#shared/sandbox-network-policy.js";
 import { ToolSessionSandboxUnsupportedError } from "#shared/sandbox-tool-session-error.js";
 
-export interface DefaultSandboxEnvironmentOptions {
-  readonly docker?: DockerSandboxEnvironmentOptions;
+/**
+ * Options for a `DefaultSandbox` environment: a shared `prepare` and `idleTimeoutMs`, plus
+ * per-provider options for Vercel Sandbox, Docker, and just-bash, applied to whichever provider
+ * is selected.
+ */
+export interface DefaultSandboxEnvironmentOptions extends SandboxIdleTimeoutOption {
+  readonly docker?: Omit<DockerSandboxEnvironmentOptions, "idleTimeoutMs">;
   readonly justBash?: {
     readonly autoInstall?: boolean;
     readonly prepare?: (sandbox: SandboxSession) => Promise<void> | void;
@@ -56,7 +60,6 @@ type DefaultSandboxPreparedArtifact =
 type DefaultSandboxSessionState = {
   readonly provider: SelectedProvider;
   readonly state: SandboxJson;
-  /** The selected provider's state protocol when it recorded `state`. */
   readonly stateProtocolVersion: number;
 };
 
@@ -95,7 +98,6 @@ export const DefaultSandbox: SandboxProvider<
         "DefaultSandbox justBash settings support autoInstall and prepare only. Use JustBashSandbox.environment({ experimental }) for customCommands or filesystem.",
       );
     }
-    // Created on first use, so a hosted bundle never constructs the local providers it prunes.
     const providers = new Map<SelectedProvider, ReturnType<typeof getSandboxEnvironmentRuntime>>();
     const provider = (name: SelectedProvider) => {
       let runtime = providers.get(name);
@@ -114,19 +116,16 @@ export const DefaultSandbox: SandboxProvider<
       return inner;
     }
 
-    // Routes to the provider that recorded the state, or else the one this build selected.
-    async function endSession(
-      context: SandboxSessionContext,
-      state: DefaultSandboxSessionState | null,
-      artifact: DefaultSandboxPreparedArtifact | undefined,
-      endOptions: SandboxSessionEndOptions,
-    ) {
-      const name = state?.provider ?? artifact?.provider ?? null;
-      if (name === null) return;
+    function recordedProvider(state: SandboxJson | null, artifact: SandboxJson | undefined) {
+      const recorded = isDefaultSandboxSessionState(state) ? state : null;
+      const name =
+        recorded?.provider ??
+        (isDefaultSandboxPreparedArtifact(artifact) ? artifact.provider : null);
+      if (name === null) return undefined;
       const inner = provider(name);
       const innerState =
-        state?.stateProtocolVersion === inner.stateProtocolVersion ? state.state : null;
-      await inner.implementation.onSessionEnd(context, innerState, endOptions);
+        recorded?.stateProtocolVersion === inner.stateProtocolVersion ? recorded.state : null;
+      return { implementation: inner.implementation, state: innerState };
     }
 
     const implementation: SandboxProviderImplementation<
@@ -135,8 +134,14 @@ export const DefaultSandbox: SandboxProvider<
       DefaultSandboxSessionState,
       NetworkPolicyExtensions
     > = {
-      onSessionEnd: (context, state, endOptions) =>
-        endSession(context, state, undefined, endOptions),
+      async onSessionEnd(context, state, endOptions) {
+        const inner = recordedProvider(state, undefined);
+        await inner?.implementation.onSessionEnd(context, inner.state, endOptions);
+      },
+      async onSessionIdle(context, state, idleOptions) {
+        const inner = recordedProvider(state, undefined);
+        await inner?.implementation.onSessionIdle?.(context, inner.state, idleOptions);
+      },
       async prepare(context) {
         const name = selectProvider();
         if (name === null) {
@@ -178,22 +183,10 @@ export const DefaultSandbox: SandboxProvider<
           await inner.implementation.resume(context, artifact.artifact, state.state),
         );
       },
-      // `requireProvider` rejects a keyed call when the selected provider cannot keep its sandbox.
       toolSessions: true,
     };
 
-    withSessionEndArtifact(implementation, async (context, state, { artifact, reason }) => {
-      await endSession(
-        context,
-        isDefaultSandboxSessionState(state) ? state : null,
-        isDefaultSandboxPreparedArtifact(artifact) ? artifact : undefined,
-        { reason },
-      );
-    });
-    // Sessions saved before DefaultSandbox recorded its own state hold the state
-    // of the provider it picked. Remove this once eve stops resuming sessions
-    // saved by releases before it, at the next sandbox state reset like eve 0.64's.
-    // `resume` treats a protocol the inner provider no longer speaks as gone.
+    withRecordedSandboxProvider(implementation, recordedProvider);
     return withAdoptedSandboxSessionStates(implementation, (record) => {
       const name = record.providerName;
       if (!isSelectedProvider(name)) return undefined;
@@ -212,7 +205,6 @@ function selectProvider(): SelectedProvider | null {
   return isEveDevEnvironment() ? "just-bash" : null;
 }
 
-// eve runs the authored `prepare` itself through `ctx.populate()`, so the inner environments omit it.
 function createEnvironment(
   name: SelectedProvider,
   options: Omit<DefaultSandboxEnvironmentOptions, "prepare">,
@@ -238,7 +230,6 @@ function innerOpenOptions(
   return undefined;
 }
 
-/** Gives a just-bash connection the `setNetworkPolicy` the other providers have. */
 function withNetworkPolicy(connection: SandboxConnection<object>) {
   const extensions: object = connection.extensions ?? {};
   if (typeof Reflect.get(extensions, "setNetworkPolicy") === "function") {

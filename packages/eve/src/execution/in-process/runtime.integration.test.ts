@@ -1,4 +1,3 @@
-// @linux-only: in-process host semantics
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
@@ -22,7 +21,6 @@ import { isStoredLine } from "#protocol/session-events/envelope.js";
 import { schemaViolation } from "#protocol/session-events/schemas.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 
-// The text each typed answer is read from, in order.
 const answerTexts = vi.hoisted((): string[] => []);
 vi.mock("#channel/resolve-text.js", async (importOriginal) => {
   const original = await importOriginal<typeof import("#channel/resolve-text.js")>();
@@ -43,7 +41,6 @@ const address = (runtime: Runtime, continuationToken: string) =>
     runtime,
   });
 
-/** What the protocol checker finds in a session's whole stream, read from its first line. */
 async function violations(runtime: Runtime, sessionId: string): Promise<Violation[]> {
   const checker = createStreamChecker({ validate: schemaViolation });
   const found: Violation[] = [];
@@ -55,7 +52,6 @@ async function violations(runtime: Runtime, sessionId: string): Promise<Violatio
   return found;
 }
 
-/** Every event a session recorded so far. */
 async function recorded(runtime: Runtime, sessionId: string): Promise<SessionStreamEvent[]> {
   const reader = (await runtime.getEventStream(sessionId, { follow: false })).getReader();
   const events: SessionStreamEvent[] = [];
@@ -64,7 +60,6 @@ async function recorded(runtime: Runtime, sessionId: string): Promise<SessionStr
   return events;
 }
 
-/** A session's events up to its first `delivery.settled` per delivery sent, with ids numbered. */
 async function conversation(runtime: Runtime, token: string, messages: readonly string[]) {
   const results = [];
   let sessionId: string | undefined;
@@ -80,7 +75,6 @@ async function conversation(runtime: Runtime, token: string, messages: readonly 
   };
 }
 
-/** Types and data with ids, times, and positions taken out: what two hosts must agree on. */
 function shape(events: readonly SessionStreamEvent[]) {
   const ids = new Map<string, string>();
   const rename = (value: unknown, key = ""): unknown => {
@@ -103,7 +97,6 @@ function shape(events: readonly SessionStreamEvent[]) {
   return events.map((event) => rename({ data: event.data, type: event.type }));
 }
 
-// Calls both tools in one step, then replies with how each came out.
 const model = markMockModel(
   new MockLanguageModelV4({
     doStream: async ({ prompt }) => {
@@ -141,7 +134,6 @@ const approvedTool = (name: string, ran: string[]) => ({
   logicalPath: `tools/${name}.ts`,
 });
 
-/** Alice asks for both calls; she approves one and denies the other, then asks again. */
 async function approveAndDeny(runtime: Runtime, token: string) {
   const alice = address(runtime, token);
   const asked = await (await alice.send("Deploy and publish.", { auth: null })).result();
@@ -184,7 +176,6 @@ describe("the in-process runtime", () => {
           "alice-approvals-workflow",
         );
 
-        // Its session ran here: Workflow names its sessions by their runs.
         expect(here.asked.sessionId).toMatch(/^session_/);
         expect(deployed.asked.sessionId).toMatch(/^wrun_/);
         expect(here.asked.interactions).toHaveLength(2);
@@ -248,7 +239,6 @@ describe("the in-process runtime", () => {
             sessionId: first.sessionId,
           });
           expect(command).toMatchObject({ status: "accepted" });
-          // A control applies between turns; the next message waits behind it.
         }
         const after = await (await alice.send("Bob asks again.", { auth: null })).result();
         return {
@@ -401,7 +391,6 @@ describe("the in-process runtime", () => {
         auth: null,
       });
       await sent.result();
-      // Follows the stream until its writer closes it.
       const reader = (await runtime.getEventStream(sent.sessionId)).getReader();
       const following = (async () => {
         const events: SessionStreamEvent[] = [];
@@ -414,7 +403,6 @@ describe("the in-process runtime", () => {
 
       const ended = (await following).filter(({ type }) => type === "session.ended");
       expect(ended).toHaveLength(1);
-      // Its stream is no longer read here.
       await expect(runtime.getStreamTailIndex(sent.sessionId)).rejects.toThrow();
     });
   });
@@ -422,7 +410,6 @@ describe("the in-process runtime", () => {
   it("ends a session whose turn is still running when disposed", async () => {
     let started!: () => void;
     const modelCalled = new Promise<void>((resolve) => (started = resolve));
-    // Answers only once its call is aborted, as a model call still streaming does.
     const waiting = markMockModel(
       new MockLanguageModelV4({
         doStream: async ({ abortSignal }) => {
@@ -490,7 +477,6 @@ describe("the in-process runtime", () => {
 
 const LATER_MESSAGE = "Carol wants the review by Friday.";
 
-// Spends the whole budget on its first call, a tool call, so the next asks to go on.
 const budgetModel = markMockModel(
   new MockLanguageModelV4({
     doStream: async ({ prompt }) => {
@@ -512,7 +498,6 @@ const budgetModel = markMockModel(
   }),
 );
 
-/** The first event `matches` accepts, read as the session writes it. */
 async function firstEvent(
   runtime: Runtime,
   sessionId: string,
@@ -531,11 +516,6 @@ async function firstEvent(
   }
 }
 
-/**
- * Alice runs out of budget, then types a message and "approve" the moment the step that asked
- * ends, before the session reads its end: what Workflow's late replay allows. Returns what
- * `afterAnswer` reads once both are sent.
- */
 async function answerBudgetPromptBackToBack<T>(
   deliveries: DeliveryTiming,
   afterAnswer: (runtime: InProcessRuntime, sessionId: string) => Promise<T>,
@@ -603,8 +583,6 @@ describe("deliveries made back to back", () => {
     expect(outcome).toBe("accepted");
   });
 
-  // Broken until vercel/eve#6307 lands: the paused turn reads the message and "approve" as one
-  // typed answer, "Carol wants…\n\napprove", which names no option, so the prompt stays open.
   it.fails("are read one at a time when batched, as on Workflow (vercel/eve#6307)", async () => {
     answerTexts.length = 0;
     const texts = await answerBudgetPromptBackToBack("batched", async () => {

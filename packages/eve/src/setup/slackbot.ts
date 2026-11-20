@@ -46,13 +46,9 @@ import {
 
 export type { SlackConnectorCandidate } from "./slack-setup-plan.js";
 
-/** Injected for tests; defaults to the real Vercel CLI subprocess primitives. */
 interface SlackbotProvisionDeps extends SlackConnectLifecycleDeps, SlackConnectorCreateDeps {
-  /** Test seam for the linked Vercel project and team lookup. */
   readProjectLink?: typeof readProjectLink;
-  /** Test seam for the workspace poll's pacing; defaults to a real sleep. */
   delay?: (ms: number, signal?: AbortSignal) => Promise<void>;
-  /** Monotonic-enough clock for enforcing the workspace lookup deadline. */
   now?: () => number;
 }
 
@@ -62,36 +58,17 @@ const realDelay = (ms: number, signal?: AbortSignal): Promise<void> =>
   sleep(ms, undefined, { signal });
 const monotonicNow = (): number => performance.now();
 
-/**
- * Existing connectors can precede the Slack browser flow, so their connector
- * details are polled for up to five minutes for `data.slackTeam`.
- */
 const WORKSPACE_POLL_TIMEOUT_MS = 5 * 60_000;
 const WORKSPACE_POLL_INTERVAL_MS = 3_000;
 
-/** A Slack connector that delivers this project's events to eve's Slack route. */
 interface SlackbotConnection {
   connectorUid: string;
-  /** Deep link that opens a DM compose with the bot ("chat with your agent"). */
   chatUrl?: string;
   workspaceName?: string;
 }
 
-/**
- * Outcome of Slackbot provisioning. `attached` means a connector exists, this
- * project receives its events at eve's Slack route, and the app is installed
- * into a Slack workspace. `already-configured` is the same state reached
- * without changing anything. `not-installed` means the workspace-install
- * deadline elapsed and any connector created by this attempt was removed.
- * `cleanup-failed` means it may remain and callers must stop rather than
- * create another connector. `trigger-limit-reached` changed nothing because
- * the connector already has the maximum number of trigger destinations.
- * `connector-in-use` changed nothing because another project now uses the
- * chosen connector.
- */
 export type ProvisionSlackbotResult =
   | { state: "connector-lookup-failed" }
-  /** `detail` is the Vercel CLI's own error line, when it printed one. */
   | { state: "create-failed"; detail?: string }
   | { state: "cancelled" }
   | { state: "existing-not-installed"; connectorUid: string }
@@ -108,19 +85,16 @@ export type ProvisionSlackbotResult =
   | ({ state: "attached" } & SlackbotConnection)
   | ({ state: "already-configured" } & SlackbotConnection);
 
-/** Terminal result of polling connector details for Slack workspace metadata. */
 type SlackWorkspacePollResult =
   | { state: "connected"; workspace: SlackWorkspaceConnection }
   | { state: "timed-out" }
   | { state: "failed"; message: string };
 
-/** What one create/reuse → workspace → routing attempt settled on. */
 type AttemptOutcome =
   | {
       state: "attached";
       ref: SlackConnectorRef;
       workspace?: SlackWorkspaceConnection;
-      /** False only when an existing connector was already fully configured. */
       changed: boolean;
     }
   | { state: "create-failed"; detail?: string }
@@ -136,33 +110,20 @@ type AttemptOutcome =
   | { state: "timed-out"; ref: SlackConnectorRef }
   | { state: "failed"; ref: SlackConnectorRef; message: string };
 
-/**
- * Wraps one provisioning step. The headless path gets an ephemeral spinner per
- * step; the interactive path routes those phases through the live status line.
- */
 type Phase = <T>(message: string, task: () => Promise<T>) => Promise<T>;
 
 type AttemptSource =
   | { state: "existing"; candidate: SlackConnectorCandidate }
-  /** `name` is the `--name` for `connect create`, already checked against the team. */
   | { state: "new"; name: string };
 
 type ExistingAttemptSource = Extract<AttemptSource, { state: "existing" }>;
 
-/**
- * What one new-connector attempt observed, so cleanup removes exactly what it
- * created and skips cleanup only when the CLI proved nothing was created.
- */
 interface CreateAttemptTrace {
   createdRef?: SlackConnectorRef;
   rejected: boolean;
 }
 type NewAttemptSource = Extract<AttemptSource, { state: "new" }>;
 
-/**
- * Polls connector details until Slack workspace metadata appears, the
- * five-minute deadline passes, or the lookup fails.
- */
 async function pollSlackWorkspace(
   deps: SlackbotProvisionDeps,
   projectRoot: string,
@@ -214,14 +175,6 @@ function cleanupFailureResult(
   };
 }
 
-/**
- * Opens Vercel Connect's install page for an existing connector, the page
- * `vercel connect token` opens on `installation_required`. The browser flow
- * that created a connector is its only other install path, and it is gone
- * once that run stops. Connect keys the browser result to the request code;
- * eve observes completion through `data.slackTeam` instead, so the verifier
- * is never kept.
- */
 function openSlackInstall(
   log: ChannelSetupLog,
   ref: SlackConnectorRef,
@@ -239,10 +192,6 @@ function openSlackInstall(
   openUrl(url.href);
 }
 
-/**
- * Explains why a new connector won't carry the agent's name, naming the
- * projects that hold `slack/<slug>` when this snapshot knows them.
- */
 function renamedConnectorMessage(
   slug: string,
   name: string,
@@ -257,24 +206,11 @@ function renamedConnectorMessage(
   return `\`slack/${slug}\` is already used by ${owner} (${projects.join(", ")}), so eve will create \`slack/${name}\` for this project.`;
 }
 
-/** Explains why setup won't attach a connector another project uses. */
 export function connectorInUseMessage(candidate: SlackConnectorInUse): string {
   const projects = candidate.otherProjects.map((project) => project.name ?? project.id).join(", ");
   return `\`${candidate.uid}\` is used by ${projects}. eve does not add a second agent to one Slack app because both would respond to the same events. Create a new Slack app for this agent instead.`;
 }
 
-/**
- * Runs one provisioning attempt end to end. A new connector completes when the
- * CLI's browser verifier succeeds (or connector details prove the workspace
- * connection first); its destinations are then read fresh. A reused connector
- * must expose workspace metadata before eve changes its event delivery.
- * Routing runs only the mutation the destinations still need, so an attempt
- * over an already-configured connector changes nothing.
- * `trace` records a fresh connector the instant it exists, and whether the
- * CLI rejected the request before its browser flow, so an aborted attempt can
- * remove exactly what it made. The `phase` seam lets each caller route
- * progress through its own transient status surface.
- */
 async function runAttempt(input: {
   log: ChannelSetupLog;
   deps: SlackbotProvisionDeps;
@@ -308,8 +244,6 @@ async function runAttempt(input: {
       workspace = poll.workspace;
       changed = true;
     }
-    // The chosen connector may have changed since the question was answered.
-    // Recheck both its project access and destinations before routing it.
     const fresh = await refreshSlackCandidate({
       deps,
       projectRoot,
@@ -366,9 +300,7 @@ async function runAttempt(input: {
     }
     ref = created.ref;
     if (created.via === "workspace") workspace = created.workspace;
-    // `connect create` runs in the linked directory, which attaches the project.
     attached = true;
-    // Connect adds a default destination at creation; read it back.
     const details = await fetchSlackConnectorDetails({
       deps,
       projectRoot,
@@ -417,20 +349,10 @@ async function runAttempt(input: {
     : { state: "attached", ref, workspace, changed };
 }
 
-/** How an interactive attempt resolved: the work finished, or the user acted. */
 type RaceResult =
   | { via: "work"; outcome: AttemptOutcome }
   | { via: "choice"; choice: string | undefined; settled: AttemptOutcome | undefined };
 
-/**
- * Races one provisioning attempt against an open prompt, under a private abort
- * controller linked to the outer signal. If the attempt finishes first its
- * outcome is returned; if the user acts first (or Esc), the attempt is aborted
- * and awaited to a settled state before returning the choice, so a connector
- * created mid-flight is observed and the caller can remove it. The prompt is
- * always dismissed. An outer abort propagating through the attempt is re-thrown
- * after the same abort-and-settle, leaving cleanup policy to the caller.
- */
 async function raceAttemptAgainstChoice(input: {
   prompt: ChannelSetupChoice;
   outerSignal: AbortSignal | undefined;
@@ -457,51 +379,30 @@ async function raceAttemptAgainstChoice(input: {
     }
     return { via: "choice", choice: winner.choice, settled };
   } catch (error) {
-    // An outer abort propagated through the attempt before the prompt settled.
     controller.abort();
     try {
       await work;
-    } catch {
-      // The caller's re-thrown error carries the authoritative failure.
-    }
+    } catch {}
     throw error;
   } finally {
     input.prompt.close();
   }
 }
 
-/** A reusable connector from {@link inspectSlackbotConnectors}, or a request to create one. */
 export type SlackConnectorSelection = SlackConnectorCandidate | "create";
 
-/**
- * Read-only snapshot of the Slack connectors setup may reuse for the linked
- * project. Setup takes it once, asks its questions from it, and hands it to
- * {@link provisionSlackbot}.
- */
 export interface SlackbotConnectorInspection {
   projectId: string;
   orgId: string | undefined;
-  /** Preferred short-name for `connect create slack --name`; suffixed when taken. */
   slug: string;
-  /**
-   * Reusable connectors in question order: the suggestion first, then
-   * attached, then the rest. Connectors other projects use are excluded.
-   */
   candidates: readonly SlackConnectorCandidate[];
   preferred?: SlackConnectorCandidate;
-  /** Connectors other projects use, which setup never attaches to this one. */
   inUse: readonly SlackConnectorInUse[];
 }
 
 const UNLINKED_PROJECT_WARNING =
   "Slack setup with Vercel Connect needs a linked Vercel project to tell which Slack connectors belong to it, so eve did not create one. Run `vercel link`, then try again.";
 
-/**
- * Inspects the connectors attached to the linked project, plus
- * `slack/<slug>` and the channel file's UID looked up by name. Throws when
- * the project isn't linked or any connector can't be read, so setup never
- * creates a connector on a guess.
- */
 export async function inspectSlackbotConnectors(
   log: ChannelSetupLog,
   projectRoot: string,
@@ -545,22 +446,10 @@ export async function inspectSlackbotConnectors(
 }
 
 interface ProvisionSlackbotOptions {
-  /**
-   * Cancels the caller's whole operation. The promise rejects after attempting
-   * cleanup; only the explicit interactive Cancel action returns `cancelled`.
-   */
   signal?: AbortSignal;
-  /** Concurrent retry/cancel controls supplied by an interactive prompter. */
   awaitChoice?: ChannelSetupAwaitChoice;
 }
 
-/**
- * Reuses the selected connector or creates a new one, then points its event
- * destination at eve, running only the steps the connector still needs.
- * Re-running it after a partial failure resumes where the previous run
- * stopped; it never detaches a project. A successful `connect create` is the
- * completion boundary for a new browser flow.
- */
 export async function provisionSlackbot(
   log: ChannelSetupLog,
   projectRoot: string,
@@ -589,7 +478,6 @@ export async function provisionSlackbot(
     return free;
   };
 
-  /** Folds a finished attempt into a result, cleaning up terminal abandonments. */
   const finishOutcome = async (
     outcome: AttemptOutcome,
     attempt: AttemptSource,
@@ -655,8 +543,6 @@ export async function provisionSlackbot(
             };
       }
       case "failed":
-        // The workspace state is unknown, so the connector is left in place
-        // rather than risk destroying a working connection.
         log.warning(`Could not verify the Slack workspace connection. ${outcome.message}`);
         return {
           state: "installation-check-failed",
@@ -720,9 +606,6 @@ export async function provisionSlackbot(
       return finishOutcome(outcome, attempt, cleanupCurrentAttempt);
     };
 
-    // An existing connector belongs to a prior run. Reconfigure it and open its
-    // install page when needed, but never remove it under this run's
-    // ownership. Only a workspace wait is worth racing against a prompt.
     if (options.awaitChoice !== undefined && attempt.candidate.workspace === undefined) {
       while (true) {
         const prompt = options.awaitChoice({
@@ -746,8 +629,6 @@ export async function provisionSlackbot(
         if (race.via === "work") return finishExistingOutcome(race.outcome);
         if (race.settled?.state === "attached") return finishExistingOutcome(race.settled);
         if (race.choice === "retry") continue;
-        // The user stopped waiting (or Esc): an existing connector is never ours
-        // to remove, so report it as not yet installed.
         return notInstalled();
       }
     }
@@ -765,8 +646,6 @@ export async function provisionSlackbot(
   ): Promise<ProvisionSlackbotResult> {
     const trace: CreateAttemptTrace = { rejected: false };
     const cleanupCurrentAttempt = () => cleanupNewAttempt(attempt, trace);
-    // No interactive surface (plain/headless): run the new request to a
-    // terminal outcome with per-step spinners; abort/retry are unavailable.
     const work = runAttempt({
       ...attemptInput(attempt, trace),
       signal: options.signal,
@@ -792,9 +671,6 @@ export async function provisionSlackbot(
   ): Promise<InteractiveAttemptDecision> {
     const trace: CreateAttemptTrace = { rejected: false };
     const cleanupCurrentAttempt = () => cleanupNewAttempt(attempt, trace);
-    // Interactive: one prompt races the whole create → attach attempt,
-    // so "Try again" / "Cancel" are live even while `connect create` parks on
-    // the browser. A user action aborts the attempt and removes its connector.
     const prompt = awaitChoice({
       status: "Waiting for Slack setup to finish...",
       context: "Complete setup in the browser, then wait while eve verifies the connection",
@@ -819,7 +695,6 @@ export async function provisionSlackbot(
           }),
       });
     } catch (error) {
-      // An outer abort tore down the attempt: remove the connector it created.
       await cleanupCurrentAttempt();
       throw error;
     }
@@ -830,8 +705,6 @@ export async function provisionSlackbot(
         result: await finishOutcome(race.outcome, attempt, cleanupCurrentAttempt),
       };
     }
-    // The user acted (or Esc). Keep the connector only if it attached before
-    // stopping; otherwise remove what this attempt created before retry/cancel.
     if (race.settled?.state === "attached") {
       return {
         state: "finished",
@@ -875,9 +748,6 @@ export async function provisionSlackbot(
   }
 }
 
-/**
- * Patches a connector UID chosen by Connect before the caller deploys the channel definition.
- */
 export async function reconcileSlackUid(
   log: ChannelSetupLog,
   projectRoot: string,

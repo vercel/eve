@@ -46,8 +46,6 @@ describe("state layout admission", () => {
       .spyOn(SessionAgentKey.codec!, "deserialize")
       .mockResolvedValue(fromCompiledBundle(bundle));
     try {
-      // Registration in a previous graph must not turn a reserved legacy authored name
-      // into proof that it belongs to the new layout.
       new ContextKey("eve:mount.v1:extensions%2Freserved:requests");
       await expect(
         deserializeContext({
@@ -82,7 +80,6 @@ describe("state layout admission", () => {
         "acme-crm.history": 5,
         "acme-crm.requests": 4,
       });
-      // The extension no longer defines `history`, so that value is dropped.
       expect([...restored.entries()].map(([key, value]) => [key.name, value])).toEqual([
         ["eve.bundle", fromCompiledBundle(bundle)],
         ["eve:mount.v1:extensions%2Fcrm:requests", 4],
@@ -91,7 +88,6 @@ describe("state layout admission", () => {
         expect.stringContaining("dropping unknown context key"),
         expect.objectContaining({ key: "acme-crm.history" }),
       );
-      // Two mounts of one package define the legacy key, so neither can claim it.
       mounts = [mount("extensions/crm"), mount("extensions/crm-eu")];
       await expect(
         deserializeContext({ "eve.bundle": {}, "acme-crm.requests": 4 }),

@@ -80,7 +80,6 @@ describe("Vercel Blob file-memory backend", () => {
     await backend.write({ content: "# Memory", expectedVersion: null, key: "team/notes", signal });
     await backend.read({ key: "team/notes", signal });
 
-    // `put` takes the pathname as a query value; `get` puts it in a URL path the store decodes once.
     expect(vi.mocked(put).mock.calls[0]?.[0]).toBe("eve/memory/file/team%2Fnotes/MEMORY.md");
     expect(vi.mocked(get).mock.calls[0]?.[0]).toBe("eve/memory/file/team%252Fnotes/MEMORY.md");
   });

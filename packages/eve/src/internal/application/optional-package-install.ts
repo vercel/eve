@@ -18,11 +18,6 @@ export { EVE_DEV_ENV_FLAG, isEveDevEnvironment };
 
 export type ProjectPackageManager = "bun" | "npm" | "pnpm" | "yarn";
 
-/**
- * Detects the project's package manager from its lockfile, walking up
- * from `appRoot` so workspace members resolve their monorepo root's
- * manager. Defaults to npm when no lockfile is found.
- */
 export function detectProjectPackageManager(appRoot: string): ProjectPackageManager {
   return resolveProjectInstallation(appRoot).packageManager;
 }
@@ -34,9 +29,7 @@ function resolveProjectInstallation(appRoot: string): {
   let current = resolve(appRoot);
   try {
     current = realpathSync.native(current);
-  } catch {
-    // A not-yet-materialized project still needs a stable absolute lock identity.
-  }
+  } catch {}
   const projectRoot = current;
   for (;;) {
     if (
@@ -75,12 +68,6 @@ const OPTIONAL_PACKAGE_STALE_LOCK_MS = 30 * 60 * 1000;
 
 const pendingOptionalPackageInstalls = new Map<string, Promise<void>>();
 
-/**
- * Installs one package into the application as a devDependency using
- * the project's own package manager, so the install is visible in
- * `package.json` and the lockfile. Throws with the captured output when
- * the install fails.
- */
 export async function installPackageIntoProject(input: {
   readonly appRoot: string;
   readonly packageName: string;
@@ -123,12 +110,6 @@ export async function installPackageIntoProject(input: {
   console.info(`[eve:dev] installed "${input.packageName}".`);
 }
 
-/**
- * Loads an optional engine package, auto-installing it into the
- * project when missing. Installs run only during `eve dev`; any other
- * process fails with the caller-supplied actionable message so
- * production deployments never mutate the application.
- */
 export async function loadOptionalEnginePackage<T>(input: {
   readonly appRoot: string;
   readonly autoInstall: boolean;
@@ -284,8 +265,6 @@ async function withOptionalPackageInstallLock(
 ): Promise<void> {
   const lockRoot = resolveProjectInstallation(input.appRoot).root;
   const pending = pendingOptionalPackageInstalls.get(lockRoot) ?? Promise.resolve();
-  // Different packages and workspace members mutate the same dependency tree.
-  // Queue every callback so each caller rechecks its own package under the lock.
   const promise = pending
     .catch(() => {})
     .then(() => withOptionalPackageInstallFileLock(lockRoot, callback));
@@ -357,10 +336,6 @@ async function waitForExistingLock(lockPath: string, startedAt: number): Promise
   await new Promise((resolve) => setTimeout(resolve, OPTIONAL_PACKAGE_LOCK_POLL_MS));
 }
 
-/**
- * Windows package manager shims are commonly `.cmd` files, which plain
- * `spawn` does not resolve reliably without shell execution.
- */
 function shouldSpawnPackageManagerWithShell(platform: NodeJS.Platform = process.platform): boolean {
   return platform === "win32";
 }

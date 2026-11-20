@@ -1,10 +1,3 @@
-// The shared fold: client, server, and anyone else fold a session's lines into the same tables.
-//
-// The fold is tolerant, as every reader must be. It ignores unknown fact and progress types,
-// facts about entities it never saw introduced (or no longer retains), and repeated terminals:
-// the first terminal wins, including outcomes a newer writer added, and nothing is inferred. It folds a line in place, replacing the rows the line changes, because a session can
-// run to many thousands of lines; take `copyView` before a fold to keep the state before it.
-
 import { FACT_CATALOG, isFactType, isProgressType } from "#protocol/session-events/catalog.js";
 import { isObject } from "#protocol/session-events/json.js";
 import {
@@ -26,19 +19,10 @@ import type {
   UsageTotals,
 } from "./tables.js";
 
-/**
- * How much a fold keeps. `complete` keeps everything, for clients and history reads.
- * `operational` keeps the session, everything still open and its ownership ancestors, what the
- * latest line touched, the latest turn's reply, and the rows of the latest turn and of any turn
- * whose calls still work, for
- * server checkpoints and observers; it drops the rest when the next line arrives. A channel shows
- * what a turn did from its rows, so they stay until the next turn starts, or its tasks finish.
- */
 export type Retention = "complete" | "operational";
 
 export interface FoldOptions {
   readonly retention?: Retention;
-  /** In operational retention, rows to keep after they close, such as ones execution still reads. */
   readonly keep?: (table: TableName, id: string) => boolean;
 }
 
@@ -89,11 +73,6 @@ type MutableTables = {
 type MutableView = Writable<SessionView> & MutableTables;
 type MutablePreviews = { -readonly [K in keyof SessionPreviews]: Writable<SessionPreviews[K]> };
 
-/**
- * Folds the line at `position` into `view`, and its progress or completions into `previews`.
- * A line at or before the view's position was already folded and is skipped, which absorbs
- * reconnect overlap and merged caches.
- */
 export function foldLine(
   view: SessionView,
   line: StoredLine,
@@ -113,7 +92,6 @@ export function foldLine(
   for (const fact of line.facts) foldFact(state, previews, fact, { at: line.at, position });
 }
 
-/** Folds lines read from `startPosition` on, for a reader that holds a whole range. */
 export function foldLines(
   view: SessionView,
   lines: Iterable<StoredLine>,
@@ -139,12 +117,6 @@ export interface ReceivedEvent {
   };
 }
 
-/**
- * Folds events as a reader received them back, regrouped into their lines by position. A line
- * folds whole, once its last record has arrived: the events of a line still arriving are
- * returned unfolded, to pass again with the rest. Lines the view already folded are skipped, so
- * replayed overlap folds once.
- */
 export function foldEvents<TEvent extends ReceivedEvent>(
   view: SessionView,
   events: readonly TEvent[],
@@ -169,7 +141,6 @@ export function foldEvents<TEvent extends ReceivedEvent>(
   return [];
 }
 
-/** The tables a complete read of `events` folds into, with each part's and call's previews. */
 export function viewOfEvents(events: readonly ReceivedEvent[]): {
   readonly view: SessionView;
   readonly previews: SessionPreviews;
@@ -180,11 +151,6 @@ export function viewOfEvents(events: readonly ReceivedEvent[]): {
   return { previews, view };
 }
 
-/**
- * A copy of a view that folding can change without changing `view`. Rows are replaced, never
- * edited, so copying the tables is enough: a reader that keeps every state, such as a UI's
- * reducer, copies before each fold instead of cloning every row.
- */
 export function copyView(view: SessionView): SessionView {
   return {
     ...view,
@@ -201,12 +167,6 @@ export function copyView(view: SessionView): SessionView {
   };
 }
 
-/**
- * Folds one event as a reader received it, for a reader that updates on each event rather than
- * on each line. Facts apply in order within a line, so folding a line event by event leaves the
- * same tables; the view's position moves past the line with its last event. Events of a line
- * the view already passed are skipped.
- */
 export function foldReceivedEvent(
   view: SessionView,
   event: { readonly type: string; readonly meta?: Partial<ReceivedEvent["meta"]> },
@@ -302,7 +262,6 @@ function foldFact(
   }
 }
 
-/** The table each lifecycle fact writes, the status it leaves, and the one an update needs. */
 const LIFECYCLE: Partial<
   Record<
     Fact["type"],
@@ -310,9 +269,7 @@ const LIFECYCLE: Partial<
       readonly table: TableName;
       readonly status?: string;
       readonly from?: string;
-      /** Fact fields the row keeps under another name, where the row's own name means more. */
       readonly rename?: Readonly<Record<string, string>>;
-      /** Fact fields the row leaves out, which only readers of the fact need. */
       readonly omit?: readonly string[];
     }
   >
@@ -325,7 +282,6 @@ const LIFECYCLE: Partial<
   "context.settled": { status: "settled", table: "changes" },
   "context.started": { status: "running", table: "changes" },
   "delivery.admitted": { status: "admitted", table: "deliveries" },
-  // Imported history can be long, and only readers of the fact show it.
   "delivery.consumed": {
     from: "admitted",
     omit: ["history"],
@@ -337,7 +293,6 @@ const LIFECYCLE: Partial<
   "interaction.settled": { status: "settled", table: "interactions" },
   "model.requested": { status: "requested", table: "runs" },
   "model.settled": { status: "settled", table: "runs" },
-  // Once per attempt: the run's first moves it to running, and each one records its attempt.
   "model.started": { status: "running", table: "runs" },
   "response.admitted": { from: "submitted", status: "admitted", table: "responses" },
   "response.settled": { status: "settled", table: "responses" },
@@ -359,11 +314,6 @@ const FOLD_FIELDS = new Set([
   "status",
 ]);
 
-/**
- * Folds a lifecycle fact by its role: an introduction adds its entity's row from the fact, an
- * update moves an open row on, and a terminal closes an open row with a known outcome. Returns
- * whether the fact changed a row; one that names a row it can't change is ignored.
- */
 function foldLifecycle(
   view: MutableView,
   fact: Fact,
@@ -402,7 +352,6 @@ function foldLifecycle(
       rows[id] = { ...row, ...data, ...status };
       return true;
     case "terminal":
-      // An outcome a newer writer added still ends the row.
       if (row === undefined || closed(row) || typeof data.outcome !== "string") return false;
       rows[id] = { ...row, ...data, closedAt: at.position, endedAt: at.at, ...status };
       return true;
@@ -411,7 +360,6 @@ function foldLifecycle(
   }
 }
 
-/** What a lifecycle fact changes beyond its own row. */
 function foldSpecifics(
   view: MutableView,
   previews: MutablePreviews | undefined,
@@ -433,7 +381,6 @@ function foldSpecifics(
       delete view.selection;
       return;
     case "model.requested": {
-      // A turn's runs are its steps, in the order it requested them.
       const { owner, runId } = fact.data;
       const turn = "turnId" in owner ? view.turns[owner.turnId] : undefined;
       if (turn === undefined) return;
@@ -452,11 +399,6 @@ function foldSpecifics(
     case "content.completed": {
       const { partId, phase, runId } = fact.data;
       if (previews !== undefined) delete previews.parts[partId];
-      // A reply part joins its turn's reply as it completes. A later step's reply replaces an
-      // earlier step's, such as a held turn's text while its tasks work: the turn's answer is the
-      // reply its last replying step writes, and a step that writes none leaves it standing. Parts
-      // the turn wrote without a run count as one step of their own. Only a run its turn made
-      // answers it: a context change's run, such as a compaction's summary, never does.
       const runOwner = runId === undefined ? undefined : view.runs[runId]?.owner;
       const turnId =
         runId === undefined
@@ -464,7 +406,6 @@ function foldSpecifics(
           : runOwner !== undefined && "turnId" in runOwner
             ? runOwner.turnId
             : undefined;
-      // A part no run wrote belongs to the turn its scope names.
       if (runId === undefined && turnId !== undefined)
         view.parts[partId] = { ...view.parts[partId]!, turnId };
       const turn = turnId === undefined ? undefined : view.turns[turnId];
@@ -539,7 +480,6 @@ function foldProgress(view: SessionView, previews: MutablePreviews, raw: unknown
   }
 }
 
-/** A settled run leaves its unfinished previews behind: parts it never completed, calls never requested. */
 function dropRunPreviews(view: SessionView, previews: MutablePreviews, runId: string): void {
   for (const [partId, preview] of Object.entries(previews.parts)) {
     if (preview.runId === runId) delete previews.parts[partId];
@@ -549,14 +489,7 @@ function dropRunPreviews(view: SessionView, previews: MutablePreviews, runId: st
   }
 }
 
-/**
- * Operational retention: drops what closed before the latest line, keeping what's open. A task
- * stays while it runs, but it pins only its open calls' paths, not the call that started it: an
- * idle task can live as long as its session, and its first call's input and output with it.
- */
 function prune(view: MutableView, keep: FoldOptions["keep"]): void {
-  // Open entities keep their owners even after those settle, and a call keeps the run that
-  // made it: otherwise a call outliving its model run loses its turn, and a closer can't find it.
   const pinned = new Set<string>();
   const pinPath = (start: Ref | undefined) => {
     const stack = start === undefined ? [] : [start];
@@ -582,14 +515,11 @@ function prune(view: MutableView, keep: FoldOptions["keep"]): void {
     pinPath({ family: "delivery", id: row.deliveryId });
   }
   const turns = liveTurns(view);
-  // The latest turn's reply parts stay with its rows, so a reader of the view can read its reply,
-  // and a later reply part of the same run keeps the earlier ones in it.
   const latest = view.session.latestTurnId;
   for (const partId of (latest === undefined ? undefined : view.turns[latest]?.reply) ?? [])
     pinned.add(`parts:${partId}`);
   const retained = (family: Family, id: string) => {
     if (pinned.has(`${tableOf(family)}:${id}`) || keep?.(tableOf(family), id) === true) return true;
-    // A settled delivery no longer belongs to its turn, but it's still the turn's input.
     const turnId =
       family === "part"
         ? undefined
@@ -620,7 +550,6 @@ function prune(view: MutableView, keep: FoldOptions["keep"]): void {
     const owner =
       "callId" in row.owner ? view.calls[row.owner.callId] : view.tasks[row.owner.taskId];
     if (owner === undefined) delete view.children[id];
-    // Delivery links serve readers, not execution; keep them out of operational checkpoints.
     else if (row.deliveries !== undefined) view.children[id] = { ...row, deliveries: undefined };
   }
   for (const row of Object.values(view.calls)) {
@@ -628,7 +557,6 @@ function prune(view: MutableView, keep: FoldOptions["keep"]): void {
   }
 }
 
-/** The latest turn, and every turn with calls still working, such as calls its tasks serve. */
 function liveTurns(view: SessionView): ReadonlySet<string> {
   const turns = new Set<string>();
   if (view.session.latestTurnId !== undefined) turns.add(view.session.latestTurnId);
@@ -640,14 +568,8 @@ function liveTurns(view: SessionView): ReadonlySet<string> {
   return turns;
 }
 
-/** A finished call's input or output past this many characters of JSON is withheld once kept. */
 const MAX_KEPT_VALUE_LENGTH = 16_384;
 
-/**
- * A finished call kept for its turn keeps what channels show of it, not a large value: one past
- * {@link MAX_KEPT_VALUE_LENGTH} reads as withheld (a reference with no `ref`), as the stream
- * itself can write it. The session's history holds the value the model reads.
- */
 function withholdLarge(view: MutableView, row: SessionView["calls"][string]): void {
   const size = (value: unknown) => (value === undefined ? 0 : (JSON.stringify(value)?.length ?? 0));
   const inputSize = size(row.input);

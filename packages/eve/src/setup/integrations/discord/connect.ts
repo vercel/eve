@@ -22,7 +22,6 @@ const DiscordConnectorRefSchema = z.object({
   supportedSubjectTypes: z.array(z.string()).refine((types) => types.includes("app")),
 });
 
-/** Parses `vercel connect create -F json` output for a Discord connector. */
 export function parseCreatedDiscordConnector(stdout: string): DiscordConnectorRef | undefined {
   try {
     const parsed = DiscordConnectorRefSchema.safeParse(JSON.parse(stdout));
@@ -32,7 +31,6 @@ export function parseCreatedDiscordConnector(stdout: string): DiscordConnectorRe
   }
 }
 
-/** Creates a Discord connector and attaches its trigger to eve's route. */
 export async function provisionDiscordConnector(input: {
   botToken: string;
   log: ChannelSetupLog;

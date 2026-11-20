@@ -23,27 +23,14 @@ import {
   type SelectState,
 } from "./select-state.js";
 
-/**
- * A prompt's live status note (e.g. a two-stage quit guard), read on each
- * render. Returns `undefined` when there is nothing to show. Wired in by
- * {@link runSelectComponent} via its `attachGuard` hook.
- */
 export interface SelectGuard {
   note(): string | undefined;
 }
 
 function toPromptState(state: State): PromptState {
-  // eve prompts never validate asynchronously, so clack's "validating" state is still active input.
   return state === "validating" ? "active" : state;
 }
 
-/**
- * Custom `@clack/core` `Prompt` backing every select picker. It adapts key
- * events to {@link reduceSelect} transitions and tracks the resolved value: the
- * highlighted option for single-select, the marked set for multi-select.
- * Filtering, multi-selection, and the cursor arrow are all driven by the
- * `search` and `multiple` flags, so one component covers every picker.
- */
 export class SelectComponent extends Prompt<string | string[]> {
   readonly options: PromptOption<string>[];
   readonly multiple: boolean;
@@ -84,8 +71,6 @@ export class SelectComponent extends Prompt<string | string[]> {
         this.apply({ type: "backspace" });
         return;
       }
-      // Space is a filter character too — only a multi-select reserves it for
-      // toggling (handled above, before this point).
       if (key !== undefined && key.length === 1 && key >= " " && key !== "\x7f") {
         this.apply({ type: "char", char: key });
       }
@@ -101,17 +86,10 @@ export class SelectComponent extends Prompt<string | string[]> {
     return filterOptions(this.options, this.filter, this.searchAction);
   }
 
-  /** True when the multi-select cursor sits on the trailing Submit row. */
   onSubmitRow(): boolean {
     return this.multiple && this.optionCursor === submitRowIndex(this.visibleOptions());
   }
 
-  /**
-   * Submit-row label: "Skip" while an optional checklist has nothing picked,
-   * "Submit" as soon as one row is marked. Locked rows are mandatory rather
-   * than chosen, so they do not count as a pick; a required checklist always
-   * says "Submit" since an empty confirm cannot resolve it.
-   */
   submitLabel(): "Submit" | "Skip" {
     if (this.required) return "Submit";
     const locked = new Set(
@@ -121,12 +99,6 @@ export class SelectComponent extends Prompt<string | string[]> {
     return picked ? "Submit" : "Skip";
   }
 
-  /**
-   * Enter resolves an actionable single-select row; completed rows are
-   * focus-only. A multi-select resolves only from its Submit row — on any
-   * option row it toggles instead, so enter can never accidentally skip the
-   * checklist.
-   */
   protected override _shouldSubmit(): boolean {
     if (!this.multiple) {
       const option = this.visibleOptions()[this.optionCursor];
@@ -137,14 +109,12 @@ export class SelectComponent extends Prompt<string | string[]> {
     return false;
   }
 
-  /** Values that should render as chosen: the marked set, or the cursor for single. */
   selectedValues(): string[] {
     if (this.multiple) return orderedSelection(this.options, this.selectedSet);
     const value = selectValueAtCursor(this.visibleOptions(), this.optionCursor);
     return value === undefined ? [] : [value];
   }
 
-  /** The folded answer shown once the prompt resolves. */
   submitDisplay(): string {
     if (this.multiple) {
       const labels = this.options
@@ -194,7 +164,6 @@ export class SelectComponent extends Prompt<string | string[]> {
   }
 }
 
-/** Renders the active component by dispatching to the renderer for its mode. */
 function renderSelectComponent(
   self: SelectComponent,
   opts: { message: string; placeholder?: string; helpText?: string },
@@ -251,17 +220,6 @@ function renderSelectComponent(
   });
 }
 
-/**
- * Runs one select picker and resolves to the chosen value(s), or a clack cancel
- * symbol when the prompt is cancelled (the caller maps that to its own error).
- * Single-select returns the highlighted value, multi-select the marked set.
- *
- * Option values round-trip through opaque string keys so values of different
- * primitive types cannot collide. `attachGuard` wires
- * extra key handling (e.g. a two-stage quit guard) and supplies the live footer
- * note; `leadingRail` colors the leader rail white for the first prompt in a
- * sequence and green thereafter.
- */
 export async function runSelectComponent<T extends PromptValue>(input: {
   message: string;
   helpText?: string;

@@ -308,8 +308,6 @@ describe("createSlackFetchFile", () => {
     expect(result?.bytes.equals(Buffer.from([7]))).toBe(true);
     expect(await underApiBase("http://localhost:3000/files/F01/cat.png")).toBeNull();
     expect(await fetchFileFor()("http://localhost:3000/files/F01/cat.png")).toBeNull();
-    // `https://slack.com/api/` is the default base: it must not turn every
-    // `https://slack.com/…` link into a bot-token-authenticated download.
     expect(
       await fetchFileFor({ apiBaseUrl: "https://slack.com/api/" })(
         "https://slack.com/files/secret.png",
@@ -332,8 +330,6 @@ describe("createSlackFetchFile", () => {
       headers: { authorization: "Bearer xoxb-test-token" },
       signal: expect.any(AbortSignal),
     });
-    // A stand-in's api.fetch attaches that stand-in's credentials, and this URL
-    // arrives in an inbound payload.
     expect(apiFetch).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
@@ -384,7 +380,6 @@ describe("collectInboundFileParts", () => {
       ts: `${index + 1}.0`,
       ...message,
     }));
-    // The refreshed thread holds the triggering mention, as Slack returns it.
     if (messages.length > 0 && !messages.some((message) => message.ts === "9.0")) {
       messages.push({ isMe: false, raw: {}, text: "<@UBOT> what is this?", ts: "9.0" });
     }
@@ -461,15 +456,12 @@ describe("collectInboundFileParts", () => {
       policy: DEFAULT_UPLOAD_POLICY,
     });
 
-    // Messages 3-12 fall in the window; message 12 repeats F10, and the reply
-    // after the trigger isn't collected.
     expect(parts.map((part) => part.filename)).toEqual(
       ["F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10"].map((id) => `${id}.csv`),
     );
   });
 
   it("fetches the window ending at a trigger past the cached first page", async () => {
-    // The cache holds the thread's first 50 replies; the mention is reply 80.
     const thread = {
       recentMessages: Array.from({ length: 50 }, (_, index) => ({
         isMe: false,
@@ -497,7 +489,6 @@ describe("collectInboundFileParts", () => {
 
     expect(fetchThreadWindow).toHaveBeenCalledWith("80.0", 11);
     expect(parts.map((part) => part.filename)).toEqual(["F79.csv"]);
-    // A short first page holds the whole thread, so there's nothing to fetch.
     const shortThread = { recentMessages: [], refresh: vi.fn() } as never;
     const notCalled = vi.fn(async () => undefined);
     await expect(
@@ -509,7 +500,6 @@ describe("collectInboundFileParts", () => {
       }),
     ).resolves.toEqual([]);
     expect(notCalled).not.toHaveBeenCalled();
-    // Past the paging limit, the window is unknown and nothing is collected.
     await expect(
       collect({
         fetchThreadWindow: async () => undefined,

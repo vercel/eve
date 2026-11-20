@@ -29,7 +29,7 @@
   "dependencies": {
     "@vercel/connect": "2.9.3",
     "ai": "^7.0.173",
-    "eve": "^1.0.0",
+    "eve": "1.2.0",
     "just-bash": "3.6.0",
     "pg": "^8.23.1",
     "zod": "4.6.7"
@@ -49,5 +49,6 @@
   },
   "engines": {
     "node": "24.x"
-  }
+  },
+  "packageManager": "pnpm@12.21.0"
 }

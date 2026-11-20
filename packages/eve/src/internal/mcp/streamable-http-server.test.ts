@@ -389,7 +389,6 @@ describe("stateless MCP Streamable HTTP server", () => {
       expect(message.length).toBeLessThanOrEqual(4_096);
       expect(message).toContain("validation details truncated");
       expect(body.result.content[0]?.text).toBe(message);
-      // JSON escaping and both compatibility fields still have a fixed wire bound.
       expect(JSON.stringify(body).length).toBeLessThan(50_000);
       expect(call).not.toHaveBeenCalled();
     },
@@ -687,14 +686,11 @@ describe("stateless MCP Streamable HTTP server", () => {
     const { call, handle } = server();
     const padding = "x".repeat(MCP_REQUEST_BODY_MAX_BYTES + 1);
     const oversized = [
-      // Legacy-era request without a protocol version header.
       request({ id: 1, jsonrpc: "2.0", method: "tools/list", params: { padding } }),
-      // Legacy-era request that declares the 2025 header.
       request(
         { id: 2, jsonrpc: "2.0", method: "tools/list", params: { padding } },
         { "mcp-protocol-version": MCP_LEGACY_PROTOCOL_VERSION },
       ),
-      // Modern-era request with a complete envelope and header.
       modernRequest({
         id: 3,
         jsonrpc: "2.0",

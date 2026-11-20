@@ -7,30 +7,21 @@ import type {
   RenderedOption,
 } from "#internal/testing/channel-conformance/harness.js";
 
-/** An open-ended question's drawer: a text field and no options. */
 const FREEFORM_FOOTER = "Enter submit · Esc dismiss";
-/** Each drawer's footer: a question's, a tool approval's, then an open-ended question's. */
 const DRAWER_FOOTERS = [
   "↑/↓ move · enter to select · esc to dismiss",
   "y yes · n no · Ctrl-C cancel",
   FREEFORM_FOOTER,
 ] as const;
-/** More drawers than any rule leaves pending at once. */
 const MAX_DRAWERS = 5;
 const FREEFORM_ROW = "Type your own answer…";
 
-/**
- * Drives the real `eve dev` TUI on a mock terminal. It reads only the screen
- * and acts only through keys, as a person at the terminal would.
- */
 export function tuiDriver(): ClientDriver {
   return {
     name: "tui",
-    // A local terminal shows only the person at it.
     capabilities: ["buttons", "text-replies"],
     surface: "private",
     async open(host, wait) {
-      // Wide enough that no reply wraps, so each one stays on one screen row.
       const screen = new MockScreen({ columns: 1000, rows: 60 });
       const keyboard = new MockUserInput();
       const renderer = new TerminalRenderer({
@@ -46,7 +37,6 @@ export function tuiDriver(): ClientDriver {
       }).run();
       const describe = () => `Screen:\n${screen.snapshot()}`;
       try {
-        // Surfaces a runner that fails during startup instead of waiting out the timeout.
         await Promise.race([
           wait("the composer", () => (composerOpen(screen) ? true : undefined), describe),
           run.then(() => {
@@ -54,7 +44,6 @@ export function tuiDriver(): ClientDriver {
           }),
         ]);
       } catch (error) {
-        // The caller only gets `close()` once `open()` resolves, so stop the runner here.
         renderer.requestInterrupt();
         await run.catch(() => {});
         throw error;
@@ -62,9 +51,6 @@ export function tuiDriver(): ClientDriver {
 
       return {
         async say(text) {
-          // A drawer holds the keyboard until Esc hands it back to the composer.
-          // Dismissing one shows the next pending request's, if any.
-          // Esc in the composer cancels the turn, so wait out each repaint first.
           for (let drawers = 0; drawers < MAX_DRAWERS && drawerOpen(screen); drawers += 1) {
             const before = screen.snapshot();
             keyboard.send("\x1b");
@@ -75,7 +61,6 @@ export function tuiDriver(): ClientDriver {
             );
           }
           await wait("the composer", () => (composerOpen(screen) ? true : undefined), describe);
-          // A typed newline submits, so multi-line text arrives as a bracketed paste.
           keyboard.send(text.includes("\n") ? `\x1b[200~${text}\x1b[201~` : text);
           keyboard.enter();
         },
@@ -89,13 +74,10 @@ export function tuiDriver(): ClientDriver {
           return { options: readOptions(screen, keyboard, prompt), prompt };
         },
         async press(option) {
-          // `waitForQuestion` leaves the cursor on the first option.
           for (let row = 0; row < (option.handle as number); row += 1) keyboard.down();
           keyboard.enter();
         },
         replies: () => readReplies(screen.snapshot()),
-        // The TUI asks in a drawer rather than a posted message, so an answered
-        // prompt shows no options once its drawer closes.
         shownPrompt: (prompt) => ({
           id: prompt,
           options:
@@ -113,7 +95,6 @@ export function tuiDriver(): ClientDriver {
   };
 }
 
-/** Each assistant reply: a `▲ ` row and the indented rows its text continues on. */
 function readReplies(snapshot: string): string[] {
   const replies: string[] = [];
   let reply: string[] | undefined;
@@ -140,13 +121,6 @@ function composerOpen(screen: MockScreen): boolean {
   return !drawerOpen(screen) && /^❯/mu.test(screen.snapshot());
 }
 
-/**
- * A drawer draws only the row under its cursor at full weight; every other
- * option, each description, and the freeform row are dim. A person reads the
- * options by moving the cursor through them, and so does the driver, until the
- * cursor wraps to the first option or stops at the last. The TUI repaints
- * synchronously on each key, so the screen is current right after one.
- */
 function readOptions(screen: MockScreen, keyboard: MockUserInput, prompt: string) {
   const options: RenderedOption[] = [];
   const first = focusedRow(screen, prompt);
@@ -158,14 +132,12 @@ function readOptions(screen: MockScreen, keyboard: MockUserInput, prompt: string
     if (next === undefined || next.line === row.line || next.line === first?.line) break;
     row = next;
   }
-  // Leave the cursor on the first option, as a fresh drawer has it.
   for (let moves = 0; moves < 10 && focusedRow(screen, prompt)?.line !== first?.line; moves++) {
     keyboard.up();
   }
   return options;
 }
 
-/** The full-weight row between `prompt` and its drawer's footer: the one under the cursor. */
 function focusedRow(
   screen: MockScreen,
   prompt: string,

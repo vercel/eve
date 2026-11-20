@@ -21,14 +21,8 @@ export type DynamicToolResult = DynamicToolEntry | DynamicToolSet | null;
 /** `defineDynamic()` for `agent/tools/`: returns one tool, a map of them, or `null`. */
 export const defineDynamic = defineDynamicDefinition as DefineDynamic<DynamicToolResult>;
 
-/**
- * Symbol-based brand stamped by `defineTool` on every entry. Invisible
- * in IntelliSense, checked at runtime to enforce the wrapper and to
- * distinguish a single entry from a map of entries.
- */
 export const TOOL_BRAND = Symbol.for("eve:tool-brand");
 
-/** True when `value` carries the `defineTool` brand. */
 export function isBrandedToolEntry(value: unknown): boolean {
   return (
     typeof value === "object" &&

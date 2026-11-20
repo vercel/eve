@@ -12,8 +12,6 @@ import {
   createFixedMountScopePlugin,
 } from "#internal/bundler/extension-scope-plugin.js";
 
-// Externalizes the framework barrels so the temp module bundles without eve
-// installed in the scratch dir — mirrors how the real loader treats them.
 const externalizeEvePlugin = {
   name: "test-externalize-eve",
   resolveId(source: string) {
@@ -145,10 +143,37 @@ describe("extension-scope plugin (bundled)", () => {
     ).rejects.toThrow(/multiple extension mounts/);
   });
 
-  afterAll(() => {
-    // Scratch dirs live under the OS temp root; leaving them is harmless and
-    // avoids racing the bundler's async file handles on cleanup.
+  it("binds an application import to the application's mount over another extension's nested mount", async () => {
+    const { sourceRoot } = scratchModule("export const value = 1;");
+    const { sourceRoot: hostRoot } = scratchModule("export const host = 1;");
+    const entry = join(sourceRoot, "..", "consumer.ts");
+    writeFileSync(entry, 'export { value } from "./extension/tools/budget.ts";');
+    const code = await bundle(entry, [
+      createExtensionMountPlugin([
+        {
+          mountId: "extensions/code",
+          sourceRoot,
+          packageName: "@acme/code",
+          specifier: "@acme/code",
+        },
+        {
+          mountId: "extensions/host",
+          sourceRoot: hostRoot,
+          packageName: "@acme/host",
+          specifier: "@acme/host",
+        },
+        {
+          mountId: "extensions/host/subagents/worker/extensions/code",
+          sourceRoot,
+          packageName: "@acme/code",
+          specifier: "@acme/code",
+        },
+      ]),
+    ]);
+    expect((await import(`data:text/javascript,${encodeURIComponent(code)}`)).value).toBe(1);
   });
+
+  afterAll(() => {});
 
   it("bakes the package namespace into an extension-owned module's defineState", async () => {
     const { modulePath, sourceRoot } = scratchModule(STATE_MODULE);
@@ -176,7 +201,6 @@ describe("extension-scope plugin (bundled)", () => {
 
   it("does not scope when there are no extensions", async () => {
     const { modulePath, sourceRoot } = scratchModule(STATE_MODULE);
-    // createExtensionScopePlugin returns null for an empty scope set; filter it.
     const plugins = [createExtensionScopePlugin([]), externalizeEvePlugin].filter(
       (plugin) => plugin !== null,
     );
@@ -186,8 +210,6 @@ describe("extension-scope plugin (bundled)", () => {
   });
 
   it("bakes the namespace via the fixed-namespace (dev per-module) plugin", async () => {
-    // The dev loader path: the plugin is handed the namespace directly, with no
-    // filesystem matching (which is unreliable under workspace symlinks).
     const { modulePath } = scratchModule(STATE_MODULE);
     const code = await bundle(modulePath, [
       createFixedMountScopePlugin("extensions/crm"),

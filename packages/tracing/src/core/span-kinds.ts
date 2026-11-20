@@ -5,6 +5,7 @@ import {
   namingAttributes,
   runtimeContextAttributes,
 } from "./attributes.js";
+/** Returns the invocation span name for an agent: `invoke_agent <name>`, or `invoke_agent` when the agent is anonymous. */
 export const invocationName = (name?: string) =>
   name === undefined ? "invoke_agent" : `invoke_agent ${name}`;
 const modelName = (name: string) => `chat ${name}`;
@@ -153,7 +154,6 @@ const kinds: { [K in ScopeData["type"]]: Kind<K> } = {
     },
   },
   model: {
-    // A turn makes model calls outside its steps, such as a context compaction's summary request.
     parents: ["step", "activation"],
     prepare({ options }, context) {
       const inputMessages =
@@ -249,7 +249,6 @@ const kinds: { [K in ScopeData["type"]]: Kind<K> } = {
         attributes: {
           ...context.attributes,
           ...frameworkAttributes(context.identity.framework),
-          // A wait the turn holds belongs to no step.
           ...(options.callId === undefined
             ? { "agent.turn.id": context.attempt.turnId }
             : attemptAttributes(context)),
@@ -283,7 +282,6 @@ const kinds: { [K in ScopeData["type"]]: Kind<K> } = {
   decision: {
     parents: ["activation", "step", "tool"],
     prepare({ options }, context) {
-      // A decision made outside any run has no run identity to record.
       const inRun = context.identity.runId !== "";
       return {
         name: decisionName(options.modelId),
@@ -291,8 +289,6 @@ const kinds: { [K in ScopeData["type"]]: Kind<K> } = {
         attributes: {
           ...(inRun ? context.attributes : undefined),
           ...namingAttributes(decisionName(options.modelId), "decision"),
-          // The turn's own span is written when the turn ends; the turn ID lets a running turn
-          // claim a decision made before its first step.
           "agent.turn.id": inRun ? context.identity.turnId || undefined : undefined,
           "agent.decision.purpose": options.purpose,
           "gen_ai.agent.name": context.identity.agentName,
@@ -303,7 +299,6 @@ const kinds: { [K in ScopeData["type"]]: Kind<K> } = {
       };
     },
     complete(span, _data, result, context) {
-      // Per-question results, refusals included, are opt-in output content.
       if (!context.capture.recordOutputs || !Array.isArray(result.output) || !result.output.length)
         return;
       applyAttributes(span, {
@@ -379,7 +374,6 @@ export function completeScope(
   serializer: ContentSerializer,
 ): void {
   const outcome = result.outcome ?? (result.failed ? "failed" : "completed");
-  // A failure is always recorded; otherwise an unknown outcome leaves the span without one.
   const known = result.outcomeUnknown !== true || result.failed === true;
   if ((data.type === "activation" || data.type === "approval") && known)
     applyAttributes(span, {

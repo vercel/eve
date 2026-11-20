@@ -1,11 +1,3 @@
-/**
- * Pure frame renderer for the `/traces` conversation viewer: state in,
- * styled rows out. The layout is a header (trace identity), a body (the
- * conversation cards, plus the optional details drawer on the right), and a
- * footer (key hints + position/notice). Every row is clipped to the
- * terminal width so the alt-screen painter can write rows verbatim.
- */
-
 import { formatElapsed } from "#cli/format-elapsed.js";
 import {
   clipVisible,
@@ -30,22 +22,16 @@ import {
 } from "./trace-viewer-state.js";
 
 const HEADER_ROWS = TRACE_VIEWER_HEADER_ROWS;
-/** Footer: padding row, key hints, and the position/notice line. */
 const FOOTER_ROWS = 3;
-/** The body always keeps at least this many columns. */
 const BODY_MIN_WIDTH = 20;
 const PANEL_MIN_WIDTH = 20;
 const PANEL_MAX_WIDTH = 64;
 
 interface TraceViewerFrame {
   readonly rows: readonly string[];
-  /** Detail rows the panel has for the selected span — fed back into key handling. */
   readonly panelTotalRows: number;
-  /** Body rows available to the conversation. */
   readonly timelineViewportRows: number;
-  /** Body rows available to the panel. */
   readonly panelViewportRows: number;
-  /** Column width the body renders at (expandability is width-dependent). */
   readonly contentWidth: number;
 }
 
@@ -53,16 +39,9 @@ interface RenderTraceViewerOptions {
   readonly width: number;
   readonly height: number;
   readonly theme: Theme;
-  /** The viewed trace received spans recently — the window extends to "now". */
   readonly activeWindowEndNs?: bigint;
-  /** Tracing is disabled via `EVE_TRACES=off` (empty-state copy). */
   readonly tracingDisabled?: boolean;
-  /** Transient confirmation shown in the header's top-right corner. */
   readonly toast?: string;
-  /**
-   * Card surfaces derived from the terminal's background (OSC 11 probe).
-   * Absent when the terminal never answered — cards fall back to rails.
-   */
   readonly surfaces?: TraceViewerSurfaces;
 }
 
@@ -110,9 +89,6 @@ export function renderTraceViewer(
     overlayToast(rows, options.toast, width, theme, options.surfaces);
   }
 
-  // Rows render on the terminal's own background — the alt-screen painter
-  // erases the screen before each frame, so no canvas fill is needed and the
-  // viewer follows the user's palette like the rest of the TUI.
   return {
     rows,
     panelTotalRows: detailLines.length,
@@ -122,14 +98,6 @@ export function renderTraceViewer(
   };
 }
 
-/**
- * Text styles for the viewer's chrome (header, footer controls, drawer,
- * empty states). Once the terminal has answered the background probe, both
- * styles anchor to the probed background — truecolor white-on-dark /
- * black-on-light primary and a truecolor grey muted — instead of trusting
- * how the terminal styles its default foreground. Without a reply they fall
- * back to the theme's plain emphasis.
- */
 function chromeStyles(
   theme: Theme,
   surfaces: TraceViewerSurfaces | undefined,
@@ -141,13 +109,6 @@ function chromeStyles(
   };
 }
 
-/**
- * The toast floats over the frame's top-right corner as a small elevated
- * card: a bright half-block bar down its left edge, a padding row above and
- * below the message, and one column of margin on the right. When card
- * surfaces are available (OSC 11 answered) the toast sits on the body band;
- * otherwise the bar alone carries it.
- */
 function overlayToast(
   rows: string[],
   message: string,
@@ -161,7 +122,6 @@ function overlayToast(
   const bar = theme.unicode ? "▌" : theme.glyph.rule;
   const active = theme.color ? surfaces : undefined;
   const surface = active === undefined ? "" : active.body;
-  // Surface-matched primary keeps the toast legible on light backgrounds.
   const primary = active?.primaryText ?? theme.colors.white;
   const close = theme.color ? "\x1b[0m" : "";
   const lines = [
@@ -169,7 +129,6 @@ function overlayToast(
     `${surface}${primary(bar)}${primary(inner)}${close}`,
     `${surface}${primary(bar)}${" ".repeat(innerWidth)}${close}`,
   ];
-  // Below the title row, so the trace identity stays readable.
   for (const [offset, line] of lines.entries()) {
     const index = HEADER_ROWS - 1 + offset;
     if (index >= rows.length) break;
@@ -177,7 +136,6 @@ function overlayToast(
   }
 }
 
-/** Splices `segment` over the right end of `row`, keeping `margin` empty columns. */
 function overlayRight(row: string, segment: string, width: number, margin: number): string {
   const cut = Math.max(0, width - margin - visibleLength(segment));
   const rowWidth = visibleLength(row);
@@ -185,11 +143,6 @@ function overlayRight(row: string, segment: string, width: number, margin: numbe
   return `${sliceVisible(padded, cut)}\x1b[0m${segment}`;
 }
 
-/** Renders the attributes panel body for one span (name, facts, attributes). */
-/**
- * Payload attributes the conversation cards already show; the drawer skips
- * them in conversation mode so it stays metadata-focused.
- */
 const CONVERSATION_CONTENT_KEYS: ReadonlySet<string> = new Set([
   "gen_ai.input.messages",
   "gen_ai.system_instructions",
@@ -240,7 +193,6 @@ export function renderSpanDetail(
       const block = formatAttributeContent(key, span.attributes[key], colors.dim, innerWidth - 2);
       const cleanKey = stripTerminalControls(key);
       if (block.length === 1) {
-        // Scalars stay beside the key; multi-line content nests beneath it.
         lines.push(...wrapVisibleLine(`${muted(cleanKey)} ${block[0]}`, innerWidth));
       } else {
         lines.push(muted(cleanKey));
@@ -282,18 +234,14 @@ function renderHeader(state: TraceViewerState, options: RenderTraceViewerOptions
     state.traces.length === 0 ? "" : muted(`[${state.traceIndex + 1}/${state.traces.length}]`);
   const live = options.activeWindowEndNs !== undefined ? colors.green("● live") : "";
   const right = [live, position].filter((part) => part.length > 0).join(" ");
-  // The badge keeps its room: the title (full session id and all) clips first.
   const header = joinRight(
     ` ${clipVisible(title, Math.max(0, width - visibleLength(right) - 2))}`,
     right,
     width,
   );
-  // Padding rows above and below keep the title off the terminal edge
-  // and separated from the cards.
   return ["", clipVisible(header, width), ""];
 }
 
-/** The conversation flow: user/assistant/tool cards in turn order. */
 function renderConversation(
   state: TraceViewerState,
   options: RenderTraceViewerOptions,
@@ -308,8 +256,6 @@ function renderConversation(
       ),
     ];
   }
-  // Render all cards, then apply the line-level scroll offset so expanded
-  // cards taller than the viewport can be scrolled through to the end.
   const allLines = conversationLines(state, width, theme, options.surfaces);
   const visible = allLines.slice(state.scrollRow, state.scrollRow + bodyRows);
   if (state.textSelection === undefined || state.textSelection.region !== "conversation") {
@@ -343,12 +289,6 @@ function conversationLines(
   return allLines;
 }
 
-/**
- * The drawer's display lines for the selected span: one row of top padding
- * and one column of side padding around the span detail. A panel that
- * doesn't fit (very narrow terminal) isn't modeled as open — otherwise key
- * handling would scroll content nobody can see.
- */
 function panelDetailLines(
   state: TraceViewerState,
   panelWidth: number,
@@ -366,10 +306,6 @@ function panelDetailLines(
   ];
 }
 
-/**
- * Plain text covered by a drag selection over the conversation, extracted
- * from the same rendered lines the user saw.
- */
 export function conversationSelectionText(
   state: TraceViewerState,
   width: number,
@@ -380,12 +316,6 @@ export function conversationSelectionText(
   return selectionText(conversationLines(state, width, theme, surfaces), selection);
 }
 
-/**
- * Plain text covered by a drag selection over the details drawer, extracted
- * from the same detail lines the frame painted. `totalWidth` is the full
- * terminal width — the drawer's width derives from it exactly as rendering
- * does, so columns map to the same cells the user selected.
- */
 export function panelSelectionText(
   state: TraceViewerState,
   totalWidth: number,
@@ -396,11 +326,6 @@ export function panelSelectionText(
   return selectionText(panelDetailLines(state, panelWidth, theme), selection);
 }
 
-/**
- * Slices the selected cells out of rendered lines: partial first/last lines
- * honor the columns, middle lines contribute in full, and each line loses
- * its trailing padding.
- */
 function selectionText(lines: readonly string[], selection: TextSelectionRange): string {
   const { start, end } = orderedTextSelection(selection);
   const parts: string[] = [];
@@ -415,7 +340,6 @@ function selectionText(lines: readonly string[], selection: TextSelectionRange):
   return parts.join("\n");
 }
 
-/** Paints the selected cells of one visible row in reverse video. */
 function highlightSelection(
   row: string,
   line: number,
@@ -426,8 +350,6 @@ function highlightSelection(
   if (line < start.line || line > end.line) return row;
   const from = line === start.line ? start.column : 0;
   const to = line === end.line ? end.column + 1 : width;
-  // Selection can extend past a row's painted cells; pad so the highlight
-  // shows the full extent the copy will cover.
   const rowWidth = visibleLength(row);
   const padded = rowWidth < to ? row + " ".repeat(to - rowWidth) : row;
   const prefix = sliceVisible(padded, from);
@@ -435,8 +357,6 @@ function highlightSelection(
   const middle = withSelection.slice(prefix.length);
   const suffix = padded.slice(withSelection.length);
   if (middle.length === 0) return row;
-  // Re-assert reverse video after any embedded reset so a card's internal
-  // style changes cannot end the highlight early.
   const inverted = middle.replaceAll("\x1b[0m", "\x1b[0m\x1b[7m");
   return `${prefix}\x1b[7m${inverted}\x1b[27m${suffix}`;
 }
@@ -457,7 +377,6 @@ function renderFooter(
   const position = itemCount === 0 ? "" : muted(`item ${state.selectedRow + 1}/${itemCount}`);
   const notice = state.notice === undefined ? "" : colors.yellow(state.notice);
   const status = [notice, position].filter((part) => part.length > 0).join(muted(" · "));
-  // A padding row separates the cards from the hints.
   return [
     "",
     clipVisible(` ${muted(hints)}`, width),
@@ -478,7 +397,6 @@ function renderEmptyState(
   return center(bodyRows, theme.colors.bold(primary(first)), muted(second));
 }
 
-/** Fills a `bodyRows`-tall body, centering `lines` as a block within it. */
 function center(bodyRows: number, ...lines: string[]): string[] {
   const rows = Array.from({ length: bodyRows }, () => "");
   const top = Math.max(0, Math.floor(bodyRows / 2) - 1);
@@ -488,10 +406,6 @@ function center(bodyRows: number, ...lines: string[]): string[] {
   return rows;
 }
 
-/**
- * Joins one conversation row to its drawer row. The single separating column
- * carries no divider: the blank gap already separates the two.
- */
 function joinPanels(left: string, leftWidth: number, right: string, width: number): string {
   const rightWidth = Math.max(0, width - leftWidth - 1);
   return `${padTo(left, leftWidth)} ${clipVisible(right, rightWidth)}`;

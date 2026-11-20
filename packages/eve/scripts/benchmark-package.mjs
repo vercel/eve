@@ -4,31 +4,11 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 
-// How big eve is to download and install. Packs the built package directory
-// the way pkg.eve.dev does (`pnpm pack`, which stages the package), then, per
-// run, installs that tarball into an empty project with npm and an empty
-// cache, the way `npm install eve` or `npx eve init` starts for someone new.
-// Each run is cold: the install time includes downloading every dependency.
-//
-// Sizes are apparent sizes (the sum of file lengths, not disk blocks), so
-// they don't depend on the runner's filesystem. The tarball and unpacked
-// sizes are eve alone and exact per commit. The install sizes are eve plus
-// every dependency and required peer npm installs with it, resolved from the
-// registry on the day the job runs: a dependency release (a new `ai` 7.x, say)
-// moves them with no eve change, and a release backfill installs today's
-// dependencies, not the ones the release shipped with. Each run line lists
-// every installed `name@version`, so a jump can be traced to eve or to a
-// dependency.
-//
-// One JSON object per line: a header, then one result per run.
-//
-// Usage: node packages/eve/scripts/benchmark-package.mjs <package-dir> [runs]
 const execFile = promisify(execFileCallback);
 const packageRoot = resolve(process.argv[2] ?? "packages/eve");
 const runs = Number(process.argv[3] ?? 3);
 if (!Number.isInteger(runs) || runs < 1) throw new Error("Expected a positive run count.");
 const INSTALL_TIMEOUT_MS = 5 * 60_000;
-/** Dependencies listed by installed size in each result, for finding what to cut. */
 const LARGEST = 15;
 
 const root = await mkdtemp(join(tmpdir(), "eve-package-benchmark-"));
@@ -110,12 +90,10 @@ for (let run = 1; run <= runs; run++) {
       installed: packages.map(({ name, version }) => `${name}@${version}`).sort(),
     }),
   );
-  // The next run starts from nothing; only the tarball is kept.
   await rm(project, { recursive: true, force: true });
   await rm(join(root, `npm-cache-${run}`), { recursive: true, force: true });
 }
 
-// A summary for reading locally; records read only the per-run lines.
 installTimes.sort((a, b) => a - b);
 console.log(
   JSON.stringify({
@@ -126,11 +104,6 @@ console.log(
   }),
 );
 
-/**
- * Apparent size of every regular file under `dir`. Symlinks (`.bin` entries)
- * are not followed. With `ownOnly`, nested `node_modules` are left out, so a
- * package's size excludes the copies of dependencies npm nested inside it.
- */
 async function treeSize(dir, ownOnly = false) {
   let bytes = 0;
   let files = 0;
@@ -149,7 +122,6 @@ async function treeSize(dir, ownOnly = false) {
   return { bytes, files };
 }
 
-/** Every installed package (a directory with a package.json) and its version, nested copies included. */
 async function installedPackages(modules) {
   const found = [];
   const visit = async (dir) => {

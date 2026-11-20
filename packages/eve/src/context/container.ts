@@ -5,33 +5,13 @@ import { LocalDevRequestKey, type LocalDevRequestProvenance } from "#context/key
 
 const EVE_CONTEXT_STORAGE_KEY = Symbol.for("eve.context-storage");
 
-/**
- * Keyed value container that backs one eve execution scope.
- *
- * Durable values are serialized across workflow steps and turns. Virtual
- * values are rebuilt each step by context providers and are never
- * serialized.
- *
- * Extends {@link ContextAccessor} with the `entries()` iterator used by
- * the serialization layer.
- */
 export interface AlsContext extends ContextAccessor {
-  /** Verified originating-client metadata, inherited only for the dev-TUI hint. */
   readonly localDevRequest?: LocalDevRequestProvenance;
-  /** Removes a durable or step-local value from the context. */
   delete<T>(key: ContextKey<T>): boolean;
-  /**
-   * Iterates all durable key/value pairs currently stored in the context.
-   * Used by the serialization layer to persist context at step boundaries.
-   */
   entries(): Iterable<readonly [ContextKey<unknown>, unknown]>;
-  /** Stores a step-local value that shadows the durable value and is never serialized. */
   setVirtualContext<T>(key: ContextKey<T>, value: T): void;
 }
 
-/**
- * Default mutable implementation of {@link AlsContext}.
- */
 export class ContextContainer implements AlsContext {
   private readonly _durableValues = new Map<string, unknown>();
   private readonly _virtualValues = new Map<string, unknown>();
@@ -90,22 +70,10 @@ export class ContextContainer implements AlsContext {
     return deletedDurable || deletedVirtual;
   }
 
-  /**
-   * Clears all step-local provider values from the context.
-   *
-   * The runtime calls this before rebuilding context providers for a new
-   * step.
-   */
   clearVirtualContext(): void {
     this._virtualValues.clear();
   }
 
-  /**
-   * Stores a step-local provider value for one key.
-   *
-   * Virtual values shadow durable values for the lifetime of the current
-   * step and are excluded from serialization.
-   */
   setVirtualContext<T>(key: ContextKey<T>, value: T): void {
     this._virtualValues.set(key.name, value);
   }
@@ -135,27 +103,16 @@ if (globalContextStorage[EVE_CONTEXT_STORAGE_KEY] === undefined) {
   globalContextStorage[EVE_CONTEXT_STORAGE_KEY] = new AsyncLocalStorage<ContextScope>();
 }
 
-/**
- * Process-wide AsyncLocalStorage used by every eve module copy in the current
- * runtime.
- *
- * Nitro step bundles can inline parts of eve while authored modules still
- * import `eve/*` from disk. Backing the storage with a global
- * symbol keeps those copies on the same ALS instance so authored tools,
- * model callbacks, and step code observe one unified eve context.
- */
 const storage = globalContextStorage[EVE_CONTEXT_STORAGE_KEY];
 export const contextStorage = {
   getStore: (): AlsContext | undefined => storage.getStore()?.context,
   run: <T>(context: AlsContext, fn: () => T): T => storage.run({ context }, fn),
 };
 
-/** Reads branch-local metadata without changing the identity of the active context. */
 export function contextScopeValue<T>(key: symbol): T | undefined {
   return storage.getStore()?.values?.get(key) as T | undefined;
 }
 
-/** Runs one async branch with metadata on the existing context storage, not another ALS. */
 export function withContextScopeValue<T>(key: symbol, value: unknown, fn: () => T): T {
   const parent = storage.getStore();
   const values = new Map(parent?.values);
@@ -163,9 +120,6 @@ export function withContextScopeValue<T>(key: symbol, value: unknown, fn: () => 
   return storage.run({ context: parent?.context, values }, fn);
 }
 
-/**
- * Returns the active context, throwing when called outside a managed scope.
- */
 export function loadContext(): AlsContext {
   const ctx = contextStorage.getStore();
   if (ctx === undefined) {

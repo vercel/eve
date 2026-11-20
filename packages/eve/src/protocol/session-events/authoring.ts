@@ -1,6 +1,5 @@
 import type { FactType, ProgressType } from "./catalog.js";
 
-// Opt in here: adding a protocol record does not automatically expose a new authoring hook.
 export const authoringEventTypes = [
   "session.started",
   "session.ended",

@@ -117,7 +117,6 @@ function approvalPress(): Request {
   );
 }
 
-/** Posts `request` to the channel's webhook and drains every task it hands to `waitUntil`. */
 async function firePost(
   channel: unknown,
   request: Request,
@@ -132,7 +131,6 @@ async function firePost(
   });
 }
 
-/** Like {@link firePost}, with the channel operations the webhook delivers through. */
 async function postWith(
   channel: unknown,
   request: Request,
@@ -180,7 +178,6 @@ describe("slackChannel ephemeral threading", () => {
       },
     });
 
-  // #5012: Slack only shows a threaded ephemeral once the thread has a reply.
   it("omits thread_ts from postEphemeral for a top-level mention", async () => {
     await firePost(postEphemeralOnMention(), mention({ ts: "1700000000.000001" }));
 
@@ -213,7 +210,6 @@ describe("slackChannel inactive prompt press", () => {
 
     const [update] = slackCalls("chat.update");
     expect(update).toMatchObject({ text: "No longer active", ts: "1700000000.000010" });
-    // Nobody's answer was taken, so the retired card credits nobody.
     const shown = JSON.stringify(update?.blocks);
     expect(shown).toContain("No longer active");
     expect(shown).not.toContain("U_APPROVER");
@@ -231,7 +227,6 @@ describe("slackChannel ephemeral request press", () => {
   const RESPONSE_URL = "https://hooks.slack.com/actions/T01/1/abc";
   const route = "route:C01:1700000000.000001:";
 
-  /** A press on an ephemeral card: Slack sends no `message`, only its container. */
   function ephemeralPress(action: Record<string, unknown>, { inThread = true } = {}): Request {
     const payload = {
       actions: [action],
@@ -271,7 +266,6 @@ describe("slackChannel ephemeral request press", () => {
       name: "a picked option",
     },
     {
-      // Keeping the preselected option submits it with the select's **Use Acme** button.
       action: {
         action_id: `${ANSWER_ACTION_PREFIX}${route}q_team:button:0`,
         block_id: "eve_use:q_team",
@@ -299,7 +293,6 @@ describe("slackChannel ephemeral request press", () => {
     expect(JSON.stringify(replaced?.blocks)).toContain("Acme");
   });
 
-  /** Opens the card's modal with a press, then submits "The billing migration" through it. */
   async function answerInModal(
     channel: unknown,
     send: ReturnType<typeof vi.fn>,
@@ -342,7 +335,6 @@ describe("slackChannel ephemeral request press", () => {
     );
   }
 
-  // The card still carries the session's route, which names the thread it answers, not where it shows.
   it.each([
     {
       answer: (channel: unknown, send: ReturnType<typeof vi.fn>) =>
@@ -471,7 +463,6 @@ describe("slackChannel messageContext.users", () => {
       getStreamTailIndex: vi.fn(),
       resolveContinuation: vi.fn(),
     };
-    // The real operations, so a layer that drops the mark between the webhook and the runtime fails.
     const operations = createChannelOperations<SlackChannelState>({
       adapter: { kind: "slack" },
       channelName: "slack",
@@ -483,7 +474,6 @@ describe("slackChannel messageContext.users", () => {
     expect(runtime.createSession).toHaveBeenCalledWith(expect.objectContaining(thread));
     expect(runtime.dispatchContinuation).not.toHaveBeenCalled();
 
-    // A reply's thread may have a session already, so the send looks for it first.
     await postWith(
       channel,
       mention({ ts: "1700000000.000002", threadTs: "1700000000.000001" }),
@@ -833,7 +823,6 @@ describe("slackChannel message status and guidance", () => {
       send,
       noSession,
     );
-    // An unmentioned edit to the root of the thread the agent serves.
     const root = {
       text: "Who can take the rollback?",
       thread_ts: rootTs,
@@ -877,9 +866,6 @@ describe("slackChannel message status and guidance", () => {
     expect(slackCalls("assistant.threads.setStatus")).toEqual([]);
   });
 
-  // Each step is followed by the thread statuses it set. Mentions are acknowledged before their
-  // hook runs, so `deferred` can only keep the rest of the turn quiet. A `hidden` tool sets
-  // `label: false`: it shows no status and doesn't end a deferred turn's quiet.
   it.each<{
     name: string;
     request: () => Request;
@@ -897,8 +883,7 @@ describe("slackChannel message status and guidance", () => {
       name: "immediate reply",
       request: threadReply,
       status: "immediate",
-      trace:
-        "post:Thinking... turn:Thinking... model:Thinking... tool:Get weather model:Get weather",
+      trace: "post:Thinking... turn:Thinking... model tool:Get weather model:Get weather",
     },
     {
       name: "deferred mention",
@@ -925,7 +910,7 @@ describe("slackChannel message status and guidance", () => {
       request: threadReply,
       status: "immediate",
       steps: ["turn", "model", "hidden", "model"],
-      trace: "post:Thinking... turn:Thinking... model:Thinking... hidden model:Thinking...",
+      trace: "post:Thinking... turn:Thinking... model hidden model:Thinking...",
     },
   ])("$name", async ({ request, status, steps = ["turn", "model", "tool", "model"], trace }) => {
     const edits: unknown[] = [];
@@ -978,6 +963,44 @@ describe("slackChannel message status and guidance", () => {
 
     expect(send.mock.calls[0]![1]).toMatchObject({ turnPolicy });
   });
+
+  it("writes a turn's status without holding the turn, and posts the reply after it", async () => {
+    const slack = Promise.withResolvers<void>();
+    const answer = fetchMock.getMockImplementation() as (
+      request: string | URL | Request,
+      init?: RequestInit,
+    ) => Promise<Response>;
+    fetchMock.mockImplementation(async (request: string | URL | Request, init?: RequestInit) => {
+      if (String(request).endsWith("assistant.threads.setStatus")) await slack.promise;
+      return answer(request, init);
+    });
+    const background: Promise<unknown>[] = [];
+    const harness = slackRenderingHarness(
+      slackChannel({ credentials: { botToken: "xoxb-test" } }),
+      { channelId: "C01", teamId: "T01", threadTs: "1700000000.000001" },
+      { waitUntil: (promise) => void background.push(promise) },
+    );
+    const operations = () =>
+      fetchMock.mock.calls
+        .map(([request]) => String(request).replace("https://slack.com/api/", ""))
+        .filter((operation) => operation !== "chat.getPermalink");
+
+    await harness.step("turn");
+    await harness.step("model");
+    expect(background).toHaveLength(2);
+    const replied = harness.event({
+      type: "content.completed",
+      data: { kind: "text", phase: "reply", value: "Sunny.", runId: "r1", partId: "p1" },
+      scope: { runId: "r1", turnId: "t1" },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(operations()).toEqual(["assistant.threads.setStatus"]);
+    slack.resolve();
+    await replied;
+    await Promise.all(background);
+
+    expect(operations()).toEqual(["assistant.threads.setStatus", "chat.postMessage"]);
+  });
 });
 
 describe("slackChannel message edits", () => {
@@ -1027,7 +1050,6 @@ describe("slackChannel message edits", () => {
     ];
     expect(address).toBe(`C01:${rootTs}`);
     expect(input).toMatchObject({ state: { quiet: true } });
-    // The channel's `turnPolicy` applies, so a queued edit can't overtake the message it edits.
     expect(input).not.toHaveProperty("turnPolicy");
     expect(input).not.toHaveProperty("title");
     expect("message" in input && input.message).toEqual(
@@ -1097,7 +1119,6 @@ describe("slackChannel message edits", () => {
   const dmEdit = { channelType: "im", previousText: "hi", text: "hello" } as const;
   const otherEdit = { previousText: "Lunch?", text: "Lunch at noon?" };
 
-  // Each row authors a hook the edit must skip, so the default can't just be "no hooks".
   it.each<{
     name: string;
     edit: Parameters<typeof edited>[0];
@@ -1156,7 +1177,6 @@ describe("slackChannel message edits", () => {
     },
   ])("$name", async ({ edit, hooks, reached }) => {
     const calls: string[] = [];
-    // Records the text each hook decided and the edit `ctx.edit` showed it.
     const hook = (name: MessageHook) =>
       name === "onMessageEdited"
         ? (ctx: SlackInboundMessageContext, decided: SlackMessageEdit) => {

@@ -79,7 +79,6 @@ async function ensurePnpmWorkspacePolicy(filePath: string): Promise<"skipped" | 
   return "written";
 }
 
-/** Whether pnpm can walk from this project into a parent-owned workspace. */
 export function findAncestorPnpmWorkspaceRoot(projectRoot: string): string | undefined {
   let dir = dirname(resolve(projectRoot));
   while (true) {
@@ -90,7 +89,6 @@ export function findAncestorPnpmWorkspaceRoot(projectRoot: string): string | und
   }
 }
 
-/** Whether pnpm can walk from this project into a parent-owned workspace. */
 export function hasAncestorPnpmWorkspace(projectRoot: string): boolean {
   return findAncestorPnpmWorkspaceRoot(projectRoot) !== undefined;
 }
@@ -100,11 +98,6 @@ function parsePnpmWorkspacePackagePatterns(source: string): string[] | undefined
   const packagesIndex = lines.findIndex((line) => /^\s*packages:/u.test(line));
   if (packagesIndex < 0) return undefined;
 
-  // This deliberately supports the common workspace shapes eve needs to edit:
-  // a block sequence (`packages:\n  - apps/*`) and a simple inline sequence.
-  // More complex YAML falls back to "unknown"; callers then treat the ancestor
-  // as workspace-owned instead of creating nested standalone package-manager
-  // state under an ambiguous monorepo.
   const inlineMatch = /^\s*packages:\s*\[(.*)\]\s*(?:#.*)?$/u.exec(lines[packagesIndex] ?? "");
   if (inlineMatch !== null) {
     const entries = inlineMatch[1]!.trim();
@@ -127,12 +120,6 @@ function parsePnpmWorkspacePackagePatterns(source: string): string[] | undefined
   return patterns;
 }
 
-/**
- * Returns the ancestor workspace root only when the workspace manifest's
- * package candidates include `projectRoot`. If the manifest cannot be parsed,
- * it is treated as a workspace owner so setup does not silently create nested
- * standalone package-manager state in an ambiguous monorepo.
- */
 export function findClaimingAncestorPnpmWorkspaceRoot(projectRoot: string): string | undefined {
   const workspaceRoot = findAncestorPnpmWorkspaceRoot(projectRoot);
   if (workspaceRoot === undefined) return undefined;
@@ -193,11 +180,6 @@ export async function ensurePnpmWorkspaceIncludesProject(
   return "written";
 }
 
-/**
- * Reads `pnpm list --depth -1 --json` and answers whether the ancestor
- * workspace explicitly includes `projectRoot`. `undefined` means the output
- * was not trustworthy enough to choose an install mode.
- */
 export function pnpmWorkspaceClaimsProject(
   stdout: string,
   projectRoot: string,

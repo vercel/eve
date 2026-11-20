@@ -1,10 +1,3 @@
-/**
- * Inbound Microsoft Teams activity parsing and prompt shaping.
- *
- * The channel owns small, documented data shapes instead of exposing the
- * full Bot Framework SDK Activity model as the primary public API.
- */
-
 import type {
   TeamsAttachment,
   TeamsChannelAccount,
@@ -107,7 +100,6 @@ export interface TeamsInboundContext {
   readonly userName?: string;
 }
 
-/** Parses one JSON-decoded Teams activity payload. */
 export function parseTeamsActivity(value: unknown): TeamsActivity | null {
   if (!isObject(value)) return null;
   if (value.type === "message") return parseMessageActivity(value);
@@ -116,12 +108,10 @@ export function parseTeamsActivity(value: unknown): TeamsActivity | null {
   return null;
 }
 
-/** Returns true when the message's inferred scope is `personal` (a one-on-one chat with the bot). */
 export function isTeamsPersonalMessage(activity: TeamsMessageActivity): boolean {
   return activity.scope === "personal";
 }
 
-/** Returns the root activity id that should anchor a Teams thread, when any. */
 export function teamsThreadRootActivityId(
   activity: TeamsMessageActivity | TeamsInvokeActivity,
 ): string | null {
@@ -129,11 +119,6 @@ export function teamsThreadRootActivityId(
   return activity.replyToId ?? activity.id;
 }
 
-/**
- * Renders one {@link TeamsInboundContext} as a `<teams_context>` block of
- * `key: value` lines for the model. Optional fields (user name, conversation
- * type, tenant, team, channel) are omitted when absent; field order is stable.
- */
 export function formatTeamsContextBlock(context: TeamsInboundContext): string {
   const lines = [
     "<teams_context>",

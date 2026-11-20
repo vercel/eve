@@ -1,5 +1,3 @@
-/** Delegation and instruction text shared by the local and deployed self-modification children. */
-
 export function renderDescription(sections: readonly string[]): string {
   return sections.filter((section) => section.length > 0).join(" ");
 }

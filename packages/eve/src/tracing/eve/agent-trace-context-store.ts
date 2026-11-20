@@ -79,7 +79,6 @@ export function currentTraceSessionId(runId: string): string | undefined {
     ?.traceSessionId;
 }
 
-/** Run after task-provider commits, so a pending workflow tool call keeps its anchor. */
 export function pruneAgentTraceState(
   context: ContextAccessor,
   sessionId: string,
@@ -122,7 +121,6 @@ export function readSessionTraceDecision(
   return traceStateValue(context.get(AgentTraceContextKey), "session", sessionId)?.decision;
 }
 
-/** Keeps only framework trace state from an interrupted step's context changes. */
 export function preserveSerializedAgentTraceState(
   original: Record<string, unknown>,
   interrupted: Record<string, unknown>,
@@ -133,7 +131,6 @@ export function preserveSerializedAgentTraceState(
     : { ...original, [AgentTraceContextKey.name]: traceState };
 }
 
-/** Reads the active turn context straight out of a serialized Workflow context. */
 export function readTurnTraceContext(
   serializedContext: Readonly<Record<string, unknown>>,
   sessionId: string,
@@ -152,7 +149,6 @@ export function readTurnTraceContext(
       );
 }
 
-/** Reads the durable action span that should parent a dispatched child agent. */
 export function readActionTraceContext(
   serializedContext: Readonly<Record<string, unknown>>,
   sessionId: string,
@@ -202,7 +198,6 @@ function withTraceDecision(
   };
 }
 
-/** Durable trace state backed by eve's serialized Workflow context. */
 export class ContextAgentTraceStateStore implements AgentTraceStateStore {
   get<K extends keyof AgentTraceValues>(kind: K, key: string): AgentTraceValues[K] | undefined {
     const entry = contextStorage.getStore()?.get(AgentTraceContextKey)?.entries[

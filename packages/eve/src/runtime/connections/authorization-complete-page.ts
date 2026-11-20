@@ -9,17 +9,6 @@ const PAGES = {
   },
 } as const;
 
-/**
- * Renders the static HTML landing page that the user's browser sees
- * after an OAuth IdP redirects back to the framework's connection
- * callback route. `failed` covers callbacks where the IdP reported an
- * error, such as the user declining consent.
- *
- * The framework would otherwise respond with an empty `202 Accepted`
- * body, which looks broken. This helper is intentionally self-contained:
- * no external assets, no script, so it renders identically regardless
- * of where the runtime serves the callback from.
- */
 export function buildAuthorizationCompletePage(outcome: keyof typeof PAGES): Response {
   const page = PAGES[outcome];
   const html = `<!doctype html>

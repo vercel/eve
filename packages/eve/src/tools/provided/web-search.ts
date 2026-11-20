@@ -61,11 +61,9 @@ export function webSearch(input: WebSearchToolInput): WebSearchToolDefinition {
   });
 }
 
-/** What the model reads about `web_search`, whichever agent offers it. */
 export const WEB_SEARCH_TOOL_DESCRIPTION =
   "Search the web for real-time information. Use this to find up-to-date information about current events, recent developments, or topics that may have changed since the knowledge cutoff.";
 
-/** The activity label of a `web_search` call: its query, from whichever provider ran it. */
 export function resolveWebSearchActivityLabel(input: unknown): string {
   if (input === null || typeof input !== "object") return "Search";
   const record = input as Record<string, unknown>;
@@ -82,12 +80,10 @@ export function resolveWebSearchActivityLabel(input: unknown): string {
   );
 }
 
-/** Default provider-managed web search configuration. */
 export const defaultWebSearch = webSearch({ provider: "parallel" });
 
 export default defaultWebSearch;
 
-/** Returns whether a value is a provider-managed web search definition. */
 export function isWebSearchToolDefinition(value: unknown): value is WebSearchToolDefinition {
   return (
     typeof value === "object" &&

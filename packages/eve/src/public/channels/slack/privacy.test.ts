@@ -96,7 +96,6 @@ describe("Slack conversation privacy", () => {
     expect((await kind({ channel_type: "group" })).visibility).toBe("private");
     expect((await kind({}, lookup({ is_private: false }))).visibility).toBe("public");
     expect((await kind({}, lookup({ is_private: true }))).visibility).toBe("private");
-    // Audience still fails closed, but visibility reports only what Slack said.
     const unknown = await kind(
       {},
       vi.fn().mockResolvedValue({ ok: false, error: "missing_scope" }),

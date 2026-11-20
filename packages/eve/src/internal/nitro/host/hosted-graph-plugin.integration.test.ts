@@ -28,7 +28,6 @@ function checkingPlugin(externalDependencies: readonly string[]) {
   });
 }
 
-// A `pg` install whose exports include `./lib/client` only when `withClient`.
 async function writePackage(packageDir: string, input: { readonly withClient: boolean }) {
   await mkdir(join(packageDir, "lib"), { recursive: true });
   await writeFile(join(packageDir, "index.js"), "export default {};\n");
@@ -54,8 +53,6 @@ async function checkOutput(input: {
     await writePackage(join(root, "node_modules", "pg"), { withClient });
   }
   if (input.installAt === "linked") {
-    // pnpm's layout: the output's node_modules entry links to a store
-    // outside it (on Windows, possibly another drive).
     await writePackage(join(root, "store", "pg"), { withClient });
     await mkdir(join(serverDir, "node_modules"), { recursive: true });
     await symlink(join(root, "store", "pg"), join(serverDir, "node_modules", "pg"), "junction");
@@ -83,9 +80,6 @@ async function checkOutput(input: {
   );
 }
 
-// Installs `pg` in the output from `files` (path -> contents, `package.json`
-// included) and checks a chunk that imports bare `pg`. Returns the output's
-// remaining file list, so tests can assert the probes are cleaned up.
 async function checkInstalledPackage(files: Readonly<Record<string, string>>) {
   const serverDir = join(await createDirectory("eve-external-output-check-"), "server");
   const packageDir = join(serverDir, "node_modules", "pg");
@@ -174,7 +168,6 @@ function hostedGraph(externals: Partial<ExternalsPolicy>) {
   });
 }
 
-/** The bundled code of a module that re-exports `specifier` through the plugin. */
 async function bundleImport(
   plugin: ReturnType<typeof hostedGraph>,
   specifier: string,

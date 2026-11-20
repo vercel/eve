@@ -52,7 +52,6 @@ describe("defineWorkflowTool", () => {
         void sendFromStep;
         // @ts-expect-error The message is sent with send(), not passed to ctx.agent().
         void ctx.agent("researcher", { message: "Review the deployment." });
-        // Token and sandbox capabilities are available when this context is passed into a step.
         const useStepContext = async (stepCtx: WorkflowStepToolContext) => stepCtx;
         void useStepContext(ctx);
         return { deployed: input.service };

@@ -1,7 +1,3 @@
-/**
- * Upload-policy authoring helpers for channel routes.
- */
-
 import type { MessageContent, MessageFilePart } from "#shared/message-content.js";
 
 import { getKnownByteLength } from "#internal/attachments/data.js";
@@ -27,23 +23,11 @@ export interface UploadPolicyConfig {
 /** Author-facing input accepted by channel factories. */
 export type UploadPolicyInput = "disabled" | Partial<UploadPolicyConfig>;
 
-/**
- * Framework default: 25 MB cap, unrestricted media types. Channels
- * override this per-route; authors override per-channel /
- * channel factory call via the `uploadPolicy` option.
- */
 export const DEFAULT_UPLOAD_POLICY: UploadPolicyConfig = Object.freeze({
   allowedMediaTypes: "*",
   maxBytes: 25 * 1024 * 1024,
 });
 
-/**
- * Describes the reason one inbound `MessageFilePart` failed the policy check.
- *
- * Channels use this to produce human-readable error responses
- * (`413 Payload Too Large`, `415 Unsupported Media Type`) or to log and
- * drop individual attachments that should not reach the harness.
- */
 export type UploadPolicyViolation =
   | {
       readonly kind: "too-large";
@@ -59,11 +43,6 @@ export type UploadPolicyViolation =
       readonly allowedMediaTypes: readonly string[];
     };
 
-/**
- * Produces a final {@link UploadPolicy} by merging an optional partial
- * override on top of `base` (default: {@link DEFAULT_UPLOAD_POLICY}).
- * Returns `"disabled"` unchanged when passed as the override.
- */
 export function mergeUploadPolicy(
   override?: UploadPolicyInput,
   base: UploadPolicyConfig = DEFAULT_UPLOAD_POLICY,
@@ -83,11 +62,6 @@ export function mergeUploadPolicy(
   return { allowedMediaTypes, maxBytes };
 }
 
-/**
- * Returns `true` when `policy` rejects every attachment — the explicit
- * `"disabled"` literal, `maxBytes: 0`, or an empty `allowedMediaTypes`
- * array. Channels use this to skip attachment-discovery work.
- */
 export function isUploadsDisabled(policy: UploadPolicy): boolean {
   if (policy === "disabled") return true;
   if (policy.maxBytes === 0) return true;
@@ -95,9 +69,6 @@ export function isUploadsDisabled(policy: UploadPolicy): boolean {
   return false;
 }
 
-/**
- * Returns `true` if `mediaType` is accepted under `policy`.
- */
 export function isMediaTypeAllowed(mediaType: string, policy: UploadPolicy): boolean {
   if (policy === "disabled") return false;
   if (policy.allowedMediaTypes === "*") {
@@ -121,17 +92,6 @@ export function isMediaTypeAllowed(mediaType: string, policy: UploadPolicy): boo
   return false;
 }
 
-/**
- * Evaluates a single `MessageFilePart` against a {@link UploadPolicy}. Returns
- * a {@link UploadPolicyViolation} on rejection, or `null` when the
- * part is either accepted or has a non-local payload (remote URL) whose
- * size cannot be determined without fetching.
- *
- * Order of checks is stable: media-type first (cheap), size second.
- * This keeps channel error responses consistent — a 25 MB disallowed
- * CSV surfaces a 415 instead of a 413 — and mirrors how most HTTP
- * proxies enforce policy.
- */
 export function evaluateFilePart(
   part: MessageFilePart,
   policy: UploadPolicy,
@@ -169,15 +129,6 @@ export function evaluateFilePart(
   return null;
 }
 
-/**
- * Walks a message's parts and returns every policy violation, in
- * iteration order. Text parts are skipped.
- *
- * Returns an empty array when the message is a plain string or when
- * every file part passes. Channels use this to decide between
- * rejecting an inbound request (HTTP) and dropping individual attachments
- * (Slack).
- */
 export function collectUploadPolicyViolations(
   content: MessageContent,
   policy: UploadPolicy,
@@ -199,10 +150,6 @@ export function collectUploadPolicyViolations(
   return violations;
 }
 
-/**
- * Renders a {@link UploadPolicyViolation} as a short human-readable
- * string. Used by channel error responses and warning logs.
- */
 export function formatUploadPolicyViolation(violation: UploadPolicyViolation): string {
   const fileLabel = violation.filename ?? violation.mediaType;
   if (violation.kind === "too-large") {

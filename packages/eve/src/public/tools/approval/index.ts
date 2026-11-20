@@ -1,7 +1,3 @@
-/**
- * Per-tool approval helpers used inside `agent/tools/*.ts` files.
- */
-
 export type {
   Approval,
   ApprovalConfiguration,

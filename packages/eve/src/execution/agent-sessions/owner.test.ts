@@ -19,7 +19,6 @@ describe("a workflow tool call's owner in its step inputs", () => {
   });
 
   it("reads a recorded input as its compiled agent", () => {
-    // What a run in flight carries: `bundle` only.
     const recorded = JSON.parse('{"bundle":{"source":{"kind":"bundled"}}}') as never;
     expect(ownerReference(recorded)).toEqual({ kind: "bundle", nodeId: undefined, source });
   });

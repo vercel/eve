@@ -60,7 +60,6 @@ describe("production deployment identity", () => {
     expect(changedId).not.toBe(firstId);
     const logPath = join(app.appRoot, "world-deployment.json");
     vi.stubEnv("EVE_TEST_DEPLOYMENT_LOG", logPath);
-    // startProductionServer launches node .output/server/index.mjs, without a CLI bootstrap.
     for (let replica = 0; replica < 2; replica++) {
       const server = await startProductionServer(app.appRoot, { host: "127.0.0.1", port: 0 });
       try {

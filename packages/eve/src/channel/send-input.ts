@@ -3,21 +3,14 @@ import type { MessageContent, MessageFilePart } from "#shared/message-content.js
 import type { SendPayload } from "#channel/routes.js";
 import { serializeUrlFilePart } from "#internal/attachments/url-refs.js";
 
-/** Normalizes the shorthand input forms accepted by channel and session sends. */
 export function normalizeSendInput(input: MessageContent | SendPayload): SendPayload {
   return isMessageContent(input) ? { message: input } : input;
 }
 
-// `Array.isArray` doesn't narrow a readonly array, so this guard does.
 function isMessageContent(input: MessageContent | SendPayload): input is MessageContent {
   return typeof input === "string" || Array.isArray(input);
 }
 
-/**
- * Serializes file parts before input crosses the durable boundary: `URL`s
- * become `eve-url:` markers and bytes become `data:` URLs, so no world
- * serializer has to round-trip a `URL` or a typed array.
- */
 export function serializeFilePartsInMessage(
   message: MessageContent | undefined,
 ): MessageContent | undefined {

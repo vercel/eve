@@ -1,6 +1,3 @@
-// The build scripts import this file directly through Node type stripping, so
-// it must stay free of `#` imports and non-erasable TypeScript syntax.
-
 interface BundlerLog {
   readonly id?: string;
   readonly ids?: readonly unknown[];
@@ -52,11 +49,6 @@ function isVendoredDependencyWarning(log: unknown): boolean {
   );
 }
 
-/**
- * Rollup/Rolldown `onLog` handler that drops warnings raised only by
- * dependency code (`node_modules` or eve's compiled vendor modules), which the
- * user cannot act on, and forwards everything else.
- */
 export function onVendoredDependencyLog<Level extends string, Log>(
   level: Level,
   log: Log,

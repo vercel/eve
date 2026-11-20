@@ -1,4 +1,3 @@
-/** The parts of immer eve uses: drafts are writable views of a frozen value. */
 export type Draft<T> = T extends readonly (infer E)[]
   ? Draft<E>[]
   : T extends object

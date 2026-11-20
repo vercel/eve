@@ -147,9 +147,6 @@ describe("defineJsonSchema", () => {
     });
   });
 
-  // Every schema-bearing keyword @cfworker/json-schema evaluates. The probe
-  // accepts "x" only when `format` is stripped and rejects "long" only when the
-  // validator reaches it, so a keyword the preparation walk skips fails here.
   const PROBE = { format: "uuid", maxLength: 3 };
   it.each([
     ["additionalItems", { additionalItems: PROBE, items: [true] }, (v: string) => [0, v]],
@@ -267,7 +264,6 @@ describe("defineJsonSchema", () => {
       properties: {
         filter: { properties: { depth: { $ref: "#/$defs/depth" } }, type: "object" },
         limit: { default: 10, type: "integer" },
-        // A default its own schema rejects is still used (Pydantic's `x: str = None`).
         query: { default: null, type: "string" },
         rows: {
           items: { properties: { n: { default: 1, type: "integer" } }, type: "object" },
@@ -411,7 +407,6 @@ describe("toModelSchema", () => {
     expect(await asSchema(toModelSchema(defineJsonSchema(jsonSource), "input")).jsonSchema).toEqual(
       jsonSource,
     );
-    // The public serializer reports the same model-facing JSON, from live or plain sources.
     expect(serializeModelInputSchema(zodSchema)).toEqual(aiSdkJsonSchema);
     expect(serializeModelInputSchema(jsonSource)).toEqual(jsonSource);
     expect(serializeModelInputSchema(null)).toBeNull();

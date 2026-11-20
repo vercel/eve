@@ -15,7 +15,6 @@ type ComputerUseSandbox = Pick<SandboxSession, "resolvePath" | "run" | "writeTex
 const DRIVER_VERSION = "0.12.5";
 const DESKTOP_INSTALL_VERSION = "2026-11-03.1";
 
-/** Include this in the consumer sandbox revalidation key so cached templates rebuild when computer use changes. */
 export const COMPUTER_USE_REVALIDATION_KEY = `computer-use:${DRIVER_VERSION}:${DESKTOP_INSTALL_VERSION}`;
 
 /** Install the desktop packages and embedded driver required by computer use. */
@@ -70,13 +69,6 @@ export async function startComputerUse(
   }
 }
 
-/**
- * Restart the desktop when a resumed sandbox lost its processes.
- *
- * Sandbox resume does not rerun consumer startup, so the display and driver
- * started there are gone after a stop. The check is one cheap command when
- * everything is already live.
- */
 export async function ensureComputerUse(
   sandbox: Pick<SandboxSession, "resolvePath" | "run">,
   abortSignal?: AbortSignal,

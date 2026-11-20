@@ -51,7 +51,6 @@ export async function resolveEvalTargetHandle(input: {
   return target;
 }
 
-/** The root agent's static tool names, and whether it has a dynamic tool resolver. */
 export interface TargetTools {
   readonly dynamic: boolean;
   readonly static: readonly string[];
@@ -59,7 +58,6 @@ export interface TargetTools {
 
 const toolsByTarget = new WeakMap<EveEvalTargetHandle, TargetTools>();
 
-/** The tools of a target resolved from `/eve/v1/info`; undefined for a hand-built handle. */
 export function targetTools(target: EveEvalTargetHandle): TargetTools | undefined {
   return toolsByTarget.get(target);
 }

@@ -162,7 +162,6 @@ function renderingHarness() {
 describe("slackChannel() code channels", () => {
   const BOT_AUTHORIZATIONS = [{ is_bot: true, user_id: "U_BOT" }];
 
-  // Each test uses its own channel ids: eve caches code channel detection per process.
   function useCodeChannels(codeChannelIds: readonly string[]): void {
     fetchMock = vi.fn(async (request: string | URL | Request, init?: RequestInit) => {
       if (!String(request).includes("conversations.info")) {
@@ -323,20 +322,17 @@ describe("slackChannel() code channels", () => {
     expect(topLevel.send.mock.calls.map(([address]) => address)).toEqual([
       "code:C_CODE_UNMENTIONED",
     ]);
-    // Replies follow the thread the person wrote in.
     expect(threaded.send.mock.calls[0]![1].state).toMatchObject({
       codeChannel: true,
       replyThreadTs: "1700000000.000100",
       threadTs: null,
     });
     expect(topLevel.send.mock.calls[0]![1].state).toMatchObject({ replyThreadTs: null });
-    // State and auth report no thread.
     expect(topLevel.send.mock.calls[0]![1].auth.attributes).not.toHaveProperty("thread_ts");
     expect(originContext.send).not.toHaveBeenCalled();
     expect(ordinary.send).not.toHaveBeenCalled();
   });
 
-  // An authored mention handler gates un-mentioned code channel messages, which don't mention the bot.
   it("sends un-mentioned code channel messages to onAppMention without counting them as mentions", async () => {
     useCodeChannels(["C_CODE_HOOK"]);
     const calls: string[] = [];
@@ -469,7 +465,6 @@ describe("slackChannel() code channels", () => {
       buildSignedRequest({ body: channelMessage({ channel: "C_CODE_GATED", user: "U_BOB" }) }),
     );
     expect(bob.send).not.toHaveBeenCalled();
-    // Bob's dropped message may arrive mid-turn, so it leaves the session status alone.
     expect(slackCalls("agents.sessions.setStatus")).toHaveLength(0);
 
     const alice = await firePost(
@@ -479,7 +474,6 @@ describe("slackChannel() code channels", () => {
     expect(alice.send.mock.calls.map(([address]) => address)).toEqual(["code:C_CODE_GATED"]);
   });
 
-  // Each row authors a hook the edit must skip, so the default can't just be "no hooks".
   it.each<{
     name: string;
     channel: string;
@@ -563,14 +557,12 @@ describe("slackChannel() code channels", () => {
     await vi.waitFor(() => expect(cancel).toHaveBeenCalled());
 
     expect(cancel).toHaveBeenCalledWith("code:C_CODE_CARD", { turnId: "turn_observed" });
-    // The card sits in a thread, so the reply stays there.
     expect(decodeBody(slackCalls("chat.postMessage")[0]![1])).toMatchObject({
       channel: "C_CODE_CARD",
       thread_ts: "1700000000.000001",
     });
   });
 
-  // A code channel card routes to the channel's session, which has no thread.
   it("answers a code channel's approval card on the channel's session", async () => {
     useCodeChannels(["C_CODE_HITL"]);
     let codeChannel: boolean | undefined;
@@ -625,7 +617,6 @@ describe("slackChannel() code channels", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  // A turn that died without ending leaves `processing` up, which never times out.
   it("resets the status to active when a stop finds no active turn", async () => {
     useCodeChannels([]);
     const channel = slackChannel({
@@ -768,8 +759,6 @@ describe("slackChannel() code channels", () => {
     expect(slackCalls("assistant.threads.setStatus")).toHaveLength(0);
   });
 
-  // Each step is followed by the statuses it wrote. `quiet` and `plain` are deliveries: edits and
-  // deferred messages are delivered quiet.
   it.each<{ name: string; trace: string }>([
     { name: "ends with no_reply", trace: "quiet turn model no_reply end:active" },
     {

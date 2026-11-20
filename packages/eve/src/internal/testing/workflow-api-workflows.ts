@@ -35,7 +35,6 @@ export async function catchWorkflowError(kind: "fatal" | "retryable") {
   try {
     await failStep(kind);
   } catch (error) {
-    // The SDK wraps an exhausted retry in FatalError, preserving its cause.
     const original =
       kind === "retryable" && typeof error === "object" && error !== null && "cause" in error
         ? error.cause

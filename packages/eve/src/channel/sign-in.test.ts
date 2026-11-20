@@ -7,10 +7,6 @@ import type { SessionView } from "#protocol/session-projection/tables.js";
 
 const turnId = "turn_0";
 
-/**
- * A turn waiting on Alice to connect GitHub; `responseId` makes it an approver's sign-in, and
- * `waitsOn` one that waits on a card already shown.
- */
 function waitingOnGitHub(responseId?: string, waitsOn?: string): SessionView {
   const view = emptySessionView();
   const facts: SessionEvent[] = [
@@ -133,7 +129,6 @@ describe("a sign-in on a channel", () => {
   });
 
   it("leaves the shown card alone when a sign-in that waited on it ends", async () => {
-    // Both sign-ins are for GitHub: the shown card's record is keyed by that name.
     const shown = waitingOnGitHub();
     const waiting = waitingOnGitHub(undefined, "sign-in-0");
     for (const ending of [

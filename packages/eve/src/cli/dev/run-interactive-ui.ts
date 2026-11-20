@@ -29,7 +29,6 @@ export async function runInteractiveDevelopmentUi(input: {
   readonly onOnboardingTerminal?: (input: EveCliSetupTerminalEvent) => void;
   readonly server: { readonly appRoot?: string; readonly serverUrl: string };
   readonly startup?: DevelopmentTuiStartup;
-  /** Onboarding that already ran on the startup screen while the server booted. */
   readonly startupOnboarding?: StartupOnboardingResult | undefined;
 }): Promise<void> {
   const runDevelopmentTui = await devBootPhase(
@@ -74,7 +73,6 @@ export async function runInteractiveDevelopmentUi(input: {
   }
 }
 
-/** Runs `task` while the local development server holds off reloading, so setup writes land together. */
 export async function withDevelopmentServerPaused<T>(
   serverUrl: string,
   task: () => Promise<T>,

@@ -22,7 +22,6 @@ interface InlineButton {
 }
 
 interface MessageBody {
-  /** Shows the message to one member of a group only. */
   readonly ephemeral_message_parameters?: unknown;
   readonly message_id?: number;
   readonly reply_markup?: { readonly inline_keyboard?: readonly InlineButton[][] };
@@ -36,7 +35,6 @@ interface PressHandle {
 
 const MESSAGE_WRITES = new Set(["sendMessage", "editMessageText", "editMessageReplyMarkup"]);
 
-/** A send's id comes back from Telegram; an edit names the message it rewrites. */
 function messageIdOf(call: PlatformCall): number {
   return call.method === "sendMessage"
     ? (call.response as { readonly result: { readonly message_id: number } }).result.message_id
@@ -57,13 +55,8 @@ function inlineOptions(call: PlatformCall): RenderedOption[] {
   );
 }
 
-/**
- * Drives the Telegram channel through its Bot API webhook, in a supergroup by
- * default or in a private chat.
- */
 export function telegramDriver(surface: Exclude<Surface, "public"> = "shared"): ChannelDriver {
   const group = surface === "shared";
-  // A fresh chat per driver keeps each test's session apart in the shared workflow world.
   nextChatId += 1;
   const CHAT = group
     ? { id: -nextChatId, title: "Release crew", type: "supergroup" }
@@ -75,19 +68,10 @@ export function telegramDriver(surface: Exclude<Surface, "public"> = "shared"): 
   } as const;
   let updateId = 0;
   let messageId = 0;
-  /** The bot's latest message, which a person in a group replies to so the bot hears them. */
   let lastBotMessage: number | undefined;
-  /** Each bot message's text as last written, by message id. */
   const texts = new Map<number, string>();
-  /** The text a keyboard-only edit leaves in place, which its body doesn't carry. */
   const keptText = new WeakMap<PlatformCall, string>();
 
-  /**
-   * A group's default policy hears only mentions and replies to the bot, and a
-   * mention starts a new conversation, so a person mentions the bot once and
-   * then replies to its latest message. The mention sits on its own line so
-   * the test model's line-based directives still read the message.
-   */
   function addressed(text: string): Record<string, unknown> {
     if (!group) return { text };
     if (lastBotMessage === undefined) return { text: `${text}\n@${BOT.username}` };
@@ -109,9 +93,7 @@ export function telegramDriver(surface: Exclude<Surface, "public"> = "shared"): 
     });
   }
 
-  /** Files a person sent, by the `file_id` the bot fetches each with. */
   const uploads = new Map<string, SentFile>();
-  /** A person's files as Telegram attaches them: an image as a photo, anything else as a document. */
   function attached(files: readonly SentFile[]): Record<string, unknown> {
     const [file] = files;
     if (file === undefined) return {};
@@ -131,10 +113,8 @@ export function telegramDriver(surface: Exclude<Surface, "public"> = "shared"): 
 
   async function decode(request: Request): Promise<PlatformCall> {
     const url = new URL(request.url);
-    // A download from Telegram's file endpoint, `/file/bot<token>/<file_id>`.
     if (url.pathname.startsWith("/file/")) {
       const fileId = url.pathname.split("/").at(-1)!;
-      // Telegram serves files as `application/octet-stream`, whatever they are (#1217).
       return {
         body: {},
         method: `GET ${url.pathname}`,
@@ -158,7 +138,6 @@ export function telegramDriver(surface: Exclude<Surface, "public"> = "shared"): 
       method,
       response: { ok: true, result: { chat: CHAT, date: 0, message_id: messageId } },
     };
-    // Editing only the keyboard leaves the message's text as it was.
     const id = messageIdOf(call);
     if (method === "editMessageReplyMarkup") keptText.set(call, texts.get(id) ?? "");
     else if (MESSAGE_WRITES.has(method)) texts.set(id, (call.body as MessageBody).text ?? "");
@@ -167,7 +146,6 @@ export function telegramDriver(surface: Exclude<Surface, "public"> = "shared"): 
 
   return {
     name: group ? "telegram" : "telegram-dm",
-    // A supergroup may have a public link, which its chat type doesn't say.
     space: group
       ? { id: `telegram:${CHAT.id}`, type: "shared" }
       : { id: `telegram:${CHAT.id}`, type: "direct", visibility: "private" },
@@ -191,7 +169,6 @@ export function telegramDriver(surface: Exclude<Surface, "public"> = "shared"): 
         ...addressed(text),
       };
       if (files.length > 0) {
-        // A message with a file carries its words as the file's caption.
         message.caption = message.text;
         delete message.text;
         Object.assign(message, attached(files));
@@ -201,11 +178,9 @@ export function telegramDriver(surface: Exclude<Surface, "public"> = "shared"): 
     findOptions(call, prompt) {
       const body = call.body as MessageBody;
       if (call.method !== "sendMessage" || body.text?.includes(prompt) !== true) return undefined;
-      // An open-ended question posts a ForceReply prompt with no keyboard.
       return inlineOptions(call);
     },
     shownMessage(call) {
-      // A callback answer is a notice only the presser sees.
       if (call.method === "answerCallbackQuery") {
         const { callback_query_id: id, text } = call.body as {
           readonly callback_query_id: string;
@@ -220,13 +195,11 @@ export function telegramDriver(surface: Exclude<Surface, "public"> = "shared"): 
         id: String(messageIdOf(call)),
         links: linkTargets((call.body as { readonly reply_markup?: unknown }).reply_markup),
         onlyPerson: (call.body as MessageBody).ephemeral_message_parameters !== undefined,
-        // Telegram drops a message's inline keyboard when an edit omits `reply_markup`.
         options: inlineOptions(call),
         text: keptText.get(call) ?? (call.body as MessageBody).text ?? "",
       };
     },
     personShownAs: [PERSON.first_name],
-    // A reply to the bot's message continues the session that posted it.
     nextAddress: () =>
       group && lastBotMessage !== undefined
         ? telegramContinuationToken({ chatId: CHAT.id, conversationId: lastBotMessage })

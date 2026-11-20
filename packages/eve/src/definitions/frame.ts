@@ -20,13 +20,11 @@ import { normalizeInstrumentationChannelKind } from "#shared/instrumentation-cha
 import { readDefinitionsState, sessionIdOf } from "./state.js";
 import { latestTurn } from "./turn.js";
 
-/** The channel the session's latest delivery came through. */
 export function channelOf(ctx: ContextReader): SessionFrame["channel"] {
   const adapter = ctx.get(ChannelKey);
   const instrumentation = ctx.get(ChannelInstrumentationKey);
   return {
     continuationToken: ctx.get(ContinuationTokenKey),
-    // An authored channel reads as `channel:<name>`, which its adapter kind doesn't carry.
     kind: normalizeInstrumentationChannelKind(
       instrumentation?.kind ?? (adapter === undefined ? undefined : getAdapterKind(adapter)),
     ),
@@ -34,10 +32,6 @@ export function channelOf(ctx: ContextReader): SessionFrame["channel"] {
   };
 }
 
-/**
- * The session as of its latest commit, or as of the commit `at` the given view: what every
- * dynamic value and hook handler reads.
- */
 export function sessionFrameOf(
   ctx: ContextReader,
   input: { readonly view?: SessionView; readonly at?: string } = {},
@@ -58,7 +52,6 @@ export function sessionFrameOf(
         ...(steeredBy !== undefined && steeredBy.length > 0 && { steeredBy }),
       },
       id: sessionIdOf(ctx),
-      // A root session has no parent; none is made up for it.
       ...(parent !== undefined && { parent }),
       predecessor: ctx.get(SessionPredecessorKey),
       schedule: readSessionSchedule(ctx),

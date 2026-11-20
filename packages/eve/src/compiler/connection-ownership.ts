@@ -1,6 +1,5 @@
 import { assertNotConnectionOwned } from "#connections/ownership.js";
 
-/** Rejects static names that fall under a static connection's name or `__` prefix. */
 export function assertStaticConnectionOwnership(input: {
   readonly connectionNames: readonly string[];
   readonly subagentNames: readonly string[];
@@ -14,7 +13,6 @@ export function assertStaticConnectionOwnership(input: {
   ] as const;
   for (const [subject, names, remedy] of checks) {
     for (const name of names) {
-      // A connection owns its own name.
       const owners =
         names === connectionNames
           ? connectionNames.filter((other) => other !== name)

@@ -38,9 +38,6 @@ describe("atomicWriteFile", () => {
     }
   });
 
-  // Windows rejects rename-over-open-file when an active handle does not allow
-  // delete/rename sharing. That preserves the no-partial-visibility invariant,
-  // but it does not provide POSIX's progress guarantee under continuous reads.
   it.skipIf(process.platform === "win32")(
     "never exposes a partial file to a concurrent reader",
     async () => {

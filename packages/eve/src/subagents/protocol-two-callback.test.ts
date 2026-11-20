@@ -21,7 +21,6 @@ const turnId = "turn_0";
 const runId = `test_${turnId}_0`;
 const position = { sequence: 4, stepIndex: 1, turnId: "child-turn" };
 
-/** The parent's turn, whose remote call `delegate` is running. */
 function delegating(): HarnessSession {
   return withPublished(withOpenTurn(BASE, { sequence: 0, stepIndex: 0, turnId }), [
     {
@@ -47,7 +46,6 @@ function mirror(session: HarnessSession, body: unknown): HarnessSession {
   return withPublished(session, relay(viewOf(session), { payload }).events);
 }
 
-/** What eve 0.83.2 posts when a child's tool needs approval and its model asks a question. */
 const inputRequest = {
   callId: "delegate",
   childContinuationToken: "child-hook",
@@ -161,7 +159,6 @@ describe("a protocol 2 child's input requests", () => {
       status: "open",
       subject: { callId: "delegate" },
     });
-    // Answers go back the way the requests came; the parent adds the child's remote binding.
     const route = { childContinuationToken: "child-hook", inputSource: "session" };
     expect(relay(viewOf(delegating()), { payload: payload! }).relays).toEqual({
       "approval-1": route,
@@ -212,7 +209,6 @@ describe("a protocol 2 child's input requests", () => {
 });
 
 describe("how a protocol 2 child settles what it asked", () => {
-  /** The parent mirrored the approval and forwarded `alice`'s answer to the child. */
   function forwarded(): HarnessSession {
     const mirrored = mirror(delegating(), inputRequest);
     return withPublished(
@@ -249,7 +245,6 @@ describe("how a protocol 2 child settles what it asked", () => {
     expect(storedProjection(candidate.state).view.responses["r-1"]?.status).toBe("admitted");
     expect(storedProjection(candidate.state).view.interactions["approval-1"]?.status).toBe("open");
 
-    // The approval's own settlement mirrors nothing; the resolution that follows decides it.
     expect(
       readProtocolTwoInputCallback(
         authorizationEvent({
@@ -358,7 +353,6 @@ describe("how a protocol 2 child settles what it asked", () => {
           status: "open",
         }),
       ]);
-      // Nobody answers a sign-in through the parent: the person signs in at the child.
       const payload = readProtocolTwoInputCallback(
         authorizationEvent({
           data: { ...fields, description: "Sign in to github to continue." },

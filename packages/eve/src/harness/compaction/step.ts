@@ -20,6 +20,8 @@ import {
   resolveEffectiveRuntimeModel,
   withGatewayTraceContext,
 } from "#harness/model-call/model.js";
+import { type CredentialedModel, credentialedModel } from "#harness/model-call/credential.js";
+import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import {
   compactMessages,
   type CompactionSummarizer,
@@ -31,7 +33,7 @@ import { takeBlockingFailure } from "#definitions/kernel.js";
 import { isDeepStrictEqual } from "node:util";
 import type { Usage } from "#protocol/session-events/envelope.js";
 import { nextChangeId, nextRunId } from "#protocol/session-projection.js";
-import { normalizeModelStreamError } from "#harness/model-call/errors.js";
+import { normalizeModelStreamError, rejectsCredential } from "#harness/model-call/errors.js";
 import { runModelCallWithRetries } from "#harness/model-call/retry.js";
 import {
   extractGatewayCostUsd,
@@ -55,10 +57,6 @@ import { resolveCallProviderOptions } from "#harness/provider-safety.js";
 import { throwIfSessionStreamDead } from "#harness/session-stream-write-error.js";
 
 const log = createLogger("harness.tool-loop");
-/**
- * Throws when the fixed part of the request (instructions, tools, memory)
- * leaves no room for any history: compacting the history cannot help then.
- */
 export function assertFixedPartFits(input: {
   readonly protectedTokens: number;
   readonly requestEnvelopeTokens: number;
@@ -72,10 +70,6 @@ export function assertFixedPartFits(input: {
   }
 }
 
-/**
- * `session.compact()`: summarizes the history, then the session waits. The control is a delivery:
- * it's admitted first, and applied once the history is decided.
- */
 export async function compactHistory(step: Step): Promise<StepResult> {
   const { config } = step;
   const delivery = controlDeliveryFor(step.view(), config.controlDelivery);
@@ -104,7 +98,7 @@ export async function compactHistory(step: Step): Promise<StepResult> {
       change,
       compact: true,
       messages,
-      model: resolvedModel.model,
+      turnModel: () => credentialedModel(resolvedModel.model),
       promptMessages: messages,
       requestEnvelopeTokens: compaction.requestEnvelopeTokens,
     });
@@ -114,29 +108,19 @@ export async function compactHistory(step: Step): Promise<StepResult> {
       sessionId: step.session.sessionId,
     });
   }
-  // Applied, not only published: the step's applied session is the compacted one.
   const reason = outcome === "failed" ? "compaction-failed" : undefined;
   await step.apply(settleDelivery(deliveryId, outcome, reason));
   return { next: null, session: step.session };
 }
 
 interface HistoryBeforeCallInput {
-  /** The durable messages the history becomes. */
   readonly messages: readonly HarnessModelMessage[];
-  /** The prompt as the model reads it, which the call's size measures. */
   readonly promptMessages: readonly HarnessModelMessage[];
   readonly model: LanguageModel;
+  readonly renew?: (rejection: unknown) => Promise<void>;
   readonly requestEnvelopeTokens: number;
 }
 
-/**
- * The history the next model call reads, committed: summarized when the call would pass the
- * threshold, a share of the model's window (`agent.ts`'s `compaction.threshold`), counting the
- * summary prompt's own overhead. Returns the messages the call reads, or `undefined` when the
- * history stays. Throws {@link CompactionOverLimitError} only when the request can't fit the
- * model's window; any other failure is rethrown, after settling any change it opened.
- * `step.session` counts the summary calls that finished.
- */
 export async function historyBeforeCall(
   step: Step,
   input: HistoryBeforeCallInput,
@@ -149,8 +133,6 @@ export async function historyBeforeCall(
   try {
     return await compactUnder(step, input, prompt, config);
   } catch (error) {
-    // Over the limit only when what the agent sends besides the history leaves it no room: once
-    // anything fits, a summary always does.
     if (!(error instanceof CompactionOverLimitError)) throw error;
     const window = config.contextWindowTokens;
     const scope = { sessionId: step.session.sessionId, turnId: step.position().turnId };
@@ -161,9 +143,6 @@ export async function historyBeforeCall(
       );
       return undefined;
     }
-    // The threshold is headroom on eve's estimate, not the model's limit. Against the window, the
-    // session keeps working, and a summary runs only when the request outgrows the window, not on
-    // every step the fixed part alone is over the threshold.
     if (window > config.threshold) {
       log.warn(
         `${error.message} eve compacts against the model's ~${window}-token context window instead.`,
@@ -181,7 +160,6 @@ export async function historyBeforeCall(
   }
 }
 
-/** Compacts the history when the request passes `config.threshold`. */
 async function compactUnder(
   step: Step,
   input: HistoryBeforeCallInput,
@@ -205,14 +183,13 @@ async function compactUnder(
     change,
     compaction: config,
     messages: input.messages,
-    model: input.model,
+    turnModel: async () => ({ model: input.model, renew: input.renew }),
     promptMessages: prompt,
     requestEnvelopeTokens: input.requestEnvelopeTokens,
     telemetryTurnId: activeTurnId(step.position()),
   });
 }
 
-/** A compaction change that opens the first time something needs it: a summary or a rewrite. */
 interface LazyChange {
   readonly changeId: string;
   readonly runId: string;
@@ -240,29 +217,21 @@ function lazyChange(
       if (opened) return;
       opened = true;
       await step.publish(startChange({ changeId: input.changeId, ...input.started }), input.prompt);
-      // What blocks a compaction, such as a memory capture, ran in the commit that started it.
-      // When it failed, the compaction fails before it rewrites the history.
       const captureFailure = takeBlockingFailure(step.ctx);
       if (captureFailure !== undefined) throw captureFailure;
     },
   };
 }
 
-/**
- * Compacts the history and commits it. The change opens with the first summary call or rewrite,
- * so a history with nothing to compact records none.
- */
 async function summarizeHistory(
   step: Step,
   input: {
-    /** Between turns, no turn's usage reports the summary calls. */
     readonly betweenTurns?: true;
     readonly change: LazyChange;
     readonly compact?: true;
     readonly compaction: CompactionConfig;
     readonly messages: readonly HarnessModelMessage[];
-    /** The turn's model, which writes summaries unless the agent names a compaction model. */
-    readonly model: LanguageModel;
+    readonly turnModel: () => Promise<CredentialedModel>;
     readonly promptMessages: readonly HarnessModelMessage[];
     readonly requestEnvelopeTokens: number | undefined;
     readonly telemetryTurnId?: string;
@@ -309,10 +278,8 @@ async function summarizeHistory(
     );
     messages = compacted.messages as HarnessModelMessage[];
     stage = compacted.stage;
-    // Dropping tool activity alone rewrites the history without a summary call.
     if (!isDeepStrictEqual(messages, before)) await change.open();
   } catch (error) {
-    // The change it opened can't settle on a dead stream; the retried step recovers it.
     throwIfSessionStreamDead(error);
     const usage = summaryUsageOf(summaryUsage);
     countSummaryUsage(step, input.betweenTurns, usage);
@@ -337,7 +304,6 @@ async function summarizeHistory(
   return messages;
 }
 
-/** Settles an open change and its summary run; what the summary calls spent belongs to the run. */
 async function settleChange(
   step: Step,
   input: {
@@ -356,7 +322,6 @@ async function settleChange(
       changeId: change.changeId,
       runId: change.runId,
       runOpen: input.runOpen,
-      // Every summary call that returned left an entry, even without usage.
       summarized: input.summaryUsage.length > 0,
       usage,
     }),
@@ -364,11 +329,6 @@ async function settleChange(
   );
 }
 
-/**
- * The history's share of the threshold and the target. Whatever the model sees besides the
- * history (instructions, tools, memory, client context) is kept whole, so it takes room like the
- * envelope: on the estimate for the threshold, and on the provider's ruler for the target.
- */
 function historyConfig(
   compaction: CompactionConfig,
   input: {
@@ -392,12 +352,19 @@ function historyConfig(
   };
 }
 
-/** The compaction model, called the way a step calls its model: streamed, and retried. */
+async function compactionModel(
+  step: Step,
+  reference: RuntimeModelReference,
+): Promise<CredentialedModel> {
+  const resolved = await step.config.resolveModel(reference);
+  return await credentialedModel(resolved);
+}
+
 async function summaryExecutor(
   step: Step,
   input: {
     readonly change: { readonly runId: string };
-    readonly model: LanguageModel;
+    readonly turnModel: () => Promise<CredentialedModel>;
     readonly telemetryTurnId?: string;
   },
 ): Promise<{
@@ -407,7 +374,8 @@ async function summaryExecutor(
   const { config, session } = step;
   const turnReference = stepReference(step);
   const reference = agentSettings(step).compactionModel ?? turnReference;
-  const model = reference === turnReference ? input.model : await config.resolveModel(reference);
+  const { model, renew } =
+    reference === turnReference ? await input.turnModel() : await compactionModel(step, reference);
   const profile = resolveModelProfile(model);
   const call = {
     abortSignal: config.abortSignal,
@@ -431,36 +399,39 @@ async function summaryExecutor(
     }).telemetry,
   };
   const retryScope = { sessionId: session.sessionId, turnId: step.position().turnId };
+  const summarize = (prompt: CompactionSummaryPrompt) =>
+    runModelCallWithRetries(
+      () => streamCompactionSummary({ ...call, ...prompt }),
+      retryScope,
+      config.abortSignal,
+    );
   return {
     modelId: gatewayModelId(model) ?? "unknown",
-    summarize: (prompt) =>
-      runModelCallWithRetries(
-        () => streamCompactionSummary({ ...call, ...prompt }),
-        retryScope,
-        config.abortSignal,
-      ),
+    async summarize(prompt) {
+      for (;;) {
+        try {
+          return await summarize(prompt);
+        } catch (error) {
+          if (renew === undefined || !rejectsCredential(error)) throw error;
+          await renew(error);
+        }
+      }
+    },
   };
 }
 
-/** Spent between turns, no turn's report to a parent claims the summary calls. */
 function countSummaryUsage(step: Step, betweenTurns: true | undefined, usage: Usage | undefined) {
   if (usage !== undefined && betweenTurns === true) {
     step.session = markUsageReported(step.session, usage);
   }
 }
 
-/** What a compaction's summary calls spent, together, as the summary run records it. */
 function summaryUsageOf(deltas: readonly (TokenUsageDelta | undefined)[]): Usage | undefined {
   const spent = deltas.filter((delta) => delta !== undefined);
   if (spent.length === 0) return undefined;
   return spent.reduce<Usage>((total, delta) => addTokenUsage(total, usageOf(delta)), NO_USAGE);
 }
 
-/**
- * Where a compaction during a turn leaves the turn's input: its latest user message, or that
- * message's replay. What the framework adds for the turn goes before it, as on the turn's first
- * step.
- */
 export function compactedTurnInput<Message extends ModelMessage>(
   messages: readonly Message[],
 ): Message | undefined {
@@ -469,10 +440,6 @@ export function compactedTurnInput<Message extends ModelMessage>(
 
 type CompactionSummaryPrompt = Parameters<CompactionSummarizer>[0];
 
-/**
- * Calls the compaction model the way a step calls its model: streamed, with stream errors
- * thrown in the same shape, so the caller's retries classify them alike.
- */
 async function streamCompactionSummary(
   input: CompactionSummaryPrompt &
     Pick<
@@ -484,7 +451,6 @@ async function streamCompactionSummary(
   readonly text: string;
   readonly usage: TokenUsageDelta | undefined;
 }> {
-  // The stream's error part is rethrown below; the default handler would also log it.
   const result = streamText({ ...input, onError: () => {} });
   for await (const part of result.fullStream) {
     if (part.type === "error") throw normalizeModelStreamError(part.error);

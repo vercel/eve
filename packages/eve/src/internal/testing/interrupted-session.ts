@@ -26,11 +26,6 @@ import { always } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
 import { defineWorkflowTool } from "#tools/workflow-definition.js";
 
-// A session whose turn steps lose their completion after they ran, as a process that exits
-// before its checkpoint saves does, or fail their session writes, so the step runs again. The
-// in-process host's step faults inject them; the host battery (`session-host/`) checks that
-// Workflow retries the same way.
-
 type StreamResult = Awaited<ReturnType<MockLanguageModelV4["doStream"]>>;
 
 const ALICE = {
@@ -45,11 +40,9 @@ export interface InterruptedSession {
   readonly next: (label: string) => Promise<SessionStreamEvent[]>;
   readonly answer: (interactionId: string, optionId: string) => Promise<void>;
   readonly send: (message: string) => Promise<void>;
-  /** Alice stops the turn that is running. */
   readonly cancel: () => Promise<void>;
   readonly events: () => readonly SessionStreamEvent[];
   readonly interrupted: () => number;
-  /** How many session writes the faults failed so far. */
   readonly failedWrites: () => number;
 }
 
@@ -57,31 +50,16 @@ export interface InterruptedSessionOptions {
   readonly tools: readonly {
     readonly name: string;
     readonly approval?: boolean;
-    /** Runs as a workflow, whose result the turn waits on. */
     readonly workflow?: true;
   }[];
-  /** What the model answers each call, from the prompt it reads. */
   readonly respond: (prompt: string, call: number) => StreamResult;
-  /** The turn step that publishes the `nth` of these facts loses its completion once. */
   readonly interruptAfter?: { readonly type: string; readonly nth?: number };
-  /** Which turn-step completions, counted from 1, are lost. */
   readonly loseTurnStep?: (completion: number) => boolean;
-  /** How many turn-step attempts, from the first, fail their first session write. */
   readonly failTurnStepWrites?: number;
-  /** The first session write containing this fails, and so does every later write of its attempt. */
   readonly failWriteOf?: string;
-  /**
-   * A turn step that threw runs again only once its turn is stopped, as a cancel during
-   * Workflow's retry delay finds it.
-   */
   readonly holdRetryUntilStopped?: true;
 }
 
-/**
- * Runs `body` against a session of an agent with `options.tools`, losing the turn-step
- * completions `options` names. Once `body` returns, checks the session's stream: every line
- * follows the one before it, and no fact is written twice.
- */
 export async function withInterruptedSession(
   name: string,
   options: InterruptedSessionOptions,
@@ -105,7 +83,6 @@ export async function withInterruptedSession(
   let interrupted = 0;
   let turnSteps = 0;
   const failed = { writes: 0 };
-  /** Whether the turn step completing now loses its completion. */
   const loses = (): boolean => {
     const lost = options.loseTurnStep?.(++turnSteps) === true || armed;
     if (lost) {
@@ -232,7 +209,6 @@ export async function withInterruptedSession(
       await run.cancel().catch(() => {});
     }
   });
-  // Every line follows the one before it, and no fact is written twice.
   const lines = [...new Set(events.map(({ meta }) => meta.position.line))];
   expect(lines).toEqual(Array.from({ length: lines.length }, (_, index) => index + lines[0]!));
   const ids = {
@@ -250,7 +226,6 @@ export async function withInterruptedSession(
   return { prompts, ran, observed: seen };
 }
 
-/** The in-process host's step faults for `options`. */
 function inProcessFaults(
   options: InterruptedSessionOptions,
   loses: () => boolean,

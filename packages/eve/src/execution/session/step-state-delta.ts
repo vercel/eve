@@ -15,30 +15,16 @@ import type {
 import { freeze, isDraftable, produce } from "#compiled/immer/index.js";
 import { applyValueDelta, diffValue, snapshotValue, type ValueDelta } from "#shared/value-delta.js";
 
-// Steps only: the workflow body applies what this returns with `applySessionStateDelta`, and
-// can't import the session's publication.
-
 const SESSION_VALUE_KEYS = ["serializedContext", "sessionState", "history"] as const;
 
-/** What a session step is given: its session values, and where it writes. */
 type StepValues = Partial<SessionStateValues> & {
   readonly sessionWritable?: WritableStream<Uint8Array>;
 };
 
-/**
- * Whether Workflow stores frozen step values by reference. Its QuickJS
- * workflow VM can't read references yet, so values are stored in full there.
- */
 function storedByReference(): boolean {
   return process.env.WORKFLOW_VM !== "quickjs";
 }
 
-/**
- * The next version of a session value: `delta` applied to the value the step
- * was given, through an immer draft. Unchanged entries stay the objects the
- * given value holds and the result is deeply frozen, so Workflow stores it as
- * only its change from the given value.
- */
 function nextVersion(given: unknown, delta: ValueDelta): unknown {
   if (delta.kind === "value" || !isDraftable(given)) {
     return freeze(applyValueDelta(given, delta), true);
@@ -46,7 +32,6 @@ function nextVersion(given: unknown, delta: ValueDelta): unknown {
   return produce(given, (draft) => applyToDraft(draft, delta));
 }
 
-/** `applyValueDelta` on a draft: the same entries, in the same order. */
 function applyToDraft(draft: any, delta: ValueDelta): void {
   if (delta.kind === "value") throw new Error("A whole value replaces the draft.");
   const apply = (key: string | number, change: ValueDelta) => {
@@ -66,7 +51,6 @@ function applyToDraft(draft: any, delta: ValueDelta): void {
   }
   for (const [key, value] of Object.entries(delta.set ?? {})) draft[key] = value;
   for (const [key, change] of Object.entries(delta.patch ?? {})) apply(key, change);
-  // Re-adding each key in turn leaves them in the delta's order.
   if (keys !== undefined && !sameOrder(Object.keys(draft), keys)) {
     for (const key of keys) {
       const value = draft[key];
@@ -80,27 +64,6 @@ function sameOrder(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((key, index) => key === right[index]);
 }
 
-/**
- * Runs a session step's work and returns its result with the session values
- * it produced replaced by their delta from the values the step was given.
- *
- * Workflow replay reads every step's output but no step's input, so a step
- * that returns only what changed keeps both replay and storage from carrying
- * the whole session once per step. The workflow body applies the delta to the
- * values it passed in; see `applySessionStateDelta`.
- *
- * Where Workflow stores frozen values by reference, each changed value is
- * instead returned whole, as the next immer version of the value the step was
- * given (see `nextVersion`): Workflow stores this output as only its change,
- * the next step's input as a reference, and the workflow body adopts the value
- * as given. Values Workflow rebuilt from references arrive frozen, so step
- * code gets editable copies of them.
- *
- * The input is snapshotted before `work` runs because step code may edit it
- * in place, as a channel adapter does with its state. A retried step's state
- * follows every line its interrupted attempt wrote; see
- * {@link followInterruptedAttempt}.
- */
 export async function withSessionStateDelta<
   I extends Partial<SessionStateValues>,
   R extends Partial<SessionStateValues>,
@@ -112,7 +75,6 @@ export async function withSessionStateDelta(
   const base = Object.fromEntries(
     SESSION_VALUE_KEYS.map((key) => [key, snapshotValue(input[key])]),
   );
-  // The step's entry: whether it runs again is decided here, once, for all it does.
   const step = enterSessionStep(input);
   const { sessionWritable } = step;
   if (sessionWritable !== undefined && base.sessionState !== undefined) {

@@ -62,7 +62,6 @@ export interface TwilioUpdateCallInput extends TwilioApiOptions {
   readonly twiml: string;
 }
 
-/** Resolves a Twilio Account SID, falling back to `TWILIO_ACCOUNT_SID`. */
 export async function resolveTwilioAccountSid(accountSid?: TwilioAccountSid): Promise<string> {
   try {
     return await resolveTwilioCredential(accountSid, "TWILIO_ACCOUNT_SID");
@@ -74,12 +73,6 @@ export async function resolveTwilioAccountSid(accountSid?: TwilioAccountSid): Pr
   }
 }
 
-/**
- * Calls Twilio's REST API with Basic auth and form-encoded body fields.
- *
- * The return shape intentionally preserves Eve's previous non-throwing HTTP
- * behavior: non-2xx Twilio responses become `{ ok: false, status, body }`.
- */
 export async function callTwilioApi(input: {
   readonly credentials?: TwilioChannelCredentials;
   readonly apiBaseUrl?: string;
@@ -99,7 +92,6 @@ export async function callTwilioApi(input: {
   );
 }
 
-/** Sends an outbound SMS/MMS-style message via Twilio's Messages resource. */
 export async function sendTwilioMessage(input: TwilioSendMessageInput): Promise<TwilioApiResponse> {
   if (!input.from && !input.messagingServiceSid) {
     throw new Error("twilioChannel: sending a message requires from or messagingServiceSid.");
@@ -123,7 +115,6 @@ export async function sendTwilioMessage(input: TwilioSendMessageInput): Promise<
   );
 }
 
-/** Updates a live Twilio call by posting replacement TwiML to the Calls resource. */
 export async function updateTwilioCall(input: TwilioUpdateCallInput): Promise<TwilioApiResponse> {
   const accountSid = await resolveTwilioAccountSid(input.credentials?.accountSid);
   const credentials = await resolveCredentials(input.credentials);
@@ -140,11 +131,6 @@ export async function updateTwilioCall(input: TwilioUpdateCallInput): Promise<Tw
   );
 }
 
-/**
- * Creates the channel's `fetchFile` for MMS media. Downloads URLs on the Twilio
- * API origin with the account's Basic auth, and returns `null` for any other
- * URL so it never receives the credentials.
- */
 export function createTwilioFetchFile(
   input: TwilioApiOptions,
 ): (url: string) => Promise<FetchFileResult | null> {

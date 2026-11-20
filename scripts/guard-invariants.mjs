@@ -207,10 +207,10 @@
  *             helpers. eve declares what it builds with, such as `rolldown`,
  *             and hands it to Nitro through `deps.paths`.
  *   rule 65 — Entries that browser bundles import (`eve/client`, `eve/react`,
- *             `eve/vue`, `eve/svelte`, `eve/events`, `eve/internal/legacy-events`)
- *             never reach a Node builtin through their value imports. One
- *             import of a server module from a shared one breaks every client
- *             bundle that loads the entry.
+ *             `eve/vue`, `eve/svelte`, `eve/solid`, `eve/events`,
+ *             `eve/internal/legacy-events`) never reach a Node builtin through
+ *             their value imports. One import of a server module from a shared
+ *             one breaks every client bundle that loads the entry.
  *   rule 66 — The host-neutral core doesn't import Workflow: the session
  *             loop (`execution/session/{program,turn,active-turn,state-cursor,
  *             input-queue,next-input}.ts`), the turn step, owner boot,
@@ -227,10 +227,23 @@
  *             `import()`s count, including ones split across lines. Workflow
  *             reaches these modules through their host ports and the host
  *             registry. Only direct imports are checked.
+ *   rule 67 — Source under `packages/` carries comments only as JSDoc on
+ *             declarations users can see: what a published package entry
+ *             exports, plus the types those declarations refer to. Tool
+ *             directives (`@ts-expect-error`, `oxlint-disable`,
+ *             `/// <reference>`, `@__PURE__`) and license notices (`/*!`,
+ *             `@license`, `SPDX-License-Identifier`) are allowed anywhere. Anything
+ *             else drifts from the code it describes; an invariant belongs in
+ *             code that throws when it breaks (a named assert, a type, or a
+ *             guard rule). See `scripts/comment-policy.mjs`.
+ *   rule 68 — Every export of a published package entry has JSDoc. Users
+ *             read these docs in their editor and in the generated API
+ *             reference.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
  * may only shrink (as offenders are removed) — they may never grow.
+ * Rules 67 and 68 have no baseline.
  */
 import { glob, readFile, readdir, lstat } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -238,6 +251,7 @@ import { dirname, join, posix, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { load as loadYaml } from "js-yaml";
 import { parseSummary } from "./changeset-format.mjs";
+import { checkComments } from "./comment-policy.mjs";
 import { checkPublicExports } from "./public-exports.mjs";
 
 const require = createRequire(import.meta.url);
@@ -1007,6 +1021,7 @@ const BROWSER_ENTRIES = [
   "packages/eve/src/react/index.ts",
   "packages/eve/src/vue/index.ts",
   "packages/eve/src/svelte/index.ts",
+  "packages/eve/src/solid/index.ts",
   "packages/eve/src/public/events/index.ts",
   "packages/eve/src/internal/legacy-events.ts",
 ];
@@ -2491,6 +2506,8 @@ async function main() {
   for (const issue of await checkPublicExports()) {
     violations.push({ rule: 55, ...issue });
   }
+
+  violations.push(...(await checkComments()));
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");

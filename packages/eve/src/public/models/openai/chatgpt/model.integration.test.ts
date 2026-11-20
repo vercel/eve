@@ -1,4 +1,3 @@
-// @linux-only: reasoning replay protocol
 import { jsonSchema } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 

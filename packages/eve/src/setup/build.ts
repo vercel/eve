@@ -1,12 +1,3 @@
-// Build-time generator for the setup island's Web Chat template. Reads the
-// `apps/docs/registry/channel/web` source item, its `web-sign-in-with-vercel`
-// overlay, and the `web-tanstack` host config files, applies the declared scaffold transforms,
-// and writes `scaffold/create/web-template.ts`. Not part of the shipped package: it is
-// excluded from tsconfig.build.json and run on demand via the package scripts
-// `generate:web-template` (--write) and `check:web-template` (--check, drift).
-//
-// Version stamping is NOT handled here: eve's scripts/stamp-version-tokens.mjs
-// walks the whole dist and stamps the scaffold's __*_VERSION__ tokens for free.
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,7 +10,6 @@ const SIGN_IN_WITH_VERCEL_SOURCE_ROOT = join(
   "apps/docs/registry/channel/web-sign-in-with-vercel",
 );
 const TANSTACK_SOURCE_ROOT = join(REPO_ROOT, "apps/docs/registry/channel/web-tanstack");
-// Only the host config files Web Chat setup and `eve add` read or write.
 const TANSTACK_TEMPLATE_FILES = ["tsconfig.json", "vite.config.ts"] as const;
 const REGISTRY_PATH = join(REPO_ROOT, "apps/docs/registry.json");
 const OUTPUT_PATH = join(SETUP_ROOT, "scaffold/create/web-template.ts");
@@ -194,9 +184,6 @@ async function renderGeneratedModule(): Promise<string> {
   );
 
   return [
-    "// Generated from apps/docs/registry/channel/web by eve's setup build (src/setup/build.ts).",
-    "// Do not edit directly. Edit the app or the declared generator transforms.",
-    "",
     "export const WEB_APP_TEMPLATE_FILES = {",
     ...entries,
     "} as const;",

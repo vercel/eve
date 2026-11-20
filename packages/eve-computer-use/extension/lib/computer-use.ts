@@ -26,13 +26,10 @@ const FIREFOX_USER_JS = [
   'user_pref("ui.systemUsesDarkTheme", 1);',
   'user_pref("browser.theme.toolbar-theme", 0);',
   'user_pref("browser.theme.content-theme", 0);',
-  // Force prefers-color-scheme: dark for page content as well as browser chrome.
   'user_pref("layout.css.prefers-color-scheme.content-override", 0);',
   'user_pref("privacy.resistFingerprinting", false);',
-  // Keep Colloid's native XFWM title bar instead of Firefox's tab/title bar.
   'user_pref("browser.tabs.inTitlebar", 0);',
   'user_pref("browser.toolbars.bookmarks.visibility", "never");',
-  // Keep address-bar recordings deterministic and free of recommendation UI.
   'user_pref("browser.urlbar.quicksuggest.enabled", false);',
   'user_pref("browser.urlbar.suggest.quicksuggest.nonsponsored", false);',
   'user_pref("browser.urlbar.suggest.quicksuggest.sponsored", false);',
@@ -45,7 +42,6 @@ const FIREFOX_USER_JS = [
   'user_pref("browser.urlbar.maxRichResults", 0);',
   'user_pref("browser.newtabpage.activity-stream.feeds.topsites", false);',
   'user_pref("browser.newtabpage.activity-stream.feeds.section.topstories", false);',
-  // Firefox opens a modal Terms of Use dialog over the first page; WebDriver sets this pref too.
   'user_pref("termsofuse.bypassNotification", true);',
 ].join("\n");
 const FIREFOX_USER_CHROME = `
@@ -207,7 +203,6 @@ export function computerUseDriverStartCommand(sandbox: PathSandbox): string {
   ].join("\n");
 }
 
-/** Exit 0 only when the display, window manager, and driver are all live. */
 export function computerUseReadyCommand(sandbox: PathSandbox): string {
   const paths = computerUsePaths(sandbox);
   return [
@@ -246,14 +241,9 @@ export function computerUseDisplayCommand(sandbox: PathSandbox): string {
     "  sleep 0.1",
     "done",
     `xdpyinfo -display ${DISPLAY} >/dev/null`,
-    // A full startxfce4 session launches unnecessary panel, desktop, and power daemons.
-    // Colloid needs the smaller D-Bus, xfsettingsd, and xfwm4 session for its dark palette.
     `dbus_output=$(dbus-launch --sh-syntax)`,
     `eval "$dbus_output"`,
     ...xfconf,
-    // xfconf values are read through this D-Bus session. Keep the address in
-    // a root-owned file so later launch/layout commands can use the same
-    // session instead of silently falling back to a decoration-less WM.
     `printf '%s' "$DBUS_SESSION_BUS_ADDRESS" > ${root}/dbus-session-address`,
     `chmod 0600 ${root}/dbus-session-address`,
     `setsid -f env DISPLAY=${DISPLAY} DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" XCURSOR_SIZE=32 xfsettingsd --replace > ${root}/xfsettingsd.log 2>&1`,
@@ -262,11 +252,7 @@ export function computerUseDisplayCommand(sandbox: PathSandbox): string {
     "  sleep 0.1",
     "done",
     `if ! pgrep -f '[x]fsettingsd' >/dev/null; then cat ${root}/xfsettingsd.log >&2 || true; echo 'xfsettingsd did not start' >&2; exit 1; fi`,
-    // Colloid's rounded SVG corners require an alpha compositor. Xvfb supports
-    // Composite; leaving it enabled avoids opaque white corner rectangles.
     `setsid -f env DISPLAY=${DISPLAY} DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" XCURSOR_SIZE=32 xfwm4 --replace --compositor=on > ${root}/xfwm4.log 2>&1`,
-    // A process check can race with xfwm4 exiting during startup. Require the
-    // EWMH root-window marker that proves a live WM actually owns the display.
     "for _ in $(seq 1 100); do",
     `  DISPLAY=${DISPLAY} xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null | grep -Eq 'window id # 0x[1-9a-f]' && break`,
     "  sleep 0.1",

@@ -21,12 +21,14 @@ export {
   type AgentBrowserInstallOptions,
 } from "./shared.js";
 
+/** Output of one command run in an eve sandbox. Missing fields are treated as exit code `0` and empty output. */
 export interface EveSandboxCommandResult {
   readonly exitCode?: number;
   readonly stderr?: string;
   readonly stdout?: string;
 }
 
+/** The part of an eve sandbox session the agent-browser helpers need: running a shell command. */
 export interface EveSandboxSession {
   run(options: {
     readonly signal?: AbortSignal;
@@ -34,18 +36,26 @@ export interface EveSandboxSession {
   }): PromiseLike<EveSandboxCommandResult>;
 }
 
+/** The part of an eve tool context {@link runAgentBrowser} needs to reach the session's sandbox. */
 export interface EveToolContext {
   getSandbox(): PromiseLike<EveSandboxSession | null>;
 }
 
+/** Options for {@link installAgentBrowser}. */
 export interface EveInstallAgentBrowserOptions extends AgentBrowserInstallOptions {
+  /** Cancels the install commands when aborted. */
   readonly abortSignal?: AbortSignal;
+  /** npm binary used to install agent-browser globally. Defaults to `npm`. */
   readonly npmBinary?: string;
 }
 
+/** Options for {@link runAgentBrowser} and {@link buildAgentBrowserCommand}. */
 export interface EveRunAgentBrowserOptions extends Omit<BuildShellCommandOptions, "session"> {
+  /** Cancels the command when aborted. */
   readonly abortSignal?: AbortSignal;
+  /** agent-browser session name. Defaults to a name built from `sessionPrefix`. */
   readonly session?: string;
+  /** Prefix for the default session name. Defaults to `eve`. */
   readonly sessionPrefix?: string;
 }
 
@@ -121,6 +131,10 @@ const DNF_CHROMIUM_DEPENDENCIES = [
 
 const EVE_BOOTSTRAP_REVISION = "4";
 
+/**
+ * Cache key for a sandbox template prepared with {@link installAgentBrowser}.
+ * It changes when the install spec or install options change, so custom template caches know to rebuild.
+ */
 export function agentBrowserRevalidationKey(options: AgentBrowserInstallOptions = {}): string {
   return [
     "agent-browser",
@@ -131,6 +145,10 @@ export function agentBrowserRevalidationKey(options: AgentBrowserInstallOptions 
   ].join(":");
 }
 
+/**
+ * Installs agent-browser into a sandbox: Chromium system libraries, the npm package, and the browser, each unless disabled.
+ * Call it from a sandbox environment's `prepare` callback so new sessions start from a prepared template. Throws {@link AgentBrowserCommandError} when a step fails.
+ */
 export async function installAgentBrowser(
   sandbox: EveSandboxSession,
   options: EveInstallAgentBrowserOptions = {},
@@ -166,6 +184,10 @@ export async function installAgentBrowser(
   return results;
 }
 
+/**
+ * Runs an agent-browser CLI command in the tool's sandbox and returns its output, with `--json` output parsed.
+ * Use it from an authored eve tool. Throws when the agent has no sandbox, and {@link AgentBrowserCommandError} when the command exits non-zero.
+ */
 export async function runAgentBrowser<TJson = unknown>(
   ctx: EveToolContext,
   args: AgentBrowserArgs,
@@ -190,6 +212,7 @@ export async function runAgentBrowser<TJson = unknown>(
   );
 }
 
+/** Builds the shell command string {@link runAgentBrowser} would run for the given CLI arguments and options. */
 export function buildAgentBrowserCommand(
   args: AgentBrowserArgs,
   options: EveRunAgentBrowserOptions = {},

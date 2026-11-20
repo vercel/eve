@@ -31,36 +31,20 @@ type RegistryGlobal = typeof globalThis & {
   [FALLBACK_REGISTRY_SYMBOL]?: Map<string, FallbackDefinitionSource>;
 };
 
-// Registries live on globalThis so duplicate eve module instances share them.
 const registryContainer = globalThis as RegistryGlobal;
 registryContainer[RESOLVED_REGISTRY_SYMBOL] ??= new WeakMap();
 registryContainer[FALLBACK_REGISTRY_SYMBOL] ??= new Map();
 const resolvedSources = registryContainer[RESOLVED_REGISTRY_SYMBOL];
 const fallbackSources = registryContainer[FALLBACK_REGISTRY_SYMBOL];
 
-/** Stamps the authoring-time fallback key used for copies eve never loaded. */
 export function stampDefinitionKey(definition: object, key: string): void {
   Object.defineProperty(definition, DEFINITION_KEY, { configurable: true, value: key });
 }
 
-/**
- * Fallback key shared by the connection factories and the resolver. The
- * description keeps connections on one host, such as Jira and Confluence,
- * distinct.
- */
 export function connectionDefinitionKey(url: string, description: string): string {
   return `connection:${JSON.stringify([url, description])}`;
 }
 
-/**
- * Records a definition object eve loaded under one mounted name. The same
- * object can be mounted more than once, for example when a subagent re-exports
- * an extension tool, so every mounted name matches it.
- *
- * `fallbackKey` also lets copies with the same stamped key match. That
- * fallback is marked ambiguous when different objects with different names
- * share it.
- */
 export function registerDefinitionSource(
   definition: object,
   entry: DefinitionSourceEntry,
@@ -84,8 +68,6 @@ export function readDefinitionSource(definition: object): RegisteredDefinitionSo
   if (key === undefined) return undefined;
   const fallback = fallbackSources.get(key);
   if (fallback?.kind === "ambiguous" && !fallback.warned) {
-    // Warn only when a lookup needs the shared fallback. Loaded definitions
-    // resolve above through their source identity.
     fallback.warned = true;
     console.warn(
       [

@@ -34,7 +34,6 @@ interface AttemptState {
   readonly toolCalls: Map<string, InstrumentationCallRequestedEvent>;
   readonly isFrameworkTool?: (name: string) => boolean;
   operation?: InstrumentationOperationRef;
-  // Only the number is kept: it disambiguates call identities within an attempt.
   stepNumber?: number;
   started?: boolean;
 }
@@ -44,7 +43,6 @@ interface ModelCallStartState {
   readonly stepNumber: number;
 }
 
-/** Creates one provider-neutral AI SDK bridge for one actual model attempt. */
 export function createAiSdkHookBridge(
   scope: InstrumentationScope,
   hooks: InstrumentationHooks,

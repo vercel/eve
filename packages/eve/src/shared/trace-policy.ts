@@ -1,7 +1,6 @@
 import { shouldCaptureInstrumentationContent } from "#shared/instrumentation-content.js";
 import type { ConversationContext } from "#shared/conversation-context.js";
 
-// Keep sampled-flag checks free of OTel imports for workflow driver bundles.
 export function isSampledTrace(context: { readonly traceFlags: number }): boolean {
   return (context.traceFlags & 1) !== 0;
 }
@@ -10,8 +9,13 @@ import {
   type InstrumentationDecision,
 } from "#shared/instrumentation-decision.js";
 
+/**
+ * What a {@link TraceCapturePolicy} receives: the agent name and the conversation's channel,
+ * audience, environment, and principal type.
+ */
 export type TraceCaptureContext = { readonly agentName: string } & ConversationContext;
 
+/** Whether to emit a trace and, when emitting, whether to record model inputs and outputs. */
 export type TracePolicyDecision =
   | { readonly emit: false }
   | {
@@ -20,6 +24,10 @@ export type TracePolicyDecision =
       readonly recordOutputs: boolean;
     };
 
+/**
+ * Decides per conversation whether to emit traces and record content. `true` emits and records
+ * content only for public audiences or in development; `false` drops the trace.
+ */
 export type TraceCapturePolicy = (trace: TraceCaptureContext) => TracePolicyDecision | boolean;
 
 export function resolveTracePolicy(

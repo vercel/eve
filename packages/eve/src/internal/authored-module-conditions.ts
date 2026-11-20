@@ -2,7 +2,6 @@ import { parseArgs } from "node:util";
 
 import { ROLLDOWN_STANDARD_CONDITION_NAMES } from "#internal/bundler/rolldown.js";
 
-/** Keep authored evaluation and its immutable bundle on the same conditional exports. */
 export function authoredModuleConditions(
   args: readonly string[] = process.execArgv,
   nodeOptions: string = process.env.NODE_OPTIONS ?? "",

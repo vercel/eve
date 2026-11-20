@@ -1,14 +1,11 @@
 import type { OpenApiParameter, OpenApiRequestBody } from "#runtime/connections/openapi-schema.js";
 import type { SecurityPlacement } from "#runtime/connections/openapi-security.js";
 
-/** HTTP methods OpenAPI defines operations for. */
 export const HTTP_METHODS = ["get", "put", "post", "delete", "patch", "head", "options"] as const;
 export type HttpMethod = (typeof HTTP_METHODS)[number];
 
-/** Internal descriptor for one resolved OpenAPI operation. */
 export interface OpenApiOperation {
   readonly toolName: string;
-  /** The document's `operationId`, when the operation declares one. */
   readonly operationId: string | undefined;
   readonly method: HttpMethod;
   readonly pathTemplate: string;
@@ -19,15 +16,6 @@ export interface OpenApiOperation {
   readonly security: SecurityPlacement | undefined;
 }
 
-/**
- * Derives a tool name for an operation that is legal for model providers.
- *
- * Provider tool-name rules (Anthropic, OpenAI) only permit
- * `[a-zA-Z0-9_-]`, so an `operationId` is sanitized rather than used
- * verbatim — characters like dots or slashes (common in real specs)
- * would otherwise be rejected and break the whole connection. Operations
- * without an `operationId` get a deterministic `<method>_<path>` name.
- */
 export function operationName(
   operation: Record<string, unknown>,
   method: HttpMethod,
@@ -47,7 +35,6 @@ export function operationName(
   return sanitizeToolName(`${method}_${sanitizedPath}`);
 }
 
-/** The operation's `operationId`, when it declares a non-empty one. */
 export function declaredOperationId(operation: Record<string, unknown>): string | undefined {
   return typeof operation.operationId === "string" && operation.operationId.length > 0
     ? operation.operationId
@@ -56,7 +43,6 @@ export function declaredOperationId(operation: Record<string, unknown>): string 
 
 const MAX_TOOL_NAME_LENGTH = 64;
 
-/** Coerces an arbitrary string into a provider-legal tool name (`[a-zA-Z0-9_-]`, ≤64). */
 function sanitizeToolName(name: string): string {
   return name
     .replace(/[^a-zA-Z0-9_-]+/g, "_")
@@ -64,7 +50,6 @@ function sanitizeToolName(name: string): string {
     .slice(0, MAX_TOOL_NAME_LENGTH);
 }
 
-/** Disambiguates a tool name against names already used in the same connection. */
 export function uniqueName(name: string, used: Set<string>): string {
   let candidate = name;
   let suffix = 2;
@@ -77,7 +62,6 @@ export function uniqueName(name: string, used: Set<string>): string {
   return candidate;
 }
 
-/** Picks a human description for an operation, preferring `summary` over `description`. */
 export function operationDescription(operation: Record<string, unknown>): string {
   if (typeof operation.summary === "string" && operation.summary.length > 0) {
     return operation.summary;

@@ -58,13 +58,11 @@ export function transcriptOf(
       `transcriptOf: "maxMessages" must be a positive integer; received ${String(maxMessages)}.`,
     );
   }
-  // Each message keeps the turn it belongs to, so turns outside the conversation drop out.
   let entries: { readonly message: TranscriptMessage; readonly turnId: string | undefined }[] = [];
   const follows = new Map<string, string | null>();
   let latestTurnId: string | undefined;
   let selection: string | null | undefined;
   let resetDeliveryId: string | undefined;
-  // Where the history of the deliveries the current line consumes goes: before their messages.
   let consumed: { readonly line: number | undefined; at: number } | undefined;
   const append = (message: TranscriptMessage, turnId: string | undefined) => {
     if (message.text.trim().length > 0) entries.push({ message, turnId });
@@ -125,14 +123,12 @@ export function transcriptOf(
     follows,
     selection === undefined ? latestTurnId : selection,
   );
-  // A turn this stream never started is one it can't place, so its messages stay.
   const messages = entries.flatMap(({ message, turnId }) =>
     turnId === undefined || !follows.has(turnId) || conversation.has(turnId) ? [message] : [],
   );
   return { messages: maxMessages === undefined ? messages : messages.slice(-maxMessages) };
 }
 
-/** The turn that heads the conversation and the turns it follows back. */
 function conversationTurns(
   follows: ReadonlyMap<string, string | null>,
   head: string | null | undefined,

@@ -36,7 +36,6 @@ function contexts() {
   });
 }
 
-/** Serves `files` from memory; every other path is absent. */
 function withFiles(effects: WebSetupDeps, files: Record<string, string>) {
   vi.mocked(effects.pathExists).mockImplementation(async (path) => path in files);
   vi.mocked(effects.readTextFile).mockImplementation(async (path) => {
@@ -507,7 +506,6 @@ describe("Web setup for a TanStack Start app", () => {
     const resolveVercelProject = vi.fn(async () => ({ orgId: "team", projectId: "project" }));
     const ctx = createSetupContexts({
       appRoot: "/project",
-      // Headless refuses unanswered required questions, so a sign-in prompt would throw.
       asker: withAnswers({ "web-hosting": "tanstack" })(headlessAsker()),
       environment: integrationSetupEnvironment("cli-missing", { kind: "unresolved" }),
       prompter: createFakePrompter().prompter,

@@ -3,7 +3,6 @@ const ALLOWED_CREATE_IN_PLACE_ENTRIES = new Set([
   ".git",
   ".gitkeep",
   ".hg",
-  // These committed manifests may establish the development environment before init can run.
   ".node-version",
   ".nvmrc",
   ".protolock",

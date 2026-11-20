@@ -6,10 +6,6 @@ import { ClientError, ClientSessionStrandedError } from "#client/client-error.js
 import { HealthResponseError } from "#client/health-response-error.js";
 import { EveError } from "#shared/eve-error.js";
 
-/**
- * What an error thrown by a separately bundled copy of eve looks like to this copy. The brand is
- * keyed by an independently obtained registry symbol, so a module-local symbol would fail here.
- */
 function fromAnotherCopy(error: EveError): Error {
   const foreign = Object.assign(new Error(error.message), { code: error.code });
   Object.defineProperty(foreign, Symbol.for("eve.error.lineage"), {

@@ -1,4 +1,3 @@
-// @linux-only: TUI placeholder from agent info; virtual paths
 import { expect, it } from "vitest";
 
 import { defaultDevelopmentExtensions } from "#compiler/development-extensions.js";

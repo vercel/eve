@@ -62,6 +62,7 @@ pnpm typecheck          # TypeScript across the workspace
 pnpm lint               # oxlint (auto-fixes)
 pnpm fmt                # oxfmt
 pnpm guard:invariants   # mechanical code-invariant checks (runs in CI)
+pnpm guard:docs-budget  # fixes and internal changes don't grow docs (pre-commit and CI)
 pnpm docs:check         # docs frontmatter and nav validation
 
 pnpm test               # unit + integration
@@ -166,10 +167,16 @@ CI.
 9. **All runtime functionality lives in the `eve` package.** Never rely on
    emitted or generated code for runtime behavior.
 
-10. **Comment why, not what.** Default to no comment; well-named code is the
-    documentation. Comment only what the code cannot say itself — a non-obvious
-    why, an invariant, a surprising edge case. Public API docs (principle 1) are
-    the exception.
+10. **Comments document the public API, nothing else.** In `packages/`, the
+    only comments are JSDoc on declarations users can see (what a published
+    entry exports and the types it refers to), tool directives such as
+    `@ts-expect-error`, and license notices (`/*! ... */`, `@license`,
+    `SPDX-License-Identifier`) that credit adapted third-party code. Every
+    published export has JSDoc. Do not add comments
+    while fixing a bug or refactoring; well-named code is the documentation.
+    Express an invariant as code that fails when it breaks: a named assert that
+    throws with the reason in its message, a type, or a `pnpm guard:invariants`
+    rule. Rules 67 and 68 enforce this with no baseline.
 
 11. **Configure Nitro from data.** eve's Nitro host is built from one typed host
     spec, one ordered plugin list, and one route table. Follow the foundation
@@ -178,7 +185,7 @@ CI.
     when touching `internal/nitro/`.
 
 Machine-checkable invariants are enforced by `pnpm guard:invariants`, which
-runs in the CI lint job. If the guard fails, fix the violation rather than
+runs in Vercel CI. If the guard fails, fix the violation rather than
 editing the baseline — baselines may only shrink.
 
 ## Research plans
@@ -278,11 +285,31 @@ credentials the fixtures need. TUI smoke tests
 live under `packages/eve/test/tui-client` and run with `pnpm test:tui`. See
 [`e2e/README.md`](./e2e/README.md).
 
+## Templates
+
+Keep every template in `apps/templates` on the same versions:
+
+- `packageManager` matches the root `package.json`.
+- The `eve` dependency is the same published version everywhere, including
+  nested packages such as `eve-discord-agent-template/daemon`.
+
+When you add, import, or update a template, match these versions. When you bump
+either one, bump it in every template in the same PR and regenerate each
+template's `pnpm-lock.yaml`. See
+[`apps/templates/README.md`](./apps/templates/README.md).
+
 ## Documentation
 
 - `docs/**` is the published documentation. If your change alters
   public behavior, update the relevant doc in the same PR and run
   `pnpm docs:check`.
+- A bug fix or internal change may rewrite docs but not grow them. When a
+  branch changes code in `packages/` without a `minor` or `major` changeset,
+  the lines it adds to `docs/` Markdown and to JSDoc may not exceed the lines
+  it deletes. Do not document a fix; its changeset records it. A feature takes
+  a `minor` changeset, and a docs correction that needs more words goes in its
+  own docs-only PR. `pnpm guard:docs-budget` checks this, as do the pre-commit
+  hook and CI.
 - When moving a published route, update authored links to the new URL and add a
   permanent redirect from every old HTML and supported Markdown URL.
 - Sidebar order lives in `docs/meta.json`.

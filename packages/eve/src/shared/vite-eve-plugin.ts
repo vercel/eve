@@ -1,9 +1,10 @@
 import type { ChildProcess } from "node:child_process";
-import { writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { cp, rm, writeFile } from "node:fs/promises";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import type { Plugin, PluginOption, ProxyOptions, UserConfig, ViteBuilder } from "vite";
 
+import { escapeRegex } from "#internal/bundler/filters.js";
 import {
   parseVercelServicesConfig,
   type VercelServicesConfig,
@@ -20,11 +21,6 @@ import {
 import { resolveDevServerTimeout, type EveFrameworkHost } from "#shared/framework-eve-server.js";
 import { readOptionalFile } from "#shared/read-optional-file.js";
 
-/**
- * Dev servers this process spawned, keyed by agent root. Module scope
- * survives Vite config restarts, which re-run `vite.config.ts` and reuse the
- * running servers through the shared registry.
- */
 const spawnedDevServers = new Map<string, ChildProcess>();
 
 /**
@@ -51,26 +47,26 @@ export interface EveVitePluginOptions {
   readonly eveBuildCommand?: string;
 }
 
-/**
- * The slice of Nitro's `nitro` Vite config key the plugin writes. It is typed
- * locally so eve does not depend on Nitro's Vite type augmentation.
- */
 type NitroUserConfig = UserConfig & {
   readonly nitro?: {
     readonly routeRules?: Record<string, { readonly proxy: string }>;
   };
 };
 
-/**
- * The slice of a Nitro module, and of the Nitro instance its `setup` receives,
- * that the plugin uses. Nitro's Vite plugin installs the `nitro` property of
- * any Vite plugin as a Nitro module.
- */
 interface EveNitroModule {
   readonly name: string;
   setup(nitro: {
     readonly options: { vercel?: { config?: VercelServicesConfig; [key: string]: unknown } };
   }): Promise<void>;
+}
+
+function isWithin(path: string, directory: string): boolean {
+  const pathFromDirectory = relative(directory, path);
+  return (
+    pathFromDirectory !== ".." &&
+    !pathFromDirectory.startsWith(`..${sep}`) &&
+    !isAbsolute(pathFromDirectory)
+  );
 }
 
 function flattenPlugins(options: readonly PluginOption[]): Plugin[] {
@@ -85,14 +81,6 @@ function flattenPlugins(options: readonly PluginOption[]): Plugin[] {
   return plugins;
 }
 
-/**
- * Create a Vite plugin that runs eve agents alongside a Vite app.
- *
- * `nitroOnly` is for hosts that Nitro serves in every mode: the plugin then
- * requires the Nitro Vite plugin and leaves `vite preview` alone.
- * `vercelOutputAfterSsrBundle` is for hosts whose adapter writes
- * `.vercel/output` when the SSR build's bundle closes, after `buildApp`.
- */
 export function createEveVitePlugin(input: {
   readonly host: EveFrameworkHost;
   readonly nitroOnly?: boolean;
@@ -101,6 +89,7 @@ export function createEveVitePlugin(input: {
 }): Plugin & { readonly nitro: EveNitroModule } {
   const { host, nitroOnly, options, vercelOutputAfterSsrBundle } = input;
   const devServerTimeoutMs = resolveDevServerTimeout(options.devServerTimeoutMs, host);
+  const isVercel = Boolean(process.env.VERCEL);
   let viteRoot: string;
   let projectRoot: string;
   let agents: readonly EveFrameworkAgent[];
@@ -108,21 +97,69 @@ export function createEveVitePlugin(input: {
   let isSsrBuild = false;
   let isVercelBuild = false;
   let nitroModuleInstalled = false;
-  // Nitro's own preview server answers every request, and its build Vite
-  // instance does not share this module state, so its plugin name is the signal.
   let nitroServesPreview = false;
 
-  async function addEveVercelServicesToOutput(): Promise<void> {
+  function serverRenderedError(found: string, staticFix = ""): Error {
+    return new Error(
+      `The eve ${host.label} plugin found ${found} and no .vercel/output from a framework or adapter, so it cannot deploy this app to Vercel. ${staticFix}A server-rendered app needs nitro() from "nitro/vite" (with the nitro package installed) or an adapter that writes .vercel/output during vite build. You can also compose eve in vercel.ts with withEve from "eve/vercel".`,
+    );
+  }
+
+  async function writeStaticVercelOutput(builder: ViteBuilder): Promise<VercelServicesConfig> {
+    if (builder.config.build.ssr) {
+      throw serverRenderedError("an SSR build (vite build --ssr)");
+    }
+    const client = builder.environments.client ?? builder;
+    const clientOutDir = resolve(viteRoot, client.config.build.outDir);
+    if ((await readOptionalFile(join(clientOutDir, "index.html"))) === undefined) {
+      throw serverRenderedError(
+        `no root index.html in ${clientOutDir}`,
+        "A static app must build index.html into build.outDir. ",
+      );
+    }
+    const base = builder.config.base.startsWith("/") ? builder.config.base : "/";
+    const outputRoot = join(viteRoot, ".vercel", "output");
+    const staticRoot = join(outputRoot, "static");
+    const staticTarget = join(staticRoot, base);
+    if (relative(staticTarget, clientOutDir) !== "") {
+      if (isWithin(clientOutDir, outputRoot) || isWithin(outputRoot, clientOutDir)) {
+        throw new Error(
+          `The eve ${host.label} plugin cannot write a static Vercel Build Output because the client build.outDir ${clientOutDir} overlaps ${outputRoot}. Set build.outDir outside .vercel/output, or to exactly ${staticTarget}.`,
+        );
+      }
+      await rm(staticRoot, { force: true, recursive: true });
+      await cp(clientOutDir, staticTarget, { recursive: true });
+    }
+    return {
+      routes: [
+        { handle: "filesystem" },
+        ...(builder.config.appType === "mpa"
+          ? []
+          : [{ src: `^${escapeRegex(base)}(.*)$`, dest: `${base}index.html` }]),
+      ],
+      version: 3,
+    };
+  }
+
+  async function addEveVercelServicesToOutput(builder?: ViteBuilder): Promise<void> {
     const outputConfigPath = join(viteRoot, ".vercel", "output", "config.json");
+    const staticOutputMarkerPath = join(viteRoot, ".vercel", "eve-static-output.json");
+    let wroteStaticOutput = false;
     const config = await addEveVercelServices(
       async () => {
         const source = await readOptionalFile(outputConfigPath);
-        if (source === undefined) {
+        const ownsOutput =
+          builder !== undefined && source === (await readOptionalFile(staticOutputMarkerPath));
+        if (source !== undefined && !ownsOutput) {
+          return parseVercelServicesConfig(JSON.parse(source), outputConfigPath);
+        }
+        if (builder === undefined) {
           throw new Error(
             `The eve ${host.label} plugin found no Vercel Build Output at ${outputConfigPath} after the build. Use a framework or adapter that writes .vercel/output during vite build, or compose eve in vercel.ts with withEve from "eve/vercel".`,
           );
         }
-        return parseVercelServicesConfig(JSON.parse(source), outputConfigPath);
+        wroteStaticOutput = true;
+        return await writeStaticVercelOutput(builder);
       },
       {
         agents,
@@ -132,18 +169,19 @@ export function createEveVitePlugin(input: {
       },
     );
     if (config !== undefined) {
-      await writeFile(outputConfigPath, `${JSON.stringify(config, null, 2)}\n`);
+      const source = `${JSON.stringify(config, null, 2)}\n`;
+      await writeFile(outputConfigPath, source);
+      if (wroteStaticOutput) {
+        await writeFile(staticOutputMarkerPath, source);
+      }
     }
   }
 
   return {
     name: `eve:${host.slug}`,
-    // Runs its build hooks after framework adapters have written `.vercel/output`.
     enforce: "post",
     nitro: {
       name: "eve",
-      // Nitro writes `.vercel/output` from this config, so merging here puts
-      // eve's routes ahead of the user's own `nitro({ vercel })` routes.
       async setup(nitro) {
         nitroModuleInstalled = true;
         if (!isVercelBuild) {
@@ -161,7 +199,6 @@ export function createEveVitePlugin(input: {
       },
     },
     config: {
-      // Nitro reads its route rules from the config in its own `config` hook.
       order: "pre",
       async handler(config, env): Promise<NitroUserConfig> {
         viteRoot = resolve(config.root ?? "");
@@ -170,29 +207,20 @@ export function createEveVitePlugin(input: {
         nitroServesPreview =
           isPreview &&
           flattenPlugins(config.plugins ?? []).some((plugin) => plugin.name === "nitro:preview");
-        isVercelBuild = env.command === "build" && Boolean(process.env.VERCEL);
+        isVercelBuild = env.command === "build" && isVercel;
         if (env.command !== "serve") {
-          // Vercel needs the agents to generate their services; every other
-          // build needs none, and may have no agent files at all.
           agents = isVercelBuild ? await resolveEveAgents(projectRoot) : [];
           return {};
         }
-        // The proxy only needs the agent names, so a frontend that reaches an
-        // agent elsewhere can build without local agent files.
         const configuredOrigin = readEveBaseUrlOrigin();
         agents =
           configuredOrigin === undefined
             ? await resolveEveAgents(projectRoot)
             : [{ appRoot: projectRoot, publicRoutePrefix: "" }];
-        // Nitro answers every preview request itself, so a proxy or a dev
-        // server here would do nothing. A Nitro-only host always reaches
-        // preview through it.
         if (nitroServesPreview || (isPreview && nitroOnly)) {
           return {};
         }
 
-        // Each workspace member's dev server serves only that member at
-        // `/eve/v1`, so dev and preview both need one server per member.
         const origins = await Promise.all(
           agents.map(async (agent) => {
             const handle = await resolveEveAgentDevServer(agent, host, devServerTimeoutMs);
@@ -220,15 +248,11 @@ export function createEveVitePlugin(input: {
         if (isPreview) {
           return { preview: { proxy } };
         }
-        // Nitro answers dev requests before Vite's proxy middleware runs, so
-        // Nitro-served apps need the proxies as route rules too.
         return { nitro: { routeRules }, server: { proxy } };
       },
     },
     configResolved(config) {
       isSsrBuild = Boolean(config.build.ssr);
-      // Nitro installs the `nitro` module above while resolving config.
-      // Without Nitro the eve routes would silently 404.
       if (nitroOnly && !isPreview && !nitroModuleInstalled) {
         throw new Error(
           `The eve ${host.label} plugin needs the Nitro Vite plugin. Install "nitro" and add nitro() from "nitro/vite" to the plugins in vite.config.ts.`,
@@ -243,22 +267,24 @@ export function createEveVitePlugin(input: {
         }
       }
     },
-    buildApp: {
-      order: "post",
-      async handler(builder: ViteBuilder) {
-        if (!isVercelBuild || nitroModuleInstalled || vercelOutputAfterSsrBundle) {
-          return;
+    ...(isVercel
+      ? {
+          buildApp: {
+            order: "post",
+            async handler(builder: ViteBuilder) {
+              if (nitroModuleInstalled || vercelOutputAfterSsrBundle) {
+                return;
+              }
+              for (const environment of Object.values(builder.environments)) {
+                if (!environment.isBuilt) {
+                  await builder.build(environment);
+                }
+              }
+              await addEveVercelServicesToOutput(builder);
+            },
+          },
         }
-        // `buildApp` runs before Vite builds the environments that `--app`
-        // selects, so the adapter has not written `.vercel/output` yet.
-        for (const environment of Object.values(builder.environments)) {
-          if (!environment.isBuilt) {
-            await builder.build(environment);
-          }
-        }
-        await addEveVercelServicesToOutput();
-      },
-    },
+      : {}),
     closeBundle: {
       sequential: true,
       async handler() {

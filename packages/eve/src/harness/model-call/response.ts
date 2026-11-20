@@ -16,20 +16,14 @@ type StepResponseMessage = HarnessStepResult["response"]["messages"][number];
 type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
 type ToolResultPart = Extract<ToolResponsePart, { type: "tool-result" }>;
 
-/**
- * The step as the harness reads it: the AI SDK's result, with the results of the calls eve ran or
- * answered appended to the response, and what the calls wait on.
- */
 export function withCallResults(input: {
   readonly stepResult: HarnessStepResult;
   readonly responseMessages: readonly StepResponseMessage[];
   readonly calls: InlineCallResults;
-  /** Results for calls that didn't run. */
   readonly answers: readonly ToolResultPart[];
   readonly invalidInputToolCallIds?: ReadonlySet<string>;
 }): HarnessStepResult {
   const { calls, stepResult } = input;
-  // AI SDK `StepResult` fields are prototype getters, so spreading the instance drops them.
   return {
     approvalRequests: calls.approvals,
     policyApprovals: calls.policyApprovals,
@@ -57,7 +51,6 @@ export function withCallResults(input: {
   };
 }
 
-/** True when provider history still owes a result for any assistant tool call. */
 export function hasUnansweredToolCall(messages: readonly ModelMessage[]): boolean {
   const callIds = new Set<string>();
   const resultIds = new Set<string>();
@@ -77,16 +70,6 @@ export function hasUnansweredToolCall(messages: readonly ModelMessage[]): boolea
   return false;
 }
 
-/**
- * Appends tool results for calls that have no result anywhere in the step's response messages.
- * The response's results share one tool message, in the order the model made its calls: the AI
- * SDK answers an invalid call as it streams, and eve's calls run once the response ends.
- *
- * Exported for its dedupe contract: a call already answered — including provider-executed
- * results the SDK keeps inline in the assistant message — must never receive a second
- * `tool-result`, or the next Anthropic call rejects the history with "each tool_use must have a
- * single result".
- */
 export function appendMissingToolResultMessages(input: {
   readonly append: readonly ToolResultPart[];
   readonly responseMessages: readonly StepResponseMessage[];
@@ -109,7 +92,6 @@ export function appendMissingToolResultMessages(input: {
       }
     }
   }
-  // Anything that answers no call of the response keeps its place after those that do.
   const position = (part: ToolResponsePart) =>
     (part.type === "tool-result" ? order.get(part.toolCallId) : undefined) ?? order.size;
   const content = [...(answered?.content ?? []), ...append].sort(
@@ -121,13 +103,6 @@ export function appendMissingToolResultMessages(input: {
   ];
 }
 
-/**
- * CallIds answered anywhere in the response messages. Scans every message
- * role: provider-executed tool results arrive inline in the *assistant*
- * message (the SDK only moves them to a `tool` message during provider
- * history normalization, which runs after the backfill paths), so a
- * tool-message-only scan would let a synthesized result duplicate them.
- */
 export function extractToolResultCallIds(messages: readonly ModelMessage[]): ReadonlySet<string> {
   const callIds = new Set<string>();
 
@@ -150,10 +125,6 @@ function isLocalOrWorkflowTool(definition: HarnessToolDefinition | undefined): b
   return isRunnableTool(definition) || isWorkflowTool(definition);
 }
 
-/**
- * Answers the calls of a response that ended early: eve runs none of them. That includes workflow
- * calls, which would otherwise dispatch after the step without their approval ever being decided.
- */
 export function answerSkippedToolCalls(
   step: HarnessStepResult,
   tools: HarnessToolLookup,

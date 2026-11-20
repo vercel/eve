@@ -1,4 +1,3 @@
-// @linux-only: AI SDK approval resume streaming
 import {
   isStepCount,
   simulateReadableStream,

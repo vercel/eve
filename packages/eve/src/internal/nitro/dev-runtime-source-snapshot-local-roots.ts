@@ -8,12 +8,6 @@ import {
 } from "#internal/application/tsconfig-dependencies.js";
 import { isPathInsideOrEqual } from "#shared/path-inside.js";
 
-/**
- * Resolves the local roots that a tsconfig's path aliases can resolve to.
- * Each alias target that lands on authored workspace source contributes the
- * owning package root (or the target directory itself when no package owns
- * it), so snapshot planning can copy the aliased source.
- */
 export async function resolveLocalTsConfigPathTargetRoots(input: {
   readonly configPath: string;
   readonly sourceRoot: string;
@@ -65,7 +59,6 @@ export async function resolveLocalTsConfigPathTargetRoots(input: {
   return [...localRoots].sort((left, right) => left.localeCompare(right));
 }
 
-/** Resolves the nearest ancestor directory (bounded by the source root) that owns a package.json. */
 export async function resolveNearestPackageRoot(
   path: string,
   sourceRoot: string,
@@ -99,7 +92,6 @@ export async function resolveNearestPackageRoot(
   return undefined;
 }
 
-/** Returns whether a path is authored workspace source rather than installed dependency data. */
 export function isAuthoredSourcePath(path: string, sourceRoot: string): boolean {
   if (!isPathInsideOrEqual(path, sourceRoot)) {
     return false;

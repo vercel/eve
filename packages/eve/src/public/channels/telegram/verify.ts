@@ -1,12 +1,3 @@
-/**
- * Telegram inbound-webhook verification.
- *
- * When you configure a webhook with `secret_token`, Telegram includes
- * that exact value in `X-Telegram-Bot-Api-Secret-Token` on every
- * webhook request. The native channel verifies the header directly or
- * delegates to a caller-supplied verifier for forwarded webhooks.
- */
-
 import { timingSafeEqual } from "node:crypto";
 
 import { createLogger } from "#internal/logging.js";
@@ -31,13 +22,11 @@ export type TelegramWebhookVerifier = (
   body: string,
 ) => unknown | Promise<unknown>;
 
-/** Options for {@link verifyTelegramRequest}. */
 export interface TelegramVerifyOptions {
   readonly secretToken: TelegramWebhookSecretToken | undefined;
   readonly webhookVerifier?: TelegramWebhookVerifier;
 }
 
-/** Resolves a Telegram webhook secret, falling back to `TELEGRAM_WEBHOOK_SECRET_TOKEN`. */
 export async function resolveTelegramWebhookSecretToken(
   secretToken?: TelegramWebhookSecretToken,
 ): Promise<string> {
@@ -46,12 +35,6 @@ export async function resolveTelegramWebhookSecretToken(
   return typeof source === "function" ? await source() : source;
 }
 
-/**
- * Verifies an inbound Telegram webhook and returns its raw body.
- *
- * Throws when no secret/verifier is configured, the secret header is
- * missing, or the supplied verifier/header rejects.
- */
 export async function verifyTelegramRequest(
   request: Request,
   options: TelegramVerifyOptions,

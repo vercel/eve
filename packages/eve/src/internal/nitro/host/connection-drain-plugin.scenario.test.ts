@@ -10,17 +10,14 @@ import { afterEach, describe, expect, it } from "vitest";
 
 const PLUGIN_PATH = fileURLToPath(new URL("./connection-drain-plugin.ts", import.meta.url));
 
-/** srvx's graceful shutdown: it closes the server, and the process exits once nothing is left. */
 const SRVX_LISTENER = 'process.on("SIGTERM", () => server.close());';
 
-/** Like signal-exit, bundled in eve's server: it re-raises a signal no other listener handles. */
 const SIGNAL_EXIT_LISTENER = `process.on("SIGTERM", function reraise(signal) {
   if (process.listenerCount(signal) > 1) return;
   process.removeListener(signal, reraise);
   process.kill(process.pid, signal);
 });`;
 
-// A self-signed test certificate, valid until 2126.
 const LOCALHOST = {
   cert: `-----BEGIN CERTIFICATE-----
 MIIBlTCCATugAwIBAgIUKHacTUI1cxpPDk584AB8UX5DhcswCgYIKoZIzj0EAwIw
@@ -68,7 +65,6 @@ afterEach(() => {
   for (const socket of sockets.splice(0)) socket.destroy();
 });
 
-/** Starts the server; with `srvx: false` it runs as srvx would skip graceful shutdown, in CI. */
 async function startServer(input: { readonly srvx: boolean; readonly protocol?: Protocol }) {
   const env: NodeJS.ProcessEnv = { ...process.env };
   delete env.CI;
@@ -95,13 +91,11 @@ async function startServer(input: { readonly srvx: boolean; readonly protocol?: 
 
 function openIdleConnection(port: number): Promise<void> {
   const socket = connect(port, "127.0.0.1");
-  // The server may reset it on shutdown.
   socket.on("error", () => {});
   sockets.push(socket);
   return new Promise((resolve) => socket.once("connect", () => resolve()));
 }
 
-/** Opens a connection and upgrades it; resolves once the server switched protocols. */
 function openUpgradedConnection(port: number, protocol: Protocol): Promise<Socket> {
   const socket =
     protocol === "https"
@@ -148,8 +142,6 @@ describe("connection drain plugin", () => {
       const { child, exited, port } = await startServer({ srvx: true, protocol });
       const agent = keepAliveAgent(protocol);
       try {
-        // A client that connected without sending a request, and a request still in flight on a
-        // connection its client keeps alive.
         await openIdleConnection(port);
         const response = get(port, protocol, agent);
         await new Promise((resolve) => setTimeout(resolve, 100));

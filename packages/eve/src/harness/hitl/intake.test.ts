@@ -19,7 +19,6 @@ import { emptySessionView } from "#protocol/session-projection/fold.js";
 import type { InteractionRow } from "#protocol/session-projection/tables.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 
-// The parked calls run with the catalog the step builds; here, the tools each test names.
 const catalog = vi.hoisted(() => ({ tools: new Map<string, HarnessToolDefinition>() }));
 vi.mock("#definitions/step.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#definitions/step.js")>()),
@@ -71,7 +70,6 @@ function call(callId: string, attemptId?: string): ApprovedCall {
   };
 }
 
-/** A model step parked on its calls: the intake runs each such step's calls as one group. */
 function parked(stepIndex: number): SuspendedStep {
   return {
     event: { sequence: 1, stepIndex, turnId: "turn-1" },
@@ -81,10 +79,6 @@ function parked(stepIndex: number): SuspendedStep {
   };
 }
 
-/**
- * A step whose sign-ins stay open as far as its view says, so only the batch's reporter settles
- * each once. `publish` fails for what `fails` names.
- */
 function intakeStep(attemptIds: readonly string[], fails?: (event: SessionEvent) => boolean) {
   const published: SessionEvent[] = [];
   const projection = {
@@ -123,7 +117,6 @@ function intakeStep(attemptIds: readonly string[], fails?: (event: SessionEvent)
   return { settled, step };
 }
 
-/** Completes a sign-in the way a connection does: through the reporter the step's context holds. */
 async function completeSignIn(attemptId: string): Promise<void> {
   await loadContext().get(SignInCompletedKey)?.(completion(attemptId));
 }
@@ -187,8 +180,6 @@ it("keeps the reporter for a step still running after another step's calls fail"
     [
       "call-b",
       tool("call-b", async () => {
-        // The sign-in completes only after the other step's calls have failed and their group
-        // has rejected.
         await aFailed;
         await new Promise((resolve) => setImmediate(resolve));
         await completeSignIn("attempt-b");

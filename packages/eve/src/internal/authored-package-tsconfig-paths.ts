@@ -34,25 +34,14 @@ const NON_PACKAGE_IMPORT_FILTER = /^(?:\.|\/|[A-Za-z]:[\\/]|node:|data:|file:)/;
 const packageTsConfigPathsCache = new Map<string, Promise<PackageTsConfigPaths | undefined>>();
 const nearestPackageRootCache = new Map<string, Promise<string | undefined>>();
 
-/**
- * Resolves tsconfig `paths` for authored source imported from linked
- * workspace packages. Rolldown handles the root app tsconfig; this only
- * fills the package-local config gap for sources outside the app root.
- */
 export function createAuthoredPackageTsConfigPathsPlugin(input: {
   appPackageRoot: string;
-  /** Leaves imports from installed dependencies to the bundler. */
   authoredSourceOnly?: boolean;
   extensions: readonly string[];
-  /** With `authoredSourceOnly`, installed importers to handle anyway. */
   handlesInstalledModule?: (path: string) => boolean;
-  /** With `authoredSourceOnly`, a hook filter that admits every importer the handler accepts. */
   importerFilter?: FilterExpression;
 }): Plugin {
   const probeStat = createCachedStatProbe();
-  // An installed eve is under `node_modules`, which the importer filter already rejects. A
-  // workspace-linked eve bundles its `src/*.ts` through the `eve-source` condition, and those
-  // imports have nothing to resolve here because eve's own tsconfig has no `paths`.
   const eveModule =
     input.authoredSourceOnly === true
       ? packageModulesRegex(realpathSync.native(resolvePackageRoot()))

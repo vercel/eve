@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import { createChannelReader, raceChannelReads } from "./owner-channels.js";
 
-/** A hook stand-in: an async iterable fed by hand. */
 function channel<T>() {
   const queue: T[] = [];
   const waiters: ((value: IteratorResult<T>) => void)[] = [];
@@ -38,8 +37,6 @@ describe("raceChannelReads", () => {
     outcome.push("done");
     expect(await first).toEqual({ channel: "outcome", next: { done: false, value: "done" } });
 
-    // The report lands while no race is waiting — as when an owner is
-    // awaiting a step — and must be delivered by the next race.
     report.push("progress");
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(await raceChannelReads(readers)).toEqual({

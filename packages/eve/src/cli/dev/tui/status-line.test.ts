@@ -177,7 +177,6 @@ describe("buildStatusLine", () => {
     });
     expect(withProject).toBe("m · ai-gateway(oidc:my-agent)");
 
-    // OIDC without a resolved project name: bare scope.
     const noProject = buildStatusLine({
       model: "m",
       endpoint: connected,
@@ -218,7 +217,6 @@ describe("buildStatusLine", () => {
     const full = buildStatusLine({ ...input, width: 120 })!;
     expect(full.startsWith("logs: warn · ")).toBe(true);
 
-    // Narrow enough that only the leading hint survives.
     expect(buildStatusLine({ ...input, width: 13 })).toBe("logs: warn");
   });
 
@@ -270,8 +268,6 @@ describe("buildStatusLine", () => {
     const apiKey = buildStatusLine({
       model: "m",
       endpoint: { kind: "gateway", connected: true, credential: "api-key" },
-      // A linked project must NOT surface here: the key is what
-      // authenticates, and the bar reports the credential in use.
       vercel: { identity },
       theme: plain,
       width: 120,
@@ -316,14 +312,10 @@ describe("buildStatusLine", () => {
       theme,
       width: 120,
     });
-    // Only the gateway stands at the terminal's default foreground — no
-    // explicit white, no bold; the scope stays dim.
     expect(linked).toContain("ai-gateway\x1b[2m(oidc)\x1b[22m");
     expect(linked).not.toContain("\x1b[97m");
     expect(linked).not.toContain("\x1b[1mai-gateway");
 
-    // External providers render quiet — no bright token — with only the
-    // authored-endpoint mark at the default foreground.
     const external = buildStatusLine({
       endpoint: { kind: "external", provider: "codex" },
       theme,

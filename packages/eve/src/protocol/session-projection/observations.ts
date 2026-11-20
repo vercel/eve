@@ -53,6 +53,7 @@ export type CallObservation = ObservationTiming & {
     | { readonly state: Exclude<CallState, "failed">; readonly error?: ErrorInfo }
   );
 
+/** Criteria for {@link calls}; every field given must match, and omitted fields match any call. */
 export interface CallFilter {
   readonly kind?: CapabilityKind;
   readonly name?: string;
@@ -61,6 +62,7 @@ export interface CallFilter {
   readonly taskId?: string;
 }
 
+/** A turn of the session: whether it is still running or has settled, and how it ended. */
 export interface TurnObservation extends ObservationTiming {
   readonly turnId: string;
   readonly status: "running" | "settled";
@@ -68,6 +70,10 @@ export interface TurnObservation extends ObservationTiming {
   readonly error?: ErrorInfo;
 }
 
+/**
+ * A message delivered to the session, from admission through being consumed by a turn to settling,
+ * with its sender and parts when known.
+ */
 export interface DeliveryObservation extends ObservationTiming {
   readonly deliveryId: string;
   readonly status: "admitted" | "consumed" | "settled";
@@ -79,6 +85,7 @@ export interface DeliveryObservation extends ObservationTiming {
   readonly parts?: readonly UserPart[];
 }
 
+/** A background task started by a call, with whether it is still running and how it ended. */
 export interface TaskObservation extends ObservationTiming {
   readonly taskId: string;
   readonly callId: string;
@@ -90,6 +97,7 @@ export interface TaskObservation extends ObservationTiming {
   readonly error?: ErrorInfo;
 }
 
+/** One model run, with its model, status, finish reason, and token usage. */
 export interface RunObservation extends ObservationTiming {
   readonly runId: string;
   readonly turnId?: string;
@@ -101,6 +109,7 @@ export interface RunObservation extends ObservationTiming {
   readonly usage?: Usage;
 }
 
+/** A committed content part, such as reply text, written by a model run or a turn. */
 export interface ContentObservation extends ObservationTiming {
   readonly partId: string;
   /** The model run that wrote the part; absent when its turn wrote it. */
@@ -123,6 +132,9 @@ export interface ChildObservation {
   readonly callId?: string;
 }
 
+/**
+ * The session's lifecycle status, outcome, runtime identity, and parent session when it is a child.
+ */
 export interface SessionObservation extends ObservationTiming {
   readonly status: "new" | "open" | "ended";
   readonly outcome?: SessionOutcome;
@@ -131,6 +143,7 @@ export interface SessionObservation extends ObservationTiming {
   readonly parent?: { readonly sessionId: string; readonly callId: string };
 }
 
+/** Token usage accumulated across the session, in total and broken down by kind. */
 export interface SessionUsage {
   readonly total: Usage;
   readonly byKind: { readonly [kind: string]: Usage };
@@ -144,6 +157,7 @@ export interface CallPreviewObservation {
   readonly label?: string;
 }
 
+/** Uncommitted text streaming into a content part, separate from the part's committed value. */
 export interface ContentPreviewObservation {
   readonly partId: string;
   readonly runId?: string;
@@ -151,6 +165,10 @@ export interface ContentPreviewObservation {
   readonly text: string;
 }
 
+/**
+ * What an unsettled turn is waiting on: the session itself making progress, open interactions that
+ * need an answer, or running calls and tasks.
+ */
 export type Waiting =
   | { readonly on: "session" }
   | { readonly on: "interaction"; readonly interactions: readonly Interaction[] }
@@ -160,6 +178,10 @@ export type Waiting =
       readonly tasks: readonly TaskObservation[];
     };
 
+/**
+ * A display summary of what the agent is doing right now: idle, thinking, compacting, calling
+ * tools by label, or waiting on interactions or tasks.
+ */
 export type Activity =
   | { readonly kind: "idle" | "thinking" | "compacting" }
   | { readonly kind: "calling"; readonly names: readonly string[] }

@@ -12,10 +12,6 @@ export interface WorkflowToolHarnessDefinitionInput {
   readonly workflowId: string;
 }
 
-/**
- * Workflow tools run outside the model step, so the harness definition carries
- * no `execute`. A `serve` tool's model input gains `taskId`.
- */
 export function createWorkflowToolHarnessDefinition(
   input: WorkflowToolHarnessDefinitionInput,
 ): HarnessToolDefinition {

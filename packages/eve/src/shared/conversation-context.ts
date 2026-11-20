@@ -5,6 +5,7 @@ import { isNonEmptyString } from "#shared/guards.js";
 import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
 import type { ForwardedTraceAssertion } from "#shared/forwarded-trace-policy.js";
 
+/** Where the agent is running: local development, a preview deployment, or production. */
 export type ConversationEnvironment = "development" | "preview" | "production";
 
 /**
@@ -68,6 +69,10 @@ export interface ConversationContext {
   readonly space?: ConversationSpace;
 }
 
+/**
+ * The caller an audience classifier sees: `anonymous`, or an authenticated principal with its
+ * kind, authenticator, and attributes.
+ */
 export type AudienceCaller =
   | { readonly type: "anonymous" }
   | {
@@ -104,7 +109,6 @@ function readSpaceId(value: unknown): string | undefined {
   return id;
 }
 
-/** Validates a space a channel or a stored context reports; anything malformed reads as none. */
 export function normalizeConversationSpace(value: unknown): ConversationSpace | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
   const candidate = value as {
@@ -135,7 +139,6 @@ export function normalizeConversationSpace(value: unknown): ConversationSpace | 
   };
 }
 
-/** Safe projection for durable sessions created before `eve.conversation` existed. */
 export const UNKNOWN_CONVERSATION_CONTEXT: ConversationContext = {
   audience: "unknown",
   channel: { kind: "unknown" },
@@ -150,11 +153,6 @@ interface ConversationContextFallback {
   readonly principalType?: string;
 }
 
-/**
- * Reconstructs a durable conversation when its key predates the key itself.
- * All callers must use this helper so legacy sessions resolve privacy fields
- * from one source of truth.
- */
 export function resolveConversationContext(
   stored: ConversationContext | undefined,
   fallback: ConversationContextFallback,

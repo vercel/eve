@@ -350,7 +350,6 @@ describe("ConversationTranscript", () => {
       "user: Deploy it.",
       "assistant: Checking first.",
       "tool: Check done",
-      // A call its approver declined reads as denied, not failed.
       "tool: Deploy denied",
       "assistant: Not deployed.",
     ]);

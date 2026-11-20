@@ -1,24 +1,16 @@
 import { spawn } from "node:child_process";
 
-/** The OS command that opens a URL in the default browser, per platform. */
 function osOpenCommand(url: string): { command: string; args: string[] } {
   switch (process.platform) {
     case "darwin":
       return { command: "open", args: [url] };
     case "win32":
-      // `cmd /c start` re-parses the URL, so `&` or `|` in a query string
-      // would run as shell syntax. rundll32 takes it as one argument.
       return { command: "rundll32", args: ["url.dll,FileProtocolHandler", url] };
     default:
       return { command: "xdg-open", args: [url] };
   }
 }
 
-/**
- * Parses a candidate string into a normalized web URL, or `undefined` if it is
- * not a valid `http(s)` URL. Uses the URL parser rather than a pattern so the
- * accept/reject decision matches what a browser would resolve.
- */
 export function parseWebUrl(candidate: string): string | undefined {
   const parsed = URL.parse(candidate.trim());
   if (parsed && (parsed.protocol === "http:" || parsed.protocol === "https:")) {
@@ -27,16 +19,7 @@ export function parseWebUrl(candidate: string): string | undefined {
   return undefined;
 }
 
-/**
- * Opens a URL in the user's default browser, best-effort and fire-and-forget.
- * Used where eve owns the hand-off (e.g. pointing the user at their Slack
- * workspace after a deploy) rather than relying on a child CLI to open it. A
- * missing or failing opener is never fatal: callers still print the URL for the
- * user to open by hand.
- */
 export function openUrl(url: string): void {
-  // Only ever hand the OS opener a real web URL, never an arbitrary scheme or
-  // a shell-significant argument.
   const webUrl = parseWebUrl(url);
   if (webUrl === undefined) return;
   const { command, args } = osOpenCommand(webUrl);
@@ -44,7 +27,5 @@ export function openUrl(url: string): void {
     const child = spawn(command, args, { stdio: "ignore", detached: true });
     child.on("error", () => {});
     child.unref();
-  } catch {
-    // The opener is a convenience; its absence must not break the flow.
-  }
+  } catch {}
 }

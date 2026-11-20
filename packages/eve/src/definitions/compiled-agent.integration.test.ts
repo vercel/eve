@@ -1,4 +1,3 @@
-// @linux-only: definition ordering; compiled from memory
 import { describe, expect, it } from "vitest";
 
 import { defineDynamic } from "#dynamic/definition.js";
@@ -12,10 +11,6 @@ import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-a
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { defineTool } from "#tools/definition.js";
 
-// The order of a session's definitions is its contract: the first to offer a tool name keeps it,
-// and eve's catalog has to come after every tool. A compiled agent's order comes from two places,
-// which file kind lands in which field (`agentContentsOf`) and where each field sits
-// (`agentDefinitionsOf`), so this compiles one file of each kind and reads the order back.
 describe("a compiled agent's definitions", () => {
   it("come in the order their contract sets, whatever kind of file each is", async () => {
     const runtime = await createTestRuntime({

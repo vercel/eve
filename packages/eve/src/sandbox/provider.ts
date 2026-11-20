@@ -69,7 +69,7 @@ export interface SandboxConnection<Extensions extends object = {}> {
   readonly extensions?: Extensions & { readonly [Key in ReservedSessionMember]?: never };
 }
 
-/** What eve passes to `start()`, `resume()`, and `onSessionEnd()`. */
+/** What eve passes to `start()`, `resume()`, `onSessionIdle()`, and `onSessionEnd()`. */
 export interface SandboxSessionContext {
   /**
    * The session that owns the sandbox. Derive native names from `session.id`:
@@ -126,9 +126,16 @@ export interface SandboxPrepareContext {
   templateKey(identity: SandboxIdentity): string;
 }
 
+/** What eve passes to `onSessionEnd()`: why the sandbox's session ended, and an abort signal. */
 export interface SandboxSessionEndOptions {
   readonly signal?: AbortSignal;
   readonly reason: "completed" | "expired" | "failed" | "deleted";
+}
+
+/** What eve passes to `onSessionIdle()`: a signal eve aborts when it stops waiting for the call. */
+export interface SandboxSessionIdleOptions {
+  /** Aborted when eve abandons the call. Pass it to the requests and commands that stop compute. */
+  readonly signal?: AbortSignal;
 }
 
 /** The lifecycle one sandbox environment implements. */
@@ -176,21 +183,54 @@ export interface SandboxProviderImplementation<
     options: SandboxSessionEndOptions,
   ): Promise<void>;
   /**
+   * Stops compute for `ctx.session.id` if it is running, and keeps its files.
+   * Never starts or resumes it. `state` is `null` when the session never
+   * recorded it. Must succeed when the sandbox is already stopped or doesn't
+   * exist. eve calls it once the session has been idle for the environment's
+   * `idleTimeoutMs`, and never for a keyed `invokeTool` sandbox. eve waits up
+   * to 120 seconds, then aborts `options.signal` and moves on. Without it,
+   * eve never stops the sandbox and the provider's own timeout applies.
+   */
+  onSessionIdle?(
+    ctx: SandboxSessionContext,
+    state: Readonly<State> | null,
+    options: SandboxSessionIdleOptions,
+  ): Promise<void>;
+  /**
    * Lets a keyed `invokeTool` call keep its sandbox between calls. eve never
    * ends a keyed sandbox, so the provider must bound its retention.
    */
   readonly toolSessions?: true;
 }
 
+/** The standard `prepare` option every sandbox environment accepts, for customizing its template. */
 export interface SandboxPrepareOption<Session> {
   /** Runs once per template, after eve seeds workspace and skill files. */
   readonly prepare?: (sandbox: Session) => void | Promise<void>;
 }
 
-/** Environment options plus the standard `prepare` option. */
-export type WithPrepareOption<Options extends object, Session> = Options &
-  SandboxPrepareOption<Session>;
+/** The standard `idleTimeoutMs` option every sandbox environment accepts. */
+export interface SandboxIdleTimeoutOption {
+  /**
+   * How long, in milliseconds, the session's sandbox keeps running after the
+   * session goes idle before eve stops its compute. Files persist, processes
+   * end, and the next use resumes it. `0` stops it as soon as the session goes
+   * idle; `false` never stops it, leaving the provider's own timeout. Applies
+   * only to providers that implement `onSessionIdle()`.
+   * @default 300000
+   */
+  readonly idleTimeoutMs?: number | false;
+}
 
+/** Environment options plus the standard `prepare` and `idleTimeoutMs` options. */
+export type WithPrepareOption<Options extends object, Session> = Options &
+  SandboxPrepareOption<Session> &
+  SandboxIdleTimeoutOption;
+
+/**
+ * What {@link defineSandboxProvider} takes: the provider's name and an `environment()` factory
+ * that returns the sandbox lifecycle for a set of environment options.
+ */
 export interface SandboxProviderDefinition<
   EnvironmentOptions extends object,
   OpenOptions extends object | undefined,
@@ -203,7 +243,8 @@ export interface SandboxProviderDefinition<
   readonly stateProtocolVersion?: number;
   /**
    * Receives the environment options without `prepare`, which eve runs in
-   * `ctx.populate()`. Always an object: `{}` when the caller passes none.
+   * `ctx.populate()`, and without `idleTimeoutMs`, which eve applies. Always an
+   * object: `{}` when the caller passes none.
    */
   environment(
     options: EnvironmentOptions,
@@ -216,6 +257,10 @@ type SandboxOptionArguments<Options extends object | undefined> = Options extend
     ? [options?: Readonly<Options>]
     : [options: Readonly<Options>];
 
+/**
+ * A sandbox provider returned by {@link defineSandboxProvider}. Call `environment()` to get a
+ * {@link SandboxEnvironment} an agent can use.
+ */
 export interface SandboxProvider<
   EnvironmentOptions extends object | undefined,
   OpenOptions extends object | undefined,
@@ -227,7 +272,6 @@ export interface SandboxProvider<
   ): SandboxEnvironment<OpenOptions, Session>;
 }
 
-/** What core runs for one environment: the provider's lifecycle with its types erased. */
 export interface SandboxProviderRuntime {
   readonly implementation: SandboxProviderImplementation<
     object | undefined,
@@ -235,10 +279,22 @@ export interface SandboxProviderRuntime {
     SandboxJson,
     object
   >;
-  /** The authored `prepare` option, which eve runs in `ctx.populate()`. */
+  readonly idleTimeoutMs: number | false;
   readonly prepare: ((sandbox: SandboxSession) => void | Promise<void>) | undefined;
   readonly providerName: string;
   readonly stateProtocolVersion: number;
+}
+
+const DEFAULT_SANDBOX_IDLE_TIMEOUT_MS = 5 * 60_000;
+
+function resolveIdleTimeoutMs(providerName: string, value: unknown): number | false {
+  if (value === undefined) return DEFAULT_SANDBOX_IDLE_TIMEOUT_MS;
+  if (value === false || (typeof value === "number" && Number.isFinite(value) && value >= 0))
+    return value;
+  throw new Error(
+    `Sandbox provider "${providerName}" received idleTimeoutMs ${typeof value === "string" ? JSON.stringify(value) : String(value)}. ` +
+      "Pass a non-negative number of milliseconds, 0 to stop the sandbox as soon as the session goes idle, or false to never stop it.",
+  );
 }
 
 /** Defines a sandbox provider from a connection and a lifecycle. */
@@ -265,9 +321,9 @@ export function defineSandboxProvider<
   return {
     name: definition.name,
     environment(options?: WithPrepareOption<EnvironmentOptions, Session>) {
-      const { prepare, ...environmentOptions } = options ?? {};
+      const { idleTimeoutMs, prepare, ...environmentOptions } = options ?? {};
       return createSandboxEnvironment<OpenOptions, Session>({
-        // The provider's own types are erased: core passes it only what it returned.
+        idleTimeoutMs: resolveIdleTimeoutMs(definition.name, idleTimeoutMs),
         implementation: definition.environment(
           environmentOptions as EnvironmentOptions,
         ) as SandboxProviderRuntime["implementation"],

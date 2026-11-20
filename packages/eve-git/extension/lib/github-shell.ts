@@ -19,6 +19,7 @@ import { GITHUB_TOOLING_PATHS } from "./tooling.ts";
 
 export type { GitHubCoAuthor } from "./attribution.ts";
 
+/** One `gh`, `git`, or `gh-signed-commit` command for {@link executeGitHubShell} to run. */
 export interface GitHubShellInput {
   readonly command: string;
   readonly description: string;
@@ -27,6 +28,7 @@ export interface GitHubShellInput {
   readonly workingDirectory?: string;
 }
 
+/** Result of a command run by {@link executeGitHubShell}, with the token redacted from its output. */
 export interface GitHubShellOutput {
   readonly exitCode: number;
   readonly stderr: string;
@@ -74,6 +76,7 @@ export interface GitHubUserConfig extends GitHubConfigBase {
   readonly principalType: "user";
 }
 
+/** Connect-brokered GitHub access: {@link GitHubAppConfig} for installation tokens or {@link GitHubUserConfig} for the caller's own token. */
 export type GitHubConfig = GitHubAppConfig | GitHubUserConfig;
 
 /** What an `authorize` callback sees before a `gh` command runs with the caller's own token. */
@@ -96,6 +99,7 @@ export interface GitHubAppAuthorizeRequest extends Omit<GitHubUserAuthorizeReque
   readonly owner: string;
 }
 
+/** What an `authorize` callback receives before a `gh` command runs, for either principal type. */
 export type GitHubAuthorizeRequest = GitHubAppAuthorizeRequest | GitHubUserAuthorizeRequest;
 
 /** Decides whether the session's caller may run one `gh` command; the agent's only access control. */
@@ -103,6 +107,7 @@ export type GitHubAuthorize<Request extends GitHubAuthorizeRequest = GitHubAutho
   request: Request,
 ) => boolean | Promise<boolean>;
 
+/** One network-policy rule for a GitHub host: requests that match get the given headers set. Passed to the `broker` callback. */
 export interface GitHubLeaseRule {
   readonly match?: {
     readonly headers?: readonly {
@@ -145,7 +150,6 @@ interface GitHubShellDependencies {
 const MAX_OUTPUT_BYTES = 100_000;
 const leaseQueues = new Map<string, Promise<void>>();
 const EXECUTABLES = new Set(["gh", "git", "gh-signed-commit"]);
-/** How `gh` and `git` report a rejected token. */
 const GITHUB_UNAUTHORIZED = /HTTP 401\b|Bad credentials|Authentication failed for|failed: 401\b/u;
 
 /**
@@ -170,6 +174,7 @@ export function isGitHubCommandInputError(err: unknown): err is GitHubCommandInp
   return err instanceof Error && err.name === "GitHubCommandInputError";
 }
 
+/** Approval check for a GitHub shell tool: denies input that is not a valid `gh`, `git`, or `gh-signed-commit` command, and otherwise requires no approval of its own. */
 export function githubShellApproval(input: GitHubShellInput | undefined) {
   if (!input) return "not-applicable" as const;
   try {
@@ -183,6 +188,10 @@ export function githubShellApproval(input: GitHubShellInput | undefined) {
   }
 }
 
+/**
+ * Runs one `gh`, `git`, or `gh-signed-commit` command in the sandbox with a Connect-brokered GitHub token.
+ * The command runs only when the config's `authorize` callback returns `true`; the sandbox process sees a placeholder token that the `broker` network rules swap for the real one. Throws when GitHub access is not configured, the input is invalid, or the caller is not authorized.
+ */
 export async function executeGitHubShell(
   input: GitHubShellInput,
   config: GitHubConfig | undefined,
@@ -215,14 +224,9 @@ export async function executeGitHubShell(
   if (config.principalType === "user") {
     if (!dependencies.getToken || !dependencies.requireAuth)
       throw new Error("User-scoped GitHub access requires ctx.getToken and ctx.requireAuth.");
-    // Connect matches a user grant only to the exact authorization details it
-    // was consented with, and repository details do not narrow user tokens.
-    // One unscoped grant therefore covers every repository after one sign-in.
     userAuth = connectUserAuthorization(config.connector);
     ({ token } = await dependencies.getToken(userAuth));
   } else {
-    // Scope the installation token to the repository, or to the owner's
-    // installation for owner-level commands such as `gh repo list <owner>`.
     const installation: {
       type: "github_app_installation";
       org: string;
@@ -238,8 +242,6 @@ export async function executeGitHubShell(
   }
   if (!token)
     throw new Error(`Connect returned an empty token for ${JSON.stringify(config.connector)}.`);
-  // The declaration is model-controlled and cannot narrow a user token.
-  // Never let it satisfy a repository allowlist for an unrestricted lease.
   const allowed =
     config.principalType === "user"
       ? await config.authorize({ argv, auth, repository: null, token })
@@ -283,10 +285,6 @@ export async function executeGitHubShell(
           GH_PROMPT_DISABLED: "1",
         };
         if (argv[0] !== "git") env.GH_TOKEN = placeholder;
-        // Defaults for every git process, including the ones gh starts. SSH
-        // GitHub remotes are rewritten to HTTPS so they carry the credential
-        // header. The command's own `-c` options still override these; the
-        // lease, not this config, bounds what the command can reach.
         const gitConfig: [string, string][] = [
           ["http.https://github.com/.extraheader", `Authorization: ${placeholderAuthorization}`],
           ["url.https://github.com/.insteadOf", "git@github.com:"],
@@ -311,7 +309,6 @@ export async function executeGitHubShell(
     await sandbox.removePath({ path: bodyFile, force: true });
   }
   if (userAuth && result.exitCode !== 0 && GITHUB_UNAUTHORIZED.test(result.stderr)) {
-    // GitHub rejected the caller's token: evict it and sign the caller in again.
     dependencies.requireAuth!(userAuth);
   }
   const stdout = sanitizeOutput(result.stdout, token, authorization);
@@ -324,7 +321,6 @@ export async function executeGitHubShell(
   };
 }
 
-/** The real credential and the placeholder a leased command sends in its place. */
 interface LeaseCredential {
   readonly authorization: string;
   readonly placeholder: string;
@@ -353,8 +349,6 @@ async function withGitHubCredentialLease<T>(
       credential.placeholder,
       () => leaseCredential(sandbox, credential, run, broker),
       {
-        // Clears the policy only while this command still holds the lock, so a command whose
-        // lock was broken as stale can't clear its successor's credential.
         cleanup: () => broker(sandbox, null),
         ...(abortSignal !== undefined && { signal: abortSignal }),
       },
@@ -365,7 +359,6 @@ async function withGitHubCredentialLease<T>(
   }
 }
 
-/** Points the sandbox's network policy at `credential` for `run`; the lock's release clears it. */
 async function leaseCredential<T>(
   sandbox: SandboxSession,
   credential: LeaseCredential,
@@ -387,7 +380,6 @@ async function leaseCredential<T>(
   ];
   await broker(sandbox, {
     "api.github.com": api,
-    // `gh release upload` and `gh release create` with assets send files here.
     "uploads.github.com": api,
     "github.com": [
       {
@@ -472,8 +464,6 @@ function validateGitHubShellInput(input: GitHubShellInput): {
   if (!input.description.trim()) {
     throw new GitHubCommandInputError("description must describe the intended result.");
   }
-  // The credential lease is wired only into these executables: gh reads the
-  // placeholder GH_TOKEN and git sends the placeholder header.
   if (!EXECUTABLES.has(argv[0]!)) {
     throw new GitHubCommandInputError("GitHub commands must use gh, git, or gh-signed-commit.");
   }

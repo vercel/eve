@@ -1,8 +1,3 @@
-/**
- * OpenTelemetry plumbing for hosts that run their own spans beside agent
- * tracing: active-operation lookup, capture context, content bounds, and MCP
- * enrichment. Agent tracing itself needs only the package root.
- */
 export { activeTraceOperation, withErrorContent } from "./adapters/otel.js";
 export { withCapture } from "./capture.js";
 export {

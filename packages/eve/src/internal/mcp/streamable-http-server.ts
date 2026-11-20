@@ -18,25 +18,13 @@ import { withMcpRequestTraceContext } from "#internal/mcp/request-trace-context.
 const log = createLogger("mcp.server");
 
 export const MCP_PROTOCOL_VERSION = "2026-07-28";
-/**
- * Upper bound for any MCP POST body. Tool arguments are small JSON; the
- * largest legitimate payload is an `outputSchema`, itself capped at 64 KiB.
- */
 export const MCP_REQUEST_BODY_MAX_BYTES = 1024 * 1024;
 
-/**
- * Cache hint for the tool lists, skill lists, and skill reads eve serves.
- * They are fixed per deployment, but clients cache per URL, and a production
- * alias serves a new deployment under the same URL, so the TTL is how long a
- * client may see the old lists after a deploy. `private`: route auth
- * admitted this caller, and a shared cache cannot rerun it for the next one.
- */
 export const MCP_LIST_CACHE_HINT = {
   cacheScope: "private",
   ttlMs: 5 * 60 * 1000,
 } as const satisfies CacheHint;
 
-/** The cacheable SDK-built results eve answers with {@link MCP_LIST_CACHE_HINT}. */
 const CACHE_HINTED_METHODS = [
   "resources/list",
   "resources/read",
@@ -53,10 +41,6 @@ interface McpToolDefinition<TInputSchema extends StandardSchemaWithJSON = Standa
   readonly outputSchema?: StandardSchemaWithJSON;
 }
 
-/**
- * `TStructured` is any JSON value: 2026 clients accept non-object structured
- * content, and the SDK wraps it as `{ result }` for 2025 clients.
- */
 export interface McpCallToolResult<TStructured = Readonly<Record<string, unknown>>> {
   readonly content: readonly McpContent[];
   readonly isError?: boolean;
@@ -71,12 +55,6 @@ export type McpContent =
   | { readonly type: "text"; readonly text: string }
   | { readonly type: "resource_link"; readonly name: string; readonly uri: string };
 
-/**
- * Stable, client-actionable reason a tool call was rejected before it could
- * return a result. `invalid_input` and `conflict` mean the caller should
- * change or re-read something; `not_found` means stop; `internal` means the
- * server failed and `errorId` correlates with its logs.
- */
 type McpToolOperationErrorCode =
   | "invalid_input"
   | "not_found"
@@ -93,7 +71,6 @@ interface McpToolOperationErrorData {
   readonly retryable: boolean;
 }
 
-/** Thrown by tool handlers to produce a structured `isError` result. */
 export class McpToolOperationError extends Error {
   readonly code: McpToolOperationErrorCode;
 
@@ -104,18 +81,11 @@ export class McpToolOperationError extends Error {
   }
 }
 
-/** Only `conflict` is retryable: the caller re-reads state and tries again. */
 const RETRYABLE_CODES: ReadonlySet<McpToolOperationErrorCode> = new Set(["conflict"]);
 
-/** What a tool handler sees of one `tools/call`. */
 export interface McpToolCallContext {
   readonly auth: SessionAuthContext | null;
-  /**
-   * The capabilities a 2026-07-28 request declared in its envelope. 2025-era
-   * requests declare none per request, so they get `undefined`.
-   */
   readonly clientCapabilities: unknown;
-  /** The request's `_meta`, without the reserved `io.modelcontextprotocol/*` keys. */
   readonly meta: Readonly<Record<string, unknown>> | undefined;
   readonly signal: AbortSignal;
 }
@@ -125,12 +95,6 @@ export interface McpServerTool {
   register(server: McpServer, auth: SessionAuthContext | null): void;
 }
 
-/**
- * A set of MCP handlers beside the tools, such as skills. Every request
- * builds a fresh server, so `register` runs once per request, after
- * `capabilities` are merged one level deep into the server's own.
- * Declaring a capability obliges `register` to set its handlers.
- */
 export interface McpServerFeature {
   readonly capabilities: McpJsonObject;
   register(server: McpServer): void;
@@ -139,7 +103,6 @@ export interface McpServerFeature {
 type InferSchemaOutput<TSchema> =
   TSchema extends StandardSchemaWithJSON<unknown, infer TOutput> ? TOutput : never;
 
-/** Keeps a schema and its inferred handler input coupled while erasing heterogeneous storage. */
 export function defineMcpTool<
   const TInputSchema extends StandardSchemaWithJSON<unknown, unknown>,
   TStructured = Readonly<Record<string, unknown>>,
@@ -188,12 +151,6 @@ export function defineMcpTool<
   };
 }
 
-/**
- * The SDK both advertises and enforces a tool's input schema, but answers a
- * rejected call with bare text. This copy keeps the advertised JSON Schema and
- * accepts any arguments, so `defineMcpTool` checks them against the real
- * schema and returns an `invalid_input` error like every other rejection.
- */
 function advertiseOnly(schema: StandardSchemaWithJSON): StandardSchemaWithJSON {
   const standard = schema["~standard"];
   return {
@@ -210,7 +167,6 @@ const MAX_VALIDATION_ISSUES = 10;
 const MAX_VALIDATION_MESSAGE_CHARS = 4_096;
 const VALIDATION_TRUNCATED = " ... (validation details truncated)";
 
-/** Bound work and allocations while formatting, not after joining all issues. */
 function formatInputError(name: string, issues: readonly StandardSchemaIssue[]): string {
   let message = "Invalid arguments for tool ";
   const limit = MAX_VALIDATION_MESSAGE_CHARS - VALIDATION_TRUNCATED.length;
@@ -243,20 +199,12 @@ function formatInputError(name: string, issues: readonly StandardSchemaIssue[]):
 interface McpStreamableHttpServerOptions {
   readonly name: string;
   readonly version: string;
-  /** Server-level usage guidance returned from `initialize` and `server/discover`. */
   readonly instructions?: string;
-  /** When set, the server declares `tools`, even for an empty list. */
   readonly tools?: readonly McpServerTool[];
   readonly features?: readonly McpServerFeature[];
   authenticate(request: Request): Promise<SessionAuthContext | null | Response>;
 }
 
-/**
- * Creates a dual-era, stateless MCP HTTP request handler.
- *
- * Current clients use MCP 2026-07-28's per-request envelope. Older clients
- * fall back to the SDK's stateless 2025 Streamable HTTP implementation.
- */
 export function createMcpStreamableHttpServer(
   options: McpStreamableHttpServerOptions,
 ): (request: Request) => Promise<Response> {
@@ -275,8 +223,6 @@ export function createMcpStreamableHttpServer(
     });
     if (request.method.toUpperCase() !== "POST") return await handler.fetch(request);
 
-    // Every POST body is read here, bounded, before the SDK sees it. The
-    // parsed value is handed to the SDK so the body is never read twice.
     const inspected = await readJsonBody(request, MCP_REQUEST_BODY_MAX_BYTES);
     if (inspected.kind === "too-large") return requestBodyTooLargeResponse();
     if (inspected.kind === "invalid-json") return invalidJsonResponse();
@@ -286,10 +232,6 @@ export function createMcpStreamableHttpServer(
     const preflightFailure = await preflightModernRequest(request, parsedBody);
     if (preflightFailure !== undefined) return preflightFailure;
 
-    // The client's trace context rides in `_meta`, not headers, so it is
-    // adopted here, before the SDK dispatches into a tool. A valid
-    // `_meta.traceparent` replaces any parent extracted from the HTTP
-    // headers; anything else keeps it. `_meta.baggage` is never read.
     return await otelContext.with(
       withMcpRequestTraceContext(otelContext.active(), parsedBody),
       () => handler.fetch(request, { parsedBody }),
@@ -297,12 +239,6 @@ export function createMcpStreamableHttpServer(
   };
 }
 
-/**
- * The SDK currently checks MCP-Protocol-Version only when the header is
- * present. MCP 2026-07-28 requires it on every modern POST, so reject the
- * missing-header case here until the upstream handler does:
- * modelcontextprotocol/typescript-sdk#2589.
- */
 async function preflightModernRequest(
   request: Request,
   parsedBody: unknown,
@@ -349,11 +285,6 @@ function isPlainRecord(value: unknown): value is Readonly<Record<string, unknown
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/**
- * Ask a side-effect-free SDK handler to apply the validation rungs that
- * precede required standard-header presence. Preserve those errors; otherwise
- * the valid current-revision envelope is ready for the missing-header error.
- */
 async function probeEarlierValidationFailure(
   request: Request,
   parsedBody: unknown,
@@ -453,7 +384,6 @@ function createServer(
   return server;
 }
 
-/** The envelope's client capabilities, when the request is 2026-07-28's. */
 function declaredClientCapabilities(
   envelope: Readonly<Record<string, unknown>> | undefined,
 ): unknown {
@@ -478,8 +408,6 @@ async function callTool<TInput, TStructured>(
         retryable: RETRYABLE_CODES.has(error.code),
       });
     }
-    // Unexpected failures never forward their message: it may carry provider
-    // responses, hostnames, or workflow payloads. The errorId is the handle.
     const errorId = logError(log, "MCP tool call failed", error);
     return toolError({
       code: "internal",
@@ -493,8 +421,6 @@ async function callTool<TInput, TStructured>(
 function toolError<TStructured>(error: McpToolOperationErrorData): McpCallToolResult<TStructured> {
   const text =
     error.errorId === undefined ? error.message : `${error.message} (errorId: ${error.errorId})`;
-  // The SDK skips outputSchema validation when isError is set, so this shape
-  // does not need to appear in each tool's declared output schema.
   return {
     content: [{ type: "text", text }],
     isError: true,

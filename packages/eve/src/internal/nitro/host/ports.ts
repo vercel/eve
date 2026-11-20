@@ -1,18 +1,10 @@
-/**
- * The dev server's port policy, isolated from the Nitro host implementation.
- * `start-development-server.ts` derives its bind-retry walk from these values.
- */
-
-/** The port `eve dev` binds when none is requested. */
 export const DEFAULT_DEVELOPMENT_SERVER_PORT = 2000;
 
-/** How many consecutive ports the dev server tries past the default before giving up. */
 export const MAX_DEVELOPMENT_SERVER_PORT_ATTEMPTS = 10;
 
 const MAX_ALLOWED_DEVELOPMENT_SERVER_PORT = 65_535;
 const PORT_ENV = "PORT";
 
-/** Reads `PORT` as the requested dev server port, or undefined when it is unset or blank. */
 export function readDevelopmentServerEnvironmentPort(): number | undefined {
   const raw = process.env[PORT_ENV];
 
@@ -31,10 +23,6 @@ export function readDevelopmentServerEnvironmentPort(): number | undefined {
   return parsed;
 }
 
-/**
- * Lists the ports the dev server tries in order: the requested (or default)
- * port, then the next ones when an occupied port may be skipped.
- */
 export function resolveDevelopmentServerPorts(input: {
   readonly port: number | string | undefined;
   readonly retryOnAddressInUse: boolean;

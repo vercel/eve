@@ -1,7 +1,3 @@
-/**
- * Slack code channels: a dedicated channel per agent task, served as one eve
- * session. See https://docs.slack.dev/ai/slack-code.
- */
 import { createHash } from "node:crypto";
 
 import { createLogger, logError } from "#internal/logging.js";
@@ -12,16 +8,9 @@ const log = createLogger("slack.code-channel");
 export type SlackRequest = (operation: string, body: unknown) => Promise<SlackApiResponse>;
 
 const MAX_CACHED_CHANNELS = 1_000;
-/** A failed lookup is retried after this, so a broken install doesn't call Slack per message. */
 const FAILED_LOOKUP_TTL_MS = 60_000;
-// Slack sets a channel's kind at creation, so a lookup holds for the process.
 const codeChannelCache = new Map<string, boolean | { readonly failedAtMs: number }>();
 
-/**
- * Whether the conversation is a code channel. A failed lookup counts as not a
- * code channel, so its messages get per-thread sessions until a retry
- * succeeds a minute later.
- */
 export async function isSlackCodeChannel(
   channelId: string,
   request: SlackRequest,
@@ -65,7 +54,6 @@ function cacheLookup(channelId: string, value: boolean | { readonly failedAtMs: 
   codeChannelCache.set(channelId, value);
 }
 
-// Slack errors worth retrying; any other refusal won't change on retry.
 const TRANSIENT_SLACK_ERRORS: ReadonlySet<string> = new Set([
   "channel_creation_failed",
   "fatal_error",
@@ -77,26 +65,12 @@ const TRANSIENT_SLACK_ERRORS: ReadonlySet<string> = new Set([
   "service_unavailable",
 ]);
 
-/** Slack shows the name as the channel's title; longer ones are cut. */
 const MAX_CODE_CHANNEL_NAME_LENGTH = 80;
 
-/**
- * Opens a code channel from an origin message. Slack invites the origin
- * message's author, links the channel in the origin thread, and refuses Slack
- * Connect origins. `session_id` makes the call idempotent, so a retry with the
- * same origin and requester returns the same channel. Throws an error marked
- * `fatal` when Slack refuses permanently, so the calling step doesn't retry.
- *
- * eve reads the origin before creating anything and asks for a private
- * channel when the origin is private. Slack always honors an explicit
- * `is_private`, so the check after creation is a backstop: on a mismatch eve
- * archives the channel and throws.
- */
 export async function createSlackCodeChannel(input: {
   readonly name: string;
   readonly originChannelId: string;
   readonly originTs: string;
-  /** Principal the channel is opened for; one channel per requester and origin message. */
   readonly requester: string;
   readonly request: SlackRequest;
 }): Promise<{ readonly channelId: string; readonly isPrivate: boolean }> {
@@ -109,9 +83,7 @@ export async function createSlackCodeChannel(input: {
     await readConversation(input.request, input.originChannelId),
   );
   const response = await input.request("agents.conversations.create", {
-    // Without a name, Slack names the channel from the origin message.
     ...(name.length > 0 && { name }),
-    // Omitted for a public origin, so Slack keeps its default of letting origin members join.
     ...(originIsPrivate && { is_private: true }),
     origin_channel_id: input.originChannelId,
     origin_message_ts: input.originTs,
@@ -153,15 +125,10 @@ function slackFailure(method: string, error: unknown): Error {
   return TRANSIENT_SLACK_ERRORS.has(code) ? new Error(message) : fatalError(message);
 }
 
-// The Workflow SDK doesn't retry a step error marked `fatal`; channels stay free of its imports.
 function fatalError(message: string): Error {
   return Object.assign(new Error(message), { fatal: true });
 }
 
-/**
- * Whether a message is the origin quote Slack posts when it creates a code
- * channel from a message. It is context, not a request.
- */
 export function isSlackCodeChannelOriginContext(raw: Record<string, unknown>): boolean {
   const blocks = raw.blocks;
   return (
@@ -174,10 +141,8 @@ export function isSlackCodeChannelOriginContext(raw: Record<string, unknown>): b
   );
 }
 
-/** Slack agent session lifecycle states. */
 export type SlackSessionStatus = "active" | "processing" | "suspended";
 
-/** Sets a code channel's session status. Failures are logged, never thrown. */
 export async function setSlackCodeChannelStatus(
   request: SlackRequest,
   channelId: string,
@@ -193,7 +158,6 @@ export async function setSlackCodeChannelStatus(
   }
 }
 
-/** Slack's `thread_ts` for a session thread: omitted for top-level posts. */
 export function slackThreadTsParam(threadTs: string): string | undefined {
   return threadTs === "" ? undefined : threadTs;
 }

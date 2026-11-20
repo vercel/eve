@@ -76,42 +76,21 @@ import {
   type ToolResultPart,
 } from "./suspended-steps.js";
 
-// The session's transitions: what changes when deliveries arrive, results reach their steps, a
-// model attempt is discarded, a task starts or ends, a child relays what it asks, answers go back
-// to their askers, sign-ins complete, and a turn fails, is cancelled, or is cleared. Each reads a
-// `SessionView` and returns the facts that report the change, with the private state that changes
-// alongside them (suspended steps, history, sign-ins, relay routes); `step.apply` publishes them
-// as one commit and saves the rest. A step that only reports facts applies them directly; the
-// shared builders are in `harness/facts.ts`. Approvals, the session-limit prompt, and sign-in
-// requests are in `approvals.ts`.
-//
-// The writer's cascade ends, in the same commit, whatever an ending leaves open. Transitions are
-// pure: what they need from effects (model responses, tool results, the requests a session
-// relays) arrives in their input.
-
 const unchanged = (view: SessionView, events: readonly SessionEvent[]) =>
   transition({ events, turn: view.turn });
 
-/** A delivery a turn consumes, with what the person sent: nothing for an answer or context. */
 export interface ConsumedDelivery {
   readonly deliveryId: string;
   readonly parts: readonly UserPart[];
-  /** Earlier conversation the delivery brought, which its consumption records. */
   readonly history?: readonly ImportedMessage[];
 }
 
-/** The turn the next turn follows: the newest, unless a context change chose another or none. */
 function followedTurn(projection: SessionProjection): string | null {
   const selection = projection.view.selection;
   if (selection === null) return null;
   return selection?.turnId ?? projection.view.session.latestTurnId ?? null;
 }
 
-// ---------------------------------------------------------------------------
-// Turns
-// ---------------------------------------------------------------------------
-
-/** The deliveries the session admitted and nothing has consumed or settled yet. */
 function waitingDeliveries(
   projection: SessionProjection,
   deliveries: readonly ConsumedDelivery[],
@@ -121,7 +100,6 @@ function waitingDeliveries(
   );
 }
 
-/** A delivery the turn consumes, with what the person sent. */
 function consumed(delivery: ConsumedDelivery, turnId: string): SessionEvent {
   return fact("delivery.consumed", {
     deliveryId: delivery.deliveryId,
@@ -131,18 +109,12 @@ function consumed(delivery: ConsumedDelivery, turnId: string): SessionEvent {
   });
 }
 
-/**
- * Deliveries arrive for a turn: the session starts once, a turn opens unless one is open, and
- * each delivery is consumed into it.
- */
 export function receive(
   view: SessionView,
   input: {
     readonly deliveries?: readonly ConsumedDelivery[];
-    /** What starts the turn when no delivery does. */
     readonly cause?: Cause;
     readonly parent?: { readonly sessionId: string; readonly callId: string };
-    /** The session this one replaced, when eve started it in place of a stranded one. */
     readonly predecessor?: SessionPredecessor;
     readonly runtime?: RuntimeIdentity;
     readonly trace?: TraceContext;
@@ -151,8 +123,6 @@ export function receive(
   const { projection } = view;
   const position = turnPosition(projection);
   const turnId = activeTurnId(position);
-  // Only a delivery still waiting is consumed. One that settled, such as an answer the turn
-  // answered for now while it waited for the rest of its batch, or one a policy refused, is not.
   const deliveries = waitingDeliveries(projection, input.deliveries ?? []);
   const first = deliveries[0];
   const cause: Cause =
@@ -169,11 +139,6 @@ export function receive(
   return unchanged(view, events);
 }
 
-/**
- * Deliveries join the open turn without opening one, as answers do.
- * Between turns an answer has nothing to join: it took effect, and settles `applied`. A delivery
- * already settled, such as one refused, joins nothing.
- */
 export function join(
   view: SessionView,
   input: { readonly deliveries: readonly ConsumedDelivery[] },
@@ -189,15 +154,10 @@ export function join(
   );
 }
 
-/** The turn completes: it settles with the reply its parts made. */
 export function complete(view: SessionView): Transition {
   return unchanged(view, turnSettled(view.projection, { outcome: "completed" }));
 }
 
-/**
- * An interrupted attempt that finished clearing the session: its history empties now, and nothing
- * it suspended or a sign-in held stays. What it remembered of approvals does.
- */
 export function clearedByAttempt(view: SessionView): Transition {
   return transition({
     events: [],
@@ -207,10 +167,6 @@ export function clearedByAttempt(view: SessionView): Transition {
   });
 }
 
-/**
- * The step failed. A recoverable failure leaves the session for the user to retry; a terminal
- * one ends it.
- */
 export function fail(
   view: SessionView,
   failure: {
@@ -218,15 +174,12 @@ export function fail(
     readonly details?: JsonObject;
     readonly message: string;
     readonly terminal?: true;
-    /** What the open run's discarded answer spent. */
     readonly usage?: Usage;
   },
 ): Transition {
-  // The calls a sign-in stopped never run: the model reads that they stopped.
   const stopped = view.turn.suspended.filter((step) => (step.approved?.length ?? 0) > 0);
   const error = errorInfoOf(failure);
   const turnId = activeTurnIdOf(view.projection);
-  // A terminal failure ends the session, which ends the turn with it, in one commit.
   const runId = turnId === undefined ? undefined : openRunOf(view.projection, turnId);
   const events = [
     ...(runId === undefined
@@ -243,23 +196,12 @@ export function fail(
   return transition({ ...commitSteps(view.turn, stopped, cancelledTranscript), events });
 }
 
-// ---------------------------------------------------------------------------
-// Calls
-// ---------------------------------------------------------------------------
-
-/** One call's result, ready for its step's transcript. */
 export interface SettledCall {
   readonly part: ToolResultPart;
-  /** A runtime result, reported at the coordinates of the step that made the call. */
   readonly result?: RuntimeActionResult;
-  /** What the agent behind the call spent, which its settlement records. */
   readonly usage?: TokenUsage;
 }
 
-/**
- * Results reach the steps that made their calls. A step whose every call now has a result
- * commits to history, where the model reads it.
- */
 export function settle(view: SessionView, input: { readonly results: readonly SettledCall[] }) {
   const events: SessionEvent[] = [];
   const steps = [...view.turn.suspended];
@@ -272,17 +214,13 @@ export function settle(view: SessionView, input: { readonly results: readonly Se
       new Set([part.toolCallId]),
     );
     const recorded = result === undefined ? undefined : view.projection.view.calls[result.callId];
-    // A call without its row (pruned, or never published) has nothing left to settle or own spend.
     if (
       result !== undefined &&
       recorded !== undefined &&
       recorded.taskId === undefined &&
       recorded.status !== "settled"
     ) {
-      // A task's start receipt is model history only. Its public call stays open until the
-      // task replies; the reply path publishes its actual settlement and delegated spend.
       events.push(callSettledFrom(result));
-      // A child's usage counts once, in the commit that settles its call.
       if (usage !== undefined) events.push(delegatedUsageFact(result.callId, usage));
     }
   }
@@ -290,12 +228,6 @@ export function settle(view: SessionView, input: { readonly results: readonly Se
   return transition({ ...commitSteps({ ...view.turn, suspended: steps }, complete), events });
 }
 
-/**
- * A model-call attempt ends without its response reaching history, in one commit with the calls
- * it announced. A retry replaces it: eve can't tell whether those calls ran, so they and the run
- * settle `abandoned`. Steering cut it off: the calls are interrupted, and the run completed what
- * it streamed. Either way the run records what the provider billed for the attempt.
- */
 export function discardAttempt(
   view: SessionView,
   input: {
@@ -306,8 +238,6 @@ export function discardAttempt(
 ): Transition {
   const tables = view.projection.view;
   const ref = { family: "run" as const, id: input.runId };
-  // A retry abandons the run, and the writer abandons what it announced with it; steering
-  // completes what it streamed, so its calls close here.
   const work = input.ending === "steered" ? closeUnder(tables, ref, "steered") : [];
   if (!isOpen(tables, ref)) return unchanged(view, work);
   const run =
@@ -322,10 +252,6 @@ export function discardAttempt(
   return unchanged(view, [...work, ...runSettledFacts(run)]);
 }
 
-/**
- * A model response made calls the runtime runs. The response waits in a suspended step until
- * every call it made has a result, so a call never reaches the model without its result.
- */
 export function suspendStep(
   view: SessionView,
   step: Pick<SuspendedStep, "endsTurn" | "event" | "messages" | "tasks">,
@@ -333,7 +259,6 @@ export function suspendStep(
   return transition({ events: [], turn: suspend(view.turn, { ...step, requests: [] }) });
 }
 
-/** The step without the approved calls in `callIds`, which have run or joined the runtime. */
 export function withoutApproved(step: SuspendedStep, callIds: ReadonlySet<string>): SuspendedStep {
   if (step.approved === undefined) return step;
   const approved = step.approved.filter((request) => !callIds.has(request.call.callId));
@@ -342,10 +267,6 @@ export function withoutApproved(step: SuspendedStep, callIds: ReadonlySet<string
   return approved.length === 0 ? rest : { ...rest, approved };
 }
 
-/**
- * The calls of `step` a sign-in stopped that can run: every sign-in each stopped on has called
- * back.
- */
 export function runnableCalls(view: SessionView, step: SuspendedStep): readonly ApprovedCall[] {
   const waiting = new Set(view.signIns.map(signInAttemptKey));
   return (step.approved ?? []).filter((call) =>
@@ -353,11 +274,6 @@ export function runnableCalls(view: SessionView, step: SuspendedStep): readonly 
   );
 }
 
-// ---------------------------------------------------------------------------
-// Tasks
-// ---------------------------------------------------------------------------
-
-/** Private dispatch metadata for a call that starts or reaches a task. */
 export interface TaskCallStart {
   readonly clearedBy?: import("#protocol/session-events/families/call.js").ClearedBy;
   readonly callId: string;
@@ -367,26 +283,16 @@ export interface TaskCallStart {
   readonly name: string;
 }
 
-/** The calls a dispatch started or refused, recorded on the session but not yet published. */
 export interface PendingDispatch {
-  /** Calls the turn waits on, each running from now in a run of its own. */
   readonly executing: readonly {
     readonly callId: string;
     readonly clearedBy?: import("#protocol/session-events/families/call.js").ClearedBy;
   }[];
-  /** Tasks the dispatch started or sent a call to. */
   readonly started: readonly TaskCallStart[];
-  /** Calls a dispatch admission refused before any run started, and the policy that refused. */
   readonly refused: readonly { readonly result: RuntimeActionResult; readonly policy: string }[];
 }
 
-/**
- * What a dispatch recorded, published as one commit: the calls the turn waits on started, the
- * tasks it started or reached, and the calls it refused.
- */
 export function startDispatchedCalls(view: SessionView, pending: PendingDispatch): Transition {
-  // One introduction per task in this commit, from the public table, not the private runtime
-  // address the dispatch already recorded.
   const introducedTasks = new Set(Object.keys(view.projection.view.tasks));
   return unchanged(view, [
     ...pending.executing.map(({ callId, clearedBy }) => callStarted(callId, { clearedBy })),
@@ -397,7 +303,6 @@ export function startDispatchedCalls(view: SessionView, pending: PendingDispatch
   ]);
 }
 
-/** A task starts once; every call it serves starts against that task. */
 export function startTask(
   view: SessionView,
   task: TaskCallStart,
@@ -430,7 +335,6 @@ export type TaskCallOutcome =
   | { readonly status: "failed"; readonly error: string }
   | { readonly status: "cancelled"; readonly reason?: TaskCancelReason };
 
-/** A task's run settled calls: each reports its outcome, naming the task as it started. */
 export function settleTask(
   view: SessionView,
   input: {
@@ -447,7 +351,6 @@ export function settleTask(
       error:
         outcome.status === "failed" ? { code: "TASK_FAILED", message: outcome.error } : undefined,
       outcome: outcome.status === "cancelled" ? "interrupted" : outcome.status,
-      // The first call carries the task's output; the others name it.
       output: index === 0 ? output : undefined,
       outputOf:
         index > 0 && output !== undefined && first !== undefined ? { callId: first } : undefined,
@@ -457,7 +360,6 @@ export function settleTask(
   return unchanged(view, settled);
 }
 
-/** A task's body ended. Replying only settles calls; it never ends a resumable task. */
 export function endTask(
   view: SessionView,
   input: {
@@ -469,7 +371,6 @@ export function endTask(
   const row = tables.tasks[input.taskId];
   if (row === undefined || row.status === "ended") return unchanged(view, []);
   const { outcome } = input;
-  // The writer closes what the task still holds before this (`cascade`).
   return unchanged(view, [
     fact("task.ended", {
       error:
@@ -481,10 +382,6 @@ export function endTask(
   ]);
 }
 
-/**
- * A task or workflow run ended, on its own or cancelled: nobody can answer what it relayed, so
- * each request still open is withdrawn.
- */
 export function finishRun(
   view: SessionView,
   run: { readonly taskId?: string; readonly requestIds?: Iterable<string> },
@@ -503,7 +400,6 @@ export function finishRun(
   );
 }
 
-/** An interaction nobody needs anymore; the writer withdraws the answers still open on it. */
 function withdrawInteraction(
   interactionId: string,
   reason: string,
@@ -512,26 +408,12 @@ function withdrawInteraction(
   return interactionSettled(interactionId, outcome, { reason });
 }
 
-// ---------------------------------------------------------------------------
-// Relay
-// ---------------------------------------------------------------------------
-
-/**
- * A child session or workflow run relays one of its interaction facts. The session mirrors each
- * as its own interaction, about the call it serves, with the asker as its origin: a request
- * opens, and records where its answers go; the asker's settlement closes it; and the asker's
- * admission or refusal of an answer this session forwarded applies to the forwarded copy. The
- * open turn waits on a request about one of its calls; a task's request waits on the task.
- */
 export function relay(
   view: SessionView,
   input: {
-    /** The sign-ins this session can call back, when it runs in a workflow. */
     readonly callsBack?: CallsBack;
     readonly payload: SubagentInteractionHookPayload;
-    /** The routes this session keeps for the requests it relays, by interaction id. */
     readonly relays?: ReadonlyMap<string, Relay>;
-    /** The workflow tool run that relays the request, and the hook its `ctx.ask()` answers reach. */
     readonly runId?: string;
     readonly workflowAsk?: WorkflowAskRoute;
   },
@@ -548,8 +430,6 @@ export function relay(
         };
   const events: SessionEvent[] = [];
   const upsert: Record<string, Relay> = {};
-  // A serving task can keep using a child after replying to the call that opened it, whether the
-  // task started with that call or took it later, and after later turns pruned the call.
   const served = tables.calls[payload.callId];
   const running = (taskId: string | undefined) =>
     taskId !== undefined && tables.tasks[taskId]?.status === "running";
@@ -561,7 +441,6 @@ export function relay(
   for (const event of payload.events) {
     const interactionId = event.data.interactionId;
     const mirror = tables.interactions[interactionId];
-    // The route this session keeps for the request, else the one the asker relays it by.
     const answersRoute = input.relays?.get(interactionId) ?? route;
     if (event.type === "interaction.opened" && !serving) continue;
     if (
@@ -573,12 +452,10 @@ export function relay(
       case "interaction.opened": {
         if (mirror !== undefined) break;
         events.push({
-          // A sign-in the person already has a card for waits on that card's answer.
           data: waitingSignIn(
             tables,
             {
               ...event.data,
-              // Every relayed request names its asker; one relayed from further down names its own.
               origin: event.data.origin ?? { interactionId, sessionId: payload.childSessionId },
               subject: { callId: payload.callId },
             },
@@ -586,7 +463,6 @@ export function relay(
           ),
           type: "interaction.opened",
         });
-        // A person answers it here, and the answer goes back the way it came.
         if (route !== undefined && event.data.request.kind !== "sign-in")
           upsert[interactionId] = route;
         break;
@@ -596,8 +472,6 @@ export function relay(
         events.push(...mirrorSettled(tables, event.data, answersRoute));
         break;
       case "response.admitted": {
-        // The asker admitted an answer this session forwarded: it stands here too, while the
-        // rest of its batch waits.
         const answer =
           mirror === undefined
             ? undefined
@@ -607,8 +481,6 @@ export function relay(
         break;
       }
       case "response.settled": {
-        // How the asker settled an answer this session forwarded; a deciding one settles with
-        // its interaction.
         const answer =
           mirror === undefined
             ? undefined
@@ -619,13 +491,11 @@ export function relay(
       }
     }
   }
-  // A route retires once its request closes, with the records of every closed row.
   return Object.keys(upsert).length > 0
     ? { ...unchanged(view, events), relays: upsert }
     : unchanged(view, events);
 }
 
-/** The row this session mirrors for the asker that relayed `payload`, about the call it serves. */
 export function relayedMirror(
   tables: PublicView,
   payload: SubagentInteractionHookPayload,
@@ -639,10 +509,6 @@ export function relayedMirror(
     : undefined;
 }
 
-/**
- * The asker settled what this session mirrors: the mirror settles the same way, crediting the
- * answer the asker names as its decider (`relayedInteractionEvents`).
- */
 function mirrorSettled(
   tables: PublicView,
   settled: FactOf<"interaction.settled">["data"],
@@ -656,13 +522,11 @@ function mirrorSettled(
     settled.cause !== undefined && "deliveryId" in settled.cause
       ? settled.cause.deliveryId
       : undefined;
-  // The writer withdraws the answers that didn't decide (`cascade`).
   const decider = decided
     ? forwardedAnswer(tables, settled.interactionId, named, route)
     : undefined;
   const events: SessionEvent[] =
     decider === undefined ? [] : [responseSettled(decider, "applied", settled.reason)];
-  // Any id the asker names is its own, not one of this session's: only a policy or hook carries.
   const cause =
     decider !== undefined
       ? { responseId: decider }
@@ -673,11 +537,6 @@ function mirrorSettled(
   return events;
 }
 
-/**
- * The open answer this session forwarded that an asker names by the delivery it received it in.
- * An asker that names none, such as a protocol 2 remote, can mean only the one open answer;
- * between several, or for a delivery this session didn't forward, there is none to credit.
- */
 function forwardedAnswer(
   tables: PublicView,
   interactionId: string,
@@ -688,13 +547,11 @@ function forwardedAnswer(
     (row) => row.interactionId === interactionId && row.status !== "settled",
   );
   if (deliveryId === undefined) return open.length === 1 ? open[0]!.responseId : undefined;
-  // A remote never sees this session's delivery ids, so it can name an answer only by a receipt.
   if (route?.remote !== undefined) {
     const receipts = route.receipts ?? {};
     const ours = Object.hasOwn(receipts, deliveryId) ? receipts[deliveryId] : undefined;
     return open.find((row) => row.deliveryId === ours)?.responseId;
   }
-  // A local child names the delivery, or a share of a payload by an id of its own.
   const source = forwardedFrom(deliveryId);
   return (
     open.find((row) => row.deliveryId === deliveryId) ??
@@ -702,13 +559,6 @@ function forwardedAnswer(
   )?.responseId;
 }
 
-/**
- * Answers to requests this session relays went on to their askers. Each delivery that carried
- * such answers is admitted here, with the answers it forwarded. An answer joins the open turn
- * that asked; a delivery that also carries input for this session goes on to its turn. Between
- * turns, forwarding alone applies the delivery. A question this session decides settles now; an
- * approval stays open until its asker settles it.
- */
 export function routeAnswer(
   view: SessionView,
   input: {
@@ -716,23 +566,14 @@ export function routeAnswer(
       readonly deliveryId: string;
       readonly principal?: Principal;
       readonly source?: DeliverySource;
-      /** The open asking turn consumes the answer, with any message parts it carried. */
       readonly consumed?: { readonly turnId: string; readonly parts: readonly UserPart[] };
-      /** The delivery also carries input for this session, whose turn consumes and settles it. */
       readonly continues?: true;
     }[];
-    /** Every answer forwarded, as admitted. */
     readonly forwarded: readonly ResponseSubmittedData[];
-    /**
-     * Relayed requests this session settles as it forwards their answer, because nobody else
-     * will before it acts: a workflow run's `ctx.ask()` question, since a run publishes nothing of
-     * its own, and a child's budget prompt this session stops on, since Stop ends its own turn.
-     */
     readonly decided: readonly {
       readonly answer: Answer;
       readonly outcome: "accepted" | "declined";
     }[];
-    /** Routes that learned the receipt a remote asker gave the answers forwarded to it. */
     readonly relays?: Readonly<Record<string, Relay>>;
   },
 ): Transition {
@@ -772,7 +613,6 @@ export function routeAnswer(
         .filter((binding) => binding.interactionId === row.interactionId)
         .map((binding) => binding.responseId),
     ];
-    // The latest answer decides; the writer withdraws the others (`cascade`).
     const decider = answers.at(-1);
     if (decider !== undefined) events.push(responseSettled(decider, "applied"));
     events.push(
@@ -791,21 +631,11 @@ export function routeAnswer(
       continue;
     events.push(deliveryApplied(delivery.deliveryId));
   }
-  // The answered routes retire with the commit, so a later delivery can't route through them.
   return input.relays === undefined
     ? unchanged(view, events)
     : { ...unchanged(view, events), relays: input.relays };
 }
 
-// ---------------------------------------------------------------------------
-// Sign-ins
-// ---------------------------------------------------------------------------
-
-/**
- * Sign-in callbacks matched the attempts `attemptIds` name: the session stops waiting on them.
- * A call they stopped runs once every sign-in it waits on has called back (`runnableCalls`); any
- * other completion reports once the turn it resumes runs (`completeSignIn`).
- */
 export function matchSignIns(
   view: SessionView,
   input: { readonly attemptIds: readonly string[] },
@@ -817,17 +647,12 @@ export function matchSignIns(
   };
 }
 
-/** The sign-ins calls stopped on, which the calls report when they settle. */
 export function callSignIns(turn: TurnState): readonly AuthorizationChallenge[] {
   return turn.suspended.flatMap((step) =>
     (step.approved ?? []).flatMap((call) => call.signIns ?? []),
   );
 }
 
-/**
- * The `stopped` calls wait for a sign-in: their results leave the step, and they stay approved and
- * open, to run once the sign-ins call back, rather than the model asking for them again.
- */
 export function awaitSignIns(
   step: SuspendedStep,
   input: {
@@ -839,8 +664,6 @@ export function awaitSignIns(
   const stopped = input.stopped.filter(({ call }) => ids.has(call.callId));
   if (stopped.length === 0) return step;
   const calls = stopped.map(({ approval, call, connections }): ApprovedCall => {
-    // A call approved before keeps its approval, and the sign-ins it already waited on report
-    // with it, beside the ones it waits on now.
     const earlier = step.approved?.find((approved) => approved.call.callId === call.callId);
     const interactionId = approval?.interactionId ?? earlier?.interactionId;
     const responder = approval?.responder ?? earlier?.responder;
@@ -862,11 +685,6 @@ export function awaitSignIns(
   };
 }
 
-/**
- * The facts that settle a sign-in its callback completed, while the session still waits on it. A
- * callback is a delivery whose response carries no value: the provider's payload stays private,
- * and the public record says only that the attempt completed and how it came out.
- */
 function signInCallbackFacts(
   tables: PublicView,
   challenge: AuthorizationChallenge,
@@ -879,7 +697,6 @@ function signInCallbackFacts(
   const interactionId = signInInteractionId(challenge);
   const row = tables.interactions[interactionId];
   if (row?.status !== "open") return [];
-  // One callback per attempt reaches the session, so the attempt names its delivery.
   const deliveryId = `callback_${interactionId}`;
   const responseId = `response_${deliveryId}`;
   const ended = interactionSettled(interactionId, settled.outcome, {
@@ -890,7 +707,6 @@ function signInCallbackFacts(
     { data: { deliveryId, source: { callback: "authorization" } }, type: "delivery.admitted" },
     responseSubmitted({ deliveryId, interactionId, responseId }),
     responseSettled(responseId, "applied"),
-    // A terminal failure says so: the turn reports it rather than asking for the sign-in again.
     settled.retryable === false
       ? { ...ended, data: { ...ended.data, response: { retryable: false } } }
       : ended,
@@ -898,11 +714,6 @@ function signInCallbackFacts(
   ];
 }
 
-/**
- * A call a sign-in stopped settled: the sign-ins it waited on end with it, accepted if it returned,
- * declined if the person refused consent, and failed with the reason it didn't otherwise. A
- * failure with `retryable: false` is terminal, recorded as the settlement's `response.retryable`. Published before the call's own settlement.
- */
 export function callSignInsSettled(
   view: Pick<SessionView, "projection">,
   call: ApprovedCall,
@@ -922,42 +733,35 @@ export function callSignInsSettled(
   );
 }
 
-/**
- * Sign-in callbacks arrived: each attempt the session still waits on is accepted. A sign-in a
- * call stopped on settles with the call instead (`callSignInsSettled`).
- */
 export function completeSignIn(
   view: SessionView,
-  input: { readonly completions: readonly AuthorizationChallenge[] },
+  input: {
+    readonly completions: readonly AuthorizationChallenge[];
+    readonly declined: ReadonlySet<string>;
+  },
 ): Transition {
   const tables = view.projection.view;
-  // A call a sign-in stopped reports it when the call settles.
   const reportedByCalls = new Set(callSignIns(view.turn).map(signInAttemptKey));
   return unchanged(
     view,
     input.completions
       .filter((challenge) => !reportedByCalls.has(signInAttemptKey(challenge)))
-      .flatMap((challenge) => signInCallbackFacts(tables, challenge, { outcome: "accepted" })),
+      .flatMap((challenge) =>
+        signInCallbackFacts(
+          tables,
+          challenge,
+          challenge.attemptId !== undefined && input.declined.has(challenge.attemptId)
+            ? { outcome: "declined", reason: SIGN_IN_DECLINED, retryable: false }
+            : { outcome: "accepted" },
+        ),
+      ),
   );
 }
 
-// ---------------------------------------------------------------------------
-// Cancel and clear
-// ---------------------------------------------------------------------------
-
-/**
- * The delivery a clear or compact arrived as. One that names none, from a caller that predates
- * control ids, is named by the position it applies at.
- */
 export function controlDeliveryFor(view: SessionView, given?: ControlDelivery): ControlDelivery {
   return given ?? { deliveryId: `control_${String(view.projection.view.position)}` };
 }
 
-/**
- * A control's transition as a delivery: admitted before what it changes and applied after, in
- * the same commit, with what it changes naming it as the cause. A control that names no
- * delivery changes the session on its own.
- */
 export function controlled(
   delivery: ControlDelivery | undefined,
   control: string,
@@ -975,15 +779,8 @@ export function controlled(
   };
 }
 
-/** What the model reads for a call its turn's cancellation stopped before the call settled. */
 export const CANCELLED_CALL_RESULT = "The turn was cancelled before this call finished.";
 
-/**
- * `session.cancel()`: the open turn ends cancelled. Its requests, its sign-ins, and every
- * relayed request are withdrawn, since the cancel stops the work that asked them; its unsettled
- * calls are stopped. The steps it ran commit to history, each unfinished call answered as
- * cancelled, so the model sees that the work started and stopped.
- */
 export function cancel(view: SessionView, input: { readonly cause?: Cause } = {}): Transition {
   const { projection } = view;
   const turnId = activeTurnIdOf(projection);
@@ -997,8 +794,6 @@ export function cancel(view: SessionView, input: { readonly cause?: Cause } = {}
     stopped.flatMap((step) => step.requests.map((request) => request.interactionId)),
   );
   const tables = projection.view;
-  // The cancel also stops the work behind every relayed request and the stopped steps' asks,
-  // wherever they sit; the writer closes the rest of what the turn held.
   const events: SessionEvent[] = Object.values(tables.interactions)
     .filter(
       (row) =>
@@ -1031,17 +826,10 @@ function unreadSettled(view: SessionView): SessionEvent[] {
     .map(({ deliveryId }) => fact("delivery.settled", { deliveryId, outcome: "ignored" }));
 }
 
-/** A stopped step's response, each call without a result answered as cancelled. */
 function cancelledTranscript(step: SuspendedStep): ModelMessage[] {
   return stoppedTranscript(step, () => CANCELLED_CALL_RESULT);
 }
 
-/**
- * A step was interrupted after it published, and its retry runs from the checkpoint before it.
- * Each step waiting on what the interrupted attempt did, an answer it applied or a call it
- * started, can't resume from it again: the step stops, each call it made answered with what the
- * stream says of it, so none runs again. The events the attempt wrote already say what changed.
- */
 export function stopInterruptedSteps(
   view: SessionView,
   input: {
@@ -1074,7 +862,6 @@ function commitSteps(
   };
 }
 
-/** A stopped step's response, each call without a result answered with `resultOf` it. */
 function stoppedTranscript(
   step: SuspendedStep,
   resultOf: (callId: string) => string,
@@ -1097,12 +884,6 @@ function stoppedTranscript(
   return messages;
 }
 
-/**
- * `session.clear()`: everything the cleared history asked for is withdrawn, its approvals and
- * the session-limit prompt and every sign-in, and the calls awaiting them stop. A clear cancels
- * the running turn and the session's working tasks first, and a task run withdraws what it
- * relayed as it stops, so relayed requests are left to it.
- */
 export function clear(view: SessionView, input: { readonly cause?: Cause } = {}): Transition {
   const { projection } = view;
   const changeId = nextChangeId(projection);
@@ -1111,10 +892,6 @@ export function clear(view: SessionView, input: { readonly cause?: Cause } = {})
     signIns: [],
     events: [
       ...clearedInteractions(view),
-      // A clear cancels a running turn before it applies, but a turn parked on a request still
-      // owns a lifecycle; end it and its
-      // non-task work before selecting an empty conversation, instead of dropping only its
-      // private suspended steps and leaving the public turn and calls open forever.
       ...turnSettled(projection, { cause: input.cause, outcome: "cancelled" }),
       ...unreadSettled(view),
       contextStarted({ cause: input.cause, changeId, kind: "clear" }),
@@ -1124,10 +901,6 @@ export function clear(view: SessionView, input: { readonly cause?: Cause } = {})
   });
 }
 
-/**
- * What a clear withdraws: every request the cleared history asked for, its turn's too. Requests
- * relayed from tasks are the cancelled task runs' to withdraw.
- */
 function clearedInteractions(view: SessionView): SessionEvent[] {
   const tables = view.projection.view;
   return Object.values(tables.interactions)

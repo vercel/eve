@@ -4,7 +4,6 @@ import type { PackageManagerInvocation } from "./types.js";
 
 type StandardExecutablePackageManager = "bun" | "npm" | "yarn";
 
-/** Resolves a manager executable, preserving test and package-runner interposition. */
 export function resolveStandardInvocation(
   kind: StandardExecutablePackageManager,
   args: readonly string[],

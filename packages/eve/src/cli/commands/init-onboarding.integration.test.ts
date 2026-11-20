@@ -5,13 +5,13 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MockScreen, MockUserInput } from "#cli/dev/tui/test/mock-terminal.js";
+import { LiveRegion } from "#cli/ui/live-region.js";
 import type * as Startup from "#cli/dev/tui/startup.js";
 import type * as StartupOnboarding from "#cli/dev/tui/startup-onboarding.js";
 
 let screen: MockScreen;
 let input: MockUserInput;
 
-// The real startup screen, drawn on a mock terminal.
 vi.mock("#cli/dev/tui/startup.js", async (importOriginal) => {
   const original = await importOriginal<typeof Startup>();
   return {
@@ -19,7 +19,6 @@ vi.mock("#cli/dev/tui/startup.js", async (importOriginal) => {
     startDevelopmentTuiStartup: (
       options: Parameters<typeof original.startDevelopmentTuiStartup>[0],
     ) => {
-      // The startup screen forwards its options to the renderer, which accepts a terminal.
       const terminal: object = {
         input,
         output: screen,
@@ -31,7 +30,6 @@ vi.mock("#cli/dev/tui/startup.js", async (importOriginal) => {
   };
 });
 
-// Onboarding asks one question on the startup screen's setup flow, like the provider picker.
 vi.mock("#cli/dev/tui/startup-onboarding.js", () => ({
   runStartupOnboarding: async (
     options: Parameters<typeof StartupOnboarding.runStartupOnboarding>[0],
@@ -80,7 +78,6 @@ describe("startInitOnboarding", () => {
 
     await expect(onboarding.close()).resolves.toEqual({});
 
-    // `close()` cancels with a synthetic Ctrl-C; only a person's Ctrl-C stops the install.
     expect(onboarding.interrupted.aborted).toBe(false);
     await expect(onboarding.finished).resolves.toEqual({ cancelled: true });
     expect(events.trackSetupTerminal).toHaveBeenCalledExactlyOnceWith({
@@ -121,7 +118,6 @@ describe("startInitOnboarding", () => {
       draft: "plan their week",
     });
     expect(onboarding.interrupted.aborted).toBe(false);
-    // eve dev paints its own screen in place, so nothing of this one stays behind.
     expect(screen.snapshot().trim()).toBe("");
     expect(events.trackSetupStep.mock.calls).toEqual([
       [{ flow: "onboarding", step: "model_provider" }],
@@ -132,5 +128,45 @@ describe("startInitOnboarding", () => {
       step: "model_provider",
       result: "completed",
     });
+  });
+
+  it("keeps its screen up under init's summary when it hands the terminal to eve dev", async () => {
+    const projectPath = await mkdtemp(join(tmpdir(), "eve-init-onboarding-handoff-"));
+    const onboarding = await startInitOnboarding({
+      projectPath,
+      preamble: ["○ Creating an eve agent in /tmp/alice", ""],
+    });
+    await screen.waitForText("Connect a model");
+    input.enter();
+    await onboarding.finished;
+    onboarding.setInstalling(false);
+    input.type("Help Alice");
+    const headerRow = () =>
+      screen
+        .snapshot()
+        .split("\n")
+        .findIndex((row) => row.includes("☰eve"));
+    const openRow = headerRow();
+
+    await onboarding.close({ rows: ["✓ Created an eve agent in /tmp/alice", ""] });
+
+    const frames = screen.frames();
+    const firstPaint = frames.findIndex((frame) => frame.includes("☰eve"));
+    expect(frames[firstPaint]).toContain("Installing dependencies…");
+    for (const frame of frames.slice(firstPaint)) {
+      expect(frame).toContain("☰eve");
+      expect(frame).not.toMatch(/Ready|Reading saved connection/u);
+    }
+    const kept = screen.snapshot();
+    expect(kept.indexOf("✓ Created an eve agent in /tmp/alice")).toBeLessThan(
+      kept.indexOf("☰eve"),
+    );
+    expect(kept).toContain("Help Alice");
+    expect(kept).toContain("Starting agent…");
+    expect(kept).not.toContain("Creating an eve agent");
+    expect(headerRow()).toBe(openRow);
+
+    new LiveRegion({ write: (chunk) => screen.write(chunk) }).update(["eve dev"]);
+    expect(screen.snapshot()).toBe(`${kept.slice(0, kept.indexOf("☰eve"))}eve dev`);
   });
 });

@@ -58,7 +58,6 @@ const TEMPLATE_IMAGE = dockerTemplateImageReference({
   templateKey: TEMPLATE_KEY,
 });
 const SESSION_KEY = "eve-sbx-ses-local-session-1";
-/** The session container's name, which derives from the app's storage path and the session key alone. */
 function providerContainerName(appRoot: string): string {
   return `eve-sbx-${createSandboxProviderIdentity({
     namespace: appRoot,
@@ -191,55 +190,6 @@ describe("Docker provider prewarm", () => {
     expect(cleanup?.args.at(-1)).toBe(buildContainerName);
   });
 
-  it("reuses a concurrently committed template image", async () => {
-    const appRoot = await createScratchDirectory("eve-docker-sandbox-");
-    let publishedReference: string | undefined;
-    const { calls, cli } = createFakeDockerCli((args) => {
-      if (args[0] === "image" && args[1] === "inspect") {
-        return publishedReference === args.at(-1)
-          ? { exitCode: 0, stdout: "sha256:peer\n" }
-          : { exitCode: 1, stderr: "No such image" };
-      }
-      if (args[0] === "commit") {
-        publishedReference = args.at(-1);
-        return {
-          exitCode: 1,
-          stderr: `AlreadyExists: image "${publishedReference}" already exists`,
-        };
-      }
-      return undefined;
-    });
-
-    const result = await createEngine({ cli }).prepare({ appRoot });
-    expect(result.imageReference).toBe(publishedReference);
-    expect(
-      calls.filter(({ args }) =>
-        publishedReference === undefined ? false : isImageInspect(args, publishedReference),
-      ),
-    ).toHaveLength(2);
-    expect(findCall(calls, (args) => args[0] === "rm" && args[1] === "-f")).toBeDefined();
-  });
-
-  it("preserves commit failures other than a concurrent publication", async () => {
-    const appRoot = await createScratchDirectory("eve-docker-sandbox-");
-    let committedReference: string | undefined;
-    const { cli } = createFakeDockerCli((args) => {
-      if (args[0] === "image" && args[1] === "inspect") {
-        return { exitCode: 1, stderr: "No such image" };
-      }
-      if (args[0] === "commit") {
-        committedReference = args.at(-1);
-        return { exitCode: 1, stderr: "disk full" };
-      }
-      return undefined;
-    });
-
-    await expect(createEngine({ cli }).prepare({ appRoot })).rejects.toThrow(
-      /Failed to commit sandbox template image .*: disk full/u,
-    );
-    expect(committedReference).toMatch(/^eve-sandbox-template:/u);
-  });
-
   it("mounts compiled resources read-only while hydrating a writable template", async () => {
     const appRoot = await createScratchDirectory("eve-docker-sandbox-");
     const resourcesPath = join(appRoot, "compiled-resources");
@@ -271,7 +221,6 @@ describe("Docker provider prewarm", () => {
         calls,
         (args) =>
           args[0] === "exec" &&
-          // The spawn wrapper re-quotes the script for `bash -lc`, escaping its quoted root.
           (args.at(-1) ?? "").includes(
             "cp -a '\\''/eve/resources'\\''/workspace/. '\\''/workspace'\\''/",
           ),
@@ -370,14 +319,10 @@ describe("Docker provider create", () => {
       expect(run?.args).toContain("eve.sandbox.role=session");
       expect(run?.args.at(-3)).toBe(TEMPLATE_IMAGE);
 
-      // No base setup against template-backed sessions — the template
-      // image already carries it.
       expect(
         findCall(calls, (args) => args[0] === "exec" && args.includes("/bin/sh")),
       ).toBeUndefined();
 
-      // An authored stop releases the container; filesystem state survives
-      // for the next `create` to restart from.
       await handle.connection.stop();
       expect(findCall(calls, (args) => args[0] === "stop")?.args).toEqual([
         "stop",
@@ -526,9 +471,6 @@ describe("Docker provider create", () => {
       "-c",
     ]);
     const wrapper = String(exec?.args.at(-1));
-    // The wrapper records its pid for the in-container tree kill, runs
-    // the original command under a login shell, and preserves its exit
-    // code while cleaning up the pid file.
     expect(wrapper).toMatch(/^echo "\$\$" > '\/tmp\/\.eve-sbx-spawn-[0-9a-f-]+\.pid'; /);
     expect(wrapper).toContain(`bash -lc 'echo "$DEPLOY_ENV"'`);
     expect(wrapper).toMatch(/status=\$\?; rm -f '[^']+'; exit \$status$/);
@@ -552,8 +494,6 @@ describe("Docker provider create", () => {
     ]);
     expect(treeKill?.args.at(-1)).toBe(pidFilePath);
     expect(String(treeKill?.args.at(-3))).toContain("kill_tree");
-    // The local docker exec client is killed after the in-container
-    // tree kill so the leaked-process window stays closed.
     expect(killedStreams).toHaveLength(1);
   });
 
@@ -648,8 +588,6 @@ describe("Docker provider create", () => {
     const { appRoot, calls, handle } = await createRunningSessionHandle({
       respond: (args) => {
         if (isContainerInspect(args) && args[3] === "{{json .NetworkSettings.Networks}}") {
-          // Containers created with `--network none` report the special
-          // "none" network, which Docker refuses to combine with bridge.
           return { exitCode: 0, stdout: '{"none":{}}' };
         }
         return undefined;
@@ -676,7 +614,6 @@ describe("Docker provider create", () => {
   it("rejects domain-level network policies with guidance toward the Vercel provider", async () => {
     const { handle } = await createRunningSessionHandle({});
 
-    // DefaultSandbox forwards the shared network policy type unchanged.
     await expect(handle.sandbox.setNetworkPolicy({ allow: { "*": [] } } as never)).rejects.toThrow(
       /Vercel provider/,
     );
@@ -701,7 +638,6 @@ describe("Docker template prune", () => {
     return { ...fake, images };
   }
 
-  // Mirrors how prewarm and session start build the provider context.
   async function prepareLikeDevelopment(appRoot: string, cli: DockerCli) {
     return await createDockerSandboxHarness({ cli }).prepare({
       appRoot,

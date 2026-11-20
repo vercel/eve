@@ -5,7 +5,6 @@ import {
   type MessagePart,
 } from "#shared/message-content.js";
 
-/** Workflow messages carry references, not attachment bytes, through durable step inputs. */
 export function normalizeAgentMessage(
   message: MessageContent<string | URL>,
 ): string | readonly (MessagePart<string> & JsonObject)[] {

@@ -49,8 +49,6 @@ export function defineGhTool(
     description,
     approval: (ctx) => {
       const status = githubShellApproval(ctx.toolInput as GitHubShellInput | undefined);
-      // An installation token is shared: only the access policy's check of the caller guards it,
-      // so a call made while someone else steers the turn asks the caller first.
       if (status !== "not-applicable" || github()?.principalType === "user") return status;
       return whenSteered(ctx) ?? status;
     },

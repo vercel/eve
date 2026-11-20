@@ -4,8 +4,6 @@ const ansiEscape = String.fromCharCode(27);
 
 const ansiPattern = new RegExp(`${ansiEscape}\\[[0-?]*[ -/]*[@-~]`, "g");
 const ansiPrefixPattern = new RegExp(`^${ansiEscape}\\[[0-?]*[ -/]*[@-~]`);
-// OSC 8 links are renderer-owned terminal controls. Their target is not
-// visible text and must not affect wrapping, table geometry, or clipping.
 const oscPattern = new RegExp(
   `${ansiEscape}\\][^${ansiEscape}\\x07]*(?:\\x07|${ansiEscape}\\\\)`,
   "g",
@@ -79,14 +77,12 @@ function sliceUnits(units: readonly TerminalTextUnit[], from: number, width: num
   return output;
 }
 
-/** Clips text styled only at grapheme boundaries, resetting any truncated style. */
 export function clipVisible(input: string, width: number): string {
   if (visibleLength(input) <= width) return input;
   const sliced = sliceVisible(input, width);
   return sliced.includes(ansiEscape) ? `${sliced}${ansiEscape}[0m` : sliced;
 }
 
-/** Terminal-cell width of editor text, measured one grapheme cluster at a time. */
 export function inputTextWidth(input: string): number {
   let width = 0;
   for (const grapheme of graphemes(input)) {
@@ -95,7 +91,6 @@ export function inputTextWidth(input: string): number {
   return width;
 }
 
-/** Expands editor tabs to the same fixed four cells used by {@link inputTextWidth}. */
 export function renderInputText(input: string): string {
   return input.replaceAll("\t", "    ");
 }
@@ -109,7 +104,6 @@ interface BlockCursorInput {
   readonly render?: (text: string) => string;
 }
 
-/** Renders a blinking block cursor without inserting or removing a terminal cell. */
 export function renderInputWithBlockCursor(input: BlockCursorInput): string {
   const render = input.render ?? renderInputText;
   const cursorText = input.under.length > 0 ? input.under : " ";
@@ -119,10 +113,6 @@ export function renderInputWithBlockCursor(input: BlockCursorInput): string {
   return `${render(input.before)}${cursorCell}${render(input.after)}`;
 }
 
-/**
- * Returns the UTF-16 offset at or immediately before a terminal column.
- * Graphemes stay intact even when the requested column falls inside a wide one.
- */
 export function offsetAtVisibleColumn(input: string, column: number): number {
   if (column <= 0) return 0;
 
@@ -184,15 +174,6 @@ function terminalControlPrefix(input: string): string | undefined {
   return input.match(ansiPrefixPattern)?.[0] ?? input.match(oscPrefixPattern)?.[0];
 }
 
-/**
- * Word-wraps a single logical line to `width` visible columns, preserving
- * ANSI styling and never splitting inside an escape sequence. Breaks on the
- * last space that fits; falls back to a hard cut for unbreakable runs.
- *
- * Tokenizes once and walks the units with a cursor, so a long unbroken
- * payload wraps in linear time instead of re-measuring the remainder on
- * every emitted row.
- */
 export function wrapVisibleLine(line: string, width: number): string[] {
   if (width <= 0) {
     return [line];
@@ -206,8 +187,6 @@ export function wrapVisibleLine(line: string, width: number): string[] {
   let unitIndex = 0;
   let charOffset = 0;
 
-  // The cursor moves one unit at a time: past the row just emitted, then past
-  // the whitespace the break consumed.
   const consume = (): void => {
     const unit = units[unitIndex]!;
     charOffset += unit.text.length;

@@ -60,20 +60,10 @@ const bootstrapWeatherPayloadSchema = z
   })
   .strict();
 
-/**
- * Returns true when authored runtime models should resolve through the
- * dedicated deterministic mock adapter. The adapter is internal to the test
- * tiers: unit, integration, and scenario tests activate it through
- * `NODE_ENV=test`; spawned smoke servers use the explicit opt-in environment
- * variable so their package-manager build keeps its normal environment.
- */
 export function shouldMockAuthoredRuntimeModels(): boolean {
   return process.env.NODE_ENV === "test" || process.env[MOCK_AUTHORED_MODELS_ENV] === "1";
 }
 
-/**
- * Creates a deterministic authored-model mock for one runtime model reference.
- */
 export function createMockAuthoredRuntimeModel(reference: RuntimeModelReference): LanguageModel {
   const existingModel = authoredRuntimeModelMocks.get(reference.id);
 
@@ -120,9 +110,6 @@ function createMockModelResult(
     }
   }
 
-  // The model is ready to answer. With the framework `eve__reply` tool
-  // offered, deliver the answer by calling it with a schema-derived sample;
-  // otherwise reply in prose.
   const finalOutput = createFinalOutputResult(options, modelId);
   if (finalOutput !== null) {
     return finalOutput;
@@ -141,11 +128,6 @@ function createMockModelResult(
   });
 }
 
-/**
- * When the framework `eve__reply` tool is offered, returns a tool-call result
- * carrying a schema-derived sample — the structured-output analogue of a final
- * text reply. Returns `null` when the tool is absent.
- */
 function createFinalOutputResult(
   options: BootstrapGenerateOptions,
   modelId: string,
@@ -168,10 +150,6 @@ function createFinalOutputResult(
   });
 }
 
-/**
- * Resolves the current authored runtime model onto the deterministic mock
- * adapter when the test seam is active.
- */
 export function resolveMockAuthoredRuntimeModel(
   reference: RuntimeModelReference,
 ): LanguageModel | null {
@@ -259,12 +237,6 @@ function createParallelAuthoredToolCallsResult(
   });
 }
 
-/**
- * Emits one built-in `agent` tool call when the current user message uses
- * the explicit directive `Delegate to a subagent: <message>`, letting
- * tests exercise a real coordination wait. Fires only before the
- * delegated call resolves; then the reply path takes over.
- */
 function createSubagentDelegationResult(
   options: BootstrapGenerateOptions,
   modelId: string,
@@ -329,16 +301,6 @@ function createAuthoredToolCallResult(
   });
 }
 
-/**
- * Emits a follow-up tool call instead of a text reply when a prior tool
- * result is present and the request names a second tool to run next.
- *
- * This is what lets the authored-model mock drive a multi-step tool loop
- * without a live model. Fixture evals use this to exercise multi-step tool
- * loops by chaining the `lookup-step-a` -> `lookup-step-b` pair: step-a's
- * `stepKey` output becomes step-b's input here.
- * Returns null when there is no next tool, ending the turn with a reply.
- */
 function createFollowUpToolCallResult(input: {
   readonly modelId: string;
   readonly options: BootstrapGenerateOptions;
@@ -372,7 +334,6 @@ const LIST_ATTACHMENTS_DIRECTIVE = /\blist the attachments\b/iu;
 
 function createAssistantMessage(prompt: BootstrapPrompt): string {
   const lastUserMessage = getLastUserPromptText(prompt) ?? "Hello from eve";
-  // Lets tests see exactly which files reached the model, through a channel's real reply.
   if (LIST_ATTACHMENTS_DIRECTIVE.test(lastUserMessage)) {
     return `Attachments: ${JSON.stringify(listPromptAttachments(prompt))}`;
   }
@@ -497,14 +458,11 @@ function getLastAuthoredToolResult(prompt: BootstrapPrompt): BootstrapToolResult
   for (const message of [...prompt].reverse()) {
     if (message.role === "user") {
       const text = getPromptContentText(message.content).trim();
-      // A task's result arrives after its receipt, in a message of its own.
       const task = readTaskResults(text).at(-1);
       if (task !== undefined) {
         const { body: output, taskId: toolCallId, tool: toolName } = task;
         return { isError: task.status === "failed", output, toolCallId, toolName };
       }
-      // The [Tasks] note is scaffolding, not a turn boundary: skipping it keeps
-      // the tool result behind it, so the same call is not issued again.
       if (isFrameworkAnnouncementText(text)) continue;
       return null;
     }
@@ -570,12 +528,6 @@ function findNextExplicitToolAfterResult(input: {
   return candidates[0]?.tool ?? null;
 }
 
-/**
- * Extracts the next tool call's arguments from the previous tool's
- * output, enabling the deterministic `lookup-step-a` -> `lookup-step-b`
- * chain. Only the `stepKey` handoff used by that fixture pair is
- * supported.
- */
 function createFollowUpToolInput(output: unknown): Record<string, string> | null {
   if (isRecord(output) && typeof output.stepKey === "string") {
     return { stepKey: output.stepKey };
@@ -642,7 +594,6 @@ function findRelevantTool(
   message: string,
 ): AvailableBootstrapTool | null {
   const normalizedMessage = normalizeText(message);
-  // Skills load through `eve__skill` only by skill-relevance selection.
   const explicitTool = tools.find(
     (tool) => tool.name !== "agent" && normalizedMessage.includes(normalizeText(tool.name)),
   );
@@ -701,19 +652,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-// eve's notes for files it couldn't pass on, such as "Attachment x.pdf could not be retrieved."
 const ATTACHMENT_NOTE = /^Attachment\b/u;
 
-/**
- * Every file part in the prompt's user messages, and every note eve left for a
- * file it couldn't pass on, oldest first, as a test can compare them.
- */
 function listPromptAttachments(prompt: BootstrapPrompt): readonly Record<string, unknown>[] {
   return prompt.flatMap((message): Record<string, unknown>[] => {
     if (message.role !== "user" || typeof message.content === "string") return [];
     return message.content.flatMap((part): Record<string, unknown>[] => {
       if (typeof part === "string") return [];
-      // Single quotes, so a channel that strips Markdown escapes can't break the listing's JSON.
       if (part.type === "text") {
         return ATTACHMENT_NOTE.test(part.text) ? [{ note: part.text.replaceAll('"', "'") }] : [];
       }
@@ -735,7 +680,6 @@ function listPromptAttachments(prompt: BootstrapPrompt): readonly Record<string,
   });
 }
 
-/** A file part's bytes or URL, from either the plain or the tagged (`{ type: "data" }`) shape. */
 function fileData(data: unknown): Uint8Array | string | URL | undefined {
   if (typeof data === "string" || data instanceof Uint8Array || data instanceof URL) return data;
   if (typeof data !== "object" || data === null) return undefined;

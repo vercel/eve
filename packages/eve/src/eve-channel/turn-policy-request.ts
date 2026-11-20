@@ -9,11 +9,6 @@ export function parseTurnPolicyField(value: unknown): TurnMode | Response | unde
   );
 }
 
-/**
- * The policy for a message whose request chose `mode`. A request chooses only whether the message
- * steers or queues. `principal` decides whose access a message can reach, so it comes from the
- * channel's own policy, and only when that policy steers.
- */
 export function turnPolicyForRequest(
   mode: TurnMode | undefined,
   channelPolicy: TurnPolicy | undefined,

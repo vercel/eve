@@ -100,6 +100,10 @@ export interface OtelOptions {
   readonly instrumentations?: readonly unknown[];
 }
 
+/**
+ * Options shared by trace destinations, such as `agentRunsIntegration()` and `otelIntegration()`:
+ * the export policies that filter spans before they leave for that destination.
+ */
 export interface ManagedTraceOptions {
   /** One destination policy, or policies applied in declaration order before export. */
   readonly exportPolicy?: SpanExportPolicy | readonly SpanExportPolicy[];
@@ -176,7 +180,7 @@ export function otelIntegration(options: OtelIntegrationOptions = {}): OtelInteg
   return createOtelIntegration(options);
 }
 
-/** @internal Local and Agent Runs destination declaration. */
+/** @internal */
 export function managedOtelIntegration(options: OtelIntegrationOptions = {}): OtelIntegration {
   return createOtelIntegration(options);
 }
@@ -209,7 +213,7 @@ function createOtelIntegration(options: OtelIntegrationOptions): OtelIntegration
   };
 }
 
-/** Vercel Agent Runs through the hosted request-context transport. @internal */
+/** @internal */
 export function agentRunsIntegration(options: ManagedTraceOptions = {}): OtelIntegration {
   assertNoRemovedContentOptions(options);
   return {
@@ -243,43 +247,24 @@ export function isOtelIntegration(value: unknown): value is OtelIntegration {
   );
 }
 
-/** What the harness reads at turn time, as opposed to at registration. */
 export interface OtelHarnessSettings {
   readonly functionId?: string;
   readonly traceChannelRequests: boolean;
   readonly tracePolicy?: TraceCapturePolicy;
 }
 
-/**
- * A tracing destination's `runtimeContext` for one model attempt; `undefined` adds nothing.
- * Later destinations win on key collisions.
- */
 export type RuntimeContextResolver = (
   input: InstrumentationModelStartedInput,
 ) => JsonObject | undefined;
 
-/** The one pipeline a process can register. */
 export interface CollectedOtel {
-  /**
-   * Whether anything declared OpenTelemetry. False means eve should leave the
-   * global tracer provider slot alone rather than register an empty pipeline.
-   */
   readonly declared: boolean;
   readonly configuration: OtelConfiguration;
   readonly runtimeContextResolvers: readonly RuntimeContextResolver[];
   readonly settings: OtelHarnessSettings;
 }
 
-/**
- * Folds the declared values into the one pipeline a process can register.
- *
- * Destinations concatenate in declaration order. The singletons cannot: two
- * `otel()` values is a boot error rather than a silent win for whichever eve
- * happened to visit first. With one declaration per file that collision needs
- * two files both exporting `otel()`, which is the only way to reach it.
- *
- * @internal
- */
+/** @internal */
 export function collectOtelPipeline(values: readonly unknown[]): CollectedOtel {
   const spanProcessors: SpanProcessorSetting[] = [];
   const metricReaders: MetricReader[] = [];

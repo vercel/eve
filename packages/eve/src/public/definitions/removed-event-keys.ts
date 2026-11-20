@@ -1,6 +1,3 @@
-// v26 event names authored hooks and channels may still use, with what replaced each in v27. A
-// definition keyed on one fails as eve loads it, with the replacement, rather than never firing.
-
 const REPLACED: Readonly<Record<string, string>> = {
   "action.input.appended": "`call.input`",
   "agent.started": "`child.opened`, which names the call whose run opened the child session",
@@ -41,7 +38,6 @@ const REPLACED: Readonly<Record<string, string>> = {
     "the turn's next `model.requested` or `delivery.consumed`; `waiting(ctx.view, turnId)` from `eve/events` reads what an open turn waits on",
 };
 
-/** Why an authored event key no longer works, and what to key on instead; `undefined` if it does. */
 export function removedEventKeyMessage(key: string): string | undefined {
   const replacement = REPLACED[key];
   return replacement === undefined

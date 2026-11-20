@@ -1,4 +1,3 @@
-// @linux-only: decide spans
 import { context, trace, SpanStatusCode } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import {
@@ -460,7 +459,6 @@ describe("decide tracing", () => {
   );
 });
 
-// AI SDK integrations such as Sentry's read content from the decision call, not from eve events.
 describe("decide AI SDK integration content", () => {
   const allowsContent: InstrumentationProviderDefinition = {
     name: "sentry",

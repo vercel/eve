@@ -1,4 +1,4 @@
 import { catalogTool } from "../lib/catalog";
 
-// Outside the `core` profile: found with eve__search instead of listed every turn.
+/** Lets the agent find an element with semantic locators and optionally act on it. Deferred: the agent finds it with tool search. */
 export default catalogTool("find", { deferred: true });

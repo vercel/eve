@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { desktopTool } from "../lib/tool";
 
+/** Lets the agent read the desktop clipboard as text. */
 export default desktopTool({
   description: "Read the desktop clipboard as text.",
   inputSchema: z.object({}),

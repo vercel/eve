@@ -1,9 +1,5 @@
 import type { SessionLineStore } from "#execution/session-line-store.js";
 
-// Session streams kept in memory: each write is one line, as the session's writer writes one
-// chunk per line. Readers follow a stream until its writer closes it. Nothing survives the
-// process.
-
 interface MemoryStream {
   readonly chunks: Uint8Array[];
   closed: boolean;
@@ -11,9 +7,7 @@ interface MemoryStream {
 }
 
 export interface MemoryLineStore extends SessionLineStore {
-  /** Opens `sessionId`'s stream and returns the writable its writer writes lines to. */
   open(sessionId: string): WritableStream<Uint8Array>;
-  /** The sessions this store holds a stream for. */
   sessions(): readonly string[];
 }
 
@@ -43,7 +37,6 @@ export function createMemoryLineStore(): MemoryLineStore {
       streams.set(sessionId, stream);
       return new WritableStream<Uint8Array>({
         write(chunk) {
-          // The writer may reuse its buffer; the stream keeps what was written.
           stream.chunks.push(chunk.slice());
           wake(stream);
         },

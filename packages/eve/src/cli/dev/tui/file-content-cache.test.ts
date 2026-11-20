@@ -14,8 +14,6 @@ describe("FileContentCache", () => {
     const cache = new FileContentCache();
     cache.observeWrite({ path: "/w/a.txt", content: "one", callId: "c1" });
 
-    // The tool block re-renders on the call's result event; the write must
-    // not diff against itself.
     expect(cache.observeWrite({ path: "/w/a.txt", content: "two", callId: "c2" })).toBe("one");
     expect(cache.observeWrite({ path: "/w/a.txt", content: "two", callId: "c2" })).toBe("one");
   });
@@ -25,7 +23,6 @@ describe("FileContentCache", () => {
     cache.observeWrite({ path: "/w/a.txt", content: "one", callId: "c1" });
     cache.forget("/w/a.txt");
 
-    // The earlier write keeps its own diff when it re-renders.
     expect(cache.observeWrite({ path: "/w/a.txt", content: "one", callId: "c1" })).toBeUndefined();
     expect(cache.observeWrite({ path: "/w/a.txt", content: "two", callId: "c2" })).toBeUndefined();
   });

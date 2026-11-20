@@ -1,4 +1,3 @@
-// @linux-only: Slack answer/card protocol
 import { describe, expect, it } from "vitest";
 
 import { withChannelConversation } from "#internal/testing/channel-conformance/harness.js";
@@ -10,7 +9,6 @@ const REPLY = "Mostly the billing migration";
 const DAY_PROMPT = "Which day works for the review?";
 
 describe("slackChannel onAnswers", () => {
-  // https://github.com/vercel/eve/issues/5074
   it("keeps a typed thread reply from answering a question the hook would refuse", async () => {
     const driver = slackDriver("shared", { onAnswers: () => null });
     await withChannelConversation(driver, async (conversation) => {
@@ -22,14 +20,12 @@ describe("slackChannel onAnswers", () => {
       expect(shared, `ask_question took the typed reply: ${shared}`).not.toContain(
         '"status":"answered"',
       );
-      // The reply reaches the agent as a new message instead.
       await conversation.waitForReplyTo(REPLY);
     });
   });
 });
 
 describe("slackChannel interactionCard", () => {
-  // https://github.com/vercel/eve/issues/5462
   it("answers a press on a renderer's nested controls and shows the renderer's answered card", async () => {
     const nested = defineSlackRenderer({
       interactionCard(card, next) {

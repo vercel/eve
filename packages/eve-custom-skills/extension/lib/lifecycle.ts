@@ -38,25 +38,19 @@ export interface SaveSkillInput {
   readonly applicationMode?: SkillApplicationMode;
 }
 
-/** What a save would do, computed before it runs so an approval rule can judge it. */
 export interface SavePlan {
-  /** The existing skill's ID, or `null` for a new skill. */
   readonly id: string | null;
   readonly name: string;
   readonly description: string;
   readonly markdown: string;
   readonly applicationMode: SkillApplicationMode;
   readonly validation: SkillValidation;
-  /** The version number the save would get. */
   readonly version: number;
-  /** Whether the version would go live: a clean first version does. */
   readonly activates: boolean;
   readonly live: SkillLiveState & { readonly instructions?: string };
-  /** The scope's revision the plan was made at. */
   readonly revision: string | null;
 }
 
-/** A planned publish, rollback, or mode change, at the scope revision it was checked against. */
 export interface HeadPlan {
   readonly head: SkillHead;
   readonly version: SkillVersionRecord;
@@ -65,9 +59,7 @@ export interface HeadPlan {
 
 export interface SaveSkillOptions {
   readonly savedBy: SkillAuthor;
-  /** A repeated save with the same key returns the version it saved. */
   readonly idempotencyKey?: string;
-  /** Holds the version in draft even when it would go live. */
   readonly draft?: boolean;
 }
 
@@ -76,7 +68,6 @@ export interface SkillChange {
   readonly previous: SkillLiveState;
 }
 
-/** A version is live, older than the live version, or not yet published. */
 export function versionStatus(version: number, liveVersion: number | null): SkillVersionStatus {
   if (version === liveVersion) return "active";
   if (liveVersion !== null && version < liveVersion) return "superseded";
@@ -108,11 +99,6 @@ function materialize(version: SkillVersionRecord, head: SkillHead): StoredSkill 
   };
 }
 
-/**
- * The custom skill lifecycle over any `SkillRepository`: immutable versions,
- * one live version per skill, drafts, publish and rollback, application
- * modes, limits, and validation.
- */
 export class SkillLifecycle {
   readonly #repository: SkillRepository;
   readonly #validator: SkillValidator;
@@ -162,7 +148,6 @@ export class SkillLifecycle {
     return head;
   }
 
-  /** The scope's skills and revision, with `name`'s head, which must exist. */
   async #snapshot(
     scope: SkillScope,
     name: string,
@@ -173,10 +158,6 @@ export class SkillLifecycle {
     return { catalog, head };
   }
 
-  /**
-   * Retries a planned write that lost a race to another change in the scope,
-   * planning it again against the newer state.
-   */
   async #retrying<T>(write: () => Promise<T>): Promise<T> {
     for (let attempt = 1; ; attempt += 1) {
       try {
@@ -240,7 +221,6 @@ export class SkillLifecycle {
     }
   }
 
-  /** What saving `input` would do now. Throws when the save would be rejected. */
   async planSave(scope: SkillScope, input: SaveSkillInput): Promise<SavePlan> {
     const name = this.normalizeName(input.name);
     const content = normalizeSkillContent(input);
@@ -277,11 +257,6 @@ export class SkillLifecycle {
     };
   }
 
-  /**
-   * Saves a new immutable version. A clean first version goes live; every
-   * other save is a draft that doesn't change what applies. A save that loses
-   * a race plans again.
-   */
   async save(
     scope: SkillScope,
     input: SaveSkillInput,
@@ -292,11 +267,6 @@ export class SkillLifecycle {
     );
   }
 
-  /**
-   * Writes exactly what `plan` describes. It fails with `SkillConflictError`
-   * if anything in the scope changed since the plan, instead of planning
-   * again, so a change judged by an approval rule is the change that runs.
-   */
   async applySave(
     scope: SkillScope,
     plan: SavePlan,
@@ -325,12 +295,10 @@ export class SkillLifecycle {
     };
   }
 
-  /** Every live skill in the scope, read in one batch. */
   async listLive(scope: SkillScope): Promise<StoredSkill[]> {
     return this.#liveSkills(scope, (await this.#repository.listHeads(scope)).heads);
   }
 
-  /** One summary per skill. Versions are numbered 1, 2, 3… with no gaps. */
   async listSummaries(scope: SkillScope): Promise<SkillSummary[]> {
     const { heads } = await this.#repository.listHeads(scope);
     const shown = heads.map((head) => head.liveVersion ?? head.latestVersion);
@@ -371,7 +339,6 @@ export class SkillLifecycle {
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  /** Every version, newest first. */
   async listVersions(scope: SkillScope, name: string): Promise<StoredSkill[]> {
     const head = await this.#requireHead(scope, name);
     const versions = await this.#repository.listVersions(scope, head.id);
@@ -380,14 +347,12 @@ export class SkillLifecycle {
       .sort((a, b) => b.version - a.version);
   }
 
-  /** One version; the latest when `version` is omitted. */
   async getVersion(scope: SkillScope, name: string, version?: number): Promise<StoredSkill> {
     const head = await this.#requireHead(scope, name);
     const target = version ?? head.latestVersion;
     return materialize(await this.#requireVersion(scope, head, target), head);
   }
 
-  /** Checks that `target` can go live, in the mode it was saved with. */
   async planPublish(scope: SkillScope, name: string, target: number): Promise<HeadPlan> {
     const { catalog, head } = await this.#snapshot(scope, name);
     if (head.liveVersion === target) {
@@ -408,7 +373,6 @@ export class SkillLifecycle {
     return { head, version, revision: catalog.revision };
   }
 
-  /** Makes `plan`'s version live, failing if the scope changed since the plan; see {@link applySave}. */
   async applyPublish(scope: SkillScope, plan: HeadPlan): Promise<SkillChange> {
     const updated = await this.#repository.updateHead(scope, {
       id: plan.head.id,
@@ -419,14 +383,12 @@ export class SkillLifecycle {
     return { skill: materialize(plan.version, updated), previous: liveState(plan.head) };
   }
 
-  /** Makes an exact version live, in the mode it was saved with. */
   async publish(scope: SkillScope, name: string, target: number): Promise<SkillChange> {
     return this.#retrying(async () =>
       this.applyPublish(scope, await this.planPublish(scope, name, target)),
     );
   }
 
-  /** Checks that the live version is `target` and can apply in `mode`. */
   async planSetMode(
     scope: SkillScope,
     name: string,
@@ -454,11 +416,6 @@ export class SkillLifecycle {
     return { head, version, revision: catalog.revision };
   }
 
-  /**
-   * Changes how the exact live version applies. A write that loses a race
-   * plans again, so a version published meanwhile is checked, and never
-   * changed in this one's place.
-   */
   async setMode(
     scope: SkillScope,
     name: string,
@@ -470,11 +427,6 @@ export class SkillLifecycle {
     );
   }
 
-  /**
-   * Applies `plan`'s version in `mode`, failing if the scope changed since the
-   * plan; see {@link applySave}. A plan that was a no-op still checks the
-   * revision, so a concurrent mode change isn't silently undone.
-   */
   async applySetMode(
     scope: SkillScope,
     plan: HeadPlan,
@@ -498,7 +450,6 @@ export class SkillLifecycle {
     return { skill: materialize(version, updated), previous: liveState(head) };
   }
 
-  /** Each named skill's ID and live state, `null` for any that don't exist. */
   async liveStates(
     scope: SkillScope,
     names: readonly string[],
@@ -519,11 +470,6 @@ export class SkillLifecycle {
     );
   }
 
-  /**
-   * Deletes skills and their whole version history. Skills are removed by ID,
-   * so a skill recreated under the same name after a removal was planned is
-   * left alone.
-   */
   async remove(
     scope: SkillScope,
     skills: readonly SkillRef[],

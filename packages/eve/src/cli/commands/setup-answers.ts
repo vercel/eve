@@ -1,6 +1,5 @@
 import { InvalidArgumentError } from "#compiled/commander/index.js";
 
-/** Parses one repeatable `--answer key=<JSON value>`. */
 export function parseSetupAnswer(
   value: string,
   previous: Record<string, unknown> = {},

@@ -3,7 +3,6 @@ interface CleanupSession {
   cleanup(signal: AbortSignal): Promise<void>;
 }
 
-/** Settles each distinct eval-owned root once. */
 export async function cleanupEvalSessions(
   sessions: readonly CleanupSession[],
   signal: AbortSignal,

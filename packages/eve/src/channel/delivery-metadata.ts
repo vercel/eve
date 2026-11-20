@@ -8,7 +8,6 @@ export interface ChannelDeliverySource {
   readonly requestTraceContext?: SessionTraceSeed;
 }
 
-/** Mints the opaque identity for one inbound channel operation. */
 export function createChannelDeliveryMetadata(
   source: ChannelDeliverySource,
 ): ChannelDeliveryMetadata {

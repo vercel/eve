@@ -1,4 +1,3 @@
-// @linux-only: invocation status mapping
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionEvent } from "#protocol/session-event.js";
@@ -44,7 +43,10 @@ function serveRun(status: string) {
 function serveRecords(records: readonly unknown[]) {
   ports.streamSessionLines.mockImplementation(async function* () {
     for (const [position, record] of records.entries()) {
-      const stored = typeof record === "object" && record !== null && "facts" in record;
+      const stored =
+        typeof record === "object" &&
+        record !== null &&
+        ("facts" in record || "progress" in record);
       yield { line: stored ? record : undefined, position, record };
     }
   });
@@ -143,13 +145,25 @@ describe("statusMessage", () => {
     data: { callId, outcome: "completed", output: "done" },
   });
 
-  async function statusMessageOf(...facts: object[]) {
+  const delta = (partId: string, delta: string, kind?: string) => ({
+    progress: {
+      type: "content.delta",
+      data: { delta, partId, ...(kind !== undefined && { kind }) },
+      scope: { runId: "run-1", turnId: "turn-1" },
+    },
+  });
+  const completed = (partId: string, kind: string, value: string, phase = "narration") => ({
+    type: "content.completed",
+    data: { kind, partId, phase, runId: "run-1", value },
+    scope: { runId: "run-1", turnId: "turn-1" },
+  });
+
+  async function statusMessageOf(...records: object[]) {
     serveRun("running");
     serveRecords(
-      [{ type: "session.started", data: {} }, turn, run, ...facts].map((fact) => ({
-        at: "2026-10-16T00:00:00.000Z",
-        facts: [fact],
-      })),
+      [{ type: "session.started", data: {} }, turn, run, ...records].map((record) =>
+        "progress" in record ? record : { at: "2026-10-16T00:00:00.000Z", facts: [record] },
+      ),
     );
     const invocation = await execution().read({ invocationId: "invocation-1", auth });
     expect(invocation?.status).toBe("working");
@@ -190,7 +204,62 @@ describe("statusMessage", () => {
         started("c-2"),
         settled("c-1"),
       ),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe("Thinking...");
+  });
+
+  it("shows the latest finished reasoning sentence while reasoning streams", async () => {
+    await expect(
+      statusMessageOf(
+        delta("r-1", "I should check the Snowflake revenue tables for last quarter. ", "reasoning"),
+        delta("r-1", "Then compare them against the forecast numbers from the fin"),
+      ),
+    ).resolves.toBe("I should check the Snowflake revenue tables for last quarter.");
+  });
+
+  it("keeps the turn's completed reasoning until new reasoning is long enough", async () => {
+    await expect(
+      statusMessageOf(
+        completed("r-1", "reasoning", "**Checking Snowflake sources**\n\nLooking at tables."),
+        call("c-1", { kind: "tool", name: "query" }),
+        started("c-1"),
+        settled("c-1"),
+        delta("r-2", "Now", "reasoning"),
+      ),
+    ).resolves.toBe("Checking Snowflake sources");
+  });
+
+  it.each([
+    ["streams", delta("t-1", "word ".repeat(60), "text")],
+    ["has completed", completed("t-1", "text", "Done.", "reply")],
+  ])("says it is writing a reply once reply text %s", async (_, reply) => {
+    await expect(
+      statusMessageOf(completed("r-1", "reasoning", "**Checking Snowflake sources**"), reply),
+    ).resolves.toBe("Writing a reply...");
+  });
+
+  it("stops saying it is writing a reply once a later model step starts", async () => {
+    await expect(
+      statusMessageOf(
+        completed("t-1", "text", "Started the export; I'll report back.", "reply"),
+        runSettled,
+        {
+          type: "model.requested",
+          data: { owner: { turnId: "turn-1" }, runId: "run-2" },
+          scope: { turnId: "turn-1" },
+        },
+        {
+          type: "content.completed",
+          data: {
+            kind: "reasoning",
+            partId: "r-2",
+            phase: "narration",
+            runId: "run-2",
+            value: "**Checking the export**",
+          },
+          scope: { runId: "run-2", turnId: "turn-1" },
+        },
+      ),
+    ).resolves.toBe("Checking the export");
   });
 
   it("keeps naming an approved call while it runs after the turn parked", async () => {

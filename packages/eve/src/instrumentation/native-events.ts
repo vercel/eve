@@ -43,7 +43,6 @@ export interface CreateInstrumentationHandleEventInput {
   readonly agentName?: string;
   readonly channelKind?: string;
   readonly channelAudience?: ChannelAudience;
-  /** With `channelAudience`, whether principal ids may be recorded; absent counts as production. */
   readonly environment?: ConversationEnvironment;
   readonly handleEvent?: HandleEventFn;
   readonly hooks?: InstrumentationHooks;
@@ -53,14 +52,9 @@ export interface CreateInstrumentationHandleEventInput {
   readonly scheduleId?: string;
   readonly sessionId: string;
   readonly title?: string;
-  /**
-   * The commit relays an exchange this session carries for a child session or a workflow run.
-   * Only its requests reach instrumentation, and only those no child session reports itself.
-   */
   readonly relayed?: boolean;
 }
 
-/** Where an attempt is in its session: its turn, its step, and which try at the step it is. */
 export interface AttemptPlace {
   readonly runId: string;
   readonly turnId?: string;
@@ -68,7 +62,6 @@ export interface AttemptPlace {
   readonly attempt: number;
 }
 
-/** An attempt's scope: the session it runs in, and its place. */
 export function attemptScopeOf(
   session: Pick<
     CreateInstrumentationHandleEventInput,
@@ -91,24 +84,17 @@ export function attemptScopeOf(
   );
 }
 
-/** What one committed line means to instrumentation, besides the line itself. */
 interface Line {
   readonly attemptScope: (place: AttemptPlace) => InstrumentationScope;
   readonly turnScope: (turnId: string) => InstrumentationScope;
   readonly capturesInputs: boolean;
   readonly capturesOutputs: boolean;
-  /** Principal ids follow the turn principal's rule: content both ways, and a public or dev audience. */
   readonly capturesPrincipalIds: boolean;
   readonly settledAtMs?: Readonly<Record<string, number>>;
   readonly startedAtMs: number;
   readonly view?: SessionView;
 }
 
-/**
- * Publishes each committed fact's instrumentation events once the publication folds it. The
- * events are a function of the fact and the tables after it: a call's or a request's attempt is
- * its run's current one, the attempt that produced it.
- */
 export function createInstrumentationHandleEvent(
   input: CreateInstrumentationHandleEventInput,
 ): HandleEventFn | undefined {
@@ -123,7 +109,6 @@ export function createInstrumentationHandleEvent(
     try {
       await handleEvent(publication, messages);
     } catch (error) {
-      // Turn hooks cancel after the publication commits; its instrumentation must still settle.
       if (
         !isTurnCancellation(error) ||
         before === undefined ||
@@ -133,7 +118,6 @@ export function createInstrumentationHandleEvent(
         throw error;
       cancellation = { error };
     }
-    // Operational state may already have retired a summary run when its context change settled.
     const published = eventsOf(publication);
     const committed =
       before !== undefined && published.some((event) => isTerminalType(event.type))
@@ -181,7 +165,6 @@ export function createInstrumentationHandleEvent(
   };
 }
 
-/** The instrumentation events one fact produces. */
 function instrumentationEventsOf(
   event: SessionEvent,
   line: Line,
@@ -208,7 +191,6 @@ function instrumentationEventsOf(
         },
       ];
     case "session.ended": {
-      // The turn that failed it, when one did; otherwise the session's latest turn.
       const { cause } = event.data;
       const turnId =
         cause !== undefined && "turnId" in cause ? cause.turnId : latestTurnId(line.view);
@@ -274,7 +256,6 @@ function instrumentationEventsOf(
       if (scope === undefined) return [];
       const { error, outcome } = event.data;
       const idempotencyKey = attemptIdempotencyKey(scope);
-      // A cancelled turn stops its run on purpose: the attempt is cancelled, not failed.
       const cancelled =
         outcome === "interrupted" &&
         scope.turnId !== undefined &&
@@ -298,7 +279,6 @@ function instrumentationEventsOf(
       return [
         {
           callId,
-          // A skill load runs eve's skill loader; any other call is eve's when its tool is.
           frameworkTool: capability.kind === "skill" || input.isFrameworkTool?.(name) === true,
           idempotencyKey: actionIdempotencyKey(sessionId, scope.turnId, callId),
           input: line.capturesInputs ? event.data.input : undefined,
@@ -338,6 +318,7 @@ function instrumentationEventsOf(
           output: line.capturesOutputs ? output : undefined,
           scope,
           type: "call.settled",
+          taskId: row?.taskId,
           usage: row?.usage,
         },
       ];
@@ -398,7 +379,6 @@ function instrumentationEventsOf(
   }
 }
 
-/** Who decided a request: the principal of the delivery that carried the deciding response. */
 function responderSummary(view: SessionView, cause: Cause | undefined, keepsId: boolean) {
   if (cause === undefined || !("responseId" in cause)) return undefined;
   const principal = responderOf(view, cause.responseId);
@@ -407,7 +387,6 @@ function responderSummary(view: SessionView, cause: Cause | undefined, keepsId: 
     : instrumentationPrincipal(principal.type, keepsId ? principal.id : undefined);
 }
 
-/** A turn's run's current attempt; a context change's run is no step of a turn. */
 function runAttempt(line: Line, runId: string | undefined): InstrumentationScope | undefined {
   const run = runId === undefined ? undefined : line.view?.runs[runId];
   if (run?.attempt === undefined) return undefined;
@@ -415,10 +394,6 @@ function runAttempt(line: Line, runId: string | undefined): InstrumentationScope
   return line.attemptScope({ runId: run.runId, attempt: run.attempt, stepIndex: run.step, turnId });
 }
 
-/**
- * Whether a child agent session asked, and so reports the request itself. A workflow run relays
- * its own questions and sign-ins the same way but has no session to report them.
- */
 function askedByChildSession(view: SessionView, row: InteractionRow): boolean {
   const { origin, subject } = row;
   if (origin === undefined) return false;
@@ -426,11 +401,6 @@ function askedByChildSession(view: SessionView, row: InteractionRow): boolean {
   return delegating?.capability.kind === "agent" || origin.sessionId in view.children;
 }
 
-/**
- * The attempt a person's request came from: its call's, or for a request about the turn or a
- * task, the turn's latest. A request the turn holds before its first model run, such as a budget
- * prompt or a sign-in, gets the turn's scope.
- */
 function interactionAttempt(line: Line, row: InteractionRow): InstrumentationScope | undefined {
   const view = line.view!;
   const { subject } = row;

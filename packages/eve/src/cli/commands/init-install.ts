@@ -6,7 +6,6 @@ const NPM_NOISE_LINE = /^\s*npm (?:silly|verbose|http|timing)\b/u;
 const INSTALL_OUTPUT_MAX_LINES = 20;
 const INSTALL_OUTPUT_MAX_BYTES = 16 * 1_024;
 
-/** Keeps a bounded error tail, falling back to npm detail only when no other output exists. */
 export function createInstallDiagnostics() {
   const lines: string[] = [];
   let bytes = 0;
@@ -29,7 +28,6 @@ export function createInstallDiagnostics() {
       const encoded = Buffer.from(line);
       if (encoded.length >= INSTALL_OUTPUT_MAX_BYTES) {
         let start = encoded.length - INSTALL_OUTPUT_MAX_BYTES + 1;
-        // Keep complete UTF-8 code points while reserving one byte for the newline.
         while ((encoded[start]! & 0xc0) === 0x80) start += 1;
         line = encoded.subarray(start).toString("utf8");
         truncated = true;

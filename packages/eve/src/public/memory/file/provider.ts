@@ -155,7 +155,6 @@ async function saveMemory(input: {
 
   for (;;) {
     const parsed = parseMemoryDocumentOrEmpty(document);
-    // Duplicate text is a successful no-op.
     if (parsed.entries.some((entry) => entry.text === text)) return;
 
     const index = nextMemoryIndex(parsed.lastAllocatedIndex);

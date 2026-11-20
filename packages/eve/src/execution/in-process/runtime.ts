@@ -24,47 +24,20 @@ import { createUlid } from "#shared/ulid.js";
 import { createInProcessHost, type InProcessHost, type InProcessHostOptions } from "./host.js";
 import type { WorkflowFunction } from "./runs.js";
 
-// A Runtime whose sessions run in this process: the same session loop, turn steps, and kernel a
-// deployment runs, with their streams, addresses, steps, and timers held in memory (`host.ts`).
-// Nothing survives the process, a session never moves between owners, and no timer ends one.
-// Workflow tool runs (subagents, the `agent` tool, tasks, workflow tools) run here too
-// (`runs.ts`), and the sessions they open run on this runtime's siblings, which share its host.
-
 export type InProcessRuntimeOptions = InProcessHostOptions;
 
 export interface InProcessRuntime extends Runtime {
-  /** Resolves once `sessionId`'s session ends here, or at once for one that isn't running. */
   settled(sessionId: string): Promise<void>;
-  /** Whether a session here holds the address `token` names. */
   holds(token: string): boolean;
-  /** How many of `sessionId`'s turn steps are running now. */
   stepsRunning(sessionId: string): number;
-  /**
-   * Resolves once nothing on its host is working: no delivery, step or session start is in
-   * flight, so each session and run waits on a message, a person or a timer.
-   */
   idle(): Promise<void>;
-  /**
-   * Starts a session from the initial entry Workflow's `workflowEntry` takes, for tests written
-   * against it.
-   */
   startEntry(
     entry: Omit<InitialWorkflowEntryInput, "ownerDeploymentId">,
   ): Promise<{ readonly sessionId: string }>;
-  /** Makes an authored workflow tool's body, its `"use workflow"` function's twin, run here. */
   registerWorkflow(workflowId: string, body: WorkflowFunction): void;
-  /**
-   * Stops serving, for this runtime and every runtime its host made: closes every session's
-   * addresses, waits for each session to end, and stops reading their streams.
-   */
   dispose(): Promise<void>;
 }
 
-/**
- * A runtime for tests that runs each session in this process, through the session loop a
- * deployment runs. Its streams are the same as Workflow's, so clients and protocol checks work
- * unchanged.
- */
 export function createInProcessRuntime(
   config: SessionRuntimeConfig,
   options: InProcessRuntimeOptions = {},
@@ -80,14 +53,9 @@ export function createInProcessRuntime(
   return runtimeFor(config);
 }
 
-/** The runtime for sessions of `config`'s agent on `host`. */
 function runtimeOn(host: InProcessHost, config: SessionRuntimeConfig): InProcessRuntime {
   const { inboxes, lines, running } = host;
 
-  /**
-   * Boots and runs a session from its initial entry, as Workflow's `workflowEntry` does. When
-   * another session holds the continuation token, the message went to it, and that's the one.
-   */
   const startEntry = (
     entry: Omit<InitialWorkflowEntryInput, "ownerDeploymentId">,
     continuationToken: string | undefined,
@@ -106,7 +74,6 @@ function runtimeOn(host: InProcessHost, config: SessionRuntimeConfig): InProcess
       {
         inboxTransport: inboxes.transportFor(sessionId),
         sessionWritable,
-        // No timer ends a session here.
         timeouts: () => undefined,
         async settleContinuationConflict({ command, continuationToken: token }) {
           if (inboxes.holder(token) === undefined)
@@ -122,7 +89,6 @@ function runtimeOn(host: InProcessHost, config: SessionRuntimeConfig): InProcess
     }
     const session = runPreparedSession(boot.session, boot.inbox, host.sessionHost).then(
       () => undefined,
-      // The session's stream records how it ended.
       () => undefined,
     );
     running.set(sessionId, session);
@@ -136,7 +102,6 @@ function runtimeOn(host: InProcessHost, config: SessionRuntimeConfig): InProcess
       const started = await startEntry(prepared.entry, input.continuationToken);
       const delivery = prepared.input.delivery;
       if (!started.claimedContinuation) {
-        // As Workflow's handle for a start that lost the address: it created nothing.
         return {
           claimedContinuation: false,
           events: readSessionEventStream(started.sessionId),

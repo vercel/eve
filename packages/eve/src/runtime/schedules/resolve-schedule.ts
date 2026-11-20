@@ -4,25 +4,14 @@ import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
 import type { ResolvedScheduleDefinition } from "#runtime/types.js";
 import { createScheduleRegistrations } from "#runtime/schedules/register.js";
 
-/**
- * Input for resolving authored schedules from the compiled manifest.
- */
 interface ResolveSchedulesInput {
   manifest: CompiledAgentManifest;
 }
 
-/**
- * Explicit compiled-artifact source used to resolve schedules from runtime
- * artifacts.
- */
 interface LoadResolvedCompiledSchedulesInput {
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
 }
 
-/**
- * Error raised when compiled authored schedules cannot be hydrated into one
- * runtime-owned schedule model.
- */
 class ResolveScheduleError extends Error {
   readonly taskName?: string;
 
@@ -41,9 +30,6 @@ class ResolveScheduleError extends Error {
   }
 }
 
-/**
- * Resolves runtime-owned schedules from the compiled manifest.
- */
 export async function resolveSchedules(
   input: ResolveSchedulesInput,
 ): Promise<ResolvedScheduleDefinition[]> {
@@ -66,10 +52,6 @@ export async function resolveSchedules(
   });
 }
 
-/**
- * Loads the compiled manifest, then resolves authored schedules into
- * runtime-owned schedule models.
- */
 export async function loadResolvedCompiledSchedules(
   input: LoadResolvedCompiledSchedulesInput,
 ): Promise<ResolvedScheduleDefinition[]> {
@@ -82,10 +64,6 @@ export async function loadResolvedCompiledSchedules(
   });
 }
 
-/**
- * Loads and resolves one compiled authored schedule from its registered Nitro
- * task name.
- */
 export async function loadResolvedCompiledScheduleByTaskName(
   taskName: string,
   input: LoadResolvedCompiledSchedulesInput,

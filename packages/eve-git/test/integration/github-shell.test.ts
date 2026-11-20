@@ -207,15 +207,12 @@ test("resolves one user grant for every repository through ctx.getToken and re-a
     config,
     dependencies,
   );
-  // User tokens need no owner, so commands tied to no repository still run.
   await executeGitHubShell(
     { command: "gh api user/repos", description: "List the caller's repositories" },
     config,
     dependencies,
   );
 
-  // No authKey: eve files both repositories' sign-in under the connector, so
-  // one grant serves them, and no call carries repository-specific options.
   assert.equal(getTokenCalls.length, 3);
   for (const [provider, options] of getTokenCalls) {
     assert.equal(options, undefined);
@@ -230,7 +227,6 @@ test("resolves one user grant for every repository through ctx.getToken and re-a
   assert.equal(requireAuthCalls[0]![0]!.principalType, "user");
   assert.equal(requireAuthCalls[0]![1], undefined);
 
-  // gh-signed-commit reports a rejected token through its own API errors.
   stderr = "GitHub ref lookup failed: 401";
   await assert.rejects(executeGitHubShell(READ, config, dependencies), /authorization required/u);
   assert.equal(requireAuthCalls.length, 2);
@@ -460,7 +456,6 @@ test("rewrites SSH GitHub remotes to HTTPS so they carry the credential", async 
     },
   });
   const repository = mkdtempSync(join(tmpdir(), "eve-git-ssh-"));
-  // Only the git config: the sandbox PATH would hide the host's git.
   const gitConfig = Object.fromEntries(
     Object.entries(runs[0]!.env ?? {}).filter(([key]) => key.startsWith("GIT_CONFIG_")),
   );
@@ -754,8 +749,6 @@ test("attributes pull requests to the person the tool context resolves", async (
 });
 
 test("serializes credential leases across sessions that share one sandbox", async () => {
-  // Subagents share their parent's sandbox. Each lease replaces the sandbox's network policy, so
-  // overlapping leases would swap or clear each other's credential mid-command.
   const lockRoot = mkdtempSync(join(tmpdir(), "eve-git-lease-"));
   const lockPath = join(lockRoot, "lease.lock");
   const policies: NetworkPolicy[] = [];
@@ -781,7 +774,6 @@ test("serializes credential leases across sessions that share one sandbox", asyn
       if (input.command.includes(LEASE_LOCK_PATH)) return runLockCommand(input.command, lockPath);
       const name = input.command.includes("'1'") ? "first" : "second";
       const placeholder = input.env?.GH_TOKEN ?? "";
-      // The command's own credential must be leased for as long as it runs.
       assert.match(JSON.stringify(active), new RegExp(placeholder, "u"));
       events.push(`${name} start`);
       if (name === "first") {
@@ -809,7 +801,6 @@ test("serializes credential leases across sessions that share one sandbox", asyn
     const first = run("1", "child-1");
     await firstStarted;
     const second = run("2", "child-2");
-    // The second lease waits on the first command instead of replacing its credential.
     await new Promise((resolve) => setTimeout(resolve, 500));
     assert.equal(policies.length, 1);
     release();
@@ -829,14 +820,12 @@ test("a lease does not release a lock another command holds", async () => {
   const lockRoot = mkdtempSync(join(tmpdir(), "eve-git-lease-"));
   const lockPath = join(lockRoot, "lease.lock");
   try {
-    // A holder whose lock was broken as stale must not release its successor's lock.
     execFileSync("mkdir", [lockPath]);
     execFileSync("sh", ["-c", `printf successor > '${lockPath}/owner'`]);
     let calls = 0;
     const sandboxFake: Pick<SandboxSession, "run"> = {
       async run(input: Parameters<SandboxSession["run"]>[0]) {
         calls += 1;
-        // Skip acquisition: simulate the stale holder releasing after its lock was broken.
         if (calls === 1) return { exitCode: 0, stdout: "", stderr: "" };
         return runLockCommand(input.command, lockPath);
       },
@@ -852,7 +841,6 @@ test("a lease does not release a lock another command holds", async () => {
         },
       },
     );
-    // Nor clear its successor's credential.
     assert.equal(cleaned, false);
     assert.equal(execFileSync("cat", [`${lockPath}/owner`], { encoding: "utf8" }), "successor");
     assert.equal(execFileSync("ls", ["-A", lockRoot], { encoding: "utf8" }), "lease.lock\n");
@@ -886,7 +874,6 @@ test("a lease breaks a lock whose holder stopped", async () => {
       },
     );
     assert.equal(owner, "next");
-    // The holder cleans up before it gives up the lock.
     assert.equal(cleanedWhileHeld, "next");
     assert.equal(execFileSync("ls", ["-A", lockRoot], { encoding: "utf8" }), "");
   } finally {
@@ -932,9 +919,7 @@ test("a lease waits on the host and stops when its call is cancelled", async () 
       { signal: controller.signal },
     );
     void waiting.catch(rejectRetried);
-    // Observe real shell progress rather than assuming Windows starts two shells within 600 ms.
     await retried;
-    // Let the lock loop consume the busy response and enter its host-side wait before aborting.
     await new Promise<void>((resolve) => setImmediate(resolve));
     controller.abort(new Error("cancelled"));
     await assert.rejects(waiting, /cancelled/u);
@@ -952,7 +937,6 @@ test("a stale lock's release that can't take the guard leaves the policy to the 
   const lockRoot = mkdtempSync(join(tmpdir(), "eve-git-lease-"));
   const lockPath = join(lockRoot, "lease.lock");
   try {
-    // Another command holds the guard while it takes over this command's old lock.
     execFileSync("mkdir", [lockPath, `${lockPath}.guard`]);
     execFileSync("sh", ["-c", `printf holder > '${lockPath}/owner'`]);
     execFileSync("touch", ["-t", "200001010000", lockPath]);
@@ -962,8 +946,6 @@ test("a stale lock's release that can't take the guard leaves the policy to the 
         cleaned = true;
       },
     });
-    // The command taking over sets its own credential, so clearing the policy here could clear it,
-    // and the lock is left for that command to take over.
     assert.equal(cleaned, false);
     assert.equal(
       execFileSync("ls", ["-A", lockRoot], { encoding: "utf8" }),
@@ -979,7 +961,6 @@ test("a fresh lock's release cleans up even when the guard is busy", async () =>
   const lockRoot = mkdtempSync(join(tmpdir(), "eve-git-lease-"));
   const lockPath = join(lockRoot, "lease.lock");
   try {
-    // Another command's release holds the guard, and no command can take over a lock this young.
     execFileSync("mkdir", [lockPath, `${lockPath}.guard`]);
     execFileSync("sh", ["-c", `printf holder > '${lockPath}/owner'`]);
     let cleaned = false;
@@ -1015,7 +996,6 @@ test("a release breaks a guard a stopped sandbox left behind", async () => {
   }
 });
 
-/** A sandbox whose holder already owns the lock at `lockPath`, so only its release runs. */
 function heldLockSandbox(lockPath: string): SandboxSession {
   let calls = 0;
   const sandbox: Pick<SandboxSession, "run"> = {
@@ -1028,7 +1008,6 @@ function heldLockSandbox(lockPath: string): SandboxSession {
   return sandbox as SandboxSession;
 }
 
-/** Runs a lease lock command in a real shell against `lockPath` instead of the sandbox's path. */
 async function runLockCommand(
   command: string,
   lockPath: string,
@@ -1064,7 +1043,6 @@ function fakeSandbox(
       return `/workspace/${path}`;
     },
     async run(input: Parameters<SandboxSession["run"]>[0]) {
-      // The sandbox lease lock is covered by its own test.
       if (input.command.includes(LEASE_LOCK_PATH)) return { exitCode: 0, stdout: "", stderr: "" };
       runs.push(input);
       return typeof result === "function" ? result(input) : result;

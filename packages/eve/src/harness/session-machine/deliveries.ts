@@ -12,22 +12,11 @@ import type { DeliveryAdmittedData } from "#protocol/session-events/families/del
 import type { SessionStartedData } from "#protocol/session-events/families/session.js";
 import { commitOf } from "./commit.js";
 
-// The session and delivery family's commits. The runtime decides when a delivery arrives, a
-// control applies, or the session ends, including when no agent can load to end it; the kernel
-// builds what records it. None of these needs more than the session's projection.
-
-/** A delivery as a step admits it: recorded unless an earlier attempt did, ignored or consumed. */
 export interface AdmittedDelivery extends DeliveryAdmittedData {
-  /** An interrupted attempt already recorded its admission. */
   readonly recorded?: boolean;
-  /** Nothing consumes it: it settles `ignored`, with why when given. */
   readonly ignored?: { readonly reason?: string };
 }
 
-/**
- * One step's admission: the session's start, when it hasn't, then each delivery admitted, and each
- * ignored one settled.
- */
 export function admitDeliveries(
   deliveries: readonly AdmittedDelivery[],
   options: { readonly start?: SessionStartedData } = {},
@@ -50,7 +39,6 @@ export function admitDeliveries(
   ]);
 }
 
-/** A control is admitted, and applied at once when `applied`: nothing waits on it. */
 export function admitControl(
   delivery: ControlDelivery,
   control: string,
@@ -62,15 +50,10 @@ export function admitControl(
   ]);
 }
 
-/** A control's admission and settlement, together. */
 export function settleControl(settlement: ControlSettlement): Commit {
   return commitOf(controlSettled(settlement));
 }
 
-/**
- * A control an interrupted step left unsettled fails rather than run again; an attempt that
- * recorded its admission doesn't record it twice.
- */
 export function failInterruptedControl(
   delivery: ControlDelivery,
   control: string,
@@ -86,7 +69,6 @@ export function failInterruptedControl(
   ]);
 }
 
-/** A delivery the step admitted settles: applied, or failed with why. */
 export function settleDelivery(
   deliveryId: string,
   outcome: "applied" | "failed",
@@ -95,10 +77,6 @@ export function settleDelivery(
   return commitOf([fact("delivery.settled", { deliveryId, outcome, reason })]);
 }
 
-/**
- * The session ends. It needs only what the stream recorded, since a session ends exactly when its
- * agent may not load: the writer closes what it leaves open.
- */
 export function endSession(
   projection: Pick<SessionProjection, "view"> | undefined,
   ending: Parameters<typeof sessionEndedFacts>[1],

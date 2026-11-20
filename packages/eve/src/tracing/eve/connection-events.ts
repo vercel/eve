@@ -3,6 +3,7 @@ import {
   context,
   ROOT_CONTEXT,
   trace,
+  type Context,
   type SpanContext,
 } from "#compiled/@opentelemetry/api/index.js";
 import { otelTelemetry } from "#compiled/@vercel/agent-runs/index.js";
@@ -25,7 +26,6 @@ import { eveOutputMapping } from "#tracing/eve/profile.js";
 
 const log = createLogger("connection.events");
 
-/** Only carry a validated W3C identity across durable steps, never baggage or content policy. */
 export function connectionEventTraceContext(value: unknown): SpanContext | undefined {
   if (typeof value !== "object" || value === null) return undefined;
   const { traceId, spanId, traceFlags } = value as Partial<SpanContext>;
@@ -58,7 +58,6 @@ export function connectionEventAttributes(input: {
   return attributes;
 }
 
-/** Preserve diagnostic categories without logging SDK request objects or provider response bodies. */
 export function connectionEventError(error: unknown): Error {
   const summary = new Error("Connection event operation failed");
   if (
@@ -109,7 +108,6 @@ type EventOperation =
   | "onGap"
   | "onTerminated";
 
-/** No model turn is needed to restore a session's trace policy in a durable event step. */
 export async function withConnectionEventSpan<T>(
   input: {
     ctx: AlsContext;
@@ -123,19 +121,18 @@ export async function withConnectionEventSpan<T>(
   execute: (reference?: SpanContext) => Promise<T>,
 ): Promise<T> {
   return contextStorage.run(input.ctx, async () => {
-    const runtime = getInstrumentationRuntime();
     const telemetry = otelTelemetry({
       tracerName: "eve.connection.events",
       mapping: eveOutputMapping(),
     });
-    const settings = runtime?.otelSettings;
-    const sessionId = input.ctx.require(SessionIdKey);
-    const attributes = connectionEventAttributes({ ...input, sessionId });
+    const attributes = connectionEventAttributes({
+      ...input,
+      sessionId: input.ctx.require(SessionIdKey),
+    });
     const run = async (reference?: SpanContext) => {
       try {
         return await execute(reference);
       } catch (error) {
-        // SDK and callback errors can include tokens or event bodies. Keep logs structural, too.
         logError(log, "connection event operation failed", connectionEventError(error), {
           ...attributes,
           operation: input.operation,
@@ -143,34 +140,8 @@ export async function withConnectionEventSpan<T>(
         throw error;
       }
     };
-    if (settings === undefined) return telemetry.suppressed!(() => run());
-    const saved = new ContextAgentTraceStateStore().get("session", sessionId);
-    const session = readInstrumentationSessionContext(input.ctx);
-    const decision =
-      session.traceSeed?.decision ??
-      saved?.decision ??
-      resolveTracePolicy(settings.tracePolicy, {
-        ...session.conversation,
-        agentName: sessionAgent(input.ctx).name ?? "eve",
-      });
-    const active = activeTraceOperation();
-    const reference =
-      connectionEventTraceContext(input.requestTraceContext) ?? active?.reference ?? saved?.context;
-    if (
-      decision.action === "drop" ||
-      active?.capture.emit === false ||
-      (session.traceSeed !== undefined && (session.traceSeed.traceFlags & 1) === 0) ||
-      (saved !== undefined && (saved.context.traceFlags & 1) === 0) ||
-      (reference !== undefined && (reference.traceFlags & 1) === 0)
-    )
-      return telemetry.suppressed!(() => run());
-    const parent =
-      reference === undefined
-        ? context.active()
-        : trace.setSpan(ROOT_CONTEXT, trace.wrapSpanContext(reference));
-    const host = markAgentTraceContext(
-      withErrorContent(withChannelAudience(parent, session.audience), false),
-    );
+    const host = sideSpanHost(input.ctx, connectionEventTraceContext(input.requestTraceContext));
+    if (host === undefined) return telemetry.suppressed!(() => run());
     const name = `agent.connection.event.${input.operation}`;
     const span = telemetry.startSpan(
       {
@@ -217,7 +188,44 @@ export async function withConnectionEventSpan<T>(
       throw error;
     } finally {
       span.end();
-      await runtime!.forceFlush().catch(() => log.warn("flushing connection event traces failed"));
+      await getInstrumentationRuntime()!
+        .forceFlush()
+        .catch(() => log.warn("flushing connection event traces failed"));
     }
   });
+}
+
+export function sideSpanHost(
+  ctx: AlsContext,
+  requestTraceContext?: SpanContext,
+): Context | undefined {
+  const settings = getInstrumentationRuntime()?.otelSettings;
+  if (settings === undefined) return undefined;
+  const sessionId = ctx.require(SessionIdKey);
+  const saved = new ContextAgentTraceStateStore().get("session", sessionId);
+  const session = readInstrumentationSessionContext(ctx);
+  const decision =
+    session.traceSeed?.decision ??
+    saved?.decision ??
+    resolveTracePolicy(settings.tracePolicy, {
+      ...session.conversation,
+      agentName: sessionAgent(ctx).name ?? "eve",
+    });
+  const active = activeTraceOperation();
+  const reference = requestTraceContext ?? active?.reference ?? saved?.context;
+  if (
+    decision.action === "drop" ||
+    active?.capture.emit === false ||
+    (session.traceSeed !== undefined && (session.traceSeed.traceFlags & 1) === 0) ||
+    (saved !== undefined && (saved.context.traceFlags & 1) === 0) ||
+    (reference !== undefined && (reference.traceFlags & 1) === 0)
+  )
+    return undefined;
+  const parent =
+    reference === undefined
+      ? context.active()
+      : trace.setSpan(ROOT_CONTEXT, trace.wrapSpanContext(reference));
+  return markAgentTraceContext(
+    withErrorContent(withChannelAudience(parent, session.audience), false),
+  );
 }

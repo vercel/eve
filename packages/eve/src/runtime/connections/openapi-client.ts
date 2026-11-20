@@ -62,31 +62,13 @@ const SWAGGER_PARAMETER_SCHEMA_KEYS = [
   "uniqueItems",
 ] as const;
 
-/**
- * Result of executing an OpenAPI operation. Returned to the model as the
- * tool result so it can react to the status and body of any response,
- * including non-2xx responses.
- */
 interface OpenApiToolResult {
   readonly status: number;
   readonly statusText: string;
   readonly body: unknown;
-  /** Target of a redirect to another origin, which eve returns instead of following. */
   location?: string;
 }
 
-/**
- * A {@link ConnectionClient} that turns an OpenAPI 3.x or Swagger 2.0
- * document into connection tools.
- *
- * Created lazily per-connection per-session. On first use it loads the
- * document (fetching it when `spec` is a URL), dereferences local
- * `$ref` pointers, and maps each operation to a tool whose name is the
- * operation's `operationId`. Tool calls reconstruct the HTTP request —
- * substituting path parameters, appending query parameters, attaching
- * resolved auth and headers — and return the response as a serializable
- * `{ status, statusText, body }`.
- */
 export class OpenApiConnectionClient implements ConnectionClient {
   #toolsPromise: Promise<OpenApiToolCache> | undefined;
   #tools: OpenApiToolCache | undefined;
@@ -96,7 +78,6 @@ export class OpenApiConnectionClient implements ConnectionClient {
     this.#connection = connection;
   }
 
-  /** Loads and parses the OpenAPI document, sharing one in-flight load. */
   async connect(): Promise<OpenApiToolCache> {
     return this.#ensureTools();
   }
@@ -186,15 +167,6 @@ export class OpenApiConnectionClient implements ConnectionClient {
     });
   }
 
-  /**
-   * Resolves the base URL operation paths are joined against.
-   *
-   * An explicit `baseUrl` on the connection definition always wins. When
-   * omitted, the document's first usable `servers` entry is used:
-   * `{var}` placeholders are filled from each variable's `default`, and a
-   * relative server URL is resolved against the spec's URL (when the spec
-   * was given as a URL). Throws when neither yields an absolute URL.
-   */
   #resolveBaseUrl(document: Record<string, unknown>): string {
     const explicit = this.#connection.url;
     const baseUrl =
@@ -297,7 +269,6 @@ export class OpenApiConnectionClient implements ConnectionClient {
             convert,
           );
         } catch (error) {
-          // A schema nested deeply enough to overflow the stack costs only its own operation.
           this.#warnInvalidInputSchema(toolName, error);
           continue;
         }
@@ -447,7 +418,6 @@ export class OpenApiConnectionClient implements ConnectionClient {
       }
       if (param.location === "path") {
         const pathValue = String(value);
-        // URL parsing normalizes dot segments even after encodeURIComponent.
         if (pathValue === "." || pathValue === "..") {
           throw new Error(
             `Path parameter "${param.name}" for tool "${operation.toolName}" in connection "${this.#connection.connectionName}" must not be "." or "..".`,
@@ -511,13 +481,6 @@ interface OperationRequestInit {
   readonly signal: AbortSignal | undefined;
 }
 
-/**
- * Sends an operation request, following redirects only within the request's
- * origin. Every hop carries the connection's credentials, and fetch forwards
- * custom headers such as an api-key header to any origin a redirect names. A
- * cross-origin redirect is therefore returned with its resolved `location`
- * instead of followed, so the caller can fetch the target without credentials.
- */
 async function fetchWithinOrigin(
   url: URL,
   init: OperationRequestInit,
@@ -549,7 +512,6 @@ async function fetchWithinOrigin(
   }
 }
 
-/** Applies fetch's method rewrite: 303, and 301/302 after a POST, re-send as a bodiless GET. */
 function redirectedRequest(init: OperationRequestInit, status: number): OperationRequestInit {
   const becomesGet =
     (status === 303 && init.method !== "GET" && init.method !== "HEAD") ||
@@ -579,17 +541,6 @@ function joinPath(baseUrl: string, path: string): string {
   return `${trimmedBase}${trimmedPath}`;
 }
 
-/**
- * Requires a connection URL to be transport-secure. The spec body configures
- * tool calls and every operation request carries the connection's resolved
- * auth, so both are only trusted over `https`. Plain `http` is permitted for
- * loopback hosts to keep local development ergonomic.
- *
- * The spec fetch is checked on the configured URL and again on the final URL
- * after any redirects. Only those two endpoints are enforced — `fetch` follows
- * intermediate redirect hops internally, so a chain through a cleartext hop is
- * not observable here.
- */
 function assertSecureUrl(rawUrl: string, connectionName: string, kind: string): void {
   let url: URL;
   try {

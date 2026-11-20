@@ -19,10 +19,6 @@ import {
 } from "./server.js";
 import { ensureEveVercelOutputConfig } from "./vercel-output-config.js";
 
-/**
- * Default private route namespace for manually configured Vercel
- * services. {@link WithEveOptions.servicePrefix} defaults to this value.
- */
 const EVE_NEXT_SERVICE_PREFIX = "/_eve_internal/eve";
 
 const EVE_NEXT_PRODUCTION_ORIGIN_ENV = "EVE_NEXT_PRODUCTION_ORIGIN";
@@ -33,20 +29,10 @@ const EVE_NAMED_AGENT_ROUTE_PREFIX = "/eve";
 type ArrayElement<T> = T extends readonly (infer TElement)[] ? TElement : never;
 type NextRewrites = Awaited<ReturnType<NonNullable<NextConfig["rewrites"]>>>;
 
-/**
- * Next.js rewrite rule that {@link withEve} emits.
- */
 type EveNextRewriteRule = ArrayElement<NextRewrites>;
 
-/**
- * Resolved return type of a Next.js `rewrites` function: an array of rules, or
- * the sectioned `{ beforeFiles, afterFiles, fallback }` object.
- */
 type EveNextRewrites = NextRewrites;
 
-/**
- * Sectioned Next.js rewrite rules.
- */
 type EveNextRewriteSections = Extract<
   NextRewrites,
   {
@@ -56,10 +42,6 @@ type EveNextRewriteSections = Extract<
   }
 >;
 
-/**
- * Alias of Next.js's `NextConfig`, the config object form {@link withEve}
- * accepts (the other being {@link WithEveConfigFunction}).
- */
 type EveNextConfig = NextConfig;
 
 /**
@@ -407,17 +389,14 @@ async function normalizeAgentsConfig(options: WithEveOptions): Promise<{
 async function buildAgentWorkspaceExtensions(
   agents: readonly ResolvedEveNextAgent[],
 ): Promise<void> {
-  // Loaded lazily so development config loads skip the extension builder.
   const [{ buildWorkspaceExtensions }, { DiscoveryProjectResolutionError }] = await Promise.all([
     import("#internal/nitro/host/workspace-extensions.js"),
     import("#discover/project.js"),
   ]);
-  // Agents can mount the same extension, so build them one at a time.
   for (const agent of agents) {
     try {
       await buildWorkspaceExtensions(agent.appRoot);
     } catch (error) {
-      // The Next.js app can proxy to an agent built and deployed elsewhere.
       if (error instanceof DiscoveryProjectResolutionError) continue;
       throw error;
     }

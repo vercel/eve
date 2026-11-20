@@ -11,7 +11,6 @@ import { resolveEveBinaryPath } from "#shared/resolve-eve-binary.js";
 
 const VERCEL_BUILD_OUTPUT_VERSION = 3;
 
-/** Emit the inferred Vercel Services project for a strict hostless workspace. */
 export async function buildAgentWorkspace(
   workspace: AgentWorkspace,
   options: { readonly skipSandboxPrewarm?: boolean } = {},

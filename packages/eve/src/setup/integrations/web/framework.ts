@@ -3,7 +3,6 @@ import { join } from "node:path";
 import { select } from "#setup/ask.js";
 import { pathExists } from "#setup/scaffold/files.js";
 
-/** Frontend frameworks the Web Chat installer can generate. */
 export type WebChatFramework = "next" | "tanstack";
 
 export const WEB_CHAT_FRAMEWORK_LABELS: Readonly<Record<WebChatFramework, string>> = {
@@ -11,7 +10,6 @@ export const WEB_CHAT_FRAMEWORK_LABELS: Readonly<Record<WebChatFramework, string
   tanstack: "TanStack Start",
 };
 
-/** Asked by `eve add channel/web` before it installs the frontend files. */
 export const WEB_FRAMEWORK_QUESTION = select<WebChatFramework>({
   key: "web-framework",
   message: "Which framework should Web Chat use?",
@@ -49,7 +47,6 @@ async function hasAny(
   return false;
 }
 
-/** The framework of the app already in `webRoot`, or `undefined` when it has none. */
 export async function detectWebChatFramework(
   webRoot: string,
   exists: typeof pathExists = pathExists,

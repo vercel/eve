@@ -95,7 +95,6 @@ function parseRegistryMapping(argument: string): { namespace: string; url: strin
   return { namespace, url };
 }
 
-/** Dev and build commands that run the Web Chat app in `apps/web`, by host framework. */
 const WEB_CHAT_SCRIPTS: Readonly<Record<WebChatFramework, Readonly<Record<string, string>>>> = {
   next: { "dev:web": "next dev apps/web", "build:web": "next build apps/web" },
   tanstack: { "dev:web": "vite dev apps/web", "build:web": "vite build apps/web" },
@@ -105,10 +104,6 @@ function isWebChatScriptDefault(name: string, command: string): boolean {
   return Object.values(WEB_CHAT_SCRIPTS).some((scripts) => scripts[name] === command);
 }
 
-/**
- * Picks the framework `eve add channel/web` installs, before it writes any file.
- * An app already in `apps/web` decides; an explicit answer that conflicts fails.
- */
 export async function resolveWebChatFramework(
   appRoot: string,
   asker: Asker,
@@ -129,7 +124,6 @@ export async function resolveWebChatFramework(
   return framework;
 }
 
-/** Resolves and prepares the root package that owns Web Chat. */
 export async function prepareWebChatProjectRoot(
   appRoot: string,
   framework: WebChatFramework = "next",
@@ -148,7 +142,6 @@ export async function prepareWebChatProjectRoot(
   const scripts = { ...document.scripts };
   for (const [name, command] of Object.entries(WEB_CHAT_SCRIPTS[framework])) {
     const current = scripts[name];
-    // Another framework's installer default would run the wrong dev server.
     if (current === undefined || isWebChatScriptDefault(name, current)) {
       scripts[name] = command;
     }
@@ -161,7 +154,6 @@ export async function prepareWebChatProjectRoot(
   return root;
 }
 
-/** Reads registry namespace mappings from package.json. */
 export async function readRegistryConfig(appRoot: string): Promise<RegistryConfig> {
   return (await readRegistryPackage(appRoot)).config;
 }
@@ -226,7 +218,6 @@ export function addWebRegistryTsconfig(
     if (current === undefined) {
       updated = setJsoncValue(updated, ["compilerOptions", key], value);
     } else if (key === "types" && Array.isArray(current) && Array.isArray(value)) {
-      // Vite's `import.meta.env` typings must load alongside authored ambient types.
       const types = [...new Set([...current, ...value])];
       if (types.length > current.length) {
         updated = setJsoncValue(updated, ["compilerOptions", "types"], types);
@@ -262,7 +253,6 @@ export function addWebRegistryTsconfig(
   return updated;
 }
 
-/** Prepares the TypeScript host configuration shadcn registry items expect. */
 export async function prepareWebRegistryProject(
   appRoot: string,
   framework: WebChatFramework = "next",
@@ -272,8 +262,6 @@ export async function prepareWebRegistryProject(
   try {
     source = await readFile(path, "utf8");
   } catch (error) {
-    // A fresh Web Chat gets its canonical tsconfig from the registry item
-    // inside the rollback-protected install transaction.
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
     throw new Error(
       `Could not add Web Chat because ${path} could not be read: ${errorMessage(error)}`,
@@ -283,7 +271,6 @@ export async function prepareWebRegistryProject(
   if (updated !== source) await writeFile(path, updated, "utf8");
 }
 
-/** Adds explicit registry namespace mappings to package.json. */
 export async function addRegistryMappings(
   appRoot: string,
   arguments_: readonly string[],

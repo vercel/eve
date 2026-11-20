@@ -28,46 +28,29 @@ import { selectionModel } from "#models/options.js";
 import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 
-// The agents a call's session can open, and where each runs: `SessionAgent.roster`. A compiled
-// agent's is its bundle's subagent registry (here); another kind of agent brings its own.
-
-/** A local child a roster resolved: where it starts, and the runtime its sessions run on. */
 export type LocalStartTarget = Extract<SubagentStartTarget, { readonly kind: "local" }>;
 
-/** The agents a session can delegate to, by the names its tools and `ctx.agent(name)` use. */
 export interface AgentRoster {
-  /** The dispatch request a call to `input.target` makes. Throws for a name it doesn't have. */
   resolveAction(callId: string, input: AgentActionInput): RuntimeAgentDispatchRequest;
-  /** The names {@link resolveAction} resolves to a remote agent. */
   remoteAgentNames(): readonly string[];
-  /** Where a fresh child for `action` starts. Throws when it can't start from this session. */
   startTarget(action: RuntimeAgentDispatchRequest, isRootSession: boolean): SubagentStartTarget;
-  /** What the child's runtime runs, with `overrides` of its model. */
   childRuntime(
     target: LocalStartTarget,
     overrides: AgentSessionRuntimeOverrides | undefined,
   ): SessionRuntimeConfig;
-  /**
-   * `ctx.agent(name, { model })`'s model, as the child's overrides. `toolName` names the workflow
-   * tool whose run opens the session, whose `agent({ models })` keys `model` may name.
-   */
   runtimeOverrides(
     name: string,
     model: AgentSessionModelSelection,
     toolName?: string,
   ): Promise<AgentSessionRuntimeOverrides>;
-  /** Which children share their parent's sandbox. Absent: only a copy of the parent does. */
   readonly graph?: SubagentSandboxGraph;
-  /** The registry remote agents and their credentials resolve from: a compiled agent's only. */
   readonly remote?: CompiledBundle["subagentRegistry"];
 }
 
-/** The roster of the agent that owns `context`'s call. */
 export async function loadAgentRoster(context: AgentSessionContext): Promise<AgentRoster> {
   return (await resolveSessionAgent(ownerReference(context))).roster(context.dynamicSelections);
 }
 
-/** A compiled agent's roster, with the dynamic agents the calling turn selected. */
 export function compiledAgentRoster(
   bundle: CompiledBundle,
   dynamicSelections: DynamicSubagentSelections,
@@ -115,7 +98,6 @@ interface AgentModelsTool {
   readonly models: NonNullable<ReturnType<typeof readAgentToolModels>>;
 }
 
-/** The `agent({ models })` tool whose run opens the session, if that is what opens it. */
 async function loadAgentModelsTool(
   bundle: CompiledBundle,
   toolName: string | undefined,
@@ -124,7 +106,6 @@ async function loadAgentModelsTool(
     toolName === undefined
       ? undefined
       : bundle.resolvedAgent.tools.find((candidate) => candidate.name === toolName);
-  // Only a workflow tool's run opens sessions, and only `agent({ models })` carries models.
   if (definition?.behavior?.handling?.kind !== "workflow-tool") return undefined;
   const models = readAgentToolModels(
     await loadResolvedModuleExport({
@@ -137,11 +118,6 @@ async function loadAgentModelsTool(
   return models === undefined ? undefined : { definition, models };
 }
 
-/**
- * An `agent({ models })` tool names its model by option key. A live model's reference points
- * back at the tool and key, so the child reads the model again from its own module map, and
- * replay opens the same option.
- */
 async function resolveAgentToolModel(
   bundle: CompiledBundle,
   { definition, models }: AgentModelsTool,

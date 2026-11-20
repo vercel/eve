@@ -17,19 +17,15 @@ export interface PreparedAuthoredRuntimeModules {
   readonly authoredWorkflowModules: AuthoredWorkflowModules;
   readonly instrumentation: PreparedAuthoredRuntimeInstrumentation;
   readonly moduleMapCode: string;
-  /** Installed packages the generated modules import and the host bundles. */
   readonly hostBundledPackageRoots: readonly string[];
   readonly sourceModules: readonly string[];
-  /** Identity of authored sources shared by the workflow driver and step registrations. */
   readonly workflowSourceFingerprint: string | undefined;
 }
 
-/** Builds the authored runtime graph before a development or production host packages it. */
 export async function prepareAuthoredRuntimeModules(input: {
   readonly appRoot: string;
   readonly manifest: CompiledAgentManifest;
   readonly moduleMapPath: string;
-  /** Whether the host bundles the prepared modules again, as hosted builds do. */
   readonly hostBundled?: boolean;
 }): Promise<PreparedAuthoredRuntimeModules> {
   const hostBundle =

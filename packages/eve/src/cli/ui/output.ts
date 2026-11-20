@@ -10,9 +10,6 @@ type CliMessageTone =
   | "success"
   | "warning";
 
-/**
- * Shared color palette used by the eve CLI.
- */
 interface CliTheme {
   readonly color: boolean;
   accent(text: string): string;
@@ -27,9 +24,6 @@ interface CliTheme {
   warning(text: string): string;
 }
 
-/**
- * One labeled value rendered inside a CLI section.
- */
 export interface CliRow {
   readonly label: string;
   readonly tone?: CliMessageTone;
@@ -237,9 +231,6 @@ function renderOrangeText(input: { color: boolean; text: string }): string {
   return `\u001B[38;5;208m${input.text}\u001B[39m`;
 }
 
-/**
- * Creates the theme used by CLI commands and the interactive REPL.
- */
 export function createCliTheme(input: { color?: boolean } = {}): CliTheme {
   const colors = picocolors.createColors(input.color ?? Boolean(process.stdout.isTTY));
 
@@ -258,9 +249,6 @@ export function createCliTheme(input: { color?: boolean } = {}): CliTheme {
   };
 }
 
-/**
- * Renders one labeled section with aligned values.
- */
 export function renderCliSection(
   theme: CliTheme,
   input: {
@@ -290,9 +278,6 @@ export function renderCliSection(
   return lines.join("\n");
 }
 
-/**
- * Renders one prefixed line used by the interactive dev REPL.
- */
 export function renderCliTaggedLine(
   theme: CliTheme,
   input: {

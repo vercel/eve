@@ -270,14 +270,12 @@ test("a replaced validator decides content rules on save, publish, and mode chan
         : { errors: [], warnings: [] };
     },
   });
-  // No routing rule: an imported skill's description can say anything.
   const imported = await skills.save(
     alice,
     { name: "imported", description: "Rédiger un compte rendu.", markdown: "v1" },
     { savedBy },
   );
   assert.equal(imported.skill.status, "active");
-  // No built-in warnings either.
   const override = {
     name: "override",
     description: "x",
@@ -292,7 +290,6 @@ test("a replaced validator decides content rules on save, publish, and mode chan
   await skills.publish(alice, "imported", 2);
   await skills.setMode(alice, "imported", 2, "always");
   assert.deepEqual(calls.slice(-3), ["save:on-demand", "publish:on-demand", "set_mode:always"]);
-  // Size limits still apply.
   await assert.rejects(
     new SkillLifecycle({
       repository: memoryRepository(),
@@ -307,7 +304,6 @@ test("applying a mode change planned as a no-op fails if the scope changed since
   const skills = lifecycle();
   await skills.save(alice, { name: "lookup", description: ROUTING, markdown: "v1" }, { savedBy });
   const noOp = await skills.planSetMode(alice, "lookup", 1, "on-demand");
-  // Someone else defers the skill after the no-op was judged.
   await skills.setMode(alice, "lookup", 1, "deferred");
   await assert.rejects(
     skills.applySetMode(alice, noOp, "on-demand"),

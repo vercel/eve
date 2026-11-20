@@ -25,16 +25,10 @@ interface LocalSandboxMetadata {
   readonly version: typeof LOCAL_SANDBOX_METADATA_VERSION;
 }
 
-/** One just-bash interpreter over a session or template root. The root's files outlive it. */
 export interface BashSandbox extends SandboxConnection {
-  /** Records the interpreter's environment, so sessions created from this template start with it. */
   captureState(): Promise<void>;
 }
 
-/**
- * The package is intentionally not bundled with eve — the provider is opt-in —
- * so it loads from the application's own dependency tree.
- */
 const JUST_BASH_PACKAGE = {
   importModule: async () => await import("just-bash"),
   missingMessage:
@@ -44,10 +38,6 @@ const JUST_BASH_PACKAGE = {
   packageName: "just-bash",
 };
 
-/**
- * Loads `just-bash` for template preparation, installing it into the project
- * when it is missing during `eve dev` (unless `autoInstall` is false).
- */
 export async function installJustBashModule(input: {
   readonly appRoot: string;
   readonly autoInstall: boolean;
@@ -60,7 +50,6 @@ export async function installJustBashModule(input: {
   });
 }
 
-/** Loads `just-bash` for a session without installing it. */
 export async function importJustBashModule(appRoot: string): Promise<JustBashModule> {
   return await importOptionalEnginePackage<JustBashModule>({ ...JUST_BASH_PACKAGE, appRoot });
 }
@@ -104,8 +93,6 @@ export async function createBashSandbox(input: {
   const sandbox = await justBash.Sandbox.create({
     cwd: WORKSPACE_ROOT,
     customCommands: [
-      // just-bash has no realpath command. Workspace tools need the filesystem's
-      // symlink-aware result, not lexical path normalization, for containment.
       justBash.defineCommand("realpath", async (args, context) => {
         const path = args.at(-1);
         if (
@@ -162,20 +149,11 @@ export async function createBashSandbox(input: {
       if (options.stdin === true) {
         throw new Error("The just-bash sandbox does not support `stdin` on spawn yet.");
       }
-      // The command sits on its own lines so a trailing `# comment` cannot
-      // swallow the closing brace. `cd X || exit` would lose cd's error in
-      // just-bash, so the braces keep `&&` applying to the whole command.
       const wrapped = `( cd ${shellQuote(options.workingDirectory)} && {\n${options.command}\n} )`;
-      // just-bash has no separate `bash` executable — it IS the bash
-      // interpreter. The `eval` builtin re-parses its single string
-      // argument as a shell line, which is the only way to feed an
-      // arbitrary shell command into the object-form `runCommand`
-      // (the only form that supports `detached`).
       const command = await sandbox.runCommand({
         args: [wrapped],
         cmd: "eval",
         detached: true,
-        // just-bash has no sandbox-level environment for `SANDBOX_AGENT_ENV`, so each command gets it.
         env: { ...SANDBOX_AGENT_ENV, ...options.env },
         signal: options.signal,
       });

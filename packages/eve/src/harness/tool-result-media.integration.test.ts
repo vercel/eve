@@ -1,4 +1,3 @@
-// @linux-only: tool result media; mock sandbox
 import { jsonSchema } from "ai";
 import { convertArrayToReadableStream, MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
@@ -16,8 +15,6 @@ const usage = {
 };
 
 describe("tool-result media staging", () => {
-  // #4839: staging runs after the step's model call and tools, so a throw
-  // there fails the step and its retry replays both.
   it("keeps the step when the sandbox rejects the write of a returned file", async () => {
     const execute = vi.fn(async () => ({ chart: "iVBORw0KGgo=" }));
     const doStream = vi.fn<MockLanguageModelV4["doStream"]>(async () => ({

@@ -11,13 +11,6 @@ import { completeLegacyDriverStep } from "./completion-step.js";
 import { interruptLegacySessionStep } from "./interrupt-step.js";
 import { prepareLegacySessionStep } from "./prepare-step.js";
 
-/**
- * Historical dispatch name. Drivers from the former driver/turn execution
- * model start this workflow for each turn. It imports the session once —
- * persisting the conversation, claiming the current-generation inbox, and
- * interrupting pending work — then runs the current owner program. The old
- * driver stays parked as the stream anchor and hears the final result.
- */
 export async function turnWorkflow(rawInput: unknown): Promise<void> {
   "use workflow";
   const prepared = await prepareLegacySessionStep(rawInput);
@@ -27,7 +20,6 @@ export async function turnWorkflow(rawInput: unknown): Promise<void> {
   try {
     await inbox.claimSessionHook(sessionCommandHookToken(sessionId));
   } catch (error) {
-    // Another importer already owns this session; its driver will hear from it.
     if (isHookConflictError(error)) return;
     throw error;
   }

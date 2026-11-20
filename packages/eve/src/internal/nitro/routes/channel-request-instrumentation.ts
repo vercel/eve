@@ -22,10 +22,6 @@ const headersGetter: TextMapGetter<Headers> = {
   keys: (headers) => [...headers.keys()],
 };
 
-/**
- * The request span ends when the response body finishes, errors, or is
- * cancelled, not when the handler returns.
- */
 export async function traceChannelRequest(
   input: { readonly request: Request; readonly routeKey: string },
   handler: (operation: ChannelRequestTrace | undefined) => Promise<Response>,

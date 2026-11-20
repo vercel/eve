@@ -1,4 +1,3 @@
-// @linux-only: trace ownership
 import { context as apiContext, trace as apiTrace, TraceFlags } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import {
@@ -88,7 +87,6 @@ beforeEach(() => {
   seenActive.length = 0;
   seenTraceSessionIds.length = 0;
   exporter = new InMemorySpanExporter();
-  // The production local-trace processor: it claims traces and releases completed ones on flush.
   processor = new AgentTraceSpanProcessor([new SimpleSpanProcessor(exporter)]);
   provider = new BasicTracerProvider({ spanProcessors: [processor] });
   apiContext.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());

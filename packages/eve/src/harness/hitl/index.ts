@@ -30,13 +30,6 @@ import { applyEndingSignIns, stepCallsBack } from "./sign-in-callbacks.js";
 import { checkSessionUsageLimit, DEFAULT_SESSION_USAGE_LIMIT } from "./budget.js";
 import { isEmptyInput } from "./delivery.js";
 
-// The session's human-in-the-loop rules, behind the few points where the rest of the harness
-// meets them: a delivery's answers and sign-in callbacks before its turn runs
-// (`admitHumanInput`, `settleHumanInput`), the work they decided once the turn has the delivery
-// (`applyHumanDecisions`), a model step's gated calls and sign-ins, the budget gate before each
-// model call, and what the model reads about pending approvals. Outside readers use only the
-// read-only requests view exported here. Nothing here pauses the turn; the step's `park` does.
-
 export {
   admitHumanInput,
   applyHumanDecisions,
@@ -48,10 +41,6 @@ export { openDeferredApprovals, queueInput } from "./approvals.js";
 export { compactInput, turnInputOnly, withoutTurnInput } from "./delivery.js";
 export type { PendingResponder } from "./responders.js";
 
-/**
- * A model step made calls that need a person's approval: the step's response waits on them
- * beside any runtime calls it made, asked as the turn's requester.
- */
 export async function askStepApprovals(
   step: Step,
   input: {
@@ -59,9 +48,7 @@ export async function askStepApprovals(
     readonly messages: readonly ModelMessage[];
     readonly requests: readonly ApprovalAsk[];
     readonly tasks: readonly RuntimeWorkflowTaskRequest[];
-    /** A call the step ran already ended the turn. */
     readonly endsTurn?: true;
-    /** The entries the step's calls ran, whose approvals the requests ask for. */
     readonly tools: HarnessToolLookup;
   },
 ): Promise<void> {
@@ -77,19 +64,17 @@ export async function askStepApprovals(
   await step.apply(transition, [...step.session.history, ...committedMessages(transition)]);
 }
 
-/**
- * A call the model step ran needs a sign-in: the calls that need it stop and wait in their
- * steps, and run once it completes.
- */
-export async function stopForToolSignIn(
+type SignInInterrupt = NonNullable<ReturnType<typeof resolveInlineAuthorizationInterrupt>>;
+
+export async function stopForSignIn(
   step: Step,
-  interrupt: NonNullable<ReturnType<typeof resolveInlineAuthorizationInterrupt>>,
+  signIn: Pick<SignInInterrupt, "challenges"> & Partial<Pick<SignInInterrupt, "calls">>,
 ): Promise<StepResult> {
   await applyEndingSignIns(
     step,
     requireSignIn(step.view(), {
-      calls: interrupt.calls,
-      challenges: interrupt.challenges,
+      calls: signIn.calls,
+      challenges: signIn.challenges,
       callsBack: stepCallsBack(step),
     }),
     step.session.history,
@@ -97,11 +82,6 @@ export async function stopForToolSignIn(
   return park(step);
 }
 
-/**
- * The gate before each model call. A spent budget asks whether to continue when someone can
- * answer, and fails the session otherwise. `messages` are the step's: they park with the prompt,
- * so the input that triggered it survives into the turn that resumes.
- */
 export async function enforceBudget(
   step: Step,
   messages: readonly ModelMessage[],
@@ -117,10 +97,8 @@ export async function enforceBudget(
   if (limit.kind === "within") return undefined;
   if (limit.kind === "ask") {
     step.session = changeHistory(step.session, { extend: messages });
-    // The prompt is asked once; a gate that finds it open still waits on it.
     if (openLimit(step.view())?.row.interactionId !== limit.ask.interactionId)
       await step.apply(requestLimit(step.view(), limit.ask), step.session.history);
-    // The turn waits on the prompt; the answer resumes it or cancels it.
     return park(step);
   }
   await step.apply(
@@ -134,15 +112,10 @@ export async function enforceBudget(
   return { next: { done: true, output: "" }, session: step.session };
 }
 
-/** What a model call needs from the approvals: what their policies remember. */
 export function humanInputContext(step: Step): { readonly approvalMemory: ApprovalMemory } {
   return { approvalMemory: approvalMemory(step.view()) };
 }
 
-/**
- * The approvals whose tool defines a response policy. Every park records them, so no Approve or
- * Cancel of such an approval skips the policy.
- */
 function responsePolicyRequestIds(
   tools: HarnessToolLookup,
   requests: readonly ApprovalAsk[],
@@ -157,15 +130,10 @@ function responsePolicyRequestIds(
     .map((ask) => ask.interactionId);
 }
 
-/** The caller whose turn parks a step. */
 function currentRequester(step: Step): SessionAuthContext | null {
   return step.ctx.get(AuthKey) ?? step.ctx.get(SessionKey)?.auth.current ?? null;
 }
 
-/**
- * Takes the message a delivery's answers deferred into the turn queue out of it, so a cancelled
- * turn can keep it in history once instead of also leaving it queued. The rest of the queue stays.
- */
 export function takeDeferredMessage<T extends HarnessSessionBase>(
   session: T,
 ): { readonly message?: StepInput["message"]; readonly session: T } {

@@ -198,7 +198,6 @@ describe("renderFlowPanel", () => {
     expect(text).toContain("▪ Creating a Slackbot through Vercel Connect…");
     expect(text).toContain("  Try again");
     expect(text).toContain("  Cancel");
-    // The spinner leads; the actions follow.
     expect(text.indexOf("Creating a Slackbot")).toBeLessThan(text.indexOf("Try again"));
   });
 });
@@ -372,8 +371,6 @@ describe("renderSelectQuestion", () => {
 
     expect(rows[0]).toBe("  Vercel project");
     expect(text).not.toContain("▔".repeat(10));
-    // The lone hint sits one space past its own label — the longer hint-less
-    // "Link an existing project" no longer pads the column open.
     expect(text).toContain("   Create a new project · fastest");
     expect(text).toContain("   Link an existing project");
     expect(text).not.toContain("›");
@@ -470,8 +467,6 @@ describe("renderSelectQuestion", () => {
       80,
     );
 
-    // Completed rows retain an inert cursor rather than borrowing the
-    // available-row selection weight; resting rows retain their checks.
     expect(rows).toContain("   › Terminal UI · Already installed");
     expect(rows).toContain("   ✓ Web Chat");
     expect(rows).toContain("     Done");
@@ -497,7 +492,6 @@ describe("renderSelectQuestion", () => {
       80,
     );
     const coloredRow = coloredRows.find((row) => row.includes("Terminal UI"));
-    // Completed rows remain dim and never borrow the selected row's weight.
     expect(coloredRow).toContain("\x1b[2mTerminal UI\x1b[22m");
     expect(coloredRow).toContain("\x1b[2m · Already installed\x1b[22m");
     expect(coloredRow).toContain("\x1b[2m›\x1b[22m");
@@ -535,8 +529,6 @@ describe("renderSelectQuestion", () => {
 
   it("appends a reset when clipping cuts a row before its color close", () => {
     const colored = createTheme({ color: true, unicode: true });
-    // The blue span's close sits past the clip width; without a trailing
-    // reset the open blue would bleed into every row painted below.
     const longName = "a-very-long-project-name-that-overflows-the-panel";
     const rows = renderFlowPanel(
       {
@@ -597,7 +589,6 @@ describe("renderSelectQuestion", () => {
       80,
     ).join("\n");
 
-    // Dim label (SGR 2), un-struck, followed by the alert annotation in yellow (SGR 33).
     expect(text).toContain(
       "\x1b[2mSlack\x1b[22m\x1b[33m ⚠ Requires Vercel account, see /model\x1b[39m",
     );
@@ -622,7 +613,6 @@ describe("renderSelectQuestion", () => {
 
     const first = rows.find((line) => line.includes("⚠"));
     expect(first).toMatch(/⚠ alpha/);
-    // A continuation line is indented and carries no glyph.
     const continuation = rows.find((line) => !line.includes("⚠") && /^\s{3,}\S/.test(line));
     expect(continuation).toBeDefined();
   });
@@ -641,8 +631,6 @@ describe("renderSelectQuestion", () => {
       }) as const;
     const baseEdit = { optionValue: "new", caretVisible: true };
 
-    // Hovering the editable row leaves the real buffer empty and parks the
-    // caret before the suggested name, so typing replaces the placeholder.
     const hover = renderSelectQuestion(
       {
         kind: "inline-edit",
@@ -660,7 +648,6 @@ describe("renderSelectQuestion", () => {
     expect(hover.join("\n")).not.toContain("Name: \x1b[22mweather-agent");
     expect(hover.at(-1)).toContain("type to rename");
 
-    // Caret off (blink) collapses to nothing — no stray space before the placeholder.
     const hoverOff = renderSelectQuestion(
       {
         kind: "inline-edit",
@@ -676,8 +663,6 @@ describe("renderSelectQuestion", () => {
     expect(stripAnsi(hoverOff.join("\n"))).toContain("Name: weather-agent");
     expect(stripAnsi(hover.join("\n"))).toBe(stripAnsi(hoverOff.join("\n")));
 
-    // Entered text keeps a trailing cursor cell, so the cursor follows rather
-    // than covers the final character and blinking does not shift the text.
     const edited = renderSelectQuestion(
       {
         kind: "inline-edit",
@@ -750,10 +735,8 @@ describe("renderSelectQuestion", () => {
 
     expect(plain).toContain("…");
     expect(plain).toContain("⨯ API key is not valid");
-    // The masked input rides the elbow rail.
     expect(plain).toContain("⎿ ");
     expect(plain.length).toBeLessThanOrEqual(width);
-    // The failure trails the masked key in plain red — no background.
     expect(row).toContain(colorTheme.colors.red(`${colorTheme.glyph.error} API key is not valid`));
   });
 
@@ -768,7 +751,6 @@ describe("renderSelectQuestion", () => {
         layout: "task-list",
         message: "Vercel project",
         options,
-        // Cursor parked on the second (non-editable) row.
         select: { ...initialSelectState({ options }), cursor: 1 },
         edit: {
           optionValue: "new",
@@ -784,7 +766,6 @@ describe("renderSelectQuestion", () => {
       theme,
       80,
     );
-    // The editable row shows its plain static hint — no caret injected.
     expect(rows.join("\n")).toContain("Name: weather-agent");
     expect(rows.join("\n")).not.toContain("weather-agent▏");
     expect(rows.at(-1)).not.toContain("type to rename");
@@ -887,13 +868,11 @@ describe("renderSelectQuestion", () => {
     );
     const text = rows.join("\n");
 
-    // The empty filter is a block-cursor field directly above its first result.
     expect(text).toContain("   search…\n     Model 0");
     expect(text).toContain("     Model 0");
     expect(text).toContain("     Model 4");
     expect(text).not.toContain("›");
     expect(text).not.toContain("Model 5");
-    // The list scrolls silently: no count row, Esc is the whole footer.
     expect(text).not.toContain("options, showing");
     expect(text).toContain("Esc back");
     expect(text).not.toContain("type to filter ·");
@@ -946,11 +925,9 @@ describe("renderSelectQuestion", () => {
       70,
     );
 
-    // An empty message contributes no header rows: the inert row leads directly.
     expect(rows[0]).toContain("Waiting for you to complete setup in the browser");
     const waiting = rows.findIndex((row) => row.includes("Waiting for you to complete setup"));
     const retry = rows.findIndex((row) => row.includes("Try again"));
-    // A blank line separates the inert context row from the actions below it.
     expect(rows[waiting + 1]).toBe("");
     expect(retry).toBe(waiting + 2);
     expect(rows[waiting]).toContain("· Waiting for you to complete setup in the browser");

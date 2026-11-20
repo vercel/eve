@@ -51,10 +51,6 @@ function defaultRules(project: TrustedSourceProject): UpdateProjectCustomAllow[]
   return rules;
 }
 
-/**
- * Plans the smallest policy update that lets a project's Development token
- * reach one of that same project's deployment environments.
- */
 export function planTrustedSourceAccess(input: {
   readonly project: TrustedSourceProject;
   readonly targetEnvironment: string;

@@ -10,7 +10,6 @@ import { parseJsonObject } from "#shared/json.js";
 export interface RuntimeActionRequestProjection {
   readonly action: RuntimeActionRequest;
   readonly presentationLabel?: string;
-  /** The tool set `label: false`, so activity leaves the call out. */
   readonly hidden?: true;
 }
 
@@ -25,7 +24,6 @@ export function createPresentedRuntimeActionRequestFromToolCall(input: {
   return presentationLabel === undefined ? { action } : { action, presentationLabel };
 }
 
-/** Label callbacks share normalization, detached input, and failure isolation. */
 export function projectToolLabel(
   definition: { readonly label?: HarnessToolDefinition["label"] } | undefined,
   phase: "start" | "delta" | "complete",

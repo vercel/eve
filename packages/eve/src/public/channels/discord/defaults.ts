@@ -79,7 +79,6 @@ function discordUserAuth(
   if (guildId !== undefined) allAttributes.guild_id = guildId;
   return {
     attributes: allAttributes,
-    // Shared by messages too, so changing it would orphan every existing Discord principal.
     authenticator: "discord-interaction",
     issuer: guildId ? `discord:${guildId}` : "discord",
     principalId: guildId ? `discord:${guildId}:${user.id}` : `discord:${user.id}`,
@@ -87,7 +86,6 @@ function discordUserAuth(
   };
 }
 
-/** Default command hook: dispatch with Discord user auth. */
 export function defaultOnCommand(
   _ctx: DiscordContext,
   interaction: DiscordCommandInteraction,
@@ -95,10 +93,6 @@ export function defaultOnCommand(
   return { auth: defaultDiscordAuth(interaction) };
 }
 
-/**
- * Edits a posted prompt the way a resolved one reads: its prompt kept, its
- * choices replaced by `label`. Throws when Discord refuses the edit.
- */
 export async function editDiscordResolvedPrompt(
   discord: Pick<DiscordHandle, "channelId" | "request">,
   prompt: Pick<DiscordHitlPrompt, "content" | "messageId">,
@@ -108,16 +102,11 @@ export async function editDiscordResolvedPrompt(
   await editDiscordMessage(discord, prompt.messageId, content);
 }
 
-/**
- * Rewrites one of the bot's messages in the current channel to `content` and
- * removes its components. Throws when Discord refuses the edit.
- */
 async function editDiscordMessage(
   discord: Pick<DiscordHandle, "channelId" | "request">,
   messageId: string,
   content: string,
 ): Promise<void> {
-  // A raw request skips the API helpers' default, so suppress pings here.
   const response = await discord.request(
     `/channels/${encodeURIComponent(discord.channelId)}/messages/${encodeURIComponent(messageId)}`,
     { allowed_mentions: DISCORD_NO_MENTIONS, components: [], content },
@@ -128,7 +117,6 @@ async function editDiscordMessage(
   }
 }
 
-/** Default Gateway message hook: dispatch messages addressed to the bot with Discord user auth. */
 export function defaultOnMessage(
   _ctx: DiscordContext,
   message: DiscordGatewayMessage,
@@ -140,19 +128,10 @@ type DiscordEventChannel = Parameters<
   NonNullable<DiscordChannelEvents["interaction.opened"]>
 >[1]["channel"];
 
-/**
- * Whether only the person signing in reads the conversation: a one-to-one DM (channel type 1),
- * from an interaction or a Gateway message. A group DM has no guild either, but every member
- * reads it. A session eve started itself records no channel type, so it isn't taken as private.
- */
 export function signsInPrivately(state: DiscordChannelState): boolean {
   return state.channelType === 1;
 }
 
-/**
- * A Discord conversation as a sign-in shows on it: a DM gets the challenge; a group DM or server
- * channel, a link-free status whose button shows the challenge to its person alone.
- */
 function discordSignIns(channel: DiscordEventChannel): SignInSurface {
   const { discord } = channel;
   const post = async (content: string) => (await discord.post({ content })).id || undefined;
@@ -175,7 +154,6 @@ function discordSignIns(channel: DiscordEventChannel): SignInSurface {
   };
 }
 
-/** Built-in Discord event handlers for typing, replies, HITL, and terminal errors. */
 export const defaultEvents: DiscordChannelEvents = surfaceEvents<DiscordEventChannel>({
   typing: (channel) => channel.discord.startTyping(),
   post: (channel, text) => channel.discord.post(text),
@@ -202,11 +180,6 @@ async function postDiscordRequest(
   };
 }
 
-/**
- * Shows a prompt's answer, and who gave it, in place of its buttons. The mention doesn't ping:
- * the edit allows none. The bot token outlives the interaction token the prompt may have been
- * posted with.
- */
 async function editDiscordSettledRequest(
   channel: DiscordEventChannel,
   settlement: RequestSettlement,
