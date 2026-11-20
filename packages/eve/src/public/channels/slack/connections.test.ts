@@ -102,6 +102,7 @@ describe("buildAuthEphemeralBlocks", () => {
         elements: [
           {
             type: "button",
+            action_id: "eve_sign_in:connect",
             text: { type: "plain_text", text: "Connect Linear" },
             url: "https://connect.example.com/authorize/sca_abc",
             style: "primary",

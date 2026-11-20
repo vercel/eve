@@ -6,7 +6,9 @@ import type { Runtime } from "#channel/types.js";
 import type { SlackChannelState } from "#public/channels/slack/slackChannel.js";
 import {
   dispatchSignInCancel,
+  dispatchSignInConnect,
   SIGN_IN_CANCEL_ACTION_ID,
+  SIGN_IN_CONNECT_ACTION_ID,
 } from "#public/channels/slack/sign-in-cancel.js";
 
 const logger = vi.hoisted(() => ({ error: vi.fn(), warn: vi.fn() }));
@@ -137,5 +139,43 @@ describe("dispatchSignInCancel", () => {
     expect(logger.warn).toHaveBeenCalledWith("failed to remove the cancelled sign-in prompt", {
       error: expect.objectContaining({ status: 404 }),
     });
+  });
+});
+
+function connectClick(ephemeral: boolean): Record<string, unknown> {
+  return {
+    actions: [{ action_id: SIGN_IN_CONNECT_ACTION_ID }],
+    container: { is_ephemeral: ephemeral, type: "message" },
+    response_url: RESPONSE_URL,
+    type: "block_actions",
+  };
+}
+
+async function clickConnect(raw: Record<string, unknown>): Promise<boolean> {
+  const tasks: Promise<unknown>[] = [];
+  const handled = dispatchSignInConnect(raw, { waitUntil: (task) => tasks.push(task) });
+  await Promise.all(tasks);
+  return handled;
+}
+
+describe("dispatchSignInConnect", () => {
+  it("removes the private sign-in prompt when the person opens its Connect link", async () => {
+    const fetchMock = stubFetch();
+    expect(await clickConnect(connectClick(true))).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith(...deletePost);
+  });
+
+  it("leaves a prompt posted as a regular message for the session to settle", async () => {
+    const fetchMock = stubFetch();
+    expect(await clickConnect(connectClick(false))).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("ignores other clicks", async () => {
+    const fetchMock = stubFetch();
+    expect(await clickConnect({ actions: [{ action_id: "other" }], type: "block_actions" })).toBe(
+      false,
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
