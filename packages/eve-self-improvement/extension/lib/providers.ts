@@ -1,5 +1,29 @@
-import { credential, type Config } from "./config.js";
+import { credential, digest, type Config } from "./config.js";
 import type { Candidate, Deployment, ReviewFeedback } from "./types.js";
+
+export function boundFeedback(feedback: ReviewFeedback): ReviewFeedback {
+  const comments: ReviewFeedback["comments"] = [];
+  let remaining = 20_000;
+  for (const comment of feedback.comments.slice(-50).reverse()) {
+    const bounded = {
+      ...comment,
+      body:
+        comment.body.length > 1000
+          ? `${comment.body.slice(0, 900)}\n[Truncated; open the linked comment for full evidence.]`
+          : comment.body,
+    };
+    const bytes = Buffer.byteLength(JSON.stringify(bounded)) + 1;
+    if (bytes > remaining) continue;
+    comments.unshift(bounded);
+    remaining -= bytes;
+  }
+  return {
+    ...feedback,
+    comments,
+    commentsDigest: feedback.commentsDigest ?? digest(feedback.comments),
+    omittedComments: (feedback.omittedComments ?? 0) + feedback.comments.length - comments.length,
+  };
+}
 
 export class ProviderError extends Error {
   constructor(
@@ -128,7 +152,7 @@ export class GitHub {
         })),
       );
       if (!data.pageInfo.hasNextPage)
-        return {
+        return boundFeedback({
           comments: [...comments, ...inline].map((c: any) => ({
             id: String(c.id),
             body: String(c.body ?? ""),
@@ -141,7 +165,7 @@ export class GitHub {
             submittedAt: r.submitted_at,
           })),
           threads,
-        };
+        });
       if (!data.pageInfo.endCursor || data.pageInfo.endCursor === cursor) break;
       cursor = data.pageInfo.endCursor;
     }

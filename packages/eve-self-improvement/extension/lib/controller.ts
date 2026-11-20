@@ -7,7 +7,7 @@ import { rankFindings, summarizeUsage } from "./analyze.js";
 import { readAgentRuns } from "./agent-runs.js";
 import { allPassed } from "./gates.js";
 import { createHostedRunner } from "./hosted.js";
-import { GitHub, Vercel } from "./providers.js";
+import { boundFeedback, GitHub, Vercel } from "./providers.js";
 import {
   inspectCandidate,
   markReady,
@@ -104,6 +104,8 @@ function reportFor(
   };
 }
 async function save(c: Config, active: Active): Promise<void> {
+  if (active.experiment?.feedback)
+    active.experiment.feedback = boundFeedback(active.experiment.feedback);
   if (active.experiment) active.experiment.updatedAt = Date.now();
   await store(c).save(active.lease, active.experiment);
 }
@@ -636,15 +638,7 @@ function reviewPayload(
     kind: "review",
     candidate,
     checks: [...checks, ...inspection.checks],
-    feedback: {
-      ...inspection.feedback,
-      comments: inspection.feedback.comments.slice(-50).map((comment) => ({
-        ...comment,
-        body: comment.body.slice(0, 1000),
-      })),
-      commentDigest: digest(inspection.feedback.comments),
-      omittedComments: Math.max(0, inspection.feedback.comments.length - 50),
-    },
+    feedback: boundFeedback(inspection.feedback),
     outputs: inspection.outputs,
   });
   if (Buffer.byteLength(payload) > 200_000)

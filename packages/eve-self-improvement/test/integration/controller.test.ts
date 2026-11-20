@@ -223,15 +223,22 @@ test("large ordinary comments have bounded review display without discarding can
   feedback.comments = Array.from({ length: 60 }, (_, i) => ({
     id: String(i),
     url: `https://github.com/fixture/comment/${i}`,
-    body: "large comment ".repeat(5000),
+    body: "大量のコメント".repeat(10000),
   }));
   const result = await advance(active.lease);
   assert.equal(result.action, "review");
   assert.ok(Buffer.byteLength(result.payload!) < 200_000);
   const display = JSON.parse(result.payload!).feedback;
-  assert.equal(display.omittedComments, 10);
+  assert.ok(display.omittedComments >= 10);
+  assert.ok(Buffer.byteLength(JSON.stringify(display.comments)) < 20_002);
   assert.equal(display.comments.at(-1).id, "59");
-  assert.ok(display.commentDigest);
+  assert.ok(display.commentsDigest);
+  const resumed = await prepare(ctx);
+  assert.ok(Buffer.byteLength(resumed.payload!) < 50_000);
+  assert.equal(JSON.parse(resumed.payload!).feedback.commentsDigest, display.commentsDigest);
+  feedback.comments[0].body += " edited";
+  const edited = await advance(active.lease);
+  assert.notEqual(JSON.parse(edited.payload!).feedback.commentsDigest, display.commentsDigest);
 });
 test("private status requires an owner-exclusive direct conversation", async () => {
   reset(experiment());

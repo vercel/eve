@@ -120,6 +120,8 @@ export interface Receipt {
 /** Conversation, inline-thread, and submitted-review evidence from the source forge. */
 export interface ReviewFeedback {
   comments: { id: string; body: string; url: string }[];
+  commentsDigest?: string;
+  omittedComments?: number;
   threads: { id: string; resolved: boolean; outdated: boolean; body: string }[];
   reviews: { id: string; state: string; body: string; submittedAt: string }[];
 }
