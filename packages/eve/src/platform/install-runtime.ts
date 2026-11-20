@@ -1,4 +1,4 @@
-import { setPlatformContext } from "#platform/context.js";
 import { createVercelPlatformContext } from "#platform/vercel/context.js";
+import { createEveRuntime, installEveRuntime } from "#runtime/eve-runtime.js";
 
-setPlatformContext(createVercelPlatformContext());
+installEveRuntime(createEveRuntime({ platform: createVercelPlatformContext() }));

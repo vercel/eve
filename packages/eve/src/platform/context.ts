@@ -1,5 +1,6 @@
 import { createVercelPlatformContext } from "#platform/vercel/context.js";
 import type { WorkspaceAgentTransport } from "#public/definitions/workspace-agent.js";
+import { eveRuntime } from "#runtime/eve-runtime.js";
 
 export type PlatformTarget = "vercel";
 
@@ -66,22 +67,8 @@ export interface PlatformContext {
   readonly workspace: PlatformWorkspace;
 }
 
-const PLATFORM_CONTEXT = Symbol.for("eve.platform-context");
-
-interface PlatformContextHolder {
-  [PLATFORM_CONTEXT]?: PlatformContext;
-}
-
-const holder = globalThis as PlatformContextHolder;
-
-export function setPlatformContext(context: PlatformContext): () => void {
-  const previous = holder[PLATFORM_CONTEXT];
-  holder[PLATFORM_CONTEXT] = context;
-  return () => {
-    holder[PLATFORM_CONTEXT] = previous;
-  };
-}
+let fallbackPlatform: PlatformContext | undefined;
 
 export function platformContext(): PlatformContext {
-  return (holder[PLATFORM_CONTEXT] ??= createVercelPlatformContext());
+  return eveRuntime()?.platform ?? (fallbackPlatform ??= createVercelPlatformContext());
 }

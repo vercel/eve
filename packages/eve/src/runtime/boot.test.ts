@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { EVE_WORKFLOW_SPEC_VERSION } from "#internal/workflow/spec-version-default.js";
+import { createVercelPlatformContext } from "#platform/vercel/context.js";
 import { bootEve } from "#runtime/boot.js";
+import { createEveRuntime, installEveRuntime } from "#runtime/eve-runtime.js";
 
 const BUILD_DEPLOYMENT_ID = "eve_0123456789abcdef0123456789abcdef";
 const STOP = new Error("stop before the World is installed");
@@ -13,9 +15,17 @@ function readWorkflowEnvironment() {
   };
 }
 
-afterEach(() => vi.unstubAllEnvs());
+let uninstallRuntime: (() => void) | undefined;
+
+afterEach(() => {
+  uninstallRuntime?.();
+  vi.unstubAllEnvs();
+});
 
 beforeEach(() => {
+  uninstallRuntime = installEveRuntime(
+    createEveRuntime({ platform: createVercelPlatformContext() }),
+  );
   for (const name of [
     "VERCEL",
     "VERCEL_DEPLOYMENT_ID",
@@ -45,6 +55,15 @@ describe("bootEve", () => {
       deploymentId: BUILD_DEPLOYMENT_ID,
       specVersion: String(EVE_WORKFLOW_SPEC_VERSION),
     });
+  });
+
+  it("refuses to boot the World before the runtime is installed", async () => {
+    uninstallRuntime?.();
+    uninstallRuntime = installEveRuntime(undefined as never);
+
+    await expect(bootEve({ createWorld: () => Promise.reject(STOP) })).rejects.toThrow(
+      "before installing its runtime",
+    );
   });
 
   it("leaves the Workflow environment alone for a parent-backed World", async () => {
