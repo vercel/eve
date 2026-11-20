@@ -295,7 +295,8 @@ Keep every template in `apps/templates` on the same versions:
 
 When you add, import, or update a template, match these versions. When you bump
 either one, bump it in every template in the same PR and regenerate each
-template's `pnpm-lock.yaml`. See [`apps/templates/README.md`](./apps/templates/README.md).
+template's `pnpm-lock.yaml`. See
+[`apps/templates/README.md`](./apps/templates/README.md).
 
 ## Documentation
 
