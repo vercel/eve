@@ -481,7 +481,7 @@ Key behaviors to plan around:
 - **Deduplication and lifetime:** Each key remembers the last 256 occurrence IDs so redeliveries reach each subscriber once. `ttlMs` accepts `60000` (1 minute) through `31536000000` (365 days), or `null` to watch until stopped. When the subscribing session ends, the subscription retires automatically on the next delivery.
 - **Identity and authorization:** Occurrences are queued (`turnPolicy: "queue"`) under the `auth` snapshot the session held when it subscribed, never the webhook caller's identity. Stored `auth` is not revalidated on each delivery, so check `auth` and `subscription.input` inside `onEvent` whenever a channel can receive events for resources a subscriber should not read.
 - A delivered event never steers a running turn. Even when the subscribing session is waiting on a sign-in, an approval or a question, the event waits for the turn to end and then runs as the next turn, because its text comes from outside the session.
-- A subscription runs the `onEvent` of the deployment that created it. After a redeploy, the first event the new deployment accepts for an older subscription ends it without delivering, and the session receives a message to subscribe again, so tightened event rules take effect for every watch.
+- Each occurrence is judged by the `onEvent` of the deployment that accepted it. A redeploy takes effect at the next event, including for subscriptions opened by an older deployment, because the delivery workflow starts on the accepting deployment.
 
 ## Cross-channel hand-off
 
@@ -817,3 +817,4 @@ Keep each route's `method` and `path` unless you mean to move the endpoint.
 - [Auth & route protection](../guides/auth-and-route-protection)
 - [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications): deliver a provider message without starting an agent turn
 - [Universal Commerce Protocol (UCP)](../protocols/ucp): serve a UCP profile from a custom channel
+

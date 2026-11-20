@@ -19,6 +19,9 @@ const mocks = vi.hoisted(() => ({
   getHookByToken: vi.fn(),
   resumeHook: vi.fn(async (_token: string, _message: unknown) => {}),
   startWorkflow: vi.fn(async (_reference: unknown, _args: unknown) => ({ runId: "run-new" })),
+  startWorkflowOnDeployment: vi.fn(
+    async (_reference: unknown, _args: unknown, _deploymentId: string) => ({ runId: "run-new" }),
+  ),
   readFirstPublished: vi.fn(),
   writes: [] as { namespace: string; value: unknown }[],
   context: { current: undefined as unknown },
@@ -29,6 +32,7 @@ vi.mock("#context/serialize.js", () => ({ deserializeContext: async () => mocks.
 vi.mock("#execution/workflow-runtime.js", () => ({
   createWorkflowRuntime: (input: unknown) => ({ runtime: input }),
   startWorkflowOnCurrentDeployment: mocks.startWorkflow,
+  startWorkflowOnDeployment: mocks.startWorkflowOnDeployment,
 }));
 vi.mock("#execution/workflow-references.js", () => ({
   subscriptionDeliveryWorkflowReference: "delivery-reference",
@@ -52,8 +56,14 @@ vi.mock("#compiled/@workflow/core/index.js", () => ({
 }));
 
 const { HookNotFoundError } = await import("#compiled/@workflow/errors/index.js");
-const { dispatchSubscriptionStep, fanOutEventStep, forwardJoinStep, joinKeyStep, leaveKeyStep } =
-  await import("./steps.js");
+const {
+  dispatchSubscriptionStep,
+  fanOutEventStep,
+  forwardJoinStep,
+  joinKeyStep,
+  leaveKeyStep,
+  startSubscriptionDeliveryStep,
+} = await import("./steps.js");
 
 const subscriberAuth: SessionAuthContext = {
   attributes: {},
@@ -234,44 +244,27 @@ it("retires the subscription when its session has ended, and fails a send that m
   expect(mocks.resumeHook).not.toHaveBeenCalled();
 });
 
-it("retires a subscription held by an older deployment and delivers nothing to its source", async () => {
-  const onEvent = vi.fn(async () => "Checks finished");
-  useSubscriptions({ onEvent });
-  mocks.hooks.add(subscriptionHookToken("binding-1"));
-
-  await dispatchSubscriptionStep({
+it("starts the delivery workflow on the deployment that accepted the event", async () => {
+  await startSubscriptionDeliveryStep({
     ...delivery("e1"),
-    binding: { ...binding, deploymentId: "dpl_old" },
     event: { id: "e1", data: {}, acceptedDeploymentId: "dpl_new" },
   });
 
-  expect(mocks.resumeHook).toHaveBeenCalledWith(subscriptionHookToken("binding-1"), {
-    kind: "retire",
-  });
-  expect(onEvent).not.toHaveBeenCalled();
-  expect(mocks.send).toHaveBeenCalledTimes(1);
-  const [message, options] = mocks.send.mock.calls[0]!;
-  expect(message).toContain("ended because the agent was redeployed");
-  expect(message).toContain('"checks_finished" on channel "github"');
-  expect(options).toMatchObject({ auth: subscriberAuth, turnPolicy: "queue" });
-  expect((options as { idempotencyKey: string }).idempotencyKey).toMatch(
-    /^eve:subscription-retired:/,
+  expect(mocks.startWorkflowOnDeployment).toHaveBeenCalledExactlyOnceWith(
+    "delivery-reference",
+    [expect.objectContaining({ event: { id: "e1", data: {}, acceptedDeploymentId: "dpl_new" } })],
+    "dpl_new",
   );
+  expect(mocks.startWorkflow).not.toHaveBeenCalled();
 });
 
-it("delivers normally when the binding's deployment is the one that accepted the event", async () => {
-  const onEvent = vi.fn(async () => "Checks finished");
-  useSubscriptions({ onEvent });
+it("starts the delivery workflow on the current deployment when the event names none", async () => {
+  await startSubscriptionDeliveryStep(delivery("e1"));
 
-  await dispatchSubscriptionStep({
-    ...delivery("e1"),
-    binding: { ...binding, deploymentId: "dpl_same" },
-    event: { id: "e1", data: {}, acceptedDeploymentId: "dpl_same" },
-  });
-
-  expect(onEvent).toHaveBeenCalledTimes(1);
-  expect(mocks.resumeHook).not.toHaveBeenCalled();
-  expect(mocks.send.mock.calls[0]![0]).toBe("Checks finished");
+  expect(mocks.startWorkflow).toHaveBeenCalledExactlyOnceWith("delivery-reference", [
+    expect.objectContaining({ binding }),
+  ]);
+  expect(mocks.startWorkflowOnDeployment).not.toHaveBeenCalled();
 });
 
 it("hands the event to each owner hook and reports the owners that ended", async () => {

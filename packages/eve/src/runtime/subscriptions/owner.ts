@@ -51,7 +51,7 @@ export async function startSubscriptionOwner(
 ): Promise<OpenedSubscription | undefined> {
   const run = await startWorkflowOnCurrentDeployment(subscriptionWorkflowReference, [
     {
-      binding: { ...binding, deploymentId: currentDeploymentId() },
+      binding,
       serializedContext: await bindingContext(binding, bundle),
     },
   ]);
