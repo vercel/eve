@@ -15,14 +15,9 @@ import {
 export default defineTool({
   description:
     "Advance the private durable experiment. Enforces live app identity, delegation, expiring fenced lease, current stage, tests and release policy. Finish pending work for scheduled resumption; do not declare it shipped.",
-  inputSchema: z.discriminatedUnion("action", [
-    z.object({ action: z.literal("next") }),
-    z.object({ action: z.literal("analysis") }),
-    z.object({ action: z.literal("review") }),
-    z.object({ action: z.literal("coded") }),
-    z.object({ action: z.literal("finish") }),
-    z.object({ action: z.literal("abort") }),
-  ]),
+  inputSchema: z.object({
+    action: z.enum(["next", "analysis", "review", "coded", "finish", "abort"]),
+  }),
   async execute(input, ctx) {
     const { lease, experiment: e } = await authorizeCoordinator(extension.config, ctx);
     const progress = taskProgress.get();
