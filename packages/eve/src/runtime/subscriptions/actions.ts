@@ -24,7 +24,7 @@ import { principalKey, resolveConnectionPrincipal } from "#runtime/connections/p
 import { connectionEventDestination } from "#runtime/subscriptions/path.js";
 import type {
   ConnectionBinding,
-  ConnectionSubscribeSource,
+  ConnectionSubscriptionSource,
   SubscriptionBinding,
 } from "#runtime/subscriptions/state.js";
 import type { ManagedEventSubscription } from "#shared/connection-events.js";
@@ -292,7 +292,7 @@ function pendingResult(binding: ConnectionBinding) {
   return { id: binding.id, name, arguments: eventArguments, status: "pending" as const };
 }
 
-type Caller = Pick<ConnectionSubscribeSource, "instanceId" | "connector" | "principalKey"> & {
+type Caller = Pick<ConnectionSubscriptionSource, "instanceId" | "connector" | "principalKey"> & {
   readonly connectionName: string;
   readonly executionPrincipal: string;
 };

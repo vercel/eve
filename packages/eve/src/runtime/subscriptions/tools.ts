@@ -105,20 +105,20 @@ export function channelSubscribeEntry(
   };
 }
 
-export type ConnectionSubscribeAction = typeof EVENT_GET_ACTION | typeof EVENT_STOP_ACTION;
+export type ConnectionSubscriptionAction = typeof EVENT_GET_ACTION | typeof EVENT_STOP_ACTION;
 
-export interface ConnectionSubscribeGate {
-  readonly approval: (action: ConnectionSubscribeAction) => HarnessToolDefinition["approval"];
+export interface ConnectionSubscriptionGate {
+  readonly approval: (action: ConnectionSubscriptionAction) => HarnessToolDefinition["approval"];
   readonly run: (
     connectionName: string,
-    action: ConnectionSubscribeAction,
+    action: ConnectionSubscriptionAction,
     input: { readonly id: string },
     options: ToolExecuteOptions,
   ) => Promise<unknown>;
 }
 
 export function subscriptionManagementEntries(
-  gate: ConnectionSubscribeGate,
+  gate: ConnectionSubscriptionGate,
 ): readonly HarnessToolDefinition[] {
   return [
     {
@@ -255,8 +255,8 @@ async function subscribe(
 async function getSubscription(
   id: string,
   options: ToolExecuteOptions,
-  gate: ConnectionSubscribeGate,
-  action: ConnectionSubscribeAction,
+  gate: ConnectionSubscriptionGate,
+  action: ConnectionSubscriptionAction,
 ): Promise<unknown> {
   const found = await owners().find(id);
   if (found === undefined) throw unknownSubscription();
@@ -269,8 +269,8 @@ async function getSubscription(
 async function stopSubscription(
   id: string,
   options: ToolExecuteOptions,
-  gate: ConnectionSubscribeGate,
-  action: ConnectionSubscribeAction,
+  gate: ConnectionSubscriptionGate,
+  action: ConnectionSubscriptionAction,
 ): Promise<unknown> {
   const found = await owners().find(id);
   if (found === undefined) throw unknownSubscription();
@@ -287,8 +287,8 @@ function ownedByCaller(binding: SubscriptionBinding): void {
 
 function connectionAction(
   binding: SubscriptionBinding,
-  action: ConnectionSubscribeAction,
-  gate: ConnectionSubscribeGate,
+  action: ConnectionSubscriptionAction,
+  gate: ConnectionSubscriptionGate,
   options: ToolExecuteOptions,
 ): Promise<unknown> {
   return gate.run(binding.source.name, action, { id: binding.id }, options);
