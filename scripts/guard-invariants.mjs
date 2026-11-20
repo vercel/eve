@@ -243,9 +243,9 @@
  *             so eve can run on other hosts. Elsewhere in `packages/eve/src`
  *             (except the Vercel-only CLI, setup, and dev-client code, and the
  *             gitignored extension copies that builds generate), source
- *             doesn't read `VERCEL*` environment variables or import a vendored
- *             `#compiled/@vercel/*` package. The eve-owned `@vercel/agent-runs`
- *             library is exempt. Files that predate the rule are baselined per
+ *             doesn't read `VERCEL*` environment variables, import a vendored
+ *             `#compiled/@vercel/*` package, or import `#platform/vercel/*`
+ *             directly. The eve-owned `@vercel/agent-runs` library is exempt. Files that predate the rule are baselined per
  *             file, and the count must match exactly, so a cleanup lowers it.
  *
  * Baselines for rules with pre-existing violations live in
@@ -1304,7 +1304,8 @@ const VERCEL_PLATFORM_ACCESS_DIRS = [
   "packages/eve/src/computer-use/extension/",
 ];
 const VERCEL_ENV_READ_RE = /\benv\.VERCEL\w*|["']VERCEL(?:_[A-Z0-9]+)*["']/g;
-const VERCEL_PLATFORM_IMPORT_RE = /["']#compiled\/@vercel\/(?!agent-runs\/)[^"']+["']/g;
+const VERCEL_PLATFORM_IMPORT_RE =
+  /["'](?:#compiled\/@vercel\/(?!agent-runs\/)[^"']+|[^"']*(?:#|\/)platform\/vercel\/[^"']+)["']/g;
 
 /**
  * Counts a file's `VERCEL*` environment reads and vendored Vercel platform imports.
@@ -2553,8 +2554,8 @@ async function main() {
       file,
       message:
         now > was
-          ? `reads \`VERCEL*\` environment variables or imports \`#compiled/@vercel/*\` in ${now} place${now === 1 ? "" : "s"} (baseline: ${was}). Vercel platform knowledge lives in \`packages/eve/src/platform/\` so eve can run on other hosts. Read deployment facts through \`currentPlatform()\` from \`#platform/current.js\`, or add the fact to the platform port and its Vercel implementation.`
-          : `reads \`VERCEL*\` environment variables or imports \`#compiled/@vercel/*\` in ${now} place${now === 1 ? "" : "s"}, fewer than its baseline (${was}). Lower \`rule69_vercelPlatformAccessByFile\` in scripts/guard-invariants-baseline.json.`,
+          ? `reads \`VERCEL*\` environment variables or imports \`#compiled/@vercel/*\` or \`#platform/vercel/*\` in ${now} place${now === 1 ? "" : "s"} (baseline: ${was}). Vercel platform knowledge lives in \`packages/eve/src/platform/\` so eve can run on other hosts. Read platform facts through \`currentPlatform()\` from \`#platform/current.js\`, or add the fact to a platform port and its Vercel implementation.`
+          : `reads \`VERCEL*\` environment variables or imports \`#compiled/@vercel/*\` or \`#platform/vercel/*\` in ${now} place${now === 1 ? "" : "s"}, fewer than its baseline (${was}). Lower \`rule69_vercelPlatformAccessByFile\` in scripts/guard-invariants-baseline.json.`,
     });
   }
 
