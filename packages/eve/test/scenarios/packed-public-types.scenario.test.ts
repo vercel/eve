@@ -24,6 +24,7 @@ const integrations: Record<string, readonly string[]> = {
   "eve/react": ["react", "@types/react"],
   "eve/vue": ["vue"],
   "eve/svelte": ["svelte"],
+  "eve/solid": ["solid-js"],
   "eve/sveltekit": ["vite"],
   "eve/tanstack": ["vite"],
   "eve/vite": ["vite"],
