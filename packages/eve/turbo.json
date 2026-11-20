@@ -85,7 +85,10 @@
       "dependsOn": ["build"],
       "inputs": [
         "$TURBO_EXTENDS$",
+        "$TURBO_ROOT$/apps/templates/eve-discord-agent-template/**",
+        "!$TURBO_ROOT$/apps/templates/eve-discord-agent-template/**/node_modules/**",
         "$TURBO_ROOT$/apps/templates/openinstinct/agent/instrumentation/otel.ts",
+        "$TURBO_ROOT$/packages/eve-recall/src/**",
         "$TURBO_ROOT$/scripts/build-profile-report.mjs"
       ],
       "tags": ["$TURBO_EXTENDS$", "ci:cpus:8"]

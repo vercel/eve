@@ -81,7 +81,6 @@
         "!docs/**",
         "!e2e/fixtures/**",
         "!examples/**",
-        "!packages/**",
         "!research/**"
       ],
       "tags": ["ci"]
