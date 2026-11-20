@@ -4,6 +4,7 @@ import type { prewarmAppSandboxes } from "#execution/sandbox/prewarm.js";
 import type { DevelopmentModelCredential } from "#internal/model-auth/development-broker-protocol.js";
 import type { HostRouteTable } from "#internal/nitro/host/host-routes.js";
 import type { createEveVercelOptions } from "#platform/vercel/build-output-config.js";
+import type { vercelBlob } from "#platform/vercel/blob.js";
 import type { VercelSandbox } from "#platform/vercel/sandbox/provider.js";
 import type { ScheduleProvider } from "#public/schedules/subscription.js";
 import type { SpanProcessor } from "#tracing/eve/otel-configuration.js";
@@ -86,6 +87,10 @@ export interface PlatformModels {
 
 export interface PlatformSandboxes {
   readonly hostedEnvironment: (typeof VercelSandbox)["environment"];
+}
+
+export interface PlatformStorage {
+  readonly hostedDocumentBackend: typeof vercelBlob;
 }
 
 export interface PlatformSchedules {

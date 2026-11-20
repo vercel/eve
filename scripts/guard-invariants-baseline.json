@@ -44,10 +44,5 @@
     "packages/eve/src/tools/provided/write-file.ts"
   ],
   "rule59_nitroVirtualIdAllowlist": [],
-  "rule51_factBuildersByFile": {},
-  "rule69_vercelPlatformAccessByFile": {
-    "packages/eve/src/evals/cli/eval-client.ts": 2,
-    "packages/eve/src/public/memory/file/backends/vercel-blob.ts": 1,
-    "packages/eve/src/self-modification/setup.ts": 1
-  }
+  "rule51_factBuildersByFile": {}
 }

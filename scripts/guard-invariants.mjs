@@ -241,21 +241,22 @@
  *             read these docs in their editor and in the generated API
  *             reference.
  *   rule 69 — Vercel platform knowledge lives in `packages/eve/src/platform/`,
- *             so eve can run on other hosts. Elsewhere in `packages/eve/src`
- *             (except the Vercel-only CLI, setup, and dev-client code, and the
- *             gitignored extension copies that builds generate, and the
- *             Vercel-only public files that re-export `src/platform/vercel/`), source
- *             doesn't read `VERCEL*` environment variables, import a vendored
- *             `#compiled/@vercel/*` package, or import `#platform/vercel/*`
- *             directly. The eve-owned `@vercel/agent-runs` library and the
+ *             so eve can run on other hosts. Elsewhere in `packages/eve/src`,
+ *             source doesn't read `VERCEL*` environment variables, import a
+ *             vendored `#compiled/@vercel/*` package, or import
+ *             `#platform/vercel/*` directly. Exempt: the Vercel-only CLI
+ *             (`src/cli/`, `src/evals/cli/`), setup, and dev-client code; the
+ *             gitignored extension copies that builds generate; the Vercel-only
+ *             public files that re-export `src/platform/vercel/`; and the
+ *             self-modification setup template, which generates Vercel-specific
+ *             user code. The eve-owned `@vercel/agent-runs` library and the
  *             `@vercel/otel` OpenTelemetry bootstrap run on any host, so they
- *             are exempt. Files that predate the rule are baselined per
- *             file, and the count must match exactly, so a cleanup lowers it.
+ *             are exempt.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
  * may only shrink (as offenders are removed) — they may never grow.
- * Rules 67 and 68 have no baseline.
+ * Rules 67, 68, and 69 have no baseline.
  */
 import { glob, readFile, readdir, lstat } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -1309,6 +1310,7 @@ function checkRule66(posix, lines, violations) {
 const VERCEL_PLATFORM_ACCESS_DIRS = [
   "packages/eve/src/platform/",
   "packages/eve/src/cli/",
+  "packages/eve/src/evals/cli/",
   "packages/eve/src/setup/",
   "packages/eve/src/services/dev-client/",
   "packages/eve/src/extensions/code/extension/",
@@ -1316,10 +1318,12 @@ const VERCEL_PLATFORM_ACCESS_DIRS = [
   "packages/eve/src/extensions/custom-skills/extension/",
   "packages/eve/src/computer-use/extension/",
 ];
-const VERCEL_PUBLIC_ENTRY_FILES = new Set([
+const VERCEL_PLATFORM_ACCESS_FILES = new Set([
   "packages/eve/src/public/agents/vercel-oidc.ts",
   "packages/eve/src/public/experimental/schedules/vercel.ts",
+  "packages/eve/src/public/memory/file/vercel.ts",
   "packages/eve/src/public/sandbox/vercel.ts",
+  "packages/eve/src/self-modification/setup.ts",
 ]);
 const VERCEL_ENV_READ_RE = /\benv\.VERCEL\w*|["']VERCEL(?:_[A-Z0-9]+)*["']/g;
 const VERCEL_PLATFORM_IMPORT_RE =
@@ -1335,7 +1339,7 @@ const VERCEL_PLATFORM_IMPORT_RE =
 function checkRule69(posix, content, current) {
   if (!posix.startsWith("packages/eve/src/") || posix.endsWith(".test.ts")) return;
   if (VERCEL_PLATFORM_ACCESS_DIRS.some((dir) => posix.startsWith(dir))) return;
-  if (VERCEL_PUBLIC_ENTRY_FILES.has(posix)) return;
+  if (VERCEL_PLATFORM_ACCESS_FILES.has(posix)) return;
   const count =
     [...content.matchAll(VERCEL_ENV_READ_RE)].length +
     [...content.matchAll(VERCEL_PLATFORM_IMPORT_RE)].length;
@@ -2563,18 +2567,11 @@ async function main() {
   violations.push(...state.rule64);
   violations.push(...(await checkRule65()));
   violations.push(...state.rule66);
-  const rule69Baseline = baseline.rule69_vercelPlatformAccessByFile ?? {};
-  for (const file of new Set([...state.rule69.keys(), ...Object.keys(rule69Baseline)])) {
-    const now = state.rule69.get(file) ?? 0;
-    const was = rule69Baseline[file] ?? 0;
-    if (now === was) continue;
+  for (const [file, count] of state.rule69) {
     violations.push({
       rule: 69,
       file,
-      message:
-        now > was
-          ? `reads \`VERCEL*\` environment variables or imports \`#compiled/@vercel/*\` or \`#platform/vercel/*\` in ${now} place${now === 1 ? "" : "s"} (baseline: ${was}). Vercel platform knowledge lives in \`packages/eve/src/platform/\` so eve can run on other hosts. Read platform facts through \`currentPlatform()\` from \`#platform/current.js\`, or add the fact to a platform port and its Vercel implementation.`
-          : `reads \`VERCEL*\` environment variables or imports \`#compiled/@vercel/*\` or \`#platform/vercel/*\` in ${now} place${now === 1 ? "" : "s"}, fewer than its baseline (${was}). Lower \`rule69_vercelPlatformAccessByFile\` in scripts/guard-invariants-baseline.json.`,
+      message: `reads \`VERCEL*\` environment variables or imports \`#compiled/@vercel/*\` or \`#platform/vercel/*\` in ${count} place${count === 1 ? "" : "s"}. Vercel platform knowledge lives in \`packages/eve/src/platform/\` so eve can run on other hosts. Read platform facts through \`currentPlatform()\` from \`#platform/current.js\` or a \`#platform/<port>.js\` accessor, or add the fact to a platform port and its Vercel implementation.`,
     });
   }
 

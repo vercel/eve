@@ -3,7 +3,7 @@ import { currentPlatform } from "#platform/current.js";
 import type { MemoryDocumentBackend } from "#public/memory/file/backend.js";
 import { inMemory } from "#public/memory/file/backends/in-memory.js";
 import { lazyBackend } from "#public/memory/file/backends/lazy.js";
-import { vercelBlob } from "#public/memory/file/backends/vercel-blob.js";
+import { platformStorage } from "#platform/storage.js";
 
 interface VercelBlobCredentials {
   readonly storeId?: string;
@@ -33,7 +33,7 @@ function selectDefaultFileMemoryBackend(
 ): MemoryDocumentBackend {
   if (probes.isDeployedOnVercel()) {
     const credentials = probes.vercelBlobCredentials();
-    if (credentials !== undefined) return vercelBlob(credentials);
+    if (credentials !== undefined) return platformStorage().hostedDocumentBackend(credentials);
     throw new Error(
       "fileMemory() requires Vercel Blob storage. Set up EVE_MEMORY_BLOB_STORE_ID with `/add memory/file` in eve dev or `eve integration setup file-memory`, then redeploy. Alternatively, pass fileMemory({ backend }).",
     );

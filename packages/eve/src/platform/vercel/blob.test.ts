@@ -3,7 +3,7 @@ import { Headers } from "undici";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MemoryDocumentConflictError } from "#public/memory/file/backend.js";
-import { vercelBlob } from "#public/memory/file/backends/vercel-blob.js";
+import { vercelBlob } from "#platform/vercel/blob.js";
 
 vi.mock("#compiled/@vercel/blob/index.js", () => ({
   BlobPreconditionFailedError: class BlobPreconditionFailedError extends Error {},
