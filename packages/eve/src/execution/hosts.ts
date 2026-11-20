@@ -29,9 +29,19 @@ export type DeliveryAddress =
   | { readonly session: string | SessionInboxAddress }
   | { readonly signIn: string };
 
+export interface DurableRun {
+  readonly runId: string;
+  readonly status: string;
+  readonly createdAt: Date;
+  readonly expiredAt: Date | undefined;
+  readonly attributes: Readonly<Record<string, string | undefined>>;
+}
+
 export interface DurableHost {
   readonly name: string;
   deliver(to: DeliveryAddress, payload: unknown): Promise<void>;
+  deploymentId(): Promise<string>;
+  findRun(runId: string): Promise<DurableRun | undefined>;
   runStatus(runId: string): Promise<string>;
   cancelRun(runId: string, reason: string): Promise<void>;
   readonly lineStore: SessionLineStore;
@@ -75,6 +85,14 @@ function durableHostFor(id: string): DurableHost {
 
 export function installedDurableHost(): DurableHost | undefined {
   return hosts().durable;
+}
+
+export function requireDurableHost(): DurableHost {
+  const { durable } = hosts();
+  if (durable !== undefined) return durable;
+  throw new Error(
+    "eve needs durable execution here, but no durable host is installed in this process. The Workflow runtime installs it when eve serves routes or runs workflow steps.",
+  );
 }
 
 export function sessionSignInCallbacks(sessionId: string): SignInCallbacks | undefined {

@@ -1,6 +1,7 @@
 import type { World } from "#compiled/@workflow/world/index.js";
 import { installWorkflowDeploymentId } from "#execution/install-workflow-deployment-id.js";
 import { closeWorkflowWorld, installWorkflowWorld } from "#execution/install-workflow-world.js";
+import { installWorkflowHost } from "#execution/workflow-host/host.js";
 import { applyWorkflowSpecVersionDefault } from "#internal/workflow/spec-version-default.js";
 import { eveRuntime, type EveRuntime } from "#runtime/eve-runtime.js";
 
@@ -23,6 +24,7 @@ export async function bootEve(input: EveBootInput): Promise<EveRuntime> {
   }
   const world = await input.createWorld();
   await installWorkflowWorld({ packageName: input.configuredWorld, world });
+  installWorkflowHost();
   runtime.onClose(closeWorkflowWorld);
   return runtime;
 }

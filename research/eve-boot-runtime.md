@@ -55,8 +55,8 @@ After boot, state is reached through globals:
   durable hosts, the runtime-session default (compiled artifacts and the agent bundle cache), the
   instrumentation runtime and providers, the platform context, and the sandbox runtimes.
 - `getWorld()` has 21 production call sites in 13 files. Only two of those files are the
-  Workflow binding itself; the other 18 calls bypass `DurableHost`, eve's own interface for
-  durable execution.
+  Workflow binding itself. Most of the other 18 are the Workflow engine's own session modules;
+  only invocation ownership and channel ingress are generic code reaching past `DurableHost`.
 - `platformContext()` and the platform capability modules have 51 call sites.
 
 This shape causes four problems:
@@ -80,62 +80,53 @@ This shape causes four problems:
 
 ```ts
 interface EveRuntime {
-  readonly platform: PlatformContext;
-  readonly artifacts: () => RuntimeCompiledArtifactsSource;
-  readonly durable: DurableHost;
-  readonly hosts: HostedRoutes;
-  readonly instrumentation: InstrumentationRuntime;
-  readonly agents: CompiledAgentCache;
+  platform: PlatformContext | undefined;
+  defaultSession: RuntimeSession | undefined;
+  readonly hosts: { routes; streams; durable?: DurableHost };
+  readonly instrumentation: { runtime?: InstrumentationRuntime; providers };
+  onClose(close: () => Promise<void>): void;
   close(): Promise<void>;
 }
 
+function eveRuntime(): EveRuntime;
 async function bootEve(input: EveBootInput): Promise<EveRuntime>;
 ```
 
-`EveBootInput` carries what the generated code gathers today: the agent name, the platform
-implementation, the compiled artifacts input, the durable backend's module and configuration (today
-a Workflow World package), and the instrumentation provider modules. The artifacts input is the
-compiled data and module map in production, and the dev artifacts configuration in `eve dev`.
+Boot happens in stages across generated modules, so the runtime is a container that boot fills in
+rather than a value one call returns. `eveRuntime()` always returns the process runtime and
+creates it on first access, so state registered early is never discarded by a later install. The
+stages run in today's order: `platform/install-runtime` sets `runtime.platform` as the
+bootstrap's first import, before any authored module loads. `bootEveProcess()` sets the queue
+namespace and installs the compiled artifacts. `bootEve()` writes the Workflow SDK's deployment ID
+and spec version, creates the World, installs the Workflow host, and registers the World's close
+with `onClose()`. Workflow bundles import the bootstrap without `bootEve`, so they never load the
+World installation.
 
-`artifacts` resolves the current `RuntimeCompiledArtifactsSource`, the existing `bundled | disk`
-union. In production it always returns the bundled source installed at boot. In `eve dev` it
-returns a disk source and re-reads the snapshot pointer on each call, as routes do today, so dev
-keeps picking up new snapshots. The agent cache stays keyed by source.
-
-`bootEve` performs today's steps in today's order, in one function you can read: platform, queue
-namespace, compiled artifacts, the Workflow SDK's deployment ID and spec version, durable host,
-instrumentation, and hosted routes. The platform comes first because installing the deployment ID
-reads it. Rule 33 only requires the queue namespace before anything that produces queue messages.
-`close()` replaces the shutdown hooks that are scattered across plugins today.
+`defaultSession` holds the compiled artifacts and agent caches outside a scoped session. In
+`eve dev` routes still resolve a disk source that re-reads the snapshot pointer on each call, so
+dev keeps picking up new snapshots. Rule 33 only requires the queue namespace before anything
+that produces queue messages.
 
 ### Durable execution stays behind `DurableHost`
 
 "World" is the Workflow SDK's name for its storage, queue, hooks, and streams backend. eve doesn't
 adopt it. `bootEve` creates the World, and the Workflow binding wraps it in a `DurableHost`, the
-eve-owned interface for delivery, run status, cancellation, the session line store, step attempts,
-and the callback URL. `EveRuntime` exposes only `durable`.
+eve-owned interface for delivery, run lookup and status, cancellation, the current deployment ID,
+the session line store, step attempts, and the callback URL.
 
-Today 18 calls to `getWorld()` in 11 files outside the binding reach past `DurableHost`. Among
-them are session-inbox ownership and resume, the session timeout and handoff steps, prewarm, the
-legacy-session steps, invocation ownership, and channel dispatch. They move onto `DurableHost`,
-which grows only by the operations they actually use. Afterwards only the Workflow binding
-(`execution/workflow-host/` and `install-workflow-world.ts`) touches the SDK's World. That
-also leaves room for a durable engine other than the Workflow SDK.
+Most of today's `getWorld()` calls are not generic code reaching past `DurableHost`; they are the
+Workflow engine itself. Session-inbox ownership and resume, ending stranded sessions, prewarm, the
+session timeout and handoff steps, the legacy-session steps, and `workflow-runtime.ts` use hooks,
+run lookups, run encryption keys, run ID pinning, and World capability flags. Moving them onto
+`DurableHost` would copy the World's interface under another name. Their files can't move into
+`execution/workflow-host/` either: Workflow step IDs derive from the module path, so moving a step
+module breaks runs in flight across a deploy.
 
-### Generated code
-
-The generated boot module only gathers inputs. Data arrives through data imports, as the Nitro host
-rules require, and modules arrive through ordinary imports. Production and `eve dev` each have their
-own boot module, as they have their own bootstrap today. The module calls `bootEve`
-once and installs the result. The runtime plugin and `workflows-handler.mjs` both import this one
-module, so it evaluates once. The runtime plugin registers `runtime.close` on Nitro's `close` hook.
-
-### Entry points and the one holder
-
-Nitro calls route handlers, the Workflow runtime calls steps with serialized input, and
-OpenTelemetry calls span hooks. None of them can pass an eve value, so one holder remains:
-`installEveRuntime(runtime)` and `eveRuntime()`. It is the only way a call from outside reaches the
-value boot produced.
+So the boundary is drawn around the engine instead. The binding directories and the named engine
+modules may use the World. Generic code reaches durable execution through `requireDurableHost()`,
+which grows only by eve-level operations its callers need: `findRun()` for invocation ownership and
+`deploymentId()` for channel ingress. Rule 71 enforces the boundary, and a second durable engine
+replaces the binding and those engine modules together.
 
 Only entry modules read the holder: route handlers, Workflow step and flow entries, Nitro plugin
 functions, and CLI commands. Each reads it once and passes the runtime, or the part of it a callee
@@ -144,7 +135,7 @@ needs, to everything below.
 | Read today                                                | Read after                            |
 | --------------------------------------------------------- | ------------------------------------- |
 | `platformContext()`                                       | `runtime.platform`                    |
-| `getWorld()`                                              | `runtime.durable`                     |
+| `getWorld()` outside the Workflow engine                  | `requireDurableHost()`                |
 | hosted routes registry                                    | `runtime.hosts`                       |
 | runtime-session compiled artifacts and agent bundle cache | `runtime.artifacts`, `runtime.agents` |
 | instrumentation runtime and providers                     | `runtime.instrumentation`             |
@@ -152,7 +143,7 @@ needs, to everything below.
 ### Ambient state that stays
 
 - **The Workflow SDK's World global.** The SDK reads its World internally, so `bootEve` calls
-  `setWorld` as an adapter. eve's own code uses `runtime.durable`, and only the Workflow binding
+  `setWorld` as an adapter. Generic eve code uses `DurableHost`, and only the Workflow engine
   sees the World.
 - **Workflow SDK configuration through env vars.** The queue namespace, deployment ID, and spec
   version are SDK inputs. `bootEve` writes them after installing the platform and before creating
@@ -191,7 +182,8 @@ it at the start of the command.
 - Generated code carries data only through `text:` and `bytes:` imports.
 - The platform is installed before the deployment ID, which reads it.
 - The queue namespace is set before anything that produces queue messages (rule 33).
-- Only the Workflow binding calls `getWorld()` or `setWorld()`. A guard rule enforces this.
+- Only the Workflow engine (the binding and the named engine modules) calls `getWorld()` or
+  `setWorld()`. Rule 71 enforces this.
 - Leaf modules import `EveRuntime` as a type only, so the runtime's implementation stays out of
   extension bundles.
 
@@ -199,12 +191,11 @@ it at the start of the command.
 
 Each step is an internal refactor with a patch changeset, and existing tests keep passing.
 
-1. Add `EveRuntime` and a `bootEve` facade that runs today's installers in today's order. The
-   generated boot module calls it. Behavior is unchanged, and the order becomes explicit.
-2. Move each slot into the runtime value, one PR per slot: platform, instrumentation, hosted
-   routes, compiled artifacts and the agent cache, then move the remaining `getWorld()` callers
-   onto `DurableHost`, so only the Workflow binding touches the SDK's World. Each PR deletes a
-   `Symbol.for` slot.
+1. Add `EveRuntime`, `bootEveProcess`, and `bootEve`, called by the generated boot modules in
+   today's order. The platform install stays the bootstrap's first import.
+2. Move each slot onto the runtime, one PR per slot: platform, instrumentation, hosts, and the
+   default runtime session. Then route generic durable access through `DurableHost` and add rule 71
+   so only the Workflow engine touches the SDK's World.
 3. Read the runtime once at each entry point and pass it down to route handlers, steps, plugins,
    the harness kernel config, and tracing.
 4. Make definitions inert and bind auth strategies when eve resolves them.
@@ -215,9 +206,6 @@ Each step is an internal refactor with a patch changeset, and existing tests kee
 
 - Which paths, if any, evaluate authored definitions and serve requests in the same process
   without going through the generated boot module? Each one needs to call `bootEve` itself.
-- Some of today's `getWorld()` callers run inside Workflow steps that the SDK invokes. They reach
-  `runtime.durable` through the holder at step entry. The migration needs to confirm that each of
-  them has an entry to read from.
 - The public surface still uses the SDK's name: the experimental
   `defineAgent({ experimental: { workflow: { world } } })` option, the exported
   `AgentWorkflowWorldDefinition` type, and about 105 lines across 18 docs pages, including concept

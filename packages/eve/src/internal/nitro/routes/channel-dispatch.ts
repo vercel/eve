@@ -24,7 +24,7 @@ import { traceChannelRequest } from "#internal/nitro/routes/channel-request-inst
 import { resolveNitroChannelRuntimeBundle } from "#internal/nitro/routes/runtime-stack.js";
 import { createRouteInvokeTool } from "#internal/nitro/routes/route-invoke-tool.js";
 import { withLocalDevRequestScope } from "#runtime/local-dev-capability.js";
-import { getWorld } from "#internal/workflow/runtime.js";
+import { requireDurableHost } from "#execution/hosts.js";
 import { platformContext } from "#platform/context.js";
 
 const log = createLogger("channel.dispatch");
@@ -248,7 +248,7 @@ async function resolveAcceptedDeploymentId(
   if (config.kind === "development" && process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV] === undefined) {
     return undefined;
   }
-  return validateDeploymentId(await (await getWorld()).getDeploymentId());
+  return validateDeploymentId(await requireDurableHost().deploymentId());
 }
 
 function validateDeploymentId(deploymentId: string): string {

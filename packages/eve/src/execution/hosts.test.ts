@@ -69,6 +69,8 @@ function durableHost(name: string): DurableHost {
           `inbox ${typeof to.session === "string" ? to.session : to.session.sessionId}`,
         );
     },
+    deploymentId: async () => "dpl_durable",
+    findRun: async () => undefined,
     runStatus: async (runId) => {
       if (runId === "run-gone") throw new HookNotFoundError(runId);
       if (runId === "run-unreadable") throw new Error("the World is down");
