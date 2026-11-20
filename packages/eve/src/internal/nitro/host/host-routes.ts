@@ -10,7 +10,7 @@ import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import type { ChannelRouteMethod } from "#public/definitions/channel.js";
 import { EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN } from "#protocol/routes.js";
 import { connectionEventRoute } from "#runtime/connections/events/path.js";
-import { createVercelScheduleName } from "#platform/vercel/schedule-name.js";
+import { platformBuildOutput } from "#platform/build-output.js";
 import type { ScheduleRegistration } from "#runtime/schedules/register.js";
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
 import { resolveWorkflowModulePath } from "#internal/application/package.js";
@@ -25,10 +25,7 @@ import {
   ROUTE_CONFIG_ID,
 } from "#internal/nitro/host/route-handlers.js";
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
-import {
-  EVE_SCHEDULE_COLLECTION_CONSUMER_ROUTE_PATH,
-  hasVercelScheduleCollections,
-} from "#internal/schedules/consumer-route.js";
+import { EVE_SCHEDULE_COLLECTION_CONSUMER_ROUTE_PATH } from "#internal/schedules/consumer-route.js";
 import type { WorkflowArtifacts } from "#internal/workflow-bundle/builder.js";
 import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#internal/workflow-bundle/flow-route.js";
 import { usesParentDevelopmentWorkflowWorld } from "#internal/workflow/development-world-protocol.js";
@@ -125,7 +122,7 @@ export function createHostRouteTable(input: HostRouteTableInput): HostRouteTable
       path: EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN,
     });
   }
-  if (!development && input.vercel && hasVercelScheduleCollections(manifest)) {
+  if (!development && input.vercel && platformBuildOutput().hasScheduleCollections(manifest)) {
     routes.push({
       kind: "schedule-consumer",
       method: "POST",
@@ -145,7 +142,7 @@ export function createHostRouteTable(input: HostRouteTableInput): HostRouteTable
 
   const scheduleTasks = (development ? [] : input.scheduleRegistrations).map((task) => ({
     ...task,
-    nitroTaskName: createVercelScheduleName({
+    nitroTaskName: platformBuildOutput().scheduleTaskName({
       agentName: input.vercelService ? manifest.config.name : undefined,
       scheduleId: task.scheduleId,
     }),
@@ -315,7 +312,7 @@ export async function renderHostRoutes(
           `route${route.path}`,
           renderHostHandler({
             handlerExport: "handleScheduleCollectionConsumer",
-            modulePath: "src/internal/nitro/routes/schedule-collection-consumer.ts",
+            modulePath: platformBuildOutput().scheduleConsumerModulePath(),
           }),
           { method: route.method, route: route.path },
         );

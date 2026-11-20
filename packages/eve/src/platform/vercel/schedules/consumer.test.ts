@@ -48,11 +48,10 @@ vi.mock("#compiled/@vercel/schedules/index.js", () => ({
   },
 }));
 
-const { createScheduleCollectionConsumer } =
-  await import("#internal/nitro/routes/schedule-collection-consumer.js");
+const { createScheduleCollectionConsumer } = await import("#platform/vercel/schedules/consumer.js");
 const { EVE_SCHEDULE_CONSUMER_MAX_DELIVERIES } =
   await import("#internal/schedules/consumer-route.js");
-const { PermanentScheduleMessageError } = await import("#internal/schedules/verify-delivery.js");
+const { PermanentScheduleMessageError } = await import("#internal/schedules/permanent-error.js");
 const { dispatchScheduledOccurrence } = await vi.importActual<
   typeof import("#runtime/schedules/dispatch-occurrence.js")
 >("#runtime/schedules/dispatch-occurrence.js");

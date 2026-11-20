@@ -1,3 +1,4 @@
+import { PermanentScheduleMessageError } from "#internal/schedules/permanent-error.js";
 import type { Schedule as VercelSchedule } from "#compiled/@vercel/schedules/index.js";
 import { z } from "#compiled/zod/index.js";
 
@@ -23,8 +24,6 @@ const queueMessageSchema = z.looseObject({
 });
 
 export type VerifiedScheduleMessage = z.infer<typeof queueMessageSchema>;
-
-export class PermanentScheduleMessageError extends Error {}
 
 export function expectScheduleQueueMessage(value: unknown): VerifiedScheduleMessage {
   let json: string | undefined;

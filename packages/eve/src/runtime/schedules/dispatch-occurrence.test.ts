@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "#compiled/zod/index.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
-import { vercelScheduleProvider } from "#public/schedules/providers/vercel.js";
+import { vercelScheduleProvider } from "#platform/vercel/schedules/provider.js";
 import {
   defineDynamicSchedules,
   type DynamicSchedulesRunArgs,

@@ -1306,7 +1306,10 @@ const VERCEL_PLATFORM_ACCESS_DIRS = [
   "packages/eve/src/extensions/custom-skills/extension/",
   "packages/eve/src/computer-use/extension/",
 ];
-const VERCEL_PUBLIC_ENTRY_FILES = new Set(["packages/eve/src/public/agents/vercel-oidc.ts"]);
+const VERCEL_PUBLIC_ENTRY_FILES = new Set([
+  "packages/eve/src/public/agents/vercel-oidc.ts",
+  "packages/eve/src/public/experimental/schedules/vercel.ts",
+]);
 const VERCEL_ENV_READ_RE = /\benv\.VERCEL\w*|["']VERCEL(?:_[A-Z0-9]+)*["']/g;
 const VERCEL_PLATFORM_IMPORT_RE =
   /["'](?:#compiled\/@vercel\/(?!agent-runs\/|otel\/)[^"']+|[^"']*(?:#|\/)platform\/vercel\/[^"']+)["']/g;

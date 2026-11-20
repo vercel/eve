@@ -25,6 +25,7 @@ import { createHostPlugins } from "#internal/nitro/host/host-plugins.js";
 import { type HostNitroRoutes, renderHostRoutes } from "#internal/nitro/host/host-routes.js";
 import type { HostRuntimePlugin, HostSpec } from "#internal/nitro/host/host-spec.js";
 import { createInstrumentationEntry } from "#internal/nitro/host/instrumentation-entry.js";
+import { platformBuildOutput } from "#platform/build-output.js";
 import {
   createRuntimePluginSource,
   EVE_RUNTIME_PLUGIN_ID,
@@ -214,7 +215,6 @@ function toNitroConfig(
 
 const EVE_RUNTIME_PLUGIN_PATHS = {
   "connection-drain": "src/internal/nitro/host/connection-drain-plugin.ts",
-  "local-schedules": "src/internal/nitro/host/local-schedules-runtime-plugin.ts",
   "sandbox-shutdown": "src/internal/nitro/host/sandbox-shutdown-plugin.ts",
 } as const;
 
@@ -232,6 +232,8 @@ function resolveRuntimePluginPath(
       return SKILL_FILES_PLUGIN_ID;
     case "timezone-schedules":
       return TIMEZONE_SCHEDULES_PLUGIN_ID;
+    case "local-schedules":
+      return resolvePackageSourceFilePath(platformBuildOutput().localSchedulesPluginModulePath());
     default:
       return resolvePackageSourceFilePath(EVE_RUNTIME_PLUGIN_PATHS[plugin]);
   }

@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { Schedule as VercelSchedule } from "@vercel/schedules";
 
+import { PermanentScheduleMessageError } from "#internal/schedules/permanent-error.js";
 import {
   expectScheduleQueueMessage,
-  PermanentScheduleMessageError,
   verifyScheduleDelivery,
-} from "#internal/schedules/verify-delivery.js";
+} from "#platform/vercel/schedules/verify-delivery.js";
 import { deriveEveScheduleQueueTopic } from "#runtime/schedules/queue-namespace.js";
 
 const application = "test-agent";

@@ -8,12 +8,12 @@ import { SchedulesApiError, SchedulesClient } from "#compiled/@vercel/schedules/
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
 import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runtime-artifacts.js";
 import { EVE_SCHEDULE_CONSUMER_MAX_DELIVERIES } from "#internal/schedules/consumer-route.js";
+import { PermanentScheduleMessageError } from "#internal/schedules/permanent-error.js";
 import {
   expectScheduleQueueMessage,
-  PermanentScheduleMessageError,
   verifyScheduleDelivery,
   type VerifiedScheduleMessage,
-} from "#internal/schedules/verify-delivery.js";
+} from "#platform/vercel/schedules/verify-delivery.js";
 import type {
   DynamicSchedulesDefinition,
   ScheduleOccurrenceIdentity,
@@ -21,7 +21,7 @@ import type {
 import {
   readVercelScheduleClientOptions,
   VERCEL_SCHEDULES_CLIENT_HEADERS,
-} from "#public/schedules/providers/vercel.js";
+} from "#platform/vercel/schedules/provider.js";
 import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { dispatchScheduledOccurrence } from "#runtime/schedules/dispatch-occurrence.js";

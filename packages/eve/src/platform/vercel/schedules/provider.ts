@@ -5,7 +5,7 @@ import type {
 } from "#compiled/@vercel/schedules/index.js";
 
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
-import { isVercelSchedulesDevEnvironment } from "#internal/schedules/dev-environment.js";
+import { isVercelSchedulesDevEnvironment } from "#platform/vercel/schedules/dev-environment.js";
 import type {
   ScheduleExpression,
   SchedulePage,

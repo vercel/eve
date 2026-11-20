@@ -5,11 +5,11 @@ import {
   createDevelopmentGenerationArtifactsSource,
   createDevelopmentNitroArtifactsConfig,
 } from "#internal/nitro/host/artifacts-config.js";
-import { createScheduleCollectionConsumer } from "#internal/nitro/routes/schedule-collection-consumer.js";
+import { createScheduleCollectionConsumer } from "#platform/vercel/schedules/consumer.js";
 import {
   createEveScheduleQueueTrigger,
   hasVercelScheduleCollections,
-} from "#internal/schedules/consumer-route.js";
+} from "#platform/vercel/schedules/routing.js";
 import { DEVELOPMENT_WORKER_APP_ROOT_ENV } from "#internal/workflow/development-world-protocol.js";
 import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
 

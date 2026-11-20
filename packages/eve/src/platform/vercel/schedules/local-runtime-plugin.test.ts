@@ -19,11 +19,11 @@ vi.mock("#internal/nitro/dev-runtime-artifacts.js", () => ({
   readDevelopmentRuntimeArtifactsSnapshotRoot: mocks.pointer,
 }));
 vi.mock("#runtime/loaders/manifest.js", () => ({ loadCompiledManifest: mocks.manifest }));
-vi.mock("#internal/nitro/routes/schedule-collection-consumer.js", () => ({
+vi.mock("#platform/vercel/schedules/consumer.js", () => ({
   createScheduleCollectionConsumer: () => ({ handler: async () => {}, retry: () => undefined }),
 }));
 
-import installLocalSchedulesRuntimePlugin from "./local-schedules-runtime-plugin.js";
+import installLocalSchedulesRuntimePlugin from "./local-runtime-plugin.js";
 
 afterEach(() => {
   vi.useRealTimers();

@@ -14,7 +14,6 @@ import type { PreparedApplicationHost } from "#internal/nitro/host/types.js";
 import type { HostRuntime } from "#internal/nitro/host/runtime-plugin.js";
 import { platformBuildOutput } from "#platform/build-output.js";
 import type { PlatformNitroOptions } from "#platform/types.js";
-import { usesLocalVercelSchedules } from "#internal/schedules/consumer-route.js";
 import type { AgentWorkflowWorldDefinition } from "#shared/agent-definition.js";
 
 export type HostMode =
@@ -95,7 +94,9 @@ export function createHostSpec(
   const runtimePlugins: HostRuntimePlugin[] = [
     ...(development ? [] : (["skill-files"] as const)),
     ...(instrumented ? (["instrumentation"] as const) : []),
-    ...(development && usesLocalVercelSchedules(manifest) ? (["local-schedules"] as const) : []),
+    ...(development && platformBuildOutput().usesLocalSchedules(manifest)
+      ? (["local-schedules"] as const)
+      : []),
     ...(!development &&
     preset !== "vercel" &&
     routes.scheduleTasks.some((task) => task.timezone !== undefined)

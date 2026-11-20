@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { vercelScheduleProvider } from "#public/schedules/providers/vercel.js";
+import { vercelScheduleProvider } from "#platform/vercel/schedules/provider.js";
 import type { ScheduleProviderContext } from "#runtime/schedules/provider-types.js";
 
 const oidcToken = `eyJhbGciOiJSUzI1NiJ9.${Buffer.from(

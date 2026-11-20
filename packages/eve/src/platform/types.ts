@@ -1,7 +1,9 @@
 import type { CurrentVercelProject } from "#channel/auth/types.js";
+import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import type { prewarmAppSandboxes } from "#execution/sandbox/prewarm.js";
 import type { HostRouteTable } from "#internal/nitro/host/host-routes.js";
 import type { createEveVercelOptions } from "#platform/vercel/build-output-config.js";
+import type { ScheduleProvider } from "#public/schedules/subscription.js";
 import type { SpanProcessor } from "#tracing/eve/otel-configuration.js";
 
 export type DeploymentEnvironmentKind = "development" | "preview" | "production";
@@ -67,6 +69,17 @@ export interface PlatformBuildOutput {
   nitroOptions(input: PlatformNitroOptionsInput): PlatformNitroOptions;
   normalizeServiceOutput(outputDir: string, routes: HostRouteTable): Promise<void>;
   prewarmSandboxes(input: PlatformSandboxPrewarmInput): Promise<boolean>;
+  usesLocalSchedules(manifest: Pick<CompiledAgentManifest, "scheduleCollections">): boolean;
+  hasScheduleCollections(manifest: {
+    readonly scheduleCollections?: readonly { readonly providerKind: string }[];
+  }): boolean;
+  scheduleTaskName(input: { readonly agentName?: string; readonly scheduleId: string }): string;
+  scheduleConsumerModulePath(): string;
+  localSchedulesPluginModulePath(): string;
+}
+
+export interface PlatformSchedules {
+  defaultProvider(): ScheduleProvider;
 }
 
 export interface Platform {
