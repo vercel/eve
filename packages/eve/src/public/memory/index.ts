@@ -14,7 +14,7 @@ import {
   EVE_PUBLIC_ROUTE_PREFIX_ENV,
   normalizePublicRoutePrefix,
 } from "#shared/public-route-prefix.js";
-import { resolveVercelProjectIdFromEnvironment } from "#shared/vercel-project.js";
+import { currentPlatform } from "#platform/current.js";
 import type { ToolDefinition } from "#tools/definition.js";
 
 /**
@@ -236,7 +236,8 @@ export function defineMemory(definition: MemoryDefinition): DefinedMemory {
  * local application roots do not share memory.
  */
 export function defaultNamespace(context: MemoryNamespaceContext): string {
-  const projectId = resolveVercelProjectIdFromEnvironment();
+  const { deployment } = currentPlatform();
+  const projectId = deployment.projectId();
   if (projectId === undefined) {
     return JSON.stringify([
       "eve-memory-default-namespace-v1",
@@ -247,13 +248,12 @@ export function defaultNamespace(context: MemoryNamespaceContext): string {
     ]);
   }
 
-  const environment =
-    process.env.VERCEL_TARGET_ENV?.trim() || process.env.VERCEL_ENV?.trim() || "production";
+  const environment = deployment.environmentName() ?? "production";
   const previewIdentity =
     environment === "preview"
-      ? process.env.VERCEL_GIT_COMMIT_REF?.trim() ||
-        process.env.VERCEL_DEPLOYMENT_ID?.trim() ||
-        process.env.VERCEL_URL?.trim() ||
+      ? deployment.build()?.gitBranch ||
+        deployment.deploymentId() ||
+        deployment.deploymentHost()?.trim() ||
         "unknown-preview"
       : null;
   const publicRoutePrefix =

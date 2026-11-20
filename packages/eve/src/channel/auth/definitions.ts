@@ -945,10 +945,8 @@ function resolveCurrentVercelProject(
   const projectId = process.env.VERCEL_PROJECT_ID?.trim();
   if (projectId === undefined || projectId.length === 0) return undefined;
 
-  const environment = process.env.VERCEL_TARGET_ENV?.trim() || process.env.VERCEL_ENV?.trim();
-  return environment === undefined || environment.length === 0
-    ? { projectId }
-    : { environment, projectId };
+  const environment = currentPlatform().deployment.environmentName();
+  return environment === undefined ? { projectId } : { environment, projectId };
 }
 
 /**

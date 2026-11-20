@@ -20,6 +20,23 @@ describe("Vercel platform deployment facts", () => {
     expect(deployment().environmentKind()).toBeUndefined();
   });
 
+  it("names the environment from the target environment before the environment kind", () => {
+    vi.stubEnv("VERCEL_TARGET_ENV", " staging ");
+    vi.stubEnv("VERCEL_ENV", "preview");
+    expect(deployment().environmentName()).toBe("staging");
+
+    vi.stubEnv("VERCEL_TARGET_ENV", "  ");
+    expect(deployment().environmentName()).toBe("preview");
+  });
+
+  it("reports the Vercel host only when VERCEL is set", () => {
+    vi.stubEnv("VERCEL", "1");
+    expect(deployment().host()).toBe("vercel");
+
+    vi.stubEnv("VERCEL", "");
+    expect(deployment().host()).toBe("node");
+  });
+
   it("trims the deployment id and treats a blank one as absent", () => {
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "  dpl_123  ");
     expect(deployment().deploymentId()).toBe("dpl_123");

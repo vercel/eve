@@ -1,4 +1,5 @@
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
+import { currentPlatform } from "#platform/current.js";
 import type { MemoryDocumentBackend } from "#public/memory/file/backend.js";
 import { inMemory } from "#public/memory/file/backends/in-memory.js";
 import { lazyBackend } from "#public/memory/file/backends/lazy.js";
@@ -19,7 +20,7 @@ const ENVIRONMENT_PROBES: DefaultFileMemoryBackendProbes = {
   vercelBlobCredentials: () =>
     credentialsFromEnvironment("EVE_MEMORY_BLOB") ?? credentialsFromEnvironment("BLOB"),
   isEveDevelopment: isEveDevEnvironment,
-  isDeployedOnVercel: () => hasEnvironmentValue("VERCEL"),
+  isDeployedOnVercel: () => currentPlatform().deployment.host() === "vercel",
 };
 const DEVELOPMENT_BACKEND = inMemory();
 
@@ -41,10 +42,6 @@ function selectDefaultFileMemoryBackend(
   throw new Error(
     "fileMemory() requires an explicit backend outside Vercel and eve dev. Pass fileMemory({ backend }).",
   );
-}
-
-function hasEnvironmentValue(name: string): boolean {
-  return Boolean(process.env[name]?.trim());
 }
 
 function credentialsFromEnvironment(

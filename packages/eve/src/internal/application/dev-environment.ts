@@ -21,7 +21,8 @@ export function isEveDevEnvironment(): boolean {
 }
 
 export function isLocalDevelopmentServer(): boolean {
-  if (process.env.VERCEL && currentPlatform().deployment.environmentKind() === "development") {
+  const { deployment } = currentPlatform();
+  if (deployment.host() === "vercel" && deployment.environmentKind() === "development") {
     return true;
   }
   return isEveDevEnvironment();

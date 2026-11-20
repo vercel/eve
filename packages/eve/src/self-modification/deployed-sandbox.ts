@@ -1,3 +1,4 @@
+import { currentPlatform } from "#platform/current.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
 import { JustBashSandbox } from "#sandbox/providers/just-bash.js";
 import { VercelSandbox } from "#sandbox/providers/vercel.js";
@@ -18,7 +19,7 @@ const VERCEL_SANDBOX_REQUIRED_MESSAGE =
 
 export function defineDeployedSelfModificationSandbox(
   config: DeployedSelfModificationConfig,
-  isDeployedOnVercel: () => boolean = () => Boolean(process.env.VERCEL),
+  isDeployedOnVercel: () => boolean = () => currentPlatform().deployment.host() === "vercel",
 ): SandboxSelector {
   if (!isDeployedRuntime()) {
     const environment = JustBashSandbox.environment();

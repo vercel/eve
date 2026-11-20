@@ -1,18 +1,17 @@
+import { currentPlatform } from "#platform/current.js";
 import { joinEveRoutePath } from "#shared/eve-route-path.js";
 import {
   EVE_PUBLIC_ROUTE_PREFIX_ENV,
   normalizePublicRoutePrefix,
 } from "#shared/public-route-prefix.js";
 
-const PRODUCTION_ENVIRONMENT = "production";
 const WORKFLOW_LOCAL_BASE_URL_ENV = "WORKFLOW_LOCAL_BASE_URL";
 
 export function resolveVercelProductionCallbackBaseUrl(): string | null {
-  if (
-    process.env.VERCEL_ENV === PRODUCTION_ENVIRONMENT &&
-    process.env.VERCEL_PROJECT_PRODUCTION_URL
-  ) {
-    return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
+  const { deployment } = currentPlatform();
+  const productionHost = deployment.productionHost();
+  if (deployment.environmentKind() === "production" && productionHost !== undefined) {
+    return `https://${productionHost}`;
   }
   return null;
 }

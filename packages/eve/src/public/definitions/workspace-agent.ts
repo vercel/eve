@@ -1,4 +1,5 @@
 import type { HeadersValue } from "#client/types.js";
+import { currentPlatform } from "#platform/current.js";
 import { type OutboundAuthFn, vercelOidc } from "#public/agents/auth.js";
 import {
   defineRemoteAgent,
@@ -66,7 +67,7 @@ function workspaceAgentRoutePrefix(name: string): string {
   const callerRoutePrefix = normalizePublicRoutePrefix(process.env.EVE_PUBLIC_ROUTE_PREFIX);
   const namespace =
     callerRoutePrefix?.slice(0, callerRoutePrefix.lastIndexOf("/")) ??
-    (process.env.VERCEL_ENV === "development" ? "" : "/eve");
+    (currentPlatform().deployment.environmentKind() === "development" ? "" : "/eve");
   return `${namespace}/${name}`;
 }
 
@@ -75,15 +76,18 @@ function defaultWorkspaceAgentTransport(name: string): WorkspaceAgentTransport {
   return {
     auth: async () => {
       requireVercelWorkspaceEnvironment();
-      return process.env.VERCEL_ENV === "development" ? { headers: {} } : auth();
+      return currentPlatform().deployment.environmentKind() === "development"
+        ? { headers: {} }
+        : auth();
     },
     url: () => {
       requireVercelWorkspaceEnvironment();
-      const development = process.env.VERCEL_ENV === "development";
+      const { deployment } = currentPlatform();
+      const development = deployment.environmentKind() === "development";
       const host =
-        process.env.VERCEL_ENV === "production"
-          ? process.env.VERCEL_PROJECT_PRODUCTION_URL
-          : process.env.VERCEL_URL;
+        deployment.environmentKind() === "production"
+          ? deployment.productionHost()
+          : deployment.deploymentHost();
       if (host === undefined || host.length === 0) {
         throw new Error(
           "The default workspace-agent transport requires VERCEL_URL, or VERCEL_PROJECT_PRODUCTION_URL in production.",
@@ -95,7 +99,7 @@ function defaultWorkspaceAgentTransport(name: string): WorkspaceAgentTransport {
 }
 
 function requireVercelWorkspaceEnvironment(): void {
-  if (process.env.VERCEL) return;
+  if (currentPlatform().deployment.host() === "vercel") return;
   throw new Error(
     "No default workspace-agent transport is available in this environment. Provide transport to defineWorkspaceAgent().",
   );

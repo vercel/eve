@@ -1,10 +1,17 @@
 import type { PlatformDeployment } from "#platform/types.js";
+import { isVercelEnvironment } from "#platform/vercel/environment.js";
+import { resolveVercelProjectIdFromEnvironment } from "#shared/vercel-project.js";
 
 function readTrimmed(name: string): string | undefined {
   return process.env[name]?.trim() || undefined;
 }
 
+function readRaw(name: string): string | undefined {
+  return process.env[name] || undefined;
+}
+
 export const vercelDeployment: PlatformDeployment = {
+  host: () => (isVercelEnvironment() ? "vercel" : "node"),
   environmentKind() {
     const environment = process.env.VERCEL_ENV;
     return environment === "development" ||
@@ -13,6 +20,8 @@ export const vercelDeployment: PlatformDeployment = {
       ? environment
       : undefined;
   },
+  environmentName: () => readTrimmed("VERCEL_TARGET_ENV") ?? readTrimmed("VERCEL_ENV"),
+  projectId: () => resolveVercelProjectIdFromEnvironment(),
   deploymentId: () => readTrimmed("VERCEL_DEPLOYMENT_ID"),
   build() {
     const gitSha = readTrimmed("VERCEL_GIT_COMMIT_SHA");
@@ -23,6 +32,7 @@ export const vercelDeployment: PlatformDeployment = {
     }
     return { deployedAt, gitBranch, gitSha };
   },
-  publicHost: () =>
-    process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL || undefined,
+  productionHost: () => readRaw("VERCEL_PROJECT_PRODUCTION_URL"),
+  deploymentHost: () => readRaw("VERCEL_URL"),
+  publicHost: () => readRaw("VERCEL_PROJECT_PRODUCTION_URL") ?? readRaw("VERCEL_URL"),
 };

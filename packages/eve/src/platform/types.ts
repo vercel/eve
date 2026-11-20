@@ -6,10 +6,17 @@ export interface DeploymentBuild {
   readonly gitSha: string | undefined;
 }
 
+export type DeploymentHost = "vercel" | "node";
+
 export interface PlatformDeployment {
+  host(): DeploymentHost;
   environmentKind(): DeploymentEnvironmentKind | undefined;
+  environmentName(): string | undefined;
+  projectId(): string | undefined;
   deploymentId(): string | undefined;
   build(): DeploymentBuild | undefined;
+  productionHost(): string | undefined;
+  deploymentHost(): string | undefined;
   publicHost(): string | undefined;
 }
 
