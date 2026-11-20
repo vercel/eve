@@ -4,78 +4,42 @@ status: proposed
 last_updated: "2026-11-20"
 ---
 
-# Booting eve into a runtime value
+# Hosts and the eve runtime
 
 ## Summary
 
-eve boots through import-time side effects. Generated modules run in import order and each writes
-its result into a process global: the compiled artifacts, the Workflow World, the instrumentation
-providers, the durable hosts, and now the platform context. Code that runs later (Nitro route
-handlers, Workflow steps, and the definitions in the user's modules) finds that state by reading the
-globals back. Nothing ties them together: the order is a convention of who imports whom, and every
-dependency is invisible in the signatures that use it.
+eve runs on Vercel. The goal is that eve can also run on other hosts. Examples are a self-hosted
+Node server, a Kubernetes cluster, and a different cloud.
 
-The platform layer (#6661, #6687, and #6688) made the cost concrete. Moving Vercel access behind a
-contract still left 51 `platformContext()` lookups spread through leaf code, because no value flows
-from boot to the code that needs it.
+This document gives the internal design for that goal. The design has three parts:
 
-This doc proposes that boot fill one `EveRuntime` value in an explicit order, under a single holder.
-Each slot of that value (platform, hosts and the durable host, instrumentation, the default runtime
-session) has one owner module, and everything else uses the owner's accessor. Definitions stay
-inert until eve first uses them.
+- **The eve runtime.** One value holds the state of the process. Boot fills this value.
+- **The host.** The host tells eve about the deployment and about the capabilities that it has.
+  eve speaks to the host only through a contract that eve owns.
+- **The durable host.** eve uses this interface for durable execution. The Workflow SDK is behind
+  it.
 
-This is an internal change. It adds no public API and changes no observable behavior.
+The design adds no public API. The behavior on Vercel does not change.
 
-## How eve boots today
+## Problem
 
-```
-Nitro server entry
-├─ #eve/runtime plugin
-│  ├─ platform/install-runtime  → setPlatformContext()                 [eve.platform-context]
-│  ├─ <compiled bootstrap>      → queue namespace env var (rule 33)
-│  │                              installBundledCompiledArtifacts()     [runtime-session default]
-│  └─ <world plugin>            → WORKFLOW_DEPLOYMENT_ID and spec-version env vars
-│                                 await createWorld(); setWorld()      [Workflow SDK global]
-├─ instrumentation plugin       → seed, then await register providers  [eve.instrumentation-*]
-├─ local-schedules, timezone-schedules, sandbox-shutdown, skill-files, connection-drain
-└─ routes (loaded lazily) and workflows-handler.mjs, which imports <world plugin> again;
-   ESM's evaluate-once semantics are what keep boot from running twice
-```
+Before this work, eve had these problems:
 
-`eve dev` boots differently. Its bootstrap only sets the queue namespace and never installs bundled
-artifacts. Routes resolve a `disk` artifacts source instead, and `resolveNitroCompiledArtifactsSource`
-re-reads the dev snapshot pointer each time, so the artifacts root can change inside one worker.
-The dev world plugin can also install a client for the parent dev process's World instead of
-creating one.
+1. **Boot order was implicit.** Generated modules ran in import order. Each module wrote its result
+   into a separate process global. Code that ran later read the globals back.
+2. **Generic code knew Vercel.** Generic modules read `VERCEL*` environment variables and imported
+   Vercel SDKs directly.
+3. **One question had three answers.** The question was "what can this host do?". The answers were
+   flag methods, fixed tables keyed by the platform name, and decisions inside the consumers.
+4. **Other hosts were not able to give implementations.** A host that eve does not ship was not
+   able to give its own sandbox, document store, schedules provider, or model credentials.
 
-After boot, state is reached through globals:
+A test made the gaps clear. The test installed a self-hosted host and checked 11 consumers. Before
+the work, 6 checks failed. After the work, all 11 checks pass.
 
-- 19 source files keep process state on `globalThis` under `Symbol.for("eve.*")`. These include the
-  durable hosts, the runtime-session default (compiled artifacts and the agent bundle cache), the
-  instrumentation runtime and providers, the platform context, and the sandbox runtimes.
-- `getWorld()` has 21 production call sites in 13 files. Only two of those files are the
-  Workflow binding itself. Most of the other 18 are the Workflow engine's own session modules;
-  only invocation ownership and channel ingress are generic code reaching past `DurableHost`.
-- `platformContext()` and the platform capability modules have 51 call sites.
+## Design
 
-This shape causes four problems:
-
-1. **Order is implicit.** Correctness depends on import order. Guard rule 33 exists to protect one
-   such ordering: the queue namespace must be set before anything produces queue messages.
-2. **Dependencies are hidden.** A function's signature doesn't say that it needs the World, the
-   hosts, or the platform. Tests have to reset globals between runs: `resetTestRealm` deletes
-   `eve.hosts` and `eve.instrumentation-runtime`.
-3. **Definitions act too early.** `defineDynamicSchedules` picks its default provider, and the
-   self-modification sandbox builds its hosted environment, when the user's module is evaluated,
-   before eve has resolved anything. Nothing can be passed to them at that point.
-4. **Leaf modules reach for implementations.** Globals invite leaf code to import whatever it needs
-   directly. eve's own extensions bundle authored code from source, so those imports end up in
-   their bundles. That is how an early version of #6661 pulled the Vercel Sandbox SDK into the
-   self-modification agent build.
-
-## Proposal
-
-### The runtime value
+### The eve runtime
 
 ```ts
 interface EveRuntime {
@@ -88,64 +52,25 @@ interface EveRuntime {
 }
 
 function eveRuntime(): EveRuntime;
-async function bootEve(input: EveBootInput): Promise<EveRuntime>;
 ```
 
-Boot happens in stages across generated modules, so the runtime is a container that boot fills in
-rather than a value one call returns. `eveRuntime()` always returns the process runtime and
-creates it on first access, so state registered early is never discarded by a later install. The
-stages run in today's order: `platform/install-runtime` sets `runtime.platform` as the
-bootstrap's first import, before any authored module loads. `bootEveProcess()` sets the queue
-namespace and installs the compiled artifacts. `bootEve()` writes the Workflow SDK's deployment ID
-and spec version, creates the World, installs the Workflow host, and registers the World's close
-with `onClose()`. Workflow bundles import the bootstrap without `bootEve`, so they never load the
-World installation.
+The runtime is a container. Boot fills it in stages. `eveRuntime()` returns the runtime of the
+process, and it makes the runtime at the first call. Thus a later stage does not remove the state of
+an earlier stage.
 
-`defaultSession` holds the compiled artifacts and agent caches outside a scoped session. In
-`eve dev` routes still resolve a disk source that re-reads the snapshot pointer on each call, so
-dev keeps picking up new snapshots. Rule 33 only requires the queue namespace before anything
-that produces queue messages.
+Boot does these steps in this sequence:
 
-### Durable execution stays behind `DurableHost`
+1. `platform/install-runtime` sets `runtime.platform`. It is the first import of the generated
+   bootstrap, so it runs before the authored modules load.
+2. `bootEveProcess()` sets the queue namespace. Then it installs the compiled artifacts.
+3. `bootEve()` writes the Workflow deployment ID and the spec version. Then it creates the World,
+   installs the Workflow host, and registers the close of the World with `onClose()`.
 
-"World" is the Workflow SDK's name for its storage, queue, hooks, and streams backend. eve doesn't
-adopt it. `bootEve` creates the World, and the Workflow binding wraps it in a `DurableHost`, the
-eve-owned interface for delivery, run lookup and status, cancellation, the current deployment ID,
-the session event store, step attempts, and the callback URL.
+Workflow bundles import the bootstrap, but they do not import `bootEve()`. Thus they do not load the
+World installation. Nitro calls `runtime.close()` when the server stops.
 
-Most of today's `getWorld()` calls are not generic code reaching past `DurableHost`; they are the
-Workflow engine itself. Session-inbox ownership and resume, ending stranded sessions, prewarm, the
-session timeout and handoff steps, the legacy-session steps, and `workflow-runtime.ts` use hooks,
-run lookups, run encryption keys, run ID pinning, and World capability flags. Moving them onto
-`DurableHost` would copy the World's interface under another name. Their files can't move into
-`execution/workflow-host/` either: Workflow step IDs derive from the module path, so moving a step
-module breaks runs in flight across a deploy.
-
-So the boundary is drawn around the engine instead. The binding directories and the named engine
-modules may use the World. Generic code reaches durable execution through `requireDurableHost()`,
-which grows only by eve-level operations its callers need: `findRun()` for invocation ownership and
-`deploymentId()` for channel ingress. Rule 71 enforces the boundary, and a second durable engine
-replaces the binding and those engine modules together.
-
-### Generated code
-
-The generated boot modules only gather inputs. Data arrives through data imports, as the Nitro host
-rules require, and modules arrive through ordinary imports. The bootstrap imports
-`platform/install-runtime` first and calls `bootEveProcess`. The world plugin calls `bootEve` once;
-the runtime plugin and `workflows-handler.mjs` both import it, so it evaluates once. The runtime
-plugin registers `runtime.close` on Nitro's `close` hook.
-
-### Entry points and the one holder
-
-Nitro calls route handlers, the Workflow runtime calls steps with serialized input, and
-OpenTelemetry calls span hooks. None of them can pass an eve value, so one holder remains:
-`eveRuntime()`, which returns the process runtime and creates it on first access. It is the only
-way a call from outside reaches the value boot built.
-
-### Slot owners
-
-Each slot has one owner module that reads and writes it on the runtime; everything else calls the
-owner's accessor. Rule 72 enforces this.
+Each slot of the runtime has one owner module. Only the owner reads and writes the slot. All other
+code uses the accessor of the owner. Guard rule 72 enforces this.
 
 | Slot                         | Owner                                               | Accessor                                      |
 | ---------------------------- | --------------------------------------------------- | --------------------------------------------- |
@@ -154,79 +79,206 @@ owner's accessor. Rule 72 enforces this.
 | `instrumentation`            | `instrumentation/runtime-global.ts`, `providers.ts` | `getInstrumentationRuntime()`, ...            |
 | `defaultSession`             | `runtime/sessions/runtime-session.ts`               | `getActiveRuntimeSession()`                   |
 
-The accessors stay ambient on purpose. Most of their callers are leaf helpers in tracing,
-instrumentation, auth, and the harness with no constructed context to receive a parameter from.
-Threading the runtime through them would move each lookup up a few frames without adding a
-capability. What changed is that every lookup reads one runtime value that boot built, through a
-contract eve owns.
+The accessors read the runtime directly. eve does not pass the runtime as a parameter, for two
+reasons:
 
-### Ambient state that stays
+- Nitro handlers, Workflow steps, and OpenTelemetry hooks start from outside eve. They cannot
+  receive an eve value as an argument.
+- Most callers are small helpers in tracing, instrumentation, auth, and the harness. They have no
+  context object that can carry the runtime.
 
-- **The Workflow SDK's World global.** The SDK reads its World internally, so `bootEve` calls
-  `setWorld` as an adapter. Generic eve code uses `DurableHost`, and only the Workflow engine
-  sees the World.
-- **Workflow SDK configuration through env vars.** The queue namespace, deployment ID, and spec
-  version are SDK inputs. `bootEve` writes them after installing the platform and before creating
-  the World, which preserves rule 33.
-- **OpenTelemetry's global tracer provider**, for the same reason as the World.
-- **Per-call `AsyncLocalStorage` scopes**, such as the context container that tools and hooks
-  read. They are scoped to a call, not boot state.
-- **Brand symbols on definitions.** They mark what an object is and hold no state.
+### The host contract
 
-### Inert definitions
+A host gives eve a `PlatformContext`. eve owns this type.
 
-Definitions don't resolve platform defaults when the user's module loads. `defineDynamicSchedules`
-was the one that did; its `provider` is now resolved when eve first reads it, at compile time for
-the manifest and at use in the schedules runtime. The others already resolve at use: the default
-sandbox selects its provider when eve prepares it, the workspace transport, memory defaults, and
-Discord relay read the platform when called, and auth strategies read it per request. The deployed
-self-modification sandbox binds its hosted environment at definition because the compiler reads that
-environment to compile the sandbox.
+```ts
+interface PlatformContext {
+  readonly build: PlatformBuild; // build target, output directory
+  readonly deployment: PlatformDeployment; // facts about the deployment, and its scope
+  readonly identity: PlatformIdentity; // workload token and issuer check
+  readonly telemetry: PlatformTelemetry;
+  readonly workspace: PlatformWorkspace; // transport between agents in one deployment
+  readonly capabilities: HostCapabilities;
+  readonly hooks?: PlatformHooks;
+}
+```
 
-### Build and CLI
+The host gives facts as values in code. eve does not read environment variables for a host. The
+Vercel platform reads `VERCEL*` variables because Vercel gives its facts in that form. A
+self-hosted host can read its facts from any source.
 
-Builds don't need a runtime value. The build root resolves the build target and build-output port
-once and passes them to the Nitro host, the route table, and the plugin list as data.
+### Host capabilities
+
+A host declares its capabilities one time:
+
+```ts
+const capabilities = hostCapabilities("1", {
+  documentStore: true,
+  modelCredentials: true,
+});
+```
+
+These rules apply:
+
+- The first argument is the version of the capability API. eve rejects a version that it does not
+  know.
+- eve rejects combinations that are not valid. `sandboxCredentialTransforms` is valid only together
+  with `hostedSandbox`, because the transforms run inside the hosted sandbox.
+- `hostCapabilities()` freezes the result and puts a mark on it. `hasCapability()` rejects an object
+  without this mark. Thus a host cannot write capabilities by hand, and eve can add capabilities in
+  a later version.
+- The mark is a `Symbol.for` key. Thus eve accepts capabilities that a different module graph made.
+
+Consumers ask the host. They do not ask for the name of the platform:
+
+```ts
+if (hasCapability(platformContext(), "hostedSandbox")) return "vercel";
+```
+
+### Hooks
+
+Some capabilities need an implementation. A host gives each implementation as a hook.
+
+| Capability                    | Hook                       | When the host does not declare it                              |
+| ----------------------------- | -------------------------- | -------------------------------------------------------------- |
+| `hostedSandbox`               | `hostedSandbox(options)`   | eve selects Docker or just-bash. A direct call fails.          |
+| `documentStore`               | `documentStore()`          | `fileMemory()` has no default store.                           |
+| `scheduleProvider`            | `scheduleProvider()`       | The author must give `provider` to `defineDynamicSchedules()`. |
+| `modelCredentials`            | `modelCredentials(token?)` | The author must configure an AI Gateway API key.               |
+| `agentRuns`                   | `agentRunsSpanProcessor()` | eve does not export Agent Runs.                                |
+| `sandboxCredentialTransforms` | none                       | Deployed self-modification is not available.                   |
+| `stopsSandboxesOnExit`        | none                       | eve does not stop sandboxes when the server stops.             |
+
+The build-output port is also a hook, `buildOutput`. It has no capability. Without the hook, eve
+uses its built-in port, which can make Vercel output and Node output.
+
+These rules apply to hooks:
+
+- A platform without hooks uses the built-in implementations of eve. The Vercel platform has no
+  hooks. Thus the import graph does not change.
+- A platform with hooks receives each capability from its hook. It receives the capability only if
+  it declares it.
+- If a host declares a capability and has no hook for it, eve stops with an error. The error names
+  the hook that the host must add.
+
+### Deployment scope and memory
+
+The deployment contract gives a scope:
+
+```ts
+interface DeploymentScope {
+  readonly platform: string;
+  readonly id: string;
+  readonly environment: string;
+  readonly variant: string | null;
+}
+```
+
+`scope()` returns `undefined` for a local application. `defaultNamespace()` makes the memory key
+from the scope. Thus two deployments with the same container path do not share memory.
+
+The Vercel scope uses the project ID and the environment. For a preview, the variant is the branch,
+then the deployment ID, then the URL. The memory keys on Vercel do not change. Tests compare the
+full key string.
+
+### Durable execution
+
+"World" is the name that the Workflow SDK uses for its storage, queue, hooks, and streams. eve does
+not use this name in its own interfaces. The Workflow binding wraps the World in a `DurableHost`:
+
+```ts
+interface DurableHost {
+  readonly name: string;
+  deliver(to: DeliveryAddress, payload: unknown): Promise<void>;
+  deploymentId(): Promise<string>;
+  findRun(runId: string): Promise<DurableRun | undefined>;
+  runStatus(runId: string): Promise<string>;
+  cancelRun(runId: string, reason: string): Promise<void>;
+  readonly sessionEvents: SessionEventStore;
+  stepAttempt(): number | undefined;
+  callbackBaseUrl(): string | undefined;
+  createRuntime(config: CreateRuntimeConfig): Runtime;
+  readonly connectionEvents: ConnectionEventOwners;
+}
+```
+
+Generic code uses `requireDurableHost()`. The Workflow engine modules can use the World directly.
+These are the binding directories and a list of named modules, for example the session inbox and
+the session steps. The named modules stay at their current paths. Workflow makes step IDs from the
+module path, so a move breaks the runs that are in progress during a deploy. Guard rule 71 enforces
+this boundary.
+
+### Bundles
+
+eve extensions bundle authored code from source. Rolldown follows each import, and it also follows
+dynamic imports. Thus an import from a contract module puts its target into the bundle.
+
+These rules keep the Vercel SDKs out of extension bundles:
+
+- The contract modules, `platform/context.ts` and `platform/capabilities.ts`, import no
+  implementation.
+- The built-in implementations are in separate capability modules. Only the code that uses a
+  capability imports its module.
+- Only a composition root imports a host module. Examples are the generated bootstrap and the CLI.
+
+### State that stays global
+
+- **The World of the Workflow SDK.** The SDK reads it internally. Only the Workflow engine uses it.
+- **Workflow configuration in environment variables.** The queue namespace, the deployment ID, and
+  the spec version are SDK inputs. `bootEve()` writes them before it creates the World.
+- **The global tracer provider of OpenTelemetry.**
+- **Scopes for one call in `AsyncLocalStorage`.** An example is the context container that tools
+  read.
+- **Brand symbols.** They mark the type of an object. They hold no state.
 
 ## Invariants
 
-- One holder per process, and `bootEve` runs once per process. Each `eve dev` generation runs in its
-  own worker, with its own globals.
-- Only boot and the slot owners reach the runtime. Rule 72 enforces this.
-- New process-wide boot state becomes an `EveRuntime` slot with one owner, not a new
-  `Symbol.for("eve.*")` global. The remaining `eve.*` symbols are per-feature registries, caches,
-  and brands outside this plan.
-- Generated code carries data only through `text:` and `bytes:` imports.
-- The platform is installed before the deployment ID, which reads it.
-- The queue namespace is set before anything that produces queue messages (rule 33).
-- Only the Workflow engine (the binding and the named engine modules) calls `getWorld()` or
-  `setWorld()`. Rule 71 enforces this.
-- Leaf modules import `EveRuntime` as a type only, so the runtime's implementation stays out of
-  extension bundles.
+- One runtime holder exists in each process. Each `eve dev` generation runs in its own worker.
+- Only boot and the slot owners read the runtime holder (rule 72).
+- Generic code does not read `VERCEL*` variables or import Vercel SDKs (rule 69).
+- Code outside `src/platform/` imports only the platform contract and the capability modules
+  (rule 70).
+- Only the Workflow engine calls `getWorld()` or `setWorld()` (rule 71).
+- eve sets the queue namespace before any code makes queue messages (rule 33).
+- eve installs the platform before it reads the deployment ID.
+- A host declares a capability before eve calls its hook.
+- New state for the whole process becomes a runtime slot with one owner. It does not become a new
+  `Symbol.for("eve.*")` global.
 
-## Migration
+## Status
 
-Each step is an internal refactor with a patch changeset, and existing tests keep passing.
+These changes are complete. Each change is internal and has a patch changeset.
 
-1. Add `EveRuntime`, `bootEveProcess`, and `bootEve`, called by the generated boot modules in
-   today's order. The platform install stays the bootstrap's first import.
-2. Move each slot onto the runtime, one PR per slot: platform, instrumentation, hosts, and the
-   default runtime session. Then route generic durable access through `DurableHost` and add rule 71
-   so only the Workflow engine touches the SDK's World.
-3. Dropped: passing the runtime down from entry points. "Slot owners" explains why the
-   accessors stay.
-4. Resolve `defineDynamicSchedules`'s default provider on first use.
-5. Add rule 72 so only boot and the slot owners reach the runtime.
+1. The platform layer and guard rules 69 and 70 (#6661, #6687, #6688).
+2. The boot functions and the runtime slots (#6693).
+3. The durable boundary and guard rule 71 (#6699).
+4. Definitions that resolve defaults at first use, and guard rule 72 (#6700, #6701).
+5. The session event store, `createRuntime` as a method, and contract types in eve terms (#6703,
+   #6704, #6705).
+6. Host capabilities, hooks, and the deployment scope (#6714, #6715, #6716).
+7. A test that installs a self-hosted host and checks 11 consumers (#6717).
+
+## Next steps
+
+1. **Host installation.** The generated bootstrap always installs the Vercel platform. The bootstrap
+   must import a host module that the application selects. Each process that loads eve code must
+   install the host first: the CLI, the framework integrations, the programmatic entries, and the
+   test setup.
+2. **Host selection.** An application must tell eve which host it uses. This is the first public
+   API. Two options are a file in the agent directory and a build option. This decision needs its
+   own review.
+3. **The write side of the session event store.** Steps write session events to the Workflow stream
+   directly. A different durable engine needs a write operation on `SessionEventStore`.
+4. **Session operations for a durable engine.** `createRuntime()` returns the full session
+   runtime of eve. `connectionEvents` is also specific to Workflow. A different engine needs smaller
+   operations: start a session run, continue it, and deliver to it.
 
 ## Open questions
 
-- Which paths, if any, evaluate authored definitions and serve requests in the same process
-  without going through the generated boot module? Each one needs to call `bootEve` itself.
-- The public surface still uses the SDK's name: the experimental
-  `defineAgent({ experimental: { workflow: { world } } })` option, the exported
-  `AgentWorkflowWorldDefinition` type, and about 105 lines across 18 docs pages, including concept
-  pages that describe eve features in terms of World capabilities. Pick one eve name for the
-  concept (for example durable backend, durable engine, or durable host) and rename the
-  experimental config and docs together with the durable-engine work. "World" stays only where
-  users choose an SDK package such as `@workflow/world-postgres`.
-- Cold start hasn't been measured against the boot before this plan.
+- Two different eve versions in one process share the `eve.runtime` holder. A newer version can find
+  a runtime without a slot that it expects. A version in the holder key can prevent this. Is this
+  necessary?
+- The public API uses the word "world" in `experimental.workflow.world` and in about 18 docs pages.
+  Which eve name replaces it?
+- Nobody measured the cold start before and after this work. Is a measurement necessary before the
+  host installation step?
