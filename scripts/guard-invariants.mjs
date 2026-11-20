@@ -245,7 +245,9 @@
  *             gitignored extension copies that builds generate), source
  *             doesn't read `VERCEL*` environment variables, import a vendored
  *             `#compiled/@vercel/*` package, or import `#platform/vercel/*`
- *             directly. The eve-owned `@vercel/agent-runs` library is exempt. Files that predate the rule are baselined per
+ *             directly. The eve-owned `@vercel/agent-runs` library and the
+ *             `@vercel/otel` OpenTelemetry bootstrap run on any host, so they
+ *             are exempt. Files that predate the rule are baselined per
  *             file, and the count must match exactly, so a cleanup lowers it.
  *
  * Baselines for rules with pre-existing violations live in
@@ -1305,7 +1307,7 @@ const VERCEL_PLATFORM_ACCESS_DIRS = [
 ];
 const VERCEL_ENV_READ_RE = /\benv\.VERCEL\w*|["']VERCEL(?:_[A-Z0-9]+)*["']/g;
 const VERCEL_PLATFORM_IMPORT_RE =
-  /["'](?:#compiled\/@vercel\/(?!agent-runs\/)[^"']+|[^"']*(?:#|\/)platform\/vercel\/[^"']+)["']/g;
+  /["'](?:#compiled\/@vercel\/(?!agent-runs\/|otel\/)[^"']+|[^"']*(?:#|\/)platform\/vercel\/[^"']+)["']/g;
 
 /**
  * Counts a file's `VERCEL*` environment reads and vendored Vercel platform imports.

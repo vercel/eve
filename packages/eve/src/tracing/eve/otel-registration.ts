@@ -16,6 +16,7 @@ import { AgentSpanIdGenerator } from "#compiled/@vercel/agent-runs/index.js";
 import type { OtelConfiguration } from "./otel-configuration.js";
 import { type Attributes } from "#compiled/@vercel/agent-runs/index.js";
 import { invocationName } from "#compiled/@vercel/agent-runs/otel.js";
+import { platformTelemetry } from "#platform/telemetry.js";
 export type SamplingOperation = { readonly name: string; readonly attributes?: Attributes };
 
 import {
@@ -111,12 +112,13 @@ class PrivateSpanFilteringProcessor implements SpanProcessor {
     )
       mutableSpan.setAttribute("gen_ai.conversation.id", conversationId);
     const traceSessionId = traceSessionIdFromContext(parentContext);
+    const traceSessionAttribute = platformTelemetry().traceSessionAttribute();
     if (
-      process.env.VERCEL_ENV !== undefined &&
+      traceSessionAttribute !== undefined &&
       traceSessionId !== undefined &&
-      mutableSpan.attributes?.["vercel.session_id"] === undefined
+      mutableSpan.attributes?.[traceSessionAttribute] === undefined
     )
-      mutableSpan.setAttribute("vercel.session_id", traceSessionId);
+      mutableSpan.setAttribute(traceSessionAttribute, traceSessionId);
     const identity = spanIdentity(span);
     if (identity !== undefined) addBounded(this.startedSpans, identity);
     for (const processor of this.processors) processor.onStart(span, parentContext);

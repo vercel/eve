@@ -1,3 +1,5 @@
+import type { SpanProcessor } from "#tracing/eve/otel-configuration.js";
+
 export type DeploymentEnvironmentKind = "development" | "preview" | "production";
 
 export interface DeploymentBuild {
@@ -23,6 +25,11 @@ export interface PlatformDeployment {
 export interface PlatformIdentity {
   token(): Promise<string>;
   ambientToken(): string | undefined;
+}
+
+export interface PlatformTelemetry {
+  traceSessionAttribute(): string | undefined;
+  runtimeSpanProcessor(): SpanProcessor;
 }
 
 export type BuildTarget = "vercel" | "node";

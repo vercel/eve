@@ -69,14 +69,6 @@
     "packages/eve/src/public/memory/file/backends/vercel-blob.ts": 1,
     "packages/eve/src/public/schedules/providers/vercel.ts": 3,
     "packages/eve/src/runtime/connections/principal.ts": 1,
-    "packages/eve/src/self-modification/setup.ts": 1,
-    "packages/eve/src/tracing/eve/content-span-processor.ts": 1,
-    "packages/eve/src/tracing/eve/invoke-tool-span.ts": 1,
-    "packages/eve/src/tracing/eve/otel-declaration.ts": 1,
-    "packages/eve/src/tracing/eve/otel-registration.ts": 2,
-    "packages/eve/src/tracing/eve/profile.ts": 1,
-    "packages/eve/src/tracing/local/agent-trace-span-processor.ts": 1,
-    "packages/eve/src/tracing/local/trace-span-processor.ts": 1,
-    "packages/eve/src/tracing/local/traces.ts": 1
+    "packages/eve/src/self-modification/setup.ts": 1
   }
 }
