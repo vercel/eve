@@ -185,7 +185,7 @@ CI.
     when touching `internal/nitro/`.
 
 Machine-checkable invariants are enforced by `pnpm guard:invariants`, which
-runs in the CI lint job. If the guard fails, fix the violation rather than
+runs in Vercel CI. If the guard fails, fix the violation rather than
 editing the baseline — baselines may only shrink.
 
 ## Research plans
