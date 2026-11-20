@@ -25,7 +25,8 @@
         "!src/extensions/custom-skills/extension/**",
         "!src/computer-use/extension/**"
       ],
-      "outputs": ["$TURBO_EXTENDS$", "docs/**"]
+      "outputs": ["$TURBO_EXTENDS$", "docs/**"],
+      "tags": ["ci", "ci:cpus:4"]
     },
     "build:compiled": {
       "dependsOn": ["^build"],
@@ -81,7 +82,8 @@
       ]
     },
     "test:unit": {
-      "dependsOn": ["build"]
+      "dependsOn": ["build"],
+      "tags": ["$TURBO_EXTENDS$", "ci:cpus:8"]
     },
     "typecheck": {
       "dependsOn": ["$TURBO_EXTENDS$", "build:compiled"],
@@ -97,7 +99,8 @@
         "!src/extensions/git/extension/**",
         "!src/extensions/custom-skills/extension/**",
         "!src/computer-use/extension/**"
-      ]
+      ],
+      "tags": ["$TURBO_EXTENDS$", "ci:cpus:8"]
     },
     "test:integration": {
       "dependsOn": ["build"]

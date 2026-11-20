@@ -9,7 +9,11 @@ import {
   sessionCommandHookToken,
   sessionInboxHookToken,
 } from "#execution/session-inbox/address.js";
-import { lookupSessionOwnerHook, resumeRunnableHook } from "#execution/session-inbox/owner.js";
+import {
+  assertRunnableSessionOwner,
+  lookupSessionOwnerHook,
+  resumeRunnableHook,
+} from "#execution/session-inbox/owner.js";
 import { getHookByToken } from "#internal/workflow/runtime.js";
 import { isObject } from "#shared/guards.js";
 
@@ -55,6 +59,7 @@ export async function resumeLegacyInbox(token: string, command: Command) {
       command,
       isObject(metadata) ? metadata.sessionInboxWireVersion : undefined,
     );
+    await assertRunnableSessionOwner({ runId: target.hook.runId, hook: target.hook });
   }
   const hook = await resumeRunnableHook(target.hook.token, payload);
   return { ownerRunId: hook.runId, sessionId: Promise.resolve(target.sessionId) };

@@ -59,7 +59,6 @@ const TEMPLATES_BY_EXPECTED_DURATION = [
   "personal-agent-template", // 73s, mostly `nuxt build`
   "eve-chat-template", // 49s, mostly `next build`
   "eve-voice-template", // 31s, mostly `next build`
-  "eve-llm-council-template", // 14s
   "slack-company-brain-template", // 11s, `eve build` only
   "eve-data-agent-template", // 7s, `eve build` only
   "eve-discord-agent-template", // 6s
