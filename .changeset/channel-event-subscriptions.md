@@ -2,7 +2,7 @@
 "eve": minor
 ---
 
-Add durable event subscriptions for channels and unify subscription tools across channels and MCP connections:
+Add durable event subscriptions for channels and unify subscription tools across channels and MCP connections.
 
 - Custom channels can define `onEvent` on `defineChannel` to let sessions subscribe, and call `emit(event, input, { id, data })` from route handlers.
 - The model now uses one `subscribe`, `get_subscription`, and `stop_subscription` tool set for both channels and MCP `experimental.events` connections, replacing per-connection `events_get_subscription` and `events_unsubscribe` tools and hiding `events_subscribe_<hash>` behind `subscribe`.

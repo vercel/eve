@@ -435,7 +435,6 @@ function ciEventId(event: GitHubCiPayload): number {
   return event.workflowRunId;
 }
 
-/** Comments the channel never acts on: its own, marked ones, and any bot's. */
 export function isIgnoredInboundComment(
   body: string,
   author: GitHubUser | undefined,

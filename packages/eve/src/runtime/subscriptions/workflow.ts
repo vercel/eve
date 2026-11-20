@@ -1,4 +1,5 @@
 import { createHook, sleep, type HookOptions } from "#compiled/@workflow/core/index.js";
+import { parseJsonObject } from "#shared/json.js";
 import { claimHookOwnership, disposeHook, isHookConflictError } from "#execution/hook-ownership.js";
 import {
   acknowledgeJoinStep,
@@ -27,10 +28,6 @@ const FIRST_CLOSE_RETRY_MS = 5_000;
 const LAST_CLOSE_RETRY_MS = 3_600_000;
 const REMEMBERED_EVENTS = 256;
 
-/**
- * Holds one session's subscription: opens it with its source, joins the key the source names,
- * forwards the events its key run hands it, and closes it when it expires or is retired.
- */
 export async function subscriptionWorkflow(input: {
   readonly binding: SubscriptionBinding;
   readonly serializedContext: Record<string, unknown>;
@@ -39,8 +36,7 @@ export async function subscriptionWorkflow(input: {
   const { binding, serializedContext } = input;
   const hook = createHook<SubscriptionOwnerMessage>({
     token: subscriptionHookToken(binding.id),
-    // The binding is workflow input, so it is already serialized JSON.
-    metadata: binding as unknown as HookOptions["metadata"],
+    metadata: parseJsonObject(binding) as HookOptions["metadata"],
   });
   try {
     await claimHookOwnership(hook);
@@ -72,11 +68,6 @@ export async function subscriptionWorkflow(input: {
   }
 }
 
-/**
- * Fans each event emitted for one key of one source out to the subscriptions holding it, once per
- * event id. Ends when no subscription holds the key. A join is acknowledged once this run holds the
- * subscription, so a join that arrives as the run ends is never mistaken for one that was kept.
- */
 export async function subscriptionKeyWorkflow(input: {
   readonly source: SubscriptionSourceRef;
   readonly key: string;

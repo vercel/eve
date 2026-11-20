@@ -22,15 +22,9 @@ import { defineJsonSchema } from "#tools/schema.js";
 
 import type { Callable } from "./step-catalog.js";
 
-/**
- * The tools that subscribe the conversation to events and manage those subscriptions, whichever
- * source reports them: `subscribe` names a source (a channel or an MCP connection), one of its
- * events and that event's input. A channel that publishes its events, such as GitHub, lists them in
- * the schema; one that only defines `onEvent` takes any event name. A connection lists its events
- * at runtime, so `subscribe` hands the call to that connection's own generated tool, which keeps
- * its sign-in, approval and event catalog check.
- */
-export function subscriptionTools(callable: Callable): ReadonlyMap<string, ToolEntry> {
+export function subscriptionTools(
+  callable: Pick<Callable, "channels" | "connections">,
+): ReadonlyMap<string, ToolEntry> {
   const channels = offeredSubscriptions(callable.channels);
   const connections = callable.connections.filter(
     (connection) => connection.experimental_events !== undefined,
@@ -128,7 +122,6 @@ function subscribeDescription(
   return `${intro}\n\n${sources.join("\n\n")}`;
 }
 
-/** Reports a connection event's `arguments` problems where the model wrote them, in `subscription.input`. */
 function towardSubscribeInput(issue: RouteIssue): RouteIssue {
   const [first, ...rest] = issue.path ?? [];
   return first === "arguments" ? { ...issue, path: ["subscription", "input", ...rest] } : issue;

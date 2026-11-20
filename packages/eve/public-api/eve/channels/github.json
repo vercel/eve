@@ -28,6 +28,7 @@
   "GitHubIssueAction",
   "GitHubIssueEvent",
   "GitHubJsonObject",
+  "GitHubOnEvent",
   "GitHubPostedComment",
   "GitHubPrivateKey",
   "GitHubProgressConfig",

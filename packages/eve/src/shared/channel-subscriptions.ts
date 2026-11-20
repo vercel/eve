@@ -56,27 +56,14 @@ export type ChannelOnEvent = (
   },
 ) => ChannelEventDecision | Promise<ChannelEventDecision>;
 
-/**
- * What one of eve's own channels publishes about the events it emits, so `subscribe` can reject a
- * name or scope the channel never reports. A channel author writes only `onEvent`; a channel eve
- * ships attaches this with {@link withSubscriptionCatalog}.
- */
 export interface ChannelSubscriptionCatalog {
-  /** What the channel reports, for the model deciding to subscribe. */
   readonly description: string;
-  /** The events the channel emits. `subscribe` rejects any other name. */
   readonly events: readonly string[];
-  /**
-   * JSON Schema of the scope the model passes with an event name. A route's `emit` reaches the
-   * subscriptions whose scope equals the scope it passes, compared exactly, so constrain a
-   * case-insensitive value, such as with a lowercase `pattern`, and emit it in that case.
-   */
   readonly inputSchema: JsonObject;
 }
 
 const CATALOG = Symbol.for("eve.channelSubscriptionCatalog");
 
-/** Returns `onEvent` carrying `catalog`, which {@link subscriptionCatalogOf} reads back. */
 export function withSubscriptionCatalog(
   onEvent: ChannelOnEvent,
   catalog: ChannelSubscriptionCatalog,

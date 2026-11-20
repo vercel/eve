@@ -7,10 +7,6 @@ export type FirstPublished<T> =
   | { readonly kind: "ended" }
   | { readonly kind: "abandoned" };
 
-/**
- * Reads the first value a workflow run published to `namespace`. Reports `ended` when the run
- * finished without publishing one, and `abandoned` when none arrives in time or `signal` aborts.
- */
 export async function readFirstPublished<T>(
   runId: string,
   namespace: string,
@@ -35,7 +31,6 @@ export async function readFirstPublished<T>(
   }
 }
 
-/** Reads the first value a workflow run published to `namespace`, or undefined if none arrives in time. */
 export async function readPublishedOutcome<T>(
   runId: string,
   namespace: string,
@@ -46,7 +41,6 @@ export async function readPublishedOutcome<T>(
   return first.kind === "value" ? first.value : undefined;
 }
 
-/** Reads the first published value without waiting for one: undefined when the run has published nothing yet. */
 export async function readPublishedOutcomeNow<T>(
   runId: string,
   namespace: string,

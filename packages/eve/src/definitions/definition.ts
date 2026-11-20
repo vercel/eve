@@ -50,7 +50,6 @@ export type Contribution = {
 
 export interface Route {
   readonly inputSchema: JsonObject;
-  /** Entries only this route reaches: callable as its target, neither listed nor searchable. */
   readonly owns?: readonly HarnessToolDefinition[];
   target(input: unknown): RouteTarget | RouteMiss;
   explain?(entry: HarnessToolDefinition, issues: readonly RouteIssue[]): readonly RouteIssue[];

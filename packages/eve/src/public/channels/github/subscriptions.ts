@@ -21,11 +21,6 @@ const LOWERCASE = "^[^A-Z]+$";
 /** The `onEvent` a GitHub channel takes: the generic one, deciding for each subscription and event. */
 export type GitHubOnEvent = ChannelOnEvent;
 
-/**
- * Every event GitHub delivers, from the maintained `@octokit/webhooks` list. A webhook with an
- * `action` is named `<event>.<action>`, so a bare name stands in the catalog only when no action
- * of it exists.
- */
 const GITHUB_EVENTS: readonly string[] = emitterEventNames.filter(
   (name) => name.includes(".") || !emitterEventNames.some((other) => other.startsWith(`${name}.`)),
 );
@@ -57,14 +52,12 @@ const INPUT_SCHEMA: JsonObject = {
 const DESCRIPTION =
   "GitHub webhook events for repositories where the GitHub App is installed, named `<event>.<action>` (such as `check_suite.completed` or `issue_comment.created`) or `<event>` when there is no action (such as `push`). Pass `{ owner, repo }` in lowercase for repository-wide events, or include `pull` for events tied to one pull request, including its check suites.";
 
-/** The events and scope the GitHub channel publishes, which `subscribe` checks a call against. */
 const GITHUB_SUBSCRIPTION_CATALOG: ChannelSubscriptionCatalog = {
   description: DESCRIPTION,
   events: GITHUB_EVENTS,
   inputSchema: INPUT_SCHEMA,
 };
 
-/** The channel's `onEvent` for an author's, carrying the GitHub catalog; `true` sends the event as a GitHub message. */
 export function githubChannelOnEvent(
   onEvent: GitHubOnEvent | undefined,
 ): ChannelOnEvent | undefined {
@@ -88,25 +81,16 @@ function describeGitHubEvent(event: ChannelEvent): string {
   ].join("\n");
 }
 
-/** One GitHub webhook delivery, named and scoped for subscriptions. */
 export interface GitHubWebhookOccurrence {
   readonly name: string;
   readonly id: string;
   readonly data: JsonObject;
-  /** The scopes subscriptions may hold it under: the repository, and each pull request it concerns. */
   readonly scopes: readonly JsonObject[];
   readonly sender: string | null;
-  /** Whether GitHub reports the sender as a bot account. */
   readonly senderIsBot: boolean;
-  /** Whether the delivery carries text a person wrote: a comment or a review. */
   readonly authored: boolean;
 }
 
-/**
- * Reads a verified webhook delivery as an occurrence for any event. Returns `null` for a delivery
- * that cannot be addressed: no event or delivery header, a body that is not a JSON object, a
- * `ping`, or no repository.
- */
 export function parseGitHubWebhookOccurrence(input: {
   readonly body: string;
   readonly contentType: string | undefined;
@@ -159,13 +143,6 @@ function pullRequestNumbers(payload: JsonObject): number[] {
   return [...numbers];
 }
 
-/**
- * Hands a verified webhook delivery to the sessions subscribed to its event, under the repository
- * and under each pull request it concerns. A comment or review the channel's own App wrote is
- * skipped, so the session's replies never wake it again. `appSlug` is the App's slug from its
- * credentials; with none, a comment or review from any bot account is skipped. Rejects if
- * emitting fails.
- */
 export async function emitGitHubWebhook(input: {
   readonly body: string;
   readonly contentType: string | undefined;

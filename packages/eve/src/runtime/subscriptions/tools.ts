@@ -32,7 +32,6 @@ const STOP_TOOL = "stop_subscription";
 
 export interface OfferedSubscription {
   readonly channelName: string;
-  /** The events and scope the channel reports, when it publishes them; otherwise `subscribe` is free-form. */
   readonly catalog: ChannelSubscriptionCatalog | undefined;
 }
 
@@ -45,10 +44,8 @@ export interface SubscribeInput {
   readonly ttlMs: number | null;
 }
 
-/** The name of the entry only the `subscribe` route reaches, for a subscription to a channel's event. */
 export const CHANNEL_SUBSCRIBE_ENTRY = "eve__subscribe_channel";
 
-/** The channel's own variant of the `subscribe` input's `subscription`. */
 export function channelSubscriptionSchemas(offered: readonly OfferedSubscription[]): JsonObject[] {
   return offered.map(({ channelName, catalog }) => {
     const event: JsonObject =
@@ -87,7 +84,6 @@ export function ttlSchema() {
   };
 }
 
-/** The entry the `subscribe` route sends a channel subscription to. */
 export function channelSubscribeEntry(
   offered: readonly OfferedSubscription[],
 ): HarnessToolDefinition {
@@ -108,7 +104,6 @@ export function channelSubscribeEntry(
   };
 }
 
-/** The model-facing `get_subscription` and `stop_subscription`, for subscriptions of every source. */
 export function subscriptionManagementEntries(): readonly HarnessToolDefinition[] {
   return [
     {
@@ -128,7 +123,6 @@ export function subscriptionManagementEntries(): readonly HarnessToolDefinition[
   ];
 }
 
-/** The channels that define `onEvent`, so a session can subscribe to them, once each. */
 export function offeredSubscriptions(
   channels: readonly Pick<ResolvedChannelDefinition, "name" | "definition">[],
 ): readonly OfferedSubscription[] {
@@ -240,7 +234,6 @@ function ownedByCaller(binding: SubscriptionBinding): void {
   if (binding.executionPrincipal !== scope().executionPrincipal) throw unknownSubscription();
 }
 
-/** Runs the connection's own get or stop, which checks that the caller holds the subscription. */
 async function connectionAction(
   binding: SubscriptionBinding,
   action: typeof EVENT_GET_ACTION | typeof EVENT_STOP_ACTION,

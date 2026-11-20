@@ -87,7 +87,7 @@ const world = vi.hoisted(() => {
     },
     expire: () => expire?.(),
     publishedOwners: [] as string[],
-    outcome: null as unknown as OpenOutcome,
+    outcome: null as OpenOutcome | null,
     open: vi.fn(async (_input: unknown) => world.outcome),
     publishOwner: vi.fn(async (runId: string) => {
       world.publishedOwners.push(runId);

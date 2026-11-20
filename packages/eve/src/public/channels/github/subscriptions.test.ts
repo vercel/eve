@@ -96,7 +96,7 @@ const commentPayload = (body: string, pull = true) =>
       id: 501,
       user: { id: 2, login: "reviewer", type: "User" },
     },
-    issue: { number: 7, ...(pull ? { pull_request: { url: "https://github.test/pulls/7" } } : {}) },
+    issue: { number: 7, pull_request: pull ? { url: "https://github.test/pulls/7" } : undefined },
   });
 
 const scopesOf = (emit: ReturnType<typeof vi.fn<EmitChannelEventFn>>) =>

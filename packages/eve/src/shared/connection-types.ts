@@ -411,7 +411,6 @@ export function supportsInteractiveAuthorization(
 export interface ConnectionToolMetadata {
   readonly annotations?: Record<string, unknown>;
   readonly description: string;
-  /** The MCP event a generated subscribe tool watches; only event actions set it. */
   readonly event?: string;
   readonly inputSchema: Record<string, unknown>;
   readonly name: string;

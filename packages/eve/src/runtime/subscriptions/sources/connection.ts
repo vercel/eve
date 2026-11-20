@@ -123,7 +123,7 @@ export const connectionSource: SubscriptionSourceRuntime = {
   },
 
   async deliver({ ctx, binding, event }) {
-    const delivery = event.data as unknown as ConnectionEventDelivery;
+    const delivery = event.data as ConnectionEventDelivery;
     const resolved = resolveConnectionBinding(ctx, binding);
     if (resolved === undefined) return;
     const { source, connection } = resolved;

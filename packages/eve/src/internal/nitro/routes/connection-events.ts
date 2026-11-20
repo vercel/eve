@@ -11,7 +11,7 @@ import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-
 import { connectionEventDestination } from "#runtime/subscriptions/path.js";
 import { installedDurableHost } from "#execution/hosts.js";
 import { isObject } from "#shared/guards.js";
-import type { JsonValue } from "#shared/json.js";
+import { parseJsonValue } from "#shared/json.js";
 
 export async function handleConnectionEventRequest(
   input: { artifactsConfig: NitroArtifactsConfig; connectionName: string },
@@ -59,10 +59,9 @@ export async function handleConnectionEventRequest(
       const emitted = await owners.emit(
         { kind: "connection", name: input.connectionName },
         delivery.subscriptionId,
-        { id: delivery.deliveryId, data: delivery as unknown as JsonValue, requestTraceContext },
+        { id: delivery.deliveryId, data: parseJsonValue(delivery), requestTraceContext },
       );
       if (emitted) return new Response(null, { status: 202 });
-      // The subscription's owner exists but has not joined its key yet, or is closing: Connect retries.
       if ((await owners.find(origin.bindingId)) !== undefined)
         return new Response(null, { status: 503, headers: { "Retry-After": "5" } });
       return new Response(null, { status: 410 });

@@ -143,7 +143,6 @@ export type ConnectionListing = "listed" | "sign-in" | Error;
 export interface FakeConnection {
   readonly calls: { readonly input: unknown; readonly tool: string }[];
   readonly client: ConnectionClient;
-  /** The calls its event actions ran, as the connection's own tools for each event. */
   readonly eventCalls: { readonly input: unknown; readonly name: string }[];
   readonly definition: ResolvedConnectionDefinition;
   listing: ConnectionListing;
@@ -153,7 +152,6 @@ export interface FakeConnection {
 export function fakeConnection(input: {
   readonly approval?: ResolvedConnectionDefinition["approval"];
   readonly description?: string;
-  /** Makes the connection emit MCP events with these names, each with a generated subscribe tool. */
   readonly events?: readonly string[];
   readonly listing?: ConnectionListing;
   readonly name: string;

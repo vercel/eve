@@ -40,10 +40,6 @@ export async function bindingContext(
   return serializeContext(ctx);
 }
 
-/**
- * Starts the workflow that holds a subscription and waits for its source to open it. Returns
- * `undefined` when the source has not answered in time. Throws the source's refusal.
- */
 export async function startSubscriptionOwner(
   binding: SubscriptionBinding,
   bundle: CompiledBundle,
@@ -97,7 +93,6 @@ export function retireSubscriptionOwner(bindingId: string): Promise<boolean> {
   } satisfies SubscriptionOwnerMessage);
 }
 
-/** Hands one event to the run holding `key` for `source`. False when no run holds the key. */
 export function emitSubscriptionEvent(
   source: SubscriptionSourceRef,
   key: string,

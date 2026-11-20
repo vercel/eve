@@ -248,11 +248,6 @@ export interface SteeringOptions {
   readonly heldSince?: number;
 }
 
-/**
- * Whether a delivery steers the running turn. A message an event subscription delivers runs under
- * the subscriber's auth but carries text its outside source wrote, so it never steers, answers a
- * pending request or withdraws a sign-in: it waits for the turn to end.
- */
 export function isSteeringDelivery(
   delivery: DeliverHookPayload,
   turn: SteeringTurn,

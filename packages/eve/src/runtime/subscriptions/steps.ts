@@ -57,10 +57,6 @@ export async function openSubscriptionStep(input: {
   });
 }
 
-/**
- * Tells whoever is waiting on the subscription how opening went. A success is published only once
- * the subscription has joined its key, so an event emitted after a reported success reaches it.
- */
 export async function publishOpenOutcomeStep(outcome: OpenOutcome): Promise<void> {
   "use step";
   await publishOutcome(outcome);
@@ -71,11 +67,6 @@ export async function publishSubscriptionOwnerStep(ownerRunId: string): Promise<
   await publishOutcome({ ownerRunId });
 }
 
-/**
- * Adds the subscription to its key's run, starting that run when none is accepting joins. Returns
- * once a run has said it holds the subscription: a run that ends first never saw the join, so the
- * join is sent again.
- */
 export async function joinKeyStep(input: {
   readonly binding: SubscriptionBinding;
   readonly key: string;
@@ -119,16 +110,11 @@ export async function leaveKeyStep(input: {
   });
 }
 
-/** Tells the joining subscription's owner that this run now holds it. */
 export async function acknowledgeJoinStep(ackId: string): Promise<void> {
   "use step";
   await publishTo(joinAckNamespace(ackId), { joined: true } satisfies JoinAck);
 }
 
-/**
- * A key run that lost the claim on its key hands its first subscription to the run that won it.
- * Ends without an acknowledgement when that run is already gone, so the owner joins again.
- */
 export async function forwardJoinStep(input: {
   readonly source: SubscriptionSourceRef;
   readonly key: string;
@@ -142,7 +128,6 @@ export async function forwardJoinStep(input: {
   await publishTo(joinAckNamespace(input.ackId), { forwardedTo: input.to } satisfies JoinAck);
 }
 
-/** Hands one event to each subscription's owner. Returns the subscriptions whose owner has ended. */
 export async function fanOutEventStep(input: {
   readonly bindingIds: readonly string[];
   readonly event: SubscriptionEvent;
@@ -207,7 +192,6 @@ export async function closeSubscriptionStep(input: {
   );
 }
 
-/** Resumes the run holding a key, returning its run id, or undefined when no run holds the key. */
 async function resumeKeyRun(
   source: SubscriptionSourceRef,
   key: string,

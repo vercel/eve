@@ -1,6 +1,7 @@
 import * as workflowRuntime from "#execution/workflow-runtime.js";
 import { installWorkflowHost } from "#execution/workflow-host/host.js";
 import { eventTracing } from "#internal/testing/event-tracing.js";
+import { parseJsonValue } from "#shared/json.js";
 import { trace } from "@opentelemetry/api";
 import { connectionEntry } from "#execution/catalog/connection-entry.js";
 import { ConnectionRegistryImpl } from "#runtime/connections/registry.js";
@@ -577,11 +578,8 @@ function eventOf(
   delivery: ConnectionEventDelivery,
   requestTraceContext?: SubscriptionEvent["requestTraceContext"],
 ): SubscriptionEvent {
-  return {
-    id: delivery.deliveryId,
-    data: delivery as unknown as SubscriptionEvent["data"],
-    ...(requestTraceContext === undefined ? {} : { requestTraceContext }),
-  };
+  const base = { id: delivery.deliveryId, data: parseJsonValue(delivery) };
+  return requestTraceContext === undefined ? base : { ...base, requestTraceContext };
 }
 function controlOf(
   delivery: ConnectionEventDelivery,

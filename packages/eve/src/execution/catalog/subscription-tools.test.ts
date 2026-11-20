@@ -16,8 +16,10 @@ const tracker = {
 };
 const plain = { connectionName: "docs" };
 
-const callable = (input: { channels?: unknown[]; connections?: unknown[] }) =>
-  ({ channels: input.channels ?? [], connections: input.connections ?? [] }) as unknown as Callable;
+const callable = (input: { channels?: unknown[]; connections?: unknown[] }) => ({
+  channels: (input.channels ?? []) as Callable["channels"],
+  connections: (input.connections ?? []) as Callable["connections"],
+});
 const tools = (input: Parameters<typeof callable>[0]) => subscriptionTools(callable(input));
 
 it("offers nothing when no channel has subscriptions and no connection emits events", () => {
@@ -35,7 +37,7 @@ it("offers one subscribe, get and stop for channels and connections together", (
   expect([...offered.keys()]).toEqual(["subscribe", "get_subscription", "stop_subscription"]);
 
   const subscribe = offered.get("subscribe")!;
-  const schema = serializeInputSchema(subscribe.definition.inputSchema as never) as unknown as {
+  const schema = serializeInputSchema(subscribe.definition.inputSchema as never) as {
     properties: { subscription: { anyOf: { properties: Record<string, unknown> }[] } };
   };
   const [github, tracked] = schema.properties.subscription.anyOf.map(

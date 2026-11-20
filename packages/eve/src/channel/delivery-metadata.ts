@@ -1,6 +1,5 @@
 import type { ChannelDeliveryMetadata, SessionTraceSeed } from "#channel/types.js";
 
-/** The channel kind of messages a subscription delivers on behalf of an outside event source. */
 export const SUBSCRIPTION_CHANNEL_KIND = "channel-subscriptions";
 export const CONNECTION_EVENT_CHANNEL_KIND = "mcp-events";
 

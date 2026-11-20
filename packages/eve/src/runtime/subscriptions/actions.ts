@@ -317,7 +317,6 @@ function canonicalJson(value: unknown): string {
   );
 }
 
-/** The name of the generated tool that subscribes to one MCP event. */
 export function eventActionName(eventName: string): string {
   return `${PREFIX}${createHash("sha256").update(eventName).digest("hex").slice(0, 24)}`;
 }
