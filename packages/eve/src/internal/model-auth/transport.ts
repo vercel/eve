@@ -5,7 +5,7 @@ import {
   developmentModelBrokerAvailable,
   readDevelopmentModelCredential,
 } from "./development-broker-client.js";
-import { platformContext } from "#platform/context.js";
+import { gatewayCredential } from "#platform/models.js";
 import { VERCEL_TEAM_HEADER } from "./vercel.js";
 import { MODEL_CONNECTION_ENV } from "#shared/model-helper.js";
 
@@ -39,7 +39,7 @@ function createLocalGateway(): ReturnType<typeof createGateway> | undefined {
     return undefined;
   const resolve = async (rejectedToken?: string, signal?: AbortSignal | null) =>
     (await readDevelopmentModelCredential("gateway", rejectedToken, signal)) ??
-    (await platformContext().models.gatewayCredential(rejectedToken));
+    (await gatewayCredential(rejectedToken));
   return createGateway({
     apiKey: "eve-local-credential",
     fetch: async (url, init) => {

@@ -1,4 +1,5 @@
 import { platformContext } from "#platform/context.js";
+import { hostedSandboxEnvironment } from "#platform/hosted-sandbox.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
 import { JustBashSandbox } from "#sandbox/providers/just-bash.js";
 import { bindSandboxEnvironment, type SandboxSelector } from "#shared/sandbox-environment.js";
@@ -29,7 +30,7 @@ export function defineDeployedSelfModificationSandbox(
   }
 
   const deployed = resolveDeployedSelfModificationConfig(config);
-  const environment = platformContext().sandbox.hostedEnvironment();
+  const environment = hostedSandboxEnvironment();
   return bindSandboxEnvironment(
     defineSandbox(async ({ session }) => {
       if (!hasCredentialTransforms()) throw new Error(VERCEL_SANDBOX_REQUIRED_MESSAGE);

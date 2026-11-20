@@ -1,3 +1,4 @@
+import { vercelBlob } from "#platform/vercel/blob.js";
 import { isVercelEnvironment } from "#platform/vercel/environment.js";
 import type { MemoryDocumentBackend } from "#public/memory/file/backend.js";
 
@@ -14,19 +15,7 @@ export function vercelDefaultDocumentBackend(): MemoryDocumentBackend | undefine
   const credentials =
     credentialsFromEnvironment("EVE_MEMORY_BLOB") ?? credentialsFromEnvironment("BLOB");
   if (credentials === undefined) throw new Error(BLOB_REQUIRED_MESSAGE);
-  return deferredBackend(async () => {
-    const { vercelBlob } = await import("#platform/vercel/blob.js");
-    return vercelBlob(credentials);
-  });
-}
-
-function deferredBackend(load: () => Promise<MemoryDocumentBackend>): MemoryDocumentBackend {
-  let backend: Promise<MemoryDocumentBackend> | undefined;
-  const get = () => (backend ??= load());
-  return {
-    read: async (input) => (await get()).read(input),
-    write: async (input) => (await get()).write(input),
-  };
+  return vercelBlob(credentials);
 }
 
 function credentialsFromEnvironment(

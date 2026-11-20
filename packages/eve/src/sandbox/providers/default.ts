@@ -1,6 +1,7 @@
 import { isLinuxDockerDaemonAvailableSync } from "#execution/sandbox/bindings/local.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { platformContext } from "#platform/context.js";
+import { hostedSandboxEnvironment } from "#platform/hosted-sandbox.js";
 import type { DockerSandboxEnvironmentOptions } from "#public/sandbox/docker-sandbox.js";
 import type { SandboxSession } from "#public/sandbox/index.js";
 import {
@@ -215,7 +216,7 @@ function createEnvironment(
     case "just-bash":
       return JustBashSandbox.environment(options.justBash ?? {});
     case "vercel":
-      return platformContext().sandbox.hostedEnvironment(options.vercel ?? {});
+      return hostedSandboxEnvironment(options.vercel ?? {});
   }
 }
 

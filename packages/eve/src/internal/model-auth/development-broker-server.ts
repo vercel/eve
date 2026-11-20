@@ -4,7 +4,7 @@ import { timingSafeEqualStrings } from "#internal/nitro/dev-client-address.js";
 import { DEVELOPMENT_WORKFLOW_TRANSPORT_HEADER } from "#internal/application/dev-transport.js";
 import { getDefaultCodexTokenBroker } from "#public/models/openai/chatgpt/token-broker.js";
 import { resolveModelApiKey } from "./api-key.js";
-import { platformContext } from "#platform/context.js";
+import { gatewayCredential } from "#platform/models.js";
 import {
   DEVELOPMENT_MODEL_CREDENTIAL_ROUTE,
   DEVELOPMENT_MODEL_REJECTED_HEADER,
@@ -36,9 +36,9 @@ export async function handleDevelopmentModelCredentialRequest(
     await loadDevelopmentEnvironmentFiles(input.appRoot);
     let credential: DevelopmentModelCredential;
     if (provider === "gateway") {
-      credential = await platformContext().models.gatewayCredential();
+      credential = await gatewayCredential();
       if (wasRejected(credential.token) && credential.kind === "oauth")
-        credential = await platformContext().models.gatewayCredential(credential.token);
+        credential = await gatewayCredential(credential.token);
     } else if (provider === "chatgpt") {
       const broker = getDefaultCodexTokenBroker();
       let token = await broker.getToken({ reason: "request" });

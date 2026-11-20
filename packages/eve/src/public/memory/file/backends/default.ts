@@ -1,5 +1,5 @@
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
-import { platformContext } from "#platform/context.js";
+import { defaultDocumentBackend } from "#platform/document-store.js";
 import type { MemoryDocumentBackend } from "#public/memory/file/backend.js";
 import { inMemory } from "#public/memory/file/backends/in-memory.js";
 import { lazyBackend } from "#public/memory/file/backends/lazy.js";
@@ -11,7 +11,7 @@ export function defaultFileMemoryBackend(): MemoryDocumentBackend {
 }
 
 function selectDefaultFileMemoryBackend(): MemoryDocumentBackend {
-  const platformBackend = platformContext().memory.defaultDocumentBackend();
+  const platformBackend = defaultDocumentBackend();
   if (platformBackend !== undefined) return platformBackend;
   if (isEveDevEnvironment()) return DEVELOPMENT_BACKEND;
   throw new Error(

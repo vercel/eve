@@ -5,6 +5,7 @@ import {
 import type { ChatGptAuthState } from "#public/models/openai/chatgpt/token-broker.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { platformContext } from "#platform/context.js";
+import { gatewayCredential } from "#platform/models.js";
 import { hasEnvValue } from "#internal/resolve-model-endpoint-status.js";
 import { buildAgentInfoResponse } from "#internal/nitro/routes/agent-info/build-agent-info-response.js";
 import {
@@ -52,8 +53,7 @@ async function resolveGatewayCredentialPresence(
   if (routing.kind === "gateway" && isEveDevEnvironment()) {
     try {
       const credential =
-        (await readDevelopmentModelCredential("gateway")) ??
-        (await platformContext().models.gatewayCredential());
+        (await readDevelopmentModelCredential("gateway")) ?? (await gatewayCredential());
       return {
         apiKey: credential.kind === "api-key",
         oidc: credential.kind === "oidc",

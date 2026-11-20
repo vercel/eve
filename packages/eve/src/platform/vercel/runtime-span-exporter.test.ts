@@ -18,34 +18,17 @@ afterEach(() => {
 });
 
 describe("Vercel runtime span export", () => {
-  it("reports through the current Vercel request context once the serializer is loaded", async () => {
+  it("reports through the current Vercel request context", () => {
     const reportSpans = vi.fn();
     (globalThis as Record<symbol, unknown>)[REQUEST_CONTEXT] = {
       get: () => ({ telemetry: { reportSpans } }),
     };
-    const exporter = vercelRuntimeSpanExporter();
-    await exporter.forceFlush?.();
     const result = vi.fn();
 
-    exporter.export([{}], result);
+    vercelRuntimeSpanExporter().export([{}], result);
 
     expect(reportSpans).toHaveBeenCalledExactlyOnceWith({ resourceSpans: [] });
     expect(result).toHaveBeenCalledExactlyOnceWith({ code: 0 });
-  });
-
-  it("reports spans that end before the serializer finishes loading", async () => {
-    const reportSpans = vi.fn();
-    (globalThis as Record<symbol, unknown>)[REQUEST_CONTEXT] = {
-      get: () => ({ telemetry: { reportSpans } }),
-    };
-    const exporter = vercelRuntimeSpanExporter();
-    const result = vi.fn();
-
-    exporter.export([{}], result);
-    await exporter.forceFlush?.();
-    await vi.waitFor(() => expect(result).toHaveBeenCalledExactlyOnceWith({ code: 0 }));
-
-    expect(reportSpans).toHaveBeenCalledExactlyOnceWith({ resourceSpans: [] });
   });
 
   it("is a successful no-op without request telemetry", () => {
