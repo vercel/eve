@@ -285,6 +285,18 @@ credentials the fixtures need. TUI smoke tests
 live under `packages/eve/test/tui-client` and run with `pnpm test:tui`. See
 [`e2e/README.md`](./e2e/README.md).
 
+## Templates
+
+Keep every template in `apps/templates` on the same versions:
+
+- `packageManager` matches the root `package.json`.
+- The `eve` dependency is the same published version everywhere, including
+  nested packages such as `eve-discord-agent-template/daemon`.
+
+When you add, import, or update a template, match these versions. When you bump
+either one, bump it in every template in the same PR and regenerate each
+template's `pnpm-lock.yaml`. See [`apps/templates/README.md`](./apps/templates/README.md).
+
 ## Documentation
 
 - `docs/**` is the published documentation. If your change alters
