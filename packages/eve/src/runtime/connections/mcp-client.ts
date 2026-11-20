@@ -1,5 +1,5 @@
 import { ConnectionEventActions, isEventAction } from "#runtime/connections/events/actions.js";
-import { createMCPClient, type MCPClient } from "#compiled/@ai-sdk/mcp/index.js";
+import type { MCPClient } from "#compiled/@ai-sdk/mcp/index.js";
 import type { ToolSet } from "ai";
 
 import {
@@ -130,6 +130,7 @@ export class McpConnectionClient implements ConnectionClient {
       getProtocolVersion: () => this.#client?.initializeResult?.protocolVersion,
     });
 
+    const { createMCPClient } = await import("#compiled/@ai-sdk/mcp/index.js");
     try {
       return await createMCPClient({
         protocolVersionDiscovery: this.#connection.protocolVersionDiscovery,
