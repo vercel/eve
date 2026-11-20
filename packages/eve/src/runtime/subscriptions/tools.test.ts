@@ -333,10 +333,10 @@ it("asks the gate for each management tool's approval with the connection action
   ]);
 });
 
-describe("onSubscription", () => {
-  const subscribeWith = (onSubscription: unknown, user = "rui") => {
+describe("onSubscribe", () => {
+  const subscribeWith = (onSubscribe: unknown, user = "rui") => {
     const offered = offeredSubscriptions([
-      { name: "github", definition: { onEvent: () => null, onSubscription } },
+      { name: "github", definition: { onEvent: () => null, onSubscribe } },
     ] as never);
     return inSession("s1", authOf(user), () =>
       channelSubscribeEntry(offered).execute!(subscribeInput, {
@@ -347,11 +347,11 @@ describe("onSubscription", () => {
   };
 
   it("runs before the subscription is held, as the caller, with the requested scope", async () => {
-    const onSubscription = vi.fn(async () => undefined);
+    const onSubscribe = vi.fn(async () => undefined);
 
-    await subscribeWith(onSubscription, "rui");
+    await subscribeWith(onSubscribe, "rui");
 
-    expect(onSubscription).toHaveBeenCalledExactlyOnceWith({
+    expect(onSubscribe).toHaveBeenCalledExactlyOnceWith({
       auth: authOf("rui"),
       sessionId: "s1",
       subscription: {

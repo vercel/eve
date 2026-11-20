@@ -11,8 +11,8 @@ import type {
 import { eventActionName } from "#runtime/subscriptions/actions.js";
 import {
   connectionOfSubscription,
-  type ConnectionSubscriptionAction,
-  type ConnectionSubscriptionGate,
+  type ConnectionSubscribeAction,
+  type ConnectionSubscribeGate,
   channelSubscribeEntry,
   channelSubscriptionSchemas,
   offeredSubscriptions,
@@ -109,8 +109,8 @@ export function subscriptionTools(
 
 function connectionGate(
   callable: Pick<Callable, "connections" | "registry">,
-): ConnectionSubscriptionGate {
-  const gated = async (id: unknown, action: ConnectionSubscriptionAction) => {
+): ConnectionSubscribeGate {
+  const gated = async (id: unknown, action: ConnectionSubscribeAction) => {
     const name = await connectionOfSubscription(id);
     const connection = callable.connections.find(({ connectionName }) => connectionName === name);
     return connection === undefined || callable.registry === undefined

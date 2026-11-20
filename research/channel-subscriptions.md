@@ -51,7 +51,7 @@ defineChannel({
   cannot hold subscriptions, and `githubChannel` throws for an event name eve cannot deliver.
 - `githubChannel` takes the same `experimental.subscriptions.onEvent` and exports
   `describeGitHubEvent(event)` for the default message. It also takes
-  `experimental.subscriptions.onSubscription`.
+  `experimental.subscriptions.onSubscribe`.
 
 ## Tools
 
@@ -77,11 +77,11 @@ tool set.
 
 ## Authorization
 
-Without `onSubscription`, any session of the agent can subscribe to any scope a channel's
+Without `onSubscribe`, any session of the agent can subscribe to any scope a channel's
 routes emit, and `onEvent` is the only check. For GitHub that means any session can watch any
 repository the App is installed on.
 
-`onSubscription` is the hook for who may subscribe. It runs inside `eve__subscribe`, as the
+`onSubscribe` is the hook for who may subscribe. It runs inside `eve__subscribe`, as the
 session, with `auth` and the requested channel, event and scope. It throws to deny, and the
 message becomes the tool's error. It can return `{ input }` to subscribe to a narrower scope,
 which eve checks against the channel's input schema again. It runs once, at subscribe time;

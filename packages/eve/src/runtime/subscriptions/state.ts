@@ -7,7 +7,7 @@ import type {
 } from "#shared/connection-events.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 
-export interface ConnectionSubscriptionSource {
+export interface ConnectionSubscribeSource {
   readonly kind: "connection";
   readonly name: string;
   readonly instanceId: string | undefined;
@@ -25,7 +25,7 @@ export interface ChannelSubscriptionSource {
   readonly ttlMs: number | null;
 }
 
-export type SubscriptionSource = ConnectionSubscriptionSource | ChannelSubscriptionSource;
+export type SubscriptionSource = ConnectionSubscribeSource | ChannelSubscriptionSource;
 
 export interface SubscriptionSourceRef {
   readonly kind: SubscriptionSource["kind"];
@@ -42,7 +42,7 @@ export interface SubscriptionBinding {
 }
 
 export type ConnectionBinding = SubscriptionBinding & {
-  readonly source: ConnectionSubscriptionSource;
+  readonly source: ConnectionSubscribeSource;
 };
 
 export interface OpenedSubscription {

@@ -1,5 +1,5 @@
 import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/channel.js";
-import type { ChannelOnSubscription } from "#shared/channel-subscriptions.js";
+import type { ChannelOnSubscribe } from "#shared/channel-subscriptions.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 import type { ChannelContext } from "#shared/channel-context.js";
@@ -174,7 +174,7 @@ export interface GitHubChannelConfig {
        * subscription and each event it receives, as the subscribed session. Return the message to
        * send (`describeGitHubEvent(event)` formats the payload) or `null` to drop the event.
        * Filter on `event.name` (`check_suite.completed`) and on `subscription.input`, and check
-       * `auth` against the repository: without `onSubscription`, any session of the
+       * `auth` against the repository: without `onSubscribe`, any session of the
        * agent can subscribe to any repository the GitHub App is installed on. Nothing is
        * subscribable without `onEvent`.
        */
@@ -185,7 +185,7 @@ export interface GitHubChannelConfig {
        * agent can otherwise subscribe to any repository the GitHub App is installed on. Return
        * `{ input }` to narrow the scope, for example to drop `pull`.
        */
-      readonly onSubscription?: ChannelOnSubscription;
+      readonly onSubscribe?: ChannelOnSubscribe;
     };
   };
   /** Policy for accepted messages that arrive while a turn is active. */
@@ -279,7 +279,7 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
     experimental: subscriptionsOnEvent && {
       subscriptions: {
         onEvent: subscriptionsOnEvent,
-        onSubscription: config.experimental?.subscriptions?.onSubscription,
+        onSubscribe: config.experimental?.subscriptions?.onSubscribe,
       },
     },
 

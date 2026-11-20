@@ -12,7 +12,7 @@ import { requireCompiledBundle, SessionAgentKey } from "#runtime/sessions/runtim
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 import {
   subscriptionCatalogOf,
-  type ChannelOnSubscription,
+  type ChannelOnSubscribe,
   type ChannelSubscriptionCatalog,
 } from "#shared/channel-subscriptions.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
@@ -33,7 +33,7 @@ export const STOP_SUBSCRIPTION_TOOL = "eve__subscription_stop";
 export interface OfferedSubscription {
   readonly channelName: string;
   readonly catalog: ChannelSubscriptionCatalog | undefined;
-  readonly onSubscription: ChannelOnSubscription | undefined;
+  readonly onSubscribe: ChannelOnSubscribe | undefined;
 }
 
 export interface SubscribeInput {
@@ -105,20 +105,20 @@ export function channelSubscribeEntry(
   };
 }
 
-export type ConnectionSubscriptionAction = typeof EVENT_GET_ACTION | typeof EVENT_STOP_ACTION;
+export type ConnectionSubscribeAction = typeof EVENT_GET_ACTION | typeof EVENT_STOP_ACTION;
 
-export interface ConnectionSubscriptionGate {
-  readonly approval: (action: ConnectionSubscriptionAction) => HarnessToolDefinition["approval"];
+export interface ConnectionSubscribeGate {
+  readonly approval: (action: ConnectionSubscribeAction) => HarnessToolDefinition["approval"];
   readonly run: (
     connectionName: string,
-    action: ConnectionSubscriptionAction,
+    action: ConnectionSubscribeAction,
     input: { readonly id: string },
     options: ToolExecuteOptions,
   ) => Promise<unknown>;
 }
 
 export function subscriptionManagementEntries(
-  gate: ConnectionSubscriptionGate,
+  gate: ConnectionSubscribeGate,
 ): readonly HarnessToolDefinition[] {
   return [
     {
@@ -165,7 +165,7 @@ export function offeredSubscriptions(
     offered.push({
       channelName: channel.name,
       catalog: subscriptionCatalogOf(onEvent),
-      onSubscription: channel.definition?.onSubscription,
+      onSubscribe: channel.definition?.onSubscribe,
     });
   }
   return offered;
@@ -211,7 +211,7 @@ async function subscribe(
   const { source: channelName, event, input: eventInput } = input.subscription;
   const entry = offered.find((candidate) => candidate.channelName === channelName);
   if (entry === undefined) throw new Error(`Channel "${channelName}" offers no subscriptions.`);
-  const { catalog, onSubscription } = entry;
+  const { catalog, onSubscribe } = entry;
   if (catalog !== undefined && !catalog.events.includes(event))
     throw new Error(`Channel "${channelName}" emits no event named "${event}".`);
   const checked = async (value: unknown): Promise<JsonObject> => {
@@ -224,8 +224,8 @@ async function subscribe(
     return parseJsonObject(validated.value);
   };
   let subscriptionInput = await checked(eventInput);
-  if (onSubscription !== undefined) {
-    const grant = await onSubscription({
+  if (onSubscribe !== undefined) {
+    const grant = await onSubscribe({
       auth,
       sessionId,
       subscription: { channelName, event, input: structuredClone(subscriptionInput) },
@@ -255,8 +255,8 @@ async function subscribe(
 async function getSubscription(
   id: string,
   options: ToolExecuteOptions,
-  gate: ConnectionSubscriptionGate,
-  action: ConnectionSubscriptionAction,
+  gate: ConnectionSubscribeGate,
+  action: ConnectionSubscribeAction,
 ): Promise<unknown> {
   const found = await owners().find(id);
   if (found === undefined) throw unknownSubscription();
@@ -269,8 +269,8 @@ async function getSubscription(
 async function stopSubscription(
   id: string,
   options: ToolExecuteOptions,
-  gate: ConnectionSubscriptionGate,
-  action: ConnectionSubscriptionAction,
+  gate: ConnectionSubscribeGate,
+  action: ConnectionSubscribeAction,
 ): Promise<unknown> {
   const found = await owners().find(id);
   if (found === undefined) throw unknownSubscription();
@@ -287,8 +287,8 @@ function ownedByCaller(binding: SubscriptionBinding): void {
 
 function connectionAction(
   binding: SubscriptionBinding,
-  action: ConnectionSubscriptionAction,
-  gate: ConnectionSubscriptionGate,
+  action: ConnectionSubscribeAction,
+  gate: ConnectionSubscribeGate,
   options: ToolExecuteOptions,
 ): Promise<unknown> {
   return gate.run(binding.source.name, action, { id: binding.id }, options);

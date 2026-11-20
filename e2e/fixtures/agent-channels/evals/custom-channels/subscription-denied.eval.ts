@@ -4,7 +4,7 @@ import { postChannel } from "./shared";
 
 export default defineEval({
   description:
-    "A subscription the channel's onSubscription denies fails with its message and holds nothing.",
+    "A subscription the channel's onSubscribe denies fails with its message and holds nothing.",
   async test(t) {
     if (process.env.EVE_E2E_MODEL !== "mock") {
       t.skip("Requires the deterministic model's subscription script.");

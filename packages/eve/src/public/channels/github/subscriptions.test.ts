@@ -341,14 +341,14 @@ describe("GitHub channel subscriptions", () => {
     });
   });
 
-  it("hands onSubscription to the compiled channel beside onEvent", () => {
-    const onSubscription = vi.fn();
+  it("hands onSubscribe to the compiled channel beside onEvent", () => {
+    const onSubscribe = vi.fn();
     const channel = githubChannel({
-      experimental: { subscriptions: { onEvent: SEND_ALL, onSubscription } },
+      experimental: { subscriptions: { onEvent: SEND_ALL, onSubscribe } },
       credentials: { installationToken: "ghs_test", webhookSecret: SECRET },
     });
     if (!isCompiledChannel(channel)) throw new Error("Expected a CompiledChannel.");
-    expect(channel.onSubscription).toBe(onSubscription);
+    expect(channel.onSubscribe).toBe(onSubscribe);
     expect(subscriptionCatalogOf(channel.onEvent!)).toBeDefined();
   });
 });

@@ -3,7 +3,7 @@ export type {
   ChannelEventDecision,
   ChannelOccurrence,
   ChannelOnEvent,
-  ChannelOnSubscription,
+  ChannelOnSubscribe,
   ChannelSubscriber,
   ChannelSubscription,
   ChannelSubscriptionGrant,

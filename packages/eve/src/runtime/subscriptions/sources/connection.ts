@@ -11,14 +11,14 @@ import { requireCompiledBundle } from "#runtime/sessions/runtime-context-keys.js
 import { retireSubscriptionOwner } from "#runtime/subscriptions/owner.js";
 import { connectionEventDestination } from "#runtime/subscriptions/path.js";
 import {
-  type ConnectionSubscriptionSource,
+  type ConnectionSubscribeSource,
   type SubscriptionBinding,
 } from "#runtime/subscriptions/state.js";
 import type { SubscriptionSourceRuntime } from "#runtime/subscriptions/sources/types.js";
 import type { ConnectionEventDelivery } from "#shared/connection-events.js";
 import { withConnectionEventSpan } from "#tracing/eve/connection-events.js";
 
-function connectionOf(binding: SubscriptionBinding): ConnectionSubscriptionSource {
+function connectionOf(binding: SubscriptionBinding): ConnectionSubscribeSource {
   if (binding.source.kind !== "connection")
     throw new Error(`Expected a connection subscription, got "${binding.source.kind}".`);
   return binding.source;

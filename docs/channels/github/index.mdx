@@ -93,7 +93,7 @@ Subscribe the GitHub App to each event you handle, such as `issues` or `check_su
 
 ## Let sessions subscribe to GitHub events
 
-A session on any channel can subscribe to GitHub webhook events without opening a GitHub thread. Pass `experimental.subscriptions.onEvent` to `githubChannel` to enable subscriptions, and `onSubscription` to decide who may subscribe to which repository. This API is experimental and can change in any release:
+A session on any channel can subscribe to GitHub webhook events without opening a GitHub thread. Pass `experimental.subscriptions.onEvent` to `githubChannel` to enable subscriptions, and `onSubscribe` to decide who may subscribe to which repository. This API is experimental and can change in any release:
 
 ```ts title="agent/channels/github.ts"
 import { githubChannel } from "eve/channels/github";
@@ -107,7 +107,7 @@ export default githubChannel({
   onComment: () => null,
   experimental: {
     subscriptions: {
-      onSubscription: ({ auth, subscription }) => {
+      onSubscribe: ({ auth, subscription }) => {
         const { owner, repo } = subscription.input;
         if (auth === null || !canRead(auth, `${String(owner)}/${String(repo)}`))
           throw new Error(`You may not watch ${String(owner)}/${String(repo)}.`);
@@ -146,7 +146,7 @@ The model calls `eve__subscribe` with `source: "github"`, an `event` name, `ttlM
 Important defaults and limits:
 
 - Enabling subscriptions does not disable `onComment`. Pass `onComment: () => null` if this channel should only serve subscriptions and never open sessions on `@botName` mentions.
-- Without `onSubscription`, any session of the agent can subscribe to any repository where the GitHub App is installed, private repositories included. Check `auth` and `subscription.input` in `onSubscription`, as in the example above, whenever the agent serves people who should not read every installed repository. It throws to deny, or returns `{ input }` to narrow the scope, for example to drop `pull`.
+- Without `onSubscribe`, any session of the agent can subscribe to any repository where the GitHub App is installed, private repositories included. Check `auth` and `subscription.input` in `onSubscribe`, as in the example above, whenever the agent serves people who should not read every installed repository. It throws to deny, or returns `{ input }` to narrow the scope, for example to drop `pull`.
 - Redelivered webhooks with the same `x-github-delivery` ID reach each subscriber once, and multiple sessions can subscribe to the same event and scope.
 - Comment and review events written by the channel's own App (identified by `appSlug` in `credentials`, or `GITHUB_APP_SLUG`) are skipped to prevent reply loops. When no App slug is known, comment and review events from any bot account are skipped. CI events triggered by the bot still deliver.
 

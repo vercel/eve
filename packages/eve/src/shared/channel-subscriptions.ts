@@ -37,7 +37,7 @@ export interface ChannelSubscriber {
  */
 export type ChannelEventDecision = string | null;
 
-/** What a session asked to subscribe to, as `onSubscription` sees it before eve holds it. */
+/** What a session asked to subscribe to, as `onSubscribe` sees it before eve holds it. */
 export interface ChannelSubscriptionRequest {
   readonly channelName: string;
   /** The event name the session passed to `eve__subscribe`. */
@@ -53,7 +53,7 @@ export interface ChannelSubscriptionRequest {
  * as one repository the session may read. Return nothing to accept the request as it is. A
  * returned `input` is checked against the channel's input schema again.
  */
-export type ChannelOnSubscription = (
+export type ChannelOnSubscribe = (
   input: ChannelSubscriber & { readonly subscription: ChannelSubscriptionRequest },
 ) => ChannelSubscriptionGrant | void | Promise<ChannelSubscriptionGrant | void>;
 
@@ -69,7 +69,7 @@ export interface ChannelSubscriptionGrant {
  * the channel's routes `emit` for the same event name and scope, and ends it when the session
  * stops it or its lifetime runs out.
  *
- * Define `onSubscription` to decide who may subscribe. Without it any session of the agent can
+ * Define `onSubscribe` to decide who may subscribe. Without it any session of the agent can
  * subscribe to any scope the channel emits, and `onEvent` is the only check.
  *
  * Runs once per subscription for each occurrence, as the subscriber. Filter on `event.name`,
@@ -88,7 +88,7 @@ export type ChannelOnEvent = (
  */
 export interface ChannelSubscriptionsDefinition {
   readonly onEvent: ChannelOnEvent;
-  readonly onSubscription?: ChannelOnSubscription;
+  readonly onSubscribe?: ChannelOnSubscribe;
 }
 
 export interface ChannelSubscriptionCatalog {

@@ -19,7 +19,7 @@ export default defineChannel({
   ],
   experimental: {
     subscriptions: {
-      onSubscription: ({ subscription }) => {
+      onSubscribe: ({ subscription }) => {
         if (String(subscription.input.project).startsWith("denied-"))
           throw new Error(`Project ${String(subscription.input.project)} may not be watched.`);
       },
