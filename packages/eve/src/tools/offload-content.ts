@@ -15,6 +15,7 @@ const NESTED_KEYS_LIMIT = 120;
 const FILE_STEM_PART_LIMIT = 64;
 
 const DEFAULT_MAX_BYTES = 20_000;
+const MAX_SAVED_BYTES = 10 * 1024 * 1024;
 
 /** Options for {@link offloadContent}. */
 export interface OffloadContentOptions<TOutput> {
@@ -26,9 +27,9 @@ export interface OffloadContentOptions<TOutput> {
   readonly maxBytes?: number;
   /**
    * What the model gets when a result is over `maxBytes` and cannot be saved,
-   * because there is no sandbox that keeps files after the call or opening the
-   * sandbox or writing the file fails. eve logs one warning per session either
-   * way.
+   * because it is over 10 MB, there is no sandbox that keeps files after the
+   * call, or opening the sandbox or writing the file fails. eve logs one
+   * warning per session either way.
    *
    * - `"inline"` sends the projected result, so nothing is lost and the context may
    *   grow. This is the default.
@@ -56,7 +57,7 @@ export interface OffloadContentOptions<TOutput> {
  *
  * The file holds the projected output, the same text or JSON the model would
  * have seen, so a `toModelOutput` that redacts a field also keeps it out of
- * the file. When the result cannot be saved,
+ * the file. A result over 10 MB is never saved. When a result cannot be saved,
  * `fallback` decides what the model gets. Error results and results with
  * file parts are never written.
  *
@@ -95,6 +96,14 @@ export function offloadContent<TOutput = unknown>(
       fallback === "inline" ? projected : { type: "text", value: note(false) };
     const warn = (ctx as Partial<WarnOnceContext>)[WARN_ONCE];
     const given = fallback === "inline" ? "the whole result" : "only a description of it";
+    if (file.bytes > MAX_SAVED_BYTES) {
+      warn?.(
+        "offloadContent.too-large",
+        `offloadContent did not save a tool result because it is over ${MAX_SAVED_BYTES.toLocaleString("en-US")} bytes, so the model gets ${given}.`,
+        { bytes: file.bytes, toolName: ctx.toolName },
+      );
+      return notSaved();
+    }
     try {
       const sandbox = await ctx.getSandbox();
       if (sandbox === undefined) {

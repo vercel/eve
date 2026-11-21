@@ -145,10 +145,13 @@ describe("offloadContent", () => {
     const { access } = fakeSandbox();
     const text = `${Array.from({ length: 1_000_000 }, (_, index) => `row ${index}`).join("\n")}\n`;
     const result = (await inContext(access, () =>
-      offloadContent({ maxBytes: 4_000 })(text, toolModelOutputContext("t", "lines")),
+      offloadContent({ fallback: "summary", maxBytes: 4_000 })(
+        text,
+        toolModelOutputContext("t", "lines"),
+      ),
     )) as { value: string };
     expect(result.value).toContain("Text (1,000,000 lines). First 20 lines:\nrow 0\nrow 1\n");
-    expect(result.value).toContain("\nrow 19\n");
+    expect(result.value).toContain("\nrow 19");
     expect(result.value).not.toContain("row 20");
   });
 
@@ -397,6 +400,40 @@ describe("offloadContent", () => {
     )) as { value: string };
     expect(result.value).toContain("could not be saved");
     expect(result.value).not.toContain("Issue 1");
+  });
+
+  it("saves a result of exactly 10 MB and skips one byte more", async () => {
+    const limit = 10 * 1024 * 1024;
+    const { records } = captureLogRecords();
+    const toModelOutput = offloadContent({ maxBytes: 400, fallback: "summary" });
+    const { access, files } = fakeSandbox();
+    const saved = await inContext(access, () =>
+      toModelOutput("a".repeat(limit), toolModelOutputContext("t", "exact")),
+    );
+    expect([...files.keys()]).toEqual(["/tmp/.eve/tool-results/t-exact.txt"]);
+    expect((saved as { value: string }).value).toContain("was saved to");
+
+    const over = fakeSandbox();
+    const skipped = (await inContext(over.access, () =>
+      toModelOutput("a".repeat(limit + 1), toolModelOutputContext("t", "over")),
+    )) as { value: string };
+    expect(over.files.size).toBe(0);
+    expect(skipped.value).toContain("could not be saved");
+    expect(skipped.value).not.toContain("was saved to");
+    const warnings = records.filter((record) => record.level === "warn");
+    expect(warnings).toHaveLength(1);
+    expect(JSON.stringify(warnings[0])).toContain("over 10,485,760 bytes");
+  });
+
+  it("sends the whole projection above 10 MB when fallback is inline", async () => {
+    captureLogRecords();
+    const { access, files } = fakeSandbox();
+    const text = "a".repeat(10 * 1024 * 1024 + 1);
+    const result = await inContext(access, () =>
+      offloadContent({ maxBytes: 400 })(text, toolModelOutputContext("t", "big")),
+    );
+    expect(files.size).toBe(0);
+    expect(result).toEqual({ type: "text", value: text });
   });
 
   it("rejects a limit that is not a positive integer", () => {

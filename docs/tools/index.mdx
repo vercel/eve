@@ -152,6 +152,7 @@ export default defineTool({
 
 - To shrink or redact the result first, pass `toModelOutput`. `offloadContent` applies it, checks the size of its output, and writes that output, so a field you remove never reaches the file.
 - When a result is over the limit and can't be saved, because there is no sandbox or opening the sandbox or writing the file fails, `fallback` decides what the model gets, and eve logs one warning per session. `"inline"` (the default) sends the result as the model would have seen it without offloading, so nothing is lost and the context may grow. `"summary"` sends only the size, shape and first lines, so the context stays small and the rest of the result is gone. A tool invoked through MCP without a tool-session key has no sandbox that outlives the call, so it counts as not saved.
+- A result over 10 MB is never written, whatever `maxBytes` is. It counts as not saved, so `fallback` decides what the model gets.
 - Error results and results with image or file parts are never written.
 - The file lasts as long as the sandbox. If the sandbox is replaced, the model has to run the tool again.
 

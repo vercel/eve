@@ -11,6 +11,7 @@ import {
   type McpServerTool,
   type McpToolCallContext,
 } from "#internal/mcp/streamable-http-server.js";
+import type { ToolModelOutput } from "#tools/model-output.js";
 import { isJsonObjectValue, type JsonValue } from "#shared/json.js";
 import { isObject } from "#shared/guards.js";
 
@@ -76,6 +77,18 @@ function toolSessionKey(context: McpToolCallContext): string | undefined {
   );
 }
 
+function modelOutputText(modelOutput: ToolModelOutput): string {
+  switch (modelOutput.type) {
+    case "text":
+    case "error-text":
+      return modelOutput.value;
+    case "json":
+      return JSON.stringify(modelOutput.value ?? null);
+    case "content":
+      return modelOutput.value.map((part) => (part.type === "text" ? part.text : "")).join("\n");
+  }
+}
+
 function toCallToolResult(
   name: string,
   result: InvokeToolResult,
@@ -86,8 +99,7 @@ function toCallToolResult(
       const output = result.output as JsonValue;
       const { modelOutput } = result;
       const isError = modelOutput.type === "error-text";
-      const text =
-        modelOutput.type === "text" || isError ? modelOutput.value : JSON.stringify(output ?? null);
+      const text = modelOutputText(modelOutput);
       const content = [{ text, type: "text" as const }];
       const structured =
         hasOutputSchema || isJsonObjectValue(output)

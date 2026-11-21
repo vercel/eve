@@ -16,6 +16,7 @@ import { MCP_PROTOCOL_VERSION } from "#internal/mcp/streamable-http-server.js";
 import { ForbiddenError, none, oauthResource, withAuthChallenges } from "#public/channels/auth.js";
 import { mcpChannel, type McpChannelConfig } from "#public/channels/mcp.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
+import type { ToolModelOutput } from "#tools/model-output.js";
 
 const MCP_LEGACY_PROTOCOL_VERSION = "2025-11-25";
 
@@ -647,6 +648,44 @@ describe("mcpChannel tools", () => {
     const called = (await rpc("tools/call", { arguments: {}, name: "count" })).result!;
     expect(called.isError).toBeUndefined();
     expect(called.structuredContent).toEqual({ result: 42 });
+  });
+
+  it("returns the model projection, not the raw output, as the text of a published tool result", async () => {
+    const records: AgentToolDescription = {
+      approval: false,
+      description: "Lists records.",
+      inputSchema: { type: "object" },
+      name: "records",
+    };
+    const raw = [{ id: 1, secret: "hunter2" }];
+    const call = async (modelOutput: ToolModelOutput) => {
+      const invokeTool = vi.fn<InvokeToolFn>(async () => ({
+        modelOutput,
+        output: raw,
+        outcome: "completed",
+      }));
+      const rpc = serve({ agent: false, tools: true }, invokeTool, [records]);
+      return (await rpc("tools/call", { arguments: {}, name: "records" })).result!;
+    };
+
+    const redacted = await call({ type: "json", value: [{ id: 1 }] });
+    expect(redacted).toEqual({ content: [{ text: '[{"id":1}]', type: "text" }] });
+
+    const offloaded = await call({ type: "text", value: "Saved to /tmp/.eve/tool-results/x.json" });
+    expect(offloaded).toEqual({
+      content: [{ text: "Saved to /tmp/.eve/tool-results/x.json", type: "text" }],
+    });
+
+    const parts = await call({
+      type: "content",
+      value: [
+        { type: "text", text: "id 1" },
+        { type: "file", data: { type: "data", data: "AAAA" }, mediaType: "image/png" },
+        { type: "text", text: "done" },
+      ],
+    });
+    expect(parts).toEqual({ content: [{ text: "id 1\n\ndone", type: "text" }] });
+    expect(JSON.stringify([redacted, offloaded, parts])).not.toContain("hunter2");
   });
 
   it("runs each call through invokeTool as the caller and maps its outcome", async () => {
