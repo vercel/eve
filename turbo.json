@@ -4,7 +4,12 @@
   "futureFlags": {
     "affectedUsingTaskInputs": true
   },
-  "globalDependencies": [".nvmrc", "pnpm-workspace.yaml", "tsconfig.json"],
+  "globalDependencies": [
+    ".nvmrc",
+    "pnpm-workspace.yaml",
+    "scripts/install-ci-tools.mjs",
+    "tsconfig.json"
+  ],
   "globalPassThroughEnv": ["EVE_TELEMETRY_DISABLED"],
   "tasks": {
     "//#check:deps": {
