@@ -31,9 +31,8 @@ export interface OffloadContentOptions<TOutput> {
   /**
    * What the model gets when a result is over `maxBytes` and cannot be saved,
    * because it is over 10 MB, there is no sandbox that keeps files after the
-   * call, the sandbox already holds 100 MB or 100 files of saved results, or
-   * opening the sandbox or writing the file fails. eve logs one
-   * warning per session either way.
+   * call, or opening the sandbox, writing the file or measuring the saved
+   * results fails. eve logs one warning per session either way.
    *
    * - `"inline"` sends the projected result, so nothing is lost and the context may
    *   grow. This is the default.
@@ -61,9 +60,11 @@ export interface OffloadContentOptions<TOutput> {
  *
  * The file holds the projected output, the same text or JSON the model would
  * have seen, so a `toModelOutput` that redacts a field also keeps it out of
- * the file. A result over 10 MB is never saved, and neither is one that would
- * take the sandbox's saved results over 100 MB or 100 files. When a result cannot be saved,
- * `fallback` decides what the model gets. Error results and results with
+ * the file. A result over 10 MB is never saved. The sandbox keeps at most
+ * 100 saved results and 100 MB of them: when a new result takes it over, the
+ * oldest saved results are removed, so the model runs that tool again to get
+ * one back. When a result cannot be saved, `fallback` decides what the model
+ * gets. Error results and results with
  * file parts are never written.
  *
  * ```ts
@@ -120,19 +121,10 @@ export function offloadContent<TOutput = unknown>(
         return notSaved();
       }
       await sandbox.writeTextFile({ content: file.text, path });
-      const held = await savedResults(sandbox).catch(async (error: unknown) => {
+      await evictOldest(sandbox, path).catch(async (error: unknown) => {
         await sandbox.removePath({ force: true, path });
         throw error;
       });
-      if (held.bytes > MAX_DIRECTORY_BYTES || held.files > MAX_DIRECTORY_FILES) {
-        await sandbox.removePath({ force: true, path });
-        warn?.(
-          "offloadContent.quota",
-          `offloadContent did not save a tool result because the sandbox already holds ${MAX_DIRECTORY_FILES} files or ${MAX_DIRECTORY_BYTES.toLocaleString("en-US")} bytes of saved results, so the model gets ${given}.`,
-          { toolName: ctx.toolName },
-        );
-        return notSaved();
-      }
     } catch (error) {
       warn?.(
         "offloadContent.save-failed",
@@ -145,22 +137,30 @@ export function offloadContent<TOutput = unknown>(
   };
 }
 
-async function savedResults(
-  sandbox: SandboxSession,
-): Promise<{ readonly bytes: number; readonly files: number }> {
+async function evictOldest(sandbox: SandboxSession, keep: string): Promise<void> {
   const { stdout } = await sandbox.run({
-    command: `find ${RESULTS_DIRECTORY} -type f -exec wc -c {} + 2>/dev/null`,
+    command: `find ${RESULTS_DIRECTORY} -type f -exec stat -c '%Y %s %n' {} + 2>/dev/null`,
   });
-  let bytes = 0;
-  let files = 0;
+  const saved: { readonly bytes: number; readonly modified: number; readonly path: string }[] = [];
   for (const line of stdout.split("\n")) {
-    const match = /^\s*(\d+) (.+)$/.exec(line);
-    if (match === null || !match[2]!.startsWith(`${RESULTS_DIRECTORY}/`)) continue;
-    bytes += Number(match[1]);
-    files += 1;
+    const match = /^(\d+) (\d+) (.+)$/.exec(line);
+    if (match === null || !match[3]!.startsWith(`${RESULTS_DIRECTORY}/`)) continue;
+    saved.push({ bytes: Number(match[2]), modified: Number(match[1]), path: match[3]! });
   }
-  if (files === 0) throw new Error("could not measure the saved tool results");
-  return { bytes, files };
+  if (!saved.some((entry) => entry.path === keep)) {
+    throw new Error("could not measure the saved tool results");
+  }
+  let bytes = saved.reduce((total, entry) => total + entry.bytes, 0);
+  let files = saved.length;
+  const oldestFirst = saved
+    .filter((entry) => entry.path !== keep)
+    .sort((a, b) => a.modified - b.modified || (a.path < b.path ? -1 : 1));
+  for (const entry of oldestFirst) {
+    if (bytes <= MAX_DIRECTORY_BYTES && files <= MAX_DIRECTORY_FILES) return;
+    await sandbox.removePath({ force: true, path: entry.path });
+    bytes -= entry.bytes;
+    files -= 1;
+  }
 }
 
 const DIRECT_CALL_CONTEXT: ToolModelOutputContext = {

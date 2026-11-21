@@ -57,6 +57,8 @@ export interface MockSandbox {
 export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
   const files = new Map<string, string>();
   const fileBytes = new Map<string, Buffer>();
+  const modified = new Map<string, number>();
+  let clock = 0;
   const writes: MockSandboxWrite[] = [];
   const commandLog: string[] = [];
   const removedPaths: string[] = [];
@@ -69,12 +71,12 @@ export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
   }
 
   async function defaultRun(options: SandboxRunOptions): Promise<SandboxCommandResult> {
-    const find = /^find (\S+) -type f -exec wc -c \{\} \+/.exec(options.command);
+    const find = /^find (\S+) -type f -exec stat -c '%Y %s %n' \{\} \+/.exec(options.command);
     if (find !== null) {
       const prefix = `${find[1]}/`;
       const lines = [...fileBytes]
         .filter(([path]) => path.startsWith(prefix))
-        .map(([path, bytes]) => `${bytes.byteLength} ${path}`);
+        .map(([path, bytes]) => `${modified.get(path) ?? 0} ${bytes.byteLength} ${path}`);
       return { exitCode: 0, stderr: "", stdout: lines.map((line) => `${line}\n`).join("") };
     }
     return { exitCode: 0, stderr: "", stdout: "" };
@@ -134,6 +136,7 @@ export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
     );
     files.set(resolved, buf.toString("utf8"));
     fileBytes.set(resolved, buf);
+    modified.set(resolved, (clock += 1));
   }
 
   const baseSession: NetworkPolicySandboxSession = {
@@ -184,6 +187,7 @@ export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
       writes.push({ content: buf, path: resolved });
       files.set(resolved, buf.toString("utf8"));
       fileBytes.set(resolved, buf);
+      modified.set(resolved, (clock += 1));
     },
     writeBinaryFile,
     async writeFiles(options: SandboxWriteFilesOptions): Promise<void> {
@@ -194,6 +198,7 @@ export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
       writes.push({ content: options.content, path: resolved });
       files.set(resolved, options.content);
       fileBytes.set(resolved, Buffer.from(options.content, "utf8"));
+      modified.set(resolved, (clock += 1));
     },
   };
   const session = baseSession;

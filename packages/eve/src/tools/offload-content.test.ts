@@ -436,7 +436,7 @@ describe("offloadContent", () => {
     expect(result).toEqual({ type: "text", value: text });
   });
 
-  it("keeps at most 100 saved results per sandbox and removes the one that goes over", async () => {
+  it("keeps the newest 100 saved results per sandbox and removes the oldest", async () => {
     const { records } = captureLogRecords();
     const { access, files } = fakeSandbox();
     const toModelOutput = offloadContent({ maxBytes: 100, fallback: "summary" });
@@ -450,16 +450,16 @@ describe("offloadContent", () => {
       return all;
     });
     expect(files.size).toBe(100);
-    expect(files.has("/tmp/.eve/tool-results/t-call_100.txt")).toBe(false);
-    expect((results[99] as { value: string }).value).toContain("was saved to");
-    expect((results[100] as { value: string }).value).toContain("could not be saved");
-    const warnings = records.filter((record) => record.level === "warn");
-    expect(warnings).toHaveLength(1);
-    expect(JSON.stringify(warnings[0])).toContain("100 files");
+    expect(files.has("/tmp/.eve/tool-results/t-call_0.txt")).toBe(false);
+    expect(files.has("/tmp/.eve/tool-results/t-call_1.txt")).toBe(true);
+    expect(files.has("/tmp/.eve/tool-results/t-call_100.txt")).toBe(true);
+    expect((results[100] as { value: string }).value).toContain(
+      "was saved to /tmp/.eve/tool-results/t-call_100.txt",
+    );
+    expect(records.filter((record) => record.level === "warn")).toHaveLength(0);
   });
 
-  it("keeps saved results under 100 MB per sandbox", async () => {
-    captureLogRecords();
+  it("removes the oldest saved results until 100 MB hold", async () => {
     const { access, files } = fakeSandbox();
     const toModelOutput = offloadContent({ maxBytes: 100, fallback: "summary" });
     const chunk = "a".repeat(10 * 1024 * 1024);
@@ -470,8 +470,28 @@ describe("offloadContent", () => {
       }
       return all;
     });
+    expect([...files.keys()]).toEqual(
+      Array.from({ length: 10 }, (_, index) => `/tmp/.eve/tool-results/t-call_${index + 1}.txt`),
+    );
+    expect((results[10] as { value: string }).value).toContain("was saved to");
+  });
+
+  it("removes several old results when one new result takes the sandbox over 100 MB", async () => {
+    const { access, files } = fakeSandbox();
+    const toModelOutput = offloadContent({ maxBytes: 100, fallback: "summary" });
+    await inContext(access, async () => {
+      for (let index = 0; index < 5; index += 1) {
+        await toModelOutput("a".repeat(1024 * 1024), toolModelOutputContext("t", `small_${index}`));
+      }
+      for (let index = 0; index < 10; index += 1) {
+        await toModelOutput(
+          "b".repeat(10 * 1024 * 1024),
+          toolModelOutputContext("t", `big_${index}`),
+        );
+      }
+    });
+    expect([...files.keys()].some((path) => path.includes("small_"))).toBe(false);
     expect(files.size).toBe(10);
-    expect((results[10] as { value: string }).value).toContain("could not be saved");
   });
 
   it("counts a rewritten call id once", async () => {

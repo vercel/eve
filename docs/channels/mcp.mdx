@@ -255,7 +255,7 @@ export default mcpChannel({
 
 With `agent: false`, the channel sends no `agent_*` instructions.
 
-The `text` of a tool's result is what the model would see, so a `toModelOutput` that redacts a field or offloads a large result applies to MCP callers too. `structuredContent` stays the tool's output, which is what its output schema describes.
+The `content` of a tool's result is what the model would see: text parts stay `text` blocks, an image part becomes an `image` block, and any other file part becomes an embedded `resource` or a `resource_link`. `toModelOutput` shapes `content` only: an offloaded result stays out of it, but a field it removes is still in `structuredContent`, which carries the tool's full output whenever the tool has an output schema or returns a JSON object.
 
 Each `tools/call` checks the arguments against the tool's input schema. It then runs the tool as the authenticated caller, or a [forwarded user](#forwarded-principals), with no model, turn, or workflow run. Every caller that the channel's `auth` accepts can call these tools, outside the agent's instructions, so review what becomes callable.
 

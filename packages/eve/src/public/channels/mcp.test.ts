@@ -684,8 +684,45 @@ describe("mcpChannel tools", () => {
         { type: "text", text: "done" },
       ],
     });
-    expect(parts).toEqual({ content: [{ text: "id 1\n\ndone", type: "text" }] });
-    expect(JSON.stringify([redacted, offloaded, parts])).not.toContain("hunter2");
+    expect(parts).toEqual({
+      content: [
+        { text: "id 1", type: "text" },
+        { data: "AAAA", mimeType: "image/png", type: "image" },
+        { text: "done", type: "text" },
+      ],
+    });
+
+    const files = await call({
+      type: "content",
+      value: [
+        {
+          type: "file",
+          data: { type: "data", data: "JVBERi0=" },
+          mediaType: "application/pdf",
+          filename: "a b.pdf",
+        },
+        {
+          type: "file",
+          data: { type: "url", url: "https://example.com/x.png" },
+          mediaType: "image/png",
+        },
+      ],
+    });
+    expect(files).toEqual({
+      content: [
+        {
+          resource: { blob: "JVBERi0=", mimeType: "application/pdf", uri: "file:///a%20b.pdf" },
+          type: "resource",
+        },
+        {
+          mimeType: "image/png",
+          name: "https://example.com/x.png",
+          type: "resource_link",
+          uri: "https://example.com/x.png",
+        },
+      ],
+    });
+    expect(JSON.stringify([redacted, offloaded, parts, files])).not.toContain("hunter2");
   });
 
   it("runs each call through invokeTool as the caller and maps its outcome", async () => {
