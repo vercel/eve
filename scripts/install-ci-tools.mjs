@@ -4,8 +4,8 @@
  * template checks, and the Node.js release in .nvmrc, because the image ships an
  * older Node.js. The `ci.bootstrapping.installCommand` in vercel.json runs this
  * after installing dependencies. Each tool lands in the root node_modules/.bin,
- * which pnpm puts first on PATH for every package script, and is verified
- * against a pinned SHA-256.
+ * which pnpm puts ahead of the system PATH for every package script, and is
+ * verified against a pinned SHA-256.
  */
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -20,13 +20,15 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 
 const NODE_VERSION = "26.13.1";
+const UV_VERSION = "0.12.17";
 const TOOLS = [
   {
     name: "uv",
-    version: "0.12.17",
-    url: "https://github.com/astral-sh/uv/releases/download/0.12.17/uv-x86_64-unknown-linux-musl.tar.gz",
+    version: UV_VERSION,
+    url: `https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-musl.tar.gz`,
     sha256: "6401c4665d8fa2a9893e087c91f585430738e3170f5398a1141483efb4a93310",
     files: { uv: "uv", uvx: "uvx" },
   },
@@ -53,12 +55,24 @@ if (nvmrc !== NODE_VERSION) {
   );
 }
 
+const download = async (url) => {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const response = await fetch(url, { signal: AbortSignal.timeout(120_000) });
+      if (!response.ok) throw new Error(`Downloading ${url} failed with HTTP ${response.status}.`);
+      return Buffer.from(await response.arrayBuffer());
+    } catch (error) {
+      if (attempt === 3) throw error;
+      console.log(`Retrying ${url} after attempt ${attempt} failed: ${error.message}`);
+      await sleep(attempt * 5_000);
+    }
+  }
+};
+
 const bin = join(root, "node_modules", ".bin");
 mkdirSync(bin, { recursive: true });
 for (const tool of TOOLS) {
-  const response = await fetch(tool.url);
-  if (!response.ok) throw new Error(`Downloading ${tool.url} failed with HTTP ${response.status}.`);
-  const archive = Buffer.from(await response.arrayBuffer());
+  const archive = await download(tool.url);
   const digest = createHash("sha256").update(archive).digest("hex");
   if (digest !== tool.sha256) {
     throw new Error(`${tool.url} has SHA-256 ${digest}, expected ${tool.sha256}.`);
