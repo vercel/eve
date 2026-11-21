@@ -137,12 +137,12 @@
         "!$TURBO_ROOT$/**/node_modules/**",
         "!$TURBO_ROOT$/**/.turbo/**"
       ],
+      "passThroughEnv": ["EVE_SANDBOX_IMAGE_TAG"],
       "tags": ["ci", "ci:cpus:8"]
     },
     "test:public-types": {
       "cache": false,
       "dependsOn": ["build"],
-      "passThroughEnv": ["EVE_TELEMETRY_DISABLED"],
       "tags": ["ci", "ci:cpus:4"]
     },
     "test:tui": {

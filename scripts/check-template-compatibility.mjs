@@ -12,6 +12,8 @@ import { availableParallelism, tmpdir } from "node:os";
 import { basename, delimiter, join, resolve } from "node:path";
 import { execFileSync, spawn } from "node:child_process";
 
+import { resolveSandboxImage } from "./resolve-sandbox-image.mjs";
+
 const repoRoot = resolve(import.meta.dirname, "..");
 const templatesDirectory = join(repoRoot, "apps", "templates");
 const temporaryDirectory = mkdtempSync(join(tmpdir(), "eve-template-compatibility-"));
@@ -297,29 +299,7 @@ const checkTemplate = async (template, tarball, tarballName) => {
 };
 
 // Templates without Vercel Sandbox build their sandbox template from eve's
-// pinned image. This resolves it the way .github/actions/sandbox-image does on
-// GitHub Actions, step for step: fail on a stale pin, use the pinned image when
-// GHCR has it, fall back to :latest when GHCR reports it missing (a change that
-// edits packages/eve/Dockerfile pins a tag the release workflow publishes only
-// after merge), and fail on any other inspect error.
-const resolveSandboxImage = () => {
-  const tagScript = join(repoRoot, "scripts", "sandbox-image-tag.mjs");
-  execFileSync(process.execPath, [tagScript, "--check"], { stdio: "inherit" });
-  const tag = execFileSync(process.execPath, [tagScript], { encoding: "utf8" }).trim();
-  const image = `ghcr.io/vercel/eve:${tag}`;
-  try {
-    execFileSync("docker", ["buildx", "imagetools", "inspect", "--raw", image], { stdio: "pipe" });
-    process.stdout.write(`Using pinned sandbox image ${image}\n`);
-  } catch (error) {
-    const output = `${error.stdout ?? ""}${error.stderr ?? ""}` || error.message;
-    if (!/: not found|manifest unknown/u.test(output)) throw new Error(output);
-    process.stdout.write(
-      `Unpublished sandbox image: ${image} is not published. This happens when this change edits packages/eve/Dockerfile, because the release workflow publishes the image after the change reaches main. If main already has this Dockerfile, check the latest Release workflow run on main for a failed image publish. This run uses ghcr.io/vercel/eve:latest, so it does not test the pinned image.\n`,
-    );
-    process.env.EVE_SANDBOX_IMAGE_TAG = "latest";
-  }
-};
-
+// pinned image, so resolve it first.
 try {
   resolveSandboxImage();
   const packageDirectory = join(repoRoot, "packages", "eve");
