@@ -1,4 +1,6 @@
-import type { ModelMessage, ToolModelMessage } from "ai";
+import type { AssistantModelMessage, ModelMessage, ToolModelMessage, ToolResultPart } from "ai";
+
+import { isObject } from "#shared/guards.js";
 
 export function normalizeProviderToolHistory(input: {
   readonly messages: readonly ModelMessage[];
@@ -86,6 +88,79 @@ export function normalizeProviderToolHistory(input: {
     messages: normalized,
     outcomeEndsResponse: lastOutcomePosition >= 0 && lastOutcomePosition > lastTextPosition,
   };
+}
+
+export function flattenProviderToolHistory(
+  messages: readonly ModelMessage[],
+  toolNames: ReadonlySet<string> = new Set(),
+): ModelMessage[] {
+  if (toolNames.size === 0) return [...messages];
+  return messages.flatMap((message): ModelMessage[] => {
+    if (message.role === "assistant" && Array.isArray(message.content)) {
+      return [{ ...message, content: message.content.map((part) => flattenPart(part, toolNames)) }];
+    }
+    if (message.role !== "tool") return [message];
+    const flattened = message.content.flatMap((part) =>
+      part.type === "tool-result" && toolNames.has(part.toolName) ? [part] : [],
+    );
+    if (flattened.length === 0) return [message];
+    const kept = message.content.filter(
+      (part) => part.type !== "tool-result" || !toolNames.has(part.toolName),
+    );
+    return [
+      ...(kept.length > 0 ? [{ ...message, content: kept }] : []),
+      {
+        role: "assistant",
+        content: flattened.map((part) => ({ type: "text", text: describeToolResult(part) })),
+      },
+    ];
+  });
+}
+
+type AssistantPart = Exclude<AssistantModelMessage["content"], string>[number];
+
+function flattenPart(part: AssistantPart, toolNames: ReadonlySet<string>): AssistantPart {
+  if (part.type === "tool-call" && toolNames.has(part.toolName)) {
+    return { type: "text", text: `[${part.toolName} call] ${JSON.stringify(part.input)}` };
+  }
+  if (part.type === "tool-result" && toolNames.has(part.toolName)) {
+    return { type: "text", text: describeToolResult(part) };
+  }
+  if (part.type !== "text") return part;
+  const anthropic = part.providerOptions?.anthropic;
+  if (anthropic === undefined || !("citations" in anthropic)) return part;
+  return {
+    ...part,
+    providerOptions: {
+      ...part.providerOptions,
+      anthropic: Object.fromEntries(
+        Object.entries(anthropic).filter(([key]) => key !== "citations"),
+      ),
+    },
+  };
+}
+
+function describeToolResult(part: ToolResultPart): string {
+  if (part.output.type.startsWith("error") || part.output.type === "execution-denied") {
+    return `[${part.toolName} results] The call failed.`;
+  }
+  const sources = new Map<string, string | undefined>();
+  collectSources(part.output, sources);
+  if (sources.size === 0) return `[${part.toolName} results] No readable results.`;
+  const lines = [...sources].map(([url, title]) => (title ? `- ${title}: ${url}` : `- ${url}`));
+  return [`[${part.toolName} results]`, ...lines].join("\n");
+}
+
+function collectSources(value: unknown, out: Map<string, string | undefined>): void {
+  if (Array.isArray(value)) {
+    for (const entry of value) collectSources(entry, out);
+    return;
+  }
+  if (!isObject(value)) return;
+  if (typeof value.url === "string" && !out.get(value.url)) {
+    out.set(value.url, typeof value.title === "string" ? value.title : undefined);
+  }
+  for (const entry of Object.values(value)) collectSources(entry, out);
 }
 
 export function awaitsProviderToolResult(messages: readonly ModelMessage[]): boolean {

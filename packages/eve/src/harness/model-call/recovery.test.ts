@@ -20,6 +20,21 @@ function includeRejection(): Error {
   });
 }
 
+function providerHistoryRejection(rejection: string): Error {
+  const upstream = Object.assign(new Error("Bad Request"), {
+    data: {
+      providerAttempts: [
+        { error: "Service temporarily unavailable", provider: "anthropic", statusCode: 503 },
+        { error: `messages.5.content.0: ${rejection}`, provider: "claudeaws", statusCode: 400 },
+      ],
+    },
+  });
+  return Object.assign(new Error("gateway", { cause: upstream }), {
+    name: "GatewayInternalServerError",
+    statusCode: 400,
+  });
+}
+
 const diagnostics = { sessionId: "s", turnId: "turn_0" };
 
 describe("recoverModelCall", () => {
@@ -35,6 +50,16 @@ describe("recoverModelCall", () => {
     expect(nudged.trailingUserNote).toContain("Do not repeat writes");
     expect(recoverModelCall(new EmptyModelResponseError(), nudged, diagnostics)).toBeUndefined();
     expect(recoverModelCall(includeRejection(), nudged, diagnostics)).toBeUndefined();
+  });
+
+  it.each([
+    "Invalid encrypted_content in search_result block",
+    "Input tag 'web_search_tool_result' found using 'type' does not match any of the expected tags",
+  ])("removes web search once when a provider rejects its earlier results: %s", (rejection) => {
+    const error = providerHistoryRejection(rejection);
+    const disabled = recoverModelCall(error, {}, diagnostics)!;
+    expect([...disabled.disabledProviderTools!]).toEqual(["web_search"]);
+    expect(recoverModelCall(error, disabled, diagnostics)).toBeUndefined();
   });
 
   it("does not change a request to recover an unrelated failure", () => {

@@ -1,7 +1,10 @@
 import type { ModelMessage } from "ai";
 import { describe, expect, it } from "vitest";
 
-import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js";
+import {
+  flattenProviderToolHistory,
+  normalizeProviderToolHistory,
+} from "#harness/provider-tool-history.js";
 
 describe("normalizeProviderToolHistory", () => {
   it("preserves text ordering around provider-executed tool results", () => {
@@ -329,6 +332,110 @@ describe("normalizeProviderToolHistory", () => {
           },
         ],
       },
+    ]);
+  });
+});
+
+describe("flattenProviderToolHistory", () => {
+  const citation = {
+    type: "web_search_result_location",
+    cited_text: "eve is a framework for durable agents.",
+    url: "https://eve.dev/docs",
+    title: "eve docs",
+    encrypted_index: "opaque-index",
+  };
+  const searchResult = {
+    type: "tool-result" as const,
+    toolCallId: "srvtoolu_1",
+    toolName: "web_search",
+    output: {
+      type: "json" as const,
+      value: [
+        {
+          type: "web_search_result",
+          url: "https://eve.dev/docs",
+          title: "eve docs",
+          pageAge: null,
+          encryptedContent: "opaque-content",
+        },
+        {
+          type: "web_search_result",
+          url: "https://github.com/vercel/eve",
+          title: null,
+          pageAge: "1 day",
+          encryptedContent: "opaque-content",
+        },
+      ],
+    },
+  };
+
+  it("turns Anthropic native web search history into plain text for another provider", () => {
+    const messages: ModelMessage[] = [
+      { role: "user", content: "What is eve?" },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "srvtoolu_1",
+            toolName: "web_search",
+            input: { query: "eve framework" },
+            providerExecuted: true,
+          },
+          searchResult,
+          {
+            type: "text",
+            text: "eve is a framework for durable agents.",
+            providerOptions: { anthropic: { citations: [citation] } },
+          },
+        ],
+      },
+    ];
+
+    expect(flattenProviderToolHistory(messages, new Set(["web_search"]))).toEqual([
+      messages[0],
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: '[web_search call] {"query":"eve framework"}' },
+          {
+            type: "text",
+            text: "[web_search results]\n- eve docs: https://eve.dev/docs\n- https://github.com/vercel/eve",
+          },
+          {
+            type: "text",
+            text: "eve is a framework for durable agents.",
+            providerOptions: { anthropic: {} },
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("moves normalized results out of tool messages without touching other tool results", () => {
+    const localResult = {
+      type: "tool-result" as const,
+      toolCallId: "call_1",
+      toolName: "read_file",
+      output: { type: "text" as const, value: "contents" },
+    };
+    const messages: ModelMessage[] = [
+      { role: "tool", content: [searchResult, localResult] },
+      { role: "tool", content: [localResult] },
+    ];
+
+    expect(flattenProviderToolHistory(messages, new Set(["web_search"]))).toEqual([
+      { role: "tool", content: [localResult] },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: "[web_search results]\n- eve docs: https://eve.dev/docs\n- https://github.com/vercel/eve",
+          },
+        ],
+      },
+      messages[1],
     ]);
   });
 });

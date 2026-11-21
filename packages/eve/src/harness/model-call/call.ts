@@ -31,7 +31,10 @@ import {
   rejectsCredential,
 } from "#harness/model-call/errors.js";
 import { type ModelProfile, resolveModelProfile } from "#harness/model-profile.js";
-import { awaitsProviderToolResult } from "#harness/provider-tool-history.js";
+import {
+  awaitsProviderToolResult,
+  flattenProviderToolHistory,
+} from "#harness/provider-tool-history.js";
 import { estimateRequestEnvelope } from "#harness/request-envelope.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
 import { retryRun } from "#harness/session-machine/runs.js";
@@ -258,7 +261,8 @@ export class ModelCaller {
     };
   }
 
-  private framing(options: ModelCallOptions, messages: readonly ModelMessage[]) {
+  private framing(options: ModelCallOptions, history: readonly ModelMessage[]) {
+    const messages = flattenProviderToolHistory(history, options.disabledProviderTools);
     const note = options.trailingUserNote;
     const asSystem = note !== undefined && awaitsProviderToolResult(messages);
     const extraSystemNote = asSystem
@@ -270,7 +274,7 @@ export class ModelCaller {
         instructions: this.system,
         profile: this.profile,
       }),
-      messages: asSystem ? [...messages] : withTrailingUserNote(messages, note),
+      messages: asSystem ? messages : withTrailingUserNote(messages, note),
     };
   }
 

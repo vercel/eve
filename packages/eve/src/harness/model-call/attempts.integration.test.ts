@@ -47,6 +47,7 @@ const overloaded = (): StreamResult =>
 async function runTurn(
   doStream: MockLanguageModelV3["doStream"],
   execute = async () => "The weekly summary.",
+  history: HarnessSession["history"] = [],
 ): Promise<SessionEvent[]> {
   vi.spyOn(Math, "random").mockReturnValue(0);
   vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -54,7 +55,7 @@ async function runTurn(
   const session: HarnessSession = {
     compaction: {},
     continuationToken: "http:attempts",
-    history: [],
+    history,
     sessionId: "attempts",
   };
   await createTestKernel({
@@ -137,6 +138,62 @@ const malformed = (): StreamResult => ({
 });
 
 describe("model attempts", () => {
+  it("retries without web search history another provider cannot read", async () => {
+    const message = "messages.1.content.1: Invalid encrypted_content in search_result block";
+    const rejection = new APICallError({
+      isRetryable: false,
+      message,
+      requestBodyValues: {},
+      responseBody: JSON.stringify({ error: { message } }),
+      statusCode: 400,
+      url: "https://gateway.test",
+    });
+    const doStream = vi
+      .fn<MockLanguageModelV3["doStream"]>()
+      .mockRejectedValueOnce(rejection)
+      .mockImplementation(async () => streamOf(reply("Here it is.")));
+
+    await runTurn(doStream, undefined, [
+      { content: "Alice asks what eve is.", kind: "user", role: "user" },
+      {
+        role: "assistant",
+        content: [
+          {
+            input: { query: "eve framework" },
+            providerExecuted: true,
+            toolCallId: "srvtoolu_1",
+            toolName: "web_search",
+            type: "tool-call",
+          },
+          {
+            output: {
+              type: "json",
+              value: [
+                {
+                  encryptedContent: "opaque-content",
+                  pageAge: null,
+                  title: "eve docs",
+                  type: "web_search_result",
+                  url: "https://eve.dev/docs",
+                },
+              ],
+            },
+            toolCallId: "srvtoolu_1",
+            toolName: "web_search",
+            type: "tool-result",
+          },
+          { text: "eve is a framework for durable agents.", type: "text" },
+        ],
+      },
+    ]);
+
+    const [rejected, retried] = doStream.mock.calls.map(([call]) => JSON.stringify(call.prompt));
+    expect(rejected).toContain("opaque-content");
+    expect(retried).not.toContain("opaque-content");
+    expect(retried).not.toContain("srvtoolu_1");
+    expect(retried).toContain("[web_search results]\\n- eve docs: https://eve.dev/docs");
+  });
+
   it.each([
     { failure: overloaded, message: "overloaded" },
     { failure: terminated, message: "ended before the response finished" },
