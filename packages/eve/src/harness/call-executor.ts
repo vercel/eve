@@ -33,6 +33,7 @@ import { createLogger, logError } from "#internal/logging.js";
 import { callProgress } from "#harness/call-facts.js";
 import { settleCall, startCall } from "#harness/session-machine/calls.js";
 import { withUsageCall } from "#harness/usage-sink.js";
+import { withModelCall } from "#runtime/connections/identity-hold.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 import { toError } from "#shared/errors.js";
 import type { ApprovalAsk } from "#harness/session-machine/view.js";
@@ -168,7 +169,7 @@ export async function executeToolCall(
         try {
           started = true;
           await input.publish(startCall(clearance));
-          await withUsageCall(callId, async () => {
+          const run = async () => {
             invoked = true;
             const executed = invokeTool(
               definition,
@@ -197,7 +198,8 @@ export async function executeToolCall(
             } else {
               output = await raceAbort(Promise.resolve(executed), abandon);
             }
-          });
+          };
+          await withUsageCall(callId, () => withModelCall(run));
         } finally {
           executionMs = performance.now() - startedAt;
         }

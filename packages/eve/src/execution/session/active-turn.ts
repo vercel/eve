@@ -27,6 +27,7 @@ import {
 } from "#execution/session-workflow-tool-run.js";
 import type { AppliedRunMessage } from "#execution/tools/workflow/apply-run-messages.js";
 import { readDurableSession } from "#execution/durable-session-read.js";
+import { openRequests, openSignIns } from "#protocol/session-projection/reader.js";
 import { activeTurnId, storedProjection, turnPosition } from "#harness/session-machine/view.js";
 import { coalesceDeliveries, selectDeliveryPayloads } from "#harness/messages.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
@@ -45,13 +46,14 @@ export class ActiveTurn {
   private readonly admitted = new Set<number>();
   private readonly routedToChildren = new Set<number>();
   private readonly mappedForHeldRequest = new Set<number>();
+  private readonly reportedSteering = new Set<number>();
   private readonly runtimeResults: RuntimeEvent[] = [];
   private readonly controller: AbortController;
   #cancelledBy: ControlOrigin | undefined;
   readonly #control: boolean;
   private readonly expectedTurnId: string;
   private readonly input: SessionExecutionInput;
-  private readonly identity: SteeringTurn;
+  private identity: SteeringTurn;
   private readonly unsubscribe: () => void;
   private unsubscribeDelivery: () => void;
   private steeringController: AbortController;
@@ -92,11 +94,17 @@ export class ActiveTurn {
     if (
       delivery.kind === "deliver" &&
       !this.input.queue.isDuplicate(delivery) &&
-      isSteeringMessage(delivery, this.identity) &&
+      isSteeringMessage(delivery, this.identity, { paused: this.awaitsPerson }) &&
       !this.input.cursor.sessionState.hasProxyInputRequests
     )
       this.steeringController.abort();
   };
+
+  private get awaitsPerson(): boolean {
+    const { state } = readDurableSession(this.input.cursor.sessionState);
+    const view = storedProjection(state).view;
+    return openRequests(view).length > 0 || openSignIns(view).length > 0;
+  }
 
   get signal(): AbortSignal {
     return this.controller.signal;
@@ -105,6 +113,10 @@ export class ActiveTurn {
   dispose(): void {
     this.unsubscribe();
     this.unsubscribeDelivery();
+  }
+
+  adopt(principal: string): void {
+    this.identity = { ...this.identity, principal };
   }
 
   get steeringSignal(): AbortSignal {
@@ -118,6 +130,19 @@ export class ActiveTurn {
     this.unsubscribeDelivery = this.input.inbox.onDelivery(this.signalSteering);
   }
 
+  private steersNow(sequence: number): boolean {
+    const delivery = this.input.queue.delivery(sequence);
+    return (
+      delivery !== undefined &&
+      isSteeringMessage(delivery, this.identity, { paused: this.awaitsPerson })
+    );
+  }
+
+  private forget(sequence: number): void {
+    this.admitted.delete(sequence);
+    this.reportedSteering.delete(sequence);
+  }
+
   async admitBoundary(settled = false): Promise<void> {
     const pending = this.input.inbox.drain();
     for (const payload of pending) await this.admit(payload, settled);
@@ -126,17 +151,28 @@ export class ActiveTurn {
   async takeSteering(options?: SteeringOptions): Promise<DeliverHookPayload | undefined> {
     const steering: DeliverHookPayload[] = [];
     while (true) {
-      const selection = this.input.queue.takeSteering(this.admitted, this.identity, options);
+      const selection = this.input.queue.takeSteering(this.admitted, this.identity, {
+        ...options,
+        paused: this.awaitsPerson,
+      });
       if (selection === undefined) break;
-      for (const sequence of selection.sequences) this.admitted.delete(sequence);
+      for (const sequence of selection.sequences) this.forget(sequence);
       const routed = await routeSelectedDelivery(selection, this.input.cursor);
       if (routed.kind === "cancel-turn") {
         this.abort();
         break;
       }
-      if (routed.kind === "turn") steering.push(routed.delivery);
+      if (routed.kind === "turn") {
+        steering.push(routed.delivery);
+        break;
+      }
     }
     this.resetSteering();
+    if (
+      !this.input.cursor.sessionState.hasProxyInputRequests &&
+      [...this.admitted].some((sequence) => this.steersNow(sequence))
+    )
+      this.steeringController.abort();
     if (steering.length === 0) return undefined;
     const delivery = steering.length === 1 ? steering[0]! : coalesceDeliveries(steering);
     if (delivery.caller !== undefined) this.caller = delivery.caller;
@@ -206,7 +242,7 @@ export class ActiveTurn {
         if (mapped.delivery === undefined) continue;
         delivery = mapped.delivery;
       }
-      this.admitted.delete(sequence);
+      this.forget(sequence);
       const split = isSteeringDelivery(delivery, this.identity, { heldOnPerson: true })
         ? undefined
         : splitAnswers(delivery);
@@ -280,28 +316,31 @@ export class ActiveTurn {
   private async routeAdmittedToChildren(): Promise<boolean> {
     let steered = false;
     for (const sequence of this.admitted) {
-      if (this.routedToChildren.has(sequence)) continue;
       const delivery = this.input.queue.delivery(sequence);
       if (delivery === undefined) {
-        this.admitted.delete(sequence);
+        this.forget(sequence);
         continue;
       }
-      this.routedToChildren.add(sequence);
-      const routed = await this.input.cursor.advance((state) =>
-        routeDeliverToChildren({ delivery, ...state }),
-      );
-      if (routed.kind === "cancel-turn") {
-        this.input.queue.replaceDelivery(sequence, undefined);
-        this.admitted.delete(sequence);
-        this.abort();
-        return false;
+      if (!this.routedToChildren.has(sequence)) {
+        this.routedToChildren.add(sequence);
+        const routed = await this.input.cursor.advance((state) =>
+          routeDeliverToChildren({ delivery, ...state }),
+        );
+        if (routed.kind === "cancel-turn") {
+          this.input.queue.replaceDelivery(sequence, undefined);
+          this.forget(sequence);
+          this.abort();
+          return false;
+        }
+        this.input.queue.replaceDelivery(sequence, routed.remainder);
+        if (routed.remainder === undefined) {
+          this.forget(sequence);
+          continue;
+        }
       }
-      this.input.queue.replaceDelivery(sequence, routed.remainder);
-      if (routed.remainder === undefined) {
-        this.admitted.delete(sequence);
-        continue;
-      }
-      if (isSteeringMessage(routed.remainder, this.identity)) steered = true;
+      if (this.reportedSteering.has(sequence) || !this.steersNow(sequence)) continue;
+      this.reportedSteering.add(sequence);
+      steered = true;
     }
     return steered;
   }

@@ -12,7 +12,7 @@ import type {
   SessionAuthContext,
   SessionCallback,
   SessionCapabilities,
-  TurnPolicy,
+  TurnMode,
 } from "#channel/types.js";
 import type { Session } from "#channel/session.js";
 import { sessionCommandErrorResponse } from "#eve-channel/support.js";
@@ -180,7 +180,7 @@ interface ParsedSessionMessageBody {
   answers?: readonly ValidatedAnswer[];
   context?: ClientContextValue;
   outputSchema?: JsonObject;
-  turnPolicy?: TurnPolicy;
+  turnPolicy?: TurnMode;
 }
 
 export function parseSessionMessageBody(

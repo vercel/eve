@@ -85,6 +85,9 @@ export interface ConnectionAuthorizationFailedErrorOptions {
    *   Terminal for the turn.
    * - `"sign_in_unavailable"`: a turn a schedule started needed a sign-in.
    *   Scheduled turns never ask for one. Terminal.
+   * - `"turn_steered"`: another person's message joined the turn after its
+   *   caller last spoke, so a call the model made could not use the caller's
+   *   identity. Terminal until the caller sends a message or approves a call.
    */
   readonly reason?: string;
 

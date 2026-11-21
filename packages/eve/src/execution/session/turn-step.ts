@@ -31,6 +31,7 @@ import {
   ToolChannelKey,
   ToolStubsKey,
   TurnDeliveryIdsKey,
+  SteeredByKey,
 } from "#context/keys.js";
 import { ChannelKey, requireCompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { sessionAgent } from "#definitions/agent.js";
@@ -62,11 +63,17 @@ import {
   sessionView,
 } from "#harness/session-machine/commit.js";
 import { matchSignIns, receive } from "#harness/session-machine/transitions.js";
-import type { DeliverPayload } from "#channel/types.js";
+import type { DeliverPayload, SessionAuthContext } from "#channel/types.js";
 import { coalesceTurnInputs, validateHarnessModelMessages } from "#harness/messages.js";
 import type { HarnessSession, HarnessStepInput, StepInput, StepResult } from "#harness/types.js";
 import { attributeAnswers } from "#execution/session/answer-caller.js";
-import { continueTurnAuth } from "#execution/session/principal.js";
+import {
+  ANONYMOUS_PRINCIPAL,
+  continueTurnAuth,
+  principalOf,
+  steeredByAfter,
+} from "#execution/session/principal.js";
+import { APPROVE_OPTION_ID } from "#protocol/interaction-options.js";
 import type {
   DurableStepResult,
   TurnStepInput,
@@ -406,10 +413,26 @@ async function runSessionStepBody(
     if (answers !== undefined || ignoredActiveDelivery) turnAuth = previousAuth;
     else if (delivery !== undefined && !startedBetweenTurns) {
       turnAuth =
-        resolved?.message === undefined ? previousAuth : continueTurnAuth(previousAuth, turnAuth);
+        resolved?.message === undefined
+          ? previousAuth
+          : continueTurnAuth(previousAuth, turnAuth, delivery.principalPolicy);
     }
     if (turnAuth === undefined) ctx.delete(AuthKey);
     else ctx.set(AuthKey, turnAuth);
+    if (startedBetweenTurns && initialEmissionState.sessionStarted) setSteeredBy(ctx, []);
+    if (
+      delivery !== undefined &&
+      answers === undefined &&
+      !ignoredActiveDelivery &&
+      resolved?.message !== undefined
+    ) {
+      if (delivery.steeredBy !== undefined) setSteeredBy(ctx, delivery.steeredBy);
+      else if (!startedBetweenTurns) {
+        setSteeredBy(ctx, steeredByAfter(ctx.get(SteeredByKey) ?? [], turnAuth, delivery.auth));
+      }
+    } else if (callerApproved(answers, previousAuth, delivery?.auth)) {
+      setSteeredBy(ctx, []);
+    }
     if (ignoredActiveDelivery) {
       adapterCtx.state = previousAdapterState!;
     } else {
@@ -758,6 +781,27 @@ function stoppedForPerson(result: StepResult): boolean {
 
 function ignoreTurnCancellation(error: unknown): void {
   if (!isTurnCancellation(error)) throw error;
+}
+
+function setSteeredBy(ctx: ContextContainer, steeredBy: readonly SessionAuthContext[]): void {
+  if (steeredBy.length === 0) ctx.delete(SteeredByKey);
+  else ctx.set(SteeredByKey, steeredBy);
+}
+
+function callerApproved(
+  answers: HarnessStepInput | undefined,
+  caller: SessionAuthContext | null | undefined,
+  responder: SessionAuthContext | null | undefined,
+): boolean {
+  if (caller == null || responder == null) return false;
+  const principal = principalOf(caller);
+  return (
+    principal !== ANONYMOUS_PRINCIPAL &&
+    principal === principalOf(responder) &&
+    (answers?.answers ?? []).some(
+      (answer) => answer.responder !== undefined && answer.optionId === APPROVE_OPTION_ID,
+    )
+  );
 }
 
 function ownSignInAnswer(

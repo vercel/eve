@@ -7,6 +7,7 @@ import {
   isConnectionAuthorizationRequiredError,
 } from "#connections/errors.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
+import { holdCallerIdentity } from "#runtime/connections/identity-hold.js";
 import { evictScopedToken, resolveScopedToken } from "#runtime/connections/scoped-authorization.js";
 import { resolveConnectionAuthorization } from "#runtime/connections/resolve-authorization.js";
 import { buildConnectionCallbackContext } from "#runtime/connections/approval-scope.js";
@@ -186,6 +187,7 @@ export class McpConnectionClient implements ConnectionClient {
     return async (request, init) => {
       const principals = readTurnPrincipals();
       if (principals === undefined) return await globalThis.fetch(request, init);
+      holdCallerIdentity(connectionName);
       const headers = new Headers(init?.headers);
       headers.set(
         FORWARDED_PRINCIPAL_HEADER,
@@ -204,6 +206,9 @@ export class McpConnectionClient implements ConnectionClient {
     args: unknown,
     options: ConnectionToolExecuteOptions,
   ): Promise<unknown> {
+    if (this.#connection.forwardPrincipal === true) {
+      holdCallerIdentity(this.#connection.connectionName);
+    }
     let result: unknown;
     try {
       const { tools } = await this.#ensureTools();

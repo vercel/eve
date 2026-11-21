@@ -210,6 +210,9 @@ export class SessionExecution {
       });
       if (handover !== undefined) this.observedHandoverAttemptKey = handover.attemptKey;
       if (result.compacted === true) turn.compacted = true;
+      if (nextStepInput?.delivery?.principalPolicy === "adopt") {
+        turn.adopt(resolveTurnPrincipal(undefined, this.input.cursor.serializedContext));
+      }
 
       const stepAdmission = this.input.queue.nextAdmission;
       const settles = result.action === "parked" && result.settled !== undefined;
