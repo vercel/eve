@@ -8,8 +8,14 @@ import {
 } from "#harness/authorization.js";
 import { resolveToolCallInputObject } from "#harness/coordination.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { normalizeToolModelOutput, type ToolModelOutputValue } from "#harness/tool-model-output.js";
+import {
+  normalizeToolModelOutput,
+  toolModelOutputContext,
+  type ToolModelOutputContextOptions,
+  type ToolModelOutputValue,
+} from "#harness/tool-model-output.js";
 import { toErrorMessage } from "#shared/errors.js";
+import { defaultToolModelOutput } from "#tools/model-output.js";
 import { isObject } from "#shared/guards.js";
 import type { JsonObject } from "#shared/json.js";
 import { toModelSchema } from "#tools/schema.js";
@@ -69,28 +75,28 @@ function isIssue(value: unknown): value is StandardSchemaV1.Issue {
 export async function toolCallModelOutput(
   definition: Pick<HarnessToolDefinition, "name" | "toModelOutput">,
   output: unknown,
-  toolCallId: string | undefined,
+  toolCallId: string,
+  contextOptions?: ToolModelOutputContextOptions,
 ): Promise<ToolModelOutputValue> {
-  return await observeToolOutput(
-    definition.name,
-    toolCallId === undefined ? [] : [{ callId: toolCallId }],
-    async () => {
-      if (isAuthorizationPendingModelOutput(output)) {
-        return { type: "text", value: authorizationPendingModelText(output.connections) };
-      }
-      if (definition.toModelOutput !== undefined) {
-        return normalizeToolModelOutput({
-          output: await definition.toModelOutput(output),
-          toolCallId,
-          toolName: definition.name,
-        });
-      }
-      if (typeof output === "string") return { type: "text", value: output };
+  return await observeToolOutput(definition.name, [{ callId: toolCallId }], async () => {
+    if (isAuthorizationPendingModelOutput(output)) {
+      return { type: "text", value: authorizationPendingModelText(output.connections) };
+    }
+    if (definition.toModelOutput !== undefined) {
       return normalizeToolModelOutput({
-        output: { type: "json", value: output ?? null },
+        output: await definition.toModelOutput(
+          output,
+          toolModelOutputContext(definition.name, toolCallId, contextOptions),
+        ),
         toolCallId,
         toolName: definition.name,
       });
-    },
-  );
+    }
+    if (typeof output === "string") return { type: "text", value: output };
+    return normalizeToolModelOutput({
+      output: defaultToolModelOutput(output),
+      toolCallId,
+      toolName: definition.name,
+    });
+  });
 }

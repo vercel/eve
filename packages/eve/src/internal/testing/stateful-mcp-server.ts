@@ -13,7 +13,9 @@ export interface StatefulMcpServer {
   waitForRequest(match: (request: StatefulMcpRequest) => boolean): Promise<StatefulMcpRequest>;
 }
 
-export function createStatefulMcpServer(): StatefulMcpServer {
+export function createStatefulMcpServer(
+  registerTools?: (server: McpServer) => void,
+): StatefulMcpServer {
   const transports = new Map<string, WebStandardStreamableHTTPServerTransport>();
   const liveSessions = new Set<string>();
   const requests: StatefulMcpRequest[] = [];
@@ -52,6 +54,7 @@ export function createStatefulMcpServer(): StatefulMcpServer {
     server.registerTool("ping", { description: "Replies pong." }, () => ({
       content: [{ type: "text", text: "pong" }],
     }));
+    registerTools?.(server);
     await server.connect(transport);
     return await transport.handleRequest(request);
   }

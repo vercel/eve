@@ -25,6 +25,7 @@ import {
 import { splitTaskIdInput } from "#execution/tasks/task-id-input.js";
 import { entryPointOf, isAgentTool } from "#execution/tasks/tool-entry-point.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import type { ToolModelOutputContext } from "#tools/model-output.js";
 import { createFrameworkUserMessage, type HarnessModelMessage } from "#harness/messages.js";
 import type { HarnessSession, HarnessToolLookup, HarnessToolMap } from "#harness/types.js";
 import type { WorkflowToolCallEntry } from "#shared/action-types.js";
@@ -109,8 +110,14 @@ export function workingTaskIds(session: HarnessSession): readonly string[] {
   return workingTasks(readTaskTable(session.state)).map((record) => record.id);
 }
 
+export type ToolModelOutputContextFactory = (
+  toolName: string,
+  callId: string,
+) => ToolModelOutputContext;
+
 export async function appendTaskContext(input: {
   readonly messages: readonly HarnessModelMessage[];
+  readonly outputContext: ToolModelOutputContextFactory;
   readonly session: HarnessSession;
   readonly tools: HarnessToolLookup;
 }): Promise<{
@@ -131,6 +138,7 @@ export async function appendTaskContext(input: {
 }
 
 async function deliverTaskResults(input: {
+  readonly outputContext: ToolModelOutputContextFactory;
   readonly session: HarnessSession;
   readonly tools: HarnessToolLookup;
 }): Promise<{ readonly message?: string; readonly session: HarnessSession }> {
@@ -139,7 +147,9 @@ async function deliverTaskResults(input: {
   const blocks: TaskResultBlock[] = [];
   for (const record of taken) {
     for (const result of record.results) {
-      blocks.push(await toResultBlock(record, result, input.tools.get(record.name)));
+      blocks.push(
+        await toResultBlock(record, result, input.tools.get(record.name), input.outputContext),
+      );
     }
   }
   return { message: renderTaskResults(blocks), session: writeTaskTable(input.session, table) };
@@ -149,26 +159,32 @@ async function toResultBlock(
   record: TaskRecord,
   result: TaskResult,
   definition: HarnessToolDefinition | undefined,
+  outputContext: ToolModelOutputContextFactory,
 ): Promise<TaskResultBlock> {
   const base = { taskId: record.id, tool: record.name };
   if (result.status === "failed") return { ...base, body: result.error, status: "failed" };
   return {
     ...base,
-    body: await projectOutput(record.name, result, definition),
+    body: await projectOutput(record, result, definition, outputContext),
     status: "completed",
   };
 }
 
 async function projectOutput(
-  tool: string,
+  { id: taskId, name: tool }: TaskRecord,
   result: Extract<TaskResult, { status: "completed" }>,
   definition: HarnessToolDefinition | undefined,
+  outputContext: ToolModelOutputContextFactory,
 ): Promise<string> {
   if (definition?.toModelOutput === undefined) return renderModelOutputText(result.output);
+  const callId = result.calls?.[0]?.callId ?? taskId;
   return await observeToolOutput(
     tool,
     result.calls ?? [],
-    async () => renderModelOutputText(await definition.toModelOutput!(result.output)),
+    async () =>
+      renderModelOutputText(
+        await definition.toModelOutput!(result.output, outputContext(tool, callId)),
+      ),
     () => renderModelOutputText(result.output),
   );
 }
