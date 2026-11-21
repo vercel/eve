@@ -49,6 +49,9 @@ test("expands fixtures × models × attempts and mock worlds the fixture selects
   const selection = select();
   assert.deepEqual(selection.concurrency, { legs: 2, evalsPerLeg: 1 });
   assert.deepEqual(selection.devStartup, { runs: 3, subjects: [{ name: "minimal", tools: 0 }] });
+  assert.deepEqual(select({ devStartup: { runs: 3, subjects: ["large"] } }).devStartup.subjects, [
+    { name: "large", tools: 80, project: "large" },
+  ]);
   assert.equal(selection.package, null);
   assert.deepEqual(select({ package: { runs: 3 } }).package, { runs: 3 });
   assert.equal(selection.init, null);
