@@ -9,7 +9,6 @@ import {
 import { defineInstrumentation } from "#public/instrumentation/index.js";
 import { otel, type TracePolicyDecision } from "#public/instrumentation/otel.js";
 
-const REGISTRY_GLOBAL_KEY = Symbol.for("eve.harness-instrumentation-providers");
 vi.mock("#tracing/eve/otel-registration.js", () => ({
   registerOtel: () => ({
     provider: { getTracer: () => ({}) },
@@ -19,7 +18,7 @@ vi.mock("#tracing/eve/otel-registration.js", () => ({
     shutdown: async () => {},
   }),
 }));
-const RUNTIME_GLOBAL_KEY = Symbol.for("eve.instrumentation-runtime");
+const EVE_RUNTIME_KEY = Symbol.for("eve.runtime");
 
 const traceContext = (audience: "public" | "private" | "unknown") => ({
   agentName: "weather-agent",
@@ -31,8 +30,7 @@ const traceContext = (audience: "public" | "private" | "unknown") => ({
 
 describe("otel and authored provider composition", () => {
   beforeEach(() => {
-    delete (globalThis as Record<symbol, unknown>)[REGISTRY_GLOBAL_KEY];
-    delete (globalThis as Record<symbol, unknown>)[RUNTIME_GLOBAL_KEY];
+    delete (globalThis as Record<symbol, unknown>)[EVE_RUNTIME_KEY];
   });
 
   it.each([

@@ -3,7 +3,7 @@ import {
   type InstrumentationEvent,
 } from "#instrumentation/lifecycle.js";
 import { requestAuthorization } from "#harness/authorization.js";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
 import type { ApprovalPolicy } from "#approval/definition.js";
 import { withAgentApprovalOnEntries } from "#approval/agent.js";
@@ -14,6 +14,7 @@ import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
+import { createEveRuntime, installEveRuntime } from "#runtime/eve-runtime.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import { defineSandboxProvider, type SandboxConnection } from "#sandbox/provider.js";
@@ -227,11 +228,9 @@ describe("invokeTool", () => {
           },
         },
       ]);
-      vi.stubGlobal(Symbol.for("eve.instrumentation-runtime"), {
-        hooks,
-        forceFlush,
-        otelSettings: undefined,
-      });
+      const eve = createEveRuntime();
+      eve.instrumentation.runtime = { hooks, forceFlush, otelSettings: undefined } as never;
+      onTestFinished(installEveRuntime(eve));
       const runtime = runtimeWith([
         tool("echo", (value) => value),
         tool("approve", () => "not executed", { approval: () => "user-approval" }),

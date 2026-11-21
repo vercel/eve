@@ -60,11 +60,9 @@ import {
 
 vi.setConfig({ testTimeout: 90_000 });
 
-const REGISTRY_GLOBAL_KEY = Symbol.for("eve.harness-instrumentation-providers");
-const RUNTIME_GLOBAL_KEY = Symbol.for("eve.instrumentation-runtime");
+const EVE_RUNTIME_KEY = Symbol.for("eve.runtime");
 afterEach(() => {
-  delete (globalThis as Record<symbol, unknown>)[REGISTRY_GLOBAL_KEY];
-  delete (globalThis as Record<symbol, unknown>)[RUNTIME_GLOBAL_KEY];
+  delete (globalThis as Record<symbol, unknown>)[EVE_RUNTIME_KEY];
 });
 
 const HEARD_TYPES = [
