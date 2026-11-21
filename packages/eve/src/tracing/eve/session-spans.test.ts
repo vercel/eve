@@ -21,6 +21,7 @@ import {
   recordPublishedLine,
 } from "#harness/session-machine/current.js";
 import { ConnectionAuthorizationFailedError } from "#connections/errors.js";
+import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import { createAiSdkHookBridge } from "#instrumentation/ai-sdk-hook-bridge.js";
 import {
   createInstrumentationHooks,
@@ -38,6 +39,8 @@ import type { ChannelAudience } from "#shared/channel-audience.js";
 import { createAgentOtelInstrumentation } from "#tracing/eve/agent-otel-provider.js";
 import { isOtelDeclaration, type TraceCapturePolicy } from "#tracing/eve/otel-declaration.js";
 import { eveOutputMapping } from "#tracing/eve/profile.js";
+
+type MockModelSettings = NonNullable<ConstructorParameters<typeof MockLanguageModelV3>[0]>;
 
 function session(
   tracePolicy: TraceCapturePolicy = () => ({ emit: true, recordInputs: true, recordOutputs: true }),
@@ -100,40 +103,42 @@ function session(
     })!;
   const handle = handleFor(false);
   const relayHandle = handleFor(true);
+  const callModel = async (doGenerate: MockModelSettings["doGenerate"]) => {
+    const scope = attemptScopeOf(
+      { channelAudience: audience, functionId: "weather", sessionId: "s", ...child },
+      { attempt: 0, runId: "run_compaction", turnId: "turn_0" },
+    );
+    await generateText({
+      maxRetries: 0,
+      model: new MockLanguageModelV3({ doGenerate }),
+      prompt: "Summarize Alice's conversation so far.",
+      telemetry: {
+        integrations: [
+          createAiSdkHookBridge(scope, hooks, otel.runInContext, {
+            "eve.compaction.request": "summary",
+          }),
+        ],
+        isEnabled: true,
+      },
+    });
+  };
   return {
     commit: (...facts: SessionEvent[]) => contextStorage.run(ctx, () => handle(commitOf(facts))),
     relay: (...facts: SessionEvent[]) =>
       contextStorage.run(ctx, () => relayHandle(commitOf(facts))),
     runTool: otel.runInContext,
-    async summarize(summary: string) {
-      const scope = attemptScopeOf(
-        { channelAudience: audience, functionId: "weather", sessionId: "s", ...child },
-        { attempt: 0, runId: "run_compaction", turnId: "turn_0" },
-      );
-      await generateText({
-        model: new MockLanguageModelV3({
-          doGenerate: async () => ({
-            content: [{ text: summary, type: "text" }],
-            finishReason: { raw: undefined, unified: "stop" },
-            providerMetadata: { gateway: { cost: "0.0042" } },
-            usage: {
-              inputTokens: { cacheRead: 0, cacheWrite: 0, noCache: 1200, total: 1200 },
-              outputTokens: { reasoning: 0, text: 80, total: 80 },
-            },
-            warnings: [],
-          }),
-        }),
-        prompt: "Summarize Alice's conversation so far.",
-        telemetry: {
-          integrations: [
-            createAiSdkHookBridge(scope, hooks, otel.runInContext, {
-              "eve.compaction.request": "summary",
-            }),
-          ],
-          isEnabled: true,
+    callModel,
+    summarize: (summary: string) =>
+      callModel(async () => ({
+        content: [{ text: summary, type: "text" }],
+        finishReason: { raw: undefined, unified: "stop" },
+        providerMetadata: { gateway: { cost: "0.0042" } },
+        usage: {
+          inputTokens: { cacheRead: 0, cacheWrite: 0, noCache: 1200, total: 1200 },
+          outputTokens: { reasoning: 0, text: 80, total: 80 },
         },
-      });
-    },
+        warnings: [],
+      })),
     async spans(): Promise<readonly ReadableSpan[]> {
       await provider.forceFlush();
       return exporter.getFinishedSpans();
@@ -730,6 +735,58 @@ describe("a session's spans, from its committed lines", () => {
     ]);
     const failed = exported.find((span) => span.name === "execute_tool weather");
     expect(failed?.attributes["error.type"]).toBe("TOOL_FAILED");
+  });
+
+  it("records no exception for a tool the turn's cancellation stops", async () => {
+    const scopes = new Map<string, InstrumentationScope>();
+    const { commit, runTool, spans } = session(undefined, undefined, undefined, undefined, [
+      {
+        name: "scopes",
+        events: { "call.requested": (event) => void scopes.set(event.callId, event.scope) },
+      },
+    ]);
+    await commit(...opening);
+    await commit(requested("call_weather", "weather"));
+    const cancelled = new TurnCancelledError();
+    await expect(
+      runTool(
+        {
+          callId: "call_weather",
+          idempotencyKey: "tool:call_weather",
+          scope: scopes.get("call_weather")!,
+          toolName: "weather",
+          type: "tool.call",
+        },
+        () => Promise.reject(cancelled),
+      ),
+    ).rejects.toBe(cancelled);
+    await commit(turnSettled({ outcome: "cancelled" }));
+
+    const tool = (await spans()).find((span) => span.name === "execute_tool weather");
+    expect(tool?.attributes["agent.action.outcome"]).toBe("cancelled");
+    expect(tool?.events.map((event) => event.name)).not.toContain("exception");
+  });
+
+  it("records no exception for a model call the turn's cancellation stops", async () => {
+    const { callModel, commit, spans } = session();
+    await commit(...opening);
+    const cancelled = new TurnCancelledError();
+    await expect(callModel(() => Promise.reject(cancelled))).rejects.toBe(cancelled);
+    await commit(turnSettled({ outcome: "cancelled" }));
+
+    const model = (await spans()).find((span) => span.name === "chat mock-model-id");
+    expect(model?.events.map((event) => event.name)).not.toContain("exception");
+  });
+
+  it("records an exception for a model call that fails", async () => {
+    const { callModel, commit, spans } = session();
+    await commit(...opening);
+    const failure = new Error("The provider is unavailable.");
+    await expect(callModel(() => Promise.reject(failure))).rejects.toBe(failure);
+    await commit(turnSettled({ outcome: "failed" }));
+
+    const model = (await spans()).find((span) => span.name === "chat mock-model-id");
+    expect(model?.events.map((event) => event.name)).toContain("exception");
   });
 
   it("exports a compaction's summary call during a turn as a model span under the turn", async () => {

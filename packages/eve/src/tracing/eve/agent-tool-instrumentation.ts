@@ -14,6 +14,7 @@ import type {
   InstrumentationCallSettledEvent,
 } from "#instrumentation/lifecycle.js";
 import { actionIdempotencyKey } from "#instrumentation/lifecycle.js";
+import { isTurnCancellation } from "#harness/turn-cancellation.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import type {
   AgentActionTraceState,
@@ -278,10 +279,11 @@ export function createAgentToolInstrumentation(input: {
       } catch (error) {
         const authorization = connectionAuthorizationAttributes(error);
         if (authorization !== undefined) execution.tool.attributes(authorization);
+        const failed = !isTurnCancellation(error);
         await finishExecution(execution, {
           completedAtMs: Date.now(),
-          failed: true,
-          error: ceiling.recordOutputs ? error : undefined,
+          failed,
+          error: failed && ceiling.recordOutputs ? error : undefined,
         });
         throw error;
       }
