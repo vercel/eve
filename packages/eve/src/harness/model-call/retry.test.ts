@@ -57,6 +57,34 @@ describe("runModelCallWithRetries", () => {
     expect(call).toHaveBeenCalledTimes(2);
   });
 
+  it("retries an AI Gateway fallback rejection while the primary provider is unavailable, within the same budget", async () => {
+    const providerAttempts = [
+      { error: "Service temporarily unavailable", provider: "anthropic", statusCode: 503 },
+      {
+        error: "Invalid encrypted_content in search_result block",
+        provider: "vertexAnthropic",
+        statusCode: 400,
+      },
+    ];
+    const call = vi.fn(async () => {
+      throw Object.assign(
+        new Error("Bad Request", {
+          cause: Object.assign(new Error("Bad Request"), {
+            data: {
+              providerMetadata: { gateway: { routing: { modelAttempts: [{ providerAttempts }] } } },
+            },
+            name: "AI_APICallError",
+            statusCode: 400,
+          }),
+        }),
+        { name: "GatewayInternalServerError", statusCode: 400, type: "internal_server_error" },
+      );
+    });
+
+    await expect(runModelCallWithRetries(call, session)).rejects.toThrow("Bad Request");
+    expect(call).toHaveBeenCalledTimes(3);
+  });
+
   it("keeps the full retry budget for other transient failures", async () => {
     const call = vi.fn(async () => {
       throw busy();
