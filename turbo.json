@@ -1,8 +1,128 @@
 {
   "$schema": "https://turborepo.com/schema.json",
   "envMode": "strict",
+  "futureFlags": {
+    "affectedUsingTaskInputs": true
+  },
   "globalDependencies": [".nvmrc", "pnpm-workspace.yaml", "tsconfig.json"],
   "tasks": {
+    "//#check:deps": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs,vue,svelte,md,mdx,css,sql,wgsl,py,png,svg,webp,woff2}"
+      ],
+      "tags": ["ci"]
+    },
+    "//#check:sandbox-image-tag": {
+      "inputs": [
+        "packages/eve/Dockerfile",
+        "packages/eve/Dockerfile.git",
+        "packages/eve/src/execution/sandbox/bindings/eve-image.ts",
+        "scripts/sandbox-image-tag.mjs"
+      ],
+      "tags": ["ci"]
+    },
+    "//#check:templates": {
+      "cache": false,
+      "dependsOn": ["eve#build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!.agents/**",
+        "!.changeset/**",
+        "!.github/**",
+        "!apps/benchmarks/**",
+        "!apps/docs/**",
+        "!apps/fixtures/**",
+        "!apps/frameworks/**",
+        "!apps/package-artifacts/**",
+        "!docs/**",
+        "!e2e/**",
+        "!examples/**",
+        "!packages/**",
+        "!research/**"
+      ],
+      "passThroughEnv": ["EVE_SANDBOX_IMAGE_TAG", "EVE_TELEMETRY_DISABLED"],
+      "tags": ["ci", "ci:cpus:16"]
+    },
+    "//#check:template-files": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!.agents/**",
+        "!.changeset/**",
+        "!.github/**",
+        "!apps/benchmarks/**",
+        "!apps/fixtures/**",
+        "!apps/frameworks/**",
+        "!apps/package-artifacts/**",
+        "!docs/**",
+        "!e2e/**",
+        "!examples/**",
+        "!packages/**",
+        "!research/**"
+      ],
+      "tags": ["ci"]
+    },
+    "//#docs:check": {
+      "dependsOn": ["eve#build:compiled"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!.agents/**",
+        "!.changeset/**",
+        "!.github/**",
+        "!apps/**",
+        "!e2e/**",
+        "!examples/**",
+        "!research/**"
+      ],
+      "tags": ["ci"]
+    },
+    "//#guard:docs-budget": {
+      "cache": false,
+      "tags": ["ci"]
+    },
+    "//#guard:fixtures": {
+      "inputs": ["packages/eve/test/fixtures/**", "scripts/guard-test-fixtures.mjs"],
+      "tags": ["ci"]
+    },
+    "//#guard:invariants": {
+      "tags": ["ci"]
+    },
+    "//#lint": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!**/*.{md,mdx,yaml,yml,sql,css,wgsl,py,png,svg,webp,woff2,txt}"
+      ],
+      "tags": ["ci", "ci:cpus:4"]
+    },
+    "//#test:eval-benchmark": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!.agents/**",
+        "!.changeset/**",
+        "!apps/**",
+        "!docs/**",
+        "!e2e/fixtures/**",
+        "!examples/**",
+        "!research/**"
+      ],
+      "tags": ["ci"]
+    },
+    "//#test:scripts": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!.agents/**",
+        "!apps/docs/**",
+        "!apps/fixtures/**",
+        "!apps/frameworks/**",
+        "!apps/package-artifacts/**",
+        "!apps/templates/**",
+        "!docs/**",
+        "!e2e/**",
+        "!examples/**",
+        "!research/**"
+      ],
+      "tags": ["ci"]
+    },
     "build": {
       "dependsOn": ["^build"],
       "env": ["VERCEL"],
@@ -24,7 +144,9 @@
         ".next/**",
         "!.next/cache/**",
         ".output/**",
-        ".vercel/output/**"
+        ".vercel/output/**",
+        "LICENSE",
+        "NOTICE"
       ]
     },
     "build:types": {
@@ -96,6 +218,7 @@
     },
     "test:integration": {
       "cache": false,
+      "tags": ["ci"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!.eve/**",
@@ -125,7 +248,8 @@
       "outputs": []
     },
     "test:unit": {
-      "cache": false,
+      "dependsOn": ["^build"],
+      "tags": ["ci"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!.eve/**",
@@ -140,6 +264,8 @@
     },
     "typecheck": {
       "dependsOn": ["^build"],
+      "passThroughEnv": ["EVE_TELEMETRY_DISABLED"],
+      "tags": ["ci"],
       "inputs": [
         "**/*.ts",
         "**/*.tsx",

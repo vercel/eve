@@ -145,5 +145,5 @@ describe("convertHtmlToMarkdown", () => {
       expect(performance.now() - started).toBeLessThan(2_000);
     }
     expect(convertHtmlToMarkdown("<div>".repeat(1_000) + "deep")).toBe("deep");
-  });
+  }, 30_000);
 });

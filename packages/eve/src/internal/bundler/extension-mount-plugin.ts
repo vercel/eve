@@ -149,13 +149,17 @@ export function createExtensionMountPlugin(
           ? resolved
           : { id: `${resolved.id}${MOUNT_QUERY}${encodeURIComponent(owner.mountId)}` };
       }
-      if (owners.length > 1) {
+      const applicationOwners = owners.filter(
+        (owner) => !roots.some((other) => owner.mountId.startsWith(`${other.mountId}/`)),
+      );
+      const candidates = applicationOwners.length > 0 ? applicationOwners : owners;
+      if (candidates.length > 1) {
         throw new Error(
-          `Import "${source}" from "${importer}" refers to multiple extension mounts (${owners.map((owner) => owner.mountId).join(", ")}). Import it from an owned mount or contribution instead.`,
+          `Import "${source}" from "${importer}" refers to multiple extension mounts (${candidates.map((owner) => owner.mountId).join(", ")}). Import it from an owned mount or contribution instead.`,
         );
       }
-      return owners.length === 1
-        ? { id: `${resolved.id}${MOUNT_QUERY}${encodeURIComponent(owners[0]!.mountId)}` }
+      return candidates.length === 1
+        ? { id: `${resolved.id}${MOUNT_QUERY}${encodeURIComponent(candidates[0]!.mountId)}` }
         : undefined;
     },
     load: {

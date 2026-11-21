@@ -10,6 +10,7 @@ describe("framework fixtures", () => {
   it.each([
     "framework-next",
     "framework-nuxt",
+    "framework-solid",
     "framework-sveltekit",
     "framework-tanstack",
     "framework-vite",
