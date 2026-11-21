@@ -748,6 +748,79 @@ test("attributes pull requests to the person the tool context resolves", async (
   );
 });
 
+test("footers comments with the co-author's footer and refuses ones it cannot footer", async () => {
+  const runs: Parameters<SandboxSession["run"]>[0][] = [];
+  const files = new Map([["/workspace/reply.md", "Fixed."]]);
+  const removed: string[] = [];
+  const config = {
+    ...CONFIG,
+    attribution: () => ({
+      name: "octocat",
+      email: "1+octocat@users.noreply.github.com",
+      commentFooter: "<sub>Sent using V</sub>",
+    }),
+  };
+  const dependencies = {
+    context: { session: { id: "session-1" } } as ToolContext,
+    sessionId: "session-1",
+    async getConnectToken() {
+      return "secret-token";
+    },
+    async getSandbox() {
+      return {
+        ...fakeSandbox(runs, { exitCode: 0, stdout: "", stderr: "" }),
+        readTextFile: async ({ path }: { path: string }) => files.get(path) ?? null,
+        writeTextFile: async ({ content, path }: { content: string; path: string }) => {
+          files.set(path, content);
+        },
+        removePath: async ({ path }: { path: string }) => {
+          removed.push(path);
+        },
+      } as SandboxSession;
+    },
+  };
+
+  await executeGitHubShell(
+    { ...READ, command: 'gh pr comment 12 --repo vercel/internal-agents --body "-Fixed the typo"' },
+    config,
+    dependencies,
+  );
+  assert.match(
+    runs.at(-1)?.command ?? "",
+    /'--body' '-Fixed the typo\n\n<sub>Sent using V<\/sub>'$/u,
+  );
+
+  await executeGitHubShell(
+    {
+      ...READ,
+      command: "gh api repos/vercel/internal-agents/pulls/12/comments/99/replies -F body=@reply.md",
+    },
+    config,
+    dependencies,
+  );
+  const copy = /'body=@(\/tmp\/eve-git-body-[^']+)'$/u.exec(runs.at(-1)?.command ?? "")?.[1] ?? "";
+  assert.ok(copy, "the command passes a footered copy of the body file");
+  assert.equal(files.get(copy), "Fixed.\n\n<sub>Sent using V</sub>");
+  assert.equal(files.get("/workspace/reply.md"), "Fixed.");
+  assert.ok(removed.includes(copy), "the footered copy is removed after the command runs");
+
+  const ran = runs.length;
+  await assert.rejects(
+    executeGitHubShell(
+      {
+        ...READ,
+        command:
+          'gh api graphql -f \'query=mutation { addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: "T", body: "Fixed."}) { comment { id } } }\'',
+      },
+      config,
+      dependencies,
+    ),
+    (error: unknown) =>
+      isGitHubCommandInputError(error) && /\/replies -f body=/u.test(error.message),
+  );
+  assert.equal(runs.length, ran, "a refused comment never runs");
+});
+
 test("serializes credential leases across sessions that share one sandbox", async () => {
   const lockRoot = mkdtempSync(join(tmpdir(), "eve-git-lease-"));
   const lockPath = join(lockRoot, "lease.lock");

@@ -96,14 +96,14 @@ Configure `github` to get GitHub tokens through Vercel Connect instead. The exte
 
 `gh-signed-commit` adds or updates non-executable regular files and deletes tracked entries. It rejects additions or updates involving executable files, symlinks, submodules, or file-mode changes before contacting GitHub. Your staged changes remain intact. For those changes, use native `git commit -S` with a configured signing key, then `git push` through the authenticated tool.
 
-| Option                 | Required      | Effect                                                                                     |
-| ---------------------- | ------------- | ------------------------------------------------------------------------------------------ |
-| `github.connector`     | With `github` | Connector that mints a GitHub token                                                        |
-| `github.broker`        | With `github` | `broker(sandbox, rules)` callback that installs, then removes, the GitHub credential rules |
-| `github.principalType` | With `github` | `"app"` for GitHub App installation tokens, or `"user"` for the caller's own token         |
-| `github.authorize`     | With `github` | `authorize(request)` returns `true` to let a `gh` call run                                 |
-| `github.attribution`   | No            | `attribution(ctx)` returns the current turn's `{ name, email }` co-author, or `null`       |
-| `github.permissions`   | No            | With `"app"`, the installation permissions each token carries, such as `"contents:write"`  |
+| Option                 | Required      | Effect                                                                                       |
+| ---------------------- | ------------- | -------------------------------------------------------------------------------------------- |
+| `github.connector`     | With `github` | Connector that mints a GitHub token                                                          |
+| `github.broker`        | With `github` | `broker(sandbox, rules)` callback that installs, then removes, the GitHub credential rules   |
+| `github.principalType` | With `github` | `"app"` for GitHub App installation tokens, or `"user"` for the caller's own token           |
+| `github.authorize`     | With `github` | `authorize(request)` returns `true` to let a `gh` call run                                   |
+| `github.attribution`   | No            | `attribution(ctx)` returns the turn's `{ name, email, commentFooter? }` co-author, or `null` |
+| `github.permissions`   | No            | With `"app"`, the installation permissions each token carries, such as `"contents:write"`    |
 
 With `"app"`, each token carries every permission the App holds unless `github.permissions` lists the ones it needs. Set it to keep tokens narrower than the App's installation without rewriting the credential rules in your broker.
 
@@ -142,7 +142,17 @@ The GitHub App is the author of commits that the `gh` tool makes. Return a verif
 `gh-signed-commit` messages and to `gh pr create` bodies passed through `--body` or `--body-file`.
 The callback receives the tool context, including `ctx.session.auth.current` and `ctx.getToken`.
 Return `null` to omit attribution. eve keeps existing co-author trailers. Commands without a body
-flag and direct `gh api` calls get no attribution.
+flag and other `gh api` calls get no trailer.
+
+Set `commentFooter` on the returned co-author, such as `"<sub>Sent using V</sub>"`, to end every
+comment, review, and review reply with that line. eve adds it to `gh pr comment`, `gh issue comment`,
+`gh discussion comment`, and `gh pr review` bodies, to the `-c/--comment` of `gh pr` and `gh issue`
+`close` and `reopen`, and to the `body` and `comments[][body]` fields of `gh api` calls to the
+REST comment, review, and reply endpoints, whether passed inline, as `@file`, or in `--input` JSON.
+Body files get a footered copy, so the agent's own file is unchanged. A body that already ends with
+the footer is left alone. With a footer set, eve refuses a command that would post a comment it
+cannot footer: a body read from standard input, a missing body file, a GraphQL comment or review
+mutation, or a `.../reviews/<id>/events` submission. The refusal names the REST form to use instead.
 
 For example, resolve the author through your application's user mapping:
 
@@ -161,7 +171,7 @@ export default git({
 });
 ```
 
-For a custom GitHub command tool, `eve/extensions/git/sandbox` exports `executeGitHubShell(input, config, dependencies)` and `githubShellApproval(input)`. `executeGitHubShell` parses the command, calls `authorize`, and installs the credential rules. `dependencies` supply the session ID and sandbox access. Use `githubShellApproval` as the tool's approval policy so invalid commands are still rejected. When the command's own input is refused before it runs, such as shell syntax, a `workingDirectory` outside the workspace, a `gh-signed-commit` directory that is not a repository root, or a missing `--body-file`, `executeGitHubShell` throws `GitHubCommandInputError`; detect it with `isGitHubCommandInputError(error)` to tell the agent's mistakes apart from configuration, Connect, and sandbox failures.
+For a custom GitHub command tool, `eve/extensions/git/sandbox` exports `executeGitHubShell(input, config, dependencies)` and `githubShellApproval(input)`. `executeGitHubShell` parses the command, calls `authorize`, and installs the credential rules. `dependencies` supply the session ID and sandbox access. Use `githubShellApproval` as the tool's approval policy so invalid commands are still rejected. When the command's own input is refused before it runs, such as shell syntax, a `workingDirectory` outside the workspace, a `gh-signed-commit` directory that is not a repository root, a missing `--body-file`, or a comment the footer cannot be added to, `executeGitHubShell` throws `GitHubCommandInputError`; detect it with `isGitHubCommandInputError(error)` to tell the agent's mistakes apart from configuration, Connect, and sandbox failures.
 
 ## Prepare the sandbox
 
