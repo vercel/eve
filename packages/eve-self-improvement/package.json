@@ -1,6 +1,6 @@
 {
   "name": "@eve/self-improvement",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Evidence-backed self-improvement for eve agents on Vercel",
   "keywords": [
     "eve",
