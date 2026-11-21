@@ -17,11 +17,16 @@ export function resolveSandboxImage() {
   const tag = execFileSync(process.execPath, [tagScript], { encoding: "utf8" }).trim();
   const image = `ghcr.io/vercel/eve:${tag}`;
   try {
-    execFileSync("docker", ["buildx", "imagetools", "inspect", "--raw", image], { stdio: "pipe" });
+    execFileSync("docker", ["buildx", "imagetools", "inspect", "--raw", image], {
+      stdio: "pipe",
+      timeout: 60_000,
+    });
     process.stdout.write(`Using pinned sandbox image ${image}\n`);
   } catch (error) {
     const output = `${error.stdout ?? ""}${error.stderr ?? ""}` || error.message;
-    if (!/: not found|manifest unknown/u.test(output)) throw new Error(output);
+    if (!/: not found|manifest unknown/u.test(output)) {
+      throw new Error(`Could not check whether ${image} is published: ${output}`);
+    }
     process.stdout.write(
       `Unpublished sandbox image: ${image} is not published. This happens when this change edits packages/eve/Dockerfile, because the release workflow publishes the image after the change reaches main. If main already has this Dockerfile, check the latest Release workflow run on main for a failed image publish. This run uses ghcr.io/vercel/eve:latest, so it does not test the pinned image.\n`,
     );
