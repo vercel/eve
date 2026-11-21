@@ -488,6 +488,38 @@ describe("McpConnectionClient authorization recovery", () => {
     expect(err).toBe(forbidden);
   });
 
+  it("stops being reusable after a failure other than authorization, until closed", async () => {
+    const client = {
+      close: vi.fn(),
+      listTools: vi.fn().mockRejectedValue(new Error("HTTP 404 session not found")),
+      toolsFromDefinitions: vi.fn(),
+    };
+    createMCPClient.mockResolvedValue(client);
+
+    const mcpClient = new McpConnectionClient(makeConnection());
+    expect(mcpClient.reusable).toBe(true);
+    await mcpClient.getToolMetadata().catch(() => undefined);
+    expect(mcpClient.reusable).toBe(false);
+
+    await mcpClient.close();
+    expect(mcpClient.reusable).toBe(true);
+  });
+
+  it("stays reusable after an authorization failure, which already resets it", async () => {
+    const client = {
+      close: vi.fn(),
+      listTools: vi.fn().mockRejectedValue(unauthorized()),
+      toolsFromDefinitions: vi.fn(),
+    };
+    createMCPClient.mockResolvedValue(client);
+
+    const mcpClient = new McpConnectionClient(makeConnection());
+    await mcpClient.getToolMetadata().catch(() => undefined);
+
+    expect(client.close).toHaveBeenCalled();
+    expect(mcpClient.reusable).toBe(true);
+  });
+
   it("maps a 401 from executeTool into ConnectionAuthorizationRequiredError", async () => {
     const client = {
       close: vi.fn(),

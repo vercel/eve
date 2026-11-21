@@ -68,6 +68,7 @@ export class McpConnectionClient implements ConnectionClient {
   #toolsPromise: Promise<McpToolCache> | undefined;
   #tools: McpToolCache | undefined;
   #connection: ResolvedConnectionDefinition;
+  #failed = false;
   readonly eventActions: ConnectionClient["eventActions"];
 
   constructor(connection: ResolvedConnectionDefinition) {
@@ -98,6 +99,10 @@ export class McpConnectionClient implements ConnectionClient {
         },
       };
     }
+  }
+
+  get reusable(): boolean {
+    return !this.#failed;
   }
 
   async connect(): Promise<MCPClient> {
@@ -305,10 +310,12 @@ export class McpConnectionClient implements ConnectionClient {
     this.#clientPromise = undefined;
     this.#toolsPromise = undefined;
     this.#tools = undefined;
+    this.#failed = false;
   }
 
   async #rethrowClassified(error: unknown): Promise<never> {
     if (!isMcpAuthRequiredError(error)) {
+      this.#failed = true;
       throw error;
     }
     const requestError = [...walkErrorChain(error)].find(

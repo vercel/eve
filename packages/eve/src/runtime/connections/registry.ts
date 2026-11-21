@@ -2,18 +2,29 @@ import type { Approval } from "#approval/definition.js";
 import { assertNotConnectionOwned } from "#connections/ownership.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { McpConnectionClient } from "#runtime/connections/mcp-client.js";
+import type { McpClientPool } from "#runtime/connections/mcp-client-pool.js";
 import { OpenApiConnectionClient } from "#runtime/connections/openapi-client.js";
 import type { ConnectionClient } from "#shared/connection-types.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
+
+export interface ConnectionClientSharing {
+  readonly pool: McpClientPool;
+  readonly scope: string;
+}
 
 export class ConnectionRegistryImpl implements ConnectionRegistry {
   #clients = new Map<string, ConnectionClient>();
   #connections: readonly ResolvedConnectionDefinition[];
   readonly #staticConnections: readonly ResolvedConnectionDefinition[];
+  readonly #sharing: ConnectionClientSharing | undefined;
 
-  constructor(connections: readonly ResolvedConnectionDefinition[]) {
+  constructor(
+    connections: readonly ResolvedConnectionDefinition[],
+    sharing?: ConnectionClientSharing,
+  ) {
     this.#staticConnections = connections;
     this.#connections = connections;
+    this.#sharing = sharing;
   }
 
   async replaceDynamicConnections(
@@ -33,7 +44,7 @@ export class ConnectionRegistryImpl implements ConnectionRegistry {
     }
 
     this.#connections = next;
-    await Promise.allSettled(staleClients.map((client) => client.close()));
+    await Promise.allSettled(staleClients.map((client) => this.#returnClient(client, true)));
   }
 
   #buildEffectiveConnections(
@@ -73,7 +84,8 @@ export class ConnectionRegistryImpl implements ConnectionRegistry {
     const client: ConnectionClient =
       connection.protocol === "openapi"
         ? new OpenApiConnectionClient(connection)
-        : new McpConnectionClient(connection);
+        : (this.#sharing?.pool.acquire(this.#sharing.scope, connection) ??
+          new McpConnectionClient(connection));
     this.#clients.set(connectionName, client);
     return client;
   }
@@ -96,9 +108,17 @@ export class ConnectionRegistryImpl implements ConnectionRegistry {
   }
 
   async dispose(): Promise<void> {
-    const closePromises = [...this.#clients.values()].map((client) => client.close());
-    await Promise.allSettled(closePromises);
+    const clients = [...this.#clients.values()];
     this.#clients.clear();
+    await Promise.allSettled(clients.map((client) => this.#returnClient(client, false)));
+  }
+
+  async #returnClient(client: ConnectionClient, discard: boolean): Promise<void> {
+    if (this.#sharing !== undefined && client instanceof McpConnectionClient) {
+      await this.#sharing.pool.release(client, { discard });
+    } else {
+      await client.close();
+    }
   }
 }
 
