@@ -235,7 +235,7 @@ export class McpConnectionClient implements ConnectionClient {
         });
       });
     } catch (error) {
-      return await this.#rethrowClassified(error);
+      return await this.#rethrowClassified(error, options.abortSignal?.aborted === true);
     }
     if (isMcpAuthChallengeResult(result)) {
       return await this.#requireAuthorization(`the server asked for sign-in to call "${toolName}"`);
@@ -333,9 +333,9 @@ export class McpConnectionClient implements ConnectionClient {
     }
   }
 
-  async #rethrowClassified(error: unknown): Promise<never> {
+  async #rethrowClassified(error: unknown, aborted = false): Promise<never> {
     if (!isMcpAuthRequiredError(error)) {
-      if (this.#sessionExpired || isTransportFailure(error)) this.#failed = true;
+      if (this.#sessionExpired || (!aborted && isTransportFailure(error))) this.#failed = true;
       throw error;
     }
     const requestError = [...walkErrorChain(error)].find(
@@ -395,7 +395,8 @@ export function isMcpAuthChallengeResult(result: unknown): boolean {
 }
 
 function isTransportFailure(error: unknown): boolean {
-  return error instanceof TypeError || readHttpStatus(error) !== undefined;
+  if (error instanceof TypeError || readHttpStatus(error) !== undefined) return true;
+  return isObject(error) && error.name === "MCPClientError" && error.code === undefined;
 }
 
 function isMcpHttpFallbackRetryableError(error: unknown): boolean {
