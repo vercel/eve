@@ -10,7 +10,8 @@ on:
 permissions:
   contents: read
 
-# Vercel CI runs lint, typecheck, the package builds, the unit tier, and the
+# Vercel CI runs lint, typecheck, the package builds, the unit tier, the Linux
+# integration tier, the framework build tests, the template checks, and the
 # repository checks from the `ci` tags in turbo.json. The jobs here run what
 # Vercel CI does not. test-scenario installs everything and shares
 # setup-node's pnpm cache. Every other job installs only the workspace packages
@@ -21,12 +22,8 @@ permissions:
 
 jobs:
   test-integration:
-    name: test-integration (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
+    name: test-integration (windows-latest)
+    runs-on: windows-latest
 
     steps:
       - name: Checkout code
@@ -195,39 +192,6 @@ jobs:
           AGENT_DESKTOP_LIVE: "1"
         run: pnpm --filter @eve/agent-desktop test:live
 
-  test-framework-fixtures:
-    name: test-framework-fixtures (next, nuxt, sveltekit, tanstack, vite)
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-
-      - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .nvmrc
-
-      # The tests that build and package apps with eve. The smoke builds build
-      # the framework apps against the workspace eve; the scenarios install the
-      # same frameworks and the packed eve into temp apps from this store,
-      # which this job's own key keeps once they have run.
-      - name: Install dependencies
-        uses: ./.github/actions/pnpm-install
-        with:
-          cache-key: build
-          filters: |
-            eve...
-            ./apps/frameworks/*
-
-      - name: Build and package apps with the workspace eve
-        run: pnpm test:build
-
   test-webchat:
     runs-on: ubuntu-latest
 
@@ -283,48 +247,6 @@ jobs:
 
       - name: Run web chat tests
         run: pnpm test:webchat
-
-  test-templates:
-    runs-on: ubuntu-latest
-    # The CLI spawns git and a detached flush process for every command when
-    # telemetry is on. CI runs collect none of it.
-    env:
-      EVE_TELEMETRY_DISABLED: "1"
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-
-      - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .nvmrc
-
-      # This job builds agents whose sandboxes pull eve's default image.
-      - name: Resolve eve sandbox image
-        uses: ./.github/actions/sandbox-image
-
-      - name: Setup uv for Python template services
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
-        with:
-          version: "0.12.17"
-
-      # Each template installs its own dependencies from its own lockfile; the
-      # only workspace package this check reads is the packed eve.
-      - name: Install dependencies
-        uses: ./.github/actions/pnpm-install
-        with:
-          cache-key: templates
-          filters: |
-            eve...
-
-      - name: Check templates with their lockfiles and the packed eve package
-        run: pnpm check:templates
 
   test-tui:
     runs-on: ubuntu-latest
