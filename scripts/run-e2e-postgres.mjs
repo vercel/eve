@@ -1,15 +1,14 @@
 #!/usr/bin/env node
 /**
- * Runs one fixture's Postgres world suite with the steps of
- * .github/workflows/e2e-postgres.yml: bootstrap the Workflow schema, build the
- * fixture, start its production server, run the mock-model evals against it,
- * and check that the runs reached PostgreSQL. Each fixture in that world runs
- * this from its directory as its `e2e:postgres` Turbo task, which starts a
- * fresh database (@eve-e2e/postgres) alongside it with Turbo's `with`. Like the
- * workflow, it serves on port 3000, where the fixtures and the Postgres world
- * call back by default, so run one fixture at a time. Under CI it first moves
- * the extension fixtures' source aside, as the workflow does, so the build
- * consumes their dist trees.
+ * Runs one fixture's Postgres world suite: bootstrap the Workflow schema, build
+ * the fixture, start its production server, run the mock-model evals against
+ * it, and check that the runs reached PostgreSQL. Each fixture in that world
+ * runs this from its directory as its `e2e:postgres` Turbo task, which starts a
+ * fresh database (@eve-e2e/postgres) alongside it with Turbo's `with`. It
+ * serves on port 3000, where the fixtures and the Postgres world call back by
+ * default, so run one fixture at a time. Under CI it first moves the extension
+ * fixtures' source aside, so the build consumes the same agent-shaped dist
+ * trees registry packages ship.
  */
 import { execFileSync, spawn } from "node:child_process";
 import {
