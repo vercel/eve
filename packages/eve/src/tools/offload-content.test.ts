@@ -522,6 +522,29 @@ describe("offloadContent", () => {
     );
   });
 
+  it("sends the fallback and removes the new file when the saved results are too many to list", async () => {
+    const { records } = captureLogRecords();
+    const initialFiles = Object.fromEntries(
+      Array.from({ length: 600 }, (_, index) => [
+        `/tmp/.eve/tool-results/${"g".repeat(150)}-${index}.txt`,
+        "",
+      ]),
+    );
+    const sandbox = mockSandbox({ initialFiles });
+    const ctx = {
+      ...toolModelOutputContext("t", "call_1"),
+      getSandbox: async () => sandbox.session,
+    } satisfies ToolModelOutputContext;
+    const result = await inContext(undefined, () =>
+      offloadContent({ maxBytes: 100, fallback: "summary" })("x".repeat(500), ctx),
+    );
+    expect((result as { value: string }).value).toContain("could not be saved");
+    expect(sandbox.files.size).toBe(600);
+    expect(JSON.stringify(records.filter((record) => record.level === "warn")[0])).toContain(
+      "too many saved tool results to measure",
+    );
+  });
+
   it("rejects a limit that is not a positive integer", () => {
     expect(() => offloadContent({ maxBytes: 0 })).toThrow("positive integer");
     expect(() => offloadContent({ maxBytes: 4.5 })).toThrow("positive integer");

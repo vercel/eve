@@ -19,6 +19,7 @@ const DEFAULT_MAX_BYTES = 20_000;
 const MAX_SAVED_BYTES = 10 * 1024 * 1024;
 const MAX_DIRECTORY_BYTES = 100 * 1024 * 1024;
 const MAX_DIRECTORY_FILES = 100;
+const MAX_LISTING_BYTES = 64 * 1024;
 
 /** Options for {@link offloadContent}. */
 export interface OffloadContentOptions<TOutput> {
@@ -139,8 +140,11 @@ export function offloadContent<TOutput = unknown>(
 
 async function evictOldest(sandbox: SandboxSession, keep: string): Promise<void> {
   const { stdout } = await sandbox.run({
-    command: `find ${RESULTS_DIRECTORY} -type f -exec stat -c '%Y %s %n' {} + 2>/dev/null`,
+    command: `find ${RESULTS_DIRECTORY} -maxdepth 1 -type f -exec stat -c '%Y %s %n' {} + 2>/dev/null | head -c ${MAX_LISTING_BYTES}`,
   });
+  if (Buffer.byteLength(stdout) >= MAX_LISTING_BYTES) {
+    throw new Error("too many saved tool results to measure");
+  }
   const saved: { readonly bytes: number; readonly modified: number; readonly path: string }[] = [];
   for (const line of stdout.split("\n")) {
     const match = /^(\d+) (\d+) (.+)$/.exec(line);

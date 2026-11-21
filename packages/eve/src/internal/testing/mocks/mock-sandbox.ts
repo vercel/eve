@@ -71,13 +71,17 @@ export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
   }
 
   async function defaultRun(options: SandboxRunOptions): Promise<SandboxCommandResult> {
-    const find = /^find (\S+) -type f -exec stat -c '%Y %s %n' \{\} \+/.exec(options.command);
+    const find =
+      /^find (\S+) -maxdepth 1 -type f -exec stat -c '%Y %s %n' \{\} \+ 2>\/dev\/null \| head -c (\d+)$/.exec(
+        options.command,
+      );
     if (find !== null) {
       const prefix = `${find[1]}/`;
       const lines = [...fileBytes]
         .filter(([path]) => path.startsWith(prefix))
         .map(([path, bytes]) => `${modified.get(path) ?? 0} ${bytes.byteLength} ${path}`);
-      return { exitCode: 0, stderr: "", stdout: lines.map((line) => `${line}\n`).join("") };
+      const listing = lines.map((line) => `${line}\n`).join("");
+      return { exitCode: 0, stderr: "", stdout: listing.slice(0, Number(find[2])) };
     }
     return { exitCode: 0, stderr: "", stdout: "" };
   }
