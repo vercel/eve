@@ -53,7 +53,9 @@ globalThis.fetch = async (url, init = {}) => {
     }
     const oid = git(["commit-tree", git(["write-tree"], { env }), "-p", input.expectedHeadOid, "-m", input.message.headline]);
     git(["update-ref", "refs/heads/" + input.branch.branchName, oid, input.expectedHeadOid]);
-    return Response.json({ data: { createCommitOnBranch: { commit: { oid } } } });
+    const message = [input.message.headline, input.message.body].filter(Boolean).join("\n\n");
+    const author = process.env.FAKE_AUTHOR ? JSON.parse(process.env.FAKE_AUTHOR) : null;
+    return Response.json({ data: { createCommitOnBranch: { commit: { oid, message, author } } } });
   }
   throw new Error("Unexpected request: " + url);
 };
@@ -181,14 +183,64 @@ for (const kind of [
   });
 }
 
+const AUTHOR = { name: "Colton Padden", email: "cmpadden@users.noreply.github.com" };
+
+async function signOffNotice(signOff: string | null, author: typeof AUTHOR | null = AUTHOR) {
+  await writeFile(join(work, "file.txt"), `${signOff} for ${author?.email}\n`);
+  await git(work, "add", "file.txt");
+  const body = signOff ? ["-b", `Fix the file.\n\nSigned-off-by: ${signOff}`] : [];
+  const { stdout, stderr } = await publish(body, author);
+  assert.equal(await git(work, "rev-parse", "HEAD"), stdout.trim());
+  return { oid: stdout.trim(), stderr };
+}
+
+test("reports a sign-off that does not match the author GitHub recorded, with the fix", async () => {
+  const { oid, stderr } = await signOffNotice(
+    "Colton Padden <5807118+cmpadden@users.noreply.github.com>",
+  );
+  assert.match(
+    stderr,
+    /^gh-signed-commit: sign-off mismatch: GitHub recorded Colton Padden <cmpadden@users\.noreply\.github\.com> as the author of [0-9a-f]{40}, but its sign-off names <5807118\+cmpadden@users\.noreply\.github\.com>\./mu,
+  );
+  assert.ok(
+    stderr.includes(
+      `I, Colton Padden <cmpadden@users.noreply.github.com>, hereby add my Signed-off-by to this commit: ${oid}\n`,
+    ),
+  );
+  assert.match(stderr, /^Signed-off-by: Colton Padden <cmpadden@users\.noreply\.github\.com>$/mu);
+});
+
+test("stays quiet when a sign-off matches the author email, ignoring case", async () => {
+  const { stderr } = await signOffNotice("Colton Padden <CMPadden@users.noreply.github.com>");
+  assert.doesNotMatch(stderr, /sign-off/u);
+});
+
+test("stays quiet without a sign-off or for a bot author", async () => {
+  assert.doesNotMatch((await signOffNotice(null)).stderr, /sign-off/u);
+  const bot = { name: "roboeve[bot]", email: "123+roboeve[bot]@users.noreply.github.com" };
+  assert.doesNotMatch(
+    (await signOffNotice("Colton Padden <colton@example.test>", bot)).stderr,
+    /sign-off/u,
+  );
+});
+
+test("says when GitHub returns no author to check a sign-off against", async () => {
+  const { oid, stderr } = await signOffNotice("Colton Padden <colton@example.test>", null);
+  assert.ok(
+    stderr.includes(
+      `could not check ${oid}'s sign-off: GitHub returned no author email. Read it with gh api repos/owner/repo/commits/${oid} --jq .commit.author`,
+    ),
+  );
+});
+
 async function git(cwd: string, ...args: string[]) {
   return (await execFileAsync("git", args, { cwd, env: ENV })).stdout.trim();
 }
 
-async function publish() {
+async function publish(extra: readonly string[] = [], author: typeof AUTHOR | null = null) {
   return execFileAsync(
     process.execPath,
-    [script, "--repo", "owner/repo", "--branch", "feature", "-m", "publish files"],
+    [script, "--repo", "owner/repo", "--branch", "feature", "-m", "publish files", ...extra],
     {
       cwd: work,
       env: {
@@ -197,6 +249,7 @@ async function publish() {
         NODE_OPTIONS: `--require=${preload}`,
         FAKE_REMOTE: remote,
         FAKE_LOG: log,
+        ...(author ? { FAKE_AUTHOR: JSON.stringify(author) } : {}),
       },
     },
   );
