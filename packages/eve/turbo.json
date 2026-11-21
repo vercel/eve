@@ -149,7 +149,18 @@
       "cache": false,
       "dependsOn": ["build"],
       "env": ["AI_GATEWAY_API_KEY", "EVE_SANDBOX_IMAGE_TAG"],
-      "tags": ["ci", "ci:cpus:4", "ci:os:ubuntu"]
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/apps/fixtures/agent-tui-client/**",
+        "!$TURBO_ROOT$/apps/fixtures/agent-tui-client/{.eve,.output,.turbo,.vercel,node_modules}/**",
+        "$TURBO_ROOT$/e2e/fixtures/agent-subagents-hitl/**",
+        "!$TURBO_ROOT$/e2e/fixtures/agent-subagents-hitl/{.eve,.output,.turbo,.vercel,node_modules}/**",
+        "$TURBO_ROOT$/e2e/fixtures/e2e-config/**",
+        "!$TURBO_ROOT$/e2e/fixtures/e2e-config/{.turbo,node_modules}/**",
+        "$TURBO_ROOT$/scripts/resolve-sandbox-image.mjs",
+        "$TURBO_ROOT$/scripts/sandbox-image-tag.mjs"
+      ],
+      "tags": ["ci", "ci:cpus:4"]
     },
     "test:watch": {
       "cache": false,
