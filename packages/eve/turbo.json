@@ -148,7 +148,7 @@
     "test:tui": {
       "cache": false,
       "dependsOn": ["build"],
-      "env": ["AI_GATEWAY_API_KEY", "EVE_SANDBOX_IMAGE_TAG"],
+      "env": ["EVE_SANDBOX_IMAGE_TAG"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/apps/fixtures/agent-tui-client/**",
