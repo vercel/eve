@@ -72,6 +72,30 @@ describe("outside-eve agent", () => {
       manager.disable();
     }
   });
+  it("gives children a failed turn leaves open the turn's error code", async () => {
+    const exporter = new InMemorySpanExporter();
+    const provider = new BasicTracerProvider({
+      spanProcessors: [new SimpleSpanProcessor(exporter)],
+    });
+    const tracing = createAgentRun({ telemetry: otelTelemetry({ provider }) });
+    const turn = await tracing.turn({
+      agentName: "support",
+      identity: { conversationId: "c", runId: "r", turnId: "t" },
+      sequence: 0,
+    });
+    const attempt = await turn.attempt({ stepIndex: 0, attempt: 0 });
+    await attempt.tool({ callId: "tool", name: "lookup" });
+    await turn.complete({ outcome: "failed", failed: true, errorType: "MODEL_CALL_FAILED" });
+
+    const spans = exporter.getFinishedSpans();
+    expect(spans).toHaveLength(3);
+    expect(spans.map((span) => span.attributes["error.type"])).toEqual([
+      "MODEL_CALL_FAILED",
+      "MODEL_CALL_FAILED",
+      "MODEL_CALL_FAILED",
+    ]);
+  });
+
   it("preserves application errors and closes memory and tool callbacks", async () => {
     const exporter = new InMemorySpanExporter();
     const provider = new BasicTracerProvider({

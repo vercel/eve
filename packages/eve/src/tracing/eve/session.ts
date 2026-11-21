@@ -190,7 +190,11 @@ export function createEveSessionTracing(input: EveSessionTracingInput): EveSessi
   async function endTurn(
     sessionId: string,
     turnId: string,
-    ending?: { readonly outcome: "cancelled" | "completed" | "failed"; readonly error?: unknown },
+    ending?: {
+      readonly outcome: "cancelled" | "completed" | "failed";
+      readonly error?: unknown;
+      readonly errorCode?: string;
+    },
   ) {
     const turn = await input.stateStore.get("turn", turnKey(sessionId, turnId));
     if (turn === undefined) return;
@@ -207,7 +211,7 @@ export function createEveSessionTracing(input: EveSessionTracingInput): EveSessi
           outcome: "failed",
           failed: true,
           error,
-          errorType: error instanceof Error ? error.name : undefined,
+          errorType: ending.errorCode ?? (error instanceof Error ? error.name : undefined),
         });
       } else await operation.complete({ outcome: ending.outcome });
     }
@@ -230,14 +234,20 @@ export function createEveSessionTracing(input: EveSessionTracingInput): EveSessi
         view.session.closedAt === view.turns[event.turnId]?.closedAt
       )
         return;
-      await endTurn(event.sessionId, event.turnId, { outcome: event.outcome, error: event.error });
+      await endTurn(event.sessionId, event.turnId, {
+        outcome: event.outcome,
+        error: event.error,
+        errorCode: event.errorCode,
+      });
     },
     async sessionEnded(event) {
       if (event.turnId === undefined) return;
       await endTurn(
         event.sessionId,
         event.turnId,
-        event.outcome === "failed" ? { outcome: "failed", error: event.error } : undefined,
+        event.outcome === "failed"
+          ? { outcome: "failed", error: event.error, errorCode: event.errorCode }
+          : undefined,
       );
     },
   };

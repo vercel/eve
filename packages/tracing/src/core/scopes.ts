@@ -347,7 +347,12 @@ export function createScopes(input: {
       const container = actualData.type === "step" || actualData.type === "activation";
       for (const next of children.values())
         if (all || !container || !OUTLIVES_ATTEMPT.has(next.type))
-          await next.release({ failed: result.failed, error: result.error, outcome: "abandoned" });
+          await next.release({
+            failed: result.failed,
+            error: result.error,
+            errorCode: result.errorCode,
+            outcome: "abandoned",
+          });
     }
 
     async function finish(result: ScopeTerminal): Promise<void> {
