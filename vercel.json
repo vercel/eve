@@ -7,6 +7,16 @@
     },
     "tasks": [
       {
+        "name": "build",
+        "env": {
+          "EVE_TELEMETRY_DISABLED": {
+            "constant": {
+              "value": "1"
+            }
+          }
+        }
+      },
+      {
         "name": "typecheck",
         "env": {
           "EVE_TELEMETRY_DISABLED": {

@@ -10,6 +10,7 @@
     "scripts/install-ci-tools.mjs",
     "tsconfig.json"
   ],
+  "globalPassThroughEnv": ["EVE_TELEMETRY_DISABLED"],
   "tasks": {
     "//#check:deps": {
       "inputs": [
@@ -46,7 +47,7 @@
         "!packages/**",
         "!research/**"
       ],
-      "passThroughEnv": ["EVE_SANDBOX_IMAGE_TAG", "EVE_TELEMETRY_DISABLED"],
+      "passThroughEnv": ["EVE_SANDBOX_IMAGE_TAG"],
       "tags": ["ci", "ci:cpus:16"]
     },
     "//#check:template-files": {
@@ -269,7 +270,6 @@
     },
     "typecheck": {
       "dependsOn": ["^build"],
-      "passThroughEnv": ["EVE_TELEMETRY_DISABLED"],
       "tags": ["ci"],
       "inputs": [
         "**/*.ts",
