@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+
 import { McpConnectionClient } from "#runtime/connections/mcp-client.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 
@@ -49,22 +51,26 @@ export class McpClientPool {
 
     this.#entries.delete(entry.key);
     this.#entries.set(entry.key, entry);
+    entry.releaseContext = AsyncLocalStorage.snapshot();
     entry.idleTimer = setTimeout(() => void this.#evict(entry), this.#idleMs);
     entry.idleTimer.unref?.();
-    await this.#trim();
+    const idle = [...this.#entries.values()].filter((candidate) => candidate.leases === 0);
+    for (const excess of idle.slice(0, Math.max(0, idle.length - this.#maxIdleClients))) {
+      void this.#evict(excess);
+    }
   }
 
-  async #trim(): Promise<void> {
+  async closeIdle(): Promise<void> {
     const idle = [...this.#entries.values()].filter((entry) => entry.leases === 0);
-    const excess = idle.slice(0, Math.max(0, idle.length - this.#maxIdleClients));
-    await Promise.all(excess.map((entry) => this.#evict(entry)));
+    await Promise.all(idle.map((entry) => this.#evict(entry)));
   }
 
   async #evict(entry: PoolEntry): Promise<void> {
     if (this.#entries.get(entry.key) !== entry || entry.leases > 0) return;
     clearTimeout(entry.idleTimer);
     this.#entries.delete(entry.key);
-    await closeQuietly(entry.client);
+    const runInReleaseContext = entry.releaseContext ?? ((fn) => fn());
+    await runInReleaseContext(() => closeQuietly(entry.client));
   }
 
   #connectionId(connection: ResolvedConnectionDefinition): number {
@@ -83,6 +89,7 @@ interface PoolEntry {
   leases: number;
   retired: boolean;
   idleTimer?: ReturnType<typeof setTimeout>;
+  releaseContext?: <R>(fn: () => R) => R;
 }
 
 async function closeQuietly(client: McpConnectionClient): Promise<void> {

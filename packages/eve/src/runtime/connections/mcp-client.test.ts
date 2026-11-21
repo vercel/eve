@@ -505,6 +505,20 @@ describe("McpConnectionClient authorization recovery", () => {
     expect(mcpClient.reusable).toBe(true);
   });
 
+  it("stays reusable when the model names a tool the server does not have", async () => {
+    const client = {
+      close: vi.fn(),
+      listTools: vi.fn().mockResolvedValue({ tools: [] }),
+      toolsFromDefinitions: vi.fn().mockReturnValue({}),
+    };
+    createMCPClient.mockResolvedValue(client);
+
+    const mcpClient = new McpConnectionClient(makeConnection());
+    await mcpClient.executeTool("missing", {}, { callId: "call-1" }).catch(() => undefined);
+
+    expect(mcpClient.reusable).toBe(true);
+  });
+
   it("stays reusable after an authorization failure, which already resets it", async () => {
     const client = {
       close: vi.fn(),

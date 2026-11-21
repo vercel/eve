@@ -91,8 +91,9 @@ describe("MCP clients shared across the steps of a turn", () => {
     vi.stubGlobal("fetch", server.fetch);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     testSession.current = undefined;
+    await mcpClientPool.closeIdle();
     vi.unstubAllGlobals();
   });
 
@@ -109,6 +110,20 @@ describe("MCP clients shared across the steps of a turn", () => {
     await server.waitForRequest((request) => request.method === "DELETE");
     expect(server.liveSessions.size).toBe(0);
     expect(mcpClientPool.size).toBe(0);
+  });
+
+  it("reconnects when the server forgot the session between steps", async () => {
+    await step(session(1));
+    const [expired] = sessions();
+    await server.fetch(connection.url, {
+      headers: { "mcp-session-id": expired! },
+      method: "DELETE",
+    });
+    expect(server.liveSessions.size).toBe(0);
+
+    await step(session(1));
+
+    expect(initializes()).toHaveLength(2);
   });
 
   it("starts a new MCP session for a new turn or a different caller", async () => {

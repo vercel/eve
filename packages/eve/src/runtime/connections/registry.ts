@@ -17,6 +17,8 @@ export class ConnectionRegistryImpl implements ConnectionRegistry {
   #connections: readonly ResolvedConnectionDefinition[];
   readonly #staticConnections: readonly ResolvedConnectionDefinition[];
   readonly #sharing: ConnectionClientSharing | undefined;
+  readonly #pooled = new Set<McpConnectionClient>();
+  #disposed = false;
 
   constructor(
     connections: readonly ResolvedConnectionDefinition[],
@@ -84,8 +86,7 @@ export class ConnectionRegistryImpl implements ConnectionRegistry {
     const client: ConnectionClient =
       connection.protocol === "openapi"
         ? new OpenApiConnectionClient(connection)
-        : (this.#sharing?.pool.acquire(this.#sharing.scope, connection) ??
-          new McpConnectionClient(connection));
+        : this.#mcpClient(connection);
     this.#clients.set(connectionName, client);
     return client;
   }
@@ -108,14 +109,25 @@ export class ConnectionRegistryImpl implements ConnectionRegistry {
   }
 
   async dispose(): Promise<void> {
+    this.#disposed = true;
     const clients = [...this.#clients.values()];
     this.#clients.clear();
     await Promise.allSettled(clients.map((client) => this.#returnClient(client, false)));
   }
 
+  #mcpClient(connection: ResolvedConnectionDefinition): McpConnectionClient {
+    const sharing = this.#sharing;
+    if (sharing === undefined || this.#disposed || !this.#staticConnections.includes(connection)) {
+      return new McpConnectionClient(connection);
+    }
+    const client = sharing.pool.acquire(sharing.scope, connection);
+    this.#pooled.add(client);
+    return client;
+  }
+
   async #returnClient(client: ConnectionClient, discard: boolean): Promise<void> {
-    if (this.#sharing !== undefined && client instanceof McpConnectionClient) {
-      await this.#sharing.pool.release(client, { discard });
+    if (client instanceof McpConnectionClient && this.#pooled.delete(client)) {
+      await this.#sharing?.pool.release(client, { discard });
     } else {
       await client.close();
     }

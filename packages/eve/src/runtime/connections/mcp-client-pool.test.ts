@@ -103,8 +103,23 @@ describe("McpClientPool", () => {
     await pool.release(older);
     await pool.release(newer);
 
-    expect(closeOlder).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(closeOlder).toHaveBeenCalledOnce());
     expect(closeNewer).not.toHaveBeenCalled();
+    expect(pool.size).toBe(1);
+  });
+
+  it("closes idle clients on demand but leaves borrowed ones open", async () => {
+    const pool = new McpClientPool();
+    const idle = pool.acquire("turn-1", connection("linear"));
+    const borrowed = pool.acquire("turn-1", connection("github"));
+    const closeIdle = spyClose(idle);
+    const closeBorrowed = spyClose(borrowed);
+    await pool.release(idle);
+
+    await pool.closeIdle();
+
+    expect(closeIdle).toHaveBeenCalledOnce();
+    expect(closeBorrowed).not.toHaveBeenCalled();
     expect(pool.size).toBe(1);
   });
 });

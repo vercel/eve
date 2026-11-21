@@ -102,16 +102,43 @@ describe("ConnectionRegistryImpl", () => {
     expect(close).not.toHaveBeenCalled();
   });
 
-  it("closes a borrowed client when its dynamic definition changes", async () => {
+  it("closes a borrowed client when a dynamic definition replaces it", async () => {
     const pool = new McpClientPool();
-    const registry = new ConnectionRegistryImpl([], { pool, scope: "turn-1" });
-    await registry.replaceDynamicConnections(new Map([["resolver", [makeConnection("linear")]]]));
+    const registry = new ConnectionRegistryImpl([makeConnection("linear")], {
+      pool,
+      scope: "turn-1",
+    });
     const client = registry.getClient("linear");
     const close = vi.spyOn(client, "close");
 
     await registry.replaceDynamicConnections(new Map([["resolver", [makeConnection("linear")]]]));
 
     expect(close).toHaveBeenCalledOnce();
+    expect(pool.size).toBe(0);
+  });
+
+  it("keeps dynamic connections out of the shared pool", async () => {
+    const pool = new McpClientPool();
+    const registry = new ConnectionRegistryImpl([], { pool, scope: "turn-1" });
+    await registry.replaceDynamicConnections(new Map([["resolver", [makeConnection("linear")]]]));
+    const close = vi.spyOn(registry.getClient("linear"), "close");
+
+    await registry.dispose();
+
+    expect(close).toHaveBeenCalledOnce();
+    expect(pool.size).toBe(0);
+  });
+
+  it("does not borrow from the pool after dispose", async () => {
+    const pool = new McpClientPool();
+    const registry = new ConnectionRegistryImpl([makeConnection("linear")], {
+      pool,
+      scope: "turn-1",
+    });
+    await registry.dispose();
+
+    registry.getClient("linear");
+
     expect(pool.size).toBe(0);
   });
 });

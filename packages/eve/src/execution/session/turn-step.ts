@@ -475,8 +475,7 @@ async function runSessionStepBody(
       try {
         await contextStorage.run(ctx, () => publish(facts));
       } finally {
-        await publisher.drain();
-        await registry?.value.dispose();
+        await publisher.drain().finally(() => registry?.value.dispose());
         if (sandbox !== undefined) {
           const sandboxState = await sandbox.value.captureState();
           if (

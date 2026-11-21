@@ -4,6 +4,7 @@ import type {
   SessionCommand,
   SessionCommandResult,
 } from "#channel/types.js";
+import { mcpClientPool } from "#runtime/connections/mcp-client-pool.js";
 import { agentSessionsOver } from "#execution/agent-sessions/sessions-over.js";
 import { dispatchCoordinationOn } from "#execution/coordination-dispatch-step.js";
 import {
@@ -246,6 +247,7 @@ export function createInProcessHost(
       }
       inboxes.closeAll();
       await Promise.all(running.values());
+      await mcpClientPool.closeIdle();
       timers.dispose();
       for (const release of releases.splice(0)) release();
     },
