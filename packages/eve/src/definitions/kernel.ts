@@ -47,7 +47,12 @@ import { bindOpeningCancel, settleHookCommands } from "./hooks.js";
 import { staticUserInstructions } from "./instructions.js";
 
 const log = createLogger("definitions");
-const neverAborted = new AbortController().signal;
+let neverAbortedSignal: AbortSignal | undefined;
+
+function neverAborted(): AbortSignal {
+  neverAbortedSignal ??= new AbortController().signal;
+  return neverAbortedSignal;
+}
 
 export type Where = Pick<DefinitionContext, "step" | "call" | "commit"> &
   Partial<Pick<DefinitionContext, "history" | "signal">>;
@@ -59,7 +64,7 @@ export function contributionsOf(
   mode: "evaluate" | "read" = "read",
 ): Contribution[] {
   const kept = new Map<string, Promise<Kept | undefined>>();
-  const signal = where.signal ?? neverAborted;
+  const signal = where.signal ?? neverAborted();
   return definitions.map((definition) =>
     definition.contribute({
       ...where,
@@ -366,7 +371,7 @@ async function withMemos<T>(
   fn: (memo: InternalContext["memo"]) => Promise<T>,
 ): Promise<{ readonly result: T; readonly used: Readonly<Record<string, JsonValue>> }> {
   const memos = openMemos({
-    abortSignal: input.abortSignal ?? neverAborted,
+    abortSignal: input.abortSignal ?? neverAborted(),
     afterDeployment: discardedByDeployment(ctx, input.scope),
     kept: readDefinitionsState(ctx).memos?.[input.scope],
     label: input.label,

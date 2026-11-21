@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
+import { answerDispatcherProbe } from "#internal/testing/node-fetch.js";
 
 const callbackUrl = "https://agent.example.com/eve/v1/activity/opaque-token";
 const requestContextSymbol = Symbol.for("@vercel/request-context");
@@ -25,7 +26,7 @@ describe("postSessionCallbackRequest", () => {
     "logs %s HTTP failures with correlation fields and a redacted destination",
     async (kind) => {
       const response = new Response("private response body", { status: 404 });
-      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+      vi.stubGlobal("fetch", answerDispatcherProbe(vi.fn().mockResolvedValue(response)));
 
       const delivered = await postSessionCallbackRequest({
         body: {
@@ -72,7 +73,7 @@ describe("postSessionCallbackRequest", () => {
       if (failure === "timeout") {
         vi.spyOn(AbortSignal, "timeout").mockReturnValue(AbortSignal.abort());
       }
-      vi.stubGlobal("fetch", vi.fn().mockRejectedValue(error));
+      vi.stubGlobal("fetch", answerDispatcherProbe(vi.fn().mockRejectedValue(error)));
 
       await expect(
         postSessionCallbackRequest({
@@ -269,6 +270,6 @@ function stubFetch() {
     async (_url: string | URL | Request, _init?: RequestInit) =>
       new Response(null, { status: 202 }),
   );
-  vi.stubGlobal("fetch", fetchMock);
+  vi.stubGlobal("fetch", answerDispatcherProbe(fetchMock));
   return fetchMock;
 }
