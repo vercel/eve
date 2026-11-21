@@ -33,6 +33,7 @@ import { refusedAnswerOf, requestBatchOf } from "#channel/interaction-prompts.js
 import { signInOf, type SignIn } from "#channel/sign-in.js";
 import type { InteractionSettledData } from "#protocol/session-events/families/interaction.js";
 import { deliverCompletedSlackReply } from "#public/channels/slack/reply-delivery.js";
+import { isSlackReplyStreaming } from "#public/channels/slack/reply-stream.js";
 import {
   SLACK_TYPING_STATUS_MAX_LENGTH,
   truncateTypingStatus,
@@ -516,7 +517,11 @@ export const defaultEvents: SlackChannelInternalEvents = {
     if (kind !== "text") return;
     const before = stream.replyChars;
     stream.replyChars += data.delta.length;
-    if (before < WRITING_REPLY_MIN_CHARS && stream.replyChars >= WRITING_REPLY_MIN_CHARS) {
+    if (
+      before < WRITING_REPLY_MIN_CHARS &&
+      stream.replyChars >= WRITING_REPLY_MIN_CHARS &&
+      !isSlackReplyStreaming(channel.state)
+    ) {
       await showStatus(channel, "Writing a reply...");
     }
   },
