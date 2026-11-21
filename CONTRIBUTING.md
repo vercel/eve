@@ -23,6 +23,12 @@ If a pull request includes unsigned commits, re-sign the commits and force-push
 the branch. Make sure the signing key is added to your GitHub account and that
 your commits appear as `Verified`.
 
+After you push and before you open or update a pull request, check each commit
+on GitHub. A signature that passes local verification is not sufficient when
+GitHub does not recognize the signing key. If you cannot update a branch that
+contains unsigned commits, create a signed replacement pull request, link to it
+from the original pull request, and close the original pull request.
+
 A `Signed-off-by` line in the commit message is not enough to satisfy this
 requirement. A verified commit signature alone does not satisfy the DCO either;
 commits need both.
