@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 
+const BUILD_DEPLOYMENT_ID =
+  'workflowEnvironment: { buildDeploymentId: "eve_BUILD_DEPLOYMENT_ID_PLACEHOLDER_" }';
+
 import {
   createDevelopmentWorkflowWorldPluginSource,
   createWorkflowWorldPluginSource,
@@ -15,22 +18,14 @@ describe("createWorkflowWorldPluginSource", () => {
 
     expect(source).toContain('import "/app/.eve/compile/compiled-artifacts-bootstrap.mjs";');
     expect(source).toContain('import * as workflowWorldModule from "@acme/eve-world";');
-    expect(source).toContain("import { installWorkflowWorld } from ");
+    expect(source).toContain("import { bootEve } from ");
+    expect(source).toContain("export const eveRuntime = await bootEve({");
+    expect(source).toContain('configuredWorld: "@acme/eve-world",');
+    expect(source).toContain(BUILD_DEPLOYMENT_ID);
     expect(source).toContain(
       "const workflowWorld = await createWorldFromModule(workflowWorldModule);",
     );
-    expect(source).toContain(
-      'await installWorkflowWorld({ packageName: "@acme/eve-world", world: workflowWorld });',
-    );
     expect(source).not.toContain("resolveLocalWorkflowWorldDataDirectory");
-    expect(source.indexOf('installWorkflowDeploymentId("')).toBeGreaterThan(-1);
-    expect(source.indexOf('installWorkflowDeploymentId("')).toBeLessThan(
-      source.indexOf("await createWorldFromModule("),
-    );
-    expect(source.indexOf("applyWorkflowSpecVersionDefault();")).toBeGreaterThan(-1);
-    expect(source.indexOf("applyWorkflowSpecVersionDefault();")).toBeLessThan(
-      source.indexOf("await createWorldFromModule("),
-    );
   });
 
   it("configures the vendored local World with eve's app-local data resolver", () => {
@@ -52,10 +47,7 @@ describe("createWorkflowWorldPluginSource", () => {
       source.indexOf("workflowWorldModule.createWorld"),
     );
     expect(source).not.toContain("createWorldFromModule(workflowWorldModule)");
-    expect(source.indexOf('installWorkflowDeploymentId("')).toBeGreaterThan(-1);
-    expect(source.indexOf('installWorkflowDeploymentId("')).toBeLessThan(
-      source.indexOf("await workflowWorldModule.createWorld("),
-    );
+    expect(source).toContain(BUILD_DEPLOYMENT_ID);
   });
 
   it("selects the vendored Vercel World with Workflow's selector", () => {
@@ -68,10 +60,7 @@ describe("createWorkflowWorldPluginSource", () => {
     expect(source).toContain("/compiled/@workflow/world-vercel/index.js");
     expect(source).toMatch(/headers: \{ "User-Agent": "eve\/.+" \}/);
     expect(source).not.toContain("authenticateLocalWorkflowDeliveries");
-    expect(source.indexOf('installWorkflowDeploymentId("')).toBeGreaterThan(-1);
-    expect(source.indexOf('installWorkflowDeploymentId("')).toBeLessThan(
-      source.indexOf("await workflowWorldModule.createWorld("),
-    );
+    expect(source).toContain(BUILD_DEPLOYMENT_ID);
   });
 });
 
@@ -82,10 +71,10 @@ describe("createDevelopmentWorkflowWorldPluginSource", () => {
       configuredWorld: undefined,
     });
 
-    expect(source).toContain("createDevelopmentWorkflowWorld");
     expect(source).toContain(
-      "await installWorkflowWorld({ world: createDevelopmentWorkflowWorld() });",
+      "export const eveRuntime = await bootEve({ createWorld: () => createDevelopmentWorkflowWorld() });",
     );
+    expect(source).not.toContain("workflowEnvironment");
     expect(source).not.toContain("@workflow/world-local");
   });
 
@@ -96,6 +85,6 @@ describe("createDevelopmentWorkflowWorldPluginSource", () => {
     });
 
     expect(source).toContain('import * as workflowWorldModule from "@acme/eve-world";');
-    expect(source).toContain("await installWorkflowWorld({");
+    expect(source).toContain('configuredWorld: "@acme/eve-world",');
   });
 });

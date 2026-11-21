@@ -260,11 +260,24 @@
  *             build host, the build-output port (`#platform/build-output.js`,
  *             `#platform/types.js`). Platform implementations stay behind
  *             them.
+ *   rule 71 — Only the Workflow engine reaches the Workflow SDK's World:
+ *             `getWorld`/`setWorld` from `#internal/workflow/runtime.js`
+ *             (named imports, or namespace and dynamic imports used for
+ *             them) appear
+ *             only in the Workflow binding, the named engine modules whose
+ *             step IDs pin their paths, and test helpers. Everything else
+ *             goes through `DurableHost`.
+ *   rule 72 — Each `EveRuntime` slot has one owner module, and everything
+ *             else uses that owner's accessor (`platformContext()`,
+ *             `requireDurableHost()`, `getInstrumentationRuntime()`, ...).
+ *             Value imports of `#runtime/eve-runtime.js` and the
+ *             `eve.runtime` key appear only in boot, the slot owners, and
+ *             test helpers. Type-only imports of `EveRuntime` stay allowed.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
  * may only shrink (as offenders are removed) — they may never grow.
- * Rules 67, 68, 69, and 70 have no baseline.
+ * Rules 67, 68, 69, 70, 71, and 72 have no baseline.
  */
 import { glob, readFile, readdir, lstat } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -396,6 +409,8 @@ function isTsLike(relPath) {
  *   rule66: Violation[];
  *   rule69: Map<string, number>;
  *   rule70: Violation[];
+ *   rule71: Violation[];
+ *   rule72: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -433,6 +448,8 @@ async function scanRepo(state) {
     checkRule51(posix, content, lines, state.rule51);
     checkRule69(posix, content, state.rule69);
     checkRule70(posix, lines, state.rule70);
+    checkRule71(posix, content, state.rule71);
+    checkRule72(posix, content, state.rule72);
     if (posix.startsWith("packages/tracing/src/")) {
       for (const [index, line] of lines.entries()) {
         const imports = [...line.matchAll(/(?:from\s+|import\s*\()(["'])([^"']+)\1/g)];
@@ -1399,6 +1416,87 @@ function checkRule70(posix, lines, violations) {
       });
     }
   }
+}
+
+// ---------- Rule 71: the World stays behind DurableHost ----------
+
+const WORKFLOW_RUNTIME_FACADE = "#internal/workflow/runtime.js";
+const WORKFLOW_ENGINE_DIRS = [
+  `${EVE_SRC}execution/workflow-host/`,
+  `${EVE_SRC}internal/workflow/`,
+  `${EVE_SRC}internal/testing/`,
+];
+const WORKFLOW_ENGINE_MODULES = new Set(
+  [
+    "cli/commands/logs-events.ts",
+    "execution/install-workflow-world.ts",
+    "execution/legacy-session/interrupt-step.ts",
+    "execution/legacy-session/prepare-step.ts",
+    "execution/session-inbox/end-stranded-session.ts",
+    "execution/session-inbox/owner.ts",
+    "execution/session-inbox/resume.ts",
+    "execution/session-prewarm.ts",
+    "execution/session/handoff-steps.ts",
+    "execution/session/timeout-steps.ts",
+    "execution/workflow-runtime.ts",
+  ].map((file) => `${EVE_SRC}${file}`),
+);
+const WORLD_IMPORT_RE =
+  /import\s*\{([^}]*)\}\s*from\s*(["'])([^"']+)\2|import\s*\*\s*as\s+\w+\s+from\s*(["'])([^"']+)\4|import\s*\(\s*(["'])([^"']+)\6\s*\)/g;
+
+function checkRule71(posix, content, violations) {
+  if (!posix.startsWith(EVE_SRC) || posix.endsWith(".test.ts")) return;
+  if (WORKFLOW_ENGINE_MODULES.has(posix)) return;
+  if (WORKFLOW_ENGINE_DIRS.some((dir) => posix.startsWith(dir))) return;
+  for (const match of content.matchAll(WORLD_IMPORT_RE)) {
+    const specifier = aliasOfSpecifier(posix, match[3] ?? match[5] ?? match[7]);
+    if (specifier !== WORKFLOW_RUNTIME_FACADE) continue;
+    const reachesWorld =
+      match[1] === undefined
+        ? /\.(?:getWorld|setWorld)\b/.test(content)
+        : /\b(?:getWorld|setWorld)\b/.test(match[1]);
+    if (!reachesWorld) continue;
+    violations.push({
+      rule: 71,
+      file: `${posix}:${content.slice(0, match.index).split("\n").length}`,
+      message: `reaches the Workflow SDK's World through \`${WORKFLOW_RUNTIME_FACADE}\`. Outside the Workflow engine, eve uses durable execution through \`DurableHost\` (\`requireDurableHost()\` in \`#execution/hosts.js\`); add the eve-level operation you need there and implement it in \`execution/workflow-host/host.ts\`.`,
+    });
+  }
+}
+
+// ---------- Rule 72: one owner per EveRuntime slot ----------
+
+const EVE_RUNTIME_MODULE = "#runtime/eve-runtime.js";
+const EVE_RUNTIME_SLOT_OWNERS = new Set(
+  [
+    "execution/hosts.ts",
+    "instrumentation/providers.ts",
+    "instrumentation/runtime-global.ts",
+    "platform/context.ts",
+    "platform/install-runtime.ts",
+    "runtime/boot.ts",
+    "runtime/eve-runtime.ts",
+    "runtime/sessions/runtime-session.ts",
+  ].map((file) => `${EVE_SRC}${file}`),
+);
+const NAMED_IMPORT_RE = /import\s*\{([^}]*)\}\s*from\s*(["'])([^"']+)\2/g;
+
+function checkRule72(posix, content, violations) {
+  if (!posix.startsWith(EVE_SRC) || posix.endsWith(".test.ts")) return;
+  if (EVE_RUNTIME_SLOT_OWNERS.has(posix) || posix.startsWith(`${EVE_SRC}internal/testing/`)) return;
+  const message = `reaches the process \`EveRuntime\` directly. Each runtime slot has one owner module; use its accessor (\`platformContext()\`, \`requireDurableHost()\`, \`getInstrumentationRuntime()\`, \`getActiveRuntimeSession()\`), or add a slot and its owner to \`EVE_RUNTIME_SLOT_OWNERS\`. Type-only imports of \`EveRuntime\` are fine.`;
+  const lineOf = (index) => content.slice(0, index).split("\n").length;
+  for (const match of content.matchAll(NAMED_IMPORT_RE)) {
+    if (aliasOfSpecifier(posix, match[3]) !== EVE_RUNTIME_MODULE) continue;
+    const values = match[1]
+      .split(",")
+      .map((name) => name.trim())
+      .filter((name) => name !== "" && !name.startsWith("type "));
+    if (values.length === 0) continue;
+    violations.push({ rule: 72, file: `${posix}:${lineOf(match.index)}`, message });
+  }
+  const key = content.indexOf('Symbol.for("eve.runtime")');
+  if (key >= 0) violations.push({ rule: 72, file: `${posix}:${lineOf(key)}`, message });
 }
 
 /**
@@ -2489,6 +2587,8 @@ async function main() {
     rule66: /** @type {Violation[]} */ ([]),
     rule69: /** @type {Map<string, number>} */ (new Map()),
     rule70: /** @type {Violation[]} */ ([]),
+    rule71: /** @type {Violation[]} */ ([]),
+    rule72: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -2624,6 +2724,8 @@ async function main() {
   violations.push(...(await checkRule65()));
   violations.push(...state.rule66);
   violations.push(...state.rule70);
+  violations.push(...state.rule71);
+  violations.push(...state.rule72);
   for (const [file, count] of state.rule69) {
     violations.push({
       rule: 69,

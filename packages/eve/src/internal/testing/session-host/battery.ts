@@ -581,12 +581,7 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
           });
           finalizeInstrumentationProviders({ serviceName: agentName });
           onTestFinished(() => {
-            delete (globalThis as Record<symbol, unknown>)[
-              Symbol.for("eve.harness-instrumentation-providers")
-            ];
-            delete (globalThis as Record<symbol, unknown>)[
-              Symbol.for("eve.instrumentation-runtime")
-            ];
+            delete (globalThis as Record<symbol, unknown>)[Symbol.for("eve.runtime")];
           });
           await withHost(
             {
