@@ -3,7 +3,7 @@ import { RunExpiredError, WorkflowRunNotFoundError } from "#compiled/@workflow/e
 import type { DeliverHookPayload } from "#channel/types.js";
 import { installDurableHost, type DurableHost } from "#execution/hosts.js";
 import type { AuthorizationCallbackPayload } from "#execution/session-inbox/inbox.js";
-import type { SessionLineStore } from "#execution/session-line-store.js";
+import type { SessionEventStore } from "#execution/session-event-store.js";
 import { resumeSignInCallback } from "#execution/session-inbox/owner.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
@@ -16,13 +16,13 @@ import {
 import { cancelRun, getRun, getWorld, resumeHook } from "#internal/workflow/runtime.js";
 import { platformContext } from "#platform/context.js";
 
-const workflowLineStore: SessionLineStore = {
+const workflowSessionEvents: SessionEventStore = {
   readable: (sessionId, startIndex) => getRun(sessionId).getReadable({ startIndex }),
   async tail(sessionId) {
     const readable = getRun(sessionId).getReadable();
     try {
       const [, tailIndex] = await Promise.all([
-        workflowLineStore.assertReadable(sessionId),
+        workflowSessionEvents.assertReadable(sessionId),
         readable.getTailIndex(),
       ]);
       return tailIndex;
@@ -72,7 +72,7 @@ export const workflowHost: DurableHost = {
   cancelRun: async (runId, reason) => {
     await cancelRun(await getWorld(), runId, { cancelReason: reason });
   },
-  lineStore: workflowLineStore,
+  sessionEvents: workflowSessionEvents,
   createRuntime: (input) => createWorkflowRuntime(input),
   connectionEvents: {
     start: (binding, bundle, signal) => startConnectionEventOwner(binding, bundle, signal),

@@ -236,9 +236,8 @@ export function defineMemory(definition: MemoryDefinition): DefinedMemory {
  * local application roots do not share memory.
  */
 export function defaultNamespace(context: MemoryNamespaceContext): string {
-  const { deployment } = platformContext();
-  const projectId = deployment.projectId();
-  if (projectId === undefined) {
+  const scope = platformContext().deployment.scope();
+  if (scope === undefined) {
     return JSON.stringify([
       "eve-memory-default-namespace-v1",
       "local",
@@ -248,24 +247,16 @@ export function defaultNamespace(context: MemoryNamespaceContext): string {
     ]);
   }
 
-  const environment = deployment.environmentName() ?? "production";
-  const previewIdentity =
-    environment === "preview"
-      ? deployment.build()?.gitBranch ||
-        deployment.deploymentId() ||
-        deployment.deploymentHost()?.trim() ||
-        "unknown-preview"
-      : null;
   const publicRoutePrefix =
     process.env[EVE_INTERNAL_AGENT_WORKSPACE_MEMBER_ENV] === "1"
       ? normalizePublicRoutePrefix(process.env[EVE_PUBLIC_ROUTE_PREFIX_ENV])
       : undefined;
   return JSON.stringify([
     "eve-memory-default-namespace-v1",
-    "vercel",
-    projectId,
-    environment,
-    previewIdentity,
+    scope.platform,
+    scope.id,
+    scope.environment,
+    scope.variant,
     ...(publicRoutePrefix === undefined ? [] : [publicRoutePrefix]),
     context.node,
     context.slot,

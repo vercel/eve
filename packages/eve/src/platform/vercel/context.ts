@@ -9,7 +9,6 @@ import { toErrorMessage } from "#shared/errors.js";
 
 export function createVercelPlatformContext(): PlatformContext {
   return {
-    target: "vercel",
     build: {
       target: () => (isVercelEnvironment() ? "vercel" : "node"),
       outputDirectory: (appRoot) =>
@@ -28,11 +27,6 @@ export function createVercelPlatformContext(): PlatformContext {
     },
     deployment: vercelDeployment,
     identity: vercelIdentity,
-    sandbox: {
-      hostedAvailable: isVercelEnvironment,
-      credentialTransforms: isVercelEnvironment,
-      stopsOnExit: isVercelEnvironment,
-    },
     telemetry: {
       traceSessionAttribute: () =>
         process.env.VERCEL_ENV === undefined ? undefined : "vercel.session_id",

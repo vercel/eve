@@ -253,7 +253,8 @@
  *             `@vercel/otel` OpenTelemetry bootstrap run on any host, so they
  *             are exempt.
  *   rule 70 — Outside `packages/eve/src/platform/`, eve depends only on the
- *             platform contract: `#platform/context.js`, the capability
+ *             platform contract: `#platform/context.js` and
+ *             `#platform/services.js`, the capability
  *             modules whose implementations must stay out of bundles that
  *             don't use them (`hosted-sandbox`, `document-store`,
  *             `schedules`, `models`, `runtime-spans`), and, in the Nitro
@@ -1384,6 +1385,7 @@ const PLATFORM_CONTRACT_MODULES = new Set([
   "#platform/models.js",
   "#platform/runtime-spans.js",
   "#platform/schedules.js",
+  "#platform/services.js",
 ]);
 const PLATFORM_BUILD_HOST_DIR = "packages/eve/src/internal/nitro/host/";
 const PLATFORM_BUILD_HOST_MODULES = new Set(["#platform/build-output.js", "#platform/types.js"]);

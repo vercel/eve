@@ -1,11 +1,8 @@
-import { platformContext, type PlatformTarget } from "#platform/context.js";
-import type { MemoryDocumentBackend } from "#public/memory/file/backend.js";
+import { platformContext } from "#platform/context.js";
+import { hostService } from "#platform/services.js";
 import { vercelDefaultDocumentBackend } from "#platform/vercel/memory.js";
-
-const IMPLEMENTATIONS: Record<PlatformTarget, () => MemoryDocumentBackend | undefined> = {
-  vercel: vercelDefaultDocumentBackend,
-};
+import type { MemoryDocumentBackend } from "#public/memory/file/backend.js";
 
 export function defaultDocumentBackend(): MemoryDocumentBackend | undefined {
-  return IMPLEMENTATIONS[platformContext().target]();
+  return hostService(platformContext(), "documentStore", vercelDefaultDocumentBackend);
 }

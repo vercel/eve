@@ -23,7 +23,7 @@ export function createEveRuntime(): EveRuntime {
   return {
     platform: undefined,
     defaultSession: undefined,
-    hosts: { routes: new Set(), streams: new Map() },
+    hosts: { routes: new Set(), sessionEventStores: new Map() },
     instrumentation: { providers: new Map(), runtime: undefined },
     onClose(close) {
       closers.push(close);
