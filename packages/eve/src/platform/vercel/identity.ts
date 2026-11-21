@@ -1,5 +1,5 @@
 import type { PlatformIdentity } from "#platform/context.js";
-import { vercelDeployment } from "#platform/vercel/deployment.js";
+import { vercelEnvironmentName } from "#platform/vercel/deployment.js";
 import { withVercelOidcProjectResolver } from "#platform/vercel/oidc-project.js";
 import { isVercelOidcIssuer } from "#platform/vercel/project.js";
 import type { CurrentVercelProject } from "#channel/auth/types.js";
@@ -27,7 +27,7 @@ function readAmbientToken(): string | undefined {
 export function vercelCurrentProject(): CurrentVercelProject | undefined {
   const projectId = process.env.VERCEL_PROJECT_ID?.trim();
   if (projectId === undefined || projectId.length === 0) return undefined;
-  const environment = vercelDeployment.environmentName();
+  const environment = vercelEnvironmentName();
   return environment === undefined ? { projectId } : { environment, projectId };
 }
 

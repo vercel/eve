@@ -1,5 +1,4 @@
-import { platformContext } from "#platform/context.js";
-import { hostedSandboxEnvironment } from "#platform/hosted-sandbox.js";
+import { hostedSandbox, hostedSandboxEnvironment } from "#platform/hosted-sandbox.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
 import { JustBashSandbox } from "#sandbox/providers/just-bash.js";
 import { bindSandboxEnvironment, type SandboxSelector } from "#shared/sandbox-environment.js";
@@ -19,7 +18,7 @@ const VERCEL_SANDBOX_REQUIRED_MESSAGE =
 
 export function defineDeployedSelfModificationSandbox(
   config: DeployedSelfModificationConfig,
-  hasCredentialTransforms: () => boolean = () => platformContext().sandbox.credentialTransforms(),
+  hasCredentialTransforms: () => boolean = () => hostedSandbox()?.credentialTransforms === true,
 ): SandboxSelector {
   if (!isDeployedRuntime()) {
     const environment = JustBashSandbox.environment();

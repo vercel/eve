@@ -6,12 +6,12 @@ import {
   installedDurableHost,
   isRetriedStep,
   registerHost,
-  registerSessionLineStore,
+  registerSessionEventStore,
   resumeRoutedHook,
   resumeRoutedSessionInbox,
   routedRunEnded,
   routedRunLive,
-  sessionLineStore,
+  sessionEventStore,
   sessionSignInCallbacks,
   type DurableHost,
   type HostedRoute,
@@ -26,10 +26,10 @@ import {
   sessionCommandHookToken,
   sessionInboxHookToken,
 } from "#execution/session-inbox/address.js";
-import type { SessionLineStore } from "#execution/session-line-store.js";
+import type { SessionEventStore } from "#execution/session-event-store.js";
 import { HookNotFoundError } from "#shared/run-errors.js";
 
-function fixedStore(records: readonly unknown[]): SessionLineStore {
+function fixedStore(records: readonly unknown[]): SessionEventStore {
   const encoder = new TextEncoder();
   return {
     assertReadable: async () => {},
@@ -79,7 +79,7 @@ function durableHost(name: string): DurableHost {
     cancelRun: async (runId) => {
       durable.reached.push(`cancel ${runId}`);
     },
-    lineStore: fixedStore([{ line: "kept by the durable host" }]),
+    sessionEvents: fixedStore([{ line: "kept by the durable host" }]),
     stepAttempt: () => durable.attempt,
     callbackBaseUrl: () => durable.callbackBaseUrl,
     createRuntime: () => {
@@ -110,7 +110,7 @@ describe("the hosts in a realm", () => {
     await expect(routedRunEnded("run-bob")).resolves.toBe(true);
     expect(isRetriedStep()).toBe(false);
     expect(installedDurableHost()).toBeUndefined();
-    expect(() => sessionLineStore("session-alice")).toThrow(
+    expect(() => sessionEventStore("session-alice")).toThrow(
       'No host in this realm holds session "session-alice".',
     );
   });
@@ -217,9 +217,9 @@ describe("the hosts in a realm", () => {
   it("reads a registered session from its store, and the durable host's once released", async () => {
     installDurableHost(durableHost("durable"));
     const store = fixedStore([{ line: "Alice" }, { line: "Bob" }]);
-    const release = registerSessionLineStore("session-alice", store);
+    const release = registerSessionEventStore("session-alice", store);
     try {
-      expect(sessionLineStore("session-alice")).toBe(store);
+      expect(sessionEventStore("session-alice")).toBe(store);
       await expect(readSessionStreamTailIndex("session-alice")).resolves.toBe(1);
       await expect(readAll(readSessionRecordHistory("session-alice", -1))).resolves.toEqual([
         { line: "Bob" },
@@ -233,10 +233,10 @@ describe("the hosts in a realm", () => {
   });
 
   it("refuses a second store for the same session", () => {
-    const release = registerSessionLineStore("session-alice", fixedStore([]));
+    const release = registerSessionEventStore("session-alice", fixedStore([]));
     try {
-      expect(() => registerSessionLineStore("session-alice", fixedStore([]))).toThrow(
-        'Session "session-alice" already has a line store.',
+      expect(() => registerSessionEventStore("session-alice", fixedStore([]))).toThrow(
+        'Session "session-alice" already has a session event store.',
       );
     } finally {
       release();

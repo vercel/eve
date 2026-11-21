@@ -62,7 +62,7 @@ import {
   sessionView,
 } from "#harness/session-machine/commit.js";
 import { matchSignIns, receive } from "#harness/session-machine/transitions.js";
-import type { DeliverPayload } from "#channel/types.js";
+import type { DeliverPayload, Runtime } from "#channel/types.js";
 import { coalesceTurnInputs, validateHarnessModelMessages } from "#harness/messages.js";
 import type { HarnessSession, HarnessStepInput, StepInput, StepResult } from "#harness/types.js";
 import { attributeAnswers } from "#execution/session/answer-caller.js";
@@ -110,7 +110,7 @@ import {
 import {
   buildRuntimeIdentity,
   createExecutionNodeStep,
-  type CreateRuntime,
+  type CreateRuntimeConfig,
 } from "#execution/node-step.js";
 import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
@@ -141,7 +141,7 @@ interface PendingStepAttributes {
 export interface SessionStepHost {
   readonly callbackBaseUrl?: string;
   setAttributes(attributes: Record<string, EveAttributeValue>): Promise<void>;
-  readonly createRuntime: CreateRuntime;
+  createRuntime(config: CreateRuntimeConfig): Runtime;
   readonly toolStubs?: ToolStubHost;
   readonly deliver?: DurableHost["deliver"];
 }
@@ -617,7 +617,7 @@ async function runSessionStepBody(
         clearOnly: input.input?.control === "clear",
         compactOnly: input.input?.control === "compact",
         controlDelivery: input.input?.controlDelivery,
-        createRuntime: host.createRuntime,
+        createRuntime: (config) => host.createRuntime(config),
         handleEvent,
         signInCompletions,
         typedAnswers: !hasDelegatedSessionContext(input.serializedContext),
@@ -667,7 +667,7 @@ async function runSessionStepBody(
               ctx.setVirtualContext(ToolChannelKey, {
                 channel: channelOf(ctx),
                 to: createToolChannelTo({
-                  createRuntime: host.createRuntime,
+                  createRuntime: (config) => host.createRuntime(config),
                   delegated: hasDelegatedSessionContext(input.serializedContext),
                   loadAgent: () => agent,
                 }),

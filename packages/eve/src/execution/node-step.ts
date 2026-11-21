@@ -34,10 +34,12 @@ import type { KernelConfig } from "#harness/types.js";
 
 const log = createLogger("execution.node-step");
 
-export type CreateRuntime = (config: {
+export interface CreateRuntimeConfig {
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
   readonly nodeId?: string;
-}) => Runtime;
+}
+
+export type CreateRuntime = (config: CreateRuntimeConfig) => Runtime;
 
 interface CreateExecutionNodeStepInput {
   readonly steeringSignal?: AbortSignal;

@@ -96,7 +96,9 @@ export function createHostSpec(
   const runtimePlugins: HostRuntimePlugin[] = [
     ...(development ? [] : (["skill-files"] as const)),
     ...(instrumented ? (["instrumentation"] as const) : []),
-    ...(development && platform.usesLocalSchedules(manifest) ? (["local-schedules"] as const) : []),
+    ...(development && platform.schedules.usesLocal(manifest)
+      ? (["local-schedules"] as const)
+      : []),
     ...(!development &&
     preset !== "vercel" &&
     routes.scheduleTasks.some((task) => task.timezone !== undefined)
@@ -114,7 +116,7 @@ export function createHostSpec(
     extensionOverridePaths: extensionOverridePaths(manifest),
     externals: createExternalsPolicy({ development, manifest, preset }),
     instrumented,
-    localSchedulesPluginModulePath: platform.localSchedulesPluginModulePath(),
+    localSchedulesPluginModulePath: platform.schedules.localPluginModulePath(),
     locations: {
       appRoot,
       buildDir: dirs.buildDir,

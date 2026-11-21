@@ -7,7 +7,7 @@ import type {
   SessionCommand,
   SessionCommandResult,
 } from "#channel/types.js";
-import { registerSessionLineStore } from "#execution/hosts.js";
+import { registerSessionEventStore } from "#execution/hosts.js";
 import { prepareInitialEntry, type SessionRuntimeConfig } from "#execution/initial-entry.js";
 import {
   readSessionEventHistory,
@@ -67,7 +67,7 @@ function runtimeOn(host: InProcessHost, config: SessionRuntimeConfig): InProcess
   ): Promise<{ readonly sessionId: string; readonly claimedContinuation: boolean }> => {
     const sessionId = `session_${createUlid()}`;
     const sessionWritable = lines.open(sessionId);
-    host.onDispose(registerSessionLineStore(sessionId, lines));
+    host.onDispose(registerSessionEventStore(sessionId, lines));
     const boot = await bootInitialOwner(
       { ...entry, ownerDeploymentId: host.deploymentId },
       sessionId,
