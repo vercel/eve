@@ -197,14 +197,13 @@ export class SessionExecution {
             caller,
             input: nextStepInput,
             recover,
-            steeringSignal: turn.steeringSignal,
           });
         return run().catch((error: unknown) => {
           const thrown = exhaustedStepError(error);
           const name = isObject(thrown) ? readNonEmptyString(thrown.name) : undefined;
           return run({
             error: name === undefined ? {} : { name },
-            ...(turn.signal.aborted && { stopped: true as const }),
+            ...(turn.cancelled && { stopped: true as const }),
           });
         });
       });
@@ -223,7 +222,7 @@ export class SessionExecution {
 
       if (result.action === "cancelled") return await this.finishCancelledTurn(turn);
       const waitsOnCalls = result.action === "paused" && result.on === "calls";
-      if (!settles && !waitsOnCalls && turn.signal.aborted) {
+      if (!settles && !waitsOnCalls && turn.cancelled) {
         return await this.finishCancelledTurn(turn);
       }
 

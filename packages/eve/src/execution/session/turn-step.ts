@@ -1,3 +1,4 @@
+import { splitTurnSignal } from "#execution/session/turn-control.js";
 import { checksSessionEvents } from "#shared/dev-checks.js";
 import { createToolChannelTo } from "#execution/tools/channel-to.js";
 import { channelOf } from "#definitions/frame.js";
@@ -150,15 +151,24 @@ export function turnStepOn(
   host: SessionStepHost,
 ): (input: TurnStepInput) => Promise<TurnStepResult> {
   return async (input) =>
-    await withSessionStateDelta(input, (state) =>
-      runSessionStep(
-        {
-          ...state,
-          serializedContext: bindTurnCallerContext(state.caller, state.serializedContext),
-        },
-        host,
-      ),
-    );
+    await withSessionStateDelta(input, async (state) => {
+      const split =
+        state.abortSignal !== undefined && state.steeringSignal === undefined
+          ? splitTurnSignal(state.abortSignal)
+          : undefined;
+      try {
+        return await runSessionStep(
+          {
+            ...state,
+            ...(split && { abortSignal: split.abortSignal, steeringSignal: split.steeringSignal }),
+            serializedContext: bindTurnCallerContext(state.caller, state.serializedContext),
+          },
+          host,
+        );
+      } finally {
+        split?.release();
+      }
+    });
 }
 
 async function runSessionStep(
