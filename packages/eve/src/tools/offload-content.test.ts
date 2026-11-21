@@ -436,6 +436,72 @@ describe("offloadContent", () => {
     expect(result).toEqual({ type: "text", value: text });
   });
 
+  it("keeps at most 100 saved results per sandbox and removes the one that goes over", async () => {
+    const { records } = captureLogRecords();
+    const { access, files } = fakeSandbox();
+    const toModelOutput = offloadContent({ maxBytes: 100, fallback: "summary" });
+    const results = await inContext(access, async () => {
+      const all: ToolModelOutput[] = [];
+      for (let index = 0; index < 101; index += 1) {
+        all.push(
+          await toModelOutput("x".repeat(500), toolModelOutputContext("t", `call_${index}`)),
+        );
+      }
+      return all;
+    });
+    expect(files.size).toBe(100);
+    expect(files.has("/tmp/.eve/tool-results/t-call_100.txt")).toBe(false);
+    expect((results[99] as { value: string }).value).toContain("was saved to");
+    expect((results[100] as { value: string }).value).toContain("could not be saved");
+    const warnings = records.filter((record) => record.level === "warn");
+    expect(warnings).toHaveLength(1);
+    expect(JSON.stringify(warnings[0])).toContain("100 files");
+  });
+
+  it("keeps saved results under 100 MB per sandbox", async () => {
+    captureLogRecords();
+    const { access, files } = fakeSandbox();
+    const toModelOutput = offloadContent({ maxBytes: 100, fallback: "summary" });
+    const chunk = "a".repeat(10 * 1024 * 1024);
+    const results = await inContext(access, async () => {
+      const all: ToolModelOutput[] = [];
+      for (let index = 0; index < 11; index += 1) {
+        all.push(await toModelOutput(chunk, toolModelOutputContext("t", `call_${index}`)));
+      }
+      return all;
+    });
+    expect(files.size).toBe(10);
+    expect((results[10] as { value: string }).value).toContain("could not be saved");
+  });
+
+  it("counts a rewritten call id once", async () => {
+    const { access, files } = fakeSandbox();
+    const toModelOutput = offloadContent({ maxBytes: 100, fallback: "summary" });
+    await inContext(access, async () => {
+      for (let index = 0; index < 150; index += 1) {
+        await toModelOutput("x".repeat(500), toolModelOutputContext("t", "same"));
+      }
+    });
+    expect(files.size).toBe(1);
+  });
+
+  it("sends the fallback and warns when the saved results cannot be measured", async () => {
+    const { records } = captureLogRecords();
+    const sandbox = mockSandbox({ run: () => ({ exitCode: 1, stderr: "no find", stdout: "" }) });
+    const ctx = {
+      ...toolModelOutputContext("t", "call_1"),
+      getSandbox: async () => sandbox.session,
+    } satisfies ToolModelOutputContext;
+    const result = await inContext(undefined, () =>
+      offloadContent({ maxBytes: 100, fallback: "summary" })("x".repeat(500), ctx),
+    );
+    expect((result as { value: string }).value).toContain("could not be saved");
+    expect(sandbox.files.size).toBe(0);
+    expect(JSON.stringify(records.filter((record) => record.level === "warn")[0])).toContain(
+      "could not measure",
+    );
+  });
+
   it("rejects a limit that is not a positive integer", () => {
     expect(() => offloadContent({ maxBytes: 0 })).toThrow("positive integer");
     expect(() => offloadContent({ maxBytes: 4.5 })).toThrow("positive integer");

@@ -1,4 +1,5 @@
 import { isObject } from "#shared/guards.js";
+import type { SandboxSession } from "#shared/sandbox-session.js";
 import {
   defaultToolModelOutput,
   WARN_ONCE,
@@ -16,6 +17,8 @@ const FILE_STEM_PART_LIMIT = 64;
 
 const DEFAULT_MAX_BYTES = 20_000;
 const MAX_SAVED_BYTES = 10 * 1024 * 1024;
+const MAX_DIRECTORY_BYTES = 100 * 1024 * 1024;
+const MAX_DIRECTORY_FILES = 100;
 
 /** Options for {@link offloadContent}. */
 export interface OffloadContentOptions<TOutput> {
@@ -28,7 +31,8 @@ export interface OffloadContentOptions<TOutput> {
   /**
    * What the model gets when a result is over `maxBytes` and cannot be saved,
    * because it is over 10 MB, there is no sandbox that keeps files after the
-   * call, or opening the sandbox or writing the file fails. eve logs one
+   * call, the sandbox already holds 100 MB or 100 files of saved results, or
+   * opening the sandbox or writing the file fails. eve logs one
    * warning per session either way.
    *
    * - `"inline"` sends the projected result, so nothing is lost and the context may
@@ -57,7 +61,8 @@ export interface OffloadContentOptions<TOutput> {
  *
  * The file holds the projected output, the same text or JSON the model would
  * have seen, so a `toModelOutput` that redacts a field also keeps it out of
- * the file. A result over 10 MB is never saved. When a result cannot be saved,
+ * the file. A result over 10 MB is never saved, and neither is one that would
+ * take the sandbox's saved results over 100 MB or 100 files. When a result cannot be saved,
  * `fallback` decides what the model gets. Error results and results with
  * file parts are never written.
  *
@@ -115,6 +120,19 @@ export function offloadContent<TOutput = unknown>(
         return notSaved();
       }
       await sandbox.writeTextFile({ content: file.text, path });
+      const held = await savedResults(sandbox).catch(async (error: unknown) => {
+        await sandbox.removePath({ force: true, path });
+        throw error;
+      });
+      if (held.bytes > MAX_DIRECTORY_BYTES || held.files > MAX_DIRECTORY_FILES) {
+        await sandbox.removePath({ force: true, path });
+        warn?.(
+          "offloadContent.quota",
+          `offloadContent did not save a tool result because the sandbox already holds ${MAX_DIRECTORY_FILES} files or ${MAX_DIRECTORY_BYTES.toLocaleString("en-US")} bytes of saved results, so the model gets ${given}.`,
+          { toolName: ctx.toolName },
+        );
+        return notSaved();
+      }
     } catch (error) {
       warn?.(
         "offloadContent.save-failed",
@@ -125,6 +143,24 @@ export function offloadContent<TOutput = unknown>(
     }
     return { type: "text", value: note(true) };
   };
+}
+
+async function savedResults(
+  sandbox: SandboxSession,
+): Promise<{ readonly bytes: number; readonly files: number }> {
+  const { stdout } = await sandbox.run({
+    command: `find ${RESULTS_DIRECTORY} -type f -exec wc -c {} + 2>/dev/null`,
+  });
+  let bytes = 0;
+  let files = 0;
+  for (const line of stdout.split("\n")) {
+    const match = /^\s*(\d+) (.+)$/.exec(line);
+    if (match === null || !match[2]!.startsWith(`${RESULTS_DIRECTORY}/`)) continue;
+    bytes += Number(match[1]);
+    files += 1;
+  }
+  if (files === 0) throw new Error("could not measure the saved tool results");
+  return { bytes, files };
 }
 
 const DIRECT_CALL_CONTEXT: ToolModelOutputContext = {

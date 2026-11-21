@@ -68,7 +68,15 @@ export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
     fileBytes.set(resolved, Buffer.from(contents, "utf8"));
   }
 
-  async function defaultRun(): Promise<SandboxCommandResult> {
+  async function defaultRun(options: SandboxRunOptions): Promise<SandboxCommandResult> {
+    const find = /^find (\S+) -type f -exec wc -c \{\} \+/.exec(options.command);
+    if (find !== null) {
+      const prefix = `${find[1]}/`;
+      const lines = [...fileBytes]
+        .filter(([path]) => path.startsWith(prefix))
+        .map(([path, bytes]) => `${bytes.byteLength} ${path}`);
+      return { exitCode: 0, stderr: "", stdout: lines.map((line) => `${line}\n`).join("") };
+    }
     return { exitCode: 0, stderr: "", stdout: "" };
   }
 
@@ -86,7 +94,7 @@ export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
       return await fallback(options);
     }
 
-    return await defaultRun();
+    return await defaultRun(options);
   }
 
   async function removePath(options: SandboxRemovePathOptions): Promise<void> {
