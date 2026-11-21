@@ -148,7 +148,8 @@
     "test:tui": {
       "cache": false,
       "dependsOn": ["build"],
-      "env": ["AI_GATEWAY_API_KEY", "EVE_SANDBOX_IMAGE_TAG"]
+      "env": ["AI_GATEWAY_API_KEY", "EVE_SANDBOX_IMAGE_TAG"],
+      "tags": ["ci", "ci:cpus:4", "ci:os:ubuntu"]
     },
     "test:watch": {
       "cache": false,

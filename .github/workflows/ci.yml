@@ -11,9 +11,9 @@ permissions:
   contents: read
 
 # Vercel CI runs lint, typecheck, the package builds, the unit tier, the Linux
-# integration tier, the framework build tests, the template checks, the
-# Postgres world suite, and the repository checks from the `ci` tags in
-# turbo.json. The jobs here run what
+# integration tier, the framework build tests, the template checks, the TUI
+# smoke tests, the Postgres world suite, and the repository checks from the
+# `ci` tags in turbo.json. The jobs here run what
 # Vercel CI does not. test-scenario installs everything and shares
 # setup-node's pnpm cache. Every other job installs only the workspace packages
 # its commands read, each under its own pnpm store cache key. See
@@ -248,42 +248,3 @@ jobs:
 
       - name: Run web chat tests
         run: pnpm test:webchat
-
-  test-tui:
-    runs-on: ubuntu-latest
-    environment:
-      name: eve-ci
-      deployment: false
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-
-      - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .nvmrc
-
-      # This job builds agents whose sandboxes pull eve's default image.
-      - name: Resolve eve sandbox image
-        uses: ./.github/actions/sandbox-image
-
-      # The smoke tests start their agent apps from the shared fixtures.
-      - name: Install dependencies
-        uses: ./.github/actions/pnpm-install
-        with:
-          cache-key: tui
-          filters: |
-            eve...
-            ./apps/fixtures/*
-            ./e2e/fixtures/*
-
-      - name: Run TUI smoke tests
-        env:
-          AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
-        run: pnpm test:tui

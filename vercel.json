@@ -37,6 +37,16 @@
         }
       },
       {
+        "name": "test:tui",
+        "env": {
+          "EVE_TELEMETRY_DISABLED": {
+            "constant": {
+              "value": "1"
+            }
+          }
+        }
+      },
+      {
         "name": "check:templates",
         "env": {
           "EVE_TELEMETRY_DISABLED": {
