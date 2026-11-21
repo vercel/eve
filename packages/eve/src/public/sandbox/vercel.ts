@@ -13,7 +13,7 @@ export {
   VercelSandbox,
   type VercelSandboxEnvironmentOptions,
   type VercelSandboxRuntimeOptions,
-} from "#sandbox/providers/vercel.js";
+} from "#platform/vercel/sandbox/provider.js";
 export type {
   VercelSandboxCreateOptions,
   VercelSandboxMount,

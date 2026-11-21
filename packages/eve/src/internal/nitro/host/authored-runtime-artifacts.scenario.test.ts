@@ -62,7 +62,7 @@ describe("authored runtime artifacts", () => {
     let developmentGeneration: Awaited<ReturnType<typeof stageDevelopmentGeneration>> | undefined;
 
     try {
-      const productionHost = await prepareProductionApplicationHost(workspace);
+      const productionHost = await prepareProductionApplicationHost(workspace, "local");
       const manifest = productionHost.compileResult.manifest;
       const instructions = manifest.instructions.find(
         (entry) => entry.logicalPath === "instructions.ts",
@@ -145,7 +145,7 @@ describe("authored runtime artifacts", () => {
     let developmentGeneration: Awaited<ReturnType<typeof stageDevelopmentGeneration>> | undefined;
 
     try {
-      const productionHost = await prepareProductionApplicationHost(workspace);
+      const productionHost = await prepareProductionApplicationHost(workspace, "local");
       const productionProviderPath =
         productionHost.compiledArtifacts.instrumentationSourcePaths?.[0];
       expect(productionProviderPath).toBe(

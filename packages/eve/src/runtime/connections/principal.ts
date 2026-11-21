@@ -2,7 +2,7 @@ import { type AlsContext, contextStorage } from "#context/container.js";
 import { AuthKey, type SessionAuthContext } from "#context/keys.js";
 import { ConnectionAuthorizationFailedError } from "#connections/errors.js";
 import type { AuthorizationDefinition, ConnectionPrincipal } from "#shared/connection-types.js";
-import { isVercelOidcIssuer } from "#shared/vercel-project.js";
+import { platformContext } from "#platform/context.js";
 
 export function principalKey(principal: ConnectionPrincipal): string {
   if (principal.type === "app") {
@@ -56,7 +56,7 @@ export function resolveConnectionPrincipalFromAuth(
 export function isVercelDevelopmentUser(current: SessionAuthContext): boolean {
   return (
     current.authenticator === "oidc" &&
-    isVercelOidcIssuer(current.issuer) &&
+    platformContext().identity.isPlatformIssuer(current.issuer) &&
     current.attributes.environment === "development" &&
     current.subject === current.attributes.user_id
   );
