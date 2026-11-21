@@ -194,6 +194,7 @@
     },
     "test:integration": {
       "cache": false,
+      "tags": ["ci"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!.eve/**",
