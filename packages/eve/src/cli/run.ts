@@ -354,6 +354,53 @@ export function createCliProgram(
       await runTraceListCommand(logger, applicationContext.root, options);
     });
 
+  const principalHelp =
+    "local-dev, schedule, anonymous, or user[:groups=a,b][:authenticator=x][:id=y]";
+
+  agentCommand(program.command("send <message>"), applicationContext)
+    .description(
+      "Send one message to the agent on the app's eve dev server and print the reply, or preview the turn with --dry-run.",
+    )
+    .option(
+      "--dry-run",
+      "Show the tools, instructions, and connections the turn would see; starts no session and calls no model",
+    )
+    .option("--as <principal>", `Caller for --dry-run (default local-dev): ${principalHelp}`)
+    .option("--json", "Output as JSON")
+    .action(async (message: string, options: { as?: string; dryRun?: boolean; json?: boolean }) => {
+      const { runSendCommand } = await import("#cli/commands/send.js");
+      await runSendCommand(logger, applicationContext.root, message, options, runtime.startHost);
+    });
+
+  const schedule = program.command("schedule").description("Run the agent's schedules.");
+  agentCommand(schedule.command("run <name>"), applicationContext)
+    .description("Run one schedule now (on the app's eve dev server, or recorded with --dry-run).")
+    .option(
+      "--dry-run",
+      "Run the schedule in this process and record its deliveries and fetches instead of sending them; calls no model",
+    )
+    .option("--payload <json>", "Dynamic schedules only: the stored payload, with --dry-run")
+    .option(
+      "--as <principal>",
+      `Dynamic schedules only: the creator, with --dry-run: ${principalHelp}`,
+    )
+    .option("--json", "Output as JSON")
+    .action(
+      async (
+        name: string,
+        options: { as?: string; dryRun?: boolean; json?: boolean; payload?: string },
+      ) => {
+        const { runScheduleRunCommand } = await import("#cli/commands/schedule.js");
+        await runScheduleRunCommand(
+          logger,
+          applicationContext.root,
+          name,
+          options,
+          runtime.startHost,
+        );
+      },
+    );
+
   agentCommand(program.command("info"), applicationContext)
     .description("Print resolved application information.")
     .option("--json", "Output as JSON")

@@ -1,4 +1,8 @@
+import { expectScheduleRun } from "#channel/schedule.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
+import type { CompiledModuleMap } from "#compiler/module-map.js";
+import type { ScheduleRunHandler } from "#public/definitions/schedule.js";
+import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
 import type { ResolvedScheduleDefinition } from "#runtime/types.js";
@@ -87,4 +91,27 @@ export async function loadResolvedCompiledScheduleByTaskName(
       taskName,
     },
   );
+}
+
+export async function loadScheduleRun(
+  schedule: ResolvedScheduleDefinition,
+  moduleMap: CompiledModuleMap,
+): Promise<ScheduleRunHandler> {
+  if (schedule.sourceKind !== "module") {
+    throw new Error(
+      `Schedule "${schedule.name}" claims hasRun but is not a module-backed schedule.`,
+    );
+  }
+  const moduleSchedule = schedule as Extract<typeof schedule, { sourceKind: "module" }>;
+  const exportValue = await loadResolvedModuleExport({
+    definition: {
+      exportName: moduleSchedule.exportName,
+      logicalPath: moduleSchedule.logicalPath,
+      sourceId: moduleSchedule.sourceId,
+    },
+    kindLabel: "schedule",
+    moduleMap,
+    nodeId: undefined,
+  });
+  return expectScheduleRun(exportValue, moduleSchedule.logicalPath, moduleSchedule.exportName);
 }
