@@ -74,18 +74,13 @@ describe("normalizeAgentDefinition", () => {
     ).toThrow(/takes only a function; unknown key\(s\): reasoning/);
   });
 
-  it("rejects a dynamic compaction model", () => {
-    expect(() =>
-      normalizeAgentDefinition(
-        {
-          compaction: {
-            model: defineDynamic(() => "openai/gpt-5.5-mini"),
-          },
-          model: "openai/gpt-5.5",
-        },
-        FAILURE_MESSAGE,
-      ),
-    ).toThrow('"compaction.model" does not support defineDynamic');
+  it("accepts a dynamic compaction model", () => {
+    const model = defineDynamic(() => "openai/gpt-5.5-mini");
+
+    expect(
+      normalizeAgentDefinition({ compaction: { model }, model: "openai/gpt-5.5" }, FAILURE_MESSAGE)
+        .compaction?.model,
+    ).toBe(model);
   });
 
   it("accepts Anthropic prompt cache options", () => {

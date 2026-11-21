@@ -293,6 +293,7 @@ export const compiledAgentWorkflowDefinitionSchema = z
 export const compiledAgentCompactionDefinitionSchema: z.ZodType<CompiledAgentCompactionDefinition> =
   z
     .object({
+      dynamicModel: z.literal(true).optional(),
       model: compiledRuntimeModelReferenceSchema.optional(),
       thresholdPercent: z.number().finite().min(0).max(1).optional(),
     })

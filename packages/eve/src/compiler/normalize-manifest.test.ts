@@ -510,6 +510,27 @@ describe("compileAgentManifest source graph", () => {
     ).toBe("Delete schedule: daily-digest");
   });
 
+  it("keeps the agent config module for a dynamic compaction.model and loads it at runtime", async () => {
+    const compactionModel = defineDynamic(() => null);
+    const sourceRegistry = registry([
+      {
+        logicalPath: "agent.ts",
+        loadNamespace: async () => ({
+          default: defineAgent({ compaction: { model: compactionModel }, model: "openai/gpt-5.4" }),
+        }),
+      },
+    ]);
+    const compiled = await compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] });
+    expect(compiled.config.compaction).toEqual({ dynamicModel: true });
+
+    const moduleMap = await createProgrammaticCompiledModuleMap(compiled, [
+      frameworkAgentSourceRegistry,
+      sourceRegistry,
+    ]);
+    const resolved = await resolveAgent({ manifest: compiled, moduleMap });
+    expect(resolved.config?.compaction?.dynamicModel).toBe(compactionModel);
+  });
+
   it("names a collection by its explicit id wherever the path-derived name went", async () => {
     const collection = scheduleCollection({ id: "requests" });
     const sourceRegistry = registry([

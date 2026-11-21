@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { defineDynamic } from "#dynamic/definition.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { normalizeDynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 
@@ -32,5 +33,20 @@ describe("normalizeDynamicSubagentAgentConfig", () => {
     ).rejects.toThrow(
       'The "limits.sessionUsage" field cannot be selected at runtime; the root agent\'s `sessionUsage` applies.',
     );
+  });
+
+  it("rejects a selected dynamic compaction.model", async () => {
+    await expect(
+      normalizeDynamicSubagentAgentConfig({
+        modelMetadata: undefined as never,
+        name: "researcher",
+        state: {} as never,
+        value: defineAgent({
+          compaction: { model: defineDynamic(() => null) },
+          description: "Perform deep research.",
+          model: "openai/gpt-5.5",
+        }),
+      }),
+    ).rejects.toThrow('The returned "compaction.model" must be static.');
   });
 });

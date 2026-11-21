@@ -21,7 +21,12 @@ import type {
   ResolvedSkillDefinition,
   ResolvedInstructionsDefinition,
 } from "#runtime/types.js";
-import type { AgentToolExposure, SessionUsageLimit } from "#shared/agent-definition.js";
+import type {
+  AgentToolExposure,
+  PublicAgentDynamicCompactionModelDefinition,
+  SessionUsageLimit,
+} from "#shared/agent-definition.js";
+import { isDynamicSentinel } from "#dynamic/definition.js";
 import type { ApprovalPolicy } from "#approval/definition.js";
 
 interface ResolveAgentInput {
@@ -111,6 +116,7 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
 
 interface AgentConfigFunctions {
   readonly approval?: ApprovalPolicy;
+  readonly compactionModel?: PublicAgentDynamicCompactionModelDefinition;
   readonly sessionUsage?: SessionUsageLimit | false;
 }
 
@@ -121,13 +127,14 @@ async function loadAgentConfigFunctions(
 ): Promise<AgentConfigFunctions> {
   const sessionUsage = manifest.config.limits?.sessionUsage;
   const approval = manifest.config.approval === true;
+  const dynamicCompaction = manifest.config.compaction?.dynamicModel === true;
   const source = manifest.config.source;
   if (approval && source === undefined) {
     throw new Error(
       'The compiled agent marks an "approval" policy but has no agent config module.',
     );
   }
-  if ((sessionUsage !== true && !approval) || source === undefined) {
+  if ((sessionUsage !== true && !approval && !dynamicCompaction) || source === undefined) {
     return sessionUsage === false ? { sessionUsage: false } : {};
   }
   const definition = await loadResolvedModuleExport({
@@ -145,8 +152,17 @@ async function loadAgentConfigFunctions(
       `The compiled agent marks an "approval" policy, but "${source.logicalPath}" no longer exports one. Rebuild the agent.`,
     );
   }
+  const compactionModel = authored.compaction?.model;
+  if (dynamicCompaction && !isDynamicSentinel(compactionModel)) {
+    throw new Error(
+      `The compiled agent marks a dynamic "compaction.model", but "${source.logicalPath}" no longer exports one. Rebuild the agent.`,
+    );
+  }
   return {
     ...(approval && { approval: authored.approval }),
+    ...(dynamicCompaction && {
+      compactionModel: compactionModel as PublicAgentDynamicCompactionModelDefinition,
+    }),
     sessionUsage: sessionUsage === false ? false : authored.limits?.sessionUsage,
   };
 }
@@ -191,7 +207,7 @@ function requireCompiledSourceOwner(
 
 function createResolvedAgentConfig(
   manifest: CompiledAgentNodeManifest,
-  { approval, sessionUsage }: AgentConfigFunctions,
+  { approval, compactionModel, sessionUsage }: AgentConfigFunctions,
 ): NonNullable<ResolvedAgent["config"]> {
   const config: {
     approval?: ApprovalPolicy;
@@ -219,10 +235,7 @@ function createResolvedAgentConfig(
   }
 
   if (manifest.config.compaction !== undefined) {
-    const compaction: {
-      model?: NonNullable<NonNullable<ResolvedAgent["config"]>["compaction"]>["model"];
-      thresholdPercent?: number;
-    } = {};
+    const compaction: NonNullable<NonNullable<ResolvedAgent["config"]>["compaction"]> = {};
 
     if (manifest.config.compaction.model !== undefined) {
       compaction.model =
@@ -248,6 +261,10 @@ function createResolvedAgentConfig(
 
     if (manifest.config.compaction.thresholdPercent !== undefined) {
       compaction.thresholdPercent = manifest.config.compaction.thresholdPercent;
+    }
+
+    if (compactionModel !== undefined) {
+      compaction.dynamicModel = compactionModel;
     }
 
     config.compaction = compaction;

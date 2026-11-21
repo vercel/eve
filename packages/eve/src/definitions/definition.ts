@@ -40,6 +40,7 @@ export interface ContributionValues {
   readonly announcements: Readonly<Record<string, Announcement>>;
   readonly effects: readonly Effect[];
   readonly model: ModelChoice | undefined;
+  readonly compactionModel: ModelChoice | undefined;
 }
 
 export type Contribution = {
