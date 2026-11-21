@@ -57,6 +57,7 @@ export async function loadModuleBackedDefinition(input: {
     );
   }
   const moduleNamespace = await input.loadNamespace(input.source.sourceId);
+  assertAuthoredExportPresent(moduleNamespace, input);
   const exportValue = getAuthoredModuleExport(moduleNamespace, input.source);
 
   if (
@@ -79,6 +80,22 @@ export async function loadModuleBackedDefinition(input: {
       `Failed to execute the ${input.kind} export "${input.source.exportName ?? "default"}" from "${input.displayPath ?? input.source.logicalPath}": ${toErrorMessage(error)}`,
     );
   }
+}
+
+function assertAuthoredExportPresent(
+  moduleNamespace: Record<string, unknown>,
+  input: { readonly displayPath?: string; readonly kind: string; readonly source: ModuleSourceRef },
+): void {
+  const exportName = input.source.exportName ?? "default";
+  if (Object.hasOwn(moduleNamespace, exportName)) return;
+  const namedExports = Object.keys(moduleNamespace).filter((name) => name !== "__esModule");
+  throw new Error(
+    `"${input.displayPath ?? input.source.logicalPath}" has no ${exportName === "default" ? "default" : `"${exportName}"`} export${
+      namedExports.length === 0
+        ? ""
+        : `; it exports ${namedExports.map((name) => `"${name}"`).join(", ")}`
+    }. Export the ${input.kind} definition as ${exportName === "default" ? "the default export" : `"${exportName}"`}.`,
+  );
 }
 
 export function compiledDefinition(

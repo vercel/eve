@@ -4,6 +4,7 @@ import type {
   CompiledSubagentNode,
   CompiledToolDefinition,
 } from "#compiler/manifest.js";
+import { formatDiagnosticSources } from "#compiler/diagnostics.js";
 import type { JsonObject } from "#shared/json.js";
 import { type CliRow, createCliTheme, renderCliSection } from "#cli/ui/output.js";
 
@@ -20,7 +21,11 @@ export interface ApplicationInfoJson {
   agentRoot: string | null;
   layout: string | null;
   status: string;
-  diagnostics: { errors: number; warnings: number } | null;
+  diagnostics: {
+    errors: number;
+    warnings: number;
+    items: ApplicationInfoDiagnostic[];
+  } | null;
   model: string | null;
   instructions: string | null;
   skills: string[];
@@ -42,6 +47,43 @@ export interface ApplicationInfoJson {
   } | null;
 }
 
+export interface ApplicationInfoDiagnostic {
+  severity: "error" | "warning";
+  code: string;
+  message: string;
+  source: string | null;
+}
+
+const COMPILE_FAILED_CODE = "compile/failed";
+
+function listDiagnostics(inspection: ApplicationInspection): ApplicationInfoDiagnostic[] {
+  if (inspection.compileError !== undefined) {
+    return [
+      {
+        code: COMPILE_FAILED_CODE,
+        message: inspection.compileError,
+        severity: "error",
+        source: null,
+      },
+    ];
+  }
+  return (inspection.compiledState?.diagnostics ?? []).map((diagnostic) => ({
+    code: diagnostic.code,
+    message: diagnostic.message,
+    severity: diagnostic.severity,
+    source: formatDiagnosticSources(diagnostic) || null,
+  }));
+}
+
+function resolveStatus(inspection: ApplicationInspection): string {
+  if (inspection.compileError !== undefined) return "failed";
+  return inspection.compiledState?.metadata.status ?? "unavailable";
+}
+
+export function isApplicationInfoHealthy(inspection: ApplicationInspection): boolean {
+  return resolveStatus(inspection) !== "failed";
+}
+
 function formatInstructions(instructions: readonly CompiledInstructionsDefinition[]): string {
   return instructions
     .map((instructions) => `${instructions.logicalPath} (${instructions.role})`)
@@ -50,17 +92,20 @@ function formatInstructions(instructions: readonly CompiledInstructionsDefinitio
 
 export function buildApplicationInfoJson(inspection: ApplicationInspection): ApplicationInfoJson {
   const { application: info, compiledState, messaging } = inspection;
+  const items = listDiagnostics(inspection);
   return {
     appRoot: info.appRoot,
     agentRoot: compiledState?.project.agentRoot ?? null,
     layout: compiledState?.project.layout ?? null,
-    status: compiledState?.metadata.status ?? "unavailable",
-    diagnostics: compiledState
-      ? {
-          errors: compiledState.metadata.discovery.summary.errors,
-          warnings: compiledState.metadata.discovery.summary.warnings,
-        }
-      : null,
+    status: resolveStatus(inspection),
+    diagnostics:
+      compiledState === null && inspection.compileError === undefined
+        ? null
+        : {
+            errors: items.filter((item) => item.severity === "error").length,
+            warnings: items.filter((item) => item.severity === "warning").length,
+            items,
+          },
     model: compiledState?.manifest.config.model?.id ?? null,
     instructions:
       compiledState === null || compiledState.manifest.instructions.length === 0
@@ -141,15 +186,15 @@ export async function printApplicationInfo(
   logger: CliInfoLogger,
   appRoot: string,
   options: PrintApplicationInfoOptions = {},
-): Promise<void> {
+): Promise<boolean> {
   const inspection = await inspectApplication(appRoot);
 
-  if (options.json) {
-    logger.log(JSON.stringify(buildApplicationInfoJson(inspection), null, 2));
-    return;
-  }
-
-  logger.log(renderApplicationInfo(inspection));
+  logger.log(
+    options.json
+      ? JSON.stringify(buildApplicationInfoJson(inspection), null, 2)
+      : renderApplicationInfo(inspection),
+  );
+  return isApplicationInfoHealthy(inspection);
 }
 
 export function renderApplicationInfo(inspection: ApplicationInspection): string {
@@ -262,16 +307,27 @@ export function renderApplicationInfo(inspection: ApplicationInspection): string
   } else {
     applicationRows.push({
       label: "Compile",
-      tone: "warning",
-      value: "unavailable",
+      tone: inspection.compileError === undefined ? "warning" : "danger",
+      value: resolveStatus(inspection) === "failed" ? "failed" : "unavailable",
     });
   }
+  const diagnosticRows: CliRow[] = listDiagnostics(inspection).map((diagnostic) => ({
+    label: diagnostic.severity === "error" ? "Error" : "Warning",
+    tone: diagnostic.severity === "error" ? "danger" : "warning",
+    value: [
+      diagnostic.message,
+      `${diagnostic.code}${diagnostic.source === null ? "" : ` · ${diagnostic.source}`}`,
+    ].join("\n"),
+  }));
 
   return [
     renderCliSection(theme, {
       rows: applicationRows,
       title: "Application",
     }),
+    ...(diagnosticRows.length === 0
+      ? []
+      : ["", renderCliSection(theme, { rows: diagnosticRows, title: "Diagnostics" })]),
     "",
     renderCliSection(theme, {
       rows: artifactRows,

@@ -403,6 +403,11 @@ function resolveLocalRef(root: JsonObject, ref: unknown): unknown {
   return node;
 }
 
+export function findJsonSchemaValidatorProblem(schema: JsonObject): string | undefined {
+  const built = buildValidator(schema);
+  return typeof built === "string" ? built : undefined;
+}
+
 function buildValidator(schema: JsonObject): Validator | string {
   try {
     const copy = structuredClone(schema) as Record<string, unknown>;

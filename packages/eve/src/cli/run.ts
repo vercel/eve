@@ -60,7 +60,7 @@ interface CliRuntimeDependencies {
     logger: CliLogger,
     appRoot: string,
     options?: { json?: boolean },
-  ): Promise<void>;
+  ): Promise<boolean>;
   runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<void>;
   runEvalCommand(
     evalIds: readonly string[],
@@ -360,7 +360,9 @@ export function createCliProgram(
     .action(async (options: { json?: boolean }) => {
       const printApplicationInfo =
         runtime.printApplicationInfo ?? (await loadPrintApplicationInfo());
-      await printApplicationInfo(logger, applicationContext.root, options);
+      if (!(await printApplicationInfo(logger, applicationContext.root, options))) {
+        process.exitCode = 1;
+      }
     });
 
   agentCommand(

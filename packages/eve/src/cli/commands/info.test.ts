@@ -97,7 +97,7 @@ describe("buildApplicationInfoJson", () => {
     });
 
     expect(json).toMatchObject({
-      diagnostics: { errors: 0, warnings: 0 },
+      diagnostics: { errors: 0, items: [], warnings: 0 },
       instructions: "instructions/rules.ts (system)",
       model: "openai/gpt-5.4",
       schedules: ["morning-digest"],
@@ -172,6 +172,72 @@ describe("buildApplicationInfoJson", () => {
       status: "unavailable",
       tools: [],
     });
+  });
+});
+
+describe("diagnostics", () => {
+  test("lists each compile diagnostic with its source", async () => {
+    const compiledState = await makeCompiledState();
+    const json = buildApplicationInfoJson({
+      application: getApplicationInfo(APP_ROOT),
+      compiledState: {
+        ...compiledState,
+        diagnostics: [
+          {
+            code: "discover/unsupported-directory",
+            message:
+              'Ignoring unsupported directory "tool/" in the agent root. Did you mean "tools/"?',
+            severity: "warning",
+            sources: [{ nodeId: "__root__", sourcePath: `${AGENT_ROOT}/tool` }],
+          },
+        ],
+      },
+      messaging: MESSAGING,
+    });
+
+    expect(json.diagnostics).toEqual({
+      errors: 0,
+      items: [
+        {
+          code: "discover/unsupported-directory",
+          message:
+            'Ignoring unsupported directory "tool/" in the agent root. Did you mean "tools/"?',
+          severity: "warning",
+          source: `${AGENT_ROOT}/tool`,
+        },
+      ],
+      warnings: 1,
+    });
+  });
+
+  test("reports a thrown compile error as a failed status with one error", async () => {
+    const message =
+      'Tool "tools/get_weather.ts" has an invalid inputSchema: its root has type "string".';
+    vi.mocked(inspectApplication).mockResolvedValue({
+      application: getApplicationInfo(APP_ROOT),
+      compileError: message,
+      compiledState: null,
+      messaging: MESSAGING,
+    });
+    const json: string[] = [];
+    const text: string[] = [];
+
+    const jsonHealthy = await printApplicationInfo({ log: (line) => json.push(line) }, APP_ROOT, {
+      json: true,
+    });
+    const textHealthy = await printApplicationInfo({ log: (line) => text.push(line) }, APP_ROOT);
+
+    expect([jsonHealthy, textHealthy]).toEqual([false, false]);
+    expect(JSON.parse(json.join("\n"))).toMatchObject({
+      diagnostics: {
+        errors: 1,
+        items: [{ code: "compile/failed", message, severity: "error", source: null }],
+        warnings: 0,
+      },
+      status: "failed",
+    });
+    expect(text.join("\n")).toMatch(/Compile\s+failed/);
+    expect(text.join("\n")).toContain(message);
   });
 });
 

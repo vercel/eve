@@ -488,7 +488,7 @@ describe("compiler model catalog", () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"));
 
     await expect(compileAgent({ startPath: appRoot })).rejects.toThrow(
-      'Cannot compile agent compaction because the primary compaction trigger model "example/missing-model" does not have known AI Gateway context window metadata.',
+      'Model "example/missing-model" in "agent.ts" is not in the AI Gateway model catalog, so eve can\'t size compaction for the primary compaction trigger model.',
     );
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
   });
@@ -516,7 +516,7 @@ describe("compiler model catalog", () => {
         startPath: appRoot,
       }),
     ).rejects.toThrow(
-      'Cannot compile agent compaction because the primary compaction trigger model "example/missing-model" does not have known AI Gateway context window metadata.',
+      'Model "example/missing-model" in "agent.ts" is not in the AI Gateway model catalog, so eve can\'t size compaction for the primary compaction trigger model.',
     );
   });
 
