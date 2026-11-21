@@ -10,6 +10,7 @@ import {
   type StatefulMcpServer,
 } from "#internal/testing/stateful-mcp-server.js";
 import { fromCompiledBundle } from "#definitions/compiled-agent.js";
+import { mcpClientPool } from "#runtime/connections/mcp-client-pool.js";
 import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 
@@ -107,6 +108,7 @@ describe("MCP clients shared across the steps of a turn", () => {
 
     await server.waitForRequest((request) => request.method === "DELETE");
     expect(server.liveSessions.size).toBe(0);
+    expect(mcpClientPool.size).toBe(0);
   });
 
   it("starts a new MCP session for a new turn or a different caller", async () => {
