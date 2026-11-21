@@ -14,12 +14,10 @@ import {
 import { loadContext } from "#context/container.js";
 import { AuthKey } from "#context/keys.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
-import { defineDynamicSchedules } from "#public/schedules/subscription.js";
-import { schedules } from "#public/experimental/schedules/client.js";
-import { byPrincipal } from "#public/schedules/scope.js";
+import { byPrincipal, defineDynamicSchedules, schedules } from "#public/schedules/index.js";
 import { declared } from "#runtime/types.js";
 import { loadScheduleCollectionDefinition } from "#runtime/schedules/load-collection.js";
-import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
+import { inMemoryScheduleProvider } from "#public/schedules/testing.js";
 import { requireCompiledBundle, SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import { loadCompiledSessionAgent } from "#runtime/sessions/compiled-session-agent.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
