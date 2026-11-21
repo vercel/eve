@@ -1,0 +1,17 @@
+enableGlobalVirtualStore: false
+
+minimumReleaseAgeExclude:
+  - "@ai-sdk/*"
+  - "@eve/*"
+  - "@vercel/*"
+  - "@workflow/*"
+  - ai
+  - eve
+  - workflow
+
+allowBuilds:
+  esbuild: true
+
+# Keep transitive schema validation on the patched Zod 4 release.
+overrides:
+  "zod@>=4.0.0 <4.6.6": "4.6.7"
