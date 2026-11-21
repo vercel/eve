@@ -2,6 +2,7 @@ import "../global.css";
 import { Footer } from "@vercel/geistdocs/footer";
 import { Navbar } from "@vercel/geistdocs/navbar";
 import type { Metadata } from "next";
+import { AnnouncementBanner } from "@/components/geistdocs/announcement-banner";
 import { GeistdocsProvider } from "@/components/geistdocs/provider";
 import { config } from "@/lib/geistdocs/config";
 import { mono, sans } from "@/lib/geistdocs/fonts";
@@ -42,6 +43,7 @@ const Layout = async ({ children }: LayoutProps<"/[lang]">) => {
       <body>
         <GeistdocsProvider basePath={config.basePath} lang={lang}>
           <Navbar config={config} />
+          <AnnouncementBanner />
           {children}
           <Footer />
         </GeistdocsProvider>
