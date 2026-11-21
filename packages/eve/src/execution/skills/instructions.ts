@@ -1,6 +1,9 @@
 import type { CatalogSkill } from "#execution/catalog/skills.js";
-import type { Announcement } from "#harness/announcements.js";
+import { type Announcement, announcementDigest } from "#harness/announcements.js";
+import { CAPPED_RESULT_PREFIX } from "#harness/compaction/engine.js";
+import type { HarnessModelMessage } from "#harness/messages.js";
 import { SKILL_TOOL_NAME } from "#protocol/catalog-tools.js";
+import { skillTarget } from "#shared/action-request-name.js";
 import { MODEL_SKILL_ROOT } from "#shared/skill-paths.js";
 
 export interface AvailableSkillDescription {
@@ -48,6 +51,58 @@ export function dynamicSkillAnnouncements(
         })),
     ) ?? NO_SKILLS;
   return { [ANNOUNCEMENT_KEY]: { initial: NO_SKILLS, value: text, render: () => text } };
+}
+
+export function changedSkillAnnouncements(
+  skills: ReadonlyMap<string, CatalogSkill>,
+  record: readonly HarnessModelMessage[],
+): Readonly<Record<string, Announcement>> {
+  return Object.fromEntries(
+    [...loadedSkills(record)].flatMap(([name, loaded]) => {
+      const skill = skills.get(name);
+      if (skill === undefined) return [];
+      const changed = loaded !== skill.markdown;
+      return [
+        [
+          `skills.loaded:${name}`,
+          {
+            initial: "",
+            kind: "context.instruction",
+            render: () =>
+              changed
+                ? `Skill \`${name}\` changed since you loaded it. Load it again with ${SKILL_TOOL_NAME}({ name: "${name}" }) before relying on it.`
+                : undefined,
+            value: changed ? announcementDigest("skill", skill.markdown) : "",
+          },
+        ],
+      ];
+    }),
+  );
+}
+
+function loadedSkills(record: readonly HarnessModelMessage[]): ReadonlyMap<string, string> {
+  const names = new Map<string, string>();
+  const loaded = new Map<string, string>();
+  for (const message of record) {
+    if (typeof message.content === "string") continue;
+    for (const part of message.content) {
+      if (part.type === "tool-call" && part.toolName === SKILL_TOOL_NAME) {
+        const name = skillTarget(part.input);
+        if (name !== undefined) names.set(part.toolCallId, name);
+      }
+      if (part.type === "tool-result" && part.toolName === SKILL_TOOL_NAME) {
+        const name = names.get(part.toolCallId);
+        if (name === undefined) continue;
+        const { output } = part;
+        if (output.type === "text" && !output.value.startsWith(CAPPED_RESULT_PREFIX)) {
+          loaded.set(name, output.value);
+        } else {
+          loaded.delete(name);
+        }
+      }
+    }
+  }
+  return loaded;
 }
 
 function formatAvailableSkillLine(skill: AvailableSkillDescription): string {

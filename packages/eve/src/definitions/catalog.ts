@@ -2,7 +2,10 @@ import type { OfferedCatalogTools } from "#context/keys.js";
 import { catalogReach, catalogTools } from "#execution/catalog/catalog-tools.js";
 import { catalogAnnouncements } from "#execution/catalog/listing.js";
 import { type Callable, callableOf } from "#execution/catalog/step-catalog.js";
-import { dynamicSkillAnnouncements } from "#execution/skills/instructions.js";
+import {
+  changedSkillAnnouncements,
+  dynamicSkillAnnouncements,
+} from "#execution/skills/instructions.js";
 import { type Definition, type DefinitionContext, once } from "./definition.js";
 
 export const catalog: Definition = {
@@ -27,9 +30,12 @@ export const catalog: Definition = {
             const added = [
               ...catalogTools(callable, offered, {
                 catalog: catalogAnnouncements(callable),
-                skills: dynamicSkillAnnouncements(
-                  [...callable.skills.values()].filter(({ source }) => source !== undefined),
-                ),
+                skills: {
+                  ...dynamicSkillAnnouncements(
+                    [...callable.skills.values()].filter(({ source }) => source !== undefined),
+                  ),
+                  ...changedSkillAnnouncements(callable.skills, ctx.call?.record ?? []),
+                },
               }),
             ].filter(([name]) => !table.entries.has(name));
             return { ...table, entries: new Map([...table.entries, ...added]) };
