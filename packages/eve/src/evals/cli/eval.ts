@@ -138,7 +138,7 @@ export async function runEvalCommand(
       }
       client = await createEvalClient(
         { kind: "remote", url: options.url },
-        { workspaceRoot: appRoot },
+        { workspaceRoot: appRoot, targetAuth: config.targetAuth },
       );
       target = await resolveEvalTargetHandle({
         client,
@@ -158,7 +158,10 @@ export async function runEvalCommand(
         port: 0,
       });
       const started = await devServer.start();
-      client = await createEvalClient({ kind: "local", url: started.url });
+      client = await createEvalClient(
+        { kind: "local", url: started.url },
+        { targetAuth: config.targetAuth },
+      );
       target = await resolveEvalTargetHandle({
         client,
         expectedAgentName: await readExpectedAgentName(appRoot),

@@ -86,6 +86,33 @@ describe("defineEvalConfig", () => {
     expect(defineEvalConfig({ judge: {} }).judge).toEqual({});
   });
 
+  it("accepts each targetAuth scheme with a string or function token", () => {
+    const token = () => "fresh-token";
+    for (const targetAuth of [
+      { bearer: token },
+      { basic: { username: "eve", password: "secret" } },
+      { vercelOidc: { token } },
+    ]) {
+      expect(defineEvalConfig({ targetAuth }).targetAuth).toBe(targetAuth);
+    }
+  });
+
+  it("rejects a targetAuth without exactly one usable scheme", () => {
+    for (const targetAuth of [
+      null,
+      {},
+      { bearer: "a", vercelOidc: { token: "b" } },
+      { bearer: "a", vercelOidc: undefined },
+      { bearer: undefined },
+      { basic: { password: "secret" } },
+      { vercelOidc: null },
+    ]) {
+      expect(() => defineInvalidConfig({ targetAuth: targetAuth as never })).toThrow(
+        "`targetAuth` must set exactly one of",
+      );
+    }
+  });
+
   it("rejects a non-positive maxConcurrency", () => {
     expect(() => defineInvalidConfig({ maxConcurrency: 0 })).toThrow(
       "`maxConcurrency` must be a positive integer",

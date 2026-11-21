@@ -1,5 +1,5 @@
 import { Client } from "#client/client.js";
-import type { ClientOptions } from "#client/types.js";
+import type { ClientAuth, ClientOptions } from "#client/types.js";
 import { readVercelProjectLink } from "#internal/vercel/project-link.js";
 import { resolveDevelopmentClientOptions } from "#services/dev-client/client-options.js";
 import {
@@ -11,9 +11,12 @@ import type { EveEvalTargetHandle } from "#evals/types.js";
 
 export function resolveEvalClientOptions(
   target: Pick<EveEvalTargetHandle, "kind" | "url">,
+  targetAuth?: ClientAuth,
 ): ClientOptions {
+  const configured: Partial<ClientOptions> =
+    targetAuth === undefined ? {} : { auth: targetAuth, redirect: "manual" };
   if (target.kind === "local") {
-    return { baseUrl: target.url };
+    return { baseUrl: target.url, ...configured };
   }
 
   const options = resolveDevelopmentClientOptions(target.url);
@@ -31,11 +34,12 @@ export function resolveEvalClientOptions(
     return { ...options, auth: { vercelOidc: { token: oidcToken } }, redirect: "manual" };
   }
 
-  return options;
+  return { ...options, ...configured };
 }
 
 interface CreateEvalClientOptions {
   readonly workspaceRoot?: string;
+  readonly targetAuth?: ClientAuth;
   readonly deps?: Partial<VerifiedRemoteDevelopmentClientDeps>;
 }
 
@@ -43,7 +47,7 @@ export async function createEvalClient(
   target: Pick<EveEvalTargetHandle, "kind" | "url">,
   options: CreateEvalClientOptions = {},
 ): Promise<Client> {
-  const base = resolveEvalClientOptions(target);
+  const base = resolveEvalClientOptions(target, options.targetAuth);
   if (target.kind === "local" || base.auth !== undefined || options.workspaceRoot === undefined) {
     return new Client(base);
   }

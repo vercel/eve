@@ -77,6 +77,38 @@ describe("resolveEvalClientOptions", () => {
     ).toThrow("Set either EVE_EVAL_AUTH_TOKEN or EVE_EVAL_OIDC_TOKEN, not both");
   });
 
+  it("resolves a targetAuth token before every local request", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () =>
+        Response.json({ ok: true, status: "ready", workflowId: "wf" }),
+      );
+    let calls = 0;
+    const client = await createEvalClient(
+      { kind: "local", url: "http://127.0.0.1:3000" },
+      { targetAuth: { bearer: async () => `token-${++calls}` } },
+    );
+
+    await client.health();
+    await client.health();
+
+    const [first, second] = fetchMock.mock.calls.map(([, init]) => init);
+    expect(new Headers(first?.headers).get("authorization")).toBe("Bearer token-1");
+    expect(new Headers(second?.headers).get("authorization")).toBe("Bearer token-2");
+    expect(first?.redirect).toBe("manual");
+  });
+
+  it("uses targetAuth for a remote target and lets EVE_EVAL_AUTH_TOKEN override it", () => {
+    const target = { kind: "remote", url: "https://example.vercel.app" } as const;
+    const targetAuth = { bearer: () => "config-token" };
+    expect(resolveEvalClientOptions(target, targetAuth)).toMatchObject({
+      auth: targetAuth,
+      redirect: "manual",
+    });
+    vi.stubEnv("EVE_EVAL_AUTH_TOKEN", "static-token");
+    expect(resolveEvalClientOptions(target, targetAuth).auth).toEqual({ bearer: "static-token" });
+  });
+
   it("ignores a blank EVE_EVAL_AUTH_TOKEN", () => {
     vi.stubEnv("EVE_EVAL_AUTH_TOKEN", "   ");
     const options = resolveEvalClientOptions({
