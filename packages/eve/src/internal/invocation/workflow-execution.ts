@@ -16,6 +16,7 @@ import type {
   AgentInvocationStatus,
 } from "#internal/invocation/agent-invocation.js";
 import { invocationOwnerKey } from "#internal/invocation/metadata.js";
+import { platformContext } from "#platform/context.js";
 import {
   invocationContinuationToken,
   readOwnedInvocationRun,
@@ -412,7 +413,7 @@ function publicInvocationFailure(
   error: ErrorInfo | undefined,
 ): Extract<AgentInvocation, { readonly status: "failed" }>["error"] {
   const data: Record<string, string> = { runId };
-  const deploymentId = vercelDeploymentId();
+  const deploymentId = platformContext().deployment.hostedDeploymentId();
   if (deploymentId !== undefined) data.vercelDeploymentId = deploymentId;
   if (error !== undefined) {
     data.eveCode = error.code;
@@ -420,12 +421,6 @@ function publicInvocationFailure(
     if (error.hint !== undefined) data.hint = error.hint;
   }
   return { code: -32603, data, message: error?.message ?? "Invocation failed." };
-}
-
-function vercelDeploymentId(): string | undefined {
-  if (process.env.VERCEL !== "1") return undefined;
-  const deploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim();
-  return deploymentId && deploymentId.length > 0 ? deploymentId : undefined;
 }
 
 function conflict(message: string): AgentInvocationMutationResult {

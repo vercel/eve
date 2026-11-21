@@ -1,4 +1,4 @@
-import { resolveModelTeamSlug } from "#internal/model-auth/vercel-team.js";
+import { resolveModelTeamSlug } from "#platform/vercel/model-auth/team.js";
 import { detectProjectIdentity, type ProjectIdentity } from "#setup/project-resolution.js";
 
 export interface VercelStatusSnapshot {

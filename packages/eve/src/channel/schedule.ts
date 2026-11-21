@@ -18,7 +18,8 @@ import type {
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey, OccurrenceIdKey, ScheduleIdKey, ScheduleInstanceKey } from "#context/keys.js";
 import { expectFunction } from "#internal/authored-module.js";
-import { PermanentScheduleMessageError } from "#internal/schedules/verify-delivery.js";
+import { PermanentScheduleMessageError } from "#internal/schedules/permanent-error.js";
+import { platformContext } from "#platform/context.js";
 import type {
   ScheduleDefinition,
   ScheduleHandlerArgs,
@@ -189,7 +190,7 @@ export class ScheduleDispatcher {
     const sessions: Delivery[] = [];
     const waitUntilTasks: Promise<unknown>[] = [];
     const toChannel = createCrossChannelToFn(runtime, toCrossChannelTargets(this.channels), {
-      acceptedDeploymentId: process.env.VERCEL_DEPLOYMENT_ID?.trim() || undefined,
+      acceptedDeploymentId: platformContext().deployment.deploymentId(),
     });
     return {
       args: {

@@ -3,6 +3,7 @@ import { join, relative, resolve } from "node:path";
 import type { CompiledWorkspaceResourceRoot } from "#compiler/manifest.js";
 import { copyDirectoryAtomically } from "#execution/sandbox/bindings/local-provider-utils.js";
 import { createLoggingSandboxSession } from "#execution/sandbox/logging-session.js";
+import { platformContext } from "#platform/context.js";
 import { createSandboxProviderIdentity } from "#execution/sandbox/provider-identity.js";
 import { createConnectionSession } from "#execution/sandbox/session.js";
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
@@ -411,22 +412,11 @@ function formatPrewarmFailureForEnvironment(input: {
   readonly providerName: string;
   readonly error: unknown;
 }): unknown {
-  if (!isVercelEnvironment() || !isLocalSandboxProvider(input.providerName)) {
-    return input.error;
-  }
-
-  return new Error(
-    `The ${input.providerName} sandbox provider is not available when deploying on Vercel. ` +
-      "Vercel build containers cannot run local Docker containers. " +
-      "Use DefaultSandbox.environment() so eve selects Vercel Sandbox on Vercel, or configure " +
-      "VercelSandbox.environment() explicitly. " +
-      `Original ${input.providerName} error: ${toErrorMessage(input.error)}`,
-    { cause: input.error },
+  if (!isLocalSandboxProvider(input.providerName)) return input.error;
+  return (
+    platformContext().build.localSandboxPrewarmFailure(input.providerName, input.error) ??
+    input.error
   );
-}
-
-function isVercelEnvironment(): boolean {
-  return Boolean(process.env.VERCEL?.trim());
 }
 
 function isLocalSandboxProvider(providerName: string): boolean {

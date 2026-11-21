@@ -4,8 +4,8 @@ import {
 } from "#internal/model-auth/development-broker-client.js";
 import type { ChatGptAuthState } from "#public/models/openai/chatgpt/token-broker.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
-import { resolveGatewayModelCredential } from "#internal/model-auth/gateway-credential.js";
-import { getVercelOidcToken } from "#compiled/@vercel/oidc/index.js";
+import { platformContext } from "#platform/context.js";
+import { gatewayCredential } from "#platform/models.js";
 import { hasEnvValue } from "#internal/resolve-model-endpoint-status.js";
 import { buildAgentInfoResponse } from "#internal/nitro/routes/agent-info/build-agent-info-response.js";
 import {
@@ -53,8 +53,7 @@ async function resolveGatewayCredentialPresence(
   if (routing.kind === "gateway" && isEveDevEnvironment()) {
     try {
       const credential =
-        (await readDevelopmentModelCredential("gateway")) ??
-        (await resolveGatewayModelCredential());
+        (await readDevelopmentModelCredential("gateway")) ?? (await gatewayCredential());
       return {
         apiKey: credential.kind === "api-key",
         oidc: credential.kind === "oidc",
@@ -72,7 +71,7 @@ async function resolveGatewayCredentialPresence(
   }
 
   try {
-    await getVercelOidcToken();
+    await platformContext().identity.token();
     return { apiKey: false, oidc: true };
   } catch {
     return { apiKey: false, oidc: false };

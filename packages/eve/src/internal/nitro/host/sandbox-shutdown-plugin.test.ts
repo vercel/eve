@@ -46,7 +46,8 @@ describe("shouldInstallSandboxShutdown", () => {
   });
 
   it("skips Vercel serverless instances", () => {
-    expect(shouldInstallSandboxShutdown({ VERCEL: "1" })).toBe(false);
+    vi.stubEnv("VERCEL", "1");
+    expect(shouldInstallSandboxShutdown({})).toBe(false);
   });
 });
 
@@ -54,7 +55,11 @@ describe("installSandboxShutdown", () => {
   it("registers no close hook when shutdown ownership is elsewhere", () => {
     const nitroApp = createNitroApp();
 
-    installSandboxShutdown({ env: { VERCEL: "1" }, log: () => {}, nitroApp });
+    installSandboxShutdown({
+      env: { EVE_DEVELOPMENT_SANDBOX_RUN_ID: "dev-run" },
+      log: () => {},
+      nitroApp,
+    });
 
     expect(nitroApp.closeHandlers).toHaveLength(0);
   });

@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 
 import { z } from "#compiled/zod/index.js";
-import { readVercelCliToken } from "#internal/model-auth/vercel-cli.js";
+import { readVercelCliToken } from "#platform/vercel/model-auth/cli.js";
 import type { VercelProjectReference } from "#setup/project-resolution.js";
 
 const APP_CONFLICT_RECOVERY =

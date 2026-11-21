@@ -14,6 +14,7 @@ import { createDevelopmentNitroArtifactsConfig } from "#internal/nitro/host/arti
 import { createHostRouteTable, renderHostRoutes } from "#internal/nitro/host/host-routes.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#internal/workflow-bundle/flow-route.js";
+import { platformBuildOutput } from "#platform/build-output.js";
 
 const routeModules = vi.hoisted(() => ({
   dispatchChannelRequest: vi.fn(
@@ -113,6 +114,7 @@ async function serve(input: {
     createHostRouteTable({
       manifest: manifest(input.world),
       mode: input.mode,
+      platform: platformBuildOutput(),
       scheduleRegistrations: input.scheduleRegistrations ?? [],
       vercel: false,
     }),
