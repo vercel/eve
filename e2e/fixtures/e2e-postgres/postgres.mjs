@@ -1,12 +1,11 @@
 #!/usr/bin/env node
 /**
- * Serves the database the Postgres world suite runs against, like the service
- * container in .github/workflows/e2e-postgres.yml: postgres:18-alpine on
- * 127.0.0.1:5432 with the `world` database, user, and password. It pulls the
- * official image from its ECR Public mirror, which has no Docker Hub pull limit. It stays up
- * until Turbo stops it, then removes the container. Each fixture's
- * `e2e:postgres` task starts it with Turbo's `with`, so on Vercel CI every
- * fixture gets its own database.
+ * Serves the database the Postgres world suite runs against: postgres:18-alpine
+ * on 127.0.0.1:5432 with the `world` database, user, and password. It pulls the
+ * official image from its ECR Public mirror, which has no Docker Hub pull
+ * limit. It stays up until Turbo stops it, then removes the container. Each
+ * fixture's `e2e:postgres` task starts it with Turbo's `with`, so on Vercel CI
+ * every fixture gets its own database.
  */
 import { execFileSync, spawn } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";

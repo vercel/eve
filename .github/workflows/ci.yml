@@ -11,8 +11,9 @@ permissions:
   contents: read
 
 # Vercel CI runs lint, typecheck, the package builds, the unit tier, the Linux
-# integration tier, the framework build tests, the template checks, and the
-# repository checks from the `ci` tags in turbo.json. The jobs here run what
+# integration tier, the framework build tests, the template checks, the
+# Postgres world suite, and the repository checks from the `ci` tags in
+# turbo.json. The jobs here run what
 # Vercel CI does not. test-scenario installs everything and shares
 # setup-node's pnpm cache. Every other job installs only the workspace packages
 # its commands read, each under its own pnpm store cache key. See
