@@ -1822,6 +1822,8 @@ importers:
         specifier: 'catalog:'
         version: 7.0.2
 
+  e2e/fixtures/e2e-postgres: {}
+
   e2e/fixtures/gadget-extension:
     dependencies:
       slugify:
