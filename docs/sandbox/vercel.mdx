@@ -92,6 +92,21 @@ When `VERCEL` is set, builds need `VERCEL_OIDC_TOKEN` for templates with a `prep
 
 A new session sandbox from a snapshot of [eve's default image](/docs/sandbox/docker#eves-default-image), without Drive mounts, runs no setup command. eve runs base-runtime setup when it attaches any other sandbox. These include existing or resumed sandboxes, custom images or snapshot sources, sandboxes with Drive mounts, and sandboxes created without a snapshot.
 
+## Rebuild the snapshot after deploy
+
+New session sandboxes start from the newest snapshot of the environment's template, so a snapshot rebuilt after deploy reaches them without a redeploy. `rebuildSandboxTemplate({ revision, prepare })`, exported from `eve/sandbox/vercel`, opens a temporary sandbox from the current snapshot, runs `prepare` in it, captures a new snapshot, and points the template at it. Call it from a schedule, a channel, or a tool in a built deployment; `eve dev` has nothing to rebuild.
+
+```ts
+const { rebuilt } = await rebuildSandboxTemplate({
+  revision: commitSha,
+  prepare: async (sandbox) => {
+    await sandbox.run({ command: "git pull", workingDirectory: "/workspace/app" });
+  },
+});
+```
+
+The call returns `{ rebuilt: false }` without running `prepare` when the template already has `revision` or another rebuild of it is running. If `prepare` throws, the template stays as it was. Snapshots expire 30 days after last use, and eve never deletes a replaced snapshot because another deployment of the same template may still start sessions from it. If the newest snapshot has expired, new sessions start from the snapshot the build captured, which expires 30 days after the deploy, and the next rebuild starts from that snapshot too. A rebuild that finds no snapshot left throws, and a redeploy captures a new one. Sessions already running, and sessions that resume, keep their own sandbox and see the old files. `eve build` captures the first snapshot. A deploy that changes the sandbox file or its environment options captures a new first snapshot, and other deploys keep the newest one.
+
 ## Initialize after open
 
 Initialize state for one session after `open()` and before you return the sandbox. Relative paths, including a relative `workingDirectory` passed to `run()` or `spawn()`, resolve from `/workspace`:

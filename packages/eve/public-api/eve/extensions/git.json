@@ -7,5 +7,10 @@
   "GitHubLeaseBroker",
   "GitHubLeaseRule",
   "GitHubUserAuthorizeRequest",
-  "default"
+  "RepoSnapshotOptions",
+  "RepoSnapshotResult",
+  "RepoSnapshotScheduleOptions",
+  "default",
+  "refreshRepoSnapshot",
+  "repoSnapshotSchedule"
 ]

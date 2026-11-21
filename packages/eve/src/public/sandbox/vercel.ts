@@ -21,3 +21,8 @@ export type {
   VercelSandboxMounts,
 } from "#public/sandbox/vercel-sandbox.js";
 export { VERCEL_EVE_GIT_SANDBOX_IMAGE } from "#execution/sandbox/bindings/eve-image.js";
+export { rebuildSandboxTemplate } from "#execution/sandbox/rebuild-template.js";
+export type {
+  SandboxTemplateRebuildInput,
+  SandboxTemplateRebuildResult,
+} from "#sandbox/template-rebuild.js";

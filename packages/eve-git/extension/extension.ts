@@ -23,6 +23,13 @@ export type {
  */
 export type GitHubLeaseBroker = GitHubConfig["broker"];
 export type { GitHubAttribution } from "./lib/github-shell.ts";
+export {
+  refreshRepoSnapshot,
+  repoSnapshotSchedule,
+  type RepoSnapshotOptions,
+  type RepoSnapshotResult,
+  type RepoSnapshotScheduleOptions,
+} from "./lib/repo-snapshot-entry.ts";
 
 const fn = <T>() => z.custom<T>((value) => typeof value === "function");
 

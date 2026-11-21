@@ -1,4 +1,6 @@
 [
+  "SandboxTemplateRebuildInput",
+  "SandboxTemplateRebuildResult",
   "VERCEL_EVE_GIT_SANDBOX_IMAGE",
   "VercelSandbox",
   "VercelSandboxCreateOptions",
@@ -7,5 +9,6 @@
   "VercelSandboxMountMode",
   "VercelSandboxMounts",
   "VercelSandboxRuntimeOptions",
-  "VercelSandboxSession"
+  "VercelSandboxSession",
+  "rebuildSandboxTemplate"
 ]
