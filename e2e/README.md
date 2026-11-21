@@ -299,6 +299,16 @@ runs the mock-compatible evals against a local production server
 runs. Every fixture carries `@workflow/world-postgres` as a dependency so
 the world module resolves at build time.
 
+Vercel CI runs the same suite as each fixture's `e2e:postgres` Turbo task,
+which starts PostgreSQL in Docker alongside it with Turbo's `with`
+(`@eve-e2e/postgres#postgres`). `scripts/run-e2e-postgres.mjs` performs the
+workflow's steps against it. The `postgres` world's `task` in `e2e/matrix.json`
+names that script, and discovery fails unless exactly the fixtures this world
+runs define it. To run a fixture locally with Docker, use
+`pnpm turbo run <package>#e2e:postgres` with the fixture's package name, one
+fixture per command as on Vercel CI. The database stops when its fixture's
+task ends, and every fixture serves on port 3000.
+
 A world suite for another workflow world follows the same shape: register
 the world in `e2e/matrix.json`, add an `e2e-<world>.yml` that consumes its
 `world_matrix_<world>` output (the registered `package` arrives as

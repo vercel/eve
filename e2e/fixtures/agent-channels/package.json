@@ -9,6 +9,7 @@
     "start": "eve start",
     "typecheck": "tsc",
     "test:e2e": "eve eval --strict",
+    "e2e:postgres": "node ../../../scripts/run-e2e-postgres.mjs",
     "test:unit": "node --test test/*.test.mjs"
   },
   "dependencies": {

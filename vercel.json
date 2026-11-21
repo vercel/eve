@@ -45,6 +45,16 @@
             }
           }
         }
+      },
+      {
+        "name": "e2e:postgres",
+        "env": {
+          "EVE_TELEMETRY_DISABLED": {
+            "constant": {
+              "value": "1"
+            }
+          }
+        }
       }
     ]
   }
