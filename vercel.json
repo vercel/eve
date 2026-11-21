@@ -2,6 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "ci": {
     "bootstrapping": {
+      "installCommand": "pnpm install --frozen-lockfile && node scripts/install-ci-tools.mjs",
       "installEnv": {}
     },
     "tasks": [
@@ -17,6 +18,16 @@
       },
       {
         "name": "test:public-types",
+        "env": {
+          "EVE_TELEMETRY_DISABLED": {
+            "constant": {
+              "value": "1"
+            }
+          }
+        }
+      },
+      {
+        "name": "check:templates",
         "env": {
           "EVE_TELEMETRY_DISABLED": {
             "constant": {

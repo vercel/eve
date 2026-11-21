@@ -22,6 +22,28 @@
       ],
       "tags": ["ci"]
     },
+    "//#check:templates": {
+      "cache": false,
+      "dependsOn": ["eve#build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!.agents/**",
+        "!.changeset/**",
+        "!.github/**",
+        "!apps/benchmarks/**",
+        "!apps/docs/**",
+        "!apps/fixtures/**",
+        "!apps/frameworks/**",
+        "!apps/package-artifacts/**",
+        "!docs/**",
+        "!e2e/**",
+        "!examples/**",
+        "!packages/**",
+        "!research/**"
+      ],
+      "passThroughEnv": ["EVE_SANDBOX_IMAGE_TAG", "EVE_TELEMETRY_DISABLED"],
+      "tags": ["ci", "ci:cpus:16"]
+    },
     "//#check:template-files": {
       "inputs": [
         "$TURBO_DEFAULT$",
@@ -122,7 +144,9 @@
         ".next/**",
         "!.next/cache/**",
         ".output/**",
-        ".vercel/output/**"
+        ".vercel/output/**",
+        "LICENSE",
+        "NOTICE"
       ]
     },
     "build:types": {

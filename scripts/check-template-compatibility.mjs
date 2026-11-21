@@ -8,7 +8,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { availableParallelism, tmpdir } from "node:os";
 import { basename, delimiter, join, resolve } from "node:path";
 import { execFileSync, spawn } from "node:child_process";
 
@@ -21,9 +21,9 @@ const temporaryDirectory = mkdtempSync(join(tmpdir(), "eve-template-compatibilit
 // eve tarball is packed once up front and only read afterwards, and the one
 // template that boots a server (`personal-agent-template`'s smoke test) is the
 // only one that binds a port. That makes it safe to run several templates at
-// once, bounded so an install/build-heavy template cannot starve the others on
-// a 4-vCPU runner.
-const MAX_CONCURRENT_TEMPLATES = 3;
+// once, bounded at one template per two CPUs (at least three) so an
+// install/build-heavy template cannot starve the others.
+const MAX_CONCURRENT_TEMPLATES = Math.max(3, Math.floor(availableParallelism() / 2));
 
 // These values satisfy build-time validation without granting service access.
 // Runtime requests still require the deployment's real configuration.
@@ -296,7 +296,32 @@ const checkTemplate = async (template, tarball, tarballName) => {
   }
 };
 
+// Templates without Vercel Sandbox build their sandbox template from eve's
+// pinned image. This resolves it the way .github/actions/sandbox-image does on
+// GitHub Actions, step for step: fail on a stale pin, use the pinned image when
+// GHCR has it, fall back to :latest when GHCR reports it missing (a change that
+// edits packages/eve/Dockerfile pins a tag the release workflow publishes only
+// after merge), and fail on any other inspect error.
+const resolveSandboxImage = () => {
+  const tagScript = join(repoRoot, "scripts", "sandbox-image-tag.mjs");
+  execFileSync(process.execPath, [tagScript, "--check"], { stdio: "inherit" });
+  const tag = execFileSync(process.execPath, [tagScript], { encoding: "utf8" }).trim();
+  const image = `ghcr.io/vercel/eve:${tag}`;
+  try {
+    execFileSync("docker", ["buildx", "imagetools", "inspect", "--raw", image], { stdio: "pipe" });
+    process.stdout.write(`Using pinned sandbox image ${image}\n`);
+  } catch (error) {
+    const output = `${error.stdout ?? ""}${error.stderr ?? ""}` || error.message;
+    if (!/: not found|manifest unknown/u.test(output)) throw new Error(output);
+    process.stdout.write(
+      `Unpublished sandbox image: ${image} is not published. This happens when this change edits packages/eve/Dockerfile, because the release workflow publishes the image after the change reaches main. If main already has this Dockerfile, check the latest Release workflow run on main for a failed image publish. This run uses ghcr.io/vercel/eve:latest, so it does not test the pinned image.\n`,
+    );
+    process.env.EVE_SANDBOX_IMAGE_TAG = "latest";
+  }
+};
+
 try {
+  resolveSandboxImage();
   const packageDirectory = join(repoRoot, "packages", "eve");
   const packedDirectory = join(temporaryDirectory, "packed");
   await run("eve", "pnpm", [
