@@ -17,6 +17,14 @@ export interface AgentModelOptionsDefinition {
   readonly providerOptions?: Record<string, JsonObject>;
   /** Prompt-cache breakpoints eve places for this model. */
   readonly promptCache?: AgentPromptCacheDefinition;
+  /**
+   * Adds an `agent:<name>` tag to `providerOptions.gateway.tags` on this model's AI Gateway
+   * calls, so AI Gateway can report spend per agent when several agents share a project. The
+   * name is the agent name eve sends as the `x-title` header. Your own tags come first; eve
+   * skips the tag when they already hold it or fill AI Gateway's limit of 10, or when it would
+   * exceed AI Gateway's 64-character tag limit.
+   */
+  readonly gatewayAgentTag?: boolean;
 }
 
 /**
@@ -71,6 +79,7 @@ export type InternalAgentModelDefinition = {
   providerOptions?: Record<string, JsonObject>;
   promptCache?: AgentPromptCacheDefinition;
   credentialed?: true;
+  gatewayAgentTag?: boolean;
 };
 
 /**
