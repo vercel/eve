@@ -412,6 +412,20 @@ describe("toModelSchema", () => {
     expect(serializeModelInputSchema(null)).toBeNull();
   });
 
+  it("types a library root union of objects as an object, which providers require", () => {
+    const union = z.discriminatedUnion("action", [
+      z.object({ action: z.literal("echo"), value: z.string() }),
+      z.object({ action: z.literal("count") }),
+    ]);
+    const jsonUnion = { anyOf: [{ type: "object" }, { type: "object" }] };
+
+    expect(serializeModelInputSchema(union)).toMatchObject({ type: "object" });
+    expect(serializeModelInputSchema(z.union([z.string(), z.number()]))).toEqual({
+      type: ["string", "number"],
+    });
+    expect(serializeModelInputSchema(jsonUnion)).toEqual(jsonUnion);
+  });
+
   it("emits the requested direction of a transforming schema", async () => {
     const schema = z.strictObject({
       count: z

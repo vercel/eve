@@ -14,6 +14,7 @@ import {
   getDirectoryEntryType,
   isAuthoredTestPath,
 } from "#discover/filesystem.js";
+import { closestName } from "#shared/closest-name.js";
 import { type InstructionsSourceRef, createModuleSourceRef } from "#discover/manifest.js";
 import { discoverMarkdownSource } from "#discover/markdown.js";
 import { discoverNamedSourceDirectory } from "#discover/named-source-directory.js";
@@ -403,12 +404,32 @@ export {
   type DiscoverNamedSourceDirectoryWithMarkdownInput,
 } from "#discover/named-source-directory.js";
 
+const AGENT_DIRECTORY_NAMES = [
+  "channels",
+  "connections",
+  "extensions",
+  "hooks",
+  "instructions",
+  "instrumentation",
+  "lib",
+  "memory",
+  "sandbox",
+  "schedules",
+  "skills",
+  "subagents",
+  "tools",
+];
+
 export function createUnsupportedRootDirectoryDiagnostics(input: {
   classifyEntry: (name: string, entryType: DirectoryEntryType) => string;
   createUnsupportedDirectoryMessage: (directoryName: string) => string;
   rootEntries: readonly ProjectSourceEntry[];
   rootPath: string;
 }): DiscoverDiagnostic[] {
+  const supportedDirectories = AGENT_DIRECTORY_NAMES.filter((name) => {
+    const kind = input.classifyEntry(name, "directory");
+    return kind !== "unknown" && !kind.startsWith("invalid-");
+  });
   return input.rootEntries.flatMap((entry) => {
     if (!entry.isDirectory()) {
       return [];
@@ -418,10 +439,11 @@ export function createUnsupportedRootDirectoryDiagnostics(input: {
       return [];
     }
 
+    const match = closestName(entry.name, supportedDirectories);
     return [
       createDiscoverWarningDiagnostic({
         code: DISCOVER_UNSUPPORTED_DIRECTORY,
-        message: input.createUnsupportedDirectoryMessage(entry.name),
+        message: `${input.createUnsupportedDirectoryMessage(entry.name)}${match === undefined ? "" : ` Did you mean "${match}/"?`}`,
         sourcePath: join(input.rootPath, entry.name),
       }),
     ];
