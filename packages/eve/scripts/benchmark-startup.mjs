@@ -1,10 +1,11 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 
 const packageRoot = resolve(process.argv[2] ?? "packages/eve");
 const runs = Number(process.argv[3] ?? 5);
@@ -162,9 +163,13 @@ for (let run = 1; run <= runs; run++) {
       await writeFile(join(root, `${mode}-${run}.log`), log);
     }
   }
+  const uncached = await timeInfo(run, ["--fresh"]);
+  const cached = await timeInfo(run, []);
+  results.push({ run, mode: "info", wallMs: uncached ?? cached, cachedMs: uncached && cached });
+  console.log(JSON.stringify(results.at(-1)));
 }
 await writeFile(join(root, "results.json"), JSON.stringify(results, null, 2));
-for (const mode of ["dev", "dev-tui", "build", "start"]) {
+for (const mode of ["dev", "dev-tui", "build", "start", "info"]) {
   const times = results
     .filter((result) => result.mode === mode)
     .map((result) => result.wallMs)
@@ -178,6 +183,24 @@ for (const mode of ["dev", "dev-tui", "build", "start"]) {
       maxMs: times.at(-1),
     }),
   );
+}
+
+async function timeInfo(run, flags) {
+  const start = performance.now();
+  const result = await promisify(execFile)(
+    process.execPath,
+    [join(packageRoot, "bin", "eve.js"), "info", "--json", ...flags],
+    { cwd: root, env, maxBuffer: 64 * 1024 * 1024 },
+  ).catch((error) => error);
+  const wallMs = Math.round(performance.now() - start);
+  await writeFile(
+    join(root, `info${flags.join("")}-${run}.log`),
+    `${result.stdout}${result.stderr}`,
+  );
+  if (result.stderr?.includes("unknown option '--fresh'")) return undefined;
+  if (result instanceof Error || JSON.parse(result.stdout).status !== "ready")
+    throw new Error(`eve info ${flags.join(" ")} failed: ${result.stderr}`);
+  return wallMs;
 }
 
 function waitReady(child, port, path, start, readLog) {

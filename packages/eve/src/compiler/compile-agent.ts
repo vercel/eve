@@ -15,6 +15,7 @@ import { type CompileMetadata } from "#compiler/artifact-contract.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import { summarizeCompilerDiagnostics, type CompilerDiagnostic } from "#compiler/diagnostics.js";
 import type { DevelopmentExtensionSelection } from "#compiler/development-extensions.js";
+import { formatDiagnosticSources, reportDiscoverWarnings } from "#compiler/report-warnings.js";
 import type { AuthoredModuleGraph } from "#internal/authored-module-graph.js";
 
 interface CompileAgentInput {
@@ -152,20 +153,6 @@ function finishAgentCompilation(
   return result;
 }
 
-function reportDiscoverWarnings(diagnostics: readonly CompilerDiagnostic[]): void {
-  const warnings = diagnostics.filter((diagnostic) => diagnostic.severity === "warning");
-
-  if (warnings.length === 0) {
-    return;
-  }
-
-  for (const warning of warnings) {
-    console.warn(
-      `Warning [${warning.code}]: ${warning.message}\n  source: ${formatDiagnosticSources(warning)}`,
-    );
-  }
-}
-
 function formatCompileAgentErrorLines(diagnostics: readonly CompilerDiagnostic[]): string[] {
   const summary = summarizeCompilerDiagnostics(diagnostics);
   const lines: string[] = [
@@ -184,12 +171,6 @@ function formatCompileAgentErrorLines(diagnostics: readonly CompilerDiagnostic[]
   }
 
   return lines;
-}
-
-function formatDiagnosticSources(diagnostic: CompilerDiagnostic): string {
-  return diagnostic.sources
-    .map((source) => source.sourcePath ?? source.logicalPath ?? source.sourceId ?? source.nodeId)
-    .join(", ");
 }
 
 function formatDiagnosticSeverity(severity: DiscoverDiagnostic["severity"]): string {

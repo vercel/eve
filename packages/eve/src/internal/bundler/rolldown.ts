@@ -11,6 +11,7 @@ import type {
   RolldownOutput,
 } from "rolldown";
 
+import { noteBundledModules } from "#internal/bundler/bundled-module-recorder.js";
 import { createPseudoPackagePlugin } from "#internal/bundler/pseudo-packages.js";
 import { onVendoredDependencyLog } from "#internal/bundler/vendored-dependency-log.js";
 
@@ -60,13 +61,17 @@ export async function parseWithRolldownAst(filename: string, sourceText: string)
 export async function buildWithRolldown(options: BuildOptions): Promise<RolldownOutput> {
   assertCustomRolldownConditionNames(options);
   const { build } = await loadRolldown();
-  return await build({
+  const output = await build({
     checks: { bundlerTimings: false },
     onLog: onRolldownBuildLog,
     ...options,
     plugins: [createPseudoPackagePlugin(), options.plugins],
     experimental: { ...options.experimental, attachDebugInfo: "none" },
   });
+  noteBundledModules(() =>
+    output.output.flatMap((item) => (item.type === "chunk" ? item.moduleIds : [])),
+  );
+  return output;
 }
 
 function onRolldownBuildLog(

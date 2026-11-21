@@ -21,6 +21,10 @@
 //                prompt (input is taken and queued before the agent is ready),
 //                from packages/eve/scripts/benchmark-startup.mjs
 //                (<dev-startup-dir>/<subject>.jsonl: its stdout)
+//   info         `eve info --json --fresh` (a full compile) and then a cached
+//                `eve info --json` on the dev-startup job's benchmark agents,
+//                from the same script; releases before `--fresh` record only
+//                the uncached time
 //   package      eve's tarball and unpacked size, and a cold `npm install` of
 //                it into an empty project: time, size, and package count,
 //                from packages/eve/scripts/benchmark-package.mjs in the same
@@ -63,6 +67,8 @@ export const FRAMEWORK_RECORD_METRICS = Object.freeze({
   "dev_startup.ready_ms": framework("ms"),
   "dev_startup.session_accepted_ms": framework("ms"),
   "dev_startup.first_turn_ms": framework("ms"),
+  "info.uncached_ms": framework("ms"),
+  "info.cached_ms": framework("ms"),
   "package.packed_bytes": framework("bytes"),
   "package.unpacked_bytes": framework("bytes"),
   "package.install_bytes": framework("bytes"),
@@ -239,6 +245,20 @@ export function buildFrameworkRecords({ plan, legs, devStartupDir, githubRunId, 
                 probe: "start",
                 path: DEV_STARTUP_ARTIFACT_PATH,
                 metrics: { "start.ready_ms": duration(start.wallMs) },
+              }),
+        );
+        const info = lines?.find((line) => line.mode === "info" && line.run === run);
+        records.push(
+          info === undefined
+            ? record({ ...base, probe: "info", missing: missingReason })
+            : record({
+                ...base,
+                probe: "info",
+                path: DEV_STARTUP_ARTIFACT_PATH,
+                metrics: {
+                  "info.uncached_ms": duration(info.wallMs),
+                  "info.cached_ms": duration(info.cachedMs),
+                },
               }),
         );
       }
