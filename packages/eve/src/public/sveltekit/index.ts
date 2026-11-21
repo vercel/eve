@@ -2,6 +2,13 @@ import type { Plugin } from "vite";
 
 import { createEveVitePlugin, type EveVitePluginOptions } from "#shared/vite-eve-plugin.js";
 
+export {
+  createEveHandle,
+  type EveSvelteKitHandleEvent,
+  type EveSvelteKitHandleInput,
+  type EveSvelteKitHandleOptions,
+} from "./handle.js";
+
 /**
  * Options for the eve SvelteKit Vite plugin.
  */
