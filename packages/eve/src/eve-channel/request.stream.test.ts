@@ -172,7 +172,7 @@ describe("createSessionStreamResponse", () => {
     await live.response.body?.cancel();
   });
 
-  it.fails("fails a read with a retryable 503 when the first line can't be read", async () => {
+  it("fails a read with a retryable 503 when the first line can't be read", async () => {
     const session = earlierEveSessionReadingFirstLine(() =>
       Promise.reject(new Error("Transient read failure.")),
     );
@@ -180,12 +180,23 @@ describe("createSessionStreamResponse", () => {
     expect(response.status).toBe(503);
   });
 
-  it.fails("fails a read with a retryable 503 when the first line is too slow", async () => {
+  it("fails a read with a retryable 503 when the first line is too slow", async () => {
     vi.useFakeTimers();
     const session = earlierEveSessionReadingFirstLine(async () => new ReadableStream());
     const response = createSessionStreamResponse(catchUpRead(), session);
     await vi.advanceTimersByTimeAsync(5_000);
     expect((await response).status).toBe(503);
+  });
+
+  it("fails a followed read past line 0 with a retryable 503 when both version-check reads fail", async () => {
+    const session = earlierEveSessionReadingFirstLine(() =>
+      Promise.reject(new Error("Transient read failure.")),
+    );
+    const response = await createSessionStreamResponse(
+      new Request("https://eve.test/eve/v1/session/session_1/stream?startIndex=1"),
+      session,
+    );
+    expect(response.status).toBe(503);
   });
 
   it.each([0, 6_000])(
