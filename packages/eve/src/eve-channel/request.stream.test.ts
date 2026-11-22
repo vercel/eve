@@ -64,6 +64,26 @@ async function records(response: Response): Promise<unknown[]> {
     .map((text) => JSON.parse(text) as unknown);
 }
 
+function earlierEveSessionReadingFirstLine(read: () => Promise<ReadableStream<unknown>>): Session {
+  const { session } = sessionOf([
+    { data: {}, meta: { at }, type: "session.started" },
+    { data: { sequence: 0, turnId: "turn_0" }, meta: { at }, type: "turn.started" },
+    {
+      data: { message: "Alice asks.", sequence: 0, turnId: "turn_0" },
+      meta: { at, deliveryIds: ["delivery_1"] },
+      type: "message.received",
+    },
+  ]);
+  return {
+    ...session,
+    getLineStream: (options) =>
+      options?.startIndex === 0 ? read() : session.getLineStream(options),
+  };
+}
+
+const catchUpRead = () =>
+  new Request("https://eve.test/eve/v1/session/session_1/stream?follow=false&startIndex=1");
+
 describe("createSessionStreamResponse", () => {
   it("bounds a historical read at the durable tail and asks for it without following", async () => {
     const { follows, session } = sessionOf([line("a"), line("b")], { open: true });
@@ -150,6 +170,22 @@ describe("createSessionStreamResponse", () => {
     const live = await followed(true);
     expect(live.follows.at(-1)).toBe(true);
     await live.response.body?.cancel();
+  });
+
+  it.fails("fails a read with a retryable 503 when the first line can't be read", async () => {
+    const session = earlierEveSessionReadingFirstLine(() =>
+      Promise.reject(new Error("Transient read failure.")),
+    );
+    const response = await createSessionStreamResponse(catchUpRead(), session);
+    expect(response.status).toBe(503);
+  });
+
+  it.fails("fails a read with a retryable 503 when the first line is too slow", async () => {
+    vi.useFakeTimers();
+    const session = earlierEveSessionReadingFirstLine(async () => new ReadableStream());
+    const response = createSessionStreamResponse(catchUpRead(), session);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect((await response).status).toBe(503);
   });
 
   it.each([0, 6_000])(
