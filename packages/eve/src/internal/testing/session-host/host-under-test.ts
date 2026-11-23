@@ -3,6 +3,10 @@ import { vi } from "vitest";
 
 import type { Runtime } from "#channel/types.js";
 import { forgetSessionLive } from "#definitions/state.js";
+import {
+  sessionCommandHookToken,
+  sessionInboxHookToken,
+} from "#execution/session-inbox/address.js";
 import { forgetRunnableOwnerRun } from "#execution/session-inbox/runnable-owner.js";
 import type { StepFaults } from "#execution/in-process/step-attempts.js";
 import { workflowToolRunWorkflowReference } from "#execution/workflow-references.js";
@@ -10,7 +14,7 @@ import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { createTestInProcessRuntime } from "#internal/testing/in-process-runtime.js";
 import type { StoredWait } from "#internal/testing/local-world-database.js";
 import { currentTestWorld } from "#internal/testing/workflow-test-world.js";
-import { cancelRun } from "#internal/workflow/runtime.js";
+import { cancelRun, getHookByToken } from "#internal/workflow/runtime.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { WorkflowBody } from "#tools/workflow-body.js";
 
@@ -53,6 +57,7 @@ export interface HostUnderTest {
   runStatus?(runId: string): Promise<string>;
   runSpecVersion?(runId: string): Promise<number | undefined>;
   rewriteRunAttributes?(runId: string, patch: Record<string, string | undefined>): Promise<void>;
+  sessionOwner?(sessionId: string): Promise<string>;
   dispose(): Promise<void>;
 }
 
@@ -164,6 +169,8 @@ async function makeWorkflowHost(setup: HostSetup = {}): Promise<HostUnderTest> {
     runSpecVersion: async (runId) =>
       (await testWorld.world.runs.get(runId, { resolveData: "none" })).specVersion,
     rewriteRunAttributes: (runId, patch) => testWorld.rewriteRunAttributes(runId, patch),
+    sessionOwner: async (sessionId) =>
+      (await getHookByToken(sessionInboxHookToken(sessionCommandHookToken(sessionId)))).runId,
     async dispose() {
       faults?.restore();
       await testWorld.idle();
