@@ -4,7 +4,7 @@ import type { CompiledModuleMap } from "#compiler/module-map.js";
 import type { DynamicContext } from "#dynamic/definition.js";
 import { mockModel } from "#evals/mock-model.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
-import { chatgpt } from "#public/models/openai/index.js";
+import { chatgpt, openai } from "#public/models/openai/index.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import { resolveRuntimeModelReference } from "#runtime/agent/resolve-model.js";
 import { inheritParentModel } from "#runtime/subagents/inherit-parent-model.js";
@@ -133,6 +133,7 @@ describe("a dynamic subagent that runs its parent's model", () => {
 
   it.each([
     { label: "chatgpt()", contextWindowTokens: 200_000, model: () => chatgpt() },
+    { label: "openai()", contextWindowTokens: 400_000, model: () => openai("gpt-5.4") },
     { label: "mockModel", contextWindowTokens: 1_000_000, model: () => mockModel() },
   ])(
     "keeps a $label parent's provider across a restore",
