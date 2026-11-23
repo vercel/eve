@@ -7,6 +7,7 @@ token for every request. The eval outlives several token lifetimes across a
 stubbed lookup, an approval response, and the runner's final stub check, and
 confirms the target rejects the first token once it has expired.
 
-It runs with the mock model in `e2e-local` against the local dev server and in
-`e2e-postgres` against `eve eval --url`. The signing secret is a fixture
-constant, not a credential.
+It runs with the mock model in `e2e-local` against the local dev server. The
+Postgres suite uses `eve eval --url` with an HTTP loopback target, which cannot
+receive workspace `targetAuth`. The signing secret is a fixture constant, not a
+credential.

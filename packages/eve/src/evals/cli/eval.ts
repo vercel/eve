@@ -138,7 +138,11 @@ export async function runEvalCommand(
       }
       client = await createEvalClient(
         { kind: "remote", url: options.url },
-        { workspaceRoot: appRoot, targetAuth: config.targetAuth },
+        {
+          workspaceRoot: appRoot,
+          targetAuth: config.targetAuth,
+          targetAuthOrigins: config.targetAuthOrigins,
+        },
       );
       target = await resolveEvalTargetHandle({
         client,

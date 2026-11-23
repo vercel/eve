@@ -67,6 +67,7 @@ Every field is optional:
 | `repeat`            | How many times each eval runs, to measure repeatability. See [Repeat evals](/docs/evals/running#repeat-evals). |
 | `setup`, `teardown` | Run-wide hooks before and after the run. See [Run setup and teardown](#run-setup-and-teardown).                |
 | `targetAuth`        | Credentials for the target. See [Short-lived tokens](/docs/evals/targets#short-lived-tokens).                  |
+| `targetAuthOrigins` | Exact HTTPS origins that can receive `targetAuth` on `--url` runs.                                             |
 
 CLI flags (`--max-concurrency`, `--timeout`, `--repeat`) and per-eval values take precedence over config defaults.
 

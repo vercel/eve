@@ -8,14 +8,15 @@ import type { EveEvalConfig, EveEvalConfigInput } from "#evals/types.js";
  * `judge` model for `t.judge(...)` assertions (so individual evals need not
  * repeat it), run-level `reporters`, `maxConcurrency`, `timeoutMs`, and `repeat`
  * defaults, optional run-wide `setup` and `teardown`, and the `targetAuth`
- * credentials sent to the target. CLI flags
+ * credentials and their remote `targetAuthOrigins` allowlist. CLI flags
  * (`--max-concurrency`, `--timeout`, `--repeat`) and per-eval values take
  * precedence over the config defaults.
  *
  * Throws on invalid input: a non-positive or non-integer `maxConcurrency` or `repeat`,
  * a negative or non-finite `timeoutMs`, non-array `reporters`, a
  * non-function `setup` or `teardown`, or a `targetAuth` without exactly one of
- * `bearer`, `basic`, or `vercelOidc` holding a string or function token.
+ * `bearer`, `basic`, or `vercelOidc` holding a string or function token. Also
+ * throws if `targetAuthOrigins` is not an array of exact HTTPS origins.
  */
 export function defineEvalConfig<TContext = undefined>(
   input: EveEvalConfigInput<TContext>,
@@ -61,6 +62,22 @@ function validateEvalConfigInput(input: EveEvalConfigInput): void {
       "Eval config `targetAuth` must set exactly one of `bearer`, `basic: { username, password }`, or `vercelOidc: { token }`, each token a string or a function returning one, as in `{ bearer: () => getToken() }`.",
     );
   }
+
+  const { targetAuthOrigins } = input;
+  if (
+    targetAuthOrigins !== undefined &&
+    (!Array.isArray(targetAuthOrigins) || !targetAuthOrigins.every(isExactHttpsOrigin))
+  ) {
+    throw new Error(
+      "Eval config `targetAuthOrigins` must be an array of exact HTTPS origins, such as `['https://agent.example.com']`, with no wildcard, path, or trailing slash.",
+    );
+  }
+}
+
+function isExactHttpsOrigin(origin: unknown): boolean {
+  if (typeof origin !== "string") return false;
+  const url = URL.parse(origin);
+  return url?.protocol === "https:" && url.origin === origin && !url.hostname.includes("*");
 }
 
 function isTargetAuth(auth: unknown): boolean {

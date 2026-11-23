@@ -76,12 +76,13 @@ import { getSessionToken } from "./session-token.js";
 
 export default defineEvalConfig({
   targetAuth: { bearer: () => getSessionToken() },
+  targetAuthOrigins: ["https://agent.example.com"],
 });
 ```
 
 `eve eval` calls a token function before every request, including stream reads, approval responses, `t.target.fetch`, and the final [tool stubs](./tool-stubs) check, so a multi-turn eval keeps the same caller from start to finish. Cache the token inside the function if minting one is slow.
 
-`targetAuth` applies to the local dev server as well as `--url` targets. On a remote target, `EVE_EVAL_AUTH_TOKEN` and `EVE_EVAL_OIDC_TOKEN` take precedence over it. Any of the three skips the Vercel lookup, and requests that carry them don't follow redirects.
+The local dev server doesn't need `targetAuthOrigins`. For `--url`, list each trusted HTTPS origin in `targetAuthOrigins`, including any non-default port, without wildcards, paths, or trailing slashes. If the origin isn't listed, the run stops before calling the token function or sending a request. `EVE_EVAL_AUTH_TOKEN` and `EVE_EVAL_OIDC_TOKEN` override workspace auth and don't require an allowlist. Allowed `targetAuth` and both overrides skip the Vercel lookup and don't follow redirects.
 
 ## What to read next
 
