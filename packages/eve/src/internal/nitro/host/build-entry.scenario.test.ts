@@ -31,6 +31,16 @@ const AGENT_FILES = {
     "  ],",
     "});",
   ].join("\n"),
+  "agent/instrumentation/audit.mjs": [
+    'import { setTimeout } from "node:timers/promises";',
+    'import { defineInstrumentation } from "eve/instrumentation";',
+    "export default defineInstrumentation({",
+    "  async setup() {",
+    "    await setTimeout(20);",
+    "    globalThis.auditReady = true;",
+    "  },",
+    "});",
+  ].join("\n"),
   "platform/entry.mjs": [
     'import "eve:instrumentation";',
     'import { start } from "eve:app";',
@@ -50,10 +60,12 @@ const AGENT_FILES = {
 
 const DRIVER = `
 const entry = await import(process.env.ENTRY_URL);
+const auditReadyAtImport = globalThis.auditReady === true;
 const work = [];
 const send = (path, init) =>
   entry.default.fetch(new Request("http://localhost" + path, init), {}, { waitUntil: (promise) => work.push(promise) });
 const health = await send("/eve/v1/health");
+const auditReadyAtFirstResponse = globalThis.auditReady === true;
 const info = await send("/eve/v1/info");
 const notes = await send("/notes", { method: "POST" });
 const savedBeforeWork = globalThis.noteSaved === true;
@@ -61,6 +73,8 @@ await Promise.all(work);
 const secondStart = await entry.startAgain().then(() => "started", (error) => error.message);
 console.log("RESULT " + JSON.stringify({
   exports: Object.keys(entry).sort(),
+  auditReadyAtImport,
+  auditReadyAtFirstResponse,
   session: new entry.EveSession().kind,
   health: health.status,
   info: info.status,
@@ -87,7 +101,7 @@ async function buildWithPlatform(
 afterEach(() => vi.unstubAllEnvs());
 
 describe("a build with a platform entry", () => {
-  it("bundles the entry as the server and serves eve through start() from eve:app", async () => {
+  it("bundles the entry as the server, registers instrumentation without top-level await, and serves eve through start() from eve:app", async () => {
     vi.stubEnv("NITRO_PRESET", "node-server");
     vi.stubEnv("VERCEL", "");
     const { appRoot } = await createAppRoot("eve-build-entry-", { files: AGENT_FILES });
@@ -119,6 +133,8 @@ describe("a build with a platform entry", () => {
     const result = stdout.split("\n").find((line) => line.startsWith("RESULT "));
     expect(JSON.parse(result!.slice("RESULT ".length))).toEqual({
       exports: ["EveSession", "default", "startAgain"],
+      auditReadyAtImport: false,
+      auditReadyAtFirstResponse: true,
       session: "platform-export",
       health: 200,
       info: 401,

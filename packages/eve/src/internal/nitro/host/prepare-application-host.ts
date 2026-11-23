@@ -106,6 +106,7 @@ export async function prepareDevelopmentApplicationHost(
 export async function prepareProductionApplicationHost(
   workspace: ApplicationBuildWorkspace,
   defaultWorkflowWorld: BuiltInWorkflowWorldTarget,
+  options: { readonly deferInstrumentationSetup?: boolean } = {},
 ): Promise<PreparedApplicationHost & { readonly moduleGraph: AuthoredModuleGraph }> {
   await buildWorkspaceExtensions(workspace.appRoot);
   const { compileResult, moduleGraph } = await compileAgentInWorkspace({
@@ -120,6 +121,7 @@ export async function prepareProductionApplicationHost(
   const compiledArtifacts = await writeCompiledArtifactsFiles({
     compileResult,
     defaultWorkflowWorld,
+    deferInstrumentationSetup: options.deferInstrumentationSetup,
     outDir: workspace.host.artifactsDir,
   });
 

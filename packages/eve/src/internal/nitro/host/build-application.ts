@@ -293,7 +293,9 @@ async function buildApplicationInWorkspace(
 ): Promise<BuiltApplicationOutput> {
   const isVercelBuild = platform.target === "vercel";
   const preparedHost = await measureBuildPhase(profiler, "host.prepare", () =>
-    prepareProductionApplicationHost(workspace, isVercelBuild ? "vercel" : "local"),
+    prepareProductionApplicationHost(workspace, isVercelBuild ? "vercel" : "local", {
+      deferInstrumentationSetup: platform.entry !== undefined,
+    }),
   );
 
   const servicePrefix = isVercelBuild

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { requireDurableHost } from "#execution/hosts.js";
+import { deferInstrumentationSetup } from "#instrumentation/providers.js";
 import { EVE_WORKFLOW_SPEC_VERSION } from "#internal/workflow/spec-version-default.js";
 import { createProcessApp, installProcessApp, processApp } from "#runtime/app.js";
 import { defaultPlatform } from "#platform/default.js";
@@ -47,7 +48,22 @@ describe("start", () => {
       "queue-namespace",
       "artifacts",
       "durable",
+      "instrumentation",
     ]);
+  });
+
+  it("ends with the instrumentation setup that the entry module deferred, and rejects with its failure", async () => {
+    const failure = new Error("The audit exporter is unreachable.");
+    deferInstrumentationSetup({ serviceName: "weather", setups: [Promise.reject(failure)] });
+    await new Promise((resolve) => setImmediate(resolve));
+    const world = {
+      close: async () => {},
+      createQueueHandler: () => undefined,
+      events: {},
+      specVersion: 9,
+    };
+
+    await expect(start({ createWorld: () => world as never })).rejects.toBe(failure);
   });
 
   it("configures the Workflow environment before it creates a World eve owns", async () => {

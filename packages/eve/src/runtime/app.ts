@@ -18,6 +18,7 @@ export interface Session {
 
 export interface AppInstrumentation {
   runtime: InstrumentationRuntime | undefined;
+  setup: Promise<void> | undefined;
   readonly providers: Map<string, InstrumentationProvider>;
 }
 
@@ -38,7 +39,7 @@ export function createProcessApp(): ProcessApp {
     platform: undefined,
     defaultSession: undefined,
     hosts: { routes: new Set(), sessionEventStores: new Map() },
-    instrumentation: { providers: new Map(), runtime: undefined },
+    instrumentation: { providers: new Map(), runtime: undefined, setup: undefined },
     lifetime: createLifetime(),
   };
 }

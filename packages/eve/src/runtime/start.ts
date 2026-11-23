@@ -33,7 +33,14 @@ const DURABLE_PHASE = {
   },
 } as const satisfies BootPhase<StartInput>;
 
-export const BOOT_PHASES = [...PROCESS_PHASES, DURABLE_PHASE] as const;
+const INSTRUMENTATION_PHASE = {
+  name: "instrumentation",
+  async run(app) {
+    await app.instrumentation.setup;
+  },
+} as const satisfies BootPhase<StartInput>;
+
+export const BOOT_PHASES = [...PROCESS_PHASES, DURABLE_PHASE, INSTRUMENTATION_PHASE] as const;
 
 export async function start(input: StartInput): Promise<App> {
   const app = processApp();
@@ -43,6 +50,7 @@ export async function start(input: StartInput): Promise<App> {
     );
   }
   await DURABLE_PHASE.run(app, input);
+  await INSTRUMENTATION_PHASE.run(app);
   app.started = startedApp(app);
   return app.started;
 }
