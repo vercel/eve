@@ -1,3 +1,5 @@
+import { appOf } from "#context/app.js";
+import { contextStorage } from "#context/container.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { defaultDocumentBackend } from "#platform/document-store.js";
 import type { MemoryDocumentBackend } from "#public/memory/file/backend.js";
@@ -11,7 +13,7 @@ export function defaultFileMemoryBackend(): MemoryDocumentBackend {
 }
 
 function selectDefaultFileMemoryBackend(): MemoryDocumentBackend {
-  const platformBackend = defaultDocumentBackend();
+  const platformBackend = defaultDocumentBackend(appOf(contextStorage.getStore())?.platform);
   if (platformBackend !== undefined) return platformBackend;
   if (isEveDevEnvironment()) return DEVELOPMENT_BACKEND;
   throw new Error(

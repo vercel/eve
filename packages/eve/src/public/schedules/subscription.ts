@@ -504,7 +504,7 @@ export function defineDynamicSchedules(
   Object.defineProperty(definition, "provider", {
     configurable: true,
     enumerable: true,
-    get: () => (provider ??= defaultScheduleProvider()),
+    get: () => (provider ??= defaultScheduleProvider(undefined)),
   });
   Object.assign(definition, {
     tool: definition.tool ?? true,

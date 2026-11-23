@@ -1,9 +1,8 @@
-import { installedPlatform } from "#platform/context.js";
+import type { Entities } from "#platform/entities.js";
 import { vercelScheduleProvider } from "#platform/vercel/schedules/provider.js";
 import type { ScheduleProvider } from "#public/schedules/subscription.js";
 
-export function defaultScheduleProvider(): ScheduleProvider {
-  const platform = installedPlatform();
+export function defaultScheduleProvider(platform: Entities | undefined): ScheduleProvider {
   const scheduleProvider =
     platform === undefined ? vercelScheduleProvider() : platform.triggers?.schedules;
   if (scheduleProvider === undefined) {

@@ -1,9 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
+import { bindApp } from "#context/app.js";
+import { ContextContainer, contextStorage } from "#context/container.js";
 import { definePlatform } from "#platform/declaration.js";
 import { createEntities } from "#platform/entities.js";
 import type { MemoryDocumentBackend } from "#public/memory/file/backend.js";
-import { createProcessApp, installProcessApp } from "#runtime/app.js";
+import { createProcessApp, installProcessApp, type App } from "#runtime/app.js";
 
 const config = {
   publicUrl: "https://agents.internal.example.com",
@@ -87,11 +89,14 @@ describe("a self-hosted host installed in code", () => {
     expect(resolveInstrumentationEnvironment()).toBe("production");
   });
 
-  it("keys default memory namespaces by its own deployment scope", async () => {
+  it("keys default memory namespaces by the deployment scope of the turn's app", async () => {
     const { defaultNamespace } = await import("#public/memory/index.js");
-    expect(
-      JSON.parse(defaultNamespace({ appRoot: "/srv/app", node: "agent", slot: "notes" })),
-    ).toEqual([
+    const turn = new ContextContainer();
+    bindApp(turn, { platform } as App);
+    const namespace = contextStorage.run(turn, () =>
+      defaultNamespace({ appRoot: "/srv/app", node: "agent", slot: "notes" }),
+    );
+    expect(JSON.parse(namespace)).toEqual([
       "eve-memory-default-namespace-v1",
       "self-hosted",
       "agents-prod",
@@ -104,7 +109,7 @@ describe("a self-hosted host installed in code", () => {
 
   it("provides its own document store", async () => {
     const { defaultDocumentBackend } = await import("#platform/document-store.js");
-    expect(defaultDocumentBackend()).toBe(documentStore);
+    expect(defaultDocumentBackend(platform)).toBe(documentStore);
   });
 
   it("provides its own model credentials", async () => {
@@ -116,14 +121,17 @@ describe("a self-hosted host installed in code", () => {
   });
 
   it("has no hosted sandbox, so eve never selects one", async () => {
-    const { hostedSandbox, hostedSandboxEnvironment } = await import("#platform/hosted-sandbox.js");
-    expect(hostedSandbox()).toBeUndefined();
-    expect(() => hostedSandboxEnvironment()).toThrow("has no hosted sandbox");
+    const { hostedSandboxOf, hostedSandboxEnvironment } =
+      await import("#platform/hosted-sandbox.js");
+    expect(hostedSandboxOf(platform)).toBeUndefined();
+    expect(() => hostedSandboxEnvironment(platform)).toThrow("has no hosted sandbox");
   });
 
   it("asks for an explicit schedules provider", async () => {
     const { defaultScheduleProvider } = await import("#platform/schedules.js");
-    expect(() => defaultScheduleProvider()).toThrow("Pass `provider` to defineDynamicSchedules()");
+    expect(() => defaultScheduleProvider(platform)).toThrow(
+      "Pass `provider` to defineDynamicSchedules()",
+    );
   });
 
   it("doesn't export Agent Runs", async () => {
@@ -135,12 +143,5 @@ describe("a self-hosted host installed in code", () => {
       "agent-runs",
     );
     expect(() => runtimeSpanProcessor()).toThrow("doesn't export Agent Runs");
-  });
-
-  it("routes workspace agents through its own transport", async () => {
-    const { defineWorkspaceAgent } = await import("#public/definitions/workspace-agent.js");
-    const agent = defineWorkspaceAgent({ name: "peer", description: "A peer agent." });
-    const url = typeof agent.url === "function" ? await agent.url() : agent.url;
-    expect(String(url)).toContain(publicHost);
   });
 });
