@@ -22,10 +22,17 @@ const AGENT_FILES = {
   "agent/channels/notes.mjs": [
     'import { defineChannel, POST } from "eve/channels";',
     'import { setTimeout } from "node:timers/promises";',
+    'import { archiveLabel } from "legacy-archive";',
     "export default defineChannel({",
     "  routes: [",
     '    POST("/notes", (_request, { waitUntil }) => {',
     "      waitUntil(setTimeout(20).then(() => { globalThis.noteSaved = true; }));",
+    '      return new Response("accepted", { status: 202 });',
+    "    }),",
+    '    POST("/notes/label", () => new Response(archiveLabel)),',
+    '    POST("/notes/archive", (_request, { waitUntil }) => {',
+    '      const cause = new Error("The archive is full.");',
+    '      waitUntil(Promise.reject(new Error("Bob could not archive his notes.", { cause })));',
     '      return new Response("accepted", { status: 202 });',
     "    }),",
     "  ],",
@@ -41,6 +48,12 @@ const AGENT_FILES = {
     "  },",
     "});",
   ].join("\n"),
+  "node_modules/legacy-archive/package.json": JSON.stringify({
+    name: "legacy-archive",
+    version: "1.0.0",
+    main: "lib/index.js",
+  }),
+  "node_modules/legacy-archive/lib/index.js": 'exports.archiveLabel = "Alice\'s archive";',
   "platform/bare-entry.mjs": [
     'import { start } from "eve:app";',
     "export default {",
@@ -76,8 +89,15 @@ const health = await send("/eve/v1/health");
 const auditReadyAtFirstResponse = globalThis.auditReady === true;
 const info = await send("/eve/v1/info");
 const notes = await send("/notes", { method: "POST" });
+const label = await (await send("/notes/label", { method: "POST" })).text();
 const savedBeforeWork = globalThis.noteSaved === true;
+const logged = [];
+const consoleError = console.error;
+console.error = (...args) => logged.push(args);
+await send("/notes/archive", { method: "POST" });
 await Promise.all(work);
+console.error = consoleError;
+const archiveFailure = logged.find(([line]) => String(line).includes("channel background task failed"));
 const secondStart = await entry.startAgain().then(() => "started", (error) => error.message);
 console.log("RESULT " + JSON.stringify({
   exports: Object.keys(entry).sort(),
@@ -87,9 +107,16 @@ console.log("RESULT " + JSON.stringify({
   health: health.status,
   info: info.status,
   notes: notes.status,
+  label,
   savedBeforeWork,
   savedAfterWork: globalThis.noteSaved === true,
   secondStart,
+  loggedCause:
+    archiveFailure === undefined
+      ? "not logged"
+      : archiveFailure[1].error.detail.split("\\n").includes("[cause]:")
+        ? "web twin"
+        : "node twin",
 }));
 process.exit(0);
 `;
@@ -154,15 +181,35 @@ describe("a build with a platform entry", () => {
       health: 200,
       info: 401,
       notes: 202,
+      label: "Alice's archive",
       savedBeforeWork: false,
       savedAfterWork: true,
       secondStart:
         "start() from eve:app was already called. Keep the app from the first call and pass it to the code that serves requests.",
+      loggedCause: "node twin",
     });
     expect(triggers).not.toHaveBeenCalled();
     await expect(startProductionServer(appRoot)).rejects.toThrow(
       "This build has a platform entry and no server of its own. Run it with the platform's runtime instead of eve start.",
     );
+  });
+
+  it("resolves the runtime-env web twins when the platform's conditions omit node", async () => {
+    const { appRoot } = await createAppRoot("eve-build-entry-conditions-", { files: AGENT_FILES });
+
+    const outputDir = await buildWithPlatform(appRoot, {
+      entry: "platform/entry.mjs",
+      conditions: ["worker", "browser"],
+    });
+
+    expect(await runEntry(appRoot, outputDir, DRIVER)).toMatchObject({
+      health: 200,
+      info: 401,
+      notes: 202,
+      label: "Alice's archive",
+      savedAfterWork: true,
+      loggedCause: "web twin",
+    });
   });
 
   it("refuses to start an app whose entry did not import eve:instrumentation first", async () => {

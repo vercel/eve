@@ -335,6 +335,16 @@ describe("createHostSpec", () => {
     expect(spec(plain, PRODUCTION, schedules).routes.scheduleTasks).toHaveLength(1);
   });
 
+  it("takes a platform's export conditions only with a platform entry", async () => {
+    const manifest = await compileAgent();
+    const conditions = ["worker", "browser"];
+
+    expect(spec(manifest, { ...ENTRY, conditions }).exportConditions).toEqual(conditions);
+    expect(() => spec(manifest, { ...PRODUCTION, conditions })).toThrow(
+      "A platform's `build.conditions` needs `build.entry`, because eve's own Node server runs with Node's export conditions. Add `build.entry` or remove `build.conditions`.",
+    );
+  });
+
   it("configures Vercel build output, including the queue-triggered flow function, only on Vercel", async () => {
     const manifest = await compileAgent();
     const vercel = spec(manifest, VERCEL);

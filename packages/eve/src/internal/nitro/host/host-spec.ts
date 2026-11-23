@@ -21,6 +21,7 @@ export type HostMode =
       readonly kind: "production";
       readonly preset: "vercel" | undefined;
       readonly entry?: string;
+      readonly conditions?: readonly string[];
       readonly publicRoutePrefix?: string;
       readonly vercelService?: boolean;
       readonly workspaceMember?: boolean;
@@ -44,6 +45,7 @@ export interface HostSpec {
   readonly authored: HostAuthoredSources;
   readonly development: boolean;
   readonly entry: string | undefined;
+  readonly exportConditions: readonly string[] | undefined;
   readonly extensionMounts: readonly CompiledExtensionMount[];
   readonly extensionOverridePaths: ReadonlyMap<string, string>;
   readonly externals: ExternalsPolicy;
@@ -100,6 +102,12 @@ export function createHostSpec(
     vercelService: mode.kind === "production" && mode.vercelService === true,
   });
   if (entry !== undefined) assertEntryCanServe(manifest, routes);
+  const conditions = mode.kind === "production" ? mode.conditions : undefined;
+  if (conditions !== undefined && entry === undefined) {
+    throw new Error(
+      "A platform's `build.conditions` needs `build.entry`, because eve's own Node server runs with Node's export conditions. Add `build.entry` or remove `build.conditions`.",
+    );
+  }
   const runtimePlugins: HostRuntimePlugin[] = [
     ...(development ? [] : (["skill-files"] as const)),
     ...(instrumented ? (["instrumentation"] as const) : []),
@@ -120,6 +128,7 @@ export function createHostSpec(
     authored: { packageRoot, tsconfig: resolveAuthoredTsConfigPath(packageRoot) },
     development,
     entry,
+    exportConditions: conditions,
     extensionMounts: nodes.flatMap((node) => node.extensionMounts),
     extensionOverridePaths: extensionOverridePaths(manifest),
     externals: createExternalsPolicy({

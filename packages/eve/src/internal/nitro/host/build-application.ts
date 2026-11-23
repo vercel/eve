@@ -78,6 +78,7 @@ function assertProfileOutputOutsideBuildOutput(
 }
 
 interface ApplicationBuildPlatform {
+  readonly conditions: readonly string[] | undefined;
   readonly entry: string | undefined;
   readonly output: PlatformBuildOutput;
   readonly target: BuildTarget;
@@ -228,6 +229,7 @@ export async function buildApplication(
   const profiler = profileOutputPath === undefined ? undefined : new ApplicationBuildProfiler();
   const build = platformBuild(options.platform);
   const platform: ApplicationBuildPlatform = {
+    conditions: build.conditions,
     entry: build.entry,
     output: platformBuildOutput(),
     target: build.platformOutput?.() === true ? "vercel" : "node",
@@ -327,6 +329,7 @@ async function buildApplicationInWorkspace(
       preset: isVercelBuild ? "vercel" : undefined,
       entry:
         platform.entry === undefined ? undefined : resolve(preparedHost.appRoot, platform.entry),
+      conditions: platform.conditions,
       publicRoutePrefix,
       vercelService: servicePrefix !== undefined || options.vercelServiceOutput !== undefined,
       workspaceMember: options.workspaceMember,

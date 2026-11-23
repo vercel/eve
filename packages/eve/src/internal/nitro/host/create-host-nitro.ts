@@ -128,6 +128,7 @@ function toNitroConfig(
   },
 ): NitroConfig {
   const { compiledArtifacts, ...locations } = spec.locations;
+  const nodeless = spec.exportConditions !== undefined && !spec.exportConditions.includes("node");
   const instrumentationEntry =
     compiledArtifacts.instrumentationPluginPath === undefined
       ? undefined
@@ -167,6 +168,9 @@ function toNitroConfig(
     compatibilityDate: EVE_NITRO_COMPATIBILITY_DATE,
     deps: { install: false, paths: { rolldown: resolveRolldownPackageDir() } },
     dev: spec.development,
+    ...(spec.exportConditions !== undefined && {
+      exportConditions: nodeless ? [...spec.exportConditions, "!node"] : [...spec.exportConditions],
+    }),
     features: { websocket: spec.websocket },
     ...(instrumentationEntry && {
       inlineDynamicImports: instrumentationEntry.inlineDynamicImports,
@@ -191,6 +195,7 @@ function toNitroConfig(
         define: { __dirname: "import.meta.dirname", __filename: "import.meta.filename" },
       },
       tsconfig: spec.authored.tsconfig,
+      ...(nodeless && { platform: "neutral" as const }),
       ...(!spec.development && { experimental: { attachDebugInfo: "none" as const } }),
     },
     rootDir: locations.appRoot,
