@@ -80,6 +80,8 @@ export default customSkills({
 });
 ```
 
+The resolver runs before every model call and tool call. Besides the session and conversation, it receives `ctx.turn`, the turn being run, and `ctx.session.parent` in a delegated session such as a subagent's, so it can pick scopes from state your app records per turn, such as which persona a turn speaks as.
+
 A scope's `key` says where its skills are stored and must be unique per owner. `label` is how the model and approval cards name who the skills are for. `shared` marks a scope many people use, which the default approval rule treats more carefully. `readOnly` lists and loads skills but refuses changes, and `loadPrefix` keeps the scope's load names apart from other scopes'.
 
 ## Turn it on per session
@@ -132,7 +134,7 @@ export default customSkills({
 
 `defaultSkillApproval` asks before publishing, rolling back, or removing, and before anything goes live in a shared scope. A personal first version and a personal mode change run without asking, and a draft never asks. A shared change is refused when its approval card, at most 3,000 characters including the skill's description, can't show it in full, so whoever approves reads everything.
 
-`approval.response` is an eve [approval response policy](/docs/human-in-the-loop#authorizing-approval-responses) that decides who may answer. By default, only the person who asked can approve a personal change, and a shared change needs someone else, so no one person can put text into everyone's prompt alone. Approvals are judged without the conversation, so the tool checks the approver again against the scope the change really targets before it runs. For admin-only shared skills, check `response.principal` in your own policy.
+`approval.response` is an eve [approval response policy](/docs/human-in-the-loop#authorizing-approval-responses) that decides who may answer. By default, only the person who asked can approve a change, personal or shared. To have someone else approve shared changes, or only admins, check `response.principal` in your own policy.
 
 The tools check their change again when they run, against the state their approval rule judged. If the skills changed in the meantime, the change fails and the model tries again; a first version that now needs approval nobody gave is saved as a draft instead.
 

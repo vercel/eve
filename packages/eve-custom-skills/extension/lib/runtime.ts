@@ -50,7 +50,12 @@ export function requireSkillLifecycle(): SkillLifecycle {
 
 export async function skillScopes(ctx: SkillScopeContext): Promise<readonly SkillScope[]> {
   const scopes = await (skillConfig().scopes ?? defaultScopes)({
-    session: { id: ctx.session.id, auth: ctx.session.auth },
+    session: {
+      id: ctx.session.id,
+      auth: ctx.session.auth,
+      ...(ctx.session.parent !== undefined && { parent: ctx.session.parent }),
+    },
+    ...(ctx.turn !== undefined && { turn: { id: ctx.turn.id } }),
     ...(ctx.conversation !== undefined && { conversation: ctx.conversation }),
   });
   const names = new Set<string>();
@@ -104,18 +109,16 @@ async function readTurnSkills(
   );
 }
 
-export async function loadTurnSkills(
-  ctx: SkillScopeContext & { readonly turnId?: string },
-): Promise<ScopeSkills[]> {
+export async function loadTurnSkills(ctx: SkillScopeContext): Promise<ScopeSkills[]> {
   const lifecycle = skillLifecycle();
   if (!lifecycle) return [];
   const scopes = await skillScopes(ctx);
   if (scopes.length === 0) return [];
-  if (!ctx.turnId) return readTurnSkills(lifecycle, scopes);
+  if (!ctx.turn) return readTurnSkills(lifecycle, scopes);
 
   let cache = turnCaches.get(lifecycle);
   if (!cache) turnCaches.set(lifecycle, (cache = new Map()));
-  const key = JSON.stringify([ctx.session.id, ctx.turnId, scopes.map(({ key }) => key)]);
+  const key = JSON.stringify([ctx.session.id, ctx.turn.id, scopes.map(({ key }) => key)]);
   const cached = cache.get(key);
   if (cached) return cached;
   const pending = readTurnSkills(lifecycle, scopes);

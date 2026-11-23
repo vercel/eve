@@ -387,3 +387,29 @@ test("a world's fixtures list rejects unknown fixtures", () => {
     /world "vercel" lists unknown fixture "missing"/u,
   );
 });
+
+test("a world task must be defined by exactly the fixtures that world runs", () => {
+  const tasked = {
+    ...registry,
+    worlds: [{ name: "vercel" }, { name: "postgres", package: "world-postgres", task: "e2e:pg" }],
+  };
+  const withTask = { scripts: { "e2e:pg": "node run.mjs" } };
+  assert.equal(worldMatrix(discover(withTask, [], undefined, tasked), "postgres").length, 1);
+  assert.throws(
+    () => discover({}, [], undefined, tasked),
+    /fixtures\/fixture\/package\.json needs a "e2e:pg" script/u,
+  );
+  assert.throws(
+    () =>
+      discover(
+        withTask,
+        [{ name: "other", dir: "fixtures/other", packageJson: withTask }],
+        undefined,
+        {
+          ...tasked,
+          worlds: [{ name: "vercel" }, { ...tasked.worlds[1], fixtures: ["fixture"] }],
+        },
+      ),
+    /fixtures\/other\/package\.json defines "e2e:pg", but the "postgres" world does not run this fixture/u,
+  );
+});

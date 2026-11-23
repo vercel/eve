@@ -19,6 +19,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { collectComments } from "./comment-policy.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
+const MAIN_REPOSITORY = "https://github.com/vercel/eve.git";
 const SOURCE_RE = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
 const DOCS_RE = /^docs\/.*\.mdx?$/;
 const CHANGESET_RE = /^\.changeset\/(?!README\.md$)[^/]+\.md$/;
@@ -93,10 +94,49 @@ function hasRef(ref) {
   }
 }
 
+/** @param {string} ref */
+function hasMergeBase(ref) {
+  try {
+    git(["merge-base", "HEAD", ref]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Vercel CI checks out the pushed commit without remotes or branches, so fetch
+ * main from GitHub. A shallow checkout deepens HEAD and main together until
+ * they share a merge base.
+ */
+function fetchMain() {
+  /** @param {string[]} options @param {string[]} refspecs */
+  const fetch = (options, refspecs = []) =>
+    git([
+      "fetch",
+      "--quiet",
+      "--no-tags",
+      ...options,
+      MAIN_REPOSITORY,
+      "main:refs/remotes/origin/main",
+      ...refspecs,
+    ]);
+  if (git(["rev-parse", "--is-shallow-repository"]).trim() !== "true") {
+    fetch([]);
+    return "origin/main";
+  }
+  const head = git(["rev-parse", "HEAD"]).trim();
+  for (let depth = 64; depth <= 4096; depth *= 4) {
+    fetch([`--depth=${depth}`], [head]);
+    if (hasMergeBase("origin/main")) return "origin/main";
+  }
+  throw new Error(
+    `Cannot find a merge base with ${MAIN_REPOSITORY} main within 4096 commits. Pass --base <sha>.`,
+  );
+}
+
 function defaultBase() {
-  const target = ["origin/main", "main"].find(hasRef);
-  if (target === undefined)
-    throw new Error("Cannot find origin/main or main to compare against. Pass --base <sha>.");
+  const target = ["origin/main", "main"].find(hasRef) ?? fetchMain();
   return git(["merge-base", "HEAD", target]).trim();
 }
 
