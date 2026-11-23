@@ -13,6 +13,7 @@ import type {
   SkillChangeEvent,
   SkillScopeContext,
 } from "../../extension/lib/types.ts";
+import manage from "../../extension/skills/manage.ts";
 import create from "../../extension/tools/create.ts";
 import list from "../../extension/tools/list.ts";
 import publish from "../../extension/tools/publish.ts";
@@ -477,4 +478,38 @@ test("when another person steers the turn, personal skill reads and writes ask t
     } as never),
     "not-applicable",
   );
+});
+
+const resolveManage = Object.getOwnPropertySymbols(manage)
+  .map((key): unknown => Reflect.get(manage, key))
+  .find((value) => typeof value === "function") as (
+  ctx: unknown,
+) => Promise<{ readonly description: string } | null>;
+
+function dynamicContext(turn: { readonly id: string } | null = { id: "turn-1" }) {
+  return {
+    session: { id: "session-1", auth: { current: alice, initiator: alice } },
+    conversation: inChannel,
+    turn,
+  };
+}
+
+test("the manage skill is offered only when the session has a skill scope", async () => {
+  mount();
+  assert.match(String((await resolveManage(dynamicContext()))?.description), /^Lifecycle rules/);
+  extension({ storage: inMemory(), scopes: () => [] });
+  assert.equal(await resolveManage(dynamicContext()), null);
+});
+
+test("the manage skill resolves scopes with the turn", async () => {
+  extension({
+    storage: inMemory(),
+    scopes: (ctx: SkillScopeContext) =>
+      ctx.turn?.id === "persona-turn"
+        ? [{ name: "persona", key: "persona:1", label: "this persona", shared: false }]
+        : [],
+  });
+  assert.ok(await resolveManage(dynamicContext({ id: "persona-turn" })));
+  assert.equal(await resolveManage(dynamicContext({ id: "other-turn" })), null);
+  assert.equal(await resolveManage(dynamicContext(null)), null);
 });

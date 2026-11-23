@@ -10,6 +10,7 @@ import {
   withSkillScope,
 } from "../lib/tool-support.ts";
 
+/** Reads one version of a custom skill. */
 export default defineTool({
   deferred: true,
   approval: steeredPersonalScopeApproval,

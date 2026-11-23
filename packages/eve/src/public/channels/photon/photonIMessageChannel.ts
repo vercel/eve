@@ -153,7 +153,9 @@ export function photonIMessageChannel(config: PhotonIMessageChannelConfig): Phot
   bridge.bot.onNewMessage(/[\s\S]*/, async (thread: Thread, message: Message) => {
     await dispatchMessage(bridge, onMessage, thread, message);
   });
-  if (config.onTapback) dispatchIMessageTapbacks(bridge, config.onTapback);
+  if (config.onTapback) {
+    dispatchIMessageTapbacks(bridge, config.onTapback, (raw) => (raw as { id?: string }).id);
+  }
 
   const channel: PhotonIMessageChannel = Object.assign(bridge.channel, {
     tapbackTool: () =>

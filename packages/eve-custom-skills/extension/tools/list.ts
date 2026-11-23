@@ -9,6 +9,7 @@ import {
   withSkillScope,
 } from "../lib/tool-support.ts";
 
+/** Lists a scope's custom skills. */
 export default defineTool({
   approval: steeredPersonalScopeApproval,
   label: {
