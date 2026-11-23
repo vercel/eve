@@ -1,12 +1,16 @@
-const inheriting = new WeakSet<object>();
+const INHERIT_PARENT_MODEL: unique symbol = Symbol.for("eve.inherit-parent-model");
 
 export function inheritParentModel<TDefinition extends object>(
   definition: TDefinition,
 ): TDefinition {
-  inheriting.add(definition);
+  Object.defineProperty(definition, INHERIT_PARENT_MODEL, { configurable: true, value: true });
   return definition;
 }
 
 export function inheritsParentModel(definition: unknown): boolean {
-  return typeof definition === "object" && definition !== null && inheriting.has(definition);
+  return (
+    typeof definition === "object" &&
+    definition !== null &&
+    Reflect.get(definition, INHERIT_PARENT_MODEL) === true
+  );
 }
