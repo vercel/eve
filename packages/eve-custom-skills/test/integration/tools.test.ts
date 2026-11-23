@@ -13,6 +13,7 @@ import type {
   SkillChangeEvent,
   SkillScopeContext,
 } from "../../extension/lib/types.ts";
+import manage from "../../extension/skills/manage.ts";
 import create from "../../extension/tools/create.ts";
 import list from "../../extension/tools/list.ts";
 import publish from "../../extension/tools/publish.ts";
