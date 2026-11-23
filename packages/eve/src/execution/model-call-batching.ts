@@ -13,6 +13,7 @@ export function canContinueModelCallBatch(input: {
     input.lastCall ||
     input.steeringSignal?.aborted === true ||
     input.result.steered === true ||
+    input.result.checkpoint === true ||
     typeof input.result.next !== "function"
   ) {
     return false;

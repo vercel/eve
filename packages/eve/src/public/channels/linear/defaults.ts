@@ -93,6 +93,7 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
     },
 
     async "call.requested"({ data }, { channel }) {
+      if ("callId" in data.owner) return;
       const buffered = channel.state.pendingToolCallMessage;
       channel.state.pendingToolCallMessage = null;
       if (buffered) {

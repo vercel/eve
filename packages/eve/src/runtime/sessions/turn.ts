@@ -1,6 +1,7 @@
 import type { Node } from "#shared/node.js";
 import type { SourceRef } from "#shared/source-ref.js";
 import type { InternalToolDefinition } from "#tools/definition.js";
+import type { WorkflowProgramOptions } from "#tools/workflow-program-input.js";
 import type { AgentSourceOwner } from "#compiler/source-graph.js";
 import type { PreparedToolBehavior } from "#tools/behavior.js";
 
@@ -11,6 +12,7 @@ export type PreparedRuntimeAuthoredTool = Readonly<
       kind: "authored-tool";
       owner: AgentSourceOwner;
       rootOnly?: boolean;
+      workflowProgram?: WorkflowProgramOptions;
     }
 >;
 

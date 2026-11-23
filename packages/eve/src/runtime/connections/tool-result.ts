@@ -61,7 +61,7 @@ function isMcpContentBlock(value: unknown): value is McpContentBlock {
   return isObject(value) && typeof value.type === "string" && MCP_CONTENT_TYPES.has(value.type);
 }
 
-function isMcpContentBlockList(value: unknown): value is McpContentBlock[] {
+export function isMcpContentBlockList(value: unknown): value is McpContentBlock[] {
   return (
     Array.isArray(value) &&
     value.length > 0 &&

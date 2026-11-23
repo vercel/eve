@@ -32,13 +32,23 @@ interface CatalogListing {
 export function catalogAnnouncements(catalog: Listed): Readonly<Record<string, Announcement>> {
   const current = listCatalog(catalog);
   const reachable = reachableNames(catalog);
+  const programTool = programToolName(catalog);
   return {
     [ANNOUNCEMENT_KEY]: {
       initial: EMPTY_LISTING,
       value: JSON.stringify(current),
-      render: (previous) => renderCatalogAnnouncement(parseListing(previous), current, reachable),
+      render: (previous) =>
+        renderCatalogAnnouncement(parseListing(previous), current, reachable, programTool),
     },
   };
+}
+
+function programToolName(catalog: Listed): string | undefined {
+  const names = [...catalog.entries.entries()]
+    .filter(([, definition]) => definition.workflowProgram?.tools === true)
+    .map(([name]) => name)
+    .sort(compareCodeUnits);
+  return names[0];
 }
 
 function listCatalog(catalog: Listed): CatalogListing {
@@ -107,30 +117,38 @@ function renderCatalogAnnouncement(
   previous: CatalogListing | undefined,
   current: CatalogListing,
   reachable: ReadonlySet<string>,
+  programTool: string | undefined,
 ): string {
   if (isEmpty(current)) {
     return `The catalog changed. It is empty now: ${SEARCH_TOOL_NAME} finds nothing.`;
   }
-  if (previous === undefined || isEmpty(previous)) return renderListing(current);
+  if (previous === undefined || isEmpty(previous)) return renderListing(current, programTool);
   const gone = [
     ...previous.namespaces.items,
     ...previous.connections.items.map(({ name }) => name),
   ].filter((name) => !reachable.has(name));
   return [
     "The catalog changed.",
-    renderListing(current),
+    renderListing(current, programTool),
     ...(gone.length > 0 ? [`No longer available: ${gone.join(", ")}`] : []),
   ].join("\n");
 }
 
-function renderListing({ connections, kinds, namespaces }: CatalogListing): string {
+function renderListing(
+  { connections, kinds, namespaces }: CatalogListing,
+  programTool: string | undefined,
+): string {
   const subject =
     kinds.length === 0 ? "Your connections have more tools" : `You have more ${joinWords(kinds)}`;
+  const several =
+    programTool !== undefined
+      ? `, or call several from ${programTool} as \`tools.<name>(input)\``
+      : "";
   const call = !kinds.includes("skills")
-    ? `Call them with ${CALL_TOOL_NAME}({ name, input }).`
+    ? `Call them with ${CALL_TOOL_NAME}({ name, input })${several}.`
     : kinds.length === 1 && connections.items.length === 0
       ? `Load them with ${SKILL_TOOL_NAME}({ name }).`
-      : `Call tools with ${CALL_TOOL_NAME}({ name, input }) and load skills with ${SKILL_TOOL_NAME}({ name }).`;
+      : `Call tools with ${CALL_TOOL_NAME}({ name, input })${several}${programTool !== undefined ? "," : ""} and load skills with ${SKILL_TOOL_NAME}({ name }).`;
   const search = ` Before saying you have no tool for a task, look for one with ${SEARCH_TOOL_NAME}, which searches your own catalog, not the web.`;
   const lines = [`${subject} than are loaded here.${search} ${call}`];
   if (namespaces.items.length > 0) {

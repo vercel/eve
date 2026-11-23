@@ -85,6 +85,9 @@ async function createPreparedRuntimeTool(
     outputSchema: serializeOutputSchema(definition.outputSchema),
     rootOnly: isSelfAgent || undefined,
     sourceId: definition.sourceId,
+    ...(definition.workflowProgram !== undefined && {
+      workflowProgram: definition.workflowProgram,
+    }),
   };
 }
 

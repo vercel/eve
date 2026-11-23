@@ -69,7 +69,12 @@ export function surfaceEvents<TChannel extends { readonly state: object }>(
     if (text !== undefined) await surface.post(channel, text);
   };
   return {
-    ...(working !== undefined && { "call.requested": working, "turn.started": working }),
+    ...(working !== undefined && {
+      "call.requested": async (event, ctx) => {
+        if (!("callId" in event.data.owner)) await working(event, ctx);
+      },
+      "turn.started": working,
+    }),
     ...(queue !== undefined && { committed: queue }),
     async "interaction.opened"(event, ctx) {
       const { channel } = ctx;

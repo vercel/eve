@@ -61,6 +61,32 @@ function instanceKey(connection: ResolvedConnectionDefinition): string {
 
 const CHANGED_INSTANCE = "\u0000changed";
 
+export async function connectionToolOutputSchema(
+  registry: ConnectionRegistry,
+  connections: readonly ResolvedConnectionDefinition[],
+  fullToolName: string,
+): Promise<
+  { readonly protocol: "mcp" | "openapi"; readonly schema: Record<string, unknown> } | undefined
+> {
+  for (const connection of connections) {
+    const prefix = connectionToolName(connection.connectionName, "");
+    if (fullToolName.length <= prefix.length || !fullToolName.startsWith(prefix)) continue;
+    const bareName = fullToolName.slice(prefix.length);
+    const client = registry.getClient(connection.connectionName);
+    let tools: readonly ConnectionToolMetadata[];
+    try {
+      tools = await listToolMetadata(connection, client);
+    } catch {
+      return undefined;
+    }
+    const found = tools.find((entry) => entry.name === bareName);
+    return found?.outputSchema === undefined
+      ? undefined
+      : { protocol: connection.protocol, schema: found.outputSchema };
+  }
+  return undefined;
+}
+
 export function connectionEntry(
   registry: ConnectionRegistry,
   connection: ResolvedConnectionDefinition,

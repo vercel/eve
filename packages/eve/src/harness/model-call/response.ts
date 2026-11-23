@@ -7,6 +7,7 @@ import type { ModelMessage, ToolSet, TypedToolCall, TypedToolResult } from "ai";
 import { isWorkflowTool } from "#execution/tasks/model-step.js";
 import { historyCallNames } from "#harness/execute-call.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import { isProgramTool } from "#harness/program-calls.js";
 import type { InlineCallResults } from "#harness/call-executor.js";
 import type { HarnessStepResult } from "#harness/step-hooks.js";
 import { isRunnableTool } from "#harness/tools.js";
@@ -122,7 +123,7 @@ export function extractToolResultCallIds(messages: readonly ModelMessage[]): Rea
 }
 
 function isLocalOrWorkflowTool(definition: HarnessToolDefinition | undefined): boolean {
-  return isRunnableTool(definition) || isWorkflowTool(definition);
+  return isRunnableTool(definition) || isWorkflowTool(definition) || isProgramTool(definition);
 }
 
 export function answerSkippedToolCalls(

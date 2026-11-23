@@ -6,6 +6,7 @@ import {
   fakeConnection,
   inlineTool,
   subagentTool,
+  workflowTool,
   type CatalogSkillSource,
 } from "#internal/testing/catalog-fixtures.js";
 
@@ -262,5 +263,44 @@ describe("catalogAnnouncements", () => {
         await baseline(INK),
       );
     });
+  });
+
+  it("mentions batching from a tools-enabled workflow tool when tools or connections are deferred", async () => {
+    const programTool: HarnessToolDefinition = {
+      ...workflowTool("workflow", "execute"),
+      workflowProgram: { maxSubagents: 10, tools: true },
+    };
+    const agentsOnlyWorkflow: HarnessToolDefinition = {
+      ...workflowTool("workflow", "task"),
+      workflowProgram: { maxSubagents: 10 },
+    };
+
+    expect(
+      await baseline({
+        connections: [{ name: "linear" }],
+        skills: [{ deferred: true, name: "triage" }],
+        tools: [deferred("sre__list_alerts"), programTool],
+      }),
+    ).toContain(
+      "Call tools with eve__tool({ name, input }), or call several from workflow as `tools.<name>(input)`, and load skills with eve__skill({ name }).",
+    );
+    expect(
+      await baseline({
+        tools: [deferred("sre__list_alerts"), programTool],
+      }),
+    ).toContain(
+      "Call them with eve__tool({ name, input }), or call several from workflow as `tools.<name>(input)`.",
+    );
+    expect(
+      await baseline({
+        skills: [{ deferred: true, name: "triage" }],
+        tools: [programTool],
+      }),
+    ).toContain("Load them with eve__skill({ name }).");
+    expect(
+      await baseline({
+        tools: [deferred("sre__list_alerts"), agentsOnlyWorkflow],
+      }),
+    ).toContain("Call them with eve__tool({ name, input }).");
   });
 });

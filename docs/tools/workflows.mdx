@@ -673,7 +673,32 @@ The model supplies an async function body through the tool's `js` input. Omit `m
 call as a [task](#run-calls-as-tasks-task) that delivers its output in a `task.result` message. Set
 `mode: "execute"` to run the program in the foreground so the turn waits for the result directly.
 
-Inside the function body, `ctx` exposes the workflow runtime's capabilities:
+Set `tools: true` alongside `mode: "execute"` to let programs call the agent's tools, connections,
+and agents directly in the turn:
+
+```ts title="agent/tools/workflow.ts"
+import { workflow } from "eve/tools/workflow";
+
+export default workflow({
+  maxSubagents: 20,
+  mode: "execute",
+  tools: true,
+});
+```
+
+Inside a `tools: true` program, call any callable tool, connection tool, or agent as
+`await tools.<name>(input)` (use `tools["name"](input)` when the name isn't a JavaScript
+identifier), find unlisted tools with `await search({ query })`, or use
+`await ctx.agent(name, { message, outputSchema? })` as an alias for agent calls (passing `model`
+when the target tool declares it, such as `agent({ models })`). Programs
+read each tool's raw return value rather than its `toModelOutput` projection, validate outputs
+against declared `outputSchema` definitions (throwing a catchable `InvalidToolOutput` error on
+mismatch), pause cleanly for batched `Promise.all` approvals or connection sign-ins, replay settled
+calls without re-running them after step interruptions, and stop early if a steering message
+arrives. Each program may make up to 1,024 total calls and `maxSubagents` agent calls, and cannot
+call tools that end the turn, `serve` tools, or another `workflow()` tool.
+
+Without `tools: true`, inside the function body, `ctx` exposes the workflow runtime's capabilities:
 
 | Member                                                                              | Behavior                                                                                                                    |
 | ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
