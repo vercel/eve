@@ -2,7 +2,23 @@ import type {
   CoordinationDispatchInput,
   CoordinationDispatchResult,
 } from "#execution/coordination-dispatch-shared.js";
+import type { closeSessionStreamStep } from "#execution/close-session-stream-step.js";
 import type { publishDispatchedCallsStep } from "#execution/coordination-dispatch-step.js";
+import type { createSessionStep } from "#execution/create-session-step.js";
+import type { mapHeldAnswersStep } from "#execution/proxied-deliver-step.js";
+import type { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
+import type {
+  endSessionSandboxStep,
+  reportSessionSandboxCleanupFailureStep,
+} from "#execution/session/end-sandbox-step.js";
+import type { settleDuplicateDeliveryStep } from "#execution/session/settle-duplicate-delivery-step.js";
+import type { cancelTasksStep } from "#execution/tasks/steps.js";
+import type { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
+import type { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
+import type {
+  reportChildSessionTeardownFailureStep,
+  terminateChildSessionsStep,
+} from "#execution/terminate-child-sessions-step.js";
 import type { stopIdleSessionSandboxStep } from "#execution/session/idle-sandbox-step.js";
 import type { prewarmSessionStep } from "#execution/session/prewarm-step.js";
 import type { settleControlDeliveryStep } from "#execution/session/settle-control-delivery-step.js";
@@ -46,6 +62,20 @@ export interface SessionStepTypes {
   readonly prewarmSession: StepOf<typeof prewarmSessionStep>;
   readonly resolveInitialTurnCaller: StepOf<typeof resolveInitialTurnCallerStep>;
   readonly notifyTurnCaller: StepOf<typeof notifyTurnCallerStep>;
+  readonly createSession: StepOf<typeof createSessionStep>;
+  readonly closeSessionStream: StepOf<typeof closeSessionStreamStep>;
+  readonly terminateChildSessions: StepOf<typeof terminateChildSessionsStep>;
+  readonly reportChildSessionTeardownFailure: StepOf<typeof reportChildSessionTeardownFailureStep>;
+  readonly endSessionSandbox: StepOf<typeof endSessionSandboxStep>;
+  readonly reportSessionSandboxCleanupFailure: StepOf<
+    typeof reportSessionSandboxCleanupFailureStep
+  >;
+  readonly emitTerminalSessionCompletion: StepOf<typeof emitTerminalSessionCompletionStep>;
+  readonly emitTerminalSessionFailure: StepOf<typeof emitTerminalSessionFailureStep>;
+  readonly settleDuplicateDelivery: StepOf<typeof settleDuplicateDeliveryStep>;
+  readonly reportDroppedWirePayload: StepOf<typeof reportDroppedWirePayloadStep>;
+  readonly mapHeldAnswers: StepOf<typeof mapHeldAnswersStep>;
+  readonly cancelTasks: StepOf<typeof cancelTasksStep>;
 }
 
 export type SessionStepName = keyof SessionStepTypes;
@@ -61,6 +91,11 @@ export type SessionStepCall = <N extends SessionStepName>(
   input: SessionStepInput<N>,
   key: string,
 ) => Promise<SessionStepResult<N>>;
+
+export interface SessionStepRunner {
+  readonly host: { readonly step: SessionStepCall };
+  readonly stepKey: (name: SessionStepName) => string;
+}
 
 export function dispatchSessionSteps(table: SessionStepTable): SessionStepCall {
   return (name, input) => {

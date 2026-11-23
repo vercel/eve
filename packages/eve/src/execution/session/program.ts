@@ -5,7 +5,6 @@ import { STUB_CONTEXT_KEY, type StubScope } from "#tool-stubs/types.js";
 import { runServingToolStubs, type ToolStubHost } from "#execution/tool-stub-host.js";
 import type { DeliverHookPayload, SessionCapabilities, TurnCaller } from "#channel/types.js";
 import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
-import { resolveInitialTurnCallerStep } from "#subagents/parent-notification.js";
 import { readDurableSession } from "#execution/durable-session-read.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { isBetweenTurns, storedProjection } from "#harness/session-machine/view.js";
@@ -32,7 +31,12 @@ import { type SessionInboxHandle } from "#execution/session-inbox/inbox.js";
 import type { SessionTimeoutControl } from "#execution/session/timeout-control.js";
 import type { SessionHandoff } from "#execution/session/handoff.js";
 import type { SessionTransferState } from "#execution/session/checkpoint.js";
-import { sessionStepKeys } from "#execution/session/steps.js";
+import {
+  sessionStepKeys,
+  type SessionStepCall,
+  type SessionStepName,
+  type SessionStepRunner,
+} from "#execution/session/steps.js";
 import type { SandboxRunning } from "#sandbox/state.js";
 import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
 
@@ -221,6 +225,8 @@ async function runSession(
   },
 ): Promise<WorkflowEntryResult> {
   const { cursor, host, inbox, queue, scope } = deps;
+  const stepKey = sessionStepKeys(boot.sessionId);
+  const steps: SessionStepRunner = { host, stepKey };
   const progress: SessionProgress = { caller: boot.caller };
   const handoff = host.moves ?? RETAINED;
   let result: WorkflowEntryResult = { output: "", isError: true };
@@ -230,7 +236,7 @@ async function runSession(
   try {
     result = await runServingToolStubs(host.toolStubs, scope, boot.sessionId, async () => {
       try {
-        loop = await runSessionLoop(boot, { cursor, host, inbox, progress, queue });
+        loop = await runSessionLoop(boot, { cursor, host, inbox, progress, queue, stepKey });
       } finally {
         await inbox.dispose();
       }
@@ -245,6 +251,7 @@ async function runSession(
         caller: progress.caller,
         cursor,
         sessionWritable: boot.sessionWritable,
+        steps,
       });
       return result;
     });
@@ -254,7 +261,7 @@ async function runSession(
     if (!finalizing) {
       await finalizeSession(
         { error, kind: "failed", turnId: progress.turnId },
-        { caller: progress.caller, cursor, sessionWritable: boot.sessionWritable },
+        { caller: progress.caller, cursor, sessionWritable: boot.sessionWritable, steps },
       );
     }
     throw createSafeOuterWorkflowError();
@@ -270,10 +277,19 @@ export async function failSession(input: {
   readonly sessionId: string;
   readonly sessionState: DurableSessionState | undefined;
   readonly sessionWritable: WritableStream<Uint8Array>;
+  readonly step: SessionStepCall;
 }): Promise<never> {
+  const steps: SessionStepRunner = {
+    host: { step: input.step },
+    stepKey: sessionStepKeys(`${input.sessionId}:fail`),
+  };
   let caller: TurnCaller | undefined;
   try {
-    caller = await resolveInitialTurnCallerStep({ serializedContext: input.serializedContext });
+    caller = await steps.host.step(
+      "resolveInitialTurnCaller",
+      { serializedContext: input.serializedContext },
+      steps.stepKey("resolveInitialTurnCaller"),
+    );
   } catch {}
   await finalizeSession(
     { error: input.error, kind: "failed" },
@@ -284,6 +300,7 @@ export async function failSession(input: {
         sessionState: input.sessionState,
       },
       sessionWritable: input.sessionWritable,
+      steps,
     },
   );
   throw createSafeOuterWorkflowError();
@@ -315,11 +332,11 @@ async function runSessionLoop(
     readonly inbox: SessionInboxHandle;
     readonly progress: SessionProgress;
     readonly queue: SessionInputQueue;
+    readonly stepKey: (name: SessionStepName) => string;
   },
 ): Promise<SessionLoopOutcome> {
-  const { cursor, host, inbox, progress, queue } = deps;
+  const { cursor, host, inbox, progress, queue, stepKey } = deps;
   const handoff = host.moves ?? RETAINED;
-  const stepKey = sessionStepKeys(boot.sessionId);
   const execution = new SessionExecution({
     capabilities: boot.capabilities,
     cursor,
@@ -409,6 +426,8 @@ async function runSessionLoop(
   > => {
     while (true) {
       const next = await nextTurnDelivery({
+        host,
+        stepKey,
         cursor,
         hasWorkingTasks: () => workingTasks(sessionTaskTable(cursor)).length > 0,
         ignore,
@@ -439,7 +458,7 @@ async function runSessionLoop(
         continue;
       }
       if (next.kind === "cancel-working-tasks") {
-        await cancelWorkingTasks(cursor, "turn-cancelled");
+        await cancelWorkingTasks({ host, stepKey }, cursor, "turn-cancelled");
         if (next.origin !== undefined) {
           const control = controlDeliveryOf(next.origin);
           await settleControlDelivery({ control, outcome: "applied", source: "cancel" });
@@ -664,7 +683,9 @@ async function runSessionLoop(
         case "clear":
         case "compact":
           if (next.kind === "clear")
-            await cancelWorkingTasks(cursor, "turn-cancelled", { turnCalls: true });
+            await cancelWorkingTasks({ host, stepKey }, cursor, "turn-cancelled", {
+              turnCalls: true,
+            });
           action = await runTurn(
             next.origin === undefined
               ? { control: next.kind }

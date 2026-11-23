@@ -288,11 +288,16 @@
  *             chooses the Node or the web version.
  *   rule 74 — The session program (rule 66's files) loads without Node: the
  *             same walk from those files reaches no Node-only import.
+ *   rule 75 — The session program imports no step function: rule 66's files
+ *             (except `turn-step.ts`, which is step code) and the program's
+ *             finalization, admission and task modules value-import no module
+ *             with a `"use step"` directive. Each step goes through
+ *             `SessionHost.step()`, whose engine tables name the step functions.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
  * may only shrink (as offenders are removed) — they may never grow.
- * Rules 67, 68, 69, 70, 71, 72, 73, and 74 have no baseline.
+ * Rules 67, 68, 69, 70, 71, 72, 73, 74, and 75 have no baseline.
  */
 import { existsSync } from "node:fs";
 import { glob, readFile, readdir, lstat } from "node:fs/promises";
@@ -1270,6 +1275,37 @@ async function checkRule74() {
       file,
       message: `imports "${specifier}", which only loads in Node, and the session program reaches it. Import chain: ${chain.join(" -> ")}. The session program must load without Node: reach Node through a \`#runtime-env/*\` module, or move the work into a session step.`,
     });
+  }
+  return violations;
+}
+
+function sessionProgramFiles() {
+  return [
+    ...[...HOST_NEUTRAL_FILES].filter(
+      (file) => file !== `${EVE_SRC}execution/session/turn-step.ts`,
+    ),
+    `${EVE_SRC}execution/session/admission.ts`,
+    `${EVE_SRC}execution/session/finalization.ts`,
+    `${EVE_SRC}execution/tasks/session.ts`,
+  ].sort();
+}
+
+async function checkRule75() {
+  /** @type {Violation[]} */
+  const violations = [];
+  for (const file of sessionProgramFiles()) {
+    const content = await readFile(join(REPO_ROOT, file), "utf8");
+    const source = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true);
+    for (const specifier of valueImportSpecifiers(source)) {
+      const target = resolveEveSource(specifier, file);
+      if (target === undefined || !existsSync(join(REPO_ROOT, target))) continue;
+      if (!STEP_DIRECTIVE_RE.test(await readFile(join(REPO_ROOT, target), "utf8"))) continue;
+      violations.push({
+        rule: 75,
+        file,
+        message: `imports "${specifier}", a module with \`"use step"\` functions, into the session program. Call the step through \`host.step(name, input, key)\`: add its name to \`SessionStepTypes\` (\`execution/session/steps.ts\`) and its function to the engine step tables (\`execution/session/shared-steps.ts\`). Type-only imports are fine.`,
+      });
+    }
   }
   return violations;
 }
@@ -2868,6 +2904,7 @@ async function main() {
   violations.push(...state.rule72);
   violations.push(...(await checkRule73()));
   violations.push(...(await checkRule74()));
+  violations.push(...(await checkRule75()));
   for (const [file, count] of state.rule69) {
     violations.push({
       rule: 69,

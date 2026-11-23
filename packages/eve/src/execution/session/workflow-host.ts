@@ -2,8 +2,7 @@ import { sleep } from "#compiled/@workflow/core/index.js";
 import type { SessionInboxHandle } from "#execution/session-inbox/inbox.js";
 import { SessionHandoff } from "#execution/session/handoff.js";
 import type { SessionBoot, SessionHost } from "#execution/session/program.js";
-import { dispatchSessionSteps } from "#execution/session/steps.js";
-import { WORKFLOW_SESSION_STEPS } from "#execution/workflow-host/session-steps.js";
+import { workflowSessionStep } from "#execution/workflow-host/session-steps.js";
 import { workflowToolStubs } from "#execution/workflow-host/tool-stubs.js";
 
 export function workflowSessionHost(boot: SessionBoot, inbox: SessionInboxHandle): SessionHost {
@@ -20,7 +19,7 @@ export function workflowSessionHost(boot: SessionBoot, inbox: SessionInboxHandle
       sessionId: boot.sessionId,
       sessionWritable: boot.sessionWritable,
     }),
-    step: dispatchSessionSteps(WORKFLOW_SESSION_STEPS),
+    step: workflowSessionStep,
     until: (at) => sleep(new Date(at)),
     toolStubs: workflowToolStubs,
   };

@@ -1,5 +1,5 @@
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
-import { settleDuplicateDeliveryStep } from "#execution/session/settle-duplicate-delivery-step.js";
+import type { SessionStepRunner } from "#execution/session/steps.js";
 
 import type {
   RuntimeActionResultHookPayload,
@@ -22,7 +22,6 @@ import {
   decodeSessionInboxPayload,
   SessionInboxPayloadError,
 } from "#execution/session-inbox/protocol.js";
-import { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 
 type SessionAdmission =
@@ -35,7 +34,7 @@ type SessionAdmission =
 
 export async function admitSessionInboxPayload(
   value: SessionInboxPayload,
-  input: {
+  input: SessionStepRunner & {
     readonly queue: SessionInputQueue;
     readonly cursor: SessionStateCursor;
     readonly inbox: Pick<SessionInbox, "ownerRunId">;
@@ -58,7 +57,11 @@ export async function admitSessionInboxPayload(
     command = decodeSessionInboxPayload(value);
   } catch (error) {
     if (!(error instanceof SessionInboxPayloadError)) throw error;
-    await reportDroppedWirePayloadStep({ detail: error.message, family: "session-inbox" });
+    await input.host.step(
+      "reportDroppedWirePayload",
+      { detail: error.message, family: "session-inbox" },
+      input.stepKey("reportDroppedWirePayload"),
+    );
     const settlement = unsupportedControl(value, error.message);
     return settlement === undefined ? { kind: "consumed" } : { kind: "unsupported", settlement };
   }
@@ -72,7 +75,11 @@ export async function admitSessionInboxPayload(
       const admission = input.queue.enqueueDelivery(command);
       if (admission === undefined) {
         await input.cursor.advance((state) =>
-          settleDuplicateDeliveryStep({ ...state, delivery: command }),
+          input.host.step(
+            "settleDuplicateDelivery",
+            { ...state, delivery: command },
+            input.stepKey("settleDuplicateDelivery"),
+          ),
         );
         return { kind: "consumed" };
       }

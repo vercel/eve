@@ -3,7 +3,11 @@ import { formatEarlierRemoteCallerInputError } from "#protocol/remote-agent-prot
 import { controlDeliveryOf } from "#execution/session/control-delivery.js";
 
 import type { SessionCapabilities, TurnCaller } from "#channel/types.js";
-import type { SessionStepCall, SessionStepName } from "#execution/session/steps.js";
+import type {
+  SessionStepCall,
+  SessionStepName,
+  SessionStepRunner,
+} from "#execution/session/steps.js";
 import type { SessionInputQueue } from "#execution/session/input-queue.js";
 import { taskToolResult, type TaskToolCall } from "#execution/tasks/calls.js";
 import { TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
@@ -122,7 +126,7 @@ export class SessionExecution {
       const outcome = await this.runTurnSteps(turn, delivery, options.pause);
       await this.handleBoundaryMessages(turn.takeBoundaryMessages(), outcome.kind === "done");
       if (outcome.kind === "park" && outcome.settled !== undefined) {
-        await cancelWorkingTasks(this.input.cursor, "turn-ended");
+        await cancelWorkingTasks(this.input, this.input.cursor, "turn-ended");
       }
       return {
         ...outcome,
@@ -430,7 +434,9 @@ export class SessionExecution {
   }
 
   async cancelTurnWork(): Promise<void> {
-    await cancelWorkingTasks(this.input.cursor, "turn-cancelled", { turnCalls: true });
+    await cancelWorkingTasks(this.input, this.input.cursor, "turn-cancelled", {
+      turnCalls: true,
+    });
   }
 
   private async finishCancelledTurn(turn: ActiveTurn): Promise<TurnOutcome> {
@@ -465,8 +471,7 @@ function dispatchedPause(
 }
 class CallWait {
   private readonly cursor: SessionStateCursor;
-  private readonly host: SessionTurnHost;
-  private readonly stepKey: SessionExecutionInput["stepKey"];
+  private readonly steps: SessionStepRunner;
   private readonly until: SessionTurnHost["until"];
   private readonly callIds: readonly string[];
   private readonly results: RuntimeActionResult[] = [];
@@ -480,8 +485,7 @@ class CallWait {
     dispatched: readonly RuntimeActionResult[],
   ) {
     this.cursor = session.cursor;
-    this.host = session.host;
-    this.stepKey = session.stepKey;
+    this.steps = { host: session.host, stepKey: session.stepKey };
     this.until = session.host.until;
     this.callIds = callIds;
     const acceptedAtMs = Date.now();
@@ -546,7 +550,9 @@ class CallWait {
       return run === undefined ? [] : [run.address];
     });
     await Promise.all(
-      runs.map((run) => this.host.step("interruptRun", run, this.stepKey("interruptRun"))),
+      runs.map((run) =>
+        this.steps.host.step("interruptRun", run, this.steps.stepKey("interruptRun")),
+      ),
     );
   }
 
@@ -555,13 +561,17 @@ class CallWait {
     const startedAtMs =
       calls.length === 0
         ? 0
-        : await this.host.step("startTaskToolCalls", undefined, this.stepKey("startTaskToolCalls"));
+        : await this.steps.host.step(
+            "startTaskToolCalls",
+            undefined,
+            this.steps.stepKey("startTaskToolCalls"),
+          );
     for (const call of calls) {
       if (call.kind === TASK_WAIT_TOOL_NAME) {
         waits.push(startTaskWait(call, startedAtMs, this.until));
         continue;
       }
-      this.accept(await answerTaskCancel(this.cursor, call));
+      this.accept(await answerTaskCancel(this.steps, this.cursor, call));
     }
     this.taskWaits = waits;
     this.taskWaits = await this.resolveTaskWaits(false);

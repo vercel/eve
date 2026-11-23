@@ -75,6 +75,7 @@ function runtimeOn(host: InProcessHost, config: SessionRuntimeConfig): InProcess
         inboxTransport: inboxes.transportFor(sessionId),
         sessionWritable,
         timeouts: () => undefined,
+        step: host.sessionHost.step,
         async settleContinuationConflict({ command, continuationToken: token }) {
           if (inboxes.holder(token) === undefined)
             throw new Error(`No session here holds continuation "${token}".`);
