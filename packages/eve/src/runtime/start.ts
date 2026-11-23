@@ -16,13 +16,19 @@ export interface StartInput {
 const DURABLE_PHASE = {
   name: "durable",
   async run(app, input) {
+    const { platform } = app;
+    if (platform === undefined) {
+      throw new Error(
+        "eve reached the durable phase without a platform. The platform phase must run before the Workflow World starts.",
+      );
+    }
     if (input.workflowEnvironment !== undefined) {
-      installWorkflowDeploymentId(input.workflowEnvironment.buildDeploymentId);
+      installWorkflowDeploymentId(platform, input.workflowEnvironment.buildDeploymentId);
       applyWorkflowSpecVersionDefault();
     }
     const world = await input.createWorld();
     await installWorkflowWorld({ packageName: input.configuredWorld, world });
-    installWorkflowHost();
+    installWorkflowHost(platform);
     registerCleanup(app.lifetime, closeWorkflowWorld);
   },
 } as const satisfies BootPhase<StartInput>;

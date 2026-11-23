@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { builtInPlatform } from "#platform/context.js";
+
 import { installWorkflowDeploymentId } from "./install-workflow-deployment-id.js";
 
 const id = "eve_0123456789abcdef0123456789abcdef";
@@ -10,7 +12,7 @@ describe("installWorkflowDeploymentId", () => {
   it("installs the artifact id before world creation", () => {
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", undefined);
     vi.stubEnv("WORKFLOW_DEPLOYMENT_ID", undefined);
-    installWorkflowDeploymentId(id);
+    installWorkflowDeploymentId(builtInPlatform(), id);
     expect(process.env.WORKFLOW_DEPLOYMENT_ID).toBe(id);
   });
 
@@ -21,7 +23,7 @@ describe("installWorkflowDeploymentId", () => {
   ])("defers to %s", (_label, env: Record<string, string>, deploymentId) => {
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", env.VERCEL_DEPLOYMENT_ID);
     vi.stubEnv("WORKFLOW_DEPLOYMENT_ID", env.WORKFLOW_DEPLOYMENT_ID);
-    installWorkflowDeploymentId(deploymentId);
+    installWorkflowDeploymentId(builtInPlatform(), deploymentId);
     expect(process.env.WORKFLOW_DEPLOYMENT_ID).toBe(env.WORKFLOW_DEPLOYMENT_ID);
   });
 });

@@ -8,6 +8,7 @@ import { compileAgent } from "../../src/compiler/compile-agent.js";
 import { createDevelopmentNitroArtifactsConfig } from "../../src/internal/nitro/host/artifacts-config.js";
 import type { AgentInfoResponse } from "../../src/internal/nitro/routes/agent-info/build-agent-info-response.js";
 import { installWorkflowHost } from "../../src/execution/workflow-host/host.js";
+import { builtInPlatform } from "../../src/platform/context.js";
 import { dispatchChannelRequest } from "../../src/internal/nitro/routes/channel-dispatch.js";
 import { EVE_INFO_ROUTE_PATH, EVE_SESSION_ROUTE_PATH } from "../../src/protocol/routes.js";
 import { useTemporaryAppRoots } from "../../src/internal/testing/use-temporary-app-roots.js";
@@ -50,7 +51,7 @@ async function requestAgentInfo(appRoot: string, request: Request): Promise<Resp
 
 describe("eve agent info route", () => {
   beforeAll(() => {
-    installWorkflowHost();
+    installWorkflowHost(builtInPlatform());
   });
 
   afterEach(() => {

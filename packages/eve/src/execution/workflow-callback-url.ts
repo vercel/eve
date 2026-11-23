@@ -1,4 +1,5 @@
-import { platformContext } from "#platform/context.js";
+import { builtInPlatform } from "#platform/context.js";
+import type { Entities } from "#platform/entities.js";
 import { joinEveRoutePath } from "#shared/eve-route-path.js";
 import {
   EVE_PUBLIC_ROUTE_PREFIX_ENV,
@@ -8,8 +9,8 @@ import { readEnv } from "#runtime-env/env.js";
 
 const WORKFLOW_LOCAL_BASE_URL_ENV = "WORKFLOW_LOCAL_BASE_URL";
 
-export function resolveVercelProductionCallbackBaseUrl(): string | null {
-  const { deployment } = platformContext();
+export function resolveVercelProductionCallbackBaseUrl(platform: Entities): string | null {
+  const { deployment } = platform;
   const productionHost = deployment.productionHost();
   if (deployment.environment() === "production" && productionHost !== undefined) {
     return `https://${productionHost}`;
@@ -17,10 +18,13 @@ export function resolveVercelProductionCallbackBaseUrl(): string | null {
   return null;
 }
 
-export function resolveWorkflowCallbackBaseUrl(metadataUrl: string): string {
+export function resolveWorkflowCallbackBaseUrl(
+  metadataUrl: string,
+  platform: Entities = builtInPlatform(),
+): string {
   const configuredLocalBaseUrl = readEnv(WORKFLOW_LOCAL_BASE_URL_ENV)?.trim();
   const localBaseUrl = configuredLocalBaseUrl ? configuredLocalBaseUrl : undefined;
-  const resolved = resolveVercelProductionCallbackBaseUrl() ?? localBaseUrl ?? metadataUrl;
+  const resolved = resolveVercelProductionCallbackBaseUrl(platform) ?? localBaseUrl ?? metadataUrl;
   const baseUrl = resolved.replace(/\/$/, "");
   const publicRoutePrefix = normalizePublicRoutePrefix(readEnv(EVE_PUBLIC_ROUTE_PREFIX_ENV));
   return publicRoutePrefix === undefined ? baseUrl : `${baseUrl}${publicRoutePrefix}`;

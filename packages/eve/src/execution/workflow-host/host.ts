@@ -14,7 +14,7 @@ import {
   startConnectionEventOwner,
 } from "#runtime/connections/events/owner.js";
 import { cancelRun, getRun, getWorld, resumeHook } from "#internal/workflow/runtime.js";
-import { platformContext } from "#platform/context.js";
+import type { Entities } from "#platform/entities.js";
 
 const workflowSessionEvents: SessionEventStore = {
   readable: (sessionId, startIndex) => getRun(sessionId).getReadable({ startIndex }),
@@ -44,62 +44,64 @@ const workflowSessionEvents: SessionEventStore = {
   },
 };
 
-export const workflowHost: DurableHost = {
-  name: "workflow",
-  deliver: async (to, payload) => {
-    if ("hook" in to) await resumeHook(to.hook, payload);
-    else if ("session" in to) await resumeSessionInbox(to.session, payload as DeliverHookPayload);
-    else await resumeSignInCallback(to.signIn, payload as AuthorizationCallbackPayload);
-  },
-  deploymentId: async () =>
-    platformContext().deployment.deploymentId() ?? (await (await getWorld()).getDeploymentId()),
-  async findRun(runId) {
-    try {
-      const run = await (await getWorld()).runs.get(runId);
-      return {
-        attributes: run.attributes,
-        createdAt: run.createdAt,
-        expiredAt: run.expiredAt,
-        runId: run.runId,
-        status: run.status,
-      };
-    } catch (error) {
-      if (WorkflowRunNotFoundError.is(error) || RunExpiredError.is(error)) return undefined;
-      throw error;
-    }
-  },
-  runStatus: async (runId) => await getRun(runId).status,
-  cancelRun: async (runId, reason) => {
-    await cancelRun(await getWorld(), runId, { cancelReason: reason });
-  },
-  sessionEvents: workflowSessionEvents,
-  createRuntime: (input) => createWorkflowRuntime(input),
-  connectionEvents: {
-    start: (binding, bundle, signal) => startConnectionEventOwner(binding, bundle, signal),
-    find: (bindingId) => findConnectionEventOwner(bindingId),
-    retire: (bindingId) => retireConnectionEventOwner(bindingId),
-  },
-  callbackBaseUrl() {
-    try {
-      const { url } = getWorkflowMetadata();
-      return typeof url === "string" ? resolveWorkflowCallbackBaseUrl(url) : undefined;
-    } catch (error) {
-      if (error instanceof Error && error.name === "NotInWorkflowOrStepContextError") {
-        return undefined;
+export function createWorkflowHost(platform: Entities): DurableHost {
+  return {
+    name: "workflow",
+    deliver: async (to, payload) => {
+      if ("hook" in to) await resumeHook(to.hook, payload);
+      else if ("session" in to) await resumeSessionInbox(to.session, payload as DeliverHookPayload);
+      else await resumeSignInCallback(to.signIn, payload as AuthorizationCallbackPayload);
+    },
+    deploymentId: async () =>
+      platform.deployment.deploymentId() ?? (await (await getWorld()).getDeploymentId()),
+    async findRun(runId) {
+      try {
+        const run = await (await getWorld()).runs.get(runId);
+        return {
+          attributes: run.attributes,
+          createdAt: run.createdAt,
+          expiredAt: run.expiredAt,
+          runId: run.runId,
+          status: run.status,
+        };
+      } catch (error) {
+        if (WorkflowRunNotFoundError.is(error) || RunExpiredError.is(error)) return undefined;
+        throw error;
       }
-      throw error;
-    }
-  },
-  stepAttempt() {
-    try {
-      return getStepMetadata().attempt;
-    } catch (error) {
-      if (error instanceof Error && error.name === "NotInStepContextError") return undefined;
-      throw error;
-    }
-  },
-};
+    },
+    runStatus: async (runId) => await getRun(runId).status,
+    cancelRun: async (runId, reason) => {
+      await cancelRun(await getWorld(), runId, { cancelReason: reason });
+    },
+    sessionEvents: workflowSessionEvents,
+    createRuntime: (input) => createWorkflowRuntime(input),
+    connectionEvents: {
+      start: (binding, bundle, signal) => startConnectionEventOwner(binding, bundle, signal),
+      find: (bindingId) => findConnectionEventOwner(bindingId),
+      retire: (bindingId) => retireConnectionEventOwner(bindingId),
+    },
+    callbackBaseUrl() {
+      try {
+        const { url } = getWorkflowMetadata();
+        return typeof url === "string" ? resolveWorkflowCallbackBaseUrl(url, platform) : undefined;
+      } catch (error) {
+        if (error instanceof Error && error.name === "NotInWorkflowOrStepContextError") {
+          return undefined;
+        }
+        throw error;
+      }
+    },
+    stepAttempt() {
+      try {
+        return getStepMetadata().attempt;
+      } catch (error) {
+        if (error instanceof Error && error.name === "NotInStepContextError") return undefined;
+        throw error;
+      }
+    },
+  };
+}
 
-export function installWorkflowHost(): void {
-  installDurableHost(workflowHost);
+export function installWorkflowHost(platform: Entities): void {
+  installDurableHost(createWorkflowHost(platform));
 }

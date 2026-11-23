@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { installWorkflowHost } from "#execution/workflow-host/host.js";
+import { builtInPlatform } from "#platform/context.js";
 import {
   scheduleCollectionTools,
   scheduleScopesTools,
@@ -29,7 +30,7 @@ import { serializeInputSchema } from "#tools/schema.js";
 import type { ToolDefinition } from "#tools/definition.js";
 import type { ScheduleOccurrenceEvent, ScheduleRecord } from "#public/schedules/subscription.js";
 
-installWorkflowHost();
+installWorkflowHost(builtInPlatform());
 
 const alice = {
   attributes: {},

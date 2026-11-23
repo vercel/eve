@@ -1,5 +1,6 @@
 import * as workflowRuntime from "#execution/workflow-runtime.js";
 import { installWorkflowHost } from "#execution/workflow-host/host.js";
+import { builtInPlatform } from "#platform/context.js";
 import { eventTracing } from "#internal/testing/event-tracing.js";
 import { trace } from "@opentelemetry/api";
 import { connectionEntry } from "#execution/catalog/connection-entry.js";
@@ -81,7 +82,7 @@ vi.mock("#runtime/sessions/compiled-agent-cache.js", () => ({
 vi.mock("#execution/terminal-session-completion-step.js", () => ({
   emitTerminalSessionCompletionStep: vi.fn(),
 }));
-installWorkflowHost();
+installWorkflowHost(builtInPlatform());
 
 let ctx: ContextContainer;
 let actions: ConnectionEventActions;

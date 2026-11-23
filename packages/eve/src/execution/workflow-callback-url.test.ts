@@ -5,6 +5,7 @@ import {
   resolveVercelProductionCallbackBaseUrl,
   resolveWorkflowCallbackBaseUrl,
 } from "#execution/workflow-callback-url.js";
+import { builtInPlatform } from "#platform/context.js";
 
 describe("resolveVercelProductionCallbackBaseUrl", () => {
   afterEach(() => {
@@ -15,14 +16,16 @@ describe("resolveVercelProductionCallbackBaseUrl", () => {
     vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", "agent.example.com");
     vi.stubEnv("VERCEL_ENV", "preview");
 
-    expect(resolveVercelProductionCallbackBaseUrl()).toBeNull();
+    expect(resolveVercelProductionCallbackBaseUrl(builtInPlatform())).toBeNull();
   });
 
   it("uses the project production URL in production", () => {
     vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", "agent.example.com");
     vi.stubEnv("VERCEL_ENV", "production");
 
-    expect(resolveVercelProductionCallbackBaseUrl()).toBe("https://agent.example.com");
+    expect(resolveVercelProductionCallbackBaseUrl(builtInPlatform())).toBe(
+      "https://agent.example.com",
+    );
   });
 
   it("keeps the Vercel automation bypass secret out of callback URLs", () => {

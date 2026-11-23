@@ -53,11 +53,13 @@ describe("applyWorkflowTransform", () => {
       "registerStepFunction",
       "withWorkflowStepAuthorization",
       "installWorkflowHost",
+      "builtInPlatform",
       executable,
     )(
       (id: string, execute: Function) => registered.set(id, execute),
       withWorkflowStepAuthorization,
       () => installs++,
+      () => ({}),
     );
     expect(installs).toBe(1);
 

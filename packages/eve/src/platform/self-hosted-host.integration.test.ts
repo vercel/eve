@@ -77,7 +77,7 @@ describe("a self-hosted host installed in code", () => {
   it("supplies the production callback base URL", async () => {
     const { resolveVercelProductionCallbackBaseUrl } =
       await import("#execution/workflow-callback-url.js");
-    expect(resolveVercelProductionCallbackBaseUrl()).toContain(publicHost);
+    expect(resolveVercelProductionCallbackBaseUrl(platform)).toContain(publicHost);
   });
 
   it("reports a production deployment, not a local development server", async () => {

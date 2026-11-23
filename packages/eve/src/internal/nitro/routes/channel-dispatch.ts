@@ -225,6 +225,7 @@ async function buildRouteArgs(input: {
       ...agent.args,
       invokeTool: createRouteInvokeTool({
         agentName: bundle.agentName,
+        app,
         config,
         origin: { adapter, agentName: bundle.agentName, channelName },
         requestUrl: event.req.url,

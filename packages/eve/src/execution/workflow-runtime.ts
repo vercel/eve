@@ -1,6 +1,7 @@
-import { durableRunEnded } from "#execution/hosts.js";
+import { durableRunEnded, installedDurableHost, type DurableHost } from "#execution/hosts.js";
 import { workflowEntryReference } from "#execution/workflow-references.js";
-import { installWorkflowHost, workflowHost } from "#execution/workflow-host/host.js";
+import { createWorkflowHost, installWorkflowHost } from "#execution/workflow-host/host.js";
+import { builtInPlatform } from "#platform/context.js";
 import { prewarmWorkflowSession } from "#execution/session-prewarm.js";
 import { readRemoteChildBinding } from "#execution/child-binding.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
@@ -120,7 +121,7 @@ function sessionHandle(
 }
 
 export function createWorkflowRuntime(config: SessionRuntimeConfig): Runtime {
-  installWorkflowHost();
+  installWorkflowHost(builtInPlatform());
   const startSession = async (
     input: RunInput,
     predecessor?: SessionPredecessor,
@@ -460,8 +461,13 @@ export async function resolveContinuation(
   return owner;
 }
 
+function workflowHost(): DurableHost {
+  const installed = installedDurableHost();
+  return installed?.name === "workflow" ? installed : createWorkflowHost(builtInPlatform());
+}
+
 export async function hasRunEnded(runId: string): Promise<boolean> {
-  return await durableRunEnded(workflowHost, runId);
+  return await durableRunEnded(workflowHost(), runId);
 }
 
 export async function startWorkflowOnCurrentDeployment<TArgs extends unknown[], TResult>(
@@ -514,7 +520,7 @@ export async function startWorkflowOnDeployment<TArgs extends unknown[], TResult
 }
 
 async function resolveCurrentWorkflowDeploymentId(): Promise<string> {
-  const deploymentId = await workflowHost.deploymentId();
+  const deploymentId = await workflowHost().deploymentId();
   if (deploymentId.length === 0 || deploymentId === "latest") {
     throw new Error("Workflow runtime could not resolve an exact deployment id.");
   }

@@ -2,7 +2,6 @@ import { compiledDelegates } from "#execution/agent-sessions/metadata.js";
 import { compiledAgentRoster } from "#execution/agent-sessions/roster.js";
 import { resolveSessionUsageLimit } from "#execution/effective-agent-config.js";
 import { memoryDefinition, memoryToolsDefinition } from "#memory/definition.js";
-import { platformContext } from "#platform/context.js";
 import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";
 import { serializeDurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
@@ -44,8 +43,8 @@ export function fromCompiledBundle(bundle: CompiledBundle): SessionAgent {
       nodeId: bundle.nodeId,
       source: serializeDurableCompiledArtifactsSource(bundle.compiledArtifactsSource),
     }),
-    revision: async () => {
-      const deploymentId = platformContext().deployment.deploymentId();
+    revision: async (platform) => {
+      const deploymentId = platform.deployment.deploymentId();
       return deploymentId
         ? `deployment:${deploymentId}`
         : await resolveRuntimeCompiledArtifactsVersionedCacheKey(bundle.compiledArtifactsSource);

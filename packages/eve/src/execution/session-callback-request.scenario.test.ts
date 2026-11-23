@@ -4,7 +4,9 @@ import { createServer, type Server } from "node:http";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
+import { builtInPlatform } from "#platform/context.js";
 
+const platform = builtInPlatform();
 const dnsMocks = vi.hoisted(() => ({ addresses: [] as LookupAddress[] }));
 
 vi.mock("node:dns", () => ({
@@ -68,6 +70,7 @@ describe("postSessionCallbackRequest destination guard", () => {
     dnsMocks.addresses = addrs;
 
     const delivery = postSessionCallbackRequest({
+      platform,
       body: { kind: "session.completed" },
       logFailures: false,
       url: `http://callback.example.test:${String(port)}/eve/v1/callback/token`,
@@ -85,6 +88,7 @@ describe("postSessionCallbackRequest destination guard", () => {
     dnsMocks.addresses = [{ address: "127.0.0.1", family: 4 }];
 
     const delivered = await postSessionCallbackRequest({
+      platform,
       body: { kind: "session.completed" },
       url: `http://callback.example.test:${String(port)}/eve/v1/callback/token`,
     });

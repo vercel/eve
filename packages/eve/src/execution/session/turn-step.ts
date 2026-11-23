@@ -539,7 +539,7 @@ async function runSessionStepBody(
     const prepareDefinitions = (session: HarnessSession): Promise<void> => {
       return (restoration ??= (async () => {
         try {
-          const revision = await agent.revision();
+          const revision = await agent.revision(platformOf(host.app));
           await contextStorage.run(ctx, () =>
             restoreDefinitions(ctx, { abortSignal, conversation: session.history, revision }),
           );
