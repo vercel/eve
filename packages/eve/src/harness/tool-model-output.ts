@@ -3,7 +3,16 @@ import type { JSONValue } from "ai";
 import { z } from "#compiled/zod/index.js";
 import { createLogger } from "#internal/logging.js";
 import { parseJsonValue, type JsonValue } from "#shared/json.js";
+import { loadContext } from "#context/container.js";
+import { ContextKey } from "#context/key.js";
+import { SandboxKey } from "#context/keys.js";
 import type { ToolModelOutputPart } from "#tools/definition.js";
+import {
+  defaultToolModelOutput,
+  WARN_ONCE,
+  type ToolModelOutputContext,
+  type WarnOnceContext,
+} from "#tools/model-output.js";
 import { formatValidationError } from "#runtime/validation.js";
 import { withToolOutputSerializationError } from "#harness/tool-output-serialization.js";
 
@@ -24,7 +33,35 @@ type ToolModelOutputValuePart =
       readonly filename?: string;
     };
 
+export interface ToolModelOutputContextOptions {
+  readonly sandboxOutlivesCall?: boolean;
+}
+
+export function toolModelOutputContext(
+  toolName: string,
+  callId: string,
+  options: ToolModelOutputContextOptions = {},
+): ToolModelOutputContext & WarnOnceContext {
+  const sandboxOutlivesCall = options.sandboxOutlivesCall ?? true;
+  return {
+    callId,
+    defaultModelOutput: defaultToolModelOutput,
+    getSandbox: async () =>
+      sandboxOutlivesCall ? ((await loadContext().get(SandboxKey)?.get()) ?? undefined) : undefined,
+    toolName,
+    [WARN_ONCE]: (id, message, fields) => {
+      const context = loadContext();
+      const seen = context.get(WarnedKey) ?? [];
+      if (seen.includes(id)) return;
+      context.set(WarnedKey, [...seen, id]);
+      log.warn(message, { toolName, ...fields });
+    },
+  };
+}
+
 const log = createLogger("harness.tool-model-output");
+
+const WarnedKey = new ContextKey<readonly string[]>("eve.toolModelOutput.warned");
 
 const CONTENT_FILE_WARN_BYTES = 3 * 1024 * 1024;
 

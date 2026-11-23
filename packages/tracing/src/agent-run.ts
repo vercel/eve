@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { runTelemetry } from "./core/run-telemetry.js";
 import { otelTelemetry } from "./adapters/otel.js";
 import { aiSdkContentSerializer } from "./adapters/serialization.js";
 import { createScopes, type LiveOperation } from "./core/scopes.js";
@@ -402,7 +403,7 @@ export function createAgentRun(input: AgentRunOptions): AgentRun {
     return operationHandle(live, live.record().data, input.onError);
   }
 
-  return {
+  const run: AgentRun = {
     turn: wrappedOperation(turnOperation, undefined, input.onError),
     decision: wrappedOperation(decision, undefined, input.onError),
     resume,
@@ -413,4 +414,6 @@ export function createAgentRun(input: AgentRunOptions): AgentRun {
     forceFlush: () => lifecycle(() => telemetry.forceFlush()),
     shutdown: () => lifecycle(() => telemetry.shutdown()),
   };
+  runTelemetry.set(run, { telemetry, usesGlobalProvider: input.telemetry === undefined });
+  return run;
 }

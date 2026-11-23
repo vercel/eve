@@ -6,6 +6,7 @@ import { toolStubPlayback } from "#execution/tool-stub-host.js";
 import { workflowToolStubs } from "#execution/workflow-host/tool-stubs.js";
 import { appendTaskContext } from "#execution/tasks/model-step.js";
 import { toolCallModelOutput } from "#harness/tool-call-io.js";
+import { toolModelOutputContext } from "#harness/tool-model-output.js";
 import {
   createTask,
   readTaskTable,
@@ -163,6 +164,7 @@ describe("durable tool stub playback", () => {
             const delivered = await appendTaskContext({
               session,
               messages: [],
+              outputContext: toolModelOutputContext,
               tools: new Map([["lookup", definition]]),
             });
             expect(JSON.stringify(delivered.messages)).toContain("raw");

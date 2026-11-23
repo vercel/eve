@@ -1,6 +1,7 @@
 import { stepCatalog } from "#definitions/step.js";
 import { changeHistory } from "#harness/session-machine/history.js";
 import { appendTaskContext } from "#execution/tasks/model-step.js";
+import { toolModelOutputContext } from "#harness/tool-model-output.js";
 import {
   anchorToTurn,
   createFrameworkUserMessage,
@@ -61,6 +62,7 @@ async function settleHistory(
   if (!hasUnansweredToolCall(messages)) {
     const taskContext = await appendTaskContext({
       messages,
+      outputContext: toolModelOutputContext,
       session,
       tools: await stepCatalog(step),
     });

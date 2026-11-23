@@ -2,7 +2,13 @@ import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+
+if (spawnSync("docker", ["buildx", "version"], { stdio: "ignore" }).status === 0) {
+  const moduleUrl = new URL("../../../../scripts/resolve-sandbox-image.mjs", import.meta.url);
+  const { resolveSandboxImage } = await import(moduleUrl.href);
+  resolveSandboxImage();
+}
 
 const root = dirname(fileURLToPath(import.meta.url));
 const tests = (await readdir(root))

@@ -1,11 +1,19 @@
-const TURN_WORKFLOW_NAME = "turnWorkflow";
+export const TURN_WORKFLOW_NAME = "turnWorkflow";
 export const WORKFLOW_ENTRY_NAME = "workflowEntry";
 export const SESSION_TIMEOUT_WORKFLOW_NAME = "sessionTimeoutWorkflow";
 export const WORKFLOW_TOOL_RUN_WORKFLOW_NAME = "workflowToolRunWorkflow";
 export const CONNECTION_EVENT_WORKFLOW_NAME = "connectionEventWorkflow";
 export const CONNECTION_EVENT_DELIVERY_WORKFLOW_NAME = "connectionEventDeliveryWorkflow";
 
-export const STABLE_WORKFLOW_NAMES: ReadonlySet<string> = new Set([
+export type StableWorkflowName =
+  | typeof WORKFLOW_ENTRY_NAME
+  | typeof TURN_WORKFLOW_NAME
+  | typeof SESSION_TIMEOUT_WORKFLOW_NAME
+  | typeof WORKFLOW_TOOL_RUN_WORKFLOW_NAME
+  | typeof CONNECTION_EVENT_WORKFLOW_NAME
+  | typeof CONNECTION_EVENT_DELIVERY_WORKFLOW_NAME;
+
+export const STABLE_WORKFLOW_NAMES: ReadonlySet<StableWorkflowName> = new Set([
   WORKFLOW_ENTRY_NAME,
   TURN_WORKFLOW_NAME,
   SESSION_TIMEOUT_WORKFLOW_NAME,

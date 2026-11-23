@@ -14,10 +14,10 @@ world-infrastructure coverage (and vice versa):
   fixture's other evals with the mock model, which keeps them on the local
   world and its dev routes, since the world suites test production builds. A
   fixture without `real-model` evals gets one mock-only job.
-- **World suites** (`e2e-vercel.yml`, `e2e-postgres.yml`, and one workflow
-  per additional workflow world): every fixture builds, deploys, and runs
-  once with deterministic mock models (`EVE_E2E_MODEL=mock`), proving the
-  world's infrastructure — build, deploy, boot, streaming, durability —
+- **World suites** (`e2e-vercel.yml`, the `e2e:postgres` Vercel CI tasks, and
+  one suite per additional workflow world): every fixture builds, deploys,
+  and runs once with deterministic mock models (`EVE_E2E_MODEL=mock`), proving
+  the world's infrastructure — build, deploy, boot, streaming, durability —
   without live models. Evals whose assertions need a real model carry the
   `real-model` tag and are excluded there via `--exclude-tag real-model`.
 
@@ -241,17 +241,18 @@ matrices from the registry:
   every relevant PR. List a fixture there only when it exercises something
   that differs on a Vercel deployment, such as Workflow on Vercel's queues,
   function packaging, Vercel Sandbox, Blob or cron, or the deployment's own
-  address. A fixture whose evals are all tagged `real-model` gets no
-  world legs, since the world suites would have nothing to run. A registered world's `package` reaches the job as
-  `EVE_E2E_WORKFLOW_WORLD` (worlds without one, like `vercel`, use the
-  deploy target's default).
+  address. A fixture whose evals are all tagged `real-model` gets no world
+  legs, since the world suites would have nothing to run. A registered
+  world's `package` reaches the suite as `EVE_E2E_WORKFLOW_WORLD` (worlds
+  without one, like `vercel`, use the deploy target's default).
 
 The short model name is the stable Actions check identifier; the full id
 selects the provider model. Updating a model version does not rename required
-checks. Each workflow also publishes one stable aggregate check —
-`e2e-local`, `e2e-vercel`, or `e2e-postgres` — which succeeds only when every
-leg succeeds. Require those aggregate checks in the repository ruleset so
-newly added fixtures and models become required automatically. Add a new
+checks. Each workflow also publishes one stable aggregate check — `e2e-local`
+or `e2e-vercel` — which succeeds only when every leg succeeds. The Postgres
+world suite reports through the `Vercel CI` check instead. Require those
+aggregate checks in the repository ruleset so newly added fixtures and models
+become required automatically. Add a new
 aggregate to the ruleset only after its workflow lands on `main`: a required
 check nothing reports blocks every PR as permanently "expected".
 
@@ -291,19 +292,27 @@ npx eve eval --strict --exclude-tag real-model \
   --url "$DEPLOYMENT_URL" --junit "$JUNIT_PATH"
 ```
 
-`.github/workflows/e2e-postgres.yml` (the Postgres world suite) starts a
-PostgreSQL service container, bootstraps the `@workflow/world-postgres`
-schema, builds each fixture with `EVE_E2E_WORKFLOW_WORLD=@workflow/world-postgres`,
-runs the mock-compatible evals against a local production server
-(`eve start`), and asserts the traffic produced Postgres-backed workflow
-runs. Every fixture carries `@workflow/world-postgres` as a dependency so
-the world module resolves at build time.
+Vercel CI runs the Postgres world suite as each fixture's `e2e:postgres`
+Turbo task, which starts PostgreSQL in Docker alongside it with Turbo's `with`
+(`@eve-e2e/postgres#postgres`). `scripts/run-e2e-postgres.mjs` bootstraps the
+`@workflow/world-postgres` schema, builds the fixture with
+`EVE_E2E_WORKFLOW_WORLD=@workflow/world-postgres`, runs the mock-compatible
+evals against a local production server (`eve start`), and asserts the
+traffic produced Postgres-backed workflow runs. Every fixture carries
+`@workflow/world-postgres` as a dependency so the world module resolves at
+build time. The `postgres` world's `task` in `e2e/matrix.json` names that
+script, and discovery fails unless exactly the fixtures this world
+runs define it. To run a fixture locally with Docker, use
+`pnpm turbo run <package>#e2e:postgres` with the fixture's package name, one
+fixture per command as on Vercel CI. The database stops when its fixture's
+task ends, and every fixture serves on port 3000.
 
-A world suite for another workflow world follows the same shape: register
-the world in `e2e/matrix.json`, add an `e2e-<world>.yml` that consumes its
+A world suite for another workflow world registers the world in
+`e2e/matrix.json`, then either adds an `e2e-<world>.yml` that consumes its
 `world_matrix_<world>` output (the registered `package` arrives as
-`matrix.world_package` for `EVE_E2E_WORKFLOW_WORLD`), set
-`EVE_E2E_MODEL=mock` (plus any backing services), and run with
+`matrix.world_package` for `EVE_E2E_WORKFLOW_WORLD`), or names a Turbo `task`
+that its fixtures define, as `postgres` does. Either way it sets
+`EVE_E2E_MODEL=mock` (plus any backing services) and runs with
 `--exclude-tag real-model`.
 
 TUI smoke scripts are not e2e. They live under
