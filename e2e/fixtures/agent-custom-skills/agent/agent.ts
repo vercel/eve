@@ -63,6 +63,13 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     // Always-on skills are in the system prompt, so the model follows them without loading them.
     return prompt.includes(PERSONA.instructions) ? `Hello. ${PERSONA_MARKER}` : "Hello.";
   }
+  if (message.startsWith("Which custom skill tools")) {
+    const tools = request.tools
+      .map(({ name }) => name)
+      .filter((name) => name.startsWith("skills__"));
+    const manage = prompt.includes("Lifecycle rules for user-created custom skills");
+    return `TOOLS:${tools.sort().join(",") || "none"} MANAGE:${manage ? "yes" : "no"}`;
+  }
   if (message.startsWith("Which release checklist")) {
     if (prompt.includes(CHECKLIST_V2)) return "CHECKLIST_V2_OFFERED";
     if (prompt.includes(CHECKLIST_V1)) return "CHECKLIST_V1_OFFERED";
