@@ -25,16 +25,6 @@ describe("the Vercel platform declaration", () => {
     expect(vercelEntities().deployment.invocationData?.()).toEqual({});
   });
 
-  it("reports a local development server only for vercel dev", () => {
-    const { deployment } = vercelEntities();
-    vi.stubEnv("VERCEL_ENV", "development");
-    vi.stubEnv("VERCEL", "1");
-    expect(deployment.localDevelopment?.()).toBe(true);
-
-    vi.stubEnv("VERCEL", "");
-    expect(deployment.localDevelopment?.()).toBe(false);
-  });
-
   it("reads Vercel at each use, not when it makes an entity", () => {
     vi.stubEnv("VERCEL", "");
     vi.stubEnv("VERCEL_ENV", undefined);

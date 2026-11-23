@@ -1,6 +1,6 @@
 import { shutdownActiveSandboxConnections } from "#execution/sandbox/active-connections.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
-import { platformContext } from "#platform/context.js";
+import { hostedSandbox } from "#platform/hosted-sandbox.js";
 
 const SANDBOX_SHUTDOWN_TIMEOUT_MS = 15_000;
 
@@ -17,7 +17,7 @@ export function shouldInstallSandboxShutdown(env: Record<string, string | undefi
   if (env.EVE_DEVELOPMENT_SANDBOX_RUN_ID !== undefined) {
     return false;
   }
-  if (platformContext().deployment.stopsSandboxesOnExit()) {
+  if (hostedSandbox()?.platformStopsSandboxes === true) {
     return false;
   }
   return true;

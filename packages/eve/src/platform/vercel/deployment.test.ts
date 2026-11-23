@@ -12,13 +12,13 @@ afterEach(() => {
 describe("Vercel platform deployment facts", () => {
   it("reports only the development, preview, and production environment kinds", () => {
     vi.stubEnv("VERCEL_ENV", "preview");
-    expect(deployment().environmentKind()).toBe("preview");
+    expect(deployment().environment()).toBe("preview");
 
     vi.stubEnv("VERCEL_ENV", "staging");
-    expect(deployment().environmentKind()).toBeUndefined();
+    expect(deployment().environment()).toBeUndefined();
 
     vi.stubEnv("VERCEL_ENV", "");
-    expect(deployment().environmentKind()).toBeUndefined();
+    expect(deployment().environment()).toBeUndefined();
   });
 
   it("names the environment from the target environment before the environment kind", () => {
@@ -57,10 +57,10 @@ describe("Vercel platform deployment facts", () => {
   it("counts only vercel dev, not a pulled VERCEL_ENV, as the platform development server", () => {
     vi.stubEnv("VERCEL_ENV", "development");
     vi.stubEnv("VERCEL", "");
-    expect(deployment().isPlatformDevelopmentServer()).toBe(false);
+    expect(deployment().localDevelopment?.()).toBe(false);
 
     vi.stubEnv("VERCEL", "1");
-    expect(deployment().isPlatformDevelopmentServer()).toBe(true);
+    expect(deployment().localDevelopment?.()).toBe(true);
   });
 
   it("trims the deployment id and treats a blank one as absent", () => {
@@ -75,10 +75,10 @@ describe("Vercel platform deployment facts", () => {
     vi.stubEnv("VERCEL_GIT_COMMIT_SHA", "");
     vi.stubEnv("VERCEL_GIT_COMMIT_REF", "   ");
     vi.stubEnv("VERCEL_DEPLOYMENT_CREATED_AT", "");
-    expect(deployment().build()).toBeUndefined();
+    expect(deployment().build?.()).toBeUndefined();
 
     vi.stubEnv("VERCEL_GIT_COMMIT_SHA", " abc123 ");
-    expect(deployment().build()).toStrictEqual({
+    expect(deployment().build?.()).toStrictEqual({
       deployedAt: undefined,
       gitBranch: undefined,
       gitSha: "abc123",

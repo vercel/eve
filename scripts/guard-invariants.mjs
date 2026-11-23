@@ -253,11 +253,11 @@
  *             `@vercel/otel` OpenTelemetry bootstrap run on any host, so they
  *             are exempt.
  *   rule 70 — Outside `packages/eve/src/platform/`, eve depends only on the
- *             platform contract: `#platform/context.js` and
- *             `#platform/services.js`, the capability
- *             modules whose implementations must stay out of bundles that
- *             don't use them (`hosted-sandbox`, `document-store`,
- *             `schedules`, `models`, `runtime-spans`), and, in the Nitro
+ *             platform contract: `#platform/context.js`, the entity types
+ *             and declarations (`entities`, `declaration`, `default`), the
+ *             capability modules whose implementations must stay out of
+ *             bundles that don't use them (`build`, `hosted-sandbox`,
+ *             `document-store`, `schedules`, `models`, `runtime-spans`), and, in the Nitro
  *             build host, the build-output port (`#platform/build-output.js`,
  *             `#platform/types.js`). Platform implementations stay behind
  *             them.
@@ -1515,13 +1515,16 @@ function checkRule69(posix, content, current) {
 // ---------- Rule 70: eve depends on the platform contract, not its implementations ----------
 
 const PLATFORM_CONTRACT_MODULES = new Set([
+  "#platform/build.js",
   "#platform/context.js",
+  "#platform/declaration.js",
+  "#platform/default.js",
   "#platform/document-store.js",
+  "#platform/entities.js",
   "#platform/hosted-sandbox.js",
   "#platform/models.js",
   "#platform/runtime-spans.js",
   "#platform/schedules.js",
-  "#platform/services.js",
 ]);
 const PLATFORM_BUILD_HOST_DIR = "packages/eve/src/internal/nitro/host/";
 const PLATFORM_BUILD_HOST_MODULES = new Set(["#platform/build-output.js", "#platform/types.js"]);
@@ -1550,7 +1553,7 @@ function checkRule70(posix, lines, violations) {
       violations.push({
         rule: 70,
         file: `${posix}:${index + 1}`,
-        message: `imports \`${specifier}\`. Outside \`packages/eve/src/platform/\`, eve depends only on the platform contract (\`#platform/context.js\` and its capability modules), plus the build-output port in the Nitro build host. Add what you need to the \`PlatformContext\` contract and \`platform/vercel/context.ts\`.`,
+        message: `imports \`${specifier}\`. Outside \`packages/eve/src/platform/\`, eve depends only on the platform contract (\`#platform/context.js\` and its capability modules), plus the build-output port in the Nitro build host. Add what you need to the platform entities (\`#platform/entities.js\`) and the Vercel declaration (\`platform/vercel/declaration.ts\`).`,
       });
     }
   }
@@ -2879,7 +2882,7 @@ async function main() {
     violations.push({
       rule: 69,
       file,
-      message: `reads \`VERCEL*\` environment variables or imports \`#compiled/@vercel/*\` or \`#platform/vercel/*\` in ${count} place${count === 1 ? "" : "s"}. Vercel platform knowledge lives in \`packages/eve/src/platform/\` so eve can run on other hosts. Read platform facts and capabilities through \`platformContext()\` from \`#platform/context.js\`, or add the capability to the \`PlatformContext\` contract and \`platform/vercel/context.ts\`.`,
+      message: `reads \`VERCEL*\` environment variables or imports \`#compiled/@vercel/*\` or \`#platform/vercel/*\` in ${count} place${count === 1 ? "" : "s"}. Vercel platform knowledge lives in \`packages/eve/src/platform/\` so eve can run on other hosts. Read platform facts and capabilities through \`platformContext()\` from \`#platform/context.js\`, or add the capability to the platform entities (\`#platform/entities.js\`) and the Vercel declaration (\`platform/vercel/declaration.ts\`).`,
     });
   }
 

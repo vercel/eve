@@ -30,6 +30,8 @@ import type * as Sha256 from "./sha256.js";
 import type * as Sha256Web from "./sha256.web.js";
 import type * as Uuid from "./uuid.js";
 import type * as UuidWeb from "./uuid.web.js";
+import type * as VercelProjectLink from "./vercel-project-link.js";
+import type * as VercelProjectLinkWeb from "./vercel-project-link.web.js";
 
 type Twin<Web extends Node, Node> = [Web, Node];
 
@@ -50,4 +52,5 @@ export type PlatformTwins = [
   Twin<typeof SandboxCacheWeb, typeof SandboxCache>,
   Twin<typeof Sha256Web, typeof Sha256>,
   Twin<typeof UuidWeb, typeof Uuid>,
+  Twin<typeof VercelProjectLinkWeb, typeof VercelProjectLink>,
 ];

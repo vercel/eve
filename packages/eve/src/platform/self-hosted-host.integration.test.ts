@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
-import type { PlatformContext } from "#platform/context.js";
-import { hostServices } from "#platform/services.js";
+import { definePlatform } from "#platform/declaration.js";
+import { createEntities } from "#platform/entities.js";
 import type { MemoryDocumentBackend } from "#public/memory/file/backend.js";
 import { createProcessApp, installProcessApp } from "#runtime/app.js";
 
@@ -14,48 +14,29 @@ const config = {
 const publicHost = new URL(config.publicUrl).host;
 const documentStore: MemoryDocumentBackend = { kind: "self-hosted-documents" } as never;
 
-const selfHostedPlatform: PlatformContext = {
-  build: {
-    target: () => "node",
-    outputDirectory: () => undefined,
-    localSandboxPrewarmFailure: () => undefined,
-  },
-  deployment: {
-    environmentKind: () => "production",
+const selfHostedPlatform = definePlatform({
+  deployment: () => ({
+    environment: () => "production",
     deploymentId: () => config.deploymentId,
-    hostedDeploymentId: () => config.deploymentId,
     build: () => config.build,
     productionHost: () => publicHost,
-    deploymentHost: () => publicHost,
     publicHost: () => publicHost,
-    isPlatformDevelopmentServer: () => false,
     scope: () => ({
       environment: "production",
       id: "agents-prod",
       platform: "self-hosted",
       variant: null,
     }),
-    stopsSandboxesOnExit: () => false,
-  },
-  identity: {
-    token: async () => {
-      throw new Error("this host has no workload identity");
-    },
-    withDevelopmentRequestScope: async (_input, callback) => await callback(),
-    callbackHeaders: () => ({}),
-  },
-  services: hostServices("1", {
-    documentStore,
-    modelCredentials: { resolve: async () => ({ kind: "api-key", token: config.gatewayApiKey }) },
   }),
-  telemetry: { traceSessionAttribute: () => undefined },
-  workspace: {
-    transport: (routePath) => ({
+  network: () => ({
+    peer: (routePath) => ({
       url: `${config.publicUrl}${routePath}`,
       auth: async () => ({ headers: {} }),
     }),
-  },
-};
+  }),
+  storage: () => ({ documents: documentStore }),
+  models: () => ({ resolve: async () => ({ kind: "api-key", token: config.gatewayApiKey }) }),
+});
 
 let uninstall: () => void;
 beforeAll(() => {
@@ -65,9 +46,9 @@ beforeAll(() => {
   vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_vercel_should_not_be_used");
   vi.stubEnv("VERCEL_URL", "vercel-should-not-be-used.vercel.app");
   vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", "vercel-prod-should-not-be-used.vercel.app");
-  const runtime = createProcessApp();
-  runtime.platform = selfHostedPlatform;
-  uninstall = installProcessApp(runtime);
+  const app = createProcessApp();
+  app.platform = createEntities(selfHostedPlatform, undefined);
+  uninstall = installProcessApp(app);
 });
 afterAll(() => {
   uninstall();

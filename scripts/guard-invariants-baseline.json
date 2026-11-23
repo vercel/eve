@@ -48,9 +48,6 @@
   "rule74_sessionProgramNodeImportAllowlist": [
     "packages/eve/src/execution/public-destination.ts -> node:dns",
     "packages/eve/src/execution/public-destination.ts -> undici",
-    "packages/eve/src/harness/workflow-admission.ts -> node:crypto",
-    "packages/eve/src/internal/vercel/project-link.ts -> node:fs/promises",
-    "packages/eve/src/internal/vercel/project-link.ts -> node:path",
-    "packages/eve/src/platform/vercel/context.ts -> node:path"
+    "packages/eve/src/harness/workflow-admission.ts -> node:crypto"
   ]
 }

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { deriveEveWorkflowQueueNamespace } from "#internal/workflow/queue-namespace.js";
 import { platformContext } from "#platform/context.js";
 import { createProcessApp, installProcessApp, type ProcessApp } from "#runtime/app.js";
+import { defaultPlatform } from "#platform/default.js";
 import { bootProcess } from "#runtime/lifecycle.js";
 
 let app: ProcessApp;
@@ -21,7 +22,7 @@ afterEach(() => {
 
 describe("bootProcess", () => {
   it("installs the platform and the queue namespace before the modules that load authored code", () => {
-    bootProcess({ agentName: "weather" }, "queue-namespace");
+    bootProcess({ agentName: "weather", platform: defaultPlatform }, "queue-namespace");
 
     expect(app.platform).toBeDefined();
     expect(platformContext()).toBe(app.platform);
@@ -29,11 +30,11 @@ describe("bootProcess", () => {
   });
 
   it("continues the phase list where an earlier module stopped, without running a phase twice", () => {
-    bootProcess({ agentName: "weather" }, "queue-namespace");
+    bootProcess({ agentName: "weather", platform: defaultPlatform }, "queue-namespace");
     const platform = app.platform;
 
-    bootProcess({ agentName: "weather" }, "artifacts");
-    bootProcess({ agentName: "weather" }, "queue-namespace");
+    bootProcess({ agentName: "weather", platform: defaultPlatform }, "artifacts");
+    bootProcess({ agentName: "weather", platform: defaultPlatform }, "queue-namespace");
 
     expect(app.platform).toBe(platform);
   });

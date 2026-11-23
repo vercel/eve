@@ -24,8 +24,7 @@ export function eveOutputMapping(options?: {
       }
       if (attributes["agent.run.id"] !== undefined) {
         const context = options?.resolve(span) ?? {
-          platform:
-            platformContext().telemetry.traceSessionAttribute() === undefined ? "other" : "vercel",
+          platform: platformContext().telemetry.sessionAttribute === undefined ? "other" : "vercel",
           traceSessionId:
             typeof attributes["agent.run.id"] === "string"
               ? currentTraceSessionId(attributes["agent.run.id"])

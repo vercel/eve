@@ -713,7 +713,7 @@ function addInvalidBearerTokenError(
  */
 export function placeholderAuth(): AuthFn<Request> {
   return () => {
-    if (platformContext().deployment.environmentKind() !== "production") {
+    if (platformContext().deployment.environment() !== "production") {
       return null;
     }
 

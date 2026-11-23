@@ -11,7 +11,7 @@ const WORKFLOW_LOCAL_BASE_URL_ENV = "WORKFLOW_LOCAL_BASE_URL";
 export function resolveVercelProductionCallbackBaseUrl(): string | null {
   const { deployment } = platformContext();
   const productionHost = deployment.productionHost();
-  if (deployment.environmentKind() === "production" && productionHost !== undefined) {
+  if (deployment.environment() === "production" && productionHost !== undefined) {
     return `https://${productionHost}`;
   }
   return null;

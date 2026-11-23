@@ -32,5 +32,11 @@ export async function resolveGatewayModelCredential(
     return { kind: "api-key", token: await resolveModelApiKey("ai-gateway-key") };
   if (selected !== "ai-gateway-project" && process.env.AI_GATEWAY_API_KEY?.trim())
     return { kind: "api-key", token: process.env.AI_GATEWAY_API_KEY };
-  return { kind: "oidc", token: await platformContext().identity.token() };
+  const { network } = platformContext();
+  if (network.token === undefined) {
+    throw new Error(
+      "The installed eve platform gives no workload token for AI Gateway. Configure the model with an AI Gateway API key.",
+    );
+  }
+  return { kind: "oidc", token: await network.token() };
 }

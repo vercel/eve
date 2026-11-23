@@ -4,6 +4,7 @@ import { requireDurableHost } from "#execution/hosts.js";
 import { EVE_WORKFLOW_SPEC_VERSION } from "#internal/workflow/spec-version-default.js";
 import { platformContext } from "#platform/context.js";
 import { createProcessApp, installProcessApp } from "#runtime/app.js";
+import { defaultPlatform } from "#platform/default.js";
 import { bootProcess } from "#runtime/lifecycle.js";
 import { endLifetime } from "#runtime/lifetime.js";
 import { BOOT_PHASES, start } from "#runtime/start.js";
@@ -32,7 +33,7 @@ beforeEach(() => {
   ]) {
     vi.stubEnv(name, undefined);
   }
-  bootProcess({ agentName: "weather" }, "artifacts");
+  bootProcess({ agentName: "weather", platform: defaultPlatform }, "artifacts");
 });
 
 afterEach(() => {

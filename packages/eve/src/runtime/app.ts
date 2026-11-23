@@ -1,12 +1,12 @@
 import type { DurableHost, Hosts } from "#execution/hosts.js";
 import type { InstrumentationProvider } from "#instrumentation/provider.js";
 import type { InstrumentationRuntime } from "#instrumentation/runtime.js";
-import type { PlatformContext } from "#platform/context.js";
+import type { Entities } from "#platform/entities.js";
 import { createLifetime, type Lifetime } from "#runtime/lifetime.js";
 import type { RuntimeSession } from "#runtime/sessions/runtime-session.js";
 
 export interface App {
-  readonly platform: PlatformContext;
+  readonly platform: Entities;
   readonly durable: DurableHost;
   readonly lifetime: Lifetime;
 }
@@ -23,7 +23,7 @@ export interface AppInstrumentation {
 
 export interface ProcessApp {
   bootedPhases: number;
-  platform: PlatformContext | undefined;
+  platform: Entities | undefined;
   defaultSession: RuntimeSession | undefined;
   readonly hosts: Hosts;
   readonly instrumentation: AppInstrumentation;

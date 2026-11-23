@@ -108,7 +108,7 @@ export const vercelIdentity = {
       {
         request: input.request,
         resolveCurrentProject: async () => {
-          const { readVercelProjectLink } = await import("#internal/vercel/project-link.js");
+          const { readVercelProjectLink } = await import("#runtime-env/vercel-project-link.js");
           const link = await readVercelProjectLink(input.appRoot);
           return link === undefined
             ? undefined

@@ -104,7 +104,7 @@ export function buildRuntimeIdentity(agent: RuntimeAgentIdentity): RuntimeIdenti
     eveVersion: installedEveVersion(),
   };
 
-  const build = platformContext().deployment.build();
+  const build = platformContext().deployment.build?.();
   return build === undefined ? identity : { ...identity, build };
 }
 

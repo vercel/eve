@@ -151,7 +151,7 @@ async function traced(
     "agent.trace.schema.version": 4,
     "gen_ai.conversation.id": operationConversationId({ sessionId: input.sessionId }),
   };
-  const traceSessionAttribute = platformContext().telemetry.traceSessionAttribute();
+  const traceSessionAttribute = platformContext().telemetry.sessionAttribute;
   if (traceSessionAttribute !== undefined) attributes[traceSessionAttribute] = input.sessionId;
   if (input.origin !== undefined) {
     attributes["eve.channel.kind"] = conversation.channel.kind;

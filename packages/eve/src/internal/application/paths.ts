@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import { workflowEntryReference } from "#execution/workflow-references.js";
-import { platformContext } from "#platform/context.js";
+import { platformBuild } from "#platform/build.js";
 import {
   resolveInstalledPackageInfo,
   resolvePackageRoot,
@@ -68,7 +68,7 @@ export function resolveSandboxCacheDirectory(appRoot: string): string {
 }
 
 export function resolveOutputDirectory(appRoot: string): string {
-  return platformContext().build.outputDirectory(appRoot) ?? join(appRoot, ".output");
+  return platformBuild().outputDirectory?.(appRoot) ?? join(appRoot, ".output");
 }
 
 export function getApplicationInfo(appRoot: string): ApplicationInfo {
