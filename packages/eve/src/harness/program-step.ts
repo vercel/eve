@@ -74,6 +74,7 @@ import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import type { StepResult } from "#harness/types.js";
 import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { callRun, runTurn } from "#protocol/session-projection/selectors.js";
+import { isMcpContentBlockList } from "#runtime/connections/tool-result.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { isObject } from "#shared/guards.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
@@ -583,8 +584,13 @@ async function resolveProgramOutputSchema(
     (!isObject(output) ||
       typeof output.status !== "number" ||
       output.status < 200 ||
-      output.status >= 300)
+      output.status >= 300 ||
+      output.status === 204 ||
+      output.status === 205)
   ) {
+    return undefined;
+  }
+  if (remote.protocol === "mcp" && isMcpContentBlockList(output)) {
     return undefined;
   }
   return toOutputSchema(remote.schema);

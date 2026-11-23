@@ -610,6 +610,9 @@ describe("workflow({ mode: 'execute', tools: true }) program step", () => {
             status: 200,
           });
         }
+        if (url.endsWith("/empty")) {
+          return new Response(null, { status: 204 });
+        }
         return new Response(JSON.stringify({ error: "missing" }), {
           headers: { "content-type": "application/json" },
           status: 404,
@@ -641,6 +644,25 @@ describe("workflow({ mode: 'execute', tools: true }) program step", () => {
                       },
                     },
                   },
+                },
+              },
+            },
+            "/empty": {
+              get: {
+                operationId: "deletePet",
+                responses: {
+                  "200": {
+                    content: {
+                      "application/json": {
+                        schema: {
+                          properties: { id: { type: "integer" } },
+                          required: ["id"],
+                          type: "object",
+                        },
+                      },
+                    },
+                  },
+                  "204": { description: "No content" },
                 },
               },
             },
@@ -676,8 +698,9 @@ describe("workflow({ mode: 'execute', tools: true }) program step", () => {
           } catch (error) {
             invalid = error.message;
           }
+          const empty = await tools.petstore__deletePet({});
           const missing = await tools.petstore__getMissing({});
-          return { invalid, missingStatus: missing.status, missingBody: missing.body };
+          return { invalid, emptyStatus: empty.status, emptyBody: empty.body, missingStatus: missing.status, missingBody: missing.body };
         `,
         modules: [apiConnection],
         tools: [],
@@ -687,8 +710,10 @@ describe("workflow({ mode: 'execute', tools: true }) program step", () => {
         expect(turn.reply).toBe("Done.");
         expect(results).toEqual([
           {
-            calls: { completed: 2 },
+            calls: { completed: 3 },
             result: {
+              emptyBody: null,
+              emptyStatus: 204,
               invalid: expect.stringContaining("InvalidToolOutput"),
               missingBody: { error: "missing" },
               missingStatus: 404,
