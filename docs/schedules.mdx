@@ -109,6 +109,31 @@ Every run sends the agent's reply to the channel. To skip a run with nothing to 
 
 A handler-form session can pause and wait like any other session, for example while a Slack thread waits for a reply.
 
+### Retire sessions on a schedule
+
+A schedule handler can retire idle or expired sessions by ID with `sessions.end()` from `eve/server`, without a channel handle or HTTP call:
+
+```ts title="agent/schedules/retire-idle.ts"
+import { defineSchedule } from "eve/schedules";
+import { sessions } from "eve/server";
+import { SessionNotActiveError } from "eve/sessions";
+
+export default defineSchedule({
+  cron: "0 * * * *",
+  async run({ appAuth }) {
+    for (const sessionId of await findExpiredSessionIds()) {
+      try {
+        await sessions.end(sessionId, { auth: appAuth, reason: "scheduled cleanup" });
+      } catch (error) {
+        if (!SessionNotActiveError.is(error)) throw error;
+      }
+    }
+  },
+});
+```
+
+`sessions.end()` finishes the session with `outcome: "completed"`, so built-in channel renderers such as Slack post nothing. It also retires [stranded sessions](./concepts/execution-model-and-durability#stranded-sessions) and handed-off sessions whose original Vercel deployment was deleted.
+
 ### Detect the app principal
 
 `isScheduleAuth(auth)` returns `true` when `auth` is the app identity that schedules pass as `appAuth`. Markdown-form sessions also run as that identity. Use it in tools, hooks, or channel handlers to treat the agent's own work differently from a user's:

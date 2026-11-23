@@ -1,4 +1,4 @@
-import { isRetriedStep } from "#execution/hosts.js";
+import { installedDurableHost, isRetriedStep } from "#execution/hosts.js";
 import { readSessionStreamTailIndex, streamSessionLines } from "#execution/session-event-stream.js";
 import type { ControlDelivery } from "#harness/types.js";
 import { buildAdapterContext } from "#channel/adapter-context.js";
@@ -56,6 +56,8 @@ import type {
 } from "#harness/types.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { createLogger } from "#internal/logging.js";
+import { isOwnerDeploymentDeletedError } from "#internal/workflow/owner-deployment-deleted.js";
+import { getWorld } from "#internal/workflow/runtime.js";
 import { eventsOfLine } from "#protocol/session-lines.js";
 import type { SessionEvent, SessionStreamEvent } from "#protocol/session-event.js";
 import type { FactPosition, StoredLine } from "#protocol/session-events/envelope.js";
@@ -633,9 +635,17 @@ export async function publishTerminalSessionEvent(input: {
       ? undefined
       : storedProjection(readDurableSession(input.sessionState).state));
   try {
+    await assertSessionAnchorKeyAvailable(sessionId);
     projection = await reconcilePublishedSessionLines(projection, sessionId);
   } catch (error) {
-    log.error(`failed to fold the published tail for terminal ${type} event`, {
+    if (isOwnerDeploymentDeletedError(error)) {
+      log.warn(`skipping terminal ${type} event: the session anchor deployment was deleted`, {
+        ...fields,
+        error,
+      });
+      return;
+    }
+    log.error(`failed to prepare terminal ${type} event`, {
       ...fields,
       error,
     });
@@ -703,7 +713,14 @@ export async function publishTerminalSessionEvent(input: {
   try {
     await contextStorage.run(ctx, () => emit(endSession(projection, input.ending)));
   } catch (error) {
-    log.error(`failed to publish terminal ${type} event`, { ...fields, error });
+    if (isOwnerDeploymentDeletedError(error)) {
+      log.warn(`skipping terminal ${type} event: the session anchor deployment was deleted`, {
+        ...fields,
+        error,
+      });
+    } else {
+      log.error(`failed to publish terminal ${type} event`, { ...fields, error });
+    }
   } finally {
     await publisher.release();
     try {
@@ -715,6 +732,14 @@ export async function publishTerminalSessionEvent(input: {
       });
     }
   }
+}
+
+async function assertSessionAnchorKeyAvailable(sessionId: string): Promise<void> {
+  if (sessionId.length === 0 || installedDurableHost()?.name !== "workflow") return;
+  const world = await getWorld();
+  if (world.getEncryptionKeyForRun === undefined) return;
+  const { deploymentId } = await world.runs.get(sessionId, { resolveData: "none" });
+  await world.getEncryptionKeyForRun(sessionId, { deploymentId });
 }
 
 async function writeUnroutedSessionEvent(
