@@ -331,8 +331,6 @@ async function reenqueueActiveDevelopmentRuns(input: {
   readonly canRecover: (generationId: string) => Promise<boolean>;
   readonly world: LocalWorld;
 }): Promise<void> {
-  // `reenqueueActiveRuns` only lists runs, so listing is where runs of generations that cannot
-  // be recovered are filtered out and the orphaned steps of the rest are released.
   const recoverableRuns: World["runs"] = {
     ...input.world.runs,
     list: (async (params) => {
