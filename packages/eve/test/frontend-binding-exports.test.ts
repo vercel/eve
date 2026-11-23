@@ -3,9 +3,9 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const EXPORT_FROM = /export\s+(?:type\s+)?\{([^}]*)\}\s+from\s+"([^"]+)"/g;
-const BINDING_MODULE = /^#(?:react|vue|svelte)\//;
+const BINDING_MODULE = /^#(?:react|vue|svelte|solid)\//;
 
-function sharedExports(binding: "react" | "vue" | "svelte"): string[] {
+function sharedExports(binding: "react" | "vue" | "svelte" | "solid"): string[] {
   const source = readFileSync(new URL(`../src/${binding}/index.ts`, import.meta.url), "utf8");
   const names: string[] = [];
   for (const [, specifiers, from] of source.matchAll(EXPORT_FROM)) {
@@ -23,5 +23,6 @@ describe("frontend binding entry points", () => {
     const react = sharedExports("react");
     expect(sharedExports("vue")).toEqual(react);
     expect(sharedExports("svelte")).toEqual(react);
+    expect(sharedExports("solid")).toEqual(react);
   });
 });

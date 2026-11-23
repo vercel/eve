@@ -19,7 +19,7 @@ import {
   type ToolAskOptions,
   type ToolAnswer,
 } from "#tools/definition.js";
-import type { ToolModelOutput } from "#tools/model-output.js";
+import type { ToolModelOutput, ToolModelOutputContext } from "#tools/model-output.js";
 import {
   WORKFLOW_TOOL_ENTRY_POINTS,
   type WorkflowToolEntryPoint,
@@ -218,7 +218,10 @@ interface WorkflowToolDefinitionBase<TInput, TOutput> extends PublicToolDefiniti
 > {
   readonly [WORKFLOW_TOOL_BRAND]: true;
   approval?: Approval<unknown extends TInput ? Record<string, unknown> : TInput>;
-  toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
+  toModelOutput?(
+    output: TOutput,
+    ctx?: ToolModelOutputContext,
+  ): ToolModelOutput | Promise<ToolModelOutput>;
 }
 
 /** A workflow tool whose calls are ordinary tool calls: the turn waits until each settles. */

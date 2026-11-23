@@ -9,8 +9,8 @@ const storeId = process.env.EVE_MEMORY_BLOB_STORE_ID?.trim();
 const token = process.env.EVE_MEMORY_BLOB_READ_WRITE_TOKEN?.trim();
 
 // Personal skills follow each person into every conversation. Channel skills
-// apply to everyone in a Slack channel or group DM, and someone other than
-// their author approves them before they go live.
+// apply to everyone in a Slack channel or group DM, and go live once their
+// author approves them.
 export default customSkills({
   storage: process.env.VERCEL
     ? vercelBlob(storeId ? { storeId } : token ? { token } : {})

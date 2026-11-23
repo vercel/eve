@@ -118,6 +118,7 @@ const EXTERNAL_PACKAGES = new Set([
   "nitro",
   "react",
   "rolldown",
+  "solid-js",
   "svelte",
   "undici",
   "vite",
@@ -283,95 +284,43 @@ await buildWithRolldown({
   onLog: onVendoredDependencyLog,
 });
 
-const vueSourceFiles = await collectSourceFiles(join(SRC_ROOT, "vue"));
+function isFrameworkBindingBuildExternal(source) {
+  if (source.startsWith("#compiled/")) {
+    return true;
+  }
 
-if (vueSourceFiles.length > 0) {
-  const vueInput = Object.fromEntries(
-    vueSourceFiles.map((sourcePath) => {
-      const parsed = parse(sourcePath);
-      return [join(parsed.dir, parsed.name).replaceAll("\\", "/"), sourcePath];
-    }),
-  );
-
-  function isVueBuildExternal(source) {
-    if (source.startsWith("#compiled/")) {
-      return true;
-    }
-
-    if (source.startsWith("#")) {
-      return false;
-    }
-
-    if (isBuiltin(source)) {
-      return true;
-    }
-
-    for (const packageName of EXTERNAL_PACKAGES) {
-      if (source === packageName || source.startsWith(`${packageName}/`)) {
-        return true;
-      }
-    }
-
+  if (source.startsWith("#")) {
     return false;
   }
 
-  await buildWithRolldown({
-    input: vueInput,
-    external: isVueBuildExternal,
-    platform: "node",
-    resolve: {
-      conditionNames: ["eve-source"],
-      mainFields: ["module", "main"],
-    },
-    treeshake: true,
-    output: {
-      chunkFileNames: "src/chunks/[name]-[hash].js",
-      comments: false,
-      dir: "dist",
-      entryFileNames: "[name].js",
-      format: "esm",
-      minify: false,
-      sourcemap: false,
-    },
-    onLog: onVendoredDependencyLog,
-  });
+  if (isBuiltin(source)) {
+    return true;
+  }
+
+  for (const packageName of EXTERNAL_PACKAGES) {
+    if (source === packageName || source.startsWith(`${packageName}/`)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
-const svelteSourceFiles = await collectSourceFiles(join(SRC_ROOT, "svelte"));
+for (const binding of ["vue", "svelte", "solid"]) {
+  const bindingSourceFiles = await collectSourceFiles(join(SRC_ROOT, binding));
 
-if (svelteSourceFiles.length > 0) {
-  const svelteInput = Object.fromEntries(
-    svelteSourceFiles.map((sourcePath) => {
-      const parsed = parse(sourcePath);
-      return [join(parsed.dir, parsed.name).replaceAll("\\", "/"), sourcePath];
-    }),
-  );
-
-  function isSvelteBuildExternal(source) {
-    if (source.startsWith("#compiled/")) {
-      return true;
-    }
-
-    if (source.startsWith("#")) {
-      return false;
-    }
-
-    if (isBuiltin(source)) {
-      return true;
-    }
-
-    for (const packageName of EXTERNAL_PACKAGES) {
-      if (source === packageName || source.startsWith(`${packageName}/`)) {
-        return true;
-      }
-    }
-
-    return false;
+  if (bindingSourceFiles.length === 0) {
+    continue;
   }
 
   await buildWithRolldown({
-    input: svelteInput,
-    external: isSvelteBuildExternal,
+    input: Object.fromEntries(
+      bindingSourceFiles.map((sourcePath) => {
+        const parsed = parse(sourcePath);
+        return [join(parsed.dir, parsed.name).replaceAll("\\", "/"), sourcePath];
+      }),
+    ),
+    external: isFrameworkBindingBuildExternal,
     platform: "node",
     resolve: {
       conditionNames: ["eve-source"],
