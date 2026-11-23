@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { installedDurableHost } from "#execution/hosts.js";
+import { installedProcessEngine } from "#execution/hosts.js";
 
 describe("Workflow's step bundle", () => {
-  it("installs Workflow as the realm's durable host when it loads", async () => {
-    expect(installedDurableHost()).toBeUndefined();
+  it("installs Workflow as the realm's durable engine when it loads", async () => {
+    expect(installedProcessEngine()).toBeUndefined();
     await import("#internal/workflow/builtins.js");
-    expect(installedDurableHost()?.name).toBe("workflow");
+    expect(installedProcessEngine()?.name).toBe("workflow");
   });
 });

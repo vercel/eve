@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { installWorkflowHost } from "#execution/workflow-host/host.js";
+import { installWorkflowEngine } from "#execution/workflow-host/host.js";
 import { builtInPlatform } from "#platform/context.js";
 
 import { RunExpiredError } from "#compiled/@workflow/errors/index.js";
@@ -14,7 +14,7 @@ vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   getWorld: async () => ({ runs: { get: getRunMetadataMock } }),
 }));
 
-installWorkflowHost(builtInPlatform());
+installWorkflowEngine(builtInPlatform());
 
 const encoder = new TextEncoder();
 

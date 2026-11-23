@@ -1,6 +1,6 @@
 import { applyRunMessagesStep } from "#execution/tools/workflow/apply-run-messages-step.js";
 import { describe, expect, it, vi } from "vitest";
-import { installWorkflowHost } from "#execution/workflow-host/host.js";
+import { installWorkflowEngine } from "#execution/workflow-host/host.js";
 import { builtInPlatform } from "#platform/context.js";
 
 import type { DurableSession, DurableSessionState } from "#execution/durable-session-store.js";
@@ -82,7 +82,7 @@ vi.mock("#execution/publish-session-events.js", async () => {
   };
 });
 
-installWorkflowHost(builtInPlatform());
+installWorkflowEngine(builtInPlatform());
 
 function usage(inputTokens: number, costUsd?: number): TokenUsage {
   return { cacheReadTokens: 0, cacheWriteTokens: 0, costUsd, inputTokens, outputTokens: 0 };

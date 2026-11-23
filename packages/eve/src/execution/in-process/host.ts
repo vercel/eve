@@ -6,11 +6,11 @@ import type {
 } from "#channel/types.js";
 import { agentSessionsOver } from "#execution/agent-sessions/sessions-over.js";
 import { dispatchCoordinationOn } from "#execution/coordination-dispatch-step.js";
+import { decodeDeliveryAddress, type Durable } from "#execution/durable.js";
 import {
   registerHost,
   resumeRoutedHook,
   resumeRoutedSessionInbox,
-  type DurableHost,
   type SignInCallbacks,
 } from "#execution/hosts.js";
 import type { SessionRuntimeConfig } from "#execution/initial-entry.js";
@@ -61,12 +61,13 @@ const NO_STEP_RUNTIME: Runtime = {
   resolveContinuation: async () => unavailable("Resolving another session"),
 };
 
-const deliverRouted: DurableHost["deliver"] = async (to, payload) => {
-  if ("hook" in to) return await resumeRoutedHook(to.hook, payload);
-  if ("session" in to)
-    return await resumeRoutedSessionInbox(to.session, payload as DeliverHookPayload);
+const deliverRouted: Durable["deliver"] = async (to, payload) => {
+  const address = decodeDeliveryAddress(to);
+  if (address.kind === "hook") return await resumeRoutedHook(address.token, payload);
+  if (address.kind === "session")
+    return await resumeRoutedSessionInbox(address.address, payload as DeliverHookPayload);
   try {
-    await resumeRoutedHook(to.signIn, payload);
+    await resumeRoutedHook(address.token, payload);
   } catch (error) {
     if (!isHookNotFound(error)) throw error;
   }

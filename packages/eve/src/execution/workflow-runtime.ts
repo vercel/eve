@@ -1,6 +1,10 @@
-import { durableRunEnded, installedDurableHost, type DurableHost } from "#execution/hosts.js";
-import { workflowEntryReference } from "#execution/workflow-references.js";
-import { createWorkflowHost, installWorkflowHost } from "#execution/workflow-host/host.js";
+import { opaque, sessionAddress } from "#execution/durable.js";
+import { durableRunEnded, installedProcessEngine } from "#execution/hosts.js";
+import {
+  installWorkflowEngine,
+  workflowProcessEngine,
+  workflowRunStatus,
+} from "#execution/workflow-host/host.js";
 import { builtInPlatform } from "#platform/context.js";
 import { prewarmWorkflowSession } from "#execution/session-prewarm.js";
 import { readRemoteChildBinding } from "#execution/child-binding.js";
@@ -42,7 +46,7 @@ import {
   type WorkflowFunction,
   type WorkflowMetadata,
 } from "#internal/workflow/runtime.js";
-import { assertStartClaims, pinRunId } from "#internal/workflow/start-claim.js";
+import { assertStartClaims, createRunId, pinRunId } from "#internal/workflow/start-claim.js";
 import type { SessionPredecessor } from "#protocol/session-events/families/session.js";
 import { runtimeNodeId } from "#runtime/sessions/session-agent.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
@@ -65,7 +69,6 @@ import { walkCauseChain } from "#shared/errors.js";
 import { buildInvocationAttributes } from "#internal/invocation/metadata.js";
 import { isAgentTraceContext } from "#tracing/eve/agent-trace-context.js";
 import {
-  SESSION_INBOX_SESSION_ID_METADATA_KEY,
   sessionCommandHookToken,
   sessionInboxHookToken,
   type SessionInboxAddress,
@@ -121,7 +124,7 @@ function sessionHandle(
 }
 
 export function createWorkflowRuntime(config: SessionRuntimeConfig): Runtime {
-  installWorkflowHost(builtInPlatform());
+  const durable = installWorkflowEngine(builtInPlatform());
   const startSession = async (
     input: RunInput,
     predecessor?: SessionPredecessor,
@@ -158,32 +161,30 @@ export function createWorkflowRuntime(config: SessionRuntimeConfig): Runtime {
     };
 
     const { continuationToken } = input;
-    assertStartClaims(await getWorld());
+    const world = await getWorld();
+    assertStartClaims(world);
     const hasContinuation = continuationToken !== undefined && continuationToken !== "";
     const workflowInput: InitialWorkflowEntryInput = {
       ...workflowInputBase,
       startClaim: hasContinuation ? "continuation" : "inbox",
     };
 
-    let run: Awaited<ReturnType<typeof startWorkflowOnCurrentDeployment>>;
+    let sessionId: string;
     try {
       const startOptions: StartOptionsWithoutDeploymentId = {
         allowReservedAttributes: true,
         attributes: normalizeEveAttributes(attributes),
       };
       if (retention !== undefined) startOptions.experimental_retention = retention;
-      run = await startWorkflowOnDeployment(
-        workflowEntryReference,
-        [workflowInput],
-        workflowInput.ownerDeploymentId,
-        startOptions,
-        (runId) => ({
-          token: sessionInboxHookToken(
-            hasContinuation ? continuationToken : sessionCommandHookToken(runId),
-          ),
-          metadata: { [SESSION_INBOX_SESSION_ID_METADATA_KEY]: runId },
-        }),
-      );
+      sessionId = createRunId(world, {
+        ...startOptions,
+        deploymentId: workflowInput.ownerDeploymentId,
+      });
+      await durable.start({
+        addresses: [sessionAddress(hasContinuation ? continuationToken : { sessionId })],
+        body: opaque({ input: workflowInput, options: startOptions }),
+        sessionId,
+      });
     } catch (error) {
       if (hasContinuation && HookConflictError.is(error)) {
         return await joinContinuationOwner(input, predecessor, attempt);
@@ -194,7 +195,7 @@ export function createWorkflowRuntime(config: SessionRuntimeConfig): Runtime {
       throw error;
     }
 
-    return sessionHandle(run.runId, input.delivery?.deliveryId, hasContinuation ? true : undefined);
+    return sessionHandle(sessionId, input.delivery?.deliveryId, hasContinuation ? true : undefined);
   };
 
   const joinContinuationOwner = async (
@@ -461,13 +462,8 @@ export async function resolveContinuation(
   return owner;
 }
 
-function workflowHost(): DurableHost {
-  const installed = installedDurableHost();
-  return installed?.name === "workflow" ? installed : createWorkflowHost(builtInPlatform());
-}
-
 export async function hasRunEnded(runId: string): Promise<boolean> {
-  return await durableRunEnded(workflowHost(), runId);
+  return await durableRunEnded(workflowRunStatus, runId);
 }
 
 export async function startWorkflowOnCurrentDeployment<TArgs extends unknown[], TResult>(
@@ -491,6 +487,7 @@ export async function startWorkflowOnDeployment<TArgs extends unknown[], TResult
   deploymentId: string,
   options?: StartOptionsWithoutDeploymentId,
   claim?: StartClaim,
+  runId?: string,
 ): Promise<Run<unknown> | Run<TResult>> {
   return await withWorkflowStartContext(async () => {
     if (deploymentId.length === 0 || deploymentId === "latest") {
@@ -503,7 +500,7 @@ export async function startWorkflowOnDeployment<TArgs extends unknown[], TResult
       deploymentId,
     };
     if (claim === undefined) return await start(workflow, args, startOptions);
-    const pinned = pinRunId(await getWorld(), startOptions);
+    const pinned = pinRunId(await getWorld(), startOptions, runId);
     const run = await start(workflow, args, {
       ...startOptions,
       experimental_hook: claim(pinned.runId),
@@ -520,7 +517,10 @@ export async function startWorkflowOnDeployment<TArgs extends unknown[], TResult
 }
 
 async function resolveCurrentWorkflowDeploymentId(): Promise<string> {
-  const deploymentId = await workflowHost().deploymentId();
+  const engine = installedProcessEngine();
+  const deploymentId = await (
+    engine?.name === "workflow" ? engine : workflowProcessEngine(builtInPlatform())
+  ).deploymentId();
   if (deploymentId.length === 0 || deploymentId === "latest") {
     throw new Error("Workflow runtime could not resolve an exact deployment id.");
   }

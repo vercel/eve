@@ -1,4 +1,4 @@
-import { installedDurableHost } from "#execution/hosts.js";
+import { installedDurable } from "#execution/hosts.js";
 import { createMcpTraceFetch } from "#runtime/connections/mcp-tracing.js";
 import { createMcpTracing } from "#tracing/eve/mcp.js";
 import { withConnectionEventSpan } from "#tracing/eve/connection-events.js";
@@ -178,7 +178,7 @@ export class ConnectionEventActions {
   ): Promise<unknown> {
     const args = parseJsonObject(input);
     const { ctx, principal, backend, sessionId, owner, executionPrincipal, caller } = this.scope();
-    const owners = installedDurableHost()?.connectionEvents;
+    const owners = installedDurable()?.connectionEvents;
     if (owners === undefined)
       throw new Error(
         "This host keeps no connection event subscriptions: watch events from a deployed agent.",

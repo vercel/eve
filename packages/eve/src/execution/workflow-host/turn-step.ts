@@ -2,7 +2,7 @@ import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 import { traceSessionHandover } from "#execution/session/handover-tracing.js";
 import { turnStepOn, type SessionStepHost } from "#execution/session/turn-step.js";
 import type { TurnStepInput, TurnStepResult } from "#execution/session/turn-step-types.js";
-import { createWorkflowHost } from "#execution/workflow-host/host.js";
+import { workflowDurable } from "#execution/workflow-host/host.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { workflowToolStubs } from "#execution/workflow-host/tool-stubs.js";
@@ -18,7 +18,7 @@ function workflowStepHost(app: App | undefined): SessionStepHost {
     if (typeof metadata.url === "string")
       callbackBaseUrl = resolveWorkflowCallbackBaseUrl(metadata.url, platform);
   } catch {}
-  const durable = app?.durable ?? createWorkflowHost(platform);
+  const durable = app?.durable ?? workflowDurable();
   return {
     app,
     callbackBaseUrl,

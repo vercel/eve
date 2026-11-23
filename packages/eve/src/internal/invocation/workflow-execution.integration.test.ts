@@ -3,9 +3,9 @@ import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 
 const ports = vi.hoisted(() => ({ findRun: vi.fn(), streamSessionLines: vi.fn() }));
-vi.mock("#execution/hosts.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("#execution/hosts.js")>()),
-  requireDurableHost: () => ({ findRun: ports.findRun }),
+vi.mock("#execution/workflow-host/host.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#execution/workflow-host/host.js")>()),
+  findWorkflowRun: ports.findRun,
 }));
 vi.mock("#execution/session-event-stream.js", () => ({
   streamSessionLines: ports.streamSessionLines,

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-const BUILD_DEPLOYMENT_ID =
-  'workflowEnvironment: { buildDeploymentId: "eve_BUILD_DEPLOYMENT_ID_PLACEHOLDER_" }';
+const BUILD_DEPLOYMENT_ID = 'buildDeploymentId: "eve_BUILD_DEPLOYMENT_ID_PLACEHOLDER_"';
 
 import {
   createDevelopmentWorkflowWorldPluginSource,
@@ -72,9 +71,9 @@ describe("createDevelopmentWorkflowWorldPluginSource", () => {
     });
 
     expect(source).toContain(
-      "export const app = await start({ createWorld: () => createDevelopmentWorkflowWorld() });",
+      "durable: workflowEngine({ world: () => createDevelopmentWorkflowWorld() }),",
     );
-    expect(source).not.toContain("workflowEnvironment");
+    expect(source).not.toContain("buildDeploymentId");
     expect(source).not.toContain("@workflow/world-local");
   });
 

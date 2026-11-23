@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { requireDurableHost } from "#execution/hosts.js";
+import type { World } from "#compiled/@workflow/world/index.js";
+import { installedDurable } from "#execution/hosts.js";
+import { workflowEngine } from "#execution/workflow-host/engine.js";
 import { deferInstrumentationSetup } from "#instrumentation/providers.js";
 import { EVE_WORKFLOW_SPEC_VERSION } from "#internal/workflow/spec-version-default.js";
 import { createProcessApp, installProcessApp, processApp } from "#runtime/app.js";
@@ -36,7 +38,8 @@ beforeEach(() => {
   bootProcess({ agentName: "weather", platform: defaultPlatform }, "artifacts");
 });
 
-afterEach(() => {
+afterEach(async () => {
+  await endLifetime(processApp().lifetime);
   uninstallApp?.();
   vi.unstubAllEnvs();
 });
@@ -63,7 +66,9 @@ describe("start", () => {
       specVersion: 9,
     };
 
-    await expect(start({ createWorld: () => world as never })).rejects.toBe(failure);
+    await expect(start({ durable: workflowEngine({ world: () => world as never }) })).rejects.toBe(
+      failure,
+    );
   });
 
   it("configures the Workflow environment before it creates a World eve owns", async () => {
@@ -71,11 +76,13 @@ describe("start", () => {
 
     await expect(
       start({
-        workflowEnvironment: { buildDeploymentId: BUILD_DEPLOYMENT_ID },
-        createWorld() {
-          seen = readWorkflowEnvironment();
-          throw STOP;
-        },
+        durable: workflowEngine({
+          buildDeploymentId: BUILD_DEPLOYMENT_ID,
+          world() {
+            seen = readWorkflowEnvironment();
+            throw STOP;
+          },
+        }),
       }),
     ).rejects.toBe(STOP);
 
@@ -88,10 +95,12 @@ describe("start", () => {
   it("refuses to boot the World before the earlier phases installed the platform", async () => {
     uninstallApp?.();
     uninstallApp = installProcessApp(createProcessApp());
-    const createWorld = vi.fn(() => Promise.reject(STOP));
+    const world = vi.fn((): Promise<World> => Promise.reject(STOP));
 
-    await expect(start({ createWorld })).rejects.toThrow("before installing its platform");
-    expect(createWorld).not.toHaveBeenCalled();
+    await expect(start({ durable: workflowEngine({ world }) })).rejects.toThrow(
+      "before installing its platform",
+    );
+    expect(world).not.toHaveBeenCalled();
   });
 
   it("leaves the Workflow environment alone for a parent-backed World", async () => {
@@ -99,10 +108,12 @@ describe("start", () => {
 
     await expect(
       start({
-        createWorld() {
-          seen = readWorkflowEnvironment();
-          throw STOP;
-        },
+        durable: workflowEngine({
+          world() {
+            seen = readWorkflowEnvironment();
+            throw STOP;
+          },
+        }),
       }),
     ).rejects.toBe(STOP);
 
@@ -113,15 +124,37 @@ describe("start", () => {
     const close = vi.fn(async () => {});
     const world = { close, createQueueHandler: () => undefined, events: {}, specVersion: 9 };
 
-    const app = await start({ createWorld: () => world as never });
+    const app = await start({ durable: workflowEngine({ world: () => world as never }) });
 
     expect(processApp().started).toBe(app);
     expect(app.platform).toBe(processApp().platform);
-    expect(app.durable).toBe(requireDurableHost());
+    expect(app.durable).toBe(installedDurable());
     expect(close).not.toHaveBeenCalled();
 
     await endLifetime(app.lifetime);
 
     expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a second live app, and serves the next app once the first ends", async () => {
+    const world = {
+      close: async () => {},
+      createQueueHandler: () => undefined,
+      events: {},
+      specVersion: 9,
+    };
+    const engine = workflowEngine({ world: () => world as never });
+    const first = await start({ durable: engine });
+    const second = createProcessApp();
+
+    await expect(
+      engine.start({ platform: first.platform, lifetime: second.lifetime }),
+    ).rejects.toThrow("another app in this process already started it");
+
+    await endLifetime(first.lifetime);
+    await expect(
+      engine.start({ platform: first.platform, lifetime: second.lifetime }),
+    ).resolves.toBe(installedDurable());
+    await endLifetime(second.lifetime);
   });
 });

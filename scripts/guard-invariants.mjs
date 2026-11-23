@@ -267,12 +267,12 @@
  *             them) appear
  *             only in the Workflow binding, the named engine modules whose
  *             step IDs pin their paths, and test helpers. Everything else
- *             goes through `DurableHost`.
+ *             goes through `Durable`.
  *   rule 72 — Code receives the app from its caller; only a Workflow step
  *             function (a file with a `"use step"` directive) reads
  *             `processApp()`, and it passes the app down. The process app's
  *             other internals have one owner module each, and everything
- *             else uses that owner's accessor (`requireDurableHost()`,
+ *             else uses that owner's accessor (`installedDurable()`,
  *             `getInstrumentationRuntime()`, ...). The process-app values of
  *             `#runtime/app.js` appear only in step functions, the boot
  *             lifecycle, the owners, and test helpers, and the `eve.app` key
@@ -1547,7 +1547,7 @@ function checkRule70(posix, lines, violations) {
   }
 }
 
-// ---------- Rule 71: the World stays behind DurableHost ----------
+// ---------- Rule 71: the World stays behind Durable ----------
 
 const WORKFLOW_RUNTIME_FACADE = "#internal/workflow/runtime.js";
 const WORKFLOW_ENGINE_DIRS = [
@@ -1588,7 +1588,7 @@ function checkRule71(posix, content, violations) {
     violations.push({
       rule: 71,
       file: `${posix}:${content.slice(0, match.index).split("\n").length}`,
-      message: `reaches the Workflow SDK's World through \`${WORKFLOW_RUNTIME_FACADE}\`. Outside the Workflow engine, eve uses durable execution through \`DurableHost\` (\`requireDurableHost()\` in \`#execution/hosts.js\`); add the eve-level operation you need there and implement it in \`execution/workflow-host/host.ts\`.`,
+      message: `reaches the Workflow SDK's World through \`${WORKFLOW_RUNTIME_FACADE}\`. Outside the Workflow engine, eve uses durable execution through \`Durable\` (\`app.durable\`, typed in \`#execution/durable.js\`); add the eve-level operation you need there and implement it in the Workflow engine under \`execution/workflow-host/\`.`,
     });
   }
 }
@@ -1617,7 +1617,7 @@ const NAMESPACE_OR_DYNAMIC_IMPORT_RE =
 function checkRule72(posix, content, violations) {
   if (!posix.startsWith(EVE_SRC) || posix.endsWith(".test.ts")) return;
   if (posix.startsWith(`${EVE_SRC}internal/testing/`)) return;
-  const message = `reaches the process app directly. Receive the app from your caller (a route, a boot phase, or the turn's context through \`appOf(ctx)\`) and read its platform with \`platformOf(app)\`; only a Workflow step function (a file with a \`"use step"\` directive) reads \`processApp()\`, and it passes the app down. Other internals of the app have one owner module each; use its accessor (\`requireDurableHost()\`, \`getInstrumentationRuntime()\`, \`getActiveRuntimeSession()\`), or add an internal and its owner to \`PROCESS_APP_OWNERS\`. Type imports from \`${PROCESS_APP_MODULE}\` are fine.`;
+  const message = `reaches the process app directly. Receive the app from your caller (a route, a boot phase, or the turn's context through \`appOf(ctx)\`) and read its platform with \`platformOf(app)\`; only a Workflow step function (a file with a \`"use step"\` directive) reads \`processApp()\`, and it passes the app down. Other internals of the app have one owner module each; use its accessor (\`installedDurable()\`, \`getInstrumentationRuntime()\`, \`getActiveRuntimeSession()\`), or add an internal and its owner to \`PROCESS_APP_OWNERS\`. Type imports from \`${PROCESS_APP_MODULE}\` are fine.`;
   const lineOf = (index) => content.slice(0, index).split("\n").length;
   const key = content.indexOf('Symbol.for("eve.app")');
   if (key >= 0 && posix !== `${EVE_SRC}runtime/app.ts`)
