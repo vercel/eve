@@ -231,20 +231,32 @@ describe("dynamic schedules client", () => {
     expect(listed).not.toHaveProperty("payload");
   });
 
-  it("updates a schedule whose stored payload a provider can't read back", async () => {
+  it("asks the provider for the payload on get and never on update", async () => {
+    const { provider, client } = setup();
+    const created = await client.create(input);
+    const get = vi.spyOn(provider, "get");
+    await client.get(created.name);
+    expect(get).toHaveBeenLastCalledWith(expect.anything(), created.name, { payload: true });
+    get.mockClear();
+    await client.update(created.name, { expression: { type: "delay", minutes: 10 } });
+    await client.update(created.name, { payload: { ...payload, task: "Summarize the month." } });
+    expect(get).toHaveBeenCalledTimes(2);
+    for (const call of get.mock.calls) expect(call).toHaveLength(2);
+  });
+
+  it("fails get but still updates a schedule whose stored payload doesn't parse", async () => {
     const { provider, client } = setup();
     const created = await client.create(input);
     const get = provider.get.bind(provider);
-    vi.spyOn(provider, "get").mockImplementation(async (context, name) => {
-      const stored = await get(context, name);
-      if (stored === null) return null;
-      const { envelope: _envelope, ...record } = stored;
-      return Object.defineProperty(record, "envelope", {
-        get: () => {
-          throw new Error("Invalid scheduled collection payload.");
-        },
-      }) as typeof stored;
+    vi.spyOn(provider, "get").mockImplementation(async (context, name, options) => {
+      const stored = await get(context, name, options);
+      return stored === null || options?.payload !== true
+        ? stored
+        : { ...stored, payload: { eve: "corrupted" } };
     });
+    await expect(client.get(created.name)).rejects.toThrow(
+      "Invalid scheduled collection payload; recreate the schedule.",
+    );
     await expect(
       client.update(created.name, { expression: { type: "delay", minutes: 10 } }),
     ).resolves.toMatchObject({ name: created.name });

@@ -26,6 +26,7 @@ import { byPrincipal } from "#public/schedules/scope.js";
 import type { ScheduleProviderContext } from "#runtime/schedules/provider-types.js";
 import {
   createScheduleCollectionPayload,
+  parseSchedulePayload,
   validateSchedulePayload,
   type ScheduleCollectionPayload,
 } from "#runtime/schedules/payload.js";
@@ -285,13 +286,17 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
     async get(name) {
       const normalized = validateScheduleName(name);
       const { provider } = await resolveNamespace("get", normalized);
-      const stored = await definition.provider.get(provider, normalized);
+      const stored = await definition.provider.get(provider, normalized, { payload: true });
       if (stored === null) return null;
-      const { envelope, ...record } = stored;
+      const { payload, ...record } = stored;
+      const { envelope } = parseSchedulePayload<TPrepared>(payload, {
+        application: callContext.application,
+        collection: callContext.collection,
+      });
       return {
         ...projectScheduleRecord(record),
         creator: envelope.principal,
-        payload: envelope.payload as TPrepared,
+        payload: envelope.payload,
       };
     },
     async invoke(name) {

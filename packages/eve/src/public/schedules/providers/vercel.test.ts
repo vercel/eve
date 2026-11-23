@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { vercelScheduleProvider } from "#public/schedules/providers/vercel.js";
-import { createScheduleCollectionPayload } from "#runtime/schedules/payload.js";
 import type { ScheduleProviderContext } from "#runtime/schedules/provider-types.js";
 
 const oidcToken = `eyJhbGciOiJSUzI1NiJ9.${Buffer.from(
@@ -16,17 +15,7 @@ const context: ScheduleProviderContext = {
   target: { key: "dynamic-schedules" },
 };
 
-const envelope = {
-  version: 3 as const,
-  payload: { task: "Review PRs" },
-  scope: "team",
-  principal: { type: "user", authenticator: "test", principalId: "alice" },
-};
-const storedPayload = createScheduleCollectionPayload({
-  application: "dynamic-schedules",
-  collection: "collection",
-  envelope,
-});
+const storedPayload = { task: "Review PRs" };
 
 function schedule(overrides: Record<string, unknown> = {}) {
   return {
@@ -226,12 +215,15 @@ describe("vercelScheduleProvider", () => {
       payload: storedPayload,
       name: "review-prs",
     });
+    const stored = await provider.get({ ...context, operationId: "get" }, "review-prs");
+    expect(stored).toMatchObject({ name: "review-prs" });
+    expect(stored).not.toHaveProperty("payload");
     await expect(
-      provider.get({ ...context, operationId: "get" }, "review-prs"),
-    ).resolves.toMatchObject({ name: "review-prs", envelope });
+      provider.get({ ...context, operationId: "get" }, "review-prs", { payload: true }),
+    ).resolves.toMatchObject({ name: "review-prs", payload: storedPayload });
   });
 
-  it("asks the Schedules API for the payload on get and returns its envelope", async () => {
+  it("asks the Schedules API for the payload only when get requests it", async () => {
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_ENV", "production");
     vi.stubEnv("VERCEL_OIDC_TOKEN", oidcToken);
@@ -247,27 +239,17 @@ describe("vercelScheduleProvider", () => {
     );
     const provider = vercelScheduleProvider({ fetch: fetchImpl });
 
-    await expect(provider.get(context, "review-prs-daily")).resolves.toMatchObject({
-      name: "review-prs-daily",
-      envelope,
-    });
+    await expect(
+      provider.get(context, "review-prs-daily", { payload: true }),
+    ).resolves.toMatchObject({ name: "review-prs-daily", payload: storedPayload });
     expect(String(fetchImpl.mock.calls[0]![0])).toBe(
       "https://vercel-schedules.com/v1/schedules/review-prs-daily?namespace=eve-namespace&include=payload",
     );
-  });
 
-  it("returns the timing of a schedule without a stored payload, and fails only when the envelope is read", async () => {
-    vi.stubEnv("VERCEL", "1");
-    vi.stubEnv("VERCEL_ENV", "production");
-    vi.stubEnv("VERCEL_OIDC_TOKEN", oidcToken);
-    const fetchImpl = vi.fn<typeof fetch>(async () => Response.json(schedule({})));
-    const stored = await vercelScheduleProvider({ fetch: fetchImpl }).get(
-      context,
-      "review-prs-daily",
-    );
-
-    expect(stored?.expression).toMatchObject({ type: "cron" });
-    expect(() => stored?.envelope).toThrow("Invalid scheduled collection payload");
+    const stored = await provider.get(context, "review-prs-daily");
+    expect(stored).toMatchObject({ name: "review-prs-daily" });
+    expect(stored).not.toHaveProperty("payload");
+    expect(String(fetchImpl.mock.calls[1]![0])).not.toContain("include=");
   });
 
   it("returns null for a schedule the Schedules API doesn't have", async () => {
@@ -277,8 +259,8 @@ describe("vercelScheduleProvider", () => {
     const fetchImpl = vi.fn<typeof fetch>(async () =>
       Response.json({ error: { code: "not_found", message: "Not found." } }, { status: 404 }),
     );
-    await expect(
-      vercelScheduleProvider({ fetch: fetchImpl }).get(context, "missing"),
-    ).resolves.toBeNull();
+    const provider = vercelScheduleProvider({ fetch: fetchImpl });
+    await expect(provider.get(context, "missing")).resolves.toBeNull();
+    await expect(provider.get(context, "missing", { payload: true })).resolves.toBeNull();
   });
 });

@@ -184,11 +184,12 @@ export interface ScheduleProvider {
     schedule: ScheduleCreate<TPayload>,
   ): Promise<ScheduleRecord>;
   list(context: ScheduleProviderContext, query: ScheduleList): Promise<SchedulePage>;
-  /** Returns the schedule with the envelope eve stored in its payload. */
+  /** With `payload: true`, also returns the payload exactly as eve supplied it on the last write. */
   get(
     context: ScheduleProviderContext,
     name: string,
-  ): Promise<(ScheduleRecord & { readonly envelope: ScheduleEnvelope }) | null>;
+    options?: { readonly payload?: boolean },
+  ): Promise<(ScheduleRecord & { readonly payload?: unknown }) | null>;
   /** Patch supplied fields; preserve identity, state, target, and omitted fields. */
   update<TPayload>(
     context: ScheduleProviderContext,

@@ -13,7 +13,6 @@
   "ScheduleDelivery",
   "ScheduleDeliveryTarget",
   "ScheduleDetail",
-  "ScheduleEnvelope",
   "ScheduleExpression",
   "ScheduleHandle",
   "ScheduleList",

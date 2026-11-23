@@ -9,7 +9,6 @@ import type {
   ScheduleProvider,
   ScheduleRecord,
 } from "#public/schedules/subscription.js";
-import { parseSchedulePayload } from "#runtime/schedules/payload.js";
 import type { ScheduleProviderContext } from "#runtime/schedules/provider-types.js";
 
 /**
@@ -78,10 +77,16 @@ export function inMemoryScheduleProvider(
       return { cursor: next < records.length ? String(next) : null, data };
     },
 
-    async get(context: ScheduleProviderContext, name: string) {
+    async get(
+      context: ScheduleProviderContext,
+      name: string,
+      options: { readonly payload?: boolean } = {},
+    ) {
       const record = schedules.get(scheduleKey(context, name));
       if (record === undefined) return null;
-      return { ...publicRecord(record), envelope: parseSchedulePayload(record.payload).envelope };
+      return options.payload === true
+        ? { ...publicRecord(record), payload: record.payload }
+        : publicRecord(record);
     },
 
     async update<TPayload>(

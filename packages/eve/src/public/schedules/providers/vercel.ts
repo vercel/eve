@@ -7,7 +7,6 @@ import type {
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { isVercelSchedulesDevEnvironment } from "#internal/schedules/dev-environment.js";
 import type {
-  ScheduleEnvelope,
   ScheduleExpression,
   SchedulePage,
   ScheduleProvider,
@@ -15,7 +14,6 @@ import type {
 } from "#public/schedules/subscription.js";
 import type { ScheduleProviderContext } from "#runtime/schedules/provider-types.js";
 import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
-import { parseSchedulePayload } from "#runtime/schedules/payload.js";
 import { deriveEveScheduleQueueTopic } from "#runtime/schedules/queue-namespace.js";
 
 const DEVELOPMENT_PROVIDER: ScheduleProvider = {
@@ -77,19 +75,18 @@ export function vercelScheduleProvider(
       const page = await (await client(context.abortSignal)).list(params);
       return { cursor: page.cursor, data: page.data.map(fromVercelSchedule) };
     },
-    async get(context, name) {
+    async get(context, name, options = {}) {
       const response = await getScheduleOrNull(
         await client(context.abortSignal),
         name,
         context.namespace,
+        options.payload === true,
       );
       if (response === null) return null;
+      const record = fromVercelSchedule(response);
+      if (options.payload !== true) return record;
       const dispatched = response.payload as { readonly payload?: unknown } | undefined;
-      const target = { application: context.target.key, collection: context.collection };
-      return Object.defineProperty(fromVercelSchedule(response), "envelope", {
-        enumerable: true,
-        get: () => parseSchedulePayload(dispatched?.payload, target).envelope,
-      }) as ScheduleRecord & { readonly envelope: ScheduleEnvelope };
+      return { ...record, payload: dispatched?.payload };
     },
     async update(context, name, patch) {
       const expression = patch.expression;
@@ -132,10 +129,10 @@ export function vercelScheduleProvider(
 }
 
 interface VercelSchedulesClient extends SchedulesClient {
-  getWithPayload(
-    name: string,
-    namespace: string,
-  ): Promise<VercelSchedule & { readonly payload?: unknown }>;
+  getWithPayload(params: {
+    readonly name: string;
+    readonly namespace: string;
+  }): Promise<VercelSchedule & { readonly payload?: unknown }>;
 }
 
 async function createClient(
@@ -146,12 +143,13 @@ async function createClient(
   const { SchedulesClient } = await import("#compiled/@vercel/schedules/index.js");
   signal.throwIfAborted();
   const fetchImpl = options.fetch ?? fetch;
+  // `@vercel/schedules` has no `include` option on `get`; remove this subclass once it does.
   class PayloadSchedulesClient extends SchedulesClient implements VercelSchedulesClient {
-    getWithPayload(name: string, namespace: string) {
-      const query = new URLSearchParams({ namespace, include: "payload" });
+    getWithPayload(params: { readonly name: string; readonly namespace: string }) {
+      const query = new URLSearchParams({ namespace: params.namespace, include: "payload" });
       return this.request<VercelSchedule & { readonly payload?: unknown }>(
         "GET",
-        `/v1/schedules/${encodeURIComponent(name)}?${query}`,
+        `/v1/schedules/${encodeURIComponent(params.name)}?${query}`,
       );
     }
   }
@@ -239,9 +237,12 @@ async function getScheduleOrNull(
   client: VercelSchedulesClient,
   name: string,
   namespace: string,
+  includePayload: boolean,
 ): Promise<(VercelSchedule & { readonly payload?: unknown }) | null> {
   try {
-    return await client.getWithPayload(name, namespace);
+    return includePayload
+      ? await client.getWithPayload({ name, namespace })
+      : await client.get({ name, namespace });
   } catch (error) {
     if (isNotFoundError(error)) return null;
     throw error;
