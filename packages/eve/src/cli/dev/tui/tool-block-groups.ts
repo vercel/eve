@@ -98,6 +98,7 @@ function sameRun(first: Block, candidate: Block): boolean {
     candidate.depth === first.depth &&
     candidate.live === first.live &&
     candidate.subagentCallId === first.subagentCallId &&
+    candidate.parentCallId === first.parentCallId &&
     candidate.toolName === first.toolName
   );
 }

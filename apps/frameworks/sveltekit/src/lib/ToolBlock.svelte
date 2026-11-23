@@ -1,5 +1,6 @@
 <script lang="ts">
-  import type { EveToolPart } from "eve/svelte";
+  import type { EveMessagePart, EveToolPart } from "eve/svelte";
+  import ToolBlock from "./ToolBlock.svelte";
 
   type Answers = readonly {
     readonly optionId?: string;
@@ -9,13 +10,23 @@
 
   let {
     part,
+    parts,
     canRespond,
     onAnswers,
   }: {
     part: EveToolPart;
+    /** The message's parts, to find the calls this call ran inside it. */
+    parts: readonly EveMessagePart[];
     canRespond: boolean;
     onAnswers: (answers: Answers) => void | Promise<void>;
   } = $props();
+
+  // The calls this call ran inside it, such as the calls of a `workflow()` program.
+  let nested = $derived(
+    parts.filter(
+      (other): other is EveToolPart => other.type === "tool" && other.parentCallId === part.callId,
+    ),
+  );
 
   let interaction = $derived(part.interaction?.request);
   let answer = $derived(part.interaction?.answer);
@@ -161,3 +172,12 @@
     </div>
   {/if}
 </div>
+
+<!-- Outside the collapsed details, so a nested call waiting for approval stays in view. -->
+{#if nested.length > 0}
+  <div class="ml-4 flex flex-col gap-2 border-l pl-4">
+    {#each nested as call (call.callId)}
+      <ToolBlock part={call} {parts} {canRespond} {onAnswers} />
+    {/each}
+  </div>
+{/if}
