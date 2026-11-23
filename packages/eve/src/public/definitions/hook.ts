@@ -134,6 +134,14 @@ export interface HookBaseContext extends SessionContext, Omit<SessionFrame, "ses
    * Throws after the handler has settled.
    */
   cancel(reason?: string): void;
+  /**
+   * Permanently retires the session, like `session.end()`. If a turn is running or being admitted,
+   * it stops before its next model call and settles `cancelled`, then the session ends `completed`
+   * with `cause: { hook }`. On `turn.settled` or between turns, the session ends once the commit's
+   * handlers finish. Drops any pending `ctx.continue()` continuation. Acts once, so asking again
+   * is safe; on `session.ended`, it does nothing. Throws after the handler has settled.
+   */
+  end(reason?: string): void;
 }
 
 /** What `turn.settled` and `*` handlers receive besides {@link HookBaseContext}. */
@@ -184,10 +192,10 @@ type DefinedHookEventKeys<TDefinition extends HookDefinition> = Extract<
 
 /**
  * Defines a hook. Each handler runs once for each matching fact a commit carries, before the next
- * model call. A handler can call `ctx.cancel`, `ctx.continue` from `turn.settled`, or an external
- * service. Pass `ctx.occurrence.idempotencyKey` to services that support idempotency. A retry
- * does not run handlers again for facts already published. A handler that throws during a turn fails the turn;
- * catch optional errors.
+ * model call. A handler can call `ctx.cancel`, `ctx.end`, `ctx.continue` from `turn.settled`, or
+ * an external service. Pass `ctx.occurrence.idempotencyKey` to services that support idempotency.
+ * A retry does not run handlers again for facts already published. A handler that throws during a
+ * turn fails the turn; catch optional errors.
  *
  * ```ts
  * export default defineHook({

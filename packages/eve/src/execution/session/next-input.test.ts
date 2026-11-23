@@ -150,6 +150,20 @@ describe("nextTurnDelivery", () => {
     });
   });
 
+  it("returns end ahead of queued deliveries and continuations when a hook ended the session", async () => {
+    vi.mocked(pendingContinuation).mockReturnValue(continuation);
+    const input = batchingInputFor([{ kind: "deliver", payloads: [{ message: "Queued." }] }]);
+    input.cursor.serializedContext["eve.reactions"] = {
+      sessionEnd: { hook: "finish-job", reason: "Job done" },
+    };
+
+    await expect(nextTurnDelivery(input)).resolves.toEqual({
+      hook: "finish-job",
+      kind: "end",
+      reason: "Job done",
+    });
+  });
+
   it("holds a continuation behind input an awaited handover still holds back", async () => {
     vi.mocked(pendingContinuation).mockReturnValue(continuation);
     let settled = false;

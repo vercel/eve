@@ -27,7 +27,7 @@ The hook's name is its path without the extension: `agent/hooks/audit.ts` is `"a
 
 The `events` map keys each handler by event type, and `*` matches every event. Any event in [Sessions, runs and streaming](../concepts/sessions-runs-and-streaming) works, such as `session.started`, `turn.settled`, `content.completed`, and `call.settled`. Progress events (`content.delta`, `call.input`, and `call.progress`) reach only handlers keyed on their exact type, never `*`.
 
-Handlers can call external services, cancel the running turn, and [continue a finished turn](#continue-a-turn-from-a-hook) with a new message. They can't add text to the model's context. To add model context at runtime, use `defineDynamic` and `defineInstructions` in `agent/instructions/`.
+Handlers can call external services, [cancel the running turn](#cancel-the-running-turn-from-a-hook), [continue a finished turn](#continue-a-turn-from-a-hook), and [end the session](#end-the-session-from-a-hook). They can't add text to the model's context. To add model context at runtime, use `defineDynamic` and `defineInstructions` in `agent/instructions/`.
 
 Import the SDK clients that a handler calls inside the handler, not at the top of the file. See [Keep the bundle small](/docs/guides/deployment#keep-the-bundle-small).
 
@@ -55,6 +55,7 @@ interface HookBaseContext extends SessionContext {
   readonly occurrence: { readonly idempotencyKey: string; readonly abortSignal: AbortSignal };
   readonly memo: Memo;
   cancel(reason?: string): void;
+  end(reason?: string): void;
 }
 ```
 
@@ -152,7 +153,7 @@ eve handles each recorded line of the stream in this order:
 1. Write. The line is saved to the session stream.
 2. Channel. The channel's handler runs for each event.
 3. Hooks. Typed handlers run first, then `*` handlers. Return values are ignored.
-4. Cancellation. A cancel requested with `ctx.cancel()` takes effect after the handlers return.
+4. Hook actions. Requests from `ctx.cancel()` and `ctx.end()` take effect after the handlers return.
 
 Hooks run after the line is saved, so a hook that throws can't corrupt the stream. [Dynamic functions](./dynamic-capabilities) don't subscribe to events; they run before each model call.
 
@@ -192,7 +193,7 @@ A message that steers a running turn doesn't start a new turn, so the hook doesn
 
 ## What happens when a hook throws
 
-An unhandled error fails the running turn before its next model call, or when the turn would end. Between turns, eve only logs the error. Catch errors from optional audit or metrics work if the turn should continue. To stop without a failure, call [`ctx.cancel(reason?)`](#cancel-the-running-turn-from-a-hook).
+An unhandled error fails the running turn before its next model call, or when the turn would end. Between turns, eve only logs the error. Catch errors from optional audit or metrics work if the turn should continue. To stop without a failure, call [`ctx.cancel(reason?)`](#cancel-the-running-turn-from-a-hook) or [`ctx.end(reason?)`](#end-the-session-from-a-hook).
 
 eve doesn't retry a failed hook or undo the state changes and side effects it made before the error. Handle retries or compensation inside the hook. Runtime failures outside the handler, such as context setup or saving state, still propagate.
 
@@ -320,6 +321,43 @@ A turn can be continued when it completed, or when the same hook cancelled it, s
 
 `ctx.continue()` returns `{ queued: true }`, or `{ queued: false, reason }` when it can't continue the turn: `not-completed`, `already-queued`, `auth-conflict` (another hook's continuation acts for a different sender), or `not-settled` (a `*` handler on another event).
 
+## End the session from a hook
+
+Call `ctx.end(reason?)` from any hook event to permanently retire the session, as [`session.end()`](./client/streaming) does. For example, end a one-shot session once its turn finishes with no remaining work:
+
+```ts title="agent/hooks/end-after-turn.ts"
+import { idle } from "eve/events";
+import { defineHook } from "eve/hooks";
+
+export default defineHook({
+  events: {
+    "turn.settled"(event, ctx) {
+      if (event.data.outcome !== "completed" || !idle(ctx.view)) return;
+      ctx.end("Job completed.");
+    },
+  },
+});
+```
+
+Checking `idle(ctx.view)` waits for queued messages and background tasks to finish. When background tasks can outlive a turn, also check `idle(ctx.view)` and `activeTurn(ctx.view)` in a `task.ended` handler.
+
+On `turn.settled`, `delivery.settled`, or between turns (such as `task.ended`), the event's remaining handlers run first. Then eve retires the session:
+
+- eve tears down child sessions and the sandbox, calling `onSessionEnd` with `reason: "completed"`.
+- eve records `session.ended` with `outcome: "completed"` and `cause: { hook }` naming the hook.
+- eve closes the session stream and releases its channel addresses.
+
+During a running or opening turn (such as `session.started`, `delivery.admitted`, `turn.started`, `model.settled`, `call.settled`, or `turn.paused`), eve stops the turn before its next model call. The turn ends with `outcome: "cancelled"` and eve cancels working tasks. Then eve retires the session with `session.ended`, `outcome: "completed"`, and `cause: { hook }`.
+
+Rules for `ctx.end()`:
+
+- It returns `void` because the session ends after the event's handlers return.
+- It drops any pending `ctx.continue()` continuation on the same turn.
+- It does nothing on `session.ended`.
+- Repeated calls act once; the first hook sets `cause: { hook }`.
+- Call it before the handler's promise resolves. A call after the handler returns throws.
+- A handler that calls `ctx.end()` and then throws fails the turn instead (or logs between turns) without ending the session.
+
 ## Subagent isolation
 
 A subagent can have its own `agent/hooks/` directory. Its hooks run only for the subagent's turns and see only its context. Parent hooks don't run for subagent turns.
@@ -337,6 +375,7 @@ While the parent's turn waits on that child, the relayed request makes it wait f
 | ----------------------------------------------- | ---------------------------------------------- |
 | Watch runtime events (audit, metrics, alerting) | `events.<type>` (or a channel handler)         |
 | Start the next turn after one finishes          | `ctx.continue()` from `events["turn.settled"]` |
+| Permanently retire the session                  | `ctx.end()` from any event handler             |
 | Give the model structured input on demand       | a tool                                         |
 | Add model context at runtime                    | `defineDynamic` with `defineInstructions`      |
 | Subscribe to platform-specific events           | a channel handler                              |

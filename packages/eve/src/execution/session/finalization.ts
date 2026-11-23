@@ -1,3 +1,4 @@
+import type { Cause } from "#protocol/session-events/envelope.js";
 import type { ControlDelivery } from "#harness/types.js";
 import type { ControlSettlement } from "#harness/facts.js";
 import { latestTurnIdOf, turnCoordinatesOf } from "#protocol/session-projection.js";
@@ -25,6 +26,11 @@ import { notifyTurnCallerStep } from "#subagents/parent-notification.js";
 
 export type SessionTerminalOutcome =
   | { readonly kind: "done"; readonly action: TurnOutcome & { readonly kind: "done" } }
+  | {
+      readonly kind: "ended";
+      readonly cause?: Cause;
+      readonly settles?: readonly ControlSettlement[];
+    }
   | {
       readonly kind: "expired";
       readonly control?: ControlDelivery;
@@ -67,7 +73,7 @@ export async function finalizeSession(
   if (sessionState !== undefined) {
     try {
       await endSessionSandboxStep({
-        reason: outcome.kind === "done" ? "completed" : outcome.kind,
+        reason: outcome.kind === "done" || outcome.kind === "ended" ? "completed" : outcome.kind,
         serializedContext,
         sessionState,
       });
@@ -84,9 +90,10 @@ export async function finalizeSession(
   const stored = storedProjection(session?.state);
   const latestTurnId = latestTurnIdOf(stored);
   const latest = latestTurnId === undefined ? undefined : turnCoordinatesOf(stored, latestTurnId);
-  if (outcome.kind === "expired") {
+  if (outcome.kind === "expired" || outcome.kind === "ended") {
     await emitTerminalSessionCompletionStep({
-      control: outcome.control,
+      cause: outcome.kind === "ended" ? outcome.cause : undefined,
+      control: outcome.kind === "expired" ? outcome.control : undefined,
       settles: outcome.settles,
       projection: stored,
       sessionState,
@@ -163,6 +170,7 @@ function settledResult(
         sessionUsage: outcome.action.usage,
         turnUsage: outcome.action.usageDelta,
       };
+    case "ended":
     case "expired":
       return context.caller === undefined
         ? { isError: false, output: "" }

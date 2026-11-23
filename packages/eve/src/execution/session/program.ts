@@ -1,3 +1,4 @@
+import { pendingSessionEnd } from "#definitions/continuation.js";
 import { settleControlDeliveryStep } from "#execution/session/settle-control-delivery-step.js";
 import type { ControlSettlement } from "#harness/facts.js";
 import { controlDeliveryOf } from "#execution/session/control-delivery.js";
@@ -262,6 +263,11 @@ async function runSessionLoop(
     ...(control && { control }),
     ...(unstarted.length > 0 && { settles: unstarted.splice(0) }),
   });
+  const hookEnded = (hook: string): SessionTerminalOutcome => ({
+    cause: { hook },
+    kind: "ended",
+    ...(unstarted.length > 0 && { settles: unstarted.splice(0) }),
+  });
 
   let prewarmedSandbox: SandboxRunning | undefined;
   let idleWindow: Promise<void> | "attempted" | undefined;
@@ -417,6 +423,8 @@ async function runSessionLoop(
             kind: "terminal",
             outcome: expired(next.origin && controlDeliveryOf(next.origin)),
           };
+        case "end":
+          return { kind: "terminal", outcome: hookEnded(next.hook) };
         case "closed":
           if (inbox.takenOver) return await handoff.adoptTakeover();
           return { kind: "terminal", outcome: expired() };
@@ -514,6 +522,11 @@ async function runSessionLoop(
         progress.caller = undefined;
       }
 
+      const end = pendingSessionEnd(cursor.serializedContext);
+      if (end !== undefined) {
+        return { kind: "terminal", outcome: hookEnded(end.hook) };
+      }
+
       const transferred = await tryCompactionHandoff();
       if (transferred !== undefined) return transferred;
 
@@ -523,6 +536,8 @@ async function runSessionLoop(
       switch (next.kind) {
         case "reset":
           return { kind: "terminal", outcome: resetOutcome(next.origin) };
+        case "end":
+          return { kind: "terminal", outcome: hookEnded(next.hook) };
         case "closed":
           if (inbox.takenOver) return await handoff.adoptTakeover();
           return { kind: "terminal", outcome: { kind: "expired" } };

@@ -36,7 +36,7 @@ export default defineSchedule({
 });
 ```
 
-A markdown-form schedule runs the agent on the prompt and discards the reply. The agent can still call tools, write to backends, and log. The session has no channel, so it can't ask a person for input or receive a follow-up message. A tool that needs approval fails the session instead of waiting. After the turn ends, the session stays open until its [session timeout](./agent-config#runtime-limits) ends it.
+A markdown-form schedule runs the agent on the prompt and discards the reply. The agent can still call tools, write to backends, and log. The session has no channel, so it can't ask a person for input or receive a follow-up message. A tool that needs approval fails the session instead of waiting. After the turn ends, the session stays open until its [session timeout](./agent-config#runtime-limits) ends it. To retire a scheduled session immediately, call `ctx.end()` in a hook. See [End the session from a hook](/docs/guides/hooks#end-the-session-from-a-hook).
 
 ## `defineSchedule`
 

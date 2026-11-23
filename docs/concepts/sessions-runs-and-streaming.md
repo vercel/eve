@@ -338,7 +338,7 @@ Clear removes model-message history in place, including static and dynamic user-
 
 A cancel stops turns, not a compaction or clear. A cancel that arrives while either runs ends `ignored`, and the compaction or clear finishes. A cancel, clear, or compact sent to a prewarmed session before its first message ends `ignored` once the session starts.
 
-End permanently retires the session ID; create another session for a fresh conversation. Every control returns a delivery receipt when accepted. An inactive target throws `SessionNotActiveError` from a handle or returns `409 session_not_active` over HTTP.
+End permanently retires the session ID; create another session for a fresh conversation. Every control returns a delivery receipt when accepted. An inactive target throws `SessionNotActiveError` from a handle or returns `409 session_not_active` over HTTP. Authored [hooks](../guides/hooks#end-the-session-from-a-hook) can also retire a session with `ctx.end()`, which records `session.ended` with `cause: { hook }`.
 
 A [stranded session](./execution-model-and-durability#stranded-sessions) can't run commands, so clear and compact can't repair it. End still works: eve retires the stranded session and returns the end's delivery receipt. The delivery ends after the session is retired and its addresses are released.
 
@@ -423,7 +423,7 @@ Each new event line goes through these stages in order:
 1. **Write**: the line is written to the stream.
 2. **Channel handler**: the channel's event handler runs for each event and can update adapter state. eve then re-evaluates the channel's `metadata(state)`. Work a handler passes to `ctx.waitUntil()` continues in the background, and eve waits for it, for up to 30 seconds, before the step that ran the handler ends. See [Run platform calls in the background](../channels/custom#run-platform-calls-in-the-background).
 3. **Hooks**: authored [hooks](../guides/hooks) subscribed to each event fire.
-4. **Intents**: eve acts on cancellation requests queued by `ctx.cancel()`.
+4. **Intents**: eve acts on cancellation requests from `ctx.cancel()` and session retirement requests from `ctx.end()`.
 
 Before the next model call, eve evaluates [dynamic values](../guides/dynamic-capabilities) from `defineDynamic`. Hooks and dynamic values read the current `ctx.channel.metadata`.
 

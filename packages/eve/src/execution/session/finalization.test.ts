@@ -78,6 +78,7 @@ beforeEach(() => vi.clearAllMocks());
 describe("session finalization", () => {
   it.each([
     { outcome: { kind: "expired" as const }, reason: "expired" },
+    { outcome: { cause: { hook: "finish-job" }, kind: "ended" as const }, reason: "completed" },
     { outcome: { kind: "failed" as const, error: new Error("failed") }, reason: "failed" },
     {
       outcome: {
@@ -99,6 +100,11 @@ describe("session finalization", () => {
       serializedContext: { key: "value" },
       sessionState,
     });
+    if (outcome.kind === "ended") {
+      expect(emitTerminalSessionCompletionStep).toHaveBeenCalledWith(
+        expect.objectContaining({ cause: { hook: "finish-job" } }),
+      );
+    }
   });
 
   it("preserves the terminal outcome when sandbox cleanup fails", async () => {

@@ -1,6 +1,6 @@
 import { readDurableSession } from "#execution/durable-session-read.js";
 import { activeTurnIdOf, latestTurnIdOf } from "#protocol/session-projection.js";
-import { pendingContinuation } from "#definitions/continuation.js";
+import { pendingContinuation, pendingSessionEnd } from "#definitions/continuation.js";
 import { controlDeliveryOf } from "#execution/session/control-delivery.js";
 import type { ControlSettlement } from "#harness/facts.js";
 import { storedProjection } from "#harness/session-machine/view.js";
@@ -21,6 +21,7 @@ export type NextTurnInstruction =
   | { readonly kind: "prewarm"; readonly targetDeploymentId: string }
   | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage }
   | { readonly kind: SessionControl; readonly origin?: ControlOrigin }
+  | { readonly kind: "end"; readonly hook: string; readonly reason?: string }
   | { readonly kind: "closed" }
   | { readonly kind: "cancel-turn"; readonly origin?: ControlOrigin }
   | { readonly kind: "cancel-working-tasks"; readonly origin?: ControlOrigin }
@@ -38,6 +39,9 @@ export async function nextTurnDelivery(input: {
   const { inbox, cursor, queue } = input;
   let freshSequence: number | undefined;
   while (true) {
+    const end = pendingSessionEnd(cursor.serializedContext);
+    if (end !== undefined) return { kind: "end", ...end };
+
     const selected = queue.takeNext({
       freshSequence: inbox.hasPending() ? undefined : freshSequence,
     });
