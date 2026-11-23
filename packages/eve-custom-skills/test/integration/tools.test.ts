@@ -9,7 +9,6 @@ import { documentRepository } from "../../extension/lib/document-repository.ts";
 import { loadTurnSkills } from "../../extension/lib/runtime.ts";
 import { spaceScope } from "../../extension/lib/scopes.ts";
 import type { SkillApprovalRule, SkillChangeEvent } from "../../extension/lib/types.ts";
-import manage from "../../extension/skills/manage.ts";
 import create from "../../extension/tools/create.ts";
 import list from "../../extension/tools/list.ts";
 import publish from "../../extension/tools/publish.ts";
