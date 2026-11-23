@@ -22,6 +22,8 @@ import type * as LocalGateway from "./local-gateway.js";
 import type * as LocalGatewayWeb from "./local-gateway.web.js";
 import type * as PackageInfo from "./package-info.js";
 import type * as PackageInfoWeb from "./package-info.web.js";
+import type * as PublicDispatcher from "./public-dispatcher.js";
+import type * as PublicDispatcherWeb from "./public-dispatcher.web.js";
 import type * as PosixPath from "./posix-path.js";
 import type * as PosixPathWeb from "./posix-path.web.js";
 import type * as SandboxCache from "./sandbox-cache.js";
@@ -49,6 +51,7 @@ export type PlatformTwins = [
   Twin<typeof LocalGatewayWeb, typeof LocalGateway>,
   Twin<typeof PackageInfoWeb, typeof PackageInfo>,
   Twin<typeof PosixPathWeb, typeof PosixPath>,
+  Twin<typeof PublicDispatcherWeb, typeof PublicDispatcher>,
   Twin<typeof SandboxCacheWeb, typeof SandboxCache>,
   Twin<typeof Sha256Web, typeof Sha256>,
   Twin<typeof UuidWeb, typeof Uuid>,

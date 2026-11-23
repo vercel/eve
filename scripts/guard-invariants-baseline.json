@@ -44,10 +44,5 @@
     "packages/eve/src/tools/provided/write-file.ts"
   ],
   "rule59_nitroVirtualIdAllowlist": [],
-  "rule51_factBuildersByFile": {},
-  "rule74_sessionProgramNodeImportAllowlist": [
-    "packages/eve/src/execution/public-destination.ts -> node:dns",
-    "packages/eve/src/execution/public-destination.ts -> undici",
-    "packages/eve/src/harness/workflow-admission.ts -> node:crypto"
-  ]
+  "rule51_factBuildersByFile": {}
 }
