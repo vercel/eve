@@ -1,9 +1,10 @@
 import type { SessionEvent } from "#protocol/session-event.js";
+import { contentPhase } from "#protocol/session-events/catalog.js";
 import type { ContextAccessor } from "#context/key.js";
 import type { StepInput } from "#harness/types.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 import { attachInputText, readInputText } from "#internal/input-text.js";
-import { createLogger } from "#internal/logging.js";
+import { createLogger, logError } from "#internal/logging.js";
 import type { FactPosition, Scope } from "#protocol/session-events/envelope.js";
 import type { ChannelContext } from "#shared/channel-context.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
@@ -17,6 +18,10 @@ import type {
 } from "#shared/channel-definition.js";
 import type { ChannelAudienceProjector } from "#channel/audience.js";
 import type { ChannelSpaceProjector } from "#channel/space.js";
+import {
+  recordChannelDeliveryFailure,
+  withChannelDeliverySpan,
+} from "#tracing/eve/channel-delivery-span.js";
 
 const log = createLogger("channel.adapter");
 
@@ -151,13 +156,32 @@ export async function callAdapterEventHandler(
     | ((event: SessionEvent | CommittedLine, ctx: ChannelAdapterContext) => void | Promise<void>)
     | undefined;
   if (handler === undefined) return;
-  try {
-    await handler(event, ctx);
-  } catch (error) {
-    log.error("adapter event handler threw — event swallowed", {
-      adapterKind: getAdapterKind(adapter),
-      eventType: type,
-      error,
-    });
-  }
+  const adapterKind = getAdapterKind(adapter);
+  const delivery = {
+    adapterKind,
+    eventType: type,
+    reachesPerson: reachesPerson(event),
+    turnId: ctx.scope?.turnId,
+  };
+  await withChannelDeliverySpan(delivery, async () => {
+    try {
+      await handler(event, ctx);
+    } catch (error) {
+      const errorId = logError(log, "adapter event handler threw — event swallowed", error, {
+        adapterKind,
+        eventType: type,
+      });
+      recordChannelDeliveryFailure("channel_handler_failed", errorId);
+    }
+  });
+}
+
+function reachesPerson(event: SessionEvent | CommittedLine): boolean {
+  if ("facts" in event) return false;
+  if (event.type === "interaction.opened") return true;
+  return (
+    event.type === "content.completed" &&
+    event.data.kind === "text" &&
+    contentPhase(event.data.phase) === "reply"
+  );
 }

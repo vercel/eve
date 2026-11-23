@@ -185,7 +185,7 @@ CI.
     when touching `internal/nitro/`.
 
 Machine-checkable invariants are enforced by `pnpm guard:invariants`, which
-runs in the CI lint job. If the guard fails, fix the violation rather than
+runs in Vercel CI. If the guard fails, fix the violation rather than
 editing the baseline — baselines may only shrink.
 
 ## Research plans
@@ -284,6 +284,19 @@ The shared Vercel project's Preview env must provide the model-provider
 credentials the fixtures need. TUI smoke tests
 live under `packages/eve/test/tui-client` and run with `pnpm test:tui`. See
 [`e2e/README.md`](./e2e/README.md).
+
+## Templates
+
+Keep every template in `apps/templates` on the same versions:
+
+- `packageManager` matches the root `package.json`.
+- The `eve` dependency is the same published version everywhere, including
+  nested packages such as `eve-discord-agent-template/daemon`.
+
+When you add, import, or update a template, match these versions. When you bump
+either one, bump it in every template in the same PR and regenerate each
+template's `pnpm-lock.yaml`. See
+[`apps/templates/README.md`](./apps/templates/README.md).
 
 ## Documentation
 

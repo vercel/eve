@@ -58,6 +58,7 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 - [Next.js](${EVE_ORIGIN}/docs/guides/frontend/nextjs.md): Mount eve routes and use the React client in Next.js.
 - [Nuxt](${EVE_ORIGIN}/docs/guides/frontend/nuxt.md): Mount eve routes and use the Vue client in Nuxt.
 - [SvelteKit](${EVE_ORIGIN}/docs/guides/frontend/sveltekit.md): Mount eve routes and use the Svelte client in SvelteKit.
+- [Solid](${EVE_ORIGIN}/docs/guides/frontend/use-eve-agent-solid.md): Mount eve routes with \`eveVite()\` and use the Solid client in Solid 2 apps.
 - [TanStack Start](${EVE_ORIGIN}/docs/guides/frontend/tanstack.md): Mount eve routes and use the React client in TanStack Start.
 - [Vite](${EVE_ORIGIN}/docs/guides/frontend/vite.md): Mount eve routes in any other Vite app.
 - [Client SDK](${EVE_ORIGIN}/docs/guides/client.md): Call an eve app from scripts, services, tests, or custom UIs.

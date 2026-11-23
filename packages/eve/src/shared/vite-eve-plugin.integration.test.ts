@@ -339,62 +339,27 @@ describe("createEveVitePlugin", () => {
     );
   });
 
-  it("refuses static output when a vercel.ts configures the project without withEve", async () => {
+  it("writes the static output when vercel.json or vercel.ts configures routing", async () => {
     const root = await createAgentProject();
     await writeClientBuild(root, { "index.html": "<!doctype html>\n" });
-    await writeFile(join(root, "vercel.ts"), "export default { cleanUrls: true };\n");
-
-    await expect(buildForVercel(root)).rejects.toThrow(
-      /vercel\.ts configures the project.*Compose eve in vercel\.ts with withEve/,
+    await writeFile(
+      join(root, "vercel.json"),
+      JSON.stringify({
+        cleanUrls: true,
+        headers: [{ headers: [{ key: "X-Test", value: "1" }], source: "/(.*)" }],
+        rewrites: [{ destination: "/index.html", source: "/(.*)" }],
+      }),
     );
-    expect(existsSync(join(root, ".vercel", "output"))).toBe(false);
-  });
+    await writeFile(join(root, "vercel.ts"), "export default { trailingSlash: true };\n");
 
-  it.each([
-    { app: { headers: [] }, expected: { app: "headers" }, rewriteHint: false, root: undefined },
-    {
-      app: undefined,
-      expected: { root: "rewrites, cleanUrls" },
-      rewriteHint: true,
-      root: { cleanUrls: true, rewrites: [{ destination: "/index.html", source: "/(.*)" }] },
-    },
-    {
-      app: { headers: [] },
-      expected: { app: "headers", root: "rewrites" },
-      rewriteHint: true,
-      root: { rewrites: [{ destination: "/index.html", source: "/(.*)" }] },
-    },
-  ])("names each vercel.json routing field a static Build Output would drop", async (row) => {
-    const projectRoot = await createTemporaryDirectory("eve-vite-plugin-");
-    const appRoot = join(projectRoot, "web");
-    await mkdir(join(appRoot, "agent"), { recursive: true });
-    await mkdir(join(projectRoot, ".vercel"), { recursive: true });
-    await writeFile(join(projectRoot, ".vercel", "project.json"), "{}");
-    for (const [directory, config] of [
-      [appRoot, row.app],
-      [projectRoot, row.root],
-    ] as const) {
-      if (config !== undefined) {
-        await writeFile(join(directory, "vercel.json"), JSON.stringify(config));
-      }
-    }
-    await writeClientBuild(appRoot, { "index.html": "<!doctype html>\n" });
+    await buildForVercel(root);
 
-    const error = await buildForVercel(appRoot).then(
-      () => undefined,
-      (reason: unknown) => (reason instanceof Error ? reason.message : String(reason)),
-    );
-
-    for (const [directory, fields] of [
-      [appRoot, row.expected.app],
-      [projectRoot, row.expected.root],
-    ] as const) {
-      if (fields !== undefined) {
-        expect(error).toContain(`${join(directory, "vercel.json")} defines ${fields}`);
-      }
-    }
-    expect(error?.includes("delete its catch-all rewrite to index.html")).toBe(row.rewriteHint);
-    expect(existsSync(join(appRoot, ".vercel", "output"))).toBe(false);
+    const config = JSON.parse(
+      await readFile(join(root, ".vercel", "output", "config.json"), "utf8"),
+    ) as { routes: unknown[]; services: Record<string, { framework?: string }> };
+    expect(existsSync(join(root, ".vercel", "output", "static", "index.html"))).toBe(true);
+    expect(config.routes[0]).toEqual(expect.objectContaining({ src: "^/eve/v1/(.*)$" }));
+    expect(config.services.eve?.framework).toBe("eve");
   });
 
   it("merges the generated eve service into the user's Nitro Vercel config", async () => {

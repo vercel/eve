@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { ApprovalContext, ApprovalPolicy } from "#approval/definition.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { SessionKey, type SessionAuthContext } from "#context/keys.js";
+import { SandboxKey, SessionKey, type SessionAuthContext } from "#context/keys.js";
+import { toolCallModelOutput } from "#harness/tool-call-io.js";
+import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
+import { offloadContent } from "#tools/offload-content.js";
 import { resolveHeaders } from "#runtime/connections/mcp-client.js";
 import { resolveProvidedArguments } from "#runtime/connections/provided-arguments.js";
 import { resolveApprovalPolicy } from "#approval/definition.js";
@@ -269,5 +272,84 @@ describe("connection tool calls", () => {
       { query: null },
       expect.objectContaining({ callId: "call-search" }),
     );
+  });
+});
+
+describe("connection tool model output", () => {
+  const listIssues: ConnectionToolMetadata = {
+    description: "List issues.",
+    inputSchema: { type: "object" },
+    name: "list_issues",
+  };
+  const issues = Array.from({ length: 60 }, (_, number) => ({ body: "x".repeat(200), number }));
+
+  async function modelOutput(
+    toolCall: ResolvedConnectionDefinition["toolCall"],
+    content: readonly unknown[] = [{ text: JSON.stringify(issues), type: "text" }],
+  ) {
+    const connection = {
+      connectionName: "tracker",
+      description: "Issue tracker.",
+      logicalPath: "connections/tracker.ts",
+      protocol: "mcp",
+      sourceId: "tracker",
+      sourceKind: "module",
+      toolCall,
+      url: "https://tracker.example.com/mcp",
+    } as ResolvedConnectionDefinition;
+    const client: ConnectionClient = {
+      close: async () => {},
+      connect: async () => undefined,
+      executeTool: async () => ({ content }),
+      getToolMetadata: async () => [listIssues],
+    };
+    const registry: ConnectionRegistry = {
+      dispose: async () => {},
+      getClient: () => client,
+      getConnectionApproval: () => undefined,
+      getConnectionNames: () => ["tracker"],
+      getConnections: () => [connection],
+    };
+    const { access, files } = mockSandbox();
+    const ctx = new ContextContainer();
+    ctx.setVirtualContext(SandboxKey, access);
+    const entry = connectionEntry(registry, connection, "list_issues");
+    const output = await contextStorage.run(ctx, async () => {
+      const result = await entry.execute!({}, { messages: [], toolCallId: "call-1" });
+      return await toolCallModelOutput(entry, result, "call-1");
+    });
+    return { files, output };
+  }
+
+  it("offloads a large result when the connection sets toolCall.toModelOutput", async () => {
+    const { files, output } = await modelOutput({
+      toModelOutput: offloadContent({ maxBytes: 4_000 }),
+    });
+    expect(output.type).toBe("text");
+    expect((output as { value: string }).value).toContain(
+      "/tmp/.eve/tool-results/tracker__list_issues-call-1.json",
+    );
+    expect([...files.values()]).toEqual([JSON.stringify(issues)]);
+  });
+
+  it("keeps an image block as a file part and writes nothing", async () => {
+    const { files, output } = await modelOutput(
+      { toModelOutput: offloadContent({ maxBytes: 10 }) },
+      [
+        { text: "x".repeat(200), type: "text" },
+        { data: "AAAA", mimeType: "image/png", type: "image" },
+      ],
+    );
+    expect(output.type).toBe("content");
+    expect((output as { value: { type: string }[] }).value.map((part) => part.type)).toContain(
+      "file",
+    );
+    expect(files.size).toBe(0);
+  });
+
+  it("sends the whole result when the connection sets no toolCall.toModelOutput", async () => {
+    const { files, output } = await modelOutput(undefined);
+    expect(output).toEqual({ type: "json", value: issues });
+    expect(files.size).toBe(0);
   });
 });

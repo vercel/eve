@@ -1,5 +1,42 @@
 # eve
 
+## 1.3.0
+
+Released 2026-11-20 · [Compare with 1.2.0](https://github.com/vercel/eve/compare/eve%401.2.0...eve%401.3.0)
+
+### Features
+
+- Custom skills scope resolvers now receive the turn being run and, in a delegated session, its parent, so an app can choose a turn's skill scopes from what it records per turn. ([#6727](https://github.com/vercel/eve/pull/6727))
+- Add `eve/solid` with `useEveAgent` for Solid 2 apps.
+  The binding has the same options and methods as the React, Vue, and Svelte bindings, and exposes state as Solid accessors such as `agent.messages()` and `agent.status()`. Register `eveVite()` to mount the agent routes, and add `nitro()` from `nitro/vite` to deploy a server-rendered Solid app to Vercel. `solid-js` 2 is an optional peer dependency. With npm, a Solid 1 project that installs eve adds `"overrides": { "eve": { "solid-js": "$solid-js" } }` to `package.json`, because npm otherwise rejects that peer. ([#6621](https://github.com/vercel/eve/pull/6621))
+- Cold starts load the MCP client only when an agent first connects to an MCP server, so apps pay for its protocol schemas only when they use MCP. ([#6709](https://github.com/vercel/eve/pull/6709))
+
+### Bug Fixes
+
+- A message sent to a pre-1.0 session's original address on a local or self-hosted World now ends that stranded session and starts a fresh one, instead of leaving the session stuck after an upgrade.
+  Thanks @muratsu for reporting this in #6646. ([#6653](https://github.com/vercel/eve/pull/6653))
+- Fix `eve build` for an app that imports `eve/extensions/code/sandbox` and also mounts `@eve/self-improvement`.
+  The self-improvement maintainer mounts its own `code` extension, so the build rejected the app's `installCodeTooling` import as belonging to two mounts. An app import now binds to the app's mount and skips mounts nested inside another extension. The coordinator's `step` tool input is now an object with an `action` enum instead of a root-level union, which Claude rejects. ([#6725](https://github.com/vercel/eve/pull/6725))
+
+## 1.2.0
+
+Released 2026-11-20 · [Compare with 1.1.0](https://github.com/vercel/eve/compare/eve%401.1.0...eve%401.2.0)
+
+### Features
+
+- Traces now include an `agent.channel.deliver` span when a channel posts a final reply or a request for input, or fails to deliver a channel event, so a reply the user never saw shows up as a failed delivery with its error ID. ([#6644](https://github.com/vercel/eve/pull/6644))
+- Agent and task call spans now record the task they started or continued as `agent.task.id`, so the calls that serve one task, including continuations of a remote agent's task, can be grouped in a trace.
+  Instrumentation providers receive the same value as `taskId` on `call.settled`. ([#6654](https://github.com/vercel/eve/pull/6654))
+- `eveVite()` now deploys Vite single-page apps to Vercel without a `vercel.ts`: when no framework or adapter writes `.vercel/output`, it writes a static Build Output from the client build and adds the agents to it.
+  The client build needs a root `index.html`; without one, the build fails and asks for `nitro()` from `nitro/vite` or an adapter that writes `.vercel/output`. ([#6620](https://github.com/vercel/eve/pull/6620))
+
+### Bug Fixes
+
+- Custom skills now let the person who asked approve their own shared skill changes, so a channel skill no longer needs a second person to go live. ([#6532](https://github.com/vercel/eve/pull/6532))
+- `eveVite()`, `eveSvelteKit()`, and `eveTanStack()` no longer stop other Vite plugins, such as Solid start mode, from building their server output outside Vercel builds. ([#6619](https://github.com/vercel/eve/pull/6619))
+- Update the bundled Workflow runtime and worlds to the Workflow 5.7.0 release, which fixes stranded runs after a crashed first delivery and reduces World reads on hook-started runs and hook resumes.
+  The release also lowers the default `WORKFLOW_ORCHESTRATOR_LINGER_MS` to 5 seconds and keeps orchestrator deliveries alive through short sleeps. With the Postgres world, run `bootstrap` before deploying the upgrade so the database has migration 0032. ([#6657](https://github.com/vercel/eve/pull/6657))
+
 ## 1.1.0
 
 Released 2026-11-18 · [Compare with 1.0.2](https://github.com/vercel/eve/compare/eve%401.0.2...eve%401.1.0)

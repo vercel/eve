@@ -1,0 +1,73 @@
+:root {
+  color-scheme: light dark;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+body {
+  margin: 0;
+}
+
+main {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin: 0 auto;
+  max-width: 48rem;
+  min-height: 100dvh;
+  padding: 1rem;
+  box-sizing: border-box;
+}
+
+header {
+  align-items: center;
+  display: flex;
+  font-family: ui-monospace, monospace;
+  font-size: 0.8125rem;
+  justify-content: space-between;
+}
+
+.messages {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.message {
+  white-space: pre-wrap;
+}
+
+.message[data-role="user"] {
+  align-self: flex-end;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+}
+
+.tool,
+.reasoning {
+  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  border-radius: 0.375rem;
+  font-size: 0.8125rem;
+  padding: 0.5rem 0.75rem;
+}
+
+.tool pre {
+  margin: 0.5rem 0 0;
+  overflow-x: auto;
+}
+
+.error {
+  color: crimson;
+}
+
+form {
+  display: flex;
+  gap: 0.5rem;
+}
+
+form textarea {
+  flex: 1;
+  font: inherit;
+  resize: none;
+}

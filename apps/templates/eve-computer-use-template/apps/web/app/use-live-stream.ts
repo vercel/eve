@@ -1,0 +1,200 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+
+import { canDecodeDesktop, DesktopStream } from "./screen-relay";
+
+interface Size {
+  readonly width: number;
+  readonly height: number;
+}
+
+export interface LiveStreamState {
+  readonly connection: "idle" | "connecting" | "live" | "offline";
+  /** The page's URL, from agent-browser's stream; the desktop stream sends none. */
+  readonly url: string | null;
+  /** The coordinate space input is measured in: the page's CSS viewport, or the screen's pixels. */
+  readonly viewport: Size | null;
+  /** Pixel size of the last frame drawn, which sets the view's shape. */
+  readonly frame: Size | null;
+  /** The desktop's cursor as a CSS `cursor` value, for Take Over; null for the page's own. */
+  readonly cursor: string | null;
+}
+
+type ServerMessage =
+  | { type: "frame"; data: string; metadata: { deviceWidth: number; deviceHeight: number } }
+  | { type: "url"; url: string }
+  | { type: string };
+
+const INITIAL: LiveStreamState = {
+  connection: "idle",
+  url: null,
+  viewport: null,
+  frame: null,
+  cursor: null,
+};
+
+/**
+ * Draw a sandbox device's live stream on `canvas`, and send it input. The browser speaks
+ * agent-browser's JSON stream protocol through the app's /api/live WebSocket. The desktop is
+ * screen-relay's H.264 stream, which the page opens directly with a single-use ticket from
+ * /api/live; `DesktopStream` decodes it and sends input to it in the same message shapes.
+ */
+export function useLiveStream(
+  canvas: React.RefObject<HTMLCanvasElement | null>,
+  url: string | undefined,
+) {
+  const [state, setState] = useState<LiveStreamState>(INITIAL);
+  const socket = useRef<WebSocket | null>(null);
+  const desktopRef = useRef<DesktopStream | null>(null);
+
+  useEffect(() => {
+    setState(url === undefined ? INITIAL : { ...INITIAL, connection: "connecting" });
+    if (url === undefined) return;
+    let disposed = false;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    let attempt = 0;
+
+    const update = (patch: Partial<LiveStreamState>) => {
+      if (!disposed) setState((current) => ({ ...current, ...patch }));
+    };
+
+    const desktop = new URL(url).searchParams.get("device") === "desktop";
+    // Without WebCodecs the desktop shows its latest screenshot instead.
+    if (desktop && !canDecodeDesktop()) {
+      setState({ ...INITIAL, connection: "offline" });
+      return;
+    }
+
+    const reconnect = () => {
+      if (!disposed) retry = setTimeout(connect, Math.min(1000 * 2 ** attempt++, 8000));
+    };
+
+    async function connect() {
+      if (disposed) return;
+      let ws: WebSocket;
+      if (desktop) {
+        const ticket = await desktopTicket(url!);
+        if (disposed) return;
+        if (ticket === null) {
+          update({ connection: "offline" });
+          return reconnect();
+        }
+        ws = new WebSocket(ticket.url, ["nsl1", `ticket.${ticket.ticket}`]);
+      } else {
+        ws = new WebSocket(url!);
+      }
+      socket.current = ws;
+      const desktopStream = desktop
+        ? new DesktopStream(
+            ws,
+            () => canvas.current,
+            (frame) => {
+              if (disposed) return;
+              // The desktop's input is measured in its own pixels, the frame's size.
+              setState((current) =>
+                current.frame?.width === frame.width && current.frame.height === frame.height
+                  ? current
+                  : { ...current, frame, viewport: frame },
+              );
+            },
+            (cursor) => update({ cursor }),
+          )
+        : null;
+      desktopRef.current = desktopStream;
+      ws.onopen = () => {
+        attempt = 0;
+        update({ connection: "live" });
+      };
+      ws.onclose = () => {
+        desktopStream?.close();
+        if (socket.current === ws) {
+          socket.current = null;
+          desktopRef.current = null;
+        }
+        if (disposed) return;
+        update({ connection: "offline" });
+        reconnect();
+      };
+      ws.onmessage = (event) => {
+        if (desktopStream !== null) {
+          desktopStream.receive(event.data);
+          return;
+        }
+        const message = JSON.parse(String(event.data)) as ServerMessage;
+        if (message.type === "frame") {
+          const { data, metadata } = message as Extract<ServerMessage, { type: "frame" }>;
+          void paint(canvas.current, `data:image/jpeg;base64,${data}`).then((frame) => {
+            if (frame === undefined) return;
+            // agent-browser reports the window's height (720) rather than the page's, which is
+            // shorter, so only the width is trustworthy. The frame has the page's shape.
+            const viewport = {
+              width: metadata.deviceWidth,
+              height: Math.round((frame.height * metadata.deviceWidth) / frame.width),
+            };
+            setState((current) =>
+              current.frame?.width === frame.width &&
+              current.frame.height === frame.height &&
+              current.viewport?.width === viewport.width &&
+              current.viewport.height === viewport.height
+                ? current
+                : { ...current, frame, viewport },
+            );
+          });
+        } else if (message.type === "url") {
+          update({ url: (message as { url: string }).url });
+        }
+      };
+    }
+
+    void connect();
+    return () => {
+      disposed = true;
+      clearTimeout(retry);
+      socket.current?.close();
+      socket.current = null;
+      desktopRef.current?.close();
+      desktopRef.current = null;
+    };
+  }, [canvas, url]);
+
+  const send = useCallback((message: Record<string, unknown>) => {
+    const ws = socket.current;
+    if (ws === null || ws.readyState !== WebSocket.OPEN) return;
+    if (desktopRef.current !== null) desktopRef.current.send(message);
+    else ws.send(JSON.stringify(message));
+  }, []);
+
+  return { ...state, send };
+}
+
+/** A ticket into the desktop's stream from /api/live, or null when it has none yet. */
+async function desktopTicket(url: string): Promise<{ url: string; ticket: string } | null> {
+  try {
+    const response = await fetch(url, { method: "POST" });
+    if (!response.ok) return null;
+    const body = (await response.json()) as { url?: unknown; ticket?: unknown };
+    return typeof body.url === "string" && typeof body.ticket === "string"
+      ? { url: body.url, ticket: body.ticket }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function paint(canvas: HTMLCanvasElement | null, src: string): Promise<Size | undefined> {
+  return new Promise((resolve) => {
+    if (canvas === null) return resolve(undefined);
+    const image = new Image();
+    image.onload = () => {
+      if (canvas.width !== image.naturalWidth || canvas.height !== image.naturalHeight) {
+        canvas.width = image.naturalWidth;
+        canvas.height = image.naturalHeight;
+      }
+      canvas.getContext("2d")?.drawImage(image, 0, 0);
+      resolve({ width: image.naturalWidth, height: image.naturalHeight });
+    };
+    image.onerror = () => resolve(undefined);
+    image.src = src;
+  });
+}

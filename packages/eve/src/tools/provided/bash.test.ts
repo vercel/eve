@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { bash, type BashToolOutput } from "./bash.js";
+import { toolModelOutputContext } from "#harness/tool-model-output.js";
 
 const finished: BashToolOutput = {
   exitCode: 1,
@@ -75,6 +76,8 @@ describe("bash model output", () => {
       expected: { type: "text", value: "Command blocked by policy." },
     },
   ])("shows $name", async ({ output, expected }) => {
-    expect(await bash.toModelOutput!(output as BashToolOutput)).toEqual(expected);
+    expect(
+      await bash.toModelOutput!(output as BashToolOutput, toolModelOutputContext("bash", "call_1")),
+    ).toEqual(expected);
   });
 });
