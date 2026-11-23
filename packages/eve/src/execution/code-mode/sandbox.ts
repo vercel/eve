@@ -68,11 +68,16 @@ const BUSY_RETRY_DELAYS_MS = [250, 500, 1_000, 2_000, 4_000, 8_000];
 const LINE_TERMINATOR_RE = /[\r\n\u2028\u2029]/u;
 
 function buildBasePrelude(hostNamespace: string): string {
+  const maxConsoleBytes = String(PROGRAM_MAX_CONSOLE_BYTES);
   return [
-    `const __logs = []; let __logBytes = 0;`,
-    `const __text = (value) => { if (typeof value === "string") return value; try { const json = JSON.stringify(value); return json === undefined ? String(value) : json; } catch { return String(value); } };`,
-    `const __log = (...args) => { const line = args.map(__text).join(" "); if (__logBytes > ${String(PROGRAM_MAX_CONSOLE_BYTES)}) return; __logBytes += line.length + 1; __logs.push(__logBytes > ${String(PROGRAM_MAX_CONSOLE_BYTES)} ? "(console output truncated)" : line); };`,
-    `const console = Object.freeze({ debug: __log, error: __log, info: __log, log: __log, warn: __log });`,
+    `const [console, __readLogs, __formatError] = (() => {`,
+    `const logs = []; let logBytes = 0;`,
+    `const utf8Bytes = (s) => { let n = 0; for (let i = 0; i < s.length; i += 1) { const c = s.charCodeAt(i); if (c < 0x80) n += 1; else if (c < 0x800) n += 2; else if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length) { n += 4; i += 1; } else n += 3; } return n; };`,
+    `const text = (value) => { if (typeof value === "string") return value; try { const json = JSON.stringify(value); return json === undefined ? String(value) : json; } catch { return String(value); } };`,
+    `const log = (...args) => { if (logBytes >= ${maxConsoleBytes}) return; const line = args.map(text).join(" "); const cost = utf8Bytes(JSON.stringify(line)) + 1; if (logBytes + cost > ${maxConsoleBytes}) { logBytes = ${maxConsoleBytes}; logs.push("(console output truncated)"); return; } logBytes += cost; logs.push(line); };`,
+    `const formatError = (error) => ({ message: error instanceof Error ? error.message : text(error), name: error instanceof Error ? error.name : "", stack: error instanceof Error ? String(error.stack ?? "") : "" });`,
+    `return [Object.freeze({ debug: log, error: log, info: log, log, warn: log }), () => logs.slice(), formatError];`,
+    `})();`,
     `const __bridge = (kind, payload) => ${hostNamespace}[kind](JSON.stringify(payload)).then(JSON.parse);`,
   ].join(" ");
 }
@@ -80,7 +85,7 @@ function buildBasePrelude(hostNamespace: string): string {
 function wrapProgram(code: string, hostNamespace: string, prelude: string | undefined): string {
   const base = buildBasePrelude(hostNamespace);
   const header = prelude !== undefined && prelude.length > 0 ? `${base} ${prelude}` : base;
-  return `${header} try { const __value = await (async () => {${code}\n})(); return JSON.stringify({ ok: true, value: __value === undefined ? null : __value, logs: __logs }); } catch (__error) { return JSON.stringify({ ok: false, error: { message: __error instanceof Error ? __error.message : __text(__error), name: __error instanceof Error ? __error.name : "", stack: __error instanceof Error ? String(__error.stack ?? "") : "" }, logs: __logs }); }`;
+  return `${header} try { const __value = await (async () => {${code}\n})(); return JSON.stringify({ ok: true, value: __value === undefined ? null : __value, logs: __readLogs() }); } catch (__error) { return JSON.stringify({ ok: false, error: __formatError(__error), logs: __readLogs() }); }`;
 }
 
 const runEncodingLimit = (jsonBytes: number) => jsonBytes * 6 + 1024;
@@ -128,7 +133,7 @@ export async function runProgramSandbox(
       const name = handler.errorName ?? defaultErrorName;
       let payload: unknown;
       try {
-        payload = parseBridgeJson(json, handler.label, PROGRAM_MAX_INPUT_BYTES);
+        payload = parseBridgeJson(json, `${handler.label} input`, PROGRAM_MAX_INPUT_BYTES);
       } catch (error) {
         throw guestError(toErrorMessage(error), code, name);
       }
@@ -222,7 +227,7 @@ export async function runProgramSandbox(
     return failed(toErrorMessage(error));
   }
   if (!isObject(settled)) return failed("The program returned no result.");
-  const logs = Array.isArray(settled.logs) ? settled.logs.map(String) : [];
+  const logs = clampHostLogs(settled.logs);
   if (settled.ok === true) {
     const value = parseJsonValue(settled.value ?? null);
     const valueBytes = Buffer.byteLength(JSON.stringify(value));
@@ -240,6 +245,25 @@ export async function runProgramSandbox(
 
 function failed(error: string): ProgramSandboxOutcome {
   return { error, logs: [], status: "failed" };
+}
+
+function clampHostLogs(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const logs: string[] = [];
+  let bytes = 0;
+  for (const entry of raw) {
+    const line = String(entry);
+    const cost = Buffer.byteLength(JSON.stringify(line)) + 1;
+    if (bytes + cost > PROGRAM_MAX_CONSOLE_BYTES) {
+      if (logs.at(-1) !== "(console output truncated)") {
+        logs.push("(console output truncated)");
+      }
+      break;
+    }
+    bytes += cost;
+    logs.push(line);
+  }
+  return logs;
 }
 
 function runFailureMessage(error: { readonly code: string; readonly message: string }): string {

@@ -675,13 +675,13 @@ call as a [task](#run-calls-as-tasks-task) that delivers its output in a `task.r
 
 Inside the function body, `ctx` exposes the workflow runtime's capabilities:
 
-| Member                                                                              | Behavior                                                                                                                        |
-| ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `ctx.agents`                                                                        | Frozen map of callable `{ [name]: { description } }` agents, including agents hidden with `tool: false` or `disableTool()`.     |
-| `ctx.agent(name, { message, outputSchema?, model?, files? })`                       | Starts a new child session and resolves to the reply or structured value. Supports local `model` overrides and HTTP(S) `files`. |
-| `ctx.ask({ prompt, title?, display?, options?, allowFreeform?, initialOptionId? })` | Asks the user on the session's channel and resolves to their answer.                                                            |
-| `ctx.sleep(seconds)`                                                                | Pauses up to 1 year without holding compute and resolves to `{ waitedSeconds }`.                                                |
-| `ctx.progress(update)`                                                              | Emits a JSON-serializable progress report while the workflow runs.                                                              |
+| Member                                                                              | Behavior                                                                                                                    |
+| ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `ctx.agents`                                                                        | Frozen map of callable `{ [name]: { description } }` agents, including agents hidden with `tool: false` or `disableTool()`. |
+| `ctx.agent(name, { message, outputSchema?, files? })`                               | Starts a new child session and resolves to the reply or structured value. Supports `https://` `files`.                      |
+| `ctx.ask({ prompt, title?, display?, options?, allowFreeform?, initialOptionId? })` | Asks the user on the session's channel and resolves to their answer.                                                        |
+| `ctx.sleep(seconds)`                                                                | Pauses up to 1 year without holding compute and resolves to `{ waitedSeconds }`.                                            |
+| `ctx.progress(update)`                                                              | Emits a JSON-serializable progress report while the workflow runs.                                                          |
 
 ```js
 await ctx.progress({ stage: "triage", agents: Object.keys(ctx.agents) });
@@ -715,16 +715,17 @@ Return values and call inputs pass through `JSON.stringify`, so a `Date` becomes
 functions or `undefined` properties drop. Returning `undefined` yields `null`. Results over
 10,000 estimated tokens are truncated to their head and tail when shown to the model.
 
-| Limit                                   | Value                   |
-| --------------------------------------- | ----------------------- |
-| Return value or call input as JSON      | 1 MiB                   |
-| Child reply as JSON                     | 4 MiB                   |
-| Continuation state while waiting        | 8 MiB                   |
-| Program source                          | 256 KiB                 |
-| Captured console output                 | 64 KiB                  |
-| Model-facing result before truncation   | 10,000 estimated tokens |
-| JavaScript CPU time per start or resume | 30 seconds              |
-| Wall-clock time per start or resume     | 5 minutes               |
+| Limit                                   | Value                    |
+| --------------------------------------- | ------------------------ |
+| Return value or call input as JSON      | 1 MiB                    |
+| Child reply as JSON                     | 4 MiB                    |
+| Continuation state while waiting        | 8 MiB                    |
+| Program source                          | 256 KiB                  |
+| Captured console output                 | 64 KiB                   |
+| `ctx.progress` per update / per step    | 16 KiB / 64 KiB (64 max) |
+| Model-facing result before truncation   | 10,000 estimated tokens  |
+| JavaScript CPU time per start or resume | 30 seconds               |
+| Wall-clock time per start or resume     | 5 minutes                |
 
 Time spent waiting for child agents, human answers, or `ctx.sleep` does not count toward either time
 limit.

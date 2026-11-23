@@ -1,31 +1,20 @@
 import { PROGRAM_MAX_AGENT_CALLS, PROGRAM_MAX_OUTPUT_BYTES } from "#execution/code-mode/limits.js";
-import { isAgentReasoningDefinition } from "#internal/runtime-model.js";
 import type {
   InteractionDisplay,
   InteractionOption,
   InteractionOptionStyle,
 } from "#protocol/session-events/families/interaction.js";
-import {
-  ANTHROPIC_PROMPT_CACHE_TTLS,
-  type AgentModelOptionsDefinition,
-  type AgentPromptCacheDefinition,
-  type AnthropicPromptCacheTtl,
-} from "#shared/agent-definition.js";
-import {
-  isJsonObjectValue,
-  parseJsonObject,
-  parseJsonValue,
-  type JsonObject,
-  type JsonValue,
-} from "#shared/json.js";
+import { parseJsonObject, parseJsonValue, type JsonObject, type JsonValue } from "#shared/json.js";
 import { MAX_MESSAGE_PARTS } from "#shared/message-content.js";
 import type { ToolQuestion } from "#tools/definition.js";
-import type { AgentSessionModelSelection } from "#tools/workflow-definition.js";
 
 export const DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS = 100;
 export const MAX_WORKFLOW_PROGRAM_MAX_SUBAGENTS = PROGRAM_MAX_AGENT_CALLS;
 export const WORKFLOW_PROGRAM_MAX_AGENT_OUTPUT_BYTES = PROGRAM_MAX_OUTPUT_BYTES;
 export const WORKFLOW_PROGRAM_MAX_SLEEP_SECONDS = 365 * 24 * 60 * 60;
+export const WORKFLOW_PROGRAM_MAX_PROGRESS_UPDATE_BYTES = 16 * 1024;
+export const WORKFLOW_PROGRAM_MAX_PROGRESS_BYTES = 64 * 1024;
+export const WORKFLOW_PROGRAM_MAX_PROGRESS_UPDATES = 64;
 
 export type WorkflowProgramAgents = Readonly<Record<string, { readonly description: string }>>;
 
@@ -53,7 +42,6 @@ export interface WorkflowProgramAgentCall {
   readonly input: {
     readonly files?: readonly WorkflowProgramAgentFile[];
     readonly message: string;
-    readonly model?: AgentSessionModelSelection;
     readonly outputSchema?: JsonObject;
   };
   readonly target: string;
@@ -78,14 +66,7 @@ export interface WorkflowProgramResolution {
   readonly value: WorkflowProgramCallResult;
 }
 
-const AGENT_INPUT_KEYS = new Set(["files", "message", "model", "outputSchema"]);
-const MODEL_SELECTION_KEYS = new Set([
-  "model",
-  "modelContextWindowTokens",
-  "modelOptions",
-  "reasoning",
-]);
-const MODEL_OPTIONS_KEYS = new Set(["promptCache", "providerOptions"]);
+const AGENT_INPUT_KEYS = new Set(["files", "message", "outputSchema"]);
 const FILE_KEYS = new Set(["filename", "mediaType", "url"]);
 const ASK_KEYS = new Set([
   "allowFreeform",
@@ -125,14 +106,10 @@ export function readWorkflowProgramAgentCall(value: unknown): WorkflowProgramAge
   const input: {
     files?: readonly WorkflowProgramAgentFile[];
     message: string;
-    model?: AgentSessionModelSelection;
     outputSchema?: JsonObject;
   } = { message: rawInput.message };
   if (rawInput.outputSchema !== undefined) {
     input.outputSchema = parseJsonObject(rawInput.outputSchema);
-  }
-  if (rawInput.model !== undefined) {
-    input.model = readWorkflowProgramModelSelection(rawInput.model);
   }
   if (rawInput.files !== undefined) {
     input.files = readWorkflowProgramAgentFiles(rawInput.files);
@@ -216,109 +193,6 @@ export function readWorkflowProgramProgressUpdate(value: unknown): JsonValue {
   return parseJsonValue(value);
 }
 
-function readWorkflowProgramModelSelection(value: unknown): AgentSessionModelSelection {
-  if (typeof value === "string") {
-    if (value.trim() === "") {
-      throw new TypeError('Workflow program ctx.agent() "model" must be a non-empty string.');
-    }
-    return value;
-  }
-  const raw = parseJsonObject(value);
-  assertKnownKeys(raw, MODEL_SELECTION_KEYS, 'Workflow program ctx.agent() "model"');
-  if (typeof raw.model !== "string" || raw.model.trim() === "") {
-    throw new TypeError(
-      'Workflow program ctx.agent() "model" object requires a non-empty "model" string.',
-    );
-  }
-  const selection: {
-    model: string;
-    modelContextWindowTokens?: number;
-    modelOptions?: AgentModelOptionsDefinition;
-    reasoning?: ReturnType<typeof readReasoning>;
-  } = { model: raw.model };
-
-  if (raw.modelContextWindowTokens !== undefined) {
-    if (!isPositiveInteger(raw.modelContextWindowTokens)) {
-      throw new TypeError(
-        'Workflow program ctx.agent() "model.modelContextWindowTokens" must be a positive integer.',
-      );
-    }
-    selection.modelContextWindowTokens = raw.modelContextWindowTokens;
-  }
-  if (raw.reasoning !== undefined) {
-    selection.reasoning = readReasoning(raw.reasoning);
-  }
-  if (raw.modelOptions !== undefined) {
-    selection.modelOptions = readModelOptions(raw.modelOptions);
-  }
-  return selection;
-}
-
-function readReasoning(value: unknown) {
-  if (!isAgentReasoningDefinition(value)) {
-    throw new TypeError(
-      'Workflow program ctx.agent() "model.reasoning" must be provider-default, none, minimal, low, medium, high, or xhigh.',
-    );
-  }
-  return value;
-}
-
-function readModelOptions(value: unknown): AgentModelOptionsDefinition {
-  const raw = parseJsonObject(value);
-  assertKnownKeys(raw, MODEL_OPTIONS_KEYS, 'Workflow program ctx.agent() "model.modelOptions"');
-  const options: {
-    promptCache?: AgentPromptCacheDefinition;
-    providerOptions?: Record<string, JsonObject>;
-  } = {};
-
-  if (raw.providerOptions !== undefined) {
-    const record = parseJsonObject(raw.providerOptions);
-    const providerOptions: Record<string, JsonObject> = {};
-    for (const [key, entry] of Object.entries(record)) {
-      if (!isJsonObjectValue(entry)) {
-        throw new TypeError(
-          `Workflow program ctx.agent() "model.modelOptions.providerOptions.${key}" must be an object.`,
-        );
-      }
-      providerOptions[key] = entry;
-    }
-    options.providerOptions = providerOptions;
-  }
-
-  if (raw.promptCache !== undefined) {
-    const promptCache = parseJsonObject(raw.promptCache);
-    assertKnownKeys(
-      promptCache,
-      new Set(["anthropic"]),
-      'Workflow program ctx.agent() "model.modelOptions.promptCache"',
-    );
-    if (promptCache.anthropic === undefined) {
-      options.promptCache = {};
-    } else {
-      const anthropic = parseJsonObject(promptCache.anthropic);
-      assertKnownKeys(
-        anthropic,
-        new Set(["ttl"]),
-        'Workflow program ctx.agent() "model.modelOptions.promptCache.anthropic"',
-      );
-      if (anthropic.ttl === undefined) {
-        options.promptCache = { anthropic: {} };
-      } else if (
-        typeof anthropic.ttl !== "string" ||
-        !ANTHROPIC_PROMPT_CACHE_TTLS.includes(anthropic.ttl as AnthropicPromptCacheTtl)
-      ) {
-        throw new TypeError(
-          'Workflow program ctx.agent() "model.modelOptions.promptCache.anthropic.ttl" must be "5m" or "1h".',
-        );
-      } else {
-        options.promptCache = { anthropic: { ttl: anthropic.ttl as AnthropicPromptCacheTtl } };
-      }
-    }
-  }
-
-  return options;
-}
-
 function readWorkflowProgramAgentFiles(value: unknown): readonly WorkflowProgramAgentFile[] {
   if (!Array.isArray(value)) {
     throw new TypeError('Workflow program ctx.agent() "files" must be an array.');
@@ -333,7 +207,7 @@ function readWorkflowProgramAgentFiles(value: unknown): readonly WorkflowProgram
     assertKnownKeys(raw, FILE_KEYS, 'Workflow program ctx.agent() "files" entry');
     if (typeof raw.url !== "string") {
       throw new TypeError(
-        'Workflow program ctx.agent() file entries require an HTTP(S) "url" string.',
+        'Workflow program ctx.agent() file entries require an HTTPS "url" string.',
       );
     }
     let parsed: URL;
@@ -341,12 +215,12 @@ function readWorkflowProgramAgentFiles(value: unknown): readonly WorkflowProgram
       parsed = new URL(raw.url);
     } catch {
       throw new TypeError(
-        'Workflow program ctx.agent() file entries require an HTTP(S) "url", not inline bytes or base64.',
+        'Workflow program ctx.agent() file entries require an https:// "url", not inline bytes or base64.',
       );
     }
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    if (parsed.protocol !== "https:") {
       throw new TypeError(
-        'Workflow program ctx.agent() file entries require an HTTP(S) "url", not inline bytes or base64.',
+        'Workflow program ctx.agent() file entries require an https:// "url", not inline bytes or base64.',
       );
     }
     if (typeof raw.mediaType !== "string" || raw.mediaType.trim() === "") {

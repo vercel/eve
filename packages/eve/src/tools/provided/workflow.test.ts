@@ -25,7 +25,7 @@ describe("workflow", () => {
     expect(isWorkflowToolDefinition(definition)).toBe(true);
     expect(definition.description).toContain("ctx.agents");
     expect(definition.description).toContain(
-      "ctx.agent(name, { message: string, outputSchema?: object, model?: string | object, files?: [{ url, mediaType, filename? }] })",
+      "ctx.agent(name, { message: string, outputSchema?: object, files?: [{ url: https://..., mediaType, filename? }] })",
     );
     expect(definition.description).toContain("ctx.ask(");
     expect(definition.description).toContain("ctx.sleep(seconds)");
@@ -116,6 +116,18 @@ describe("workflow", () => {
       expect(projectedUtf8.value.startsWith("START_")).toBe(true);
       expect(projectedUtf8.value.endsWith("_END")).toBe(true);
       expect(projectedUtf8.value).toContain("characters left out");
+    }
+
+    const fileShaped = {
+      data: `https://example.com/${"a".repeat(60_000)}`,
+      mediaType: "image/png",
+      type: "file",
+    };
+    const projectedFile = await project(fileShaped);
+    expect(projectedFile.type).toBe("text");
+    if (projectedFile.type === "text") {
+      expect(projectedFile.value).toContain("over 10000 tokens");
+      expect(projectedFile.value.length).toBeLessThan(60_000);
     }
   });
 

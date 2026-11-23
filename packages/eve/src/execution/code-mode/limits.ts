@@ -1,6 +1,5 @@
 export const PROGRAM_MAX_CALLS = 1024;
 export const PROGRAM_MAX_AGENT_CALLS = 128;
-export const PROGRAM_MAX_INLINE_CALLS = 32;
 export const PROGRAM_CPU_TIMEOUT_MS = 30_000;
 export const PROGRAM_TIMEOUT_MS = 300_000;
 export const PROGRAM_MEMORY_BYTES = 64 * 1024 * 1024;

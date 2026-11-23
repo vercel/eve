@@ -1,14 +1,13 @@
 import { PROGRAM_MAX_RESULT_TOKENS } from "#execution/code-mode/limits.js";
-import { estimateTokens } from "#harness/token-estimate.js";
 import type { JsonValue } from "#shared/json.js";
 import { defaultToolModelOutput, type ToolModelOutput } from "#tools/model-output.js";
 
 export function truncateProgramModelOutput(output: JsonValue): ToolModelOutput {
-  if (estimateTokens(output) <= PROGRAM_MAX_RESULT_TOKENS) {
+  const text = typeof output === "string" ? output : JSON.stringify(output ?? null);
+  const budgetBytes = PROGRAM_MAX_RESULT_TOKENS * 4;
+  if (Buffer.byteLength(text) <= budgetBytes) {
     return defaultToolModelOutput(output);
   }
-  const text = typeof output === "string" ? output : JSON.stringify(output);
-  const budgetBytes = PROGRAM_MAX_RESULT_TOKENS * 4;
   const head = slicePrefixByUtf8Bytes(text, Math.floor(budgetBytes * 0.75));
   const tail = sliceSuffixByUtf8Bytes(text, Math.floor(budgetBytes * 0.25));
   const dropped = text.length - head.length - tail.length;
