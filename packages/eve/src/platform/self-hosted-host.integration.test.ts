@@ -38,6 +38,8 @@ const selfHostedPlatform = definePlatform({
   models: () => ({ resolve: async () => ({ kind: "api-key", token: config.gatewayApiKey }) }),
 });
 
+const platform = createEntities(selfHostedPlatform, undefined);
+
 let uninstall: () => void;
 beforeAll(() => {
   vi.stubEnv("VERCEL", "1");
@@ -47,7 +49,7 @@ beforeAll(() => {
   vi.stubEnv("VERCEL_URL", "vercel-should-not-be-used.vercel.app");
   vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", "vercel-prod-should-not-be-used.vercel.app");
   const app = createProcessApp();
-  app.platform = createEntities(selfHostedPlatform, undefined);
+  app.platform = platform;
   uninstall = installProcessApp(app);
 });
 afterAll(() => {
@@ -58,13 +60,17 @@ afterAll(() => {
 describe("a self-hosted host installed in code", () => {
   it("supplies the runtime identity's build", async () => {
     const { buildRuntimeIdentity } = await import("#execution/node-step.js");
-    expect(buildRuntimeIdentity({ id: "agent", name: "agent" }).build).toEqual(config.build);
+    expect(buildRuntimeIdentity({ id: "agent", name: "agent" }, platform).build).toEqual(
+      config.build,
+    );
   });
 
   it("supplies the public host for gateway attribution", async () => {
     const { buildGatewayAttributionHeaders } = await import("#harness/model-call/model.js");
     expect(
-      buildGatewayAttributionHeaders({ gateway: true } as never, undefined)?.["http-referer"],
+      buildGatewayAttributionHeaders({ gateway: true } as never, undefined, platform)?.[
+        "http-referer"
+      ],
     ).toBe(config.publicUrl);
   });
 

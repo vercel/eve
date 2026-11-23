@@ -15,6 +15,8 @@ import { type Step, stepReference } from "#harness/step/context.js";
 import { agentSettings } from "#execution/effective-agent-config.js";
 import { againstWindow, compactionConfig } from "#harness/compaction/config.js";
 import { activeTurnId } from "#harness/session-machine/view.js";
+import { appOf } from "#context/app.js";
+import { platformOf } from "#platform/context.js";
 import {
   buildGatewayAttributionHeaders,
   resolveEffectiveRuntimeModel,
@@ -379,7 +381,11 @@ async function summaryExecutor(
   const profile = resolveModelProfile(model);
   const call = {
     abortSignal: config.abortSignal,
-    headers: buildGatewayAttributionHeaders(profile, config.runtimeIdentity),
+    headers: buildGatewayAttributionHeaders(
+      profile,
+      config.runtimeIdentity,
+      platformOf(appOf(step.ctx)),
+    ),
     model: withGatewayTraceContext(
       model,
       profile,

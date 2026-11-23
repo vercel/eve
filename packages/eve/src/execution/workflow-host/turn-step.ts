@@ -6,9 +6,10 @@ import { workflowHost } from "#execution/workflow-host/host.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { workflowToolStubs } from "#execution/workflow-host/tool-stubs.js";
+import { processApp, type App } from "#runtime/app.js";
 import { setEveAttributes } from "#runtime/attributes/emit.js";
 
-function workflowStepHost(): SessionStepHost {
+function workflowStepHost(app: App | undefined): SessionStepHost {
   let callbackBaseUrl: string | undefined;
   try {
     const metadata = getWorkflowMetadata();
@@ -16,6 +17,7 @@ function workflowStepHost(): SessionStepHost {
       callbackBaseUrl = resolveWorkflowCallbackBaseUrl(metadata.url);
   } catch {}
   return {
+    app,
     callbackBaseUrl,
     createRuntime: createWorkflowRuntime,
     setAttributes: setEveAttributes,
@@ -38,5 +40,5 @@ export async function turnStep(input: TurnStepInput): Promise<TurnStepResult> {
       },
     );
   }
-  return await turnStepOn(workflowStepHost())(input);
+  return await turnStepOn(workflowStepHost(processApp().started))(input);
 }

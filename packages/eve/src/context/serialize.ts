@@ -1,3 +1,4 @@
+import { AppKey } from "#context/app.js";
 import { type AlsContext, ContextContainer } from "#context/container.js";
 import { resolveKey } from "#context/key.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -12,6 +13,7 @@ const STATE_LAYOUT_VERSION = 1;
 export function serializeContext(ctx: AlsContext): Record<string, unknown> {
   const data: Record<string, unknown> = {};
   for (const [key, value] of ctx.entries()) {
+    if (key.name === AppKey.name) continue;
     try {
       data[key.name] = key.codec ? key.codec.serialize(value) : value;
     } catch (error) {

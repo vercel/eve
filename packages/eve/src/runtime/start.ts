@@ -37,7 +37,8 @@ export async function start(input: StartInput): Promise<App> {
     );
   }
   await DURABLE_PHASE.run(app, input);
-  return startedApp(app);
+  app.started = startedApp(app);
+  return app.started;
 }
 
 function startedApp({ platform, hosts, lifetime }: ProcessApp): App {

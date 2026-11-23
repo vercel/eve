@@ -18,6 +18,7 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey, OccurrenceIdKey, ScheduleIdKey, ScheduleInstanceKey } from "#context/keys.js";
 import { expectFunction } from "#internal/authored-module.js";
 import { PermanentScheduleMessageError } from "#internal/schedules/permanent-error.js";
+import { bindApp } from "#context/app.js";
 import { platformOf } from "#platform/context.js";
 import type { App } from "#runtime/app.js";
 import type {
@@ -82,6 +83,7 @@ export class ScheduleDispatcher {
 
   async trigger(input: ScheduleDispatchInput): Promise<ScheduleDispatchResult> {
     const scope = new ContextContainer();
+    bindApp(scope, this.app);
     scope.set(ScheduleIdKey, input.scheduleId);
     return await contextStorage.run(scope, () => this.triggerInScope(input));
   }

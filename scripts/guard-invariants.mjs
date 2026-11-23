@@ -1597,6 +1597,7 @@ const PROCESS_APP_VALUES = new Set(["createProcessApp", "installProcessApp", "pr
 const PROCESS_APP_OWNERS = new Set(
   [
     "execution/hosts.ts",
+    "execution/workflow-host/turn-step.ts",
     "instrumentation/providers.ts",
     "instrumentation/runtime-global.ts",
     "platform/context.ts",

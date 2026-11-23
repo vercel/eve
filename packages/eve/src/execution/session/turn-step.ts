@@ -34,6 +34,9 @@ import {
 } from "#context/keys.js";
 import { ChannelKey, requireCompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { sessionAgent } from "#definitions/agent.js";
+import { bindApp } from "#context/app.js";
+import { platformOf } from "#platform/context.js";
+import type { App } from "#runtime/app.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
@@ -139,6 +142,7 @@ interface PendingStepAttributes {
 }
 
 export interface SessionStepHost {
+  readonly app?: App;
   readonly callbackBaseUrl?: string;
   setAttributes(attributes: Record<string, EveAttributeValue>): Promise<void>;
   createRuntime(config: CreateRuntimeConfig): Runtime;
@@ -185,6 +189,7 @@ async function runSessionStepBody(
 
   let durableSession = readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
+  bindApp(ctx, host.app);
   enterSessionProjection(ctx, durableSession.state);
   const orphaned = await readOrphanedLines({
     sessionId: durableSession.sessionId,
@@ -509,7 +514,9 @@ async function runSessionStepBody(
     };
 
     if (delivery !== undefined && resolved === undefined && startedBetweenTurns) {
-      await publishAdmission(buildRuntimeIdentity(agent)).catch(ignoreTurnCancellation);
+      await publishAdmission(buildRuntimeIdentity(agent, platformOf(host.app))).catch(
+        ignoreTurnCancellation,
+      );
       await instrumentation?.flush();
       const aliased = saveSessionProjection(
         reconcileSessionContinuationToken(ctx, initialSession),
@@ -527,7 +534,7 @@ async function runSessionStepBody(
       });
     }
 
-    const runtimeIdentity = buildRuntimeIdentity(agent);
+    const runtimeIdentity = buildRuntimeIdentity(agent, platformOf(host.app));
     let restoration: Promise<void> | undefined;
     const prepareDefinitions = (session: HarnessSession): Promise<void> => {
       return (restoration ??= (async () => {
@@ -611,6 +618,7 @@ async function runSessionStepBody(
       signInCompletions: readonly AuthorizationChallenge[] | undefined,
     ): Promise<StepResult> => {
       const step = createExecutionNodeStep({
+        platform: platformOf(host.app),
         steeringSignal: input.steeringSignal,
         abortSignal,
         capabilities,

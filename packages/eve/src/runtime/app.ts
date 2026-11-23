@@ -23,6 +23,7 @@ export interface AppInstrumentation {
 
 export interface ProcessApp {
   bootedPhases: number;
+  started: App | undefined;
   platform: Entities | undefined;
   defaultSession: RuntimeSession | undefined;
   readonly hosts: Hosts;
@@ -33,6 +34,7 @@ export interface ProcessApp {
 export function createProcessApp(): ProcessApp {
   return {
     bootedPhases: 0,
+    started: undefined,
     platform: undefined,
     defaultSession: undefined,
     hosts: { routes: new Set(), sessionEventStores: new Map() },
