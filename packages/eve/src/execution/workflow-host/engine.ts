@@ -2,6 +2,7 @@ import type { World } from "#compiled/@workflow/world/index.js";
 import type { DurableEngine, EngineApp } from "#execution/durable.js";
 import { installWorkflowDeploymentId } from "#execution/install-workflow-deployment-id.js";
 import { closeWorkflowWorld, installWorkflowWorld } from "#execution/install-workflow-world.js";
+import { WORKFLOW_ENGINE_BUILD } from "#execution/workflow-host/build.js";
 import { installWorkflowEngine } from "#execution/workflow-host/host.js";
 import { applyWorkflowSpecVersionDefault } from "#internal/workflow/spec-version-default.js";
 import { registerCleanup, type Lifetime } from "#runtime/lifetime.js";
@@ -28,6 +29,7 @@ function claimProcess(lifetime: Lifetime): () => void {
 
 export function workflowEngine(options: WorkflowEngineOptions): DurableEngine {
   return {
+    build: WORKFLOW_ENGINE_BUILD,
     async start(app) {
       const release = claimProcess(app.lifetime);
       try {

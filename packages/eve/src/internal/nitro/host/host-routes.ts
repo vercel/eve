@@ -5,6 +5,8 @@ import { dirname, join, relative } from "node:path";
 import type { NitroEventHandler } from "nitro/types";
 
 import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
+import type { BuildContribution } from "#execution/durable.js";
+import { isWorkflowEngineBuild } from "#execution/workflow-host/build.js";
 import { normalizeRoutePattern } from "#compiler/channel-route-plan.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import type { ChannelRouteMethod } from "#public/definitions/channel.js";
@@ -81,6 +83,7 @@ export interface HostRouteTable {
 }
 
 interface HostRouteTableInput {
+  readonly durable: BuildContribution;
   readonly manifest: Pick<CompiledAgentManifest, "channelRoutes" | "config"> &
     Partial<Pick<CompiledAgentManifest, "connections" | "scheduleCollections">>;
   readonly mode: "development" | "production";
@@ -135,15 +138,17 @@ export function createHostRouteTable(input: HostRouteTableInput): HostRouteTable
       vercelFunction: "schedule-queue",
     });
   }
-  routes.push({
-    kind: "workflow",
-    method: "ALL",
-    path: staticVercelFunctionPath(EVE_WORKFLOW_FLOW_ROUTE_PATH),
-    vercelFunction: "workflow-queue",
-    ...(hasDirectWorkflowQueue(input) && {
-      directQueuePrefix: deriveEveWorkflowQueuePrefix(manifest.config.name),
-    }),
-  });
+  if (isWorkflowEngineBuild(input.durable)) {
+    routes.push({
+      kind: "workflow",
+      method: "ALL",
+      path: staticVercelFunctionPath(EVE_WORKFLOW_FLOW_ROUTE_PATH),
+      vercelFunction: "workflow-queue",
+      ...(hasDirectWorkflowQueue(input) && {
+        directQueuePrefix: deriveEveWorkflowQueuePrefix(manifest.config.name),
+      }),
+    });
+  }
 
   const scheduleTasks = (development ? [] : input.scheduleRegistrations).map((task) => ({
     ...task,

@@ -11,6 +11,7 @@ import { EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN } from "#protocol/routes.js";
 import type { ScheduleRegistration } from "#runtime/schedules/register.js";
 import { resolveWorkflowModulePath } from "#internal/application/package.js";
 import { createDevelopmentNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
+import { WORKFLOW_ENGINE_BUILD } from "#execution/workflow-host/build.js";
 import { createHostRouteTable, renderHostRoutes } from "#internal/nitro/host/host-routes.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#internal/workflow-bundle/flow-route.js";
@@ -112,6 +113,7 @@ async function serve(input: {
 
   const routes = await renderHostRoutes(
     createHostRouteTable({
+      durable: WORKFLOW_ENGINE_BUILD,
       manifest: manifest(input.world),
       mode: input.mode,
       platform: platformBuildOutput(),

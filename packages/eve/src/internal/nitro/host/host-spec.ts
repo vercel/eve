@@ -9,6 +9,8 @@ import {
   createExternalsPolicy,
   type ExternalsPolicy,
 } from "#internal/nitro/host/externals-policy.js";
+import type { BuildContribution } from "#execution/durable.js";
+import { isWorkflowEngineBuild, WORKFLOW_ENGINE_BUILD } from "#execution/workflow-host/build.js";
 import { createHostRouteTable, type HostRouteTable } from "#internal/nitro/host/host-routes.js";
 import type { PreparedApplicationHost } from "#internal/nitro/host/types.js";
 import type { HostRuntime } from "#internal/nitro/host/runtime-plugin.js";
@@ -93,7 +95,9 @@ export function createHostSpec(
       : undefined;
   const instrumented = compiledArtifacts.instrumentationPluginPath !== undefined;
   const nodes = [manifest, ...manifest.subagents.map((subagent) => subagent.agent)];
+  assertEngineBuilds(manifest, WORKFLOW_ENGINE_BUILD);
   const routes = createHostRouteTable({
+    durable: WORKFLOW_ENGINE_BUILD,
     manifest,
     mode: mode.kind,
     platform,
@@ -183,6 +187,29 @@ function assertEntryCanServe(manifest: CompiledAgentManifest, routes: HostRouteT
       `Authored schedules aren't supported with \`Build.entry\` yet: schedule "${schedule.scheduleId}" in "${schedule.logicalPath}". Remove the schedule or build without \`build.entry\`. Dynamic schedules through the platform's \`Triggers\` are supported.`,
     );
   }
+}
+
+export function assertEngineBuilds(
+  manifest: CompiledAgentManifest,
+  durable: BuildContribution,
+): void {
+  if (hasAuthoredWorkflows(manifest) && durable.runs !== true) {
+    throw new Error(
+      "This agent has authored workflows, and its durable engine can't run them. Remove the workflow tools, or use an engine that runs workflows, such as the Workflow engine.",
+    );
+  }
+  if (!isWorkflowEngineBuild(durable)) {
+    throw new Error(
+      "eve builds only the Workflow engine's routes and bundles so far, and this durable engine contributes its own. Use the Workflow engine.",
+    );
+  }
+}
+
+function hasAuthoredWorkflows(manifest: CompiledAgentManifest): boolean {
+  const nodes = [manifest, ...manifest.subagents.map((subagent) => subagent.agent)];
+  return nodes.some((node) =>
+    node.tools.some((tool) => tool.behavior?.handling?.kind === "workflow-tool"),
+  );
 }
 
 function hasWorkflowProgram(manifest: CompiledAgentManifest): boolean {

@@ -58,6 +58,7 @@ export interface DurableEngine {
 export interface BuildContribution {
   readonly routes?: readonly EngineRoute[];
   readonly entries?: Readonly<Record<string, string>>;
+  readonly runs?: boolean;
 }
 
 export interface EngineRoute {
