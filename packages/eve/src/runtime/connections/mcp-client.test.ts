@@ -102,6 +102,54 @@ describe("McpConnectionClient", () => {
     },
   );
 
+  it("follows tools/list cursors until the server stops paging", async () => {
+    const listTools = vi
+      .fn()
+      .mockResolvedValueOnce({
+        nextCursor: "page-2",
+        tools: [{ description: "First", inputSchema: {}, name: "first" }],
+      })
+      .mockResolvedValueOnce({
+        nextCursor: "",
+        tools: [{ description: "Second", inputSchema: {}, name: "second" }],
+      });
+    const toolsFromDefinitions = vi.fn().mockReturnValue({});
+    createMCPClient.mockResolvedValue({ close: vi.fn(), listTools, toolsFromDefinitions });
+
+    const metadata = await new McpConnectionClient(makeConnection()).getToolMetadata();
+
+    expect(metadata.map((tool) => tool.name)).toEqual(["first", "second"]);
+    expect(listTools).toHaveBeenNthCalledWith(1);
+    expect(listTools).toHaveBeenNthCalledWith(2, { params: { cursor: "page-2" } });
+    expect(toolsFromDefinitions).toHaveBeenCalledWith({
+      tools: [
+        expect.objectContaining({ name: "first" }),
+        expect.objectContaining({ name: "second" }),
+      ],
+    });
+  });
+
+  it("rejects a tools/list cursor the server already returned", async () => {
+    const listTools = vi.fn().mockResolvedValue({ nextCursor: "again", tools: [] });
+    createMCPClient.mockResolvedValue({ close: vi.fn(), listTools, toolsFromDefinitions: vi.fn() });
+
+    await expect(new McpConnectionClient(makeConnection()).getToolMetadata()).rejects.toThrow(
+      "MCP tools/list returned a repeated cursor.",
+    );
+    expect(listTools).toHaveBeenCalledTimes(2);
+  });
+
+  it("caps tools/list paging", async () => {
+    let page = 0;
+    const listTools = vi.fn(async () => ({ nextCursor: `page-${++page}`, tools: [] }));
+    createMCPClient.mockResolvedValue({ close: vi.fn(), listTools, toolsFromDefinitions: vi.fn() });
+
+    await expect(new McpConnectionClient(makeConnection()).getToolMetadata()).rejects.toThrow(
+      "MCP tools/list exceeds the 100-page limit.",
+    );
+    expect(listTools).toHaveBeenCalledTimes(100);
+  });
+
   it("hides provided arguments from schemas and adds resolved values at execution", async () => {
     const execute = vi.fn().mockResolvedValue({ ok: true });
     const toolsFromDefinitions = vi.fn().mockReturnValue({ lookup: { execute } });
