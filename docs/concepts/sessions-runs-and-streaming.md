@@ -375,7 +375,7 @@ Requests without the parameter get no header. `follow=false` instead bounds the 
 
 ## Read a session in process
 
-Code inside the agent's deployment, such as a hook, tool, schedule, or channel route, can read a session's stream with `sessions` from `eve/server`. It doesn't call the HTTP route. It has the client's `attach(sessionId).stream(...)` shape and needs no deployment URL, credentials, or stream protocol:
+Code inside the agent's deployment, such as a hook, tool, schedule, or channel route, can read, end, or prewarm sessions by ID with `sessions` from `eve/server`. It runs in process and needs no deployment URL, credentials, or HTTP round trip:
 
 ```ts
 import { sessions } from "eve/server";
@@ -387,9 +387,15 @@ for await (const event of events) {
 }
 ```
 
-`stream()` takes `SessionStreamOptions` from `eve/sessions`: `startIndex` (a line position; negative values count back from the tail), `follow`, and `signal`. Client readers also accept `reconnect: false` or a `ReconnectOptions` object from `eve/client`. With `follow: false`, the read ends at the recorded tail observed when it opens. Otherwise it follows new events until the stream closes or the signal aborts. Key stored events on [`meta.position`](#positions), which stays stable across reads.
+`sessions.attach(sessionId)` returns a read-only `SessionReader`. `stream()` takes `SessionStreamOptions` from `eve/sessions`: `startIndex` (a line position; negative values count back from the tail), `follow`, and `signal`. Client readers also accept `reconnect: false` or a `ReconnectOptions` object from `eve/client`. With `follow: false`, the read ends at the recorded tail observed when it opens. Otherwise it follows new events until the stream closes or the signal aborts. Key stored events on [`meta.position`](#positions), which stays stable across reads.
 
-A read sees only recorded events. A hook runs after its line is written, so a bounded read there includes the event that triggered it. `sessions` reads any session ID without channel auth, so check that a caller may read a session before passing an ID from a request. It's available only in code that runs inside the eve server.
+A read sees only recorded events. A hook runs after its line is written, so a bounded read there includes the event that triggered it.
+
+`sessions.end(sessionId, options?)` retires an active or [stranded](./execution-model-and-durability#stranded-sessions) session without creating a replacement and returns a `Delivery`. Pass `{ auth, reason }` using `SessionEndOptions` from `eve/server`. It throws `SessionNotActiveError` (from `eve/sessions`) when the session is not active.
+
+`sessions.prewarm(sessionId)` prepares an idle session to move onto the current deployment without starting a model turn. It returns a `PrewarmSessionResult` whose `status` is `"ready"`, `"accepted"`, `"unsupported"`, or `"no_active_session"`.
+
+`sessions` operates on any session ID without channel auth, so check that a caller may read, end, or prewarm a session before passing an ID from a request. It's available only in code that runs inside the eve server.
 
 ## Inspect the agent over HTTP
 

@@ -31,6 +31,7 @@ import {
   assertRunnableSessionOwner,
   findSessionHookHolder,
   resumeRunnableHook,
+  StrandedSessionOwnerError,
   strandedIfDeploymentDeleted,
 } from "#execution/session-inbox/owner.js";
 import { withPreV27Answers } from "#execution/session-inbox/pre-v27.js";
@@ -92,21 +93,41 @@ export async function resumeSessionInbox(
     get sessionId() {
       return (identity ??= (async () => {
         try {
-          const sessionId =
-            knownSessionId ??
-            (remembered !== undefined && remembered.hook.hookId === hook.hookId
-              ? await liveSessionId(remembered)
-              : requireSessionId(await hook.metadata));
+          let sessionId: string;
+          if (knownSessionId !== undefined) {
+            if (command.kind === "reset") await assertLiveResetOwner(hook);
+            sessionId = knownSessionId;
+          } else {
+            sessionId =
+              remembered !== undefined && remembered.hook.hookId === hook.hookId
+                ? await liveSessionId(remembered)
+                : requireSessionId(await hook.metadata);
+          }
           rememberInboxOwner(hook, sessionId);
           return sessionId;
         } catch (cause) {
           forgetInboxOwner(physicalToken);
+          if (cause instanceof StrandedSessionOwnerError) throw cause;
           const stranded = await strandedIfDeploymentDeleted(cause, hook);
           throw stranded === cause ? new AcceptedSessionIdentityError(cause) : stranded;
         }
       })());
     },
   };
+}
+
+async function assertLiveResetOwner(hook: Hook): Promise<void> {
+  const world = await getWorld();
+  if (world.getEncryptionKeyForRun === undefined) return;
+  try {
+    const deploymentId =
+      hook.resumeContext?.deploymentId ??
+      (await world.runs.get(hook.runId, { resolveData: "none" })).deploymentId;
+    await world.getEncryptionKeyForRun(hook.runId, { deploymentId });
+  } catch (cause) {
+    const stranded = await strandedIfDeploymentDeleted(cause, hook);
+    if (stranded !== cause) throw stranded;
+  }
 }
 
 async function liveSessionId({ hook, sessionId }: RememberedInboxOwner): Promise<string> {
@@ -185,11 +206,18 @@ export async function resumeSessionStartHook(
   if (hook.runId !== sessionId || address === undefined) return undefined;
   await assertRunnableSessionOwner({ runId: hook.runId });
   const { metadata: _metadata, ...resumable } = hook;
+  const isReset = isObject(payload) && payload.kind === "reset";
   try {
     const resumed = await resumeHook(resumable, payload);
+    if (isReset) await assertLiveResetOwner(resumed);
     return { address, runId: resumed.runId };
   } catch (error) {
     if (HookNotFoundError.is(error)) return undefined;
+    if (isReset) {
+      if (error instanceof StrandedSessionOwnerError) throw error;
+      const stranded = await strandedIfDeploymentDeleted(error, hook.runId);
+      if (stranded !== error) throw stranded;
+    }
     throw error;
   }
 }
