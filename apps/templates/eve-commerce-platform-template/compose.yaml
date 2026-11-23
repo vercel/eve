@@ -1,0 +1,20 @@
+# Local PostgreSQL for `pnpm dev` and `pnpm eval`.
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: evey
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: postgres
+    ports:
+      - "127.0.0.1:54329:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d evey"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres-data:

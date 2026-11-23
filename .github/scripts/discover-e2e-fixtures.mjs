@@ -64,6 +64,24 @@ export function discoverE2eFixtures({ registry, fixtures }) {
     if (legs.length === 0) {
       throw new Error(`No e2e fixtures select the registered world "${world.name}".`);
     }
+    // A world with a `task` also runs on Vercel CI as that Turbo task, which
+    // exactly the fixtures this world runs must define.
+    if (world.task !== undefined) {
+      const selected = new Set(legs.map((leg) => leg.name));
+      for (const fixture of normalizedFixtures) {
+        const defined = Object.hasOwn(fixture.scripts, world.task);
+        if (defined && !selected.has(fixture.name)) {
+          throw new Error(
+            `${fixture.dir}/package.json defines "${world.task}", but the "${world.name}" world does not run this fixture. Remove the script.`,
+          );
+        }
+        if (!defined && selected.has(fixture.name)) {
+          throw new Error(
+            `${fixture.dir}/package.json needs a "${world.task}" script, because the "${world.name}" world runs this fixture on Vercel CI. Copy it from another fixture in that world.`,
+          );
+        }
+      }
+    }
     outputs.push(`world_matrix_${world.name}=${JSON.stringify(legs)}`);
   }
   return { lines: `${outputs.join("\n")}\n`, modelMatrix, worlds, fixtures: normalizedFixtures };
@@ -183,6 +201,7 @@ function normalizeFixture({ name, dir, packageJson, evals = [], realModelEvals =
     name,
     packageName,
     dir,
+    scripts: pkg.scripts ?? {},
     modelMatrix,
     modelShards,
     modelSuiteEvals: {

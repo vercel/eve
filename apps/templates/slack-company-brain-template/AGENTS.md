@@ -34,8 +34,8 @@ read the relevant guide in `node_modules/eve/dist/docs/public/`.
   callback in `git.ts` is the only access check on GitHub commands.
 - `agent/extensions/skills.ts`: eve's experimental custom skills extension.
   People save their own versioned skills by asking: personal ones follow them
-  everywhere, and channel ones apply to everyone in a Slack channel after
-  someone else approves them. Stored in memory's Blob store; scopes come from
+  everywhere, and channel ones apply to everyone in a Slack channel once
+  their author approves them. Stored in memory's Blob store; scopes come from
   the trusted session, never from model input.
 - `agent/memory/`: two file memory slots. `personal` is per person and only
   on in private conversations; `channel` is per Slack channel. Scopes come from

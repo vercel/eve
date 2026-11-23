@@ -63,9 +63,18 @@ export interface SkillScope {
   readonly metadata?: Readonly<Record<string, unknown>>;
 }
 
-/** What a scope resolver reads: the session and where its conversation happens. */
+/**
+ * What a scope resolver reads: the session, the turn the scopes apply to, and
+ * where the conversation happens. `session.parent` is present in a delegated
+ * session, such as a subagent's.
+ */
 export interface SkillScopeContext {
-  readonly session: Pick<SessionInfo, "id" | "auth">;
+  readonly session: Pick<SessionInfo, "id" | "auth" | "parent">;
+  /**
+   * The turn being run, so per-turn state such as the persona a turn speaks
+   * as can choose its scopes. Absent before a session's first turn.
+   */
+  readonly turn?: { readonly id: string };
   readonly conversation?: ConversationContext;
 }
 

@@ -1,5 +1,6 @@
 import type { ChannelDelivery } from "#shared/channel-delivery.js";
 import { logError, type Logger } from "#internal/logging.js";
+import { recordChannelDeliveryFailure } from "#tracing/eve/channel-delivery-span.js";
 
 /** Channel state that remembers a final reply the user never saw. */
 export interface UndeliveredReplyState {
@@ -26,6 +27,7 @@ export async function reportUndeliveredReply(
   const errorId = logError(surface.log, `final reply was not delivered to ${surface.name}`, error, {
     turnId,
   });
+  recordChannelDeliveryFailure("reply_undelivered", errorId);
   surface.state.undeliveredReplyErrorId = errorId;
   try {
     await surface.post(

@@ -5,10 +5,9 @@ import { withConnectionEventSpan } from "#tracing/eve/connection-events.js";
 import { principalOf } from "#execution/session/principal.js";
 import { defineJsonSchema, toInputSchema } from "#tools/schema.js";
 import { createHash } from "node:crypto";
-import {
-  createMCPClient,
-  type Experimental_MCPEventDefinition as EventDefinition,
-  type Experimental_MCPEvents as MCPEvents,
+import type {
+  Experimental_MCPEventDefinition as EventDefinition,
+  Experimental_MCPEvents as MCPEvents,
 } from "#compiled/@ai-sdk/mcp/index.js";
 import { contextStorage } from "#context/container.js";
 import { AuthKey, SessionIdKey, SessionTraceSeedKey } from "#context/keys.js";
@@ -111,6 +110,7 @@ export class ConnectionEventActions {
       },
       protocolVersionDiscovery: this.connection.protocolVersionDiscovery,
     };
+    const { createMCPClient } = await import("#compiled/@ai-sdk/mcp/index.js");
     client = await createMCPClient(config);
     try {
       return await run(client.experimental_events);

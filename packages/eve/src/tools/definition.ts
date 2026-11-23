@@ -17,7 +17,7 @@ import type { TokenResult } from "#shared/connection-types.js";
 import type { ToolAuthOptions, ToolAuthProvider } from "#tools/auth.js";
 import type { InteractionRequest } from "#protocol/session-events/families/interaction.js";
 import { TOOL_BRAND } from "#tools/dynamic.js";
-import type { ToolModelOutput } from "#tools/model-output.js";
+import type { ToolModelOutput, ToolModelOutputContext } from "#tools/model-output.js";
 
 type ApprovalContextInput<TInput> = 0 extends 1 & TInput
   ? TInput
@@ -26,7 +26,11 @@ type ApprovalContextInput<TInput> = 0 extends 1 & TInput
     : TInput;
 
 export type { ToolAuthDefinition, ToolAuthOptions, ToolAuthProvider } from "#tools/auth.js";
-export type { ToolModelOutput, ToolModelOutputPart } from "#tools/model-output.js";
+export type {
+  ToolModelOutput,
+  ToolModelOutputContext,
+  ToolModelOutputPart,
+} from "#tools/model-output.js";
 
 export type ToolExecuteOptions = Omit<ToolExecutionOptions<unknown>, "context"> & {
   readonly approval?: { readonly responder: SessionAuthContext };
@@ -309,9 +313,22 @@ export interface ToolDefinition<TInput = unknown, TOutput = unknown> extends Pub
    * When omitted, the model sees the full `execute` return value
    * (default AI SDK serialization). Channel event handlers
    * (`call.settled`) always receive the full output regardless.
+   *
+   * The second argument, {@link ToolModelOutputContext}, gives the call id,
+   * the tool name and the session's sandbox. eve always passes it, and a
+   * function that takes only the output keeps working. `defineTool` types it
+   * as always present.
    */
-  toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
+  toModelOutput?(
+    output: TOutput,
+    ctx?: ToolModelOutputContext,
+  ): ToolModelOutput | Promise<ToolModelOutput>;
 }
+
+type DefinedToolModelOutput<TOutput> = (
+  output: TOutput,
+  ctx: ToolModelOutputContext,
+) => ToolModelOutput | Promise<ToolModelOutput>;
 
 type ToolOutputFromExecuteReturn<TReturn> =
   TReturn extends Promise<infer TOutput>
@@ -350,10 +367,7 @@ export function defineTool<
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
   >["label"];
   approval?: ToolDefinition<StandardSchemaV1.InferOutput<TInputSchema>, unknown>["approval"];
-  toModelOutput?: ToolDefinition<
-    unknown,
-    StandardJSONSchemaV1.InferOutput<TOutputSchema>
-  >["toModelOutput"];
+  toModelOutput?: DefinedToolModelOutput<StandardJSONSchemaV1.InferOutput<TOutputSchema>>;
 }): ToolDefinitionWithExecuteReturn<
   StandardSchemaV1.InferOutput<TInputSchema>,
   StandardJSONSchemaV1.InferOutput<TOutputSchema>,
@@ -373,7 +387,7 @@ export function defineTool<
     ToolOutputFromExecuteReturn<TReturn>
   >["label"];
   approval?: ToolDefinition<StandardSchemaV1.InferOutput<TSchema>, unknown>["approval"];
-  toModelOutput?: ToolDefinition<unknown, ToolOutputFromExecuteReturn<TReturn>>["toModelOutput"];
+  toModelOutput?: DefinedToolModelOutput<ToolOutputFromExecuteReturn<TReturn>>;
 }): ToolDefinitionWithExecuteReturn<
   StandardSchemaV1.InferOutput<TSchema>,
   ToolOutputFromExecuteReturn<TReturn>,
@@ -396,10 +410,7 @@ export function defineTool<
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
   >["label"];
   approval?: ToolDefinition<Record<string, unknown>, unknown>["approval"];
-  toModelOutput?: ToolDefinition<
-    unknown,
-    StandardJSONSchemaV1.InferOutput<TOutputSchema>
-  >["toModelOutput"];
+  toModelOutput?: DefinedToolModelOutput<StandardJSONSchemaV1.InferOutput<TOutputSchema>>;
 }): ToolDefinitionWithExecuteReturn<
   Record<string, unknown>,
   StandardJSONSchemaV1.InferOutput<TOutputSchema>,
@@ -413,7 +424,7 @@ export function defineTool<TReturn>(definition: {
   execute(input: Record<string, unknown>, ctx: ToolContext): TReturn;
   label?: ToolDefinition<Record<string, unknown>, ToolOutputFromExecuteReturn<TReturn>>["label"];
   approval?: ToolDefinition<Record<string, unknown>, unknown>["approval"];
-  toModelOutput?: ToolDefinition<unknown, ToolOutputFromExecuteReturn<TReturn>>["toModelOutput"];
+  toModelOutput?: DefinedToolModelOutput<ToolOutputFromExecuteReturn<TReturn>>;
 }): ToolDefinitionWithExecuteReturn<
   Record<string, unknown>,
   ToolOutputFromExecuteReturn<TReturn>,

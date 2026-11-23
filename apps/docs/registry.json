@@ -142,6 +142,69 @@
       ]
     },
     {
+      "name": "extension/agent-desktop",
+      "type": "registry:item",
+      "title": "agent-desktop",
+      "description": "Operate native Linux desktop apps through their accessibility trees in an eve sandbox.",
+      "dependencies": [
+        "@eve/agent-desktop"
+      ],
+      "meta": {
+        "eve": {
+          "requires": ">=1.0.0"
+        }
+      },
+      "files": [
+        {
+          "path": "registry/extensions/agent-desktop.ts",
+          "type": "registry:file",
+          "target": "agent/extensions/desktop.ts"
+        }
+      ]
+    },
+    {
+      "name": "extension/board",
+      "type": "registry:item",
+      "title": "Vercel Board",
+      "description": "Let an eve agent watch board channels, reply in threads, and claim tasks.",
+      "dependencies": [
+        "@eve/board@^0.1.0"
+      ],
+      "meta": {
+        "eve": {
+          "requires": ">=1.0.0"
+        }
+      },
+      "files": [
+        {
+          "path": "registry/extensions/board.ts",
+          "type": "registry:file",
+          "target": "agent/extensions/board.ts"
+        }
+      ]
+    },
+    {
+      "name": "extension/self-improvement",
+      "type": "registry:item",
+      "title": "Self-Improvement",
+      "description": "Review agent outcomes on a schedule and propose tested improvements as GitHub pull requests.",
+      "dependencies": [
+        "@eve/self-improvement@^0.1.0"
+      ],
+      "meta": {
+        "eve": {
+          "requires": ">=1.1.0"
+        }
+      },
+      "files": [
+        {
+          "path": "registry/extensions/self-improvement.ts",
+          "type": "registry:file",
+          "target": "agent/extensions/self-improvement.ts"
+        }
+      ]
+    },
+    {
       "name": "extension/browserbase",
       "type": "registry:item",
       "title": "Browserbase",
