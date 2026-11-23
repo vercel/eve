@@ -1,21 +1,10 @@
 import { platformContext } from "#platform/context.js";
 import { hostService, type HostedSandbox } from "#platform/services.js";
-import { isVercelEnvironment } from "#platform/vercel/environment.js";
-import { VercelSandbox } from "#platform/vercel/sandbox/provider.js";
+import { vercelCompute } from "#platform/vercel/compute.js";
 import type { VercelSandboxCreateOptions } from "#public/sandbox/vercel-sandbox.js";
 
-function vercelHostedSandbox(): HostedSandbox {
-  const onVercel = isVercelEnvironment();
-  return {
-    name: "vercel",
-    selectByDefault: onVercel,
-    credentialTransforms: onVercel,
-    environment: (options) => VercelSandbox.environment(options),
-  };
-}
-
 export function hostedSandbox(): HostedSandbox | undefined {
-  return hostService(platformContext(), "hostedSandbox", vercelHostedSandbox);
+  return hostService(platformContext(), "hostedSandbox", vercelCompute);
 }
 
 export function hostedSandboxEnvironment(options?: VercelSandboxCreateOptions) {

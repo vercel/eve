@@ -1,10 +1,12 @@
 import { join } from "node:path";
 
 import type { PlatformContext } from "#platform/context.js";
-import { vercelDeployment } from "#platform/vercel/deployment.js";
+import { vercelSessionAttribute } from "#platform/vercel/core.js";
+import { vercelDeployment, vercelDeploymentHost } from "#platform/vercel/deployment.js";
 import { isVercelEnvironment } from "#platform/vercel/environment.js";
 import { vercelIdentity } from "#platform/vercel/identity.js";
-import { vercelWorkspaceTransport } from "#platform/vercel/workspace-transport.js";
+import { vercelNetwork } from "#platform/vercel/network.js";
+import { isVercelOidcIssuer } from "#platform/vercel/project.js";
 import { toErrorMessage } from "#shared/errors.js";
 
 export function createVercelPlatformContext(): PlatformContext {
@@ -25,12 +27,25 @@ export function createVercelPlatformContext(): PlatformContext {
             )
           : undefined,
     },
-    deployment: vercelDeployment,
-    identity: vercelIdentity,
-    telemetry: {
-      traceSessionAttribute: () =>
-        process.env.VERCEL_ENV === undefined ? undefined : "vercel.session_id",
+    deployment: {
+      environmentKind: vercelDeployment.environment,
+      deploymentId: vercelDeployment.deploymentId,
+      hostedDeploymentId: () => vercelDeployment.invocationData()["vercelDeploymentId"],
+      build: vercelDeployment.build,
+      productionHost: vercelDeployment.productionHost,
+      deploymentHost: vercelDeploymentHost,
+      publicHost: vercelDeployment.publicHost,
+      isPlatformDevelopmentServer: vercelDeployment.localDevelopment,
+      scope: vercelDeployment.scope,
+      stopsSandboxesOnExit: isVercelEnvironment,
     },
-    workspace: { transport: vercelWorkspaceTransport },
+    identity: {
+      token: vercelNetwork.token,
+      isPlatformIssuer: (issuer) => isVercelOidcIssuer(issuer),
+      withDevelopmentRequestScope: vercelIdentity.developmentScope,
+      callbackHeaders: vercelNetwork.self,
+    },
+    telemetry: { traceSessionAttribute: vercelSessionAttribute },
+    workspace: { transport: vercelNetwork.peer },
   };
 }
