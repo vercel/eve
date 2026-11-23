@@ -7,4 +7,4 @@ export const agentNameSchema = z
   .trim()
   .min(1)
   .max(40)
-  .regex(/^[\p{L}\p{N}][\p{L}\p{N}\p{M} .’'\-]*$/u);
+  .regex(/^[\p{L}\p{N}][\p{L}\p{N}\p{M} .’'-]*$/u);

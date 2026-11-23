@@ -67,12 +67,13 @@ export function memoryDefinition(memory: ResolvedMemoryDefinition): Definition {
           const turn = latest["turn.started"] ?? null;
           if (turn === null) return null;
           const cleared = latest["context.settled:clear"] ?? null;
+          const steeredBy = evaluation.session.auth.steeredBy;
           const recalled = await evaluation.memo(
             {
               cleared,
               principal: principalOf(evaluation),
-              steeredBy: evaluation.session.auth.steeredBy ?? null,
               turn,
+              ...(steeredBy !== undefined && steeredBy.length > 0 && { steeredBy }),
             },
             () => recallOnce(memory, evaluation, cleared),
           );
@@ -162,8 +163,10 @@ async function recallOnce(
 ): Promise<RecallRecord | null> {
   const messages = requireHistory(ctx.history, memory.logicalPath);
   const turnContext = activeTurn(messages);
-  const scope = await resolveMemoryScope(memory, ctx);
-  if (scope === null) return null;
+  const resolved = await resolveTrackedMemoryScope(memory, ctx);
+  if (resolved === null) return null;
+  if (resolved.callerScoped && (ctx.session.auth.steeredBy ?? []).length > 0) return null;
+  const { scope } = resolved;
   const operation = operationId(ctx.session.id, memory.slot, "turn.started", turnContext);
   const result = await instrumentMemoryOperation(
     instrumentations.get(ctx.ctx),
@@ -430,8 +433,13 @@ export async function memoryTools(memory: ResolvedMemoryDefinition, ctx: Interna
   const { provider, slot } = memory;
   if (provider.tools === undefined) return null;
   const turn = readDefinitionsState(ctx.ctx).latest["turn.started"] ?? null;
+  const steeredBy = ctx.session.auth.steeredBy;
   const resolved = await ctx.memo(
-    { principal: principalOf(ctx), steeredBy: ctx.session.auth.steeredBy ?? null, turn },
+    {
+      principal: principalOf(ctx),
+      turn,
+      ...(steeredBy !== undefined && steeredBy.length > 0 && { steeredBy }),
+    },
     () => resolveTrackedMemoryScope(memory, ctx),
   );
   if (resolved === null) return null;

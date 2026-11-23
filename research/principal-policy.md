@@ -138,8 +138,8 @@ The call fails before anything is sent, no sign-in starts, and the turn doesn't 
 The caller's token fails with `ConnectionAuthorizationFailedError` and `reason: "turn_steered"`. So
 do MCP tool calls with `forwardPrincipal` and connection event subscriptions. Dynamic schedule
 tools, remote agent calls with `forwardPrincipal`, and `byPrincipal`-scoped memory tools fail with
-an error that carries the same message. `byPrincipal`-scoped memory also skips automatic capture
-while `steeredBy` is set. The message names nobody and tells the model what unblocks it:
+an error that carries the same message. `byPrincipal`-scoped memory also skips automatic recall and
+capture while `steeredBy` is set. The message names nobody and tells the model what unblocks it:
 
 ```text
 Another person's message joined this turn after its caller last spoke, so connection "github" can't use the caller's identity. Ask the caller to confirm in this conversation, then try again.

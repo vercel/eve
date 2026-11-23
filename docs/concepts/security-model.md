@@ -163,7 +163,7 @@ The git extension's `gh` tool (in app-installation mode), the custom skills exte
 - With [ambient listening](/docs/patterns/ambient-listening) and `no_reply`, return `principal: "retain"` only on messages directed at the agent (such as mentions). Setting channel-level `principal: "retain"` lets unmentioned side-chat interrupt a running turn, hold the caller's identity, or end the turn early if the model calls `no_reply`.
 - The channel must show the model who sent each message. Slack does. eve adds no attribution.
 - A steering message can ask the model to repeat anything already in the conversation.
-- Memory slots scoped with `byPrincipal` hold their tools and skip automatic capture while `steeredBy` is set. If a custom `scope` function reads `ctx.session.auth.current` without `byPrincipal`, check `ctx.session.auth.steeredBy` there or use `byPrincipal`.
+- Memory slots scoped with `byPrincipal` hold their tools and skip automatic recall and capture while `steeredBy` is set. If a custom `scope` function reads `ctx.session.auth.current` without `byPrincipal`, check `ctx.session.auth.steeredBy` there or use `byPrincipal`.
 
 ## Authored markdown is data
 

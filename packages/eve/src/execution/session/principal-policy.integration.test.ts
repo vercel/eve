@@ -395,19 +395,39 @@ async function withSignInRun(
 }
 
 async function withSubagentRun(
-  body: (run: SessionRun & { readonly reports: AccessReport[] }) => Promise<void>,
+  body: (
+    run: SessionRun & {
+      readonly childSawPrivateMemory: () => boolean;
+      readonly reports: AccessReport[];
+    },
+  ) => Promise<void>,
 ) {
   let release!: () => void;
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
   const reports: AccessReport[] = [];
+  let childLoadedMemory = false;
+  const privateMemory = defineMemory({
+    provider: defineMemoryProvider({
+      recall: {
+        "turn.started": async () => ({
+          messages: [{ content: "SECRET_ALICE_MEMORY" }],
+        }),
+      },
+    }),
+    scope: byPrincipal,
+  });
   const model = markMockModel(
     new MockLanguageModelV4({
       doStream: async ({ prompt }) => {
         const raw = JSON.stringify(prompt);
-        const first = JSON.stringify(prompt.find((message) => message.role === "user")?.content);
-        if (first.includes("CHILD:")) {
+        const isChild = prompt.some(
+          (message) =>
+            message.role === "user" && JSON.stringify(message.content).includes("CHILD:"),
+        );
+        if (isChild) {
+          if (raw.includes("SECRET_ALICE_MEMORY")) childLoadedMemory = true;
           return raw.includes(`"toolName":"report_access"`)
             ? textStreamResult("Child done.")
             : toolCallStreamResult({
@@ -449,10 +469,17 @@ async function withSubagentRun(
       message: "Use hold_open, then ask the child.",
       model,
       release: () => release(),
-      modules: [holdOpenTool([gate]), reportAccessTool(reports)],
+      modules: [
+        holdOpenTool([gate]),
+        reportAccessTool(reports),
+        {
+          loadNamespace: async () => ({ default: privateMemory }),
+          logicalPath: "memory/personal.ts",
+        },
+      ],
     },
     async (session) => {
-      await body({ ...session, reports });
+      await body({ ...session, childSawPrivateMemory: () => childLoadedMemory, reports });
     },
   );
 }
@@ -1003,6 +1030,7 @@ describe("principal policy", () => {
           token: undefined,
         },
       ]);
+      expect(run.childSawPrivateMemory()).toBe(false);
       expect(filterEventsByType(seen, "turn.started")).toHaveLength(1);
     });
   }, 60_000);
