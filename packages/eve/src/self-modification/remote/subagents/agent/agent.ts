@@ -1,6 +1,7 @@
 import { defineAgent, defineDynamic } from "eve";
 import { steered } from "eve/tools/approval";
 
+import { inheritParentModel } from "#runtime/subagents/inherit-parent-model.js";
 import { DEFAULT_AGENT_MODEL_ID, DEFAULT_AGENT_REASONING } from "#shared/default-agent-model.js";
 
 import { hasGitHubCredential } from "../../../credentials.js";
@@ -48,11 +49,12 @@ export default defineDynamic(async (ctx) => {
   });
   if (!authorized) return null;
   const configuredModel = bound.model ?? ctx.model.id;
-  return defineAgent({
+  const agent = defineAgent({
     approval: steered(),
     description,
     model: configuredModel ?? DEFAULT_AGENT_MODEL_ID,
     reasoning:
       bound.reasoning ?? (configuredModel === undefined ? DEFAULT_AGENT_REASONING : undefined),
   });
+  return bound.model === undefined ? inheritParentModel(agent) : agent;
 });

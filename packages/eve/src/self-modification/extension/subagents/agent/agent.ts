@@ -5,6 +5,7 @@ import {
   type AgentStaticModelDefinition,
 } from "eve";
 
+import { inheritParentModel } from "#runtime/subagents/inherit-parent-model.js";
 import { DEFAULT_AGENT_MODEL_ID, DEFAULT_AGENT_REASONING } from "#shared/default-agent-model.js";
 import { getLocalDevCapability } from "eve/local-dev";
 
@@ -48,7 +49,8 @@ export function defineSelfModificationAgent(options: SelfModificationAgentOption
     ) {
       return null;
     }
-    const configuredModel = options.model ?? bound.model ?? ctx.model.id ?? undefined;
+    const explicitModel = options.model ?? bound.model;
+    const configuredModel = explicitModel ?? ctx.model.id ?? undefined;
     const reasoning =
       options.reasoning ??
       bound.reasoning ??
@@ -65,7 +67,8 @@ export function defineSelfModificationAgent(options: SelfModificationAgentOption
       repairDelegation,
       localEffectiveEdits,
     ]);
-    return defineAgent({ description, model, reasoning });
+    const agent = defineAgent({ description, model, reasoning });
+    return explicitModel === undefined ? inheritParentModel(agent) : agent;
   });
 }
 
