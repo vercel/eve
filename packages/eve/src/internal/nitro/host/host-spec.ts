@@ -99,6 +99,7 @@ export function createHostSpec(
     vercel: preset === "vercel",
     vercelService: mode.kind === "production" && mode.vercelService === true,
   });
+  if (entry !== undefined) assertEntryCanServe(manifest, routes);
   const runtimePlugins: HostRuntimePlugin[] = [
     ...(development ? [] : (["skill-files"] as const)),
     ...(instrumented ? (["instrumentation"] as const) : []),
@@ -158,6 +159,21 @@ export function createHostSpec(
     websocket: development || routes.routes.some((route) => route.method === "WEBSOCKET"),
     world: manifest.config.experimental?.workflow?.world,
   };
+}
+
+function assertEntryCanServe(manifest: CompiledAgentManifest, routes: HostRouteTable): void {
+  const websocket = manifest.channelRoutes.effective.find((route) => route.method === "WEBSOCKET");
+  if (websocket !== undefined) {
+    throw new Error(
+      `A WEBSOCKET channel route needs eve's Node server: WEBSOCKET ${websocket.urlPath} in "${websocket.logicalPath}". Remove the route or build without \`build.entry\`.`,
+    );
+  }
+  const schedule = routes.scheduleTasks[0];
+  if (schedule !== undefined) {
+    throw new Error(
+      `Authored schedules aren't supported with \`Build.entry\` yet: schedule "${schedule.scheduleId}" in "${schedule.logicalPath}". Remove the schedule or build without \`build.entry\`. Dynamic schedules through the platform's \`Triggers\` are supported.`,
+    );
+  }
 }
 
 function hasWorkflowProgram(manifest: CompiledAgentManifest): boolean {

@@ -6,11 +6,11 @@ import { promisify } from "node:util";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { buildApplication } from "#internal/nitro/host.js";
+import { buildApplication, startProductionServer } from "#internal/nitro/host.js";
 import { useTemporaryAppRoots } from "#internal/testing/use-temporary-app-roots.js";
 import { definePlatform } from "#platform/declaration.js";
 import { defaultPlatform } from "#platform/default.js";
-import type { Build } from "#platform/entities.js";
+import type { Build, Triggers } from "#platform/entities.js";
 
 const execFileAsync = promisify(execFile);
 const createAppRoot = useTemporaryAppRoots();
@@ -40,6 +40,14 @@ const AGENT_FILES = {
     "    globalThis.auditReady = true;",
     "  },",
     "});",
+  ].join("\n"),
+  "platform/bare-entry.mjs": [
+    'import { start } from "eve:app";',
+    "export default {",
+    "  async fetch(request) {",
+    "    return (await start()).fetch(request);",
+    "  },",
+    "};",
   ].join("\n"),
   "platform/entry.mjs": [
     'import "eve:instrumentation";',
@@ -86,6 +94,24 @@ console.log("RESULT " + JSON.stringify({
 process.exit(0);
 `;
 
+async function runEntry(appRoot: string, outputDir: string, driver: string): Promise<unknown> {
+  const { stdout } = await execFileAsync(process.execPath, ["--input-type=module", "-e", driver], {
+    cwd: appRoot,
+    env: {
+      ...process.env,
+      ENTRY_URL: pathToFileURL(join(outputDir, "server", "index.mjs")).href,
+      NITRO_PRESET: "",
+    },
+    timeout: 60_000,
+  });
+  const result = stdout.split("\n").find((line) => line.startsWith("RESULT "));
+  return JSON.parse(result!.slice("RESULT ".length));
+}
+
+const triggers = vi.fn((): Triggers => {
+  throw new Error("The platform's triggers factory ran during the build.");
+});
+
 async function buildWithPlatform(
   appRoot: string,
   build: Build,
@@ -93,12 +119,15 @@ async function buildWithPlatform(
 ): Promise<string> {
   return await buildApplication(appRoot, {
     ...options,
-    platform: definePlatform({ deployment: defaultPlatform.deployment, build }),
+    platform: definePlatform({ deployment: defaultPlatform.deployment, build, triggers }),
     skipSandboxPrewarm: true,
   });
 }
 
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => {
+  vi.unstubAllEnvs();
+  triggers.mockClear();
+});
 
 describe("a build with a platform entry", () => {
   it("bundles the entry as the server, registers instrumentation without top-level await, and serves eve through start() from eve:app", async () => {
@@ -117,21 +146,7 @@ describe("a build with a platform entry", () => {
       deploymentId?: string;
     };
     expect(profile.deploymentId).toMatch(/^eve_[a-f0-9]{32}$/);
-    const { stdout } = await execFileAsync(
-      process.execPath,
-      ["--input-type=module", "-e", DRIVER],
-      {
-        cwd: appRoot,
-        env: {
-          ...process.env,
-          ENTRY_URL: pathToFileURL(join(outputDir, "server", "index.mjs")).href,
-          NITRO_PRESET: "",
-        },
-        timeout: 60_000,
-      },
-    );
-    const result = stdout.split("\n").find((line) => line.startsWith("RESULT "));
-    expect(JSON.parse(result!.slice("RESULT ".length))).toEqual({
+    expect(await runEntry(appRoot, outputDir, DRIVER)).toEqual({
       exports: ["EveSession", "default", "startAgain"],
       auditReadyAtImport: false,
       auditReadyAtFirstResponse: true,
@@ -144,5 +159,43 @@ describe("a build with a platform entry", () => {
       secondStart:
         "start() from eve:app was already called. Keep the app from the first call and pass it to the code that serves requests.",
     });
+    expect(triggers).not.toHaveBeenCalled();
+    await expect(startProductionServer(appRoot)).rejects.toThrow(
+      "This build has a platform entry and no server of its own. Run it with the platform's runtime instead of eve start.",
+    );
+  });
+
+  it("refuses to start an app whose entry did not import eve:instrumentation first", async () => {
+    const { appRoot } = await createAppRoot("eve-build-entry-bare-", { files: AGENT_FILES });
+    const outputDir = await buildWithPlatform(appRoot, { entry: "platform/bare-entry.mjs" });
+
+    expect(
+      await runEntry(
+        appRoot,
+        outputDir,
+        `const entry = await import(process.env.ENTRY_URL);
+const outcome = await entry.default
+  .fetch(new Request("http://localhost/eve/v1/health"))
+  .then((response) => "served " + response.status, (error) => error.message);
+console.log("RESULT " + JSON.stringify(outcome));
+process.exit(0);`,
+      ),
+    ).toBe(
+      "start() from eve:app ran before eve:instrumentation was imported. Import eve:instrumentation first in your entry, before eve:app.",
+    );
+  });
+
+  it("stops at an authored schedule even when the platform has triggers, without running them", async () => {
+    const { appRoot } = await createAppRoot("eve-build-entry-schedule-", {
+      files: {
+        ...AGENT_FILES,
+        "agent/schedules/digest.md": '---\ncron: "0 9 * * *"\n---\nSend Alice her daily digest.\n',
+      },
+    });
+
+    await expect(buildWithPlatform(appRoot, { entry: "platform/entry.mjs" })).rejects.toThrow(
+      'Authored schedules aren\'t supported with `Build.entry` yet: schedule "digest" in "schedules/digest.md". Remove the schedule or build without `build.entry`. Dynamic schedules through the platform\'s `Triggers` are supported.',
+    );
+    expect(triggers).not.toHaveBeenCalled();
   });
 });

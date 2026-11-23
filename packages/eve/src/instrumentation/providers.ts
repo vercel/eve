@@ -82,6 +82,10 @@ export function deferInstrumentationSetup(input: {
   processApp().instrumentation.setup = setup;
 }
 
+export function instrumentationSetupDeferred(): boolean {
+  return processApp().instrumentation.setup !== undefined;
+}
+
 /** @internal */
 export function getInstrumentationProviders(): readonly RegisteredInstrumentationProvider[] {
   return [...providerRegistry()]
