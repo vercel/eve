@@ -143,7 +143,6 @@ async function createClient(
   const { SchedulesClient } = await import("#compiled/@vercel/schedules/index.js");
   signal.throwIfAborted();
   const fetchImpl = options.fetch ?? fetch;
-  // `@vercel/schedules` has no `include` option on `get`; remove this subclass once it does.
   class PayloadSchedulesClient extends SchedulesClient implements VercelSchedulesClient {
     getWithPayload(params: { readonly name: string; readonly namespace: string }) {
       const query = new URLSearchParams({ namespace: params.namespace, include: "payload" });
