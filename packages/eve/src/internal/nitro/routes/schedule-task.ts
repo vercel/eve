@@ -7,6 +7,7 @@ import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifa
 import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runtime-artifacts.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { createLogger } from "#internal/logging.js";
+import type { App } from "#runtime/app.js";
 import { areSchedulesDisabled, EVE_SCHEDULES_DISABLED_ENV } from "#internal/schedules/disabled.js";
 
 const log = createLogger("schedule.dispatch");
@@ -15,6 +16,7 @@ let loggedSchedulesDisabled = false;
 export async function dispatchScheduleTask(
   taskName: string,
   config: NitroArtifactsConfig,
+  app?: App,
 ): Promise<
   | { scheduleId: string; sessionIds: readonly string[] }
   | { skipped: "schedules-disabled"; taskName: string }
@@ -32,12 +34,14 @@ export async function dispatchScheduleTask(
   return await dispatchScheduleTaskFromArtifacts(
     taskName,
     resolveNitroCompiledArtifactsSource(config),
+    app,
   );
 }
 
 export async function dispatchScheduleTaskFromArtifacts(
   taskName: string,
   compiledArtifactsSource: RuntimeCompiledArtifactsSource,
+  app?: App,
 ): Promise<{ scheduleId: string; sessionIds: readonly string[] }> {
   const schedule = await loadResolvedCompiledScheduleByTaskName(taskName, {
     compiledArtifactsSource,
@@ -46,6 +50,7 @@ export async function dispatchScheduleTaskFromArtifacts(
   const bundle = await getCompiledRuntimeAgentBundle({ compiledArtifactsSource });
   const runtime = requireDurableHost().createRuntime({ compiledArtifactsSource });
   const dispatcher = new ScheduleDispatcher({
+    app,
     runtime,
     channels: bundle.graph.root.channels,
   });

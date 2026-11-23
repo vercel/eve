@@ -18,7 +18,7 @@ import {
   type ResolvedOidcAuthStrategy,
   type RouteStrategyAuthenticationResult,
 } from "#channel/auth/types.js";
-import { platformContext } from "#platform/context.js";
+import { builtInPlatform } from "#platform/context.js";
 
 import {
   createRuntimeIpAllowList,
@@ -713,7 +713,7 @@ function addInvalidBearerTokenError(
  */
 export function placeholderAuth(): AuthFn<Request> {
   return () => {
-    if (platformContext().deployment.environment() !== "production") {
+    if (builtInPlatform().deployment.environment() !== "production") {
       return null;
     }
 

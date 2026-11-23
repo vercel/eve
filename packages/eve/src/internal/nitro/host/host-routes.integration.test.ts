@@ -108,7 +108,7 @@ async function serve(input: {
     workflowsPath,
     "export async function POST(request) { return new Response(`flow ${request.method}`); }\n",
   );
-  await writeFile(workflowWorldPluginPath, "export default function plugin() {}\n");
+  await writeFile(workflowWorldPluginPath, "export const app = undefined;\n");
 
   const routes = await renderHostRoutes(
     createHostRouteTable({
@@ -187,6 +187,7 @@ describe("rendered host routes", () => {
       expect.anything(),
       "HEAD /health",
       artifactsConfig,
+      undefined,
     );
   });
 
@@ -241,6 +242,7 @@ describe("rendered host routes", () => {
       expect.anything(),
       "WEBSOCKET /rooms/:id",
       artifactsConfig,
+      undefined,
     );
     expect(upgradeParams).toEqual({ id: "1" });
     expect(routeModules.dispatchChannelRequest).not.toHaveBeenCalled();
@@ -271,6 +273,7 @@ describe("rendered host routes", () => {
     expect(routeModules.handleConnectionEventRequest).toHaveBeenCalledWith(
       { artifactsConfig, connectionName: "issues" },
       expect.any(Request),
+      undefined,
     );
 
     const devSchedulePath = EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN.replace(/:[^/]+/g, "daily");
@@ -280,6 +283,7 @@ describe("rendered host routes", () => {
     expect(routeModules.handleDevScheduleDispatchRequest).toHaveBeenCalledWith(
       artifactsConfig,
       expect.any(Request),
+      undefined,
     );
   });
 
@@ -334,6 +338,10 @@ describe("rendered host routes", () => {
       run(event: { name: string }): Promise<unknown>;
     };
     expect(await task.run({ name: "any-nitro-name" })).toEqual({ result: "ran pacific" });
-    expect(routeModules.dispatchScheduleTask).toHaveBeenCalledWith("pacific", artifactsConfig);
+    expect(routeModules.dispatchScheduleTask).toHaveBeenCalledWith(
+      "pacific",
+      artifactsConfig,
+      undefined,
+    );
   });
 });

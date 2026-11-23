@@ -8,8 +8,16 @@ export function installedPlatform(): Entities | undefined {
 
 let fallbackPlatform: Entities | undefined;
 
+export function builtInPlatform(): Entities {
+  return (fallbackPlatform ??= createFallbackPlatform());
+}
+
+export function platformOf(app: { readonly platform: Entities } | undefined): Entities {
+  return app?.platform ?? builtInPlatform();
+}
+
 export function platformContext(): Entities {
-  return processApp().platform ?? (fallbackPlatform ??= createFallbackPlatform());
+  return processApp().platform ?? builtInPlatform();
 }
 
 function createFallbackPlatform(): Entities {

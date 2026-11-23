@@ -23,6 +23,8 @@ import {
   renderScheduleTaskModule,
   renderWorkflowFileHandler,
   ROUTE_CONFIG_ID,
+  ROUTE_APP_ID,
+  renderRouteAppModule,
 } from "#internal/nitro/host/route-handlers.js";
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
 import { EVE_SCHEDULE_COLLECTION_CONSUMER_ROUTE_PATH } from "#internal/schedules/consumer-route.js";
@@ -223,6 +225,7 @@ export async function renderHostRoutes(
   const handlers: NitroEventHandler[] = [];
   const virtual: Record<string, string> = {
     [ROUTE_CONFIG_ID]: renderRouteConfigModule({ configPath: input.artifactsConfigPath }),
+    [ROUTE_APP_ID]: renderRouteAppModule({ appModulePath: input.workflowWorldPluginPath }),
   };
   const addVirtualModule = (name: string, source: string): string => {
     const id = `#eve/${name}.mjs`;
