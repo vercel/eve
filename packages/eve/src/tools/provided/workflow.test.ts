@@ -90,6 +90,46 @@ describe("workflow", () => {
     expect(() => workflow({ maxSubagents: 0 })).toThrow("between 1 and 128");
     expect(() => workflow({ maxSubagents: 129 })).toThrow("between 1 and 128");
     expect(() => workflow({ mode: "serve" as never })).toThrow('mode must be "task" or "execute"');
+    expect(() => workflow({ tools: true } as never)).toThrow(
+      'workflow({ tools: true }) requires mode: "execute".',
+    );
+    expect(() => workflow({ mode: "task", tools: true } as never)).toThrow(
+      'workflow({ tools: true }) requires mode: "execute".',
+    );
+    expect(() => workflow({ mode: "execute", tools: "yes" as never })).toThrow(
+      "workflow tools must be a boolean.",
+    );
+  });
+
+  it("supports opt-in tool calling with mode: execute and tools: true", () => {
+    const definition = workflow({ maxSubagents: 6, mode: "execute", tools: true });
+
+    expect(isWorkflowToolDefinition(definition)).toBe(true);
+    expect(definition.execute).toBe(runWorkflowProgramExecute);
+    expect(definition.description).toContain("tools.<name>(input)");
+    expect(definition.description).toContain("search({ query })");
+    expect(definition.description).toContain("ctx.agent(name, { message, outputSchema?, model? })");
+    expect(definition.description).toContain("at most 6 agents");
+    expect(readWorkflowProgramOptions(definition)).toEqual({ maxSubagents: 6, tools: true });
+
+    const previousWorkflowId = Reflect.get(runWorkflowProgramExecute, "workflowId");
+    Reflect.set(runWorkflowProgramExecute, "workflowId", "workflow//test//execute-tools");
+    try {
+      const normalized = normalizeToolDefinition(definition, "Invalid workflow.");
+      expect(normalized).toMatchObject({
+        kind: "tool",
+        definition: {
+          workflow: { entryPoint: "execute" },
+          workflowProgram: { maxSubagents: 6, tools: true },
+        },
+      });
+    } finally {
+      if (previousWorkflowId === undefined) {
+        Reflect.deleteProperty(runWorkflowProgramExecute, "workflowId");
+      } else {
+        Reflect.set(runWorkflowProgramExecute, "workflowId", previousWorkflowId);
+      }
+    }
   });
 
   it("caps model-facing outputs over 10,000 estimated tokens while leaving smaller outputs untouched", async () => {

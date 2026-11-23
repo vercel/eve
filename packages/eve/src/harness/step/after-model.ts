@@ -29,7 +29,10 @@ import {
   getInvalidToolCallInputError,
   isInvalidToolCall,
 } from "#harness/tool-call-input-errors.js";
+import { DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS } from "#execution/dynamic-workflow/schema.js";
 import { isWorkflowTool, workingTaskIds } from "#execution/tasks/model-step.js";
+import { isProgramTool } from "#harness/program-calls.js";
+import { newProgram, savePrograms } from "#harness/session-machine/programs.js";
 import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js";
 import { renderFinalOutputWhileWorkingError } from "#execution/tasks/render.js";
 import { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
@@ -110,13 +113,25 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
   const workflowToolCalls = ((result.toolCalls ?? []) as TypedToolCall<ToolSet>[])
     .filter((toolCall) => !invalidInputToolCallIds.has(toolCall.toolCallId))
     .filter((toolCall) => !blockedCallIds.has(toolCall.toolCallId))
-    .filter((toolCall) => isWorkflowTool(input.catalog.get(toolCall.toolName)));
+    .filter((toolCall) => {
+      const definition = input.catalog.get(toolCall.toolName);
+      return isWorkflowTool(definition) && !isProgramTool(definition);
+    });
+  const programCalls = ((result.toolCalls ?? []) as TypedToolCall<ToolSet>[])
+    .filter((toolCall) => !invalidInputToolCallIds.has(toolCall.toolCallId))
+    .filter((toolCall) => !blockedCallIds.has(toolCall.toolCallId))
+    .filter((toolCall) => isProgramTool(input.catalog.get(toolCall.toolName)));
 
   const authorizationInterrupt = resolveInlineAuthorizationInterrupt({
     signIns: result.signIns ?? [],
   });
 
-  if (workflowToolCalls.length > 0 || approvalRequests.length > 0 || authorizationInterrupt) {
+  if (
+    workflowToolCalls.length > 0 ||
+    programCalls.length > 0 ||
+    approvalRequests.length > 0 ||
+    authorizationInterrupt
+  ) {
     const { sequence, stepIndex, turnId } = step.position();
     const dispatched = collectWorkflowCalls({
       clearances: result.policyApprovals ?? {},
@@ -139,6 +154,19 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
       await askStepApprovals(step, { ...parked, requests: approvalRequests, tools: input.catalog });
     } else {
       await step.apply(suspendStep(step.view(), parked));
+    }
+    if (programCalls.length > 0) {
+      const programs = programCalls.map((toolCall) => {
+        const definition = input.catalog.get(toolCall.toolName);
+        return newProgram(
+          toolCall.toolCallId,
+          toolCall.toolName,
+          toolCall.input,
+          { sequence, stepIndex, turnId },
+          definition?.workflowProgram?.maxSubagents ?? DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS,
+        );
+      });
+      await step.apply(savePrograms(step.view(), programs));
     }
     if (authorizationInterrupt) return stopForSignIn(step, authorizationInterrupt);
     return park(step);

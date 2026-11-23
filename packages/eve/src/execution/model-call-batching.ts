@@ -27,6 +27,7 @@ export async function runModelCallBatch(input: {
     if (
       input.steeringSignal?.aborted === true ||
       result.steered === true ||
+      result.checkpoint === true ||
       !shouldRunAnotherModelCall({
         completedModelCalls,
         modelCallsPerStep: input.modelCallsPerStep,

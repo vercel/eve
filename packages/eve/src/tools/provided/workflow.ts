@@ -1,3 +1,4 @@
+import { PROGRAM_MAX_CALLS } from "#execution/code-mode/limits.js";
 import { truncateProgramModelOutput } from "#execution/code-mode/result.js";
 import {
   DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS,
@@ -18,20 +19,31 @@ import { defineJsonSchema } from "#tools/schema.js";
 import { frameworkTool } from "./framework-tool.js";
 
 /** Options for {@link workflow}, such as the maximum number of child-agent calls and execution mode. */
-export interface WorkflowToolOptions {
-  /** Maximum child-agent calls per program, from 1 to 128. Defaults to 100. */
-  readonly maxSubagents?: number;
-  /**
-   * How each call runs: `"task"` runs in the background and delivers the result in a `task.result`
-   * message, while `"execute"` runs in the foreground so the current turn waits for the result.
-   * Defaults to `"task"`.
-   */
-  readonly mode?: "task" | "execute";
-}
+export type WorkflowToolOptions =
+  | {
+      /** Maximum child-agent calls per program, from 1 to 128. Defaults to 100. */
+      readonly maxSubagents?: number;
+      /**
+       * How each call runs: `"task"` runs in the background and delivers the result in a
+       * `task.result` message, while `"execute"` runs in the foreground so the current turn waits
+       * for the result. Defaults to `"task"`.
+       */
+      readonly mode?: "task" | "execute";
+      /** Set `true` with `mode: "execute"` to let programs call the agent's tools and connections. */
+      readonly tools?: false;
+    }
+  | {
+      /** Maximum child-agent calls per program, from 1 to 128. Defaults to 100. */
+      readonly maxSubagents?: number;
+      /** Runs in the foreground so the current turn waits for the result directly. */
+      readonly mode: "execute";
+      /** Allows programs to call the agent's tools, connections, and agents via `tools` and `search()`. */
+      readonly tools: true;
+    };
 
 /**
- * Input to the `workflow` tool: the body of an async JavaScript function that invokes agents,
- * asks questions, sleeps, reports progress, and returns one JSON-serializable value.
+ * Input to the `workflow` tool: the body of an async JavaScript function that orchestrates agents
+ * or tools and returns one JSON-serializable value.
  */
 export interface WorkflowToolInput {
   /** Async JavaScript function body evaluated inside the isolated workflow runtime. */
@@ -61,16 +73,56 @@ const workflowInputSchema = defineJsonSchema<WorkflowToolInput>({
   additionalProperties: false,
 });
 
+const workflowToolsInputSchema = defineJsonSchema<WorkflowToolInput>({
+  type: "object",
+  properties: {
+    js: {
+      type: "string",
+      description:
+        'JavaScript statements executed inside an async function. Supply only the body, without a surrounding function declaration or arrow function. Call tools, connections, and agents as `await tools.<name>(input)` (`tools["name"](input)` when the name is not an identifier), find unlisted tools with `await search({ query })`, or use `await ctx.agent(name, { message, outputSchema?, model? })` as an alias for agent calls. Return one JSON-serializable value.',
+    },
+  },
+  required: ["js"],
+  additionalProperties: false,
+});
+
 /** Defines a model-facing workflow tool backed by isolated runtime JavaScript. */
 export function workflow(
   options: WorkflowToolOptions & { readonly mode: "execute" },
 ): WorkflowExecuteToolDefinition<WorkflowToolInput, JsonValue>;
 export function workflow(
-  options?: WorkflowToolOptions & { readonly mode?: "task" },
+  options?: WorkflowToolOptions & { readonly mode?: "task"; readonly tools?: false },
 ): WorkflowTaskToolDefinition<WorkflowToolInput, JsonValue>;
 export function workflow(options?: WorkflowToolOptions): WorkflowTool;
 export function workflow(options: WorkflowToolOptions = {}): WorkflowTool {
   const normalized = normalizeWorkflowToolOptions(options);
+  if (normalized.tools) {
+    const description = [
+      "Run an async JavaScript function body in the foreground that calls your tools, connections, and agents, and returns one JSON-serializable value.",
+      "Runs in the foreground: the current turn waits until the program finishes and receives its result directly.",
+      'Call any callable tool, connection tool, or agent by its flat catalog name as `await tools.<name>(input)` (use `tools["name"](input)` when the name is not an identifier).',
+      "Call `await search({ query })` to find tools that are not in your tool list.",
+      "`await ctx.agent(name, { message, outputSchema?, model? })` is available as an alias for `await tools[name](...)`.",
+      "Each call resolves to the tool's output (or an agent's reply, or a value matching `outputSchema` when provided); a failed or rejected call throws.",
+      "Start independent calls together with `Promise.all` so concurrent work runs together and approvals are requested at once, and await every call before returning.",
+      "There is no fetch, file system, timers, or imports. `console.log` output is captured and returned with the result.",
+      `The program may make at most ${String(PROGRAM_MAX_CALLS)} total calls and invoke at most ${String(normalized.maxSubagents)} agents.`,
+    ].join(" ");
+    return attachWorkflowProgramOptions(
+      frameworkTool(
+        defineWorkflowTool({
+          description,
+          execute: runWorkflowProgramExecute,
+          inputSchema: workflowToolsInputSchema,
+          toModelOutput: truncateProgramModelOutput,
+        }),
+      ),
+      {
+        maxSubagents: normalized.maxSubagents,
+        tools: true,
+      },
+    );
+  }
   const modeGuidance =
     normalized.mode === "execute"
       ? "Runs in the foreground: the current turn waits until the program finishes and receives its result directly."
@@ -110,6 +162,7 @@ export function workflow(options: WorkflowToolOptions = {}): WorkflowTool {
 function normalizeWorkflowToolOptions(options: WorkflowToolOptions): {
   readonly maxSubagents: number;
   readonly mode: "task" | "execute";
+  readonly tools: boolean;
 } {
   if (typeof options !== "object" || options === null) {
     throw new TypeError("workflow options must be an object.");
@@ -118,8 +171,16 @@ function normalizeWorkflowToolOptions(options: WorkflowToolOptions): {
   if (mode !== "task" && mode !== "execute") {
     throw new TypeError('workflow mode must be "task" or "execute".');
   }
+  if (options.tools !== undefined && typeof options.tools !== "boolean") {
+    throw new TypeError("workflow tools must be a boolean.");
+  }
+  const tools = options.tools === true;
+  if (tools && mode !== "execute") {
+    throw new TypeError('workflow({ tools: true }) requires mode: "execute".');
+  }
   const program = parseWorkflowProgramOptions({
     maxSubagents: options.maxSubagents ?? DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS,
+    ...(tools && { tools: true }),
   });
-  return { ...program, mode };
+  return { ...program, mode, tools };
 }

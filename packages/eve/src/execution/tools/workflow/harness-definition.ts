@@ -44,6 +44,8 @@ export function createPreparedWorkflowToolHarnessDefinition(
       name: tool.name,
       outputSchema: toOutputSchema(tool.outputSchema),
       rootOnly: tool.rootOnly,
+      ...(tool.kind === "authored-tool" &&
+        tool.workflowProgram !== undefined && { workflowProgram: tool.workflowProgram }),
     },
     workflowId,
   });

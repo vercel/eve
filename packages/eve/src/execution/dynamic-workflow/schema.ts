@@ -41,7 +41,10 @@ export interface WorkflowProgramInput {
   readonly maxSubagents: number;
 }
 
-export type WorkflowProgramOptions = Pick<WorkflowProgramInput, "maxSubagents">;
+export interface WorkflowProgramOptions {
+  readonly maxSubagents: number;
+  readonly tools?: true;
+}
 
 export interface WorkflowProgramAgentFile {
   readonly filename?: string;
@@ -109,7 +112,12 @@ export function parseWorkflowProgramOptions(value: unknown): WorkflowProgramOpti
       `workflow maxSubagents must be an integer between 1 and ${String(MAX_WORKFLOW_PROGRAM_MAX_SUBAGENTS)}.`,
     );
   }
-  return { maxSubagents: input.maxSubagents };
+  if (input.tools !== undefined && typeof input.tools !== "boolean") {
+    throw new TypeError("workflow tools must be a boolean.");
+  }
+  return input.tools === true
+    ? { maxSubagents: input.maxSubagents, tools: true }
+    : { maxSubagents: input.maxSubagents };
 }
 
 export function readWorkflowProgramAgentCall(value: unknown): WorkflowProgramAgentCall {

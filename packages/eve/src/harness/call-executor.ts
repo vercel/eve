@@ -558,8 +558,8 @@ export async function publishDenial(
   return { settled: [{ part }], toolResults: [] };
 }
 
-function approvalRequest(
-  call: TypedToolCall<ToolSet>,
+export function approvalRequest(
+  call: Pick<TypedToolCall<ToolSet>, "input" | "toolCallId" | "toolName">,
   definition: HarnessToolDefinition | undefined,
 ): ApprovalAsk {
   const { toolCallId: callId, toolName } = call;
@@ -588,7 +588,7 @@ function approvalRequest(
 }
 
 function authoredApprovalPrompt(
-  call: TypedToolCall<ToolSet>,
+  call: Pick<TypedToolCall<ToolSet>, "input" | "toolCallId" | "toolName">,
   definition: HarnessToolDefinition | undefined,
 ): string | undefined {
   const approval = definition?.approval;

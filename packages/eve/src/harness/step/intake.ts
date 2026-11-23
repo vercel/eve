@@ -18,6 +18,7 @@ import {
 import { finishRun, settle } from "#harness/session-machine/transitions.js";
 import { recordLateSpend as recordLateSpendFact } from "#harness/session-machine/runs.js";
 import { activeTurnId, parkedCallsAnswered, runtimeWait } from "#harness/session-machine/view.js";
+import { stepCallIds } from "#harness/session-machine/suspended-steps.js";
 import { getTurnClientContextState } from "#harness/turn-client-context.js";
 import type { HarnessStepInput } from "#harness/types.js";
 import { readClientContext } from "#internal/client-context.js";
@@ -52,7 +53,14 @@ export async function settleRuntimeWork(
   step.session = finished.session;
   await step.apply(finishRun(step.view(), { requestIds: finished.requestIds }));
   const catalog = await stepCatalog(step);
-  const results = await runtimeResultCalls(ready, catalog);
+  const programCalls = new Set(
+    step
+      .view()
+      .turn.suspended.flatMap((parked) =>
+        parked.program === undefined ? [] : [...stepCallIds(parked)],
+      ),
+  );
+  const results = await runtimeResultCalls(ready, catalog, programCalls);
   const staged = await stageToolResultMedia([
     { role: "tool", content: results.map(({ part }) => part) },
   ]);

@@ -10,6 +10,7 @@ import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { startsTasks } from "#execution/tasks/tool-entry-point.js";
 import { runEntryCall } from "#harness/execute-call.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import { isProgramTool } from "#harness/program-calls.js";
 import { checkToolCallInput } from "#harness/tool-call-io.js";
 import type {
   CallResolver,
@@ -25,7 +26,9 @@ import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import { refineJsonSchema } from "#tools/schema.js";
 
+import { programEntry } from "./catalog-tools.js";
 import { connectionEntry, connectionSignInEntry } from "./connection-entry.js";
+import { programOutputNote } from "./signatures.js";
 import { createSkillLoader, type CatalogSkill } from "./skills.js";
 
 const ENDS_TURN_TOOL_NOTE =
@@ -43,6 +46,7 @@ export interface Callable {
 
 export interface StepCatalog extends HarnessToolLookup {
   readonly advertised: HarnessToolMap;
+  readonly callable: Callable;
   readonly connections: readonly ResolvedConnectionDefinition[];
   readonly deferred: HarnessToolMap;
   readonly entries: HarnessToolMap;
@@ -62,22 +66,27 @@ export function callableOf(input: CatalogInput): Callable {
   const { connections, skills } = input.table;
   const bundle = compiledBundleOf(input.ctx);
   const agentApproval = bundle === undefined ? undefined : resolveAgentApproval(bundle);
-  const entries = withAgentApprovalOnEntries(
-    new Map(
-      [...input.table.entries]
-        .filter(
-          ([, entry]) => entry.route === undefined && isVisible(entry.definition, input.session),
-        )
-        .map(([name, entry]) => [name, entry.definition]),
-    ),
-    agentApproval,
+  const rawEntries = new Map(
+    [...input.table.entries]
+      .filter(
+        ([, entry]) => entry.route === undefined && isVisible(entry.definition, input.session),
+      )
+      .map(([name, entry]) => [name, entry.definition]),
   );
+  const entries = withAgentApprovalOnEntries(rawEntries, agentApproval);
+  for (const [name, definition] of rawEntries) {
+    if (isProgramTool(definition) && entries.has(name)) {
+      entries.set(name, definition);
+    }
+  }
   const registry = input.ctx.get(ConnectionRegistryKey);
   const versions = dynamicConnectionVersions(input.ctx);
-  return {
+  const hasProgramTool = [...entries.values()].some((definition) => isProgramTool(definition));
+  const callable: Callable = {
     connections,
     deferred: new Map([...entries].filter(([, definition]) => definition.deferred === true)),
-    describe: (definition) => describeEntry(definition, input.endsTurn),
+    describe: (definition) =>
+      describeEntry(definition, input.endsTurn, hasProgramTool ? callable : undefined),
     entries,
     get: (name) =>
       entries.get(name) ??
@@ -87,6 +96,7 @@ export function callableOf(input: CatalogInput): Callable {
     registry,
     skills,
   };
+  return callable;
 }
 
 export function buildStepCatalog(input: CatalogInput): StepCatalog {
@@ -101,6 +111,7 @@ export function buildStepCatalog(input: CatalogInput): StepCatalog {
   const advertised: Map<string, HarnessToolDefinition> = new Map();
   const catalog: StepCatalog = {
     advertised,
+    callable,
     connections: callable.connections,
     deferred: callable.deferred,
     describe: callable.describe,
@@ -195,10 +206,22 @@ function runResolved(
   return runEntryCall(resolved, options);
 }
 
-function describeEntry(definition: HarnessToolDefinition, endsTurn: boolean): string {
-  return endsTurn && definition.endsTurn === true
-    ? `${definition.description}\n\n${ENDS_TURN_TOOL_NOTE}`.trimStart()
-    : definition.description;
+function describeEntry(
+  definition: HarnessToolDefinition,
+  endsTurn: boolean,
+  programs: Callable | undefined,
+): string {
+  const note =
+    endsTurn && definition.endsTurn === true
+      ? ENDS_TURN_TOOL_NOTE
+      : programs !== undefined &&
+          definition.deferred !== true &&
+          "entry" in programEntry(programs, definition.name)
+        ? programOutputNote(definition)
+        : undefined;
+  return note === undefined
+    ? definition.description
+    : `${definition.description}\n\n${note}`.trimStart();
 }
 
 function isVisible(

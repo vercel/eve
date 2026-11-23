@@ -12,6 +12,7 @@ import type { OutboundAuthFn } from "#public/agents/auth.js";
 import type { StreamEventHook } from "#public/definitions/hook.js";
 import type { ApprovalPolicy, Approval } from "#approval/definition.js";
 import type { ToolModelOutput, ToolModelOutputContext } from "#tools/definition.js";
+import type { WorkflowProgramOptions } from "#tools/workflow-program-input.js";
 import type { ConnectionToolCallDefinition } from "#public/definitions/connections/tool-call.js";
 import type {
   AuthorizationDefinition,
@@ -129,6 +130,7 @@ export type ResolvedToolDefinition = Readonly<
       output: unknown,
       ctx: ToolModelOutputContext,
     ) => ToolModelOutput | Promise<ToolModelOutput>;
+    readonly workflowProgram?: WorkflowProgramOptions;
   };
 
 export interface ResolvedHookDefinition extends ResolvedModuleSourceRef {
