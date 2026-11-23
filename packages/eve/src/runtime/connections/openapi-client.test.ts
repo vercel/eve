@@ -217,11 +217,28 @@ describe("OpenApiConnectionClient", () => {
     const ERROR = { type: "object", properties: { message: { type: "string" } } };
     const json = (schema: unknown) => ({ content: { "application/json": { schema } } });
 
-    async function petsTool(responses: Record<string, unknown>) {
+    async function petsTool(
+      responses: Record<string, unknown>,
+      options?: {
+        readonly documentProduces?: readonly string[];
+        readonly operationProduces?: readonly string[];
+      },
+    ) {
       const client = new OpenApiConnectionClient(
         makeConnection({
           spec: {
-            paths: { "/pets": { get: { operationId: "listPets", responses } } },
+            ...(options?.documentProduces !== undefined && { produces: options.documentProduces }),
+            paths: {
+              "/pets": {
+                get: {
+                  operationId: "listPets",
+                  ...(options?.operationProduces !== undefined && {
+                    produces: options.operationProduces,
+                  }),
+                  responses,
+                },
+              },
+            },
             components: { responses: { Pet: json(PET_REF) }, schemas: { Pet: PET } },
           },
         }),
@@ -253,23 +270,54 @@ describe("OpenApiConnectionClient", () => {
     });
 
     it.each([
-      ["a Swagger 2.0 response", { "200": { schema: PET_REF } }],
-      ["a shared response", { "201": { $ref: "#/components/responses/Pet" } }],
-      ["the first 2xx response to declare one", { "202": {}, "203": json(PET_REF) }],
-      ["the default response when there is no 2xx response", { default: json(PET_REF) }],
-    ])("reads the body's schema from %s", async (_name, responses) => {
-      expect((await petsTool(responses)).outputSchema).toMatchObject({
+      ["a Swagger 2.0 response", { "200": { schema: PET_REF } }, undefined],
+      [
+        "a Swagger 2.0 operation overriding non-JSON document produces with JSON",
+        { "200": { schema: PET_REF } },
+        {
+          documentProduces: ["application/xml"],
+          operationProduces: ["Application/JSON; charset=utf-8"],
+        },
+      ],
+      [
+        "a parameterized JSON content key",
+        { "200": { content: { "Application/JSON; charset=utf-8": { schema: PET_REF } } } },
+        undefined,
+      ],
+      ["a shared response", { "201": { $ref: "#/components/responses/Pet" } }, undefined],
+      ["the first 2xx response to declare one", { "202": {}, "203": json(PET_REF) }, undefined],
+      ["the default response when there is no 2xx response", { default: json(PET_REF) }, undefined],
+    ])("reads the body's schema from %s", async (_name, responses, options) => {
+      expect((await petsTool(responses, options)).outputSchema).toMatchObject({
         properties: { body: { $ref: "#/$defs/Pet" } },
       });
     });
 
     it.each([
-      ["no body", { "204": { description: "deleted" } }],
-      ["a body that isn't JSON", { "200": { content: { "text/csv": { schema: PET } } } }],
-      ["errors alone", { "200": {}, default: json(ERROR) }],
-      ["an unserializable response schema", { "200": json({ const: Number.NaN }) }],
-    ])("declares none when the responses describe %s", async (_name, responses) => {
-      const tool = await petsTool(responses);
+      ["no body", { "204": { description: "deleted" } }, undefined],
+      [
+        "a body that isn't JSON",
+        { "200": { content: { "text/csv": { schema: PET } } } },
+        undefined,
+      ],
+      [
+        "a Swagger 2.0 operation producing only XML",
+        { "200": { schema: PET_REF } },
+        { operationProduces: ["application/xml"] },
+      ],
+      [
+        "a Swagger 2.0 document producing only XML",
+        { "200": { schema: PET_REF } },
+        { documentProduces: ["application/xml"] },
+      ],
+      [
+        "a bodiless 2xx alongside a default error response",
+        { "200": {}, default: json(ERROR) },
+        undefined,
+      ],
+      ["an unserializable response schema", { "200": json({ const: Number.NaN }) }, undefined],
+    ])("declares none when the responses describe %s", async (_name, responses, options) => {
+      const tool = await petsTool(responses, options);
       expect(tool.name).toBe("listPets");
       expect(tool).not.toHaveProperty("outputSchema");
     });

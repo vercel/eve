@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isIdentifier, renderOutputType, renderToolSignature } from "./signature.js";
+import { renderOutputType, renderToolSignature } from "./signature.js";
 
 describe("renderToolSignature", () => {
   it.each([
@@ -136,6 +136,34 @@ describe("renderToolSignature", () => {
     expect(performance.now() - started).toBeLessThan(1_000);
     expect(signature.length).toBeLessThanOrEqual(4_000);
   });
+
+  it("keeps input parameter descriptions when a large output schema is capped", () => {
+    const signature = renderToolSignature({
+      name: "github__repos_get",
+      inputSchema: {
+        type: "object",
+        properties: {
+          owner: { type: "string", description: "The account owner of the repository." },
+          repo: { type: "string", description: "The repository name without the .git extension." },
+        },
+        required: ["owner", "repo"],
+      },
+      outputSchema: {
+        type: "object",
+        properties: Object.fromEntries(
+          Array.from({ length: 80 }, (_, index) => [
+            `field_name_${index}`,
+            { type: "string", description: "x".repeat(80) },
+          ]),
+        ),
+      },
+    });
+    expect(signature).toContain("owner: string /* The account owner of the repository */");
+    expect(signature).toContain(
+      "repo: string /* The repository name without the .git extension */",
+    );
+    expect(signature).not.toContain("xxx");
+  });
 });
 
 describe("renderOutputType", () => {
@@ -178,18 +206,5 @@ describe("renderOutputType", () => {
     });
     expect(type).toHaveLength(1_000);
     expect(type!.endsWith("...")).toBe(true);
-  });
-});
-
-describe("isIdentifier", () => {
-  it("recognizes names valid after a dot", () => {
-    expect(isIdentifier("listPets")).toBe(true);
-    expect(isIdentifier("_private")).toBe(true);
-    expect(isIdentifier("$ref1")).toBe(true);
-    expect(isIdentifier("")).toBe(false);
-    expect(isIdentifier("1abc")).toBe(false);
-    expect(isIdentifier("x-trace-id")).toBe(false);
-    expect(isIdentifier("a.b")).toBe(false);
-    expect(isIdentifier("a b")).toBe(false);
   });
 });
