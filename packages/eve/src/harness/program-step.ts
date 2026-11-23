@@ -73,6 +73,7 @@ import { checkToolCallInput } from "#harness/tool-call-io.js";
 import { decideApproval, isRunnableTool } from "#harness/tools.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import type { StepResult } from "#harness/types.js";
+import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { callRun, runTurn } from "#protocol/session-projection/selectors.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { isObject } from "#shared/guards.js";
@@ -170,7 +171,11 @@ export async function runProgramStep(step: Step, program: ProgramRun): Promise<S
         request.index,
         decision.awaitsPerson === true
           ? {
-              ask: { ...approvalRequest(toolCall, entry), remember: decision.remember },
+              ask: {
+                ...approvalRequest(toolCall, entry),
+                ...(decision.callerOnly === true && { callerOnly: true as const }),
+                remember: decision.remember,
+              },
               call: toolCall,
               kind: "approval",
             }
@@ -200,7 +205,11 @@ export async function runProgramStep(step: Step, program: ProgramRun): Promise<S
     });
     if (outcome.awaitsApproval === true) {
       parked.set(request.index, {
-        ask: { ...approvalRequest(toolCall, entry), remember: outcome.remember },
+        ask: {
+          ...approvalRequest(toolCall, entry),
+          ...(outcome.callerOnly === true && { callerOnly: true as const }),
+          remember: outcome.remember,
+        },
         call: toolCall,
         kind: "approval",
       });
@@ -217,8 +226,71 @@ export async function runProgramStep(step: Step, program: ProgramRun): Promise<S
   };
 
   const search = async (request: ProgramRequest, input: unknown): Promise<JsonValue> => {
+    if (request.resumed !== undefined) {
+      return await programOutput(
+        catalog,
+        SEARCH_TOOL_NAME,
+        request.resumed.resolution as ProgramCallResult,
+      );
+    }
+    const callId = programCallId(program.callId, request.index);
+    const recovered = program.recovered?.[callId];
+    if (recovered !== undefined && (recovered.started || recovered.outcome !== undefined)) {
+      return await settled(
+        { input: input ?? {}, toolName: SEARCH_TOOL_NAME },
+        interruptedProgramCall(asInterruptedCall(recovered)),
+      );
+    }
     if (stopped()) throw new ProgramCallError(PROGRAM_STEERED_MESSAGE);
     if (request.index > PROGRAM_MAX_CALLS) throw new ProgramCallError(callLimitMessage("search"));
+
+    const searchEntry = catalog.get(SEARCH_TOOL_NAME);
+    if (
+      searchEntry !== undefined &&
+      searchEntry.approval !== undefined &&
+      isRunnableTool(searchEntry)
+    ) {
+      const toolInput = await checkProgramInput(catalog, searchEntry, input ?? {}, callId);
+      const toolCall = batchCall(callId, SEARCH_TOOL_NAME, toolInput);
+      await requestProgramCall(step, program, catalog, toolCall);
+      const action = { callId, input: toolInput, toolName: SEARCH_TOOL_NAME };
+      const outcome = await inline(async () => {
+        if (stopped()) throw new ProgramCallError(PROGRAM_STEERED_MESSAGE);
+        return await executeToolCall(
+          action,
+          {
+            abortSignal: step.config.abortSignal,
+            approvalMemory: humanInputContext(step).approvalMemory,
+            definition: withoutModelOutput(searchEntry),
+            messages: step.session.history,
+            publish: step.publish,
+            telemetry,
+          },
+          "evaluate",
+        );
+      });
+      if (outcome.awaitsApproval === true) {
+        parked.set(request.index, {
+          ask: {
+            ...approvalRequest(toolCall, searchEntry),
+            ...(outcome.callerOnly === true && { callerOnly: true as const }),
+            remember: outcome.remember,
+          },
+          call: toolCall,
+          kind: "approval",
+        });
+        return request.interrupt();
+      }
+      if (outcome.signIn !== undefined) {
+        parked.set(request.index, { call: toolCall, kind: "sign-in", signIn: outcome.signIn });
+        return request.interrupt();
+      }
+      return await settled(
+        action,
+        resultOf(outcome.settled[0]?.part, outcome.toolResults[0]?.output),
+      );
+    }
+
     try {
       return toJsonValue(await programSearch(catalog.callable, input));
     } catch (error) {
@@ -262,8 +334,8 @@ export async function runProgramStep(step: Step, program: ProgramRun): Promise<S
   }
   throwIfTurnAborted(step.config.abortSignal);
 
-  if (stopped()) return finishProgram(step, catalog, current, { error: PROGRAM_STEERED_MESSAGE });
   if (outcome.status !== "interrupted") return finishProgram(step, catalog, current, outcome);
+  if (stopped()) return finishProgram(step, catalog, current, { error: PROGRAM_STEERED_MESSAGE });
   return parkProgram(step, catalog, current, outcome, parked);
 }
 

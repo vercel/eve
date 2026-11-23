@@ -1,5 +1,8 @@
 import { ProgramCallError, runProgramSandbox } from "#execution/code-mode/sandbox.js";
 import {
+  WORKFLOW_PROGRAM_MAX_PROGRESS_BYTES,
+  WORKFLOW_PROGRAM_MAX_PROGRESS_UPDATES,
+  WORKFLOW_PROGRAM_MAX_PROGRESS_UPDATE_BYTES,
   readWorkflowProgramAgentCall,
   readWorkflowProgramAskRequest,
   readWorkflowProgramProgressUpdate,
@@ -53,6 +56,7 @@ export async function runWorkflowProgramStep(
 
   const waiting = new Map<number, WorkflowProgramAction>();
   const progress: JsonValue[] = [];
+  let progressBytes = 0;
 
   const resumeResult = (resolution: unknown): JsonValue => {
     const outcome = resolution as WorkflowProgramCallResult;
@@ -70,7 +74,7 @@ export async function runWorkflowProgramStep(
       agent: {
         errorCode: "WORKFLOW_PROGRAM_AGENT_ERROR",
         errorName: "WorkflowProgramAgentError",
-        label: "ctx.agent() input",
+        label: "ctx.agent()",
         handle: async (request, payload) => {
           if (request.resumed !== undefined) return resumeResult(request.resumed.resolution);
           let call;
@@ -84,7 +88,7 @@ export async function runWorkflowProgramStep(
         },
       },
       ask: {
-        label: "ctx.ask() input",
+        label: "ctx.ask()",
         handle: async (request, payload) => {
           if (request.resumed !== undefined) return resumeResult(request.resumed.resolution);
           let askRequest;
@@ -99,7 +103,7 @@ export async function runWorkflowProgramStep(
         },
       },
       progress: {
-        label: "ctx.progress() input",
+        label: "ctx.progress()",
         handle: async (_request, payload) => {
           let update: JsonValue;
           try {
@@ -113,12 +117,29 @@ export async function runWorkflowProgramStep(
           } catch (error) {
             throw new ProgramCallError(toErrorMessage(error));
           }
+          const updateBytes = Buffer.byteLength(JSON.stringify(update));
+          if (updateBytes > WORKFLOW_PROGRAM_MAX_PROGRESS_UPDATE_BYTES) {
+            throw new ProgramCallError(
+              `WORKFLOW_PROGRAM_PROGRESS_TOO_LARGE: ctx.progress() update is ${String(updateBytes)} bytes of JSON, over the ${String(WORKFLOW_PROGRAM_MAX_PROGRESS_UPDATE_BYTES)} byte limit.`,
+            );
+          }
+          if (progress.length >= WORKFLOW_PROGRAM_MAX_PROGRESS_UPDATES) {
+            throw new ProgramCallError(
+              `WORKFLOW_PROGRAM_PROGRESS_LIMIT_REACHED: ctx.progress() may be called at most ${String(WORKFLOW_PROGRAM_MAX_PROGRESS_UPDATES)} times per step.`,
+            );
+          }
+          if (progressBytes + updateBytes > WORKFLOW_PROGRAM_MAX_PROGRESS_BYTES) {
+            throw new ProgramCallError(
+              `WORKFLOW_PROGRAM_PROGRESS_LIMIT_REACHED: ctx.progress() updates in one step exceed the ${String(WORKFLOW_PROGRAM_MAX_PROGRESS_BYTES)} byte limit.`,
+            );
+          }
+          progressBytes += updateBytes;
           progress.push(update);
           return null;
         },
       },
       sleep: {
-        label: "ctx.sleep() input",
+        label: "ctx.sleep()",
         handle: async (request, payload) => {
           if (request.resumed !== undefined) return resumeResult(request.resumed.resolution);
           let seconds: number;

@@ -457,4 +457,78 @@ try {
       runWorkflowProgramStep({ callId: "tamper", program: input, resume: valid }),
     ).resolves.toEqual({ logs: [], progress: [], result: "no", status: "completed" });
   });
+
+  it("enforces host-side byte and count budgets on ctx.progress() updates", async () => {
+    const oversized = await runWorkflowProgramStep({
+      callId: "progress-large",
+      program: program(`
+try {
+  await ctx.progress("x".repeat(20 * 1024));
+  return "unexpected";
+} catch (error) {
+  return { code: error.code, message: error.message, name: error.name };
+}`),
+    });
+    expect(oversized).toEqual({
+      logs: [],
+      progress: [],
+      result: {
+        code: "WORKFLOW_PROGRAM_ERROR",
+        message: expect.stringContaining("WORKFLOW_PROGRAM_PROGRESS_TOO_LARGE"),
+        name: "WorkflowProgramError",
+      },
+      status: "completed",
+    });
+
+    const aggregate = await runWorkflowProgramStep({
+      callId: "progress-aggregate",
+      program: program(`
+const chunk = "a".repeat(15 * 1024);
+let accepted = 0;
+let caught = null;
+for (let i = 0; i < 10; i += 1) {
+  try {
+    await ctx.progress(chunk);
+    accepted += 1;
+  } catch (error) {
+    caught = error.message;
+    break;
+  }
+}
+return { accepted, caught };`),
+    });
+    expect(aggregate).toMatchObject({
+      logs: [],
+      result: {
+        accepted: 4,
+        caught: expect.stringContaining("WORKFLOW_PROGRAM_PROGRESS_LIMIT_REACHED"),
+      },
+      status: "completed",
+    });
+    if (aggregate.status === "completed") {
+      expect(aggregate.progress).toHaveLength(4);
+    }
+  });
+
+  it("bounds Unicode/escaped console output in UTF-8 JSON bytes and isolates internal log state", async () => {
+    const outcome = await runWorkflowProgramStep({
+      callId: "unicode-console",
+      program: program(`
+for (let i = 0; i < 40; i += 1) {
+  console.log("\\u0000".repeat(1_000));
+}
+let logsAccessible = false;
+try {
+  void __logs;
+  logsAccessible = true;
+} catch {}
+return { logsAccessible, payload: "x".repeat(1024 * 1024 - 64) };`),
+    });
+    expect(outcome.status).toBe("completed");
+    if (outcome.status === "completed") {
+      expect(outcome.result).toMatchObject({ logsAccessible: false });
+      expect(outcome.logs.at(-1)).toBe("(console output truncated)");
+      expect(Buffer.byteLength(JSON.stringify(outcome.logs))).toBeLessThanOrEqual(64 * 1024 + 64);
+    }
+  });
 });

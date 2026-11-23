@@ -17,6 +17,7 @@ export interface StepCoordinates {
 }
 
 export interface ApprovalAsk {
+  readonly callerOnly?: true;
   readonly remember?: RememberRequest;
   readonly interactionId: string;
   readonly call: {

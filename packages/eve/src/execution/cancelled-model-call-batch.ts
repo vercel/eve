@@ -4,6 +4,7 @@ import {
   AuthKey,
   ChannelInstrumentationKey,
   SandboxKey,
+  SteeredByKey,
   TurnDeliveryIdsKey,
 } from "#context/keys.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
@@ -79,7 +80,7 @@ export async function createCancelledModelCallBatchResult(input: {
   const cancelledSession =
     input.checkpoint?.result.session ??
     (await cancelledWithoutCheckpoint(input.ctx, input.initialSession, input.stepInput));
-  const checkpointContext = {
+  const checkpointContext: Record<string, unknown> = {
     ...(input.checkpoint?.serializedContext ?? input.beforeBatchContext),
     [AuthKey.name]: interruptedContext[AuthKey.name],
     [TurnDeliveryIdsKey.name]: interruptedContext[TurnDeliveryIdsKey.name],
@@ -89,6 +90,11 @@ export async function createCancelledModelCallBatchResult(input: {
       [ChannelInstrumentationKey.name]: interruptedContext[ChannelInstrumentationKey.name],
     }),
   };
+  if (SteeredByKey.name in interruptedContext) {
+    checkpointContext[SteeredByKey.name] = interruptedContext[SteeredByKey.name];
+  } else {
+    delete checkpointContext[SteeredByKey.name];
+  }
 
   return {
     action: "cancelled",

@@ -164,15 +164,21 @@ export class SessionInputQueue {
     turn: SteeringTurn,
     options?: SteeringOptions,
   ): TurnSelection | undefined {
-    const steering = this.entries.filter(
+    const eligible = this.entries.filter(
       (entry): entry is QueuedDelivery =>
         entry.kind === "delivery" &&
         admitted.has(entry.sequence) &&
         isSteeringDelivery(entry.delivery, turn, {
           heldOnPerson: options?.heldSince !== undefined && entry.sequence >= options.heldSince,
+          paused: options?.paused,
         }),
     );
-    if (steering.length === 0) return undefined;
+    const senderOf = ({ delivery }: QueuedDelivery) =>
+      delivery.auth === undefined ? turn.principal : principalOf(delivery.auth);
+    const first = eligible[0];
+    if (first === undefined) return undefined;
+    const end = eligible.findIndex((entry) => senderOf(entry) !== senderOf(first));
+    const steering = end === -1 ? eligible : eligible.slice(0, end);
     this.retain((entry) => entry.kind !== "delivery" || !steering.includes(entry));
     return {
       delivery: combine(steering),
@@ -242,23 +248,39 @@ export interface SteeringTurn {
 
 export interface SteeringOptions {
   readonly heldSince?: number;
+  readonly paused?: boolean;
 }
 
 export function isSteeringDelivery(
   delivery: DeliverHookPayload,
   turn: SteeringTurn,
-  options?: { readonly heldOnPerson?: boolean },
+  options?: { readonly heldOnPerson?: boolean; readonly paused?: boolean },
 ): boolean {
+  const paused = options?.paused === true || options?.heldOnPerson === true;
   return (
     (options?.heldOnPerson === true || (delivery.turnPolicy ?? "steer") === "steer") &&
     (delivery.caller === undefined || delivery.caller.callId === turn.callerCallId) &&
-    (delivery.auth === undefined || principalOf(delivery.auth) === turn.principal)
+    (delivery.auth === undefined ||
+      principalOf(delivery.auth) === turn.principal ||
+      (!paused && joinsAnotherTurn(delivery)))
   );
 }
 
-export function isSteeringMessage(delivery: DeliverHookPayload, turn: SteeringTurn): boolean {
+function joinsAnotherTurn(delivery: DeliverHookPayload): boolean {
   return (
-    isSteeringDelivery(delivery, turn) &&
+    delivery.principalPolicy === "retain" &&
+    delivery.auth != null &&
+    principalOf(delivery.auth) !== ANONYMOUS_PRINCIPAL
+  );
+}
+
+export function isSteeringMessage(
+  delivery: DeliverHookPayload,
+  turn: SteeringTurn,
+  options?: { readonly paused?: boolean },
+): boolean {
+  return (
+    isSteeringDelivery(delivery, turn, options) &&
     delivery.payloads.some(
       (payload) => payload.message !== undefined && payload.answers === undefined,
     )

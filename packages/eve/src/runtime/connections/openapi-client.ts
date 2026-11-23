@@ -8,6 +8,7 @@ import {
 import {
   declaredOperationId,
   HTTP_METHODS,
+  isJsonMediaType,
   type OpenApiOperation,
   operationDescription,
   operationName,
@@ -587,7 +588,7 @@ async function readResponseBody(response: Response): Promise<unknown> {
     return null;
   }
   const contentType = response.headers.get("content-type") ?? "";
-  if (contentType.includes("application/json")) {
+  if (isJsonMediaType(contentType)) {
     try {
       return JSON.parse(text);
     } catch {

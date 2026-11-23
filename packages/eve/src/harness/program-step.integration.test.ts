@@ -118,6 +118,7 @@ function tool(name: string, definition: unknown) {
 
 async function withProgramSession<T>(
   input: {
+    readonly approval?: Parameters<typeof defineAgent>[0]["approval"];
     readonly js: string;
     readonly maxSubagents?: number;
     readonly modules?: readonly ReturnType<typeof moduleEntry>[];
@@ -137,6 +138,7 @@ async function withProgramSession<T>(
   const test = await createTestRuntime({
     agent: {
       definition: defineAgent({
+        ...(input.approval !== undefined && { approval: input.approval }),
         model: defineDynamic(() => ({ model, modelContextWindowTokens: 200_000 })),
       }),
       name: "program-session",
@@ -522,6 +524,76 @@ describe("workflow({ mode: 'execute', tools: true }) program step", () => {
           },
         ]);
         expect(await violations(runtime, asked.sessionId)).toEqual([]);
+      },
+    );
+  });
+
+  it("enforces agent-wide approval policies on search() inside programs", async () => {
+    const deferredTool = tool(
+      "secret_lookup",
+      defineTool({
+        deferred: true,
+        description: "Inspect restricted internal records.",
+        execute: () => ({ secret: true }),
+        inputSchema: { type: "object" },
+      }),
+    );
+
+    await withProgramSession(
+      {
+        approval: ({ toolName }) =>
+          toolName === "eve__search"
+            ? { reason: "Discovery blocked.", type: "denied" }
+            : "approved",
+        js: `
+          try {
+            return await search({ query: "secret" });
+          } catch (error) {
+            return { blocked: error.message };
+          }
+        `,
+        tools: [deferredTool],
+      },
+      async ({ alice, results, runtime }) => {
+        const turn = await (await alice.send("Search.", { auth: null })).result();
+        expect(turn.reply).toBe("Done.");
+        expect(results).toEqual([
+          {
+            calls: { rejected: 1 },
+            notCompleted: [
+              { input: '{"query":"secret"}', outcome: "rejected", tool: "eve__search" },
+            ],
+            result: { blocked: "Discovery blocked." },
+          },
+        ]);
+        expect(await violations(runtime, turn.sessionId)).toEqual([]);
+      },
+    );
+
+    await withProgramSession(
+      {
+        approval: ({ toolName }) => (toolName === "eve__search" ? "user-approval" : "approved"),
+        js: `return (await search({ query: "secret" })).results.map((entry) => entry.tool);`,
+        tools: [deferredTool],
+      },
+      async ({ alice, results, runtime }) => {
+        const paused = await (await alice.send("Search with approval.", { auth: null })).result();
+        expect(paused.interactions).toHaveLength(1);
+        expect(paused.interactions[0]!.request.kind).toBe("approval");
+
+        const finished = await (
+          await alice.deliver(
+            {
+              answers: [
+                { interactionId: paused.interactions[0]!.interactionId, optionId: "approve" },
+              ],
+            },
+            { auth: null },
+          )
+        ).result();
+        expect(finished.reply).toBe("Done.");
+        expect(results).toEqual([{ calls: { completed: 1 }, result: ["secret_lookup"] }]);
+        expect(await violations(runtime, paused.sessionId)).toEqual([]);
       },
     );
   });

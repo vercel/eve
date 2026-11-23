@@ -124,7 +124,7 @@ async function callProgramAgent(
   ctx: WorkflowToolContext,
   call: WorkflowProgramAgentCall,
 ): Promise<JsonValue> {
-  const { files, message, model, outputSchema } = call.input;
+  const { files, message, outputSchema } = call.input;
   const content: MessageContent<string | URL> =
     files !== undefined && files.length > 0
       ? [
@@ -137,8 +137,7 @@ async function callProgramAgent(
           })),
         ]
       : message;
-  const session = model === undefined ? ctx.agent(call.target) : ctx.agent(call.target, { model });
-  const response = await session.send<JsonValue>(content, {
+  const response = await ctx.agent(call.target).send<JsonValue>(content, {
     outputSchema,
     signal: ctx.abortSignal,
   });
@@ -219,8 +218,19 @@ function formatProgramFailure(
   }
   const message = parts.join(" ");
   if (logs.length === 0) return message;
-  const consoleOutput = `\nconsole output:\n${logs.join("\n")}`;
-  return `${message}${consoleOutput.slice(0, MAX_FAILURE_LOG_CHARS)}`;
+  const joined = logs.join("\n");
+  const clipped = truncateCodeUnits(joined, MAX_FAILURE_LOG_CHARS);
+  return `${message}\nconsole output:\n${clipped}`;
+}
+
+function truncateCodeUnits(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  let end = maxChars;
+  if (end > 0) {
+    const code = text.charCodeAt(end - 1);
+    if (code >= 0xd800 && code <= 0xdbff) end -= 1;
+  }
+  return `${text.slice(0, end)}...`;
 }
 
 export { MAX_WORKFLOW_PROGRAM_MAX_SUBAGENTS };

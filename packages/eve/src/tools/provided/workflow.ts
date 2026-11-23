@@ -50,13 +50,14 @@ export interface WorkflowToolInput {
   readonly js: string;
 }
 
-/** The workflow tool {@link workflow} returns. Runs the model's program as a task or in the turn. */
-export type WorkflowTool =
-  | WorkflowTaskToolDefinition<WorkflowToolInput, JsonValue>
-  | WorkflowExecuteToolDefinition<WorkflowToolInput, JsonValue>;
+/** The task workflow tool {@link workflow} returns by default. Each call runs the model's program as a task. */
+export type WorkflowTool = WorkflowTaskToolDefinition<WorkflowToolInput, JsonValue>;
+
+/** The foreground workflow tool {@link workflow} returns when `mode` is `"execute"`. */
+export type WorkflowExecuteTool = WorkflowExecuteToolDefinition<WorkflowToolInput, JsonValue>;
 
 const workflowProgramAgentContract =
-  "Read ctx.agents for available { [name]: { description } } targets. Call ctx.agent(name, { message: string, outputSchema?: object, model?: string | object, files?: [{ url, mediaType, filename? }] }). Each call starts a new agent that does not see this conversation, so put everything it needs in message. It resolves directly to the agent's reply; when outputSchema is provided, the reply matches that schema. It does not return an agent metadata wrapper. The owning agent resolves the target and applies its existing availability and authorization checks.";
+  "Read ctx.agents for available { [name]: { description } } targets. Call ctx.agent(name, { message: string, outputSchema?: object, files?: [{ url: https://..., mediaType, filename? }] }). Each call starts a new agent that does not see this conversation, so put everything it needs in message. It resolves directly to the agent's reply; when outputSchema is provided, the reply matches that schema. It does not return an agent metadata wrapper. The owning agent resolves the target and applies its existing availability and authorization checks.";
 
 const workflowProgramCapabilitiesContract =
   "Call ctx.ask({ prompt, title?, display?, options?, allowFreeform?, initialOptionId? }) to ask the person on this channel and receive their answer. Call ctx.sleep(seconds) to pause durably without holding compute and resolve to { waitedSeconds }. Call ctx.progress(update) to emit a JSON-serializable progress report. console.log output is captured and returned as { result, logs } when non-empty, or attached to the error on failure.";
@@ -89,12 +90,12 @@ const workflowToolsInputSchema = defineJsonSchema<WorkflowToolInput>({
 /** Defines a model-facing workflow tool backed by isolated runtime JavaScript. */
 export function workflow(
   options: WorkflowToolOptions & { readonly mode: "execute" },
-): WorkflowExecuteToolDefinition<WorkflowToolInput, JsonValue>;
+): WorkflowExecuteTool;
 export function workflow(
   options?: WorkflowToolOptions & { readonly mode?: "task"; readonly tools?: false },
-): WorkflowTaskToolDefinition<WorkflowToolInput, JsonValue>;
-export function workflow(options?: WorkflowToolOptions): WorkflowTool;
-export function workflow(options: WorkflowToolOptions = {}): WorkflowTool {
+): WorkflowTool;
+export function workflow(options?: WorkflowToolOptions): WorkflowTool | WorkflowExecuteTool;
+export function workflow(options: WorkflowToolOptions = {}): WorkflowTool | WorkflowExecuteTool {
   const normalized = normalizeWorkflowToolOptions(options);
   if (normalized.tools) {
     const description = [

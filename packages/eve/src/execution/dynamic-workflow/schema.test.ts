@@ -21,7 +21,7 @@ describe("workflow program schema", () => {
     ).toThrow("between 1 and 128");
   });
 
-  it("validates ctx.agent payloads including optional model and files", () => {
+  it("validates ctx.agent payloads including optional https files", () => {
     expect(
       readWorkflowProgramAgentCall({
         target: "researcher",
@@ -34,15 +34,6 @@ describe("workflow program schema", () => {
             },
           ],
           message: "continue",
-          model: {
-            model: "anthropic/claude-opus-5.5",
-            modelContextWindowTokens: 200_000,
-            modelOptions: {
-              promptCache: { anthropic: { ttl: "1h" } },
-              providerOptions: { anthropic: { speed: "fast" } },
-            },
-            reasoning: "high",
-          },
           outputSchema: { properties: { ok: { type: "boolean" } }, type: "object" },
         },
       }),
@@ -57,26 +48,8 @@ describe("workflow program schema", () => {
           },
         ],
         message: "continue",
-        model: {
-          model: "anthropic/claude-opus-5.5",
-          modelContextWindowTokens: 200_000,
-          modelOptions: {
-            promptCache: { anthropic: { ttl: "1h" } },
-            providerOptions: { anthropic: { speed: "fast" } },
-          },
-          reasoning: "high",
-        },
         outputSchema: { properties: { ok: { type: "boolean" } }, type: "object" },
       },
-    });
-    expect(
-      readWorkflowProgramAgentCall({
-        target: "researcher",
-        input: { message: "hi", model: "openai/gpt-5.4-mini" },
-      }),
-    ).toEqual({
-      target: "researcher",
-      input: { message: "hi", model: "openai/gpt-5.4-mini" },
     });
     expect(() => readWorkflowProgramAgentCall({ target: "researcher", input: {} })).toThrow(
       'requires a "message" string',
@@ -84,9 +57,18 @@ describe("workflow program schema", () => {
     expect(() =>
       readWorkflowProgramAgentCall({
         target: "researcher",
-        input: { message: "hi", model: { model: "openai/gpt-5.4", reasoning: "ultra" } },
+        input: { message: "hi", model: "openai/gpt-5.4" },
       }),
-    ).toThrow('"model.reasoning"');
+    ).toThrow('unknown field "model"');
+    expect(() =>
+      readWorkflowProgramAgentCall({
+        target: "researcher",
+        input: {
+          files: [{ mediaType: "text/plain", url: "http://internal.example/secret.txt" }],
+          message: "hi",
+        },
+      }),
+    ).toThrow('https:// "url"');
     expect(() =>
       readWorkflowProgramAgentCall({
         target: "researcher",
@@ -95,7 +77,7 @@ describe("workflow program schema", () => {
           message: "hi",
         },
       }),
-    ).toThrow('HTTP(S) "url"');
+    ).toThrow('https:// "url"');
     expect(() =>
       readWorkflowProgramAgentCall({
         target: "researcher",

@@ -20,6 +20,7 @@ import type {
 import type { ManagedEventSubscribeInput } from "#shared/connection-events.js";
 import { parseJsonObject } from "#shared/json.js";
 import { principalKey, resolveConnectionPrincipal } from "#runtime/connections/principal.js";
+import { holdCallerIdentity } from "#runtime/connections/identity-hold.js";
 import { connectionEventDestination } from "#runtime/connections/events/path.js";
 import {
   sameEventOwner,
@@ -59,13 +60,14 @@ export class ConnectionEventActions {
     this.transportFetch = transportFetch;
   }
 
-  private scope() {
+  private scope(options?: { readonly hold?: boolean }) {
     const ctx = contextStorage.getStore();
     if (ctx === undefined) throw new Error("Event subscriptions require an active eve session.");
     if (ctx.get(SessionAgentKey)?.nodeId !== undefined)
       throw new Error(
         "Experimental event subscriptions currently require a root-agent connection.",
       );
+    if (options?.hold !== false) holdCallerIdentity(this.connection.connectionName, ctx);
     const { authorization, backend, connector } = this.events;
     const principal = resolveConnectionPrincipal(
       this.connection.connectionName,
@@ -94,8 +96,11 @@ export class ConnectionEventActions {
     };
   }
 
-  private async withClient<T>(run: (events: EventCatalog) => Promise<T>): Promise<T> {
-    this.scope();
+  private async withClient<T>(
+    run: (events: EventCatalog) => Promise<T>,
+    options?: { readonly hold?: boolean },
+  ): Promise<T> {
+    this.scope(options);
     let client: Awaited<ReturnType<typeof createMCPClient>> | undefined;
     const config = {
       transport: {
@@ -127,7 +132,7 @@ export class ConnectionEventActions {
     for (let pageIndex = 0; pageIndex < 20; pageIndex++) {
       const page = await withConnectionEventSpan(
         {
-          ctx: this.scope().ctx,
+          ctx: this.scope({ hold: false }).ctx,
           connectionName: this.connection.connectionName,
           operation: "catalog",
         },
@@ -150,21 +155,24 @@ export class ConnectionEventActions {
   }
 
   async metadata(): Promise<ConnectionToolMetadata[]> {
-    return this.withClient(async (events) => {
-      const catalog = await this.catalog(events);
-      return [
-        ...catalog.map((event) => ({
-          name: actionName(event.name),
-          description: `Watch ${event.name}. ${event.description ?? ""} Events reach this connection's authored callback for ttlMs milliseconds or until stopped. Set ttlMs to null to watch indefinitely. Watching the same event with the same arguments again returns the existing watch.`,
-          inputSchema: subscribeInputSchema(event.inputSchema),
-        })),
-        ...managementMetadata(),
-      ];
-    });
+    return this.withClient(
+      async (events) => {
+        const catalog = await this.catalog(events);
+        return [
+          ...catalog.map((event) => ({
+            name: actionName(event.name),
+            description: `Watch ${event.name}. ${event.description ?? ""} Events reach this connection's authored callback for ttlMs milliseconds or until stopped. Set ttlMs to null to watch indefinitely. Watching the same event with the same arguments again returns the existing watch.`,
+            inputSchema: subscribeInputSchema(event.inputSchema),
+          })),
+          ...managementMetadata(),
+        ];
+      },
+      { hold: false },
+    );
   }
 
   recoveryMetadata(): ConnectionToolMetadata[] {
-    this.scope();
+    this.scope({ hold: false });
     return managementMetadata().map((tool) => ({
       ...tool,
       description: `MCP discovery is unavailable. ${tool.description}`,

@@ -125,6 +125,24 @@ describe("schedule creation and invocation", () => {
         ({ callId, toolInput, toolName: "schedule__requests__create" }) as never;
       const request = resolveApprovalPolicy(create.approval!);
       await expect(
+        request({
+          callId: "steered",
+          session: {
+            auth: {
+              current: alice,
+              initiator: alice,
+              steeredBy: [{ ...alice, principalId: "bob" }],
+            },
+          },
+          toolInput: input,
+          toolName: "schedule__requests__create",
+        } as never),
+      ).resolves.toMatchObject({
+        type: "denied",
+        reason: expect.stringContaining("dynamic schedules"),
+      });
+      expect(approvedTargets).toEqual([]);
+      await expect(
         request(policyContext("invalid", { ...input, payload: {} })),
       ).resolves.toMatchObject({ type: "denied" });
       expect(approvedTargets).toEqual([]);

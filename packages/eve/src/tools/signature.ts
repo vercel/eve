@@ -37,7 +37,11 @@ interface SignatureInput {
 }
 
 export function renderToolSignature(input: SignatureInput): string {
-  return capped((descriptions) => renderSignature(input, descriptions), MAX_SIGNATURE_LENGTH);
+  const outputType = renderOutputType(input.outputSchema) ?? "unknown";
+  return capped(
+    (descriptions) => renderSignature(input, descriptions, outputType),
+    MAX_SIGNATURE_LENGTH,
+  );
 }
 
 export function renderOutputType(outputSchema: Schema | undefined): string | undefined {
@@ -60,11 +64,9 @@ function capped(render: (descriptions: boolean) => string, max: number): string 
   return compact.length > max ? `${compact.slice(0, max - 3)}...` : compact;
 }
 
-function renderSignature(input: SignatureInput, descriptions: boolean): string {
+function renderSignature(input: SignatureInput, descriptions: boolean, outputType: string): string {
   const inputType =
     input.inputSchema === undefined ? "{}" : renderSchema(input.inputSchema, descriptions);
-  const outputType =
-    input.outputSchema === undefined ? "unknown" : renderSchema(input.outputSchema, descriptions);
   return `${input.name}(input: ${inputType}): Promise<${outputType}>`;
 }
 

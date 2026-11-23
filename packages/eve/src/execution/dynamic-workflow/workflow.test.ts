@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DeliveryResult } from "#shared/delivery.js";
 import type { MessageContent } from "#shared/message-content.js";
-import type { AgentSessionOptions } from "#tools/workflow-definition.js";
 
 const mocks = vi.hoisted(() => ({
   runWorkflowProgramStep: vi.fn(),
@@ -20,6 +19,7 @@ import {
   MAX_WORKFLOW_PROGRAM_MAX_SUBAGENTS,
   runJsProgram,
 } from "#execution/dynamic-workflow/workflow.js";
+import { WORKFLOW_PROGRAM_MAX_SLEEP_SECONDS } from "#execution/dynamic-workflow/schema.js";
 import { attachWorkflowToolRunContext } from "#execution/tools/workflow/ask.js";
 
 const pending = {
@@ -32,7 +32,7 @@ const secondPending = {
 };
 const continuation = "signed-continuation";
 const reply = vi.fn();
-const agent = vi.fn((target: string, _options?: AgentSessionOptions) => ({
+const agent = vi.fn((target: string) => ({
   send: async (message: MessageContent<string | URL>) => ({
     result: async (): Promise<DeliveryResult> => {
       const output: unknown = await reply(target, message);
@@ -64,7 +64,7 @@ describe("runJsProgram", () => {
     vi.clearAllMocks();
   });
 
-  it("snapshots ctx.agents, passes model and files to ctx.agent, and returns raw result when logs are empty", async () => {
+  it("snapshots ctx.agents, passes files to ctx.agent, and returns raw result when logs are empty", async () => {
     const rich = {
       action: {
         input: {
@@ -76,7 +76,6 @@ describe("runJsProgram", () => {
             },
           ],
           message: "review this",
-          model: "anthropic/claude-opus-5.5",
           outputSchema: { type: "object" },
         },
         kind: "agent" as const,
@@ -100,15 +99,14 @@ describe("runJsProgram", () => {
     reply.mockResolvedValue({ result: "child" });
 
     await expect(runJsProgram("return 1", ctx, options)).resolves.toEqual({ result: "done" });
-    expect(mocks.runWorkflowProgramStep).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({
-        program: expect.objectContaining({
-          agents: { researcher: { description: "Researches topics" } },
-        }),
-      }),
+    const firstStepCall = mocks.runWorkflowProgramStep.mock.calls[0]![0];
+    expect(firstStepCall.program.agents).toEqual({
+      researcher: { description: "Researches topics" },
+    });
+    expect(firstStepCall.program.continuationSecurity.maxAgeMs).toBeGreaterThan(
+      WORKFLOW_PROGRAM_MAX_SLEEP_SECONDS * 1_000,
     );
-    expect(agent).toHaveBeenCalledWith("researcher", { model: "anthropic/claude-opus-5.5" });
+    expect(agent).toHaveBeenCalledWith("researcher");
     expect(reply).toHaveBeenCalledWith("researcher", [
       { text: "review this", type: "text" },
       {
@@ -349,8 +347,11 @@ describe("runJsProgram", () => {
     expect(message).toContain("Calls that completed before this are not undone.");
     expect(message).toContain("Calls: 1 completed, 1 failed.");
     expect(message).toContain("\nconsole output:\nfirst line\n");
-    const logPortion = message.slice(message.indexOf("\nconsole output:\n"));
-    expect(logPortion.length).toBeLessThanOrEqual(4_000);
+    const logBody = message.slice(
+      message.indexOf("\nconsole output:\n") + "\nconsole output:\n".length,
+    );
+    expect(logBody.length).toBe(4_003);
+    expect(logBody.endsWith("...")).toBe(true);
   });
 
   it("validates JavaScript and the trusted call budget before starting a program", async () => {
@@ -363,26 +364,40 @@ describe("runJsProgram", () => {
     expect(mocks.runWorkflowProgramStep).not.toHaveBeenCalled();
   });
 
-  it("keeps owner cancellation terminal during agent calls and sleep", async () => {
-    const controller = new AbortController();
-    const cancelledCtx = {
-      abortSignal: controller.signal,
-      agent,
-      callId: "workflow-call",
-    } as never;
-    mocks.runWorkflowProgramStep.mockResolvedValueOnce({
-      continuation,
-      pending: [{ action: { kind: "sleep", seconds: 60 }, id: "sleep-1" }],
-      progress: [],
-      status: "interrupted",
-    });
-    mocks.sleep.mockReturnValue(new Promise<void>(() => {}));
+  it.each(["agent", "sleep"] as const)(
+    "keeps owner cancellation terminal during %s calls",
+    async (kind) => {
+      const controller = new AbortController();
+      const cancelledCtx = {
+        abortSignal: controller.signal,
+        agent,
+        callId: "workflow-call",
+      } as never;
+      mocks.runWorkflowProgramStep.mockResolvedValueOnce({
+        continuation,
+        pending: [
+          kind === "agent" ? pending : { action: { kind: "sleep", seconds: 60 }, id: "sleep-1" },
+        ],
+        progress: [],
+        status: "interrupted",
+      });
+      if (kind === "agent") {
+        reply.mockImplementation(async () => {
+          controller.abort(new Error("owner cancelled"));
+          throw new Error("child stopped");
+        });
+      } else {
+        mocks.sleep.mockReturnValue(new Promise<void>(() => {}));
+      }
 
-    const running = runJsProgram("return 1", cancelledCtx, options);
-    await vi.waitFor(() => expect(mocks.sleep).toHaveBeenCalledWith(60_000));
-    controller.abort(new Error("owner cancelled"));
+      const running = runJsProgram("return 1", cancelledCtx, options);
+      if (kind === "sleep") {
+        await vi.waitFor(() => expect(mocks.sleep).toHaveBeenCalledWith(60_000));
+        controller.abort(new Error("owner cancelled"));
+      }
 
-    await expect(running).rejects.toThrow("owner cancelled");
-    expect(mocks.runWorkflowProgramStep).toHaveBeenCalledTimes(1);
-  });
+      await expect(running).rejects.toThrow("owner cancelled");
+      expect(mocks.runWorkflowProgramStep).toHaveBeenCalledTimes(1);
+    },
+  );
 });

@@ -95,7 +95,7 @@ curl -X POST https://<deployment>/eve/v1/session/wrun_A \
   -d '{"answers":[{"interactionId":"req_A","optionId":"approve"}]}'
 ```
 
-A follow-up message joins the running turn by default; see [Overlapping messages](/docs/channels#overlapping-messages). Set `turnPolicy: "queue"` on `eveChannel(...)` to make follow-ups wait for running turns to finish. `answers` only answer the requests they name.
+A follow-up message joins the running turn by default. Set `turnPolicy: "queue"` on `eveChannel(...)` to make follow-ups wait for running turns to finish. Set `turnPolicy: { mode: "steer", principal }` on `eveChannel(...)` to let a message from someone other than the running turn's caller join it. A request body's `turnPolicy` is `"steer"` or `"queue"`. It cannot set `principal`, and a request that steers keeps the channel's `principal`. See [Overlapping messages](/docs/channels#overlapping-messages). `answers` only answer the requests they name.
 
 | Session state                | Response                                                                                         |
 | ---------------------------- | ------------------------------------------------------------------------------------------------ |
@@ -332,6 +332,7 @@ export default eveChannel({
 - The returned value has the request's `ClientContextValue` shape, exported from `eve/channels/eve`: a string, an array of strings, or a JSON object.
 - eve labels client-supplied entries `Client context:` for the model. Returned context is sent without the label.
 - `onMessage` runs only for requests with a message. An answer keeps the context its request sent.
+- Return `turnPolicy` from `onMessage` to replace the channel's and request's `turnPolicy` for that message, such as `{ mode: "steer", principal: "retain" }`. Read `ctx.eve.turnPolicy` to inspect the mode (`"steer"` or `"queue"`) the client requested.
 
 ### Start from prior history
 
