@@ -1,8 +1,7 @@
+import type { HostServices } from "#platform/services.js";
 import { createVercelPlatformContext } from "#platform/vercel/context.js";
 import type { WorkspaceAgentTransport } from "#public/definitions/workspace-agent.js";
 import { eveRuntime } from "#runtime/eve-runtime.js";
-
-export type PlatformTarget = "vercel";
 
 export type BuildTarget = "vercel" | "node";
 
@@ -14,10 +13,15 @@ export interface DeploymentBuild {
   readonly gitSha: string | undefined;
 }
 
+export interface DeploymentScope {
+  readonly platform: string;
+  readonly id: string;
+  readonly environment: string;
+  readonly variant: string | null;
+}
+
 export interface PlatformDeployment {
   environmentKind(): DeploymentEnvironmentKind | undefined;
-  environmentName(): string | undefined;
-  projectId(): string | undefined;
   deploymentId(): string | undefined;
   hostedDeploymentId(): string | undefined;
   build(): DeploymentBuild | undefined;
@@ -25,6 +29,8 @@ export interface PlatformDeployment {
   deploymentHost(): string | undefined;
   publicHost(): string | undefined;
   isPlatformDevelopmentServer(): boolean;
+  scope(): DeploymentScope | undefined;
+  stopsSandboxesOnExit(): boolean;
 }
 
 export interface PlatformIdentity {
@@ -43,12 +49,6 @@ export interface PlatformBuild {
   localSandboxPrewarmFailure(providerName: string, error: unknown): Error | undefined;
 }
 
-export interface PlatformSandbox {
-  hostedAvailable(): boolean;
-  credentialTransforms(): boolean;
-  stopsOnExit(): boolean;
-}
-
 export interface PlatformWorkspace {
   transport(routePath: string): WorkspaceAgentTransport | undefined;
 }
@@ -58,11 +58,10 @@ export interface PlatformTelemetry {
 }
 
 export interface PlatformContext {
-  readonly target: PlatformTarget;
   readonly build: PlatformBuild;
   readonly deployment: PlatformDeployment;
   readonly identity: PlatformIdentity;
-  readonly sandbox: PlatformSandbox;
+  readonly services?: HostServices;
   readonly telemetry: PlatformTelemetry;
   readonly workspace: PlatformWorkspace;
 }

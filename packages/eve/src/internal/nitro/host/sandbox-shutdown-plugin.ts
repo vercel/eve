@@ -17,7 +17,7 @@ export function shouldInstallSandboxShutdown(env: Record<string, string | undefi
   if (env.EVE_DEVELOPMENT_SANDBOX_RUN_ID !== undefined) {
     return false;
   }
-  if (platformContext().sandbox.stopsOnExit()) {
+  if (platformContext().deployment.stopsSandboxesOnExit()) {
     return false;
   }
   return true;

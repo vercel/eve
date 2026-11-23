@@ -1,6 +1,6 @@
 import { expect, it, onTestFinished } from "vitest";
-import { registerHost, registerSessionLineStore } from "#execution/hosts.js";
-import { createMemoryLineStore } from "#execution/in-process/line-store.js";
+import { registerHost, registerSessionEventStore } from "#execution/hosts.js";
+import { createMemorySessionEventStore } from "#execution/in-process/session-event-store.js";
 import { createStepAttempts } from "#execution/in-process/step-attempts.js";
 import { streamSessionEvents } from "#execution/session-event-stream.js";
 import { applySessionStateDelta } from "#execution/session/state-delta.js";
@@ -28,11 +28,11 @@ let nextSession = 0;
 
 function sessionSteps() {
   const sessionId = `session-nonturn-${++nextSession}`;
-  const lines = createMemoryLineStore();
+  const lines = createMemorySessionEventStore();
   const stream = lines.open(sessionId);
   const attempts = createStepAttempts(undefined);
   const releases = [
-    registerSessionLineStore(sessionId, lines),
+    registerSessionEventStore(sessionId, lines),
     registerHost({
       deliver: async () => undefined,
       runEnded: () => undefined,

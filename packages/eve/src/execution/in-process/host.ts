@@ -34,7 +34,10 @@ import {
   type DeliveryTiming,
   type MemoryInboxRegistry,
 } from "./inbox-transport.js";
-import { createMemoryLineStore, type MemoryLineStore } from "./line-store.js";
+import {
+  createMemorySessionEventStore,
+  type MemorySessionEventStore,
+} from "./session-event-store.js";
 import { createInProcessRuns, type InProcessRuns } from "./runs.js";
 import { createStepAttempts, type StepFaults } from "./step-attempts.js";
 import { acrossStepBoundary, structuredCloneBoundary, type StepBoundary } from "./step-boundary.js";
@@ -80,7 +83,7 @@ export interface InProcessHostOptions {
 
 export interface InProcessHost {
   readonly deploymentId: string;
-  readonly lines: MemoryLineStore;
+  readonly lines: MemorySessionEventStore;
   readonly inboxes: MemoryInboxRegistry;
   readonly runs: InProcessRuns;
   readonly running: Map<string, Promise<void>>;
@@ -100,7 +103,7 @@ export function createInProcessHost(
   options: InProcessHostOptions,
   runtimeFor: (config: SessionRuntimeConfig) => Runtime,
 ): InProcessHost {
-  const lines = createMemoryLineStore();
+  const lines = createMemorySessionEventStore();
   const stepBoundary = options.stepBoundary ?? structuredCloneBoundary;
   const work = createWorkCounter();
   const registry = createMemoryInboxRegistry(stepBoundary, {
