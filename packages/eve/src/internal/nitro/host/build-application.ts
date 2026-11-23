@@ -26,7 +26,7 @@ import {
 import { stageProductionCompilerArtifacts } from "#internal/application/production-compiler-artifacts.js";
 import { stageBuildDeploymentId } from "#internal/nitro/host/stage-build-deployment-id.js";
 import { createHostNitro } from "#internal/nitro/host/create-host-nitro.js";
-import { platformBuild } from "#platform/build.js";
+import { platformBuild, platformDurableBuild } from "#platform/build.js";
 import { createHostSpec } from "#internal/nitro/host/host-spec.js";
 import { emitVercelAgentSummary } from "#internal/nitro/host/build-vercel-agent-summary.js";
 import { emitConnectManifest } from "#internal/external-resources.js";
@@ -41,6 +41,7 @@ import { platformBuildOutput } from "#platform/build-output.js";
 import type { PlatformBuildOutput } from "#platform/types.js";
 import { prewarmAppSandboxes } from "#execution/sandbox/prewarm.js";
 import type { ApplicationBuildOptions } from "#internal/nitro/host/types.js";
+import type { BuildContribution } from "#execution/durable.js";
 import { findClosestVercelOutputDirectory } from "#shared/vercel-output-directory.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { resolveDiscoveryProject } from "#discover/project.js";
@@ -79,6 +80,7 @@ function assertProfileOutputOutsideBuildOutput(
 
 interface ApplicationBuildPlatform {
   readonly conditions: readonly string[] | undefined;
+  readonly durable: BuildContribution | undefined;
   readonly entry: string | undefined;
   readonly output: PlatformBuildOutput;
   readonly target: BuildTarget;
@@ -230,6 +232,7 @@ export async function buildApplication(
   const build = platformBuild(options.platform);
   const platform: ApplicationBuildPlatform = {
     conditions: build.conditions,
+    durable: platformDurableBuild(options.platform),
     entry: build.entry,
     output: platformBuildOutput(),
     target: build.platformOutput?.() === true ? "vercel" : "node",
@@ -330,6 +333,7 @@ async function buildApplicationInWorkspace(
       entry:
         platform.entry === undefined ? undefined : resolve(preparedHost.appRoot, platform.entry),
       conditions: platform.conditions,
+      durable: platform.durable,
       publicRoutePrefix,
       vercelService: servicePrefix !== undefined || options.vercelServiceOutput !== undefined,
       workspaceMember: options.workspaceMember,

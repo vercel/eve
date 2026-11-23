@@ -1,4 +1,4 @@
-import { instrumentationSetupDeferred } from "#instrumentation/providers.js";
+import { instrumentationLoaded } from "#instrumentation/providers.js";
 
 interface BuiltServer {
   fetch(request: Request): Response | Promise<Response>;
@@ -13,7 +13,7 @@ export interface EntryApp {
 }
 
 export function createEntryAppStart(
-  loadServer: () => Promise<{ readonly default: BuiltServer }>,
+  loadServer: () => Promise<BuiltServer>,
 ): () => Promise<EntryApp> {
   let started = false;
   return async () => {
@@ -22,13 +22,13 @@ export function createEntryAppStart(
         "start() from eve:app was already called. Keep the app from the first call and pass it to the code that serves requests.",
       );
     }
-    if (!instrumentationSetupDeferred()) {
+    if (!instrumentationLoaded()) {
       throw new Error(
         "start() from eve:app ran before eve:instrumentation was imported. Import eve:instrumentation first in your entry, before eve:app.",
       );
     }
     started = true;
-    const server = (await loadServer()).default;
+    const server = await loadServer();
     return {
       async fetch(request, options) {
         if (options?.waitUntil !== undefined) {

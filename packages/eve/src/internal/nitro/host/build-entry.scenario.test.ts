@@ -11,6 +11,7 @@ import { useTemporaryAppRoots } from "#internal/testing/use-temporary-app-roots.
 import { definePlatform } from "#platform/declaration.js";
 import { defaultPlatform } from "#platform/default.js";
 import type { Build, Triggers } from "#platform/entities.js";
+import type { DurableEngine } from "#execution/durable.js";
 
 const execFileAsync = promisify(execFile);
 const createAppRoot = useTemporaryAppRoots();
@@ -54,6 +55,27 @@ const AGENT_FILES = {
     main: "lib/index.js",
   }),
   "node_modules/legacy-archive/lib/index.js": 'exports.archiveLabel = "Alice\'s archive";',
+  "platform/app.mjs": [
+    'import "eve:instrumentation";',
+    'import { start } from "eve:app";',
+    "globalThis.platformAppLoads = (globalThis.platformAppLoads ?? 0) + 1;",
+    "let started;",
+    "export const app = () => (started ??= start());",
+  ].join("\n"),
+  "platform/served-entry.mjs": [
+    'import { app } from "./app.mjs";',
+    "export default {",
+    "  async fetch(request) {",
+    "    return (await app()).fetch(request);",
+    "  },",
+    "};",
+  ].join("\n"),
+  "platform/engine-worker.mjs": [
+    'import { app } from "./app.mjs";',
+    "export async function handle(request) {",
+    "  return (await app()).fetch(request);",
+    "}",
+  ].join("\n"),
   "platform/bare-entry.mjs": [
     'import { start } from "eve:app";',
     "export default {",
@@ -127,7 +149,10 @@ async function runEntry(appRoot: string, outputDir: string, driver: string): Pro
     env: {
       ...process.env,
       ENTRY_URL: pathToFileURL(join(outputDir, "server", "index.mjs")).href,
+      NITRO_HOST: "127.0.0.1",
+      NITRO_PORT: "0",
       NITRO_PRESET: "",
+      WORKER_URL: pathToFileURL(join(outputDir, "server", "engine-worker.mjs")).href,
     },
     timeout: 60_000,
   });
@@ -139,14 +164,30 @@ const triggers = vi.fn((): Triggers => {
   throw new Error("The platform's triggers factory ran during the build.");
 });
 
+const workerEngine = (): DurableEngine => ({
+  build: { entries: { "engine-worker": "platform/engine-worker.mjs" } },
+  start() {
+    throw new Error("The test engine only contributes build data.");
+  },
+});
+
+const HEALTH_FROM_WORKER = `
+const worker = await import(process.env.WORKER_URL);
+const { status } = await worker.handle(new Request("http://localhost/eve/v1/health"));
+const listening = process.getActiveResourcesInfo().includes("TCPServerWrap");
+console.log("RESULT " + JSON.stringify({ health: status, appLoads: globalThis.platformAppLoads, listening }));
+process.exit(0);
+`;
+
 async function buildWithPlatform(
   appRoot: string,
   build: Build,
-  options: { readonly profileOutputPath?: string } = {},
+  options: { readonly durable?: () => DurableEngine; readonly profileOutputPath?: string } = {},
 ): Promise<string> {
+  const { durable, ...buildOptions } = options;
   return await buildApplication(appRoot, {
-    ...options,
-    platform: definePlatform({ deployment: defaultPlatform.deployment, build, triggers }),
+    ...buildOptions,
+    platform: definePlatform({ deployment: defaultPlatform.deployment, build, durable, triggers }),
     skipSandboxPrewarm: true,
   });
 }
@@ -209,6 +250,47 @@ describe("a build with a platform entry", () => {
       label: "Alice's archive",
       savedAfterWork: true,
       loggedCause: "web twin",
+    });
+  });
+
+  it("builds an engine's entry beside a platform entry, and both share the one module that calls start()", async () => {
+    const { appRoot } = await createAppRoot("eve-build-engine-entry-", { files: AGENT_FILES });
+    const outputDir = await buildWithPlatform(
+      appRoot,
+      { entry: "platform/served-entry.mjs" },
+      { durable: workerEngine },
+    );
+
+    expect(
+      await runEntry(
+        appRoot,
+        outputDir,
+        `const served = await import(process.env.ENTRY_URL);
+const worker = await import(process.env.WORKER_URL);
+const health = (url) => new Request(new URL("/eve/v1/health", url));
+const fromServed = await served.default.fetch(health("http://localhost"));
+const fromWorker = await worker.handle(health("http://localhost"));
+console.log("RESULT " + JSON.stringify({
+  served: fromServed.status,
+  worker: fromWorker.status,
+  appLoads: globalThis.platformAppLoads,
+}));
+process.exit(0);`,
+      ),
+    ).toEqual({ served: 200, worker: 200, appLoads: 1 });
+  });
+
+  it("builds an engine's entry beside eve's Node server without starting the server", async () => {
+    const { appRoot } = await createAppRoot("eve-build-engine-entry-node-", { files: AGENT_FILES });
+    const outputDir = await buildWithPlatform(appRoot, {}, { durable: workerEngine });
+
+    expect(JSON.parse(await readFile(join(outputDir, "nitro.json"), "utf8"))).toMatchObject({
+      preset: "node-server",
+    });
+    expect(await runEntry(appRoot, outputDir, HEALTH_FROM_WORKER)).toEqual({
+      health: 200,
+      appLoads: 1,
+      listening: false,
     });
   });
 

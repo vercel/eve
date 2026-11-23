@@ -14,11 +14,19 @@ interface EntryPluginContext {
   load(options: { id: string }): Promise<{ exports: readonly string[] | null }>;
 }
 
-export function createInstrumentationEntry(instrumentationPath: string, platformEntry?: string) {
+export function createInstrumentationEntry(
+  instrumentationPath: string,
+  options: { readonly platformEntry?: string; readonly appImports?: boolean } = {},
+) {
   let presetEntry: string | undefined;
+  const { platformEntry } = options;
+  const appImports = platformEntry !== undefined || options.appImports === true;
   const hostEntry = platformEntry ?? INSTRUMENTATION_ENTRY;
-  const builtIds = platformEntry === undefined ? [INSTRUMENTATION_ENTRY] : [APP_MODULE];
-  const importedIds = platformEntry === undefined ? [] : [EVE_APP, EVE_INSTRUMENTATION];
+  const builtIds = [
+    ...(platformEntry === undefined ? [INSTRUMENTATION_ENTRY] : []),
+    ...(appImports ? [APP_MODULE] : []),
+  ];
+  const importedIds = appImports ? [EVE_APP, EVE_INSTRUMENTATION] : [];
   const serverEntry = () => {
     if (presetEntry === undefined) throw new Error("Nitro built before selecting its entry.");
     return presetEntry;
@@ -43,7 +51,7 @@ export function createInstrumentationEntry(instrumentationPath: string, platform
     load: {
       filter: { id: builtIds.map((id) => exactRegex(id)) },
       async handler(this: EntryPluginContext, id: string) {
-        if (id === APP_MODULE) return createAppModuleSource(serverEntry());
+        if (id === APP_MODULE) return createAppModuleSource();
         const entry = await this.resolve(serverEntry());
         if (entry === null) throw new Error(`Cannot resolve Nitro entry ${serverEntry()}`);
         const { exports } = await this.load(entry);
@@ -59,13 +67,13 @@ export function createInstrumentationEntry(instrumentationPath: string, platform
       },
     },
   };
-  return { inlineDynamicImports: false, module, plugin } as const;
+  return { hostEntry, inlineDynamicImports: false, module, plugin } as const;
 }
 
-function createAppModuleSource(serverEntry: string): string {
+function createAppModuleSource(): string {
   const runtimePath = resolvePackageSourceFilePath("src/internal/nitro/host/entry-app-runtime.ts");
   return [
     `import { createEntryAppStart } from ${stringifyEsmImportSpecifier(runtimePath)};`,
-    `export const start = createEntryAppStart(() => import(${stringifyEsmImportSpecifier(serverEntry)}));`,
+    'export const start = createEntryAppStart(async () => (await import("nitro/app")).useNitroApp());',
   ].join("\n");
 }

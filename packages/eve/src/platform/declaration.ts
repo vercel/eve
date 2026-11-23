@@ -1,3 +1,4 @@
+import type { DurableEngine } from "#execution/durable.js";
 import type {
   Build,
   Compute,
@@ -16,6 +17,7 @@ type Factory<Entity, Context> = (app: PlatformApp, context: Context) => Entity;
 export interface PlatformFields<Context> {
   context?(): Context | Promise<Context>;
   deployment: Factory<Deployment, Context>;
+  durable?(): DurableEngine;
   triggers?: Factory<Triggers, Context>;
   compute?: Factory<Compute, Context>;
   storage?: Factory<Storage, Context>;

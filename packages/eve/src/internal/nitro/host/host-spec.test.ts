@@ -262,6 +262,23 @@ describe("createHostSpec", () => {
     expect(() => assertEngineBuilds(withWorkflow, WORKFLOW_ENGINE_BUILD)).not.toThrow();
   });
 
+  it("builds a platform engine's entries, and stops at an entry named like the main entry or at engine routes", async () => {
+    const manifest = await compileAgent();
+    const entries = { worker: "platform/worker.mjs" };
+
+    expect(spec(manifest, { ...ENTRY, durable: { entries } }).entries).toEqual({
+      worker: `${APP_ROOT}/platform/worker.mjs`,
+    });
+    expect(() =>
+      assertEngineBuilds(manifest, { entries: { index: "platform/index.mjs" } }),
+    ).toThrow(
+      "The durable engine's entry \"index\" has the name of the main entry, server/index.mjs. Rename the engine's entry.",
+    );
+    expect(() =>
+      assertEngineBuilds(manifest, { routes: [{ path: "/queue", handler: "platform/queue.mjs" }] }),
+    ).toThrow("eve builds only the Workflow engine's routes so far");
+  });
+
   it("installs the workflow sandbox runtime for a subagent's generated-program tool", async () => {
     const manifest = withSubagent(
       await compileAgent(),

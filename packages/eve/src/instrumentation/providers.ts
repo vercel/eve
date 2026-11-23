@@ -82,8 +82,9 @@ export function deferInstrumentationSetup(input: {
   processApp().instrumentation.setup = setup;
 }
 
-export function instrumentationSetupDeferred(): boolean {
-  return processApp().instrumentation.setup !== undefined;
+export function instrumentationLoaded(): boolean {
+  const { runtime, setup } = processApp().instrumentation;
+  return setup !== undefined || runtime !== undefined;
 }
 
 /** @internal */
