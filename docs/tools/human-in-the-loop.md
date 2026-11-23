@@ -205,7 +205,7 @@ A remembered approval is consent, not authorization. Authorize the current calle
 
 Use it on a tool or connection that authorizes from `ctx.session.auth.current` while using a shared credential, because eve cannot detect that check. Use it as the agent's `approval` in `agent.ts` to ask before every call made while steered. See [A turn runs as one principal](/docs/concepts/security-model#a-turn-runs-as-one-principal) for the identity hold.
 
-- When `steered()` is the agent's `approval` or a tool's `approval.request`, only the turn's caller can approve while `steeredBy` is set, even if the tool defines a custom `approval.response` policy.
+- When `steered()` triggers an approval—whether as the agent's `approval`, a tool's `approval.request`, or inside a wrapper—only the turn's caller can approve while `steeredBy` is set, even if the tool defines a custom `approval.response` policy.
 - Only an accepted approval from the caller clears `steeredBy`. One approval covers later calls until someone else's message joins again.
 - When the turn has no signed-in caller (`principalType` is not `"user"`), `steered()` denies the call instead of asking.
 - An approval pauses the turn on the caller, so other people's messages wait until the caller answers. The identity hold alone never pauses a turn.

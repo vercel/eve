@@ -62,6 +62,7 @@ export interface ToolSignIn {
 }
 
 export interface CallOutcome {
+  readonly callerOnly?: true;
   readonly remember?: RememberRequest;
   readonly clearance?: Clearance;
   readonly settled: readonly CallResult[];
@@ -134,7 +135,13 @@ export async function executeToolCall(
       recheck: approval === "recheck",
     });
     if (decision.awaitsPerson === true)
-      return { awaitsApproval: true, remember: decision.remember, settled, toolResults };
+      return {
+        awaitsApproval: true,
+        ...(decision.callerOnly === true && { callerOnly: true as const }),
+        remember: decision.remember,
+        settled,
+        toolResults,
+      };
     if (decision.denied) {
       await input.beforeResult?.({
         failure: decision.reason ?? TOOL_EXECUTION_DENIED_MESSAGE,
@@ -468,7 +475,11 @@ export async function executeInlineCalls(input: {
             : await decideDeferredCall(action, definition, input);
           const approval =
             executed.awaitsApproval === true
-              ? { ...approvalRequest(call, definition), remember: executed.remember }
+              ? {
+                  ...approvalRequest(call, definition),
+                  ...(executed.callerOnly === true && { callerOnly: true as const }),
+                  remember: executed.remember,
+                }
               : undefined;
           return { call, executed, approval };
         } catch (error) {
@@ -515,7 +526,13 @@ async function decideDeferredCall(
     input: call.input,
   });
   if (decision.awaitsPerson === true)
-    return { awaitsApproval: true, remember: decision.remember, settled: [], toolResults: [] };
+    return {
+      awaitsApproval: true,
+      ...(decision.callerOnly === true && { callerOnly: true as const }),
+      remember: decision.remember,
+      settled: [],
+      toolResults: [],
+    };
   if (!decision.denied)
     return {
       settled: [],

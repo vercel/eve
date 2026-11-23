@@ -71,6 +71,7 @@ export const AuthKey = new ContextKey<SessionAuthContext | null>("eve.auth");
 export const ToolStubsKey = new ContextKey<StubScope>(STUB_CONTEXT_KEY);
 export const InitiatorAuthKey = new ContextKey<SessionAuthContext | null>("eve.initiatorAuth");
 export const SteeredByKey = new ContextKey<readonly SessionAuthContext[]>("eve.steeredBy");
+export const DeferCallerSteeredClearKey = new ContextKey<boolean>("eve.deferCallerSteeredClear");
 export const SessionIdKey = new ContextKey<string>("eve.sessionId");
 export const ConversationIdKey = new ContextKey<string>("eve.conversationId");
 export const SessionInboxKey = new ContextKey<SessionInboxAddress>(SESSION_INBOX_CONTEXT_KEY);

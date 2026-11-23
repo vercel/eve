@@ -150,6 +150,30 @@ describe("withAgentApproval", () => {
     expect(await contextStorage.run(steeredCtx, () => response(responseCtx(alice)))).toEqual({
       status: "allowed",
     });
+
+    const toolSteered = withAgentApproval(always(), {
+      request: steered(),
+      response: allowTeam,
+    });
+    const toolResponse = (toolSteered as Exclude<Approval, ApprovalPolicy>).response!;
+    expect(
+      await contextStorage.run(steeredCtx, () => toolResponse(responseCtx(bob))),
+    ).toMatchObject({ status: "rejected" });
+
+    const wrappedDecision = await evaluateApproval(
+      async (evalCtx) => (await steered()(evalCtx)) ?? "not-applicable",
+      {
+        abortSignal: new AbortController().signal,
+        callId: "call-wrapped",
+        session: {
+          auth: { current: alice, initiator: alice, steeredBy: [bob] },
+          id: "s1",
+          turn: { id: "t1", sequence: 0 },
+        },
+        toolName: "deploy",
+      } as never,
+    );
+    expect(wrappedDecision).toMatchObject({ awaitsPerson: true, callerOnly: true });
   });
 });
 

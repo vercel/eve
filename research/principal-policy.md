@@ -1,6 +1,6 @@
 ---
-issue: TBD
-status: in-progress
+issue: https://github.com/vercel/eve/pull/6312
+status: implemented
 last_updated: "2026-11-23"
 ---
 
@@ -175,15 +175,16 @@ the call starts. Otherwise it returns `undefined` and leaves the decision to oth
   or attributes while using a shared credential. eve can't detect these.
 - **On the agent:** `approval: steered()` in `agent.ts` asks before every call. Use it to give the
   caller an approval card instead of a failed call.
-- **Caller-only enforcement:** when `steered()` is the agent's `approval` or a tool's
-  `approval.request`, only the turn's caller can approve while `steeredBy` is set, even if the tool
-  has a custom `approval.response` policy.
+- **Caller-only enforcement:** whenever `steered()` triggers an approval—whether as the agent's
+  `approval`, a tool's `approval.request`, or inside a wrapper—only the turn's caller can approve
+  while `steeredBy` is set, even if the tool has a custom `approval.response` policy.
 - **One ask per steer.** An accepted caller approval clears `steeredBy`, so the approved call gets
   their identity and later calls don't ask again until someone else's message joins.
 - **No one to ask.** When the turn has no signed-in caller, `steered()` denies the call. An approval
   whose requester is anonymous would otherwise take anyone's answer.
-- **First-party extensions.** The git extension's `gh` tool (in app-installation mode) and the
-  custom skills extension's personal-scope tools use `steered()` automatically while steered.
+- **First-party extensions.** The git extension's `gh` tool (in app-installation mode), the custom
+  skills extension's writes and personal-scope reads, and the deployed self-modification extension's
+  tools use `steered()` automatically while steered.
 
 An approval pauses the turn on the caller, so other people's messages wait until they answer. The
 identity hold alone never pauses a turn.

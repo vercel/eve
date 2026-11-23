@@ -744,6 +744,83 @@ describe("principal policy", () => {
     );
   }, 60_000);
 
+  it("a caller's typed approval denial does not clear steeredBy", async () => {
+    const model = markMockModel(
+      new MockLanguageModelV4({
+        doStream: async ({ prompt }) => {
+          const results = prompt.flatMap((message) =>
+            message.role === "tool"
+              ? message.content.flatMap((part) =>
+                  part.type === "tool-result" ? [part.toolName] : [],
+                )
+              : [],
+          );
+          if (!results.includes("hold_open")) {
+            return toolCallStreamResult({
+              input: "{}",
+              toolCallId: "call-hold_open",
+              toolName: "hold_open",
+            });
+          }
+          if (!results.includes("gated_action")) {
+            return toolCallStreamResult({
+              input: "{}",
+              toolCallId: "call-gated",
+              toolName: "gated_action",
+            });
+          }
+          if (!results.includes("report_access")) {
+            return toolCallStreamResult({
+              input: "{}",
+              toolCallId: "call-report",
+              toolName: "report_access",
+            });
+          }
+          return textStreamResult("Done.");
+        },
+        modelId: "scripted-model",
+        provider: "eve-test",
+      }),
+    );
+    const holdOpenCalls = new Set<string>();
+    const gatedAction = {
+      loadNamespace: async () => ({
+        default: defineTool({
+          approval: always(),
+          description: "Action requiring approval.",
+          execute: async () => ({ ran: true }),
+          inputSchema: {},
+        }),
+      }),
+      logicalPath: "tools/gated_action.ts",
+    };
+    await withSteeringRun(
+      "principal-policy-typed-denial",
+      async (run) => {
+        await run.nextUntil("hold_open started", holdOpenStarted(holdOpenCalls));
+        await run.send(BOB, "Actually include everyone.", "retain");
+        run.release();
+        await run.nextUntil(
+          "gated_action approval",
+          (event) => event.type === "interaction.opened" && event.data.request.kind === "approval",
+        );
+
+        await run.send(ALICE, "deny");
+        await run.nextUntil("turn settled", (event) => event.type === "turn.settled");
+
+        expect(run.reports).toEqual([
+          {
+            caller: "alice",
+            reason: "turn_steered",
+            steeredBy: ["bob"],
+            token: undefined,
+          },
+        ]);
+      },
+      { extraModules: [gatedAction], model },
+    );
+  }, 60_000);
+
   it("a held call fails as a tool error the model reads, and the turn goes on", async () => {
     const holdOpenCalls = new Set<string>();
     await withSteeringRun(

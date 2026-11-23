@@ -260,10 +260,11 @@ async function weigh(input: {
     };
     const responseContext = { decision: input.decision, principal: input.pending.responder };
     if (
-      approval !== undefined &&
-      typeof approval !== "function" &&
-      isSteeredApprovalPolicy(approval.request) &&
-      (context.session.auth.steeredBy ?? []).length > 0
+      input.request.callerOnly === true ||
+      (approval !== undefined &&
+        typeof approval !== "function" &&
+        isSteeredApprovalPolicy(approval.request) &&
+        (context.session.auth.steeredBy ?? []).length > 0)
     ) {
       const callerOnly = requesterOnlyResponse({
         request: requestContext,

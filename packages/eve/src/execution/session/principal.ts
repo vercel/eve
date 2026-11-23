@@ -45,7 +45,9 @@ export function steeredByAfter(
   caller: SessionAuthContext | null | undefined,
   sender: SessionAuthContext | null | undefined,
 ): readonly SessionAuthContext[] {
-  if (sender === undefined || sender === null) return steeredBy;
+  if (sender === undefined || sender === null || principalOf(sender) === ANONYMOUS_PRINCIPAL) {
+    return steeredBy;
+  }
   if (principalOf(sender) === principalOf(caller)) return [];
   return steeredBy.some((person) => principalOf(person) === principalOf(sender))
     ? steeredBy

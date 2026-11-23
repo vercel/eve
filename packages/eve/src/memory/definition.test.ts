@@ -247,4 +247,64 @@ describe("resolveMemoryScope", () => {
       ),
     ).resolves.toBe("saved");
   });
+
+  it("re-evaluates custom memory.scope when steeredBy changes within the same turn", async () => {
+    const alice = {
+      attributes: {},
+      authenticator: "slack",
+      principalId: "alice",
+      principalType: "user" as const,
+    };
+    const bob = { ...alice, principalId: "bob" };
+    const memoCache = new Map<string, unknown>();
+    const provider = {
+      recall: { "turn.started": async () => null },
+      tools: async () => ({
+        save: defineTool({
+          description: "Save.",
+          execute: async () => "saved",
+          inputSchema: {} as never,
+        }),
+      }),
+    };
+    const memory = {
+      namespace: "team",
+      provider,
+      scope: (scopeCtx: { session: { auth: { steeredBy?: readonly unknown[] } } }) =>
+        scopeCtx.session.auth.steeredBy ? null : "alice-only",
+      slot: "custom",
+    };
+    const container = new ContextContainer();
+    const memo = (key: unknown, compute: () => unknown) => {
+      const serialized = JSON.stringify(key);
+      if (memoCache.has(serialized)) return memoCache.get(serialized);
+      const value = compute();
+      memoCache.set(serialized, value);
+      return value;
+    };
+
+    const unsteered = await memoryTools(
+      memory as never,
+      {
+        abortSignal: new AbortController().signal,
+        channel: { kind: "channel:slack", metadata: {} },
+        ctx: container,
+        memo,
+        session: { auth: { current: alice, initiator: alice }, id: "session-1" },
+      } as never,
+    );
+    expect(unsteered?.custom__save).toBeDefined();
+
+    const steered = await memoryTools(
+      memory as never,
+      {
+        abortSignal: new AbortController().signal,
+        channel: { kind: "channel:slack", metadata: {} },
+        ctx: container,
+        memo,
+        session: { auth: { current: alice, initiator: alice, steeredBy: [bob] }, id: "session-1" },
+      } as never,
+    );
+    expect(steered).toBeNull();
+  });
 });

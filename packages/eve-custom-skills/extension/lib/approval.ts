@@ -195,8 +195,16 @@ export function skillApproval<TInput extends object, TPlan>(input: {
         throw error;
       }
       const decision = await input.rule()(planned.request);
+      const steeredStatus =
+        decision === "allow" || decision === "ask" ? await whenSteered(ctx) : undefined;
       const status =
-        decision === "allow" ? (whenSteered(ctx) ?? toEveStatus(decision)) : toEveStatus(decision);
+        decision === "allow"
+          ? (steeredStatus ?? toEveStatus(decision))
+          : decision === "ask" &&
+              typeof steeredStatus === "object" &&
+              steeredStatus.type === "denied"
+            ? steeredStatus
+            : toEveStatus(decision);
       if (status === "user-approval") {
         rememberCard(
           cardKey(ctx.toolName, ctx.callId, toolInput),

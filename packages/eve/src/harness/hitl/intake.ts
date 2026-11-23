@@ -1,5 +1,5 @@
 import { sameResponder } from "#approval/requester-only.js";
-import { AuthKey, SessionKey, SteeredByKey } from "#context/keys.js";
+import { AuthKey, DeferCallerSteeredClearKey, SessionKey, SteeredByKey } from "#context/keys.js";
 import { approvedClearance, type Clearance } from "#harness/clearance.js";
 import { transition } from "#harness/session-machine/commit.js";
 import { callRun, runTurn } from "#protocol/session-projection/selectors.js";
@@ -127,6 +127,10 @@ export async function admitHumanInput(
     return { kind: "stop", result: { next: step.runStep, session: step.session } };
   }
   const consumedMessage = answered?.messageConsumed === true;
+  if (step.ctx.get(DeferCallerSteeredClearKey) === true) {
+    step.ctx.delete(DeferCallerSteeredClearKey);
+    if (!consumedMessage && messaged) clearSteeredBy(step);
+  }
   return {
     consumedMessage,
     input: withoutResponses(answered),
@@ -155,17 +159,7 @@ export async function settleHumanInput(
   });
   await step.apply(settled);
   if (callerApprovedSettled(step, settled.approved)) {
-    step.ctx.delete(SteeredByKey);
-    const current = step.ctx.get(SessionKey);
-    if (current !== undefined && current.auth.steeredBy !== undefined) {
-      step.ctx.setVirtualContext(
-        SessionKey,
-        Object.freeze({
-          ...current,
-          auth: { current: current.auth.current, initiator: current.auth.initiator },
-        }),
-      );
-    }
+    clearSteeredBy(step);
   }
   const view = step.view();
   const resumed = view.turn.suspended.flatMap((parked) =>
@@ -387,6 +381,20 @@ async function withdrawSteeredSignIns(
 function hasTurnInput(input: HarnessStepInput | undefined): boolean {
   if (input === undefined) return false;
   return input.message !== undefined || (input.answers?.length ?? 0) > 0;
+}
+
+function clearSteeredBy(step: Step): void {
+  step.ctx.delete(SteeredByKey);
+  const current = step.ctx.get(SessionKey);
+  if (current !== undefined && current.auth.steeredBy !== undefined) {
+    step.ctx.setVirtualContext(
+      SessionKey,
+      Object.freeze({
+        ...current,
+        auth: { current: current.auth.current, initiator: current.auth.initiator },
+      }),
+    );
+  }
 }
 
 function callerApprovedSettled(step: Step, approved: readonly RunnableCall[]): boolean {

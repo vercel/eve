@@ -1,4 +1,5 @@
 import { defineDynamic, defineTool, type ToolContext } from "eve/tools";
+import { steered } from "eve/tools/approval";
 
 import { classifyCatalogEntry } from "../../../../extension/classify-registry-item.js";
 import {
@@ -147,6 +148,7 @@ async function addProductionRegistryItem(
 
 export function productionRegistryAddTool(deployed: ResolvedDeployedSelfModificationConfig) {
   return defineTool({
+    approval: steered(),
     description:
       "Install an exact item from the official eve registry into the current production change proposal. If setup pauses, call this tool again with the non-secret answers and the installed state from its result. External authorization and secret binding must be completed by the developer.",
     inputSchema: productionInputSchema,

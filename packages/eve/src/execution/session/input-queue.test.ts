@@ -198,10 +198,18 @@ describe("SessionInputQueue", () => {
       principalType: "user" as const,
     };
     const bob = { ...alice, principalId: "BOB" };
+    const anonymous = {
+      attributes: {},
+      authenticator: "none",
+      principalId: "anon",
+      principalType: "anonymous" as const,
+    };
     const steered = [bob];
 
     expect(steeredByAfter(steered, alice, undefined)).toBe(steered);
     expect(steeredByAfter(steered, alice, null)).toBe(steered);
+    expect(steeredByAfter(steered, null, anonymous)).toBe(steered);
+    expect(steeredByAfter(steered, anonymous, anonymous)).toBe(steered);
     expect(steeredByAfter(steered, alice, alice)).toEqual([]);
     expect(steeredByAfter(steered, alice, bob)).toBe(steered);
     expect(steeredByAfter([], alice, bob)).toEqual([bob]);

@@ -3,6 +3,7 @@ import type { ApprovalContext, ApprovalPolicy } from "#approval/definition.js";
 import type { AgentModelOptionsDefinition } from "#shared/agent-definition.js";
 import { decideFor } from "#ai/decide.js";
 import { approvalEvaluation } from "#approval/evaluation.js";
+import { contextScopeValue, withContextScopeValue } from "#context/container.js";
 import { parseJsonValue } from "#shared/json.js";
 
 const MAX_ACTION_BYTES = 64 * 1024;
@@ -108,6 +109,24 @@ export function once<TInput = unknown>(): ApprovalPolicy<TInput> {
 const STEERED_WITHOUT_CALLER =
   "Other people's messages steered this turn, and it has no signed-in caller to approve the call.";
 const STEERED_APPROVAL_POLICY = Symbol.for("eve.approval.steered");
+const STEERED_ASKED = Symbol.for("eve.approval.steeredAsked");
+
+interface SteeredAskTracker {
+  asked: boolean;
+}
+
+export async function trackSteeredAsk<T>(
+  run: () => T | Promise<T>,
+): Promise<{ readonly value: T; readonly asked: boolean }> {
+  const tracker: SteeredAskTracker = { asked: false };
+  const value = await withContextScopeValue(STEERED_ASKED, tracker, run);
+  return { value, asked: tracker.asked };
+}
+
+export function markSteeredApprovalPolicy<T extends ApprovalPolicy<any>>(policy: T): T {
+  Object.defineProperty(policy, STEERED_APPROVAL_POLICY, { value: true });
+  return policy;
+}
 
 export function isSteeredApprovalPolicy(policy: unknown): boolean {
   return (
@@ -124,10 +143,12 @@ export function isSteeredApprovalPolicy(policy: unknown): boolean {
 export function steered<TInput = unknown>(): ApprovalPolicy<TInput> {
   const policy: ApprovalPolicy<TInput> = ({ session }) => {
     if ((session.auth.steeredBy ?? []).length === 0) return undefined;
-    return session.auth.current?.principalType === "user"
-      ? "user-approval"
-      : { type: "denied", reason: STEERED_WITHOUT_CALLER };
+    if (session.auth.current?.principalType !== "user") {
+      return { type: "denied", reason: STEERED_WITHOUT_CALLER };
+    }
+    const tracker = contextScopeValue<SteeredAskTracker>(STEERED_ASKED);
+    if (tracker !== undefined) tracker.asked = true;
+    return "user-approval";
   };
-  Object.defineProperty(policy, STEERED_APPROVAL_POLICY, { value: true });
-  return policy;
+  return markSteeredApprovalPolicy(policy);
 }

@@ -68,7 +68,12 @@ export function memoryDefinition(memory: ResolvedMemoryDefinition): Definition {
           if (turn === null) return null;
           const cleared = latest["context.settled:clear"] ?? null;
           const recalled = await evaluation.memo(
-            { cleared, principal: principalOf(evaluation), turn },
+            {
+              cleared,
+              principal: principalOf(evaluation),
+              steeredBy: evaluation.session.auth.steeredBy ?? null,
+              turn,
+            },
             () => recallOnce(memory, evaluation, cleared),
           );
           if (recalled === null) return null;
@@ -425,8 +430,9 @@ export async function memoryTools(memory: ResolvedMemoryDefinition, ctx: Interna
   const { provider, slot } = memory;
   if (provider.tools === undefined) return null;
   const turn = readDefinitionsState(ctx.ctx).latest["turn.started"] ?? null;
-  const resolved = await ctx.memo({ principal: principalOf(ctx), turn }, () =>
-    resolveTrackedMemoryScope(memory, ctx),
+  const resolved = await ctx.memo(
+    { principal: principalOf(ctx), steeredBy: ctx.session.auth.steeredBy ?? null, turn },
+    () => resolveTrackedMemoryScope(memory, ctx),
   );
   if (resolved === null) return null;
   const { callerScoped, scope } = resolved;

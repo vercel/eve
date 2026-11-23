@@ -23,6 +23,7 @@ import type {
   ScheduleCreateApproval,
 } from "#public/schedules/subscription.js";
 import type { PreparedScheduleWrite } from "#runtime/schedules/collection-client.js";
+import { turnSteeredMessage } from "#runtime/connections/identity-hold.js";
 import { scheduleDisplayName } from "#runtime/schedules/record.js";
 import { MAX_SCHEDULE_DELAY_MINUTES } from "#runtime/schedules/validation.js";
 import { scheduleCollectionToolPrefix } from "#shared/schedule-collection-tools.js";
@@ -359,6 +360,9 @@ function writeApproval<TWrite extends PreparedScheduleWrite, TPayload>(
 ) {
   const approval: { request: ApprovalPolicy; response?: ApprovalResponsePolicy } = {
     request: async (context) => {
+      if ((context.session?.auth?.steeredBy ?? []).length > 0) {
+        return { type: "denied", reason: turnSteeredMessage("dynamic schedules") };
+      }
       try {
         const prepared = await prepare(context.toolInput);
         const key = keyFor(context.callId);

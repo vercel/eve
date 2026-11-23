@@ -32,6 +32,7 @@ import {
   ToolStubsKey,
   TurnDeliveryIdsKey,
   SteeredByKey,
+  DeferCallerSteeredClearKey,
 } from "#context/keys.js";
 import { ChannelKey, requireCompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { sessionAgent } from "#definitions/agent.js";
@@ -67,7 +68,13 @@ import type { DeliverPayload, SessionAuthContext } from "#channel/types.js";
 import { coalesceTurnInputs, validateHarnessModelMessages } from "#harness/messages.js";
 import type { HarnessSession, HarnessStepInput, StepInput, StepResult } from "#harness/types.js";
 import { attributeAnswers } from "#execution/session/answer-caller.js";
-import { continueTurnAuth, principalOf, steeredByAfter } from "#execution/session/principal.js";
+import {
+  ANONYMOUS_PRINCIPAL,
+  continueTurnAuth,
+  principalOf,
+  steeredByAfter,
+} from "#execution/session/principal.js";
+import { openRequests } from "#protocol/session-projection/reader.js";
 import type {
   DurableStepResult,
   TurnStepInput,
@@ -263,6 +270,17 @@ async function runSessionStepBody(
   const startedBetweenTurns = isBetweenTurns(currentProjection(ctx));
   const hasMessagePayload =
     delivery?.payloads.some((payload) => payload.message !== undefined) === true;
+  const hasOpenApproval =
+    !startedBetweenTurns &&
+    openRequests(currentProjection(ctx).view).some((row) => row.request.kind === "approval");
+  const deferCallerSteeredClear =
+    hasOpenApproval &&
+    hasMessagePayload &&
+    (previousSteeredBy?.length ?? 0) > 0 &&
+    delivery?.steeredBy === undefined &&
+    delivery?.auth != null &&
+    principalOf(delivery.auth) !== ANONYMOUS_PRINCIPAL &&
+    principalOf(delivery.auth) === principalOf(previousAuth);
 
   if (startedBetweenTurns && initialEmissionState.sessionStarted) setSteeredBy(ctx, []);
   if (delivery?.auth !== undefined) {
@@ -277,6 +295,7 @@ async function runSessionStepBody(
     if (delivery.steeredBy !== undefined) setSteeredBy(ctx, delivery.steeredBy);
     else if (
       !startedBetweenTurns &&
+      !deferCallerSteeredClear &&
       (delivery.principalPolicy === "retain" ||
         (delivery.auth !== undefined && principalOf(delivery.auth) === principalOf(previousAuth)))
     ) {
@@ -438,6 +457,12 @@ async function runSessionStepBody(
     if (turnAuth === undefined) ctx.delete(AuthKey);
     else ctx.set(AuthKey, turnAuth);
     if (startedBetweenTurns && initialEmissionState.sessionStarted) setSteeredBy(ctx, []);
+    const shouldDeferCallerClear =
+      deferCallerSteeredClear &&
+      delivery !== undefined &&
+      answers === undefined &&
+      !ignoredActiveDelivery &&
+      resolved?.message !== undefined;
     if (
       delivery !== undefined &&
       answers === undefined &&
@@ -445,7 +470,7 @@ async function runSessionStepBody(
       resolved?.message !== undefined
     ) {
       if (delivery.steeredBy !== undefined) setSteeredBy(ctx, delivery.steeredBy);
-      else if (!startedBetweenTurns) {
+      else if (!startedBetweenTurns && !shouldDeferCallerClear) {
         setSteeredBy(ctx, steeredByAfter(previousSteeredBy ?? [], turnAuth, delivery.auth));
       }
     } else if (!startedBetweenTurns) {
@@ -700,6 +725,9 @@ async function runSessionStepBody(
                 startSessionPrewarmers(ctx, "turn");
               }
               ctx.setVirtualContext(HandleEventKey, handleEvent);
+              if (firstCall && shouldDeferCallerClear) {
+                ctx.setVirtualContext(DeferCallerSteeredClearKey, true);
+              }
               if (host.deliver !== undefined)
                 ctx.setVirtualContext(ResumeSignInKey, signInDelivery(host.deliver));
               const stubs = ctx.get(ToolStubsKey);
