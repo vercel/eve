@@ -131,7 +131,7 @@ function toNitroConfig(
   const instrumentationEntry =
     compiledArtifacts.instrumentationPluginPath === undefined
       ? undefined
-      : createInstrumentationEntry(compiledArtifacts.instrumentationPluginPath);
+      : createInstrumentationEntry(compiledArtifacts.instrumentationPluginPath, spec.entry);
 
   return {
     ...built.routes,

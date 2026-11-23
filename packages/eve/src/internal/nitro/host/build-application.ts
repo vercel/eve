@@ -78,6 +78,7 @@ function assertProfileOutputOutsideBuildOutput(
 }
 
 interface ApplicationBuildPlatform {
+  readonly entry: string | undefined;
   readonly output: PlatformBuildOutput;
   readonly target: BuildTarget;
 }
@@ -225,9 +226,11 @@ export async function buildApplication(
   const profileOutputPath =
     options.profileOutputPath === undefined ? undefined : resolve(options.profileOutputPath);
   const profiler = profileOutputPath === undefined ? undefined : new ApplicationBuildProfiler();
+  const build = platformBuild(options.platform);
   const platform: ApplicationBuildPlatform = {
+    entry: build.entry,
     output: platformBuildOutput(),
-    target: platformBuild().platformOutput?.() === true ? "vercel" : "node",
+    target: build.platformOutput?.() === true ? "vercel" : "node",
   };
 
   const extensionBuild = await measureBuildPhase(profiler, "extension.check", () =>
@@ -320,6 +323,8 @@ async function buildApplicationInWorkspace(
     {
       kind: "production",
       preset: isVercelBuild ? "vercel" : undefined,
+      entry:
+        platform.entry === undefined ? undefined : resolve(preparedHost.appRoot, platform.entry),
       publicRoutePrefix,
       vercelService: servicePrefix !== undefined || options.vercelServiceOutput !== undefined,
       workspaceMember: options.workspaceMember,
@@ -400,7 +405,7 @@ async function buildApplicationInWorkspace(
   }
 
   const deploymentId =
-    nitro.options.preset === "node-server"
+    nitro.options.preset === "node-server" || spec.entry !== undefined
       ? await measureBuildPhase(profiler, "id.compute", () =>
           stageBuildDeploymentId(workspace.publication.output.stagedDir),
         )

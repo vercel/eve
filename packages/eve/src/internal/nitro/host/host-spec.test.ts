@@ -21,6 +21,7 @@ const APP_ROOT = "/tmp/weather-agent";
 const DEVELOPMENT: HostMode = { kind: "development" };
 const PRODUCTION: HostMode = { kind: "production", preset: undefined };
 const VERCEL: HostMode = { kind: "production", preset: "vercel" };
+const ENTRY: HostMode = { kind: "production", preset: undefined, entry: `${APP_ROOT}/entry.mjs` };
 
 type Modules = Array<NonNullable<Parameters<typeof compileFromMemory>[0]["modules"]>[number]>;
 
@@ -196,7 +197,7 @@ describe("createHostSpec", () => {
     }
   });
 
-  it("adds embedded skill files, sandbox shutdown, and development-runtime pruning only to production hosts", async () => {
+  it("adds embedded skill files, sandbox shutdown, and development-runtime pruning only to production hosts, and connection drain only to eve's Node server", async () => {
     const manifest = await compileAgent();
     const production = spec(manifest, PRODUCTION);
     const development = spec(manifest, DEVELOPMENT);
@@ -207,6 +208,12 @@ describe("createHostSpec", () => {
       "connection-drain",
     ]);
     expect(spec(manifest, VERCEL).runtimePlugins).not.toContain("connection-drain");
+    expect(spec(manifest, ENTRY)).toMatchObject({
+      entry: `${APP_ROOT}/entry.mjs`,
+      preset: "standard",
+      runtimePlugins: ["skill-files", "sandbox-shutdown"],
+    });
+    expect(production.preset).toBeUndefined();
     expect(production.runtime.localTracing).toBe(false);
     expect(production.externals.pruneDevelopmentRuntime).toBe(true);
     expect(development.runtimePlugins).not.toContain("skill-files");

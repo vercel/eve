@@ -89,6 +89,7 @@ export interface Telemetry {
 }
 
 export interface Build {
+  readonly entry?: string;
   platformOutput?(): boolean;
   outputDirectory?(appRoot: string): string | undefined;
   sandboxPrewarmFailure?(providerName: string, error: unknown): Error | undefined;

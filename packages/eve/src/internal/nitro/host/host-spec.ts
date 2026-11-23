@@ -20,6 +20,7 @@ export type HostMode =
   | {
       readonly kind: "production";
       readonly preset: "vercel" | undefined;
+      readonly entry?: string;
       readonly publicRoutePrefix?: string;
       readonly vercelService?: boolean;
       readonly workspaceMember?: boolean;
@@ -42,12 +43,13 @@ export interface HostSpec {
   readonly agentName: string;
   readonly authored: HostAuthoredSources;
   readonly development: boolean;
+  readonly entry: string | undefined;
   readonly extensionMounts: readonly CompiledExtensionMount[];
   readonly extensionOverridePaths: ReadonlyMap<string, string>;
   readonly externals: ExternalsPolicy;
   readonly instrumented: boolean;
   readonly localSchedulesPluginModulePath: string;
-  readonly preset: "vercel" | undefined;
+  readonly preset: "vercel" | "standard" | undefined;
   readonly routes: HostRouteTable;
   readonly runtime: HostRuntime;
   readonly runtimePlugins: readonly HostRuntimePlugin[];
@@ -82,7 +84,11 @@ export function createHostSpec(
   const { manifest, paths } = preparedHost.compileResult;
   const packageRoot = findAuthoredPackageRoot(appRoot) ?? appRoot;
   const development = mode.kind === "development";
-  const preset = mode.kind === "production" ? mode.preset : undefined;
+  const entry = mode.kind === "production" ? mode.entry : undefined;
+  const preset =
+    mode.kind === "production"
+      ? (mode.preset ?? (entry === undefined ? undefined : "standard"))
+      : undefined;
   const instrumented = compiledArtifacts.instrumentationPluginPath !== undefined;
   const nodes = [manifest, ...manifest.subagents.map((subagent) => subagent.agent)];
   const routes = createHostRouteTable({
@@ -105,16 +111,21 @@ export function createHostSpec(
       ? (["timezone-schedules"] as const)
       : []),
     ...(development ? [] : (["sandbox-shutdown"] as const)),
-    ...(!development && preset !== "vercel" ? (["connection-drain"] as const) : []),
+    ...(!development && preset === undefined ? (["connection-drain"] as const) : []),
   ];
 
   return {
     agentName: manifest.config.name,
     authored: { packageRoot, tsconfig: resolveAuthoredTsConfigPath(packageRoot) },
     development,
+    entry,
     extensionMounts: nodes.flatMap((node) => node.extensionMounts),
     extensionOverridePaths: extensionOverridePaths(manifest),
-    externals: createExternalsPolicy({ development, manifest, preset }),
+    externals: createExternalsPolicy({
+      development,
+      manifest,
+      preset: preset === "vercel" ? preset : undefined,
+    }),
     instrumented,
     localSchedulesPluginModulePath: platform.schedules.localPluginModulePath(),
     locations: {
