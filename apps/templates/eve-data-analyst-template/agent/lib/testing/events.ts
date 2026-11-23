@@ -29,24 +29,35 @@ export const eventView = (events: readonly HookEvent[]): SessionView =>
  */
 export const hookContext = (
   overrides: Partial<HookContext<"turn.started">> = {}
-): HookContext<"turn.started"> => ({
-  ...sessionContext(),
-  agent: { name: "test" },
-  cancel: () => {
-    throw new Error("Unexpected cancellation.");
-  },
-  channel: { kind: "channel:slack", metadata: {} },
-  memo: (_key, fn) =>
-    Promise.resolve(
-      fn({ abortSignal: new AbortController().signal, idempotencyKey: "test" })
-    ),
-  now: new Date("2026-10-10T00:00:00.000Z"),
-  occurrence: {
-    abortSignal: new AbortController().signal,
-    idempotencyKey: "test",
-  },
-  position: { index: 0, line: 0 },
-  turn: null,
-  view: emptySessionView(),
-  ...overrides,
-});
+): HookContext<"turn.started"> => {
+  const context: HookContext<"turn.started"> & {
+    end: (reason?: string) => void;
+  } = {
+    ...sessionContext(),
+    agent: { name: "test" },
+    cancel: () => {
+      throw new Error("Unexpected cancellation.");
+    },
+    channel: { kind: "channel:slack", metadata: {} },
+    end: () => {
+      throw new Error("Unexpected session end.");
+    },
+    memo: (_key, fn) =>
+      Promise.resolve(
+        fn({
+          abortSignal: new AbortController().signal,
+          idempotencyKey: "test",
+        })
+      ),
+    now: new Date("2026-10-10T00:00:00.000Z"),
+    occurrence: {
+      abortSignal: new AbortController().signal,
+      idempotencyKey: "test",
+    },
+    position: { index: 0, line: 0 },
+    turn: null,
+    view: emptySessionView(),
+    ...overrides,
+  };
+  return context;
+};

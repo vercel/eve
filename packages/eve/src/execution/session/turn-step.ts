@@ -311,13 +311,17 @@ async function runSessionStepBody(
     instrumentation?.prepareDelivery(rawDelivery);
   }
 
+  const hookCancellation = new AbortController();
   const publisher = openSessionEventPublisher({
+    cancelTurn:
+      input.input?.control === undefined
+        ? () => hookCancellation.abort(new TurnCancelledError())
+        : undefined,
     ctx,
     origin: "own",
     sessionWritable: input.sessionWritable,
   });
   const { adapterCtx } = publisher.dispatcher;
-  const hookCancellation = new AbortController();
   const abortSignal =
     input.abortSignal === undefined
       ? hookCancellation.signal

@@ -1,3 +1,4 @@
+import { pendingSessionEnd } from "#definitions/continuation.js";
 import { controlDeliveryOf } from "#execution/session/control-delivery.js";
 import { settleControlDeliveryStep } from "#execution/session/settle-control-delivery-step.js";
 import type { ControlOrigin } from "#execution/session/input-queue.js";
@@ -177,7 +178,13 @@ export class ActiveTurn {
   async nextRuntimeEvent(timers: readonly Promise<string>[]): Promise<RuntimeEvent> {
     while (true) {
       const steered = await this.routeAdmittedToChildren();
-      if (this.signal.aborted) return "cancelled";
+      if (
+        this.signal.aborted ||
+        pendingSessionEnd(this.input.cursor.serializedContext) !== undefined
+      ) {
+        this.abort();
+        return "cancelled";
+      }
       if (steered) return { kind: "steering" };
       const event = this.runtimeResults.shift();
       if (event !== undefined) return event;
@@ -187,6 +194,10 @@ export class ActiveTurn {
       if (payload === undefined)
         throw new Error("Session inbox closed before runtime actions completed.");
       if (await this.admit(payload)) return { kind: "input" };
+      if (pendingSessionEnd(this.input.cursor.serializedContext) !== undefined) {
+        this.abort();
+        return "cancelled";
+      }
     }
   }
 

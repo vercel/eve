@@ -1,3 +1,4 @@
+import { pendingSessionEnd } from "#definitions/continuation.js";
 import { settleControlDeliveryStep } from "#execution/session/settle-control-delivery-step.js";
 import type { ControlSettlement } from "#harness/facts.js";
 import { controlDeliveryOf } from "#execution/session/control-delivery.js";
@@ -262,6 +263,19 @@ async function runSessionLoop(
     ...(control && { control }),
     ...(unstarted.length > 0 && { settles: unstarted.splice(0) }),
   });
+  const hookEnded = (
+    hook: string,
+    turn?: Pick<
+      Extract<SessionTerminalOutcome, { readonly kind: "ended" }>,
+      "cancelled" | "settled"
+    >,
+  ): SessionTerminalOutcome => ({
+    cause: { hook },
+    kind: "ended",
+    ...(turn?.cancelled !== undefined && { cancelled: turn.cancelled }),
+    ...(turn?.settled !== undefined && { settled: turn.settled }),
+    ...(unstarted.length > 0 && { settles: unstarted.splice(0) }),
+  });
 
   let prewarmedSandbox: SandboxRunning | undefined;
   let idleWindow: Promise<void> | "attempted" | undefined;
@@ -417,6 +431,8 @@ async function runSessionLoop(
             kind: "terminal",
             outcome: expired(next.origin && controlDeliveryOf(next.origin)),
           };
+        case "end":
+          return { kind: "terminal", outcome: hookEnded(next.hook) };
         case "closed":
           if (inbox.takenOver) return await handoff.adoptTakeover();
           return { kind: "terminal", outcome: expired() };
@@ -444,6 +460,8 @@ async function runSessionLoop(
     if (boot.compactFirst === true) {
       await runTurn({ control: "compact" });
       compactionHandoffDue = false;
+      const end = pendingSessionEnd(cursor.serializedContext);
+      if (end !== undefined) return { kind: "terminal", outcome: hookEnded(end.hook) };
     }
     switch (boot.start.kind) {
       case "first-message":
@@ -496,22 +514,39 @@ async function runSessionLoop(
       if (action.cancelled === true) {
         const { caller } = progress;
         const settled = await settleCancelledTurn(caller !== undefined, action.cancelledBy);
+        const end = pendingSessionEnd(cursor.serializedContext);
+        if (end !== undefined) {
+          progress.caller = caller;
+          return {
+            kind: "terminal",
+            outcome: hookEnded(end.hook, { cancelled: { usage: settled.usage } }),
+          };
+        }
         if (caller !== undefined) {
           const notification = { caller, sessionId: boot.sessionId };
           await notifyCancelledTaskCallerStep(
             settled.usage === undefined ? notification : { ...notification, usage: settled.usage },
           );
         }
-      } else if (action.settled !== undefined) {
-        if (progress.caller !== undefined) {
-          await notifyTurnCallerStep({
-            caller: progress.caller,
-            lifecycle: "parked",
-            sessionId: boot.sessionId,
-            settled: action.settled,
-          });
+      } else {
+        const end = pendingSessionEnd(cursor.serializedContext);
+        if (end !== undefined) {
+          return {
+            kind: "terminal",
+            outcome: hookEnded(end.hook, { settled: action.settled }),
+          };
         }
-        progress.caller = undefined;
+        if (action.settled !== undefined) {
+          if (progress.caller !== undefined) {
+            await notifyTurnCallerStep({
+              caller: progress.caller,
+              lifecycle: "parked",
+              sessionId: boot.sessionId,
+              settled: action.settled,
+            });
+          }
+          progress.caller = undefined;
+        }
       }
 
       const transferred = await tryCompactionHandoff();
@@ -523,6 +558,8 @@ async function runSessionLoop(
       switch (next.kind) {
         case "reset":
           return { kind: "terminal", outcome: resetOutcome(next.origin) };
+        case "end":
+          return { kind: "terminal", outcome: hookEnded(next.hook) };
         case "closed":
           if (inbox.takenOver) return await handoff.adoptTakeover();
           return { kind: "terminal", outcome: { kind: "expired" } };

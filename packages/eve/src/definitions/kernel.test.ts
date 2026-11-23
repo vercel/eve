@@ -596,6 +596,7 @@ describe("runEffects", () => {
     await commit(ctx, { written: written(1) });
 
     expect(() => later!.cancel()).toThrow("after its handler settled");
+    expect(() => later!.end()).toThrow("after its handler settled");
     await expect(later!.memo("late", () => null)).rejects.toThrow("after its evaluation settled");
   });
 
@@ -806,6 +807,77 @@ describe("runEffects", () => {
         }),
       });
       expect(readDefinitionsState(ctx).continuation?.turnId).toBe("turn-1");
+    });
+
+    it("ends the session, cancels an active or opening turn, drops continuations, and ignores failures", async () => {
+      const active = session(noTools, [
+        hook("first", { "*": (_event, ctx) => ctx.end("Job finished.") }),
+        hook("second", { "*": (_event, ctx) => ctx.end("Too late.") }),
+      ]);
+      turnRunning(active);
+      const cancels: unknown[] = [];
+      await commit(active, {
+        cancelTurn: (cancel) => cancels.push(cancel),
+        written: written(1),
+      });
+      expect(cancels).toEqual([{ hook: "hooks/first.ts", reason: "Job finished." }]);
+      expect(readDefinitionsState(active).sessionEnd).toEqual({ hook: "first" });
+
+      const opening = session(noTools, [
+        hook("gate", { "session.started": (_event, ctx) => ctx.end("Blocked.") }),
+      ]);
+      const openingCancels: unknown[] = [];
+      await commit(opening, {
+        cancelBeforeTurn: (cancel) => openingCancels.push(cancel),
+        written: written(1, "session.started"),
+      });
+      expect(openingCancels).toEqual([{ hook: "hooks/gate.ts", reason: "Blocked." }]);
+      expect(readDefinitionsState(opening).sessionEnd).toEqual({ hook: "gate" });
+
+      const both = session(noTools, [
+        {
+          events: {
+            "turn.settled": (_event: unknown, ctx: HookContext<"turn.settled">) => {
+              ctx.continue("Keep going.");
+              ctx.end("Done.");
+            },
+          },
+          slug: "done",
+        },
+        {
+          events: {
+            "turn.settled": (_event: unknown, ctx: HookContext<"turn.settled">) =>
+              ctx.continue("After end."),
+          },
+          slug: "later",
+        },
+      ]);
+      both.set(ChannelKey, { kind: "http" } as never);
+      const projection = initialSessionProjection();
+      foldLine(
+        projection.view,
+        { at: "2026-01-01T00:00:00.000Z", facts: settledFacts },
+        projection.view.position,
+      );
+      enterSessionProjectionAt(both, projection);
+      await commit(both, { written: written(1, "turn.settled", settledFacts[1]!.data) });
+      expect(readDefinitionsState(both).sessionEnd).toEqual({ hook: "done" });
+      expect(readDefinitionsState(both).continuation).toBeUndefined();
+
+      const ignored = session(noTools, [
+        hook("broken", {
+          "session.ended": (_event, ctx) => ctx.end("Already ended."),
+          "turn.started": (_event, ctx) => {
+            ctx.end("Will throw.");
+            throw new Error("boom");
+          },
+        }),
+      ]);
+      turnRunning(ignored);
+      await commit(ignored, { written: written(1, "session.ended", { outcome: "completed" }) });
+      await commit(ignored, { written: written(2) });
+      expect(readDefinitionsState(ignored).sessionEnd).toBeUndefined();
+      expect(takeTurnFailure(ignored)).toContain("boom");
     });
   });
 });

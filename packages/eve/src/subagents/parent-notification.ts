@@ -72,6 +72,7 @@ export async function notifyTurnCallerStep(input: {
 
 export async function notifyCancelledTaskCallerStep(input: {
   readonly caller: TurnCaller;
+  readonly lifecycle?: AgentTurnOutcome["kind"];
   readonly sessionId: string;
   readonly usage?: TokenUsage;
 }): Promise<void> {
@@ -88,7 +89,7 @@ export async function notifyCancelledTaskCallerStep(input: {
     kind: "subagent-result",
     origin: "child",
     outcome: {
-      kind: "parked",
+      kind: input.lifecycle ?? "parked",
       result: { kind: "cancelled" },
       usageDelta,
     },
