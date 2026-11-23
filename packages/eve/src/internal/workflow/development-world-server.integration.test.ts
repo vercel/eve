@@ -257,7 +257,7 @@ describe("parent development Workflow World", () => {
     }
   });
 
-  it.fails("signs the wake-up that cancelling an orphaned run queues", async () => {
+  it("signs the wake-up that cancelling an orphaned run queues", async () => {
     const appRoot = await createScratchDirectory("eve-parent-workflow-orphan-wake-up-");
     await seedGeneration(appRoot, "generation-a");
     const first = createWorld({ activeGenerationId: () => "generation-a", appRoot });

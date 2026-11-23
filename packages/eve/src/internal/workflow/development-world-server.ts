@@ -168,8 +168,9 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
       .then(async () => {
         if (this.#closed) return;
         const runIds = await this.#collectExpiredRunIds();
+        const world = this.#workerDeliveringWorld();
         for (const runId of runIds) {
-          await cancelExpiredDevelopmentRun(this.#world, runId);
+          await cancelExpiredDevelopmentRun(world, runId);
         }
       });
     return this.#reconciliation;
@@ -246,6 +247,19 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
     }
   }
 
+  #workerDeliveringWorld(): World {
+    const prefix = deriveEveWorkflowQueuePrefix(this.#agentName);
+    return {
+      ...this.#world,
+      queue: async (queueName, message, options) =>
+        await this.#queue(
+          queueName.replace(WORKFLOW_QUEUE_PREFIX_PATTERN, prefix) as ValidQueueName,
+          message,
+          options,
+        ),
+    };
+  }
+
   async #queue(...args: Parameters<World["queue"]>): ReturnType<World["queue"]> {
     const [queueName, message, options] = args;
     return await this.#world.queue(queueName, message, {
@@ -314,6 +328,7 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
 }
 
 const DEVELOPMENT_WORLD_OPERATION_SET: ReadonlySet<string> = new Set(DEVELOPMENT_WORLD_OPERATIONS);
+const WORKFLOW_QUEUE_PREFIX_PATTERN = /^__(?:[a-z][a-z0-9]*_)?wkf_workflow_/;
 
 function isDevelopmentWorldRequest(value: unknown): value is DevelopmentWorldRequest {
   return (
