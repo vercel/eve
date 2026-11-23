@@ -50,12 +50,21 @@ export function HarnessLoop() {
     if (!frame || !canvas || !context || typeof Path2D !== "function") return;
     const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
     if (motion.matches) return;
-    const styleSheet = getComputedStyle(frame);
-    const atlas = makeAtlas([
-      "#fff",
-      ...prism.map((name) => styleSheet.getPropertyValue(`--ds-${name}-900`).trim() || "#fff"),
-    ]);
-    if (!atlas) return;
+    let palette = "";
+    let atlas: HTMLCanvasElement | null = null;
+    const paint = () => {
+      const styleSheet = getComputedStyle(frame);
+      const colors = [
+        styleSheet.color,
+        ...prism.map((name) => styleSheet.getPropertyValue(`--ds-${name}-900`).trim()),
+      ];
+      const next = colors.join("|");
+      if (next === palette && atlas) return atlas;
+      palette = next;
+      atlas = makeAtlas(colors.map((color) => color || styleSheet.color)) ?? atlas;
+      return atlas;
+    };
+    if (!paint()) return;
     const flow = createHoverFlow();
     flow.resize(loopWidth, loopHeight);
     let animation = 0;
@@ -81,13 +90,15 @@ export function HarnessLoop() {
       flow.step(dt, pending?.from, pending?.to);
       pending = undefined;
       const runs = runPositions(elapsed);
+      const glyphs = paint();
+      if (!glyphs) return;
       context!.clearRect(0, 0, loopWidth, loopHeight);
       for (const mark of projectLoop(0.6 + elapsed * 0.11)) {
         const tile = mark.symbol * sprite;
         const left = mark.x - mark.size / 2;
         const top = mark.y - mark.size / 2;
         context!.globalAlpha = loopMarkOpacity(mark, runs);
-        context!.drawImage(atlas!, tile, 0, sprite, sprite, left, top, mark.size, mark.size);
+        context!.drawImage(glyphs, tile, 0, sprite, sprite, left, top, mark.size, mark.size);
         const { density, vx, vy } = flow.sample(mark.x, mark.y);
         if (density < 0.035 || mark.shade < 0.1) continue;
         const angle = Math.atan2(vy, vx) / (2 * Math.PI) + 0.5;
@@ -96,7 +107,7 @@ export function HarnessLoop() {
           prism.length;
         context!.globalAlpha = Math.min(1, density * 1.2) * 0.55;
         context!.drawImage(
-          atlas!,
+          glyphs,
           tile,
           (hue + 1) * sprite,
           sprite,

@@ -134,7 +134,7 @@ const secondaryAction =
 export default function ChallengePage() {
   return (
     <main className="w-full min-w-0 pb-24">
-      <section aria-labelledby="challenge-title" className={`dark ${styles.hero}`}>
+      <section aria-labelledby="challenge-title" className={styles.hero}>
         <GlyphField
           brightness={0.1}
           className={styles.backdrop}
@@ -171,7 +171,7 @@ export default function ChallengePage() {
           </div>
           <HarnessLoop />
         </div>
-        <div className="relative bg-black">
+        <div className="relative bg-background-200">
           <dl
             className={`${container} grid gap-x-8 border-t border-gray-400 sm:grid-cols-2 lg:grid-cols-[1fr_0.45fr_1.55fr_0.8fr]`}
           >

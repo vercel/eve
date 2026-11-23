@@ -1,12 +1,12 @@
 .hero {
   position: relative;
   overflow: hidden;
-  background: #000;
-  color-scheme: dark;
+  border-bottom: 1px solid var(--ds-gray-alpha-400);
+  background: var(--ds-background-200);
 }
 
 .backdrop {
-  --peak: #8f8f8f;
+  --peak: var(--ds-gray-900);
   position: absolute;
   top: 0;
   left: 50%;
@@ -14,15 +14,30 @@
   max-width: none;
   height: 90rem;
   translate: -50% 0;
-  color: #3d3d3d;
+  color: var(--ds-gray-500);
   pointer-events: none;
+}
+
+:global(.light-theme) .backdrop {
+  color: var(--ds-gray-400);
 }
 
 .loop {
   position: relative;
   aspect-ratio: 640 / 500;
   min-width: 0;
-  color: #fff;
+  color: var(--ds-gray-1000);
+}
+
+:global(.light-theme) .loop {
+  color: var(--ds-gray-900);
+}
+
+@media (min-width: 64rem) {
+  .loop {
+    width: 118%;
+    margin-inline-end: -14%;
+  }
 }
 
 .loopStill,

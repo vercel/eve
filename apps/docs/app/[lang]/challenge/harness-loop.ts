@@ -8,7 +8,7 @@ export const loopCheckpoints = 4;
 
 const sections = 172;
 const sides = 9;
-const tube = 0.3;
+const tube = 0.42;
 const tau = Math.PI * 2;
 const light = normalize([-0.42, 0.58, 0.7]);
 
@@ -66,8 +66,8 @@ export type LoopMark = {
 };
 
 const camera = 7.5;
-const tilt = 0.92;
-const margin = 22;
+const tilt = 0.68;
+const margin = 12;
 
 function rotation(spin: number) {
   const cosSpin = Math.cos(spin);
@@ -109,7 +109,7 @@ export function projectLoop(spin: number): LoopMark[] {
         x: loopWidth / 2 + x * loopScale * perspective,
         y: loopHeight / 2 - y * loopScale * perspective,
         depth: z,
-        size: 11.5 * perspective,
+        size: 12.5 * perspective,
         shade: front ? 0.24 + 0.76 * lit : 0.07,
         t,
         symbol,
