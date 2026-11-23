@@ -1,5 +1,6 @@
 export {
   workflow,
+  type WorkflowExecuteTool,
   type WorkflowTool,
   type WorkflowToolInput,
   type WorkflowToolOptions,

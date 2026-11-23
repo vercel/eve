@@ -1,39 +1,61 @@
+import { truncateProgramModelOutput } from "#execution/code-mode/result.js";
 import {
   DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS,
   parseWorkflowProgramOptions,
 } from "#execution/dynamic-workflow/schema.js";
-import { runWorkflowProgramTask } from "#execution/dynamic-workflow/tool.js";
-import type { JsonValue } from "#shared/json.js";
-import { defineWorkflowTool, type WorkflowTaskToolDefinition } from "#tools/workflow-definition.js";
+import {
+  runWorkflowProgramExecute,
+  runWorkflowProgramTask,
+} from "#execution/dynamic-workflow/tool.js";
+import type { JsonValue } from "#public/events/index.js";
+import {
+  defineWorkflowTool,
+  type WorkflowExecuteToolDefinition,
+  type WorkflowTaskToolDefinition,
+} from "#public/tools/index.js";
 import { attachWorkflowProgramOptions } from "#tools/workflow-program-input.js";
 import { defineJsonSchema } from "#tools/schema.js";
+import { frameworkTool } from "./framework-tool.js";
 
-/** Options for {@link workflow}, such as the maximum number of child-agent calls per program. */
+/** Options for {@link workflow}, such as the maximum number of child-agent calls and execution mode. */
 export interface WorkflowToolOptions {
   /** Maximum child-agent calls per program, from 1 to 128. Defaults to 100. */
   readonly maxSubagents?: number;
+  /**
+   * How each call runs: `"task"` runs in the background and delivers the result in a `task.result`
+   * message, while `"execute"` runs in the foreground so the current turn waits for the result.
+   * Defaults to `"task"`.
+   */
+  readonly mode?: "task" | "execute";
 }
 
 /**
- * Input to the `workflow` tool: the body of an async JavaScript function that invokes agents and
- * returns one JSON-serializable value.
+ * Input to the `workflow` tool: the body of an async JavaScript function that invokes agents,
+ * asks questions, sleeps, reports progress, and returns one JSON-serializable value.
  */
 export interface WorkflowToolInput {
+  /** Async JavaScript function body evaluated inside the isolated workflow runtime. */
   readonly js: string;
 }
 
-/** The workflow tool {@link workflow} returns. Each call runs the model's program as a task. */
+/** The task workflow tool {@link workflow} returns by default. Each call runs the model's program as a task. */
 export type WorkflowTool = WorkflowTaskToolDefinition<WorkflowToolInput, JsonValue>;
 
+/** The foreground workflow tool {@link workflow} returns when `mode` is `"execute"`. */
+export type WorkflowExecuteTool = WorkflowExecuteToolDefinition<WorkflowToolInput, JsonValue>;
+
 const workflowProgramAgentContract =
-  "Call ctx.agent(name, { message: string, outputSchema?: object }). Each call starts a new agent that does not see this conversation, so put everything it needs in message. It resolves directly to the agent's reply; when outputSchema is provided, the reply matches that schema. It does not return an agent metadata wrapper. The owning agent resolves the target and applies its existing availability and authorization checks.";
+  "Read ctx.agents for available { [name]: { description } } targets. Call ctx.agent(name, { message: string, outputSchema?: object, files?: [{ url: https://..., mediaType, filename? }] }). Each call starts a new agent that does not see this conversation, so put everything it needs in message. It resolves directly to the agent's reply; when outputSchema is provided, the reply matches that schema. It does not return an agent metadata wrapper. The owning agent resolves the target and applies its existing availability and authorization checks.";
+
+const workflowProgramCapabilitiesContract =
+  "Call ctx.ask({ prompt, title?, display?, options?, allowFreeform?, initialOptionId? }) to ask the person on this channel and receive their answer. Call ctx.sleep(seconds) to pause durably without holding compute and resolve to { waitedSeconds }. Call ctx.progress(update) to emit a JSON-serializable progress report. console.log output is captured and returned as { result, logs } when non-empty, or attached to the error on failure.";
 
 const workflowInputSchema = defineJsonSchema<WorkflowToolInput>({
   type: "object",
   properties: {
     js: {
       type: "string",
-      description: `JavaScript statements executed inside an async function. Supply only the body, without a surrounding function declaration or arrow function. ${workflowProgramAgentContract} Return one JSON-serializable value.`,
+      description: `JavaScript statements executed inside an async function. Supply only the body, without a surrounding function declaration or arrow function. ${workflowProgramAgentContract} ${workflowProgramCapabilitiesContract} Return one JSON-serializable value.`,
     },
   },
   required: ["js"],
@@ -41,35 +63,62 @@ const workflowInputSchema = defineJsonSchema<WorkflowToolInput>({
 });
 
 /** Defines a model-facing workflow tool backed by isolated runtime JavaScript. */
-export function workflow(options: WorkflowToolOptions = {}): WorkflowTool {
+export function workflow(
+  options: WorkflowToolOptions & { readonly mode: "execute" },
+): WorkflowExecuteTool;
+export function workflow(options?: WorkflowToolOptions & { readonly mode?: "task" }): WorkflowTool;
+export function workflow(options?: WorkflowToolOptions): WorkflowTool | WorkflowExecuteTool;
+export function workflow(options: WorkflowToolOptions = {}): WorkflowTool | WorkflowExecuteTool {
   const normalized = normalizeWorkflowToolOptions(options);
+  const modeGuidance =
+    normalized.mode === "execute"
+      ? "Runs in the foreground: the current turn waits until the program finishes and receives its result directly."
+      : "Runs in the background as a task: returns a receipt at once and delivers the result in a later task.result message.";
   const description = [
-    "Run an async JavaScript function body that invokes agents and returns one JSON-serializable value.",
+    "Run an async JavaScript function body that orchestrates agents, questions, timers, and progress updates, and returns one JSON-serializable value.",
+    modeGuidance,
     workflowProgramAgentContract,
+    workflowProgramCapabilitiesContract,
     'Supply the body directly, for example: return await ctx.agent("researcher", { message: "Describe the task" });',
-    "Await every ctx.agent call before returning.",
+    "Await every ctx.agent, ctx.ask, ctx.sleep, and ctx.progress call before returning.",
     `The program may invoke at most ${String(normalized.maxSubagents)} agents.`,
   ].join(" ");
-  return attachWorkflowProgramOptions(
-    frameworkTool(
-      defineWorkflowTool({
-        description,
-        inputSchema: workflowInputSchema,
-        task: runWorkflowProgramTask,
-      }),
-    ),
-    normalized,
-  );
+  const definition =
+    normalized.mode === "execute"
+      ? frameworkTool(
+          defineWorkflowTool({
+            description,
+            execute: runWorkflowProgramExecute,
+            inputSchema: workflowInputSchema,
+            toModelOutput: truncateProgramModelOutput,
+          }),
+        )
+      : frameworkTool(
+          defineWorkflowTool({
+            description,
+            inputSchema: workflowInputSchema,
+            task: runWorkflowProgramTask,
+            toModelOutput: truncateProgramModelOutput,
+          }),
+        );
+  return attachWorkflowProgramOptions(definition, {
+    maxSubagents: normalized.maxSubagents,
+  });
 }
 
 function normalizeWorkflowToolOptions(options: WorkflowToolOptions): {
   readonly maxSubagents: number;
+  readonly mode: "task" | "execute";
 } {
   if (typeof options !== "object" || options === null) {
     throw new TypeError("workflow options must be an object.");
   }
-  return parseWorkflowProgramOptions({
+  const mode = options.mode ?? "task";
+  if (mode !== "task" && mode !== "execute") {
+    throw new TypeError('workflow mode must be "task" or "execute".');
+  }
+  const program = parseWorkflowProgramOptions({
     maxSubagents: options.maxSubagents ?? DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS,
   });
+  return { ...program, mode };
 }
-import { frameworkTool } from "./framework-tool.js";
