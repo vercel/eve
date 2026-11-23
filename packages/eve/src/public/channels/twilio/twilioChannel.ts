@@ -101,6 +101,8 @@ export type TwilioInboundResult = {
   auth: SessionAuthContext | null;
   /** Overrides the workflow run title without changing the message sent to the model. */
   title?: string;
+  /** How this one message treats a running turn, replacing the channel's `turnPolicy` as a whole. */
+  turnPolicy?: TurnPolicy;
 } | null;
 
 /** Sync or async {@link TwilioInboundResult}. */
@@ -565,6 +567,7 @@ async function dispatchText(input: {
           to: message.to ?? null,
         },
         title: result.title,
+        ...(result.turnPolicy !== undefined && { turnPolicy: result.turnPolicy }),
       });
   } catch (error) {
     log.error("text delivery failed", { error });
@@ -639,6 +642,7 @@ async function dispatchVoiceTranscription(input: {
           to: transcription.to ?? null,
         },
         title: result.title,
+        ...(result.turnPolicy !== undefined && { turnPolicy: result.turnPolicy }),
       });
   } catch (error) {
     log.error("voice transcription delivery failed", { error });

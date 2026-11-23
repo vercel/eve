@@ -75,6 +75,7 @@
   "TranscriptData",
   "TranscriptMessage",
   "TranscriptOptions",
+  "TurnMode",
   "agentCallActivity",
   "conversationOf",
   "endsTurn",

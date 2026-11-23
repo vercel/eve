@@ -1,7 +1,7 @@
 import type { ChannelCors } from "#channel/cors.js";
 import type { MessageContent } from "#shared/message-content.js";
 
-import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import type { SessionAuthContext, TurnMode, TurnPolicy } from "#channel/types.js";
 import type { TrustedForwarders } from "#channel/forwarded-principal.js";
 import type { AuthFn, AuthResult } from "#public/channels/auth.js";
 import type { UploadPolicyInput } from "#public/channels/upload-policy.js";
@@ -63,6 +63,8 @@ export interface EveHandle {
   readonly request: Request;
   /** Existing runtime session id for follow-up requests. */
   readonly sessionId?: string;
+  /** The request's `turnPolicy` (`"steer"` or `"queue"`), or `undefined` when omitted. */
+  readonly turnPolicy?: TurnMode;
 }
 
 /** Pre-dispatch context passed to `eveChannel({ onMessage })`. */
@@ -95,6 +97,11 @@ export type EveMessageResult = {
   readonly history?: readonly SessionHistoryMessage[];
   /** Sets the title when creating a workflow or sending its first message after prewarming. */
   readonly title?: string;
+  /**
+   * How this one message treats a running turn, replacing the channel's and request's
+   * `turnPolicy` as a whole.
+   */
+  readonly turnPolicy?: TurnPolicy;
 };
 
 /** Synchronous or asynchronous `onMessage` result. */

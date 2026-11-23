@@ -21,6 +21,8 @@ import {
 } from "#execution/agent-sessions/start.js";
 import type { DynamicRemoteBinding } from "#definitions/remote.js";
 import { NonRetryableError } from "#shared/run-errors.js";
+import { turnSteeredMessage } from "#runtime/connections/identity-hold.js";
+import type { SessionAuth } from "#context/keys.js";
 import { isRemoteReplyHookToken } from "#execution/callback-hook-tokens.js";
 import { loadAgentRoster, type AgentRoster } from "#execution/agent-sessions/roster.js";
 import type { RemoteAgentCredentials } from "#runtime/subagents/dynamic-remote-agent-config.js";
@@ -48,6 +50,7 @@ export async function startRemoteSession(
     registry: registry.subagentsByNodeId,
     remoteAgentName: action.remoteAgentName,
   });
+  holdForwardedCaller(remote, auth.steeredBy, action.remoteAgentName);
   const { callbackBaseUrl } = access;
   const child = await startRemoteAgentSession({
     action,
@@ -78,6 +81,16 @@ export async function startRemoteSession(
   return child.deliveryId === undefined ? { address } : { address, deliveryId: child.deliveryId };
 }
 
+function holdForwardedCaller(
+  remote: ResolvedRuntimeRemoteAgentNode,
+  steeredBy: SessionAuth["steeredBy"],
+  agentName: string,
+): void {
+  if (remote.forwardPrincipal === true && (steeredBy ?? []).length > 0) {
+    throw new NonRetryableError(turnSteeredMessage(`remote agent "${agentName}"`));
+  }
+}
+
 export async function sendRemoteSessionMessage(
   input: AgentSessionMessage & RemoteAgentSession,
   idempotencyKey: string,
@@ -85,6 +98,7 @@ export async function sendRemoteSessionMessage(
   const { address, context } = input;
   const replyTo = remoteReplyToken(input.replyTo, address.name);
   const remote = await resolveSessionRemote(context, address);
+  holdForwardedCaller(remote, input.auth.steeredBy, address.name);
   return await continueRemoteAgentSession({
     auth: input.auth.current,
     callback: {

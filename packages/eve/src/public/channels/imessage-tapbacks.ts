@@ -1,4 +1,4 @@
-import type { SessionAuthContext } from "#channel/types.js";
+import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import { loadContext } from "#context/container.js";
 import type {
   Adapter,
@@ -65,6 +65,8 @@ export type IMessageTapbackResult = {
   readonly message?: string;
   /** Overrides the workflow run title without changing the message sent to the model. */
   readonly title?: string;
+  /** How this one tapback treats a running turn, replacing the channel's `turnPolicy` as a whole. */
+  readonly turnPolicy?: TurnPolicy;
 } | null;
 
 /** Input of the tool returned by `tapbackTool()`. */
@@ -176,6 +178,7 @@ export function dispatchIMessageTapbacks<TAdapters extends Record<string, Adapte
           : { messageId: tapback.messageId, optionId: result.answer },
       thread: event.thread.toJSON(),
       title: result.title,
+      ...(result.turnPolicy !== undefined && { turnPolicy: result.turnPolicy }),
     });
   });
 }
