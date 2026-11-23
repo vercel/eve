@@ -297,7 +297,7 @@ People save skills by asking, and each applies from their next message:
 | Scope      | Applies to                                 | Goes live                                     |
 | ---------- | ------------------------------------------ | --------------------------------------------- |
 | `personal` | The person who saved it, in every thread   | First version at once; later ones on approval |
-| `channel`  | Everyone in that Slack channel or group DM | After someone other than the author approves  |
+| `channel`  | Everyone in that Slack channel or group DM | After the author approves                     |
 
 Every save is a version. Later saves stay drafts until someone publishes them,
 and publishing an earlier version rolls back. Approvals appear as Slack

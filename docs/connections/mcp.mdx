@@ -156,11 +156,26 @@ Annotations are hints, not guarantees. Trust them only as far as you trust the s
 
 ## Control result size
 
-An MCP tool call returns the tool's `structuredContent` when the server sends it. Otherwise it returns the result's text, parsed as JSON when the tool declares no output schema. Image, audio, and resource content reaches the model as file parts, and a result with `isError: true` fails the call with its text. MCP connections have no per-result transform like an authored tool's [`toModelOutput`](/docs/tools#shape-what-the-model-sees-with-tomodeloutput).
+An MCP tool call returns the tool's `structuredContent` when the server sends it. Otherwise it returns the result's text, parsed as JSON when the tool declares no output schema. Image, audio, and resource content reaches the model as file parts, and a result with `isError: true` fails the call with its text. Set `toolCall.toModelOutput` to change what the model sees, as an authored tool's [`toModelOutput`](/docs/tools#shape-what-the-model-sees-with-tomodeloutput) does.
 
 When a remote tool returns more than the model needs, narrow the result at the server. Add a search or summary tool, or return a handle another call can use to fetch a smaller slice.
 
 If you don't control the server, replace that operation with an authored tool that calls an equivalent upstream API. The authored tool can store the full payload outside model context and return only the needed fields through `toModelOutput`. Hide the original with [`tools.block`](#tool-filters) so the model doesn't see duplicate tools.
+
+To keep a large result out of the model's context without changing the server, set `toolCall.toModelOutput` to [`offloadContent`](../tools#keep-large-results-out-of-context-with-offloadcontent). A result over 20,000 bytes goes to a file in the sandbox, and the model gets the file's path and shape:
+
+```ts title="agent/connections/issues.ts"
+import { defineMcpClientConnection } from "eve/connections";
+import { offloadContent } from "eve/tools";
+
+export default defineMcpClientConnection({
+  url: "https://mcp.example.com/",
+  description: "Issue tracker.",
+  toolCall: { toModelOutput: offloadContent() },
+});
+```
+
+`toolCall.toModelOutput` receives each tool's result and applies to every tool on the connection. [OpenAPI connections](./openapi) take the same field.
 
 ## Application-provided tool arguments
 

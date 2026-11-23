@@ -172,8 +172,8 @@ Classify the failure:
   it to the user as unrelated.
 - Flaky: the failure does not relate to the diff, and it shows timeouts,
   network, provider, or deploy errors. Most flakes come from `test-integration`
-  on either OS, `test-scenario`, and `e2e-vercel` or `e2e-postgres` fixture
-  deploys. `e2e-local` uses live models, so it can also vary between runs.
+  on either OS, `test-scenario`, and `e2e-vercel` fixture deploys. `e2e-local`
+  uses live models, so it can also vary between runs.
 
 Rerun only the failed jobs of a flaky failure. GitHub refuses a rerun while any
 job in that workflow run is still in progress, so wait for the run to finish:

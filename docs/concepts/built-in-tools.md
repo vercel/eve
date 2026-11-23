@@ -75,6 +75,8 @@ A wrapper that spreads `bash` keeps its `timeout` input. If the wrapper supplies
 
 The wrapper also keeps the plain-text view through the spread `toModelOutput`. If your `execute` returns a string, the model sees that text. Any other shape, including a `bash` result with extra fields, reaches the model as JSON; set your own [`toModelOutput`](../tools#shape-what-the-model-sees-with-tomodeloutput) to change that.
 
+To keep a large result out of the model's context, set [`offloadContent`](../tools#keep-large-results-out-of-context-with-offloadcontent) as the wrapper's `toModelOutput`. `bash` already saves long output under `/tmp/.eve/jobs/`, so it doesn't need it.
+
 Disable only `bash`:
 
 ```ts title="agent/tools/bash.ts"

@@ -56,8 +56,8 @@ jobs:
   # rest run once on the default model. The default model's job also runs the
   # fixture's other evals with the mock model, which keeps them on the local
   # world and its dev routes; a fixture without `real-model` evals gets one
-  # mock-only job. The world suites (e2e-vercel, e2e-postgres) cover the other
-  # workflow worlds with deterministic mock models.
+  # mock-only job. The world suites (e2e-vercel, and e2e:postgres on Vercel CI)
+  # cover the other workflow worlds with deterministic mock models.
   e2e:
     name: e2e-local (${{ matrix.name }}, ${{ matrix.model_name }})${{ matrix.shard && format(' [{0}]', matrix.shard) || '' }}
     runs-on: ubuntu-latest

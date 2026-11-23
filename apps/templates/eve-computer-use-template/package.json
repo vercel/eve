@@ -1,0 +1,45 @@
+{
+  "name": "eve-computer-use-template",
+  "version": "0.0.0",
+  "type": "module",
+  "imports": {
+    "#*": "./agent/*",
+    "#evals/*": "./evals/*"
+  },
+  "scripts": {
+    "build": "pnpm build:eve && pnpm build:web",
+    "build:eve": "eve build",
+    "build:web": "next build --turbopack apps/web",
+    "dev": "next dev apps/web -H 127.0.0.1",
+    "dev:eve": "eve dev",
+    "dev:all": "vercel dev --local --listen 127.0.0.1:3000",
+    "dev:web": "next dev apps/web -H 127.0.0.1",
+    "test": "node --test agent/lib/*.test.ts apps/web/lib/*.test.ts",
+    "typecheck": "tsc -p apps/web/tsconfig.json"
+  },
+  "dependencies": {
+    "@agent-browser/eve": "0.40.0",
+    "@ui-sdk/core": "0.1.0-beta.10",
+    "@ui-sdk/react": "0.1.0-beta.10",
+    "@upstash/redis": "1.38.2",
+    "@vercel/functions": "3.10.5",
+    "@vercel/sandbox": "3.9.0",
+    "ai": "7.0.137",
+    "eve": "1.2.0",
+    "geist": "1.7.2",
+    "next": "16.4.6",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "ws": "8.22.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "~26.2.0",
+    "@types/react": "~19.2.15",
+    "@types/react-dom": "~19.2.3",
+    "@types/ws": "^8.18.2",
+    "just-bash": "^3.6.0",
+    "typescript": "7.0.2"
+  },
+  "packageManager": "pnpm@12.21.0"
+}

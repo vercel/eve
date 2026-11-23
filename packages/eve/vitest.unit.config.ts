@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
-import { join, posix } from "node:path";
+import { createRequire } from "node:module";
+import { dirname, join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
@@ -86,6 +87,13 @@ export default defineConfig({
   resolve: {
     alias: [
       ...workspaceChannelPackages,
+      {
+        find: /^solid-js$/,
+        replacement: join(
+          dirname(createRequire(import.meta.url).resolve("solid-js/package.json")),
+          "dist/solid.js",
+        ),
+      },
       {
         find: /^eve\/instrumentation\/otel$/,
         replacement: new URL("./src/public/instrumentation/otel.ts", import.meta.url).pathname,

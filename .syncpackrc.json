@@ -19,6 +19,8 @@
       "label": "Extensions declare a broad eve peer range",
       "dependencies": ["eve"],
       "packages": [
+        "@eve/board",
+        "@eve/self-improvement",
         "@eve/recall",
         "eve-code",
         "@eve/agent-desktop",
