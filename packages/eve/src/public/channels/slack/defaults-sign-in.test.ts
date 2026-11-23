@@ -150,8 +150,9 @@ describe("showSlackSignIn", () => {
 
     await showSlackSignIn(signIn, channel);
 
-    const sent = directMessages(request);
+    const sent = directMessages(request, "D777");
     expect(sent).toHaveLength(1);
+    expect(sent[0]?.thread_ts).toBeUndefined();
     expect(JSON.stringify(sent[0]?.blocks)).not.toContain("This is for your request in");
   });
 
@@ -184,24 +185,83 @@ describe("showSlackSignIn", () => {
     expect(state.pendingAuthDirectMessages).toBeUndefined();
   });
 
-  it("keeps the public status and private prompt in a thread", async () => {
-    const { channel, request, thread } = context({ threadTs: "1700000000.000001" });
+  it("posts the public status in a thread and sends the prompt with Cancel to the person's DM", async () => {
+    const { channel, request, state, thread } = context({ threadTs: "1700000000.000001" });
 
     await showSlackSignIn(signIn, channel);
 
-    expect(directMessages(request)).toHaveLength(0);
     expect(thread.post).toHaveBeenCalledWith("Paused: waiting for <@U777> to connect GitHub…");
-    expect(thread.postEphemeral).toHaveBeenCalledOnce();
+    expect(thread.postEphemeral).not.toHaveBeenCalled();
+    const sent = directMessages(request);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.text).toContain(signIn.url);
+    const blocks = JSON.stringify(sent[0]?.blocks);
+    expect(blocks).toContain("This is for your request in <#C01>.");
+    expect(blocks).toContain("eve_sign_in:cancel");
+    expect(state.pendingAuthDirectMessages).toEqual({
+      int_0: { channelId: "D777", ts: "1700000000.000201" },
+    });
   });
 
-  it("keeps the public status and private prompt in a code channel", async () => {
+  it("posts the public status in a code channel and sends the prompt to the person's DM", async () => {
     const { channel, request, thread } = context({ codeChannel: true, threadTs: "" });
 
     await showSlackSignIn(signIn, channel);
 
-    expect(directMessages(request)).toHaveLength(0);
     expect(thread.post).toHaveBeenCalledWith("Paused: waiting for <@U777> to connect GitHub…");
+    expect(thread.postEphemeral).not.toHaveBeenCalled();
+    expect(directMessages(request)).toHaveLength(1);
+  });
+
+  it("falls back to the private prompt in a thread when the DM can't be sent", async () => {
+    const { channel, thread } = context({
+      reply: (operation, body) =>
+        operation === "chat.postMessage" && body.channel === "U777"
+          ? { error: "channel_not_found", ok: false }
+          : undefined,
+      threadTs: "1700000000.000001",
+    });
+
+    await showSlackSignIn(signIn, channel);
+
+    expect(thread.post).toHaveBeenCalledOnce();
     expect(thread.postEphemeral).toHaveBeenCalledOnce();
+  });
+
+  it("posts the prompt into a DM session's own thread, without a status", async () => {
+    const { channel, request, state, thread } = context({
+      channelId: "D777",
+      reply: (operation, body) =>
+        operation === "chat.postMessage" && body.channel === "D777"
+          ? { channel: "D777", ok: true, ts: "1700000000.000301" }
+          : undefined,
+      threadTs: "1700000000.000001",
+    });
+
+    await showSlackSignIn(signIn, channel);
+
+    expect(thread.post).not.toHaveBeenCalled();
+    expect(thread.postEphemeral).not.toHaveBeenCalled();
+    const sent = directMessages(request, "D777");
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.thread_ts).toBe("1700000000.000001");
+    expect(JSON.stringify(sent[0]?.blocks)).not.toContain("This is for your request in");
+    expect(state.pendingAuthDirectMessages).toEqual({
+      int_0: { channelId: "D777", ts: "1700000000.000301" },
+    });
+  });
+
+  it("edits the public status and the DM prompt when a threaded sign-in settles", async () => {
+    const { channel, request, state } = context({ threadTs: "1700000000.000001" });
+    await showSlackSignIn(signIn, channel);
+
+    await settleSlackSignIn(signIn, settled("int_0", "accepted"), channel);
+
+    expect(calls(request, "chat.update").map((body) => [body.channel, body.ts])).toEqual([
+      ["D777", "1700000000.000201"],
+      ["C01", "1700000000.000100"],
+    ]);
+    expect(state.pendingAuthDirectMessages).toEqual({});
   });
 });
 

@@ -29,6 +29,7 @@ import {
   showAnswerChange,
 } from "#public/channels/slack/request-cards.js";
 import type { SlackInteractionCardChain } from "#public/channels/slack/renderers.js";
+import type { SignInCancelTarget } from "#public/channels/slack/sign-in-cancel.js";
 import { refusedAnswerOf, requestBatchOf } from "#channel/interaction-prompts.js";
 import { signInOf, type SignIn } from "#channel/sign-in.js";
 import type { InteractionSettledData } from "#protocol/session-events/families/interaction.js";
@@ -217,14 +218,14 @@ function firstNonEmptyLine(text: string): string | undefined {
 export async function showSlackSignIn(event: SignIn, channel: SlackEventContext): Promise<void> {
   const { displayName } = event;
   const recipientUserId = slackUserIdForPrincipal(channel.state, event.principalId) ?? null;
-  const challengeUrl = event.url;
+  const deliverable = recipientUserId !== null && Boolean(event.url || event.instructions);
+  const { channelId, codeChannel, threadTs } = channel.slack;
+  const cancel = signInCancel(event, channel);
 
   if (
-    recipientUserId &&
-    (challengeUrl || event.instructions) &&
-    !channel.slack.codeChannel &&
-    channel.slack.threadTs === "" &&
-    (await showSlackSignInDirectMessage(event, recipientUserId, channel))
+    deliverable &&
+    (isSlackDirectMessageId(channelId) || (!codeChannel && threadTs === "")) &&
+    (await showSlackSignInDirectMessage(event, recipientUserId, channel, cancel))
   ) {
     return;
   }
@@ -248,49 +249,58 @@ export async function showSlackSignIn(event: SignIn, channel: SlackEventContext)
     }
   }
 
-  const { instructions } = event;
-  if (recipientUserId && (challengeUrl || instructions)) {
-    const target = slackSessionTargetOf(channel.slack);
-    const cancel =
-      event.responseId === undefined &&
-      target.channelId &&
-      (target.codeChannel || target.threadTs) &&
-      event.turnId
-        ? { ...target, turnId: event.turnId }
-        : undefined;
-    const prompt = {
-      cancel,
-      displayName,
-      instructions,
-      url: challengeUrl,
-      userCode: event.userCode,
-    };
-    try {
-      await channel.thread.postEphemeral(recipientUserId, {
-        blocks: buildAuthEphemeralBlocks(prompt),
-        text: buildAuthEphemeralText(prompt),
-      });
-    } catch (error) {
-      log.error("Slack auth ephemeral delivery failed", {
-        name: event.name,
-        error,
-      });
-    }
+  if (!deliverable) return;
+  if (
+    !isSlackDirectMessageId(channelId) &&
+    (await showSlackSignInDirectMessage(event, recipientUserId, channel, cancel))
+  ) {
+    return;
   }
+  const prompt = {
+    cancel,
+    displayName,
+    instructions: event.instructions,
+    url: event.url,
+    userCode: event.userCode,
+  };
+  try {
+    await channel.thread.postEphemeral(recipientUserId, {
+      blocks: buildAuthEphemeralBlocks(prompt),
+      text: buildAuthEphemeralText(prompt),
+    });
+  } catch (error) {
+    log.error("Slack auth ephemeral delivery failed", {
+      name: event.name,
+      error,
+    });
+  }
+}
+
+function signInCancel(event: SignIn, channel: SlackEventContext): SignInCancelTarget | undefined {
+  const target = slackSessionTargetOf(channel.slack);
+  return event.responseId === undefined &&
+    target.channelId &&
+    (target.codeChannel || target.threadTs) &&
+    event.turnId
+    ? { ...target, turnId: event.turnId }
+    : undefined;
 }
 
 async function showSlackSignInDirectMessage(
   event: SignIn,
   recipientUserId: string,
   channel: SlackEventContext,
+  cancel: SignInCancelTarget | undefined,
 ): Promise<boolean> {
   const pending = channel.state.pendingAuthDirectMessages ?? {};
   if (pending[event.interactionId] !== undefined) return true;
-  const { channelId } = channel.slack;
+  const { channelId, threadTs } = channel.slack;
+  const inDirectMessage = isSlackDirectMessageId(channelId);
   const prompt = {
+    cancel,
     displayName: event.displayName,
     instructions: event.instructions,
-    requestedInChannelId: channelId && !isSlackDirectMessageId(channelId) ? channelId : undefined,
+    requestedInChannelId: channelId && !inDirectMessage ? channelId : undefined,
     url: event.url,
     userCode: event.userCode,
   };
@@ -298,7 +308,8 @@ async function showSlackSignInDirectMessage(
   try {
     response = await channel.slack.request("chat.postMessage", {
       blocks: buildAuthEphemeralBlocks(prompt),
-      channel: recipientUserId,
+      channel: inDirectMessage ? channelId : recipientUserId,
+      ...(inDirectMessage && threadTs ? { thread_ts: threadTs } : {}),
       text: buildAuthEphemeralText(prompt),
       unfurl_links: false,
       unfurl_media: false,
@@ -326,8 +337,8 @@ async function showSlackSignInDirectMessage(
   return true;
 }
 
-function isSlackDirectMessageId(channelId: string): boolean {
-  return channelId.startsWith("D");
+function isSlackDirectMessageId(channelId: string | undefined): channelId is string {
+  return channelId?.startsWith("D") === true;
 }
 
 async function settleSlackSignInDirectMessage(
