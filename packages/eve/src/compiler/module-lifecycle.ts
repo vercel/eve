@@ -9,7 +9,6 @@ import {
   type CompiledBindingNamespaceLoader,
 } from "#compiler/load-binding-namespace.js";
 
-/** Owns namespace loading and lifecycle decisions for one node compilation. */
 export class NodeModuleEvaluationContext {
   #bindings: Readonly<Record<string, AgentModuleBinding>> = {};
   readonly #lifecycle = new NodeModuleLifecycle();
@@ -48,7 +47,6 @@ export class NodeModuleEvaluationContext {
   }
 }
 
-/** Marks authored config namespaces whose values must be resolved by the runtime. */
 export function markConfigRuntimeEntries(
   config: CompiledAgentDefinition,
   evaluation: NodeModuleEvaluationContext,
@@ -57,17 +55,16 @@ export function markConfigRuntimeEntries(
     config.dynamicModel,
     config.model?.source,
     config.compaction?.model?.source,
-    // The runtime loads `limits.sessionUsage` and `compaction.compact` from the agent config module.
     config.limits?.sessionUsage === true || config.compaction?.compact === true
       ? config.source
       : undefined,
+    config.approval === true ? config.source : undefined,
   ];
   for (const source of sources) {
     if (source !== undefined) evaluation.requireRuntimeEntry(source.sourceId);
   }
 }
 
-/** Tracks one selected node's module namespace usage across compilation and runtime linking. */
 class NodeModuleLifecycle {
   readonly #compileLoads = new Set<string>();
   readonly #runtimeRoots = new Set<string>();
@@ -105,28 +102,10 @@ function collectRuntimeEntryClosure(
   bindings: Readonly<Record<string, AgentModuleBinding>>,
   roots: ReadonlySet<string>,
 ): Set<string> {
-  const runtimeEntries = new Set<string>();
-  const visiting = new Set<string>();
-
-  const visit = (sourceId: string): void => {
-    if (runtimeEntries.has(sourceId)) return;
-    if (visiting.has(sourceId)) {
-      throw new Error(`Compiled module dependency cycle includes "${sourceId}".`);
-    }
-    const binding = bindings[sourceId];
-    if (binding === undefined) {
+  for (const sourceId of roots) {
+    if (bindings[sourceId] === undefined) {
       throw new Error(`Runtime module entry "${sourceId}" has no selected binding.`);
     }
-    visiting.add(sourceId);
-    if (binding.backing.kind === "programmatic") {
-      for (const dependencySourceId of Object.values(binding.backing.dependencies ?? {})) {
-        visit(dependencySourceId);
-      }
-    }
-    visiting.delete(sourceId);
-    runtimeEntries.add(sourceId);
-  };
-
-  for (const sourceId of roots) visit(sourceId);
-  return runtimeEntries;
+  }
+  return new Set(roots);
 }

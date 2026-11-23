@@ -1,6 +1,6 @@
 {
   "name": "eve",
-  "version": "0.86.1",
+  "version": "1.4.0",
   "private": false,
   "description": "Filesystem-first framework for durable backend AI agents that run anywhere.",
   "keywords": [
@@ -87,6 +87,11 @@
       "import": "./dist/src/svelte/index.js",
       "default": "./dist/src/svelte/index.js"
     },
+    "./solid": {
+      "types": "./dist/src/solid/index.d.ts",
+      "import": "./dist/src/solid/index.js",
+      "default": "./dist/src/solid/index.js"
+    },
     "./next": {
       "types": "./dist/src/public/next/index.d.ts",
       "import": "./dist/src/public/next/index.js",
@@ -112,6 +117,11 @@
       "types": "./dist/src/public/tanstack/index.d.ts",
       "import": "./dist/src/public/tanstack/index.js",
       "default": "./dist/src/public/tanstack/index.js"
+    },
+    "./vite": {
+      "types": "./dist/src/public/vite/index.d.ts",
+      "import": "./dist/src/public/vite/index.js",
+      "default": "./dist/src/public/vite/index.js"
     },
     "./tools/approval": {
       "types": "./dist/src/public/tools/approval/index.d.ts",
@@ -177,6 +187,11 @@
       "types": "./dist/src/public/tools/write-file.d.ts",
       "import": "./dist/src/public/tools/write-file.js",
       "default": "./dist/src/public/tools/write-file.js"
+    },
+    "./tools/edit_file": {
+      "types": "./dist/src/public/tools/edit-file.d.ts",
+      "import": "./dist/src/public/tools/edit-file.js",
+      "default": "./dist/src/public/tools/edit-file.js"
     },
     "./tools/web_fetch": {
       "types": "./dist/src/public/tools/web-fetch.d.ts",
@@ -351,12 +366,6 @@
       "import": "./dist/src/extensions/code/extension/extension.js",
       "default": "./dist/src/extensions/code/extension/extension.js"
     },
-    "./extensions/code/tools": {
-      "eve-source": "./dist/src/extensions/code/tools.js",
-      "types": "./dist/src/extensions/code/tools.d.ts",
-      "import": "./dist/src/extensions/code/tools.js",
-      "default": "./dist/src/extensions/code/tools.js"
-    },
     "./extensions/code/sandbox": {
       "eve-source": "./dist/src/extensions/code/sandbox.js",
       "types": "./dist/src/extensions/code/sandbox.d.ts",
@@ -380,6 +389,24 @@
       "types": "./dist/src/extensions/git/extension/lib/sandbox.d.ts",
       "import": "./dist/src/extensions/git/extension/lib/sandbox.js",
       "default": "./dist/src/extensions/git/extension/lib/sandbox.js"
+    },
+    "./experimental/extensions/custom-skills": {
+      "eve-source": "./dist/src/extensions/custom-skills/extension/extension.js",
+      "types": "./dist/src/extensions/custom-skills/extension/extension.d.ts",
+      "import": "./dist/src/extensions/custom-skills/extension/extension.js",
+      "default": "./dist/src/extensions/custom-skills/extension/extension.js"
+    },
+    "./experimental/extensions/custom-skills/policies": {
+      "eve-source": "./dist/src/extensions/custom-skills/extension/lib/public/policies.js",
+      "types": "./dist/src/extensions/custom-skills/extension/lib/public/policies.d.ts",
+      "import": "./dist/src/extensions/custom-skills/extension/lib/public/policies.js",
+      "default": "./dist/src/extensions/custom-skills/extension/lib/public/policies.js"
+    },
+    "./experimental/extensions/custom-skills/repository": {
+      "eve-source": "./dist/src/extensions/custom-skills/extension/lib/public/repository.js",
+      "types": "./dist/src/extensions/custom-skills/extension/lib/public/repository.d.ts",
+      "import": "./dist/src/extensions/custom-skills/extension/lib/public/repository.js",
+      "default": "./dist/src/extensions/custom-skills/extension/lib/public/repository.js"
     },
     "./extension": {
       "types": "./dist/src/public/extension/index.d.ts",
@@ -462,6 +489,11 @@
       "import": "./dist/src/public/channels/mcp.js",
       "default": "./dist/src/public/channels/mcp.js"
     },
+    "./channels/a2a": {
+      "types": "./dist/src/public/channels/a2a.d.ts",
+      "import": "./dist/src/public/channels/a2a.js",
+      "default": "./dist/src/public/channels/a2a.js"
+    },
     "./channels/slack": {
       "types": "./dist/src/public/channels/slack/index.d.ts",
       "import": "./dist/src/public/channels/slack/index.js",
@@ -531,23 +563,11 @@
       "import": "./dist/src/internal/scaffold.js",
       "default": "./dist/src/internal/scaffold.js"
     },
-    "./internal/code/prwatch": {
-      "eve-source": "./dist/src/extensions/code/extension/lib/prwatch.js",
-      "types": "./dist/src/extensions/code/extension/lib/prwatch.d.ts",
-      "import": "./dist/src/extensions/code/extension/lib/prwatch.js",
-      "default": "./dist/src/extensions/code/extension/lib/prwatch.js"
-    },
-    "./internal/grep": {
-      "eve-source": "./dist/src/internal/grep.js",
-      "types": "./dist/src/internal/grep.d.ts",
-      "import": "./dist/src/internal/grep.js",
-      "default": "./dist/src/internal/grep.js"
-    },
-    "./internal/workspace": {
-      "eve-source": "./dist/src/internal/workspace.js",
-      "types": "./dist/src/internal/workspace.d.ts",
-      "import": "./dist/src/internal/workspace.js",
-      "default": "./dist/src/internal/workspace.js"
+    "./internal/channels": {
+      "eve-source": "./src/internal/channels.ts",
+      "types": "./dist/src/internal/channels.d.ts",
+      "import": "./dist/src/internal/channels.js",
+      "default": "./dist/src/internal/channels.js"
     },
     "./internal/git": {
       "eve-source": "./dist/src/internal/git.js",
@@ -604,30 +624,32 @@
   },
   "scripts": {
     "clean": "node -e \"fs.rmSync('dist', { recursive: true, force: true })\"",
-    "build": "pnpm run check:bin-runtime-dependencies && node ./scripts/build-js.mjs && node ./scripts/copy-docs.mjs && node ./scripts/stamp-version-tokens.mjs && node ../../scripts/copy-package-license.mjs . && node ../../scripts/stage-package.mjs .",
+    "build": "pnpm run check:bin-runtime-dependencies && node ./scripts/build-js.mjs && node ./scripts/copy-docs.mjs && node ./scripts/stamp-version-tokens.mjs && node ../../scripts/copy-package-license.mjs . && node ../../scripts/stage-package.mjs . && node ./scripts/prune-declarations.mjs .package",
     "build:compiled": "node ./scripts/vendor-compiled.mjs",
     "build:js": "node ./scripts/build-js.mjs",
     "build:types": "tsc -p tsconfig.build.json",
     "check:bin-runtime-dependencies": "node ./scripts/check-bin-runtime-dependencies.mjs",
     "dev": "pnpm run build:compiled && node ./scripts/copy-runtime-assets.mjs && tsc -p tsconfig.dev.json --watch --preserveWatchOutput",
-    "prepack": "pnpm --workspace-root build:eve && node ../../scripts/stage-package.mjs .",
+    "prepack": "pnpm --workspace-root build:eve && node ../../scripts/stage-package.mjs . && node ./scripts/prune-declarations.mjs .package",
     "test:webchat": "vitest run --config vitest.browser.config.ts",
-    "test:framework-fixtures": "vitest run --config vitest.framework-fixtures.config.ts",
+    "test:build": "vitest run --config vitest.build.config.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:public-types": "vitest run --config vitest.public-types.config.ts",
     "test:scenario": "vitest run --config vitest.scenario.config.ts",
     "test:unit": "vitest run --config vitest.unit.config.ts",
     "test:watch": "vitest --config vitest.unit.config.ts",
-    "typecheck": "pnpm run check:web-template && tsc -p tsconfig.json --noEmit",
+    "typecheck": "pnpm run check:web-template && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.channel-packages.json",
     "generate:web-template": "node src/setup/build.ts --write",
     "check:web-template": "node src/setup/build.ts --check",
     "test:tui": "tsc -p tsconfig.tui.json --noEmit && node test/tui-client/run-all.mjs"
   },
   "dependencies": {
-    "nitro": "3.0.260903-beta",
-    "undici": "8.10.2"
+    "nitro": "3.0.261103-rc",
+    "rolldown": "1.3.2",
+    "undici": "8.12.4"
   },
   "devDependencies": {
-    "@agentclientprotocol/sdk": "1.3.0",
+    "@agentclientprotocol/sdk": "2.6.0",
     "@ai-sdk/anthropic": "catalog:",
     "@ai-sdk/google": "catalog:",
     "@ai-sdk/mcp": "catalog:",
@@ -635,70 +657,72 @@
     "@ai-sdk/otel": "catalog:",
     "@ai-sdk/provider": "catalog:",
     "@ai-sdk/provider-utils": "catalog:",
-    "@cfworker/json-schema": "4.1.1",
-    "@chat-adapter/slack": "4.42.0",
-    "@chat-adapter/state-memory": "4.42.0",
-    "@chat-adapter/twilio": "4.42.0",
-    "@clack/core": "1.3.1",
+    "@cfworker/json-schema": "4.1.6",
+    "@chat-adapter/slack": "4.44.0",
+    "@chat-adapter/state-memory": "4.44.0",
+    "@chat-adapter/twilio": "4.44.0",
+    "@clack/core": "1.6.0",
     "@eve/catalog": "workspace:*",
     "@linqapp/chat-sdk-adapter": "^0.5.1",
-    "@modelcontextprotocol/server": "2.0.0",
-    "@nuxt/kit": "^4.0.0",
-    "@nuxt/schema": "^4.0.0",
+    "@modelcontextprotocol/server": "2.4.0",
+    "@nuxt/kit": "^4.6.4",
+    "@nuxt/schema": "^4.6.4",
     "@opentelemetry/context-async-hooks": "catalog:",
     "@opentelemetry/core": "catalog:",
-    "@opentelemetry/otlp-transformer": "0.214.0",
+    "@opentelemetry/otlp-transformer": "0.223.1",
     "@opentelemetry/sdk-trace-base": "catalog:",
     "@photon-ai/chat-adapter-imessage": "3.2.0",
-    "@shadcn/registry": "0.1.3",
-    "@slack/web-api": "7.19.0",
+    "@shadcn/registry": "0.2.1",
+    "@slack/web-api": "8.3.0",
     "@standard-schema/spec": "1.1.0",
     "@sveltejs/kit": "^2.0.0",
     "@types/json-schema": "7.0.15",
     "@types/react": "catalog:",
-    "@types/react-test-renderer": "19.1.0",
+    "@types/react-test-renderer": "19.3.1",
     "@vercel/agent-runs": "workspace:*",
-    "@vercel/blob": "2.8.0",
+    "@vercel/blob": "2.9.0",
     "@vercel/connect": "catalog:",
-    "@vercel/detect-agent": "1.2.3",
-    "@vercel/oidc": "3.8.0",
+    "@vercel/detect-agent": "1.2.7",
+    "@vercel/oidc": "4.0.9",
     "@vercel/otel": "catalog:",
-    "@vercel/queue": "0.5.1",
+    "@vercel/queue": "0.11.0",
     "@vercel/sandbox": "catalog:",
-    "@vercel/schedules": "0.0.0-alpha.19",
-    "@vercel/sdk": "1.28.8",
-    "@workflow/core": "5.2.3",
-    "@workflow/errors": "5.0.5",
-    "@workflow/serde": "5.0.0",
-    "@workflow/world": "5.0.5",
-    "@workflow/world-local": "5.1.2",
-    "@workflow/world-vercel": "5.2.3",
+    "@vercel/schedules": "0.0.3",
+    "@vercel/sdk": "1.28.63",
+    "@workflow/core": "5.7.0",
+    "@workflow/errors": "5.1.4",
+    "@workflow/serde": "5.0.1",
+    "@workflow/world": "5.3.0",
+    "@workflow/world-local": "5.5.0",
+    "@workflow/world-vercel": "5.7.0",
     "ai": "catalog:",
-    "chat": "4.42.0",
-    "chokidar": "5.0.0",
-    "commander": "14.0.3",
-    "dd-trace": "6.13.0",
-    "emulate": "0.6.0",
-    "env-runner": "0.1.16",
-    "eventsource-parser": "3.1.0",
-    "jose": "6.2.3",
-    "js-yaml": "4.3.2",
+    "chat": "4.44.0",
+    "chokidar": "6.0.0",
+    "commander": "15.1.0",
+    "croner": "11.0.0",
+    "dd-trace": "6.24.0",
+    "emulate": "0.13.1",
+    "env-runner": "0.3.11",
+    "eventsource-parser": "4.1.3",
+    "immer": "11.2.10",
+    "jose": "6.2.17",
+    "js-yaml": "5.5.0",
     "jsonc-parser": "3.3.1",
     "just-bash": "3.6.0",
     "just-secrets": "0.0.2",
     "marked": "catalog:",
     "next": "catalog:",
     "picocolors": "catalog:",
-    "playwright-core": "1.63.0",
+    "playwright-core": "1.65.0",
     "react": "catalog:",
-    "react-test-renderer": "19.2.6",
-    "run": "2.1.8",
-    "semver": "7.8.4",
-    "svelte": "^5.0.0",
-    "turndown": "7.2.4",
-    "vite": "^8.3.1",
+    "react-test-renderer": "19.3.1",
+    "run": "2.1.12",
+    "semver": "7.8.6",
+    "solid-js": "2.0.1",
+    "svelte": "^5.57.3",
+    "vite": "^8.3.8",
     "vitest": "catalog:",
-    "vue": "^3.5.0",
+    "vue": "^3.5.45",
     "zod": "catalog:",
     "zod-validation-error": "5.0.0"
   },
@@ -707,16 +731,16 @@
     "@nuxt/kit": "^4.0.0",
     "@nuxt/schema": "^4.0.0",
     "@opentelemetry/api": "^1.0.0",
-    "@vercel/connect": "^2.5.2",
     "ai": "catalog:",
     "braintrust": "^3.0.0",
     "chat": "^4.42.0",
-    "dd-trace": "^6.13.0",
+    "dd-trace": "^6.20.1",
     "just-bash": "^3.6.0",
     "next": "^16.0.0",
     "react": "^19.0.0",
+    "solid-js": "^2.0.0",
     "svelte": "^5.0.0",
-    "vite": "^8.3.1",
+    "vite": "^8.3.3",
     "vue": "^3.5.0"
   },
   "peerDependenciesMeta": {
@@ -726,13 +750,13 @@
     "@nuxt/schema": {
       "optional": true
     },
-    "@vercel/connect": {
-      "optional": true
-    },
     "next": {
       "optional": true
     },
     "react": {
+      "optional": true
+    },
+    "solid-js": {
       "optional": true
     },
     "svelte": {
@@ -773,6 +797,9 @@
       },
       "./extensions/git": {
         "dist": "./dist/src/extensions/git/extension"
+      },
+      "./experimental/extensions/custom-skills": {
+        "dist": "./dist/src/extensions/custom-skills/extension"
       },
       "./extensions/computer-use": {
         "dist": "./dist/src/computer-use/extension"

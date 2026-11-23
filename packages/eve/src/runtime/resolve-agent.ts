@@ -9,12 +9,11 @@ import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { resolveChannelDefinition } from "#runtime/resolve-channel.js";
 
 import { resolveConnectionDefinition } from "#runtime/resolve-connection.js";
-import { resolveDynamicDefinition } from "#runtime/resolve-dynamic.js";
-import { resolveHookDefinition } from "#runtime/resolve-hook.js";
+import { resolveDefinition, resolveScheduleCollection } from "#runtime/resolve-definition.js";
+import { stripLogicalPathExtension } from "#discover/filesystem.js";
 import { createResolvedModuleSourceRef } from "#runtime/resolve-helpers.js";
 import { resolveSandboxDefinition } from "#runtime/resolve-sandbox.js";
 import { resolveToolDefinition } from "#runtime/resolve-tool.js";
-import { resolveMemoryDefinition } from "#runtime/resolve-memory.js";
 import { normalizeAgentDefinition } from "#internal/authored-definition/core.js";
 import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
 import type {
@@ -24,19 +23,14 @@ import type {
   ResolvedInstructionsDefinition,
 } from "#runtime/types.js";
 import type { AgentToolExposure, SessionUsageLimit } from "#shared/agent-definition.js";
+import type { ApprovalPolicy } from "#approval/definition.js";
 
-/**
- * Input for resolving one compiled authored agent into a runtime-owned model.
- */
 interface ResolveAgentInput {
   manifest: CompiledAgentNodeManifest | CompiledAgentResources;
   moduleMap: CompiledModuleMap;
   nodeId?: string;
 }
 
-/**
- * Resolves the core authored agent path from compiled artifacts.
- */
 export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAgent> {
   const resolvedSkills = input.manifest.skills.map((skill) => ({
     ...skill,
@@ -63,43 +57,20 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
       ),
     ),
   );
-  const scope = { moduleMap: input.moduleMap, nodeId: input.nodeId };
-  const resolvedDynamicConnectionResolvers = await Promise.all(
-    input.manifest.dynamicConnections.map((definition) =>
-      resolveDynamicDefinition(definition, { ...scope, kindLabel: "dynamic connection" }),
+  const scope = {
+    moduleMap: input.moduleMap,
+    nodeId: input.nodeId,
+    toolFiles: toolFileNames(input.manifest),
+  };
+  const definitions = await Promise.all([
+    ...input.manifest.definitions.map((definition) => resolveDefinition(definition, scope)),
+    ...input.manifest.scheduleCollections.map((collection) =>
+      resolveScheduleCollection(collection, scope),
     ),
-  );
-  const resolvedDynamicInstructionsResolvers = await Promise.all(
-    (input.manifest.dynamicInstructions ?? []).map((def) =>
-      resolveDynamicDefinition(def, { ...scope, kindLabel: "dynamic instructions" }),
-    ),
-  );
-  const resolvedDynamicSkillResolvers = await Promise.all(
-    (input.manifest.dynamicSkills ?? []).map((def) =>
-      resolveDynamicDefinition(def, { ...scope, kindLabel: "dynamic skill" }),
-    ),
-  );
-  const resolvedDynamicToolResolvers = await Promise.all(
-    input.manifest.dynamicTools.map((def) =>
-      resolveDynamicDefinition(def, { ...scope, kindLabel: "dynamic tool" }),
-    ),
-  );
-  // Hook resolution preserves the manifest's lexicographic-on-slug order
-  // produced by the discovery walker; the per-node registry inherits
-  // that order.
-  const resolvedHooks = await Promise.all(
-    input.manifest.hooks.map((hookDefinition) =>
-      resolveHookDefinition(hookDefinition, input.moduleMap, input.nodeId),
-    ),
-  );
+  ]);
   const resolvedConnections = await Promise.all(
     input.manifest.connections.map((connectionDefinition) =>
       resolveConnectionDefinition(connectionDefinition, input.moduleMap, input.nodeId),
-    ),
-  );
-  const resolvedMemories = await Promise.all(
-    input.manifest.memories.map((definition) =>
-      resolveMemoryDefinition(definition, input.moduleMap, input.nodeId),
     ),
   );
   const authoredSandbox = await resolveSandboxDefinition(
@@ -114,18 +85,13 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
   const resolvedAgent: ResolvedAgent = {
     channels: resolvedChannels,
     connections: resolvedConnections,
-    dynamicConnectionResolvers: resolvedDynamicConnectionResolvers,
-    dynamicInstructionsResolvers: resolvedDynamicInstructionsResolvers,
-    dynamicSkillResolvers: resolvedDynamicSkillResolvers,
-    dynamicToolResolvers: resolvedDynamicToolResolvers,
-    hooks: resolvedHooks,
+    definitions,
     instructions,
     metadata: {
       agentRoot: input.manifest.agentRoot,
       appRoot: input.manifest.appRoot,
       diagnosticsSummary: input.manifest.diagnosticsSummary,
     },
-    memories: resolvedMemories,
     sandbox: authoredSandbox,
     workspaceResourceRoot,
     skills: resolvedSkills,
@@ -138,46 +104,64 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
         ...resolvedAgent,
         config: createResolvedAgentConfig(
           input.manifest,
-          await loadAuthoredFunctions(input.manifest, input.moduleMap, input.nodeId),
+          await loadAgentConfigFunctions(input.manifest, input.moduleMap, input.nodeId),
         ),
       }
     : resolvedAgent;
 }
 
-/** The functions an agent config authors, which the manifest can only mark. */
-interface AuthoredFunctions {
+interface AgentConfigFunctions {
+  readonly approval?: ApprovalPolicy;
   readonly compact?: CompactionStrategy;
   readonly sessionUsage?: SessionUsageLimit | false;
 }
 
-/** Loads `limits.sessionUsage` and `compaction.compact` from the agent config module. */
-async function loadAuthoredFunctions(
+async function loadAgentConfigFunctions(
   manifest: CompiledAgentNodeManifest,
   moduleMap: CompiledModuleMap,
   nodeId: string | undefined,
-): Promise<AuthoredFunctions> {
-  const { config } = manifest;
-  const sessionUsage = config.limits?.sessionUsage === false ? false : undefined;
-  const source = config.source;
-  if (
-    source === undefined ||
-    (config.limits?.sessionUsage !== true && config.compaction?.compact !== true)
-  ) {
-    return { sessionUsage };
+): Promise<AgentConfigFunctions> {
+  const sessionUsage = manifest.config.limits?.sessionUsage;
+  const approval = manifest.config.approval === true;
+  const source = manifest.config.source;
+  if (approval && source === undefined) {
+    throw new Error(
+      'The compiled agent marks an "approval" policy but has no agent config module.',
+    );
   }
-  const definition = normalizeAgentDefinition(
-    await loadResolvedModuleExport({
-      definition: source,
-      kindLabel: "agent config",
-      moduleMap,
-      nodeId,
-    }),
+  const compact = manifest.config.compaction?.compact === true;
+  if (compact && source === undefined) {
+    throw new Error(
+      'The compiled agent marks a "compaction.compact" strategy but has no agent config module.',
+    );
+  }
+  if ((sessionUsage !== true && !approval && !compact) || source === undefined) {
+    return sessionUsage === false ? { sessionUsage: false } : {};
+  }
+  const definition = await loadResolvedModuleExport({
+    definition: source,
+    kindLabel: "agent config",
+    moduleMap,
+    nodeId,
+  });
+  const authored = normalizeAgentDefinition(
+    definition,
     `Expected the authored agent config export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`,
   );
+  if (approval && authored.approval === undefined) {
+    throw new Error(
+      `The compiled agent marks an "approval" policy, but "${source.logicalPath}" no longer exports one. Rebuild the agent.`,
+    );
+  }
+  if (compact && authored.compaction?.compact === undefined) {
+    throw new Error(
+      `The compiled agent marks a "compaction.compact" strategy, but "${source.logicalPath}" no longer exports one. Rebuild the agent.`,
+    );
+  }
   return {
-    compact: config.compaction?.compact === true ? definition.compaction?.compact : undefined,
-    sessionUsage:
-      config.limits?.sessionUsage === true ? definition.limits?.sessionUsage : sessionUsage,
+    ...(approval && { approval: authored.approval }),
+    ...(compact && { compact: authored.compaction?.compact }),
+    sessionUsage: sessionUsage === false ? false : authored.limits?.sessionUsage,
   };
 }
 
@@ -221,9 +205,10 @@ function requireCompiledSourceOwner(
 
 function createResolvedAgentConfig(
   manifest: CompiledAgentNodeManifest,
-  { compact, sessionUsage }: AuthoredFunctions,
+  { approval, compact, sessionUsage }: AgentConfigFunctions,
 ): NonNullable<ResolvedAgent["config"]> {
   const config: {
+    approval?: ApprovalPolicy;
     compaction?: NonNullable<ResolvedAgent["config"]>["compaction"];
     defaultTools?: boolean;
     description?: string;
@@ -239,6 +224,9 @@ function createResolvedAgentConfig(
 
   if (manifest.config.defaultTools !== undefined) {
     config.defaultTools = manifest.config.defaultTools;
+  }
+  if (approval !== undefined) {
+    config.approval = approval;
   }
   if (manifest.config.description !== undefined) {
     config.description = manifest.config.description;
@@ -325,10 +313,13 @@ function createResolvedAgentConfig(
         ? {
             id: model.id,
             contextWindowTokens: model.contextWindowTokens,
+            promptCache: model.promptCache,
+            maxOutputTokens: model.maxOutputTokens,
             providerOptions: model.providerOptions,
           }
         : {
             contextWindowTokens: model.contextWindowTokens,
+            maxOutputTokens: model.maxOutputTokens,
             id: model.id,
             promptCache: model.promptCache,
             providerOptions: model.providerOptions,
@@ -340,4 +331,33 @@ function createResolvedAgentConfig(
             },
           },
   };
+}
+
+function toolFileNames(
+  manifest: CompiledAgentNodeManifest | CompiledAgentResources,
+): ReadonlySet<string> {
+  return new Set([
+    ...manifest.tools.flatMap(({ name, sourceId }) =>
+      manifest.bindings[sourceId]?.owner.kind === "framework" ? [] : [name],
+    ),
+    ...manifest.definitions.flatMap((definition) =>
+      definition.kind === "tool" && definition.extensionNamespace === undefined
+        ? [definition.slug]
+        : [],
+    ),
+    ...disabledToolNames(manifest),
+  ]);
+}
+
+export function disabledToolNames(
+  manifest: Pick<CompiledAgentResources, "sourceComposition">,
+): readonly string[] {
+  return manifest.sourceComposition.entries.flatMap((entry) => {
+    if (entry.kind !== "disabled" || !entry.source.logicalPath.startsWith("tools/")) return [];
+    return [
+      stripLogicalPathExtension(entry.source.logicalPath)
+        .replace(/^tools\//, "")
+        .replaceAll("/", "-"),
+    ];
+  });
 }

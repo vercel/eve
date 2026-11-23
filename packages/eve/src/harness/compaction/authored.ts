@@ -1,197 +1,195 @@
-import type { ModelMessage } from "ai";
+import type { ModelMessage, SystemModelMessage, ToolSet } from "ai";
 
 import {
   checkpointHead,
-  compactMessages,
-  type CompactionSummarizer,
+  COMPACTION_PROMPT_OVERHEAD_TOKENS,
   extractPreviousCheckpoint,
 } from "#harness/compaction/engine.js";
-import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
-import {
-  COMPACTION_CHECKPOINT_MARKER,
-  createCompactionPrompt,
-} from "#harness/compaction/prompt.js";
-import type { HistoryRewrite } from "#harness/compaction/step.js";
-import {
-  createFrameworkUserMessage,
-  type HarnessModelMessage,
-  isUserModelMessage,
-  validateHarnessModelMessages,
-} from "#harness/messages.js";
+import { createCompactionPrompt } from "#harness/compaction/prompt.js";
+import { CompactionOverflowError } from "#harness/compaction/overflow-error.js";
+import { isContextOverflowError } from "#harness/model-call/errors.js";
+import { createFrameworkUserMessage, type HarnessModelMessage } from "#harness/messages.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import type { PublicAgentStaticModelDefinition } from "#shared/agent-definition.js";
-import type { CompactionContext, CompactionStrategy } from "#shared/compaction-strategy.js";
-import type { HistoryMessage } from "#shared/history-message.js";
+import type {
+  CompactionContext,
+  CompactionEvent,
+  CompactionReason,
+  CompactionStrategy,
+  ResolvedCompactionStrategy,
+} from "#shared/compaction-strategy.js";
+import type { StoredHistoryMessage } from "#shared/history-message.js";
 
-/** Where `fixedTail()` finds eve's default rewrite on the context eve passes a strategy. */
-export const FIXED_TAIL = Symbol.for("eve.compaction.fixedTail");
-
-/** `fixedTail()`'s options. */
+/** What `fixedTail()` can change: the model that writes its summary, and the instructions added to the checkpoint prompt. */
 export interface FixedTailOptions {
-  /** The model that writes the summary. Defaults to the turn model. */
+  /** The model that writes the summary, when it isn't the turn's model. */
   readonly model?: PublicAgentStaticModelDefinition;
-  /** Added to eve's summary prompt, such as what the summary must keep word for word. */
+  /** Added to eve's checkpoint prompt, such as what the summary must keep word for word. */
   readonly instructions?: string;
 }
 
 type FixedTail = (
-  history: readonly HistoryMessage[],
+  history: readonly StoredHistoryMessage[],
   options: FixedTailOptions,
-) => Promise<HistoryMessage[]>;
+) => Promise<StoredHistoryMessage[]>;
 
-/** An agent's `compaction.compact` as eve runs it: under the change, checked before it applies. */
-export function authoredRewrite(strategy: CompactionStrategy): HistoryRewrite {
-  return async (messages, rewrite) => {
-    const reason = rewrite.force ? "manual" : "automatic";
-    const summarizerFor = (options?: {
-      readonly instructions?: string;
-      readonly model?: PublicAgentStaticModelDefinition;
-    }): CompactionSummarizer => {
-      const summarize = rewrite.summarizeWith(options?.model);
-      const { instructions } = options ?? {};
-      return instructions === undefined
-        ? summarize
-        : (prompt) => summarize({ ...prompt, system: `${prompt.system}\n\n${instructions}` });
-    };
+const fixedTails = new WeakMap<CompactionContext, FixedTail>();
+
+export function resolveStrategy(
+  strategy: CompactionStrategy | undefined,
+): ResolvedCompactionStrategy | undefined {
+  if (strategy === undefined) return undefined;
+  if (typeof strategy === "function") {
+    return { compact: strategy, when: { "model.requested": true } };
+  }
+  return { compact: strategy.compact, when: strategy.when ?? { "model.requested": true } };
+}
+
+export function triggersAt(
+  strategy: ResolvedCompactionStrategy | undefined,
+  event: CompactionEvent,
+): boolean {
+  return strategy !== undefined && strategy.when[event] !== undefined;
+}
+
+export interface RequestPrefix {
+  readonly instructions: RequestInstructions;
+  readonly tools?: ToolSet;
+}
+
+export type RequestInstructions = string | SystemModelMessage | SystemModelMessage[] | undefined;
+
+export type SummaryCall = (request: {
+  readonly messages: ModelMessage[];
+  readonly system: RequestInstructions;
+}) => Promise<string>;
+
+export type Summarize = (
+  history: readonly HarnessModelMessage[],
+  options: {
+    readonly model?: PublicAgentStaticModelDefinition;
+    readonly instructions?: string;
+  },
+) => Promise<HarnessModelMessage[]>;
+
+export interface StrategyInput {
+  readonly history: readonly HarnessModelMessage[];
+  readonly inputTokens: number;
+  readonly summarize: Summarize;
+}
+
+export interface StrategyContext {
+  readonly event: CompactionContext["event"];
+  readonly reason: CompactionReason;
+  readonly sessionId: string;
+  readonly changeId: string;
+  readonly abortSignal: AbortSignal;
+  readonly threshold: number;
+  readonly limit: number;
+  open(): Promise<void>;
+  readonly model: Pick<CompactionContext["model"], "contextWindowTokens" | "maxOutputTokens">;
+  identity(): Promise<Pick<CompactionContext["model"], "provider" | "modelId">>;
+  request(): Promise<RequestPrefix>;
+  summarizeWith(model?: PublicAgentStaticModelDefinition): SummaryCall;
+  send(
+    history: readonly HarnessModelMessage[],
+    providerOptions: Parameters<CompactionContext["send"]>[1]["providerOptions"],
+  ): Promise<HarnessModelMessage[]>;
+}
+
+export function strategyHistory(
+  strategy: ResolvedCompactionStrategy,
+  rewrite: StrategyContext,
+): (input: StrategyInput) => Promise<readonly HarnessModelMessage[] | undefined> {
+  return async (input) => {
+    if (rewrite.reason === "automatic") {
+      const trigger = rewrite.event === undefined ? undefined : strategy.when[rewrite.event];
+      if (trigger === undefined) return undefined;
+      const { inputTokens } = input;
+      const isDue =
+        trigger === true
+          ? inputTokens + COMPACTION_PROMPT_OVERHEAD_TOKENS > rewrite.threshold
+          : trigger({
+              contextWindowTokens: rewrite.model.contextWindowTokens,
+              maxOutputTokens: rewrite.model.maxOutputTokens,
+              inputTokens,
+              threshold: rewrite.threshold,
+            });
+      if (!isDue) return undefined;
+    }
+    await rewrite.open();
+    const identity = await rewrite.identity();
+    const { limit } = rewrite;
     const ctx: CompactionContext = {
       abortSignal: rewrite.abortSignal,
       change: { changeId: rewrite.changeId },
-      checkpoint: (summary) => checkpointHead(summary) as HistoryMessage[],
-      reason,
+      checkpoint: (summary) => checkpointHead(summary) as StoredHistoryMessage[],
+      model: { ...rewrite.model, ...identity },
+      event: rewrite.event,
+      reason: rewrite.reason,
+      send: async (history, { providerOptions }) =>
+        (await rewrite.send(
+          history as HarnessModelMessage[],
+          providerOptions,
+        )) as StoredHistoryMessage[],
       session: { id: rewrite.sessionId },
-      summarize: async (history, options) => {
+      summarize: async (history, options = {}) => {
+        const call = rewrite.summarizeWith(options.model);
+        const summarize: SummaryCall = async (request) => {
+          try {
+            return await call(request);
+          } catch (error) {
+            if (isContextOverflowError(error)) throw new CompactionOverflowError({ cause: error });
+            throw error;
+          }
+        };
+        if (options.prompt !== undefined) {
+          return await summarize({
+            messages: [
+              ...(history as ModelMessage[]),
+              createFrameworkUserMessage("context.compaction", options.prompt),
+            ],
+            system:
+              options.system === undefined
+                ? (await rewrite.request()).instructions
+                : options.system || undefined,
+          });
+        }
         const { conversation, previousCheckpoint } = extractPreviousCheckpoint(
           history as ModelMessage[],
         );
         const prompt = createCompactionPrompt({
           messages: conversation,
           previousCheckpoint,
-          transcriptBudgetTokens: rewrite.config.threshold,
+          transcriptBudgetTokens: Math.min(limit, rewrite.threshold),
         });
-        return await summarizerFor(options)({
+        return await summarize({
           messages: [createFrameworkUserMessage("context.compaction", prompt.prompt)],
-          system: prompt.system,
+          system:
+            options.instructions === undefined
+              ? prompt.system
+              : `${prompt.system}\n\n${options.instructions}`,
         });
       },
       tokens: {
         estimate: (history) => estimateTokens(history as ModelMessage[]),
-        limit: rewrite.config.threshold,
+        limit,
       },
     };
-    const fixedTail: FixedTail = async (history, options) =>
-      (await compactMessages(
-        [...(history as ModelMessage[])],
-        rewrite.config,
-        summarizerFor(options),
-        rewrite.force,
-        rewrite.historyTokens,
-      )) as HistoryMessage[];
-    Object.defineProperty(ctx, FIXED_TAIL, { value: fixedTail });
-
-    const result = await strategy(messages as HistoryMessage[], ctx);
-    if (result === undefined) {
-      if (reason === "automatic") {
-        throw new CompactionOverLimitError(
-          `The compaction strategy removed nothing, but the history (~${Math.round(estimateTokens(messages))} tokens) is over the compaction limit (~${Math.round(rewrite.config.threshold)}).`,
-        );
-      }
-      return undefined;
-    }
-    return checkCompactedHistory(messages, result as ModelMessage[], {
-      automatic: reason === "automatic",
-      limit: rewrite.config.threshold,
-    });
+    fixedTails.set(
+      ctx,
+      async (history, options) =>
+        (await input.summarize(
+          history as HarnessModelMessage[],
+          options,
+        )) as StoredHistoryMessage[],
+    );
+    return (await strategy.compact(input.history as StoredHistoryMessage[], ctx)) as
+      | readonly HarnessModelMessage[]
+      | undefined;
   };
 }
 
-/**
- * A strategy's result, checked: every user message keeps its kind, no call loses its result, a
- * checkpoint opens the history, the turn's input survives, and an automatic result fits.
- */
-export function checkCompactedHistory(
-  before: readonly HarnessModelMessage[],
-  after: readonly ModelMessage[],
-  input: { readonly automatic: boolean; readonly limit: number },
-): HarnessModelMessage[] {
-  let messages: HarnessModelMessage[];
-  try {
-    messages = validateHarnessModelMessages(after);
-  } catch {
-    throw new Error(
-      "The compaction strategy returned a user message without a kind. Keep the messages eve passed it, or build a checkpoint with ctx.checkpoint().",
-    );
-  }
-  const answered = (history: readonly ModelMessage[]) => {
-    const calls = new Set<string>();
-    const results = new Set<string>();
-    for (const message of history) {
-      if (typeof message.content === "string") continue;
-      for (const part of message.content) {
-        if (part.type === "tool-call" && part.providerExecuted !== true) calls.add(part.toolCallId);
-        if (part.type === "tool-result" && message.role === "tool") results.add(part.toolCallId);
-      }
-    }
-    return { calls, results };
-  };
-  const was = answered(before);
-  const now = answered(messages);
-  for (const callId of now.calls) {
-    if (!now.results.has(callId) && (was.results.has(callId) || !was.calls.has(callId))) {
-      throw new Error(
-        `The compaction strategy kept tool call ${callId} but dropped its result. Keep or remove a call together with its result; turns() from "eve/compaction" groups them.`,
-      );
-    }
-  }
-  for (const callId of now.results) {
-    if (!now.calls.has(callId)) {
-      throw new Error(
-        `The compaction strategy kept the result of tool call ${callId} but dropped the call. Keep or remove a call together with its result; turns() from "eve/compaction" groups them.`,
-      );
-    }
-  }
-  const checkpoints = messages.flatMap((message, index) =>
-    isCheckpointMarker(message) ? [index] : [],
-  );
-  if (checkpoints.some((index) => index !== 0) || checkpoints.length > 1) {
-    throw new Error(
-      "The compaction strategy placed a checkpoint after other messages. Put ctx.checkpoint() first, followed by the history you keep.",
-    );
-  }
-  const turnInput = latestUserMessage(before);
-  if (
-    input.automatic &&
-    turnInput !== undefined &&
-    !messages.some((message) => JSON.stringify(message) === JSON.stringify(turnInput))
-  ) {
-    throw new Error(
-      "The compaction strategy removed the turn's input. Keep the latest user message: the model answers it next.",
-    );
-  }
-  const size = estimateTokens(messages);
-  if (input.automatic && size > input.limit) {
-    throw new CompactionOverLimitError(
-      `The compaction strategy returned ~${Math.round(size)} tokens of history; the limit is ~${Math.round(input.limit)}.`,
-    );
-  }
-  return messages;
-}
-
-function isCheckpointMarker(message: ModelMessage): boolean {
-  return (
-    isUserModelMessage(message) &&
-    message.kind === "context.compaction" &&
-    message.content === COMPACTION_CHECKPOINT_MARKER
-  );
-}
-
-function latestUserMessage(history: readonly ModelMessage[]): ModelMessage | undefined {
-  return history.findLast((message) => isUserModelMessage(message) && message.kind === "user");
-}
-
-/**
- * The context's view of the rewrite in progress, for `fixedTail()`: undefined when a strategy runs
- * outside eve, as in a unit test that passes its own context.
- */
 export function fixedTailOf(ctx: CompactionContext): FixedTail | undefined {
-  return (ctx as CompactionContext & { readonly [FIXED_TAIL]?: FixedTail })[FIXED_TAIL];
+  return fixedTails.get(ctx);
 }

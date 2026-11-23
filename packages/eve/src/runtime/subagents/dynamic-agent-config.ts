@@ -2,7 +2,10 @@ import { normalizeAgentDefinition } from "#internal/authored-definition/core.js"
 import { isDefinedAgent } from "#public/definitions/agent.js";
 import type { ContextAccessor } from "#context/key.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
-import { getEffectiveModelSelection } from "#reactions/kinds/model.js";
+import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
+import { currentModel } from "#definitions/model.js";
+import { inheritsParentModel } from "#runtime/subagents/inherit-parent-model.js";
+import { compiledBundleOf } from "#runtime/sessions/runtime-context-keys.js";
 import { resolveRuntimeModelSelection } from "#runtime/agent/resolve-model.js";
 import type { ModelMetadata } from "#internal/model-catalog.js";
 import {
@@ -18,7 +21,6 @@ export interface DynamicSubagentAgentConfig {
     readonly thresholdPercent?: number;
   };
   readonly description: string;
-  /** Serialized into workflow input, so it can't carry the `sessionUsage` function. */
   readonly limits?: Pick<AgentLimitsDefinition, "sessionTimeoutMs">;
   readonly model: DynamicSubagentModelReference;
   readonly reasoning?: AgentReasoningDefinition;
@@ -66,6 +68,11 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
       `${message} The "limits.sessionUsage" field cannot be selected at runtime; the root agent's \`sessionUsage\` applies.`,
     );
   }
+  if (definition.approval !== undefined) {
+    throw new Error(
+      `${message} The "approval" field cannot be selected at runtime; the root agent's \`approval\` applies.`,
+    );
+  }
 
   const config: {
     compaction?: DynamicSubagentAgentConfig["compaction"];
@@ -76,15 +83,18 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
     tool?: AgentToolExposure;
   } = {
     description: definition.description,
-    model: await normalizeDurableModelSelection({
-      modelMetadata: input.modelMetadata,
-      selection: {
-        model: definition.model,
-        modelContextWindowTokens:
-          definition.modelContextWindowTokens ?? parentContextWindow(input.state, definition.model),
-        modelOptions: definition.modelOptions,
-      },
-    }),
+    model:
+      parentProviderModel(input.state, input.value) ??
+      (await normalizeDurableModelSelection({
+        modelMetadata: input.modelMetadata,
+        selection: {
+          model: definition.model,
+          modelContextWindowTokens:
+            definition.modelContextWindowTokens ??
+            parentContextWindow(input.state, definition.model),
+          modelOptions: definition.modelOptions,
+        },
+      })),
   };
 
   if (definition.compaction !== undefined) {
@@ -132,13 +142,23 @@ async function normalizeDurableModelSelection(input: {
   return resolved.reference;
 }
 
-/**
- * The parent's context window, for a child that runs the parent's own model: a subagent that
- * passes `view.model.id` along gets the metadata the parent's model already has, which a custom
- * model's id alone doesn't carry.
- */
+function parentProviderModel(
+  state: ContextAccessor,
+  definition: unknown,
+): DynamicSubagentModelReference | undefined {
+  if (!inheritsParentModel(definition)) return undefined;
+  const parent = currentModel(state);
+  if (parent?.source === undefined) return undefined;
+  const { reasoning: _reasoning, ...reference } = parent;
+  return {
+    ...reference,
+    sourceNodeId:
+      reference.sourceNodeId ?? compiledBundleOf(state)?.nodeId ?? ROOT_COMPILED_AGENT_NODE_ID,
+  };
+}
+
 function parentContextWindow(state: ContextAccessor, model: unknown): number | undefined {
   if (typeof model !== "string") return undefined;
-  const parent = getEffectiveModelSelection(state)?.reference;
+  const parent = currentModel(state);
   return parent?.id === model ? parent.contextWindowTokens : undefined;
 }

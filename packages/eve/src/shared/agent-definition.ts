@@ -1,7 +1,9 @@
 import type { CompactionStrategy } from "#shared/compaction-strategy.js";
 import type { JsonObject } from "#shared/json.js";
+import type { ApprovalPolicy } from "#approval/definition.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import type { TokenUsage } from "#shared/token-usage.js";
+import type { DefinedModel } from "#models/definition.js";
 import {
   isDynamicSentinel,
   type DynamicModelContext,
@@ -57,24 +59,6 @@ export type AgentReasoningDefinition =
   | "high"
   | "xhigh";
 
-/**
- * How an agent's model is reached at runtime, decided at compile time from the
- * authored model value.
- *
- * - `gateway`: routed through the Vercel AI Gateway. This covers a bare model
- *   id string (resolved via the AI SDK global default provider), a
- *   `gateway(...)` instance, and a gateway id whose provider key is forwarded
- *   to the gateway via `providerOptions.gateway.byok`. `target` is the upstream
- *   provider slug carried in the model id (e.g. `"anthropic"`), best-effort.
- *   `byok` is set to that provider slug when a `providerOptions.gateway.byok`
- *   block is present.
- * - `external`: a direct provider instance (e.g. `anthropic(...)`) that bypasses
- *   the gateway and talks to the provider's own endpoint. `provider` is the AI
- *   SDK provider name (e.g. `"anthropic"`).
- *
- * This is a routing fact, not a model-existence check; it does not assert the
- * model id names a real model.
- */
 export type ModelRouting =
   | { kind: "gateway"; target: string; byok?: string }
   | { kind: "external"; provider: string };
@@ -82,11 +66,13 @@ export type ModelRouting =
 export type InternalAgentModelDefinition = {
   id: string;
   contextWindowTokens?: number;
+  maxOutputTokens?: number;
   source?: ModuleSourceRef;
-  /** Field of the `source` agent config export that holds this model; absent means `model`. */
   sourceField?: "compaction.model";
+  sourceModelOption?: string;
   providerOptions?: Record<string, JsonObject>;
   promptCache?: AgentPromptCacheDefinition;
+  credentialed?: true;
 };
 
 /**
@@ -106,8 +92,19 @@ export interface EveLanguageModel {
 /** A concrete model handle: an AI Gateway model id string or an {@link EveLanguageModel}. */
 export type PublicAgentStaticModelDefinition = string | EveLanguageModel;
 
-export interface PublicAgentModelSelectionDefinition {
-  readonly model: PublicAgentStaticModelDefinition;
+/**
+ * A model for a session's turns: a static model, or a {@link DefinedModel} with its own `auth`.
+ */
+export type PublicAgentTurnModelDefinition = PublicAgentStaticModelDefinition | DefinedModel;
+
+/**
+ * A model together with settings that apply only when it is selected, such as reasoning effort
+ * and provider options.
+ */
+export interface PublicAgentModelSelectionDefinition<
+  TModel extends PublicAgentTurnModelDefinition = PublicAgentStaticModelDefinition,
+> {
+  readonly model: TModel;
   /** Override the agent reasoning effort for this selection; omitted values inherit it. */
   readonly reasoning?: AgentReasoningDefinition;
   /** Context window of the selected model, in tokens. */
@@ -116,9 +113,13 @@ export interface PublicAgentModelSelectionDefinition {
   readonly modelOptions?: AgentModelOptionsDefinition;
 }
 
+/**
+ * What a dynamic model function returns: a model ID, instance, or {@link DefinedModel}, or a
+ * {@link PublicAgentModelSelectionDefinition} holding one.
+ */
 export type PublicAgentDynamicModelResult =
-  | PublicAgentStaticModelDefinition
-  | PublicAgentModelSelectionDefinition;
+  | PublicAgentTurnModelDefinition
+  | PublicAgentModelSelectionDefinition<PublicAgentTurnModelDefinition>;
 
 /**
  * A `model` chosen per model call: `defineDynamic()` from `eve` or `eve/models`, or `auto()`. Its
@@ -144,22 +145,8 @@ export type PublicAgentModelDefinition =
   | PublicAgentDynamicModelDefinition;
 
 export interface InternalAgentCompactionDefinition {
-  /**
-   * Optional model used only for generating compaction summaries.
-   *
-   * When omitted, eve uses the active turn model for the summary call.
-   */
   model?: InternalAgentModelDefinition;
-  /**
-   * Fraction of the primary model context window that triggers compaction.
-   *
-   * eve defaults to `0.9` when this is omitted.
-   */
   thresholdPercent?: number;
-  /**
-   * Whether the agent config module authors `compaction.compact`. It's a function, so the
-   * manifest only marks it; the runtime loads it from the config `source`.
-   */
   compact?: boolean;
 }
 
@@ -207,7 +194,8 @@ export interface PublicAgentDefaultCompactionDefinition {
   /**
    * Optional model used only for generating compaction summaries.
    *
-   * When omitted, eve uses the active turn model for the summary call.
+   * When omitted, eve uses the active turn model for the summary call. A summary call can't hold
+   * the turn for a sign-in, so it takes no `defineModel` value.
    */
   readonly model?: PublicAgentStaticModelDefinition;
   /**
@@ -372,12 +360,9 @@ export interface AgentWorkflowDefinition {
  */
 export type AgentToolExposure = boolean | "deferred";
 
-/**
- * Compiled-side agent definition. Carries a `name` because the compiler
- * stamps the path-derived `agentId` onto every compiled agent node.
- */
 export type InternalAgentDefinition = {
   name: string;
+  approval?: boolean;
   description?: string;
   build?: AgentBuildDefinition;
   compaction?: InternalAgentCompactionDefinition;
@@ -390,10 +375,6 @@ export type InternalAgentDefinition = {
   limits?: CompiledAgentLimitsDefinition;
 };
 
-/**
- * Compiled `limits`. `sessionUsage` is a function, so the manifest only marks that the agent
- * config module authors one; the runtime loads it from `source`.
- */
 export interface CompiledAgentLimitsDefinition {
   readonly sessionTimeoutMs?: number | false;
   readonly sessionUsage?: boolean;
@@ -413,6 +394,26 @@ type PublicAgentDefinitionBase = {
    * the parent agent as the lowered subagent tool's description.
    */
   readonly description?: string;
+  /**
+   * One approval policy for every call this agent's model makes: authored, built-in, extension,
+   * dynamic, workflow, and connection tools, and subagents. It runs beside each entry's own
+   * `approval`, and the stricter status wins (denied, then user approval, then approved), so it
+   * can add a gate but never remove one. Returning `undefined` leaves the entry's own decision.
+   *
+   * The root agent's policy also applies in every local subagent session; a subagent's own can only
+   * add to it. A remote agent's deployment governs its own calls; this policy gates the call to it.
+   * `eve__search`, `eve__skill`, task controls, connection sign-in, `ctx.agent()` calls from
+   * workflow code, and provider-executed tools such as a provider's native web search are not
+   * covered.
+   *
+   * ```ts
+   * approval: ({ toolName, toolAnnotations }) =>
+   *   toolName.startsWith("billing__") || toolAnnotations?.destructiveHint === true
+   *     ? "user-approval"
+   *     : undefined, // leave the tool's own decision
+   * ```
+   */
+  readonly approval?: ApprovalPolicy;
   readonly build?: AgentBuildDefinition;
   readonly compaction?: PublicAgentCompactionDefinition;
   /**
@@ -457,6 +458,13 @@ export type PublicAgentDefinition = PublicAgentDefinitionBase &
         /** Language model used for agent turns. */
         readonly model: PublicAgentStaticModelDefinition;
         /** Optional context-window override for the static model. */
+        readonly modelContextWindowTokens?: number;
+        readonly modelOptions?: AgentModelOptionsDefinition;
+      }
+    | {
+        /** A model with its own `auth`; see `defineModel` in `eve/models`. */
+        readonly model: DefinedModel;
+        /** Optional context-window override for a model `id` outside the AI Gateway catalog. */
         readonly modelContextWindowTokens?: number;
         readonly modelOptions?: AgentModelOptionsDefinition;
       }

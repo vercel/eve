@@ -1,6 +1,7 @@
 import { fixedTailOf, type FixedTailOptions } from "#harness/compaction/authored.js";
+import { awaitsResult } from "#harness/compaction/check.js";
 import type { CompactionStrategy } from "#shared/compaction-strategy.js";
-import type { HistoryMessage } from "#shared/history-message.js";
+import type { StoredHistoryMessage } from "#shared/history-message.js";
 
 /**
  * eve's default strategy. It caps oversized tool results in older history, with no model call,
@@ -33,15 +34,15 @@ export function fixedTail(options: FixedTailOptions = {}): CompactionStrategy {
  * just ahead of it, and never splits a tool call from its result, so a strategy that drops or
  * summarizes whole turns keeps every exchange intact. A checkpoint head is its own first turn.
  */
-export function turns(history: readonly HistoryMessage[]): HistoryMessage[][] {
-  const groups: HistoryMessage[][] = [];
-  let current: HistoryMessage[] = [];
-  let leading: HistoryMessage[] = [];
+export function turns(history: readonly StoredHistoryMessage[]): StoredHistoryMessage[][] {
+  const groups: StoredHistoryMessage[][] = [];
+  let current: StoredHistoryMessage[] = [];
+  let leading: StoredHistoryMessage[] = [];
   const open = new Set<string>();
   for (const message of history) {
     if (Array.isArray(message.content)) {
       for (const part of message.content) {
-        if (part.type === "tool-call") open.add(part.toolCallId);
+        if (part.type === "tool-call" && awaitsResult(part)) open.add(part.toolCallId);
         if (part.type === "tool-result") open.delete(part.toolCallId);
       }
     }
@@ -50,7 +51,7 @@ export function turns(history: readonly HistoryMessage[]): HistoryMessage[][] {
       leading = [];
       continue;
     }
-    const kind = (message as { readonly kind?: unknown }).kind;
+    const { kind } = message;
     if (kind === "user" || kind === "task.result") {
       if (current.length > 0) groups.push(current);
       current = [...leading, message];

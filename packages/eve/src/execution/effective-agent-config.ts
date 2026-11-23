@@ -1,34 +1,54 @@
-import type { CompactionStrategy } from "#shared/compaction-strategy.js";
 import type { ContextReader } from "#context/key.js";
-import { AgentSessionRuntimeOverridesKey, DynamicSubagentAgentConfigKey } from "#context/keys.js";
-import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
+import { DynamicSubagentAgentConfigKey } from "#context/keys.js";
+import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
+import type { ApprovalPolicy } from "#approval/definition.js";
+import { strictestApproval } from "#approval/agent.js";
+import { sessionAgent } from "#definitions/agent.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
-import type { AgentLimitsDefinition, SessionUsageLimit } from "#shared/agent-definition.js";
-import type { AgentSessionRuntimeOverrides } from "#execution/agent-sessions/runtime-overrides.js";
-import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
+import type { SessionAgent } from "#runtime/sessions/session-agent.js";
+import type { CompactionStrategy } from "#shared/compaction-strategy.js";
+import type {
+  AgentLimitsDefinition,
+  AgentReasoningDefinition,
+  SessionUsageLimit,
+} from "#shared/agent-definition.js";
 
-interface EffectiveAgentRuntime {
-  readonly limits?: AgentLimitsDefinition;
+export interface AgentSettings {
+  readonly compactionStrategy?: CompactionStrategy;
+  readonly compactionModel?: RuntimeModelReference;
+  readonly reasoning?: AgentReasoningDefinition;
   readonly thresholdPercent?: number;
-  readonly turnAgent: RuntimeTurnAgent;
 }
 
-export function resolveEffectiveAgentRuntime(
-  bundle: Pick<CompiledBundle, "resolvedAgent" | "turnAgent">,
-  context: ContextReader,
-): EffectiveAgentRuntime {
-  return resolveEffectiveAgentRuntimeFromConfig(
-    bundle,
-    context.get(DynamicSubagentAgentConfigKey),
-    context.get(AgentSessionRuntimeOverridesKey),
-  );
+export function agentSettings(step: {
+  readonly ctx: Pick<ContextReader, "get" | "require">;
+}): AgentSettings {
+  const config = step.ctx.get(DynamicSubagentAgentConfigKey);
+  if (config !== undefined) {
+    return {
+      compactionModel: config.compaction?.model,
+      reasoning: config.reasoning,
+      thresholdPercent: config.compaction?.thresholdPercent,
+    };
+  }
+  const { settings } = sessionAgent(step.ctx);
+  return {
+    compactionStrategy: settings.compaction?.compact,
+    compactionModel: settings.compaction?.model,
+    reasoning: settings.reasoning,
+    thresholdPercent: settings.compaction?.thresholdPercent,
+  };
 }
 
-/**
- * The session's `limits.sessionUsage`: the agent's own, else the root agent's.
- * A dynamic subagent config can't carry one, so its sessions run the root's.
- */
+export function agentLimits(
+  agent: Pick<SessionAgent, "settings">,
+  ctx: Pick<ContextReader, "get">,
+): Pick<AgentLimitsDefinition, "sessionTimeoutMs"> | undefined {
+  const config = ctx.get(DynamicSubagentAgentConfigKey);
+  return config === undefined ? agent.settings.limits : config.limits;
+}
+
 export function resolveSessionUsageLimit(
   bundle: Pick<CompiledBundle, "graph" | "resolvedAgent">,
 ): SessionUsageLimit | undefined {
@@ -38,57 +58,12 @@ export function resolveSessionUsageLimit(
   return limit === false ? () => false : limit;
 }
 
-/** The agent's own `compaction.compact`. A subagent without one uses eve's default strategy. */
-export function resolveCompactionStrategy(
-  bundle: Pick<CompiledBundle, "resolvedAgent">,
-): CompactionStrategy | undefined {
-  return bundle.resolvedAgent.config?.compaction?.compact;
-}
-
-export function resolveEffectiveAgentRuntimeFromConfig(
-  bundle: Pick<CompiledBundle, "resolvedAgent" | "turnAgent">,
-  config: DynamicSubagentAgentConfig | undefined,
-  overrides?: AgentSessionRuntimeOverrides,
-): EffectiveAgentRuntime {
-  let effective: EffectiveAgentRuntime;
-  if (config === undefined) {
-    if (bundle.turnAgent.configResolver === true) {
-      throw new Error("Dynamic subagent execution requires a selected concrete agent config.");
-    }
-    effective = {
-      limits: bundle.resolvedAgent.config?.limits,
-      thresholdPercent: bundle.resolvedAgent.config?.compaction?.thresholdPercent,
-      turnAgent: bundle.turnAgent,
-    };
-  } else {
-    const {
-      compactionModel: _compiledCompactionModel,
-      configResolver: _configResolver,
-      dynamicModel: _dynamicModel,
-      model: _compiledModel,
-      ...turnAgent
-    } = bundle.turnAgent;
-    effective = {
-      limits: config.limits,
-      thresholdPercent: config.compaction?.thresholdPercent,
-      turnAgent: {
-        ...turnAgent,
-        compactionModel: config.compaction?.model,
-        model: config.model,
-        reasoning: config.reasoning,
-      },
-    };
-  }
-
-  if (overrides === undefined) return effective;
-  const {
-    configResolver: _configResolver,
-    dynamicModel: _dynamicModel,
-    model: _configuredModel,
-    ...turnAgent
-  } = effective.turnAgent;
-  return {
-    ...effective,
-    turnAgent: { ...turnAgent, model: overrides.model },
-  };
+export function resolveAgentApproval(
+  bundle: Pick<CompiledBundle, "graph" | "nodeId" | "resolvedAgent">,
+): ApprovalPolicy | undefined {
+  const root = bundle.graph.nodesByNodeId.get(ROOT_RUNTIME_AGENT_NODE_ID)?.agent.config?.approval;
+  if (bundle.nodeId === undefined || bundle.nodeId === ROOT_RUNTIME_AGENT_NODE_ID) return root;
+  const own = bundle.resolvedAgent.config?.approval;
+  if (own === undefined) return root;
+  return root === undefined ? own : strictestApproval([root, own]);
 }

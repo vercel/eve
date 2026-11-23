@@ -167,7 +167,29 @@ describe("normalizeAgentDefinition", () => {
         { model: "openai/gpt-5.4", compaction: { compact: "fixedTail" } },
         FAILURE_MESSAGE,
       ),
-    ).toThrow('"compaction.compact" must be a compaction strategy function');
+    ).toThrow('"compaction.compact" must be a compaction strategy');
+  });
+
+  it("keeps a strategy with its trigger, and rejects an event eve doesn't ask at", () => {
+    const strategy = {
+      compact: () => undefined,
+      when: { "model.requested": true, "turn.settled": () => true },
+    };
+    expect(
+      normalizeAgentDefinition(
+        { model: "openai/gpt-5.4", compaction: { compact: strategy } },
+        FAILURE_MESSAGE,
+      ).compaction,
+    ).toEqual({ compact: strategy });
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          model: "openai/gpt-5.4",
+          compaction: { compact: { compact: () => undefined, when: { overflow: true } } },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow('"compaction.compact" must be a compaction strategy');
   });
 
   it("accepts agent limits and keeps the session usage function", () => {
@@ -424,6 +446,30 @@ describe("normalizeAgentDefinition", () => {
 });
 
 describe("normalizeScheduleDefinition", () => {
+  it.each(["", "  ", "Mars/Olympus", "+01:00", 42])(
+    "rejects invalid schedule timezone %j",
+    (timezone) => {
+      expect(() =>
+        normalizeScheduleDefinition(
+          { cron: "0 13 * * *", timezone, content: "Send a digest." },
+          "schedules/digest.ts:",
+        ),
+      ).toThrow(/schedules\/digest\.ts:.*IANA timezone/);
+    },
+  );
+
+  it.each([
+    ["america/los_angeles", "America/Los_Angeles"],
+    [" utc ", "UTC"],
+  ])("canonicalizes schedule timezone %j", (timezone, expected) => {
+    expect(
+      normalizeScheduleDefinition(
+        { cron: "0 13 * * *", timezone, content: "Send a digest." },
+        "schedules/digest.ts:",
+      ),
+    ).toMatchObject({ timezone: expected });
+  });
+
   it.each(["approval", "needsApproval"])("rejects the removed %s field", (field) => {
     expect(() =>
       normalizeScheduleDefinition(

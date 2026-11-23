@@ -1,5 +1,7 @@
 import type { CompactionStrategy } from "#shared/compaction-strategy.js";
+import { validateScheduleTimezone } from "#shared/schedule-timezone.js";
 import { isAgentReasoningDefinition } from "#internal/runtime-model.js";
+import { normalizeAgentApproval } from "#internal/authored-definition/approval.js";
 import type {
   AgentDefinition,
   AgentBuildDefinition,
@@ -27,6 +29,7 @@ import {
   type SessionUsageLimit,
 } from "#shared/agent-definition.js";
 import { assertDynamicSentinelKeys, isDynamicSentinel } from "#dynamic/definition.js";
+import { isDefinedModel } from "#models/definition.js";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
@@ -36,12 +39,6 @@ type NormalizedAgentDefinition = Omit<AgentDefinition, "build"> & {
   };
 };
 
-/**
- * Normalizes one authored agent definition into the canonical internal shape.
- *
- * Authored `name` fields are rejected — agent identity is derived at compile
- * time from `manifest.agentId` (package name or app-root basename).
- */
 export function normalizeAgentDefinition(
   value: unknown,
   message: string,
@@ -55,6 +52,7 @@ export function normalizeAgentDefinition(
   expectOnlyKnownKeys(
     record,
     [
+      "approval",
       "build",
       "compaction",
       "defaultTools",
@@ -128,14 +126,16 @@ export function normalizeAgentDefinition(
     definition.limits = normalizeAgentLimitsDefinition(record.limits, message);
   }
 
+  if (record.approval !== undefined) {
+    definition.approval = normalizeAgentApproval(record.approval, message);
+  }
+
   return definition as Readonly<NormalizedAgentDefinition>;
 }
 
-/** A static model passes through; a dynamic one is its `defineDynamic(fn)` value. */
 function normalizeAgentModel(value: unknown, message: string): NormalizedAgentDefinition["model"] {
   if (!isDynamicSentinel(value)) return value as NormalizedAgentDefinition["model"];
   assertDynamicSentinelKeys(value, `${message} The dynamic "model":`);
-  // Keep the sentinel itself: eve's own resolvers, such as auto(), carry internal hooks on it.
   return value as NormalizedAgentDefinition["model"];
 }
 
@@ -147,7 +147,6 @@ function normalizeAgentReasoningDefinition(
   return value;
 }
 
-/** `false` explicitly disables one numeric runtime limit. */
 function expectPositiveIntegerOrFalse(value: unknown, message: string): number | false {
   if (value === false) {
     return false;
@@ -290,7 +289,6 @@ function normalizeAgentModelOptions(
   return options;
 }
 
-/** Validates an authored `modelOptions.promptCache` value. */
 export function normalizeAgentPromptCache(
   value: unknown,
   message: string,
@@ -340,9 +338,9 @@ function normalizeAgentCompactionDefinition(
   } = {};
 
   if (record.compact !== undefined) {
-    if (typeof record.compact !== "function") {
+    if (!isCompactionStrategy(record.compact)) {
       throw new Error(
-        `${message} "compaction.compact" must be a compaction strategy function, such as fixedTail() from "eve/compaction".`,
+        `${message} "compaction.compact" must be a compaction strategy: a function, such as fixedTail() from "eve/compaction", or { compact, when }.`,
       );
     }
     for (const key of ["model", "modelContextWindowTokens"] as const) {
@@ -359,6 +357,11 @@ function normalizeAgentCompactionDefinition(
     if (isDynamicSentinel(record.model)) {
       throw new Error(
         `${message} "compaction.model" does not support defineDynamic — provide a static model.`,
+      );
+    }
+    if (isDefinedModel(record.model)) {
+      throw new Error(
+        `${message} "compaction.model" takes a model ID or a model instance. A defineModel value needs a credential, and the summary call can't hold the turn for a sign-in.`,
       );
     }
     normalizedDefinition.model = record.model as PublicAgentStaticModelDefinition;
@@ -389,14 +392,6 @@ function normalizeAgentCompactionDefinition(
   return normalizedDefinition as NonNullable<NormalizedAgentDefinition["compaction"]>;
 }
 
-/**
- * Normalizes one authored instructions definition into the canonical
- * internal shape.
- *
- * Authored `name` fields are rejected — instructions prompt identity is
- * derived from the file path (`instructions.md` or
- * `instructions.{ts,...}`).
- */
 export function normalizeInstructionsDefinition(
   value: unknown,
   message: string,
@@ -414,13 +409,6 @@ export function normalizeInstructionsDefinition(
   };
 }
 
-/**
- * Normalizes one authored skill definition into the canonical internal
- * shape.
- *
- * Authored `name` fields are rejected — skill identity is derived from
- * the file path under `agent/skills/`.
- */
 export function normalizeSkillDefinition(value: unknown, message: string): SkillDefinition {
   const record = expectObjectRecord(value, message);
   expectOnlyKnownKeys(
@@ -472,18 +460,9 @@ function normalizeSkillFiles(
   return normalized;
 }
 
-/**
- * Normalizes one authored schedule definition into the canonical internal
- * shape.
- *
- * Authored `name` fields are rejected — schedule identity is derived from
- * the file path under `agent/schedules/`. Exactly one of `content` (the
- * fire-and-forget agent prompt) or `run` (the cron handler function)
- * must be provided.
- */
 export function normalizeScheduleDefinition(value: unknown, message: string): ScheduleDefinition {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["cron", "content", "run"], message);
+  expectOnlyKnownKeys(record, ["cron", "timezone", "content", "run"], message);
 
   const cron = expectString(record.cron, message);
   const hasContent = record.content !== undefined;
@@ -500,7 +479,22 @@ export function normalizeScheduleDefinition(value: unknown, message: string): Sc
     );
   }
 
-  const definition: { cron: string; content?: string; run?: ScheduleRunHandler } = { cron };
+  const definition: {
+    cron: string;
+    timezone?: string;
+    content?: string;
+    run?: ScheduleRunHandler;
+  } = { cron };
+  if (record.timezone !== undefined) {
+    try {
+      if (typeof record.timezone !== "string") {
+        throw new Error('Expected "timezone" to be an IANA timezone string.');
+      }
+      definition.timezone = validateScheduleTimezone(record.timezone);
+    } catch (error) {
+      throw new Error(`${message} ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
 
   if (hasContent) {
     definition.content = expectString(record.content, message);
@@ -509,4 +503,24 @@ export function normalizeScheduleDefinition(value: unknown, message: string): Sc
   }
 
   return definition as ScheduleDefinition;
+}
+
+const COMPACTION_EVENTS: ReadonlySet<string> = new Set([
+  "model.requested",
+  "model.retried",
+  "turn.settled",
+]);
+
+function isCompactionStrategy(value: unknown): value is CompactionStrategy {
+  if (typeof value === "function") return true;
+  if (typeof value !== "object" || value === null) return false;
+  const { compact, when } = value as { readonly compact?: unknown; readonly when?: unknown };
+  if (typeof compact !== "function") return false;
+  if (when === undefined) return true;
+  if (typeof when !== "object" || when === null || Array.isArray(when)) return false;
+  return Object.entries(when).every(
+    ([event, trigger]) =>
+      COMPACTION_EVENTS.has(event) &&
+      (trigger === undefined || trigger === true || typeof trigger === "function"),
+  );
 }
