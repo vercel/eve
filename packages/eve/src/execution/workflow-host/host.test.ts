@@ -1,0 +1,61 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { RunExpiredError, WorkflowRunNotFoundError } from "#compiled/@workflow/errors/index.js";
+
+const world = vi.hoisted(() => ({ getDeploymentId: vi.fn(), runs: { get: vi.fn() } }));
+vi.mock("#internal/workflow/runtime.js", () => ({ getWorld: async () => world }));
+
+import { workflowHost } from "#execution/workflow-host/host.js";
+
+beforeEach(() => {
+  vi.stubEnv("VERCEL_DEPLOYMENT_ID", "");
+});
+
+afterEach(() => {
+  vi.resetAllMocks();
+  vi.unstubAllEnvs();
+});
+
+describe("the Workflow durable host", () => {
+  it("reads a run as eve's durable run", async () => {
+    const createdAt = new Date("2026-11-20T00:00:00.000Z");
+    world.runs.get.mockResolvedValue({
+      attributes: { owner: "alice" },
+      createdAt,
+      expiredAt: undefined,
+      input: ["not part of eve's run"],
+      runId: "wrun_1",
+      status: "running",
+    });
+
+    await expect(workflowHost.findRun("wrun_1")).resolves.toEqual({
+      attributes: { owner: "alice" },
+      createdAt,
+      expiredAt: undefined,
+      runId: "wrun_1",
+      status: "running",
+    });
+  });
+
+  it("finds no run when Workflow has none or its data expired", async () => {
+    world.runs.get.mockRejectedValueOnce(new WorkflowRunNotFoundError("wrun_gone"));
+    await expect(workflowHost.findRun("wrun_gone")).resolves.toBeUndefined();
+
+    world.runs.get.mockRejectedValueOnce(new RunExpiredError("Run data expired.", "wrun_old"));
+    await expect(workflowHost.findRun("wrun_old")).resolves.toBeUndefined();
+  });
+
+  it("surfaces any other failure to read a run", async () => {
+    world.runs.get.mockRejectedValue(new Error("the World is down"));
+
+    await expect(workflowHost.findRun("wrun_1")).rejects.toThrow("the World is down");
+  });
+
+  it("prefers the platform's deployment id over the World's", async () => {
+    world.getDeploymentId.mockResolvedValue("dpl_world");
+    await expect(workflowHost.deploymentId()).resolves.toBe("dpl_world");
+
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_platform");
+    await expect(workflowHost.deploymentId()).resolves.toBe("dpl_platform");
+  });
+});

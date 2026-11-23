@@ -63,7 +63,7 @@ function useRuntime(
   stateStore: AgentTraceStateStore = new ContextAgentTraceStateStore(),
   authored: readonly InstrumentationProviderDefinition[] = [],
 ) {
-  delete (globalThis as Record<symbol, unknown>)[Symbol.for("eve.instrumentation-runtime")];
+  delete (globalThis as Record<symbol, unknown>)[Symbol.for("eve.runtime")];
   const agent = createAgentOtelInstrumentation({
     environment: "production",
     frameworkVersion: "test",
@@ -143,7 +143,7 @@ afterEach(async () => {
   await provider.shutdown();
   trace.disable();
   context.disable();
-  delete (globalThis as Record<symbol, unknown>)[Symbol.for("eve.instrumentation-runtime")];
+  delete (globalThis as Record<symbol, unknown>)[Symbol.for("eve.runtime")];
   vi.unstubAllGlobals();
 });
 

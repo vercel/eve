@@ -27,8 +27,7 @@ import { defineTool } from "#tools/definition.js";
 
 type Choice = "first" | "second";
 
-const REGISTRY_GLOBAL_KEY = Symbol.for("eve.harness-instrumentation-providers");
-const RUNTIME_GLOBAL_KEY = Symbol.for("eve.instrumentation-runtime");
+const EVE_RUNTIME_KEY = Symbol.for("eve.runtime");
 
 const choice = defineState<Choice>("test.turn-choice", () => "first");
 
@@ -139,8 +138,7 @@ describe("state a turn.started hook writes", () => {
     trace.disable();
     context.disable();
     propagation.disable();
-    delete (globalThis as Record<symbol, unknown>)[REGISTRY_GLOBAL_KEY];
-    delete (globalThis as Record<symbol, unknown>)[RUNTIME_GLOBAL_KEY];
+    delete (globalThis as Record<symbol, unknown>)[EVE_RUNTIME_KEY];
   });
 
   it("chooses the model for every call of that turn, starting with the first", async () => {
