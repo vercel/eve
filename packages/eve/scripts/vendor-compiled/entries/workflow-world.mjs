@@ -1,1 +1,1 @@
-export { HookSchema, startHookId } from "@workflow/world";
+export { HookSchema, reenqueueActiveRuns, startHookId } from "@workflow/world";

@@ -12,7 +12,10 @@ import {
 } from "#internal/nitro/development-generation.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { getDevelopmentWorkflowGeneration } from "#runtime/development-generation.js";
-import { deriveEveWorkflowQueuePrefix } from "#internal/workflow/queue-namespace.js";
+import {
+  deriveEveWorkflowQueueNamespace,
+  deriveEveWorkflowQueuePrefix,
+} from "#internal/workflow/queue-namespace.js";
 import {
   decodeDevelopmentWorldValue,
   encodeDevelopmentWorldValue,
@@ -57,6 +60,7 @@ afterEach(() => {
   delete process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV];
   delete process.env[DEVELOPMENT_WORKER_APP_ROOT_ENV];
   delete process.env.WORKFLOW_LOCAL_BASE_URL;
+  delete process.env.WORKFLOW_QUEUE_NAMESPACE;
   for (const name of LOCAL_DELIVERY_TIMEOUT_ENV_NAMES) {
     const originalValue = originalLocalDeliveryTimeoutEnv.get(name);
     if (originalValue === undefined) {
@@ -257,55 +261,70 @@ describe("parent development Workflow World", () => {
     }
   });
 
-  it.fails("signs the wake-up that cancelling an orphaned run queues", async () => {
-    const appRoot = await createScratchDirectory("eve-parent-workflow-orphan-wake-up-");
-    await seedGeneration(appRoot, "generation-a");
-    const first = createWorld({ activeGenerationId: () => "generation-a", appRoot });
-    await first.start();
-    const created = await callWorld(first, "events.create", [
-      null,
-      {
-        eventData: {
-          deploymentId: "generation-a",
-          executionContext: {},
-          input: new Uint8Array(),
-          workflowName: workflowEntryReference.workflowId,
+  it.each([
+    ["recorded no queue namespace", {}],
+    [
+      "recorded the agent's queue namespace",
+      { queueNamespace: deriveEveWorkflowQueueNamespace(AGENT_NAME) },
+    ],
+  ])(
+    "signs the wake-up that cancelling an orphaned run queues, for a run that %s",
+    async (_name, executionContext) => {
+      const appRoot = await createScratchDirectory("eve-parent-workflow-orphan-wake-up-");
+      await seedGeneration(appRoot, "generation-a");
+      const first = createWorld({ activeGenerationId: () => "generation-a", appRoot });
+      await first.start();
+      const created = await callWorld(first, "events.create", [
+        null,
+        {
+          eventData: {
+            deploymentId: "generation-a",
+            executionContext,
+            input: new Uint8Array(),
+            workflowName: workflowEntryReference.workflowId,
+          },
+          eventType: "run_created",
+          specVersion: createDevelopmentWorkflowWorld().specVersion,
         },
-        eventType: "run_created",
-        specVersion: createDevelopmentWorkflowWorld().specVersion,
-      },
-    ]);
-    const runId = readCreatedRunId(created);
-    await first.close();
-    await rm(join(appRoot, ".eve", "dev-runtime", "snapshots", "generation-a"), {
-      force: true,
-      recursive: true,
-    });
-
-    const restarted = createWorld({ activeGenerationId: () => "generation-b", appRoot });
-    connectWorkerToWorld(restarted, appRoot);
-    const worldFetch = globalThis.fetch;
-    const handler = createWorkerQueueHandler();
-    const delivered = Promise.withResolvers<number>();
-    globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
-      const request = new Request(input, init);
-      if (!request.url.includes("/.well-known/workflow/v1/")) return await worldFetch(request);
-      const response = await handler(request);
-      delivered.resolve(response.status);
-      return response;
-    }) as typeof fetch;
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    try {
-      await restarted.start();
-      await expect(callWorld(restarted, "runs.get", [runId])).resolves.toMatchObject({
-        status: "cancelled",
+      ]);
+      const runId = readCreatedRunId(created);
+      await first.close();
+      await rm(join(appRoot, ".eve", "dev-runtime", "snapshots", "generation-a"), {
+        force: true,
+        recursive: true,
       });
-      await expect(delivered.promise).resolves.toBe(200);
-    } finally {
-      await restarted.close();
-      errorSpy.mockRestore();
-    }
-  });
+
+      const restarted = createWorld({ activeGenerationId: () => "generation-b", appRoot });
+      connectWorkerToWorld(restarted, appRoot);
+      const worldFetch = globalThis.fetch;
+      const handler = createWorkerQueueHandler();
+      const delivered = Promise.withResolvers<{ queue: string | null; status: number }>();
+      globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+        const request = new Request(input, init);
+        if (!request.url.includes("/.well-known/workflow/v1/")) return await worldFetch(request);
+        const response = await handler(request);
+        delivered.resolve({
+          queue: request.headers.get("x-vqs-queue-name"),
+          status: response.status,
+        });
+        return response;
+      }) as typeof fetch;
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      try {
+        await restarted.start();
+        await expect(callWorld(restarted, "runs.get", [runId])).resolves.toMatchObject({
+          status: "cancelled",
+        });
+        await expect(delivered.promise).resolves.toEqual({
+          queue: `${QUEUE_PREFIX}${workflowEntryReference.workflowId}`,
+          status: 200,
+        });
+      } finally {
+        await restarted.close();
+        errorSpy.mockRestore();
+      }
+    },
+  );
 
   it("recovers retained runs across restarts without recovering cancelled orphans", async () => {
     const appRoot = await createScratchDirectory("eve-parent-workflow-recovery-");
@@ -330,7 +349,7 @@ describe("parent development Workflow World", () => {
     await first.start();
     const runIds: string[] = [];
     try {
-      for (const deploymentId of [
+      for (const [index, deploymentId] of [
         "retained",
         "missing",
         "changed-framework",
@@ -338,7 +357,7 @@ describe("parent development Workflow World", () => {
         "changed-workflow",
         "invalid-json",
         "invalid-schema",
-      ]) {
+      ].entries()) {
         runIds.push(
           readCreatedRunId(
             await callWorld(first, "events.create", [
@@ -348,7 +367,10 @@ describe("parent development Workflow World", () => {
                 specVersion: 6,
                 eventData: {
                   deploymentId,
-                  executionContext: {},
+                  executionContext:
+                    index % 2 === 0
+                      ? { queueNamespace: deriveEveWorkflowQueueNamespace(AGENT_NAME) }
+                      : {},
                   input: new Uint8Array(),
                   workflowName: workflowEntryReference.workflowId,
                 },
@@ -362,12 +384,14 @@ describe("parent development Workflow World", () => {
     }
     const deliveries: string[] = [];
     const messages: unknown[] = [];
+    const queues = new Set<string | null>();
     process.env.WORKFLOW_LOCAL_BASE_URL = "http://eve-dev.local";
     globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
       const message = JSON.parse(new TextDecoder().decode(init?.body as Uint8Array)) as {
         runId: string;
       };
       deliveries.push(message.runId);
+      queues.add(new Headers(init?.headers).get("x-vqs-queue-name"));
       messages.push(message);
       return Response.json({ ok: true });
     }) as typeof fetch;
@@ -383,6 +407,7 @@ describe("parent development Workflow World", () => {
       await expect
         .poll(() => [...deliveries].sort())
         .toEqual([runIds[0], runIds[2], runIds[3], runIds[4]].sort());
+      expect([...queues]).toEqual([`${QUEUE_PREFIX}${workflowEntryReference.workflowId}`]);
       for (const message of messages) {
         expect(message).toMatchObject({ recovery: true, runSpecVersion: 6 });
       }
