@@ -257,6 +257,56 @@ describe("parent development Workflow World", () => {
     }
   });
 
+  it.fails("signs the wake-up that cancelling an orphaned run queues", async () => {
+    const appRoot = await createScratchDirectory("eve-parent-workflow-orphan-wake-up-");
+    await seedGeneration(appRoot, "generation-a");
+    const first = createWorld({ activeGenerationId: () => "generation-a", appRoot });
+    await first.start();
+    const created = await callWorld(first, "events.create", [
+      null,
+      {
+        eventData: {
+          deploymentId: "generation-a",
+          executionContext: {},
+          input: new Uint8Array(),
+          workflowName: workflowEntryReference.workflowId,
+        },
+        eventType: "run_created",
+        specVersion: createDevelopmentWorkflowWorld().specVersion,
+      },
+    ]);
+    const runId = readCreatedRunId(created);
+    await first.close();
+    await rm(join(appRoot, ".eve", "dev-runtime", "snapshots", "generation-a"), {
+      force: true,
+      recursive: true,
+    });
+
+    const restarted = createWorld({ activeGenerationId: () => "generation-b", appRoot });
+    connectWorkerToWorld(restarted, appRoot);
+    const worldFetch = globalThis.fetch;
+    const handler = createWorkerQueueHandler();
+    const delivered = Promise.withResolvers<number>();
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const request = new Request(input, init);
+      if (!request.url.includes("/.well-known/workflow/v1/")) return await worldFetch(request);
+      const response = await handler(request);
+      delivered.resolve(response.status);
+      return response;
+    }) as typeof fetch;
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      await restarted.start();
+      await expect(callWorld(restarted, "runs.get", [runId])).resolves.toMatchObject({
+        status: "cancelled",
+      });
+      await expect(delivered.promise).resolves.toBe(200);
+    } finally {
+      await restarted.close();
+      errorSpy.mockRestore();
+    }
+  });
+
   it("recovers retained runs across restarts without recovering cancelled orphans", async () => {
     const appRoot = await createScratchDirectory("eve-parent-workflow-recovery-");
     await seedGeneration(appRoot, "retained");
