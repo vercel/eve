@@ -2,13 +2,16 @@ import { glyphNoise, glyphSymbols } from "./glyphs";
 
 type Vector = readonly [number, number, number];
 
-export const loopWidth = 640;
-export const loopHeight = 500;
+export const loopWidth = 720;
+export const loopHeight = 440;
 export const loopCheckpoints = 4;
 
-const sections = 172;
-const sides = 9;
-const tube = 0.42;
+const restingYaw = 0.55;
+const sway = 0.17;
+
+const sections = 240;
+const sides = 6;
+const tube = 0.15;
 const tau = Math.PI * 2;
 const light = normalize([-0.42, 0.58, 0.7]);
 
@@ -21,9 +24,10 @@ function cross(a: Vector, b: Vector): Vector {
   return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 }
 
-function knot(t: number): Vector {
-  const radius = 1.3 + 0.46 * Math.cos(3 * t);
-  return [radius * Math.cos(2 * t), radius * Math.sin(2 * t), 0.62 * Math.sin(3 * t)];
+function infinityCurve(t: number): Vector {
+  const sine = Math.sin(t);
+  const x = (2.4 * Math.cos(t)) / (1 + sine * sine);
+  return [x, x * sine, 0.45 * sine];
 }
 
 export type LoopSample = { position: Vector; normal: Vector; t: number; symbol: number };
@@ -32,12 +36,12 @@ export const loopSamples: LoopSample[] = Array.from({ length: sections * sides }
   const section = Math.floor(index / sides);
   const side = index % sides;
   const t = (section / sections) * tau;
-  const center = knot(t);
-  const ahead = knot(t + 0.001);
+  const center = infinityCurve(t);
+  const ahead = infinityCurve(t + 0.001);
   const tangent = normalize([ahead[0] - center[0], ahead[1] - center[1], ahead[2] - center[2]]);
   const across = normalize(cross(tangent, [0, 0, 1]));
   const up = cross(tangent, across);
-  const angle = (side / sides) * tau + section * 0.17;
+  const angle = (side / sides) * tau + section * 0.11;
   const normal: Vector = [
     across[0] * Math.cos(angle) + up[0] * Math.sin(angle),
     across[1] * Math.cos(angle) + up[1] * Math.sin(angle),
@@ -66,26 +70,27 @@ export type LoopMark = {
 };
 
 const camera = 7.5;
-const tilt = 0.68;
-const margin = 12;
+const tilt = 0.42;
+const margin = 16;
 
-function rotation(spin: number) {
-  const cosSpin = Math.cos(spin);
-  const sinSpin = Math.sin(spin);
+function rotation(yaw: number) {
+  const cosYaw = Math.cos(yaw);
+  const sinYaw = Math.sin(yaw);
   const cosTilt = Math.cos(tilt);
   const sinTilt = Math.sin(tilt);
   return ([x, y, z]: Vector): Vector => {
-    const rx = x * cosSpin - y * sinSpin;
-    const ry = x * sinSpin + y * cosSpin;
-    return [rx, ry * cosTilt - z * sinTilt, ry * sinTilt + z * cosTilt];
+    const rx = x * cosYaw + z * sinYaw;
+    const rz = -x * sinYaw + z * cosYaw;
+    return [rx, y * cosTilt - rz * sinTilt, y * sinTilt + rz * cosTilt];
   };
 }
 
 const loopScale = (() => {
   let reachX = 0;
   let reachY = 0;
-  for (let step = 0; step < 72; step++) {
-    const rotate = rotation((step / 72) * tau);
+  const samples = 24;
+  for (let step = 0; step <= samples; step++) {
+    const rotate = rotation(restingYaw + sway * ((step / samples) * 2 - 1));
     for (const { position } of loopSamples) {
       const [x, y, z] = rotate(position);
       const perspective = camera / (camera - z);
@@ -96,8 +101,8 @@ const loopScale = (() => {
   return Math.min((loopWidth / 2 - margin) / reachX, (loopHeight / 2 - margin) / reachY);
 })();
 
-export function projectLoop(spin: number): LoopMark[] {
-  const rotate = rotation(spin);
+export function projectLoop(seconds: number): LoopMark[] {
+  const rotate = rotation(restingYaw + sway * Math.sin(seconds * 0.25));
   return loopSamples
     .map(({ position, normal, t, symbol }) => {
       const [x, y, z] = rotate(position);
@@ -109,7 +114,7 @@ export function projectLoop(spin: number): LoopMark[] {
         x: loopWidth / 2 + x * loopScale * perspective,
         y: loopHeight / 2 - y * loopScale * perspective,
         depth: z,
-        size: 12.5 * perspective,
+        size: 9.5 * perspective,
         shade: front ? 0.24 + 0.76 * lit : 0.07,
         t,
         symbol,
@@ -164,7 +169,7 @@ function buildStill() {
       return `<path id="loop-glyph-${index}" d="${path}" transform="scale(1.4)" ${paint}/>`;
     })
     .join("");
-  const marks = projectLoop(0.6).map((mark) => ({
+  const marks = projectLoop(0).map((mark) => ({
     symbol: mark.symbol,
     opacity: loopMarkOpacity(mark, runs).toFixed(2),
     transform: `translate(${mark.x.toFixed(1)} ${mark.y.toFixed(1)}) scale(${(mark.size / 16).toFixed(3)})`,

@@ -1,5 +1,3 @@
-import type { CSSProperties } from "react";
-import styles from "./challenge.module.css";
 import { type GlyphFieldOptions, glyphCell, glyphMarks, glyphSymbols } from "./glyphs";
 
 export function GlyphField({
@@ -30,20 +28,8 @@ export function GlyphField({
           />
         ))}
       </defs>
-      {glyphMarks(options).map(({ id, x, y, symbol, opacity, twinkle, delay }) => (
-        <use
-          className={twinkle ? styles.twinkle : undefined}
-          href={`#${prefix}-${symbol}`}
-          key={id}
-          opacity={opacity}
-          style={
-            twinkle
-              ? ({ "--rest": opacity, animationDelay: `-${delay}ms` } as CSSProperties)
-              : undefined
-          }
-          x={x}
-          y={y}
-        />
+      {glyphMarks(options).map(({ id, x, y, symbol, opacity }) => (
+        <use href={`#${prefix}-${symbol}`} key={id} opacity={opacity} x={x} y={y} />
       ))}
     </svg>
   );

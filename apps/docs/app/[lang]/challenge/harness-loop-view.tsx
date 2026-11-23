@@ -92,12 +92,13 @@ export function HarnessLoop() {
       const runs = runPositions(elapsed);
       const glyphs = paint();
       if (!glyphs) return;
+      const strength = Number(getComputedStyle(frame!).getPropertyValue("--loop-strength")) || 1;
       context!.clearRect(0, 0, loopWidth, loopHeight);
-      for (const mark of projectLoop(0.6 + elapsed * 0.11)) {
+      for (const mark of projectLoop(elapsed)) {
         const tile = mark.symbol * sprite;
         const left = mark.x - mark.size / 2;
         const top = mark.y - mark.size / 2;
-        context!.globalAlpha = loopMarkOpacity(mark, runs);
+        context!.globalAlpha = loopMarkOpacity(mark, runs) * strength;
         context!.drawImage(glyphs, tile, 0, sprite, sprite, left, top, mark.size, mark.size);
         const { density, vx, vy } = flow.sample(mark.x, mark.y);
         if (density < 0.035 || mark.shade < 0.1) continue;
@@ -175,7 +176,12 @@ export function HarnessLoop() {
   }, []);
 
   return (
-    <div aria-hidden="true" className={styles.loop} ref={frameRef}>
+    <div
+      aria-hidden="true"
+      className={styles.loop}
+      ref={frameRef}
+      style={{ aspectRatio: `${loopWidth} / ${loopHeight}` }}
+    >
       <svg
         className={styles.loopStill}
         data-hidden={animated || undefined}

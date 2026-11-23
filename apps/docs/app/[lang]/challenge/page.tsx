@@ -140,7 +140,7 @@ export default function ChallengePage() {
           className={styles.backdrop}
           clearing={{ x: 0.2, y: 0.24, radiusX: 0.34, radiusY: 0.3 }}
           columns={96}
-          density={0.2}
+          density={0.16}
           fit="meet"
           rows={90}
           seed={7}

@@ -52,8 +52,6 @@ export function glyphMarks({
         y: (row + 0.5) * glyphCell,
         symbol: Math.floor(glyphNoise(column, row, seed + 1) * glyphSymbols.length),
         opacity: brightness + glyphNoise(column, row, seed + 2) * (1 - brightness) * 0.72,
-        twinkle: glyphNoise(column, row, seed + 3) > 0.91,
-        delay: Math.round(glyphNoise(column, row, seed + 4) * 6400),
       },
     ];
   }).flat();

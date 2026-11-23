@@ -6,7 +6,6 @@
 }
 
 .backdrop {
-  --peak: var(--ds-gray-900);
   position: absolute;
   top: 0;
   left: 50%;
@@ -15,6 +14,7 @@
   height: 90rem;
   translate: -50% 0;
   color: var(--ds-gray-500);
+  opacity: 0.66;
   pointer-events: none;
 }
 
@@ -24,19 +24,22 @@
 
 .loop {
   position: relative;
-  aspect-ratio: 640 / 500;
   min-width: 0;
   color: var(--ds-gray-1000);
 }
 
 :global(.light-theme) .loop {
+  --loop-strength: 0.72;
   color: var(--ds-gray-900);
+}
+
+:global(.light-theme) .loopStill {
+  opacity: 0.72;
 }
 
 @media (min-width: 64rem) {
   .loop {
-    width: 118%;
-    margin-inline-end: -14%;
+    width: calc(100% + 1rem);
   }
 }
 
@@ -54,22 +57,4 @@
 
 .loopCanvas {
   pointer-events: none;
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .twinkle {
-    animation: twinkle 6.4s ease-in-out infinite;
-  }
-
-  @keyframes twinkle {
-    0%,
-    100% {
-      opacity: var(--rest);
-    }
-
-    45% {
-      opacity: 1;
-      color: var(--peak, #fff);
-    }
-  }
 }

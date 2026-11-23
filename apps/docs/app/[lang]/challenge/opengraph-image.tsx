@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { ImageResponse } from "next/og";
 import { challengeDeadline, challengeHeadline, challengeTitle } from "./challenge-details";
 import { glyphFieldSvg } from "./glyphs";
-import { stillLoop } from "./harness-loop";
+import { loopHeight, loopWidth, stillLoop } from "./harness-loop";
 
 export const alt = challengeTitle;
 export const size = { width: 1200, height: 630 };
@@ -20,7 +20,7 @@ const backdrop = dataUri(
       columns: 75,
       rows: 40,
       seed: 7,
-      density: 0.2,
+      density: 0.16,
       brightness: 0.1,
       clearing: { x: 0.2, y: 0.5, radiusX: 0.32, radiusY: 0.6 },
     },
@@ -49,7 +49,7 @@ export default async function ChallengeOpenGraphImage() {
         alt=""
         height={640}
         src={backdrop}
-        style={{ position: "absolute", top: 0, left: 0 }}
+        style={{ position: "absolute", top: 0, left: 0, opacity: 0.66 }}
         width={1200}
       />
       <div style={{ display: "flex", flexDirection: "column", width: 480 }}>
@@ -69,7 +69,7 @@ export default async function ChallengeOpenGraphImage() {
           {challengeHeadline}
         </div>
       </div>
-      <img alt="" height={480} src={loop} width={614} />
+      <img alt="" height={Math.round((640 * loopHeight) / loopWidth)} src={loop} width={640} />
     </div>,
     {
       ...size,
