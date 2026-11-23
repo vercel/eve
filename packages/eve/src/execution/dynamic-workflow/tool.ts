@@ -7,13 +7,29 @@ export interface WorkflowProgramToolInput {
   readonly maxSubagents?: number;
 }
 
+export async function runWorkflowProgram(
+  input: WorkflowProgramToolInput,
+  ctx: WorkflowToolContext,
+): Promise<JsonValue> {
+  return runJsProgram(input.js, ctx, {
+    maxSubagents: input.maxSubagents ?? 0,
+  });
+}
+
 export async function runWorkflowProgramTask(
   input: WorkflowProgramToolInput,
   ctx: WorkflowToolContext,
 ): Promise<JsonValue> {
   "use workflow";
 
-  return runJsProgram(input.js, ctx, {
-    maxSubagents: input.maxSubagents ?? 0,
-  });
+  return runWorkflowProgram(input, ctx);
+}
+
+export async function runWorkflowProgramExecute(
+  input: WorkflowProgramToolInput,
+  ctx: WorkflowToolContext,
+): Promise<JsonValue> {
+  "use workflow";
+
+  return runWorkflowProgram(input, ctx);
 }
