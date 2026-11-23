@@ -8,10 +8,8 @@ import { defineTool, type ToolDefinition } from "#tools/definition.js";
 import type { CompiledAgentManifest, CompiledSkillDefinition } from "#compiler/manifest.js";
 import { createCompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog.js";
 import type { ModelMetadata } from "#internal/model-catalog.js";
-import {
-  createProgrammaticCompiledModuleMap,
-  type CompiledModuleMap,
-} from "#compiler/module-map.js";
+import { createProgrammaticCompiledModuleMap } from "#compiler/module-map.js";
+import type { CompiledModuleMap } from "#compiler/module-map-schema.js";
 import { compileAgentManifest } from "#compiler/normalize-manifest.js";
 import {
   createAgentSourceRegistry,

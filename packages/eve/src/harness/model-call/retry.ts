@@ -1,10 +1,9 @@
-import { setTimeout as delay } from "node:timers/promises";
-
 import { createLogger } from "#internal/logging.js";
 import { classifyModelCallError } from "#harness/model-call/errors.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
 import { throwIfSessionStreamDead } from "#harness/session-stream-write-error.js";
 import { decide, type Policy, type Restriction } from "#shared/restriction.js";
+import { delay } from "#runtime-env/delay.js";
 
 const log = createLogger("harness.tool-loop");
 const MODEL_CALL_MAX_ATTEMPTS = 3;
@@ -76,7 +75,7 @@ export async function runModelCallWithRetries<T>(
         error,
       });
       await diag.onRetry?.(error);
-      await delay(delayMs, undefined, { signal });
+      await delay(delayMs, signal);
     }
   }
 }

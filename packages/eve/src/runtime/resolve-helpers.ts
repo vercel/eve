@@ -1,5 +1,5 @@
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
-import type { CompiledModuleMap } from "#compiler/module-map.js";
+import type { CompiledModuleMap } from "#compiler/module-map-schema.js";
 import {
   expectObjectRecord,
   getAuthoredModuleExport,

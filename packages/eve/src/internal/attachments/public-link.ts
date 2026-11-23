@@ -1,4 +1,3 @@
-import type { FetchFileResult } from "#channel/adapter.js";
 import { requestPublicUrl } from "#execution/web-fetch/request.js";
 import { EveAttachmentError } from "#internal/attachments/errors.js";
 
@@ -6,7 +5,12 @@ const DOWNLOAD_TIMEOUT_MS = 30_000;
 const MAX_DOWNLOADS_PER_MESSAGE = 10;
 const GENERIC_MEDIA_TYPES = new Set(["application/octet-stream", "binary/octet-stream"]);
 
-export type PublicDownloads = (url: URL, adapterKind: string) => Promise<FetchFileResult>;
+export interface DownloadedFile {
+  readonly bytes: Uint8Array;
+  readonly mediaType?: string;
+}
+
+export type PublicDownloads = (url: URL, adapterKind: string) => Promise<DownloadedFile>;
 
 export function createPublicDownloads(maxBytes: number): PublicDownloads {
   let started = 0;
@@ -28,7 +32,7 @@ async function fetchPublicAttachment(
   url: URL,
   adapterKind: string,
   maxBytes: number,
-): Promise<FetchFileResult> {
+): Promise<DownloadedFile> {
   if (url.protocol !== "https:") {
     throw refusal(adapterKind, "eve downloads only public https:// links.");
   }
@@ -49,7 +53,7 @@ async function fetchPublicAttachment(
   if (mediaType === "text/html") {
     throw refusal(adapterKind, "The link returned a web page instead of a file.");
   }
-  const bytes = Buffer.from(await response.arrayBuffer());
+  const bytes = new Uint8Array(await response.arrayBuffer());
   return mediaType === undefined || mediaType === "" || GENERIC_MEDIA_TYPES.has(mediaType)
     ? { bytes }
     : { bytes, mediaType };

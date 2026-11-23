@@ -4,7 +4,6 @@ import { createMcpTracing } from "#tracing/eve/mcp.js";
 import { withConnectionEventSpan } from "#tracing/eve/connection-events.js";
 import { principalOf } from "#execution/session/principal.js";
 import { defineJsonSchema, toInputSchema } from "#tools/schema.js";
-import { createHash } from "node:crypto";
 import {
   createMCPClient,
   type Experimental_MCPEventDefinition as EventDefinition,
@@ -28,6 +27,7 @@ import {
   type EventOwner,
 } from "#runtime/connections/events/state.js";
 import type { ManagedEventSubscription } from "#shared/connection-events.js";
+import { sha256Hex } from "#shared/digest.js";
 
 const GET = "events_get_subscription";
 const STOP = "events_unsubscribe";
@@ -235,19 +235,17 @@ export class ConnectionEventActions {
       if (valid.issues !== undefined)
         throw new Error("Event arguments do not match the authorized catalog schema.");
       const eventArguments = parseJsonObject(valid.value);
-      const id = createHash("sha256")
-        .update(
-          canonicalJson([
-            sessionId,
-            this.connection.instanceId,
-            this.connection.connectionName,
-            owner,
-            executionPrincipal,
-            definition.name,
-            eventArguments,
-          ]),
-        )
-        .digest("hex");
+      const id = sha256Hex(
+        canonicalJson([
+          sessionId,
+          this.connection.instanceId,
+          this.connection.connectionName,
+          owner,
+          executionPrincipal,
+          definition.name,
+          eventArguments,
+        ]),
+      );
       const binding: EventBinding = {
         ...caller,
         id,
@@ -310,7 +308,7 @@ function canonicalJson(value: unknown): string {
 }
 
 function actionName(eventName: string): string {
-  return `${PREFIX}${createHash("sha256").update(eventName).digest("hex").slice(0, 24)}`;
+  return `${PREFIX}${sha256Hex(eventName).slice(0, 24)}`;
 }
 
 function managementMetadata(): ConnectionToolMetadata[] {

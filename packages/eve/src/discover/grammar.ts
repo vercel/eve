@@ -19,6 +19,11 @@ import { discoverMarkdownSource } from "#discover/markdown.js";
 import { discoverNamedSourceDirectory } from "#discover/named-source-directory.js";
 import type { ProjectSource, ProjectSourceEntry } from "#discover/project-source.js";
 import { collectFlatSlotCandidates } from "#discover/slots.js";
+import {
+  CONNECTION_SLUG_PATTERN,
+  TOOL_SLUG_PATTERN,
+  TOOL_SLUG_RULE,
+} from "#shared/name-grammar.js";
 
 export const DISCOVER_MODULE_SLOT_COLLISION = "discover/module-slot-collision";
 
@@ -49,18 +54,6 @@ const DISCOVER_CHANNEL_NAME_INVALID = "discover/channel-name-invalid";
 export const DISCOVER_HOOK_NAME_INVALID = "discover/hook-name-invalid";
 
 export const DISCOVER_EXTENSION_NAME_INVALID = "discover/extension-name-invalid";
-
-export const TOOL_SLUG_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
-
-export const TOOL_SLUG_RULE =
-  "Expected ASCII letters, digits, underscores, and dashes only, starting with a letter, up to 64 characters.";
-
-export const SKILL_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/;
-
-export const SKILL_NAME_RULE =
-  "Expected ASCII letters, digits, underscores, and dashes only, starting with a letter or digit, up to 64 characters.";
-
-export const CONNECTION_SLUG_PATTERN = /^[a-z][a-z0-9-]{0,63}$/;
 
 const CHANNEL_SLUG_PATTERN = /^(\.?[a-z][a-z0-9-]{0,63}|\[[a-zA-Z][a-zA-Z0-9_]{0,63}\])$/;
 

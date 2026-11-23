@@ -254,6 +254,7 @@ type Note = 'request from "./not-an-import"';`,
       join(COMPILED_VENDOR_ROOT, "@vercel", "otel", "index.js"),
     ).href;
     const { stdout } = await execFileAsync(process.execPath, [
+      "--conditions=eve-source",
       "--input-type=module",
       "--eval",
       [

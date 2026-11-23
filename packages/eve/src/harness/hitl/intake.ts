@@ -49,6 +49,7 @@ import {
 import { decideApproval } from "#harness/tools.js";
 import { changedSinceOffered, changedToolMessage, failedCall } from "#harness/approval-outcome.js";
 import { settleCall } from "#harness/session-machine/calls.js";
+import { startEach } from "#harness/tool-concurrency.js";
 
 export type HumanInputIntake =
   | { readonly kind: "stop"; readonly result: StepResult }
@@ -260,7 +261,7 @@ async function runApproved(
   const signIns = signInReports({ publish: step.publish, view: () => step.view() });
   step.ctx.setVirtualContext(SignInCompletedKey, signIns.completed(calls));
   const groups = await Promise.allSettled(
-    local.map(async ({ approvals, tools }) => {
+    startEach(local, async ({ approvals, tools }) => {
       if (approvals.length === 0) return { settled: [], signIns: [] };
       const view = step.view().projection.view;
       const call = view.calls[approvals[0]!.call.callId];

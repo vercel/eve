@@ -1,4 +1,5 @@
 import type { Attachment } from "#compiled/chat/index.js";
+import { fromBase64, toBase64Url, utf8Bytes, utf8String } from "#shared/bytes.js";
 
 export const CHAT_SDK_FILE_PROTOCOL = "chat-sdk-file:";
 
@@ -17,7 +18,7 @@ export function encodeChatSdkFileRef(ref: ChatSdkFileRef): URL {
     attachment: { fetchMetadata, mimeType, name, size, type, url },
   };
   const encoded = new URL(CHAT_SDK_FILE_PROTOCOL);
-  encoded.searchParams.set("p", Buffer.from(JSON.stringify(payload)).toString("base64url"));
+  encoded.searchParams.set("p", toBase64Url(utf8Bytes(JSON.stringify(payload))));
   return encoded;
 }
 
@@ -26,7 +27,7 @@ export function parseChatSdkFileRef(url: URL): ChatSdkFileRef | null {
   const encoded = url.searchParams.get("p");
   if (encoded === null) return null;
   try {
-    const ref = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as ChatSdkFileRef;
+    const ref = JSON.parse(utf8String(fromBase64(encoded))) as ChatSdkFileRef;
     return typeof ref.adapter === "string" && typeof ref.attachment === "object" ? ref : null;
   } catch {
     return null;

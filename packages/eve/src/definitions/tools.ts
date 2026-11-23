@@ -1,7 +1,7 @@
 import { assertNotConnectionOwned } from "#connections/ownership.js";
 import type { ContextContainer } from "#context/container.js";
 import type { ContextReader } from "#context/key.js";
-import { TOOL_SLUG_PATTERN, TOOL_SLUG_RULE } from "#discover/grammar.js";
+import { TOOL_SLUG_PATTERN, TOOL_SLUG_RULE } from "#shared/name-grammar.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { compiledBundleOf } from "#runtime/sessions/runtime-context-keys.js";

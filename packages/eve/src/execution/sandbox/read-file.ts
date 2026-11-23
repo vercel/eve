@@ -15,6 +15,7 @@ import { readMediaMetadata } from "#internal/attachments/read-media-metadata.js"
 import { inlinesSandboxRefAsBytes } from "#internal/attachments/sandbox-refs.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 import { capLineLength, MAX_OUTPUT_BYTES } from "#execution/sandbox/truncate-output.js";
+import { utf8ByteLength } from "#shared/bytes.js";
 
 const DEFAULT_OFFSET = 1;
 const DEFAULT_LIMIT = 2000;
@@ -118,7 +119,7 @@ export async function executeReadFileOnSandbox(
     const lineNumber = effectiveOffset + i;
     const line = capLineLength(selectedLines[i] ?? "");
     const numbered = `${lineNumber}: ${line}`;
-    const lineBytes = Buffer.byteLength(numbered, "utf8") + 1;
+    const lineBytes = utf8ByteLength(numbered) + 1;
 
     if (outputBytes + lineBytes > MAX_OUTPUT_BYTES && outputLines.length > 0) {
       truncatedByBytes = true;

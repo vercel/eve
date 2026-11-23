@@ -1,6 +1,7 @@
 import type { LogWarningsFunction } from "ai";
 
 import { createLogger } from "#internal/logging.js";
+import { readEnv } from "#runtime-env/env.js";
 
 const log = createLogger("harness.ai-sdk-warnings");
 
@@ -10,7 +11,7 @@ export function ensureAiSdkWarningLogger(): void {
   }
 
   globalThis.AI_SDK_LOG_WARNINGS =
-    process.env.AI_SDK_LOG_WARNINGS === "false" ? false : logAiSdkWarnings;
+    readEnv("AI_SDK_LOG_WARNINGS") === "false" ? false : logAiSdkWarnings;
 }
 
 const logAiSdkWarnings: LogWarningsFunction = ({ warnings, provider, model }) => {

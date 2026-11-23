@@ -2,7 +2,8 @@ import { join } from "node:path";
 
 import { createDiscoverErrorDiagnostic, type DiscoverDiagnostic } from "#discover/diagnostics.js";
 import { matchesSupportedModuleBaseName, stripLogicalPathExtension } from "#discover/filesystem.js";
-import { TOOL_SLUG_PATTERN, discoverFlatModuleSource } from "#discover/grammar.js";
+import { discoverFlatModuleSource } from "#discover/grammar.js";
+import { TOOL_SLUG_PATTERN } from "#shared/name-grammar.js";
 import type { MemorySourceRef } from "#discover/manifest.js";
 import { discoverNamedSourceDirectory } from "#discover/named-source-directory.js";
 import type { ProjectSource, ProjectSourceEntry } from "#discover/project-source.js";

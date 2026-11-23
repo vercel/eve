@@ -7,8 +7,10 @@ import type {
 } from "#compiler/manifest.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import type { CompiledModuleBinding } from "#compiler/source-graph.js";
-import type { CompiledModuleMap } from "#compiler/module-map.js";
-import { collectRuntimeModuleBindingsForManifest } from "#compiler/module-map.js";
+import {
+  type CompiledModuleMap,
+  collectRuntimeModuleBindingsForManifest,
+} from "#compiler/module-map-schema.js";
 import { HOST_HTTP_INVENTORY } from "#framework/host-inventory.js";
 
 type CompiledNode = CompiledAgentNodeManifest | CompiledAgentResources;

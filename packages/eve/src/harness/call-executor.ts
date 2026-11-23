@@ -39,6 +39,7 @@ import type { ApprovalAsk } from "#harness/session-machine/view.js";
 import { toModelSchema } from "#tools/schema.js";
 import { projectToolLabel } from "#harness/action-presentation.js";
 import { displayTitle } from "#protocol/session-projection/display-name.js";
+import { startEach } from "#harness/tool-concurrency.js";
 
 type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
 export interface CallResult {
@@ -450,7 +451,8 @@ export async function executeInlineCalls(input: {
       input.tools.get(call.toolName) !== undefined,
   );
   const finished = await Promise.allSettled(
-    calls.map(
+    startEach(
+      calls,
       async (
         call,
       ): Promise<{

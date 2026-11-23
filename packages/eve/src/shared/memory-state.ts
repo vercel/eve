@@ -1,10 +1,10 @@
-import { createHash } from "node:crypto";
-
 import type {
   MemoryRecallResult,
   MemoryScope,
   MemoryScopeResolverResult,
 } from "#public/memory/index.js";
+import { concatBytes, utf8ByteLength, utf8Bytes as encodeUtf8 } from "#shared/bytes.js";
+import { sha256Base64Url } from "#shared/digest.js";
 
 const MEMORY_NAMESPACE_MAX_BYTES = 1_024;
 const MEMORY_SCOPE_COMPONENT_MAX_BYTES = 1_024;
@@ -34,10 +34,10 @@ export function createMemoryScope(input: {
   }
   const namespaceKey = digest("memns1_", namespaceEncoding);
   const scopeKey = digest("memscope1_", scopeEncoding);
-  const composite = Buffer.concat([
-    Buffer.from("eve-memory-composite-v1\0"),
-    lengthPrefix(Buffer.from(namespaceKey)),
-    lengthPrefix(Buffer.from(scopeKey)),
+  const composite = concatBytes([
+    encodeUtf8("eve-memory-composite-v1\0"),
+    lengthPrefix(encodeUtf8(namespaceKey)),
+    lengthPrefix(encodeUtf8(scopeKey)),
   ]);
   return Object.freeze({
     key: digest("memscope1_", composite),
@@ -122,33 +122,33 @@ function validateMemoryScopeValue(scope: Exclude<MemoryScopeResolverResult, null
   }
 }
 
-function encodeScope(scope: Exclude<MemoryScopeResolverResult, null>): Buffer {
+function encodeScope(scope: Exclude<MemoryScopeResolverResult, null>): Uint8Array {
   if (typeof scope === "string") return encodeScalar("scope-scalar", scope);
-  return Buffer.concat([
-    Buffer.from("scope-tuple-v1\0"),
+  return concatBytes([
+    encodeUtf8("scope-tuple-v1\0"),
     uint32(scope.length),
-    ...scope.map((component) => lengthPrefix(Buffer.from(component, "utf8"))),
+    ...scope.map((component) => lengthPrefix(encodeUtf8(component))),
   ]);
 }
 
-function encodeScalar(type: string, value: string): Buffer {
-  return Buffer.concat([Buffer.from(`${type}-v1\0`), lengthPrefix(Buffer.from(value, "utf8"))]);
+function encodeScalar(type: string, value: string): Uint8Array {
+  return concatBytes([encodeUtf8(`${type}-v1\0`), lengthPrefix(encodeUtf8(value))]);
 }
 
-function lengthPrefix(value: Buffer): Buffer {
-  return Buffer.concat([uint32(value.byteLength), value]);
+function lengthPrefix(value: Uint8Array): Uint8Array {
+  return concatBytes([uint32(value.byteLength), value]);
 }
 
-function uint32(value: number): Buffer {
-  const result = Buffer.allocUnsafe(4);
-  result.writeUInt32BE(value);
+function uint32(value: number): Uint8Array {
+  const result = new Uint8Array(4);
+  new DataView(result.buffer).setUint32(0, value, false);
   return result;
 }
 
-function digest(prefix: string, value: Buffer): string {
-  return `${prefix}${createHash("sha256").update(value).digest("base64url")}`;
+function digest(prefix: string, value: Uint8Array): string {
+  return `${prefix}${sha256Base64Url(value)}`;
 }
 
 function utf8Bytes(value: string): number {
-  return Buffer.byteLength(value, "utf8");
+  return utf8ByteLength(value);
 }

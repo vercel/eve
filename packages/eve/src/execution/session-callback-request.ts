@@ -11,6 +11,7 @@ import { isLocalDevelopmentServer } from "#internal/application/dev-environment.
 import { createLogger } from "#internal/logging.js";
 import { platformContext } from "#platform/context.js";
 import { isObject } from "#shared/guards.js";
+import { readEnv } from "#runtime-env/env.js";
 
 const log = createLogger("execution.session-callback");
 const SESSION_CALLBACK_TIMEOUT_MS = 30_000;
@@ -126,7 +127,7 @@ async function resolveSessionCallbackHeaders(urlValue: string): Promise<Record<s
 }
 
 function configuredCallbackOrigins(): Array<(url: URL) => boolean> {
-  const configured = process.env.EVE_CALLBACK_TRUSTED_ORIGINS?.trim();
+  const configured = readEnv("EVE_CALLBACK_TRUSTED_ORIGINS")?.trim();
   if (!configured) return [];
   return configured.split(",").map((entry) => {
     const url = URL.parse(entry.trim());

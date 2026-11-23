@@ -1,6 +1,5 @@
 import type { InstrumentationChannel } from "#shared/instrumentation-channel.js";
 import type { ConversationContext } from "#shared/conversation-context.js";
-import { createHash } from "node:crypto";
 
 import type { HistoryMessage as ModelMessage } from "#shared/history-message.js";
 
@@ -16,6 +15,8 @@ import {
 } from "#shared/public-route-prefix.js";
 import { platformContext } from "#platform/context.js";
 import type { ToolDefinition } from "#tools/definition.js";
+import { readEnv } from "#runtime-env/env.js";
+import { sha256Base64Url } from "#shared/digest.js";
 
 /**
  * What a namespace function receives: the application root, the agent or subagent, and the slot
@@ -241,15 +242,15 @@ export function defaultNamespace(context: MemoryNamespaceContext): string {
     return JSON.stringify([
       "eve-memory-default-namespace-v1",
       "local",
-      createHash("sha256").update(context.appRoot).digest("base64url"),
+      sha256Base64Url(context.appRoot),
       context.node,
       context.slot,
     ]);
   }
 
   const publicRoutePrefix =
-    process.env[EVE_INTERNAL_AGENT_WORKSPACE_MEMBER_ENV] === "1"
-      ? normalizePublicRoutePrefix(process.env[EVE_PUBLIC_ROUTE_PREFIX_ENV])
+    readEnv(EVE_INTERNAL_AGENT_WORKSPACE_MEMBER_ENV) === "1"
+      ? normalizePublicRoutePrefix(readEnv(EVE_PUBLIC_ROUTE_PREFIX_ENV))
       : undefined;
   return JSON.stringify([
     "eve-memory-default-namespace-v1",
