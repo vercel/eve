@@ -527,10 +527,11 @@ export const defaultEvents: SlackChannelInternalEvents = {
   },
 
   async "call.requested"({ data }, { channel }) {
+    const { capability, owner } = data;
+    if ("callId" in owner) return;
     const narration = channel.state.pendingToolCallMessage;
     channel.state.pendingToolCallMessage = null;
-    const { capability, owner } = data;
-    const counts = !("callId" in owner) && showsActivity(capability);
+    const counts = showsActivity(capability);
     if (!narration && !counts) return;
     if ("turnId" in owner) {
       await showStatus(channel, narration ?? callLabel(data));

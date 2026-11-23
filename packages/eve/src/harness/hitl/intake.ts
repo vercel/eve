@@ -5,9 +5,15 @@ import { transition } from "#harness/session-machine/commit.js";
 import { callRun, runTurn } from "#protocol/session-projection/selectors.js";
 import { stepCatalog } from "#definitions/step.js";
 import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
+import { DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS } from "#execution/dynamic-workflow/schema.js";
 import { collectWorkflowCalls } from "#harness/coordination.js";
-import { collectProgramWorkflowCalls, withOwnOutputs } from "#harness/program-calls.js";
+import {
+  collectProgramWorkflowCalls,
+  isProgramTool,
+  withOwnOutputs,
+} from "#harness/program-calls.js";
 import { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
+import { newProgram, savePrograms, type ProgramRun } from "#harness/session-machine/programs.js";
 import { completeSignIn, runnableCalls, settle } from "#harness/session-machine/transitions.js";
 import {
   type ApprovedCall,
@@ -192,6 +198,7 @@ async function runApproved(
     byStep.set(parked, [...(byStep.get(parked) ?? []), approval]);
   }
   const tasks: RuntimeWorkflowTaskRequest[] = [];
+  const programs: ProgramRun[] = [];
   const denied: CallResult[] = [];
   const local: { approvals: ApprovedCall[]; tools: HarnessToolLookup }[] = [];
   const claimed = new Set<string>();
@@ -230,6 +237,18 @@ async function runApproved(
           approvedClearance(step.view().projection.view, approval.call.callId) ?? recheck.clearance;
         if (clearance === undefined)
           throw new Error(`Approved call "${approval.call.callId}" has no clearance to dispatch.`);
+        if (isProgramTool(tool)) {
+          programs.push(
+            newProgram(
+              approval.call.callId,
+              approval.call.toolName,
+              approval.call.input,
+              parked.event,
+              tool.workflowProgram?.maxSubagents ?? DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS,
+            ),
+          );
+          continue;
+        }
         workflows.set(approval.call.callId, { approval, clearance });
       }
     }
@@ -272,6 +291,7 @@ async function runApproved(
   }
   if (denied.length > 0) await step.apply(settle(step.view(), { results: denied }));
   if (tasks.length > 0) await step.apply(dispatch(step.view(), { tasks }));
+  if (programs.length > 0) await step.apply(savePrograms(step.view(), programs));
 
   const calls = local.flatMap(({ approvals }) => approvals);
   step.frameworkToolNames = new Set(

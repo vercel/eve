@@ -75,7 +75,10 @@ export function collectProgramWorkflowCalls(
             executeInput: agentCallInput(definition, toolName, input),
             workflowId: programAgentCallWorkflowReference.workflowId,
           }
-        : { workflowId: definition.workflowId };
+        : {
+            executeInput: definition.executeInput?.(input),
+            workflowId: definition.workflowId,
+          };
     return admitWorkflowTask(
       {
         ...request,

@@ -200,23 +200,25 @@ function notRun(): ProgramCallResult {
 }
 
 export function savePrograms(view: SessionView, programs: readonly ProgramRun[]): Transition {
-  return transition({ events: [], turn: programs.reduce(withProgram, view.turn) });
+  const ids = new Set(programs.map((program) => program.callId));
+  const turn = programs.reduce(withProgram, view.turn);
+  return transition({
+    events: [],
+    turn: {
+      ...turn,
+      suspended: turn.suspended.map((step) => stripApprovedProgramCalls(step, ids)),
+    },
+  });
+}
+
+function stripApprovedProgramCalls(step: SuspendedStep, ids: ReadonlySet<string>): SuspendedStep {
+  if (step.approved === undefined || step.approved.length === 0) return step;
+  const approved = step.approved.filter((entry) => !ids.has(entry.call.callId));
+  if (approved.length === step.approved.length) return step;
+  const { approved: _approved, ...rest } = step;
+  return approved.length === 0 ? rest : { ...rest, approved };
 }
 
 export function endProgram(view: SessionView, callId: string): Transition {
   return transition({ events: [], turn: withoutPrograms(view.turn, new Set([callId])) });
-}
-
-export function stopProgramBatch(
-  view: SessionView,
-  program: Pick<ProgramRun, "callId">,
-  stopped: ProgramCallResult,
-): Transition {
-  const batch = programBatch(view.turn, program);
-  if (batch === undefined) return transition({ events: [], turn: view.turn });
-  const suspended = view.turn.suspended.filter((step) => step !== batch);
-  return transition({
-    events: [],
-    turn: resumePrograms({ ...view.turn, suspended }, [batch], () => stopped),
-  });
 }

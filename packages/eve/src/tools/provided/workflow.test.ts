@@ -108,7 +108,7 @@ describe("workflow", () => {
     expect(definition.execute).toBe(runWorkflowProgramExecute);
     expect(definition.description).toContain("tools.<name>(input)");
     expect(definition.description).toContain("search({ query })");
-    expect(definition.description).toContain("ctx.agent(name, { message, outputSchema?, model? })");
+    expect(definition.description).toContain("ctx.agent(name, { message, outputSchema? })");
     expect(definition.description).toContain("at most 6 agents");
     expect(readWorkflowProgramOptions(definition)).toEqual({ maxSubagents: 6, tools: true });
 

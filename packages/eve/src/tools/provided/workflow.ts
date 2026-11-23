@@ -80,7 +80,7 @@ const workflowToolsInputSchema = defineJsonSchema<WorkflowToolInput>({
     js: {
       type: "string",
       description:
-        'JavaScript statements executed inside an async function. Supply only the body, without a surrounding function declaration or arrow function. Call tools, connections, and agents as `await tools.<name>(input)` (`tools["name"](input)` when the name is not an identifier), find unlisted tools with `await search({ query })`, or use `await ctx.agent(name, { message, outputSchema?, model? })` as an alias for agent calls. Return one JSON-serializable value.',
+        'JavaScript statements executed inside an async function. Supply only the body, without a surrounding function declaration or arrow function. Call tools, connections, and agents as `await tools.<name>(input)` (`tools["name"](input)` when the name is not an identifier), find unlisted tools with `await search({ query })`, or use `await ctx.agent(name, { message, outputSchema? })` as an alias for agent calls (also accepts `model` when the target tool declares it, such as `agent({ models })`). Return one JSON-serializable value.',
     },
   },
   required: ["js"],
@@ -103,7 +103,7 @@ export function workflow(options: WorkflowToolOptions = {}): WorkflowTool | Work
       "Runs in the foreground: the current turn waits until the program finishes and receives its result directly.",
       'Call any callable tool, connection tool, or agent by its flat catalog name as `await tools.<name>(input)` (use `tools["name"](input)` when the name is not an identifier).',
       "Call `await search({ query })` to find tools that are not in your tool list.",
-      "`await ctx.agent(name, { message, outputSchema?, model? })` is available as an alias for `await tools[name](...)`.",
+      "`await ctx.agent(name, { message, outputSchema? })` is available as an alias for `await tools[name](...)` (also accepts `model` when the target tool declares it, such as `agent({ models })`).",
       "Each call resolves to the tool's output (or an agent's reply, or a value matching `outputSchema` when provided); a failed or rejected call throws.",
       "Start independent calls together with `Promise.all` so concurrent work runs together and approvals are requested at once, and await every call before returning.",
       "There is no fetch, file system, timers, or imports. `console.log` output is captured and returned with the result.",

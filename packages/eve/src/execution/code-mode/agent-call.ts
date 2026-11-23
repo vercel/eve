@@ -26,8 +26,12 @@ export async function callProgramAgent(
   const agent = ctx.agent(target, model === undefined ? undefined : { model });
   const response = await agent.send<JsonValue>(message, { outputSchema, signal: ctx.abortSignal });
   const result = await response.result();
+  ctx.abortSignal.throwIfAborted();
   if (result.status === "failed") {
     throw new Error(`Agent "${name}" failed to handle the message: ${result.error.message}`);
+  }
+  if (result.status === "cancelled") {
+    throw new Error(`Agent "${name}" was cancelled before completing.`);
   }
   return outputSchema !== undefined ? (result.data ?? null) : (result.reply ?? null);
 }

@@ -21,6 +21,7 @@ import {
   programInputIssue,
   programSearch,
 } from "#execution/catalog/catalog-tools.js";
+import { connectionToolOutputSchema } from "#execution/catalog/connection-entry.js";
 import type { StepCatalog } from "#execution/catalog/step-catalog.js";
 import { stepCatalog } from "#definitions/step.js";
 import {
@@ -35,7 +36,7 @@ import {
   type ToolSignIn,
 } from "#harness/call-executor.js";
 import { toJsonValue } from "#harness/call-facts.js";
-import type { Clearance } from "#harness/clearance.js";
+import { approvedClearance, type Clearance } from "#harness/clearance.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { askStepApprovals, humanInputContext, stopForSignIn } from "#harness/hitl/index.js";
 import { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
@@ -52,10 +53,8 @@ import {
   batchMessages,
   endProgram,
   programCallId,
-  programOf,
   programResultOf,
   savePrograms,
-  stopProgramBatch,
   withSettledCall,
   type ProgramCallResult,
   type ProgramRun,
@@ -78,7 +77,7 @@ import { callRun, runTurn } from "#protocol/session-projection/selectors.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { isObject } from "#shared/guards.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
-import { toModelSchema } from "#tools/schema.js";
+import { toModelSchema, toOutputSchema } from "#tools/schema.js";
 
 export const PROGRAM_STEERED_MESSAGE = "Stopped early because a new message arrived.";
 
@@ -123,6 +122,9 @@ export async function runProgramStep(step: Step, program: ProgramRun): Promise<S
     const callId = programCallId(program.callId, request.index);
     const recovered = program.recovered?.[callId];
     if (recovered !== undefined && (recovered.started || recovered.outcome !== undefined)) {
+      if (recovered.name !== "" && recovered.name !== name) {
+        throw new ProgramCallError(replayDivergedMessage(name));
+      }
       return await settled(
         { input, toolName: name },
         interruptedProgramCall(asInterruptedCall(recovered)),
@@ -236,6 +238,9 @@ export async function runProgramStep(step: Step, program: ProgramRun): Promise<S
     const callId = programCallId(program.callId, request.index);
     const recovered = program.recovered?.[callId];
     if (recovered !== undefined && (recovered.started || recovered.outcome !== undefined)) {
+      if (recovered.name !== "" && recovered.name !== SEARCH_TOOL_NAME) {
+        throw new ProgramCallError(replayDivergedMessage(SEARCH_TOOL_NAME));
+      }
       return await settled(
         { input: input ?? {}, toolName: SEARCH_TOOL_NAME },
         interruptedProgramCall(asInterruptedCall(recovered)),
@@ -342,27 +347,23 @@ export async function runProgramStep(step: Step, program: ProgramRun): Promise<S
 export async function stopProgram(step: Step, program: ProgramRun): Promise<void> {
   const catalog = await stepCatalog(step);
   await startProgram(step, program, catalog);
-  await step.apply(
-    stopProgramBatch(step.view(), program, {
-      error: PROGRAM_STEERED_MESSAGE,
-      outcome: "interrupted",
-      status: "failed",
-    }),
-  );
-  const stopped = programOf(step.view().turn, program.callId) ?? program;
-  await finishProgram(step, catalog, stopped, { error: PROGRAM_STEERED_MESSAGE });
+  await finishProgram(step, catalog, program, { error: PROGRAM_STEERED_MESSAGE });
 }
 
 async function startProgram(step: Step, program: ProgramRun, catalog: StepCatalog): Promise<void> {
   if (step.view().projection.view.calls[program.callId]?.status !== "requested") return;
   const definition = catalog.get(program.toolName);
   if (definition === undefined) return;
-  const decision = await decideApproval(definition, {
-    abortSignal: step.config.abortSignal,
-    callId: program.callId,
-    input: { js: program.code },
-  });
-  if (decision.clearance !== undefined) await step.publish(startCall(decision.clearance));
+  const clearance =
+    approvedClearance(step.view().projection.view, program.callId) ??
+    (
+      await decideApproval(definition, {
+        abortSignal: step.config.abortSignal,
+        callId: program.callId,
+        input: { js: program.code },
+      })
+    ).clearance;
+  if (clearance !== undefined) await step.publish(startCall(clearance));
 }
 
 async function requestProgramCall(
@@ -374,9 +375,7 @@ async function requestProgramCall(
   const requested = step.view().projection.view.calls[toolCall.toolCallId];
   if (requested !== undefined) {
     if (requested.capability.name === toolCall.toolName && requested.status === "requested") return;
-    throw new ProgramCallError(
-      `EXECUTE_REPLAY_DIVERGED: after an interruption the program made a different call than before, so "${toolCall.toolName}" was not called. Programs must make the same calls when they run again.`,
-    );
+    throw new ProgramCallError(replayDivergedMessage(toolCall.toolName));
   }
   const { action, hidden, presentationLabel } = createPresentedRuntimeActionRequestFromToolCall({
     toolCall: toolCall as never,
@@ -430,35 +429,47 @@ async function parkProgram(
 
   const calls = pending.map(({ call }) => call);
   const requests = calls.flatMap((call) => (call.kind === "approval" ? [call.ask] : []));
+  const signIn = resolveInlineAuthorizationInterrupt({
+    signIns: calls.flatMap((call) => (call.kind === "sign-in" ? [call.signIn] : [])),
+  });
+  const dispatchCalls = calls.flatMap((call) =>
+    call.kind === "dispatch"
+      ? [
+          {
+            callId: call.call.toolCallId,
+            clearance: call.clearance,
+            input: call.call.input as JsonObject,
+            toolName: call.call.toolName,
+          },
+        ]
+      : [],
+  );
   const batch = {
     event: program.event,
     messages: batchMessages(calls.map(({ call }) => call)),
     program: { callId: program.callId },
-    tasks: collectProgramWorkflowCalls(
-      calls.flatMap((call) =>
-        call.kind === "dispatch"
-          ? [
-              {
-                callId: call.call.toolCallId,
-                clearance: call.clearance,
-                input: call.call.input as JsonObject,
-                toolName: call.call.toolName,
-              },
-            ]
-          : [],
-      ),
-      catalog,
-    ),
+    tasks: signIn === undefined ? collectProgramWorkflowCalls(dispatchCalls, catalog) : [],
   };
   if (requests.length > 0) {
     await askStepApprovals(step, { ...batch, requests, tools: catalog });
   } else {
     await step.apply(suspendStep(step.view(), batch));
   }
-  const signIn = resolveInlineAuthorizationInterrupt({
-    signIns: calls.flatMap((call) => (call.kind === "sign-in" ? [call.signIn] : [])),
-  });
-  const result = signIn === undefined ? park(step) : await stopForSignIn(step, signIn);
+  const signInInterrupt =
+    signIn === undefined
+      ? undefined
+      : {
+          ...signIn,
+          calls: [
+            ...signIn.calls,
+            ...dispatchCalls.map(({ callId, input, toolName }) => ({
+              call: { callId, input, toolName },
+              connections: signIn.challenges.map((challenge) => challenge.name),
+            })),
+          ],
+        };
+  const result =
+    signInInterrupt === undefined ? park(step) : await stopForSignIn(step, signInInterrupt);
   return { ...result, checkpoint: true };
 }
 
@@ -473,9 +484,7 @@ async function finishProgram(
   const failed = "error" in outcome;
   const output: JsonObject = {
     ...programResult(
-      failed && outcome.error !== PROGRAM_STEERED_MESSAGE
-        ? { ...outcome, error: programFailure(outcome.error, program.counts) }
-        : outcome,
+      failed ? { ...outcome, error: programFailure(outcome.error, program.counts) } : outcome,
       program.counts,
     ),
     ...(program.unfinished.length > 0 && {
@@ -495,7 +504,12 @@ async function finishProgram(
         {
           label: failed
             ? undefined
-            : projectToolLabel(catalog.get(program.toolName), "complete", { js: "" }, output),
+            : projectToolLabel(
+                catalog.get(program.toolName),
+                "complete",
+                { js: program.code },
+                output,
+              ),
         },
       ),
     );
@@ -535,7 +549,12 @@ async function programOutput(
 ): Promise<JsonValue> {
   if (result.status !== "completed") throw new ProgramCallError(result.error);
   const resolved = programEntry(catalog.callable, name);
-  const outputSchema = "entry" in resolved ? resolved.entry.outputSchema : undefined;
+  const outputSchema = await resolveProgramOutputSchema(
+    catalog,
+    name,
+    "entry" in resolved ? resolved.entry.outputSchema : undefined,
+    result.output,
+  );
   if (outputSchema === undefined) return result.output;
   const schema = asSchema(toModelSchema(outputSchema, "output"));
   const checked = await schema.validate?.(result.output);
@@ -543,6 +562,36 @@ async function programOutput(
   throw new ProgramCallError(
     `InvalidToolOutput: "${name}" returned a value that doesn't match its output schema: ${toErrorMessage(checked.error)}`,
   );
+}
+
+async function resolveProgramOutputSchema(
+  catalog: StepCatalog,
+  name: string,
+  directSchema: HarnessToolDefinition["outputSchema"],
+  output: JsonValue,
+): Promise<HarnessToolDefinition["outputSchema"]> {
+  if (directSchema !== undefined) return directSchema;
+  if (catalog.callable.registry === undefined) return undefined;
+  const remote = await connectionToolOutputSchema(
+    catalog.callable.registry,
+    catalog.callable.connections,
+    name,
+  );
+  if (remote === undefined) return undefined;
+  if (
+    remote.protocol === "openapi" &&
+    (!isObject(output) ||
+      typeof output.status !== "number" ||
+      output.status < 200 ||
+      output.status >= 300)
+  ) {
+    return undefined;
+  }
+  return toOutputSchema(remote.schema);
+}
+
+function replayDivergedMessage(toolName: string): string {
+  return `EXECUTE_REPLAY_DIVERGED: after an interruption the program made a different call than before, so "${toolName}" was not called. Programs must make the same calls when they run again.`;
 }
 
 function readCall(payload: unknown): { readonly name: string; readonly input: unknown } {

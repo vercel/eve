@@ -1,6 +1,7 @@
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
-import type { ApprovalPolicy } from "#approval/definition.js";
-import { withAgentApprovalOnEntries } from "#approval/agent.js";
+import { resolveApprovalPolicy, type ApprovalPolicy } from "#approval/definition.js";
+import { withAgentApproval, withAgentApprovalOnEntries } from "#approval/agent.js";
+import { normalizeApprovalStatus } from "#approval/status.js";
 import { resolveAgentApproval } from "#execution/effective-agent-config.js";
 import { connectionToolName } from "#connections/ownership.js";
 import { dynamicConnectionVersions } from "#definitions/connections.js";
@@ -74,9 +75,15 @@ export function callableOf(input: CatalogInput): Callable {
       .map(([name, entry]) => [name, entry.definition]),
   );
   const entries = withAgentApprovalOnEntries(rawEntries, agentApproval);
-  for (const [name, definition] of rawEntries) {
-    if (isProgramTool(definition) && entries.has(name)) {
-      entries.set(name, definition);
+  if (agentApproval !== undefined) {
+    const denyOnly = denyOnlyApproval(agentApproval);
+    for (const [name, definition] of rawEntries) {
+      if (isProgramTool(definition) && entries.has(name)) {
+        entries.set(name, {
+          ...definition,
+          approval: withAgentApproval(denyOnly, definition.approval),
+        });
+      }
     }
   }
   const registry = input.ctx.get(ConnectionRegistryKey);
@@ -257,6 +264,14 @@ function connectionEntryNamed(
     }
   }
   return undefined;
+}
+
+function denyOnlyApproval(policy: ApprovalPolicy): ApprovalPolicy {
+  return async (ctx) => {
+    const status = normalizeApprovalStatus(await resolveApprovalPolicy(policy)(ctx));
+    const type = typeof status === "object" ? status.type : status;
+    return type === "denied" ? status : "approved";
+  };
 }
 
 function failure(path: readonly string[], message: string): StandardSchemaV1.FailureResult {

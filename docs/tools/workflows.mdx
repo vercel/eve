@@ -689,7 +689,8 @@ export default workflow({
 Inside a `tools: true` program, call any callable tool, connection tool, or agent as
 `await tools.<name>(input)` (use `tools["name"](input)` when the name isn't a JavaScript
 identifier), find unlisted tools with `await search({ query })`, or use
-`await ctx.agent(name, { message, outputSchema?, model? })` as an alias for agent calls. Programs
+`await ctx.agent(name, { message, outputSchema? })` as an alias for agent calls (passing `model`
+when the target tool declares it, such as `agent({ models })`). Programs
 read each tool's raw return value rather than its `toModelOutput` projection, validate outputs
 against declared `outputSchema` definitions (throwing a catchable `InvalidToolOutput` error on
 mismatch), pause cleanly for batched `Promise.all` approvals or connection sign-ins, replay settled

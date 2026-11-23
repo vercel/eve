@@ -20,6 +20,7 @@ import { isStoredLine } from "#protocol/session-events/envelope.js";
 import { schemaViolation } from "#protocol/session-events/schemas.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineMcpClientConnection } from "#public/definitions/connections/mcp.js";
+import { defineOpenAPIConnection } from "#public/definitions/connections/openapi.js";
 import agentTool from "#public/tools/agent.js";
 import { workflow } from "#public/tools/workflow.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
@@ -594,6 +595,107 @@ describe("workflow({ mode: 'execute', tools: true }) program step", () => {
         expect(finished.reply).toBe("Done.");
         expect(results).toEqual([{ calls: { completed: 1 }, result: ["secret_lookup"] }]);
         expect(await violations(runtime, paused.sessionId)).toEqual([]);
+      },
+    );
+  });
+
+  it("validates connection outputSchema (throwing InvalidToolOutput on mismatch and passing through OpenAPI non-2xx)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL) => {
+        const url = String(input);
+        if (url.endsWith("/ok")) {
+          return new Response(JSON.stringify({ id: "not-a-number" }), {
+            headers: { "content-type": "application/json" },
+            status: 200,
+          });
+        }
+        return new Response(JSON.stringify({ error: "missing" }), {
+          headers: { "content-type": "application/json" },
+          status: 404,
+        });
+      }),
+    );
+
+    const apiConnection = moduleEntry(
+      "connections/petstore.ts",
+      defineOpenAPIConnection({
+        baseUrl: "https://petstore.example",
+        description: "Petstore API.",
+        spec: {
+          openapi: "3.0.3",
+          info: { title: "Petstore", version: "1.0.0" },
+          paths: {
+            "/ok": {
+              get: {
+                operationId: "getPet",
+                responses: {
+                  "200": {
+                    content: {
+                      "application/json": {
+                        schema: {
+                          properties: { id: { type: "integer" } },
+                          required: ["id"],
+                          type: "object",
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            "/missing": {
+              get: {
+                operationId: "getMissing",
+                responses: {
+                  "200": {
+                    content: {
+                      "application/json": {
+                        schema: {
+                          properties: { id: { type: "integer" } },
+                          required: ["id"],
+                          type: "object",
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      }),
+    );
+
+    await withProgramSession(
+      {
+        js: `
+          let invalid = null;
+          try {
+            await tools.petstore__getPet({});
+          } catch (error) {
+            invalid = error.message;
+          }
+          const missing = await tools.petstore__getMissing({});
+          return { invalid, missingStatus: missing.status, missingBody: missing.body };
+        `,
+        modules: [apiConnection],
+        tools: [],
+      },
+      async ({ alice, results, runtime }) => {
+        const turn = await (await alice.send("Check petstore.", { auth: null })).result();
+        expect(turn.reply).toBe("Done.");
+        expect(results).toEqual([
+          {
+            calls: { completed: 2 },
+            result: {
+              invalid: expect.stringContaining("InvalidToolOutput"),
+              missingBody: { error: "missing" },
+              missingStatus: 404,
+            },
+          },
+        ]);
+        expect(await violations(runtime, turn.sessionId)).toEqual([]);
       },
     );
   });
