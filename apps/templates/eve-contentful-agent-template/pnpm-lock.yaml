@@ -186,7 +186,7 @@ importers:
         version: 17.2.7
       '@vercel/connect':
         specifier: 2.9.3
-        version: 2.9.3(ai@7.0.173(zod@4.6.7))(eve@1.0.0)
+        version: 2.9.3(ai@7.0.173(zod@4.6.7))(eve@1.2.0(ai@7.0.173(zod@4.6.7))(just-bash@3.6.0)(vite@8.3.3(@types/node@24.19.1)(jiti@2.7.0)(yaml@2.9.1)))
       '@vercel/sandbox':
         specifier: 3.5.1
         version: 3.5.1
@@ -194,8 +194,8 @@ importers:
         specifier: ^7.0.173
         version: 7.0.173(zod@4.6.7)
       eve:
-        specifier: ^1.0.0
-        version: 1.0.0(@vercel/connect@2.9.3)(ai@7.0.173(zod@4.6.7))(just-bash@3.6.0)(vite@8.3.3(@types/node@24.19.1)(jiti@2.7.0)(yaml@2.9.1))
+        specifier: 1.2.0
+        version: 1.2.0(ai@7.0.173(zod@4.6.7))(just-bash@3.6.0)(vite@8.3.3(@types/node@24.19.1)(jiti@2.7.0)(yaml@2.9.1))
       just-bash:
         specifier: 3.6.0
         version: 3.6.0
@@ -1643,8 +1643,8 @@ packages:
     resolution: {integrity: sha512-kVscqXk4OCp68SZ0dkgEKVi6/8ij300KBWTJq32P/dYeWTSwK41WyTxalN1eRmA5Z9UU/LX9D7FWSmV9SAYx6g==}
     engines: {node: '>=0.10.0'}
 
-  eve@1.0.0:
-    resolution: {integrity: sha512-N4v0GYcJ/ClAtffQo8viUjBVR+F/FhaAQ/tfke4rC2mSyJueUczrT5GvQF3tiX+6Uq612O2n0IJUGpAwHr7OvQ==}
+  eve@1.2.0:
+    resolution: {integrity: sha512-l051+5qaf5pv/FS5JxZMQRAIhA5YdBmDwyPcucbJKyjgYQJMphpzfX95Xb0MmYDI0oSYUSOdtTOxpCgBq4A9gQ==}
     engines: {node: '>=24'}
     hasBin: true
     peerDependencies:
@@ -1652,7 +1652,6 @@ packages:
       '@nuxt/kit': ^4.0.0
       '@nuxt/schema': ^4.0.0
       '@opentelemetry/api': ^1.0.0
-      '@vercel/connect': ^2.7.0
       ai: ^7.0.172
       braintrust: ^3.0.0
       chat: ^4.42.0
@@ -1671,8 +1670,6 @@ packages:
       '@nuxt/schema':
         optional: true
       '@opentelemetry/api':
-        optional: true
-      '@vercel/connect':
         optional: true
       braintrust:
         optional: true
@@ -3501,12 +3498,12 @@ snapshots:
     dependencies:
       execa: 5.1.1
 
-  '@vercel/connect@2.9.3(ai@7.0.173(zod@4.6.7))(eve@1.0.0)':
+  '@vercel/connect@2.9.3(ai@7.0.173(zod@4.6.7))(eve@1.2.0(ai@7.0.173(zod@4.6.7))(just-bash@3.6.0)(vite@8.3.3(@types/node@24.19.1)(jiti@2.7.0)(yaml@2.9.1)))':
     dependencies:
       '@vercel/oidc': 4.0.9
     optionalDependencies:
       ai: 7.0.173(zod@4.6.7)
-      eve: 1.0.0(@vercel/connect@2.9.3)(ai@7.0.173(zod@4.6.7))(just-bash@3.6.0)(vite@8.3.3(@types/node@24.19.1)(jiti@2.7.0)(yaml@2.9.1))
+      eve: 1.2.0(ai@7.0.173(zod@4.6.7))(just-bash@3.6.0)(vite@8.3.3(@types/node@24.19.1)(jiti@2.7.0)(yaml@2.9.1))
 
   '@vercel/detect-agent@1.2.5': {}
 
@@ -3783,14 +3780,13 @@ snapshots:
 
   esutils@2.0.3: {}
 
-  eve@1.0.0(@vercel/connect@2.9.3)(ai@7.0.173(zod@4.6.7))(just-bash@3.6.0)(vite@8.3.3(@types/node@24.19.1)(jiti@2.7.0)(yaml@2.9.1)):
+  eve@1.2.0(ai@7.0.173(zod@4.6.7))(just-bash@3.6.0)(vite@8.3.3(@types/node@24.19.1)(jiti@2.7.0)(yaml@2.9.1)):
     dependencies:
       ai: 7.0.173(zod@4.6.7)
       nitro: 3.0.261103-rc
       rolldown: 1.3.2
       undici: 8.12.4
     optionalDependencies:
-      '@vercel/connect': 2.9.3(ai@7.0.173(zod@4.6.7))(eve@1.0.0)
       just-bash: 3.6.0
       vite: 8.3.3(@types/node@24.19.1)(jiti@2.7.0)(yaml@2.9.1)
 

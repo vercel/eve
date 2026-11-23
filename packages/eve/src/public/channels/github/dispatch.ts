@@ -1,4 +1,4 @@
-import type { SessionAuthContext } from "#channel/types.js";
+import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 import type { ChannelFrom } from "#channel/channel-operations.js";
 
@@ -248,6 +248,7 @@ async function dispatchWebhookEventTurn(input: {
     history: result.history,
     state: input.state,
     title: result.title,
+    turnPolicy: result.turnPolicy,
   });
 }
 
@@ -288,6 +289,7 @@ async function dispatchCommentTurn(input: {
     history: result.history,
     state: input.state,
     title: result.title,
+    turnPolicy: result.turnPolicy,
   });
 }
 
@@ -318,6 +320,7 @@ async function sendGitHubTurn(input: {
   readonly history?: readonly SessionHistoryMessage[];
   readonly state: GitHubChannelState;
   readonly title: string | undefined;
+  readonly turnPolicy?: TurnPolicy;
 }): Promise<void> {
   const contextBlock = formatGitHubContextBlock({
     botName: input.botName,
@@ -338,6 +341,7 @@ async function sendGitHubTurn(input: {
       history: input.history,
       state: input.state,
       title: input.title,
+      ...(input.turnPolicy !== undefined && { turnPolicy: input.turnPolicy }),
     });
   } catch (error) {
     logError(log, input.logMessage ?? "GitHub delivery failed", error, {

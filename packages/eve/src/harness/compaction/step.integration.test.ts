@@ -1,19 +1,32 @@
 import { APICallError, jsonSchema } from "ai";
-import { MockLanguageModelV3 } from "ai/test";
+import { MockLanguageModelV3, MockLanguageModelV4 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
+import { SessionIdKey } from "#context/keys.js";
+import { fromCompiledBundle } from "#definitions/compiled-agent.js";
+import { forgetSessionLive, readDefinitionsState } from "#definitions/state.js";
+import { evaluateValues } from "#definitions/step.js";
+import type { DynamicContext } from "#dynamic/definition.js";
 import * as compaction from "#harness/compaction/engine.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
+import { markMockModel } from "#internal/mock-model-identity.js";
+import { textStreamResult } from "#internal/testing/approval-resume.js";
 import { createTestKernel } from "#internal/testing/kernel.js";
 import { eventsOf } from "#harness/publication.js";
 import { sessionUsage, takeSessionUsageDelta } from "#harness/session-usage.js";
 import type { HarnessSession, HarnessToolMap, StepFn } from "#harness/types.js";
 import { estimateTokens } from "#harness/token-estimate.js";
+import { enterSessionProjection } from "#harness/session-machine/current.js";
 import { foldingHandler } from "#internal/testing/session-machine.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { createStreamChecker } from "#protocol/session-events/checker.js";
+import { defineAgent } from "#public/definitions/agent.js";
+import { defineDynamic as defineDynamicModel } from "#public/definitions/model.js";
+import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
+import type { SessionAgent } from "#runtime/sessions/session-agent.js";
+import type { PublicAgentDynamicModelDefinition } from "#shared/agent-definition.js";
 
 type StreamResult = Awaited<ReturnType<MockLanguageModelV3["doStream"]>>;
 type StreamPart = StreamResult["stream"] extends ReadableStream<infer Part> ? Part : never;
@@ -683,5 +696,274 @@ describe("announcements after a compaction during a turn", () => {
       [catalog, question],
       ["Summary of our conversation so far:", catalog, question],
     ]);
+  });
+});
+
+function dynamicModelAgent(input: {
+  readonly compactionModel?: { readonly id: string };
+  readonly dynamicTool?: (ctx: DynamicContext) => unknown;
+  readonly model: PublicAgentDynamicModelDefinition;
+}): SessionAgent {
+  const sourceId = "agent.ts";
+  return fromCompiledBundle({
+    graph: { nodesByNodeId: new Map() },
+    modelMetadata: async () => ({}),
+    moduleMap: {
+      nodes: {
+        root: {
+          modules: {
+            [sourceId]: {
+              default: defineAgent({ model: input.model } as never),
+            },
+          },
+        },
+      },
+    },
+    nodeId: "root",
+    resolvedAgent: {
+      config: {},
+      definitions:
+        input.dynamicTool === undefined
+          ? []
+          : [
+              {
+                evaluate: input.dynamicTool,
+                kind: "tool",
+                logicalPath: "tools/unused.ts",
+                slug: "unused",
+                sourceId: "tools/unused.ts",
+              },
+            ],
+      instructions: [],
+      skills: [],
+    },
+    subagentRegistry: { dynamicResolvers: [], preparedTools: [], subagentsByName: new Map() },
+    toolRegistry: { toolsByName: new Map() },
+    turnAgent: {
+      compactionModel: input.compactionModel,
+      dynamicModel: { exportName: "default", logicalPath: sourceId, sourceId },
+      id: "agent",
+    },
+  } as never);
+}
+
+const COMPACT_HISTORY: HarnessModelMessage[] = [
+  { content: "Please prepare the quarterly report.", kind: "user", role: "user" },
+  { content: "I started the report.", role: "assistant" },
+  { content: "Thanks, keep going.", kind: "user", role: "user" },
+];
+
+describe("between-turn compaction with dynamic models", () => {
+  it("evaluates a dynamic model with no persisted slot and leaves unrelated dynamic definitions unevaluated", async () => {
+    const modelEvaluations: number[] = [];
+    const dynamicTool = vi.fn(() => null);
+    const model = new MockLanguageModelV3({ doStream: async () => summaryStream() });
+    const events: SessionEvent[] = [];
+    const ctx = new ContextContainer();
+    ctx.set(SessionIdKey, "dynamic-compact-fresh");
+    ctx.set(
+      SessionAgentKey,
+      dynamicModelAgent({
+        dynamicTool,
+        model: defineDynamicModel(async (evalCtx) => {
+          modelEvaluations.push((await evalCtx.messages()).length);
+          return { model: "openai/dynamic-model", modelContextWindowTokens: 20_000 };
+        }),
+      }),
+    );
+
+    const result = await contextStorage.run(ctx, () =>
+      createTestKernel({
+        agent: { model: { id: "unused-static" } },
+        compactOnly: true,
+        handleEvent: foldingHandler(async (event) => void events.push(event)),
+        resolveModel: async (reference) => {
+          expect(reference.id).toBe("openai/dynamic-model");
+          return model;
+        },
+        tools: new Map(),
+      })(
+        {
+          compaction: {},
+          continuationToken: "http:dynamic-compact-fresh",
+          history: COMPACT_HISTORY,
+          sessionId: "dynamic-compact-fresh",
+        },
+        {},
+      ),
+    );
+
+    expect(modelEvaluations).toEqual([COMPACT_HISTORY.length]);
+    expect(dynamicTool).not.toHaveBeenCalled();
+    expect(events.filter((event) => event.type === "context.settled")).toMatchObject([
+      { data: { kind: "compaction", outcome: "completed" } },
+    ]);
+    expect(events.filter((event) => event.type === "delivery.settled")).toMatchObject([
+      { data: { outcome: "applied" } },
+    ]);
+    expect(result.session.history).toContainEqual({
+      content: "Alice asked for the quarterly report.",
+      role: "assistant",
+    });
+    expect(readDefinitionsState(ctx).slots["model:agent"]).toMatchObject({
+      value: { reference: { contextWindowTokens: 20_000, id: "openai/dynamic-model" } },
+    });
+  });
+
+  it("re-evaluates a cold live dynamic model with conversation history", async () => {
+    const seenMessages: number[] = [];
+    const liveModel = markMockModel(
+      new MockLanguageModelV4({
+        doStream: async () => textStreamResult("Cold live summary."),
+        modelId: "live-model",
+        provider: "eve-test",
+      }),
+    );
+    const ctx = new ContextContainer();
+    const sessionId = "dynamic-compact-cold-live";
+    ctx.set(SessionIdKey, sessionId);
+    enterSessionProjection(ctx, undefined);
+    ctx.set(
+      SessionAgentKey,
+      dynamicModelAgent({
+        model: defineDynamicModel(async (evalCtx) => {
+          seenMessages.push((await evalCtx.messages()).length);
+          return { model: liveModel, modelContextWindowTokens: 20_000 };
+        }),
+      }),
+    );
+    await contextStorage.run(ctx, () => evaluateValues(ctx, { conversation: COMPACT_HISTORY }));
+    expect(readDefinitionsState(ctx).slots["model:agent"]?.live).toBe(true);
+
+    forgetSessionLive(sessionId);
+    const resolveModel = vi.fn(async () => {
+      throw new Error("resolveModel should not be called for a live dynamic model");
+    });
+    const events: SessionEvent[] = [];
+    const result = await contextStorage.run(ctx, () =>
+      createTestKernel({
+        agent: { model: { id: "unused-static" } },
+        compactOnly: true,
+        handleEvent: foldingHandler(async (event) => void events.push(event)),
+        resolveModel,
+        tools: new Map(),
+      })(
+        {
+          compaction: {},
+          continuationToken: `http:${sessionId}`,
+          history: COMPACT_HISTORY,
+          sessionId,
+        },
+        {},
+      ),
+    );
+
+    expect(resolveModel).not.toHaveBeenCalled();
+    expect(seenMessages).toEqual([COMPACT_HISTORY.length, COMPACT_HISTORY.length]);
+    expect(events.filter((event) => event.type === "context.settled")).toMatchObject([
+      { data: { kind: "compaction", outcome: "completed" } },
+    ]);
+    expect(result.session.history).toContainEqual({
+      content: "Cold live summary.",
+      role: "assistant",
+    });
+  });
+
+  it("uses compaction.model for summarization while still resolving the dynamic turn model", async () => {
+    const turnStream = vi.fn(async () => summaryStream());
+    const compactionStream = vi.fn(async () => summaryStream());
+    const turnModel = new MockLanguageModelV3({
+      doStream: turnStream,
+      modelId: "turn-model",
+      provider: "openai",
+    });
+    const compactionModel = new MockLanguageModelV3({
+      doStream: compactionStream,
+      modelId: "compaction-model",
+      provider: "anthropic",
+    });
+    const events: SessionEvent[] = [];
+    const ctx = new ContextContainer();
+    ctx.set(SessionIdKey, "dynamic-compact-override");
+    ctx.set(
+      SessionAgentKey,
+      dynamicModelAgent({
+        compactionModel: { id: "anthropic/compaction-model" },
+        model: defineDynamicModel(() => ({
+          model: "openai/turn-model",
+          modelContextWindowTokens: 20_000,
+        })),
+      }),
+    );
+
+    await contextStorage.run(ctx, () =>
+      createTestKernel({
+        agent: { model: { id: "unused-static" } },
+        compactOnly: true,
+        handleEvent: foldingHandler(async (event) => void events.push(event)),
+        resolveModel: async (reference) =>
+          reference.id === "anthropic/compaction-model" ? compactionModel : turnModel,
+        tools: new Map(),
+      })(
+        {
+          compaction: {},
+          continuationToken: "http:dynamic-compact-override",
+          history: COMPACT_HISTORY,
+          sessionId: "dynamic-compact-override",
+        },
+        {},
+      ),
+    );
+
+    expect(turnStream).not.toHaveBeenCalled();
+    expect(compactionStream).toHaveBeenCalledOnce();
+    expect(events.filter((event) => event.type === "model.started")).toMatchObject([
+      { data: { modelId: "anthropic/compaction-model" } },
+    ]);
+    expect(events.filter((event) => event.type === "context.settled")).toMatchObject([
+      { data: { kind: "compaction", outcome: "completed" } },
+    ]);
+  });
+
+  it("settles the compact delivery as failed when the dynamic model throws", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const choose = vi.fn(() => {
+      throw new Error("Dynamic model router unavailable.");
+    });
+    const events: SessionEvent[] = [];
+    const ctx = new ContextContainer();
+    ctx.set(SessionIdKey, "dynamic-compact-error");
+    ctx.set(
+      SessionAgentKey,
+      dynamicModelAgent({
+        model: defineDynamicModel(choose),
+      }),
+    );
+
+    const result = await contextStorage.run(ctx, () =>
+      createTestKernel({
+        agent: { model: { id: "unused-static" } },
+        compactOnly: true,
+        handleEvent: foldingHandler(async (event) => void events.push(event)),
+        resolveModel: async () =>
+          new MockLanguageModelV3({ doStream: async () => summaryStream() }),
+        tools: new Map(),
+      })(
+        {
+          compaction: {},
+          continuationToken: "http:dynamic-compact-error",
+          history: COMPACT_HISTORY,
+          sessionId: "dynamic-compact-error",
+        },
+        {},
+      ),
+    );
+
+    expect(choose).toHaveBeenCalledOnce();
+    expect(events.filter((event) => event.type === "delivery.settled")).toMatchObject([
+      { data: { outcome: "failed", reason: "compaction-failed" } },
+    ]);
+    expect(events.some((event) => event.type.startsWith("context."))).toBe(false);
+    expect(result.session.history).toEqual(COMPACT_HISTORY);
   });
 });

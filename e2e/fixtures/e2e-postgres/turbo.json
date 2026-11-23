@@ -1,0 +1,9 @@
+{
+  "extends": ["//"],
+  "tasks": {
+    "postgres": {
+      "cache": false,
+      "persistent": true
+    }
+  }
+}

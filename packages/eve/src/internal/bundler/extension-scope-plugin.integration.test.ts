@@ -143,6 +143,36 @@ describe("extension-scope plugin (bundled)", () => {
     ).rejects.toThrow(/multiple extension mounts/);
   });
 
+  it("binds an application import to the application's mount over another extension's nested mount", async () => {
+    const { sourceRoot } = scratchModule("export const value = 1;");
+    const { sourceRoot: hostRoot } = scratchModule("export const host = 1;");
+    const entry = join(sourceRoot, "..", "consumer.ts");
+    writeFileSync(entry, 'export { value } from "./extension/tools/budget.ts";');
+    const code = await bundle(entry, [
+      createExtensionMountPlugin([
+        {
+          mountId: "extensions/code",
+          sourceRoot,
+          packageName: "@acme/code",
+          specifier: "@acme/code",
+        },
+        {
+          mountId: "extensions/host",
+          sourceRoot: hostRoot,
+          packageName: "@acme/host",
+          specifier: "@acme/host",
+        },
+        {
+          mountId: "extensions/host/subagents/worker/extensions/code",
+          sourceRoot,
+          packageName: "@acme/code",
+          specifier: "@acme/code",
+        },
+      ]),
+    ]);
+    expect((await import(`data:text/javascript,${encodeURIComponent(code)}`)).value).toBe(1);
+  });
+
   afterAll(() => {});
 
   it("bakes the package namespace into an extension-owned module's defineState", async () => {

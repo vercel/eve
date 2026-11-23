@@ -112,11 +112,16 @@ export async function lookupSessionOwnerHook(token: string): Promise<Hook> {
   }
 }
 
-export async function strandedIfDeploymentDeleted(error: unknown, hook: Hook): Promise<unknown> {
+export async function strandedIfDeploymentDeleted(
+  error: unknown,
+  runIdOrHook: Hook | string,
+): Promise<unknown> {
   if (!isOwnerDeploymentDeletedError(error)) return error;
+  const runId = typeof runIdOrHook === "string" ? runIdOrHook : runIdOrHook.runId;
+  const hook = typeof runIdOrHook === "string" ? undefined : runIdOrHook;
   try {
     const world = await getWorld();
-    const ownerRun = await world.runs.get(hook.runId, { resolveData: "none" });
+    const ownerRun = await world.runs.get(runId, { resolveData: "none" });
     return new StrandedSessionOwnerError(ownerRun, hook);
   } catch {
     return error;

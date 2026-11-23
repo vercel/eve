@@ -20,7 +20,7 @@ import type {
   TurnPolicy,
   TurnCaller,
 } from "#channel/types.js";
-import { controlCommand, DEFAULT_TURN_POLICY } from "#channel/types.js";
+import { controlCommand, DEFAULT_TURN_POLICY, storedTurnPolicy } from "#channel/types.js";
 import { serializeFilePartsInMessage } from "#channel/send-input.js";
 import type { SessionAuth } from "#context/keys.js";
 import type { ChannelContext } from "#shared/channel-context.js";
@@ -30,6 +30,7 @@ import {
   ContinuationTokenKey,
   InitiatorAuthKey,
   SessionIdKey,
+  SteeredByKey,
 } from "#context/keys.js";
 import { type Answer, type StrictAnswers, parseAnswers } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
@@ -100,7 +101,10 @@ export interface SessionSendOptions {
   readonly outputSchema?: JsonObject;
   /** Workflow run title for a session this send starts. Defaults to one derived from the message. */
   readonly title?: string;
-  /** How the message treats a running turn. */
+  /**
+   * How the message treats a running turn. `{ mode: "steer", principal }` also decides what it
+   * does to a turn that runs as someone else. Replaces the channel's `turnPolicy` as a whole.
+   */
   readonly turnPolicy?: TurnPolicy;
 }
 
@@ -139,7 +143,9 @@ interface InternalSessionDeliveryOptions extends SessionDeliveryOptions {
 export function createSession(
   id: string,
   runtime: Runtime,
-  metadata: Partial<ChannelDeliverySource> & { readonly turnPolicy?: TurnPolicy } = {},
+  metadata: Partial<ChannelDeliverySource> & {
+    readonly turnPolicy?: TurnPolicy;
+  } = {},
 ): InternalSession {
   return {
     id,
@@ -169,7 +175,7 @@ export function createSession(
         kind: "send" as const,
         payload,
         requestId: metadata.requestId,
-        turnPolicy: options.turnPolicy ?? metadata.turnPolicy ?? DEFAULT_TURN_POLICY,
+        ...storedTurnPolicy(options.turnPolicy ?? metadata.turnPolicy ?? DEFAULT_TURN_POLICY),
         title: options.title,
       };
       const result = await runtime.dispatchSession({
@@ -275,7 +281,9 @@ export function createSession(
 
 export function createAttachSessionFn(
   runtime: Runtime,
-  metadata: Partial<ChannelDeliverySource> & { readonly turnPolicy?: TurnPolicy } = {},
+  metadata: Partial<ChannelDeliverySource> & {
+    readonly turnPolicy?: TurnPolicy;
+  } = {},
 ): (sessionId: string) => Session {
   return (sessionId) => createSession(sessionId, runtime, metadata);
 }
@@ -296,9 +304,11 @@ export function buildChannelContext(accessor: ContextAccessor): ChannelContext {
         return accessor.get(SessionIdKey) ?? "";
       },
       get auth(): SessionAuth {
+        const steeredBy = accessor.get(SteeredByKey);
         return {
           current: accessor.get(AuthKey) ?? null,
           initiator: accessor.get(InitiatorAuthKey) ?? null,
+          ...(steeredBy !== undefined && steeredBy.length > 0 && { steeredBy }),
         };
       },
     },

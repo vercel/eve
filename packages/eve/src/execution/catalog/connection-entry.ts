@@ -11,7 +11,10 @@ import {
   type ConnectionToolAnnotations,
 } from "#approval/definition.js";
 import { withAgentApproval } from "#approval/agent.js";
-import { isConnectionAuthorizationRequiredError } from "#connections/errors.js";
+import {
+  isConnectionAuthorizationFailedError,
+  isConnectionAuthorizationRequiredError,
+} from "#connections/errors.js";
 import { connectionToolName } from "#connections/ownership.js";
 import { loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
@@ -75,8 +78,16 @@ export function connectionEntry(
     inputSchema: refineJsonSchema({}, (input) => checkInput(registry, connection, toolName, input)),
     label: { start: () => label },
     name: connectionToolName(connection.connectionName, toolName),
-    toModelOutput: connectionToolModelOutput,
+    toModelOutput: connectionModelOutput(connection),
   };
+}
+
+function connectionModelOutput(
+  connection: ResolvedConnectionDefinition,
+): NonNullable<HarnessToolDefinition["toModelOutput"]> {
+  const custom = connection.toolCall?.toModelOutput;
+  if (custom === undefined) return connectionToolModelOutput;
+  return (output, ctx) => custom(output, { ...ctx, defaultModelOutput: connectionToolModelOutput });
 }
 
 export function connectionSignInEntry(
@@ -139,7 +150,10 @@ async function runConnectionTool(
   const session = await completeConnectionSignIn(registry, connection);
   const { auth, client, scoped } = session;
   const listing = await listConnectionTools(connection, session);
-  if ("failure" in listing) throw new Error(listing.failure);
+  if ("failure" in listing) {
+    if (isConnectionAuthorizationFailedError(listing.error)) throw listing.error;
+    throw new Error(listing.failure);
+  }
   if ("authorization" in listing) {
     return await auth.handleError(listing.error, listing.authorization);
   }

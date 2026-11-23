@@ -1,10 +1,17 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 
-import { skillScopes } from "../lib/runtime.ts";
-import { loadName, scopeField, withSkillScope } from "../lib/tool-support.ts";
+import {
+  loadName,
+  scopeField,
+  scopesFor,
+  steeredPersonalScopeApproval,
+  withSkillScope,
+} from "../lib/tool-support.ts";
 
+/** Lists a scope's custom skills. */
 export default defineTool({
+  approval: steeredPersonalScopeApproval,
   label: {
     start: () => "Listing skills",
     complete: () => "Listed skills",
@@ -15,7 +22,7 @@ export default defineTool({
   async execute(input, ctx) {
     return withSkillScope(ctx, input.scope, "Failed to list skills.", async (skills, scope) => {
       const summaries = await skills.listSummaries(scope);
-      const scopes = await skillScopes(ctx);
+      const scopes = await scopesFor(ctx);
       return {
         scopes: scopes.map(({ name, label, readOnly }) => ({
           name,

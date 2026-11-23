@@ -49,7 +49,7 @@ vi.mock("#compiled/@linqapp/chat-sdk-adapter/index.js", () => ({
 }));
 vi.mock("#public/channels/auth.js", () => ({ vercelOidc }));
 
-import { Message } from "#compiled/chat/index.js";
+import { getEmoji, Message } from "#compiled/chat/index.js";
 import { defaultLinqAuth, linqChannel } from "#public/channels/linq/linqChannel.js";
 
 function forgedWebhook(): Request {
@@ -87,6 +87,7 @@ describe("linqChannel", () => {
 
     expect(markRead).toHaveBeenCalledWith(thread.id, message.id);
     expect(send).toHaveBeenCalledWith("Hello Linq", {
+      idempotencyKey: "message-id",
       auth: {
         attributes: { user_name: "user" },
         authenticator: "linq-message",
@@ -224,6 +225,33 @@ describe("linqChannel", () => {
       onTapback: (_ctx, tapback) => ({ auth: defaultLinqAuth(tapback) }),
     });
     expect(reaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("keys tapbacks by the provider's event id so a retried webhook runs one turn", async () => {
+    linqChannel({
+      credentials: { apiKey: "linq-api-key", signingSecret: "linq-signing-secret" },
+      onTapback: () => ({ auth: null }),
+    });
+    const handler = reaction.mock.calls[0]?.[0];
+    if (handler === undefined) throw new Error("Expected a tapback handler.");
+    const user = { fullName: "User", isBot: false, isMe: false, userId: "user", userName: "user" };
+
+    await handler({
+      adapter: {},
+      added: true,
+      emoji: getEmoji("heart"),
+      messageId: "message-id",
+      raw: { event_id: "event-id" },
+      rawEmoji: "love",
+      thread: { toJSON: () => ({ id: "thread-id" }) },
+      threadId: "thread-id",
+      user,
+    });
+
+    expect(send).toHaveBeenCalledWith(
+      "Tapback: Loved a message",
+      expect.objectContaining({ idempotencyKey: "event-id" }),
+    );
   });
 
   it("offers a tapback tool that takes standard tapbacks and emoji", () => {

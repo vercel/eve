@@ -21,6 +21,9 @@ export const SAY = {
   spendBudget: "Alice spends the remaining budget on a summary.",
   statusNote: "Alice asks for a status note.",
   deadline: "Alice adds that the note should mention the deadline.",
+  slowReport: "Alice asks for a slow status report.",
+  bobAccess: "Bob asks to add his access check to the report.",
+  aliceConfirms: "Alice confirms the access check.",
 } as const;
 
 export const REPLY = {
@@ -133,6 +136,18 @@ export function respond(request: MockModelRequest): MockModelResponse {
         ? REPLY.statusNoteWithDeadline
         : REPLY.statusNote,
     }),
+    [SAY.slowReport]: () =>
+      run([call("slow", "slow-step")], () => `Slow report: ${outcome("slow")}.`),
+    [SAY.bobAccess]: () =>
+      run(
+        [call("access-steered", "access-report")],
+        () => `Access check: ${outcome("access-steered")}.`,
+      ),
+    [SAY.aliceConfirms]: () =>
+      run(
+        [call("access-confirmed", "access-report")],
+        () => `Confirmed access check: ${outcome("access-confirmed")}.`,
+      ),
   };
   scripts[SAY.deadline] = scripts[SAY.statusNote]!;
 

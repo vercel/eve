@@ -21,6 +21,8 @@ import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { getRun, start } from "#internal/workflow/runtime.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
+import { defineAgent } from "#public/definitions/agent.js";
+import { defineDynamic as defineDynamicModel } from "#public/definitions/model.js";
 
 const FOLLOW_UP = "Bob asks for the weekend forecast.";
 
@@ -156,6 +158,50 @@ it("leaves a session whose owner still runs a task with that owner", async () =>
       expect((await findSessionHookHolder(commandToken))?.runId).toBe(owner.runId);
       expect(await readTailIndex(sessionId)).toBe(KITCHEN_SINK.length - 1);
     } finally {
+      await owner.cancel().catch(() => {});
+    }
+  });
+});
+
+it("compacts and continues a pre-v27 session when the agent uses a dynamic model", async () => {
+  const memoCalls: number[] = [];
+  const runtime = await createTestRuntime({
+    agent: {
+      definition: defineAgent({
+        model: defineDynamicModel(async (ctx) => {
+          const messageCount = (await ctx.messages()).length;
+          const id = await ctx.memo("session-model", () => {
+            memoCalls.push(messageCount);
+            return "openai/gpt-5.4";
+          });
+          return { model: id, modelContextWindowTokens: 128_000 };
+        }),
+      }),
+      name: "pre-v27-handoff-dynamic-model",
+    },
+  });
+  await runtime.run(async () => {
+    const turnCount = turnsIn(KITCHEN_SINK);
+    const { owner, sessionId, successor } = await handOffForced(KITCHEN_SINK, turnCount);
+    try {
+      const followUp = await readTurn(sessionId, KITCHEN_SINK.length);
+      const types = followUp.map((event) => event.type);
+      expect(types.indexOf("context.settled")).toBeLessThan(types.indexOf("turn.started"));
+      expect(followUp).toContainEqual(
+        expect.objectContaining({
+          type: "context.settled",
+          data: expect.objectContaining({ kind: "compaction", outcome: "completed" }),
+        }),
+      );
+      expect(followUp).toContainEqual(
+        expect.objectContaining({
+          type: "content.completed",
+          data: expect.objectContaining({ value: expect.stringContaining(FOLLOW_UP) }),
+        }),
+      );
+      expect(memoCalls).toEqual([2]);
+    } finally {
+      await successor.cancel().catch(() => {});
       await owner.cancel().catch(() => {});
     }
   });

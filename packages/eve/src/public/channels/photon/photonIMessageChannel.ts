@@ -64,6 +64,8 @@ export type PhotonInboundResult = {
   readonly history?: readonly SessionHistoryMessage[];
   /** Overrides the workflow run title without changing the message sent to the model. */
   readonly title?: string;
+  /** How this one message treats a running turn, replacing the channel's `turnPolicy` as a whole. */
+  readonly turnPolicy?: TurnPolicy;
 } | null;
 
 /** Sync or async {@link PhotonInboundResult}. */
@@ -151,7 +153,9 @@ export function photonIMessageChannel(config: PhotonIMessageChannelConfig): Phot
   bridge.bot.onNewMessage(/[\s\S]*/, async (thread: Thread, message: Message) => {
     await dispatchMessage(bridge, onMessage, thread, message);
   });
-  if (config.onTapback) dispatchIMessageTapbacks(bridge, config.onTapback);
+  if (config.onTapback) {
+    dispatchIMessageTapbacks(bridge, config.onTapback, (raw) => (raw as { id?: string }).id);
+  }
 
   const channel: PhotonIMessageChannel = Object.assign(bridge.channel, {
     tapbackTool: () =>
@@ -225,6 +229,7 @@ async function dispatchMessage(
     history: result.history,
     thread,
     title: result.title,
+    ...(result.turnPolicy !== undefined && { turnPolicy: result.turnPolicy }),
   });
 }
 

@@ -181,6 +181,7 @@ async function runInvocation(input: {
         definition,
         input: validated.value,
         observer,
+        sandboxOutlivesCall: options.key !== undefined,
         signal: options.signal,
       }),
     );
@@ -259,6 +260,7 @@ async function runCall(input: {
   readonly definition: HarnessToolDefinition;
   readonly input: JsonObject;
   readonly observer: InvokeToolObserver;
+  readonly sandboxOutlivesCall: boolean;
   readonly signal: AbortSignal | undefined;
 }): Promise<InvokeToolResult> {
   const { callId, definition, observer } = input;
@@ -339,7 +341,9 @@ async function runCall(input: {
 
   try {
     return {
-      modelOutput: (await toolCallModelOutput(definition, json, callId)) as ToolModelOutput,
+      modelOutput: (await toolCallModelOutput(definition, json, callId, {
+        sandboxOutlivesCall: input.sandboxOutlivesCall,
+      })) as ToolModelOutput,
       output: json,
       outcome: "completed",
     };

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createChannelAddress } from "#channel/channel-address.js";
+import { ScheduleDispatcher } from "#channel/schedule.js";
 import { createSession } from "#channel/session.js";
 import { handleConnectionCallbackRequest } from "#execution/connections/callback-route.js";
 import { SessionStrandedError } from "#channel/session-stranded-error.js";
@@ -11,6 +12,7 @@ import {
   EVE_TYPE_ATTRIBUTE,
   EVE_VERSION_ATTRIBUTE,
 } from "#execution/eve-workflow-attributes.js";
+import { workflowEntry } from "#execution/session/entry.js";
 import { signalSessionTimeoutStep } from "#execution/session/timeout-steps.js";
 import {
   sessionCommandHookToken,
@@ -23,15 +25,24 @@ import { emptySessionView, foldReceivedEvent } from "#protocol/session-projectio
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
+import { buildSerializedContext, handoffFollowUp } from "#internal/testing/entry-test-helpers.js";
+import { captureTurnEvents } from "#internal/testing/events.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 import {
   parkedAnchorWorkflow,
   sessionCommandInboxWorkflow,
 } from "#internal/testing/session-inbox-workflow.js";
-import { startSessionOwner, waitForHook } from "#internal/testing/workflow-test-helpers.js";
+import { waitForParkedTurnStep } from "#internal/testing/session-test-helpers.js";
+import {
+  startSessionOwner,
+  waitForHook,
+  waitForHookOwner,
+} from "#internal/testing/workflow-test-helpers.js";
 import { getRun, getWorld, start } from "#internal/workflow/runtime.js";
 import { type SessionPredecessor } from "#protocol/session-events/families/session.js";
 import { transcriptOf, type TranscriptData } from "#client/transcript.js";
+import { defaultEvents as defaultSlackEvents } from "#public/channels/slack/defaults.js";
+import { defineChannel, POST } from "#public/definitions/channel.js";
 import { sessions } from "#public/server/index.js";
 import { defineDynamic, defineInstructions } from "#public/definitions/instructions.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
@@ -70,13 +81,16 @@ async function parkStrandedSuccessor(continuationToken: string) {
   return { anchor, owner };
 }
 
-async function deleteOwnerDeployment(runId: string): Promise<() => void> {
+async function deleteOwnerDeployment(
+  runId: string,
+  reason = "Deployment not found.",
+): Promise<() => void> {
   const world = await getWorld();
   const original = world.getEncryptionKeyForRun;
   const getKey = async (run: string | { readonly runId: string }, context?: object) => {
     if ((typeof run === "string" ? run : run.runId) === runId) {
       const error = new Error(
-        `Failed to fetch run key for ${runId} (deployment dpl_deleted): HTTP 404 Not Found — {"error":{"code":"not_found","message":"Deployment not found."}}`,
+        `Failed to fetch run key for ${runId} (deployment dpl_deleted): HTTP 404 Not Found — {"error":{"code":"not_found","message":"${reason}"}}`,
       );
       error.name = "RunKeyFetchError";
       throw Object.assign(error, { status: 404 });
@@ -715,7 +729,327 @@ describe("stranded sessions", () => {
       }
     });
   });
+
+  it("ends a session whose owner deployment was deleted via sessions.end()", async () => {
+    const test = await createTestRuntime({ agent: { name: "server-end-deleted-owner" } });
+    await test.run(async () => {
+      const logs = captureLogRecords();
+      const continuationToken = "http:server-end-deleted-owner";
+      const owner = await start(sessionCommandInboxWorkflow, [{ token: continuationToken }], {
+        allowReservedAttributes: true,
+        attributes: {
+          [EVE_TYPE_ATTRIBUTE]: "session",
+          [EVE_VERSION_ATTRIBUTE]: resolveInstalledPackageInfo().version,
+        },
+      });
+      await waitForHook(owner, { token: sessionInboxHookToken(continuationToken) });
+      const restoreWorld = await deleteOwnerDeployment(owner.runId);
+      const runtime = channelRuntime();
+      try {
+        const delivery = await sessions.end(owner.runId, { reason: "retire stranded owner" });
+
+        expect(delivery.sessionId).toBe(owner.runId);
+        await expect(owner.status).resolves.toBe("cancelled");
+        await expect(runtime.resolveContinuation(continuationToken)).resolves.toBeUndefined();
+        expect(logs.records).toContainEqual(
+          expect.objectContaining({
+            fields: expect.objectContaining({ previousSessionId: owner.runId, trigger: "reset" }),
+            message: "Reset stranded session",
+          }),
+        );
+      } finally {
+        restoreWorld();
+        await cancelIfActive(owner);
+      }
+    });
+  });
+
+  it("lets a schedule handler retire an idle session with sessions.end() without Slack posting a notice", async () => {
+    const endedOutcomes: string[] = [];
+    const postedNotices: string[] = [];
+    const slackChannel = defineChannel({
+      events: {
+        async "session.ended"(event, ctx) {
+          endedOutcomes.push(event.data.outcome);
+          await defaultSlackEvents["session.ended"]?.(event, {
+            ...ctx,
+            channel: {
+              thread: {
+                post: async (text: string) => {
+                  postedNotices.push(text);
+                },
+              },
+            } as never,
+          });
+        },
+      },
+      routes: [POST("/slack", async () => new Response("ok"))],
+    });
+    const test = await createTestRuntime({
+      agent: { name: "schedule-server-end" },
+      modules: [
+        {
+          logicalPath: "channels/slack-end-observer.ts",
+          loadNamespace: async () => ({ default: slackChannel }),
+        },
+      ],
+    });
+    await test.run(async () => {
+      const anchor = await startSessionOwner(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_a",
+          sessionTimeoutMs: false,
+          input: { message: "Alice asks for the quarterly checklist." },
+          serializedContext: buildSerializedContext({
+            acceptedDeploymentId: "dpl_a",
+            channelKind: "channel:slack-end-observer",
+            continuationToken: "http:schedule-server-end",
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(anchor);
+      const runtime = channelRuntime();
+      let endDeliveryId: string | undefined;
+      try {
+        await stream.nextTurn();
+        await waitForParkedTurnStep(anchor.runId);
+
+        const dispatcher = new ScheduleDispatcher({ channels: [], runtime });
+        await dispatcher.trigger({
+          scheduleId: "retire-idle",
+          async run({ appAuth }) {
+            const delivery = await sessions.end(anchor.runId, {
+              auth: appAuth,
+              reason: "scheduled cleanup",
+            });
+            endDeliveryId = delivery.deliveryId;
+          },
+        });
+
+        await vi.waitFor(async () => {
+          expect(await getRun(anchor.runId).status).toBe("completed");
+        });
+        const events: SessionEvent[] = [];
+        for await (const event of sessions.attach(anchor.runId).stream({ follow: false })) {
+          events.push(event);
+        }
+        const ended = events.find((event) => event.type === "session.ended");
+        expect(ended).toMatchObject({
+          type: "session.ended",
+          data: {
+            cause: { deliveryId: endDeliveryId },
+            outcome: "completed",
+          },
+        });
+        expect(endedOutcomes).toEqual(["completed"]);
+        expect(postedNotices).toEqual([]);
+      } finally {
+        stream.dispose();
+        await cancelIfActive(anchor);
+      }
+    });
+  });
+
+  it("retires a handed-off session whose anchor deployment was deleted via sessions.end()", async () => {
+    const channelEndedCalls: string[] = [];
+    const test = await createTestRuntime({
+      agent: { name: "deleted-anchor-end" },
+      modules: [
+        {
+          logicalPath: "channels/deleted-anchor-end.ts",
+          loadNamespace: async () => ({
+            default: defineChannel({
+              events: {
+                async "session.ended"({ data }) {
+                  channelEndedCalls.push(data.outcome);
+                },
+              },
+              routes: [POST("/deleted-anchor-end", async () => new Response("ok"))],
+            }),
+          }),
+        },
+      ],
+    });
+    await test.run(async () => {
+      const continuationToken = "http:deleted-anchor-end";
+      const runtime = channelRuntime();
+      const { anchor, owner, dispose } = await startHandedOffSession({
+        channelKind: "channel:deleted-anchor-end",
+        continuationToken,
+        runtime,
+      });
+      const restoreWorld = await deleteOwnerDeployment(anchor.runId);
+      let freshSessionId: string | undefined;
+      try {
+        const delivery = await sessions.end(anchor.runId, { reason: "retire deleted anchor" });
+        expect(delivery.sessionId).toBe(anchor.runId);
+
+        await vi.waitFor(
+          async () => {
+            expect(await getRun(owner.runId).status).toBe("completed");
+            expect(await getRun(anchor.runId).status).toBe("cancelled");
+          },
+          { timeout: 15_000 },
+        );
+        expect(channelEndedCalls).toEqual([]);
+        await expect(runtime.resolveContinuation(continuationToken)).resolves.toBeUndefined();
+
+        const fresh = await httpAddress(runtime, "deleted-anchor-end").send(
+          "Alice opens a fresh conversation after retirement.",
+          { auth: null },
+        );
+        freshSessionId = fresh.sessionId;
+        expect(fresh.sessionId).not.toBe(anchor.runId);
+        expect(fresh.sessionId).not.toBe(owner.runId);
+        await expect(
+          waitForReceivedMessages(fresh.sessionId, [
+            "Alice opens a fresh conversation after retirement.",
+          ]),
+        ).resolves.toEqual([]);
+      } finally {
+        restoreWorld();
+        dispose();
+        await cancelIfActive(owner, anchor);
+        await resetSession(runtime, freshSessionId);
+      }
+    });
+  });
+
+  it("retires a handed-off session whose anchor deployment was deleted when its session timeout elapses", async () => {
+    const channelEndedCalls: string[] = [];
+    const test = await createTestRuntime({
+      agent: { name: "deleted-anchor-timeout" },
+      modules: [
+        {
+          logicalPath: "channels/deleted-anchor-timeout.ts",
+          loadNamespace: async () => ({
+            default: defineChannel({
+              events: {
+                async "session.ended"({ data }) {
+                  channelEndedCalls.push(data.outcome);
+                },
+              },
+              routes: [POST("/deleted-anchor-timeout", async () => new Response("ok"))],
+            }),
+          }),
+        },
+      ],
+    });
+    await test.run(async () => {
+      const continuationToken = "http:deleted-anchor-timeout";
+      const runtime = channelRuntime();
+      const { anchor, owner, dispose } = await startHandedOffSession({
+        channelKind: "channel:deleted-anchor-timeout",
+        continuationToken,
+        runtime,
+      });
+      const writer = getRun(anchor.runId).getWritable<Uint8Array>().getWriter();
+      await writer.write(
+        new TextEncoder().encode(
+          encodeLine({
+            at: "2026-10-01T00:00:00.000Z",
+            facts: [{ data: { deliveryId: "orphaned-line" }, type: "delivery.admitted" }],
+          }),
+        ),
+      );
+      writer.releaseLock();
+
+      const restoreWorld = await deleteOwnerDeployment(anchor.runId);
+      try {
+        await signalSessionTimeoutStep({
+          ownerRunId: owner.runId,
+          token: sessionCommandHookToken(anchor.runId),
+        });
+
+        await vi.waitFor(
+          async () => {
+            expect(await getRun(owner.runId).status).toBe("completed");
+            expect(await getRun(anchor.runId).status).toBe("cancelled");
+          },
+          { timeout: 15_000 },
+        );
+        expect(channelEndedCalls).toEqual([]);
+        await expect(runtime.resolveContinuation(continuationToken)).resolves.toBeUndefined();
+      } finally {
+        restoreWorld();
+        dispose();
+        await cancelIfActive(owner, anchor);
+      }
+    });
+  });
+
+  it("keeps failing when the anchor key lookup returns a non-deleted-deployment 404", async () => {
+    const test = await createTestRuntime({ agent: { name: "deleted-anchor-negative-control" } });
+    await test.run(async () => {
+      const continuationToken = "http:deleted-anchor-negative-control";
+      const runtime = channelRuntime();
+      const { anchor, owner, dispose } = await startHandedOffSession({
+        channelKind: "http",
+        continuationToken,
+        runtime,
+      });
+      const restoreWorld = await deleteOwnerDeployment(anchor.runId, "Project not found.");
+      try {
+        await sessions.end(anchor.runId);
+
+        await vi.waitFor(
+          async () => {
+            expect(await getRun(owner.runId).status).toBe("failed");
+          },
+          { timeout: 15_000 },
+        );
+        await expect(getRun(anchor.runId).status).resolves.toBe("running");
+      } finally {
+        restoreWorld();
+        dispose();
+        await cancelIfActive(owner, anchor);
+      }
+    });
+  });
 });
+
+async function startHandedOffSession(input: {
+  readonly channelKind: string;
+  readonly continuationToken: string;
+  readonly runtime: Runtime;
+}) {
+  const anchor = await startSessionOwner(workflowEntry, [
+    {
+      kind: "initial",
+      ownerDeploymentId: "dpl_a",
+      sessionTimeoutMs: false,
+      input: { message: "Alice starts the release checklist." },
+      serializedContext: buildSerializedContext({
+        acceptedDeploymentId: "dpl_a",
+        channelKind: input.channelKind,
+        continuationToken: input.continuationToken,
+      }),
+    },
+  ]);
+  const stream = captureTurnEvents(anchor);
+  await stream.nextTurn();
+  await waitForParkedTurnStep(anchor.runId);
+  await input.runtime.dispatchSession({
+    command: handoffFollowUp("dpl_b", "Bob reviews the checklist on deployment B.", "handoff-turn"),
+    sessionId: anchor.runId,
+  });
+  await stream.nextTurn();
+  const inboxToken = sessionInboxHookToken(sessionCommandHookToken(anchor.runId));
+  let ownerRunId = "";
+  await vi.waitFor(async () => {
+    const holder = await waitForHookOwner(inboxToken);
+    expect(holder.runId).not.toBe(anchor.runId);
+    ownerRunId = holder.runId;
+  });
+  await waitForHook(anchor, { token: `${anchor.runId}:anchor` });
+  await waitForParkedTurnStep(ownerRunId);
+  return {
+    anchor,
+    owner: getRun(ownerRunId),
+    dispose: () => stream.dispose(),
+  };
+}
 
 type TranscriptRead = TranscriptData & { readonly predecessor: SessionPredecessor };
 

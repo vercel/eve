@@ -89,7 +89,10 @@ export async function compactHistory(step: Step): Promise<StepResult> {
   });
   let outcome: "applied" | "failed" = "applied";
   try {
-    const resolvedModel = await resolveEffectiveRuntimeModel(step);
+    const resolvedModel = await resolveEffectiveRuntimeModel(step, {
+      abortSignal: config.abortSignal,
+      conversation: messages,
+    });
     step.model = resolvedModel.choice;
     const compaction = compactionConfig(step);
     await summarizeHistory(step, {

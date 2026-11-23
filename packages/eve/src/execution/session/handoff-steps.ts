@@ -16,7 +16,9 @@ import {
   type SessionCheckpoint,
 } from "#execution/session/checkpoint.js";
 import { createLogger } from "#internal/logging.js";
-import { getWorld, resumeHook } from "#internal/workflow/runtime.js";
+import { isOwnerDeploymentDeletedError } from "#internal/workflow/owner-deployment-deleted.js";
+import { cancelRun, getWorld, resumeHook } from "#internal/workflow/runtime.js";
+import { isRunInactive } from "#shared/run-errors.js";
 import { hasRunEnded, startWorkflowOnDeployment } from "#execution/workflow-runtime.js";
 import { workflowEntryReference } from "#execution/workflow-references.js";
 import {
@@ -285,10 +287,47 @@ export async function sendSessionHandoverPartStep(input: {
 
 export async function signalSessionAnchorStep(input: {
   readonly result: { readonly output: unknown };
+  readonly sessionId?: string;
   readonly token: string;
 }): Promise<void> {
   "use step";
-  await resumeHook(input.token, input.result);
+  let anchorRunId =
+    input.sessionId ??
+    (input.token.endsWith(":anchor") ? input.token.slice(0, -":anchor".length) : undefined);
+  let deploymentDeleted = false;
+  try {
+    const hook = await resumeHook(input.token, input.result);
+    anchorRunId ??= hook.runId;
+    const world = await getWorld();
+    if (world.getEncryptionKeyForRun !== undefined) {
+      try {
+        const deploymentId =
+          hook.resumeContext?.deploymentId ??
+          (await world.runs.get(hook.runId, { resolveData: "none" })).deploymentId;
+        await world.getEncryptionKeyForRun(hook.runId, { deploymentId });
+      } catch (error) {
+        if (isOwnerDeploymentDeletedError(error)) deploymentDeleted = true;
+      }
+    }
+  } catch (error) {
+    if (HookNotFoundError.is(error)) return;
+    if (!isOwnerDeploymentDeletedError(error)) throw error;
+    deploymentDeleted = true;
+  }
+  if (!deploymentDeleted) return;
+  if (anchorRunId !== undefined && anchorRunId.length > 0) {
+    try {
+      await cancelRun(await getWorld(), anchorRunId, {
+        cancelReason: "Session ended: its deployment was retired",
+      });
+    } catch (cancelError) {
+      if (!isRunInactive(cancelError)) throw cancelError;
+    }
+  }
+  log.warn("cancelled session anchor whose deployment was deleted", {
+    anchorRunId,
+    token: input.token,
+  });
 }
 
 export async function readSessionStreamTailStep(input: {

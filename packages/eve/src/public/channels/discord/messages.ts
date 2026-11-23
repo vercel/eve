@@ -1,4 +1,4 @@
-import type { SessionAuthContext } from "#channel/types.js";
+import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import { EveAttachmentError } from "#internal/attachments/errors.js";
 import { readLimitedBytes } from "#internal/attachments/limited-read.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -112,6 +112,8 @@ export type DiscordMessageResult = {
    * `startThread` were `false`. Defaults to `gateway.startThread`.
    */
   readonly startThread?: boolean | DiscordStartThreadOptions;
+  /** How this one message treats a running turn, replacing the channel's `turnPolicy` as a whole. */
+  readonly turnPolicy?: TurnPolicy;
 } | null;
 
 /** Sync or async {@link DiscordMessageResult}. */
@@ -287,6 +289,7 @@ export function createDiscordGatewayRoute(input: {
         context: [contextBlock, ...(result.context ?? [])],
         state,
         title: result.title,
+        ...(result.turnPolicy !== undefined && { turnPolicy: result.turnPolicy }),
       });
       return Response.json({ accepted: true, sessionId: session.sessionId }, { status: 202 });
     },

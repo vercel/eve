@@ -18,6 +18,7 @@ import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-a
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import { defineSandboxProvider, type SandboxConnection } from "#sandbox/provider.js";
 import type { ToolContext } from "#tools/definition.js";
+import { offloadContent } from "#tools/offload-content.js";
 import { defineJsonSchema } from "#tools/schema.js";
 
 vi.mock("#runtime/sandbox/prepared-artifacts.js", () => ({
@@ -495,6 +496,30 @@ describe("invokeTool", () => {
     expect(await note("y", bob, "desk")).toMatchObject({ output: "y" });
     expect(starts).toHaveLength(3);
     expect(deleted).not.toHaveBeenCalled();
+  });
+
+  it("offloads an over-budget result only when the call has a tool-session key", async () => {
+    const { registry } = keyedSandboxes();
+    const big = "x".repeat(400);
+    const runtime = runtimeWith(
+      [
+        tool("dump", () => big, {
+          toModelOutput: offloadContent({ maxBytes: 40 }),
+        }),
+      ],
+      registry,
+    );
+
+    const oneOff = await invokeTool(runtime, "dump", {}, { auth: alice });
+    expect(oneOff).toMatchObject({ modelOutput: { type: "text", value: big } });
+
+    const keyed = await invokeTool(runtime, "dump", {}, { auth: alice, key: "desk" });
+    expect(keyed).toMatchObject({
+      modelOutput: {
+        type: "text",
+        value: expect.stringContaining("/tmp/.eve/tool-results/dump-"),
+      },
+    });
   });
 
   it("keeps forwarded callers apart by effective user and by the forwarder that vouched", async () => {

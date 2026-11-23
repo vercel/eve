@@ -1,4 +1,5 @@
-import type { ControlDelivery } from "#harness/types.js";
+import type { Cause } from "#protocol/session-events/envelope.js";
+import type { ControlDelivery, SettledTurn } from "#harness/types.js";
 import type { ControlSettlement } from "#harness/facts.js";
 import { latestTurnIdOf, turnCoordinatesOf } from "#protocol/session-projection.js";
 import type { TurnCaller } from "#channel/types.js";
@@ -21,10 +22,20 @@ import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import { sessionUsage, takeSessionUsageDelta } from "#harness/session-usage.js";
-import { notifyTurnCallerStep } from "#subagents/parent-notification.js";
+import {
+  notifyCancelledTaskCallerStep,
+  notifyTurnCallerStep,
+} from "#subagents/parent-notification.js";
 
 export type SessionTerminalOutcome =
   | { readonly kind: "done"; readonly action: TurnOutcome & { readonly kind: "done" } }
+  | {
+      readonly kind: "ended";
+      readonly cause?: Cause;
+      readonly settles?: readonly ControlSettlement[];
+      readonly settled?: SettledTurn;
+      readonly cancelled?: { readonly usage?: TokenUsage };
+    }
   | {
       readonly kind: "expired";
       readonly control?: ControlDelivery;
@@ -67,7 +78,7 @@ export async function finalizeSession(
   if (sessionState !== undefined) {
     try {
       await endSessionSandboxStep({
-        reason: outcome.kind === "done" ? "completed" : outcome.kind,
+        reason: outcome.kind === "done" || outcome.kind === "ended" ? "completed" : outcome.kind,
         serializedContext,
         sessionState,
       });
@@ -84,9 +95,10 @@ export async function finalizeSession(
   const stored = storedProjection(session?.state);
   const latestTurnId = latestTurnIdOf(stored);
   const latest = latestTurnId === undefined ? undefined : turnCoordinatesOf(stored, latestTurnId);
-  if (outcome.kind === "expired") {
+  if (outcome.kind === "expired" || outcome.kind === "ended") {
     await emitTerminalSessionCompletionStep({
-      control: outcome.control,
+      cause: outcome.kind === "ended" ? outcome.cause : undefined,
+      control: outcome.kind === "expired" ? outcome.control : undefined,
       settles: outcome.settles,
       projection: stored,
       sessionState,
@@ -111,17 +123,31 @@ export async function finalizeSession(
 
   const settled = settledResult(outcome, context);
   if (context.caller !== undefined) {
-    const notification: { isError?: boolean; output: unknown; usage?: TokenUsage } = {
-      output: settled.output,
-      usage: settled.turnUsage,
-    };
-    if (settled.isError) notification.isError = true;
-    await notifyTurnCallerStep({
-      caller: context.caller,
-      lifecycle: "terminal",
-      sessionId: sessionState?.sessionId ?? (serializedContext["eve.sessionId"] as string),
-      settled: notification,
-    });
+    const sessionId = sessionState?.sessionId ?? (serializedContext["eve.sessionId"] as string);
+    if (outcome.kind === "ended" && outcome.cancelled !== undefined) {
+      const notification = {
+        caller: context.caller,
+        lifecycle: "terminal" as const,
+        sessionId,
+      };
+      await notifyCancelledTaskCallerStep(
+        outcome.cancelled.usage === undefined
+          ? notification
+          : { ...notification, usage: outcome.cancelled.usage },
+      );
+    } else {
+      const notification: { isError?: boolean; output: unknown; usage?: TokenUsage } = {
+        output: settled.output,
+        usage: settled.turnUsage,
+      };
+      if (settled.isError) notification.isError = true;
+      await notifyTurnCallerStep({
+        caller: context.caller,
+        lifecycle: "terminal",
+        sessionId,
+        settled: notification,
+      });
+    }
   }
   return outcome.kind === "done"
     ? {
@@ -163,6 +189,30 @@ function settledResult(
         sessionUsage: outcome.action.usage,
         turnUsage: outcome.action.usageDelta,
       };
+    case "ended":
+      if (outcome.cancelled !== undefined) {
+        return {
+          isError: true,
+          output: "The agent invocation was cancelled.",
+          ...(session !== undefined && { sessionUsage: sessionUsage(session) }),
+          ...(outcome.cancelled.usage !== undefined && { turnUsage: outcome.cancelled.usage }),
+        };
+      }
+      if (outcome.settled !== undefined) {
+        return {
+          isError: outcome.settled.isError === true,
+          output: outcome.settled.output,
+          ...(session !== undefined && { sessionUsage: sessionUsage(session) }),
+          ...(outcome.settled.usage !== undefined && { turnUsage: outcome.settled.usage }),
+        };
+      }
+      return context.caller === undefined
+        ? { isError: false, output: "" }
+        : {
+            isError: true,
+            output: "The session ended before the delegated task completed.",
+            ...usage,
+          };
     case "expired":
       return context.caller === undefined
         ? { isError: false, output: "" }

@@ -488,6 +488,103 @@ describe("McpConnectionClient authorization recovery", () => {
     expect(err).toBe(forbidden);
   });
 
+  it("stops being reusable after a failure other than authorization, until closed", async () => {
+    const client = {
+      close: vi.fn(),
+      listTools: vi.fn().mockRejectedValue(new Error("HTTP 404 session not found")),
+      toolsFromDefinitions: vi.fn(),
+    };
+    createMCPClient.mockResolvedValue(client);
+
+    const mcpClient = new McpConnectionClient(makeConnection());
+    expect(mcpClient.reusable).toBe(true);
+    await mcpClient.getToolMetadata().catch(() => undefined);
+    expect(mcpClient.reusable).toBe(false);
+
+    await mcpClient.close();
+    expect(mcpClient.reusable).toBe(true);
+  });
+
+  function mcpClientError(message: string, code?: number) {
+    return Object.assign(new Error(message), { code, name: "MCPClientError" });
+  }
+
+  function clientWhoseToolFails(error: Error) {
+    return {
+      close: vi.fn(),
+      listTools: vi.fn().mockResolvedValue({
+        tools: [{ name: "do_thing", description: "", inputSchema: {} }],
+      }),
+      toolsFromDefinitions: vi.fn().mockReturnValue({
+        do_thing: { execute: vi.fn().mockRejectedValue(error) },
+      }),
+    };
+  }
+
+  it("stops being reusable when its transport drops without an HTTP status", async () => {
+    createMCPClient.mockResolvedValue(
+      clientWhoseToolFails(mcpClientError("MCP SSE Transport Error: Not connected")),
+    );
+
+    const mcpClient = new McpConnectionClient(makeConnection());
+    await mcpClient.executeTool("do_thing", {}, { callId: "call-1" }).catch(() => undefined);
+
+    expect(mcpClient.reusable).toBe(false);
+  });
+
+  it("stays reusable when the server answers with a JSON-RPC error", async () => {
+    createMCPClient.mockResolvedValue(
+      clientWhoseToolFails(mcpClientError("Invalid params", -32602)),
+    );
+
+    const mcpClient = new McpConnectionClient(makeConnection());
+    await mcpClient.executeTool("do_thing", {}, { callId: "call-1" }).catch(() => undefined);
+
+    expect(mcpClient.reusable).toBe(true);
+  });
+
+  it("stays reusable when the caller aborts the tool call", async () => {
+    createMCPClient.mockResolvedValue(clientWhoseToolFails(mcpClientError("Request was aborted")));
+    const abort = new AbortController();
+    abort.abort();
+
+    const mcpClient = new McpConnectionClient(makeConnection());
+    await mcpClient
+      .executeTool("do_thing", {}, { abortSignal: abort.signal, callId: "call-1" })
+      .catch(() => undefined);
+
+    expect(mcpClient.reusable).toBe(true);
+  });
+
+  it("stays reusable when the model names a tool the server does not have", async () => {
+    const client = {
+      close: vi.fn(),
+      listTools: vi.fn().mockResolvedValue({ tools: [] }),
+      toolsFromDefinitions: vi.fn().mockReturnValue({}),
+    };
+    createMCPClient.mockResolvedValue(client);
+
+    const mcpClient = new McpConnectionClient(makeConnection());
+    await mcpClient.executeTool("missing", {}, { callId: "call-1" }).catch(() => undefined);
+
+    expect(mcpClient.reusable).toBe(true);
+  });
+
+  it("stays reusable after an authorization failure, which already resets it", async () => {
+    const client = {
+      close: vi.fn(),
+      listTools: vi.fn().mockRejectedValue(unauthorized()),
+      toolsFromDefinitions: vi.fn(),
+    };
+    createMCPClient.mockResolvedValue(client);
+
+    const mcpClient = new McpConnectionClient(makeConnection());
+    await mcpClient.getToolMetadata().catch(() => undefined);
+
+    expect(client.close).toHaveBeenCalled();
+    expect(mcpClient.reusable).toBe(true);
+  });
+
   it("maps a 401 from executeTool into ConnectionAuthorizationRequiredError", async () => {
     const client = {
       close: vi.fn(),

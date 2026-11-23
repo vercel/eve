@@ -10,6 +10,7 @@ import {
 } from "#execution/session/checkpoint.js";
 import {
   prepareSuccessorStep,
+  signalSessionAnchorStep,
   signalSessionOwnerActivationStep,
   startSuccessorStep,
   sendSessionHandoverPartStep,
@@ -22,6 +23,7 @@ import type { AgentSandbox, SessionAgent } from "#runtime/sessions/session-agent
 import { DefaultSandbox } from "#sandbox/providers/default.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 
+const cancelRunMock = vi.fn();
 const deserializeContextMock = vi.fn();
 const readDurableSessionMock = vi.fn();
 const setAttributesMock = vi.fn();
@@ -110,6 +112,7 @@ vi.mock("#execution/durable-session-read.js", async (importOriginal) => ({
 }));
 vi.mock("#internal/workflow/runtime.js", async (importOriginal) => ({
   ...(await importOriginal()),
+  cancelRun: (...args: unknown[]) => cancelRunMock(...args),
   getRun: (...args: unknown[]) => getRunMock(...args),
   getHookByToken: (...args: unknown[]) => getHookByTokenMock(...args),
   getWorld: () => getWorldMock(),
@@ -382,6 +385,122 @@ describe("signalSessionOwnerActivationStep", () => {
         token: "owner-1:handoff:0",
       }),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("signalSessionAnchorStep", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getWorldMock.mockResolvedValue({});
+  });
+
+  function runKeyError(reason: string) {
+    return Object.assign(
+      new Error(
+        `Failed to fetch run key for wrun_anchor (deployment dpl_old): HTTP 404 Not Found — {"error":{"code":"not_found","message":"${reason}"}}`,
+      ),
+      { name: "RunKeyFetchError", status: 404 },
+    );
+  }
+
+  it("cancels the anchor derived from token when resumeHook hits a deleted deployment without sessionId", async () => {
+    const world = { name: "mock-world" };
+    getWorldMock.mockResolvedValue(world);
+    resumeHookMock.mockRejectedValue(runKeyError("Deployment not found."));
+    cancelRunMock.mockResolvedValue(undefined);
+
+    await expect(
+      signalSessionAnchorStep({
+        result: { output: "" },
+        token: "wrun_anchor:anchor",
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(cancelRunMock).toHaveBeenCalledWith(world, "wrun_anchor", {
+      cancelReason: "Session ended: its deployment was retired",
+    });
+  });
+
+  it("cancels a sealed-box anchor whose encryption key returns Deployment not found", async () => {
+    const world = {
+      getEncryptionKeyForRun: vi.fn().mockRejectedValue(runKeyError("Deployment not found.")),
+    };
+    getWorldMock.mockResolvedValue(world);
+    resumeHookMock.mockResolvedValue({
+      resumeContext: { deploymentId: "dpl_old" },
+      runId: "wrun_anchor",
+    });
+    cancelRunMock.mockRejectedValue(
+      Object.assign(new Error("already cancelled"), { name: "EntityConflictError" }),
+    );
+
+    await expect(
+      signalSessionAnchorStep({
+        result: { output: "" },
+        sessionId: "wrun_anchor",
+        token: "wrun_anchor:anchor",
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(world.getEncryptionKeyForRun).toHaveBeenCalledWith("wrun_anchor", {
+      deploymentId: "dpl_old",
+    });
+    expect(cancelRunMock).toHaveBeenCalledWith(world, "wrun_anchor", {
+      cancelReason: "Session ended: its deployment was retired",
+    });
+  });
+
+  it("rethrows non-deleted-deployment 404 errors from resumeHook", async () => {
+    resumeHookMock.mockRejectedValue(runKeyError("Project not found."));
+
+    await expect(
+      signalSessionAnchorStep({
+        result: { output: "" },
+        sessionId: "wrun_anchor",
+        token: "wrun_anchor:anchor",
+      }),
+    ).rejects.toThrow("Project not found.");
+    expect(cancelRunMock).not.toHaveBeenCalled();
+  });
+
+  it("returns cleanly when the anchor hook is already gone", async () => {
+    resumeHookMock.mockRejectedValue(new HookNotFoundError("wrun_anchor:anchor"));
+
+    await expect(
+      signalSessionAnchorStep({
+        result: { output: "" },
+        sessionId: "wrun_anchor",
+        token: "wrun_anchor:anchor",
+      }),
+    ).resolves.toBeUndefined();
+    expect(cancelRunMock).not.toHaveBeenCalled();
+  });
+
+  it("falls back to world.runs.get for deploymentId and hook.runId when resumeContext and sessionId are absent", async () => {
+    const world = {
+      getEncryptionKeyForRun: vi.fn().mockRejectedValue(runKeyError("Deployment not found.")),
+      runs: {
+        get: vi.fn().mockResolvedValue({ deploymentId: "dpl_from_run", runId: "wrun_anchor" }),
+      },
+    };
+    getWorldMock.mockResolvedValue(world);
+    resumeHookMock.mockResolvedValue({ runId: "wrun_anchor" });
+    cancelRunMock.mockResolvedValue(undefined);
+
+    await expect(
+      signalSessionAnchorStep({
+        result: { output: "" },
+        token: "custom-anchor-token",
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(world.runs.get).toHaveBeenCalledWith("wrun_anchor", { resolveData: "none" });
+    expect(world.getEncryptionKeyForRun).toHaveBeenCalledWith("wrun_anchor", {
+      deploymentId: "dpl_from_run",
+    });
+    expect(cancelRunMock).toHaveBeenCalledWith(world, "wrun_anchor", {
+      cancelReason: "Session ended: its deployment was retired",
+    });
   });
 });
 

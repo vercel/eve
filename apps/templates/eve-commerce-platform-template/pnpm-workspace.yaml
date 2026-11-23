@@ -7,7 +7,7 @@ ignoredOptionalDependencies:
   - "@mongodb-js/zstd"
   - "node-liblzma"
 minimumReleaseAgeExclude:
-  - eve@1.1.0
+  - eve@1.2.0
 # Patched versions of transitive dependencies that upstream still pins.
 overrides:
   "@esbuild-kit/core-utils>esbuild": 0.25.12

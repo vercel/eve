@@ -85,7 +85,7 @@ export type HookContinueOptions = Pick<SessionSendOptions, "context"> &
 
 /**
  * What `ctx.continue()` did, decided when it's called. `queued` means eve recorded the message;
- * another turn that starts first, a cancel, a clear, or a reset still drops it.
+ * another turn that starts first, a cancel, a clear, `ctx.end()`, or a reset still drops it.
  */
 export type HookContinueResult =
   | { readonly queued: true }
@@ -134,6 +134,14 @@ export interface HookBaseContext extends SessionContext, Omit<SessionFrame, "ses
    * Throws after the handler has settled.
    */
   cancel(reason?: string): void;
+  /**
+   * Permanently retires the session, like `session.end()`. If a turn is running or being admitted,
+   * it stops before its next model call and settles `cancelled`, then the session ends `completed`
+   * with `cause: { hook }`. On `turn.settled` or between turns, the session ends once the commit's
+   * handlers finish. Drops any pending `ctx.continue()` continuation. Acts once, so asking again
+   * is safe; on `session.ended`, it does nothing. Throws after the handler has settled.
+   */
+  end(reason?: string): void;
 }
 
 /** What `turn.settled` and `*` handlers receive besides {@link HookBaseContext}. */
@@ -144,7 +152,7 @@ export interface HookContinue {
    * idle, as a delivery whose source names this hook and the channel, and the model is told no
    * person wrote it. Hooks that continue the same turn share one next turn, each message its own
    * payload, in hook order. It yields: any other turn that starts first, a `session.cancel()`, a
-   * clear, or a reset drops it, so a person's input always wins. Unlike `session.send()`, it returns synchronously and there's no
+   * clear, `ctx.end()`, or a reset drops it, so a person's input always wins. Unlike `session.send()`, it returns synchronously and there's no
    * receipt: the delivery doesn't exist until the session admits it. Like other hook effects, it's
    * lost if the step is interrupted before it's saved. Throws after the handler has settled.
    */
@@ -184,10 +192,10 @@ type DefinedHookEventKeys<TDefinition extends HookDefinition> = Extract<
 
 /**
  * Defines a hook. Each handler runs once for each matching fact a commit carries, before the next
- * model call. A handler can call `ctx.cancel`, `ctx.continue` from `turn.settled`, or an external
- * service. Pass `ctx.occurrence.idempotencyKey` to services that support idempotency. A retry
- * does not run handlers again for facts already published. A handler that throws during a turn fails the turn;
- * catch optional errors.
+ * model call. A handler can call `ctx.cancel`, `ctx.end`, `ctx.continue` from `turn.settled`, or
+ * an external service. Pass `ctx.occurrence.idempotencyKey` to services that support idempotency.
+ * A retry does not run handlers again for facts already published. A handler that throws during a
+ * turn fails the turn; catch optional errors.
  *
  * ```ts
  * export default defineHook({

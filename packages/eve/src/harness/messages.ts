@@ -383,6 +383,7 @@ interface DeliverLike {
   readonly deliveryMetadata?: readonly ChannelDeliveryMetadataEntry[];
   readonly kind: "deliver";
   readonly payloads: readonly DeliverPayload[];
+  readonly steeredBy?: readonly SessionAuthContext[];
 }
 
 export function coalesceDeliveries<T extends DeliverLike>(items: readonly T[]): T {
@@ -394,6 +395,7 @@ export function coalesceDeliveries<T extends DeliverLike>(items: readonly T[]): 
 
   let auth = first.auth;
   let caller = first.caller;
+  let steeredBy = first.steeredBy;
   const payloads = [...first.payloads];
   const deliveryMetadata = [...(first.deliveryMetadata ?? [])];
 
@@ -408,6 +410,7 @@ export function coalesceDeliveries<T extends DeliverLike>(items: readonly T[]): 
       }
       caller = item.caller;
     }
+    steeredBy = item.steeredBy;
     payloads.push(...item.payloads);
     deliveryMetadata.push(
       ...(item.deliveryMetadata ?? []).map((entry) => ({
@@ -417,13 +420,17 @@ export function coalesceDeliveries<T extends DeliverLike>(items: readonly T[]): 
     );
   }
 
-  return {
+  const merged: T = {
     ...first,
     auth,
     caller,
     deliveryMetadata: deliveryMetadata.length === 0 ? undefined : deliveryMetadata,
     payloads,
   };
+  const writable = merged as { -readonly [K in keyof DeliverLike]: DeliverLike[K] };
+  if (steeredBy === undefined) delete writable.steeredBy;
+  else writable.steeredBy = steeredBy;
+  return merged;
 }
 
 export function selectDeliveryPayloads<T extends DeliverLike>(
