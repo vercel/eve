@@ -321,6 +321,42 @@ describe("OpenApiConnectionClient", () => {
       expect(tool.name).toBe("listPets");
       expect(tool).not.toHaveProperty("outputSchema");
     });
+    it("parses case-varied Application/JSON response headers as JSON", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(
+          async () =>
+            new Response(JSON.stringify([{ id: 1, name: "Milo" }]), {
+              status: 200,
+              headers: { "content-type": "Application/JSON; charset=utf-8" },
+            }),
+        ),
+      );
+      const client = new OpenApiConnectionClient(
+        makeConnection({
+          spec: {
+            paths: {
+              "/pets": {
+                get: {
+                  operationId: "listPets",
+                  responses: {
+                    "200": {
+                      content: {
+                        "Application/JSON; charset=utf-8": {
+                          schema: { type: "array", items: PET },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        }),
+      );
+      const result = await client.executeTool("listPets", {}, EXECUTE_OPTIONS);
+      expect(result).toMatchObject({ status: 200, body: [{ id: 1, name: "Milo" }] });
+    });
   });
 
   it("builds input schemas from Swagger 2.0 top-level parameters", async () => {

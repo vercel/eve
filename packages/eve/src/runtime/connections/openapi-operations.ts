@@ -86,7 +86,7 @@ function swaggerProducesJson(
   return produces.some((mediaType) => typeof mediaType === "string" && isJsonMediaType(mediaType));
 }
 
-function isJsonMediaType(mediaType: string): boolean {
+export function isJsonMediaType(mediaType: string): boolean {
   return mediaType.split(";", 1)[0]?.trim().toLowerCase() === "application/json";
 }
 
