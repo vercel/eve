@@ -130,15 +130,50 @@ export interface DeliverPayload extends Omit<ChannelDelivery, "state"> {
   readonly [key: string]: unknown;
 }
 
-/** Controls how a channel message interacts with an active turn. */
-export type TurnPolicy = "steer" | "queue";
+/** Whether a message joins a running turn (`"steer"`) or waits for it to end (`"queue"`). */
+export type TurnMode = "steer" | "queue";
 
-export const DEFAULT_TURN_POLICY: TurnPolicy = "steer";
+/**
+ * What a steering message does when the running turn runs as another principal.
+ * - `"match"` (the default): it joins only a turn whose caller is its sender.
+ * - `"retain"`: it also joins another principal's turn as input, and the turn retains its caller.
+ */
+export type PrincipalPolicy = "match" | "retain";
+
+/**
+ * Controls how a channel message interacts with an active turn: `"steer"` joins it, and
+ * `"queue"` waits for it to end. `"steer"` is `{ mode: "steer" }`, and `"queue"` is
+ * `{ mode: "queue" }`.
+ *
+ * A steering policy's `principal` decides what the message does when the turn runs as someone
+ * else:
+ * - `"match"` (the default): the message waits for the turn to end, then starts a turn as its sender.
+ * - `"retain"`: the message joins as input, and the turn retains its caller.
+ */
+export type TurnPolicy =
+  | TurnMode
+  | { readonly mode: "queue" }
+  | { readonly mode: "steer"; readonly principal?: PrincipalPolicy };
+
+export const DEFAULT_TURN_POLICY: TurnMode = "steer";
+
+export function storedTurnPolicy(policy: TurnPolicy): {
+  readonly turnPolicy: TurnMode;
+  readonly principalPolicy?: PrincipalPolicy;
+} {
+  if (typeof policy === "string") return { turnPolicy: policy };
+  if (policy.mode !== "steer" || policy.principal === undefined || policy.principal === "match") {
+    return { turnPolicy: policy.mode };
+  }
+  return { turnPolicy: "steer", principalPolicy: policy.principal };
+}
 
 export type SessionCommand =
   | {
       readonly idempotencyKey?: string;
       readonly auth?: SessionAuthContext | null;
+      /** @internal */
+      readonly steeredBy?: readonly SessionAuthContext[];
       readonly caller?: TurnCaller;
       readonly title?: string;
       readonly kind: "send";
@@ -146,7 +181,8 @@ export type SessionCommand =
       readonly payload: DeliverPayload;
       readonly delivery?: ChannelDeliveryMetadata;
       readonly requestId?: string;
-      readonly turnPolicy?: TurnPolicy;
+      readonly turnPolicy?: TurnMode;
+      readonly principalPolicy?: PrincipalPolicy;
     }
   | ({
       readonly kind: "cancel";
@@ -222,12 +258,15 @@ export interface DeliverHookPayload {
   readonly schedule?: import("#context/session-schedule.js").SessionSchedule;
   readonly title?: string;
   readonly auth?: SessionAuthContext | null;
+  /** @internal */
+  readonly steeredBy?: readonly SessionAuthContext[];
   readonly caller?: TurnCaller;
   readonly deliveryMetadata?: readonly ChannelDeliveryMetadataEntry[];
   readonly requestId?: string;
   readonly kind: "deliver";
   readonly payloads: readonly DeliverPayload[];
-  readonly turnPolicy?: TurnPolicy;
+  readonly turnPolicy?: TurnMode;
+  readonly principalPolicy?: PrincipalPolicy;
 }
 
 export interface SessionTimeoutHookPayload {
@@ -330,6 +369,8 @@ export interface RunInput {
   readonly inheritedConversation?: ConversationContext;
   readonly delivery?: ChannelDeliveryMetadata;
   readonly auth: SessionAuthContext | null;
+  /** @internal */
+  readonly steeredBy?: readonly SessionAuthContext[];
   readonly audienceAuth?: SessionAuthContext | null;
   readonly capabilities?: SessionCapabilities;
   readonly requestId?: string;

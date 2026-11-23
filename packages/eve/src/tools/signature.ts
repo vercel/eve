@@ -5,6 +5,7 @@ type Schema = Record<string, unknown>;
 const MAX_DEPTH = 6;
 const MAX_NODES = 1_000;
 const MAX_SIGNATURE_LENGTH = 4_000;
+const MAX_OUTPUT_TYPE_LENGTH = 1_000;
 const MAX_DESCRIPTION_LENGTH = 120;
 const CONSTRAINT_KEYS = [
   "format",
@@ -36,26 +37,47 @@ interface SignatureInput {
 }
 
 export function renderToolSignature(input: SignatureInput): string {
-  const signature = renderSignature(input, true);
-  if (signature.length <= MAX_SIGNATURE_LENGTH) return signature;
-  const compact = renderSignature(input, false);
-  return compact.length > MAX_SIGNATURE_LENGTH
-    ? `${compact.slice(0, MAX_SIGNATURE_LENGTH - 3)}...`
-    : compact;
+  const outputType = renderOutputType(input.outputSchema) ?? "unknown";
+  return capped(
+    (descriptions) => renderSignature(input, descriptions, outputType),
+    MAX_SIGNATURE_LENGTH,
+  );
 }
 
-function renderSignature(input: SignatureInput, descriptions: boolean): string {
-  const render = (schema: Schema) =>
-    renderType(schema, {
-      budget: { remaining: MAX_NODES },
-      depth: 0,
-      descriptions,
-      refs: new Set(),
-      root: schema,
-    });
-  const inputType = input.inputSchema === undefined ? "{}" : render(input.inputSchema);
-  const outputType = input.outputSchema === undefined ? "unknown" : render(input.outputSchema);
+export function renderOutputType(outputSchema: Schema | undefined): string | undefined {
+  if (outputSchema === undefined) return undefined;
+  const type = capped(
+    (descriptions) => renderSchema(outputSchema, descriptions),
+    MAX_OUTPUT_TYPE_LENGTH,
+  );
+  return type === "unknown" ? undefined : type;
+}
+
+function isIdentifier(name: string): boolean {
+  return IDENTIFIER.test(name);
+}
+
+function capped(render: (descriptions: boolean) => string, max: number): string {
+  const full = render(true);
+  if (full.length <= max) return full;
+  const compact = render(false);
+  return compact.length > max ? `${compact.slice(0, max - 3)}...` : compact;
+}
+
+function renderSignature(input: SignatureInput, descriptions: boolean, outputType: string): string {
+  const inputType =
+    input.inputSchema === undefined ? "{}" : renderSchema(input.inputSchema, descriptions);
   return `${input.name}(input: ${inputType}): Promise<${outputType}>`;
+}
+
+function renderSchema(schema: Schema, descriptions: boolean): string {
+  return renderType(schema, {
+    budget: { remaining: MAX_NODES },
+    depth: 0,
+    descriptions,
+    refs: new Set(),
+    root: schema,
+  });
 }
 
 function renderType(schema: unknown, context: RenderContext): string {
@@ -125,7 +147,7 @@ function renderObject(schema: Schema, context: RenderContext): string {
       : [],
   );
   const fields = Object.entries(properties).map(([key, value]) => {
-    const name = IDENTIFIER.test(key) ? key : JSON.stringify(key);
+    const name = isIdentifier(key) ? key : JSON.stringify(key);
     const optional = required.has(key) ? "" : "?";
     const comment = isObject(value) ? propertyComment(value, context) : "";
     return `${name}${optional}: ${renderType(value, next(context))}${comment}`;

@@ -13,6 +13,7 @@ export default defineConfig({
     alias: SCENARIO_ALIASES,
   },
   test: {
+    globalSetup: ["./test/setup/sandbox-image.ts"],
     maxWorkers: 4,
     projects: [
       {

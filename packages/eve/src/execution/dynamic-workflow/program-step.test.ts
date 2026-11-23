@@ -1,6 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { FatalError, RetryableError } from "#compiled/@workflow/core/index.js";
 import { RunConcurrencyError, RunCpuTimeoutError, RunError } from "#compiled/run/index.js";
 
 const run = vi.fn();
@@ -23,25 +22,74 @@ const step = () =>
 
 describe("runWorkflowProgramStep failures", () => {
   beforeEach(() => vi.resetAllMocks());
+  afterEach(() => vi.useRealTimers());
 
-  it("retries when run has no free worker", async () => {
-    run.mockRejectedValue(new RunConcurrencyError(4));
+  it("retries in-step on worker busy and succeeds when a worker frees up", async () => {
+    vi.useFakeTimers();
+    run
+      .mockRejectedValueOnce(new RunConcurrencyError(4))
+      .mockRejectedValueOnce(new RunConcurrencyError(4))
+      .mockResolvedValueOnce({
+        status: "completed",
+        value: JSON.stringify({ logs: [], ok: true, value: 1 }),
+      });
 
-    const error = await step().catch((caught: unknown) => caught);
-    expect(RetryableError.is(error)).toBe(true);
-    expect(FatalError.is(error)).toBe(false);
-    expect((error as RetryableError).message).toBe(
-      "JavaScript runtime maxWorkers limit reached (4).",
-    );
-    expect((error as RetryableError).retryAfter.getTime()).toBeGreaterThan(Date.now() + 4_000);
+    const pending = step();
+    await vi.runAllTimersAsync();
+
+    await expect(pending).resolves.toEqual({
+      logs: [],
+      progress: [],
+      result: 1,
+      status: "completed",
+    });
+    expect(run).toHaveBeenCalledTimes(3);
   });
 
-  it("keeps other run failures fatal", async () => {
-    run.mockRejectedValue(new RunCpuTimeoutError(30_000));
-    const cpu = await step().catch((caught: unknown) => caught);
-    expect(FatalError.is(cpu)).toBe(true);
-    expect((cpu as FatalError).message).toBe(
-      "JavaScript runtime exceeded its CPU time limit of 30000ms.",
-    );
+  it("returns EXECUTE_RUNTIME_BUSY after exhausting busy retries", async () => {
+    vi.useFakeTimers();
+    run.mockRejectedValue(new RunConcurrencyError(4));
+
+    const pending = step();
+    await vi.runAllTimersAsync();
+
+    await expect(pending).resolves.toEqual({
+      error: "EXECUTE_RUNTIME_BUSY: no program runtime was free. Run the program again.",
+      logs: [],
+      progress: [],
+      status: "failed",
+    });
+    expect(run).toHaveBeenCalledTimes(7);
+  });
+
+  it.each([
+    {
+      error: new RunCpuTimeoutError(30_000),
+      expected: "EXECUTE_CPU_LIMIT_REACHED",
+      label: "CPU timeout",
+    },
+    {
+      error: new RunError("wall timeout", "RUN_TIMEOUT"),
+      expected: "EXECUTE_TIME_LIMIT_REACHED",
+      label: "wall-clock timeout",
+    },
+    {
+      error: new RunError("continuation too large", "RUN_CONTINUATION_TOO_LARGE"),
+      expected: "EXECUTE_CONTINUATION_LIMIT_REACHED",
+      label: "oversized continuation",
+    },
+  ])("maps $label RunError to a failed outcome with actionable guidance", async (row) => {
+    run.mockRejectedValue(row.error);
+
+    const outcome = await step();
+    expect(outcome.status).toBe("failed");
+    if (outcome.status === "failed") {
+      expect(outcome.error).toContain(row.expected);
+    }
+  });
+
+  it("propagates unexpected host errors outside RunError", async () => {
+    run.mockRejectedValue(new Error("host crash"));
+    await expect(step()).rejects.toThrow("host crash");
   });
 });

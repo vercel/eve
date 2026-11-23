@@ -1,5 +1,5 @@
 import { ConnectionEventActions, isEventAction } from "#runtime/connections/events/actions.js";
-import { createMCPClient, type MCPClient } from "#compiled/@ai-sdk/mcp/index.js";
+import type { MCPClient } from "#compiled/@ai-sdk/mcp/index.js";
 import type { ToolSet } from "ai";
 
 import {
@@ -7,6 +7,7 @@ import {
   isConnectionAuthorizationRequiredError,
 } from "#connections/errors.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
+import { holdCallerIdentity } from "#runtime/connections/identity-hold.js";
 import { evictScopedToken, resolveScopedToken } from "#runtime/connections/scoped-authorization.js";
 import { resolveConnectionAuthorization } from "#runtime/connections/resolve-authorization.js";
 import { buildConnectionCallbackContext } from "#runtime/connections/approval-scope.js";
@@ -68,6 +69,8 @@ export class McpConnectionClient implements ConnectionClient {
   #toolsPromise: Promise<McpToolCache> | undefined;
   #tools: McpToolCache | undefined;
   #connection: ResolvedConnectionDefinition;
+  #failed = false;
+  #sessionExpired = false;
   readonly eventActions: ConnectionClient["eventActions"];
 
   constructor(connection: ResolvedConnectionDefinition) {
@@ -100,6 +103,10 @@ export class McpConnectionClient implements ConnectionClient {
     }
   }
 
+  get reusable(): boolean {
+    return !this.#failed;
+  }
+
   async connect(): Promise<MCPClient> {
     if (this.#client !== undefined) {
       return this.#client;
@@ -130,6 +137,7 @@ export class McpConnectionClient implements ConnectionClient {
       getProtocolVersion: () => this.#client?.initializeResult?.protocolVersion,
     });
 
+    const { createMCPClient } = await import("#compiled/@ai-sdk/mcp/index.js");
     try {
       return await createMCPClient({
         protocolVersionDiscovery: this.#connection.protocolVersionDiscovery,
@@ -155,7 +163,9 @@ export class McpConnectionClient implements ConnectionClient {
         const headers = new Headers(init?.headers);
         for (const name of connectionHeaderNames) headers.delete(name);
         for (const [name, value] of Object.entries(resolved.headers)) headers.set(name, value);
-        return await fetcher(request, { ...init, headers });
+        const response = await fetcher(request, { ...init, headers });
+        if (response.status === 404 && headers.has("mcp-session-id")) this.#sessionExpired = true;
+        return response;
       };
 
       const resolved = await resolve();
@@ -185,6 +195,7 @@ export class McpConnectionClient implements ConnectionClient {
     return async (request, init) => {
       const principals = readTurnPrincipals();
       if (principals === undefined) return await globalThis.fetch(request, init);
+      holdCallerIdentity(connectionName);
       const headers = new Headers(init?.headers);
       headers.set(
         FORWARDED_PRINCIPAL_HEADER,
@@ -203,17 +214,12 @@ export class McpConnectionClient implements ConnectionClient {
     args: unknown,
     options: ConnectionToolExecuteOptions,
   ): Promise<unknown> {
+    if (this.#connection.forwardPrincipal === true) {
+      holdCallerIdentity(this.#connection.connectionName);
+    }
     let result: unknown;
     try {
-      const { tools } = await this.#ensureTools();
-
-      const sdkTool = tools[toolName];
-      if (sdkTool?.execute === undefined) {
-        throw new Error(
-          `Tool "${toolName}" not found in connection "${this.#connection.connectionName}".`,
-        );
-      }
-      const execute = sdkTool.execute;
+      await this.#sdkTool(toolName);
 
       const resolvedArgs = await resolveProvidedArguments({
         args,
@@ -222,21 +228,44 @@ export class McpConnectionClient implements ConnectionClient {
         toolName,
       });
 
-      result = await withMcpToolCallSpan({
-        arguments: args,
-        connectionName: this.#connection.connectionName,
-        execute: async () =>
-          await execute(resolvedArgs, { abortSignal: options.abortSignal } as never),
-        protocolVersion: this.#client?.initializeResult?.protocolVersion,
-        toolName,
+      result = await this.#retryExpiredSession(async () => {
+        const execute = await this.#sdkTool(toolName);
+        return await withMcpToolCallSpan({
+          arguments: args,
+          connectionName: this.#connection.connectionName,
+          execute: async () =>
+            await execute(resolvedArgs, { abortSignal: options.abortSignal } as never),
+          protocolVersion: this.#client?.initializeResult?.protocolVersion,
+          toolName,
+        });
       });
     } catch (error) {
-      return await this.#rethrowClassified(error);
+      return await this.#rethrowClassified(error, options.abortSignal?.aborted === true);
     }
     if (isMcpAuthChallengeResult(result)) {
       return await this.#requireAuthorization(`the server asked for sign-in to call "${toolName}"`);
     }
     return result;
+  }
+
+  async #sdkTool(toolName: string) {
+    const execute = (await this.#ensureTools()).tools[toolName]?.execute;
+    if (execute === undefined) {
+      throw new Error(
+        `Tool "${toolName}" not found in connection "${this.#connection.connectionName}".`,
+      );
+    }
+    return execute;
+  }
+
+  async #retryExpiredSession<T>(operation: () => Promise<T>): Promise<T> {
+    try {
+      return await operation();
+    } catch (error) {
+      if (!this.#sessionExpired) throw error;
+      await this.close();
+      return await operation();
+    }
   }
 
   async #ensureTools(): Promise<McpToolCache> {
@@ -260,7 +289,7 @@ export class McpConnectionClient implements ConnectionClient {
 
   async #fetchTools(): Promise<McpToolCache> {
     try {
-      return await this.#fetchToolsInner();
+      return await this.#retryExpiredSession(() => this.#fetchToolsInner());
     } catch (error) {
       return await this.#rethrowClassified(error);
     }
@@ -297,17 +326,21 @@ export class McpConnectionClient implements ConnectionClient {
   }
 
   async close(): Promise<void> {
-    if (this.#client !== undefined) {
-      await this.#client.close();
+    try {
+      await this.#client?.close();
+    } finally {
       this.#client = undefined;
+      this.#clientPromise = undefined;
+      this.#toolsPromise = undefined;
+      this.#tools = undefined;
+      this.#failed = false;
+      this.#sessionExpired = false;
     }
-    this.#clientPromise = undefined;
-    this.#toolsPromise = undefined;
-    this.#tools = undefined;
   }
 
-  async #rethrowClassified(error: unknown): Promise<never> {
+  async #rethrowClassified(error: unknown, aborted = false): Promise<never> {
     if (!isMcpAuthRequiredError(error)) {
+      if (this.#sessionExpired || (!aborted && isTransportFailure(error))) this.#failed = true;
       throw error;
     }
     const requestError = [...walkErrorChain(error)].find(
@@ -364,6 +397,11 @@ export function isMcpAuthChallengeResult(result: unknown): boolean {
   const challenge = result._meta[MCP_WWW_AUTHENTICATE_META_KEY];
   if (typeof challenge === "string") return challenge.length > 0;
   return Array.isArray(challenge) && challenge.length > 0;
+}
+
+function isTransportFailure(error: unknown): boolean {
+  if (error instanceof TypeError || readHttpStatus(error) !== undefined) return true;
+  return isObject(error) && error.name === "MCPClientError" && error.code === undefined;
 }
 
 function isMcpHttpFallbackRetryableError(error: unknown): boolean {

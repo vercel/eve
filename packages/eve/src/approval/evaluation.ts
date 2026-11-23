@@ -1,6 +1,7 @@
 import type { ApprovalContext, ApprovalPolicy, ApprovalStatus } from "#approval/definition.js";
 import { approvalDecision, type ApprovalDecision } from "#approval/status.js";
 import type { JsonValue } from "#shared/json.js";
+import { trackSteeredAsk } from "#tools/approval/policies.js";
 
 export interface RememberedApproval {
   readonly outcome: "accepted" | "declined";
@@ -57,12 +58,16 @@ export async function evaluateApproval(
     recheck,
   });
   const evaluated: EvaluatedContext = { ...context, [evaluationKey]: evaluation };
-  const status = await policy(evaluated);
+  const { asked: callerOnly, value: status } = await trackSteeredAsk(() => policy(evaluated));
   const decision = approvalDecision(status);
   if (decision.awaitsPerson !== true) return decision;
   if (recheck) return { denied: false };
   const remember = typeof status === "object" && status !== null ? asked.get(status) : undefined;
-  return remember === undefined ? decision : { ...decision, remember };
+  return {
+    ...decision,
+    ...(callerOnly && { callerOnly: true as const }),
+    ...(remember !== undefined && { remember }),
+  };
 }
 
 export function rememberDecision(

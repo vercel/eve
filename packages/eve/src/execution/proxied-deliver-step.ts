@@ -414,7 +414,6 @@ async function deliverChannelAnswers(
   const adapter = ctx.require(ChannelKey);
   if (adapter.deliver === undefined) return input;
 
-  if (input.delivery.auth !== undefined) ctx.set(AuthKey, input.delivery.auth ?? null);
   let state = adapter.state ?? {};
   let mapped = false;
   const payloads: DeliverPayload[] = [];
@@ -431,7 +430,12 @@ async function deliverChannelAnswers(
       }
       const adapterCtx = buildAdapterContext({ ...adapter, state: structuredClone(state) }, ctx);
       const result = await adapter.deliver(
-        { ...payload, answers: [response], message: undefined },
+        {
+          ...payload,
+          ...(input.delivery.auth !== undefined && { auth: input.delivery.auth }),
+          answers: [response],
+          message: undefined,
+        },
         adapterCtx,
       );
       const routed = result?.answers?.filter(routable) ?? [];

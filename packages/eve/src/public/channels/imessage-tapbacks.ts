@@ -1,4 +1,4 @@
-import type { SessionAuthContext } from "#channel/types.js";
+import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import { loadContext } from "#context/container.js";
 import type {
   Adapter,
@@ -65,6 +65,8 @@ export type IMessageTapbackResult = {
   readonly message?: string;
   /** Overrides the workflow run title without changing the message sent to the model. */
   readonly title?: string;
+  /** How this one tapback treats a running turn, replacing the channel's `turnPolicy` as a whole. */
+  readonly turnPolicy?: TurnPolicy;
 } | null;
 
 /** Input of the tool returned by `tapbackTool()`. */
@@ -153,6 +155,7 @@ export function iMessageTapbackText(tapback: IMessageTapback): string {
 export function dispatchIMessageTapbacks<TAdapters extends Record<string, Adapter>>(
   bridge: ChatSdkChannelBridge<TAdapters>,
   onTapback: TapbackHook,
+  eventId: (raw: unknown) => string | undefined,
 ): void {
   bridge.bot.onReaction(async (event: ReactionEvent) => {
     if (event.user.isMe) return;
@@ -168,12 +171,14 @@ export function dispatchIMessageTapbacks<TAdapters extends Record<string, Adapte
     await bridge.send(result.message ?? iMessageTapbackText(tapback), {
       auth: result.auth,
       context: [...(result.context ?? [])],
+      idempotencyKey: eventId(event.raw),
       inputAnswer:
         result.answer === undefined
           ? undefined
           : { messageId: tapback.messageId, optionId: result.answer },
       thread: event.thread.toJSON(),
       title: result.title,
+      ...(result.turnPolicy !== undefined && { turnPolicy: result.turnPolicy }),
     });
   });
 }

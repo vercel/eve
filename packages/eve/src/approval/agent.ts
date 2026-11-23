@@ -1,10 +1,15 @@
 import {
   type Approval,
   type ApprovalPolicy,
+  type ApprovalResponsePolicy,
   type ApprovalStatus,
   resolveApprovalPolicy,
 } from "#approval/definition.js";
+import { requesterOnlyResponse } from "#approval/requester-only.js";
 import { normalizeApprovalStatus } from "#approval/status.js";
+import { contextStorage } from "#context/container.js";
+import { SteeredByKey } from "#context/keys.js";
+import { isSteeredApprovalPolicy, markSteeredApprovalPolicy } from "#tools/approval/policies.js";
 
 function rank(status: ApprovalStatus): number {
   const normalized = normalizeApprovalStatus(status);
@@ -16,7 +21,7 @@ function rank(status: ApprovalStatus): number {
 }
 
 export function strictestApproval(policies: readonly ApprovalPolicy[]): ApprovalPolicy {
-  return async (ctx) => {
+  const combined: ApprovalPolicy = async (ctx) => {
     let strictest: ApprovalStatus = undefined;
     for (const policy of policies) {
       const status = await policy(ctx);
@@ -24,6 +29,19 @@ export function strictestApproval(policies: readonly ApprovalPolicy[]): Approval
       if (rank(strictest) === 3) break;
     }
     return strictest;
+  };
+  return policies.some(isSteeredApprovalPolicy) ? markSteeredApprovalPolicy(combined) : combined;
+}
+
+function withSteeredResponseGuard<TInput>(
+  response: ApprovalResponsePolicy<TInput>,
+): ApprovalResponsePolicy<TInput> {
+  return (ctx) => {
+    if ((contextStorage.getStore()?.get(SteeredByKey) ?? []).length > 0) {
+      const callerOnly = requesterOnlyResponse(ctx);
+      if (callerOnly.status === "rejected") return callerOnly;
+    }
+    return response(ctx);
   };
 }
 
@@ -33,8 +51,12 @@ export function withAgentApproval(
 ): Approval | undefined {
   if (agent === undefined) return own;
   if (own === undefined) return agent;
-  const request = strictestApproval([agent, resolveApprovalPolicy(own)]);
-  return typeof own === "function" ? request : { ...own, request };
+  const ownRequest = resolveApprovalPolicy(own);
+  const request = strictestApproval([agent, ownRequest]);
+  if (typeof own === "function") return request;
+  const steeredGuard = isSteeredApprovalPolicy(agent) || isSteeredApprovalPolicy(ownRequest);
+  if (own.response === undefined || !steeredGuard) return { ...own, request };
+  return { ...own, request, response: withSteeredResponseGuard(own.response) };
 }
 
 export function withAgentApprovalOnEntries<

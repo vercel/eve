@@ -36,7 +36,7 @@ export default defineSchedule({
 });
 ```
 
-A markdown-form schedule runs the agent on the prompt and discards the reply. The agent can still call tools, write to backends, and log. The session has no channel, so it can't ask a person for input or receive a follow-up message. A tool that needs approval fails the session instead of waiting. After the turn ends, the session stays open until its [session timeout](./agent-config#runtime-limits) ends it.
+A markdown-form schedule runs the agent on the prompt and discards the reply. The agent can still call tools, write to backends, and log. The session has no channel, so it can't ask a person for input or receive a follow-up message. A tool that needs approval fails the session instead of waiting. After the turn ends, the session stays open until its [session timeout](./agent-config#runtime-limits) ends it. To retire a scheduled session immediately, call `ctx.end()` in a hook. See [End the session from a hook](/docs/guides/hooks#end-the-session-from-a-hook).
 
 ## `defineSchedule`
 
@@ -108,6 +108,31 @@ The `auth` option sets which identity the session runs as. `appAuth` is the app'
 Every run sends the agent's reply to the channel. To skip a run with nothing to report, check in the handler before you call `send`. When only the agent can tell, add the opt-in [`no_reply`](/docs/concepts/built-in-tools#no_reply) tool and ask the agent to call it, so the run posts nothing.
 
 A handler-form session can pause and wait like any other session, for example while a Slack thread waits for a reply.
+
+### Retire sessions on a schedule
+
+A schedule handler can retire idle or expired sessions by ID with `sessions.end()` from `eve/server`, without a channel handle or HTTP call:
+
+```ts title="agent/schedules/retire-idle.ts"
+import { defineSchedule } from "eve/schedules";
+import { sessions } from "eve/server";
+import { SessionNotActiveError } from "eve/sessions";
+
+export default defineSchedule({
+  cron: "0 * * * *",
+  async run({ appAuth }) {
+    for (const sessionId of await findExpiredSessionIds()) {
+      try {
+        await sessions.end(sessionId, { auth: appAuth, reason: "scheduled cleanup" });
+      } catch (error) {
+        if (!SessionNotActiveError.is(error)) throw error;
+      }
+    }
+  },
+});
+```
+
+`sessions.end()` finishes a live session with `outcome: "completed"`. It also retires [stranded sessions](./concepts/execution-model-and-durability#stranded-sessions) (recording `outcome: "failed"` with `error.code: "session_stranded"`) and handed-off sessions whose original Vercel deployment was deleted (recording no terminal event). Built-in channel renderers such as Slack post nothing in any of these cases: live sessions end `completed`, and stranded or deleted-deployment retirements skip channel `session.ended` handlers.
 
 ### Detect the app principal
 

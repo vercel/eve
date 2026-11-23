@@ -45,7 +45,7 @@ export async function completeConnectionSignIn(
 export type ConnectionListing =
   | { readonly tools: readonly ConnectionToolMetadata[] }
   | { readonly authorization: ScopedAuthorization; readonly error: unknown }
-  | { readonly failure: string };
+  | { readonly error?: unknown; readonly failure: string };
 
 export async function listConnectionTools(
   connection: ResolvedConnectionDefinition,
@@ -57,7 +57,10 @@ export async function listConnectionTools(
   } catch (error) {
     if (!isConnectionAuthorizationRequiredError(error)) {
       log.warn("failed to load connection tools", { connection: name, error });
-      return { failure: listingFailureMessage(name, error) };
+      return {
+        ...(isConnectionAuthorizationFailedError(error) && { error }),
+        failure: listingFailureMessage(name, error),
+      };
     }
     if (scoped === undefined) {
       return { failure: `"${name}" requires authorization and cannot start interactive sign-in.` };

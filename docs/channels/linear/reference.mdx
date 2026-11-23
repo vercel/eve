@@ -75,16 +75,16 @@ If a trusted gateway verifies Linear webhooks first, pass `credentials.webhookVe
 
 `linearChannel(config)` takes these options. All are optional.
 
-| Option           | Default                                                 | Description                                                                                     |
-| ---------------- | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `credentials`    | `LINEAR_AGENT_ACCESS_TOKEN` and `LINEAR_WEBHOOK_SECRET` | From `connectLinearCredentials(...)`, or `{ accessToken, webhookSecret, webhookVerifier }`.     |
-| `route`          | `/eve/v1/linear`                                        | Webhook path.                                                                                   |
-| `maxSkewMs`      | `60000`                                                 | Allowed webhook timestamp age for the built-in verifier. A custom `webhookVerifier` ignores it. |
-| `api`            | `https://api.linear.app/graphql` and the global `fetch` | `{ apiBaseUrl, fetch }` for GraphQL calls.                                                      |
-| `turnPolicy`     | `"steer"`                                               | `"steer"` or `"queue"` for prompts that arrive during a turn.                                   |
-| `onAgentSession` | Dispatch `created` and `prompted` events                | `(ctx, event)` hook. See [Custom hooks](#custom-hooks).                                         |
-| `onDataWebhook`  | None                                                    | `(event)` handler for other Linear data webhooks delivered to the same route.                   |
-| `events`         | eve's default handlers                                  | Per-event handler overrides. See [Custom hooks](#custom-hooks).                                 |
+| Option           | Default                                                 | Description                                                                                                                                                                                                        |
+| ---------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `credentials`    | `LINEAR_AGENT_ACCESS_TOKEN` and `LINEAR_WEBHOOK_SECRET` | From `connectLinearCredentials(...)`, or `{ accessToken, webhookSecret, webhookVerifier }`.                                                                                                                        |
+| `route`          | `/eve/v1/linear`                                        | Webhook path.                                                                                                                                                                                                      |
+| `maxSkewMs`      | `60000`                                                 | Allowed webhook timestamp age for the built-in verifier. A custom `webhookVerifier` ignores it.                                                                                                                    |
+| `api`            | `https://api.linear.app/graphql` and the global `fetch` | `{ apiBaseUrl, fetch }` for GraphQL calls.                                                                                                                                                                         |
+| `turnPolicy`     | `"steer"`                                               | `"steer"` or `"queue"` for prompts that arrive during a turn. `{ mode: "steer", principal }` also decides whether another person's message joins. See [Overlapping messages](/docs/channels#overlapping-messages). |
+| `onAgentSession` | Dispatch `created` and `prompted` events                | `(ctx, event)` hook. See [Custom hooks](#custom-hooks).                                                                                                                                                            |
+| `onDataWebhook`  | None                                                    | `(event)` handler for other Linear data webhooks delivered to the same route.                                                                                                                                      |
+| `events`         | eve's default handlers                                  | Per-event handler overrides. See [Custom hooks](#custom-hooks).                                                                                                                                                    |
 
 The channel mounts `POST /eve/v1/linear`.
 

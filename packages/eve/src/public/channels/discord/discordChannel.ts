@@ -167,6 +167,8 @@ export type DiscordCommandResult = {
   /** Prior conversation added as user and assistant turns before this message. */
   readonly history?: readonly SessionHistoryMessage[];
   readonly title?: string;
+  /** How this one command treats a running turn, replacing the channel's `turnPolicy` as a whole. */
+  readonly turnPolicy?: TurnPolicy;
 } | null;
 
 /** Sync or async {@link DiscordCommandResult}. */
@@ -316,7 +318,11 @@ export function discordChannel(config: DiscordChannelConfig = {}): DiscordChanne
       payload,
       channel: DiscordChannelContext & { readonly session: ChannelContext["session"] },
     ) {
-      recordDiscordUser(channel.state, channel.session.auth.current, payload);
+      recordDiscordUser(
+        channel.state,
+        payload.auth !== undefined ? payload.auth : channel.session.auth.current,
+        payload,
+      );
     },
 
     routes: [
@@ -799,6 +805,7 @@ async function dispatchCommand(input: {
         history: input.result.history,
         state: { ...input.state, triggeringUserId: input.interaction.user.id },
         title: input.result.title,
+        ...(input.result.turnPolicy !== undefined && { turnPolicy: input.result.turnPolicy }),
       });
   } catch (error) {
     log.error("command delivery failed", { error });

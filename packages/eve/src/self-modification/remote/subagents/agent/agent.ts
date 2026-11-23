@@ -1,4 +1,5 @@
 import { defineAgent, defineDynamic } from "eve";
+import { steered } from "eve/tools/approval";
 
 import { DEFAULT_AGENT_MODEL_ID, DEFAULT_AGENT_REASONING } from "#shared/default-agent-model.js";
 
@@ -48,6 +49,7 @@ export default defineDynamic(async (ctx) => {
   if (!authorized) return null;
   const configuredModel = bound.model ?? ctx.model.id;
   return defineAgent({
+    approval: steered(),
     description,
     model: configuredModel ?? DEFAULT_AGENT_MODEL_ID,
     reasoning:

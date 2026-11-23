@@ -12,7 +12,7 @@ import type {
   SessionAuthContext,
   SessionCallback,
   SessionCapabilities,
-  TurnPolicy,
+  TurnMode,
 } from "#channel/types.js";
 import type { Session } from "#channel/session.js";
 import { sessionCommandErrorResponse } from "#eve-channel/support.js";
@@ -180,7 +180,7 @@ interface ParsedSessionMessageBody {
   answers?: readonly ValidatedAnswer[];
   context?: ClientContextValue;
   outputSchema?: JsonObject;
-  turnPolicy?: TurnPolicy;
+  turnPolicy?: TurnMode;
 }
 
 export function parseSessionMessageBody(
@@ -355,16 +355,19 @@ export async function createSessionStreamResponse(
       startIndex === undefined || startIndex >= 0
         ? internalSession(session).getLineStream({ follow, startIndex: startIndex ?? 0 })
         : undefined;
-    early?.catch(() => {});
     const earlierEve = startedOnEarlierEve(session, follow && (startIndex ?? 0) > 0);
+    early?.catch(() => {});
+    earlierEve.catch(() => {});
     let tailIndex: number | undefined;
-    if (includeTailIndex || early === undefined) {
-      try {
+    let v26: boolean;
+    try {
+      if (includeTailIndex || early === undefined) {
         tailIndex = await internalSession(session).getStreamTailIndex();
-      } catch (error) {
-        void early?.then((lines) => lines.cancel()).catch(() => {});
-        throw error;
       }
+      v26 = await earlierEve;
+    } catch (error) {
+      void early?.then((lines) => lines.cancel()).catch(() => {});
+      throw error;
     }
     const from =
       early === undefined
@@ -373,7 +376,7 @@ export async function createSessionStreamResponse(
     let lines: ReadableStream<unknown>;
     let lineLimit =
       includeTailIndex && tailIndex !== undefined ? Math.max(0, tailIndex - from + 1) : undefined;
-    if (await earlierEve) {
+    if (v26) {
       void early?.then((opened) => opened.cancel()).catch(() => {});
       const live = follow && (await internalSession(session).hasRunnableOwner());
       if (follow && !live) lineLimit = undefined;
@@ -440,20 +443,25 @@ async function startedOnEarlierEve(session: Session, hasFirstLine: boolean): Pro
         })
       : open(false));
     reader = lines.getReader();
-    if (settled) void reader.cancel().catch(() => {});
+    if (settled) {
+      void reader.cancel().catch(() => {});
+      return false;
+    }
     const { done, value } = await reader.read();
     if (done) return false;
     if (isV26Line(value)) return true;
     rememberCurrentSession(session.id);
     return false;
   })();
-  const timeout = new Promise<false>((resolve) => {
-    timer = setTimeout(() => resolve(false), SESSION_VERSION_CHECK_TIMEOUT_MS);
+  first.catch(() => {});
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error("Timed out reading the session's first line.")),
+      SESSION_VERSION_CHECK_TIMEOUT_MS,
+    );
   });
   try {
     return await Promise.race([first, timeout]);
-  } catch {
-    return false;
   } finally {
     settled = true;
     clearTimeout(timer);

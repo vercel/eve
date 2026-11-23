@@ -64,6 +64,7 @@ const { approval, execute } = skillChange({
   },
 });
 
+/** Changes how a custom skill's live version applies. */
 export default defineTool({
   deferred: true,
   label: {

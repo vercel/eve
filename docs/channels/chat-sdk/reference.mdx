@@ -260,20 +260,20 @@ Workspace-visible threads are `public`, DMs and private or external threads are 
 
 ## Options
 
-| Option                    | Default      | Purpose                                                                  |
-| ------------------------- | ------------ | ------------------------------------------------------------------------ |
-| `adapters`                | —            | Map of adapter name to Chat SDK adapter instance. One webhook per entry. |
-| `state`                   | —            | Chat SDK state adapter for subscriptions, locks, and dedupe.             |
-| `userName`                | —            | Display name for the bot (a standard Chat SDK `ChatConfig` field).       |
-| `route`                   | `/eve/v1`    | Base path for generated adapter webhooks (`{route}/{adapter}`).          |
-| `routes`                  | —            | Per-adapter path overrides for fixed or migrated webhook URLs.           |
-| `turnPolicy`              | `"steer"`    | `"steer"` or `"queue"`. `send(...)` can override it per message.         |
-| `streaming`               | `true`       | Post-then-edit streaming. Set `false` for one-message-per-turn surfaces. |
-| `streamingEditIntervalMs` | `1000`       | Minimum interval between streaming edits.                                |
-| `events`                  | built-in     | Per-event handlers. A supplied handler replaces that built-in default.   |
-| `inputActionPrefix`       | `eve_input:` | Prefix for default HITL button action ids.                               |
-| `resolveInputAuth`        | `null`       | Auth resolver applied when a HITL button click resumes a session.        |
-| `webhook`                 | —            | Extra Chat SDK webhook options (eve owns `waitUntil`).                   |
+| Option                    | Default      | Purpose                                                                                                                                                            |
+| ------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `adapters`                | —            | Map of adapter name to Chat SDK adapter instance. One webhook per entry.                                                                                           |
+| `state`                   | —            | Chat SDK state adapter for subscriptions, locks, and dedupe.                                                                                                       |
+| `userName`                | —            | Display name for the bot (a standard Chat SDK `ChatConfig` field).                                                                                                 |
+| `route`                   | `/eve/v1`    | Base path for generated adapter webhooks (`{route}/{adapter}`).                                                                                                    |
+| `routes`                  | —            | Per-adapter path overrides for fixed or migrated webhook URLs.                                                                                                     |
+| `turnPolicy`              | `"steer"`    | `"steer"`, `"queue"`, or `{ mode: "steer", principal }`. `send(...)` can override it per message. See [Overlapping messages](/docs/channels#overlapping-messages). |
+| `streaming`               | `true`       | Post-then-edit streaming. Set `false` for one-message-per-turn surfaces.                                                                                           |
+| `streamingEditIntervalMs` | `1000`       | Minimum interval between streaming edits.                                                                                                                          |
+| `events`                  | built-in     | Per-event handlers. A supplied handler replaces that built-in default.                                                                                             |
+| `inputActionPrefix`       | `eve_input:` | Prefix for default HITL button action ids.                                                                                                                         |
+| `resolveInputAuth`        | `null`       | Auth resolver applied when a HITL button click resumes a session.                                                                                                  |
+| `webhook`                 | —            | Extra Chat SDK webhook options (eve owns `waitUntil`).                                                                                                             |
 
 Any other Chat SDK `ChatConfig` field (for example `concurrency`) is accepted and passed through.
 
