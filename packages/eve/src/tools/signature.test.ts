@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { renderToolSignature } from "./signature.js";
+import { renderOutputType, renderToolSignature } from "./signature.js";
 
 describe("renderToolSignature", () => {
   it.each([
@@ -135,5 +135,76 @@ describe("renderToolSignature", () => {
     });
     expect(performance.now() - started).toBeLessThan(1_000);
     expect(signature.length).toBeLessThanOrEqual(4_000);
+  });
+
+  it("keeps input parameter descriptions when a large output schema is capped", () => {
+    const signature = renderToolSignature({
+      name: "github__repos_get",
+      inputSchema: {
+        type: "object",
+        properties: {
+          owner: { type: "string", description: "The account owner of the repository." },
+          repo: { type: "string", description: "The repository name without the .git extension." },
+        },
+        required: ["owner", "repo"],
+      },
+      outputSchema: {
+        type: "object",
+        properties: Object.fromEntries(
+          Array.from({ length: 80 }, (_, index) => [
+            `field_name_${index}`,
+            { type: "string", description: "x".repeat(80) },
+          ]),
+        ),
+      },
+    });
+    expect(signature).toContain("owner: string /* The account owner of the repository */");
+    expect(signature).toContain(
+      "repo: string /* The repository name without the .git extension */",
+    );
+    expect(signature).not.toContain("xxx");
+  });
+});
+
+describe("renderOutputType", () => {
+  it("renders the type a call resolves to", () => {
+    expect(
+      renderOutputType({
+        type: "object",
+        properties: { content: { type: "string" }, nextOffset: { type: "integer" } },
+        required: ["content"],
+      }),
+    ).toBe("{ content: string; nextOffset?: number }");
+  });
+
+  it.each([
+    ["no schema", undefined],
+    ["a schema that says nothing about the value", {}],
+  ])("renders nothing for %s", (_name, schema) => {
+    expect(renderOutputType(schema)).toBeUndefined();
+  });
+
+  it("drops descriptions before any property name to stay within 1,000 characters", () => {
+    const names = Array.from({ length: 20 }, (_, index) => `field${index}`);
+    const type = renderOutputType({
+      type: "object",
+      properties: Object.fromEntries(
+        names.map((name) => [name, { type: "string", description: "x".repeat(100) }]),
+      ),
+    });
+    expect(type!.length).toBeLessThanOrEqual(1_000);
+    expect(names.filter((name) => !type!.includes(`${name}?: string`))).toEqual([]);
+    expect(type).not.toContain("xxx");
+  });
+
+  it("cuts a type whose property names alone pass 1,000 characters", () => {
+    const type = renderOutputType({
+      type: "object",
+      properties: Object.fromEntries(
+        Array.from({ length: 200 }, (_, index) => [`field${index}`, { type: "string" }]),
+      ),
+    });
+    expect(type).toHaveLength(1_000);
+    expect(type!.endsWith("...")).toBe(true);
   });
 });

@@ -25,7 +25,7 @@ export default defineOpenAPIConnection({
 
 The [shared connection options](../connections#options) apply, with `operations` as the filter. OpenAPI adds `baseUrl`; see [Base URL and servers](#base-url-and-servers).
 
-Each operation becomes a tool named `<connection>__<operationId>`, such as `petstore__getInventory`. An operation without an `operationId` gets a deterministic `<method>_<sanitized-path>` name. The model calls it with `eve__tool({ name: "petstore__getInventory", input })` and receives `{ status, statusText, body }`.
+Each operation becomes a tool named `<connection>__<operationId>`, such as `petstore__getInventory`. An operation without an `operationId` gets a deterministic `<method>_<sanitized-path>` name. The model calls it with `eve__tool({ name: "petstore__getInventory", input })` and receives `{ status, statusText, body }`. The tool's `signature` in search results types `body` from the operation's success response. That is its first `2xx` response with a JSON schema, or its `default` response when it declares no `2xx` response.
 
 `spec` is a URL that eve fetches at runtime, or an inline OpenAPI object. A spec URL must use `https`, also after redirects. Plain `http` works only for loopback hosts such as `localhost`. Use a URL when the provider maintains the contract. Use an inline object for private APIs, specs you pin in source control, or small hand-written contracts.
 
