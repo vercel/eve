@@ -9,6 +9,7 @@ import { decodeSandboxRef } from "#internal/attachments/sandbox-refs.js";
 import { pngBytes } from "#internal/testing/media-fixtures.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { readFile } from "#tools/provided/read-file.js";
+import { toolModelOutputContext } from "#harness/tool-model-output.js";
 
 function sandboxContext(sandbox: ReturnType<typeof mockSandbox>): ContextContainer {
   const ctx = new ContextContainer();
@@ -54,7 +55,7 @@ describe("read_file images", () => {
         filePath: path,
       });
       const modelOutput = await contextStorage.run(sandboxContext(sandbox), async () =>
-        readFile.toModelOutput?.(output),
+        readFile.toModelOutput?.(output, toolModelOutputContext("read_file", "call_1")),
       );
 
       expect(output.file).toEqual({
@@ -163,7 +164,7 @@ describe("read_file images", () => {
 
     await sandbox.session.writeBinaryFile({ content: pngBytes(8, 8, 1024), path });
     const modelOutput = await contextStorage.run(sandboxContext(sandbox), async () =>
-      readFile.toModelOutput?.(output),
+      readFile.toModelOutput?.(output, toolModelOutputContext("read_file", "call_1")),
     );
 
     expect(modelOutput).toEqual({
@@ -211,7 +212,7 @@ describe("read_file PDFs", () => {
 
     const output = await executeReadFileOnSandbox(sandbox.session, { filePath: path });
     const modelOutput = await contextStorage.run(sandboxContext(sandbox), async () =>
-      readFile.toModelOutput?.(output),
+      readFile.toModelOutput?.(output, toolModelOutputContext("read_file", "call_1")),
     );
 
     expect(output.file).toEqual({ mediaType: "application/pdf", pages: 1, size: pdf.byteLength });

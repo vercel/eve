@@ -5,6 +5,7 @@ import type {
   InternalToolDefinition,
   InternalToolLabelDefinition,
   ToolExecuteOptions,
+  ToolModelOutputContext,
 } from "#tools/definition.js";
 import type { JsonValue } from "#shared/json.js";
 import type { PreparedToolBehavior } from "#tools/behavior.js";
@@ -26,7 +27,7 @@ export interface HarnessToolDefinition {
   readonly approval?: Approval;
   readonly outputSchema?: FlexibleSchema;
   readonly rootOnly?: boolean;
-  readonly toModelOutput?: (output: unknown) => unknown;
+  readonly toModelOutput?: (output: unknown, ctx: ToolModelOutputContext) => unknown;
   readonly version?: string;
   readonly workflowId?: string;
 }

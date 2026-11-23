@@ -125,6 +125,39 @@ Return `{ type: "text", value }` for a summary or `{ type: "json", value }` for 
 
 Do not return secrets, credentials, unnecessary personal data, or unbounded sensitive content from tools. Filter, minimize, and redact tool outputs before you return them.
 
+`toModelOutput` also receives a second argument with the `callId`, the `toolName`, `getSandbox()`, which resolves the session's sandbox or `undefined` when the agent has none, and `defaultModelOutput()`, which returns what the model would see without a `toModelOutput`. A function that takes only the output keeps working. When a test calls `toModelOutput` directly and the function reads `ctx`, pass a `ctx` too, because the type allows leaving it out and the call then throws.
+
+### Keep large results out of context with `offloadContent`
+
+A tool result goes into the conversation in full, and every later model call in the turn sends it again. A 680 KB JSON result is about 190,000 tokens. `offloadContent` from `eve/tools` builds a `toModelOutput` that writes a result over a size limit to a file in the sandbox and gives the model a short note instead:
+
+```ts title="agent/tools/fetch_issues.ts"
+import { defineTool, offloadContent } from "eve/tools";
+import { z } from "zod";
+
+export default defineTool({
+  description: "List the issues of a repository.",
+  inputSchema: z.object({ repo: z.string() }),
+  async execute({ repo }) {
+    const response = await fetch(
+      `https://api.github.com/repos/${repo}/issues?state=all&per_page=100`,
+    );
+    return await response.json();
+  },
+  toModelOutput: offloadContent(),
+});
+```
+
+`maxBytes` is the largest result, in UTF-8 bytes, that reaches the model unchanged. It defaults to 20,000 bytes, about 5,000 tokens. A result over the limit is written to `/tmp/.eve/tool-results/<tool name>-<call id>.json` (`.txt` for a string). The file holds what the model would have seen without offloading: the tool's output, or the output of the `toModelOutput` you pass. The model sees the path, the size, a short description of the shape (for text, the line count and the first 20 lines), and a hint to read parts of the file with `jq`, `read_file` or `bash`. Channels and hooks still get the full output on `call.settled`.
+
+- To shrink or redact the result first, pass `toModelOutput`. `offloadContent` applies it, checks the size of its output, and writes that output, so a field you remove never reaches the file.
+- When a result is over the limit and can't be saved, because there is no sandbox, or opening the sandbox, writing the file or listing the saved results fails, or the directory holds too many files to list, `fallback` decides what the model gets, and eve logs one warning per session. `"inline"` (the default) sends the result as the model would have seen it without offloading, so nothing is lost and the context may grow. `"summary"` sends only the size, shape and first lines, so the context stays small and the rest of the result is gone. A tool invoked through MCP without a tool-session key has no sandbox that outlives the call, so it counts as not saved.
+- A result over 10 MB is never written, whatever `maxBytes` is. It counts as not saved, so `fallback` decides what the model gets.
+- Error results and results with image or file parts are never written.
+- A sandbox keeps at most 100 saved results and 100 MB of them, and a result over 10 MB is never saved. When a new result takes the sandbox over a limit, eve removes the oldest saved results. The file also goes away when the sandbox is replaced. In both cases the model has to run the tool again.
+
+To offload a built-in tool's result, spread the exported definition and set `toModelOutput`, as in [Built-in tools](/docs/concepts/built-in-tools). Built-in tools such as `web_fetch` and `grep` cut long output inside `execute`, so `offloadContent` sees the shortened result. For a connection, set [`toolCall.toModelOutput`](/docs/connections/mcp#control-result-size).
+
 ### Send images to the model with content parts
 
 To give a vision-capable model an image, such as a screenshot or chart, return a `content` output from `toModelOutput`. Build outputs with `toolOutput` and parts with `toolOutputPart`, both from `eve/tools`:
