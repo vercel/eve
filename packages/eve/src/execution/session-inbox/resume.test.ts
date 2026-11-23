@@ -233,6 +233,50 @@ describe("session inbox resume", () => {
     expect(resumeHookMock).not.toHaveBeenCalled();
   });
 
+  it("refuses a pre-1.0 owner reached through its legacy inbox address", async () => {
+    getWorldMock.mockResolvedValue(singleDeploymentWorld("0.50.0"));
+    getHookByTokenMock.mockImplementation(async (token: string) => {
+      if (token.startsWith(sessionInboxHookToken(""))) throw new HookNotFoundError(token);
+      return sessionHook("wrun_pre_v1", token, { sessionInboxWireVersion: 7 });
+    });
+    resumeHookMock.mockImplementation(async (token: string) => {
+      if (token.startsWith(sessionInboxHookToken(""))) throw new HookNotFoundError(token);
+      return sessionHook("wrun_pre_v1", token, { sessionInboxWireVersion: 7 });
+    });
+
+    const refusal = await resumeSessionInbox("slack:C1:1700000000.000100", {
+      kind: "send",
+      payload: { message: "Alice follows up after the upgrade." },
+    }).catch((error: unknown) => error);
+
+    expect(refusal).toBeInstanceOf(StrandedSessionOwnerError);
+    expect(refusal).toMatchObject({ eveVersion: "0.50.0", ownerRunId: "wrun_pre_v1" });
+    expect(resumeHookMock).not.toHaveBeenCalledWith(
+      "slack:C1:1700000000.000100",
+      expect.anything(),
+    );
+  });
+
+  it("treats a pre-0.45 owner reached through its legacy inbox address as not found", async () => {
+    const world = singleDeploymentWorld("0.40.0");
+    getWorldMock.mockResolvedValue(world);
+    getHookByTokenMock.mockImplementation(async (token: string) => {
+      if (token.startsWith(sessionInboxHookToken(""))) throw new HookNotFoundError(token);
+      return sessionHook("wrun_pre_v045", token, {});
+    });
+    resumeHookMock.mockImplementation(async (token: string) => {
+      throw new HookNotFoundError(token);
+    });
+
+    const refusal = await resumeSessionInbox("slack:C1:1600000000.000100", {
+      kind: "send",
+      payload: { message: "Alice follows up on an old thread." },
+    }).catch((error: unknown) => error);
+
+    expect(HookNotFoundError.is(refusal)).toBe(true);
+    expect(world.runs.get).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["retires a dormant eve dev run another eve version built", "0.0.1", true],
     ["keeps a dormant eve dev run this eve version built", undefined, false],

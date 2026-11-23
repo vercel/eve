@@ -48,7 +48,7 @@ const KNOWN_AUTHORIZATION_KEYS = [
   "startAuthorization",
   "vercelConnect",
 ] as const;
-const KNOWN_TOOL_CALL_KEYS = ["providedArguments"] as const;
+const KNOWN_TOOL_CALL_KEYS = ["providedArguments", "toModelOutput"] as const;
 
 export function normalizeMcpClientConnectionDefinition(
   value: unknown,
@@ -173,28 +173,40 @@ function normalizeConnectionToolCall(
   );
   expectOnlyKnownKeys(toolCall, KNOWN_TOOL_CALL_KEYS, `${message} The "toolCall" field`);
 
-  if (toolCall.providedArguments === undefined) {
-    return {};
+  const result: {
+    -readonly [K in keyof ConnectionToolCallDefinition]: ConnectionToolCallDefinition[K];
+  } = {};
+  if (toolCall.providedArguments !== undefined) {
+    result.providedArguments = normalizeProvidedArguments(toolCall.providedArguments, message);
   }
+  if (toolCall.toModelOutput !== undefined) {
+    if (typeof toolCall.toModelOutput !== "function") {
+      throw new Error(`${message} The "toolCall.toModelOutput" field must be a function.`);
+    }
+    result.toModelOutput = toolCall.toModelOutput as ConnectionToolCallDefinition["toModelOutput"];
+  }
+  return result;
+}
 
+function normalizeProvidedArguments(value: unknown, message: string): ProvidedArgumentsDefinition {
   const providedArguments = expectObjectRecord(
-    toolCall.providedArguments,
+    value,
     `${message} The "toolCall.providedArguments" field must be a plain object.`,
   );
 
-  for (const [key, value] of Object.entries(providedArguments)) {
-    if (typeof value === "function") {
+  for (const [key, provided] of Object.entries(providedArguments)) {
+    if (typeof provided === "function") {
       continue;
     }
     if (
-      typeof value === "object" &&
-      value !== null &&
-      typeof (value as { then?: unknown }).then === "function"
+      typeof provided === "object" &&
+      provided !== null &&
+      typeof (provided as { then?: unknown }).then === "function"
     ) {
       continue;
     }
     try {
-      parseJsonValue(value);
+      parseJsonValue(provided);
     } catch {
       throw new Error(
         `${message} The "toolCall.providedArguments.${key}" value must be JSON-serializable, a Promise, or a function.`,
@@ -202,7 +214,7 @@ function normalizeConnectionToolCall(
     }
   }
 
-  return { providedArguments: providedArguments as ProvidedArgumentsDefinition };
+  return providedArguments as ProvidedArgumentsDefinition;
 }
 
 export function normalizeOpenApiConnectionDefinition(

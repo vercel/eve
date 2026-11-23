@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "eval": "eve eval --strict"
+    "eval": "eve eval --strict",
+    "e2e:postgres": "node ../../../scripts/run-e2e-postgres.mjs"
   },
   "dependencies": {
     "@eve-e2e/config": "workspace:*",

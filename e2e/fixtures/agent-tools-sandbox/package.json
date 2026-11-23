@@ -9,7 +9,8 @@
     "dev": "eve dev",
     "start": "eve start",
     "typecheck": "tsc",
-    "test:e2e": "eve eval --strict"
+    "test:e2e": "eve eval --strict",
+    "e2e:postgres": "node ../../../scripts/run-e2e-postgres.mjs"
   },
   "dependencies": {
     "@eve-e2e/config": "workspace:*",

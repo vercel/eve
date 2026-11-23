@@ -98,6 +98,8 @@ const DEFAULT_MAPPING: OutputMapping = {
   link: (_span, link) => ({ "agent.link.type": link.relationship }),
 };
 
+export const telemetryTracerProviders = new WeakMap<AgentTelemetry, () => TracerProvider>();
+
 function onVercel(): boolean {
   const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
     ?.env;
@@ -131,38 +133,43 @@ export interface OtelTelemetryOptions {
 
 /** OpenTelemetry implementation of {@link AgentTelemetry}. */
 export function otelTelemetry(options: OtelTelemetryOptions = {}): AgentTelemetry {
-  const provider = options.provider ?? trace.getTracerProvider();
-  const tracer = provider.getTracer(options.tracerName ?? AGENT_RUNS_SCOPE, options.tracerVersion);
+  const provider = () => options.provider ?? trace.getTracerProvider();
   const mapping = options.mapping ?? DEFAULT_MAPPING;
   const idGenerator = options.idGenerator;
   function lifecycle(method: "forceFlush" | "shutdown"): () => Promise<void> {
     return (
       options[method] ??
       (async () => {
+        const selected = provider();
+        const current =
+          (selected as TracerProvider & { getDelegate?(): TracerProvider }).getDelegate?.() ??
+          selected;
         const callback = (
-          provider as TracerProvider & { forceFlush?(): Promise<void>; shutdown?(): Promise<void> }
+          current as TracerProvider & { forceFlush?(): Promise<void>; shutdown?(): Promise<void> }
         )[method];
         if (callback === undefined)
           throw new Error(`The tracer provider does not support ${method}.`);
-        await callback.call(provider);
+        await callback.call(current);
       })
     );
   }
   function start(span: PreparedSpan, executionContext?: ExecutionContext): SpanWriter {
-    const recorded = tracer.startSpan(
-      span.name,
-      {
-        attributes: mappedAttributes(mapping, span, span.attributes),
-        kind: span.kind === undefined ? undefined : SpanKind[span.kind],
-        root: span.root,
-        startTime: span.startTimeMs,
-        links: span.links?.map((link) => ({
-          context: otelReference(link.context),
-          attributes: mapping?.link(span, link) ?? { "agent.link.type": link.relationship },
-        })),
-      },
-      parentContext(span.root ? undefined : span.parent, executionContext),
-    );
+    const recorded = provider()
+      .getTracer(options.tracerName ?? AGENT_RUNS_SCOPE, options.tracerVersion)
+      .startSpan(
+        span.name,
+        {
+          attributes: mappedAttributes(mapping, span, span.attributes),
+          kind: span.kind === undefined ? undefined : SpanKind[span.kind],
+          root: span.root,
+          startTime: span.startTimeMs,
+          links: span.links?.map((link) => ({
+            context: otelReference(link.context),
+            attributes: mapping?.link(span, link) ?? { "agent.link.type": link.relationship },
+          })),
+        },
+        parentContext(span.root ? undefined : span.parent, executionContext),
+      );
     return {
       reference: portableReference(recorded.spanContext()),
       setAttribute(key, value) {
@@ -184,7 +191,7 @@ export function otelTelemetry(options: OtelTelemetryOptions = {}): AgentTelemetr
       },
     };
   }
-  return {
+  const telemetry: AgentTelemetry = {
     startSpan(span, { reference, context: host } = {}) {
       if (reference === undefined || idGenerator === undefined) return start(span, host);
       const writer = idGenerator.withTraceId(reference.traceId, () =>
@@ -237,4 +244,6 @@ export function otelTelemetry(options: OtelTelemetryOptions = {}): AgentTelemetr
     forceFlush: lifecycle("forceFlush"),
     shutdown: lifecycle("shutdown"),
   };
+  telemetryTracerProviders.set(telemetry, provider);
+  return telemetry;
 }

@@ -6,6 +6,7 @@ import { encodeLegacyCommand, resumeLegacyInbox, UnsupportedLegacySessionError }
 const { get, resume } = vi.hoisted(() => ({ get: vi.fn(), resume: vi.fn() }));
 vi.mock("#internal/workflow/runtime.js", () => ({ getHookByToken: get, resumeHook: resume }));
 vi.mock("#execution/session-inbox/owner.js", () => ({
+  assertRunnableSessionOwner: async () => {},
   lookupSessionOwnerHook: (token: string) => get(token),
   resumeRunnableHook: (token: string, payload: unknown) => resume(token, payload),
 }));

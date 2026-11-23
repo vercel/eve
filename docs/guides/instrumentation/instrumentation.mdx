@@ -70,7 +70,7 @@ Events that also appear in the session stream use the same names and outcomes th
 
 A message that pauses for a person ends with `awaiting-input`, and the work after the answer belongs to the answer's message. OTel links a turn to a message only when the turn handled exactly one message.
 
-Each call emits one `call.*` pair, and SDK callbacks don't add a second one. A subagent's `call.settled` includes its reported usage.
+Each call emits one `call.*` pair, and SDK callbacks don't add a second one. A subagent's `call.settled` includes its reported usage. A call that runs as a task names it as `taskId` on `call.settled`, including a call that continues an existing task.
 
 The event's `scope` field holds the session and run IDs the event belongs to. `turnId` can be absent for compaction or direct calls. Treat `idempotencyKey` as opaque. `runId` and `attempt` identify a run; runtime-context resolvers receive them as `run: { id, attempt }`.
 

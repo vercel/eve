@@ -10,11 +10,11 @@ import { theme } from "./lib/theme.ts";
 const TICKER = "GOOG";
 const PRICE = "178.92";
 process.env.EVE_TUI_UNICODE = "1";
+process.env.EVE_E2E_MODEL = "mock";
 
 const WEATHER_SMOKE_TARGET: RunOptions = {
   app: "agent-subagents-hitl",
   kind: "local-build",
-  startEnv: { ...process.env, EVE_E2E_MODEL: "mock" },
 };
 
 run(WEATHER_SMOKE_TARGET, async (target) => {

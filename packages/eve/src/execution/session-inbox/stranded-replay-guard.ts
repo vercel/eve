@@ -6,8 +6,13 @@ import {
   type OwnerRun,
 } from "#execution/session-inbox/runnable-owner.js";
 import {
+  CONNECTION_EVENT_DELIVERY_WORKFLOW_NAME,
+  CONNECTION_EVENT_WORKFLOW_NAME,
+  SESSION_TIMEOUT_WORKFLOW_NAME,
+  TURN_WORKFLOW_NAME,
   WORKFLOW_ENTRY_NAME,
   WORKFLOW_TOOL_RUN_WORKFLOW_NAME,
+  type StableWorkflowName,
 } from "#execution/stable-workflow-names.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger } from "#internal/logging.js";
@@ -16,13 +21,24 @@ import { cancelRun } from "#internal/workflow/runtime.js";
 
 const log = createLogger("execution.session-inbox.stranded-replay-guard");
 
+type StrandedRun = "session" | "retire" | "replay";
+
+const STRANDED_RUNS: Readonly<Record<StableWorkflowName, StrandedRun>> = {
+  [WORKFLOW_ENTRY_NAME]: "session",
+  [TURN_WORKFLOW_NAME]: "session",
+  [WORKFLOW_TOOL_RUN_WORKFLOW_NAME]: "retire",
+  [CONNECTION_EVENT_WORKFLOW_NAME]: "retire",
+  [SESSION_TIMEOUT_WORKFLOW_NAME]: "replay",
+  [CONNECTION_EVENT_DELIVERY_WORKFLOW_NAME]: "replay",
+};
+
 export function guardStrandedSessionReplay<TWorld extends World>(world: TWorld): TWorld {
   if (routesToOwnerDeployment(world)) return world;
   const { name } = resolveInstalledPackageInfo();
-  const guardedWorkflows = new Map<string, GuardedWorkflow>([
-    [`workflow//${name}//${WORKFLOW_ENTRY_NAME}`, "session"],
-    [`workflow//${name}//${WORKFLOW_TOOL_RUN_WORKFLOW_NAME}`, "tool"],
-  ]);
+  const guardedWorkflows = new Map<string, GuardedWorkflow>();
+  for (const [workflow, stranded] of Object.entries(STRANDED_RUNS)) {
+    if (stranded !== "replay") guardedWorkflows.set(`workflow//${name}//${workflow}`, stranded);
+  }
   const createQueueHandler = world.createQueueHandler.bind(world);
   world.createQueueHandler = (queueNamePrefix, handler) =>
     createQueueHandler(queueNamePrefix, async (message, meta) => {
@@ -40,7 +56,7 @@ export function guardStrandedSessionReplay<TWorld extends World>(world: TWorld):
   return world;
 }
 
-type GuardedWorkflow = "session" | "tool";
+type GuardedWorkflow = Exclude<StrandedRun, "replay">;
 
 async function skipRetiredRun(
   world: World,
@@ -66,7 +82,7 @@ function strandedReplayAction(
   workflow: GuardedWorkflow,
 ): "park" | "replay" | "retire" {
   if (run.status !== "pending" && run.status !== "running") return "replay";
-  return workflow === "tool" || run.attributes[EVE_TYPE_ATTRIBUTE] === "subagent"
+  return workflow === "retire" || run.attributes[EVE_TYPE_ATTRIBUTE] === "subagent"
     ? "retire"
     : "park";
 }
@@ -88,8 +104,9 @@ async function retireRun(world: World, run: OwnerRun): Promise<void> {
   } catch (error) {
     if (!isRunInactive(error)) throw error;
   }
-  log.warn("Retired stranded descendant run", {
+  log.warn("Retired stranded run", {
     runId: run.runId,
+    workflowName: run.workflowName,
     previousEveVersion: run.attributes[EVE_VERSION_ATTRIBUTE] ?? "unknown",
     currentEveVersion: resolveInstalledPackageInfo().version,
   });

@@ -39,6 +39,7 @@ Install the packages for each integration entry you import. Most are optional pe
 | `eve/react`                                                   | `react` 19 (and its React typings in TypeScript apps) |
 | `eve/vue`                                                     | `vue` 3.5 or later in v3                              |
 | `eve/svelte`                                                  | `svelte` 5                                            |
+| `eve/solid`                                                   | `solid-js` 2                                          |
 | `eve/next`                                                    | `next` 16 and `react` 19                              |
 | `eve/sveltekit`, `eve/tanstack`                               | `vite` 8.3.1 or later in v8                           |
 | `eve/nuxt`                                                    | `@nuxt/kit` 4 and `@nuxt/schema` 4                    |
@@ -81,7 +82,7 @@ The AI SDK is a required peer and has its own Zod peer requirement. To type the 
 | `defineEval`                                          | `eve/evals`                                                             | `evals/*.eval.ts`                                                                      | [Evals](/docs/evals)                                   |
 | `defineEvalConfig`                                    | `eve/evals`                                                             | `evals/evals.config.ts`                                                                | [Evals](/docs/evals)                                   |
 | `mockModel`                                           | `eve/evals`                                                             | Deterministic fixture agent models                                                     | [Evals](/docs/evals)                                   |
-| `useEveAgent`                                         | `eve/react`, `eve/vue`, `eve/svelte`                                    | frontend                                                                               | [Frontend](/docs/guides/frontend)                      |
+| `useEveAgent`                                         | `eve/react`, `eve/vue`, `eve/svelte`, `eve/solid`                       | frontend                                                                               | [Frontend](/docs/guides/frontend)                      |
 
 Tool-wide helpers and types such as `defineTool`, `defineWorkflowTool`, `defineDynamic`, `disableTool`, and `ToolLabelDefinition` come from `eve/tools`. Built-in tool definitions use their own subpaths; see [Built-in tools](../concepts/built-in-tools):
 
@@ -194,7 +195,7 @@ Type the context in a `"use step"` helper as `WorkflowStepToolContext`, which ex
 | `eve/evals/expect`                                                                | `includes`, `equals`, `matches`, `similarity`                                                                     |
 | `eve/evals/reporters`                                                             | `braintrustReporter`, `junitReporter`, `EvalReporter`                                                             |
 | `eve/evals/loaders`                                                               | `loadJson`, `loadYaml`                                                                                            |
-| `eve/react`, `eve/vue`, `eve/svelte`                                              | `useEveAgent`                                                                                                     |
+| `eve/react`, `eve/vue`, `eve/svelte`, `eve/solid`                                 | `useEveAgent`                                                                                                     |
 | `eve/next`, `eve/nuxt`, `eve/sveltekit`, `eve/tanstack`                           | framework bundler plugins                                                                                         |
 | [`eve/client`](/docs/guides/client)                                               | `Client`, `ClientSession`, health and agent-info schemas, `EveError` and the typed client errors                  |
 | [`eve/sessions`](../guides/client/messages#reusable-delivery-reads)               | `Delivery`, `DeliveryResult`, read options, `SessionReader`, `Session`, `EveError`, and `SessionNotActiveError`   |
