@@ -1,0 +1,66 @@
+.technical {
+  font-family: var(--font-mono), monospace;
+}
+
+.technical * {
+  font-family: inherit;
+}
+
+.poster {
+  position: relative;
+  background: #000;
+  color: #fff;
+}
+
+.surface {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 960 / 550;
+  max-block-size: min(72vh, 39rem);
+  overflow: hidden;
+}
+
+.surface > h1,
+.canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.surface > h1 {
+  width: min(78%, 44rem);
+  margin-inline: auto;
+}
+
+.art,
+.canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.art {
+  object-fit: contain;
+}
+
+.canvas {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.surface[data-moving] .canvas {
+  visibility: visible;
+}
+
+.surface[data-moving] .art {
+  visibility: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .surface[data-moving] .canvas {
+    visibility: hidden;
+  }
+
+  .surface[data-moving] .art {
+    visibility: visible;
+  }
+}
