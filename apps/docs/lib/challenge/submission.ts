@@ -20,11 +20,16 @@ function httpsUrl(value: string) {
   }
 }
 
-function repositoryPath(value: string) {
+function repositoryLink(value: string) {
   const url = httpsUrl(value);
-  if (!url || url.hostname !== "github.com") return null;
+  if (!url || !url.hostname.includes(".")) return null;
   const path = url.pathname.replace(/\/$/, "").replace(/\.git$/, "");
-  return /^\/[\w-]+\/[\w.-]+$/.test(path) ? path : null;
+  if (url.hostname === "github.com" || url.hostname === "www.github.com") {
+    return /^\/[\w-]+\/[\w.-]+$/.test(path)
+      ? { href: `https://github.com${path}`, github: path }
+      : null;
+  }
+  return /^\/[^/]+\/[^/]+/.test(path) ? { href: `${url.origin}${path}`, github: null } : null;
 }
 
 function youtubeId(value: string) {
@@ -43,20 +48,23 @@ function youtubeId(value: string) {
 }
 
 export function buildSubmission({ repository, description, video }: Submission) {
-  const repo = repositoryPath(repository);
+  const repo = repositoryLink(repository);
   const demo = youtubeId(video);
   const summary = description.trim();
   const preview: SubmissionPreview = {
     summary: summary || "What you built goes here.",
-    repository: repo
-      ? `https://github.com${repo}`
-      : repository.trim() || "https://github.com/you/your-agent",
+    repository: repo?.href ?? (repository.trim() || "https://github.com/you/your-agent"),
     video: demo ? `https://youtu.be/${demo}` : video.trim(),
-    media: demo ? { kind: "youtube", id: demo } : repo ? { kind: "github", path: repo } : null,
+    media: demo
+      ? { kind: "youtube", id: demo }
+      : repo?.github
+        ? { kind: "github", path: repo.github }
+        : null,
   };
   const errors: Partial<Record<keyof Submission, string>> = {};
   if (!repo)
-    errors.repository = "Enter a GitHub repository URL, such as https://github.com/you/your-agent.";
+    errors.repository =
+      "Enter a public code repository URL, such as https://github.com/you/your-agent.";
   if (!summary || summary.length > descriptionLimit)
     errors.description = `Describe your project in 1–${descriptionLimit} characters.`;
   if (video.trim() && !demo) errors.video = "Enter a YouTube video link or leave this field blank.";

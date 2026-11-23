@@ -111,7 +111,7 @@ export function PostBuilder() {
           className="inline-flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-gray-1000 px-4 text-label-14 font-medium text-background-100 hover:bg-gray-900 sm:w-fit"
           type="submit"
         >
-          Open draft on X <span className="sr-only">(opens in a new tab)</span>
+          Open Draft <span className="sr-only">on X (opens in a new tab)</span>
           <ArrowUpRight aria-hidden size={16} />
         </button>
         <noscript>

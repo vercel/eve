@@ -29,8 +29,20 @@ describe("challenge post draft", () => {
     );
   });
 
+  it("accepts repositories hosted outside GitHub without a GitHub preview card", () => {
+    const result = buildSubmission({
+      ...entry,
+      repository: "https://gitlab.com/example/weather-agent.git",
+    });
+    expect(result.preview.media).toBeNull();
+    expect(new URL(result.intent ?? "").searchParams.get("text")).toContain(
+      "\nhttps://gitlab.com/example/weather-agent\n",
+    );
+  });
+
   it.each([
-    ["repository", "https://github.com.example/weather-agent"],
+    ["repository", "http://gitlab.com/example/weather-agent"],
+    ["repository", "https://codeberg.org/example"],
     ["repository", "https://github.com/example/weather-agent/issues"],
     ["description", "   "],
     ["video", "https://www.youtube.com/@example"],

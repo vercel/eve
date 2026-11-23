@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { ImageResponse } from "next/og";
 import { challengeDeadline, challengeHeadline, challengeTitle } from "./challenge-details";
 import { glyphFieldSvg } from "./glyphs";
+import { stillLoop } from "./harness-loop";
 
 export const alt = challengeTitle;
 export const size = { width: 1200, height: 630 };
@@ -26,12 +27,7 @@ const backdrop = dataUri(
     "#3d3d3d",
   ),
 );
-const logo = dataUri(
-  glyphFieldSvg(
-    { columns: 56, rows: 18, seed: 3, density: 0.97, brightness: 0.78, shape: "logo" },
-    "#fff",
-  ),
-);
+const loop = dataUri(stillLoop.svg);
 
 export default async function ChallengeOpenGraphImage() {
   const [sans, mono] = await fonts;
@@ -73,7 +69,7 @@ export default async function ChallengeOpenGraphImage() {
           {challengeHeadline}
         </div>
       </div>
-      <img alt="" height={187} src={logo} width={582} />
+      <img alt="" height={480} src={loop} width={614} />
     </div>,
     {
       ...size,

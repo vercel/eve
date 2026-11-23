@@ -5,18 +5,6 @@
   color-scheme: dark;
 }
 
-.wake {
-  position: relative;
-}
-
-.wakeCanvas {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-}
-
 .backdrop {
   --peak: #8f8f8f;
   position: absolute;
@@ -30,11 +18,27 @@
   pointer-events: none;
 }
 
-.logo {
-  display: block;
-  width: 100%;
-  height: auto;
+.loop {
+  position: relative;
+  aspect-ratio: 640 / 500;
+  min-width: 0;
   color: #fff;
+}
+
+.loopStill,
+.loopCanvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.loopStill[data-hidden] {
+  visibility: hidden;
+}
+
+.loopCanvas {
+  pointer-events: none;
 }
 
 @media (prefers-reduced-motion: no-preference) {

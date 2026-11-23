@@ -13,7 +13,6 @@ export function GlyphField({
       aria-hidden="true"
       className={className}
       data-glyph-field=""
-      data-glyph-shape={options.shape}
       fill="none"
       preserveAspectRatio={`xMidYMid ${fit}`}
       viewBox={`0 0 ${options.columns * glyphCell} ${options.rows * glyphCell}`}

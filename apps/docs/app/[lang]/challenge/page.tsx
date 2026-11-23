@@ -15,7 +15,7 @@ import {
   winnerCount,
 } from "./challenge-details";
 import { GlyphField } from "./glyph-field";
-import { GlyphWake } from "./glyph-wake";
+import { HarnessLoop } from "./harness-loop-view";
 import { PostBuilder } from "./post-builder";
 
 const description =
@@ -135,67 +135,54 @@ export default function ChallengePage() {
   return (
     <main className="w-full min-w-0 pb-24">
       <section aria-labelledby="challenge-title" className={`dark ${styles.hero}`}>
-        <GlyphWake>
-          <GlyphField
-            brightness={0.1}
-            className={styles.backdrop}
-            clearing={{ x: 0.2, y: 0.24, radiusX: 0.34, radiusY: 0.3 }}
-            columns={96}
-            density={0.2}
-            fit="meet"
-            rows={90}
-            seed={7}
-          />
-          <div
-            className={`${container} relative grid items-center gap-12 pt-16 pb-12 sm:pt-24 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] lg:gap-16 lg:pt-28 lg:pb-20`}
-          >
-            <div className="min-w-0">
-              <h1
-                className="mt-4 max-w-[11ch] text-balance text-heading-48 text-gray-1000 sm:text-heading-56 xl:text-heading-64"
-                id="challenge-title"
-              >
-                <span className="sr-only">eve </span>
-                {challengeHeadline}
-              </h1>
-              <p className="mt-6 max-w-[36rem] text-pretty text-copy-18 text-gray-900">
-                {description}
-              </p>
-              <InstallSwitcher className="mt-8 max-w-full" source="challenge_hero" />
-              <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-                <a className={primaryAction} href="#submit">
-                  Share your project
-                </a>
-                <Link className={secondaryAction} href="/docs/getting-started" prefetch={true}>
-                  Read the docs <ArrowRight aria-hidden size={16} />
-                </Link>
-              </div>
-            </div>
-            <div aria-hidden="true" className="min-w-0">
-              <GlyphField
-                brightness={0.78}
-                className={styles.logo}
-                columns={56}
-                density={0.97}
-                fit="meet"
-                rows={18}
-                seed={3}
-                shape="logo"
-              />
-            </div>
-          </div>
-          <div className="relative bg-black">
-            <dl
-              className={`${container} grid gap-x-8 border-t border-gray-400 sm:grid-cols-2 lg:grid-cols-[1fr_0.45fr_1.55fr_0.8fr]`}
+        <GlyphField
+          brightness={0.1}
+          className={styles.backdrop}
+          clearing={{ x: 0.2, y: 0.24, radiusX: 0.34, radiusY: 0.3 }}
+          columns={96}
+          density={0.2}
+          fit="meet"
+          rows={90}
+          seed={7}
+        />
+        <div
+          className={`${container} relative grid items-center gap-12 pt-16 pb-12 sm:pt-24 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] lg:gap-16 lg:pt-28 lg:pb-20`}
+        >
+          <div className="min-w-0">
+            <h1
+              className="mt-4 max-w-[11ch] text-balance text-heading-48 text-gray-1000 sm:text-heading-56 xl:text-heading-64"
+              id="challenge-title"
             >
-              {brief.map(([term, value]) => (
-                <div className="min-w-0 py-5 lg:py-7" key={term}>
-                  <dt className="font-mono text-copy-13 text-gray-900">{term}</dt>
-                  <dd className="mt-2 text-pretty text-copy-16 text-gray-1000">{value}</dd>
-                </div>
-              ))}
-            </dl>
+              <span className="sr-only">eve </span>
+              {challengeHeadline}
+            </h1>
+            <p className="mt-6 max-w-[36rem] text-pretty text-copy-18 text-gray-900">
+              {description}
+            </p>
+            <InstallSwitcher className="mt-8 max-w-full" source="challenge_hero" />
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+              <a className={primaryAction} href="#submit">
+                Share your project
+              </a>
+              <Link className={secondaryAction} href="/docs/getting-started" prefetch={true}>
+                Read the docs <ArrowRight aria-hidden size={16} />
+              </Link>
+            </div>
           </div>
-        </GlyphWake>
+          <HarnessLoop />
+        </div>
+        <div className="relative bg-black">
+          <dl
+            className={`${container} grid gap-x-8 border-t border-gray-400 sm:grid-cols-2 lg:grid-cols-[1fr_0.45fr_1.55fr_0.8fr]`}
+          >
+            {brief.map(([term, value]) => (
+              <div className="min-w-0 py-5 lg:py-7" key={term}>
+                <dt className="font-mono text-copy-13 text-gray-900">{term}</dt>
+                <dd className="mt-2 text-pretty text-copy-16 text-gray-1000">{value}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
       </section>
 
       <section aria-labelledby="how-to-enter" className={`${container} py-16 sm:py-24`}>

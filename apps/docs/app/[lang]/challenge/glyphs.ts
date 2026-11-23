@@ -18,57 +18,8 @@ export type GlyphFieldOptions = {
   seed: number;
   density?: number;
   clearing?: GlyphClearing;
-  shape?: "logo";
   brightness?: number;
 };
-
-const logoPaths = [
-  "M169 8.47h-51.39L81.73 53H70.36L113 0H169z",
-  "M169 44.51v8.47h-45.87V44.5z",
-  "M45.87 52.98H0V44.5h45.87z",
-  "M38.66 30.55H0v-8.47h38.66z",
-  "M169 30.55h-38.66v-8.47H169z",
-  "M75.52 8.47H0V0h75.52z",
-];
-
-function polygon(path: string) {
-  const tokens = path.match(/[MLHVZmlhvz]|-?\d*\.?\d+/g) ?? [];
-  const points: [number, number][] = [];
-  let x = 0;
-  let y = 0;
-  let command = "M";
-  for (let index = 0; index < tokens.length; index++) {
-    const token = tokens[index]!;
-    if (/[a-z]/i.test(token)) {
-      command = token;
-      continue;
-    }
-    const value = Number(token);
-    if (command === "M" || command === "L") {
-      x = value;
-      y = Number(tokens[++index]);
-    } else if (command === "H") x = value;
-    else if (command === "V") y = value;
-    else if (command === "h") x += value;
-    else if (command === "v") y += value;
-    points.push([x, y]);
-  }
-  return points;
-}
-
-const logoPolygons = logoPaths.map(polygon);
-
-function insideLogo(x: number, y: number) {
-  return logoPolygons.some((points) => {
-    let inside = false;
-    for (let index = 0, last = points.length - 1; index < points.length; last = index++) {
-      const [ax, ay] = points[index]!;
-      const [bx, by] = points[last]!;
-      if (ay > y !== by > y && x < ax + ((bx - ax) * (y - ay)) / (by - ay)) inside = !inside;
-    }
-    return inside;
-  });
-}
 
 export function glyphNoise(x: number, y: number, channel: number) {
   let seed =
@@ -83,16 +34,12 @@ export function glyphMarks({
   seed,
   density = 0.42,
   clearing,
-  shape,
   brightness = 0.22,
 }: GlyphFieldOptions) {
   return Array.from({ length: columns * rows }, (_, index) => {
     const column = index % columns;
     const row = Math.floor(index / columns);
     if (glyphNoise(column, row, seed) > density) return [];
-    if (shape && !insideLogo(((column + 0.5) / columns) * 169, ((row + 0.5) / rows) * 53)) {
-      return [];
-    }
     if (clearing) {
       const dx = ((column + 0.5) / columns - clearing.x) / clearing.radiusX;
       const dy = ((row + 0.5) / rows - clearing.y) / clearing.radiusY;

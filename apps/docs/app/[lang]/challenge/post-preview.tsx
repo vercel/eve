@@ -2,7 +2,7 @@
 
 import { ArrowUpRight, Play, UserRound } from "lucide-react";
 import Image from "next/image";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { challengeHashtag, type SubmissionPreview } from "@/lib/challenge/submission";
 
 export function PostPreview({ preview }: { preview: SubmissionPreview }) {
@@ -44,6 +44,10 @@ export function PostPreview({ preview }: { preview: SubmissionPreview }) {
 
 function VideoCard({ id }: { id: string }) {
   const [playing, setPlaying] = useState(false);
+  const player = useRef<HTMLIFrameElement>(null);
+  useEffect(() => {
+    if (playing) player.current?.focus();
+  }, [playing]);
   return (
     <div className="mt-3 overflow-hidden rounded-xl border border-gray-400">
       <div className="relative aspect-video min-h-[200px] bg-[#101010]">
@@ -52,7 +56,7 @@ function VideoCard({ id }: { id: string }) {
             allow="autoplay; encrypted-media; picture-in-picture"
             allowFullScreen
             className="absolute inset-0 size-full border-0"
-            ref={(element) => element?.focus()}
+            ref={player}
             referrerPolicy="strict-origin-when-cross-origin"
             src={`https://www.youtube-nocookie.com/embed/${id}?autoplay=1`}
             title="Submitted YouTube demo"
