@@ -25,7 +25,7 @@ import {
   type SchedulePrincipalReference,
 } from "#public/schedules/subscription.js";
 import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
-import { PermanentScheduleMessageError } from "#internal/schedules/verify-delivery.js";
+import { PermanentScheduleMessageError } from "#internal/schedules/permanent-error.js";
 import type { MessageContent } from "#shared/message-content.js";
 import { createScheduleCollectionPayload } from "#runtime/schedules/payload.js";
 import { z } from "#compiled/zod/index.js";

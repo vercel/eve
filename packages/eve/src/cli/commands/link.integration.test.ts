@@ -10,13 +10,13 @@ import type { LinkProjectDeps } from "#setup/boxes/link-project.js";
 import type { ResolveProvisioningDeps } from "#setup/boxes/resolve-provisioning.js";
 import type { LinkFlowDeps } from "#setup/flows/link.js";
 import { isEveProject } from "#setup/scaffold/index.js";
-import { readVercelCliToken } from "#internal/model-auth/vercel-cli.js";
+import { readVercelCliToken } from "#platform/vercel/model-auth/cli.js";
 
 import { runLinkCommand, type LinkCliLogger } from "./link.js";
 import type { NonInteractiveLinkDependencies } from "./vercel-non-interactive.js";
 
-vi.mock("#internal/model-auth/vercel-cli.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("#internal/model-auth/vercel-cli.js")>()),
+vi.mock("#platform/vercel/model-auth/cli.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#platform/vercel/model-auth/cli.js")>()),
   readVercelCliToken: vi.fn(),
 }));
 

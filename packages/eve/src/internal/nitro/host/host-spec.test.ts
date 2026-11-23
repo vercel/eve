@@ -4,17 +4,18 @@ import { resolveCompilerArtifactPaths } from "#compiler/artifacts.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import { createHostSpec, type HostMode } from "#internal/nitro/host/host-spec.js";
 import type { PreparedApplicationHost } from "#internal/nitro/host/types.js";
-import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#internal/nitro/host/vercel-build-output-config.js";
+import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#platform/vercel/build-output-config.js";
 import { compileFromMemory } from "#internal/testing/compile-from-memory.js";
 import { defineChannel, WS } from "#public/definitions/channel.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
 import { defineDynamicSchedules } from "#public/schedules/subscription.js";
 import { JustBashSandbox } from "#sandbox/providers/just-bash.js";
-import { VercelSandbox } from "#sandbox/providers/vercel.js";
+import { VercelSandbox } from "#platform/vercel/sandbox/provider.js";
 import { defineTool } from "#tools/definition.js";
 import { defineWorkflowTool } from "#tools/workflow-definition.js";
 import { attachWorkflowProgramOptions } from "#tools/workflow-program-input.js";
 import { z } from "zod";
+import { platformBuildOutput } from "#platform/build-output.js";
 
 const APP_ROOT = "/tmp/weather-agent";
 const DEVELOPMENT: HostMode = { kind: "development" };
@@ -153,10 +154,12 @@ function spec(
     schedules: [],
     workflowBuildDir: `${APP_ROOT}/.eve/workflow`,
   };
-  return createHostSpec(host, mode, {
-    buildDir: `${APP_ROOT}/.eve/nitro`,
-    outputDir: `${APP_ROOT}/.output`,
-  });
+  return createHostSpec(
+    host,
+    mode,
+    { buildDir: `${APP_ROOT}/.eve/nitro`, outputDir: `${APP_ROOT}/.output` },
+    platformBuildOutput(),
+  );
 }
 
 afterEach(() => {

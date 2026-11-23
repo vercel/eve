@@ -15,7 +15,7 @@ import { stampDevelopmentClientAddress } from "#internal/nitro/dev-client-addres
 import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/application/dev-transport.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { EveAuthFn, EveAuthResult } from "#public/channels/eve.js";
-import { withVercelOidcProjectResolver } from "#channel/auth/vercel-oidc-project.js";
+import { withVercelOidcProjectResolver } from "#platform/vercel/oidc-project.js";
 import {
   type AuthFn,
   type AuthResult,

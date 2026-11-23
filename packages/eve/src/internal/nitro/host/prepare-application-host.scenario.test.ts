@@ -40,7 +40,7 @@ describe("application host preparation", () => {
     const workspace = await createApplicationBuildWorkspace(appRoot);
 
     try {
-      const preparedHost = await prepareProductionApplicationHost(workspace);
+      const preparedHost = await prepareProductionApplicationHost(workspace, "local");
 
       expect(preparedHost.compileResult.paths.compileDirectoryPath).toBe(
         join(workspace.compiler.artifactsDir, "compile"),
@@ -82,7 +82,7 @@ describe("application host preparation", () => {
     };
 
     try {
-      const preparedHost = await prepareProductionApplicationHost(workspace);
+      const preparedHost = await prepareProductionApplicationHost(workspace, "local");
       const { "compiled-artifacts-data.json": _, ...preparedModules } = await readHostArtifacts();
       const entry = {
         artifact: { imageReference: "eve-sandbox-template:alice" },
@@ -121,7 +121,7 @@ describe("application host preparation", () => {
     const workspace = await createApplicationBuildWorkspace(appRoot);
 
     try {
-      const preparedHost = await prepareProductionApplicationHost(workspace);
+      const preparedHost = await prepareProductionApplicationHost(workspace, "vercel");
       const workflowWorldPlugin = await readFile(
         preparedHost.compiledArtifacts.workflowWorldPluginPath,
         "utf8",
