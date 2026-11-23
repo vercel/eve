@@ -1,10 +1,5 @@
 import { createEntities, type Entities } from "#platform/entities.js";
 import { vercelCorePlatform } from "#platform/vercel/core.js";
-import { processApp } from "#runtime/app.js";
-
-export function installedPlatform(): Entities | undefined {
-  return processApp().platform;
-}
 
 let fallbackPlatform: Entities | undefined;
 
@@ -14,10 +9,6 @@ export function builtInPlatform(): Entities {
 
 export function platformOf(app: { readonly platform: Entities } | undefined): Entities {
   return app?.platform ?? builtInPlatform();
-}
-
-export function platformContext(): Entities {
-  return processApp().platform ?? builtInPlatform();
 }
 
 function createFallbackPlatform(): Entities {

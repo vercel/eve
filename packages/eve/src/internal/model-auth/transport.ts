@@ -39,7 +39,7 @@ function createLocalGateway(): ReturnType<typeof createGateway> | undefined {
     return undefined;
   const resolve = async (rejectedToken?: string, signal?: AbortSignal | null) =>
     (await readDevelopmentModelCredential("gateway", rejectedToken, signal)) ??
-    (await gatewayCredential(rejectedToken));
+    (await gatewayCredential(undefined, rejectedToken));
   return createGateway({
     apiKey: "eve-local-credential",
     fetch: async (url, init) => {

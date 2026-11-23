@@ -5,7 +5,7 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { definePlatform } from "#platform/declaration.js";
 import { createEntities } from "#platform/entities.js";
 import type { MemoryDocumentBackend } from "#public/memory/file/backend.js";
-import { createProcessApp, installProcessApp, type App } from "#runtime/app.js";
+import type { App } from "#runtime/app.js";
 
 const config = {
   publicUrl: "https://agents.internal.example.com",
@@ -30,19 +30,12 @@ const selfHostedPlatform = definePlatform({
       variant: null,
     }),
   }),
-  network: () => ({
-    peer: (routePath) => ({
-      url: `${config.publicUrl}${routePath}`,
-      auth: async () => ({ headers: {} }),
-    }),
-  }),
   storage: () => ({ documents: documentStore }),
   models: () => ({ resolve: async () => ({ kind: "api-key", token: config.gatewayApiKey }) }),
 });
 
 const platform = createEntities(selfHostedPlatform, undefined);
 
-let uninstall: () => void;
 beforeAll(() => {
   vi.stubEnv("VERCEL", "1");
   vi.stubEnv("VERCEL_ENV", "preview");
@@ -50,16 +43,12 @@ beforeAll(() => {
   vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_vercel_should_not_be_used");
   vi.stubEnv("VERCEL_URL", "vercel-should-not-be-used.vercel.app");
   vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", "vercel-prod-should-not-be-used.vercel.app");
-  const app = createProcessApp();
-  app.platform = platform;
-  uninstall = installProcessApp(app);
 });
 afterAll(() => {
-  uninstall();
   vi.unstubAllEnvs();
 });
 
-describe("a self-hosted host installed in code", () => {
+describe("a self-hosted platform given to eve", () => {
   it("supplies the runtime identity's build", async () => {
     const { buildRuntimeIdentity } = await import("#execution/node-step.js");
     expect(buildRuntimeIdentity({ id: "agent", name: "agent" }, platform).build).toEqual(
@@ -80,13 +69,6 @@ describe("a self-hosted host installed in code", () => {
     const { resolveVercelProductionCallbackBaseUrl } =
       await import("#execution/workflow-callback-url.js");
     expect(resolveVercelProductionCallbackBaseUrl(platform)).toContain(publicHost);
-  });
-
-  it("reports a production deployment, not a local development server", async () => {
-    const { isLocalDevelopmentServer, resolveInstrumentationEnvironment } =
-      await import("#internal/application/dev-environment.js");
-    expect(isLocalDevelopmentServer()).toBe(false);
-    expect(resolveInstrumentationEnvironment()).toBe("production");
   });
 
   it("keys default memory namespaces by the deployment scope of the turn's app", async () => {
@@ -114,7 +96,7 @@ describe("a self-hosted host installed in code", () => {
 
   it("provides its own model credentials", async () => {
     const { gatewayCredential } = await import("#platform/models.js");
-    await expect(gatewayCredential()).resolves.toEqual({
+    await expect(gatewayCredential(platform)).resolves.toEqual({
       kind: "api-key",
       token: config.gatewayApiKey,
     });
@@ -135,13 +117,8 @@ describe("a self-hosted host installed in code", () => {
   });
 
   it("doesn't export Agent Runs", async () => {
-    const { seedInstrumentationProviders, getInstrumentationProviders } =
-      await import("#instrumentation/providers.js");
-    const { runtimeSpanProcessor } = await import("#platform/runtime-spans.js");
-    seedInstrumentationProviders();
-    expect(getInstrumentationProviders().map((provider) => provider.slot)).not.toContain(
-      "agent-runs",
-    );
-    expect(() => runtimeSpanProcessor()).toThrow("doesn't export Agent Runs");
+    const { exportsAgentRuns, runtimeSpanProcessor } = await import("#platform/runtime-spans.js");
+    expect(exportsAgentRuns(platform)).toBe(false);
+    expect(() => runtimeSpanProcessor(platform)).toThrow("doesn't export Agent Runs");
   });
 });

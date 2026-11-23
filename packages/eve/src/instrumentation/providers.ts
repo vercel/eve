@@ -6,7 +6,7 @@ import {
 import { createInstrumentationSetupContext } from "#instrumentation/setup-context.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { DEVELOPMENT_WORKER_APP_ROOT_ENV } from "#internal/workflow/development-world-protocol.js";
-import { platformContext } from "#platform/context.js";
+import { builtInPlatform } from "#platform/context.js";
 import { exportsAgentRuns } from "#platform/runtime-spans.js";
 import { processApp } from "#runtime/app.js";
 import { agentRuns, localTraces } from "#public/instrumentation/otel.js";
@@ -32,8 +32,11 @@ function providerRegistry(): Map<string, InstrumentationProvider> {
 
 export function seedInstrumentationProviders(): void {
   const registry = providerRegistry();
-  const environmentKind = platformContext().deployment.environment();
-  if (exportsAgentRuns() && (environmentKind === "preview" || environmentKind === "production")) {
+  const environmentKind = builtInPlatform().deployment.environment();
+  if (
+    exportsAgentRuns(undefined) &&
+    (environmentKind === "preview" || environmentKind === "production")
+  ) {
     registry.set("agent-runs", agentRuns());
   }
   if (process.env[DEVELOPMENT_WORKER_APP_ROOT_ENV] !== undefined) {

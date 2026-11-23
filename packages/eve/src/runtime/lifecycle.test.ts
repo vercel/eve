@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { deriveEveWorkflowQueueNamespace } from "#internal/workflow/queue-namespace.js";
-import { platformContext } from "#platform/context.js";
 import { createProcessApp, installProcessApp, type ProcessApp } from "#runtime/app.js";
 import { defaultPlatform } from "#platform/default.js";
 import { bootProcess } from "#runtime/lifecycle.js";
@@ -25,7 +24,6 @@ describe("bootProcess", () => {
     bootProcess({ agentName: "weather", platform: defaultPlatform }, "queue-namespace");
 
     expect(app.platform).toBeDefined();
-    expect(platformContext()).toBe(app.platform);
     expect(process.env.WORKFLOW_QUEUE_NAMESPACE).toBe(deriveEveWorkflowQueueNamespace("weather"));
   });
 

@@ -55,7 +55,8 @@ async function resolveGatewayCredentialPresence(
   if (routing.kind === "gateway" && isEveDevEnvironment()) {
     try {
       const credential =
-        (await readDevelopmentModelCredential("gateway")) ?? (await gatewayCredential());
+        (await readDevelopmentModelCredential("gateway")) ??
+        (await gatewayCredential(app?.platform));
       return {
         apiKey: credential.kind === "api-key",
         oidc: credential.kind === "oidc",
