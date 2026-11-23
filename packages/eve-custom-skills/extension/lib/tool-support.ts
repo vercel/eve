@@ -1,15 +1,10 @@
-import type { ConversationContext, SessionAuth, SessionAuthContext } from "eve/context";
-import type {
-  ApprovalConfiguration,
-  ApprovalContext,
-  ApprovalResponsePolicy,
-} from "eve/tools/approval";
+import type { ConversationContext, SessionAuthContext, SessionInfo } from "eve/context";
+import type { ApprovalConfiguration, ApprovalContext } from "eve/tools/approval";
 import { z } from "zod";
 
 import {
   defaultSkillApproval,
   defaultSkillResponse,
-  requireDefaultResponder,
   skillApproval,
   type PlannedChange,
 } from "./approval.ts";
@@ -69,7 +64,7 @@ export const modeField = z
   );
 
 export interface SkillCallContext {
-  readonly session: { readonly id: string; readonly auth: SessionAuth };
+  readonly session: Pick<SessionInfo, "id" | "auth" | "turn" | "parent">;
   readonly conversation?: ConversationContext;
 }
 
@@ -81,9 +76,10 @@ export function loadName(scope: SkillScope, name: string): string {
   return scope.loadPrefix ? `${scope.loadPrefix}_${name}` : name;
 }
 
-async function scopesFor(ctx: SkillCallContext) {
+export async function scopesFor(ctx: SkillCallContext): Promise<readonly SkillScope[]> {
   return skillScopes({
     session: ctx.session,
+    turn: ctx.session.turn,
     ...(ctx.conversation !== undefined && { conversation: ctx.conversation }),
   });
 }
@@ -196,7 +192,7 @@ export function skillChange<
     approval: skillApproval<TInput, TPlan>({
       plan: (ctx: ApprovalContext<TInput>, toolInput) => plan(ctx, toolInput),
       rule,
-      response: () => skillConfig().approval.response ?? defaultResponse,
+      response: () => skillConfig().approval.response ?? defaultSkillResponse,
       fallbackCard: input.fallbackCard,
     }),
     async execute(toolInput, ctx) {
@@ -204,9 +200,6 @@ export function skillChange<
         const planned = await plan(ctx, toolInput);
         const decision = await rule()(planned.request);
         if (typeof decision === "object") throw new SkillChangeRefusedError(decision.deny);
-        if (ctx.approval !== undefined && skillConfig().approval.response === undefined) {
-          requireDefaultResponder(planned.scope, ctx.session.auth.current, ctx.approval.responder);
-        }
         const approved = decision === "allow" || ctx.approval !== undefined;
         const { output, change } = await input.run(planned.plan, { ...planned, approved, ctx });
         if (change) await emit({ ...change, ...changeBase(planned.scope, ctx) });
@@ -217,23 +210,6 @@ export function skillChange<
     },
   };
 }
-
-async function targetsSharedScope(ctx: Parameters<ApprovalResponsePolicy>[0]): Promise<boolean> {
-  try {
-    const scopes = await skillScopes({
-      session: {
-        id: ctx.session.id,
-        auth: { current: ctx.request.principal, initiator: ctx.session.initiator },
-      },
-    });
-    const requested = (ctx.request.toolInput as { readonly scope?: unknown } | undefined)?.scope;
-    return requireScope(scopes, typeof requested === "string" ? requested : undefined).shared;
-  } catch {
-    return true;
-  }
-}
-
-const defaultResponse = defaultSkillResponse(targetsSharedScope);
 
 function changeBase(
   scope: SkillScope,

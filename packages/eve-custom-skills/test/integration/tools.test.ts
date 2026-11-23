@@ -8,7 +8,11 @@ import extension from "../../extension/extension.ts";
 import { documentRepository } from "../../extension/lib/document-repository.ts";
 import { loadTurnSkills } from "../../extension/lib/runtime.ts";
 import { spaceScope } from "../../extension/lib/scopes.ts";
-import type { SkillApprovalRule, SkillChangeEvent } from "../../extension/lib/types.ts";
+import type {
+  SkillApprovalRule,
+  SkillChangeEvent,
+  SkillScopeContext,
+} from "../../extension/lib/types.ts";
 import create from "../../extension/tools/create.ts";
 import list from "../../extension/tools/list.ts";
 import publish from "../../extension/tools/publish.ts";
@@ -178,7 +182,7 @@ test("removal reports who removed what", async () => {
   });
 });
 
-test("by default the requester answers for personal skills, and someone else for shared ones", async () => {
+test("by default only the requester answers, for personal and shared skills alike", async () => {
   mount();
   const response = approvalOf(publish).response;
   const answer = async (scope: string | undefined, responder: SessionAuthContext) =>
@@ -190,13 +194,11 @@ test("by default the requester answers for personal skills, and someone else for
       })) as { status: string }
     ).status;
 
-  assert.equal(await answer(undefined, alice), "allowed");
-  assert.equal(await answer(undefined, bob), "rejected");
-  assert.equal(await answer("channel", alice), "rejected");
-  assert.equal(await answer("channel", bob), "allowed");
-  const renamed = { ...alice, subject: "alice-renamed" };
-  assert.equal(await answer("channel", renamed), "rejected");
-  assert.equal(await answer(undefined, renamed), "rejected");
+  for (const scope of [undefined, "channel"]) {
+    assert.equal(await answer(scope, alice), "allowed");
+    assert.equal(await answer(scope, bob), "rejected");
+    assert.equal(await answer(scope, { ...alice, subject: "alice-renamed" }), "rejected");
+  }
 });
 
 test("an approval applies only to the skill it showed, not one recreated under its name", async () => {
@@ -367,7 +369,7 @@ test("a scope whose storage fails is skipped for the turn, with a note for the m
   const loaded = await loadTurnSkills({
     session: { id: "session-1", auth: { current: alice, initiator: alice } },
     conversation: inChannel,
-    turnId: "turn-9",
+    turn: { id: "turn-9" },
   });
   assert.deepEqual(
     loaded.map(({ scope, skills, unavailable }) => [scope.name, skills.length, unavailable]),
@@ -378,19 +380,42 @@ test("a scope whose storage fails is skipped for the turn, with a note for the m
   );
 });
 
-test("a requester can't approve their own shared change, even when it reaches them", async () => {
+test("a requester can approve their own shared change", async () => {
   mount();
-  const shared = { ...deploy, scope: "channel" };
-  const refused = await run(create, shared, context({ approvedBy: alice }));
-  assert.equal(refused.success, false);
-  assert.match(String(refused.error), /someone other than the person who asked/);
-  const renamed = await run(
+  const approved = await run(
     create,
-    shared,
-    context({ approvedBy: { ...alice, subject: "alice-renamed" } }),
+    { ...deploy, scope: "channel" },
+    context({ approvedBy: alice }),
   );
-  assert.match(String(renamed.error), /someone other than the person who asked/);
-  const notOwner = await run(create, { ...deploy }, context({ approvedBy: bob }));
-  assert.equal(notOwner.success, false);
-  assert.match(String(notOwner.error), /Only the person who asked/);
+  assert.equal(approved.success, true);
+  assert.equal(approved.status, "active");
+});
+
+test("scope resolvers see the turn and the parent session, from tools and per-turn loading", async () => {
+  const seen: SkillScopeContext[] = [];
+  extension({
+    storage: inMemory(),
+    scopes: (ctx: SkillScopeContext) => {
+      seen.push(ctx);
+      return [
+        { name: "persona", key: `turn:${ctx.turn?.id}`, label: "this persona", shared: false },
+      ];
+    },
+  });
+  const parent = {
+    callId: "call-0",
+    rootSessionId: "root-1",
+    sessionId: "root-1",
+    turn: { id: "root-turn", sequence: 0 },
+  };
+  const child = { session: { ...(context() as { session: object }).session, parent } };
+  await run(list, {}, { ...(context() as object), ...child });
+  await loadTurnSkills({
+    session: { id: "session-1", auth: { current: alice, initiator: alice }, parent },
+    turn: { id: "turn-2" },
+  });
+  const resolved = seen.map(
+    ({ turn, session }) => `${turn?.id} in ${session.parent?.rootSessionId}`,
+  );
+  assert.deepEqual([...new Set(resolved)], ["turn-1 in root-1", "turn-2 in root-1"]);
 });

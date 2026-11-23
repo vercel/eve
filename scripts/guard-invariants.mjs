@@ -207,10 +207,10 @@
  *             helpers. eve declares what it builds with, such as `rolldown`,
  *             and hands it to Nitro through `deps.paths`.
  *   rule 65 — Entries that browser bundles import (`eve/client`, `eve/react`,
- *             `eve/vue`, `eve/svelte`, `eve/events`, `eve/internal/legacy-events`)
- *             never reach a Node builtin through their value imports. One
- *             import of a server module from a shared one breaks every client
- *             bundle that loads the entry.
+ *             `eve/vue`, `eve/svelte`, `eve/solid`, `eve/events`,
+ *             `eve/internal/legacy-events`) never reach a Node builtin through
+ *             their value imports. One import of a server module from a shared
+ *             one breaks every client bundle that loads the entry.
  *   rule 66 — The host-neutral core doesn't import Workflow: the session
  *             loop (`execution/session/{program,turn,active-turn,state-cursor,
  *             input-queue,next-input}.ts`), the turn step, owner boot,
@@ -1021,6 +1021,7 @@ const BROWSER_ENTRIES = [
   "packages/eve/src/react/index.ts",
   "packages/eve/src/vue/index.ts",
   "packages/eve/src/svelte/index.ts",
+  "packages/eve/src/solid/index.ts",
   "packages/eve/src/public/events/index.ts",
   "packages/eve/src/internal/legacy-events.ts",
 ];

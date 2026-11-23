@@ -248,6 +248,36 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
+    slug: "agent-desktop",
+    name: "agent-desktop",
+    kind: "extension",
+    tagline:
+      "Operate native Linux desktop apps through their accessibility trees in an eve sandbox.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+  },
+  {
+    slug: "board",
+    name: "Vercel Board",
+    kind: "extension",
+    tagline: "Let an eve agent watch board channels, reply in threads, and claim tasks.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+  },
+  {
+    slug: "code",
+    name: "Code",
+    kind: "extension",
+    tagline: "Add project instructions, coding skills, and sandbox tooling to an eve agent.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+  },
+  {
+    slug: "self-improvement",
+    name: "Self-Improvement",
+    kind: "extension",
+    tagline:
+      "Review agent outcomes on a schedule and propose tested improvements as GitHub pull requests.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+  },
+  {
     slug: "blitzreels",
     name: "BlitzReels",
     kind: "extension",
