@@ -66,6 +66,7 @@ export default defineDynamic(async (ctx: DynamicContext) => {
   const scopes = await skillScopes({
     session: ctx.session,
     ...(ctx.conversation !== undefined && { conversation: ctx.conversation }),
+    ...(ctx.turn !== null && { turn: { id: ctx.turn.id } }),
   });
   return scopes.length > 0 ? manage : null;
 });
