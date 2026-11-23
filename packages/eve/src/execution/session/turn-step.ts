@@ -143,7 +143,21 @@ const log = createLogger("execution.turn-step");
 
 interface PendingStepAttributes {
   title?: Promise<void>;
-  usage?: Promise<void>;
+  usage?: Record<string, EveAttributeValue>;
+  usageWrite?: Promise<void>;
+}
+
+function writePendingUsage(pending: PendingStepAttributes, host: SessionStepHost): Promise<void> {
+  const usage = pending.usage;
+  if (usage !== undefined) {
+    pending.usage = undefined;
+    const previous = pending.usageWrite;
+    pending.usageWrite = (async () => {
+      await previous;
+      await host.setAttributes(usage);
+    })().catch(() => {});
+  }
+  return pending.usageWrite ?? Promise.resolve();
 }
 
 export interface SessionStepHost {
@@ -178,7 +192,7 @@ async function runSessionStep(
     return await runSessionStepBody(input, pendingAttributes, host);
   } finally {
     await pendingAttributes.title;
-    await pendingAttributes.usage;
+    await writePendingUsage(pendingAttributes, host);
   }
 }
 
@@ -696,11 +710,7 @@ async function runSessionStepBody(
         node: effectiveNode,
         sessionUsageLimit,
         setAttributes: async (attributes) => {
-          const previous = pendingAttributes.usage ?? pendingAttributes.title;
-          pendingAttributes.usage = (async () => {
-            await previous?.catch(() => {});
-            await host.setAttributes(attributes);
-          })().catch(() => {});
+          pendingAttributes.usage = attributes;
         },
       });
       return step(lifecycleSession, stepInput);
@@ -782,6 +792,7 @@ async function runSessionStepBody(
       });
     }
 
+    void writePendingUsage(pendingAttributes, host);
     await publisher.drain();
     const aliased = saveSessionProjection(
       dropClosedRecords(
