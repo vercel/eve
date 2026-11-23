@@ -1,3 +1,4 @@
+import type { DeploymentBuild, DeploymentScope } from "#platform/entities.js";
 import type { HostServices } from "#platform/services.js";
 import { createVercelPlatformContext } from "#platform/vercel/context.js";
 import type { WorkspaceAgentTransport } from "#public/definitions/workspace-agent.js";
@@ -6,19 +7,6 @@ import { processApp } from "#runtime/app.js";
 export type BuildTarget = "vercel" | "node";
 
 export type DeploymentEnvironmentKind = "development" | "preview" | "production";
-
-export interface DeploymentBuild {
-  readonly deployedAt: string | undefined;
-  readonly gitBranch: string | undefined;
-  readonly gitSha: string | undefined;
-}
-
-export interface DeploymentScope {
-  readonly platform: string;
-  readonly id: string;
-  readonly environment: string;
-  readonly variant: string | null;
-}
 
 export interface PlatformDeployment {
   environmentKind(): DeploymentEnvironmentKind | undefined;
