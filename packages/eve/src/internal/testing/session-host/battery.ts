@@ -157,6 +157,40 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
         );
       });
 
+      it("reads its stream lines, tail and status through Durable", async () => {
+        await withHost(
+          { name: `${name}-durable-reads`, respond: () => textStreamResult("Noted, Alice.") },
+          async ({ durable, runtime, settled }) => {
+            const first = await (
+              await alice(runtime, `${name}:durable-reads`).send("Alice asks.", { auth: null })
+            ).result();
+            await settled();
+            const tail = await durable.tail(first.sessionId);
+            expect(tail).toBe(await runtime.getStreamTailIndex(first.sessionId));
+            const lines: { position: number; record: unknown }[] = [];
+            for await (const { line, position } of durable.readStream(first.sessionId, 1)) {
+              lines.push({ position, record: JSON.parse(line) });
+              if (position === tail) break;
+            }
+            const records: unknown[] = [];
+            for await (const record of await runtime.getLineStream(first.sessionId, {
+              follow: false,
+            }))
+              records.push(record);
+            expect(lines).toEqual(
+              records.slice(1).map((record, index) => ({ position: index + 1, record })),
+            );
+            expect(await durable.status(first.sessionId)).toBe("running");
+            await runtime.dispatchSession({
+              command: { deliveryId: "end", kind: "reset" },
+              sessionId: first.sessionId,
+            });
+            await settled();
+            expect(await durable.status(first.sessionId)).toBe("ended");
+          },
+        );
+      });
+
       it("runs the agent tool's child session and hears its reply", async () => {
         const firstMessage = (prompt: string) =>
           JSON.stringify(

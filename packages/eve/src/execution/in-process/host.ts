@@ -6,11 +6,19 @@ import type {
 } from "#channel/types.js";
 import { agentSessionsOver } from "#execution/agent-sessions/sessions-over.js";
 import { dispatchCoordinationOn } from "#execution/coordination-dispatch-step.js";
-import { decodeDeliveryAddress, type Durable } from "#execution/durable.js";
+import {
+  decodeDeliveryAddress,
+  readStreamLines,
+  reveal,
+  type Durable,
+  type SessionStartResult,
+} from "#execution/durable.js";
 import {
   registerHost,
   resumeRoutedHook,
+  registerSessionEventStore,
   resumeRoutedSessionInbox,
+  type ResumeAddress,
   type SignInCallbacks,
 } from "#execution/hosts.js";
 import type { SessionRuntimeConfig } from "#execution/initial-entry.js";
@@ -21,15 +29,19 @@ import {
 } from "#execution/session-commands.js";
 import {
   logicalSessionInboxToken,
+  logicalSessionToken,
   sessionCommandHookToken,
 } from "#execution/session-inbox/address.js";
-import type { SessionHost } from "#execution/session/program.js";
+import type { InitialWorkflowEntryInput } from "#execution/session/entry-input.js";
+import { bootInitialOwner } from "#execution/session/owner-boot.js";
+import { runPreparedSession, type SessionHost } from "#execution/session/program.js";
+import type { SessionStartBody } from "#execution/session-runtime.js";
 import { SHARED_SESSION_STEPS } from "#execution/session/shared-steps.js";
 import { dispatchSessionSteps } from "#execution/session/steps.js";
 import { turnStepOn, type SessionStepHost } from "#execution/session/turn-step.js";
 import { createInProcessToolStubs } from "#execution/in-process/tool-stubs.js";
 import { applyRunMessagesOn } from "#execution/tools/workflow/apply-run-messages.js";
-import { isHookNotFound } from "#shared/run-errors.js";
+import { HookNotFoundError, isHookNotFound } from "#shared/run-errors.js";
 import { createUlid } from "#shared/ulid.js";
 import {
   createMemoryInboxRegistry,
@@ -63,7 +75,7 @@ const NO_STEP_RUNTIME: Runtime = {
   resolveContinuation: async () => unavailable("Resolving another session"),
 };
 
-const deliverRouted: Durable["deliver"] = async (to, payload) => {
+const deliverRouted: ResumeAddress = async (to, payload) => {
   const address = decodeDeliveryAddress(to);
   if (address.kind === "hook") return await resumeRoutedHook(address.token, payload);
   if (address.kind === "session")
@@ -91,6 +103,10 @@ export interface InProcessHost {
   readonly runs: InProcessRuns;
   readonly running: Map<string, Promise<void>>;
   readonly sessionHost: SessionHost;
+  readonly durable: Durable;
+  startEntry(
+    entry: Omit<InitialWorkflowEntryInput, "ownerDeploymentId">,
+  ): Promise<SessionStartResult>;
   stepsRunning(sessionId: string): number;
   working<T>(work: () => Promise<T>): Promise<T>;
   idle(): Promise<void>;
@@ -212,6 +228,60 @@ export function createInProcessHost(
     until: (at) => timers.until(at),
   };
 
+  const tokenOf = (to: Parameters<Durable["deliver"]>[0]): string => {
+    const address = decodeDeliveryAddress(to);
+    return address.kind === "session" ? logicalSessionToken(address.address) : address.token;
+  };
+  const known = (sessionId: string): boolean =>
+    running.has(sessionId) || lines.sessions().includes(sessionId);
+  const bootEntry = async (
+    entry: Omit<InitialWorkflowEntryInput, "ownerDeploymentId">,
+    wanted?: string,
+  ): Promise<SessionStartResult> => {
+    if (wanted !== undefined && known(wanted)) return { kind: "started", sessionId: wanted };
+    const sessionId = wanted ?? `session_${createUlid()}`;
+    const sessionWritable = lines.open(sessionId);
+    releases.push(registerSessionEventStore(sessionId, lines));
+    const boot = await bootInitialOwner(
+      { ...entry, ownerDeploymentId: IN_PROCESS_DEPLOYMENT_ID },
+      sessionId,
+      {
+        inboxTransport: inboxes.transportFor(sessionId),
+        sessionWritable,
+        step: sessionHost.step,
+        timeouts: () => undefined,
+        settleContinuationConflict: async () => {},
+      },
+    );
+    if (boot === undefined) return { kind: "held" };
+    const session = runPreparedSession(boot.session, boot.inbox, sessionHost).then(
+      () => undefined,
+      () => undefined,
+    );
+    running.set(sessionId, session);
+    void session.finally(() => running.delete(sessionId));
+    return { kind: "started", sessionId };
+  };
+  const startEntry: InProcessHost["startEntry"] = (entry) => work.count(() => bootEntry(entry));
+  const durable: Durable = {
+    start: (session) =>
+      work.count(() => bootEntry(reveal<SessionStartBody>(session.body).entry, session.sessionId)),
+    async deliver(to, payload) {
+      const token = tokenOf(to);
+      const delivery = await inboxes.deliver(token, payload);
+      if (delivery?.kind !== "delivered")
+        return { accepted: false, reason: "inactive", cause: new HookNotFoundError(token) };
+      if ((payload as { readonly kind?: unknown }).kind === "reset")
+        await addressesReleased(inboxes, delivery.owner);
+      return { accepted: true, sessionId: delivery.owner };
+    },
+    sessionFor: async (to) => inboxes.holder(tokenOf(to)),
+    readStream: (sessionId, from) => readStreamLines(lines.readable(sessionId, from), from),
+    tail: (sessionId) => lines.tail(sessionId),
+    status: async (sessionId) =>
+      running.has(sessionId) ? "running" : known(sessionId) ? "ended" : undefined,
+  };
+
   releases.push(
     registerHost({
       async deliver(token, payload) {
@@ -228,6 +298,8 @@ export function createInProcessHost(
   return {
     deliverCommand,
     deploymentId: IN_PROCESS_DEPLOYMENT_ID,
+    durable,
+    startEntry,
     inboxes,
     lines,
     runs,

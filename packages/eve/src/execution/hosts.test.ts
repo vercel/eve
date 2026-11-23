@@ -16,8 +16,9 @@ import {
   sessionSignInCallbacks,
   type HostedRoute,
   type ProcessEngine,
+  type ResumeAddress,
 } from "#execution/hosts.js";
-import { decodeDeliveryAddress, type Durable } from "#execution/durable.js";
+import { decodeDeliveryAddress } from "#execution/durable.js";
 import {
   readSessionRecordHistory,
   readSessionStreamTailIndex,
@@ -65,18 +66,20 @@ function processEngine(name: string): ProcessEngine {
   return {
     name,
     durable: {
-      start: async () => {},
-      deliver: async (to) => {
-        const address = decodeDeliveryAddress(to);
-        if (address.kind === "hook") durable.reached.push(`resume ${address.token}`);
-        else if (address.kind === "session")
-          durable.reached.push(
-            `inbox ${typeof address.address === "string" ? address.address : address.address.sessionId}`,
-          );
-      },
+      start: async () => ({ kind: "held" }),
+      deliver: async () => ({ accepted: true }),
+      sessionFor: async () => undefined,
       readStream: async function* () {},
       tail: async () => -1,
       status: async () => undefined,
+    },
+    resume: async (to) => {
+      const address = decodeDeliveryAddress(to);
+      if (address.kind === "hook") durable.reached.push(`resume ${address.token}`);
+      else if (address.kind === "session")
+        durable.reached.push(
+          `inbox ${typeof address.address === "string" ? address.address : address.address.sessionId}`,
+        );
     },
     deploymentId: async () => "dpl_durable",
     runStatus: async (runId) => {
@@ -135,7 +138,7 @@ describe("the hosts in a realm", () => {
 
   it("asks the route running a session how it's called back, and the durable host for others", () => {
     installProcessEngine(processEngine("durable"));
-    const deliver: Durable["deliver"] = async () => {};
+    const deliver: ResumeAddress = async () => {};
     const release = registerHost({
       deliver: async () => undefined,
       runEnded: () => undefined,

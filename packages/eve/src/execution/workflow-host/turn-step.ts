@@ -2,6 +2,7 @@ import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 import { traceSessionHandover } from "#execution/session/handover-tracing.js";
 import { turnStepOn, type SessionStepHost } from "#execution/session/turn-step.js";
 import type { TurnStepInput, TurnStepResult } from "#execution/session/turn-step-types.js";
+import { delivered } from "#execution/durable.js";
 import { workflowDurable } from "#execution/workflow-host/host.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
@@ -25,7 +26,7 @@ function workflowStepHost(app: App | undefined): SessionStepHost {
     createRuntime: createWorkflowRuntime,
     setAttributes: setEveAttributes,
     toolStubs: workflowToolStubs,
-    deliver: (to, payload) => durable.deliver(to, payload),
+    deliver: (to, payload) => delivered(durable.deliver(to, payload)),
   };
 }
 

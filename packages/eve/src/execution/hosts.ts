@@ -1,5 +1,11 @@
 import type { DeliverHookPayload } from "#channel/types.js";
-import { hookAddress, sessionAddress, signInAddress, type Durable } from "#execution/durable.js";
+import {
+  hookAddress,
+  sessionAddress,
+  signInAddress,
+  type DeliveryAddress,
+  type Durable,
+} from "#execution/durable.js";
 import {
   logicalSessionToken,
   sessionInboxHookToken,
@@ -18,14 +24,17 @@ export interface HostedRoute {
   signInCallbacks?(sessionId: string): SignInCallbacks | undefined;
 }
 
+export type ResumeAddress = (to: DeliveryAddress, payload: unknown) => Promise<void>;
+
 export interface SignInCallbacks {
   readonly callbackBaseUrl: string;
-  readonly deliver: Durable["deliver"];
+  readonly deliver: ResumeAddress;
 }
 
 export interface ProcessEngine {
   readonly name: string;
   readonly durable: Durable;
+  readonly resume: ResumeAddress;
   deploymentId(): Promise<string>;
   runStatus(runId: string): Promise<string>;
   cancelRun(runId: string, reason: string): Promise<void>;
@@ -84,7 +93,7 @@ export function sessionSignInCallbacks(sessionId: string): SignInCallbacks | und
   const callbackBaseUrl = engine?.callbackBaseUrl();
   return engine === undefined || callbackBaseUrl === undefined
     ? undefined
-    : { callbackBaseUrl, deliver: engine.durable.deliver };
+    : { callbackBaseUrl, deliver: engine.resume };
 }
 
 export function isRetriedStep(): boolean {
@@ -109,14 +118,14 @@ export async function deliverToHostedHook(token: string, payload: unknown): Prom
 }
 
 export function signInDelivery(
-  deliver: Durable["deliver"],
+  deliver: ResumeAddress,
 ): (token: string, payload: AuthorizationCallbackPayload) => Promise<void> {
   return (token, payload) => deliver(signInAddress(token), payload);
 }
 
 export async function resumeRoutedHook(token: string, payload: unknown): Promise<void> {
   if (!(await deliverToHostedHook(token, payload)))
-    await engineFor(token).durable.deliver(hookAddress(token), payload);
+    await engineFor(token).resume(hookAddress(token), payload);
 }
 
 export async function resumeRoutedSessionInbox(
@@ -125,7 +134,7 @@ export async function resumeRoutedSessionInbox(
 ): Promise<void> {
   const token = sessionInboxHookToken(logicalSessionToken(address));
   if (!(await deliverToHostedHook(token, delivery)))
-    await engineFor(token).durable.deliver(sessionAddress(address), delivery);
+    await engineFor(token).resume(sessionAddress(address), delivery);
 }
 
 function hostedRunEnded(runId: string): boolean | undefined {

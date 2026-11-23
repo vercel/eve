@@ -1,40 +1,25 @@
 import { getStepMetadata, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 import { RunExpiredError, WorkflowRunNotFoundError } from "#compiled/@workflow/errors/index.js";
-import type { DeliverHookPayload } from "#channel/types.js";
-import {
-  decodeDeliveryAddress,
-  reveal,
-  type Durable,
-  type SessionStartInput,
-  type SessionStatus,
-  type StreamLine,
-} from "#execution/durable.js";
+import { readStreamLines, type Durable, type SessionStatus } from "#execution/durable.js";
 import { installProcessEngine, type ProcessEngine } from "#execution/hosts.js";
-import type { InitialWorkflowEntryInput } from "#execution/session/entry-input.js";
-import type { AuthorizationCallbackPayload } from "#execution/session-inbox/inbox.js";
 import type { SessionEventStore } from "#execution/session-event-store.js";
-import { resumeSignInCallback } from "#execution/session-inbox/owner.js";
-import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
-import {
-  SESSION_INBOX_SESSION_ID_METADATA_KEY,
-  logicalSessionToken,
-  sessionInboxHookToken,
-} from "#execution/session-inbox/address.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
-import { workflowEntryReference } from "#execution/workflow-references.js";
-import { startWorkflowOnDeployment } from "#execution/workflow-runtime.js";
+import {
+  assertFollowableWorkflowSession,
+  deliverToWorkflow,
+  hasRunnableWorkflowOwner,
+  prewarmWorkflowAddress,
+  readWorkflowChildBinding,
+  resumeWorkflowAddress,
+  startWorkflowSession,
+  workflowSessionFor,
+} from "#execution/workflow-host/session-durable.js";
 import {
   findConnectionEventOwner,
   retireConnectionEventOwner,
   startConnectionEventOwner,
 } from "#runtime/connections/events/owner.js";
-import {
-  cancelRun,
-  getRun,
-  getWorld,
-  resumeHook,
-  type StartOptionsWithoutDeploymentId,
-} from "#internal/workflow/runtime.js";
+import { cancelRun, getRun, getWorld } from "#internal/workflow/runtime.js";
 import type { Entities } from "#platform/entities.js";
 
 export interface WorkflowRun {
@@ -43,11 +28,6 @@ export interface WorkflowRun {
   readonly createdAt: Date;
   readonly expiredAt: Date | undefined;
   readonly attributes: Readonly<Record<string, string | undefined>>;
-}
-
-export interface WorkflowSessionStart {
-  readonly input: InitialWorkflowEntryInput;
-  readonly options: StartOptionsWithoutDeploymentId;
 }
 
 export const workflowSessionEvents: SessionEventStore = {
@@ -127,38 +107,6 @@ export function workflowStepAttempt(): number | undefined {
   }
 }
 
-const deliverToWorkflow: Durable["deliver"] = async (to, payload) => {
-  const address = decodeDeliveryAddress(to);
-  if (address.kind === "hook") await resumeHook(address.token, payload);
-  else if (address.kind === "session")
-    await resumeSessionInbox(address.address, payload as DeliverHookPayload);
-  else await resumeSignInCallback(address.token, payload as AuthorizationCallbackPayload);
-};
-
-async function startWorkflowSession({
-  addresses,
-  body,
-  sessionId,
-}: SessionStartInput): Promise<void> {
-  const { input, options } = reveal<WorkflowSessionStart>(body);
-  const [claimed] = addresses;
-  const claimAddress = claimed === undefined ? undefined : decodeDeliveryAddress(claimed);
-  if (claimAddress?.kind !== "session") {
-    throw new Error("A Workflow session claims exactly its session inbox address at its start.");
-  }
-  await startWorkflowOnDeployment(
-    workflowEntryReference,
-    [input],
-    input.ownerDeploymentId,
-    options,
-    (runId) => ({
-      token: sessionInboxHookToken(logicalSessionToken(claimAddress.address)),
-      metadata: { [SESSION_INBOX_SESSION_ID_METADATA_KEY]: runId },
-    }),
-    sessionId,
-  );
-}
-
 const SESSION_STATUS: Readonly<Record<string, SessionStatus>> = {
   cancelled: "ended",
   completed: "ended",
@@ -176,36 +124,19 @@ async function workflowSessionStatus(sessionId: string): Promise<SessionStatus |
   }
 }
 
-async function* readWorkflowStream(sessionId: string, from: number): AsyncIterable<StreamLine> {
-  const reader = workflowSessionEvents.readable(sessionId, from).getReader();
-  const decoder = new TextDecoder();
-  let position = from;
-  let buffered = "";
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffered += decoder.decode(value, { stream: true });
-      let end = buffered.indexOf("\n");
-      while (end >= 0) {
-        yield { position: position++, line: buffered.slice(0, end) };
-        buffered = buffered.slice(end + 1);
-        end = buffered.indexOf("\n");
-      }
-    }
-    if (buffered.length > 0) yield { position, line: buffered };
-  } finally {
-    await reader.cancel().catch(() => {});
-  }
-}
-
 export function workflowDurable(): Durable {
   return {
     start: startWorkflowSession,
     deliver: deliverToWorkflow,
-    readStream: readWorkflowStream,
+    sessionFor: workflowSessionFor,
+    readStream: (sessionId, from) =>
+      readStreamLines(workflowSessionEvents.readable(sessionId, from), from),
     tail: (sessionId) => workflowSessionEvents.tail(sessionId),
     status: workflowSessionStatus,
+    prewarm: prewarmWorkflowAddress,
+    assertFollowable: assertFollowableWorkflowSession,
+    hasRunnableOwner: hasRunnableWorkflowOwner,
+    readChildBinding: readWorkflowChildBinding,
     connectionEvents: {
       start: (binding, bundle, signal) => startConnectionEventOwner(binding, bundle, signal),
       find: (bindingId) => findConnectionEventOwner(bindingId),
@@ -218,6 +149,7 @@ export function workflowProcessEngine(platform: Entities): ProcessEngine {
   return {
     name: "workflow",
     durable: workflowDurable(),
+    resume: resumeWorkflowAddress,
     deploymentId: () => workflowDeploymentId(platform),
     runStatus: workflowRunStatus,
     cancelRun: cancelWorkflowRun,

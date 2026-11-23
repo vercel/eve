@@ -128,8 +128,7 @@ import {
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import { signInInteractionId } from "#harness/interaction-facts.js";
 import { SIGN_IN_DECLINED } from "#harness/hitl/sign-ins.js";
-import type { Durable } from "#execution/durable.js";
-import { signInDelivery } from "#execution/hosts.js";
+import { signInDelivery, type ResumeAddress } from "#execution/hosts.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 import type { AuthorizationCallback } from "#shared/connection-types.js";
 
@@ -148,7 +147,7 @@ export interface SessionStepHost {
   setAttributes(attributes: Record<string, EveAttributeValue>): Promise<void>;
   createRuntime(config: CreateRuntimeConfig): Runtime;
   readonly toolStubs?: ToolStubHost;
-  readonly deliver?: Durable["deliver"];
+  readonly deliver?: ResumeAddress;
 }
 
 export function turnStepOn(
