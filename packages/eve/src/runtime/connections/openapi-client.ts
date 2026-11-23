@@ -11,10 +11,12 @@ import {
   type OpenApiOperation,
   operationDescription,
   operationName,
+  successResponseSchema,
   uniqueName,
 } from "#runtime/connections/openapi-operations.js";
 import {
   buildInputSchema,
+  buildOutputSchema,
   createSchemaConverter,
   deref,
   isArray,
@@ -153,6 +155,7 @@ export class OpenApiConnectionClient implements ConnectionClient {
         inputSchema,
         name: operation.toolName,
         ...(operation.operationId !== undefined && { operationId: operation.operationId }),
+        ...(operation.outputSchema !== undefined && { outputSchema: operation.outputSchema }),
       });
     }
 
@@ -282,12 +285,29 @@ export class OpenApiConnectionClient implements ConnectionClient {
           parameters,
           requestBody,
           inputSchema: buildInputSchema(parameters, requestBody, defs),
+          outputSchema: this.#resolveOutputSchema(document, operationValue),
           security: resolveSecurity(document, operationValue),
         });
       }
     }
 
     return operations;
+  }
+
+  #resolveOutputSchema(
+    document: Record<string, unknown>,
+    operation: Record<string, unknown>,
+  ): JsonObject | undefined {
+    const body = successResponseSchema(document, operation);
+    if (body === undefined) {
+      return undefined;
+    }
+    const { convert, defs } = createSchemaConverter(document);
+    try {
+      return parseJsonObject(buildOutputSchema(convert(body), defs));
+    } catch {
+      return undefined;
+    }
   }
 
   #resolveParameters(

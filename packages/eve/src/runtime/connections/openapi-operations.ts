@@ -1,5 +1,10 @@
-import type { OpenApiParameter, OpenApiRequestBody } from "#runtime/connections/openapi-schema.js";
+import {
+  deref,
+  type OpenApiParameter,
+  type OpenApiRequestBody,
+} from "#runtime/connections/openapi-schema.js";
 import type { SecurityPlacement } from "#runtime/connections/openapi-security.js";
+import { isObject } from "#shared/guards.js";
 
 export const HTTP_METHODS = ["get", "put", "post", "delete", "patch", "head", "options"] as const;
 export type HttpMethod = (typeof HTTP_METHODS)[number];
@@ -13,7 +18,38 @@ export interface OpenApiOperation {
   readonly parameters: readonly OpenApiParameter[];
   readonly requestBody: OpenApiRequestBody | undefined;
   readonly inputSchema: Record<string, unknown>;
+  readonly outputSchema: Record<string, unknown> | undefined;
   readonly security: SecurityPlacement | undefined;
+}
+
+export function successResponseSchema(
+  document: Record<string, unknown>,
+  operation: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  const { responses } = operation;
+  if (!isObject(responses)) {
+    return undefined;
+  }
+  const success = Object.keys(responses).filter((status) => /^2(\d\d|XX)$/iu.test(status));
+  for (const status of success.length > 0 ? success : ["default"]) {
+    const schema = jsonResponseSchema(document, responses[status]);
+    if (schema !== undefined) {
+      return schema;
+    }
+  }
+  return undefined;
+}
+
+function jsonResponseSchema(
+  document: Record<string, unknown>,
+  raw: unknown,
+): Record<string, unknown> | undefined {
+  const response = isObject(raw) ? deref(document, raw) : undefined;
+  if (!isObject(response)) {
+    return undefined;
+  }
+  const media = isObject(response.content) ? response.content["application/json"] : response;
+  return isObject(media) && isObject(media.schema) ? media.schema : undefined;
 }
 
 export function operationName(

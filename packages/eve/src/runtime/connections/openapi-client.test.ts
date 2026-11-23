@@ -207,6 +207,74 @@ describe("OpenApiConnectionClient", () => {
     expect(resolver).toHaveBeenCalledWith(expect.objectContaining({ callId: "call-1" }));
   });
 
+  describe("output schema", () => {
+    const PET = {
+      type: "object",
+      properties: { id: { type: "integer" }, name: { type: "string" } },
+      required: ["id", "name"],
+    };
+    const PET_REF = { $ref: "#/components/schemas/Pet" };
+    const ERROR = { type: "object", properties: { message: { type: "string" } } };
+    const json = (schema: unknown) => ({ content: { "application/json": { schema } } });
+
+    async function petsTool(responses: Record<string, unknown>) {
+      const client = new OpenApiConnectionClient(
+        makeConnection({
+          spec: {
+            paths: { "/pets": { get: { operationId: "listPets", responses } } },
+            components: { responses: { Pet: json(PET_REF) }, schemas: { Pet: PET } },
+          },
+        }),
+      );
+      return (await client.getToolMetadata())[0]!;
+    }
+
+    it("types the result's body from the success response, keeping its $ref targets", async () => {
+      const tool = await petsTool({
+        "200": json({ type: "array", items: PET_REF }),
+        "404": json(ERROR),
+      });
+
+      expect(tool.outputSchema).toEqual({
+        type: "object",
+        properties: {
+          status: { type: "integer" },
+          statusText: { type: "string" },
+          body: { type: "array", items: { $ref: "#/$defs/Pet" } },
+          location: { type: "string" },
+        },
+        required: ["status", "statusText", "body"],
+        $defs: { Pet: PET },
+      });
+      expect(tool.inputSchema).not.toHaveProperty("$defs");
+      expect(renderToolSignature(tool)).toBe(
+        "listPets(input: Record<string, unknown>): Promise<{ status: number; statusText: string; body: { id: number; name: string }[]; location?: string }>",
+      );
+    });
+
+    it.each([
+      ["a Swagger 2.0 response", { "200": { schema: PET_REF } }],
+      ["a shared response", { "201": { $ref: "#/components/responses/Pet" } }],
+      ["the first 2xx response to declare one", { "202": {}, "203": json(PET_REF) }],
+      ["the default response when there is no 2xx response", { default: json(PET_REF) }],
+    ])("reads the body's schema from %s", async (_name, responses) => {
+      expect((await petsTool(responses)).outputSchema).toMatchObject({
+        properties: { body: { $ref: "#/$defs/Pet" } },
+      });
+    });
+
+    it.each([
+      ["no body", { "204": { description: "deleted" } }],
+      ["a body that isn't JSON", { "200": { content: { "text/csv": { schema: PET } } } }],
+      ["errors alone", { "200": {}, default: json(ERROR) }],
+      ["an unserializable response schema", { "200": json({ const: Number.NaN }) }],
+    ])("declares none when the responses describe %s", async (_name, responses) => {
+      const tool = await petsTool(responses);
+      expect(tool.name).toBe("listPets");
+      expect(tool).not.toHaveProperty("outputSchema");
+    });
+  });
+
   it("builds input schemas from Swagger 2.0 top-level parameters", async () => {
     const client = new OpenApiConnectionClient(makeConnection({ spec: SWAGGER_SPEC, url: "" }));
     const metadata = await client.getToolMetadata();

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { renderToolSignature } from "./signature.js";
+import { isIdentifier, renderOutputType, renderToolSignature } from "./signature.js";
 
 describe("renderToolSignature", () => {
   it.each([
@@ -135,5 +135,61 @@ describe("renderToolSignature", () => {
     });
     expect(performance.now() - started).toBeLessThan(1_000);
     expect(signature.length).toBeLessThanOrEqual(4_000);
+  });
+});
+
+describe("renderOutputType", () => {
+  it("renders the type a call resolves to", () => {
+    expect(
+      renderOutputType({
+        type: "object",
+        properties: { content: { type: "string" }, nextOffset: { type: "integer" } },
+        required: ["content"],
+      }),
+    ).toBe("{ content: string; nextOffset?: number }");
+  });
+
+  it.each([
+    ["no schema", undefined],
+    ["a schema that says nothing about the value", {}],
+  ])("renders nothing for %s", (_name, schema) => {
+    expect(renderOutputType(schema)).toBeUndefined();
+  });
+
+  it("drops descriptions before any property name to stay within 1,000 characters", () => {
+    const names = Array.from({ length: 20 }, (_, index) => `field${index}`);
+    const type = renderOutputType({
+      type: "object",
+      properties: Object.fromEntries(
+        names.map((name) => [name, { type: "string", description: "x".repeat(100) }]),
+      ),
+    });
+    expect(type!.length).toBeLessThanOrEqual(1_000);
+    expect(names.filter((name) => !type!.includes(`${name}?: string`))).toEqual([]);
+    expect(type).not.toContain("xxx");
+  });
+
+  it("cuts a type whose property names alone pass 1,000 characters", () => {
+    const type = renderOutputType({
+      type: "object",
+      properties: Object.fromEntries(
+        Array.from({ length: 200 }, (_, index) => [`field${index}`, { type: "string" }]),
+      ),
+    });
+    expect(type).toHaveLength(1_000);
+    expect(type!.endsWith("...")).toBe(true);
+  });
+});
+
+describe("isIdentifier", () => {
+  it("recognizes names valid after a dot", () => {
+    expect(isIdentifier("listPets")).toBe(true);
+    expect(isIdentifier("_private")).toBe(true);
+    expect(isIdentifier("$ref1")).toBe(true);
+    expect(isIdentifier("")).toBe(false);
+    expect(isIdentifier("1abc")).toBe(false);
+    expect(isIdentifier("x-trace-id")).toBe(false);
+    expect(isIdentifier("a.b")).toBe(false);
+    expect(isIdentifier("a b")).toBe(false);
   });
 });
