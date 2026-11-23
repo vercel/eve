@@ -275,7 +275,13 @@ export async function handleInteractionPost(
     return ack;
   }
 
-  if (dispatchSignInCancel(payload.raw, ctx)) return ack;
+  const signInRequest = buildSlackWorkspaceHandle({
+    api: deps.api,
+    botToken: deps.config.credentials?.botToken,
+    installationTeamId: readInstallationTeamId(payload.raw),
+    teamId: undefined,
+  }).request;
+  if (dispatchSignInCancel(payload.raw, ctx, signInRequest)) return ack;
 
   const interaction = parseBlockActionsPayload(payload);
   if (!interaction) return ack;

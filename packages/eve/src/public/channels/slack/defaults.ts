@@ -251,8 +251,14 @@ export async function showSlackSignIn(event: SignIn, channel: SlackEventContext)
   }
 
   if (!deliverable) return;
+  let promptCancel = cancel;
+  if (!directOnly) {
+    await showSlackSignInDirectMessage(event, recipientUserId, channel, undefined);
+    const copy = channel.state.pendingAuthDirectMessages?.[event.interactionId];
+    if (cancel !== undefined && copy !== undefined) promptCancel = { ...cancel, copy };
+  }
   const prompt = {
-    cancel,
+    cancel: promptCancel,
     displayName,
     instructions: event.instructions,
     url: event.url,
@@ -269,7 +275,6 @@ export async function showSlackSignIn(event: SignIn, channel: SlackEventContext)
       error,
     });
   }
-  if (!directOnly) await showSlackSignInDirectMessage(event, recipientUserId, channel, cancel);
 }
 
 function signInCancel(event: SignIn, channel: SlackEventContext): SignInCancelTarget | undefined {
@@ -300,16 +305,17 @@ async function showSlackSignInDirectMessage(
     url: event.url,
     userCode: event.userCode,
   };
+  const body: Record<string, unknown> = {
+    blocks: buildAuthEphemeralBlocks(prompt),
+    channel: inDirectMessage ? channelId : recipientUserId,
+    text: buildAuthEphemeralText(prompt),
+    unfurl_links: false,
+    unfurl_media: false,
+  };
+  if (inDirectMessage && threadTs) body.thread_ts = threadTs;
   let response: SlackApiResponse;
   try {
-    response = await channel.slack.request("chat.postMessage", {
-      blocks: buildAuthEphemeralBlocks(prompt),
-      channel: inDirectMessage ? channelId : recipientUserId,
-      ...(inDirectMessage && threadTs ? { thread_ts: threadTs } : {}),
-      text: buildAuthEphemeralText(prompt),
-      unfurl_links: false,
-      unfurl_media: false,
-    });
+    response = await channel.slack.request("chat.postMessage", body);
   } catch (error) {
     log.warn("Slack auth direct message delivery failed", { name: event.name, error });
     return false;

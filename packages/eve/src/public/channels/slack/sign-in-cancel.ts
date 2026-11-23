@@ -3,13 +3,23 @@ import { sendSlackResponseUrl } from "#compiled/@chat-adapter/slack/api.js";
 import { SessionNotActiveError } from "#channel/session-not-active-error.js";
 import { createLogger } from "#internal/logging.js";
 import type { SlackChannelState, SlackSessionTarget } from "#public/channels/slack/slackChannel.js";
-import { slackSessionToken } from "#public/channels/slack/api.js";
+import { slackSessionToken, type SlackWorkspaceHandle } from "#public/channels/slack/api.js";
 
 const log = createLogger("slack.interactions");
 
+type SlackApiRequest = SlackWorkspaceHandle["request"];
+
 export const SIGN_IN_CANCEL_ACTION_ID = "eve_sign_in:cancel";
 
-export type SignInCancelTarget = SlackSessionTarget & { readonly turnId: string };
+export type SignInCancelTarget = SlackSessionTarget & {
+  readonly turnId: string;
+  readonly copy?: SignInPromptCopy;
+};
+
+export interface SignInPromptCopy {
+  readonly channelId: string;
+  readonly ts: string;
+}
 
 export function parseSignInCancelTarget(value: unknown): SignInCancelTarget | undefined {
   if (typeof value !== "string") return undefined;
@@ -20,10 +30,20 @@ export function parseSignInCancelTarget(value: unknown): SignInCancelTarget | un
     return undefined;
   }
   if (typeof parsed !== "object" || parsed === null) return undefined;
-  const { channelId, codeChannel, threadTs, turnId } = parsed as Record<string, unknown>;
+  const { channelId, codeChannel, copy, threadTs, turnId } = parsed as Record<string, unknown>;
   if (typeof channelId !== "string" || typeof turnId !== "string") return undefined;
-  if (codeChannel === true) return { channelId, codeChannel, turnId };
-  return typeof threadTs === "string" ? { channelId, threadTs, turnId } : undefined;
+  let target: SignInCancelTarget;
+  if (codeChannel === true) target = { channelId, codeChannel, turnId };
+  else if (typeof threadTs === "string") target = { channelId, threadTs, turnId };
+  else return undefined;
+  const parsedCopy = parseCopy(copy);
+  return parsedCopy === undefined ? target : { ...target, copy: parsedCopy };
+}
+
+function parseCopy(value: unknown): SignInPromptCopy | undefined {
+  if (!isObjectRecord(value)) return undefined;
+  const { channelId, ts } = value;
+  return typeof channelId === "string" && typeof ts === "string" ? { channelId, ts } : undefined;
 }
 
 export function dispatchSignInCancel(
@@ -32,10 +52,11 @@ export function dispatchSignInCancel(
     readonly from: ChannelFrom<SlackChannelState>;
     readonly waitUntil: (task: Promise<unknown>) => void;
   },
+  request: SlackApiRequest,
 ): boolean {
   const cancel = readSignInCancel(raw);
   if (cancel === undefined) return false;
-  ctx.waitUntil(cancelHeldSignIn(cancel, ctx));
+  ctx.waitUntil(cancelHeldSignIn(cancel, ctx, request));
   return true;
 }
 
@@ -61,8 +82,9 @@ function readSignInCancel(raw: Record<string, unknown>): SignInCancel | undefine
 async function cancelHeldSignIn(
   cancel: SignInCancel,
   ctx: { readonly from: ChannelFrom<SlackChannelState> },
+  request: SlackApiRequest,
 ): Promise<void> {
-  const { turnId } = cancel.target;
+  const { copy, turnId } = cancel.target;
   try {
     await ctx.from(slackSessionToken(cancel.target)).cancel({ turnId });
   } catch (error) {
@@ -71,11 +93,38 @@ async function cancelHeldSignIn(
       return;
     }
   }
+  if (copy !== undefined) await closeCopy(copy, request);
   if (cancel.responseUrl === undefined) return;
   try {
     await sendSlackResponseUrl(cancel.responseUrl, { deleteOriginal: true });
   } catch (error) {
     log.warn("failed to remove the cancelled sign-in prompt", { error });
+  }
+}
+
+const CANCELLED_TEXT = "Sign-in cancelled";
+
+async function closeCopy(copy: SignInPromptCopy, request: SlackApiRequest): Promise<void> {
+  const target = { channel: copy.channelId, ts: copy.ts };
+  try {
+    const updated = await request("chat.update", {
+      ...target,
+      blocks: [{ type: "section", text: { type: "mrkdwn", text: CANCELLED_TEXT } }],
+      text: CANCELLED_TEXT,
+    });
+    if (updated.ok === true) return;
+  } catch (error) {
+    log.warn("failed to close the cancelled sign-in prompt's DM copy", { error });
+  }
+  try {
+    const deleted = await request("chat.delete", target);
+    if (deleted.ok !== true) {
+      log.warn("failed to remove the cancelled sign-in prompt's DM copy", {
+        error: deleted.error ?? "unknown_error",
+      });
+    }
+  } catch (error) {
+    log.warn("failed to remove the cancelled sign-in prompt's DM copy", { error });
   }
 }
 

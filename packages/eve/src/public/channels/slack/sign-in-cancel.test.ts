@@ -36,12 +36,12 @@ function createRuntime(dispatchContinuation: Runtime["dispatchContinuation"]): R
   };
 }
 
-function cancelClick(): Record<string, unknown> {
+function cancelClick(copy?: { channelId: string; ts: string }): Record<string, unknown> {
   return {
     actions: [
       {
         action_id: SIGN_IN_CANCEL_ACTION_ID,
-        value: JSON.stringify({ channelId: "C1", threadTs: "1.2", turnId: "turn_1" }),
+        value: JSON.stringify({ channelId: "C1", threadTs: "1.2", turnId: "turn_1", copy }),
       },
     ],
     response_url: RESPONSE_URL,
@@ -49,16 +49,25 @@ function cancelClick(): Record<string, unknown> {
   };
 }
 
-async function clickCancel(runtime: Runtime): Promise<void> {
+const slackRequest = vi.fn(async (_operation: string, _body: unknown) => ({ ok: true }));
+
+async function clickCancel(
+  runtime: Runtime,
+  copy?: { channelId: string; ts: string },
+): Promise<void> {
   const { from } = createChannelOperations<SlackChannelState>({
     adapter: { kind: "slack" },
     channelName: "slack",
     runtime,
   });
   const tasks: Promise<unknown>[] = [];
-  expect(dispatchSignInCancel(cancelClick(), { from, waitUntil: (task) => tasks.push(task) })).toBe(
-    true,
-  );
+  expect(
+    dispatchSignInCancel(
+      cancelClick(copy),
+      { from, waitUntil: (task) => tasks.push(task) },
+      slackRequest as never,
+    ),
+  ).toBe(true);
   await Promise.all(tasks);
 }
 
@@ -105,6 +114,30 @@ describe("dispatchSignInCancel", () => {
     await clickCancel(runtime);
 
     expect(fetchMock).toHaveBeenCalledWith(...deletePost);
+  });
+
+  it("closes the prompt's DM copy when the held turn has already ended", async () => {
+    stubFetch();
+    const runtime = createRuntime(vi.fn().mockResolvedValue({ status: "no_active_turn" }));
+
+    await clickCancel(runtime, { channelId: "D1", ts: "3.4" });
+
+    expect(slackRequest).toHaveBeenCalledWith("chat.update", {
+      blocks: [{ text: { text: "Sign-in cancelled", type: "mrkdwn" }, type: "section" }],
+      channel: "D1",
+      text: "Sign-in cancelled",
+      ts: "3.4",
+    });
+  });
+
+  it("deletes the prompt's DM copy when Slack refuses the edit", async () => {
+    stubFetch();
+    slackRequest.mockResolvedValueOnce({ ok: false });
+    const runtime = createRuntime(vi.fn().mockResolvedValue({ status: "no_active_turn" }));
+
+    await clickCancel(runtime, { channelId: "D1", ts: "3.4" });
+
+    expect(slackRequest).toHaveBeenCalledWith("chat.delete", { channel: "D1", ts: "3.4" });
   });
 
   it("keeps the prompt when the cancel throws a retryable SessionNotActiveError", async () => {

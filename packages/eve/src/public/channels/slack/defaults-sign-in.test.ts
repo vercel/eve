@@ -186,7 +186,7 @@ describe("showSlackSignIn", () => {
     expect(state.pendingAuthDirectMessages).toBeUndefined();
   });
 
-  it("keeps the public status and private prompt in a thread, and sends a copy with Cancel to the person's DM", async () => {
+  it("keeps the public status and private prompt in a thread, and sends a copy without Cancel to the person's DM", async () => {
     const { channel, request, state, thread } = context({ threadTs: "1700000000.000001" });
 
     await showSlackSignIn(signIn, channel);
@@ -198,7 +198,17 @@ describe("showSlackSignIn", () => {
     expect(sent[0]?.text).toContain(signIn.url);
     const blocks = JSON.stringify(sent[0]?.blocks);
     expect(blocks).toContain("This is for your request in <#C01>.");
-    expect(blocks).toContain("eve_sign_in:cancel");
+    expect(blocks).not.toContain("eve_sign_in:cancel");
+    const ephemeral = thread.postEphemeral.mock.calls[0]![1] as {
+      blocks: { elements?: { value?: string }[] }[];
+    };
+    const cancel = ephemeral.blocks
+      .flatMap((block) => block.elements ?? [])
+      .find((element) => element.value !== undefined);
+    expect(JSON.parse(cancel?.value ?? "{}").copy).toEqual({
+      channelId: "D777",
+      ts: "1700000000.000201",
+    });
     expect(state.pendingAuthDirectMessages).toEqual({
       int_0: { channelId: "D777", ts: "1700000000.000201" },
     });

@@ -58,6 +58,7 @@ interface ResponseUrlBody {
 
 interface SlackMessageBody {
   readonly blocks?: readonly unknown[];
+  readonly channel?: string;
   readonly markdown_text?: string;
   readonly text?: string;
   readonly ts?: string;
@@ -260,7 +261,9 @@ export function slackDriver(
       return {
         id,
         links: linkTargets(body.blocks ?? []),
-        onlyPerson: call.method === "chat.postEphemeral",
+        onlyPerson:
+          call.method === "chat.postEphemeral" ||
+          (body.channel !== CHANNEL && /^[DU]/u.test(body.channel ?? "")),
         options: hitlOptions(body.blocks ?? [], id),
         text: [body.markdown_text ?? body.text ?? "", ...blockTexts(body.blocks ?? [])].join("\n"),
       };
