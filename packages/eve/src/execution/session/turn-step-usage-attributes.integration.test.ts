@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
@@ -22,10 +22,8 @@ function createSinkWritable(): WritableStream<Uint8Array> {
   });
 }
 
-async function flushMicrotasks(): Promise<void> {
-  for (let i = 0; i < 10; i++) {
-    await Promise.resolve();
-  }
+async function drainPendingTurns(): Promise<void> {
+  await new Promise<void>((resolve) => setTimeout(resolve, 15));
 }
 
 function createTurnStepInput(sessionId: string, message: string, channelKind = "channel:chat") {
@@ -69,10 +67,6 @@ function createStepHost(setAttributes: SessionStepHost["setAttributes"]): Sessio
   };
 }
 
-afterEach(() => {
-  vi.restoreAllMocks();
-});
-
 describe("turnStepOn usage attributes", () => {
   it("coalesces a multi-call step into one usage write overlapping channel drain and waits before returning", async () => {
     const drainStarted = Promise.withResolvers<void>();
@@ -82,13 +76,13 @@ describe("turnStepOn usage attributes", () => {
 
     const usageWrites: Array<Record<string, EveAttributeValue>> = [];
     let toolCalls = 0;
+    let usageWritesBeforeSecondCall: number | undefined;
 
     const lookup = defineTool({
       description: "Look up an item",
       inputSchema: z.object({ id: z.string() }),
       execute: async ({ id }) => {
         toolCalls += 1;
-        expect(usageWrites).toHaveLength(0);
         return { found: id };
       },
     });
@@ -112,17 +106,19 @@ describe("turnStepOn usage attributes", () => {
         definition: defineAgent({
           experimental: { workflow: { modelCallsPerStep: 4 } },
           model: defineDynamic(() => ({
-            model: mockModel(({ toolResults }) =>
-              toolResults.length === 0
-                ? {
-                    toolCalls: [{ id: "call-1", input: { id: "a" }, name: "lookup" }],
-                    usage: { inputTokens: 10, outputTokens: 5 },
-                  }
-                : {
-                    text: "Done.",
-                    usage: { inputTokens: 20, outputTokens: 8 },
-                  },
-            ),
+            model: mockModel(({ toolResults }) => {
+              if (toolResults.length === 0) {
+                return {
+                  toolCalls: [{ id: "call-1", input: { id: "a" }, name: "lookup" }],
+                  usage: { inputTokens: 10, outputTokens: 5 },
+                };
+              }
+              usageWritesBeforeSecondCall = usageWrites.length;
+              return {
+                text: "Done.",
+                usage: { inputTokens: 20, outputTokens: 8 },
+              };
+            }),
             modelContextWindowTokens: 200_000,
           })),
         }),
@@ -158,6 +154,7 @@ describe("turnStepOn usage attributes", () => {
         await usageStarted.promise;
 
         expect(toolCalls).toBe(1);
+        expect(usageWritesBeforeSecondCall).toBe(0);
         expect(usageWrites).toHaveLength(1);
         expect(usageWrites[0]).toMatchObject({
           "$eve.input_tokens": 30,
@@ -167,7 +164,7 @@ describe("turnStepOn usage attributes", () => {
         expect(usageWrites[0]?.["$eve.tool_count"]).toBeGreaterThanOrEqual(1);
 
         drainGate.resolve();
-        await flushMicrotasks();
+        await drainPendingTurns();
         expect(settled).toBe(false);
 
         usageGate.resolve();
@@ -186,6 +183,7 @@ describe("turnStepOn usage attributes", () => {
     const settleStarted = Promise.withResolvers<void>();
     const settleGate = Promise.withResolvers<void>();
     const titleGate = Promise.withResolvers<void>();
+    const usageStarted = Promise.withResolvers<void>();
     const usageGate = Promise.withResolvers<void>();
 
     const titleWrites: Array<Record<string, EveAttributeValue>> = [];
@@ -229,6 +227,7 @@ describe("turnStepOn usage attributes", () => {
           }
           if ("$eve.input_tokens" in attributes) {
             usageWrites.push(attributes);
+            usageStarted.resolve();
             await usageGate.promise;
           }
         }),
@@ -244,7 +243,7 @@ describe("turnStepOn usage attributes", () => {
 
       try {
         await settleStarted.promise;
-        await flushMicrotasks();
+        await usageStarted.promise;
 
         expect(titleWrites).toHaveLength(1);
         expect(usageWrites).toHaveLength(1);
@@ -255,11 +254,11 @@ describe("turnStepOn usage attributes", () => {
         });
 
         settleGate.resolve();
-        await flushMicrotasks();
+        await drainPendingTurns();
         expect(settled).toBe(false);
 
         titleGate.resolve();
-        await flushMicrotasks();
+        await drainPendingTurns();
         expect(settled).toBe(false);
 
         usageGate.resolve();
@@ -360,7 +359,7 @@ describe("turnStepOn usage attributes", () => {
         });
 
         titleGate.resolve();
-        await flushMicrotasks();
+        await drainPendingTurns();
         expect(settled).toBe(false);
 
         usageGate.resolve();
