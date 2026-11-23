@@ -9,16 +9,22 @@ export interface InstalledPackage {
   readonly root: string;
 }
 
+export interface InstalledDependencyClosureOptions {
+  readonly includeOptional?: boolean;
+}
+
 export function installedDependencyClosure(
   packageRoots: readonly string[],
+  options?: InstalledDependencyClosureOptions,
 ): readonly InstalledPackage[] {
+  const includeOptional = options?.includeOptional ?? true;
   const closure: InstalledPackage[] = [];
   const visitedRoots = new Set<string>();
   const pendingRoots = packageRoots.map(toCanonicalPath);
   for (let root = pendingRoots.pop(); root !== undefined; root = pendingRoots.pop()) {
     if (visitedRoots.has(root)) continue;
     visitedRoots.add(root);
-    const manifest = readPackageManifest(root);
+    const manifest = readPackageManifest(root, includeOptional);
     closure.push({ name: manifest.name, root });
     for (const dependency of manifest.dependencies) {
       const dependencyRoot = findInstalledDependencyRoot(dependency, root);
@@ -88,7 +94,10 @@ export function installedPackageRoot(filePath: string): string | undefined {
   }
 }
 
-function readPackageManifest(packageRoot: string): {
+function readPackageManifest(
+  packageRoot: string,
+  includeOptional = true,
+): {
   readonly name: string | undefined;
   readonly dependencies: readonly string[];
 } {
@@ -97,12 +106,11 @@ function readPackageManifest(packageRoot: string): {
       string,
       unknown
     >;
-    const dependencyNames = ["dependencies", "optionalDependencies", "peerDependencies"].flatMap(
-      (field) =>
-        pkg[field] !== null && typeof pkg[field] === "object"
-          ? Object.keys(pkg[field] as Record<string, unknown>)
-          : [],
-    );
+    const dependencyNames = [
+      ...objectKeys(pkg.dependencies),
+      ...(includeOptional ? objectKeys(pkg.optionalDependencies) : []),
+      ...peerDependencyNames(pkg, includeOptional),
+    ];
     return {
       name: typeof pkg.name === "string" ? pkg.name : undefined,
       dependencies: [...new Set(dependencyNames)],
@@ -110,6 +118,33 @@ function readPackageManifest(packageRoot: string): {
   } catch {
     return { name: undefined, dependencies: [] };
   }
+}
+
+function objectKeys(value: unknown): readonly string[] {
+  return value !== null && typeof value === "object"
+    ? Object.keys(value as Record<string, unknown>)
+    : [];
+}
+
+function peerDependencyNames(
+  pkg: Record<string, unknown>,
+  includeOptional: boolean,
+): readonly string[] {
+  const names = objectKeys(pkg.peerDependencies);
+  if (includeOptional) return names;
+  const meta =
+    pkg.peerDependenciesMeta !== null && typeof pkg.peerDependenciesMeta === "object"
+      ? (pkg.peerDependenciesMeta as Record<string, unknown>)
+      : undefined;
+  if (meta === undefined) return names;
+  return names.filter((name) => {
+    const entry = meta[name];
+    return !(
+      entry !== null &&
+      typeof entry === "object" &&
+      (entry as { optional?: unknown }).optional === true
+    );
+  });
 }
 
 function findInstalledDependencyRoot(dependency: string, fromRoot: string): string | undefined {

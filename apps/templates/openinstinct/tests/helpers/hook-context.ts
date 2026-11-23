@@ -29,11 +29,14 @@ export function hookContextFor({
   turnId = "turn-1",
   view = emptySessionView(),
 }: TestHookContextOptions = {}): HookContext<"turn.settled"> {
-  return {
+  const context: HookContext<"turn.settled"> & {
+    end: (reason?: string) => void;
+  } = {
     agent: { name: agentName },
     cancel: () => undefined,
     channel,
     continue: continueTurn,
+    end: () => undefined,
     async getSandbox() {
       throw new Error("Sandbox access is outside this focused test.");
     },
@@ -54,4 +57,5 @@ export function hookContextFor({
     turn: { id: turnId, input: [], status: "running" },
     view,
   };
+  return context;
 }

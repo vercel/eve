@@ -4,7 +4,13 @@
   "futureFlags": {
     "affectedUsingTaskInputs": true
   },
-  "globalDependencies": [".nvmrc", "pnpm-workspace.yaml", "tsconfig.json"],
+  "globalDependencies": [
+    ".nvmrc",
+    "pnpm-workspace.yaml",
+    "scripts/install-ci-tools.mjs",
+    "tsconfig.json"
+  ],
+  "globalPassThroughEnv": ["EVE_TELEMETRY_DISABLED"],
   "tasks": {
     "//#check:deps": {
       "inputs": [
@@ -21,6 +27,28 @@
         "scripts/sandbox-image-tag.mjs"
       ],
       "tags": ["ci"]
+    },
+    "//#check:templates": {
+      "cache": false,
+      "dependsOn": ["eve#build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!.agents/**",
+        "!.changeset/**",
+        "!.github/**",
+        "!apps/benchmarks/**",
+        "!apps/docs/**",
+        "!apps/fixtures/**",
+        "!apps/frameworks/**",
+        "!apps/package-artifacts/**",
+        "!docs/**",
+        "!e2e/**",
+        "!examples/**",
+        "!packages/**",
+        "!research/**"
+      ],
+      "passThroughEnv": ["EVE_SANDBOX_IMAGE_TAG"],
+      "tags": ["ci", "ci:cpus:16"]
     },
     "//#check:template-files": {
       "inputs": [
@@ -122,7 +150,9 @@
         ".next/**",
         "!.next/cache/**",
         ".output/**",
-        ".vercel/output/**"
+        ".vercel/output/**",
+        "LICENSE",
+        "NOTICE"
       ]
     },
     "build:types": {
@@ -163,6 +193,23 @@
       ],
       "outputs": []
     },
+    "e2e:postgres": {
+      "cache": false,
+      "dependsOn": ["e2e:dependencies"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/e2e/fixtures/e2e-postgres/**",
+        "!$TURBO_ROOT$/e2e/fixtures/e2e-postgres/node_modules/**",
+        "!$TURBO_ROOT$/e2e/fixtures/e2e-postgres/.turbo/**",
+        "$TURBO_ROOT$/e2e/matrix.json",
+        "$TURBO_ROOT$/scripts/resolve-sandbox-image.mjs",
+        "$TURBO_ROOT$/scripts/run-e2e-postgres.mjs",
+        "$TURBO_ROOT$/scripts/sandbox-image-tag.mjs"
+      ],
+      "passThroughEnv": ["CI", "EVE_SANDBOX_IMAGE_TAG"],
+      "tags": ["ci", "ci:cpus:4"],
+      "with": ["@eve-e2e/postgres#postgres"]
+    },
     "e2e:dependencies": {
       "cache": false,
       "dependsOn": ["^build"]
@@ -194,6 +241,7 @@
     },
     "test:integration": {
       "cache": false,
+      "tags": ["ci"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!.eve/**",
@@ -239,7 +287,6 @@
     },
     "typecheck": {
       "dependsOn": ["^build"],
-      "passThroughEnv": ["EVE_TELEMETRY_DISABLED"],
       "tags": ["ci"],
       "inputs": [
         "**/*.ts",

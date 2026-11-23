@@ -75,8 +75,16 @@ export function connectionEntry(
     inputSchema: refineJsonSchema({}, (input) => checkInput(registry, connection, toolName, input)),
     label: { start: () => label },
     name: connectionToolName(connection.connectionName, toolName),
-    toModelOutput: connectionToolModelOutput,
+    toModelOutput: connectionModelOutput(connection),
   };
+}
+
+function connectionModelOutput(
+  connection: ResolvedConnectionDefinition,
+): NonNullable<HarnessToolDefinition["toModelOutput"]> {
+  const custom = connection.toolCall?.toModelOutput;
+  if (custom === undefined) return connectionToolModelOutput;
+  return (output, ctx) => custom(output, { ...ctx, defaultModelOutput: connectionToolModelOutput });
 }
 
 export function connectionSignInEntry(

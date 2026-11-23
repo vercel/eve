@@ -111,7 +111,14 @@
       "tags": ["$TURBO_EXTENDS$", "ci:cpus:8"]
     },
     "test:integration": {
-      "dependsOn": ["build"]
+      "dependsOn": ["build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/**",
+        "!$TURBO_ROOT$/**/node_modules/**",
+        "!$TURBO_ROOT$/**/.turbo/**"
+      ],
+      "tags": ["$TURBO_EXTENDS$", "ci:cpus:8"]
     },
     "test:scenario": {
       "dependsOn": ["$TURBO_EXTENDS$", "build"]
@@ -123,18 +130,37 @@
     },
     "test:build": {
       "cache": false,
-      "dependsOn": ["build"]
+      "dependsOn": ["build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/**",
+        "!$TURBO_ROOT$/**/node_modules/**",
+        "!$TURBO_ROOT$/**/.turbo/**"
+      ],
+      "passThroughEnv": ["EVE_SANDBOX_IMAGE_TAG"],
+      "tags": ["ci", "ci:cpus:8"]
     },
     "test:public-types": {
       "cache": false,
       "dependsOn": ["build"],
-      "passThroughEnv": ["EVE_TELEMETRY_DISABLED"],
       "tags": ["ci", "ci:cpus:4"]
     },
     "test:tui": {
       "cache": false,
       "dependsOn": ["build"],
-      "env": ["AI_GATEWAY_API_KEY", "EVE_SANDBOX_IMAGE_TAG"]
+      "env": ["EVE_SANDBOX_IMAGE_TAG"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/apps/fixtures/agent-tui-client/**",
+        "!$TURBO_ROOT$/apps/fixtures/agent-tui-client/{.eve,.output,.turbo,.vercel,node_modules}/**",
+        "$TURBO_ROOT$/e2e/fixtures/agent-subagents-hitl/**",
+        "!$TURBO_ROOT$/e2e/fixtures/agent-subagents-hitl/{.eve,.output,.turbo,.vercel,node_modules}/**",
+        "$TURBO_ROOT$/e2e/fixtures/e2e-config/**",
+        "!$TURBO_ROOT$/e2e/fixtures/e2e-config/{.turbo,node_modules}/**",
+        "$TURBO_ROOT$/scripts/resolve-sandbox-image.mjs",
+        "$TURBO_ROOT$/scripts/sandbox-image-tag.mjs"
+      ],
+      "tags": ["ci", "ci:cpus:4"]
     },
     "test:watch": {
       "cache": false,

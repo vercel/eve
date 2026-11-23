@@ -318,13 +318,17 @@ async function runSessionStepBody(
     instrumentation?.prepareDelivery(rawDelivery);
   }
 
+  const hookCancellation = new AbortController();
   const publisher = openSessionEventPublisher({
+    cancelTurn:
+      input.input?.control === undefined
+        ? () => hookCancellation.abort(new TurnCancelledError())
+        : undefined,
     ctx,
     origin: "own",
     sessionWritable: input.sessionWritable,
   });
   const { adapterCtx } = publisher.dispatcher;
-  const hookCancellation = new AbortController();
   const abortSignal =
     input.abortSignal === undefined
       ? hookCancellation.signal
@@ -498,7 +502,7 @@ async function runSessionStepBody(
       try {
         await contextStorage.run(ctx, () => publish(facts));
       } finally {
-        await publisher.drain();
+        await publisher.drain().finally(() => registry?.value.dispose());
         if (sandbox !== undefined) {
           const sandboxState = await sandbox.value.captureState();
           if (

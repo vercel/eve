@@ -6,7 +6,7 @@ import type { AlsContext } from "#context/container.js";
 import { SessionIdKey } from "#context/keys.js";
 import type { JsonValue } from "#shared/json.js";
 import { isNonEmptyString } from "#shared/guards.js";
-import { REACTIONS_STATE_KEY, type Continuation } from "./continuation.js";
+import { REACTIONS_STATE_KEY, type Continuation, type SessionEndRequest } from "./continuation.js";
 
 export interface Slot {
   readonly value: JsonValue;
@@ -24,6 +24,7 @@ export interface DefinitionsState {
   readonly revision?: string;
   readonly intents?: readonly PendingIntent[];
   readonly continuation?: Continuation;
+  readonly sessionEnd?: SessionEndRequest;
   readonly cancelledTurnId?: string;
   readonly cancelledBy?: string;
   readonly cancelledOpening?: { readonly by: string; readonly deliveryIds: readonly string[] };

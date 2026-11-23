@@ -3,11 +3,13 @@ import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
 
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
+import type { Runtime } from "#channel/types.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { markMockModel } from "#internal/mock-model-identity.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { textStreamResult } from "#internal/testing/approval-resume.js";
 import { buildSerializedContext } from "#internal/testing/entry-test-helpers.js";
+import { captureTurnEvents, type CapturedTurnStream } from "#internal/testing/events.js";
 import { resumeRoutedHook } from "#execution/hosts.js";
 import { startTestSession } from "#internal/testing/test-session-hosts.js";
 import { defineAgent } from "#public/definitions/agent.js";
@@ -45,7 +47,13 @@ async function runSession(input: {
   readonly name: string;
   readonly hooks: Readonly<Record<string, HookDefinition>>;
   readonly firstCall?: Promise<void>;
-  readonly drive: (session: { readonly inbox: string; readonly log: string[] }) => Promise<void>;
+  readonly drive: (session: {
+    readonly continuationToken: string;
+    readonly inbox: string;
+    readonly log: string[];
+    readonly runtime: Runtime;
+    readonly stream: CapturedTurnStream;
+  }) => Promise<void>;
 }): Promise<{ readonly log: string[]; readonly inputs: string[]; readonly prompts: string[] }> {
   const log: string[] = [];
   const inputs: string[] = [];
@@ -97,9 +105,17 @@ async function runSession(input: {
         continuationToken,
       }),
     });
+    const stream = captureTurnEvents(run);
     try {
-      await input.drive({ inbox: sessionInboxHookToken(continuationToken), log });
+      await input.drive({
+        continuationToken,
+        inbox: sessionInboxHookToken(continuationToken),
+        log,
+        runtime: run.runtime,
+        stream,
+      });
     } finally {
+      stream.dispose();
       await run.cancel().catch(() => {});
     }
   });
@@ -370,4 +386,102 @@ describe("hook ctx.continue()", () => {
     },
     90_000,
   );
+});
+
+describe("hook ctx.end()", () => {
+  it("retires the session after turn.settled, drops continuations, and releases its address", async () => {
+    let endedEvent: unknown;
+    let resolvedAfterEnd: unknown = "still-open";
+    const { inputs, log } = await runSession({
+      drive: async ({ continuationToken, runtime, stream }) => {
+        const events = await stream.nextUntil((event) => event.type === "session.ended");
+        endedEvent = events.find((event) => event.type === "session.ended");
+        resolvedAfterEnd = await runtime.resolveContinuation(continuationToken);
+      },
+      hooks: {
+        "keep-going": defineHook({
+          events: {
+            "turn.settled": (_event, ctx) => {
+              ctx.continue("Should be dropped.");
+            },
+          },
+        }),
+        "finish-job": defineHook({
+          events: {
+            "turn.settled": (event, ctx) => {
+              if (event.data.outcome === "completed") ctx.end("Job completed.");
+            },
+          },
+        }),
+      },
+      name: "hook-end-turn-settled",
+    });
+
+    expect(inputs).toEqual(["Alice asks for the report."]);
+    expect(log.filter((entry) => entry.startsWith("turn:"))).toEqual(["turn:completed"]);
+    expect(endedEvent).toMatchObject({
+      data: { cause: { hook: "finish-job" }, outcome: "completed" },
+      type: "session.ended",
+    });
+    expect(resolvedAfterEnd).toBeUndefined();
+  }, 90_000);
+
+  it.each(["turn.started", "session.started"] as const)(
+    "cancels the turn before calling the model and retires the session on %s",
+    async (endOn) => {
+      let endedEvent: unknown;
+      const { inputs, log } = await runSession({
+        drive: async ({ stream }) => {
+          const events = await stream.nextUntil((event) => event.type === "session.ended");
+          endedEvent = events.find((event) => event.type === "session.ended");
+        },
+        hooks: {
+          gate: defineHook({
+            events: {
+              [endOn]: (_event: unknown, ctx: HookContext) => {
+                ctx.end("Session closed by policy.");
+              },
+            },
+          }),
+        },
+        name: `hook-end-${endOn.replace(".", "-")}`,
+      });
+
+      expect(inputs).toEqual([]);
+      expect(log.filter((entry) => entry.startsWith("turn:"))).toEqual(["turn:cancelled"]);
+      expect(endedEvent).toMatchObject({
+        data: { cause: { hook: "gate" }, outcome: "completed" },
+        type: "session.ended",
+      });
+    },
+    90_000,
+  );
+
+  it("retires the session between turns on context.settled without cancelling a turn", async () => {
+    let endedEvent: unknown;
+    const { log } = await runSession({
+      drive: async ({ inbox, log, stream }) => {
+        await until(log, "turn:completed", 1);
+        await resumeRoutedHook(inbox, { deliveryId: "clear-1", kind: "clear" });
+        const events = await stream.nextUntil((event) => event.type === "session.ended");
+        endedEvent = events.find((event) => event.type === "session.ended");
+      },
+      hooks: {
+        "after-clear": defineHook({
+          events: {
+            "context.settled": (event, ctx) => {
+              if (event.data.kind === "clear") ctx.end("Retired after clear.");
+            },
+          },
+        }),
+      },
+      name: "hook-end-after-clear",
+    });
+
+    expect(log.filter((entry) => entry.startsWith("turn:"))).toEqual(["turn:completed"]);
+    expect(endedEvent).toMatchObject({
+      data: { cause: { hook: "after-clear" }, outcome: "completed" },
+      type: "session.ended",
+    });
+  }, 90_000);
 });

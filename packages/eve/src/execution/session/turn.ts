@@ -1,3 +1,4 @@
+import { pendingSessionEnd } from "#definitions/continuation.js";
 import { EARLIER_REMOTE_CALLER_CONTEXT_KEY_NAME } from "#context/key-names.js";
 import { formatEarlierRemoteCallerInputError } from "#protocol/remote-agent-protocol.js";
 import { controlDeliveryOf } from "#execution/session/control-delivery.js";
@@ -171,7 +172,9 @@ export class SessionExecution {
     const { cancelled } = await this.input.cursor.advance((state) =>
       this.input.host.applyRunMessages({ ...state, canCancelTurn: turn !== undefined, messages }),
     );
-    if (cancelled) turn?.abort();
+    if (cancelled || pendingSessionEnd(this.input.cursor.serializedContext) !== undefined) {
+      turn?.abort();
+    }
   }
 
   private async runTurnSteps(
@@ -225,6 +228,14 @@ export class SessionExecution {
       );
 
       if (result.action === "cancelled") return await this.finishCancelledTurn(turn);
+      if (
+        !settles &&
+        result.action !== "done" &&
+        !isBetweenTurns(storedProjection(cursor.sessionState.snapshot.session.state)) &&
+        pendingSessionEnd(cursor.serializedContext) !== undefined
+      ) {
+        return await this.finishCancelledTurn(turn);
+      }
       const waitsOnCalls = result.action === "paused" && result.on === "calls";
       if (!settles && !waitsOnCalls && turn.signal.aborted) {
         return await this.finishCancelledTurn(turn);
@@ -287,6 +298,13 @@ export class SessionExecution {
     const calls = paused.on === "calls" ? await this.startCallWait(paused) : undefined;
     let interrupted = false;
     while (true) {
+      if (
+        turn.signal.aborted ||
+        pendingSessionEnd(this.input.cursor.serializedContext) !== undefined
+      ) {
+        turn.abort();
+        return "cancelled";
+      }
       if (pendingInteraction !== undefined) {
         const callbacks = this.input.queue.takeAuthorizations(pendingInteraction.attemptIds);
         if (callbacks !== undefined) return { delivery: { kind: "deliver", payloads: callbacks } };

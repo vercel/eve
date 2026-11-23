@@ -2033,6 +2033,55 @@ describe("SessionExecution checkpoints", () => {
     const [cancelled] = vi.mocked(cancelTasksStep).mock.invocationCallOrder;
     expect(announced).toBeLessThan(cancelled!);
   });
+
+  it("cancels a paused turn when dispatch sets a pending hook session end", async () => {
+    const sessionState = stateWithBlockingRun();
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockImplementationOnce(
+        turnStepWork(async () => ({
+          action: "paused",
+          ...callsPause({ callIds: ["hold-call"] }),
+          serializedContext: {},
+          sessionState,
+        })),
+      );
+    vi.mocked(dispatchCoordinationStep).mockImplementation(
+      dispatchWork(async () => ({
+        results: [],
+        serializedContext: { "eve.reactions": { sessionEnd: { hook: "gate" } } },
+        sessionState,
+      })),
+    );
+
+    await expect(
+      createExecution({ inbox: idleInbox(), sessionState }).runTurn(undefined),
+    ).resolves.toEqual({
+      cancelled: true,
+      kind: "park",
+    });
+  });
+
+  it("does not cancel a non-existent turn when a hook ends the session during a control step", async () => {
+    const sessionState = state("");
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockImplementationOnce(
+        turnStepWork(async () => ({
+          action: "parked",
+          serializedContext: { "eve.reactions": { sessionEnd: { hook: "after-clear" } } },
+          sessionState,
+        })),
+      );
+
+    await expect(
+      createExecution({ inbox: idleInbox(), sessionState }).runTurn({ control: "clear" }),
+    ).resolves.toEqual({
+      kind: "park",
+      settled: undefined,
+    });
+    expect(cancelTasksStep).not.toHaveBeenCalled();
+  });
 });
 
 const PUBLISHED = "test.published";
