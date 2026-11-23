@@ -30,7 +30,8 @@ export default defineEval({
     resumed.messageIncludes("public-catalog__list_items");
     resumed.messageIncludes("Lamp");
     resumed.messageIncludes('"deployed":"api"');
-    resumed.messageIncludes("WORKFLOW-CHILD:release-check");
+    resumed.messageIncludes('"note":"WORKFLOW-CHILD:');
+    resumed.messageIncludes("release-check");
 
     const allEvents = [...parked.events, ...resumed.events];
     const workflowCallId = parked.toolCalls.find((call) => call.name === "workflow")?.callId;
