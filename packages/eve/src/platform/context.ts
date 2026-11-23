@@ -1,4 +1,4 @@
-import type { DeploymentBuild, DeploymentScope } from "#platform/entities.js";
+import type { DeploymentBuild, DeploymentScope, Identity } from "#platform/entities.js";
 import type { HostServices } from "#platform/services.js";
 import { createVercelPlatformContext } from "#platform/vercel/context.js";
 import type { WorkspaceAgentTransport } from "#public/definitions/workspace-agent.js";
@@ -23,7 +23,8 @@ export interface PlatformDeployment {
 
 export interface PlatformIdentity {
   token(): Promise<string>;
-  isPlatformIssuer(issuer: string | undefined): boolean;
+  verifyOidcCaller?: Identity["verifyOidcCaller"];
+  developmentCaller?: Identity["developmentCaller"];
   withDevelopmentRequestScope<T>(
     input: { readonly appRoot: string; readonly request: Request },
     callback: () => Promise<T>,

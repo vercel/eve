@@ -1,3 +1,8 @@
+import type { JWTPayload } from "#compiled/jose/index.js";
+import type {
+  ResolvedOidcAuthStrategy,
+  RouteStrategyAuthenticationResult,
+} from "#channel/auth/types.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { DevelopmentModelCredential } from "#internal/model-auth/development-broker-protocol.js";
 import { isPlatformDeclaration, type PlatformDeclaration } from "#platform/declaration.js";
@@ -53,7 +58,18 @@ export interface Storage {
   readonly documents?: MemoryDocumentBackend;
 }
 
+export interface OidcCallerInput {
+  readonly issuer: string;
+  readonly payload: JWTPayload;
+  readonly strategy: ResolvedOidcAuthStrategy;
+}
+
+export type OidcCallerVerdict =
+  | Extract<RouteStrategyAuthenticationResult, { kind: "authenticated" | "caller-not-allowed" }>
+  | { readonly kind: "continue"; readonly currentProject: boolean; readonly runtime: boolean };
+
 export interface Identity {
+  verifyOidcCaller?(input: OidcCallerInput): OidcCallerVerdict;
   developmentCaller?(caller: SessionAuthContext): boolean;
   developmentScope?<T>(
     input: { readonly appRoot: string; readonly request: Request },

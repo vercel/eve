@@ -6,7 +6,6 @@ import { vercelDeployment, vercelDeploymentHost } from "#platform/vercel/deploym
 import { isVercelEnvironment } from "#platform/vercel/environment.js";
 import { vercelIdentity } from "#platform/vercel/identity.js";
 import { vercelNetwork } from "#platform/vercel/network.js";
-import { isVercelOidcIssuer } from "#platform/vercel/project.js";
 import { toErrorMessage } from "#shared/errors.js";
 
 export function createVercelPlatformContext(): PlatformContext {
@@ -41,7 +40,8 @@ export function createVercelPlatformContext(): PlatformContext {
     },
     identity: {
       token: vercelNetwork.token,
-      isPlatformIssuer: (issuer) => isVercelOidcIssuer(issuer),
+      verifyOidcCaller: vercelIdentity.verifyOidcCaller,
+      developmentCaller: vercelIdentity.developmentCaller,
       withDevelopmentRequestScope: vercelIdentity.developmentScope,
       callbackHeaders: vercelNetwork.self,
     },

@@ -41,7 +41,6 @@ const selfHostedPlatform: PlatformContext = {
     token: async () => {
       throw new Error("this host has no workload identity");
     },
-    isPlatformIssuer: () => false,
     withDevelopmentRequestScope: async (_input, callback) => await callback(),
     callbackHeaders: () => ({}),
   },

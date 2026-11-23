@@ -37,7 +37,7 @@ export function resolveConnectionPrincipalFromAuth(
     });
   }
 
-  if (authorization.vercelConnect !== undefined && isVercelDevelopmentUser(current)) {
+  if (authorization.vercelConnect !== undefined && isPlatformDevelopmentCaller(current)) {
     return {
       attributes: current.attributes,
       id: current.subject ?? current.principalId,
@@ -53,13 +53,8 @@ export function resolveConnectionPrincipalFromAuth(
   };
 }
 
-export function isVercelDevelopmentUser(current: SessionAuthContext): boolean {
-  return (
-    current.authenticator === "oidc" &&
-    platformContext().identity.isPlatformIssuer(current.issuer) &&
-    current.attributes.environment === "development" &&
-    current.subject === current.attributes.user_id
-  );
+export function isPlatformDevelopmentCaller(current: SessionAuthContext): boolean {
+  return platformContext().identity.developmentCaller?.(current) ?? false;
 }
 
 function buildUserPrincipalRequiredMessage(
