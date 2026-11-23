@@ -18,7 +18,7 @@ vi.mock("#tracing/eve/otel-registration.js", () => ({
     shutdown: async () => {},
   }),
 }));
-const EVE_RUNTIME_KEY = Symbol.for("eve.runtime");
+const PROCESS_APP_KEY = Symbol.for("eve.app");
 
 const traceContext = (audience: "public" | "private" | "unknown") => ({
   agentName: "weather-agent",
@@ -30,7 +30,7 @@ const traceContext = (audience: "public" | "private" | "unknown") => ({
 
 describe("otel and authored provider composition", () => {
   beforeEach(() => {
-    delete (globalThis as Record<symbol, unknown>)[EVE_RUNTIME_KEY];
+    delete (globalThis as Record<symbol, unknown>)[PROCESS_APP_KEY];
   });
 
   it.each([

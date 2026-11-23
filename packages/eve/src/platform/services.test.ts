@@ -9,7 +9,7 @@ import { runtimeSpanProcessor } from "#platform/runtime-spans.js";
 import { defaultScheduleProvider } from "#platform/schedules.js";
 import { hasHostService, hostServices, type HostServices } from "#platform/services.js";
 import { createVercelPlatformContext } from "#platform/vercel/context.js";
-import { createEveRuntime, installEveRuntime } from "#runtime/eve-runtime.js";
+import { createProcessApp, installProcessApp } from "#runtime/app.js";
 
 const store = { kind: "host-store" };
 const scheduleProvider = { kind: "host-schedules" };
@@ -34,10 +34,10 @@ const allServices: HostServices = {
 
 let uninstall: (() => void) | undefined;
 function install(platform: Partial<PlatformContext>): PlatformContext {
-  const runtime = createEveRuntime();
+  const runtime = createProcessApp();
   const installed = { ...createVercelPlatformContext(), ...platform } as PlatformContext;
   runtime.platform = installed;
-  uninstall = installEveRuntime(runtime);
+  uninstall = installProcessApp(runtime);
   return installed;
 }
 

@@ -2,7 +2,7 @@ import type { DescribedAgent } from "#channel/agent-description.js";
 import type { InstalledSkillFiles } from "#channel/skill-files.js";
 import type { BundledCompiledArtifacts } from "#runtime/loaders/bundled-artifacts.js";
 import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
-import { eveRuntime } from "#runtime/eve-runtime.js";
+import { processApp } from "#runtime/app.js";
 import { createScopeStorage, type ScopeStorage } from "#context/scope-storage.js";
 
 export interface RuntimeSession {
@@ -82,8 +82,8 @@ if (globalContainer[RUNTIME_SESSION_STORAGE_GLOBAL_KEY] === undefined) {
 const runtimeSessionStorage = globalContainer[RUNTIME_SESSION_STORAGE_GLOBAL_KEY];
 
 function resolveProcessDefaultSession(): RuntimeSession {
-  const runtime = eveRuntime();
-  return (runtime.defaultSession ??= createRuntimeSession("process-default"));
+  const app = processApp();
+  return (app.defaultSession ??= createRuntimeSession("process-default"));
 }
 
 export function getActiveRuntimeSession(): RuntimeSession {

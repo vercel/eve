@@ -1,7 +1,7 @@
 import type { HostServices } from "#platform/services.js";
 import { createVercelPlatformContext } from "#platform/vercel/context.js";
 import type { WorkspaceAgentTransport } from "#public/definitions/workspace-agent.js";
-import { eveRuntime } from "#runtime/eve-runtime.js";
+import { processApp } from "#runtime/app.js";
 
 export type BuildTarget = "vercel" | "node";
 
@@ -66,8 +66,12 @@ export interface PlatformContext {
   readonly workspace: PlatformWorkspace;
 }
 
+export function createPlatformContext(): PlatformContext {
+  return createVercelPlatformContext();
+}
+
 let fallbackPlatform: PlatformContext | undefined;
 
 export function platformContext(): PlatformContext {
-  return eveRuntime().platform ?? (fallbackPlatform ??= createVercelPlatformContext());
+  return processApp().platform ?? (fallbackPlatform ??= createPlatformContext());
 }

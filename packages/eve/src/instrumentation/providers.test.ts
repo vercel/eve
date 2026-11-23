@@ -21,7 +21,7 @@ import {
   type InstrumentationSetupContext,
 } from "#public/instrumentation/provider.js";
 
-const EVE_RUNTIME_KEY = Symbol.for("eve.runtime");
+const PROCESS_APP_KEY = Symbol.for("eve.app");
 
 const traceContext = (audience: "public" | "private" | "unknown") => ({
   agentName: "weather",
@@ -38,7 +38,7 @@ function register(slot: string, value: unknown): Promise<void> {
 describe("registerInstrumentationProvider", () => {
   beforeEach(() => {
     vi.unstubAllEnvs();
-    delete (globalThis as Record<symbol, unknown>)[EVE_RUNTIME_KEY];
+    delete (globalThis as Record<symbol, unknown>)[PROCESS_APP_KEY];
   });
 
   it("registers a provider under its slot", async () => {
@@ -140,7 +140,7 @@ describe("registerInstrumentationProvider", () => {
 describe("seedInstrumentationProviders", () => {
   beforeEach(() => {
     vi.unstubAllEnvs();
-    delete (globalThis as Record<symbol, unknown>)[EVE_RUNTIME_KEY];
+    delete (globalThis as Record<symbol, unknown>)[PROCESS_APP_KEY];
     vi.stubEnv("EVE_TRACES", "off");
     vi.stubEnv("VERCEL_ENV", undefined);
     vi.stubEnv(DEVELOPMENT_WORKER_APP_ROOT_ENV, "/tmp/eve-seed-test");
@@ -220,7 +220,7 @@ describe("finalizeInstrumentationProviders", () => {
 
   beforeEach(() => {
     vi.unstubAllEnvs();
-    delete (globalThis as Record<symbol, unknown>)[EVE_RUNTIME_KEY];
+    delete (globalThis as Record<symbol, unknown>)[PROCESS_APP_KEY];
   });
 
   it("publishes to an authored handler", async () => {

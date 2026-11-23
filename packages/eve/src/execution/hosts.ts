@@ -9,7 +9,7 @@ import type { CreateRuntimeConfig } from "#execution/node-step.js";
 import type { AuthorizationCallbackPayload } from "#execution/session-inbox/inbox.js";
 import type { SessionEventStore } from "#execution/session-event-store.js";
 import type { ConnectionEventOwners } from "#runtime/connections/events/owners.js";
-import { eveRuntime } from "#runtime/eve-runtime.js";
+import { processApp } from "#runtime/app.js";
 import { HookNotFoundError, isRunNotFound, isRunTargetGone } from "#shared/run-errors.js";
 
 export interface HostedRoute {
@@ -59,7 +59,7 @@ export interface Hosts {
 }
 
 function hosts(): Hosts {
-  return eveRuntime().hosts;
+  return processApp().hosts;
 }
 
 export function registerHost(route: HostedRoute): () => void {

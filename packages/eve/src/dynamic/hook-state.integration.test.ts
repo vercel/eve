@@ -27,7 +27,7 @@ import { defineTool } from "#tools/definition.js";
 
 type Choice = "first" | "second";
 
-const EVE_RUNTIME_KEY = Symbol.for("eve.runtime");
+const PROCESS_APP_KEY = Symbol.for("eve.app");
 
 const choice = defineState<Choice>("test.turn-choice", () => "first");
 
@@ -138,7 +138,7 @@ describe("state a turn.started hook writes", () => {
     trace.disable();
     context.disable();
     propagation.disable();
-    delete (globalThis as Record<symbol, unknown>)[EVE_RUNTIME_KEY];
+    delete (globalThis as Record<symbol, unknown>)[PROCESS_APP_KEY];
   });
 
   it("chooses the model for every call of that turn, starting with the first", async () => {

@@ -581,7 +581,7 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
           });
           finalizeInstrumentationProviders({ serviceName: agentName });
           onTestFinished(() => {
-            delete (globalThis as Record<symbol, unknown>)[Symbol.for("eve.runtime")];
+            delete (globalThis as Record<symbol, unknown>)[Symbol.for("eve.app")];
           });
           await withHost(
             {

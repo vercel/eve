@@ -7,7 +7,7 @@ import {
 } from "#instrumentation/providers.js";
 import { defineInstrumentation } from "#public/instrumentation/index.js";
 
-const EVE_RUNTIME_KEY = Symbol.for("eve.runtime");
+const PROCESS_APP_KEY = Symbol.for("eve.app");
 
 const traceContext = (audience: "public" | "private" | "unknown") => ({
   agentName: "weather",
@@ -27,7 +27,7 @@ function deferred(): { readonly promise: Promise<void>; readonly resolve: () => 
 
 describe("authored instrumentation provider dispatch", () => {
   beforeEach(() => {
-    delete (globalThis as Record<symbol, unknown>)[EVE_RUNTIME_KEY];
+    delete (globalThis as Record<symbol, unknown>)[PROCESS_APP_KEY];
   });
 
   it("awaits setup in slot order while event handlers overlap", async () => {

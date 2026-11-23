@@ -268,12 +268,14 @@
  *             only in the Workflow binding, the named engine modules whose
  *             step IDs pin their paths, and test helpers. Everything else
  *             goes through `DurableHost`.
- *   rule 72 — Each `EveRuntime` slot has one owner module, and everything
- *             else uses that owner's accessor (`platformContext()`,
+ *   rule 72 — The process app's internals have one owner module each, and
+ *             everything else uses that owner's accessor (`platformContext()`,
  *             `requireDurableHost()`, `getInstrumentationRuntime()`, ...).
- *             Value imports of `#runtime/eve-runtime.js` and the
- *             `eve.runtime` key appear only in boot, the slot owners, and
- *             test helpers. Type-only imports of `EveRuntime` stay allowed.
+ *             `processApp()`, the other process-app values of
+ *             `#runtime/app.js`, and the `eve.app` key appear only in
+ *             the boot lifecycle, the owners, and test helpers. Type imports and
+ *             `openSession()`, which takes the app as an argument, stay
+ *             allowed.
  *   rule 73 — Each web twin in `src/runtime-env/` (`x.web.ts`) loads without
  *             Node: following its value imports, with `#runtime-env/*` resolved
  *             to web twins, it reaches no Node builtin and no Node-only package
@@ -1600,38 +1602,45 @@ function checkRule71(posix, content, violations) {
   }
 }
 
-// ---------- Rule 72: one owner per EveRuntime slot ----------
+// ---------- Rule 72: one owner per process-app internal ----------
 
-const EVE_RUNTIME_MODULE = "#runtime/eve-runtime.js";
-const EVE_RUNTIME_SLOT_OWNERS = new Set(
+const PROCESS_APP_MODULE = "#runtime/app.js";
+const PROCESS_APP_VALUES = new Set(["createProcessApp", "installProcessApp", "processApp"]);
+const PROCESS_APP_OWNERS = new Set(
   [
     "execution/hosts.ts",
     "instrumentation/providers.ts",
     "instrumentation/runtime-global.ts",
     "platform/context.ts",
-    "platform/install-runtime.ts",
-    "runtime/boot.ts",
-    "runtime/eve-runtime.ts",
+    "runtime/app.ts",
+    "runtime/lifecycle.ts",
     "runtime/sessions/runtime-session.ts",
+    "runtime/start.ts",
   ].map((file) => `${EVE_SRC}${file}`),
 );
 const NAMED_IMPORT_RE = /import\s*\{([^}]*)\}\s*from\s*(["'])([^"']+)\2/g;
+const NAMESPACE_OR_DYNAMIC_IMPORT_RE =
+  /(?:import\s*\*\s*as\s+\w+\s+from\s*|import\s*\(\s*)(["'])([^"']+)\1/g;
 
 function checkRule72(posix, content, violations) {
   if (!posix.startsWith(EVE_SRC) || posix.endsWith(".test.ts")) return;
-  if (EVE_RUNTIME_SLOT_OWNERS.has(posix) || posix.startsWith(`${EVE_SRC}internal/testing/`)) return;
-  const message = `reaches the process \`EveRuntime\` directly. Each runtime slot has one owner module; use its accessor (\`platformContext()\`, \`requireDurableHost()\`, \`getInstrumentationRuntime()\`, \`getActiveRuntimeSession()\`), or add a slot and its owner to \`EVE_RUNTIME_SLOT_OWNERS\`. Type-only imports of \`EveRuntime\` are fine.`;
+  if (PROCESS_APP_OWNERS.has(posix) || posix.startsWith(`${EVE_SRC}internal/testing/`)) return;
+  const message = `reaches the process app directly. Each internal of the app has one owner module; use its accessor (\`platformContext()\`, \`requireDurableHost()\`, \`getInstrumentationRuntime()\`, \`getActiveRuntimeSession()\`), take the \`App\` that \`start()\` returns as an argument, or add an internal and its owner to \`PROCESS_APP_OWNERS\`. Type imports from \`${PROCESS_APP_MODULE}\` are fine.`;
   const lineOf = (index) => content.slice(0, index).split("\n").length;
   for (const match of content.matchAll(NAMED_IMPORT_RE)) {
-    if (aliasOfSpecifier(posix, match[3]) !== EVE_RUNTIME_MODULE) continue;
-    const values = match[1]
+    if (aliasOfSpecifier(posix, match[3]) !== PROCESS_APP_MODULE) continue;
+    const reachesProcessApp = match[1]
       .split(",")
-      .map((name) => name.trim())
-      .filter((name) => name !== "" && !name.startsWith("type "));
-    if (values.length === 0) continue;
+      .map((name) => name.trim().split(/\s+as\s+/)[0])
+      .some((name) => PROCESS_APP_VALUES.has(name));
+    if (reachesProcessApp)
+      violations.push({ rule: 72, file: `${posix}:${lineOf(match.index)}`, message });
+  }
+  for (const match of content.matchAll(NAMESPACE_OR_DYNAMIC_IMPORT_RE)) {
+    if (aliasOfSpecifier(posix, match[2]) !== PROCESS_APP_MODULE) continue;
     violations.push({ rule: 72, file: `${posix}:${lineOf(match.index)}`, message });
   }
-  const key = content.indexOf('Symbol.for("eve.runtime")');
+  const key = content.indexOf('Symbol.for("eve.app")');
   if (key >= 0) violations.push({ rule: 72, file: `${posix}:${lineOf(key)}`, message });
 }
 
