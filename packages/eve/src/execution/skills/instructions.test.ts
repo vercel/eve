@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import type { CompiledSkillDefinition } from "#compiler/manifest.js";
-import type { CatalogSkill } from "#execution/catalog/skills.js";
+import type {
+  CatalogSkill,
+  SkillLoadProvenance,
+  SkillLoadResultPart,
+} from "#execution/catalog/skills.js";
 import {
   changedSkillAnnouncements,
   formatAvailableSkillsSection,
 } from "#execution/skills/instructions.js";
 import { announce } from "#definitions/messages.js";
-import { CAPPED_RESULT_PREFIX } from "#harness/compaction/engine.js";
 import type { CallRecord } from "#definitions/definition.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 
@@ -86,10 +89,21 @@ describe("formatAvailableSkillsSection", () => {
 });
 
 describe("changedSkillAnnouncements", () => {
-  const catalog = (markdown: string): ReadonlyMap<string, CatalogSkill> =>
-    new Map([["deploy", { deferred: false, description: "Deploys", markdown, name: "deploy" }]]);
+  const identity = { scope: "application:root", identity: "skills/deploy.ts" };
+  const provenance = (revision: string): SkillLoadProvenance => ({ ...identity, revision });
 
-  function load(callId: string, markdown: string): HarnessModelMessage[] {
+  function load(
+    callId: string,
+    markdown: string,
+    skillLoad?: SkillLoadProvenance,
+  ): HarnessModelMessage[] {
+    const result: SkillLoadResultPart = {
+      output: { type: "text", value: markdown },
+      ...(skillLoad !== undefined && { skillLoad }),
+      toolCallId: callId,
+      toolName: "eve__skill",
+      type: "tool-result",
+    };
     return [
       {
         content: [
@@ -103,60 +117,80 @@ describe("changedSkillAnnouncements", () => {
         role: "assistant",
       },
       {
-        content: [
-          {
-            output: { type: "text", value: markdown },
-            toolCallId: callId,
-            toolName: "eve__skill",
-            type: "tool-result",
-          },
-        ],
+        content: [result],
         role: "tool",
       },
     ];
   }
 
-  function step(draft: CallRecord, markdown: string): CallRecord {
-    return announce(draft, new Set(), changedSkillAnnouncements(catalog(markdown), draft.record));
+  function step(draft: CallRecord, revision: string, overrides: Partial<CatalogSkill> = {}) {
+    const catalog = new Map<string, CatalogSkill>([
+      [
+        "deploy",
+        {
+          deferred: false,
+          description: "Deploys",
+          markdown: revision,
+          name: "deploy",
+          provenance: provenance(revision),
+          ...overrides,
+        },
+      ],
+    ]);
+    return announce(draft, new Set(), changedSkillAnnouncements(catalog, draft.record));
   }
 
-  const added = (before: CallRecord, after: CallRecord) =>
-    after.record.slice(before.record.length).map(({ content }) => content);
+  const added = (after: ReturnType<typeof step>) =>
+    after.view.slice(after.record.length).map(({ content }) => content);
 
   it("says nothing while the loaded skill matches the current one", () => {
-    const draft: CallRecord = { historyState: {}, record: load("call_1", "v1") };
+    const draft: CallRecord = { historyState: {}, record: load("call_1", "v1", provenance("v1")) };
 
-    expect(added(draft, step(draft, "v1"))).toEqual([]);
+    expect(added(step(draft, "v1"))).toEqual([]);
   });
 
   it("asks once to reload a skill whose content changed after it was loaded", () => {
-    const draft: CallRecord = { historyState: {}, record: load("call_1", "v1") };
-    const changed = step(draft, "v2");
-
-    expect(added(draft, changed)).toEqual([
-      'Skill `deploy` changed since you loaded it. Load it again with eve__skill({ name: "deploy" }) before relying on it.',
-    ]);
-    expect(added(changed, step(changed, "v2"))).toEqual([]);
-  });
-
-  it("says nothing for a copy that compaction truncated", () => {
+    const markdown =
+      "[Truncated by eve: tool result reduced during context compaction. Re-run the tool if you need the full output.]\n\nRelease procedure.";
     const draft: CallRecord = {
       historyState: {},
-      record: load("call_1", `${CAPPED_RESULT_PREFIX}v1 clipped`),
+      record: load("call_1", markdown, provenance("v1")),
     };
+    const changed = step(draft, "v2");
 
-    expect(added(draft, step(draft, "v1"))).toEqual([]);
+    expect(added(changed)).toEqual([
+      'Skill `deploy` changed since you loaded it. Load it again with eve__skill({ name: "deploy" }) before relying on it.',
+    ]);
+    expect(changed.record).toEqual(draft.record);
+    expect(added(step(changed, "v2"))).toEqual([]);
+  });
+
+  it("does not fall back to an earlier proven load when the latest load is unproven", () => {
+    const record = [...load("call_1", "v1", provenance("v1")), ...load("call_2", "v2")];
+    expect(added(step({ historyState: {}, record }, "v3"))).toEqual([]);
+  });
+
+  it.each([
+    ["a different source", { ...provenance("v2"), identity: "skills/deploy.md" }],
+    ["a different scope", { ...provenance("v2"), scope: "application:another-agent" }],
+    ["an unproven current skill", undefined],
+  ])("does not ask to reload a same-name skill with %s", (_label, current) => {
+    const record = load("call_1", "v1", provenance("v1"));
+    expect(added(step({ historyState: {}, record }, "v2", { provenance: current }))).toEqual([]);
   });
 
   it("goes quiet after a reload and speaks again on the next change", () => {
-    const changed = step({ historyState: {}, record: load("call_1", "v1") }, "v2");
+    const changed = step(
+      { historyState: {}, record: load("call_1", "v1", provenance("v1")) },
+      "v2",
+    );
     const reloaded: CallRecord = {
       ...changed,
-      record: [...changed.record, ...load("call_2", "v2")],
+      record: [...changed.record, ...load("call_2", "v2", provenance("v2"))],
     };
     const quiet = step(reloaded, "v2");
 
-    expect(added(reloaded, quiet)).toEqual([]);
-    expect(added(quiet, step(quiet, "v3"))).toHaveLength(1);
+    expect(added(quiet)).toEqual([]);
+    expect(added(step(quiet, "v3"))).toHaveLength(1);
   });
 });

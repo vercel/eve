@@ -19,6 +19,7 @@ import {
   writeSkillPackageToSandbox,
 } from "#shared/skill-package.js";
 import { formatAvailableSkillsSection, skillFilePath } from "#execution/skills/instructions.js";
+import { announcementDigest } from "#harness/announcements.js";
 import { compiledBundleOf } from "#runtime/sessions/runtime-context-keys.js";
 import { slotsOf, slotValueOf } from "#definitions/state.js";
 import { namedEntries, type EntryKind } from "./named.js";
@@ -32,7 +33,9 @@ import {
 
 export const skills: Definition = {
   contribute: ({ container }) => {
-    const own = compiledBundleOf(container)?.resolvedAgent.skills ?? [];
+    const bundle = compiledBundleOf(container);
+    const own = bundle?.resolvedAgent.skills ?? [];
+    const scope = JSON.stringify(["application", bundle?.nodeId ?? null]);
     return {
       tools: () => ({
         skills: new Map(
@@ -44,6 +47,14 @@ export const skills: Definition = {
               markdown: skill.content,
               name: skill.name,
               path: skillFilePath(skill.name),
+              provenance:
+                skill.owner?.kind === "application"
+                  ? {
+                      identity: skill.sourceId,
+                      revision: announcementDigest("skill", skill.content),
+                      scope,
+                    }
+                  : undefined,
             },
           ]),
         ),

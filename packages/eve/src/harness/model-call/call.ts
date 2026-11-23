@@ -21,6 +21,7 @@ import {
 import { emitStreamContent } from "#harness/emission.js";
 import { historyCallNames, toEntryStep, toEntryStream } from "#harness/execute-call.js";
 import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
+import { SKILL_TOOL_NAME } from "#protocol/catalog-tools.js";
 import type { GenerationSteering } from "#harness/generation-steering.js";
 import { interruptStreamOnFailure } from "#harness/interruptible-stream.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
@@ -240,7 +241,9 @@ export class ModelCaller {
 
   private async buildRequest(): Promise<void> {
     const { prompt, step } = this;
+    const { catalog } = this.input;
     const call = {
+      skillCatalog: catalog.advertised.has(SKILL_TOOL_NAME) ? catalog.skills : undefined,
       currentInput: new Set(this.turnMessages),
       historyState: step.ctx.get(HistoryStateKey) ?? {},
       record: prompt.messages,

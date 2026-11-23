@@ -135,7 +135,7 @@ describe("a skill a new deployment changed", () => {
     expect(notices(next!.prompt)).toBe(1);
     expect(next!.prompt).toContain("Skill `foo` changed");
     expect(after!.prompt).toContain("Foo procedure v2.");
-    expect(notices(after!.prompt)).toBe(1);
+    expect(notices(after!.prompt)).toBe(0);
     for (const { prompt } of prompts) expect(prompt).not.toContain("Skill `bar` changed");
   }, 90_000);
 

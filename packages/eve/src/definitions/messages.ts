@@ -11,9 +11,10 @@ export function announce(
   draft: CallRecord,
   currentInput: ReadonlySet<HarnessModelMessage>,
   announcements: Readonly<Record<string, Announcement>>,
-): CallRecord {
-  if (awaitsProviderToolResult(draft.record)) return draft;
+): CallRecord & { readonly view: readonly HarnessModelMessage[] } {
+  if (awaitsProviderToolResult(draft.record)) return { ...draft, view: draft.record };
   const added: HarnessModelMessage[] = [];
+  const retained: HarnessModelMessage[] = [];
   let announced = draft.historyState.announcements;
   let messages = draft.historyState.messages;
   let changed = false;
@@ -26,18 +27,26 @@ export function announce(
     if (content !== undefined) {
       const message = createFrameworkUserMessage(announcement.kind ?? "context.state", content);
       added.push(message);
-      messages = { ...messages, [key]: announcementDigest(message.kind, message.content) };
+      if (announcement.transient !== true) {
+        retained.push(message);
+        messages = { ...messages, [key]: announcementDigest(message.kind, message.content) };
+      }
     }
     announced = { ...announced, [key]: announcement.value };
     changed = true;
   }
-  if (!changed) return draft;
+  if (!changed) return { ...draft, view: draft.record };
   const at = draft.record.findIndex((message) => currentInput.has(message));
   const index = at === -1 ? draft.record.length : at;
+  const insert = (entries: readonly HarnessModelMessage[]) =>
+    entries.length === 0
+      ? draft.record
+      : [...draft.record.slice(0, index), ...entries, ...draft.record.slice(index)];
+  const record = insert(retained);
   return {
-    ...draft,
     historyState: { ...draft.historyState, announcements: announced, messages },
-    record: [...draft.record.slice(0, index), ...added, ...draft.record.slice(index)],
+    record,
+    view: retained.length === added.length ? record : insert(added),
   };
 }
 

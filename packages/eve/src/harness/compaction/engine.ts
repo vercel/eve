@@ -1,5 +1,7 @@
 import type { ModelMessage } from "ai";
 
+import type { SkillLoadResultPart } from "#execution/catalog/skills.js";
+
 import {
   clipMiddleUtf16Safe,
   COMPACTION_CHECKPOINT_MARKER,
@@ -383,7 +385,7 @@ function overLimitError(config: CompactionConfig): CompactionOverLimitError {
 
 const CAPPED_RESULT_ANNOTATION =
   "[Truncated by eve: tool result reduced during context compaction. Re-run the tool if you need the full output.]";
-export const CAPPED_RESULT_PREFIX = `${CAPPED_RESULT_ANNOTATION}\n\n`;
+const CAPPED_RESULT_PREFIX = `${CAPPED_RESULT_ANNOTATION}\n\n`;
 
 function capToolResults(messages: readonly ModelMessage[]): ModelMessage[] {
   return messages.map((message) => {
@@ -407,8 +409,10 @@ function capToolResults(messages: readonly ModelMessage[]): ModelMessage[] {
       }
 
       changed = true;
+      const result: SkillLoadResultPart = part;
+      const { skillLoad: _skillLoad, ...retained } = result;
       return {
-        ...part,
+        ...retained,
         output: {
           type: output.type === "error-text" ? ("error-text" as const) : ("text" as const),
           value: `${CAPPED_RESULT_PREFIX}${clipMiddleUtf16Safe(serialized, TRANSCRIPT_PAYLOAD_LIMIT - CAPPED_RESULT_PREFIX.length)}`,

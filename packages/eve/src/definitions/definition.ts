@@ -114,6 +114,7 @@ export interface Effect {
 }
 
 export interface CallInput {
+  readonly skillCatalog?: ReadonlyMap<string, CatalogSkill>;
   readonly record: readonly HarnessModelMessage[];
   readonly currentInput: ReadonlySet<HarnessModelMessage>;
   readonly historyState: HistoryState;

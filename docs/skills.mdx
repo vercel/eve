@@ -68,7 +68,7 @@ A flat markdown skill without `description` uses the body's first non-empty line
 
 ## How loading works
 
-eve lists each skill's name and description in the system prompt. When a request matches a description, or names the skill, the model loads it with `eve__skill({ name })`. The skill's markdown becomes that call's result in the current turn. If a deploy later changes a skill the session already loaded, eve tells the model on its next step to load it again rather than follow the stale copy.
+eve lists each skill's name and description in the system prompt. When a request matches a description, or names the skill, the model loads it with `eve__skill({ name })`. The skill's markdown becomes that call's result in the current turn. If a deploy changes a skill authored in the agent’s `skills/` directory, eve asks the model to reload it when the session still holds a confirmed load of that same skill. This does not apply to dynamic skills.
 
 An agent with skills always has the [`eve__skill` tool](./concepts/built-in-tools#eve__search-eve__tool-and-eve__skill). Each load reports a `load-skill` action named for the skill, and `t.calledSkill` asserts it in [evals](./evals/assertions).
 

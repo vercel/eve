@@ -34,7 +34,9 @@ export const catalog: Definition = {
                   ...dynamicSkillAnnouncements(
                     [...callable.skills.values()].filter(({ source }) => source !== undefined),
                   ),
-                  ...changedSkillAnnouncements(callable.skills, ctx.call?.record ?? []),
+                  ...(ctx.call?.skillCatalog === undefined
+                    ? {}
+                    : changedSkillAnnouncements(ctx.call.skillCatalog, ctx.call.record)),
                 },
               }),
             ].filter(([name]) => !table.entries.has(name));

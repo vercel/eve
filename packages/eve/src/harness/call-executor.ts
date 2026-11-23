@@ -14,6 +14,7 @@ import {
   type TypedToolResult,
 } from "ai";
 
+import { type SkillLoadResultPart, skillLoadProvenance } from "#execution/catalog/skills.js";
 import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
 import {
   type AuthorizationSignal,
@@ -40,9 +41,8 @@ import { toModelSchema } from "#tools/schema.js";
 import { projectToolLabel } from "#harness/action-presentation.js";
 import { displayTitle } from "#protocol/session-projection/display-name.js";
 
-type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
 export interface CallResult {
-  readonly part: Extract<ToolResponsePart, { type: "tool-result" }>;
+  readonly part: SkillLoadResultPart;
 }
 
 const log = createLogger("harness.tool-loop");
@@ -162,6 +162,12 @@ export async function executeToolCall(
     input.beforeExecute?.();
     await telemetry.started();
     let executionMs = 0;
+    const executeOptions = {
+      ...(input.responder !== undefined && { approval: { responder: input.responder } }),
+      abortSignal: input.abortSignal,
+      messages: [...input.messages],
+      toolCallId: callId,
+    };
     try {
       await telemetry.execute(async () => {
         const startedAt = performance.now();
@@ -170,17 +176,7 @@ export async function executeToolCall(
           await input.publish(startCall(clearance));
           await withUsageCall(callId, async () => {
             invoked = true;
-            const executed = invokeTool(
-              definition,
-              args,
-              {
-                ...(input.responder !== undefined && { approval: { responder: input.responder } }),
-                abortSignal: input.abortSignal,
-                messages: [...input.messages],
-                toolCallId: callId,
-              },
-              clearance,
-            );
+            const executed = invokeTool(definition, args, executeOptions, clearance);
             const abandon = approval === "evaluate" ? input.abortSignal : undefined;
             if (isAsyncIterable(executed)) {
               for await (const partial of untilAborted(executed, abandon)) {
@@ -243,11 +239,14 @@ export async function executeToolCall(
       toolName,
       type: "tool-result",
     } as TypedToolResult<ToolSet>);
+    const modelOutput = failed
+      ? { type: "error-text" as const, value: failure }
+      : await toolCallModelOutput(definition, output, callId);
+    const skillLoad = modelOutput.type === "text" ? skillLoadProvenance(executeOptions) : undefined;
     completed = {
       part: {
-        output: failed
-          ? { type: "error-text", value: failure }
-          : await toolCallModelOutput(definition, output, callId),
+        output: modelOutput,
+        ...(skillLoad !== undefined && { skillLoad }),
         toolCallId: callId,
         toolName,
         type: "tool-result",
