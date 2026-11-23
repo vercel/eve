@@ -188,7 +188,15 @@ test("a metrics outage does not disrupt the rest of the turn's work", async () =
   }
 });
 
+// Either works: `idleTimeoutMs: 0` on the environment, so eve stops the sandbox as soon as the
+// session goes idle, or an agent-wide `turn.settled` hook that stops it.
 test("stops the sandbox when a turn finishes", async () => {
+  try {
+    await sandboxModule();
+  } catch {
+    // A missing sandbox fails its own tests; a hook can still stop the sandbox here.
+  }
+  if (environmentOptions?.idleTimeoutMs === 0) return;
   vi.stubGlobal(
     "fetch",
     vi.fn(async () => new Response(null, { status: 202 })),
