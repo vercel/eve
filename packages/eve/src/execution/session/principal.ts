@@ -33,7 +33,6 @@ export function continueTurnAuth<T extends SessionAuthContext | null | undefined
   if (auth === undefined) return turnAuth;
   if (principalOf(auth) !== principalOf(turnAuth)) {
     if (policy === "retain") return turnAuth;
-    if (policy === "adopt") return auth;
     throw new Error(
       "A message from another principal cannot join a running turn. Gate it with isSteeringDelivery so it waits for the turn to end.",
     );

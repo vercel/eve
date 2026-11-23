@@ -83,6 +83,7 @@ export type {
   ClientSessionState,
   ReconnectOptions,
   TokenValue,
+  TurnMode,
 } from "#client/types.js";
 
 export type {

@@ -173,13 +173,11 @@ export class SessionInputQueue {
           paused: options?.paused,
         }),
     );
-    const groupOf = ({ delivery }: QueuedDelivery) => {
-      const sender = delivery.auth === undefined ? turn.principal : principalOf(delivery.auth);
-      return sender === turn.principal ? sender : `${sender}\n${delivery.principalPolicy ?? ""}`;
-    };
+    const senderOf = ({ delivery }: QueuedDelivery) =>
+      delivery.auth === undefined ? turn.principal : principalOf(delivery.auth);
     const first = eligible[0];
     if (first === undefined) return undefined;
-    const end = eligible.findIndex((entry) => groupOf(entry) !== groupOf(first));
+    const end = eligible.findIndex((entry) => senderOf(entry) !== senderOf(first));
     const steering = end === -1 ? eligible : eligible.slice(0, end);
     this.retain((entry) => entry.kind !== "delivery" || !steering.includes(entry));
     return {
@@ -270,7 +268,7 @@ export function isSteeringDelivery(
 
 function joinsAnotherTurn(delivery: DeliverHookPayload): boolean {
   return (
-    (delivery.principalPolicy === "retain" || delivery.principalPolicy === "adopt") &&
+    delivery.principalPolicy === "retain" &&
     delivery.auth != null &&
     principalOf(delivery.auth) !== ANONYMOUS_PRINCIPAL
   );

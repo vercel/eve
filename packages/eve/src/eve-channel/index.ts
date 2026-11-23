@@ -486,6 +486,7 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
         let context: readonly string[] | undefined;
         let history: readonly SessionHistoryMessage[] | undefined;
         let title: string | undefined;
+        let hookTurnPolicy: EveChannelConfig["turnPolicy"];
         let dispatchAuth: SessionAuthContext | null = forwarded.auth;
         if (body.message !== undefined) {
           const messageResult = await resolveOnMessage({
@@ -495,12 +496,14 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
             message: body.message,
             request: req,
             sessionId,
+            turnPolicy: body.turnPolicy,
           });
           if (messageResult instanceof Response) return messageResult;
           clientContext = messageResult.clientContext;
           context = messageResult.context;
           history = messageResult.history;
           title = messageResult.title;
+          hookTurnPolicy = messageResult.turnPolicy;
           dispatchAuth = messageResult.auth;
         }
 
@@ -515,7 +518,7 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
               context,
               history,
               outputSchema: body.outputSchema,
-              turnPolicy: turnPolicyForRequest(body.turnPolicy, input.turnPolicy),
+              turnPolicy: hookTurnPolicy ?? turnPolicyForRequest(body.turnPolicy, input.turnPolicy),
               title,
               ...(body.idempotencyKey !== undefined && {
                 deliveryId: await deliveryIdForIdempotencyKey(body.idempotencyKey),

@@ -419,3 +419,62 @@ test("scope resolvers see the turn and the parent session, from tools and per-tu
   );
   assert.deepEqual([...new Set(resolved)], ["turn-1 in root-1", "turn-2 in root-1"]);
 });
+
+test("when another person steers the turn, personal skill reads and writes ask the caller while shared reads stay open", async () => {
+  mount();
+  await run(create, { ...deploy }, context());
+  await run(create, { ...deploy, scope: "channel" }, context({ approvedBy: alice }));
+
+  const steeredCtx = {
+    abortSignal: new AbortController().signal,
+    callId: "call-steered",
+    conversation: inChannel,
+    session: {
+      id: "session-1",
+      turn: { id: "turn-1", sequence: 1 },
+      auth: { current: alice, initiator: alice, steeredBy: [bob] },
+    },
+  };
+  const createApproval =
+    typeof create.approval === "function" ? create.approval : create.approval!.request;
+  assert.equal(
+    await createApproval({
+      ...steeredCtx,
+      toolInput: { ...deploy, name: "steered-personal" },
+      toolName: "create",
+    } as never),
+    "user-approval",
+  );
+  assert.equal(
+    await (list.approval as (ctx: never) => unknown)({
+      ...steeredCtx,
+      toolInput: {},
+      toolName: "list",
+    } as never),
+    "user-approval",
+  );
+  assert.equal(
+    await (read.approval as (ctx: never) => unknown)({
+      ...steeredCtx,
+      toolInput: { name: "deploy" },
+      toolName: "read",
+    } as never),
+    "user-approval",
+  );
+  assert.equal(
+    await (list.approval as (ctx: never) => unknown)({
+      ...steeredCtx,
+      toolInput: { scope: "channel" },
+      toolName: "list",
+    } as never),
+    "not-applicable",
+  );
+  assert.equal(
+    await (read.approval as (ctx: never) => unknown)({
+      ...steeredCtx,
+      toolInput: { name: "deploy", scope: "channel" },
+      toolName: "read",
+    } as never),
+    "not-applicable",
+  );
+});

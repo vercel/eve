@@ -67,13 +67,7 @@ import type { DeliverPayload, SessionAuthContext } from "#channel/types.js";
 import { coalesceTurnInputs, validateHarnessModelMessages } from "#harness/messages.js";
 import type { HarnessSession, HarnessStepInput, StepInput, StepResult } from "#harness/types.js";
 import { attributeAnswers } from "#execution/session/answer-caller.js";
-import {
-  ANONYMOUS_PRINCIPAL,
-  continueTurnAuth,
-  principalOf,
-  steeredByAfter,
-} from "#execution/session/principal.js";
-import { APPROVE_OPTION_ID } from "#protocol/interaction-options.js";
+import { continueTurnAuth, principalOf, steeredByAfter } from "#execution/session/principal.js";
 import type {
   DurableStepResult,
   TurnStepInput,
@@ -263,11 +257,31 @@ async function runSessionStepBody(
     }
   }
   const previousAuth = ctx.get(AuthKey);
+  const previousSteeredBy = ctx.get(SteeredByKey);
   const hadInitiator = ctx.has(InitiatorAuthKey);
+  const initialEmissionState = turnPosition(currentProjection(ctx));
+  const startedBetweenTurns = isBetweenTurns(currentProjection(ctx));
+  const hasMessagePayload =
+    delivery?.payloads.some((payload) => payload.message !== undefined) === true;
 
+  if (startedBetweenTurns && initialEmissionState.sessionStarted) setSteeredBy(ctx, []);
   if (delivery?.auth !== undefined) {
-    ctx.set(AuthKey, delivery.auth ?? null);
-    if (!ctx.has(InitiatorAuthKey)) ctx.set(InitiatorAuthKey, delivery.auth ?? null);
+    if (startedBetweenTurns) {
+      ctx.set(AuthKey, delivery.auth ?? null);
+      if (!ctx.has(InitiatorAuthKey)) ctx.set(InitiatorAuthKey, delivery.auth ?? null);
+    } else if (hasMessagePayload && principalOf(delivery.auth) === principalOf(previousAuth)) {
+      ctx.set(AuthKey, delivery.auth ?? null);
+    }
+  }
+  if (delivery !== undefined && hasMessagePayload) {
+    if (delivery.steeredBy !== undefined) setSteeredBy(ctx, delivery.steeredBy);
+    else if (
+      !startedBetweenTurns &&
+      (delivery.principalPolicy === "retain" ||
+        (delivery.auth !== undefined && principalOf(delivery.auth) === principalOf(previousAuth)))
+    ) {
+      setSteeredBy(ctx, steeredByAfter(previousSteeredBy ?? [], previousAuth, delivery.auth));
+    }
   }
   const requester =
     delivery === undefined
@@ -293,8 +307,6 @@ async function runSessionStepBody(
     sessionId: initialSession.sessionId,
   });
   bindMemoryInstrumentation(ctx, instrumentation?.memory);
-  const initialEmissionState = turnPosition(currentProjection(ctx));
-  const startedBetweenTurns = isBetweenTurns(currentProjection(ctx));
   if (
     !initialEmissionState.sessionStarted &&
     !ctx.has(SessionTitleKey) &&
@@ -368,9 +380,11 @@ async function runSessionStepBody(
       let accepted = 0;
       try {
         for (const payload of delivery.payloads) {
+          const deliveredPayload =
+            delivery.auth === undefined ? payload : { ...payload, auth: delivery.auth };
           const result = adapter.deliver
-            ? await adapter.deliver(payload, adapterCtx)
-            : defaultDeliverResult(payload);
+            ? await adapter.deliver(deliveredPayload, adapterCtx)
+            : defaultDeliverResult(deliveredPayload);
           if (result === undefined || result === null) {
             delivered.push({ input: undefined, payload });
             continue;
@@ -419,7 +433,7 @@ async function runSessionStepBody(
       turnAuth =
         resolved?.message === undefined
           ? previousAuth
-          : continueTurnAuth(previousAuth, turnAuth, delivery.principalPolicy);
+          : continueTurnAuth(previousAuth, delivery.auth, delivery.principalPolicy);
     }
     if (turnAuth === undefined) ctx.delete(AuthKey);
     else ctx.set(AuthKey, turnAuth);
@@ -432,10 +446,10 @@ async function runSessionStepBody(
     ) {
       if (delivery.steeredBy !== undefined) setSteeredBy(ctx, delivery.steeredBy);
       else if (!startedBetweenTurns) {
-        setSteeredBy(ctx, steeredByAfter(ctx.get(SteeredByKey) ?? [], turnAuth, delivery.auth));
+        setSteeredBy(ctx, steeredByAfter(previousSteeredBy ?? [], turnAuth, delivery.auth));
       }
-    } else if (callerApproved(answers, previousAuth, delivery?.auth)) {
-      setSteeredBy(ctx, []);
+    } else if (!startedBetweenTurns) {
+      setSteeredBy(ctx, previousSteeredBy ?? []);
     }
     if (ignoredActiveDelivery) {
       adapterCtx.state = previousAdapterState!;
@@ -790,22 +804,6 @@ function ignoreTurnCancellation(error: unknown): void {
 function setSteeredBy(ctx: ContextContainer, steeredBy: readonly SessionAuthContext[]): void {
   if (steeredBy.length === 0) ctx.delete(SteeredByKey);
   else ctx.set(SteeredByKey, steeredBy);
-}
-
-function callerApproved(
-  answers: HarnessStepInput | undefined,
-  caller: SessionAuthContext | null | undefined,
-  responder: SessionAuthContext | null | undefined,
-): boolean {
-  if (caller == null || responder == null) return false;
-  const principal = principalOf(caller);
-  return (
-    principal !== ANONYMOUS_PRINCIPAL &&
-    principal === principalOf(responder) &&
-    (answers?.answers ?? []).some(
-      (answer) => answer.responder !== undefined && answer.optionId === APPROVE_OPTION_ID,
-    )
-  );
 }
 
 function ownSignInAnswer(

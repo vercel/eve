@@ -47,17 +47,15 @@ export interface SharedDelivery {
 
 /**
  * Posts to the shared channel's thread as `principalId`, the way a teammate
- * would. `route` picks the thread policy: `messages` retains the running turn's
- * caller, and `handover` lets the sender adopt it.
+ * would. The channel retains the running turn's caller.
  */
 export async function postMessage(
   target: EveEvalTargetHandle,
-  route: "messages" | "handover",
   threadId: string,
   principalId: string,
   message: string,
 ): Promise<SharedDelivery> {
-  const path = `/shared/${threadId}/${route}`;
+  const path = `/shared/${threadId}/messages`;
   const response = await target.fetch(path, {
     body: JSON.stringify({ message }),
     headers: { "content-type": "application/json", "x-eve-fixture-user": principalId },

@@ -112,13 +112,12 @@ export default defineChannel({
 });
 ```
 
-| `principal`         | Behavior                                                                                                               |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `"match"` (default) | Another person's message waits for the turn to end, then starts a turn as its sender.                                  |
-| `"retain"`          | Another signed-in person's message joins the running turn as input. The turn retains its caller.                       |
-| `"adopt"`           | Another signed-in person's message joins the running turn, and the sender becomes its caller from the next model call. |
+| `principal`         | Behavior                                                                                         |
+| ------------------- | ------------------------------------------------------------------------------------------------ |
+| `"match"` (default) | Another person's message waits for the turn to end, then starts a turn as its sender.            |
+| `"retain"`          | Another signed-in person's message joins the running turn as input. The turn retains its caller. |
 
-`"steer"` is short for `{ mode: "steer" }`, and `"queue"` for `{ mode: "queue" }`. `principal` is server-side only: set it on a channel definition or a server-side send. An HTTP request body and the client SDK accept only `"steer"` or `"queue"`. See [A turn runs as one principal](/docs/concepts/security-model#a-turn-runs-as-one-principal).
+`"steer"` is short for `{ mode: "steer" }`, and `"queue"` for `{ mode: "queue" }`. `principal` is server-side only: set it on a channel definition, in a server-side send, or in a built-in channel's message hook result. An HTTP request body and the client SDK accept only `"steer"` or `"queue"`. See [A turn runs as one principal](/docs/concepts/security-model#a-turn-runs-as-one-principal).
 
 `from(address).send(...)`, fixed `Session.send(...)`, cross-channel sends, and Chat SDK bridge sends accept a per-send `turnPolicy` override, which replaces the channel's `turnPolicy`. A send with only `answers` answers its pending request without joining the turn. Use `cancel()` to stop without a replacement.
 

@@ -137,9 +137,8 @@ export type TurnMode = "steer" | "queue";
  * What a steering message does when the running turn runs as another principal.
  * - `"match"` (the default): it joins only a turn whose caller is its sender.
  * - `"retain"`: it also joins another principal's turn as input, and the turn retains its caller.
- * - `"adopt"`: it also joins another principal's turn, and the turn adopts the sender as its caller.
  */
-export type PrincipalPolicy = "match" | "retain" | "adopt";
+export type PrincipalPolicy = "match" | "retain";
 
 /**
  * Controls how a channel message interacts with an active turn: `"steer"` joins it, and
@@ -150,7 +149,6 @@ export type PrincipalPolicy = "match" | "retain" | "adopt";
  * else:
  * - `"match"` (the default): the message waits for the turn to end, then starts a turn as its sender.
  * - `"retain"`: the message joins as input, and the turn retains its caller.
- * - `"adopt"`: the message joins, and the turn adopts the sender as its caller.
  */
 export type TurnPolicy =
   | TurnMode

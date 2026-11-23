@@ -725,7 +725,7 @@ describe("eve ID-addressed session routes", () => {
       new Request("https://eve.test/eve/v1/session/wrun_A", {
         body: JSON.stringify({
           message: "follow-up",
-          turnPolicy: { mode: "steer", principal: "adopt" },
+          turnPolicy: { mode: "steer", principal: "retain" },
         }),
         headers: { "content-type": "application/json" },
         method: "POST",
@@ -735,6 +735,46 @@ describe("eve ID-addressed session routes", () => {
 
     expect(response.status).toBe(400);
     expect(session.send).not.toHaveBeenCalled();
+  });
+
+  it("lets onMessage read the request's turnPolicy and override it per message", async () => {
+    const session = createFixedSession();
+    const seenModes: (string | undefined)[] = [];
+    const handler = route("POST", "/eve/v1/session/:sessionId", {
+      auth: none(),
+      turnPolicy: "queue",
+      onMessage(ctx) {
+        seenModes.push(ctx.eve.turnPolicy);
+        return {
+          auth: ctx.eve.caller,
+          turnPolicy:
+            ctx.eve.turnPolicy === "queue" ? "queue" : { mode: "steer", principal: "retain" },
+        };
+      },
+    });
+
+    await handler(
+      new Request("https://eve.test/eve/v1/session/wrun_A", {
+        body: JSON.stringify({ message: "steered", turnPolicy: "steer" }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+      createArgs(session),
+    );
+    await handler(
+      new Request("https://eve.test/eve/v1/session/wrun_A", {
+        body: JSON.stringify({ message: "queued", turnPolicy: "queue" }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+      createArgs(session),
+    );
+
+    expect(seenModes).toEqual(["steer", "queue"]);
+    expect(vi.mocked(session.send).mock.calls.map(([, opts]) => opts.turnPolicy)).toEqual([
+      { mode: "steer", principal: "retain" },
+      "queue",
+    ]);
   });
 
   it("names a keyed message's delivery by its key, so a repeat is the same delivery", async () => {

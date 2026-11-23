@@ -21,7 +21,10 @@ import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import type { SessionEvent, SessionStreamEvent } from "#protocol/session-event.js";
 import { defineAgent } from "#public/definitions/agent.js";
+import { defineChannel, POST } from "#public/definitions/channel.js";
 import { defineDynamic } from "#public/definitions/model.js";
+import { defineMemory, defineMemoryProvider } from "#public/memory/index.js";
+import { byPrincipal } from "#public/memory/scope.js";
 import type { AuthorizationDefinition } from "#shared/connection-types.js";
 import { always, steered } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
@@ -138,6 +141,7 @@ async function answerAs(
 async function withSession(
   name: string,
   input: {
+    readonly channelKind?: string;
     readonly message: string;
     readonly model: MockLanguageModelV4;
     readonly modules: Modules;
@@ -145,6 +149,7 @@ async function withSession(
   },
   body: (run: SessionRun) => Promise<void>,
 ) {
+  const channelKind = input.channelKind ?? "http";
   const runtime = await createTestRuntime({
     agent: {
       definition: defineAgent({
@@ -157,7 +162,7 @@ async function withSession(
     },
     modules: input.modules,
   });
-  const continuationToken = `http:${name}`;
+  const continuationToken = `${channelKind}:${name}`;
 
   await runtime.run(async () => {
     const run = await startSessionOwner(workflowEntry, [
@@ -166,7 +171,7 @@ async function withSession(
         ownerDeploymentId: "dpl_inline",
         input: { message: input.message },
         serializedContext: {
-          ...buildSerializedContext({ auth: ALICE, channelKind: "http", continuationToken }),
+          ...buildSerializedContext({ auth: ALICE, channelKind, continuationToken }),
           "eve.capabilities": { requestInput: true },
         },
       },
@@ -188,7 +193,7 @@ async function withSession(
           await resumeHook(sessionInboxHookToken(continuationToken), {
             auth,
             kind: "send",
-            delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
+            delivery: createChannelDeliveryMetadata({ channelKind, channelName: "test" }),
             payload: { message },
             ...(principalPolicy !== undefined && { principalPolicy }),
           });
@@ -260,6 +265,8 @@ async function withSteeringRun(
   body: (run: SteeringRun) => Promise<void>,
   options: {
     readonly approval?: Approval;
+    readonly channelKind?: string;
+    readonly extraModules?: Modules;
     readonly holds?: number;
     readonly model?: MockLanguageModelV4;
     readonly uncaught?: boolean;
@@ -277,10 +284,15 @@ async function withSteeringRun(
   await withSession(
     name,
     {
+      channelKind: options.channelKind,
       message: "Use hold_open.",
       model: options.model ?? scriptedModel,
       release: () => gates[held++]?.release(),
-      modules: [holdOpenTool(gates.map(({ gate }) => gate)), reportAccessTool(reports, options)],
+      modules: [
+        holdOpenTool(gates.map(({ gate }) => gate)),
+        reportAccessTool(reports, options),
+        ...(options.extraModules ?? []),
+      ],
     },
     async (session) => {
       await body({
@@ -629,42 +641,107 @@ describe("principal policy", () => {
     );
   }, 60_000);
 
-  it("an adopt message makes its sender the turn's caller", async () => {
-    const holdOpenCalls = new Set<string>();
-    await withSteeringRun("principal-policy-adopt", async (run) => {
-      const started = await run.nextUntil("hold_open started", holdOpenStarted(holdOpenCalls));
-      await run.send(BOB, "Actually include everyone.", "adopt");
-      await run.send(BOB, "And add a summary.");
-      run.release();
-      const turn = await run.next("turn after both messages");
-      const seen = [...started, ...turn];
-
-      expect(run.reports).toEqual([
-        {
-          caller: "bob",
-          reason: undefined,
-          steeredBy: undefined,
-          token: "token-for-bob",
-        },
-        {
-          caller: "bob",
-          reason: undefined,
-          steeredBy: undefined,
-          token: "token-for-bob",
-        },
-      ]);
-      const turns = filterEventsByType(seen, "turn.started");
-      expect(turns).toHaveLength(1);
-      const bobMessages = filterEventsByType(seen, "delivery.consumed").filter((event) =>
-        textOfDelivery(event).some((text) =>
-          ["Actually include everyone.", "And add a summary."].includes(text),
-        ),
-      );
-      expect(bobMessages.map((event) => event.data.turnId)).toEqual([
-        turns[0]!.data.turnId,
-        turns[0]!.data.turnId,
-      ]);
+  it("a channel deliver hook sees the retained caller, steeredBy, and payload.auth, and skips byPrincipal capture while steered", async () => {
+    const observedDeliveries: {
+      readonly current: string | null;
+      readonly payloadAuth: string | null | undefined;
+      readonly steeredBy: readonly string[] | undefined;
+    }[] = [];
+    const capturedScopes: string[] = [];
+    const channel = defineChannel({
+      deliver(payload, ctx) {
+        observedDeliveries.push({
+          current: ctx.session.auth.current?.principalId ?? null,
+          payloadAuth: payload.auth === undefined ? undefined : (payload.auth?.principalId ?? null),
+          steeredBy: ctx.session.auth.steeredBy?.map((person) => person.principalId),
+        });
+      },
+      routes: [POST("/messages", async () => new Response(null, { status: 204 }))],
     });
+    const personalMemory = defineMemory({
+      provider: defineMemoryProvider({
+        capture: {
+          "turn.completed": async ({ memory }) => {
+            capturedScopes.push(memory.scope.key);
+          },
+        },
+        recall: { "turn.started": async () => null },
+      }),
+      scope: byPrincipal,
+    });
+    const holdOpenCalls = new Set<string>();
+    await withSteeringRun(
+      "principal-policy-deliver-and-memory",
+      async (run) => {
+        await run.nextUntil("hold_open started", holdOpenStarted(holdOpenCalls));
+        await run.send(BOB, "Actually include everyone.", "retain");
+        run.release();
+        await run.next("steered turn completed");
+
+        expect(observedDeliveries).toEqual([
+          { current: "alice", payloadAuth: "alice", steeredBy: undefined },
+          { current: "alice", payloadAuth: "bob", steeredBy: ["bob"] },
+        ]);
+        expect(run.reports).toEqual([
+          { caller: "alice", reason: "turn_steered", steeredBy: ["bob"], token: undefined },
+        ]);
+        expect(capturedScopes).toEqual([]);
+      },
+      {
+        channelKind: "channel:shared",
+        extraModules: [
+          { loadNamespace: async () => ({ default: channel }), logicalPath: "channels/shared.ts" },
+          {
+            loadNamespace: async () => ({ default: personalMemory }),
+            logicalPath: "memory/personal.ts",
+          },
+        ],
+      },
+    );
+  }, 60_000);
+
+  it("a caller's rejected response-policy approval does not clear steeredBy", async () => {
+    const holdOpenCalls = new Set<string>();
+    await withSteeringRun(
+      "principal-policy-rejected-response",
+      async (run) => {
+        await run.nextUntil("hold_open started", holdOpenStarted(holdOpenCalls));
+        await run.send(BOB, "Actually include everyone.", "retain");
+        run.release();
+        const paused = await run.nextUntil(
+          "report_access approval",
+          (event) => event.type === "interaction.opened" && event.data.request.kind === "approval",
+        );
+        const approval = filterEventsByType(paused, "interaction.opened").find(
+          (event) => event.data.request.kind === "approval",
+        )!;
+
+        const refused = await run.answer(ALICE, approval.data.interactionId, "response.settled");
+        expect(
+          filterEventsByType(refused, "response.settled").map((event) => event.data.outcome),
+        ).toEqual(["refused"]);
+
+        await answerAs(run.commandInbox, BOB, approval.data.interactionId);
+        await run.nextUntil("turn settled", (event) => event.type === "turn.settled");
+        expect(run.reports).toEqual([
+          {
+            caller: "alice",
+            reason: "turn_steered",
+            steeredBy: ["bob"],
+            token: undefined,
+          },
+        ]);
+      },
+      {
+        approval: {
+          request: always(),
+          response: ({ response }) =>
+            response.principal.principalId === "bob"
+              ? { status: "allowed" }
+              : { reason: "Peer approval required.", status: "rejected" },
+        },
+      },
+    );
   }, 60_000);
 
   it("a held call fails as a tool error the model reads, and the turn goes on", async () => {

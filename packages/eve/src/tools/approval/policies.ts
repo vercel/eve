@@ -107,6 +107,14 @@ export function once<TInput = unknown>(): ApprovalPolicy<TInput> {
 
 const STEERED_WITHOUT_CALLER =
   "Other people's messages steered this turn, and it has no signed-in caller to approve the call.";
+const STEERED_APPROVAL_POLICY = Symbol.for("eve.approval.steered");
+
+export function isSteeredApprovalPolicy(policy: unknown): boolean {
+  return (
+    typeof policy === "function" &&
+    (policy as { readonly [STEERED_APPROVAL_POLICY]?: true })[STEERED_APPROVAL_POLICY] === true
+  );
+}
 
 /**
  * Returns an `approval` callback that asks the turn's caller before a call made while other
@@ -114,10 +122,12 @@ const STEERED_WITHOUT_CALLER =
  * other call to the tool's and agent's other policies.
  */
 export function steered<TInput = unknown>(): ApprovalPolicy<TInput> {
-  return ({ session }) => {
+  const policy: ApprovalPolicy<TInput> = ({ session }) => {
     if ((session.auth.steeredBy ?? []).length === 0) return undefined;
     return session.auth.current?.principalType === "user"
       ? "user-approval"
       : { type: "denied", reason: STEERED_WITHOUT_CALLER };
   };
+  Object.defineProperty(policy, STEERED_APPROVAL_POLICY, { value: true });
+  return policy;
 }

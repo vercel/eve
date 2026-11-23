@@ -21,9 +21,11 @@ import {
   type MemoryScope,
   type MemoryTurnContext,
 } from "#public/memory/index.js";
+import { steeredModelCall, turnSteeredMessage } from "#runtime/connections/identity-hold.js";
 import { compiledBundleOf, SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import { runtimeNodeId } from "#runtime/sessions/session-agent.js";
 import type { ResolvedMemoryDefinition } from "#runtime/types.js";
+import { trackPrincipalScope } from "#shared/principal-scope.js";
 import {
   createMemoryScope,
   type NormalizedMemoryRecallMessage,
@@ -114,8 +116,11 @@ async function captureTurn(
   const container = ctx.container as ContextContainer;
   const messages = requireHistory(ctx.history, memory.logicalPath);
   const turnContext = activeTurn(messages);
-  const scope = await resolveMemoryScope(memory, commitScopeContext(ctx));
-  if (scope === null) return;
+  const scopeCtx = commitScopeContext(ctx);
+  const resolved = await resolveTrackedMemoryScope(memory, scopeCtx);
+  if (resolved === null) return;
+  if (resolved.callerScoped && (scopeCtx.session.auth.steeredBy ?? []).length > 0) return;
+  const { scope } = resolved;
   const id = operationId(sessionIdOf(container), memory.slot, "turn.completed", turnContext);
   try {
     await instrumentMemoryOperation(
@@ -210,8 +215,11 @@ async function captureBeforeCompaction(
   const container = ctx.container as ContextContainer;
   try {
     const messages = requireHistory(ctx.history, memory.logicalPath);
-    const scope = await resolveMemoryScope(memory, commitScopeContext(ctx));
-    if (scope === null) return;
+    const scopeCtx = commitScopeContext(ctx);
+    const resolved = await resolveTrackedMemoryScope(memory, scopeCtx);
+    if (resolved === null) return;
+    if (resolved.callerScoped && (scopeCtx.session.auth.steeredBy ?? []).length > 0) return;
+    const { scope } = resolved;
     const turn = started.data.turnId === undefined ? null : activeTurn(messages);
     const id = [
       "eve-memory-operation-v1",
@@ -323,19 +331,26 @@ export interface ScopeContext {
   readonly session: Pick<SessionFrame["session"], "auth" | "id">;
 }
 
-export async function resolveMemoryScope(
+interface TrackedMemoryScope {
+  readonly callerScoped: boolean;
+  readonly scope: MemoryScope;
+}
+
+async function resolveTrackedMemoryScope(
   memory: Pick<ResolvedMemoryDefinition, "namespace" | "scope" | "slot">,
   ctx: ScopeContext,
-): Promise<MemoryScope | null> {
-  const scope =
+): Promise<TrackedMemoryScope | null> {
+  const { used: callerScoped, value: scope } =
     typeof memory.scope === "function"
-      ? await memory.scope({
-          abortSignal: ctx.abortSignal,
-          channel: ctx.channel,
-          ...(ctx.conversation !== undefined && { conversation: ctx.conversation }),
-          session: { auth: ctx.session.auth, id: ctx.session.id },
-        })
-      : memory.scope;
+      ? await trackPrincipalScope(() =>
+          (memory.scope as Extract<typeof memory.scope, Function>)({
+            abortSignal: ctx.abortSignal,
+            channel: ctx.channel,
+            ...(ctx.conversation !== undefined && { conversation: ctx.conversation }),
+            session: { auth: ctx.session.auth, id: ctx.session.id },
+          }),
+        )
+      : { used: false, value: memory.scope };
   if (scope === null) return disabled(memory.slot, "scope");
   const namespaceContext = {
     appRoot: compiledBundleOf(ctx.ctx)?.resolvedAgent.metadata.appRoot ?? "",
@@ -349,7 +364,14 @@ export async function resolveMemoryScope(
         ? await memory.namespace(namespaceContext)
         : memory.namespace;
   if (namespace === null) return disabled(memory.slot, "namespace");
-  return createMemoryScope({ namespace, scope, slot: memory.slot });
+  return { callerScoped, scope: createMemoryScope({ namespace, scope, slot: memory.slot }) };
+}
+
+export async function resolveMemoryScope(
+  memory: Pick<ResolvedMemoryDefinition, "namespace" | "scope" | "slot">,
+  ctx: ScopeContext,
+): Promise<MemoryScope | null> {
+  return (await resolveTrackedMemoryScope(memory, ctx))?.scope ?? null;
 }
 
 function disabled(slot: string, resolver: "namespace" | "scope"): null {
@@ -403,10 +425,11 @@ export async function memoryTools(memory: ResolvedMemoryDefinition, ctx: Interna
   const { provider, slot } = memory;
   if (provider.tools === undefined) return null;
   const turn = readDefinitionsState(ctx.ctx).latest["turn.started"] ?? null;
-  const scope = await ctx.memo({ principal: principalOf(ctx), turn }, () =>
-    resolveMemoryScope(memory, ctx),
+  const resolved = await ctx.memo({ principal: principalOf(ctx), turn }, () =>
+    resolveTrackedMemoryScope(memory, ctx),
   );
-  if (scope === null) return null;
+  if (resolved === null) return null;
+  const { callerScoped, scope } = resolved;
   const context: { -readonly [K in keyof MemoryToolsContext]: MemoryToolsContext[K] } = {
     abortSignal: ctx.abortSignal,
     channel: ctx.channel,
@@ -435,6 +458,9 @@ export async function memoryTools(memory: ResolvedMemoryDefinition, ctx: Interna
           ...tool,
           description,
           execute(input: unknown, toolContext: Parameters<typeof tool.execute>[1]) {
+            if (callerScoped && steeredModelCall()) {
+              throw new Error(turnSteeredMessage(`memory "${slot}"`));
+            }
             recordMemoryToolStore(scope.key, slot);
             return tool.execute(input, toolContext);
           },

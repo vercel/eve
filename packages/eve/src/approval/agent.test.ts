@@ -8,7 +8,9 @@ import {
   type ApprovalStatus,
 } from "#approval/definition.js";
 import { evaluateApproval } from "#approval/evaluation.js";
-import { always, never, once } from "#tools/approval/policies.js";
+import { ContextContainer, contextStorage } from "#context/container.js";
+import { SteeredByKey } from "#context/keys.js";
+import { always, never, once, steered } from "#tools/approval/policies.js";
 
 const ctx = (toolName: string, toolInput?: Record<string, unknown>) =>
   ({ abortSignal: new AbortController().signal, callId: "call-1", toolInput, toolName }) as never;
@@ -110,6 +112,44 @@ describe("withAgentApproval", () => {
     const response = () => ({ status: "allowed" as const });
     const approval = withAgentApproval(never(), { prompt, request: always(), response });
     expect(approval).toMatchObject({ prompt, response });
+  });
+
+  it("restricts a custom response policy to the caller when steered() is the agent policy", async () => {
+    const alice = {
+      attributes: {},
+      authenticator: "test",
+      principalId: "alice",
+      principalType: "user" as const,
+    };
+    const bob = { ...alice, principalId: "bob" };
+    const allowTeam = () => ({ status: "allowed" as const });
+    const approval = withAgentApproval(steered(), {
+      request: always(),
+      response: allowTeam,
+    });
+    expect(typeof approval).toBe("object");
+    const response = (approval as Exclude<Approval, ApprovalPolicy>).response!;
+    const responseCtx = (responder: typeof alice) =>
+      ({
+        auth: {} as never,
+        request: { callId: "call-1", interactionId: "int-1", principal: alice, toolName: "deploy" },
+        response: { decision: "approve" as const, principal: responder },
+        session: { id: "s1", initiator: alice, turn: { id: "t1", sequence: 0 } },
+      }) as never;
+
+    const unsteered = new ContextContainer();
+    expect(await contextStorage.run(unsteered, () => response(responseCtx(bob)))).toEqual({
+      status: "allowed",
+    });
+
+    const steeredCtx = new ContextContainer();
+    steeredCtx.set(SteeredByKey, [bob]);
+    expect(await contextStorage.run(steeredCtx, () => response(responseCtx(bob)))).toMatchObject({
+      status: "rejected",
+    });
+    expect(await contextStorage.run(steeredCtx, () => response(responseCtx(alice)))).toEqual({
+      status: "allowed",
+    });
   });
 });
 

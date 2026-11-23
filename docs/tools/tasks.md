@@ -278,7 +278,7 @@ each task's start and end instead. See
   `[Tasks]` note cover every task in the session. Any later turn can continue an idle resumable task
   by its `taskId`, and that call runs with its own caller's auth. By default, only the turn's own
   caller steers it. A channel can set `turnPolicy: { mode: "steer", principal: "retain" }` to let
-  another signed-in person's message steer, or `principal: "adopt"` to make that person the caller.
+  another signed-in person's message steer while retaining the turn's caller.
   See [A turn runs as one principal](/docs/concepts/security-model#a-turn-runs-as-one-principal).
   Anonymous callers share one identity. eve doesn't check which caller started a task. In a session with several people, such as a
   shared Slack thread, the model working for one person can continue or `eve__task_cancel` another

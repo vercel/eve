@@ -1228,7 +1228,11 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       payload,
       channel: SlackChannelContext & { readonly session: ChannelContext["session"] },
     ) {
-      recordSlackPrincipal(channel.state, channel.session.auth.current, payload);
+      recordSlackPrincipal(
+        channel.state,
+        payload.auth !== undefined ? payload.auth : channel.session.auth.current,
+        payload,
+      );
       followReplyThread(channel.state, payload);
       followTriggeringMessage(channel.state, payload);
       followQuietTurn(channel.state, payload);

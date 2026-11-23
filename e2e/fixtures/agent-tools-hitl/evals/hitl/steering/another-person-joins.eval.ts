@@ -16,7 +16,7 @@ export default defineEval({
   timeoutMs: 60_000,
   async test(t) {
     const threadId = crypto.randomUUID();
-    const started = await postMessage(t.target, "messages", threadId, ALICE, SAY.slowReport);
+    const started = await postMessage(t.target, threadId, ALICE, SAY.slowReport);
     await t.require(
       started,
       satisfies(
@@ -30,7 +30,7 @@ export default defineEval({
     const turn = t.target.attach(sessionId).watch();
     await turn.waitForEvent("call.requested", { data: { capability: { name: "slow-step" } } });
 
-    const joined = await postMessage(t.target, "messages", threadId, BOB, SAY.bobAccess);
+    const joined = await postMessage(t.target, threadId, BOB, SAY.bobAccess);
     await t.require(
       joined,
       satisfies(
@@ -52,7 +52,7 @@ export default defineEval({
     });
     steered.event("turn.settled", { count: 1, data: { outcome: "completed" } });
 
-    const confirmed = await postMessage(t.target, "messages", threadId, ALICE, SAY.aliceConfirms);
+    const confirmed = await postMessage(t.target, threadId, ALICE, SAY.aliceConfirms);
     await t.require(
       confirmed,
       satisfies(

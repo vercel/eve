@@ -2,10 +2,17 @@ import { defineTool } from "eve/tools";
 import { z } from "zod";
 
 import { SkillVersionNotFoundError } from "../lib/errors.ts";
-import { nameField, scopeField, versionField, withSkillScope } from "../lib/tool-support.ts";
+import {
+  nameField,
+  scopeField,
+  steeredPersonalScopeApproval,
+  versionField,
+  withSkillScope,
+} from "../lib/tool-support.ts";
 
 export default defineTool({
   deferred: true,
+  approval: steeredPersonalScopeApproval,
   label: {
     start: ({ name }) => `Reading skill ${name}`,
     complete: ({ name }) => `Read skill ${name}`,

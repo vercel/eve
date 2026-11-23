@@ -533,20 +533,23 @@ export default slackChannel({
 });
 ```
 
-Return `turnPolicy` from a message hook to set the policy for one message. It replaces the channel's `turnPolicy`. `{ mode: "steer", principal: "retain" }` lets another person's message join a running turn, which keeps its caller. `principal: "adopt"` also joins the message and makes the sender the caller:
+Return `turnPolicy` from a message hook to set the policy for one message. It replaces the channel's `turnPolicy`. `{ mode: "steer", principal: "retain" }` lets another person's message join a running turn, which keeps its caller:
 
 ```ts title="agent/channels/slack.ts"
 import { defaultSlackAuth, slackChannel } from "eve/channels/slack";
 
 export default slackChannel({
-  onAppMention(ctx, message) {
-    return {
-      auth: defaultSlackAuth(message, ctx),
-      turnPolicy: { mode: "steer", principal: "retain" },
-    };
+  async onMessage(ctx, message) {
+    const auth = defaultSlackAuth(message, ctx);
+    if (ctx.isBotMentioned()) {
+      return { auth, turnPolicy: { mode: "steer", principal: "retain" } };
+    }
+    return { auth };
   },
 });
 ```
+
+When following a thread without mentions and using `no_reply`, return `principal: "retain"` only on messages directed at the agent (such as mentions). Setting channel-level `principal: "retain"` lets unmentioned side-chat interrupt a running turn, hold the caller's identity, or end the turn if the model calls `no_reply`.
 
 Message and interaction hooks expose the thread's session operations on `ctx`:
 

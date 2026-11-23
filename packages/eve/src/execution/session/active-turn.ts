@@ -54,7 +54,7 @@ export class ActiveTurn {
   readonly #control: boolean;
   private readonly expectedTurnId: string;
   private readonly input: SessionExecutionInput;
-  private identity: SteeringTurn;
+  private readonly identity: SteeringTurn;
   private readonly unsubscribe: () => void;
   private unsubscribeDelivery: () => void;
   private steeringController: AbortController;
@@ -114,10 +114,6 @@ export class ActiveTurn {
   dispose(): void {
     this.unsubscribe();
     this.unsubscribeDelivery();
-  }
-
-  adopt(principal: string): void {
-    this.identity = { ...this.identity, principal };
   }
 
   get steeringSignal(): AbortSignal {

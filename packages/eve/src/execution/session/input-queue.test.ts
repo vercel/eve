@@ -153,7 +153,7 @@ describe("SessionInputQueue", () => {
     expect(both.takeSteering(bothAdmitted, turn)?.sequences).toEqual([afterAlice]);
   });
 
-  it("lets another person's adopt message join, one policy per step", () => {
+  it("takes the last delivery's steeredBy when coalescing same-sender steering messages", () => {
     const alice = {
       attributes: {},
       authenticator: "slack",
@@ -167,44 +167,15 @@ describe("SessionInputQueue", () => {
       message: string,
       auth: typeof alice | null | undefined,
       options: {
-        readonly principalPolicy?: "retain" | "adopt";
         readonly steeredBy?: readonly (typeof bob)[];
       } = {},
     ) =>
       queue.enqueueDelivery({
         ...(auth !== undefined && { auth }),
-        ...(options.principalPolicy !== undefined && {
-          principalPolicy: options.principalPolicy,
-        }),
         ...(options.steeredBy !== undefined && { steeredBy: options.steeredBy }),
         kind: "deliver",
         payloads: [{ message }],
       })!.sequence;
-
-    const adopting = new SessionInputQueue([]);
-    const adoptByBob = send(adopting, "Actually include everyone.", bob, {
-      principalPolicy: "adopt",
-    });
-    expect(adopting.takeSteering(new Set([adoptByBob]), turn)?.sequences).toEqual([adoptByBob]);
-
-    const paused = new SessionInputQueue([]);
-    const whilePaused = send(paused, "Actually include everyone.", bob, {
-      principalPolicy: "adopt",
-    });
-    const pausedAdmitted = new Set([whilePaused]);
-    expect(paused.takeSteering(pausedAdmitted, turn, { paused: true })).toBeUndefined();
-    expect(paused.takeSteering(pausedAdmitted, turn)?.sequences).toEqual([whilePaused]);
-
-    const policies = new SessionInputQueue([]);
-    const retainedByBob = send(policies, "Look at the launch numbers.", bob, {
-      principalPolicy: "retain",
-    });
-    const adoptedByBob = send(policies, "Actually include everyone.", bob, {
-      principalPolicy: "adopt",
-    });
-    const policyAdmitted = new Set([retainedByBob, adoptedByBob]);
-    expect(policies.takeSteering(policyAdmitted, turn)?.sequences).toEqual([retainedByBob]);
-    expect(policies.takeSteering(policyAdmitted, turn)?.sequences).toEqual([adoptedByBob]);
 
     const merged = new SessionInputQueue([]);
     const firstWithout = send(merged, "Also cover the launch date.", alice);

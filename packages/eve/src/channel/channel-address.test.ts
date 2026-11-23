@@ -130,9 +130,9 @@ describe("createChannelAddress", () => {
     await address.send("channel policy", { auth: null });
     await address.send("string", { auth: null, turnPolicy: "steer" });
     await address.send("queue", { auth: null, turnPolicy: { mode: "queue" } });
-    await address.send("adopt", {
+    await address.send("match", {
       auth: null,
-      turnPolicy: { mode: "steer", principal: "adopt" },
+      turnPolicy: { mode: "steer", principal: "match" },
     });
 
     const stored = vi
@@ -144,7 +144,7 @@ describe("createChannelAddress", () => {
       ["steer", "retain"],
       ["steer", undefined],
       ["queue", undefined],
-      ["steer", "adopt"],
+      ["steer", undefined],
     ]);
   });
 

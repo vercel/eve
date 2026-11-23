@@ -1,9 +1,12 @@
+import type { SessionAuthContext } from "#channel/types.js";
 import type { Answer } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
 import type { MessageContent } from "#shared/message-content.js";
 
 /** One inbound delivery passed to a channel's `deliver` hook. */
 export interface ChannelDelivery<TState = undefined> {
+  /** Authenticated sender of this delivery, when supplied by the channel or caller. */
+  readonly auth?: SessionAuthContext | null;
   readonly message?: MessageContent;
   readonly answers?: readonly Answer[];
   /** Context persisted in history before this delivery's message. */
@@ -24,4 +27,4 @@ export interface ChannelDelivery<TState = undefined> {
  * What a `deliver` hook may return. Channel state changes go through `channel.state`. A
  * replacement without `answerText` keeps the delivery's.
  */
-export type ChannelDeliveryReplacement = Omit<ChannelDelivery, "state">;
+export type ChannelDeliveryReplacement = Omit<ChannelDelivery, "auth" | "state">;

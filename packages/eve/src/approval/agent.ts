@@ -1,10 +1,15 @@
 import {
   type Approval,
   type ApprovalPolicy,
+  type ApprovalResponsePolicy,
   type ApprovalStatus,
   resolveApprovalPolicy,
 } from "#approval/definition.js";
+import { requesterOnlyResponse } from "#approval/requester-only.js";
 import { normalizeApprovalStatus } from "#approval/status.js";
+import { contextStorage } from "#context/container.js";
+import { SteeredByKey } from "#context/keys.js";
+import { isSteeredApprovalPolicy } from "#tools/approval/policies.js";
 
 function rank(status: ApprovalStatus): number {
   const normalized = normalizeApprovalStatus(status);
@@ -27,6 +32,18 @@ export function strictestApproval(policies: readonly ApprovalPolicy[]): Approval
   };
 }
 
+function withSteeredResponseGuard<TInput>(
+  response: ApprovalResponsePolicy<TInput>,
+): ApprovalResponsePolicy<TInput> {
+  return (ctx) => {
+    if ((contextStorage.getStore()?.get(SteeredByKey) ?? []).length > 0) {
+      const callerOnly = requesterOnlyResponse(ctx);
+      if (callerOnly.status === "rejected") return callerOnly;
+    }
+    return response(ctx);
+  };
+}
+
 export function withAgentApproval(
   agent: ApprovalPolicy | undefined,
   own: Approval | undefined,
@@ -34,7 +51,9 @@ export function withAgentApproval(
   if (agent === undefined) return own;
   if (own === undefined) return agent;
   const request = strictestApproval([agent, resolveApprovalPolicy(own)]);
-  return typeof own === "function" ? request : { ...own, request };
+  if (typeof own === "function") return request;
+  if (own.response === undefined || !isSteeredApprovalPolicy(agent)) return { ...own, request };
+  return { ...own, request, response: withSteeredResponseGuard(own.response) };
 }
 
 export function withAgentApprovalOnEntries<

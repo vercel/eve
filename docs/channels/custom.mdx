@@ -225,11 +225,11 @@ const answers = parseAnswers(decodedResponses);
 await source.respond(answers, { auth });
 ```
 
-Message sends use the channel's `turnPolicy`, which defaults to `"steer"`; see [Overlapping messages](/docs/channels#overlapping-messages). A steering policy's `principal`, which defaults to `"match"`, controls whether another signed-in person's message can join a running turn, and whether its sender becomes the caller. A sent message can interrupt the model before your `deliver` hook runs. Filter events before `send(...)` when they should never interrupt the model.
+Message sends use the channel's `turnPolicy`, which defaults to `"steer"`; see [Overlapping messages](/docs/channels#overlapping-messages). A steering policy's `principal`, which defaults to `"match"`, controls whether another signed-in person's message can join a running turn. A sent message can interrupt the model before your `deliver` hook runs. Filter events before `send(...)` when they should never interrupt the model.
 
 Every `send()` and `respond()` passes its `state` option to the channel's `deliver(payload, channel)` hook as `payload.state`, including sends to an existing session. Use it for per-message values such as a message's author. The hook decides what to merge into `channel.state`; eve seeds `channel.state` from `state` only when `send()` creates the session.
 
-The payload is `ChannelDelivery<TState>` from `eve/channels`: `message`, `answers`, `context`, `outputSchema`, `answerText`, and `state?: Partial<TState>`. The hook's return value decides what reaches the session:
+The payload is `ChannelDelivery<TState>` from `eve/channels`: `auth`, `message`, `answers`, `context`, `outputSchema`, `answerText`, and `state?: Partial<TState>`. `payload.auth` is the authenticated sender of this delivery, while `channel.session.auth.current` stays the running turn's caller. The hook's return value decides what reaches the session:
 
 - Return nothing to keep it unchanged.
 - Return a replacement with `message`, `answers`, `context`, `outputSchema`, or `answerText` to change it. Other fields, including `state`, are not accepted; change saved state through `channel.state`. A replacement without `answerText` keeps the delivery's.

@@ -26,9 +26,8 @@ async function messageOf(request: Request): Promise<string> {
 /**
  * A shared thread: teammates address the same thread, so a message from
  * another person joins whatever turn is running instead of starting a new one.
- * The channel retains that turn's caller by default; the handover route lets
- * the sender adopt it. The server chooses the policy by route, not from the
- * request body.
+ * The channel retains that turn's caller. The server chooses the policy on the
+ * channel, not from the request body.
  */
 export default defineChannel({
   turnPolicy: { mode: "steer", principal: "retain" },
@@ -36,13 +35,6 @@ export default defineChannel({
     POST("/shared/:threadId/messages", async (request, { from, params }) => {
       const session = await from(params.threadId ?? "").send(await messageOf(request), {
         auth: authFor(request),
-      });
-      return Response.json({ ok: true, sessionId: session.sessionId });
-    }),
-    POST("/shared/:threadId/handover", async (request, { from, params }) => {
-      const session = await from(params.threadId ?? "").send(await messageOf(request), {
-        auth: authFor(request),
-        turnPolicy: { mode: "steer", principal: "adopt" },
       });
       return Response.json({ ok: true, sessionId: session.sessionId });
     }),

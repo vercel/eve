@@ -332,6 +332,7 @@ export default eveChannel({
 - The returned value has the request's `ClientContextValue` shape, exported from `eve/channels/eve`: a string, an array of strings, or a JSON object.
 - eve labels client-supplied entries `Client context:` for the model. Returned context is sent without the label.
 - `onMessage` runs only for requests with a message. An answer keeps the context its request sent.
+- Return `turnPolicy` from `onMessage` to replace the channel's and request's `turnPolicy` for that message, such as `{ mode: "steer", principal: "retain" }`. Read `ctx.eve.turnPolicy` to inspect the mode (`"steer"` or `"queue"`) the client requested.
 
 ### Start from prior history
 

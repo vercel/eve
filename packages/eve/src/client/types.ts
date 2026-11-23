@@ -6,6 +6,7 @@ import type { CancelTurnResult } from "#protocol/cancel-turn.js";
 import type { ClearStatus } from "#protocol/clear-session.js";
 import type { CompactStatus } from "#protocol/compact-session.js";
 import type { TurnMode } from "#channel/types.js";
+export type { TurnMode };
 import type { Answer } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ToolStub } from "#tool-stubs/types.js";
