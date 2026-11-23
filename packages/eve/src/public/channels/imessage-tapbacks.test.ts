@@ -72,18 +72,19 @@ describe("iMessage tapbacks", () => {
     const onTapback = vi.fn((_ctx, tapback: { tapback: string }) =>
       tapback.tapback === "love" ? { auth: null, context: ["ctx"] } : null,
     );
-    dispatchIMessageTapbacks(bridge, onTapback);
+    dispatchIMessageTapbacks(bridge, onTapback, (raw) => (raw as { id?: string }).id);
     const handler = onReaction.mock.calls[0]?.[0] as (event: ReactionEvent) => Promise<void>;
 
     await handler(reaction({ user: { ...author, isMe: true } }));
     await handler(reaction({ emoji: getEmoji("thumbs_up"), rawEmoji: "like" }));
-    await handler(reaction());
+    await handler(reaction({ raw: { id: "event-id" } }));
 
     expect(onTapback).toHaveBeenCalledTimes(2);
     expect(send).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenCalledWith("Tapback: Loved a message", {
       auth: null,
       context: ["ctx"],
+      idempotencyKey: "event-id",
       thread: { id: "thread-id" },
       title: undefined,
     });
@@ -92,10 +93,13 @@ describe("iMessage tapbacks", () => {
   it("fetches the reacted message when the event leaves it out, and passes the hook's answer for that message", async () => {
     const onReaction = vi.fn();
     const send = vi.fn();
-    dispatchIMessageTapbacks({ bot: { onReaction }, send } as never, (_ctx, tapback) =>
-      tapback.tapback === "like" && tapback.message?.text === "See you at 7"
-        ? { answer: "approve", auth: null }
-        : null,
+    dispatchIMessageTapbacks(
+      { bot: { onReaction }, send } as never,
+      (_ctx, tapback) =>
+        tapback.tapback === "like" && tapback.message?.text === "See you at 7"
+          ? { answer: "approve", auth: null }
+          : null,
+      () => undefined,
     );
     const handler = onReaction.mock.calls[0]?.[0] as (event: ReactionEvent) => Promise<void>;
     const fetchMessage = vi.fn(async () => message("See you at 7"));
