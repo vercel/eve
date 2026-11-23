@@ -1,4 +1,4 @@
-export const challengeHashtag = "#eveAgentShowcase";
+export const challengeHashtag = "#eveProjectShowcase";
 export const eveOnX = "https://x.com/eve";
 export const descriptionLimit = 100;
 
@@ -47,7 +47,7 @@ export function buildSubmission({ repository, description, video }: Submission) 
   const demo = youtubeId(video);
   const summary = description.trim();
   const preview: SubmissionPreview = {
-    summary: summary || "What your agent does goes here.",
+    summary: summary || "What you built goes here.",
     repository: repo
       ? `https://github.com${repo}`
       : repository.trim() || "https://github.com/you/your-agent",
@@ -58,7 +58,7 @@ export function buildSubmission({ repository, description, video }: Submission) 
   if (!repo)
     errors.repository = "Enter a GitHub repository URL, such as https://github.com/you/your-agent.";
   if (!summary || summary.length > descriptionLimit)
-    errors.description = `Describe your agent in 1–${descriptionLimit} characters.`;
+    errors.description = `Describe your project in 1–${descriptionLimit} characters.`;
   if (video.trim() && !demo) errors.video = "Enter a YouTube video link or leave this field blank.";
 
   const text = [

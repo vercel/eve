@@ -1,167 +1,259 @@
-import { ArrowUpRight, Plus } from "lucide-react";
+import { ArrowRight, ArrowUpRight, Plus } from "lucide-react";
 import type { Metadata } from "next";
+import Image from "next/image";
+import Link from "next/link";
 import { challengeHashtag, eveOnX } from "@/lib/challenge/submission";
 import { canonicalAlternates } from "@/lib/geistdocs/canonical";
 import { pageTitleMetadata } from "@/lib/geistdocs/metadata-title";
 import { templateGalleryUrl } from "@/lib/templates/links";
+import { InstallSwitcher } from "../(home)/components/install-switcher";
+import styles from "./challenge.module.css";
+import {
+  challengeDeadline,
+  challengeHeadline,
+  challengeTitle,
+  winnerCount,
+} from "./challenge-details";
+import { GlyphField } from "./glyph-field";
+import { GlyphWake } from "./glyph-wake";
 import { PostBuilder } from "./post-builder";
-import poster from "./poster.module.css";
-import { TitleGlyphs } from "./title-glyphs";
-import { challengeTitle } from "./title-stencils";
 
+const description =
+  "Build with the eve framework and showcase your project for a chance to win limited edition swag.";
 const title = pageTitleMetadata(challengeTitle);
-const introduction = [
-  "Are you looking to learn more about the eve framework, or do you already have an exciting project to showcase?",
-  "Showcase what you've built for the chance to win limited edition eve-branded swag.",
-];
-const description = introduction.join(" ");
 
 export const metadata: Metadata = {
   ...title,
   description,
   alternates: canonicalAlternates("/challenge"),
   openGraph: { ...title.openGraph, description, url: "/challenge" },
-  twitter: {
-    ...title.twitter,
-    description,
-    card: "summary_large_image",
-  },
+  twitter: { ...title.twitter, description, card: "summary_large_image" },
 };
 
-const steps = [
-  [
-    "Build an agent",
-    "Build an agent with the eve framework and publish it to a public code repository.",
-  ],
-  [
-    "Record a demo",
-    "Optionally showcase your agent by recording a quick video. Projects with a video will be prioritized in judging.",
-  ],
-  [
-    "Follow and post on X",
-    <>
-      <a className="font-medium text-gray-1000 underline underline-offset-4" href={eveOnX}>
-        Follow @eve
-      </a>
-      , and then share your project with the world!
-    </>,
-  ],
+const brief = [
+  ["Prizes", "Limited edition eve-branded swag."],
+  ["Winners", String(winnerCount)],
+  ["Judging", "Technical complexity, usefulness, and creativity."],
+  ["Deadline", challengeDeadline],
 ] as const;
+
+const steps = [
+  {
+    title: "Build with eve",
+    detail:
+      "Build an agent, extension, integration, or application with the eve framework and publish it to a public code repository.",
+  },
+  {
+    title: "Record a demo",
+    detail:
+      "Optionally showcase your project by recording a quick video. Projects with a video will be prioritized in judging.",
+  },
+  {
+    title: "Share your project",
+    detail: (
+      <>
+        <a className="font-medium text-gray-1000 underline underline-offset-4" href={eveOnX}>
+          Follow @eve
+        </a>
+        , and then share your project with the world!
+      </>
+    ),
+  },
+];
 
 const templates = [
   {
     title: "Voice Agent",
     description: "Talk to your agent in the browser and follow along with a live transcript.",
     slug: "eve-voice-template",
+    image:
+      "https://images.ctfassets.net/e5382hct74si/2ooTuMfoAv4ufxRV9i6eL2/b9c363aa8d99f07d4ffd4972b6a61814/eve-voice-agent-3x.png",
   },
   {
     title: "eve Web Chat",
     description:
       "Give your agent a browser chat interface with streaming replies and tool activity.",
     slug: "eve-chat-template",
+    image:
+      "https://images.ctfassets.net/e5382hct74si/2nvBUG8fflDbjQEc6ZsFS/e0545d7ee60b274a92e4392b4017c06d/eve-chat-template-3x.png",
   },
   {
     title: "eve Coding Agent",
     description:
       "Ask your agent from Slack or GitHub to investigate an issue, review a change, or open a pull request.",
     slug: "eve-coding-agent-template",
+    image:
+      "https://images.ctfassets.net/e5382hct74si/17McJixTRhRSTxuY608S7W/a999a2326b936e67fdd9e41c81879aa5/eve-coding-agent-3x.png",
   },
 ] as const;
 
 const faqs = [
   [
     "What counts as an entry?",
-    `Follow @eve on X and publish a public post with ${challengeHashtag}, a short description of your eve agent, and a GitHub repository link the eve team can open.`,
+    `Any project built with the eve framework counts, including agents, extensions, integrations, and applications. To enter, follow @eve on X and publish a public post with ${challengeHashtag}, a short description of your project, and a link to its public code repository.`,
   ],
   [
     "Do I need to record a video?",
-    "No. However, if you include a YouTube demo the eve team can watch, your entry gets priority in review. Show what you ask the agent to do and what it produces.",
+    "No. However, if you include a YouTube demo the eve team can watch, your entry gets priority in review. Show what your project does and how it works.",
   ],
   [
     "How are winners chosen?",
-    "The eve team will be reviewing entries and taking into consideration technical complexity, usefulness, social media engagement, and creativity.",
+    "The eve team will be reviewing entries and taking into consideration technical complexity, usefulness, and creativity.",
   ],
   [
     "How will winners hear from the eve team?",
     "The eve team will follow up with winners on X with details.",
   ],
+  ["What do winners receive?", "Each winner will receive limited edition eve-branded swag."],
   [
-    "What do winners receive?",
-    "Each winner will receive limited-edition eve and Vercel branded swag.",
+    "Where can I get help?",
+    <>
+      The eve team is happy to help. Tag{" "}
+      <a className="font-medium text-gray-1000 underline underline-offset-4" href={eveOnX}>
+        @eve on X
+      </a>
+      , or start a discussion in the{" "}
+      <a
+        className="font-medium text-gray-1000 underline underline-offset-4"
+        href="https://github.com/vercel/eve/discussions"
+      >
+        vercel/eve GitHub repository
+      </a>
+      .
+    </>,
   ],
-];
+] as const;
 
+const container = "mx-auto w-full min-w-0 max-w-[80rem] px-4 sm:px-8";
 const heading = "text-balance text-heading-32 text-gray-1000 sm:text-heading-40";
-const subheading = "text-heading-24 text-gray-1000";
+const primaryAction =
+  "inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-gray-1000 px-4 text-label-14 font-medium text-background-100 hover:bg-gray-900";
+const secondaryAction =
+  "inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-gray-400 bg-background-100 px-4 text-label-14 font-medium text-gray-1000 hover:bg-gray-100";
 
 export default function ChallengePage() {
   return (
-    <main className={`${poster.technical} w-full min-w-0 pb-24`}>
-      <TitleGlyphs />
-
-      <div className="mx-auto w-full min-w-0 max-w-[80rem] px-4 sm:px-8">
-        <section aria-labelledby="challenge" className="py-12 sm:py-16">
-          <h2 className={heading} id="challenge">
-            eve Builder Challenge
-          </h2>
-          <div className="mt-3 grid gap-3 text-pretty text-copy-16 text-gray-900">
-            {introduction.map((paragraph) => (
-              <p key={paragraph}>{paragraph}</p>
-            ))}
-          </div>
-
-          <div className="mt-8 grid gap-8 sm:mt-10 sm:gap-10">
-            <section aria-labelledby="how-to-enter" className="min-w-0">
-              <h3 className={subheading} id="how-to-enter">
-                How to enter
-              </h3>
-              <ol
-                className="mt-4 grid list-none divide-y divide-gray-400 border-y border-gray-400 md:grid-cols-3 md:divide-x md:divide-y-0 md:rounded-xl md:border"
-                role="list"
+    <main className="w-full min-w-0 pb-24">
+      <section aria-labelledby="challenge-title" className={`dark ${styles.hero}`}>
+        <GlyphWake>
+          <GlyphField
+            brightness={0.1}
+            className={styles.backdrop}
+            clearing={{ x: 0.2, y: 0.24, radiusX: 0.34, radiusY: 0.3 }}
+            columns={96}
+            density={0.2}
+            fit="meet"
+            rows={90}
+            seed={7}
+          />
+          <div
+            className={`${container} relative grid items-center gap-12 pt-16 pb-12 sm:pt-24 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] lg:gap-16 lg:pt-28 lg:pb-20`}
+          >
+            <div className="min-w-0">
+              <h1
+                className="mt-4 max-w-[11ch] text-balance text-heading-48 text-gray-1000 sm:text-heading-56 xl:text-heading-64"
+                id="challenge-title"
               >
-                {steps.map(([name, detail], index) => (
-                  <li
-                    className="grid grid-cols-[2ch_minmax(0,1fr)] items-baseline gap-x-3 py-4 md:px-4 lg:px-5"
-                    key={name}
-                  >
-                    <span aria-hidden="true" className="text-copy-14 text-gray-900 tabular-nums">
-                      {index + 1}.
-                    </span>
-                    <div>
-                      <h4 className="text-heading-20 text-gray-1000">{name}</h4>
-                      <p className="mt-1 max-w-[54ch] text-copy-14 text-gray-900">{detail}</p>
-                    </div>
-                  </li>
-                ))}
-              </ol>
-            </section>
-
-            <section aria-labelledby="submit" className="min-w-0">
-              <h3 className={subheading} id="submit">
-                Submit your agent
-              </h3>
-              <div className="@container mt-4">
-                <PostBuilder />
+                <span className="sr-only">eve </span>
+                {challengeHeadline}
+              </h1>
+              <p className="mt-6 max-w-[36rem] text-pretty text-copy-18 text-gray-900">
+                {description}
+              </p>
+              <InstallSwitcher className="mt-8 max-w-full" source="challenge_hero" />
+              <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+                <a className={primaryAction} href="#submit">
+                  Share your project
+                </a>
+                <Link className={secondaryAction} href="/docs/getting-started" prefetch={true}>
+                  Read the docs <ArrowRight aria-hidden size={16} />
+                </Link>
               </div>
-            </section>
+            </div>
+            <div aria-hidden="true" className="min-w-0">
+              <GlyphField
+                brightness={0.78}
+                className={styles.logo}
+                columns={56}
+                density={0.97}
+                fit="meet"
+                rows={18}
+                seed={3}
+                shape="logo"
+              />
+            </div>
           </div>
-        </section>
+          <div className="relative bg-black">
+            <dl
+              className={`${container} grid gap-x-8 border-t border-gray-400 sm:grid-cols-2 lg:grid-cols-[1fr_0.45fr_1.55fr_0.8fr]`}
+            >
+              {brief.map(([term, value]) => (
+                <div className="min-w-0 py-5 lg:py-7" key={term}>
+                  <dt className="font-mono text-copy-13 text-gray-900">{term}</dt>
+                  <dd className="mt-2 text-pretty text-copy-16 text-gray-1000">{value}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        </GlyphWake>
+      </section>
 
-        <section aria-labelledby="inspiration" className="border-t border-gray-400 py-12 sm:py-16">
-          <h2 className={heading} id="inspiration">
-            Looking for inspiration?
-          </h2>
-          <p className="mt-3 text-copy-16 text-gray-900">
-            Start with one of these eve templates and make it your own.
-          </p>
-          <div className="mt-6 grid gap-4 md:grid-cols-3">
-            {templates.map(({ title, description, slug }) => (
-              <article
-                className="flex min-w-0 flex-col rounded-xl border border-gray-400 bg-background-100 p-4 lg:p-6"
-                key={title}
-              >
+      <section aria-labelledby="how-to-enter" className={`${container} py-16 sm:py-24`}>
+        <h2 className={heading} id="how-to-enter">
+          How to enter
+        </h2>
+        <p className="mt-3 max-w-[64ch] text-pretty text-copy-16 text-gray-900">
+          Submit before {challengeDeadline}, and include{" "}
+          <span className="font-mono text-gray-1000">{challengeHashtag}</span> in your post on X.
+        </p>
+        <ol className="mt-10 border-t border-gray-400">
+          {steps.map((step, index) => (
+            <li
+              className="grid scroll-mt-24 gap-x-6 gap-y-3 border-b border-gray-400 py-7 sm:grid-cols-[3rem_minmax(0,1fr)] lg:grid-cols-[3rem_minmax(0,18rem)_minmax(0,1fr)] lg:gap-x-10"
+              id={index === steps.length - 1 ? "submit" : undefined}
+              key={step.title}
+            >
+              <span aria-hidden="true" className="font-mono text-copy-14 text-gray-900">
+                {index + 1}
+              </span>
+              <h3 className="text-heading-24 text-gray-1000">{step.title}</h3>
+              <p className="max-w-[62ch] min-w-0 text-pretty text-copy-16 text-gray-900 sm:col-start-2 lg:col-start-3">
+                {step.detail}
+              </p>
+              {index === steps.length - 1 && (
+                <div className="@container mx-auto mt-6 w-full max-w-[60rem] sm:col-span-full">
+                  <PostBuilder />
+                </div>
+              )}
+            </li>
+          ))}
+        </ol>
+      </section>
+
+      <section aria-labelledby="inspiration" className={`${container} pb-16 sm:pb-24`}>
+        <h2 className={heading} id="inspiration">
+          Looking for inspiration?
+        </h2>
+        <p className="mt-3 text-pretty text-copy-16 text-gray-900">
+          Start with one of these eve templates and make it your own.
+        </p>
+        <div className="mt-8 grid gap-4 md:grid-cols-3">
+          {templates.map(({ title, description, slug, image }) => (
+            <article
+              className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-gray-400 bg-background-100"
+              key={title}
+            >
+              <Image
+                alt={`${title} template preview`}
+                className="aspect-[1200/630] w-full border-b border-gray-400 object-cover"
+                height={630}
+                sizes="(min-width: 768px) 33vw, 100vw"
+                src={image}
+                width={1200}
+              />
+              <div className="flex flex-1 flex-col p-5 lg:p-6">
                 <h3 className="text-heading-20 text-gray-1000">{title}</h3>
-                <p className="mt-2 mb-5 text-copy-14 text-gray-900">{description}</p>
+                <p className="mt-2 mb-5 text-pretty text-copy-14 text-gray-900">{description}</p>
                 <a
                   aria-label={`View the ${title} template`}
                   className="mt-auto inline-flex items-center gap-1.5 self-start text-label-14 font-medium text-gray-1000 underline-offset-4 hover:underline"
@@ -169,32 +261,32 @@ export default function ChallengePage() {
                 >
                   View template <ArrowUpRight aria-hidden size={14} />
                 </a>
-              </article>
-            ))}
-          </div>
-        </section>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
 
-        <section aria-labelledby="faq" className="border-t border-gray-400 pt-12 sm:pt-16">
-          <h2 className={heading} id="faq">
-            FAQs
-          </h2>
-          <div className="mt-6 divide-y divide-gray-400 rounded-xl border border-gray-400 bg-background-100">
-            {faqs.map(([question, answer]) => (
-              <details className="group px-4 sm:px-6" key={question}>
-                <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-2 py-3 text-label-16 font-medium text-gray-1000 sm:gap-3 [&::-webkit-details-marker]:hidden">
-                  <span className="min-w-0">{question}</span>
-                  <Plus
-                    className="shrink-0 text-gray-900 group-open:rotate-45"
-                    aria-hidden
-                    size={18}
-                  />
-                </summary>
-                <p className="pb-5 text-copy-14 leading-relaxed text-gray-900">{answer}</p>
-              </details>
-            ))}
-          </div>
-        </section>
-      </div>
+      <section aria-labelledby="faq" className={container}>
+        <h2 className={heading} id="faq">
+          FAQs
+        </h2>
+        <div className="mt-8 divide-y divide-gray-400 border-y border-gray-400">
+          {faqs.map(([question, answer]) => (
+            <details className="group" key={question}>
+              <summary className="flex min-h-16 cursor-pointer list-none items-center justify-between gap-3 py-4 text-heading-16 text-gray-1000 [&::-webkit-details-marker]:hidden">
+                <span className="min-w-0">{question}</span>
+                <Plus
+                  aria-hidden
+                  className="shrink-0 text-gray-900 group-open:rotate-45"
+                  size={18}
+                />
+              </summary>
+              <p className="pb-6 pr-8 text-pretty text-copy-16 text-gray-900">{answer}</p>
+            </details>
+          ))}
+        </div>
+      </section>
     </main>
   );
 }

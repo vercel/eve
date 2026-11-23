@@ -75,7 +75,7 @@ export function PostBuilder() {
             id="challenge-description"
             maxLength={descriptionLimit}
             onChange={(event) => setDescription(event.target.value)}
-            placeholder="I built an agent that turns Slack threads into weekly team updates."
+            placeholder="I built an eve extension that turns Slack threads into weekly team updates."
             required
             rows={3}
             value={description}

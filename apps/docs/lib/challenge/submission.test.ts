@@ -13,7 +13,7 @@ describe("challenge post draft", () => {
     const url = new URL(result.intent ?? "");
     expect(url.origin + url.pathname).toBe("https://x.com/intent/tweet");
     expect(url.searchParams.get("text")).toBe(
-      "My agent posts tomorrow’s forecast in Slack.\n\nhttps://github.com/example/weather-agent\n\n#eveAgentShowcase",
+      "My agent posts tomorrow’s forecast in Slack.\n\nhttps://github.com/example/weather-agent\n\n#eveProjectShowcase",
     );
     expect(result.preview.media).toEqual({ kind: "github", path: "/example/weather-agent" });
   });
@@ -25,7 +25,7 @@ describe("challenge post draft", () => {
     });
     expect(result.preview.media).toEqual({ kind: "youtube", id: "dQw4w9WgXcQ" });
     expect(new URL(result.intent ?? "").searchParams.get("text")).toContain(
-      "\nhttps://youtu.be/dQw4w9WgXcQ\n\n#eveAgentShowcase",
+      "\nhttps://youtu.be/dQw4w9WgXcQ\n\n#eveProjectShowcase",
     );
   });
 

@@ -31,7 +31,7 @@ export const InstallSwitcher = ({
   onAudienceChange,
 }: {
   className?: string;
-  source: "home_hero" | "home_footer";
+  source: "home_hero" | "home_footer" | "challenge_hero";
   onAudienceChange?: (audience: InstallAudience) => void;
 }): JSX.Element => {
   const [audience, setAudienceState] = useState<InstallAudience>("humans");
