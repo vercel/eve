@@ -391,7 +391,7 @@ for await (const event of events) {
 
 A read sees only recorded events. A hook runs after its line is written, so a bounded read there includes the event that triggered it.
 
-`sessions.end(sessionId, options?)` retires an active or [stranded](./execution-model-and-durability#stranded-sessions) session without creating a replacement and returns a `Delivery`. Pass `{ auth, reason }` using `SessionEndOptions` from `eve/server`. It throws `SessionNotActiveError` when the session is not active.
+`sessions.end(sessionId, options?)` retires an active or [stranded](./execution-model-and-durability#stranded-sessions) session without creating a replacement and returns a `Delivery`. Pass `{ auth, reason }` using `SessionEndOptions` from `eve/server`. It throws `SessionNotActiveError` (from `eve/sessions`) when the session is not active.
 
 `sessions.prewarm(sessionId)` prepares an idle session to move onto the current deployment without starting a model turn. It returns a `PrewarmSessionResult` whose `status` is `"ready"`, `"accepted"`, `"unsupported"`, or `"no_active_session"`.
 

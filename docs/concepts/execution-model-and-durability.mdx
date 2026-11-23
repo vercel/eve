@@ -153,7 +153,7 @@ Runs that recorded no eve version are treated as stranded.
 On Vercel Workflow, a session's run executes only on the deployment that started it. If that deployment is deleted, for example by a deployment retention policy, the run can't execute again. eve detects this when a channel address or `end()` reaches the session:
 
 - A channel message, such as a new message in a Slack thread, ends the session and starts a fresh one at the same address. The message becomes its first turn, and the fresh session names the session it replaced.
-- `end()` on a channel address or by session ID — including session handles, `DELETE /eve/v1/session/:id`, and `sessions.end()` from `eve/server` — ends the session. `create()` throws `SessionStrandedError`.
+- `end()` on a channel address or by session ID — including session handles, `POST /eve/v1/session/:sessionId/end`, and `sessions.end()` from `eve/server` — ends the session. `create()` throws `SessionStrandedError`.
 - The replaced session's recorded history can be unreadable, because its encryption key belonged to the deleted deployment. An instruction that reads the predecessor's stream should handle that error.
 
 eve doesn't detect a deleted deployment on other session-ID paths. A send by session ID can be accepted and never processed. The session timeout doesn't end the session, because its timer ran on the deleted deployment too.

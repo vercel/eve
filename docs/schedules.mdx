@@ -132,7 +132,7 @@ export default defineSchedule({
 });
 ```
 
-`sessions.end()` finishes the session with `outcome: "completed"`, so built-in channel renderers such as Slack post nothing. It also retires [stranded sessions](./concepts/execution-model-and-durability#stranded-sessions) and handed-off sessions whose original Vercel deployment was deleted.
+`sessions.end()` finishes a live session with `outcome: "completed"`. It also retires [stranded sessions](./concepts/execution-model-and-durability#stranded-sessions) (recording `outcome: "failed"` with `error.code: "session_stranded"`) and handed-off sessions whose original Vercel deployment was deleted (recording no terminal event). Built-in channel renderers such as Slack post nothing in any of these cases: live sessions end `completed`, and stranded or deleted-deployment retirements skip channel `session.ended` handlers.
 
 ### Detect the app principal
 
