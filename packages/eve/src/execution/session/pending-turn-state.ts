@@ -1,6 +1,8 @@
 import { sessionView } from "#harness/session-machine/commit.js";
 import { runtimeWait, ownOpenRequestIds } from "#harness/session-machine/view.js";
 import type { TaskToolCall } from "#execution/tasks/calls.js";
+import type { PendingDispatch } from "#harness/session-machine/transitions.js";
+import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { SessionProjection } from "#protocol/session-projection.js";
 import { openSignIns } from "#protocol/session-projection/reader.js";
@@ -17,6 +19,8 @@ export type TurnPause =
       readonly callIds: readonly string[];
       readonly dispatch: boolean;
       readonly taskToolCalls: readonly TaskToolCall[];
+      readonly results?: readonly RuntimeActionResult[];
+      readonly publish?: PendingDispatch;
     };
 
 export function pausedOnInteraction(

@@ -77,6 +77,7 @@ export interface SessionStepInput {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
   readonly sessionWritable: WritableStream<Uint8Array>;
+  readonly rerun?: true;
 }
 
 export interface SessionHistoryStepInput extends SessionStepInput {
@@ -91,8 +92,10 @@ export type SessionStepState = Entered<SessionStepInput>;
 
 export type SessionHistoryStepState = Entered<SessionHistoryStepInput>;
 
-export function enterSessionStep<I extends object>(input: I): Entered<I> {
-  return { ...input, rerun: isRetriedStep() };
+export function enterSessionStep<I extends object>(
+  input: I & { readonly rerun?: true },
+): Entered<I> {
+  return { ...input, rerun: input.rerun === true || isRetriedStep() };
 }
 
 export interface PublishedSessionEvents {

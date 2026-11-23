@@ -33,6 +33,7 @@ export interface TurnStepInput {
   readonly sessionState: DurableSessionState;
   readonly history: HarnessModelMessage[];
   readonly recover?: { readonly error: { readonly name?: string }; readonly stopped?: true };
+  readonly rerun?: true;
 }
 
 export interface DurableStepResultFields {
