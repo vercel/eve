@@ -6,9 +6,6 @@ export const loopWidth = 720;
 export const loopHeight = 440;
 export const loopCheckpoints = 4;
 
-const restingYaw = 0.55;
-const sway = 0.17;
-
 const sections = 240;
 const sides = 6;
 const tube = 0.15;
@@ -73,55 +70,52 @@ const camera = 7.5;
 const tilt = 0.42;
 const margin = 16;
 
-function rotation(yaw: number) {
+function projectLoop(): LoopMark[] {
+  const yaw = 0.55;
   const cosYaw = Math.cos(yaw);
   const sinYaw = Math.sin(yaw);
   const cosTilt = Math.cos(tilt);
   const sinTilt = Math.sin(tilt);
-  return ([x, y, z]: Vector): Vector => {
+  const rotate = ([x, y, z]: Vector): Vector => {
     const rx = x * cosYaw + z * sinYaw;
     const rz = -x * sinYaw + z * cosYaw;
     return [rx, y * cosTilt - rz * sinTilt, y * sinTilt + rz * cosTilt];
   };
-}
-
-const loopScale = (() => {
-  let reachX = 0;
-  let reachY = 0;
-  const samples = 24;
-  for (let step = 0; step <= samples; step++) {
-    const rotate = rotation(restingYaw + sway * ((step / samples) * 2 - 1));
-    for (const { position } of loopSamples) {
-      const [x, y, z] = rotate(position);
-      const perspective = camera / (camera - z);
-      reachX = Math.max(reachX, Math.abs(x * perspective));
-      reachY = Math.max(reachY, Math.abs(y * perspective));
-    }
-  }
-  return Math.min((loopWidth / 2 - margin) / reachX, (loopHeight / 2 - margin) / reachY);
-})();
-
-export function projectLoop(seconds: number): LoopMark[] {
-  const rotate = rotation(restingYaw + sway * Math.sin(seconds * 0.25));
-  return loopSamples
-    .map(({ position, normal, t, symbol }) => {
-      const [x, y, z] = rotate(position);
-      const facing = rotate(normal);
-      const perspective = camera / (camera - z);
-      const lit = Math.max(0, facing[0] * light[0] + facing[1] * light[1] + facing[2] * light[2]);
-      const front = facing[2] > -0.08;
-      return {
-        x: loopWidth / 2 + x * loopScale * perspective,
-        y: loopHeight / 2 - y * loopScale * perspective,
-        depth: z,
-        size: 9.5 * perspective,
-        shade: front ? 0.24 + 0.76 * lit : 0.07,
-        t,
-        symbol,
-      };
-    })
+  const marks = loopSamples.map(({ position, normal, t, symbol }) => {
+    const [x, y, z] = rotate(position);
+    const facing = rotate(normal);
+    const perspective = camera / (camera - z);
+    const lit = Math.max(0, facing[0] * light[0] + facing[1] * light[1] + facing[2] * light[2]);
+    return {
+      x: x * perspective,
+      y: -y * perspective,
+      depth: z,
+      size: 9.5 * perspective,
+      shade: facing[2] > -0.08 ? 0.24 + 0.76 * lit : 0.07,
+      t,
+      symbol,
+    };
+  });
+  const xs = marks.map(({ x }) => x);
+  const ys = marks.map(({ y }) => y);
+  const left = Math.min(...xs);
+  const right = Math.max(...xs);
+  const top = Math.min(...ys);
+  const bottom = Math.max(...ys);
+  const scale = Math.min(
+    (loopWidth - 2 * margin) / (right - left),
+    (loopHeight - 2 * margin) / (bottom - top),
+  );
+  return marks
+    .map((mark) => ({
+      ...mark,
+      x: loopWidth / 2 + (mark.x - (left + right) / 2) * scale,
+      y: loopHeight / 2 + (mark.y - (top + bottom) / 2) * scale,
+    }))
     .sort((a, b) => a.depth - b.depth);
 }
+
+export const loopMarks = projectLoop();
 
 export function runPositions(seconds: number) {
   return [0, 1, 2].map((run) => {
@@ -169,7 +163,7 @@ function buildStill() {
       return `<path id="loop-glyph-${index}" d="${path}" transform="scale(1.4)" ${paint}/>`;
     })
     .join("");
-  const marks = projectLoop(0).map((mark) => ({
+  const marks = loopMarks.map((mark) => ({
     symbol: mark.symbol,
     opacity: loopMarkOpacity(mark, runs).toFixed(2),
     transform: `translate(${mark.x.toFixed(1)} ${mark.y.toFixed(1)}) scale(${(mark.size / 16).toFixed(3)})`,

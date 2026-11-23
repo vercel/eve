@@ -6,8 +6,8 @@ import { glyphSymbols } from "./glyphs";
 import {
   loopHeight,
   loopMarkOpacity,
+  loopMarks,
   loopWidth,
-  projectLoop,
   runPositions,
   stillLoop,
 } from "./harness-loop";
@@ -94,7 +94,7 @@ export function HarnessLoop() {
       if (!glyphs) return;
       const strength = Number(getComputedStyle(frame!).getPropertyValue("--loop-strength")) || 1;
       context!.clearRect(0, 0, loopWidth, loopHeight);
-      for (const mark of projectLoop(elapsed)) {
+      for (const mark of loopMarks) {
         const tile = mark.symbol * sprite;
         const left = mark.x - mark.size / 2;
         const top = mark.y - mark.size / 2;
