@@ -1,4 +1,3 @@
-import { settleControlDeliveryStep } from "#execution/session/settle-control-delivery-step.js";
 import type { ControlSettlement } from "#harness/facts.js";
 import { controlDeliveryOf } from "#execution/session/control-delivery.js";
 import type { ControlDelivery } from "#harness/types.js";
@@ -6,11 +5,7 @@ import { STUB_CONTEXT_KEY, type StubScope } from "#tool-stubs/types.js";
 import { runServingToolStubs, type ToolStubHost } from "#execution/tool-stub-host.js";
 import type { DeliverHookPayload, SessionCapabilities, TurnCaller } from "#channel/types.js";
 import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
-import {
-  notifyCancelledTaskCallerStep,
-  notifyTurnCallerStep,
-  resolveInitialTurnCallerStep,
-} from "#subagents/parent-notification.js";
+import { resolveInitialTurnCallerStep } from "#subagents/parent-notification.js";
 import { readDurableSession } from "#execution/durable-session-read.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { isBetweenTurns, storedProjection } from "#harness/session-machine/view.js";
@@ -32,14 +27,12 @@ import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { cancelWorkingTasks, sessionTaskTable } from "#execution/tasks/session.js";
 import { workingTasks } from "#execution/tasks/table.js";
 import type { TurnOutcome, TurnStepPayload } from "#execution/session/turn-step-types.js";
-import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
 import { finalizeSession, type SessionTerminalOutcome } from "#execution/session/finalization.js";
 import { type SessionInboxHandle } from "#execution/session-inbox/inbox.js";
 import type { SessionTimeoutControl } from "#execution/session/timeout-control.js";
 import type { SessionHandoff } from "#execution/session/handoff.js";
 import type { SessionTransferState } from "#execution/session/checkpoint.js";
-import { prewarmSessionStep } from "#execution/session/prewarm-step.js";
-import { stopIdleSessionSandboxStep } from "#execution/session/idle-sandbox-step.js";
+import { sessionStepKeys } from "#execution/session/steps.js";
 import type { SandboxRunning } from "#sandbox/state.js";
 import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
 
@@ -326,6 +319,7 @@ async function runSessionLoop(
 ): Promise<SessionLoopOutcome> {
   const { cursor, host, inbox, progress, queue } = deps;
   const handoff = host.moves ?? RETAINED;
+  const stepKey = sessionStepKeys(boot.sessionId);
   const execution = new SessionExecution({
     capabilities: boot.capabilities,
     cursor,
@@ -333,7 +327,16 @@ async function runSessionLoop(
     inbox,
     queue,
     sessionId: boot.sessionId,
+    stepKey,
   });
+  const settleControlDelivery = (settlement: ControlSettlement) =>
+    cursor.advance((state) =>
+      host.step(
+        "settleControlDelivery",
+        { ...state, settlement },
+        stepKey("settleControlDelivery"),
+      ),
+    );
   const sessionTimeout = boot.sessionTimeoutControl;
   let prewarming: Promise<void> = Promise.resolve();
   let prewarmSettled = true;
@@ -346,12 +349,11 @@ async function runSessionLoop(
       unstarted.push(settlement);
       return;
     }
-    await cursor.advance((state) => settleControlDeliveryStep({ ...state, settlement }));
+    await settleControlDelivery(settlement);
   };
   const settleUnstarted = async (): Promise<void> => {
     if (!started()) return;
-    for (const settlement of unstarted.splice(0))
-      await cursor.advance((state) => settleControlDeliveryStep({ ...state, settlement }));
+    for (const settlement of unstarted.splice(0)) await settleControlDelivery(settlement);
   };
   const expired = (control?: ControlDelivery): SessionTerminalOutcome => ({
     kind: "expired",
@@ -390,7 +392,11 @@ async function runSessionLoop(
       prewarmedSandbox = undefined;
       await cursor
         .advance(({ serializedContext, sessionState }) =>
-          stopIdleSessionSandboxStep({ serializedContext, sessionState }),
+          host.step(
+            "stopIdleSandbox",
+            { serializedContext, sessionState },
+            stepKey("stopIdleSandbox"),
+          ),
         )
         .catch(() => undefined);
       return;
@@ -436,12 +442,7 @@ async function runSessionLoop(
         await cancelWorkingTasks(cursor, "turn-cancelled");
         if (next.origin !== undefined) {
           const control = controlDeliveryOf(next.origin);
-          await cursor.advance((state) =>
-            settleControlDeliveryStep({
-              ...state,
-              settlement: { control, outcome: "applied", source: "cancel" },
-            }),
-          );
+          await settleControlDelivery({ control, outcome: "applied", source: "cancel" });
         }
         continue;
       }
@@ -501,14 +502,21 @@ async function runSessionLoop(
   const settleCancelledTurn = async (report: boolean, control?: ControlDelivery) => {
     const { caller } = progress;
     const settled = await cursor.advanceWithHistory(
-      (state) => settleCancelledTurnStep({ ...state, control, reportUsage: report }),
+      (state) =>
+        host.step(
+          "settleCancelledTurn",
+          { ...state, control, reportUsage: report },
+          stepKey("settleCancelledTurn"),
+        ),
       { after: () => undefined, before: { at: "cancel", report, ...(control && { control }) } },
     );
     progress.caller = undefined;
     if (report && caller !== undefined) {
       const notification = { caller, sessionId: boot.sessionId };
-      await notifyCancelledTaskCallerStep(
+      await host.step(
+        "notifyCancelledTaskCaller",
         settled.usage === undefined ? notification : { ...notification, usage: settled.usage },
+        stepKey("notifyCancelledTaskCaller"),
       );
     }
   };
@@ -557,7 +565,11 @@ async function runSessionLoop(
         prewarming = cursor
           .advanceBeside(
             async ({ serializedContext, sessionState }) => {
-              const prewarmed = await prewarmSessionStep({ serializedContext, sessionState });
+              const prewarmed = await host.step(
+                "prewarmSession",
+                { serializedContext, sessionState },
+                stepKey("prewarmSession"),
+              );
               prewarmedSandbox = prewarmed.sandboxRunning;
               return prewarmed;
             },
@@ -582,7 +594,11 @@ async function runSessionLoop(
         const { from } = boot.start;
         progress.caller ??=
           (from.at === "step" ? from.input?.delivery?.caller : undefined) ??
-          (await resolveInitialTurnCallerStep({ serializedContext: cursor.serializedContext }));
+          (await host.step(
+            "resolveInitialTurnCaller",
+            { serializedContext: cursor.serializedContext },
+            stepKey("resolveInitialTurnCaller"),
+          ));
         if (from.at === "cancel") {
           await settleCancelledTurn(from.report, from.control);
           return { action: { kind: "park" }, kind: "action" };
@@ -615,12 +631,16 @@ async function runSessionLoop(
         await settleCancelledTurn(progress.caller !== undefined, action.cancelledBy);
       } else if (action.settled !== undefined) {
         if (progress.caller !== undefined) {
-          await notifyTurnCallerStep({
-            caller: progress.caller,
-            lifecycle: "parked",
-            sessionId: boot.sessionId,
-            settled: action.settled,
-          });
+          await host.step(
+            "notifyTurnCaller",
+            {
+              caller: progress.caller,
+              lifecycle: "parked",
+              sessionId: boot.sessionId,
+              settled: action.settled,
+            },
+            stepKey("notifyTurnCaller"),
+          );
         }
         progress.caller = undefined;
       }

@@ -1,4 +1,3 @@
-import { applyRunMessagesStep } from "#execution/tools/workflow/apply-run-messages-step.js";
 import { describe, expect, it, vi } from "vitest";
 import { installWorkflowEngine } from "#execution/workflow-host/host.js";
 import { builtInPlatform } from "#platform/context.js";
@@ -10,9 +9,9 @@ import type { SessionInbox } from "#execution/session-inbox/inbox.js";
 import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { SessionExecution, type SessionTurnHost } from "#execution/session/turn.js";
+import { dispatchSessionSteps, sessionStepKeys } from "#execution/session/steps.js";
+import { WORKFLOW_SESSION_STEPS } from "#execution/workflow-host/session-steps.js";
 import { sleep } from "#compiled/@workflow/core/index.js";
-import { dispatchCoordinationStep } from "#execution/workflow-host/dispatch-step.js";
-import { turnStep } from "#execution/workflow-host/turn-step.js";
 import { cancelTasksStep } from "#execution/tasks/steps.js";
 import {
   cancelTask,
@@ -29,9 +28,7 @@ import { withSessionUsage } from "#internal/testing/session-usage.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
 const WORKFLOW_TURN_HOST: SessionTurnHost = {
-  applyRunMessages: (input) => applyRunMessagesStep(input),
-  dispatchRuns: (input) => dispatchCoordinationStep(input),
-  runTurnStep: (input) => turnStep(input),
+  step: dispatchSessionSteps(WORKFLOW_SESSION_STEPS),
   until: (at) => sleep(new Date(at)),
 };
 
@@ -133,6 +130,7 @@ function sessionWithTask(input: {
     inbox,
     queue: new SessionInputQueue([]),
     sessionId: base.sessionId,
+    stepKey: sessionStepKeys(base.sessionId),
   });
   const from: WorkflowToolRunRef = {
     callId: `${input.name}-call`,

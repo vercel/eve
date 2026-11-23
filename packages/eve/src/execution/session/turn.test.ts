@@ -7,6 +7,8 @@ import type { SessionView } from "#harness/session-machine/view.js";
 import type { SessionInbox, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { SessionExecution, type SessionTurnHost } from "#execution/session/turn.js";
+import { dispatchSessionSteps, sessionStepKeys } from "#execution/session/steps.js";
+import { WORKFLOW_SESSION_STEPS } from "#execution/workflow-host/session-steps.js";
 import { sleep } from "#compiled/@workflow/core/index.js";
 import { createTurnControl } from "#execution/session/turn-control.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
@@ -50,9 +52,7 @@ import type {
 import type { TokenUsage } from "#shared/token-usage.js";
 
 const WORKFLOW_TURN_HOST: SessionTurnHost = {
-  applyRunMessages: (input) => applyRunMessagesStep(input),
-  dispatchRuns: (input) => dispatchCoordinationStep(input),
-  runTurnStep: (input) => turnStep(input),
+  step: dispatchSessionSteps(WORKFLOW_SESSION_STEPS),
   until: (at) => sleep(new Date(at)),
 };
 
@@ -1394,6 +1394,7 @@ describe("SessionExecution checkpoints", () => {
       inbox,
       queue: new SessionInputQueue([]),
       sessionId: sessionState.sessionId,
+      stepKey: sessionStepKeys(sessionState.sessionId),
     });
 
     await expect(
@@ -2243,6 +2244,7 @@ function createExecution(input: {
     inbox: input.inbox,
     queue: input.queue ?? new SessionInputQueue([]),
     sessionId: input.sessionState.sessionId,
+    stepKey: sessionStepKeys(input.sessionState.sessionId),
   });
 }
 

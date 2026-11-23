@@ -3,12 +3,7 @@ import { formatEarlierRemoteCallerInputError } from "#protocol/remote-agent-prot
 import { controlDeliveryOf } from "#execution/session/control-delivery.js";
 
 import type { SessionCapabilities, TurnCaller } from "#channel/types.js";
-import { publishDispatchedCallsStep } from "#execution/coordination-dispatch-step.js";
-import type {
-  CoordinationDispatchInput,
-  CoordinationDispatchResult,
-} from "#execution/coordination-dispatch-shared.js";
-import type { WithSessionStateDelta } from "#execution/session/state-delta.js";
+import type { SessionStepCall, SessionStepName } from "#execution/session/steps.js";
 import type { SessionInputQueue } from "#execution/session/input-queue.js";
 import { taskToolResult, type TaskToolCall } from "#execution/tasks/calls.js";
 import { TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
@@ -32,12 +27,7 @@ import {
   isAppliedRunMessage,
   takeLeadingAppliedRunMessages,
 } from "#execution/session-workflow-tool-run.js";
-import type {
-  AppliedRunMessage,
-  ApplyRunMessagesInput,
-  ApplyRunMessagesResult,
-} from "#execution/tools/workflow/apply-run-messages.js";
-import { interruptWorkflowToolRun } from "#execution/tools/workflow/interrupt.js";
+import type { AppliedRunMessage } from "#execution/tools/workflow/apply-run-messages.js";
 import {
   isAgentSessionMessage,
   type WorkflowToolRunMessage,
@@ -49,7 +39,6 @@ import type {
   TurnOutcome,
   TurnStepInput,
   TurnStepPayload,
-  TurnStepResult,
 } from "#execution/session/turn-step-types.js";
 import { exhaustedStepError } from "#execution/workflow-errors.js";
 import { isObject, readNonEmptyString } from "#shared/guards.js";
@@ -63,7 +52,6 @@ import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { PendingDispatch } from "#harness/session-machine/transitions.js";
 import type { TokenUsage } from "#shared/token-usage.js";
-import { startTaskToolCallsStep } from "#execution/session/task-tool-tracing-step.js";
 
 export function hasDelegatedCallerContext(serializedContext: Record<string, unknown>): boolean {
   if (earlierRemoteCaller(serializedContext) !== undefined) return false;
@@ -84,11 +72,7 @@ const NO_INPUT_CAPABILITY_ERROR_MESSAGE =
   "Configure unattended tools with an approval policy that does not require human input.";
 
 export interface SessionTurnHost {
-  runTurnStep(input: TurnStepInput): Promise<TurnStepResult>;
-  dispatchRuns(
-    input: CoordinationDispatchInput,
-  ): Promise<WithSessionStateDelta<CoordinationDispatchResult>>;
-  applyRunMessages(input: ApplyRunMessagesInput): Promise<ApplyRunMessagesResult>;
+  readonly step: SessionStepCall;
   until(at: number): Promise<void>;
 }
 
@@ -96,6 +80,7 @@ export interface SessionExecutionInput {
   readonly capabilities?: SessionCapabilities;
   readonly cursor: SessionStateCursor;
   readonly host: SessionTurnHost;
+  readonly stepKey: (name: SessionStepName) => string;
   readonly inbox: SessionInboxReader;
   readonly queue: SessionInputQueue;
   readonly sessionId: string;
@@ -175,7 +160,11 @@ export class SessionExecution {
     if (messages.length === 0) return;
     const { cancelled } = await this.input.cursor.advance(
       (state) =>
-        this.input.host.applyRunMessages({ ...state, canCancelTurn: turn !== undefined, messages }),
+        this.input.host.step(
+          "applyRunMessages",
+          { ...state, canCancelTurn: turn !== undefined, messages },
+          this.input.stepKey("applyRunMessages"),
+        ),
       { consumes: messages },
     );
     if (cancelled) turn?.abort();
@@ -205,15 +194,19 @@ export class SessionExecution {
       const result = await cursor.advanceWithHistory(
         (state) => {
           const run = (recover?: TurnStepInput["recover"]) =>
-            this.input.host.runTurnStep({
-              ...state,
-              handover,
-              abortSignal: turn.signal,
-              caller,
-              input,
-              recover,
-              steeringSignal: turn.steeringSignal,
-            });
+            this.input.host.step(
+              "turn",
+              {
+                ...state,
+                handover,
+                abortSignal: turn.signal,
+                caller,
+                input,
+                recover,
+                steeringSignal: turn.steeringSignal,
+              },
+              this.input.stepKey("turn"),
+            );
           return run().catch((error: unknown) => {
             const thrown = exhaustedStepError(error);
             const name = isObject(thrown) ? readNonEmptyString(thrown.name) : undefined;
@@ -362,13 +355,17 @@ export class SessionExecution {
     const { cursor } = this.input;
     const dispatched = await cursor.advance(
       ({ serializedContext, sessionState }) =>
-        this.input.host.dispatchRuns({
-          serializedContext,
-          sessionState,
-          workflowToolRunOwner: {
-            inbox: sessionInboxHookToken(sessionCommandHookToken(this.input.sessionId)),
+        this.input.host.step(
+          "dispatchRuns",
+          {
+            serializedContext,
+            sessionState,
+            workflowToolRunOwner: {
+              inbox: sessionInboxHookToken(sessionCommandHookToken(this.input.sessionId)),
+            },
           },
-        }),
+          this.input.stepKey("dispatchRuns"),
+        ),
       {
         after: (result) => ({
           at: "pause",
@@ -394,9 +391,15 @@ export class SessionExecution {
     pending: PendingDispatch,
   ): Promise<void> {
     if (!hasPendingDispatch(pending)) return;
-    await this.input.cursor.advance((state) => publishDispatchedCallsStep({ ...state, pending }), {
-      after: () => ({ at: "pause", pause: dispatchedPause(paused, results, undefined) }),
-    });
+    await this.input.cursor.advance(
+      (state) =>
+        this.input.host.step(
+          "publishDispatchedCalls",
+          { ...state, pending },
+          this.input.stepKey("publishDispatchedCalls"),
+        ),
+      { after: () => ({ at: "pause", pause: dispatchedPause(paused, results, undefined) }) },
+    );
   }
   async handleWorkflowMessage(
     message: WorkflowToolRunMessage,
@@ -462,6 +465,8 @@ function dispatchedPause(
 }
 class CallWait {
   private readonly cursor: SessionStateCursor;
+  private readonly host: SessionTurnHost;
+  private readonly stepKey: SessionExecutionInput["stepKey"];
   private readonly until: SessionTurnHost["until"];
   private readonly callIds: readonly string[];
   private readonly results: RuntimeActionResult[] = [];
@@ -470,11 +475,13 @@ class CallWait {
   private taskWaits: TaskWait[] = [];
 
   constructor(
-    session: Pick<SessionExecutionInput, "cursor" | "host">,
+    session: Pick<SessionExecutionInput, "cursor" | "host" | "stepKey">,
     callIds: readonly string[],
     dispatched: readonly RuntimeActionResult[],
   ) {
     this.cursor = session.cursor;
+    this.host = session.host;
+    this.stepKey = session.stepKey;
     this.until = session.host.until;
     this.callIds = callIds;
     const acceptedAtMs = Date.now();
@@ -538,12 +545,17 @@ class CallWait {
       const run = findBlockingWorkflowToolRun(state, callId);
       return run === undefined ? [] : [run.address];
     });
-    await Promise.all(runs.map((run) => interruptWorkflowToolRun(run)));
+    await Promise.all(
+      runs.map((run) => this.host.step("interruptRun", run, this.stepKey("interruptRun"))),
+    );
   }
 
   async answerTaskToolCalls(calls: readonly TaskToolCall[]): Promise<void> {
     const waits: TaskWait[] = [];
-    const startedAtMs = calls.length === 0 ? 0 : await startTaskToolCallsStep();
+    const startedAtMs =
+      calls.length === 0
+        ? 0
+        : await this.host.step("startTaskToolCalls", undefined, this.stepKey("startTaskToolCalls"));
     for (const call of calls) {
       if (call.kind === TASK_WAIT_TOOL_NAME) {
         waits.push(startTaskWait(call, startedAtMs, this.until));
