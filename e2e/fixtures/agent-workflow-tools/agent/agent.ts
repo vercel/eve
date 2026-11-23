@@ -128,7 +128,7 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
                 '  ctx.agent("workflow-marker", { message: "release-check" }),',
                 "]);",
                 "return {",
-                "  found: found.tools.map((tool) => tool.name),",
+                "  found: found.results.map((entry) => entry.tool),",
                 "  items,",
                 "  deployed,",
                 "  note,",

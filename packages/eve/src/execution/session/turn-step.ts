@@ -125,7 +125,7 @@ import { reconcileSessionContinuationToken } from "#execution/reconcile-session-
 import { hydrateDurableSession } from "#execution/session.js";
 import { toolStubPlayback, type ToolStubHost } from "#execution/tool-stub-host.js";
 import { ToolStubPlaybackKey } from "#context/providers/tool-stubs-key.js";
-import { runModelCallBatch } from "#execution/model-call-batching.js";
+import { canContinueModelCallBatch, runModelCallBatch } from "#execution/model-call-batching.js";
 import {
   createCancelledModelCallBatchResult,
   type CompletedModelCallCheckpoint,
@@ -143,7 +143,30 @@ const log = createLogger("execution.turn-step");
 
 interface PendingStepAttributes {
   title?: Promise<void>;
-  usage?: Promise<void>;
+  usage?: Record<string, EveAttributeValue>;
+  usageWrite?: Promise<void>;
+}
+
+function recordPendingUsage(
+  pending: PendingStepAttributes,
+  attributes: Record<string, EveAttributeValue>,
+): void {
+  for (const [key, value] of Object.entries(attributes)) {
+    if (value !== undefined) (pending.usage ??= {})[key] = value;
+  }
+}
+
+function writePendingUsage(pending: PendingStepAttributes, host: SessionStepHost): Promise<void> {
+  const usage = pending.usage;
+  if (usage !== undefined) {
+    pending.usage = undefined;
+    const previous = pending.usageWrite;
+    pending.usageWrite = (async () => {
+      await previous;
+      await host.setAttributes(usage);
+    })().catch(() => {});
+  }
+  return pending.usageWrite ?? Promise.resolve();
 }
 
 export interface SessionStepHost {
@@ -177,8 +200,12 @@ async function runSessionStep(
   try {
     return await runSessionStepBody(input, pendingAttributes, host);
   } finally {
-    await pendingAttributes.title;
-    await pendingAttributes.usage;
+    const usageWrite = writePendingUsage(pendingAttributes, host);
+    try {
+      await pendingAttributes.title;
+    } finally {
+      await usageWrite;
+    }
   }
 }
 
@@ -675,6 +702,7 @@ async function runSessionStepBody(
       lifecycleSession: HarnessSession,
       stepInput: HarnessStepInput | undefined,
       signInCompletions: readonly AuthorizationChallenge[] | undefined,
+      lastCall: boolean,
     ): Promise<StepResult> => {
       const step = createExecutionNodeStep({
         steeringSignal: input.steeringSignal,
@@ -696,11 +724,8 @@ async function runSessionStepBody(
         node: effectiveNode,
         sessionUsageLimit,
         setAttributes: async (attributes) => {
-          const previous = pendingAttributes.usage ?? pendingAttributes.title;
-          pendingAttributes.usage = (async () => {
-            await previous?.catch(() => {});
-            await host.setAttributes(attributes);
-          })().catch(() => {});
+          recordPendingUsage(pendingAttributes, attributes);
+          if (lastCall) void writePendingUsage(pendingAttributes, host);
         },
       });
       return step(lifecycleSession, stepInput);
@@ -716,7 +741,7 @@ async function runSessionStepBody(
         initialInput: resolved,
         initialSession,
         modelCallsPerStep,
-        runStep: async ({ firstCall, session, stepInput }) => {
+        runStep: async ({ firstCall, lastCall, session, stepInput }) => {
           const result = await runStep(
             ctx,
             session,
@@ -750,7 +775,22 @@ async function runSessionStepBody(
                 firstCall && completedAuths !== undefined
                   ? completedAuths.map(({ challenge }) => challenge)
                   : undefined;
-              const harnessResult = await runHarnessStep(schemaSession, stepInput, completions);
+              const harnessResult = await runHarnessStep(
+                schemaSession,
+                stepInput,
+                completions,
+                lastCall,
+              );
+              if (
+                !canContinueModelCallBatch({
+                  lastCall,
+                  steeringSignal: input.steeringSignal,
+                  result: harnessResult,
+                  projection: currentProjection(ctx),
+                })
+              ) {
+                void writePendingUsage(pendingAttributes, host);
+              }
               await publisher.finish({ announce: stoppedForPerson(harnessResult) });
               return harnessResult;
             },
@@ -764,6 +804,7 @@ async function runSessionStepBody(
         },
       });
     } catch (error) {
+      void writePendingUsage(pendingAttributes, host);
       if (!isTurnCancellation(error) && !abortSignal.aborted) {
         await instrumentation?.flush();
         throw error;
@@ -782,6 +823,7 @@ async function runSessionStepBody(
       });
     }
 
+    void writePendingUsage(pendingAttributes, host);
     await publisher.drain();
     const aliased = saveSessionProjection(
       dropClosedRecords(

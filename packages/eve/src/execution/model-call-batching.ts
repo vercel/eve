@@ -1,6 +1,26 @@
 import { storedProjection } from "#harness/session-machine/view.js";
 import { waitsOnAnything } from "#execution/session/pending-turn-state.js";
 import type { HarnessSession, HarnessStepInput, StepResult } from "#harness/types.js";
+import type { SessionProjection } from "#protocol/session-projection.js";
+
+export function canContinueModelCallBatch(input: {
+  readonly lastCall: boolean;
+  readonly steeringSignal?: AbortSignal;
+  readonly result: StepResult;
+  readonly projection: SessionProjection;
+}): boolean {
+  if (
+    input.lastCall ||
+    input.steeringSignal?.aborted === true ||
+    input.result.steered === true ||
+    input.result.checkpoint === true ||
+    typeof input.result.next !== "function"
+  ) {
+    return false;
+  }
+
+  return !waitsOnAnything(input.result.session, input.projection);
+}
 
 export async function runModelCallBatch(input: {
   readonly steeringSignal?: AbortSignal;
@@ -9,6 +29,7 @@ export async function runModelCallBatch(input: {
   readonly modelCallsPerStep: number;
   readonly runStep: (input: {
     readonly firstCall: boolean;
+    readonly lastCall: boolean;
     readonly session: HarnessSession;
     readonly stepInput: HarnessStepInput | undefined;
   }) => Promise<StepResult>;
@@ -18,20 +39,20 @@ export async function runModelCallBatch(input: {
   let completedModelCalls = 0;
 
   while (true) {
+    const lastCall = completedModelCalls + 1 >= input.modelCallsPerStep;
     const result = await input.runStep({
       firstCall: completedModelCalls === 0,
+      lastCall,
       session,
       stepInput,
     });
     completedModelCalls++;
     if (
-      input.steeringSignal?.aborted === true ||
-      result.steered === true ||
-      result.checkpoint === true ||
-      !shouldRunAnotherModelCall({
-        completedModelCalls,
-        modelCallsPerStep: input.modelCallsPerStep,
+      !canContinueModelCallBatch({
+        lastCall,
+        steeringSignal: input.steeringSignal,
         result,
+        projection: storedProjection(result.session.state),
       })
     ) {
       return result;
@@ -39,19 +60,4 @@ export async function runModelCallBatch(input: {
     session = result.session;
     stepInput = undefined;
   }
-}
-
-function shouldRunAnotherModelCall(input: {
-  readonly completedModelCalls: number;
-  readonly modelCallsPerStep: number;
-  readonly result: StepResult;
-}): boolean {
-  if (
-    input.completedModelCalls >= input.modelCallsPerStep ||
-    typeof input.result.next !== "function"
-  ) {
-    return false;
-  }
-
-  return !waitsOnAnything(input.result.session, storedProjection(input.result.session.state));
 }
