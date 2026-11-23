@@ -1,0 +1,23 @@
+{
+  "name": "framework-solid",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@solidjs/web": "2.0.1",
+    "eve": "workspace:*",
+    "nitro": "3.0.261103-rc",
+    "solid-js": "2.0.1",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@solidjs/vite-plugin": "3.0.1",
+    "@types/node": "catalog:",
+    "vite": "^8.3.8"
+  }
+}

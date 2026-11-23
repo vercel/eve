@@ -3,6 +3,7 @@ import {
   context,
   ROOT_CONTEXT,
   trace,
+  type Context,
   type SpanContext,
 } from "#compiled/@opentelemetry/api/index.js";
 import { otelTelemetry } from "#compiled/@vercel/agent-runs/index.js";
@@ -120,14 +121,14 @@ export async function withConnectionEventSpan<T>(
   execute: (reference?: SpanContext) => Promise<T>,
 ): Promise<T> {
   return contextStorage.run(input.ctx, async () => {
-    const runtime = getInstrumentationRuntime();
     const telemetry = otelTelemetry({
       tracerName: "eve.connection.events",
       mapping: eveOutputMapping(),
     });
-    const settings = runtime?.otelSettings;
-    const sessionId = input.ctx.require(SessionIdKey);
-    const attributes = connectionEventAttributes({ ...input, sessionId });
+    const attributes = connectionEventAttributes({
+      ...input,
+      sessionId: input.ctx.require(SessionIdKey),
+    });
     const run = async (reference?: SpanContext) => {
       try {
         return await execute(reference);
@@ -139,34 +140,8 @@ export async function withConnectionEventSpan<T>(
         throw error;
       }
     };
-    if (settings === undefined) return telemetry.suppressed!(() => run());
-    const saved = new ContextAgentTraceStateStore().get("session", sessionId);
-    const session = readInstrumentationSessionContext(input.ctx);
-    const decision =
-      session.traceSeed?.decision ??
-      saved?.decision ??
-      resolveTracePolicy(settings.tracePolicy, {
-        ...session.conversation,
-        agentName: sessionAgent(input.ctx).name ?? "eve",
-      });
-    const active = activeTraceOperation();
-    const reference =
-      connectionEventTraceContext(input.requestTraceContext) ?? active?.reference ?? saved?.context;
-    if (
-      decision.action === "drop" ||
-      active?.capture.emit === false ||
-      (session.traceSeed !== undefined && (session.traceSeed.traceFlags & 1) === 0) ||
-      (saved !== undefined && (saved.context.traceFlags & 1) === 0) ||
-      (reference !== undefined && (reference.traceFlags & 1) === 0)
-    )
-      return telemetry.suppressed!(() => run());
-    const parent =
-      reference === undefined
-        ? context.active()
-        : trace.setSpan(ROOT_CONTEXT, trace.wrapSpanContext(reference));
-    const host = markAgentTraceContext(
-      withErrorContent(withChannelAudience(parent, session.audience), false),
-    );
+    const host = sideSpanHost(input.ctx, connectionEventTraceContext(input.requestTraceContext));
+    if (host === undefined) return telemetry.suppressed!(() => run());
     const name = `agent.connection.event.${input.operation}`;
     const span = telemetry.startSpan(
       {
@@ -213,7 +188,44 @@ export async function withConnectionEventSpan<T>(
       throw error;
     } finally {
       span.end();
-      await runtime!.forceFlush().catch(() => log.warn("flushing connection event traces failed"));
+      await getInstrumentationRuntime()!
+        .forceFlush()
+        .catch(() => log.warn("flushing connection event traces failed"));
     }
   });
+}
+
+export function sideSpanHost(
+  ctx: AlsContext,
+  requestTraceContext?: SpanContext,
+): Context | undefined {
+  const settings = getInstrumentationRuntime()?.otelSettings;
+  if (settings === undefined) return undefined;
+  const sessionId = ctx.require(SessionIdKey);
+  const saved = new ContextAgentTraceStateStore().get("session", sessionId);
+  const session = readInstrumentationSessionContext(ctx);
+  const decision =
+    session.traceSeed?.decision ??
+    saved?.decision ??
+    resolveTracePolicy(settings.tracePolicy, {
+      ...session.conversation,
+      agentName: sessionAgent(ctx).name ?? "eve",
+    });
+  const active = activeTraceOperation();
+  const reference = requestTraceContext ?? active?.reference ?? saved?.context;
+  if (
+    decision.action === "drop" ||
+    active?.capture.emit === false ||
+    (session.traceSeed !== undefined && (session.traceSeed.traceFlags & 1) === 0) ||
+    (saved !== undefined && (saved.context.traceFlags & 1) === 0) ||
+    (reference !== undefined && (reference.traceFlags & 1) === 0)
+  )
+    return undefined;
+  const parent =
+    reference === undefined
+      ? context.active()
+      : trace.setSpan(ROOT_CONTEXT, trace.wrapSpanContext(reference));
+  return markAgentTraceContext(
+    withErrorContent(withChannelAudience(parent, session.audience), false),
+  );
 }

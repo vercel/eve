@@ -9,6 +9,7 @@ import type { ToolContext } from "#tools/definition.js";
 import type { ToolSchema } from "#tools/schema.js";
 
 import { editFile, type EditFileToolEdit, type EditFileToolOutput } from "./edit-file.js";
+import { toolModelOutputContext } from "#harness/tool-model-output.js";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder("utf-8", { ignoreBOM: true });
@@ -83,7 +84,9 @@ describe("edit_file", () => {
       "\uFEFFconst a = 10;\r\nconst b = 20;\r\nconst c = 30;\r\n",
     );
     expect(output).toEqual({ path: "src/app.ts", replacements: 2 });
-    expect(await editFile.toModelOutput?.(output)).toEqual({
+    expect(
+      await editFile.toModelOutput?.(output, toolModelOutputContext("edit_file", "call_1")),
+    ).toEqual({
       type: "text",
       value: "Successfully replaced 2 block(s) in src/app.ts.",
     });

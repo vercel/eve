@@ -8,9 +8,11 @@ import {
   defineMcpTool,
   McpToolOperationError,
   type McpCallToolResult,
+  type McpContent,
   type McpServerTool,
   type McpToolCallContext,
 } from "#internal/mcp/streamable-http-server.js";
+import type { ToolModelOutput } from "#tools/model-output.js";
 import { isJsonObjectValue, type JsonValue } from "#shared/json.js";
 import { isObject } from "#shared/guards.js";
 
@@ -76,6 +78,39 @@ function toolSessionKey(context: McpToolCallContext): string | undefined {
   );
 }
 
+function modelOutputContent(modelOutput: ToolModelOutput): McpContent[] {
+  switch (modelOutput.type) {
+    case "text":
+    case "error-text":
+      return [{ text: modelOutput.value, type: "text" }];
+    case "json":
+      return [{ text: JSON.stringify(modelOutput.value ?? null), type: "text" }];
+    case "content":
+      return modelOutput.value.map((part, index): McpContent => {
+        if (part.type === "text") return { text: part.text, type: "text" };
+        if (part.data.type === "url") {
+          return {
+            mimeType: part.mediaType,
+            name: part.filename ?? part.data.url,
+            type: "resource_link",
+            uri: part.data.url,
+          };
+        }
+        if (part.mediaType.startsWith("image/")) {
+          return { data: part.data.data, mimeType: part.mediaType, type: "image" };
+        }
+        return {
+          resource: {
+            blob: part.data.data,
+            mimeType: part.mediaType,
+            uri: `file:///${encodeURIComponent(part.filename ?? `result-${index}`)}`,
+          },
+          type: "resource",
+        };
+      });
+  }
+}
+
 function toCallToolResult(
   name: string,
   result: InvokeToolResult,
@@ -86,9 +121,7 @@ function toCallToolResult(
       const output = result.output as JsonValue;
       const { modelOutput } = result;
       const isError = modelOutput.type === "error-text";
-      const text =
-        modelOutput.type === "text" || isError ? modelOutput.value : JSON.stringify(output ?? null);
-      const content = [{ text, type: "text" as const }];
+      const content = modelOutputContent(modelOutput);
       const structured =
         hasOutputSchema || isJsonObjectValue(output)
           ? { content, structuredContent: output ?? null }

@@ -4,7 +4,10 @@ import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import type { World } from "#compiled/@workflow/world/index.js";
 import { EVE_VERSION_ATTRIBUTE } from "#execution/eve-workflow-attributes.js";
 import {
+  CONNECTION_EVENT_DELIVERY_WORKFLOW_NAME,
+  CONNECTION_EVENT_WORKFLOW_NAME,
   SESSION_TIMEOUT_WORKFLOW_NAME,
+  TURN_WORKFLOW_NAME,
   WORKFLOW_ENTRY_NAME,
   WORKFLOW_TOOL_RUN_WORKFLOW_NAME,
 } from "#execution/stable-workflow-names.js";
@@ -19,8 +22,11 @@ type QueueHandler = Parameters<World["createQueueHandler"]>[1];
 
 const QUEUE_PREFIX = "__eve_test_wkf_workflow_";
 const { name: packageName, version: currentEveVersion } = resolveInstalledPackageInfo();
-const SESSION_QUEUE = `${QUEUE_PREFIX}workflow//${packageName}//${WORKFLOW_ENTRY_NAME}`;
-const TOOL_QUEUE = `${QUEUE_PREFIX}workflow//${packageName}//${WORKFLOW_TOOL_RUN_WORKFLOW_NAME}`;
+const queueOf = (workflow: string) => `${QUEUE_PREFIX}workflow//${packageName}//${workflow}`;
+const SESSION_QUEUE = queueOf(WORKFLOW_ENTRY_NAME);
+const TOOL_QUEUE = queueOf(WORKFLOW_TOOL_RUN_WORKFLOW_NAME);
+const LEGACY_SESSION_QUEUE = queueOf(TURN_WORKFLOW_NAME);
+const CONNECTION_EVENT_QUEUE = queueOf(CONNECTION_EVENT_WORKFLOW_NAME);
 
 async function parkRun(
   token: string,
@@ -56,15 +62,19 @@ async function guardedDelivery(capabilities?: World["capabilities"]) {
 }
 
 describe("guardStrandedSessionReplay", () => {
-  it.each([{ eveVersion: "0.0.1" }, { eveVersion: undefined }])(
-    "acknowledges a stranded session from eve $eveVersion without replaying it",
-    async ({ eveVersion }) => {
+  it.each([
+    { kind: "session", eveVersion: "0.0.1", queue: SESSION_QUEUE },
+    { kind: "session", eveVersion: undefined, queue: SESSION_QUEUE },
+    { kind: "legacy session", eveVersion: "0.0.1", queue: LEGACY_SESSION_QUEUE },
+  ])(
+    "acknowledges a stranded $kind from eve $eveVersion without replaying it",
+    async ({ kind, eveVersion, queue }) => {
       const logs = captureLogRecords();
-      const run = await parkRun(`replay-guard:stranded:${eveVersion}`, eveVersion);
+      const run = await parkRun(`replay-guard:stranded:${kind}:${eveVersion}`, eveVersion);
       try {
         const { deliver, handler } = await guardedDelivery();
 
-        await expect(deliver(run.runId)).resolves.toBeUndefined();
+        await expect(deliver(run.runId, queue)).resolves.toBeUndefined();
 
         expect(handler).not.toHaveBeenCalled();
         await expect(run.status).resolves.toBe("running");
@@ -85,6 +95,7 @@ describe("guardStrandedSessionReplay", () => {
     { kind: "subagent", eveVersion: undefined, queue: SESSION_QUEUE },
     { kind: "workflow tool", eveVersion: "0.0.1", queue: TOOL_QUEUE },
     { kind: "workflow tool", eveVersion: undefined, queue: TOOL_QUEUE },
+    { kind: "connection event owner", eveVersion: "0.0.1", queue: CONNECTION_EVENT_QUEUE },
   ])("retires a $kind from eve $eveVersion without replay", async ({ kind, eveVersion, queue }) => {
     captureLogRecords();
     const token = `replay-guard:retire:${kind}:${eveVersion}`;
@@ -173,12 +184,17 @@ describe("guardStrandedSessionReplay", () => {
     {
       case: "an older session timeout run",
       eveVersion: "0.0.1",
-      queue: `${QUEUE_PREFIX}workflow//${packageName}//${SESSION_TIMEOUT_WORKFLOW_NAME}`,
+      queue: queueOf(SESSION_TIMEOUT_WORKFLOW_NAME),
     },
     {
-      case: "another workflow's run",
+      case: "an older connection event delivery run",
       eveVersion: "0.0.1",
-      queue: `${QUEUE_PREFIX}workflow//${packageName}//turnWorkflow`,
+      queue: queueOf(CONNECTION_EVENT_DELIVERY_WORKFLOW_NAME),
+    },
+    {
+      case: "an older run of a workflow eve does not ship",
+      eveVersion: "0.0.1",
+      queue: queueOf("someAuthoredWorkflow"),
     },
     {
       capabilities: { deploymentAffinity: true },

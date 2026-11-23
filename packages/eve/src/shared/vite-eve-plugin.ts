@@ -17,20 +17,11 @@ import {
   resolveEveAgentDevServer,
   resolveEveAgents,
   type EveFrameworkAgent,
-  type VercelProjectConfig,
 } from "#shared/framework-eve-integration.js";
 import { resolveDevServerTimeout, type EveFrameworkHost } from "#shared/framework-eve-server.js";
 import { readOptionalFile } from "#shared/read-optional-file.js";
 
 const spawnedDevServers = new Map<string, ChildProcess>();
-const VERCEL_JSON_ROUTING_FIELDS = [
-  "rewrites",
-  "redirects",
-  "headers",
-  "routes",
-  "cleanUrls",
-  "trailingSlash",
-] as const;
 
 /**
  * Options for eve's Vite plugins.
@@ -114,10 +105,7 @@ export function createEveVitePlugin(input: {
     );
   }
 
-  async function writeStaticVercelOutput(
-    builder: ViteBuilder,
-    project: VercelProjectConfig,
-  ): Promise<VercelServicesConfig> {
+  async function writeStaticVercelOutput(builder: ViteBuilder): Promise<VercelServicesConfig> {
     if (builder.config.build.ssr) {
       throw serverRenderedError("an SSR build (vite build --ssr)");
     }
@@ -127,23 +115,6 @@ export function createEveVitePlugin(input: {
       throw serverRenderedError(
         `no root index.html in ${clientOutDir}`,
         "A static app must build index.html into build.outDir. ",
-      );
-    }
-    if (project.vercelTsPath !== undefined) {
-      throw new Error(
-        `The eve ${host.label} plugin cannot write a static Vercel Build Output because ${project.vercelTsPath} configures the project, and Vercel does not apply its routing to a Build Output. Compose eve in vercel.ts with withEve from "eve/vercel", or use a framework or adapter that writes .vercel/output during vite build.`,
-      );
-    }
-    const routingProblems = project.vercelJsonFiles
-      .map(({ config, path }) => ({
-        fields: VERCEL_JSON_ROUTING_FIELDS.filter((field) => config[field] !== undefined),
-        path,
-      }))
-      .filter(({ fields }) => fields.length > 0);
-    if (routingProblems.length > 0) {
-      const definesRewrites = routingProblems.some(({ fields }) => fields.includes("rewrites"));
-      throw new Error(
-        `The eve ${host.label} plugin cannot write a static Vercel Build Output because ${routingProblems.map(({ fields, path }) => `${path} defines ${fields.join(", ")}`).join(" and ")}, which Vercel does not apply to a Build Output. ${definesRewrites ? "A single-page app can delete its catch-all rewrite to index.html, because eveVite() already serves index.html for unmatched paths. Move other routing" : "Move that routing"} to vercel.ts and compose eve there with withEve from "eve/vercel", or use a framework or adapter that writes .vercel/output during vite build.`,
       );
     }
     const base = builder.config.base.startsWith("/") ? builder.config.base : "/";
@@ -175,7 +146,7 @@ export function createEveVitePlugin(input: {
     const staticOutputMarkerPath = join(viteRoot, ".vercel", "eve-static-output.json");
     let wroteStaticOutput = false;
     const config = await addEveVercelServices(
-      async (project) => {
+      async () => {
         const source = await readOptionalFile(outputConfigPath);
         const ownsOutput =
           builder !== undefined && source === (await readOptionalFile(staticOutputMarkerPath));
@@ -188,7 +159,7 @@ export function createEveVitePlugin(input: {
           );
         }
         wroteStaticOutput = true;
-        return await writeStaticVercelOutput(builder, project);
+        return await writeStaticVercelOutput(builder);
       },
       {
         agents,

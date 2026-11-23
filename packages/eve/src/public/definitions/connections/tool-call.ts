@@ -1,5 +1,6 @@
 import type { JsonValue } from "#public/types/json.js";
 import type { ConnectionCallbackContext } from "#shared/connection-types.js";
+import type { ToolModelOutput, ToolModelOutputContext } from "#tools/model-output.js";
 
 /** Context available while resolving an application-provided connection tool argument. */
 export type ProvidedArgumentContext = ConnectionCallbackContext & {
@@ -27,4 +28,15 @@ export type ProvidedArgumentsDefinition = Readonly<Record<string, ProvidedArgume
 export interface ConnectionToolCallDefinition {
   /** Application-owned arguments hidden from the model and added at execution time. */
   readonly providedArguments?: ProvidedArgumentsDefinition;
+  /**
+   * Controls what the model sees as the result of a connection tool call.
+   * Receives the tool's result and returns the model-facing output. Hooks and
+   * channels still get the full result on `call.settled`. Use
+   * `offloadContent` from `eve/tools` to keep a large result in a sandbox file.
+   * Defaults to `ctx.defaultModelOutput`.
+   */
+  readonly toModelOutput?: (
+    output: unknown,
+    ctx: ToolModelOutputContext,
+  ) => ToolModelOutput | Promise<ToolModelOutput>;
 }

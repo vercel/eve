@@ -1,4 +1,8 @@
-import { RunExpiredError, WorkflowRunNotFoundError } from "#compiled/@workflow/errors/index.js";
+import {
+  RunExpiredError,
+  WorkflowRunNotFoundError,
+  WorkflowWorldError,
+} from "#compiled/@workflow/errors/index.js";
 
 import type { SessionAuthContext } from "#channel/types.js";
 import {
@@ -17,9 +21,22 @@ export async function readOwnedInvocationRun(sessionId: string, auth: SessionAut
       ? run
       : undefined;
   } catch (error) {
-    if (WorkflowRunNotFoundError.is(error) || RunExpiredError.is(error)) return undefined;
+    if (isMissingRun(error)) return undefined;
     throw error;
   }
+}
+
+function isMissingRun(error: unknown): boolean {
+  return (
+    WorkflowRunNotFoundError.is(error) ||
+    RunExpiredError.is(error) ||
+    isUnsafeEntityIdError(error) ||
+    (WorkflowWorldError.is(error) && error.status === 400)
+  );
+}
+
+function isUnsafeEntityIdError(error: unknown): boolean {
+  return error instanceof Error && error.name === "UnsafeEntityIdError";
 }
 
 export function invocationContinuationToken(
