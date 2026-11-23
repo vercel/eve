@@ -157,7 +157,7 @@ describe("showSlackSignIn", () => {
   });
 
   it("falls back to the channel when the DM can't be sent", async () => {
-    const { channel, thread } = context({
+    const { channel, request, thread } = context({
       reply: (operation, body) =>
         operation === "chat.postMessage" && body.channel === "U777"
           ? { error: "channel_not_found", ok: false }
@@ -167,6 +167,7 @@ describe("showSlackSignIn", () => {
 
     await showSlackSignIn(signIn, channel);
 
+    expect(directMessages(request)).toHaveLength(1);
     expect(thread.post).toHaveBeenCalledWith("Paused: waiting for <@U777> to connect GitHub…");
     expect(thread.postEphemeral).toHaveBeenCalledOnce();
   });
