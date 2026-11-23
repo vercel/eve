@@ -185,6 +185,7 @@ export function toolBlock(
     toolName,
     toolGroup: presentation.group,
   };
+  if (part.parentCallId !== undefined) block.parentCallId = part.parentCallId;
   if (presentation.doneTitle !== undefined) {
     block.doneTitle = stripTerminalControls(presentation.doneTitle);
   }
@@ -316,7 +317,9 @@ export function subagentSteps(messages: readonly EveMessage[]): SubagentStep[] {
 }
 
 export function isToolCallRow(part: EveMessagePart): part is EveToolPart {
-  return part.type === "tool" && (part.state === "streaming" || isTerminalToolCallPart(part));
+  if (part.type !== "tool") return false;
+  if (part.kind === "agent" && part.parentCallId !== undefined) return true;
+  return part.state === "streaming" || isTerminalToolCallPart(part);
 }
 
 export function taskCallsById(

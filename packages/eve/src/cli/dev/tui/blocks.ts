@@ -68,6 +68,7 @@ export interface Block {
   detailLines?: readonly ToolDetailLine[];
   keepDetailWhenDone?: boolean;
   subagentCallId?: string;
+  parentCallId?: string;
   agentName?: string;
   taskKind?: TaskKind;
   updateSeq?: number;
