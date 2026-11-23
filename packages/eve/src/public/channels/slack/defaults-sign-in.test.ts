@@ -185,13 +185,13 @@ describe("showSlackSignIn", () => {
     expect(state.pendingAuthDirectMessages).toBeUndefined();
   });
 
-  it("posts the public status in a thread and sends the prompt with Cancel to the person's DM", async () => {
+  it("keeps the public status and private prompt in a thread, and sends a copy with Cancel to the person's DM", async () => {
     const { channel, request, state, thread } = context({ threadTs: "1700000000.000001" });
 
     await showSlackSignIn(signIn, channel);
 
     expect(thread.post).toHaveBeenCalledWith("Paused: waiting for <@U777> to connect GitHub…");
-    expect(thread.postEphemeral).not.toHaveBeenCalled();
+    expect(thread.postEphemeral).toHaveBeenCalledOnce();
     const sent = directMessages(request);
     expect(sent).toHaveLength(1);
     expect(sent[0]?.text).toContain(signIn.url);
@@ -203,17 +203,17 @@ describe("showSlackSignIn", () => {
     });
   });
 
-  it("posts the public status in a code channel and sends the prompt to the person's DM", async () => {
+  it("keeps the public status and private prompt in a code channel, and sends a copy to the person's DM", async () => {
     const { channel, request, thread } = context({ codeChannel: true, threadTs: "" });
 
     await showSlackSignIn(signIn, channel);
 
     expect(thread.post).toHaveBeenCalledWith("Paused: waiting for <@U777> to connect GitHub…");
-    expect(thread.postEphemeral).not.toHaveBeenCalled();
+    expect(thread.postEphemeral).toHaveBeenCalledOnce();
     expect(directMessages(request)).toHaveLength(1);
   });
 
-  it("falls back to the private prompt in a thread when the DM can't be sent", async () => {
+  it("keeps the private prompt in a thread when the DM can't be sent", async () => {
     const { channel, thread } = context({
       reply: (operation, body) =>
         operation === "chat.postMessage" && body.channel === "U777"
@@ -228,7 +228,7 @@ describe("showSlackSignIn", () => {
     expect(thread.postEphemeral).toHaveBeenCalledOnce();
   });
 
-  it("posts the prompt into a DM session's own thread, without a status", async () => {
+  it("posts the copy into a DM session's own thread", async () => {
     const { channel, request, state, thread } = context({
       channelId: "D777",
       reply: (operation, body) =>
@@ -240,8 +240,8 @@ describe("showSlackSignIn", () => {
 
     await showSlackSignIn(signIn, channel);
 
-    expect(thread.post).not.toHaveBeenCalled();
-    expect(thread.postEphemeral).not.toHaveBeenCalled();
+    expect(thread.post).toHaveBeenCalledOnce();
+    expect(thread.postEphemeral).toHaveBeenCalledOnce();
     const sent = directMessages(request, "D777");
     expect(sent).toHaveLength(1);
     expect(sent[0]?.thread_ts).toBe("1700000000.000001");

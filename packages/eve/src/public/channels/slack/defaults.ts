@@ -219,12 +219,13 @@ export async function showSlackSignIn(event: SignIn, channel: SlackEventContext)
   const { displayName } = event;
   const recipientUserId = slackUserIdForPrincipal(channel.state, event.principalId) ?? null;
   const deliverable = recipientUserId !== null && Boolean(event.url || event.instructions);
-  const { channelId, codeChannel, threadTs } = channel.slack;
+  const { codeChannel, threadTs } = channel.slack;
   const cancel = signInCancel(event, channel);
 
   if (
     deliverable &&
-    (isSlackDirectMessageId(channelId) || (!codeChannel && threadTs === "")) &&
+    !codeChannel &&
+    threadTs === "" &&
     (await showSlackSignInDirectMessage(event, recipientUserId, channel, cancel))
   ) {
     return;
@@ -250,12 +251,6 @@ export async function showSlackSignIn(event: SignIn, channel: SlackEventContext)
   }
 
   if (!deliverable) return;
-  if (
-    !isSlackDirectMessageId(channelId) &&
-    (await showSlackSignInDirectMessage(event, recipientUserId, channel, cancel))
-  ) {
-    return;
-  }
   const prompt = {
     cancel,
     displayName,
@@ -274,6 +269,7 @@ export async function showSlackSignIn(event: SignIn, channel: SlackEventContext)
       error,
     });
   }
+  await showSlackSignInDirectMessage(event, recipientUserId, channel, cancel);
 }
 
 function signInCancel(event: SignIn, channel: SlackEventContext): SignInCancelTarget | undefined {
