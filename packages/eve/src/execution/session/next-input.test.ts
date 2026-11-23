@@ -153,14 +153,27 @@ describe("nextTurnDelivery", () => {
   it("returns end ahead of queued deliveries and continuations when a hook ended the session", async () => {
     vi.mocked(pendingContinuation).mockReturnValue(continuation);
     const input = batchingInputFor([{ kind: "deliver", payloads: [{ message: "Queued." }] }]);
-    input.cursor.serializedContext["eve.reactions"] = {
-      sessionEnd: { hook: "finish-job", reason: "Job done" },
-    };
+    input.cursor.serializedContext["eve.reactions"] = { sessionEnd: { hook: "finish-job" } };
 
-    await expect(nextTurnDelivery(input)).resolves.toEqual({
-      hook: "finish-job",
+    await expect(nextTurnDelivery(input)).resolves.toEqual({ hook: "finish-job", kind: "end" });
+  });
+
+  it("returns end when routeSelectedDelivery ends the session before starting the routed turn", async () => {
+    const inbox = createMockInbox([messageRead("parent follow-up")]);
+    vi.mocked(routeDeliverToChildren).mockResolvedValueOnce({
+      kind: "continue",
+      remainder: { kind: "deliver", payloads: [{ message: "parent follow-up" }] },
+      stateDelta: {
+        serializedContext: {
+          kind: "value",
+          value: { "eve.reactions": { sessionEnd: { hook: "route-end" } } },
+        },
+      },
+    });
+
+    await expect(nextTurnDelivery(waitInput(inbox))).resolves.toEqual({
+      hook: "route-end",
       kind: "end",
-      reason: "Job done",
     });
   });
 

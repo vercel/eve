@@ -456,4 +456,32 @@ describe("hook ctx.end()", () => {
     },
     90_000,
   );
+
+  it("retires the session between turns on context.settled without cancelling a turn", async () => {
+    let endedEvent: unknown;
+    const { log } = await runSession({
+      drive: async ({ inbox, log, stream }) => {
+        await until(log, "turn:completed", 1);
+        await resumeRoutedHook(inbox, { deliveryId: "clear-1", kind: "clear" });
+        const events = await stream.nextUntil((event) => event.type === "session.ended");
+        endedEvent = events.find((event) => event.type === "session.ended");
+      },
+      hooks: {
+        "after-clear": defineHook({
+          events: {
+            "context.settled": (event, ctx) => {
+              if (event.data.kind === "clear") ctx.end("Retired after clear.");
+            },
+          },
+        }),
+      },
+      name: "hook-end-after-clear",
+    });
+
+    expect(log.filter((entry) => entry.startsWith("turn:"))).toEqual(["turn:completed"]);
+    expect(endedEvent).toMatchObject({
+      data: { cause: { hook: "after-clear" }, outcome: "completed" },
+      type: "session.ended",
+    });
+  }, 90_000);
 });

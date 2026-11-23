@@ -41,10 +41,7 @@ export function queueCommands(
   for (const command of commands) {
     if (command.type === "end") {
       if (sessionEnd === undefined) {
-        sessionEnd =
-          command.reason === undefined
-            ? { hook: command.hook }
-            : { hook: command.hook, reason: command.reason };
+        sessionEnd = { hook: command.hook };
         changed = true;
       }
       if (continuation !== undefined) {

@@ -228,6 +228,7 @@ export class SessionExecution {
       if (
         !settles &&
         result.action !== "done" &&
+        !isBetweenTurns(storedProjection(cursor.sessionState.snapshot.session.state)) &&
         pendingSessionEnd(cursor.serializedContext) !== undefined
       ) {
         return await this.finishCancelledTurn(turn);
@@ -294,6 +295,13 @@ export class SessionExecution {
     const calls = paused.on === "calls" ? await this.startCallWait(paused) : undefined;
     let interrupted = false;
     while (true) {
+      if (
+        turn.signal.aborted ||
+        pendingSessionEnd(this.input.cursor.serializedContext) !== undefined
+      ) {
+        turn.abort();
+        return "cancelled";
+      }
       if (pendingInteraction !== undefined) {
         const callbacks = this.input.queue.takeAuthorizations(pendingInteraction.attemptIds);
         if (callbacks !== undefined) return { delivery: { kind: "deliver", payloads: callbacks } };

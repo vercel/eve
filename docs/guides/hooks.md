@@ -323,25 +323,22 @@ A turn can be continued when it completed, or when the same hook cancelled it, s
 
 ## End the session from a hook
 
-Call `ctx.end(reason?)` from any hook event to permanently retire the session, as [`session.end()`](./client/streaming) does. For example, end a one-shot session once its turn finishes with no remaining work:
+Call `ctx.end(reason?)` from any hook event to permanently retire the session, as [`session.end()`](./client/streaming) does. For example, end a one-shot or job session once its turn finishes:
 
 ```ts title="agent/hooks/end-after-turn.ts"
-import { idle } from "eve/events";
 import { defineHook } from "eve/hooks";
 
 export default defineHook({
   events: {
     "turn.settled"(event, ctx) {
-      if (event.data.outcome !== "completed" || !idle(ctx.view)) return;
+      if (event.data.outcome !== "completed") return;
       ctx.end("Job completed.");
     },
   },
 });
 ```
 
-Checking `idle(ctx.view)` waits for queued messages and background tasks to finish. When background tasks can outlive a turn, also check `idle(ctx.view)` and `activeTurn(ctx.view)` in a `task.ended` handler.
-
-On `turn.settled`, `delivery.settled`, or between turns (such as `task.ended`), the event's remaining handlers run first. Then eve retires the session:
+On `turn.settled`, `delivery.settled`, or between turns (such as `context.settled`), the event's remaining handlers run first. Then eve retires the session ahead of any queued follow-up messages:
 
 - eve tears down child sessions and the sandbox, calling `onSessionEnd` with `reason: "completed"`.
 - eve records `session.ended` with `outcome: "completed"` and `cause: { hook }` naming the hook.
@@ -352,7 +349,7 @@ During a running or opening turn (such as `session.started`, `delivery.admitted`
 Rules for `ctx.end()`:
 
 - It returns `void` because the session ends after the event's handlers return.
-- It drops any pending `ctx.continue()` continuation on the same turn.
+- It retires the session ahead of any queued follow-up messages and drops any pending `ctx.continue()` continuation on the same turn.
 - It does nothing on `session.ended`.
 - Repeated calls act once; the first hook sets `cause: { hook }`.
 - Call it before the handler's promise resolves. A call after the handler returns throws.

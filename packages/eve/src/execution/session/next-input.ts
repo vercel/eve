@@ -21,7 +21,7 @@ export type NextTurnInstruction =
   | { readonly kind: "prewarm"; readonly targetDeploymentId: string }
   | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage }
   | { readonly kind: SessionControl; readonly origin?: ControlOrigin }
-  | { readonly kind: "end"; readonly hook: string; readonly reason?: string }
+  | { readonly kind: "end"; readonly hook: string }
   | { readonly kind: "closed" }
   | { readonly kind: "cancel-turn"; readonly origin?: ControlOrigin }
   | { readonly kind: "cancel-working-tasks"; readonly origin?: ControlOrigin }
@@ -51,6 +51,8 @@ export async function nextTurnDelivery(input: {
         : { kind: selected.control, origin: selected.origin };
     if (selected?.kind === "turn") {
       const routed = await routeSelectedDelivery(selected, cursor);
+      const endAfterRoute = pendingSessionEnd(cursor.serializedContext);
+      if (endAfterRoute !== undefined) return { kind: "end", ...endAfterRoute };
       if (routed.kind === "cancel-turn") return routed;
       if (routed.kind === "consumed") continue;
       return routed;

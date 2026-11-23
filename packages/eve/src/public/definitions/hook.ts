@@ -85,7 +85,7 @@ export type HookContinueOptions = Pick<SessionSendOptions, "context"> &
 
 /**
  * What `ctx.continue()` did, decided when it's called. `queued` means eve recorded the message;
- * another turn that starts first, a cancel, a clear, or a reset still drops it.
+ * another turn that starts first, a cancel, a clear, `ctx.end()`, or a reset still drops it.
  */
 export type HookContinueResult =
   | { readonly queued: true }
@@ -152,7 +152,7 @@ export interface HookContinue {
    * idle, as a delivery whose source names this hook and the channel, and the model is told no
    * person wrote it. Hooks that continue the same turn share one next turn, each message its own
    * payload, in hook order. It yields: any other turn that starts first, a `session.cancel()`, a
-   * clear, or a reset drops it, so a person's input always wins. Unlike `session.send()`, it returns synchronously and there's no
+   * clear, `ctx.end()`, or a reset drops it, so a person's input always wins. Unlike `session.send()`, it returns synchronously and there's no
    * receipt: the delivery doesn't exist until the session admits it. Like other hook effects, it's
    * lost if the step is interrupted before it's saved. Throws after the handler has settled.
    */

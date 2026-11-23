@@ -821,10 +821,7 @@ describe("runEffects", () => {
         written: written(1),
       });
       expect(cancels).toEqual([{ hook: "hooks/first.ts", reason: "Job finished." }]);
-      expect(readDefinitionsState(active).sessionEnd).toEqual({
-        hook: "first",
-        reason: "Job finished.",
-      });
+      expect(readDefinitionsState(active).sessionEnd).toEqual({ hook: "first" });
 
       const opening = session(noTools, [
         hook("gate", { "session.started": (_event, ctx) => ctx.end("Blocked.") }),
@@ -835,10 +832,7 @@ describe("runEffects", () => {
         written: written(1, "session.started"),
       });
       expect(openingCancels).toEqual([{ hook: "hooks/gate.ts", reason: "Blocked." }]);
-      expect(readDefinitionsState(opening).sessionEnd).toEqual({
-        hook: "gate",
-        reason: "Blocked.",
-      });
+      expect(readDefinitionsState(opening).sessionEnd).toEqual({ hook: "gate" });
 
       const both = session(noTools, [
         {
@@ -867,7 +861,7 @@ describe("runEffects", () => {
       );
       enterSessionProjectionAt(both, projection);
       await commit(both, { written: written(1, "turn.settled", settledFacts[1]!.data) });
-      expect(readDefinitionsState(both).sessionEnd).toEqual({ hook: "done", reason: "Done." });
+      expect(readDefinitionsState(both).sessionEnd).toEqual({ hook: "done" });
       expect(readDefinitionsState(both).continuation).toBeUndefined();
 
       const ignored = session(noTools, [

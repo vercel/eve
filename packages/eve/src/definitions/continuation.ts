@@ -9,7 +9,6 @@ export interface Continuation {
 
 export interface SessionEndRequest {
   readonly hook: string;
-  readonly reason?: string;
 }
 
 export function continuationKey(sessionId: string, turnId: string): string {
