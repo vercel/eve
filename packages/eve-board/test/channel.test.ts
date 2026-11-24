@@ -142,7 +142,7 @@ test("the default channel also serves legacy POST /board/wake, and a custom rout
   const defaultRoutes = compiled().routes;
   assert.deepEqual(
     defaultRoutes.map((route) => `${route.method} ${route.path}`),
-    ["POST /eve/v1/board/wake", "POST /board/wake"],
+    ["POST /eve/v1/board/wake", "POST /eve/v1/board/:board/wake", "POST /board/wake"],
   );
   const legacy = defaultRoutes.find((route) => route.path === "/board/wake")!;
   const pending: Promise<unknown>[] = [];
@@ -165,7 +165,7 @@ test("the default channel also serves legacy POST /board/wake, and a custom rout
   const customFromOption = compiledOf(createBoardChannel(settings, { route: "/eve/v1/acme/" }));
   assert.deepEqual(
     customFromOption.routes.map((route) => `${route.method} ${route.path}`),
-    ["POST /eve/v1/acme/wake"],
+    ["POST /eve/v1/acme/wake", "POST /eve/v1/acme/:board/wake"],
   );
 
   const customFromSettings = compiledOf(
@@ -173,7 +173,7 @@ test("the default channel also serves legacy POST /board/wake, and a custom rout
   );
   assert.deepEqual(
     customFromSettings.routes.map((route) => `${route.method} ${route.path}`),
-    ["POST /eve/v1/team-board/wake"],
+    ["POST /eve/v1/team-board/wake", "POST /eve/v1/team-board/:board/wake"],
   );
 });
 

@@ -6,57 +6,138 @@ import { isValidBoardRouteBase } from "./lib/route.ts";
 
 const grant = z.union([z.literal("all"), z.array(z.enum(BOARD_PERMISSIONS)).readonly()]);
 
+const profile = z
+  .string()
+  .regex(BOARD_NAME_PATTERN, "a letter, then up to 31 letters, numbers, or hyphens");
+
+const can = z.union([
+  grant,
+  z.record(
+    z
+      .string()
+      .refine(
+        (pattern) => pattern === "*" || BOARD_CHANNEL_SELECTOR.test(pattern),
+        "a channel, a subtree such as `work/`, or `*`",
+      ),
+    grant,
+  ),
+]);
+
+const watchChannel = z
+  .string()
+  .max(200)
+  .regex(BOARD_CHANNEL_SELECTOR, "lowercase segments joined by /")
+  .refine((channel) => !channel.endsWith("/"), "one channel, not a subtree");
+
+const configurers = z.array(z.string().min(1));
+
+const boardUrl = z
+  .string()
+  .url()
+  .refine((value) => /^https?:\/\//u.test(value), "an http:// or https:// board URL");
+
+const boardEntry = z.object({
+  /** Which of the team's boards, by name. Defaults to the team's default board, or `BOARD_URL`'s. */
+  name: z.string().min(1).max(64).optional(),
+  /** Another team's board, by its ID (`team_…`) or slug. */
+  team: z.string().min(1).optional(),
+  /** Direct URL for a local or self-hosted board, overriding `BOARD_URL` for this board. */
+  url: boardUrl.optional(),
+  /** Profile override for this board. Defaults to the top-level `profile` or `"eve"`. */
+  profile: profile.optional(),
+  /** What board tools and watches may reach on this board. Defaults to the deployment's access. */
+  can: can.optional(),
+  /** Channel that keeps watch instructions on this board. Defaults to `"eve-config/watches"`. */
+  watchChannel: watchChannel.optional(),
+  /** Principal IDs that may configure watches on this board. Defaults to top-level `configurers`. */
+  configurers: configurers.optional(),
+});
+
 /**
- * Makes the agent a participant on a Vercel Board. The agent creates watches with its `watch`
- * tool when someone asks; each watch's match wakes it in the board thread, or claims a ready
- * task first, and board tools let it read, post, schedule, and settle tasks.
+ * Makes the agent a participant on one or more Vercel Boards. The agent creates watches with its
+ * `watch` tool when someone asks; each watch's match wakes it in the board thread, or claims a
+ * ready task first, and board tools let it read, post, schedule, and settle tasks.
  */
 export default defineExtension({
-  config: z.object({
-    /** Which of the team's boards, by name. Defaults to the team's default board, or `BOARD_URL`'s. */
-    name: z.string().min(1).max(64).optional(),
-    /** Another team's board, by its ID (`team_…`) or slug. */
-    team: z.string().min(1).optional(),
-    /** The profile the agent writes as on the board. Defaults to `"eve"`. */
-    profile: z
-      .string()
-      .regex(BOARD_NAME_PATTERN, "a letter, then up to 31 letters, numbers, or hyphens")
-      .optional(),
-    /**
-     * What the board tools and watches may reach at most, below what the deployment may, such as
-     * `{ "intake/": ["read", "post", "react", "label"] }`. Defaults to the deployment's access.
-     */
-    can: z
-      .union([
-        grant,
-        z.record(
+  config: z
+    .object({
+      /** Which of the team's boards, by name. Defaults to the team's default board, or `BOARD_URL`'s. */
+      name: z.string().min(1).max(64).optional(),
+      /** Another team's board, by its ID (`team_…`) or slug. */
+      team: z.string().min(1).optional(),
+      /** Direct URL for a local or self-hosted board, overriding `BOARD_URL`. */
+      url: boardUrl.optional(),
+      /** The profile the agent writes as on the board. Defaults to `"eve"`. */
+      profile: profile.optional(),
+      /**
+       * What the board tools and watches may reach at most, below what the deployment may, such as
+       * `{ "intake/": ["read", "post", "react", "label"] }`. Defaults to the deployment's access.
+       */
+      can: can.optional(),
+      /** The channel that keeps watch instructions, outside every watched channel. Defaults to `"eve-config/watches"`. */
+      watchChannel: watchChannel.optional(),
+      /** Principal IDs that may create and remove watches. Defaults to anyone but board actors who aren't people. */
+      configurers: configurers.optional(),
+      /** Base route path for the board wake endpoint (`<route>/wake` or `<route>/:board/wake`). Defaults to `"/eve/v1/board"`. */
+      route: z
+        .string()
+        .min(1)
+        .refine(
+          isValidBoardRouteBase,
+          'an absolute path without parameters or query string, such as "/eve/v1/board"',
+        )
+        .optional(),
+      /** Named boards served by this mount. Do not combine with top-level `name`, `team`, `url`, `can`, or `watchChannel`. */
+      boards: z
+        .record(
           z
             .string()
-            .refine(
-              (pattern) => pattern === "*" || BOARD_CHANNEL_SELECTOR.test(pattern),
-              "a channel, a subtree such as `work/`, or `*`",
-            ),
-          grant,
-        ),
-      ])
-      .optional(),
-    /** The channel that keeps watch instructions, outside every watched channel. Defaults to `"eve-config/watches"`. */
-    watchChannel: z
-      .string()
-      .max(200)
-      .regex(BOARD_CHANNEL_SELECTOR, "lowercase segments joined by /")
-      .refine((channel) => !channel.endsWith("/"), "one channel, not a subtree")
-      .optional(),
-    /** Principal IDs that may create and remove watches. Defaults to anyone but board actors who aren't people. */
-    configurers: z.array(z.string().min(1)).optional(),
-    /** Base route path for the board wake endpoint (`<route>/wake`). Defaults to `"/eve/v1/board"`. */
-    route: z
-      .string()
-      .min(1)
-      .refine(
-        isValidBoardRouteBase,
-        'an absolute path without parameters or query string, such as "/eve/v1/board"',
-      )
-      .optional(),
-  }),
+            .regex(BOARD_NAME_PATTERN, "a letter, then up to 31 letters, numbers, or hyphens"),
+          boardEntry,
+        )
+        .optional(),
+    })
+    .superRefine((value, ctx) => {
+      if (value.boards === undefined) return;
+      const entries = Object.entries(value.boards);
+      if (entries.length === 0) {
+        ctx.addIssue({
+          code: "custom",
+          message: "boards must configure at least one board.",
+          path: ["boards"],
+        });
+      }
+      if (
+        value.name !== undefined ||
+        value.team !== undefined ||
+        value.url !== undefined ||
+        value.can !== undefined ||
+        value.watchChannel !== undefined
+      ) {
+        ctx.addIssue({
+          code: "custom",
+          message:
+            "Cannot combine `boards` with top-level `name`, `team`, `url`, `can`, or `watchChannel`; set those fields on each entry in `boards`.",
+          path: ["boards"],
+        });
+      }
+      const seenTargets = new Map<string, string>();
+      for (const [key, entry] of entries) {
+        const target = JSON.stringify([
+          entry.url?.trim().replace(/\/+$/u, "") ?? null,
+          entry.team ?? null,
+          entry.name ?? null,
+        ]);
+        const previous = seenTargets.get(target);
+        if (previous !== undefined) {
+          ctx.addIssue({
+            code: "custom",
+            message: `boards "${previous}" and "${key}" target the same board; give each entry a distinct \`name\`, \`team\`, or \`url\`.`,
+            path: ["boards", key],
+          });
+        } else {
+          seenTargets.set(target, key);
+        }
+      }
+    }),
 });

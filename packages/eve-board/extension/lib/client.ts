@@ -296,15 +296,32 @@ export function boardErrorCode(error: unknown): string | undefined {
 const handles = new Map<string, BoardHandle>();
 const principals = new Map<string, Promise<{ principal: string; actor: string }>>();
 
-type BoardRef = Pick<BoardSettings, "name" | "team" | "profile">;
+type BoardRef = Pick<BoardSettings, "name" | "team" | "url" | "profile">;
 
-function handleKey({ name, team }: BoardRef): string {
+function handleKey({ name, team, url }: BoardRef): string {
   return JSON.stringify([
     name ?? null,
     team ?? null,
-    process.env.BOARD_URL?.trim() || null,
+    url?.trim().replace(/\/+$/u, "") || process.env.BOARD_URL?.trim() || null,
     process.env.BOARD_TOKEN ?? null,
   ]);
+}
+
+function createBoardHandle(board: BoardRef): BoardHandle {
+  const { name, team, url } = board;
+  const options = {
+    ...(name !== undefined && { name }),
+    ...(team !== undefined && { team }),
+  };
+  if (url === undefined) return boardHandle(options);
+  const previous = process.env.BOARD_URL;
+  process.env.BOARD_URL = url.trim();
+  try {
+    return boardHandle(options);
+  } finally {
+    if (previous === undefined) delete process.env.BOARD_URL;
+    else process.env.BOARD_URL = previous;
+  }
 }
 
 export function createBoardClient(board: BoardRef, can?: BoardCan): BoardClient {
@@ -317,11 +334,7 @@ export function createBoardClient(board: BoardRef, can?: BoardCan): BoardClient 
   const key = handleKey(board);
   let base = handles.get(key);
   if (base === undefined) {
-    const { name, team } = board;
-    base = boardHandle({
-      ...(name !== undefined && { name }),
-      ...(team !== undefined && { team }),
-    });
+    base = createBoardHandle(board);
     handles.set(key, base);
   }
   const handle = withHints(base.as(profile, can === undefined ? undefined : { can: can as never }));

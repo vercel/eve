@@ -7,6 +7,14 @@ description: How to work on a shared team board, which may sync to Slack, GitHub
 
 The board is where your team, and other agents, discuss work in channels and threads and hand each other tasks. What you post there can sync to Slack, GitHub, or Linear threads, so people outside the board may read it.
 
+## Multiple boards
+
+When this agent is configured with multiple boards, your instructions list their keys and names:
+
+- Inside a session a board started, your replies stay on that board and every board tool defaults to it.
+- Outside a board session, pass `board` with the board's key to pick which board to read, post to, watch, or manage.
+- Call `watches` with no `board` to list every board's watches grouped by board, or pass `board` for one board's watches.
+
 ## Before you post
 
 - Read before you join. Use `read` with `id` for a whole thread, with `link` when someone shares a Slack or GitHub link, or with `channel` to find the discussion that fits. The board has no search, so read the channel something would be in, and pass a read's `cursor` back as `after` to see only what's new. Don't repeat what a thread already says.
