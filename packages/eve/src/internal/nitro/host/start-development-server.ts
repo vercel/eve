@@ -15,10 +15,13 @@ import {
   EVE_DEV_RUNTIME_ARTIFACTS_SUSPEND_ROUTE_PATH,
 } from "#protocol/routes.js";
 import { resolveDiscoveryProject } from "#discover/project.js";
-import { DevelopmentServerState } from "#internal/nitro/host/dev-server-state.js";
+import {
+  DevelopmentServerState,
+  type DevelopmentServerRecord,
+} from "#internal/nitro/host/dev-server-state.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { isLoopbackServerUrl } from "#shared/network-address.js";
-import { readDevelopmentRuntimeArtifactsRevision } from "#services/dev-client/runtime-artifacts.js";
+import { readDevelopmentServerId } from "#services/dev-client/runtime-artifacts.js";
 import { handleDevRuntimeArtifactsRequest } from "#internal/nitro/routes/dev-runtime-artifacts.js";
 import {
   pruneLocalSandboxTemplatesInBackground,
@@ -47,7 +50,7 @@ import {
   activateDevelopmentGeneration,
   discardDevelopmentGeneration,
 } from "#internal/nitro/development-generation.js";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import {
   createDevelopmentWorkflowWorld,
   installWorkflowLocalQueueEnvironment,
@@ -63,12 +66,12 @@ const DEVELOPMENT_SERVER_READINESS_TIMEOUT_MS = 1_000;
 
 export { normalizeDevelopmentServerClientUrl };
 
-async function isDevelopmentServerReady(serverUrl: string): Promise<boolean> {
+async function isRecordedServerRunning(record: DevelopmentServerRecord): Promise<boolean> {
   return (
-    (await readDevelopmentRuntimeArtifactsRevision({
-      serverUrl,
+    (await readDevelopmentServerId({
+      serverUrl: record.url,
       timeoutMs: DEVELOPMENT_SERVER_READINESS_TIMEOUT_MS,
-    })) !== undefined
+    })) === record.id
   );
 }
 
@@ -120,6 +123,7 @@ function addDevelopmentControlHandler(input: {
   readonly getWatcher: () => AuthoredSourceWatcherHandle | undefined;
   readonly workflowWorld: ParentDevelopmentWorkflowWorld | undefined;
   readonly transportSecret: string;
+  readonly serverId: string;
 }): void {
   input.devServer.setControlHandler(async (request) => {
     const credentialResponse = await handleDevelopmentModelCredentialRequest(request, {
@@ -133,7 +137,7 @@ function addDevelopmentControlHandler(input: {
     }
     const url = new URL(request.url);
     if (url.pathname === EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH && request.method === "GET") {
-      return handleDevRuntimeArtifactsRequest({ appRoot: input.appRoot });
+      return handleDevRuntimeArtifactsRequest({ appRoot: input.appRoot, serverId: input.serverId });
     }
     const isSuspendRequest =
       url.pathname === EVE_DEV_RUNTIME_ARTIFACTS_SUSPEND_ROUTE_PATH && request.method === "POST";
@@ -159,14 +163,14 @@ function addDevelopmentControlHandler(input: {
     }
     if (isResumeRequest) {
       await watcher.resume(leaseId!, { silent: url.searchParams.get("silent") === "1" });
-      return handleDevRuntimeArtifactsRequest({ appRoot: input.appRoot });
+      return handleDevRuntimeArtifactsRequest({ appRoot: input.appRoot, serverId: input.serverId });
     }
     if (url.searchParams.get("force") === "1") {
       await watcher.rebuild();
     } else {
       await watcher.flush();
     }
-    return handleDevRuntimeArtifactsRequest({ appRoot: input.appRoot });
+    return handleDevRuntimeArtifactsRequest({ appRoot: input.appRoot, serverId: input.serverId });
   });
 }
 
@@ -280,21 +284,23 @@ async function startNitroDevelopmentServer(
     options.port !== undefined ||
     environmentPort !== undefined;
   const state = new DevelopmentServerState(project);
-  const existingServerUrl = await state.read();
+  const existingRecord = await state.read();
 
   if (
-    existingServerUrl !== undefined &&
-    isLoopbackServerUrl(existingServerUrl) &&
-    (await isDevelopmentServerReady(existingServerUrl))
+    existingRecord !== undefined &&
+    isLoopbackServerUrl(existingRecord.url) &&
+    (await isRecordedServerRunning(existingRecord))
   ) {
     if (options.existing === "attach-if-unconfigured" && !hasExplicitServerConfiguration) {
       return {
-        handle: { kind: "existing", appRoot: project.appRoot, url: existingServerUrl },
+        handle: { kind: "existing", appRoot: project.appRoot, url: existingRecord.url },
         close: undefined,
       };
     }
-    throw await createDevelopmentServerAlreadyRunningError(project.appRoot, existingServerUrl);
+    throw await createDevelopmentServerAlreadyRunningError(project.appRoot, existingRecord.url);
   }
+  await state.remove();
+  const serverId = randomUUID();
 
   const cleanup = new AsyncDisposableStack();
   const previousDevelopmentSandboxRunId = process.env[EVE_DEVELOPMENT_SANDBOX_RUN_ID_ENV];
@@ -379,6 +385,7 @@ async function startNitroDevelopmentServer(
       getWatcher: () => authoredSourceWatcher,
       workflowWorld,
       transportSecret: workflowTransportSecret,
+      serverId,
     });
     const hostname = options.host ?? DEFAULT_DEVELOPMENT_SERVER_HOST;
     const retryOnAddressInUse = requestedPort === undefined;
@@ -456,7 +463,7 @@ async function startNitroDevelopmentServer(
       builds.close();
       await watcher.close();
     });
-    await state.write(serverUrl);
+    await state.write({ url: serverUrl, pid: process.pid, id: serverId });
     const owned = cleanup.move();
     let closePromise: Promise<void> | undefined;
     const close = (): Promise<void> => {
