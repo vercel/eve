@@ -25,6 +25,6 @@ export const VercelSandbox: SandboxProvider<
   VercelSandboxSession
 > = defineSandboxProvider({
   name: "vercel",
-  environment: (options: VercelSandboxCreateOptions) =>
-    createVercelSandbox({ createOptions: options as VercelCreateOptions }),
+  environment: ({ rebuildable, ...createOptions }: VercelSandboxCreateOptions) =>
+    createVercelSandbox({ createOptions: createOptions as VercelCreateOptions, rebuildable }),
 });

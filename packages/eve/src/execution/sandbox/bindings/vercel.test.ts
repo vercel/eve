@@ -24,6 +24,7 @@ import type { VercelSandboxRuntimeOptions } from "#public/sandbox/vercel-sandbox
 import { VercelSandbox } from "#sandbox/providers/vercel.js";
 import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
 import { DefaultSandbox } from "#sandbox/providers/default.js";
+import { getSandboxTemplateRebuilder } from "#sandbox/template-rebuild.js";
 
 vi.mock("#runtime/sandbox/prepared-artifacts.js", () => ({
   loadSandboxPreparedArtifact: vi.fn(async () => ({ snapshotId: "prepared-snapshot" })),
@@ -213,7 +214,13 @@ function createFakeVercelProvider(...presets: ReadonlyArray<ReturnType<typeof cr
     Snapshot: {
       get: vi.fn(async (options: { snapshotId: string }) => {
         if (!snapshots.has(options.snapshotId)) throw missing();
-        return { snapshotId: options.snapshotId, status: "created" };
+        return {
+          delete: vi.fn(async () => {
+            snapshots.delete(options.snapshotId);
+          }),
+          snapshotId: options.snapshotId,
+          status: "created",
+        };
       }),
     },
   };
@@ -946,6 +953,55 @@ describe("createVercelSandbox", () => {
     });
   });
 
+  describe("template key and the Vercel environment", () => {
+    const keyIn = async (
+      env: { readonly target?: string; readonly vercel?: string },
+      rebuildable: boolean,
+    ) => {
+      vi.stubEnv("VERCEL_ENV", env.vercel);
+      vi.stubEnv("VERCEL_TARGET_ENV", env.target);
+      return await templateKeyOf(async (sandboxModule) =>
+        createTestVercelSandbox({
+          loadSandboxModule: async () => sandboxModule as never,
+          prepare: async () => {},
+          rebuildable,
+        }).prepare({ appRoot: "/tmp/test-app-root", sourceRevision: "revision-golden" }),
+      );
+    };
+
+    it("gives a rebuildable app its own template per environment", async () => {
+      const keys = [
+        await keyIn({ vercel: "production" }, true),
+        await keyIn({ vercel: "preview" }, true),
+        await keyIn({ vercel: "development" }, true),
+      ];
+      expect(new Set(keys).size).toBe(3);
+    });
+
+    it("gives a custom environment its own template, apart from preview", async () => {
+      const preview = await keyIn({ target: "preview", vercel: "preview" }, true);
+      const staging = await keyIn({ target: "staging", vercel: "preview" }, true);
+      expect(staging).not.toBe(preview);
+      expect(await keyIn({ vercel: "preview" }, true)).toBe(preview);
+    });
+
+    it("treats an unset or blank environment alike", async () => {
+      expect(await keyIn({ vercel: " preview " }, true)).toBe(
+        await keyIn({ vercel: "preview" }, true),
+      );
+      expect(await keyIn({}, true)).toBe(await keyIn({ target: "  ", vercel: "  " }, true));
+    });
+
+    it("shares one template across environments for an app that is not rebuildable", async () => {
+      const keys = [
+        await keyIn({ vercel: "production" }, false),
+        await keyIn({ target: "staging", vercel: "preview" }, false),
+        await keyIn({}, false),
+      ];
+      expect(new Set(keys).size).toBe(1);
+    });
+  });
+
   describe("session identity and cleanup", () => {
     function session() {
       const fake = createFakeVercelProvider();
@@ -1276,8 +1332,12 @@ describe("createVercelSandbox", () => {
       const firstResult = await first;
 
       const [firstSandbox, secondSandbox] = await Promise.all(privateSandboxes(fake));
-      expect(firstResult).toEqual({ snapshotId: `${firstSandbox?.name}-snapshot` });
-      expect(second).toEqual({ snapshotId: `${secondSandbox?.name}-snapshot` });
+      expect(firstResult).toEqual({
+        snapshotId: `${firstSandbox?.name}-snapshot`,
+      });
+      expect(second).toEqual({
+        snapshotId: `${secondSandbox?.name}-snapshot`,
+      });
       expect(firstSandbox?.snapshot).toHaveBeenCalledTimes(1);
       expect(secondSandbox?.snapshot).toHaveBeenCalledTimes(1);
       expect(fake.pointer()?.sourceSnapshotId).toBe(second.snapshotId);
@@ -2511,5 +2571,344 @@ describe("Vercel active timeout", () => {
     finished.resolve({ exitCode: 0 });
     await process.wait();
     await sandboxConnectionDisposal(handle.connection)?.();
+  });
+});
+
+describe("scheduled template rebuilds", () => {
+  const appRoot = "/tmp/test-app-root";
+  const templateKey = `eve-sbx-tpl-vercel-${"a".repeat(32)}`;
+  const buildSnapshotId = "build-snapshot";
+  const artifact = { snapshotId: buildSnapshotId, templateKey };
+  const snapshotExpired = () =>
+    Object.assign(new Error("snapshot gone"), { response: { status: 410 } });
+
+  function enforceSnapshotExpiry(fake: ReturnType<typeof createFakeVercelProvider>) {
+    const create = fake.sandboxModule.Sandbox.create.getMockImplementation();
+    fake.sandboxModule.Sandbox.create.mockImplementation(async (options: MockCreateOptions) => {
+      const source = options.source?.snapshotId;
+      if (source !== undefined && !fake.snapshots.has(source)) {
+        throw snapshotExpired();
+      }
+      return await create!(options);
+    });
+  }
+
+  function setup(createOptions?: { readonly tags: Record<string, string> }) {
+    const fake = createFakeVercelProvider();
+    fake.snapshots.add(buildSnapshotId);
+    fake.seedTemplate(
+      templateKey,
+      createMockSandbox({
+        name: templateKey,
+        sourceSnapshotId: buildSnapshotId,
+        status: "stopped",
+      }),
+    );
+    const input = {
+      createSandbox: async ({
+        createOptions,
+        sandboxModule,
+      }: {
+        createOptions: object;
+        sandboxModule: { Sandbox: { create(options: never): Promise<never> } };
+      }) => await sandboxModule.Sandbox.create(createOptions as never),
+      loadSandboxModule: async () => fake.sandboxModule as never,
+    };
+    const implementation = createVercelImplementation({ ...input, createOptions } as never);
+    const rebuild = getSandboxTemplateRebuilder(implementation);
+    if (rebuild === undefined) throw new Error("the Vercel provider registers no rebuilder");
+    const provider = createTestVercelSandbox({ ...input, createOptions } as never);
+    const sessionSource = async (sandboxName: string) => {
+      await provider.start({ appRoot, prepared: artifact, sandboxName });
+      const created = fake.sandboxModule.Sandbox.create.mock.calls.at(-1)?.[0] as {
+        source?: { snapshotId: string };
+      };
+      return created.source?.snapshotId;
+    };
+    return { fake, provider, rebuild, sessionSource };
+  }
+
+  it("records the template key in the artifact only when the sandbox is rebuildable", async () => {
+    const prepareWith = async (rebuildable: boolean) => {
+      const fake = createFakeVercelProvider();
+      const provider = createVercelSandbox({
+        createSandbox: async ({ createOptions, sandboxModule }) =>
+          await sandboxModule.Sandbox.create(createOptions),
+        loadSandboxModule: async () => fake.sandboxModule as never,
+        rebuildable,
+      });
+      const prepared = (await provider.prepare({ appRoot })) as VercelSandboxPreparedArtifact;
+      return { fake, prepared };
+    };
+
+    const rebuildable = await prepareWith(true);
+    expect(rebuildable.prepared.templateKey).toBe(rebuildable.fake.pointer()?.name);
+    expect((await prepareWith(false)).prepared).toEqual({ snapshotId: expect.any(String) });
+  });
+
+  it("makes no pointer lookup for a build that is not rebuildable", async () => {
+    const { fake, provider } = setup();
+    await provider.start({
+      appRoot,
+      prepared: { snapshotId: buildSnapshotId },
+      sandboxName: "session-plain",
+    });
+
+    const lookedUp = fake.sandboxModule.Sandbox.get.mock.calls.map(
+      ([options]) => (options as { name: string }).name,
+    );
+    expect(lookedUp).not.toContain(templateKey);
+  });
+
+  it("opens from the build snapshot when the pointer lookup fails", async () => {
+    const { fake, rebuild, sessionSource } = setup();
+    await rebuild(artifact, { prepare: async () => {}, revision: "rev-1" });
+    const get = fake.sandboxModule.Sandbox.get.getMockImplementation();
+    fake.sandboxModule.Sandbox.get.mockImplementation(async (options: { name: string }) => {
+      if (options.name === templateKey) {
+        throw Object.assign(new Error("unavailable"), { response: { status: 503 } });
+      }
+      return await get!(options);
+    });
+
+    expect(await sessionSource("session-lookup-failed")).toBe(buildSnapshotId);
+  });
+
+  it("keeps the author's tags next to the revision on the rebuilt pointer", async () => {
+    const { fake, rebuild } = setup({ tags: { team: "x" } });
+
+    await rebuild(artifact, { prepare: async () => {}, revision: "rev-1" });
+
+    expect(fake.pointer()?.tags).toEqual({ team: "x", "eve-template-revision": "rev-1" });
+  });
+
+  it("puts the previous pointer back when publishing the new one fails", async () => {
+    const { fake, rebuild } = setup();
+    const create = fake.sandboxModule.Sandbox.create.getMockImplementation();
+    fake.sandboxModule.Sandbox.create.mockImplementation(async (options: MockCreateOptions) => {
+      if (
+        TEMPLATE_POINTER_NAME.test(options.name) &&
+        options.source?.snapshotId !== buildSnapshotId
+      ) {
+        throw new Error("create failed");
+      }
+      return await create!(options);
+    });
+
+    await expect(rebuild(artifact, { prepare: async () => {}, revision: "rev-1" })).rejects.toThrow(
+      "create failed",
+    );
+
+    expect(fake.pointer()?.sourceSnapshotId).toBe(buildSnapshotId);
+    expect(fake.snapshots.has(buildSnapshotId)).toBe(true);
+  });
+
+  it("says how to make a sandbox rebuildable when the build did not", async () => {
+    const { rebuild } = setup();
+
+    await expect(
+      rebuild({ snapshotId: buildSnapshotId }, { prepare: async () => {}, revision: "rev-1" }),
+    ).rejects.toThrow("rebuildable: true");
+  });
+
+  it("opens new sessions from the build snapshot until a rebuild publishes a newer one", async () => {
+    const { fake, rebuild, sessionSource } = setup();
+    expect(await sessionSource("session-before")).toBe(buildSnapshotId);
+
+    await rebuild(artifact, { prepare: async () => {}, revision: "rev-1" });
+
+    const rebuilt = fake.pointer()?.sourceSnapshotId;
+    expect(rebuilt).not.toBe(buildSnapshotId);
+    expect(await sessionSource("session-after")).toBe(rebuilt);
+  });
+
+  it("publishes the pointer with the revision and keeps every earlier snapshot", async () => {
+    const { fake, rebuild } = setup();
+    const prepare = vi.fn(async () => {});
+
+    expect(await rebuild(artifact, { prepare, revision: "rev-1" })).toEqual({ rebuilt: true });
+    expect(prepare).toHaveBeenCalledTimes(1);
+    expect(fake.pointer()?.tags).toEqual({ "eve-template-revision": "rev-1" });
+    const firstSnapshot = fake.pointer()?.sourceSnapshotId as string;
+    expect(firstSnapshot).not.toBe(buildSnapshotId);
+
+    expect(await rebuild(artifact, { prepare, revision: "rev-2" })).toEqual({ rebuilt: true });
+    expect(fake.pointer()?.tags).toEqual({ "eve-template-revision": "rev-2" });
+    expect(fake.snapshots.has(buildSnapshotId)).toBe(true);
+    expect(fake.snapshots.has(firstSnapshot)).toBe(true);
+    expect(fake.snapshots.has(fake.pointer()?.sourceSnapshotId as string)).toBe(true);
+  });
+
+  it("keeps the snapshot a newer deployment reused as its fallback after an older deployment rebuilds", async () => {
+    const { fake, rebuild } = setup();
+    await rebuild(artifact, { prepare: async () => {}, revision: "rev-1" });
+    const reused = fake.pointer()?.sourceSnapshotId as string;
+
+    await rebuild(artifact, { prepare: async () => {}, revision: "rev-2" });
+
+    expect(fake.snapshots.has(reused)).toBe(true);
+  });
+
+  it("rebuilds from the build snapshot when the pointer's snapshot has expired", async () => {
+    const { fake, rebuild, sessionSource } = setup();
+    await rebuild(artifact, { prepare: async () => {}, revision: "rev-1" });
+    const expired = fake.pointer()?.sourceSnapshotId as string;
+    fake.snapshots.delete(expired);
+    enforceSnapshotExpiry(fake);
+
+    expect(await rebuild(artifact, { prepare: async () => {}, revision: "rev-1" })).toEqual({
+      rebuilt: true,
+    });
+
+    const rebuilt = fake.pointer()?.sourceSnapshotId as string;
+    expect(rebuilt).not.toBe(expired);
+    expect(fake.snapshots.has(rebuilt)).toBe(true);
+    expect(await sessionSource("session-after")).toBe(rebuilt);
+  });
+
+  it("says why an environment without a snapshot cannot be rebuilt", async () => {
+    const { rebuild } = setup();
+
+    await expect(rebuild({}, { prepare: async () => {}, revision: "rev-1" })).rejects.toThrow(
+      "no snapshot to rebuild",
+    );
+  });
+
+  it("asks for a redeploy when no snapshot of the template is left", async () => {
+    const { fake, rebuild } = setup();
+    fake.snapshots.clear();
+    enforceSnapshotExpiry(fake);
+
+    await expect(
+      rebuild(artifact, { prepare: async () => {}, revision: "rev-1" }),
+    ).rejects.toBeInstanceOf(SandboxTemplateNotProvisionedError);
+  });
+
+  it("starts nothing when the template already has the revision", async () => {
+    const { fake, rebuild } = setup();
+    await rebuild(artifact, { prepare: async () => {}, revision: "rev-1" });
+    const created = fake.sandboxModule.Sandbox.create.mock.calls.length;
+    const prepare = vi.fn(async () => {});
+
+    expect(await rebuild(artifact, { prepare, revision: "rev-1" })).toEqual({ rebuilt: false });
+
+    expect(prepare).not.toHaveBeenCalled();
+    expect(fake.sandboxModule.Sandbox.create.mock.calls.length).toBe(created);
+  });
+
+  it("leaves the pointer and snapshots alone when prepare fails", async () => {
+    const { fake, rebuild, sessionSource } = setup();
+    const snapshotsBefore = new Set(fake.snapshots);
+
+    await expect(
+      rebuild(artifact, {
+        prepare: async () => {
+          throw new Error("install failed");
+        },
+        revision: "rev-1",
+      }),
+    ).rejects.toThrow("install failed");
+
+    expect(fake.pointer()?.sourceSnapshotId).toBe(buildSnapshotId);
+    expect(fake.pointer()?.tags).toBeUndefined();
+    expect(fake.snapshots).toEqual(snapshotsBefore);
+    expect([...fake.sandboxes.keys()]).toEqual([templateKey]);
+    expect(await sessionSource("session-after")).toBe(buildSnapshotId);
+  });
+
+  it("runs one rebuild at a time", async () => {
+    const { rebuild } = setup();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const first = rebuild(artifact, { prepare: () => gate, revision: "rev-1" });
+    await vi.waitFor(() => undefined);
+
+    const second = await rebuild(artifact, { prepare: async () => {}, revision: "rev-2" });
+    release();
+
+    expect(second).toEqual({ rebuilt: false });
+    expect(await first).toEqual({ rebuilt: true });
+  });
+
+  it("keeps the published snapshot when stopping the new pointer fails", async () => {
+    const { fake, rebuild, sessionSource } = setup();
+    const create = fake.sandboxModule.Sandbox.create.getMockImplementation();
+    fake.sandboxModule.Sandbox.create.mockImplementation(async (options: MockCreateOptions) => {
+      const sandbox = await create!(options);
+      if (TEMPLATE_POINTER_NAME.test(options.name)) {
+        sandbox.stop.mockRejectedValue(new Error("stop failed"));
+      }
+      return sandbox;
+    });
+
+    expect(await rebuild(artifact, { prepare: async () => {}, revision: "rev-1" })).toEqual({
+      rebuilt: true,
+    });
+
+    const published = fake.pointer()?.sourceSnapshotId as string;
+    expect(published).not.toBe(buildSnapshotId);
+    expect(fake.snapshots.has(published)).toBe(true);
+    expect(await sessionSource("session-after")).toBe(published);
+  });
+
+  it("discards its snapshot when another process published first", async () => {
+    const { fake, rebuild } = setup();
+    const result = await rebuild(artifact, {
+      prepare: async () => {
+        fake.sandboxes.get(templateKey)?.delete();
+        await fake.sandboxModule.Sandbox.create({
+          name: templateKey,
+          source: { snapshotId: "other-process-snapshot", type: "snapshot" },
+        });
+      },
+      revision: "rev-1",
+    });
+
+    expect(result).toEqual({ rebuilt: false });
+    expect(fake.pointer()?.sourceSnapshotId).toBe("other-process-snapshot");
+    expect([...fake.snapshots].filter((id) => id.startsWith(templateKey))).toEqual([]);
+  });
+
+  it("falls back to the build snapshot when the pointer's snapshot is gone", async () => {
+    const { fake, rebuild, sessionSource } = setup();
+    await rebuild(artifact, { prepare: async () => {}, revision: "rev-1" });
+    const pointerSnapshot = fake.pointer()?.sourceSnapshotId as string;
+    const create = fake.sandboxModule.Sandbox.create.getMockImplementation();
+    fake.sandboxModule.Sandbox.create.mockImplementation(async (options: MockCreateOptions) => {
+      if (
+        options.source?.snapshotId === pointerSnapshot &&
+        !TEMPLATE_POINTER_NAME.test(options.name)
+      ) {
+        throw snapshotExpired();
+      }
+      return await create!(options);
+    });
+
+    expect(await sessionSource("session-after")).toBe(buildSnapshotId);
+  });
+
+  it("keeps resumed sessions on their own sandbox", async () => {
+    const { fake, provider, rebuild } = setup();
+    const { state } = await provider.start({
+      appRoot,
+      prepared: artifact,
+      sandboxName: "session-1",
+    });
+    const created = fake.sandboxModule.Sandbox.create.mock.calls.length;
+
+    await rebuild(artifact, { prepare: async () => {}, revision: "rev-1" });
+    await provider.openSession({
+      appRoot,
+      existing: state,
+      prepared: artifact,
+      sandboxName: "session-1",
+    });
+
+    const sessionCreates = fake.sandboxModule.Sandbox.create.mock.calls
+      .slice(created)
+      .filter(([options]) => (options as { name: string }).name.startsWith("eve-sbx-vercel-"));
+    expect(sessionCreates).toEqual([]);
   });
 });

@@ -2,7 +2,10 @@ import {
   getVercelSandboxFetch,
   resolveVercelSandboxCredentials,
 } from "#execution/sandbox/bindings/vercel-credentials.js";
-import { isVercelSandboxMissingError } from "#execution/sandbox/bindings/vercel-errors.js";
+import {
+  isVercelSandboxMissingError,
+  isVercelSnapshotUnavailableError,
+} from "#execution/sandbox/bindings/vercel-errors.js";
 import { getNamedVercelSandbox } from "#execution/sandbox/bindings/vercel-lookup.js";
 import type {
   VercelCreateOptions,
@@ -55,4 +58,23 @@ export async function stopVercelSandbox(
     return;
   }
   await sandbox.stop(signal === undefined ? undefined : { signal });
+}
+
+export async function deleteVercelSnapshot(input: {
+  readonly createOptions: VercelCreateOptions;
+  readonly sandboxModule: VercelModule;
+  readonly snapshotId: string;
+}): Promise<void> {
+  try {
+    const snapshot = await input.sandboxModule.Snapshot.get({
+      ...(await resolveVercelSandboxCredentials(input.createOptions)),
+      fetch: getVercelSandboxFetch(input.createOptions),
+      signal: input.createOptions.signal,
+      snapshotId: input.snapshotId,
+    });
+    await snapshot.delete({ signal: input.createOptions.signal });
+  } catch (error) {
+    if (!isVercelSandboxMissingError(error) && !isVercelSnapshotUnavailableError(error))
+      throw error;
+  }
 }

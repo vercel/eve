@@ -51,6 +51,13 @@ export type VercelSandboxCreateOptions = SandboxNetworkOptions & {
   readonly failoverRegions?: string[];
   readonly snapshotExpiration?: number;
   readonly keepLastSnapshots?: { count: number; expiration?: number; deleteEvicted?: boolean };
+  /**
+   * Lets `rebuildSandboxTemplate()` refresh this sandbox's template after a deploy. Only a build
+   * with `rebuildable: true` makes new sessions look up the rebuilt template; other builds open
+   * from the snapshot they were deployed with and make no extra call.
+   * @default false
+   */
+  readonly rebuildable?: boolean;
 } & (
     | {
         image?: string;
@@ -94,6 +101,6 @@ export type VercelSandboxMounts = Readonly<Record<string, VercelSandboxMount>>;
 /** Options accepted when creating one live Vercel sandbox from an environment. */
 export type VercelSandboxRuntimeOptions = Omit<
   VercelSandboxCreateOptions,
-  "fetch" | "image" | "projectId" | "source" | "tags" | "teamId" | "token"
+  "fetch" | "image" | "projectId" | "rebuildable" | "source" | "tags" | "teamId" | "token"
 > &
   SandboxNetworkOptions & { readonly mounts?: VercelSandboxMounts };
