@@ -1,4 +1,4 @@
-import type { Experimental_DecisionModel } from "ai";
+import type { Experimental_DecisionModel, Experimental_ExtractionModel } from "ai";
 import { mockModel, type MockModelRequest, type MockModelResponder } from "eve/evals";
 import { auto } from "eve/models";
 
@@ -73,6 +73,44 @@ export const decisionModel: Exclude<Experimental_DecisionModel, string> = {
       usage: { inputTokens: 42, outputTokens: 3 },
       warnings: [],
       response: { modelId: "fixture-decider" },
+    };
+  },
+};
+
+export const extractionModel: Exclude<Experimental_ExtractionModel, string> = {
+  specificationVersion: "v4",
+  provider: "fixture",
+  modelId: "fixture-extractor",
+  supportedFieldTypes: ["text", "list"],
+  async doExtract({ state }) {
+    const part = state.findIndex((entry) => entry.type === "text");
+    const text = part === -1 ? "" : (state[part] as { text: string }).text;
+    const invoice = /INV-\d+/.exec(text);
+    const contacts = /Contacts: (.+)\./.exec(text)?.[1]?.split(", ") ?? [];
+    return {
+      answers: {
+        invoiceNumber: invoice
+          ? {
+              type: "text",
+              value: invoice[0],
+              confidence: 0.97,
+              source: {
+                type: "text",
+                part,
+                start: invoice.index,
+                end: invoice.index + invoice[0].length,
+              },
+            }
+          : { type: "text", value: null, pNull: 0.9 },
+        contacts: {
+          type: "list",
+          value: contacts,
+          items: contacts.map(() => ({ confidence: 0.9 })),
+        },
+      },
+      usage: { inputTokens: 30, outputTokens: 4 },
+      warnings: [],
+      response: { modelId: "fixture-extractor" },
     };
   },
 };

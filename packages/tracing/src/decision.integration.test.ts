@@ -126,6 +126,54 @@ describe("decision tracing", () => {
     },
   );
 
+  it.each([false, true])(
+    "records an extraction span under the tool, with results only as output content (outputs: %s)",
+    async (recordOutputs) => {
+      const extracted = [
+        { field_index: 0, field_name: "invoiceNumber", type: "text", value: "INV-2041" },
+      ];
+      const turn = await tracing.turn({
+        agentName: "support",
+        identity,
+        sequence: 0,
+        capture: { emit: true, recordInputs: false, recordOutputs },
+      });
+      const attempt = await turn.attempt({ stepIndex: 0, attempt: 0 });
+      const tool = await attempt.tool({ callId: "call-1", name: "read_invoice" });
+      await tool.run(() =>
+        tracing.extraction(
+          { modelId: "extract-1", provider: "scaledown", identity },
+          async (operation) => {
+            await operation.complete({
+              output: extracted,
+              usage: { inputTokens: 30, outputTokens: 4 },
+            });
+          },
+        ),
+      );
+      await tool.complete();
+      await attempt.complete();
+      await turn.complete();
+
+      const extraction = span("extraction extract-1");
+      expect(extraction.parentSpanContext?.spanId).toBe(
+        span("execute_tool read_invoice").spanContext().spanId,
+      );
+      expect(extraction.attributes).toMatchObject({
+        "agent.turn.id": "turn-1",
+        "gen_ai.operation.name": "extraction",
+        "gen_ai.provider.name": "scaledown",
+        "gen_ai.request.model": "extract-1",
+        "gen_ai.usage.input_tokens": 30,
+        "gen_ai.usage.output_tokens": 4,
+      });
+      expect(extraction.attributes).not.toHaveProperty("agent.decision.purpose");
+      expect(extraction.attributes["gen_ai.extraction.results"]).toBe(
+        recordOutputs ? JSON.stringify(extracted) : undefined,
+      );
+    },
+  );
+
   it("records nothing beneath an unsampled parent", async () => {
     let inner: boolean | undefined;
     await tracing.decision(

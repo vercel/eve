@@ -69,6 +69,7 @@ interface AgentOtelInstrumentation {
     turnId: string,
   ) => Promise<InstrumentationTraceContext | undefined>;
   readonly decision: AgentRun["decision"];
+  readonly extraction: AgentRun["extraction"];
   readonly runInContext: InstrumentationContextRunner;
 }
 
@@ -268,6 +269,7 @@ export function createAgentOtelInstrumentation(
     prepareTurnTrace,
     readTurnTraceContext: sessionTracing.readTurnTraceContext,
     decision: tracing.decision,
+    extraction: tracing.extraction,
     async runInContext(operation, execute) {
       if (operation.type === "memory.operation") return memory.runInContext(operation, execute);
       const ceiling = { emit: true, ...(await capturePolicy.forOperation(operation.scope)) };

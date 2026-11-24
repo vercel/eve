@@ -5,7 +5,7 @@ import {
   InMemorySpanExporter,
   SimpleSpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
-import { Experimental_DecisionMockModelV4 } from "ai/test";
+import { Experimental_DecisionMockModelV4, Experimental_ExtractionMockModelV4 } from "ai/test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -26,7 +26,7 @@ import {
   registerInstrumentationRuntime,
   type ExecutionInstrumentation,
 } from "#instrumentation/runtime.js";
-import { decide } from "#public/ai/index.js";
+import { decide, extract } from "#public/ai/index.js";
 import { decideFor } from "#ai/decide.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
 import type { TraceCapturePolicy } from "#shared/trace-policy.js";
@@ -457,6 +457,131 @@ describe("decide tracing", () => {
       expect(decisions()).toHaveLength(0);
     },
   );
+});
+
+describe("extract tracing", () => {
+  const fields = {
+    invoiceNumber: { type: "text", instructions: "The invoice number on Alice's invoice" },
+    contacts: { type: "list", items: "text", instructions: "Contact names" },
+  } as const;
+  const invoice = "Invoice INV-2041 for Alice. Contacts: Ana, Bo.";
+  const extracted = {
+    answers: {
+      invoiceNumber: { type: "text" as const, value: "INV-2041", confidence: 0.98 },
+      contacts: { type: "list" as const, value: ["Ana", "Bo"] },
+    },
+    usage: { inputTokens: 30, outputTokens: 4 },
+    warnings: [],
+  };
+  const extractions = () =>
+    exporter
+      .getFinishedSpans()
+      .filter((span) => span.attributes["gen_ai.operation.name"] === "extraction");
+
+  it("emits one extraction span under the active tool and parents provider work to it", async () => {
+    const model = new Experimental_ExtractionMockModelV4({
+      doExtract: async () => {
+        trace.getTracer("test.provider").startSpan("extraction request").end();
+        return {
+          ...extracted,
+          providerMetadata: { gateway: { generationId: "gen_alice", cost: "0.0002" } },
+        };
+      },
+    });
+    let parentId: string | undefined;
+    await inSession(async (ctx) => {
+      const turn = trace.setSpan(
+        context.active(),
+        trace.wrapSpanContext(ctx.require(SessionTraceSeedKey)),
+      );
+      await trace.getTracer("test.tool").startActiveSpan("read invoice", {}, turn, async (span) => {
+        parentId = span.spanContext().spanId;
+        try {
+          const result = await extract({ model, fields, state: invoice });
+          expect(result.answers.invoiceNumber.value).toBe("INV-2041");
+        } finally {
+          span.end();
+        }
+      });
+    });
+
+    expect(extractions()).toHaveLength(1);
+    const extraction = extractions()[0]!;
+    expect(extraction.name).toBe(`extraction ${model.modelId}`);
+    expect(extraction.parentSpanContext?.spanId).toBe(parentId);
+    expect(extraction.attributes).toMatchObject({
+      "gen_ai.provider.name": model.provider,
+      "gen_ai.request.model": model.modelId,
+      "gen_ai.usage.input_tokens": 30,
+      "gen_ai.usage.output_tokens": 4,
+      "gen_ai.generation.id": "gen_alice",
+      "gen_ai.usage.cost": 0.0002,
+      "agent.turn.id": "turn-1",
+    });
+    expect(extraction.attributes).not.toHaveProperty("agent.decision.purpose");
+    const request = exporter.getFinishedSpans().find((span) => span.name === "extraction request")!;
+    expect(request.parentSpanContext?.spanId).toBe(extraction.spanContext().spanId);
+    expect(JSON.stringify(extraction.attributes)).not.toContain(invoice);
+  });
+
+  it.each([true, false])(
+    "records extraction results only when outputs are recorded (%s)",
+    async (recordOutputs) => {
+      runtime = useRuntime(() => ({ emit: true, recordInputs: false, recordOutputs }));
+      const model = new Experimental_ExtractionMockModelV4({ doExtract: async () => extracted });
+      await inSession(async () => {
+        await extract({ model, fields, state: invoice });
+      });
+      expect(extractions()[0]!.attributes["gen_ai.extraction.results"]).toBe(
+        recordOutputs
+          ? JSON.stringify([
+              {
+                field_index: 0,
+                field_name: "invoiceNumber",
+                type: "text",
+                value: "INV-2041",
+                confidence: 0.98,
+              },
+              { field_index: 1, field_name: "contacts", type: "list", value: ["Ana", "Bo"] },
+            ])
+          : undefined,
+      );
+    },
+  );
+
+  it("records a refusal as a result, not a failure, and fails the span on provider errors", async () => {
+    runtime = useRuntime(() => ({ emit: true, recordInputs: false, recordOutputs: true }));
+    const error = new Error("private invoice details");
+    const refusing = new Experimental_ExtractionMockModelV4({
+      doExtract: async () => ({
+        ...extracted,
+        answers: { ...extracted.answers, contacts: { type: "refusal" } },
+      }),
+    });
+    const failing = new Experimental_ExtractionMockModelV4({
+      doExtract: async () => {
+        throw error;
+      },
+    });
+    await inSession(async () => {
+      await expect(extract({ model: refusing, fields, state: invoice })).rejects.toMatchObject({
+        fieldIds: ["contacts"],
+      });
+      await expect(extract({ model: failing, fields, state: invoice, maxRetries: 0 })).rejects.toBe(
+        error,
+      );
+    });
+    const [refused, failed] = extractions();
+    expect(refused!.status.code).toBe(SpanStatusCode.UNSET);
+    expect(JSON.parse(String(refused!.attributes["gen_ai.extraction.results"]))).toEqual([
+      { field_index: 1, field_name: "contacts", type: "refusal" },
+    ]);
+    expect(failed!.status.code).toBe(SpanStatusCode.ERROR);
+    expect(failed!.attributes["error.type"]).toBe("extraction_error");
+    expect(JSON.stringify({ events: failed!.events, status: failed!.status })).not.toContain(
+      error.message,
+    );
+  });
 });
 
 describe("decide AI SDK integration content", () => {

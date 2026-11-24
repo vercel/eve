@@ -48,7 +48,7 @@ export function settleRun(
 }
 
 export function recordUsage(input: {
-  readonly kind: "auxiliary" | "decision";
+  readonly kind: "auxiliary" | "decision" | "extraction";
   readonly callId?: string;
   readonly usage: Usage;
 }): Commit {

@@ -74,3 +74,9 @@ export function localGatewayDecisionModel(
 ): ReturnType<ReturnType<typeof createGateway>["decisionModel"]> | undefined {
   return createLocalGateway()?.decisionModel(id);
 }
+
+export function localGatewayExtractionModel(
+  id: string,
+): ReturnType<ReturnType<typeof createGateway>["extractionModel"]> | undefined {
+  return createLocalGateway()?.extractionModel(id);
+}

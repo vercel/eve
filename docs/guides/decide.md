@@ -160,7 +160,7 @@ The choice above is typed as `"billing" | "support"`. Each answer appears under 
 
 A model instance must implement decision model specification `v4`, the version AI SDK 7 supports. A matching `provider`, `modelId`, and `specificationVersion` alone is not enough. If the installed `ai` package does not export a decision API, `decide` throws an error that names the missing export. Validation, retries, and provider errors follow AI SDK semantics.
 
-`decide` also works outside a tool and doesn't need an active eve session.
+`decide` also works outside a tool and doesn't need an active eve session. To read values such as invoice numbers or dates out of content instead of answering questions about it, use [`extract`](./extract).
 
 ## Judge eval results
 

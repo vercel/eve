@@ -10,7 +10,6 @@ export const invocationName = (name?: string) =>
   name === undefined ? "invoke_agent" : `invoke_agent ${name}`;
 const modelName = (name: string) => `chat ${name}`;
 const toolName = (name: string) => `execute_tool ${name}`;
-const decisionName = (modelId: string) => `decision ${modelId}`;
 const SPAN_NAMES = {
   approval: "agent.approval",
   step: "agent.step",
@@ -22,6 +21,7 @@ const CONTENT_FIELDS = {
   approvalResponse: "agent.approval.response",
   memoryRecords: "gen_ai.memory.records",
   decisionResults: "gen_ai.decision.results",
+  extractionResults: "gen_ai.extraction.results",
 } as const;
 export function applyAttributes(
   span: { setAttribute(key: string, value: Exclude<Attributes[string], undefined>): unknown },
@@ -88,6 +88,39 @@ function toolInput(arguments_: unknown, context: KindContext): Attributes {
 function toolOutput(span: TraceOperation, result: ScopeTerminal, context: CompletionContext): void {
   if (context.capture.recordOutputs)
     applyAttributes(span, { [CONTENT_FIELDS.toolResult]: context.serializer.json(result.output) });
+}
+function modelCallSpan(
+  operation: "decision" | "extraction",
+  options: { readonly modelId: string; readonly provider?: string },
+  context: KindContext,
+  attributes?: Attributes,
+): Pick<PreparedSpan, "name" | "kind" | "attributes"> {
+  const inRun = context.identity.runId !== "";
+  const name = `${operation} ${options.modelId}`;
+  return {
+    name,
+    kind: "CLIENT",
+    attributes: {
+      ...(inRun ? context.attributes : undefined),
+      ...namingAttributes(name, operation),
+      "agent.turn.id": inRun ? context.identity.turnId || undefined : undefined,
+      ...attributes,
+      "gen_ai.agent.name": context.identity.agentName,
+      "gen_ai.operation.name": operation,
+      "gen_ai.provider.name": options.provider,
+      "gen_ai.request.model": options.modelId,
+    },
+  };
+}
+function modelCallResults(
+  span: TraceOperation,
+  result: ScopeTerminal,
+  context: CompletionContext,
+  field: string,
+): void {
+  if (!context.capture.recordOutputs || !Array.isArray(result.output) || !result.output.length)
+    return;
+  applyAttributes(span, { [field]: context.serializer.json(result.output) });
 }
 const kinds: { [K in ScopeData["type"]]: Kind<K> } = {
   activation: {
@@ -281,30 +314,16 @@ const kinds: { [K in ScopeData["type"]]: Kind<K> } = {
   },
   decision: {
     parents: ["activation", "step", "tool"],
-    prepare({ options }, context) {
-      const inRun = context.identity.runId !== "";
-      return {
-        name: decisionName(options.modelId),
-        kind: "CLIENT",
-        attributes: {
-          ...(inRun ? context.attributes : undefined),
-          ...namingAttributes(decisionName(options.modelId), "decision"),
-          "agent.turn.id": inRun ? context.identity.turnId || undefined : undefined,
-          "agent.decision.purpose": options.purpose,
-          "gen_ai.agent.name": context.identity.agentName,
-          "gen_ai.operation.name": "decision",
-          "gen_ai.provider.name": options.provider,
-          "gen_ai.request.model": options.modelId,
-        },
-      };
-    },
-    complete(span, _data, result, context) {
-      if (!context.capture.recordOutputs || !Array.isArray(result.output) || !result.output.length)
-        return;
-      applyAttributes(span, {
-        [CONTENT_FIELDS.decisionResults]: context.serializer.json(result.output),
-      });
-    },
+    prepare: ({ options }, context) =>
+      modelCallSpan("decision", options, context, { "agent.decision.purpose": options.purpose }),
+    complete: (span, _data, result, context) =>
+      modelCallResults(span, result, context, CONTENT_FIELDS.decisionResults),
+  },
+  extraction: {
+    parents: ["activation", "step", "tool"],
+    prepare: ({ options }, context) => modelCallSpan("extraction", options, context),
+    complete: (span, _data, result, context) =>
+      modelCallResults(span, result, context, CONTENT_FIELDS.extractionResults),
   },
   memory: {
     parents: ["activation", "step", "tool"],
@@ -384,7 +403,10 @@ export function completeScope(
       span,
       usageAttributes(
         result.usage,
-        data.type === "activation" || data.type === "model" || data.type === "decision",
+        data.type === "activation" ||
+          data.type === "model" ||
+          data.type === "decision" ||
+          data.type === "extraction",
       ),
     );
   kind(data).complete?.(span, data, result, { capture, startTimeMs, serializer, outcome });

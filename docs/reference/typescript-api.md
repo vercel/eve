@@ -190,7 +190,7 @@ Type the context in a `"use step"` helper as `WorkflowStepToolContext`, which ex
 | [`eve/models`](../guides/decide)                                                  | `auto`, `defineModel`, `DefinedModel`, `ModelDefinition`, `EveLanguageModel`                                        |
 | `eve/models/openai`                                                               | `openai`, `chatgpt`                                                                                                 |
 | `eve/models/anthropic`                                                            | `anthropic`                                                                                                         |
-| [`eve/ai`](../guides/decide#decide-inside-a-tool)                                 | Standalone `decide`                                                                                                 |
+| [`eve/ai`](../guides/decide#decide-inside-a-tool)                                 | Standalone `decide` and [`extract`](../guides/extract)                                                              |
 | `eve/evals`                                                                       | `defineEval`, `defineEvalConfig`, `mockModel`, eval types                                                           |
 | `eve/evals/expect`                                                                | `includes`, `equals`, `matches`, `similarity`                                                                       |
 | `eve/evals/reporters`                                                             | `braintrustReporter`, `junitReporter`, `EvalReporter`                                                               |

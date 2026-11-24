@@ -59,6 +59,21 @@ export default defineAgent({
         ],
       };
     }
+    if (request.userMessages.some((text) => text.includes("extract-request"))) {
+      const result = request.toolResults.find((result) => result.name === "extract-request");
+      if (result) return JSON.stringify({ isError: result.isError, output: result.output });
+      return {
+        toolCalls: [
+          {
+            id: "extract-request-1",
+            name: "extract-request",
+            input: {
+              missingAnswer: request.userMessages.some((text) => text.includes("missing answer")),
+            },
+          },
+        ],
+      };
+    }
     if (request.userMessages.some((text) => text.includes("parallel investigations"))) {
       const completed = request.messages.filter((message) =>
         message.text.includes("child-result:"),

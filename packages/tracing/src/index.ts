@@ -4,6 +4,7 @@ export {
   type AgentRunOptions,
   type AgentMemoryTracing,
   type DecisionInput,
+  type ExtractionInput,
   type TurnInput,
   type ResumeInput,
 } from "./agent-run.js";
@@ -21,6 +22,7 @@ export type {
   ApprovalOperation,
   MemoryOperation,
   DecisionOperation,
+  ExtractionOperation,
   ModelCallReturn,
   ModelStreamReturn,
 } from "./operations.js";

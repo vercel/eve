@@ -10,6 +10,7 @@ import {
   operationHandle,
   wrappedOperation,
   type DecisionOperation,
+  type ExtractionOperation,
   type TurnOperation,
   type WrappedOperation,
 } from "./operations.js";
@@ -118,8 +119,11 @@ export interface DecisionInput {
   readonly context?: ExecutionContext;
 }
 
+/** One call to an extraction model, such as reading an invoice number from a document. */
+export type ExtractionInput = Omit<DecisionInput, "purpose">;
+
 /**
- * Traces agent execution: start turns, resume saved durable turns, record memory and decision calls,
+ * Traces agent execution: start turns, resume saved durable turns, record memory, decision, and extraction calls,
  * and flush or shut down the telemetry. Create one with {@link createAgentRun}.
  */
 export interface AgentRun {
@@ -128,6 +132,7 @@ export interface AgentRun {
   resume(input: ResumeInput): Promise<TurnOperation | undefined>;
   memory: AgentMemoryTracing;
   decision: WrappedOperation<DecisionInput, DecisionOperation>;
+  extraction: WrappedOperation<ExtractionInput, ExtractionOperation>;
   forceFlush(): Promise<void>;
   shutdown(): Promise<void>;
 }
@@ -380,32 +385,37 @@ export function createAgentRun(input: AgentRunOptions): AgentRun {
     return value;
   }
 
-  async function decision(data: DecisionInput): Promise<DecisionOperation> {
+  async function modelCall(
+    type: "decision" | "extraction",
+    data: DecisionInput,
+  ): Promise<DecisionOperation> {
     const active = telemetry.active();
     const owner = active?.reference ?? data.parent;
     const span = telemetry.activeSpan?.(data.context);
     const parent = owner === undefined || span?.traceId === owner.traceId ? span : owner;
     const sampled = parent === undefined || (parent.traceFlags & 1) !== 0;
+    const options = { modelId: data.modelId, provider: data.provider };
     const live = await scopes.start({
       identity: {
         ...(data.identity ?? { conversationId: "", runId: "", turnId: "" }),
         agentName: data.agentName,
       },
-      key: `decision:${randomUUID()}`,
+      key: `${type}:${randomUUID()}`,
       capture: sampled ? (data.capture ?? active?.capture ?? METADATA_ONLY) : NOT_SAMPLED,
       parent,
       context: data.context,
-      data: {
-        type: "decision",
-        options: { modelId: data.modelId, provider: data.provider, purpose: data.purpose },
-      },
+      data:
+        type === "decision"
+          ? { type, options: { ...options, purpose: data.purpose } }
+          : { type, options },
     });
     return operationHandle(live, live.record().data, input.onError);
   }
 
   const run: AgentRun = {
     turn: wrappedOperation(turnOperation, undefined, input.onError),
-    decision: wrappedOperation(decision, undefined, input.onError),
+    decision: wrappedOperation((data) => modelCall("decision", data), undefined, input.onError),
+    extraction: wrappedOperation((data) => modelCall("extraction", data), undefined, input.onError),
     resume,
     memory: {
       search: (data, execute) => memory("search_memory", data, execute),

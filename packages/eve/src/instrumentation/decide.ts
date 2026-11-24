@@ -7,121 +7,38 @@ import type { DecisionPurpose } from "#ai/decide.js";
 import type { DecisionOptions, DecisionQuestion } from "#ai/decision-types.js";
 import { decisionResults } from "#instrumentation/decision-results.js";
 import { Experimental_DecisionRefusalError as DecisionRefusalError } from "#compiled/@ai-sdk/provider/index.js";
-import { context } from "#compiled/@opentelemetry/api/index.js";
-import { currentCapture } from "#compiled/@vercel/agent-runs/index.js";
-import { ContextContainer, contextStorage } from "#context/container.js";
-import { SessionIdKey, SessionKey } from "#context/keys.js";
 import {
   aiSdkCapture,
   getRegisteredTelemetryIntegrations,
 } from "#instrumentation/ai-sdk-telemetry.js";
-import { getInstrumentationRuntime } from "#instrumentation/runtime-global.js";
-import { readInstrumentationSessionContext } from "#instrumentation/session-context.js";
-import { resolveInstrumentationTraceDecision } from "#instrumentation/trace-decision.js";
-import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
-import {
-  applyLiveDeliveryAudienceCeiling,
-  defaultContentCapture,
-} from "#shared/forwarded-trace-policy.js";
-import { readSessionTraceDecision } from "#tracing/eve/agent-trace-context-store.js";
-import { withChannelAudience } from "#tracing/eve/channel-audience-context.js";
-import { withOperationTraceContext } from "#tracing/eve/conversation-context.js";
-import { gatewayCostAttributes, readGatewayCostData } from "#tracing/eve/gateway.js";
-import { eveTurnIdentity } from "#tracing/eve/operation-input.js";
-import { resolveTraceRootSessionId } from "#shared/trace-root.js";
+import { runTracedModelCall, startModelCallTrace } from "#instrumentation/model-call-trace.js";
 
 export async function decideWithTracing<
   const Questions extends Readonly<Record<string, DecisionQuestion>>,
 >(options: DecisionOptions<Questions>, purpose: DecisionPurpose) {
-  const runtime = getInstrumentationRuntime();
-  if (runtime === undefined) return decideWithMetadata(options);
-  const ctx = contextStorage.getStore() ?? new ContextContainer();
-  const session = readInstrumentationSessionContext(ctx);
-  const agentName = ctx.get(SessionAgentKey)?.name ?? "eve";
-  const ceiling = session.forwardedTracePolicy?.ceiling;
-  const hooks =
-    runtime.hooks.forTrace?.({ agentName, ...session.conversation }, { ceiling }) ?? runtime.hooks;
-  const settings = runtime.otelSettings;
-  const traceDecision = runtime.decision;
-  if (settings === undefined || traceDecision === undefined) {
-    return decideWithMetadata(options, {
-      telemetry: aiSdkCapture(defaultContentCapture(session.conversation, ceiling), hooks),
-    });
-  }
-  const sessionId = ctx.get(SessionIdKey);
-  const turnId = ctx.get(SessionKey)?.turn.id;
-  const turnContext =
-    sessionId === undefined || turnId === undefined
-      ? undefined
-      : await runtime.readTurnTraceContext?.(sessionId, turnId);
-  const decision = resolveInstrumentationTraceDecision(
-    settings,
-    agentName,
-    session.conversation,
-    session.traceSeed,
-    sessionId === undefined ? undefined : readSessionTraceDecision(ctx, sessionId),
-  );
-  const effective =
-    decision === undefined
-      ? undefined
-      : applyLiveDeliveryAudienceCeiling(
-          decision,
-          session.audience,
-          session.forwardedTracePolicy,
-          session.conversation.environment,
-        );
-  const inherited = currentCapture();
-  const record = effective?.action === "record";
-  const capture = {
-    emit: record && inherited?.emit !== false,
-    recordInputs: record && effective.recordInputs && inherited?.recordInputs !== false,
-    recordOutputs: record && effective.recordOutputs && inherited?.recordOutputs !== false,
-  };
-  let host = withChannelAudience(context.active(), session.audience);
-  if (sessionId !== undefined)
-    host = withOperationTraceContext(host, {
-      sessionId,
-      rootSessionId: session.parent?.rootSessionId,
-      traceSessionId: resolveTraceRootSessionId(ctx, sessionId),
-    });
-  const model = resolveDecisionModel(options.model ?? DEFAULT_DECISION_MODEL);
-  const operation = await traceDecision({
-    modelId: typeof model === "string" ? model : model.modelId,
-    provider: typeof model === "string" ? undefined : model.provider,
+  const traced = await startModelCallTrace(
+    "decision",
+    () => resolveDecisionModel(options.model ?? DEFAULT_DECISION_MODEL),
     purpose,
-    identity:
-      sessionId === undefined || turnId === undefined
-        ? undefined
-        : eveTurnIdentity({ sessionId, rootSessionId: session.parent?.rootSessionId, turnId }),
-    agentName: settings.functionId ?? agentName,
-    capture,
-    parent: turnContext ?? session.traceSeed,
-    context: host,
-  });
+  );
+  if (traced === undefined) return decideWithMetadata(options);
+  if (traced.operation === undefined) {
+    return decideWithMetadata(options, { telemetry: aiSdkCapture(traced.content, traced.hooks) });
+  }
   const telemetry = {
     integrations: [...getRegisteredTelemetryIntegrations({ excludeEveOtelIntegration: true })],
-    ...aiSdkCapture(operation.capture, hooks),
+    ...aiSdkCapture(traced.operation.capture, traced.hooks),
   };
-  try {
-    const result = await operation.run(() =>
-      decideWithMetadata({ ...options, model }, { telemetry }),
-    );
-    operation.attributes({
-      "gen_ai.response.id": result.response.id,
-      "gen_ai.response.model": result.response.modelId,
-      ...gatewayCostAttributes(readGatewayCostData(result.providerMetadata) ?? {}),
-    });
-    await operation.complete({
-      output: decisionResults(options.questions, { answers: result.answers }),
-      usage: { inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens },
-    });
-    return result;
-  } catch (error) {
-    await operation.complete(
-      DecisionRefusalError.isInstance(error)
-        ? { output: decisionResults(options.questions, { refused: error.questionIds }) }
-        : { failed: true, errorCode: "decision_error" },
-    );
-    throw error;
-  }
+  return runTracedModelCall(
+    "decision",
+    traced.operation,
+    () => decideWithMetadata({ ...options, model: traced.model }, { telemetry }),
+    {
+      completed: (result) => decisionResults(options.questions, { answers: result.answers }),
+      refused: (error) =>
+        DecisionRefusalError.isInstance(error)
+          ? decisionResults(options.questions, { refused: error.questionIds })
+          : undefined,
+    },
+  );
 }

@@ -113,6 +113,8 @@ export type ApprovalOperation = Operation;
 export type MemoryOperation = Operation;
 /** A traced call to a decision model, such as choosing a model for a turn. */
 export type DecisionOperation = Operation;
+/** A traced call to an extraction model, such as reading fields from a document. */
+export type ExtractionOperation = Operation;
 /** What a `modelCall` callback returns: the call's `result` with its finish reason, usage, and optional response metadata and content. */
 export interface ModelCallReturn<T> extends ModelResult {
   readonly result: T;

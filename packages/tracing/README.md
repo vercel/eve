@@ -162,6 +162,12 @@ OpenTelemetry GenAI `gen_ai.decision.results` shape; they are output content,
 recorded only when the capture records outputs. A refusal is a result, not a
 failure.
 
+`run.extraction(data)` records one `extraction <model>` call to an extraction
+model, such as reading an invoice number from a document. It takes the same
+fields as `run.decision` except `purpose`, and nests the same way. Per-field
+results passed as `output` are recorded as `gen_ai.extraction.results`, only
+when the capture records outputs.
+
 ## AI SDK
 
 Install the AI SDK if it is not already installed:
