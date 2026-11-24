@@ -29,6 +29,7 @@ import {
   type Slot,
   writeLive,
   writeDefinitionsState,
+  writeSlot,
 } from "#definitions/state.js";
 import { collectEffects, draftOf } from "./combine.js";
 import {
@@ -279,11 +280,6 @@ function dropRemovedSlots(ctx: ContextContainer, definitions: readonly Definitio
 export async function installDefinitions(ctx: ContextContainer): Promise<void> {
   const installs = new Set((await sessionDefinitions(ctx)).map(({ install }) => install));
   for (const install of installs) await install?.(ctx);
-}
-
-function writeSlot(ctx: ContextContainer, id: string, slot: Slot): void {
-  const state = readDefinitionsState(ctx);
-  writeDefinitionsState(ctx, { ...state, slots: { ...state.slots, [id]: slot } });
 }
 
 interface Run {

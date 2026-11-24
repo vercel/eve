@@ -10,7 +10,11 @@ export function memoryMismatch(source: Pick<ModuleSourceRef, "exportName" | "log
 export function normalizeMemoryDefinition(value: unknown, message: string): MemoryDefinition {
   if (!isMemoryDefinition(value)) throw new Error(message);
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["description", "namespace", "provider", "scope"], message);
+  expectOnlyKnownKeys(
+    record,
+    ["description", "namespace", "provider", "scope", "supersede"],
+    message,
+  );
   if (
     record.description !== undefined &&
     (typeof record.description !== "string" || record.description.trim().length === 0)
@@ -31,6 +35,13 @@ export function normalizeMemoryDefinition(value: unknown, message: string): Memo
     typeof record.scope !== "function"
   ) {
     throw new Error(`${message} "scope" must be a string, null, or resolver.`);
+  }
+  if (
+    record.supersede !== undefined &&
+    record.supersede !== "hide" &&
+    record.supersede !== "append"
+  ) {
+    throw new Error(`${message} "supersede" must be "hide" or "append".`);
   }
   const provider = expectObjectRecord(record.provider, `${message} "provider" must be an object.`);
   expectOnlyKnownKeys(provider, ["recall", "capture", "tools"], `${message} "provider"`);
