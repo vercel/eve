@@ -1,0 +1,60 @@
+.hero {
+  position: relative;
+  overflow: hidden;
+  border-bottom: 1px solid var(--ds-gray-alpha-400);
+  background: var(--ds-background-200);
+}
+
+.backdrop {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 96rem;
+  max-width: none;
+  height: 90rem;
+  translate: -50% 0;
+  color: var(--ds-gray-500);
+  opacity: 0.66;
+  pointer-events: none;
+}
+
+:global(.light-theme) .backdrop {
+  color: var(--ds-gray-400);
+}
+
+.loop {
+  position: relative;
+  min-width: 0;
+  color: var(--ds-gray-1000);
+}
+
+:global(.light-theme) .loop {
+  --loop-strength: 0.72;
+  color: var(--ds-gray-900);
+}
+
+:global(.light-theme) .loopStill {
+  opacity: 0.72;
+}
+
+@media (min-width: 64rem) {
+  .loop {
+    width: calc(100% + 1rem);
+  }
+}
+
+.loopStill,
+.loopCanvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.loopStill[data-hidden] {
+  visibility: hidden;
+}
+
+.loopCanvas {
+  pointer-events: none;
+}

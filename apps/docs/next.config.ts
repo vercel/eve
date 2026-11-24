@@ -52,6 +52,11 @@ const config: NextConfig = {
         protocol: "https",
         hostname: "placehold.co",
       },
+      {
+        protocol: "https",
+        hostname: "images.ctfassets.net",
+        pathname: "/e5382hct74si/**",
+      },
     ],
   },
 
