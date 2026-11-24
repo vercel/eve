@@ -57,9 +57,9 @@ const agent: DefinedAgent = defineAgent({
   model: openai(model),
   reasoning: "medium",
   modelOptions:
-    process.env.REPRO_STORE === "default"
-      ? undefined
-      : { providerOptions: { openai: { store: false } } },
+    process.env.REPRO_STORE === "false"
+      ? { providerOptions: { openai: { store: false } } }
+      : undefined,
   modelContextWindowTokens: 272_000,
   compaction: arm === "native" ? { threshold: 0.35, compact: measuredNative } : { threshold: 0.35 },
 });

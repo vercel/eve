@@ -119,7 +119,7 @@ export default defineEval({
 
     const result = {
       arm,
-      store: process.env.REPRO_STORE ?? "false",
+      store: process.env.REPRO_STORE ?? "unset",
       rewrittenCompactions: rewrites.length,
       unchangedCompactions: log.length - rewrites.length,
       windows,
@@ -138,7 +138,10 @@ export default defineEval({
     const dir = process.env.REPRO_OUT;
     if (dir !== undefined) {
       mkdirSync(dir, { recursive: true });
-      writeFileSync(join(dir, `result-${arm}.json`), JSON.stringify(result, null, 2));
+      writeFileSync(
+        join(dir, `result-${arm}-store-${process.env.REPRO_STORE ?? "unset"}.json`),
+        JSON.stringify(result, null, 2),
+      );
     }
   },
 });
