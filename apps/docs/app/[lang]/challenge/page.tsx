@@ -6,7 +6,6 @@ import { challengeHashtag, eveOnX } from "@/lib/challenge/submission";
 import { canonicalAlternates } from "@/lib/geistdocs/canonical";
 import { pageTitleMetadata } from "@/lib/geistdocs/metadata-title";
 import { templateGalleryUrl } from "@/lib/templates/links";
-import { InstallSwitcher } from "../(home)/components/install-switcher";
 import styles from "./challenge.module.css";
 import {
   challengeDeadline,
@@ -162,7 +161,6 @@ export default function ChallengePage() {
             <p className="mt-6 max-w-[36rem] text-pretty text-copy-18 text-gray-900">
               {description}
             </p>
-            <InstallSwitcher className="mt-8 max-w-full" source="challenge_hero" />
             <div className="mt-6 flex flex-col gap-3 sm:flex-row">
               <a className={primaryAction} href="#submit">
                 Share your project
