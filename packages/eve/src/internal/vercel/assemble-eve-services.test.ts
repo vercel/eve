@@ -43,4 +43,14 @@ describe("assertSingleEveVersion", () => {
       "Every eve agent in one Vercel deployment must resolve the same eve version, found eve@1.4.0 in ., agents/support; eve@1.2.0 in agents/billing.",
     );
   });
+
+  it("rejects a standalone agent whose eve differs from the project's", () => {
+    const versions: Record<string, string> = {
+      "/project": "1.4.0",
+      "/project/agents/support": "1.2.0",
+    };
+    expect(() => assertSingleEveVersion([agent("support")], (root) => versions[root])).toThrow(
+      "found eve@1.4.0 in .; eve@1.2.0 in agents/support.",
+    );
+  });
 });
