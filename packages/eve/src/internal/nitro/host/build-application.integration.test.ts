@@ -841,11 +841,19 @@ describe("buildApplication", () => {
     const appRoot = await createScratchDirectory("eve-build-application-unreachable-route-");
     const agentRoot = join(appRoot, "agent");
     const { defineChannel, POST } = await import("#public/definitions/channel.js");
+    const { eveChannel } = await import("#eve-channel/index.js");
+    const { none } = await import("#public/channels/auth.js");
     const { manifest } = await compileFromMemory({
       agentRoot,
       appRoot,
       model: "openai/gpt-5.4",
       modules: [
+        {
+          logicalPath: "channels/eve.ts",
+          loadNamespace: async () => ({
+            default: eveChannel({ auth: none() }),
+          }),
+        },
         {
           logicalPath: "channels/custom.ts",
           loadNamespace: async () => ({
@@ -853,6 +861,7 @@ describe("buildApplication", () => {
               routes: [
                 POST("/outside/wake", async () => new Response()),
                 POST("/eve/v1/inside/wake", async () => new Response()),
+                POST("/inside/wake", async () => new Response()),
               ],
             }),
           }),

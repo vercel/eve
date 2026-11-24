@@ -121,8 +121,6 @@ export type BoardReceiveTarget =
 
 /** How the board channel runs turns and downloads attachments. Board settings come from the extension's configuration. */
 export interface BoardChannelConfig {
-  /** Base route path for the board wake endpoint (`<route>/wake`). Defaults to the extension's `route` or `"/eve/v1/board"`. */
-  readonly route?: string;
   readonly turnPolicy?: TurnPolicy;
   /** Size and media-type limits for attachments eve downloads from the board. */
   readonly uploadPolicy?: UploadPolicyInput;
@@ -186,7 +184,7 @@ export function createBoardChannel(
     },
   });
 
-  const routeBase = normalizeBoardRouteBase(options.route ?? settings().route);
+  const routeBase = normalizeBoardRouteBase(settings().route);
   const handleWake = async (
     _request: Request,
     {

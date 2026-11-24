@@ -20,6 +20,11 @@ const SHARED_SERVER_FUNCTION = "eve/__server";
 
 const SERVICE_NAMESPACES = [`${EVE_ROUTE_PREFIX.slice(1)}/`, ".well-known/workflow/"];
 
+export function isForwardedVercelServiceRoute(urlPath: string): boolean {
+  const stripped = urlPath.replace(/^\/+/, "");
+  return SERVICE_NAMESPACES.some((namespace) => stripped.startsWith(namespace));
+}
+
 export async function normalizeVercelServiceOutput(
   outputDir: string,
   routeTable: Pick<HostRouteTable, "routes">,

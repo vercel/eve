@@ -12,6 +12,7 @@ import {
 import {
   findReservedEveNamespaceCollision,
   HOST_HTTP_INVENTORY,
+  isRootEveChannel,
 } from "#framework/host-inventory.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 
@@ -33,7 +34,7 @@ export function createCompiledChannelRoutePlan(input: {
       );
     }
     const namespaceCollision = findReservedEveNamespaceCollision(channel.urlPath, {
-      allowEveProtocol: isRootEveChannel(channel, input.sources[channel.sourceId]),
+      allowEveProtocol: isRootEveChannel(channel, input.sources[channel.sourceId]?.owner.kind),
     });
     if (namespaceCollision !== undefined) {
       if (namespaceCollision.kind === "dynamic") {
@@ -203,11 +204,4 @@ function splitRoute(path: string): string[] {
 
 function isParameter(segment: string): boolean {
   return segment.startsWith(":") || /^\[[^\]]+\]$/.test(segment);
-}
-
-function isRootEveChannel(
-  channel: CompiledChannelDefinition,
-  source: AgentSourceDescriptor | undefined,
-): boolean {
-  return channel.logicalPath === "channels/eve.ts" && source?.owner.kind !== "extension";
 }

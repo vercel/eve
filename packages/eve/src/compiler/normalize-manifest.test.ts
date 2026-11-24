@@ -1506,6 +1506,8 @@ describe("compileAgentManifest source graph", () => {
     "/eve/v1/hooks/custom",
     "/eve/v1/dev/custom",
     "/eve/v1/:namespace/wake",
+    "/eve/v1/*",
+    "/eve/v1/**",
   ])("rejects a custom channel route %s in a reserved eve namespace", async (urlPath) => {
     const sourceRegistry = registry([
       {
@@ -1521,6 +1523,29 @@ describe("compileAgentManifest source graph", () => {
     await expect(
       compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
     ).rejects.toThrow("compile/reserved-route-collision");
+  });
+
+  it("allows an authored root eve channel with a non-.ts extension to serve eve protocol routes", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "channels/eve.mjs",
+        loadNamespace: async () => ({
+          default: defineChannel({
+            routes: [GET("/eve/v1/health", async () => new Response("ok"))],
+          }),
+        }),
+      },
+    ]);
+
+    const compiled = await compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] });
+
+    expect(compiled.channelRoutes.effective).toContainEqual(
+      expect.objectContaining({
+        logicalPath: "channels/eve.mjs",
+        method: "GET",
+        urlPath: "/eve/v1/health",
+      }),
+    );
   });
 
   it("allows custom channel routes under their own /eve/v1/<namespace>", async () => {
