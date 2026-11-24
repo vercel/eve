@@ -1897,6 +1897,22 @@ importers:
         specifier: 'catalog:'
         version: 7.0.2
 
+  e2e/fixtures/repro-native-compaction:
+    dependencies:
+      eve:
+        specifier: workspace:*
+        version: link:../../../packages/eve
+      zod:
+        specifier: 'catalog:'
+        version: 4.6.7
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.6.6
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+
   e2e/fixtures/toolkit-extension:
     dependencies:
       zod:
