@@ -51,6 +51,7 @@ export interface SessionInboxTransport<Hook extends InboxHook = InboxHook> {
   dispose(hook: Hook): Promise<void>;
   isTakenOver(error: unknown): boolean;
   ownerRunId(): string;
+  now(): number;
 }
 
 interface Source<Hook extends InboxHook> {
@@ -99,6 +100,7 @@ export interface SessionInbox extends SessionInboxReader, SessionInboxOwnership 
 export interface SessionInboxHandle extends SessionInbox {
   readonly awaitingHandover: boolean;
   whenHandoverSettled(): Promise<void>;
+  whenPendingOrHandoverSettled(): Promise<"pending" | "settled">;
   abandonHandover(attemptKey: string): void;
   whenBlockedOnHandover(): Promise<void>;
   whenArrival(): Promise<void>;
@@ -193,7 +195,7 @@ export function createSessionInbox<Hook extends InboxHook>(
         handoverObservation = {
           attemptKey: current.attemptKey,
           payloadCount: current.nextPart,
-          appliedAtMs: Date.now(),
+          appliedAtMs: transport.now(),
         };
         observe(interruptHandlers, restored, isInterrupt);
         openHandover();
@@ -269,7 +271,7 @@ export function createSessionInbox<Hook extends InboxHook>(
     stopped = true;
     for (const source of released) source.stopping = true;
     notify();
-    await Promise.all(released.map(({ hook }) => transport.dispose(hook)));
+    await settled(released.map(({ hook }) => transport.dispose(hook)));
     queue.splice(0);
     notify();
   };
@@ -329,6 +331,14 @@ export function createSessionInbox<Hook extends InboxHook>(
     async whenHandoverSettled() {
       while (handover !== undefined) await wait();
     },
+    async whenPendingOrHandoverSettled() {
+      while (true) {
+        if (failure !== undefined || hasReadable() || closed()) return "pending";
+        if (handover === undefined) return "settled";
+        blockedOnHandover();
+        await wait();
+      }
+    },
     abandonHandover(attemptKey) {
       const current = handover;
       if (current?.attemptKey !== attemptKey) return;
@@ -359,10 +369,7 @@ export function createSessionInbox<Hook extends InboxHook>(
           nextPart: 0,
           parts: new Map(),
         };
-      const outcomes = await Promise.allSettled(
-        [...new Set(tokens)].map((token) => claimSessionHook(token, options)),
-      );
-      for (const outcome of outcomes) if (outcome.status === "rejected") throw outcome.reason;
+      await settled([...new Set(tokens)].map((token) => claimSessionHook(token, options)));
     },
     async whenTakenOver(signal) {
       signal?.addEventListener("abort", notify, { once: true });
@@ -428,6 +435,18 @@ export function createSessionInbox<Hook extends InboxHook>(
       await stop();
     },
   };
+}
+
+async function settled(work: readonly Promise<unknown>[]): Promise<void> {
+  let failure: { readonly error: unknown } | undefined;
+  for (const item of work) {
+    try {
+      await item;
+    } catch (error) {
+      failure ??= { error };
+    }
+  }
+  if (failure !== undefined) throw failure.error;
 }
 
 export function isWorkflowMessage(value: SessionInboxPayload): value is WorkflowToolRunMessage {

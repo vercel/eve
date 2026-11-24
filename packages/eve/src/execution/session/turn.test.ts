@@ -8,6 +8,7 @@ import type { SessionView } from "#harness/session-machine/view.js";
 import type { SessionInbox, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { SessionExecution, type SessionTurnHost } from "#execution/session/turn.js";
+import { sessionHostClock } from "#execution/session/host-clock.js";
 import { dispatchSessionSteps, sessionStepKeys } from "#execution/session/steps.js";
 import { WORKFLOW_SESSION_STEPS } from "#execution/workflow-host/session-steps.js";
 import { sleep } from "#compiled/@workflow/core/index.js";
@@ -52,10 +53,15 @@ import type {
 } from "#execution/tools/workflow/messages.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
-const WORKFLOW_TURN_HOST: SessionTurnHost = {
-  step: dispatchSessionSteps(WORKFLOW_SESSION_STEPS),
-  until: (at) => sleep(new Date(at)),
-};
+function workflowTurnHost(
+  inbox: Pick<SessionInbox, "whenPending">,
+  sleepUntil: (at: number) => Promise<void> = (at) => sleep(new Date(at)),
+): SessionTurnHost {
+  return {
+    ...sessionHostClock(inbox, sleepUntil),
+    step: dispatchSessionSteps(WORKFLOW_SESSION_STEPS),
+  };
+}
 
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -1149,6 +1155,7 @@ describe("SessionExecution checkpoints", () => {
 
     expect(routeDeliverToChildren).toHaveBeenCalledWith(
       expect.objectContaining({ delivery: answer }),
+      expect.anything(),
     );
     expect(queue.pendingCount).toBe(0);
   });
@@ -1244,6 +1251,7 @@ describe("SessionExecution checkpoints", () => {
 
     expect(routeDeliverToChildren).toHaveBeenCalledWith(
       expect.objectContaining({ delivery: answerAndCorrection }),
+      expect.anything(),
     );
     expect(interruptWorkflowToolRun).toHaveBeenCalledWith({
       hookToken: "deploy-control",
@@ -1390,7 +1398,7 @@ describe("SessionExecution checkpoints", () => {
       sessionWritable: new WritableStream<Uint8Array>(),
     });
     const execution = new SessionExecution({
-      host: WORKFLOW_TURN_HOST,
+      host: workflowTurnHost(inbox),
       cursor,
       inbox,
       queue: new SessionInputQueue([]),
@@ -1910,15 +1918,12 @@ describe("SessionExecution checkpoints", () => {
     vi.mocked(startTaskToolCallsStep).mockResolvedValueOnce(1_000_000);
     const deadlines: number[] = [];
     let pass: () => void = () => {};
-    const host: SessionTurnHost = {
-      ...WORKFLOW_TURN_HOST,
-      until: (at) => {
-        deadlines.push(at);
-        return new Promise<void>((resolve) => {
-          pass = resolve;
-        });
-      },
-    };
+    const host = workflowTurnHost(inbox, (at) => {
+      deadlines.push(at);
+      return new Promise<void>((resolve) => {
+        pass = resolve;
+      });
+    });
     let continued: unknown;
     vi.mocked(turnStep)
       .mockReset()
@@ -2239,7 +2244,7 @@ function createExecution(input: {
 }): SessionExecution {
   const cursor = input.cursor ?? createCursor(input);
   return new SessionExecution({
-    host: input.host ?? WORKFLOW_TURN_HOST,
+    host: input.host ?? workflowTurnHost(input.inbox),
     capabilities: input.capabilities,
     cursor,
     inbox: input.inbox,

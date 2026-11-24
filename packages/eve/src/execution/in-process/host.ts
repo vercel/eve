@@ -39,6 +39,8 @@ import { bootInitialOwner } from "#execution/session/owner-boot.js";
 import { runPreparedSession, type SessionHost } from "#execution/session/program.js";
 import type { SessionStartBody } from "#execution/session-runtime.js";
 import { SHARED_SESSION_STEPS } from "#execution/session/shared-steps.js";
+import { sessionHostClock, settleAll } from "#execution/session/host-clock.js";
+import type { SessionInboxHandle } from "#execution/session-inbox/inbox.js";
 import { dispatchSessionSteps } from "#execution/session/steps.js";
 import { turnStepOn, type SessionStepHost } from "#execution/session/turn-step.js";
 import { createInProcessToolStubs } from "#execution/in-process/tool-stubs.js";
@@ -107,7 +109,6 @@ export interface InProcessHost {
   readonly inboxes: MemoryInboxRegistry;
   readonly runs: InProcessRuns;
   readonly running: Map<string, Promise<void>>;
-  readonly sessionHost: SessionHost;
   readonly durable: Durable;
   startEntry(
     entry: Omit<InitialWorkflowEntryInput, "ownerDeploymentId">,
@@ -201,43 +202,44 @@ export function createInProcessHost(
     stopLate,
   });
   const dispatchRuns = dispatchCoordinationOn(hosts, runs.startRun);
-  const sessionHost: SessionHost = {
+  const step = dispatchSessionSteps({
+    ...SHARED_SESSION_STEPS,
+    applyRunMessages: (input) => work.count(() => applyRunMessages(input)),
+    dispatchRuns: (input) => work.count(() => dispatchRuns(input)),
+    turn: (input) =>
+      work.count(async () => {
+        const { abortSignal, sessionWritable, steeringSignal, ...data } = input;
+        const { sessionId } = input.sessionState;
+        steps.set(sessionId, (steps.get(sessionId) ?? 0) + 1);
+        try {
+          const result = await attempts.run(
+            {
+              name: "turnStep",
+              sessionId,
+              ...(abortSignal !== undefined && { signal: abortSignal }),
+            },
+            async (attempt) => ({
+              ...(await acrossStepBoundary(stepBoundary, data)),
+              abortSignal,
+              sessionWritable: attempts.writable(attempt, sessionWritable),
+              steeringSignal,
+            }),
+            runTurnStep,
+          );
+          return await acrossStepBoundary(stepBoundary, result);
+        } finally {
+          const left = (steps.get(sessionId) ?? 1) - 1;
+          if (left === 0) steps.delete(sessionId);
+          else steps.set(sessionId, left);
+          await inboxes.heard();
+        }
+      }),
+  });
+  const sessionHostFor = (inbox: SessionInboxHandle): SessionHost => ({
+    ...sessionHostClock(inbox, (at) => timers.until(at)),
+    step,
     toolStubs,
-    step: dispatchSessionSteps({
-      ...SHARED_SESSION_STEPS,
-      applyRunMessages: (input) => work.count(() => applyRunMessages(input)),
-      dispatchRuns: (input) => work.count(() => dispatchRuns(input)),
-      turn: (input) =>
-        work.count(async () => {
-          const { abortSignal, sessionWritable, steeringSignal, ...data } = input;
-          const { sessionId } = input.sessionState;
-          steps.set(sessionId, (steps.get(sessionId) ?? 0) + 1);
-          try {
-            const result = await attempts.run(
-              {
-                name: "turnStep",
-                sessionId,
-                ...(abortSignal !== undefined && { signal: abortSignal }),
-              },
-              async (attempt) => ({
-                ...(await acrossStepBoundary(stepBoundary, data)),
-                abortSignal,
-                sessionWritable: attempts.writable(attempt, sessionWritable),
-                steeringSignal,
-              }),
-              runTurnStep,
-            );
-            return await acrossStepBoundary(stepBoundary, result);
-          } finally {
-            const left = (steps.get(sessionId) ?? 1) - 1;
-            if (left === 0) steps.delete(sessionId);
-            else steps.set(sessionId, left);
-            await inboxes.heard();
-          }
-        }),
-    }),
-    until: (at) => timers.until(at),
-  };
+  });
 
   const tokenOf = (to: Parameters<Durable["deliver"]>[0]): string => {
     const address = decodeDeliveryAddress(to);
@@ -259,13 +261,14 @@ export function createInProcessHost(
       {
         inboxTransport: inboxes.transportFor(sessionId),
         sessionWritable,
-        step: sessionHost.step,
+        step,
+        all: settleAll,
         timeouts: () => undefined,
         settleContinuationConflict: async () => {},
       },
     );
     if (boot === undefined) return { kind: "held" };
-    const session = runPreparedSession(boot.session, boot.inbox, sessionHost).then(
+    const session = runPreparedSession(boot.session, boot.inbox, sessionHostFor(boot.inbox)).then(
       () => undefined,
       () => undefined,
     );
@@ -316,7 +319,6 @@ export function createInProcessHost(
     lines,
     runs,
     running,
-    sessionHost,
     stepsRunning: (sessionId) => steps.get(sessionId) ?? 0,
     working: (counted) => work.count(counted),
     idle: () => work.idle(),

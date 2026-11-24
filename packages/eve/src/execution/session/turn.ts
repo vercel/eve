@@ -75,9 +75,20 @@ const NO_INPUT_CAPABILITY_ERROR_MESSAGE =
   "This session cannot request human input, so it cannot wait for a tool approval or question. " +
   "Configure unattended tools with an approval policy that does not require human input.";
 
+export type SessionWake = "input" | "due" | "woken";
+
+export interface SessionNextOptions {
+  readonly until?: number;
+  readonly wake?: Promise<unknown>;
+}
+
 export interface SessionTurnHost {
   readonly step: SessionStepCall;
-  until(at: number): Promise<void>;
+  next(options?: SessionNextOptions): Promise<SessionWake>;
+  now(): number;
+  all<T extends readonly unknown[] | []>(
+    work: T,
+  ): Promise<{ -readonly [K in keyof T]: PromiseSettledResult<Awaited<T[K]>> }>;
 }
 
 export interface SessionExecutionInput {
@@ -148,7 +159,11 @@ export class SessionExecution {
       if (!isAppliedRunMessage(message)) {
         await this.applyRunMessages(applied, turn);
         applied = [];
-        await handleWorkflowToolRunMessage({ cursor: this.input.cursor, message });
+        await handleWorkflowToolRunMessage({
+          cursor: this.input.cursor,
+          message,
+          steps: this.input,
+        });
         await this.input.cursor.consumed([message]);
       } else if (!ending || !isAgentSessionMessage(message)) {
         applied.push(message);
@@ -320,7 +335,7 @@ export class SessionExecution {
       const runtimeResults = await calls?.ready(interrupted);
       if (runtimeResults !== undefined) return await this.withSteering(turn, { runtimeResults });
 
-      const next = await turn.nextRuntimeEvent(calls?.timers() ?? []);
+      const next = await turn.nextRuntimeEvent(calls?.deadlines() ?? []);
       if (next === "cancelled") return next;
       switch (next.kind) {
         case "steering":
@@ -416,7 +431,11 @@ export class SessionExecution {
       await this.applyRunMessages([message, ...following], turn);
       return;
     }
-    const result = await handleWorkflowToolRunMessage({ cursor: this.input.cursor, message });
+    const result = await handleWorkflowToolRunMessage({
+      cursor: this.input.cursor,
+      message,
+      steps: this.input,
+    });
     if (result !== undefined && calls !== undefined) {
       calls.acceptRun(result, message);
       this.outcomeMessages.set(result.callId, message);
@@ -471,8 +490,8 @@ function dispatchedPause(
 }
 class CallWait {
   private readonly cursor: SessionStateCursor;
+  private readonly host: SessionTurnHost;
   private readonly steps: SessionStepRunner;
-  private readonly until: SessionTurnHost["until"];
   private readonly callIds: readonly string[];
   private readonly results: RuntimeActionResult[] = [];
   private readonly acceptedAtMs = new Map<string, number>();
@@ -485,10 +504,10 @@ class CallWait {
     dispatched: readonly RuntimeActionResult[],
   ) {
     this.cursor = session.cursor;
+    this.host = session.host;
     this.steps = { host: session.host, stepKey: session.stepKey };
-    this.until = session.host.until;
     this.callIds = callIds;
-    const acceptedAtMs = Date.now();
+    const acceptedAtMs = this.host.now();
     for (const result of dispatched) this.accept(result, acceptedAtMs);
   }
 
@@ -512,8 +531,10 @@ class CallWait {
     };
   }
 
-  timers(): readonly Promise<string>[] {
-    return this.taskWaits.flatMap((wait) => (wait.timer === undefined ? [] : [wait.timer]));
+  deadlines(): readonly TaskDeadline[] {
+    return this.taskWaits.flatMap(({ callId, deadline }) =>
+      deadline === undefined ? [] : [{ at: deadline, callId }],
+    );
   }
 
   timedOut(callId: string): void {
@@ -524,7 +545,7 @@ class CallWait {
 
   acceptInbox(results: readonly RuntimeActionResult[]): void {
     const snapshot = this.cursor.sessionState.snapshot.session.state;
-    const acceptedAtMs = Date.now();
+    const acceptedAtMs = this.host.now();
     for (const result of results) {
       if (
         result.kind === "tool-result" &&
@@ -549,11 +570,12 @@ class CallWait {
       const run = findBlockingWorkflowToolRun(state, callId);
       return run === undefined ? [] : [run.address];
     });
-    await Promise.all(
+    const interrupted = await this.host.all(
       runs.map((run) =>
         this.steps.host.step("interruptRun", run, this.steps.stepKey("interruptRun")),
       ),
     );
+    for (const result of interrupted) if (result.status === "rejected") throw result.reason;
   }
 
   async answerTaskToolCalls(calls: readonly TaskToolCall[]): Promise<void> {
@@ -568,7 +590,7 @@ class CallWait {
           );
     for (const call of calls) {
       if (call.kind === TASK_WAIT_TOOL_NAME) {
-        waits.push(startTaskWait(call, startedAtMs, this.until));
+        waits.push(startTaskWait(call, startedAtMs));
         continue;
       }
       this.accept(await answerTaskCancel(this.steps, this.cursor, call));
@@ -577,7 +599,7 @@ class CallWait {
     this.taskWaits = await this.resolveTaskWaits(false);
   }
 
-  private accept(result: RuntimeActionResult, acceptedAtMs = Date.now()): void {
+  private accept(result: RuntimeActionResult, acceptedAtMs = this.host.now()): void {
     this.results.push(result);
     this.acceptedAtMs.set(result.callId, acceptedAtMs);
   }
@@ -591,32 +613,34 @@ class CallWait {
         waiting.push(wait);
         continue;
       }
-      const text = renderTaskWaitResult(result, Date.now() - wait.startedAtMs);
+      const text = renderTaskWaitResult(result, this.host.now() - wait.startedAtMs);
       this.accept(taskToolResult(wait.callId, TASK_WAIT_TOOL_NAME, text));
     }
     return waiting;
   }
 }
 
+export interface TaskDeadline {
+  readonly at: number;
+  readonly callId: string;
+}
+
 interface TaskWait {
   readonly callId: string;
+  readonly deadline?: number;
   readonly startedAtMs: number;
-  readonly timer?: Promise<string>;
   timedOut: boolean;
 }
 
 function startTaskWait(
   call: Extract<TaskToolCall, { readonly kind: typeof TASK_WAIT_TOOL_NAME }>,
   startedAtMs: number,
-  until: SessionTurnHost["until"],
 ): TaskWait {
   const { callId, timeoutMs } = call;
-  const timer =
-    timeoutMs === undefined ? undefined : until(startedAtMs + timeoutMs).then(() => callId);
   return {
     callId,
+    ...(timeoutMs !== undefined && { deadline: startedAtMs + timeoutMs }),
     startedAtMs,
     timedOut: timeoutMs === 0,
-    timer,
   };
 }

@@ -5,7 +5,10 @@ import type {
 import type { closeSessionStreamStep } from "#execution/close-session-stream-step.js";
 import type { publishDispatchedCallsStep } from "#execution/coordination-dispatch-step.js";
 import type { createSessionStep } from "#execution/create-session-step.js";
-import type { mapHeldAnswersStep } from "#execution/proxied-deliver-step.js";
+import type {
+  mapHeldAnswersStep,
+  routeProxiedDeliverStep,
+} from "#execution/proxied-deliver-step.js";
 import type { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
 import type {
   endSessionSandboxStep,
@@ -31,6 +34,12 @@ import type {
   ApplyRunMessagesResult,
 } from "#execution/tools/workflow/apply-run-messages.js";
 import type { interruptWorkflowToolRun } from "#execution/tools/workflow/interrupt.js";
+import type { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
+import type {
+  withdrawFinishedRunQuestionsStep,
+  withdrawWorkflowToolRunQuestionStep,
+} from "#execution/tools/workflow/withdraw-step.js";
+import type { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
 import type {
   notifyCancelledTaskCallerStep,
   notifyTurnCallerStep,
@@ -76,6 +85,18 @@ export interface SessionStepTypes {
   readonly reportDroppedWirePayload: StepOf<typeof reportDroppedWirePayloadStep>;
   readonly mapHeldAnswers: StepOf<typeof mapHeldAnswersStep>;
   readonly cancelTasks: StepOf<typeof cancelTasksStep>;
+  readonly routeProxiedDeliver: StepOf<typeof routeProxiedDeliverStep>;
+  readonly proxySubagentEvent: StepOf<typeof runProxySubagentEventStep>;
+  readonly withdrawFinishedRunQuestions: StepOf<typeof withdrawFinishedRunQuestionsStep>;
+  readonly withdrawRunQuestion: StepOf<typeof withdrawWorkflowToolRunQuestionStep>;
+  readonly resumeHook: {
+    readonly input: {
+      readonly token: Parameters<typeof resumeHookStep>[0];
+      readonly payload: Parameters<typeof resumeHookStep>[1];
+      readonly options?: Parameters<typeof resumeHookStep>[2];
+    };
+    readonly result: Awaited<ReturnType<typeof resumeHookStep>>;
+  };
 }
 
 export type SessionStepName = keyof SessionStepTypes;

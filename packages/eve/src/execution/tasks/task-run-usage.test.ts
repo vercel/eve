@@ -9,7 +9,8 @@ import type { SessionEvent } from "#protocol/session-event.js";
 import type { SessionInbox } from "#execution/session-inbox/inbox.js";
 import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
-import { SessionExecution, type SessionTurnHost } from "#execution/session/turn.js";
+import { SessionExecution } from "#execution/session/turn.js";
+import { sessionHostClock } from "#execution/session/host-clock.js";
 import { dispatchSessionSteps, sessionStepKeys } from "#execution/session/steps.js";
 import { WORKFLOW_SESSION_STEPS } from "#execution/workflow-host/session-steps.js";
 import { sleep } from "#compiled/@workflow/core/index.js";
@@ -27,11 +28,6 @@ import { checkSessionUsageLimit } from "#harness/hitl/budget.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { withSessionUsage } from "#internal/testing/session-usage.js";
 import type { TokenUsage } from "#shared/token-usage.js";
-
-const WORKFLOW_TURN_HOST: SessionTurnHost = {
-  step: dispatchSessionSteps(WORKFLOW_SESSION_STEPS),
-  until: (at) => sleep(new Date(at)),
-};
 
 const publishedFacts = vi.hoisted((): SessionEvent[] => []);
 const sentCommands = vi.hoisted(() => vi.fn(async (_token: string, _message: unknown) => {}));
@@ -127,7 +123,10 @@ function sessionWithTask(input: {
     sessionWritable: new WritableStream<Uint8Array>(),
   });
   const execution = new SessionExecution({
-    host: WORKFLOW_TURN_HOST,
+    host: {
+      ...sessionHostClock(inbox, (at) => sleep(new Date(at))),
+      step: dispatchSessionSteps(WORKFLOW_SESSION_STEPS),
+    },
     cursor,
     inbox,
     queue: new SessionInputQueue([]),

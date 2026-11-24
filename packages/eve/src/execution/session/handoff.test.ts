@@ -516,6 +516,7 @@ function createInbox(
     awaitingHandover: input.awaitingHandover ?? false,
     takenOver: false,
     whenHandoverSettled: () => new Promise<void>(() => {}),
+    whenPendingOrHandoverSettled: () => new Promise<"pending">(() => {}),
     claimSessionHook: vi.fn(async () => {}),
     claimSessionHooks: vi.fn(async () => {}),
     claimedTokens: TOKENS,

@@ -24,6 +24,7 @@ import {
 import type { InitialWorkflowEntryInput } from "#execution/session/entry-input.js";
 import { failSession, type SessionBoot } from "#execution/session/program.js";
 import { sessionStepKeys, type SessionStepCall } from "#execution/session/steps.js";
+import type { SessionTurnHost } from "#execution/session/turn.js";
 import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session/timeout.js";
 import type { SessionTimeoutControl, SessionTimeouts } from "#execution/session/timeout-control.js";
 import { createTurnControl, type TurnControl } from "#execution/session/turn-control.js";
@@ -59,6 +60,7 @@ type InitialOwnerPreparation = OwnedInitialSession | { readonly kind: "alias-con
 async function prepareInitialOwner(
   inbox: SessionInboxHandle,
   input: {
+    readonly all: SessionTurnHost["all"];
     readonly continuationToken: string;
     readonly sessionCreation: Promise<unknown>;
     readonly sessionId: string;
@@ -76,7 +78,7 @@ async function prepareInitialOwner(
     turnControl: createTurnControl(),
   };
   const claim = { confirmAfter: input.sessionCreation };
-  const [stableClaim, aliasClaim] = await Promise.allSettled([
+  const [stableClaim, aliasClaim] = await input.all([
     inbox.claimSessionHook(
       sessionCommandHookToken(input.sessionId),
       input.startClaim === "inbox" ? { ...claim, claimedAtStart: true } : claim,
@@ -106,6 +108,7 @@ export interface InitialOwnerPorts<Hook extends InboxHook = InboxHook> {
   readonly inboxTransport: SessionInboxTransport<Hook>;
   readonly timeouts: SessionTimeouts;
   readonly step: SessionStepCall;
+  readonly all: SessionTurnHost["all"];
   settleContinuationConflict(input: {
     readonly command: Extract<SessionCommand, { readonly kind: "send" }>;
     readonly continuationToken: string;
@@ -160,6 +163,7 @@ export async function bootInitialOwner<Hook extends InboxHook>(
             stepKey("createSession"),
           );
     const ownerPreparationPromise = prepareInitialOwner(inbox, {
+      all: ports.all,
       continuationToken,
       sessionCreation: sessionCreationPromise,
       sessionId,
@@ -170,7 +174,7 @@ export async function bootInitialOwner<Hook extends InboxHook>(
     const callerResolutionPromise = hasDelegatedSessionContext(serializedContext)
       ? step("resolveInitialTurnCaller", { serializedContext }, stepKey("resolveInitialTurnCaller"))
       : Promise.resolve(undefined);
-    const [sessionCreation, ownerPreparation, callerResolution] = await Promise.allSettled([
+    const [sessionCreation, ownerPreparation, callerResolution] = await ports.all([
       sessionCreationPromise,
       ownerPreparationPromise,
       callerResolutionPromise,

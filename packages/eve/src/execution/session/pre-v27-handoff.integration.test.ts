@@ -162,6 +162,41 @@ it("leaves a session whose owner still runs a task with that owner", async () =>
   });
 });
 
+it("continues a session from a version 19 checkpoint that the previous build wrote", async () => {
+  const runtime = await createTestRuntime({ agent: { name: "v19-handoff" } });
+  await runtime.run(async () => {
+    const alias = `http:v19:${crypto.randomUUID()}`;
+    const { commandToken, owner, sessionId } = await startOwner(alias);
+    const checkpoint: unknown = JSON.parse(
+      V19_CHECKPOINT.replaceAll(V19_SESSION_ID, sessionId).replaceAll(V19_ALIAS, alias),
+    );
+    const successor = await start(workflowEntry, [
+      successorArguments({ alias, checkpoint, commandToken, sessionId }),
+    ]);
+    try {
+      await owner.returnValue;
+      const followUp = await readTurn(sessionId, 0);
+      expect(followUp).toContainEqual(
+        expect.objectContaining({
+          type: "turn.started",
+          data: expect.objectContaining({ follows: "turn_0", turnId: "turn_1" }),
+        }),
+      );
+      expect(followUp).toContainEqual(
+        expect.objectContaining({
+          type: "content.completed",
+          data: expect.objectContaining({ value: expect.stringContaining(FOLLOW_UP) }),
+        }),
+      );
+      const holder = await findSessionHookHolder(sessionInboxHookToken(commandToken));
+      expect(holder?.runId).toBe(successor.runId);
+    } finally {
+      await successor.cancel().catch(() => {});
+      await owner.cancel().catch(() => {});
+    }
+  });
+});
+
 async function handOffForced(records: readonly unknown[], turnCount: number) {
   const handoff = await startForcedHandoff(records, turnCount);
   await handoff.owner.returnValue;
@@ -174,30 +209,38 @@ async function startForcedHandoff(
   state: Record<string, unknown> = {},
 ) {
   const alias = `http:pre-v27:${crypto.randomUUID()}`;
-  const owner = await start(sessionCommandInboxWorkflow, [{ token: alias }]);
-  const sessionId = owner.runId;
-  const commandToken = sessionCommandHookToken(sessionId);
-  await waitForHook(owner, { token: sessionInboxHookToken(commandToken) });
-  await waitForHook(owner, { token: sessionInboxHookToken(alias) });
+  const { commandToken, owner, sessionId } = await startOwner(alias);
   await recordLines(sessionId, records);
   const successor = await start(workflowEntry, [
-    successorArguments({ alias, commandToken, sessionId, state, turnCount }),
+    successorArguments({
+      alias,
+      checkpoint: savedCheckpoint(sessionId, turnCount, state),
+      commandToken,
+      sessionId,
+    }),
   ]);
   return { owner, sessionId, successor };
 }
 
+async function startOwner(alias: string) {
+  const owner = await start(sessionCommandInboxWorkflow, [{ token: alias }]);
+  const commandToken = sessionCommandHookToken(owner.runId);
+  await waitForHook(owner, { token: sessionInboxHookToken(commandToken) });
+  await waitForHook(owner, { token: sessionInboxHookToken(alias) });
+  return { commandToken, owner, sessionId: owner.runId };
+}
+
 function successorArguments(input: {
   readonly alias: string;
+  readonly checkpoint: unknown;
   readonly commandToken: string;
   readonly sessionId: string;
-  readonly state: Record<string, unknown>;
-  readonly turnCount: number;
 }) {
-  const { alias, commandToken, sessionId, state, turnCount } = input;
+  const { alias, checkpoint, commandToken, sessionId } = input;
   return {
     activationToken: `${sessionId}:handoff:0`,
     attemptKey: `${sessionId}:0`,
-    checkpoint: savedCheckpoint(sessionId, turnCount, state),
+    checkpoint: checkpoint as never,
     delivery: followUpDelivery(),
     handoffVersion: 3,
     hookTokens: [commandToken, alias],
@@ -305,3 +348,288 @@ function savedCheckpoint(sessionId: string, turnCount: number, state: Record<str
     version: 17,
   } as never;
 }
+
+const V19_SESSION_ID = "wrun_01M84VS9F9SBZQZ23J6SSJEXHG";
+const V19_ALIAS = "http:workflow:replay-moved";
+const V19_CHECKPOINT = `{
+ "capabilities": {
+  "requestInput": true
+ },
+ "retention": 0,
+ "sessionTimeoutMs": 2592000000,
+ "admittedDeliveryKeys": [],
+ "history": [
+  {
+   "content": "Summary of our conversation so far:",
+   "kind": "context.compaction",
+   "role": "user"
+  },
+  {
+   "content": "Noted, Alice.",
+   "role": "assistant"
+  },
+  {
+   "role": "assistant",
+   "content": [
+    {
+     "type": "text",
+     "text": "Noted, Alice."
+    }
+   ]
+  }
+ ],
+ "serializedContext": {
+  "eve.bundle": {
+   "source": {
+    "kind": "bundled"
+   }
+  },
+  "eve.channel": {
+   "kind": "http",
+   "state": {}
+  },
+  "eve.channelInstrumentation": {
+   "channelType": "http",
+   "kind": "channel:http",
+   "metadata": {}
+  },
+  "eve.conversation": {
+   "audience": "unknown",
+   "channel": {
+    "kind": "channel:http",
+    "name": "http"
+   },
+   "environment": "production",
+   "principalType": "anonymous"
+  },
+  "eve.sessionTitle": "Alice asks for the summary.",
+  "eve.continuationToken": "http:workflow:replay-moved",
+  "eve.continuationHookTokens": [
+   "http:workflow:replay-moved"
+  ],
+  "eve.auth": null,
+  "eve.initiatorAuth": null,
+  "eve.capabilities": {
+   "requestInput": true
+  },
+  "eve.channelDelivery": {
+   "channelKind": "channel:http",
+   "channelName": "http",
+   "deliveryId": "0e3fc208-2b4b-4501-ad31-ea0a697a4c2e"
+  },
+  "eve.otelTraceEnabled": false,
+  "eve.sessionId": "wrun_01M84VS9F9SBZQZ23J6SSJEXHG",
+  "eve.sessionInbox": {
+   "sessionId": "wrun_01M84VS9F9SBZQZ23J6SSJEXHG"
+  },
+  "eve.callbackBaseUrl": "http://localhost:3000",
+  "eve.conversationId": "wrun_01M84VS9F9SBZQZ23J6SSJEXHG",
+  "eve.turnDeliveryIds": [
+   "0e3fc208-2b4b-4501-ad31-ea0a697a4c2e"
+  ],
+  "eve.reactions": {
+   "latest": {
+    "session.started": 0,
+    "*": 12,
+    "delivery.admitted": 8,
+    "turn.started": 1,
+    "delivery.consumed": 1,
+    "model.requested": 10,
+    "model.started": 10,
+    "content.delta": 4,
+    "content.completed": 5,
+    "model.settled": 11,
+    "usage.recorded": 11,
+    "turn.settled": 7,
+    "delivery.settled": 12,
+    "context.started": 9,
+    "context.started:compaction": 9,
+    "context.settled": 11,
+    "context.settled:compaction": 11
+   },
+   "slots": {
+    "model:agent": {
+     "digest": "hfxLwFYgVPPoYM6q1YM1kr",
+     "since": 1,
+     "value": {
+      "reference": {
+       "id": "eve-test/workflow-replay-moved",
+       "contextWindowTokens": 200000
+      }
+     },
+     "live": true
+    }
+   },
+   "revision": "bundled",
+   "at": "2026-11-23T18:48:08.312Z"
+  },
+  "eve.model": {
+   "reference": {
+    "id": "eve-test/workflow-replay-moved",
+    "contextWindowTokens": 200000
+   }
+  },
+  "eve.historyState": {},
+  "eve.stateLayout": 1
+ },
+ "sessionState": {
+  "continuationToken": "http:workflow:replay-moved",
+  "hasProxyInputRequests": false,
+  "sessionId": "wrun_01M84VS9F9SBZQZ23J6SSJEXHG",
+  "version": 2,
+  "snapshot": {
+   "session": {
+    "continuationToken": "http:workflow:replay-moved",
+    "sessionId": "wrun_01M84VS9F9SBZQZ23J6SSJEXHG",
+    "compaction": {
+     "estimateRatio": 0.0003940110323089047,
+     "requestEnvelopeTokens": 2512,
+     "lastStage": "tail"
+    },
+    "sandboxState": {
+     "session": null
+    },
+    "state": {
+     "eve.harness.sessionProjection": {
+      "counters": {
+       "changes": 1,
+       "runs": 2
+      },
+      "view": {
+       "calls": {},
+       "changes": {},
+       "children": {},
+       "deliveries": {
+        "0e3fc208-2b4b-4501-ad31-ea0a697a4c2e": {
+         "introducedAt": 0,
+         "startedAt": "2026-11-23T18:48:08.204Z",
+         "deliveryId": "0e3fc208-2b4b-4501-ad31-ea0a697a4c2e",
+         "source": {
+          "channel": "channel:http"
+         },
+         "status": "settled",
+         "parts": [
+          {
+           "kind": "text",
+           "text": "Alice asks for the summary."
+          }
+         ],
+         "turnId": "turn_0",
+         "consumedAt": 1,
+         "outcome": "handled",
+         "closedAt": 7,
+         "endedAt": "2026-11-23T18:48:08.245Z"
+        },
+        "bbcac318-70f3-4839-929d-6de4e5bce45d": {
+         "introducedAt": 8,
+         "startedAt": "2026-11-23T18:48:08.303Z",
+         "deliveryId": "bbcac318-70f3-4839-929d-6de4e5bce45d",
+         "source": {
+          "control": "compact"
+         },
+         "status": "settled",
+         "outcome": "applied",
+         "closedAt": 12,
+         "endedAt": "2026-11-23T18:48:08.312Z"
+        }
+       },
+       "interactions": {},
+       "parts": {
+        "run_0.0": {
+         "introducedAt": 5,
+         "startedAt": "2026-11-23T18:48:08.242Z",
+         "kind": "text",
+         "partId": "run_0.0",
+         "phase": "reply",
+         "runId": "run_0",
+         "value": "Noted, Alice."
+        }
+       },
+       "position": 13,
+       "responses": {},
+       "runs": {
+        "run_0": {
+         "introducedAt": 2,
+         "startedAt": "2026-11-23T18:48:08.211Z",
+         "owner": {
+          "turnId": "turn_0"
+         },
+         "runId": "run_0",
+         "status": "settled",
+         "step": 0,
+         "attempt": 0,
+         "modelId": "eve-test/workflow-replay-moved",
+         "finishReason": "stop",
+         "outcome": "completed",
+         "closedAt": 6,
+         "endedAt": "2026-11-23T18:48:08.243Z",
+         "usage": {
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "inputTokens": 1,
+          "outputTokens": 1
+         }
+        }
+       },
+       "session": {
+        "status": "open",
+        "turnCount": 1,
+        "runtime": {
+         "agentId": "workflow-replay-moved",
+         "agentName": "workflow-replay-moved",
+         "eveVersion": "1.1.0"
+        },
+        "startedAt": "2026-11-23T18:48:08.204Z",
+        "latestTurnId": "turn_0"
+       },
+       "tasks": {},
+       "turns": {
+        "turn_0": {
+         "introducedAt": 1,
+         "startedAt": "2026-11-23T18:48:08.208Z",
+         "cause": {
+          "deliveryId": "0e3fc208-2b4b-4501-ad31-ea0a697a4c2e"
+         },
+         "follows": null,
+         "turnId": "turn_0",
+         "status": "settled",
+         "runs": 1,
+         "reply": [
+          "run_0.0"
+         ],
+         "outcome": "completed",
+         "closedAt": 7,
+         "endedAt": "2026-11-23T18:48:08.245Z"
+        }
+       },
+       "usage": {
+        "byKind": {
+         "model": {
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "inputTokens": 2,
+          "outputTokens": 2
+         }
+        },
+        "total": {
+         "cacheReadTokens": 0,
+         "cacheWriteTokens": 0,
+         "inputTokens": 2,
+         "outputTokens": 2
+        }
+       }
+      },
+      "outputStarted": "turn_0"
+     },
+     "eve.harness.reportedSessionUsage": {
+      "cacheReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "inputTokens": 2,
+      "outputTokens": 2
+     }
+    }
+   }
+  }
+ },
+ "version": 19
+}`;

@@ -12,7 +12,7 @@ import {
 } from "#execution/session/input-queue.js";
 import { handedOnBy } from "#execution/session/handed-on.js";
 import { routeSelectedDelivery } from "#execution/session/route-selected-delivery.js";
-import type { SessionExecutionInput } from "#execution/session/turn.js";
+import type { SessionExecutionInput, TaskDeadline } from "#execution/session/turn.js";
 import { createTurnControl, type TurnControl } from "#execution/session/turn-control.js";
 import type { SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import { decodeSessionInboxPayload } from "#execution/session-inbox/protocol.js";
@@ -129,7 +129,7 @@ export class ActiveTurn {
       const selection = this.input.queue.takeSteering(this.admitted, this.identity, options);
       if (selection === undefined) break;
       for (const sequence of selection.sequences) this.admitted.delete(sequence);
-      const routed = await routeSelectedDelivery(selection, this.input.cursor);
+      const routed = await routeSelectedDelivery(selection, this.input.cursor, this.input);
       if (routed.kind === "cancel-turn") {
         this.abort();
         break;
@@ -174,14 +174,14 @@ export class ActiveTurn {
     return [...taken, ...takeLeadingAppliedRunMessages(this.input.inbox, admits)];
   }
 
-  async nextRuntimeEvent(timers: readonly Promise<string>[]): Promise<RuntimeEvent> {
+  async nextRuntimeEvent(deadlines: readonly TaskDeadline[]): Promise<RuntimeEvent> {
     while (true) {
       const steered = await this.routeAdmittedToChildren();
       if (this.signal.aborted) return "cancelled";
       if (steered) return { kind: "steering" };
       const event = this.runtimeResults.shift();
       if (event !== undefined) return event;
-      const elapsed = await this.waitForInboxOrTimer(timers);
+      const elapsed = await this.waitForInboxOrDeadline(deadlines);
       if (elapsed !== undefined) return { callId: elapsed, kind: "timeout" };
       const payload = await this.input.inbox.next();
       if (payload === undefined)
@@ -220,12 +220,17 @@ export class ActiveTurn {
     return undefined;
   }
 
-  private async waitForInboxOrTimer(
-    timers: readonly Promise<string>[],
+  private async waitForInboxOrDeadline(
+    deadlines: readonly TaskDeadline[],
   ): Promise<string | undefined> {
-    if (timers.length === 0 || this.input.inbox.hasPending()) return undefined;
-    const inboxReady = this.input.inbox.whenPending().then(() => undefined);
-    return await Promise.race([inboxReady, ...timers]);
+    const first = deadlines.reduce<TaskDeadline | undefined>(
+      (earliest, deadline) =>
+        earliest === undefined || deadline.at < earliest.at ? deadline : earliest,
+      undefined,
+    );
+    if (first === undefined || this.input.inbox.hasPending()) return undefined;
+    const woken = await this.input.host.next({ until: first.at });
+    return woken === "due" ? first.callId : undefined;
   }
 
   private cancelsThisTurn(payload: SessionInboxPayload): boolean {
@@ -295,7 +300,7 @@ export class ActiveTurn {
       }
       this.routedToChildren.add(sequence);
       const routed = await this.input.cursor.advance(
-        (state) => routeDeliverToChildren({ delivery, ...state }),
+        (state) => routeDeliverToChildren({ delivery, ...state }, this.input),
         {
           handedOn: (result) =>
             result.kind === "cancel-turn" ? [] : handedOnBy(delivery, result.remainder),

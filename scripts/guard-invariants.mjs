@@ -289,10 +289,16 @@
  *   rule 74 — The session program (rule 66's files) loads without Node: the
  *             same walk from those files reaches no Node-only import.
  *   rule 75 — The session program imports no step function: rule 66's files
- *             (except `turn-step.ts`, which is step code) and the program's
- *             finalization, admission and task modules value-import no module
- *             with a `"use step"` directive. Each step goes through
+ *             (except `turn-step.ts` and `step-state-delta.ts`, which are step
+ *             code) and the program's finalization, admission and task modules
+ *             reach no module with a `"use step"` directive by following value
+ *             imports, directly or through other modules. Each step goes through
  *             `SessionHost.step()`, whose engine tables name the step functions.
+ *             The same files read no clock and make no race: no `Date.now`,
+ *             `new Date()` without an argument, `Promise.race`, `.all`,
+ *             `.allSettled` or `.any`, `setTimeout`, `setInterval`, or
+ *             `Math.random`. They use `SessionHost.now()`, `.all()` and
+ *             `.next({ until })`, which an engine makes replay-safe.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -1279,15 +1285,66 @@ async function checkRule74() {
   return violations;
 }
 
+const SESSION_STEP_CODE = new Set([
+  "packages/eve/src/execution/session/turn-step.ts",
+  "packages/eve/src/execution/session/step-state-delta.ts",
+]);
+
 function sessionProgramFiles() {
   return [
-    ...[...HOST_NEUTRAL_FILES].filter(
-      (file) => file !== `${EVE_SRC}execution/session/turn-step.ts`,
-    ),
+    ...[...HOST_NEUTRAL_FILES].filter((file) => !SESSION_STEP_CODE.has(file)),
     `${EVE_SRC}execution/session/admission.ts`,
     `${EVE_SRC}execution/session/finalization.ts`,
     `${EVE_SRC}execution/tasks/session.ts`,
   ].sort();
+}
+
+const PROGRAM_NONDETERMINISM = new Map([
+  ["Date.now", "`host.now()`"],
+  ["Math.random", "a value from a step"],
+  ["Promise.all", "`host.all()`"],
+  ["Promise.allSettled", "`host.all()`"],
+  ["Promise.any", "`host.next()` or `host.all()`"],
+  ["Promise.race", "`host.next({ until })`"],
+  ["setInterval", "`host.next({ until })`"],
+  ["setTimeout", "`host.next({ until })`"],
+]);
+
+/** @param {import("typescript").SourceFile} source @returns {{ name: string; line: number }[]} */
+function programNondeterminism(source) {
+  /** @type {{ name: string; line: number }[]} */
+  const found = [];
+  /** @param {import("typescript").Node} node */
+  const visit = (node) => {
+    let name;
+    if (ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.expression)) {
+      name = `${node.expression.text}.${node.name.text}`;
+    } else if (
+      ts.isIdentifier(node) &&
+      (node.text === "setTimeout" || node.text === "setInterval") &&
+      !(ts.isPropertyAccessExpression(node.parent) && node.parent.name === node)
+    ) {
+      name = node.text;
+    } else if (
+      ts.isNewExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === "Date" &&
+      (node.arguments === undefined || node.arguments.length === 0)
+    ) {
+      found.push({ name: "new Date()", line: lineOf(source, node) });
+    }
+    if (name !== undefined && PROGRAM_NONDETERMINISM.has(name)) {
+      found.push({ name, line: lineOf(source, node) });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return found;
+}
+
+/** @param {import("typescript").SourceFile} source @param {import("typescript").Node} node */
+function lineOf(source, node) {
+  return source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
 }
 
 async function checkRule75() {
@@ -1296,18 +1353,55 @@ async function checkRule75() {
   for (const file of sessionProgramFiles()) {
     const content = await readFile(join(REPO_ROOT, file), "utf8");
     const source = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true);
-    for (const specifier of valueImportSpecifiers(source)) {
-      const target = resolveEveSource(specifier, file);
-      if (target === undefined || !existsSync(join(REPO_ROOT, target))) continue;
-      if (!STEP_DIRECTIVE_RE.test(await readFile(join(REPO_ROOT, target), "utf8"))) continue;
+    for (const { name, line } of programNondeterminism(source)) {
       violations.push({
         rule: 75,
         file,
-        message: `imports "${specifier}", a module with \`"use step"\` functions, into the session program. Call the step through \`host.step(name, input, key)\`: add its name to \`SessionStepTypes\` (\`execution/session/steps.ts\`) and its function to the engine step tables (\`execution/session/shared-steps.ts\`). Type-only imports are fine.`,
+        line,
+        message: `uses \`${name}\` in the session program, which an engine replays. Use ${PROGRAM_NONDETERMINISM.get(name) ?? "`host.now()`"} so the engine gives a replay the same value.`,
       });
     }
   }
+  for (const { file, chain } of await stepModuleReach(sessionProgramFiles())) {
+    violations.push({
+      rule: 75,
+      file: chain[chain.length - 2] ?? file,
+      message: `reaches "${file}", a module with \`"use step"\` functions, from the session program. Import chain: ${chain.join(" -> ")}. Call the step through \`host.step(name, input, key)\`: add its name to \`SessionStepTypes\` (\`execution/session/steps.ts\`) and its function to the engine step tables (\`execution/session/shared-steps.ts\`), and pass the program's step runner to the module that called it. Type-only imports are fine.`,
+    });
+  }
   return violations;
+}
+
+/**
+ * Follows value imports from the session program and stops at each module with a
+ * `"use step"` directive, which it reports with the chain that reached it.
+ *
+ * @param {readonly string[]} entries
+ */
+async function stepModuleReach(entries) {
+  /** @type {{ file: string; chain: string[] }[]} */
+  const found = [];
+  /** @type {Map<string, string | undefined>} */
+  const parents = new Map(entries.map((entry) => [entry, undefined]));
+  const queue = [...entries];
+  while (queue.length > 0) {
+    const file = /** @type {string} */ (queue.shift());
+    const content = await readFile(join(REPO_ROOT, file), "utf8");
+    if (parents.get(file) !== undefined && STEP_DIRECTIVE_RE.test(content)) {
+      const chain = [file];
+      for (let at = parents.get(file); at !== undefined; at = parents.get(at)) chain.push(at);
+      found.push({ file, chain: chain.reverse() });
+      continue;
+    }
+    const source = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true);
+    for (const specifier of valueImportSpecifiers(source)) {
+      const next = resolveEveSource(specifier, file);
+      if (next === undefined || parents.has(next) || !existsSync(join(REPO_ROOT, next))) continue;
+      parents.set(next, file);
+      queue.push(next);
+    }
+  }
+  return found;
 }
 
 /**

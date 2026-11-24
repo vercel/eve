@@ -28,8 +28,8 @@ import {
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
   EVE_SESSION_ATTRIBUTE,
-  EVE_VERSION_ATTRIBUTE,
   EVE_PREWARM_ATTRIBUTE,
+  eveBuildAttributes,
 } from "#execution/eve-workflow-attributes.js";
 import { owningSandboxDefinition } from "#runtime/sandbox/registry.js";
 import {
@@ -215,7 +215,7 @@ async function recordSessionOwner(sessionId: string): Promise<void> {
     {
       [EVE_SESSION_ATTRIBUTE]: sessionId,
       [EVE_PREWARM_ATTRIBUTE]: "1",
-      [EVE_VERSION_ATTRIBUTE]: resolveInstalledPackageInfo().version,
+      ...eveBuildAttributes(resolveInstalledPackageInfo().version),
     },
     { allowReservedAttributes: true },
   );

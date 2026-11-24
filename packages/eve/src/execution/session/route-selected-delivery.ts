@@ -2,6 +2,7 @@ import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { handedOnBy } from "#execution/session/handed-on.js";
 import type { TurnSelection } from "#execution/session/input-queue.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
+import type { SessionStepRunner } from "#execution/session/steps.js";
 
 type RoutedTurnSelection =
   | { readonly kind: "cancel-turn" }
@@ -11,9 +12,10 @@ type RoutedTurnSelection =
 export async function routeSelectedDelivery(
   selection: TurnSelection,
   cursor: SessionStateCursor,
+  steps: SessionStepRunner,
 ): Promise<RoutedTurnSelection> {
   const routed = await cursor.advance(
-    (state) => routeDeliverToChildren({ delivery: selection.delivery, ...state }),
+    (state) => routeDeliverToChildren({ delivery: selection.delivery, ...state }, steps),
     {
       handedOn: (result) =>
         result.kind === "cancel-turn" ? [] : handedOnBy(selection.delivery, result.remainder),

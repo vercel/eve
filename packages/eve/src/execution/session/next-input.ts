@@ -49,7 +49,7 @@ export async function nextTurnDelivery(
         ? { kind: selected.control }
         : { kind: selected.control, origin: selected.origin };
     if (selected?.kind === "turn") {
-      const routed = await routeSelectedDelivery(selected, cursor);
+      const routed = await routeSelectedDelivery(selected, cursor, input);
       if (routed.kind === "cancel-turn") return routed;
       if (routed.kind === "consumed") continue;
       return routed;

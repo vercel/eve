@@ -379,31 +379,29 @@ async function runSessionLoop(
   });
 
   let prewarmedSandbox: SandboxRunning | undefined;
-  let idleWindow: Promise<void> | "attempted" | undefined;
+  let idleWindow: number | "attempted" | undefined;
   const sandboxMayBeRunning = (): SandboxRunning | undefined =>
     readDurableSession(cursor.sessionState).sandboxState?.running ?? prewarmedSandbox;
   const sessionBusy = (): boolean =>
     queue.pendingCount > 0 ||
     workingTasks(sessionTaskTable(cursor)).length > 0 ||
     !isBetweenTurns(storedProjection(cursor.sessionState.snapshot.session.state));
-  const beforeInbox = async (other: Promise<unknown>): Promise<boolean> =>
-    await Promise.race([inbox.whenPending().then(() => false), other.then(() => true)]);
   const stopSandboxOnceIdle = async (): Promise<void> => {
     while (!inbox.hasPending()) {
       if (!prewarmSettled) {
-        if (!(await beforeInbox(prewarming))) return;
+        if ((await host.next({ wake: prewarming })) === "input") return;
         continue;
       }
       const running = sandboxMayBeRunning();
       if (running === undefined) idleWindow = undefined;
       if (running === undefined || idleWindow === "attempted" || sessionBusy()) return;
       if (inbox.awaitingHandover) {
-        if (!(await beforeInbox(inbox.whenHandoverSettled()))) return;
+        if ((await inbox.whenPendingOrHandoverSettled()) === "pending") return;
         continue;
       }
       if (running.idleTimeoutMs > 0) {
-        idleWindow ??= host.until(Date.now() + running.idleTimeoutMs);
-        if (!(await beforeInbox(idleWindow)) || inbox.hasPending()) return;
+        idleWindow ??= host.now() + running.idleTimeoutMs;
+        if ((await host.next({ until: idleWindow })) !== "due" || inbox.hasPending()) return;
       }
       idleWindow = "attempted";
       prewarmedSandbox = undefined;
@@ -630,7 +628,7 @@ async function runSessionLoop(
   };
 
   try {
-    const [actionResult, timerResult] = await Promise.allSettled([
+    const [actionResult, timerResult] = await host.all([
       runInitialAction(),
       sessionTimeout?.start(),
     ]);

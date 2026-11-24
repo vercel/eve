@@ -29,5 +29,6 @@ export function workflowInboxTransport(sessionId: string): SessionInboxTransport
     dispose: (hook) => disposeHook(hook),
     isTakenOver: (error) => isHookForceClaimedError(error),
     ownerRunId: () => getWorkflowMetadata().workflowRunId,
+    now: () => Date.now(),
   };
 }

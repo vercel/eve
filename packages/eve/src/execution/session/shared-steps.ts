@@ -1,7 +1,7 @@
 import { closeSessionStreamStep } from "#execution/close-session-stream-step.js";
 import { publishDispatchedCallsStep } from "#execution/coordination-dispatch-step.js";
 import { createSessionStep } from "#execution/create-session-step.js";
-import { mapHeldAnswersStep } from "#execution/proxied-deliver-step.js";
+import { mapHeldAnswersStep, routeProxiedDeliverStep } from "#execution/proxied-deliver-step.js";
 import { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
 import {
   endSessionSandboxStep,
@@ -22,6 +22,12 @@ import type { SessionStepTable } from "#execution/session/steps.js";
 import { startTaskToolCallsStep } from "#execution/session/task-tool-tracing-step.js";
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
 import { interruptWorkflowToolRun } from "#execution/tools/workflow/interrupt.js";
+import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
+import {
+  withdrawFinishedRunQuestionsStep,
+  withdrawWorkflowToolRunQuestionStep,
+} from "#execution/tools/workflow/withdraw-step.js";
+import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
 import {
   notifyCancelledTaskCallerStep,
   notifyTurnCallerStep,
@@ -51,4 +57,9 @@ export const SHARED_SESSION_STEPS = {
   reportDroppedWirePayload: reportDroppedWirePayloadStep,
   mapHeldAnswers: mapHeldAnswersStep,
   cancelTasks: cancelTasksStep,
+  routeProxiedDeliver: routeProxiedDeliverStep,
+  proxySubagentEvent: runProxySubagentEventStep,
+  withdrawFinishedRunQuestions: withdrawFinishedRunQuestionsStep,
+  withdrawRunQuestion: withdrawWorkflowToolRunQuestionStep,
+  resumeHook: ({ options, payload, token }) => resumeHookStep(token, payload, options),
 } as const satisfies Omit<SessionStepTable, "turn" | "dispatchRuns" | "applyRunMessages">;

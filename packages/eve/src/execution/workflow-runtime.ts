@@ -8,7 +8,7 @@ import { context, trace } from "#compiled/@opentelemetry/api/index.js";
 import { durableRunEnded, installedProcessEngine } from "#execution/hosts.js";
 import type { SessionRuntimeConfig } from "#execution/initial-entry.js";
 import { dispatchSessionCommand, sessionRuntime } from "#execution/session-runtime.js";
-import { EVE_VERSION_ATTRIBUTE } from "#execution/eve-workflow-attributes.js";
+import { eveBuildAttributes } from "#execution/eve-workflow-attributes.js";
 import {
   installFallbackWorkflowEngine,
   workflowDurable,
@@ -77,7 +77,7 @@ export async function startWorkflowOnDeployment<TArgs extends unknown[], TResult
     const startOptions = {
       ...options,
       allowReservedAttributes: true,
-      attributes: { ...options?.attributes, [EVE_VERSION_ATTRIBUTE]: EVE_PACKAGE_INFO.version },
+      attributes: { ...options?.attributes, ...eveBuildAttributes(EVE_PACKAGE_INFO.version) },
       deploymentId,
     };
     if (claim === undefined) return await start(workflow, args, startOptions);
