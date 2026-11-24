@@ -40,7 +40,7 @@ export default eveChannel({
 | ---------------------------- | -------------------------------------- |
 | Returns `SessionAuthContext` | Accepts the request and stops the walk |
 | Returns `null` / `undefined` | Skips to the next entry                |
-| Throws                       | Rejects with a specific status         |
+| Throws an `HttpError`        | Rejects with that error's status       |
 
 If every entry skips, the request gets a `401`. Its `WWW-Authenticate` header advertises the schemes the entries declare:
 
@@ -75,19 +75,26 @@ export default eveChannel({
 
 Put your own providers ahead of the catch-all helpers, and `localDev()` last. A `vercelOidc()` before `localDev()` lets a local Vercel OIDC bearer resolve a real user instead of the stand-in `local-dev` caller. On non-Vercel hosts, omit `vercelOidc()` unless you want to accept Vercel-issued tokens.
 
-To reject with a precise status instead of skipping, throw:
+To reject with a precise status instead of skipping, throw an `HttpError` or one of its subclasses:
 
 ```ts
-import { ForbiddenError, UnauthenticatedError } from "eve/channels/auth";
+import {
+  ForbiddenError,
+  HttpError,
+  TooManyRequestsError,
+  UnauthenticatedError,
+} from "eve/channels/auth";
 
 throw new UnauthenticatedError({
   code: "authentication_required",
   message: "Sign in to continue.",
 }); // 401
 throw new ForbiddenError({ message: "Not allowed on this workspace." }); // 403
+throw new TooManyRequestsError({ retryAfter: 60 }); // 429 with retry-after: 60
+throw new HttpError(402, { code: "payment_required", message: "Upgrade your plan." });
 ```
 
-Any other thrown error follows the normal channel failure path. When building a custom channel on `defineChannel`, call `routeAuth(request, auth)` from `eve/channels/auth` to reuse the same walk semantics.
+The response has `cache-control: no-store` and a `{ ok: false, code, error }` JSON body. Any other thrown error follows the normal channel failure path. When building a custom channel on `defineChannel`, call `routeAuth(request, auth)` from `eve/channels/auth` to reuse the same walk semantics.
 
 ## Verifier helpers
 
@@ -210,7 +217,7 @@ export default defineChannel({
 });
 ```
 
-`UnauthenticatedError` (`401`) and `ForbiddenError` (`403`) wrap this builder; throw them from an `AuthFn` that `routeAuth` walks. Call `createUnauthorizedResponse` directly only when returning a `Response` from a hand-rolled route.
+`UnauthenticatedError` (`401`) and `ForbiddenError` (`403`) build the same response; throw them from an `AuthFn` that `routeAuth` walks. Call `createUnauthorizedResponse` directly only when returning a `Response` from a hand-rolled route.
 
 ## Network policy
 
