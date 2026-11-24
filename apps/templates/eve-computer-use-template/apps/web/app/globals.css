@@ -1577,6 +1577,10 @@ kbd {
   height: 22px;
   font-size: 11px;
 }
+.browser-docked .mode-agent {
+  top: auto;
+  bottom: 8px;
+}
 .browser-docked .mode-replay {
   top: auto;
   left: auto;
