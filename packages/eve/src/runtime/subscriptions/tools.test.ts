@@ -36,10 +36,13 @@ vi.mock("#runtime/sessions/runtime-context-keys.js", async (importOriginal) => (
 const { offeredSubscriptions, stopSubscriptionEntry, subscribeToChannel } =
   await import("./tools.js");
 
+const checksFinished = [
+  { name: "checks_finished", description: "Checks finished.", inputSchema: { type: "object" } },
+];
 const channelsOf = (...entries: readonly [string, unknown, unknown?][]) =>
   entries.map(([name, onEvent, events]) => ({
     name,
-    definition: { onEvent, events },
+    definition: { onEvent, events: events ?? checksFinished },
   })) as never;
 const channels = channelsOf(["github", () => null]);
 
@@ -159,11 +162,10 @@ it("derives the key emit derives from the input, comparing strings exactly", asy
   expect(upper!.id).not.toBe(lower!.id);
 });
 
-it("accepts any event name and any input object from a channel that declares no events, leaving the decision to onEvent", async () => {
-  await expect(
-    subscribeAs("s1", "rui", { source: "github", event: "pushed", input: {}, ttlMs: null }),
-  ).resolves.toMatchObject({ event: "pushed", input: {}, status: "active" });
-  expect(host.start).toHaveBeenCalledTimes(1);
+it("refuses a channel that defines onEvent without events", () => {
+  expect(() =>
+    offeredSubscriptions([{ name: "github", definition: { onEvent: () => null } }] as never),
+  ).toThrow('Channel "github" defines onEvent without events.');
 });
 
 const eventDefinitions = [
@@ -342,7 +344,7 @@ it("asks the gate for the stop tool's approval with the connection action it run
 describe("onSubscribe", () => {
   const subscribeWith = (onSubscribe: unknown, user = "rui") => {
     const offered = offeredSubscriptions([
-      { name: "github", definition: { onEvent: () => null, onSubscribe } },
+      { name: "github", definition: { onEvent: () => null, events: checksFinished, onSubscribe } },
     ] as never);
     return inSession("s1", authOf(user), () =>
       subscribeToChannel(offered, subscribeInput, undefined),

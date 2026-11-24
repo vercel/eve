@@ -3,7 +3,7 @@ import { expect, it, vi } from "vitest";
 import { serializeInputSchema } from "#tools/schema.js";
 
 import { catalogReach } from "./catalog-tools.js";
-import { subscriptionTools } from "./subscription-tools.js";
+import { subscriptionSources, subscriptionTools } from "./subscription-tools.js";
 import type { Callable } from "./step-catalog.js";
 
 const held = vi.hoisted(() => ({ bindings: new Map<string, unknown>() }));
@@ -18,7 +18,7 @@ vi.mock("#execution/hosts.js", () => ({
   }),
 }));
 
-const channel = (name: string) => ({ name, definition: { onEvent: () => null } });
+const channel = (name: string) => ({ name, definition: { onEvent: () => null, events: [] } });
 const tracker = {
   approval: () => "denied",
   connectionName: "tracker",
@@ -27,7 +27,12 @@ const tracker = {
 };
 const plain = { connectionName: "docs" };
 
-const callable = (input: { channels?: unknown[]; connections?: unknown[] }) => ({
+const callable = (input: {
+  channels?: unknown[];
+  connections?: unknown[];
+  subagent?: boolean;
+}) => ({
+  subagent: input.subagent ?? false,
   channels: (input.channels ?? []) as Callable["channels"],
   connections: (input.connections ?? []) as Callable["connections"],
   registry: {
@@ -97,6 +102,15 @@ it("reaches eve__search for an agent whose only source is a channel with events"
   expect(reach).toMatchObject({ subscriptions: true, tools: false, connections: false });
   expect(
     catalogReach({ ...callable({}), deferred: new Map(), skills: new Map() } as never),
+  ).toMatchObject({ subscriptions: false });
+});
+
+it("offers a subagent no subscription source, search result or tool", () => {
+  const input = { channels: [channel("github")], connections: [tracker], subagent: true };
+  expect(tools(input).size).toBe(0);
+  expect(subscriptionSources(callable(input))).toEqual({ channels: [], connections: [] });
+  expect(
+    catalogReach({ ...callable(input), deferred: new Map(), skills: new Map() } as never),
   ).toMatchObject({ subscriptions: false });
 });
 

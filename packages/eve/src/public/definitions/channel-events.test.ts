@@ -228,3 +228,14 @@ describe("defineChannel events", () => {
     );
   });
 });
+
+describe("defineChannel subscriptions", () => {
+  it("throws when experimental.subscriptions has no events", () => {
+    expect(() =>
+      defineChannel({
+        routes: [],
+        experimental: { subscriptions: { onEvent: () => null } as never },
+      }),
+    ).toThrow("experimental.subscriptions requires `events`");
+  });
+});

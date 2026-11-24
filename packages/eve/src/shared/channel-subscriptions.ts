@@ -91,10 +91,9 @@ export interface ChannelSubscriptionsDefinition {
   readonly onSubscribe?: ChannelOnSubscribe;
   /**
    * The events the channel emits, each with the `input` that scopes it. `eve__search` lists them
-   * and `eve__subscribe` rejects any other event name. Without it the model passes any event name
-   * and input, as the agent's instructions describe them.
+   * and `eve__subscribe` rejects any other event name.
    */
-  readonly events?: readonly ChannelEventDefinition[];
+  readonly events: readonly ChannelEventDefinition[];
 }
 
 /** One event a channel emits: its name, what it means, and the JSON Schema of the `input` that scopes it. */

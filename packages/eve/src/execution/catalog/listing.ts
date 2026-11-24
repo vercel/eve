@@ -7,7 +7,10 @@ import { compareCodeUnits } from "./rank.js";
 import { subscriptionSources } from "./subscription-tools.js";
 import type { Callable } from "./step-catalog.js";
 
-type Listed = Pick<Callable, "channels" | "connections" | "deferred" | "entries" | "skills">;
+type Listed = Pick<
+  Callable,
+  "channels" | "connections" | "deferred" | "entries" | "skills" | "subagent"
+>;
 
 const ANNOUNCEMENT_KEY = "catalog";
 const MAX_LISTED_NAMESPACES = 20;
@@ -80,6 +83,7 @@ const EMPTY_LISTING = JSON.stringify(
     deferred: new Map(),
     entries: new Map(),
     skills: new Map(),
+    subagent: false,
   }),
 );
 

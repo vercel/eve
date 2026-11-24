@@ -258,7 +258,7 @@ describe("catalogAnnouncements", () => {
     });
 
     it("lists subscribable sources and sends the model to eve__search for their events", async () => {
-      const channels = [{ name: "github", definition: { onEvent: () => null } }];
+      const channels = [{ name: "github", definition: { onEvent: () => null, events: [] } }];
 
       expect(await baseline({ channels })).toBe(
         'Subscribable sources: github. Find their events with eve__search ("subscriptions__<source>__") before calling eve__subscribe.',

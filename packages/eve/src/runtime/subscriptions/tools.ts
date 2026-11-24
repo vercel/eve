@@ -30,7 +30,7 @@ export const STOP_SUBSCRIPTION_TOOL = "eve__subscription_stop";
 
 export interface OfferedSubscription {
   readonly channelName: string;
-  readonly events: readonly ChannelEventDefinition[] | undefined;
+  readonly events: readonly ChannelEventDefinition[];
   readonly onSubscribe: ChannelOnSubscribe | undefined;
 }
 
@@ -94,10 +94,13 @@ export function offeredSubscriptions(
   for (const channel of channels) {
     const onEvent = channel.definition?.onEvent;
     if (onEvent === undefined || seen.has(channel.name)) continue;
+    const events = channel.definition?.events;
+    if (events === undefined)
+      throw new Error(`Channel "${channel.name}" defines onEvent without events.`);
     seen.add(channel.name);
     offered.push({
       channelName: channel.name,
-      events: channel.definition?.events,
+      events,
       onSubscribe: channel.definition?.onSubscribe,
     });
   }
@@ -145,13 +148,12 @@ export async function subscribeToChannel(
   const entry = offered.find((candidate) => candidate.channelName === channelName);
   if (entry === undefined) throw new Error(`Channel "${channelName}" offers no subscriptions.`);
   const { events, onSubscribe } = entry;
-  const definition = events?.find((candidate) => candidate.name === event);
-  if (events !== undefined && definition === undefined)
+  const definition = events.find((candidate) => candidate.name === event);
+  if (definition === undefined)
     throw new Error(
       `Channel "${channelName}" emits no event named "${event}".${suggestions(event, events)} Find its events with ${SEARCH_TOOL_NAME}({ query: "subscriptions__${channelName}__" }).`,
     );
   const checked = async (value: unknown): Promise<JsonObject> => {
-    if (definition === undefined) return parseJsonObject(value);
     const validated = await defineJsonSchema(definition.inputSchema)["~standard"].validate(value);
     if (validated.issues !== undefined)
       throw new Error(

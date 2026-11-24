@@ -28,8 +28,9 @@ export interface SubscriptionSources {
 }
 
 export function subscriptionSources(
-  callable: Pick<Callable, "channels" | "connections">,
+  callable: Pick<Callable, "channels" | "connections" | "subagent">,
 ): SubscriptionSources {
+  if (callable.subagent) return { channels: [], connections: [] };
   return {
     channels: offeredSubscriptions(callable.channels),
     connections: callable.connections.filter(
@@ -39,7 +40,7 @@ export function subscriptionSources(
 }
 
 export function subscriptionTools(
-  callable: Pick<Callable, "channels" | "connections" | "registry">,
+  callable: Pick<Callable, "channels" | "connections" | "registry" | "subagent">,
 ): ReadonlyMap<string, ToolEntry> {
   const { channels, connections } = subscriptionSources(callable);
   if (channels.length === 0 && connections.length === 0) return new Map();
@@ -142,11 +143,7 @@ function subscribeDescription(
     ...connections.map(({ connectionName }) => connectionName),
   ];
   const sources = [
-    ...channels.map(({ channelName, events }) =>
-      events === undefined
-        ? `${channelName} (channel, events are in the agent's instructions)`
-        : `${channelName} (channel)`,
-    ),
+    ...channels.map(({ channelName }) => `${channelName} (channel)`),
     ...connections.map(({ connectionName }) => `${connectionName} (connection)`),
   ];
   return [

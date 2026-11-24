@@ -38,6 +38,7 @@ export interface Callable {
   readonly connections: readonly ResolvedConnectionDefinition[];
   readonly skills: ReadonlyMap<string, CatalogSkill>;
   readonly registry: ConnectionRegistry | undefined;
+  readonly subagent: boolean;
   get(name: string): HarnessToolDefinition | undefined;
   describe(definition: HarnessToolDefinition): string;
 }
@@ -49,6 +50,7 @@ export interface StepCatalog extends HarnessToolLookup {
   readonly deferred: HarnessToolMap;
   readonly entries: HarnessToolMap;
   readonly skills: ReadonlyMap<string, CatalogSkill>;
+  readonly subagent: boolean;
   describe(definition: HarnessToolDefinition): string;
   readonly resolve: CallResolver;
 }
@@ -95,6 +97,7 @@ export function callableOf(input: CatalogInput): Callable {
         : connectionEntryNamed(name, registry, connections, versions, agentApproval)),
     registry,
     skills,
+    subagent: input.session.rootSessionId !== undefined,
   };
 }
 
@@ -130,6 +133,7 @@ export function buildStepCatalog(input: CatalogInput): StepCatalog {
         : { call: { ...toolCall, input: target.input, toolName: target.name }, definition };
     },
     skills: callable.skills,
+    subagent: callable.subagent,
   };
   for (const [name, entry] of input.table.entries) {
     if (entry.route !== undefined) {

@@ -5,12 +5,15 @@ import { postChannel } from "./shared";
 export default defineEval({
   tags: ["real-model"],
   description:
-    "A session subscribes to a channel's event with the scope its instructions describe, and a redelivered event reaches it once.",
+    "A session that is only told a channel exists finds its events with eve__search, subscribes to one with the scope the search shows, and a redelivered event reaches it once.",
   async test(t) {
     const subscribed = await t.send(
       "Tell me when the build of the project `web` breaks, for the next 10 minutes. Reply `subscribed` once you are watching.",
     );
     subscribed.expectOk();
+    const names = subscribed.toolCalls.map((call) => call.name);
+    const searched = names.indexOf("eve__search");
+    await t.require(searched >= 0 && searched < names.indexOf("eve__subscribe"), equals(true));
     t.calledTool("eve__subscribe", {
       count: 1,
       input: { source: "events", event: /^build\.(finished|failed)$/ },

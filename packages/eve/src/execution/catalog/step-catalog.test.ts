@@ -848,7 +848,7 @@ describe("buildStepCatalog", () => {
     });
   });
   describe("subscribe", () => {
-    const channels = [{ name: "github", definition: { onEvent: () => null } }];
+    const channels = [{ name: "github", definition: { onEvent: () => null, events: [] } }];
     const subscribed = async () => {
       const tracker = fakeConnection({ name: "tracker", tools: [], events: ["build.finished"] });
       const { catalog, run } = await catalogContext({ channels, connections: [tracker] });

@@ -91,7 +91,7 @@ const binding: SubscriptionBinding = {
 const keyToken = subscriptionKeyHookToken(source, "vercel/eve#7");
 const bundleWith = (onEvent: unknown) => ({
   compiledArtifactsSource: { kind: "disk", appRoot: "/virtual" },
-  resolvedAgent: { channels: [{ name: "github", definition: { onEvent } }] },
+  resolvedAgent: { channels: [{ name: "github", definition: { onEvent, events: [] } }] },
 });
 const useSubscriptions = (onEvent: unknown, auth: SessionAuthContext | null = null) => {
   const ctx = new ContextContainer();
