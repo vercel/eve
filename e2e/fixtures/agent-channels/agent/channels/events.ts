@@ -19,6 +19,18 @@ export default defineChannel({
   ],
   experimental: {
     subscriptions: {
+      events: ["build.finished", "build.failed"].map((name) => ({
+        name,
+        description: `A build of a project ${name === "build.failed" ? "failed" : "finished"}.`,
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          required: ["project"],
+          properties: {
+            project: { type: "string", description: "The project name in lowercase." },
+          },
+        },
+      })),
       onSubscribe: ({ subscription }) => {
         if (String(subscription.input.project).startsWith("denied-"))
           throw new Error(`Project ${String(subscription.input.project)} may not be watched.`);

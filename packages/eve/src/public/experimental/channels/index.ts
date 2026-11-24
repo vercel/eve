@@ -1,5 +1,6 @@
 export type {
   ChannelEvent,
+  ChannelEventDefinition,
   ChannelEventDecision,
   ChannelOccurrence,
   ChannelOnEvent,

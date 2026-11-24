@@ -59,6 +59,7 @@ function union(
     connections: reach.connections || before?.connections === true,
     searchableSkills: reach.searchableSkills || before?.searchableSkills === true,
     skills: reach.skills || before?.skills === true,
+    subscriptions: reach.subscriptions || before?.subscriptions === true,
     tools: reach.tools || before?.tools === true,
   };
 }

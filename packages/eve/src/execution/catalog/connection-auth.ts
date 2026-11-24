@@ -15,7 +15,6 @@ import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import {
   supportsInteractiveAuthorization,
   type ConnectionClient,
-  type ConnectionEventActionHandler,
   type ConnectionToolMetadata,
 } from "#shared/connection-types.js";
 import { toErrorMessage } from "#shared/errors.js";
@@ -91,7 +90,7 @@ export async function listToolMetadata(
     }, LISTING_TIMEOUT_MS);
   });
   try {
-    const tools = await listConnectionMetadata(connectionName, client, deadline);
+    const tools = await listConnectionMetadata(client, deadline);
     return tools.filter((tool) =>
       passesToolFilter(
         tool.operationId === undefined ? [tool.name] : [tool.name, tool.operationId],
@@ -103,45 +102,11 @@ export async function listToolMetadata(
   }
 }
 
-async function listConnectionMetadata(
-  connectionName: string,
+function listConnectionMetadata(
   client: ConnectionClient,
   deadline: Promise<never>,
 ): Promise<readonly ConnectionToolMetadata[]> {
-  const remoteListing = Promise.race([client.getToolMetadata(), deadline]);
-  const actions = client.eventActions;
-  if (actions === undefined) return remoteListing;
-  const [remoteResult, actionResult] = await Promise.allSettled([
-    remoteListing,
-    listEventActions(connectionName, actions, deadline),
-  ]);
-  for (const result of [remoteResult, actionResult]) {
-    if (result.status === "rejected" && isConnectionAuthorizationRequiredError(result.reason))
-      throw result.reason;
-  }
-  const generated = actionResult.status === "fulfilled" ? actionResult.value : [];
-  if (remoteResult.status === "rejected") {
-    if (generated.length > 0) return generated;
-    throw remoteResult.reason;
-  }
-  const remote = remoteResult.value;
-  if (remote.some((tool) => actions.ownsName(tool.name)))
-    throw new Error("Remote tool names conflict with eve's event action namespace.");
-  return [...remote, ...generated];
-}
-
-async function listEventActions(
-  connectionName: string,
-  actions: ConnectionEventActionHandler,
-  deadline: Promise<never>,
-): Promise<readonly ConnectionToolMetadata[]> {
-  try {
-    return await Promise.race([actions.metadata(), deadline]);
-  } catch (error) {
-    if (isConnectionAuthorizationRequiredError(error)) throw error;
-    log.warn("failed to discover connection events", { connection: connectionName, error });
-    return [];
-  }
+  return Promise.race([client.getToolMetadata(), deadline]);
 }
 
 export function listingFailureMessage(connectionName: string, error: unknown): string {

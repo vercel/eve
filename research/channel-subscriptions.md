@@ -13,7 +13,8 @@ MCP connections can do it through `experimental.events`. Channels could not, so 
 received GitHub webhooks could only react to them by opening a new session.
 
 A channel now lets a session subscribe to future events from it. The model calls
-`eve__subscribe` with a source, an event name and a scope. eve holds the subscription in a
+`eve__subscribe` with a source, an event name and a scope, after finding the event with
+`eve__search`. eve holds the subscription in a
 durable workflow, and each matching occurrence is queued onto the subscribing session as a new
 turn.
 
@@ -51,14 +52,25 @@ defineChannel({
   cannot hold subscriptions, and `githubChannel` throws for an event name eve cannot deliver.
 - `githubChannel` takes the same `experimental.subscriptions.onEvent` and exports
   `describeGitHubEvent(event)` for the default message. It also takes
-  `experimental.subscriptions.onSubscribe`.
+  `experimental.subscriptions.onSubscribe`. Its `experimental.subscriptions.events` narrows the
+  events it offers.
+- `experimental.subscriptions.events` lists a channel's events as `{ name, description,
+  inputSchema }`. `eve__search` returns them and `eve__subscribe` rejects any other name.
 
 ## Tools
 
-The root agent gets three tools: `eve__subscribe`, `eve__subscription_get` and
-`eve__subscription_stop`. They use the `eve__` prefix because eve reserves it, so an authored
-tool cannot replace them. They are framework tools and subagents do not see them, because a
-subagent has no session of its own to receive events.
+The root agent gets two tools: `eve__subscribe` and `eve__subscription_stop`. They use the
+`eve__` prefix because eve reserves it, so an authored tool cannot replace them. They are
+framework tools and subagents do not see them, because a subagent has no session of its own to
+receive events.
+
+`eve__subscribe` takes a flat `{ source, event, input, ttlMs }`. Its description and schema are
+fixed per build: they name the sources and point to `eve__search`, and do not list events, so a
+source with hundreds of events (GitHub has 261) costs the same tokens per step as one with two.
+`eve__search` returns each event as `{ source, event, description, signature }`, found by words
+or by the prefix `subscriptions__<source>__`. A channel's events come from its definition. An MCP
+connection's come from `events/list`, which eve calls only when a search covers the connection or
+a subscribe runs. An unknown event fails at call time with the closest names.
 
 One `source` names either a channel or a connection. A channel and a connection that both offer
 subscriptions and share a name cannot be told apart, so eve reports an error when it builds the
@@ -91,5 +103,5 @@ which eve checks against the channel's input schema again. It runs once, at subs
 
 - One authoring contract for MCP and channel subscriptions, and renaming MCP
   `experimental.events` to `experimental.subscriptions`.
-- Per-event schemas for the scope and the data.
+- Schemas for the data an event carries.
 - Emitting from tools, schedules and hooks, and delivery to something other than a session.

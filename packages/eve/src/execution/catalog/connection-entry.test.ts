@@ -17,7 +17,9 @@ import type {
 } from "#shared/connection-types.js";
 import type { ToolSchema } from "#tools/schema.js";
 
-import { connectionEntry } from "./connection-entry.js";
+import { EVENT_SUBSCRIBE_ACTION } from "#runtime/subscriptions/actions.js";
+
+import { connectionEntry, runConnectionEventAction } from "./connection-entry.js";
 
 const tools: readonly ConnectionToolMetadata[] = [
   {
@@ -128,12 +130,6 @@ describe("connection tool call", () => {
     principalType: "user" as const,
   };
 
-  const subscribe: ConnectionToolMetadata = {
-    description: "Subscribe to issue events.",
-    inputSchema: { type: "object" },
-    name: "subscribe_issues",
-  };
-
   function call(responder?: SessionAuthContext, toolName = "delete_issue") {
     const connection = {
       connectionName: "tracker",
@@ -162,8 +158,7 @@ describe("connection tool call", () => {
         execute: async () => ({
           approvedBy: (await resolveHeaders(connection))["X-Approved-By"],
         }),
-        metadata: async () => [subscribe],
-        ownsName: (name) => name === subscribe.name,
+        list: async () => [],
       },
       executeTool: async (name, args, options) => ({
         structuredContent: await resolveProvidedArguments({
@@ -188,15 +183,15 @@ describe("connection tool call", () => {
       sessionId: "session-1",
       turn: { id: "turn-1", sequence: 0 },
     });
+    const options = {
+      messages: [],
+      toolCallId: "call-1",
+      ...(responder !== undefined && { approval: { responder } }),
+    };
     return contextStorage.run(ctx, async () =>
-      connectionEntry(registry, connection, toolName).execute!(
-        {},
-        {
-          messages: [],
-          toolCallId: "call-1",
-          ...(responder !== undefined && { approval: { responder } }),
-        },
-      ),
+      toolName === EVENT_SUBSCRIBE_ACTION
+        ? runConnectionEventAction(registry, connection, toolName, {}, options)
+        : connectionEntry(registry, connection, toolName).execute!({}, options),
     );
   }
 
@@ -217,8 +212,8 @@ describe("connection tool call", () => {
   });
 
   it("gives an approved event action's headers its approver", async () => {
-    await expect(call(user("bob"), subscribe.name)).resolves.toEqual({ approvedBy: "bob" });
-    await expect(call(undefined, subscribe.name)).resolves.toEqual({ approvedBy: "" });
+    await expect(call(user("bob"), EVENT_SUBSCRIBE_ACTION)).resolves.toEqual({ approvedBy: "bob" });
+    await expect(call(undefined, EVENT_SUBSCRIBE_ACTION)).resolves.toEqual({ approvedBy: "" });
   });
 });
 

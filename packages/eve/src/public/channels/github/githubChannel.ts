@@ -10,7 +10,7 @@ import { createLogger, logError } from "#internal/logging.js";
 import {
   type GitHubOnEvent,
   emitGitHubWebhook,
-  githubChannelOnEvent,
+  githubEventDefinitions,
 } from "#public/channels/github/subscriptions.js";
 import {
   buildGitHubBinding,
@@ -186,6 +186,12 @@ export interface GitHubChannelConfig {
        * `{ input }` to narrow the scope, for example to drop `pull`.
        */
       readonly onSubscribe?: ChannelOnSubscribe;
+      /**
+       * Narrows the events a session can subscribe to, for `eve__search` and for `eve__subscribe`.
+       * Each entry is an event such as `check_suite`, or an event and action such as
+       * `check_suite.completed`. Defaults to every GitHub webhook event.
+       */
+      readonly events?: readonly string[];
     };
   };
   /** Policy for accepted messages that arrive while a turn is active. */
@@ -260,7 +266,7 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
     botName: config.botName,
     credentials: config.credentials,
   });
-  const subscriptionsOnEvent = githubChannelOnEvent(config.experimental?.subscriptions?.onEvent);
+  const subscriptionsOnEvent = config.experimental?.subscriptions?.onEvent;
   const appSlug = createGitHubBotNameResolver({ credentials: config.credentials });
   const dispatchOptions = { botName };
   const mergedEvents: GitHubChannelEvents = {
@@ -280,6 +286,7 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
       subscriptions: {
         onEvent: subscriptionsOnEvent,
         onSubscribe: config.experimental?.subscriptions?.onSubscribe,
+        events: githubEventDefinitions(config.experimental?.subscriptions?.events),
       },
     },
 

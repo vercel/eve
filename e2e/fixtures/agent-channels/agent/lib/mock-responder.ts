@@ -63,14 +63,7 @@ function respondToSubscription(
     return `SUBSCRIPTION-RESULT ${JSON.stringify({ error: result.isError, output: result.output })}`;
   const input =
     mode === "SUBSCRIBE"
-      ? {
-          subscription: {
-            source: "events",
-            event: "build.failed",
-            input: { project: value },
-          },
-          ttlMs: 600_000,
-        }
+      ? { source: "events", event: "build.failed", input: { project: value }, ttlMs: 600_000 }
       : { id: value };
   return { toolCalls: [{ name: tool, input }] };
 }

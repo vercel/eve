@@ -27,9 +27,6 @@ import { fromCompiledBundle } from "#definitions/compiled-agent.js";
 import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import { serializeInputSchema, type ToolSchemaSource } from "#tools/schema.js";
 
-import { connectionToolName } from "#connections/ownership.js";
-import { eventActionName } from "#runtime/subscriptions/actions.js";
-import { SUBSCRIBE_TOOL } from "#runtime/subscriptions/tools.js";
 import type { StepCatalog } from "./step-catalog.js";
 import { labelCallbacks } from "#internal/testing/tool-labels.js";
 
@@ -851,77 +848,106 @@ describe("buildStepCatalog", () => {
     });
   });
   describe("subscribe", () => {
-    const channels = [
-      {
-        name: "github",
-        definition: {
-          onEvent: () => null,
-        },
-      },
-    ];
-    const subscribed = async (subscription: unknown) => {
+    const channels = [{ name: "github", definition: { onEvent: () => null } }];
+    const subscribed = async () => {
       const tracker = fakeConnection({ name: "tracker", tools: [], events: ["build.finished"] });
       const { catalog, run } = await catalogContext({ channels, connections: [tracker] });
-      const input = { subscription, ttlMs: 120_000 };
-      const validated = await validate(catalog, "eve__subscribe", input);
-      return { catalog, run, tracker, validated, input };
+      return { catalog, run, tracker };
     };
 
-    it("advertises eve__subscribe, eve__subscription_get and eve__subscription_stop, and not the connection's own event tool", async () => {
-      const { catalog } = await subscribed({});
+    it("advertises eve__subscribe and eve__subscription_stop with eve__search, and not the connection's events as tools", async () => {
+      const { catalog } = await subscribed();
       expect(names(catalog.advertised)).toEqual(
-        expect.arrayContaining([
-          "eve__subscribe",
-          "eve__subscription_get",
-          "eve__subscription_stop",
-        ]),
+        expect.arrayContaining(["eve__search", "eve__subscribe", "eve__subscription_stop"]),
       );
+      expect(names(catalog.advertised)).not.toContain("eve__subscription_get");
       expect(names(catalog.advertised).filter((name) => name.includes("events_"))).toEqual([]);
     });
 
-    it("runs a connection source on that connection's own event tool", async () => {
-      const { catalog, run, tracker, validated, input } = await subscribed({
+    it("validates the flat input without fetching the connection's events", async () => {
+      const { catalog, tracker } = await subscribed();
+      const input = {
         source: "tracker",
         event: "build.finished",
         input: { job: "web" },
-      });
-      expect(validated).toEqual({ value: input });
-      const resolved = catalog.resolve({ input, toolName: "eve__subscribe" });
-      expect(resolved?.call.toolName).toBe(
-        connectionToolName("tracker", eventActionName("build.finished")),
+        ttlMs: 120_000,
+      };
+      expect(await validate(catalog, "eve__subscribe", input)).toEqual({ value: input });
+      expect(await validate(catalog, "eve__subscribe", { subscription: input })).toHaveProperty(
+        "issues",
       );
+      expect(tracker.eventListCalls).toEqual([]);
+    });
+
+    it("subscribes a connection source with its own event action", async () => {
+      const { catalog, run, tracker } = await subscribed();
+      const input = {
+        source: "tracker",
+        event: "build.finished",
+        input: { job: "web" },
+        ttlMs: 120_000,
+      };
+      const resolved = catalog.resolve({ input, toolName: "eve__subscribe" });
+      expect(resolved?.call.toolName).toBe("eve__subscribe");
       await run(() =>
         resolved?.definition.execute?.(resolved.call.input, { messages: [], toolCallId: "call-1" }),
       );
       expect(tracker.eventCalls).toEqual([
         {
-          name: eventActionName("build.finished"),
-          input: { arguments: { job: "web" }, ttlMs: 120_000 },
+          name: "events_subscribe",
+          input: { event: "build.finished", arguments: { job: "web" }, ttlMs: 120_000 },
         },
       ]);
     });
 
-    it("routes a channel source to the channel subscription entry", async () => {
-      const { catalog, input } = await subscribed({
-        source: "github",
-        event: "check_suite.completed",
-        input: { pull: 7 },
+    it("finds a connection's events with eve__search only when searched", async () => {
+      const { catalog, run, tracker } = await subscribed();
+      expect(tracker.eventListCalls).toEqual([]);
+      const search = catalog.resolve({
+        input: { query: "subscriptions__tracker__" },
+        toolName: "eve__search",
       });
-      const resolved = catalog.resolve({ input, toolName: "eve__subscribe" });
-      expect(resolved?.call.toolName).toBe(SUBSCRIBE_TOOL);
+      const found = (await run(() =>
+        search?.definition.execute?.(search.call.input, { messages: [], toolCallId: "call-2" }),
+      )) as { results: { event?: string; source?: string; signature?: string }[] };
+      expect(found.results).toEqual([
+        expect.objectContaining({ event: "build.finished", source: "tracker" }),
+      ]);
+      expect(found.results[0]?.signature).toContain("eve__subscribe(");
+      expect(tracker.eventListCalls).toHaveLength(1);
     });
 
-    it("does not let eve__tool call the connection's event tool directly", async () => {
-      const { catalog } = await subscribed({});
-      const name = connectionToolName("tracker", eventActionName("build.finished"));
-      const call = {
-        input: { name, input: { arguments: {}, ttlMs: null } },
-        toolName: CALL_TOOL_NAME,
+    it("finds a channel's events from code, without any connection", async () => {
+      const github = {
+        name: "github",
+        definition: {
+          onEvent: () => null,
+          events: [
+            {
+              name: "check_suite.completed",
+              description: "A check suite finished.",
+              inputSchema: { type: "object", properties: { owner: { type: "string" } } },
+            },
+            { name: "push", description: "A push.", inputSchema: { type: "object" } },
+          ],
+        },
       };
-      const validatedCall = await validate(catalog, CALL_TOOL_NAME, call.input);
-      expect(JSON.stringify(validatedCall)).toContain(
-        "Subscribe to a connection's events with eve__subscribe.",
-      );
+      const { catalog, run } = await catalogContext({ channels: [github] });
+      const search = (query: string) => {
+        const resolved = catalog.resolve({ input: { query }, toolName: "eve__search" });
+        return run(() =>
+          resolved?.definition.execute?.(resolved.call.input, { messages: [], toolCallId: "c" }),
+        ) as Promise<{ results: { event?: string }[] }>;
+      };
+      expect((await search("subscriptions__github__")).results.map(({ event }) => event)).toEqual([
+        "check_suite.completed",
+        "push",
+      ]);
+      expect((await search("github check suite")).results[0]).toMatchObject({
+        event: "check_suite.completed",
+        source: "github",
+        description: "A check suite finished.",
+      });
     });
   });
 });

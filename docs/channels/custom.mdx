@@ -455,9 +455,30 @@ export default defineChannel({
 });
 ```
 
-When at least one channel defines `experimental.subscriptions.onEvent`, or a connection enables `experimental.events`, eve exposes `eve__subscribe`, `eve__subscription_get`, and `eve__subscription_stop` to the root agent. Subagents do not get them. A channel and a connection that both offer subscriptions cannot share a name. `eve__subscribe` takes `{ subscription: { source, event, input }, ttlMs }`, where `source` is a channel name or an [MCP connection](/docs/connections/mcp) name. Subscriptions are durable and outlast the turn that created them.
+When at least one channel defines `experimental.subscriptions.onEvent`, or a connection enables `experimental.events`, eve exposes `eve__subscribe` and `eve__subscription_stop` to the root agent, with `eve__search` to find events. Subagents do not get them. A channel and a connection that both offer subscriptions cannot share a name. `eve__subscribe` takes `{ source, event, input, ttlMs }`, where `source` is a channel name or an [MCP connection](/docs/connections/mcp) name. Subscriptions are durable and outlast the turn that created them.
 
-eve does not publish a catalog of a custom channel's events, so `eve__subscribe` accepts any event name for it. Describe the event names and the `input` the channel expects in the agent's instructions, for example: "Subscribe to the `builds` channel with the event `build.finished` or `build.failed` and an `input` of `{ project }`, with the project name in lowercase."
+List a channel's events in `experimental.subscriptions.events`, each with a `name`, a `description`, and the JSON Schema `inputSchema` of its `input`. The model finds them with `eve__search` (`subscriptions__<channel>__`), and `eve__subscribe` rejects any other event name with the closest names and checks `input` against the schema:
+
+```ts
+experimental: {
+  subscriptions: {
+    events: [
+      {
+        name: "build.finished",
+        description: "A build of a project succeeded.",
+        inputSchema: {
+          type: "object",
+          required: ["project"],
+          properties: { project: { type: "string", description: "The project name in lowercase." } },
+        },
+      },
+    ],
+    onEvent: ({ event }) => `Build ${event.id}: ${event.name}`,
+  },
+},
+```
+
+Without `events`, `eve__subscribe` accepts any event name for the channel and `eve__search` finds nothing for it, so describe the event names and the `input` the channel expects in the agent's instructions, for example: "Subscribe to the `builds` channel with the event `build.finished` or `build.failed` and an `input` of `{ project }`, with the project name in lowercase."
 
 `canWatch` stands for your own check of what `auth` may watch.
 
@@ -474,7 +495,7 @@ Any other return value, including `undefined`, `false`, `true`, and `""`, fails 
 
 Key behaviors to plan around:
 
-- `eve__subscribe` accepts any `event` name and any JSON object as `input`. A subscription to an event the channel never emits stays open until it expires or the model stops it, so keep names and scopes in the agent's instructions.
+- Without `events`, `eve__subscribe` accepts any `event` name and any JSON object as `input`. A subscription to an event the channel never emits stays open until it expires or the model stops it, so list the events or keep names and scopes in the agent's instructions.
 - `emit(event, input, { id, data })` matches subscriptions with the exact same `event` name and canonical `input`. `{ project: "Web" }` and `{ project: "web" }` do not match, so normalize case in `emit` and tell the model the case to use in the agent's instructions. One route call can emit the same event under multiple scopes. `emit` resolves to `true` when at least one subscription matches and `false` when nobody is subscribed, so a webhook with no subscribers still succeeds. It throws when the host cannot hold subscriptions, such as a local run outside a deployed agent.
 - Each `(event, input)` key remembers the last 256 event IDs so redeliveries reach each subscriber once. `ttlMs` accepts `120000` (2 minutes) through `31536000000` (365 days), or `null` until stopped. When the subscribing session ends, the subscription retires automatically on the next delivery.
 - Without `onSubscribe`, any session of the agent can subscribe to any scope the channel emits, and `onEvent` is the only check. Define `onSubscribe` to check `auth` and `subscription.input` whenever a subscriber should not read every scope the channel can emit. `onSubscribe` runs once, when the session subscribes, so `onEvent` is still the place to react to a change in what the subscriber may read.

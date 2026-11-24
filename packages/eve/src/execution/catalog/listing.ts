@@ -1,11 +1,13 @@
 import { isAgentTool } from "#execution/tasks/tool-entry-point.js";
 import type { Announcement } from "#harness/announcements.js";
 import { CALL_TOOL_NAME, SEARCH_TOOL_NAME, SKILL_TOOL_NAME } from "#protocol/catalog-tools.js";
+import { SUBSCRIBE_TOOL } from "#runtime/subscriptions/tools.js";
 
 import { compareCodeUnits } from "./rank.js";
+import { subscriptionSources } from "./subscription-tools.js";
 import type { Callable } from "./step-catalog.js";
 
-type Listed = Pick<Callable, "connections" | "deferred" | "entries" | "skills">;
+type Listed = Pick<Callable, "channels" | "connections" | "deferred" | "entries" | "skills">;
 
 const ANNOUNCEMENT_KEY = "catalog";
 const MAX_LISTED_NAMESPACES = 20;
@@ -27,6 +29,7 @@ interface CatalogListing {
   readonly connections: Capped<ListedConnection>;
   readonly kinds: readonly Kind[];
   readonly namespaces: Capped<string>;
+  readonly subscriptions: readonly string[];
 }
 
 export function catalogAnnouncements(catalog: Listed): Readonly<Record<string, Announcement>> {
@@ -58,15 +61,26 @@ function listCatalog(catalog: Listed): CatalogListing {
   const connections = catalog.connections
     .map(({ connectionName, description }) => ({ description, name: connectionName }))
     .sort((a, b) => compareCodeUnits(a.name, b.name));
+  const sources = subscriptionSources(catalog);
   return {
     connections: capped(connections, MAX_LISTED_CONNECTIONS),
     kinds,
     namespaces: { ...namespaces, items: [...namespaces.items].sort(compareCodeUnits) },
+    subscriptions: [
+      ...sources.channels.map(({ channelName }) => channelName),
+      ...sources.connections.map(({ connectionName }) => connectionName),
+    ].sort(compareCodeUnits),
   };
 }
 
 const EMPTY_LISTING = JSON.stringify(
-  listCatalog({ connections: [], deferred: new Map(), entries: new Map(), skills: new Map() }),
+  listCatalog({
+    channels: [],
+    connections: [],
+    deferred: new Map(),
+    entries: new Map(),
+    skills: new Map(),
+  }),
 );
 
 function namespaceCounts(catalog: Listed): ReadonlyMap<string, number> {
@@ -123,7 +137,19 @@ function renderCatalogAnnouncement(
   ].join("\n");
 }
 
-function renderListing({ connections, kinds, namespaces }: CatalogListing): string {
+function renderListing({
+  connections,
+  kinds,
+  namespaces,
+  subscriptions = [],
+}: CatalogListing): string {
+  const subscribable =
+    subscriptions.length === 0
+      ? []
+      : [
+          `Subscribable sources: ${subscriptions.join(", ")}. Find their events with ${SEARCH_TOOL_NAME} ("subscriptions__<source>__") before calling ${SUBSCRIBE_TOOL}.`,
+        ];
+  if (kinds.length === 0 && connections.items.length === 0) return subscribable.join("\n");
   const subject =
     kinds.length === 0 ? "Your connections have more tools" : `You have more ${joinWords(kinds)}`;
   const call = !kinds.includes("skills")
@@ -146,7 +172,7 @@ function renderListing({ connections, kinds, namespaces }: CatalogListing): stri
       ...(connections.more ? ["- and more"] : []),
     );
   }
-  return lines.join("\n");
+  return [...lines, ...subscribable].join("\n");
 }
 
 function joinWords(words: readonly string[]): string {
@@ -162,7 +188,11 @@ function formatConnection(entry: ListedConnection): string {
 }
 
 function isEmpty(listing: CatalogListing): boolean {
-  return listing.kinds.length === 0 && listing.connections.items.length === 0;
+  return (
+    listing.kinds.length === 0 &&
+    listing.connections.items.length === 0 &&
+    (listing.subscriptions ?? []).length === 0
+  );
 }
 
 function parseListing(value: string | undefined): CatalogListing | undefined {

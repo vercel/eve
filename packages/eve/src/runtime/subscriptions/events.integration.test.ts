@@ -3,7 +3,6 @@ import { installWorkflowHost } from "#execution/workflow-host/host.js";
 import { eventTracing } from "#internal/testing/event-tracing.js";
 import { parseJsonValue } from "#shared/json.js";
 import { trace } from "@opentelemetry/api";
-import { connectionEntry } from "#execution/catalog/connection-entry.js";
 import { ConnectionRegistryImpl } from "#runtime/connections/registry.js";
 import { compileFromMemory } from "#internal/testing/compile-from-memory.js";
 import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
@@ -18,8 +17,8 @@ import { requireCompiledBundle, SessionAgentKey } from "#runtime/sessions/runtim
 import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import {
   ConnectionEventActions,
-  EVENT_GET_ACTION,
   EVENT_STOP_ACTION,
+  EVENT_SUBSCRIBE_ACTION,
 } from "#runtime/subscriptions/actions.js";
 import { startSubscriptionOwner } from "#runtime/subscriptions/owner.js";
 import type {
@@ -313,22 +312,19 @@ it.each([3_600_000, null])(
       async () => ({ Authorization: "Bearer test" }),
       transportFetch,
     );
-    await watch("watch-1", ttlMs);
-    expect(methods.filter((method) => method === "events/list")).toHaveLength(2);
+    await watch("watch-1", ttlMs, "issue.created");
+    expect(methods.filter((method) => method === "events/list")).toHaveLength(1);
     expect(methods).not.toContain("events/subscribe");
     const catalogSpans = tracing.exporter
       .getFinishedSpans()
       .filter((span) => span.name === "events/list");
-    expect(catalogSpans).toHaveLength(2);
+    expect(catalogSpans).toHaveLength(1);
     expect(traceparents).toEqual(
       catalogSpans.map(
         (span) => `00-${span.spanContext().traceId}-${span.spanContext().spanId}-01`,
       ),
     );
-    expect(catalogSpans.map((span) => span.attributes["mcp.method.name"])).toEqual([
-      "events/list",
-      "events/list",
-    ]);
+    expect(catalogSpans.map((span) => span.attributes["mcp.method.name"])).toEqual(["events/list"]);
     expect(
       tracing.exporter
         .getFinishedSpans()
@@ -351,12 +347,6 @@ it.each([120_000, 31_536_000_000, null])(
     expect(requested[0]).toMatchObject({ ttlMs, idempotencyKey: initial.binding!.id });
     expect(requested[0]).not.toHaveProperty("expiresAt");
     expect(initial.binding!.source.request.ttlMs).toBe(ttlMs);
-    const [tool] = await contextStorage.run(ctx, () => actions.metadata());
-    const { toInputSchema } = await import("#tools/schema.js");
-    const schema = toInputSchema(tool!.inputSchema);
-    expect(
-      await schema["~standard"].validate({ arguments: { project: "ABC" }, ttlMs }),
-    ).not.toHaveProperty("issues");
   },
 );
 
@@ -369,14 +359,11 @@ it.each([
   { ttlMs: "120000" },
   { ttlMs: 120_000, expiresAt: null },
 ])("rejects invalid subscription input %j before starting a watch", async (lifetime) => {
-  const [tool] = await contextStorage.run(ctx, () => actions.metadata());
-  const input = { arguments: { project: "ABC" }, ...lifetime };
-  const { toInputSchema } = await import("#tools/schema.js");
-  expect(await toInputSchema(tool!.inputSchema)["~standard"].validate(input)).toHaveProperty(
-    "issues",
-  );
+  const input = { event: eventName(), arguments: { project: "ABC" }, ...lifetime };
   await expect(
-    contextStorage.run(ctx, () => actions.execute(tool!.name, input, { callId: "invalid" })),
+    contextStorage.run(ctx, () =>
+      actions.execute(EVENT_SUBSCRIBE_ACTION, input, { callId: "invalid" }),
+    ),
   ).rejects.toThrow("Invalid subscription input");
   expect(subscriber).not.toHaveBeenCalled();
   expect(handlers.size).toBe(0);
@@ -386,12 +373,11 @@ it.each([{ ttlMs: 1 }, { ttlMs: 120_000, expiresAt: null }])(
   "rejects invalid subscription input %j even when the provider schema cannot be validated",
   async (lifetime) => {
     eventSchema = { type: "object", properties: { project: { type: "provider-specific" } } };
-    const [tool] = await contextStorage.run(ctx, () => actions.metadata());
     await expect(
       contextStorage.run(ctx, () =>
         actions.execute(
-          tool!.name,
-          { arguments: { project: "ABC" }, ...lifetime },
+          EVENT_SUBSCRIBE_ACTION,
+          { event: eventName(), arguments: { project: "ABC" }, ...lifetime },
           { callId: "invalid" },
         ),
       ),
@@ -401,49 +387,29 @@ it.each([{ ttlMs: 1 }, { ttlMs: 120_000, expiresAt: null }])(
   },
 );
 
-it.each(["available", "provided arguments", "catalog unavailable", "connection unavailable"])(
-  "returns subscription results through eve's connection tool entry with MCP %s",
+it.each(["available", "catalog unavailable", "connection unavailable"])(
+  "subscribes and stops through the connection's event actions with MCP %s",
   async (availability) => {
     connection = { ...connection, headers: { account: "alice" } };
-    if (availability === "provided arguments")
-      connection = {
-        ...connection,
-        toolCall: { providedArguments: { arguments: () => ({ project: "REMOTE_ONLY" }) } },
-      };
     const registry = new ConnectionRegistryImpl([connection]);
     try {
       await contextStorage.run(ctx, async () => {
-        const [tool] = await listToolMetadata(
-          connection,
-          registry.getClient(connection.connectionName),
-        );
-        const execute = (name: string, input: unknown) =>
-          connectionEntry(registry, connection, name).execute!(input, {
-            toolCallId: name,
-            messages: [],
-          });
         const manage = (name: string, input: unknown) =>
           registry
             .getClient(connection.connectionName)
             .eventActions!.execute(name, input, { callId: name });
-        const created = (await execute(tool!.name, {
+        const created = (await manage(EVENT_SUBSCRIBE_ACTION, {
+          event: "alice.issue.created",
           arguments: { project: "ABC" },
           ttlMs: TTL_MS,
         })) as { id: string };
         expect(created).toMatchObject({ subscriptionId: "sub_0", status: "active" });
         expect(requested[0]!.arguments).toEqual({ project: "ABC" });
-        if (availability.includes("unavailable")) {
+        if (availability !== "available") {
           if (availability === "connection unavailable") await registry.dispose();
           createClient.mockRejectedValue(new Error("MCP unavailable"));
-        }
-        vi.mocked(adapter.getSubscription).mockResolvedValue(saved.values().next().value!);
-        expect(await manage(EVENT_GET_ACTION, { id: created.id })).toMatchObject({
-          id: created.id,
-          subscriptionId: "sub_0",
-        });
-        if (availability.includes("unavailable")) {
           setUser("bob");
-          await expect(manage(EVENT_GET_ACTION, { id: created.id })).rejects.toThrow(
+          await expect(manage(EVENT_STOP_ACTION, { id: created.id })).rejects.toThrow(
             "Unknown subscription",
           );
           setUser("alice");
@@ -460,42 +426,60 @@ it.each(["available", "provided arguments", "catalog unavailable", "connection u
   },
 );
 
-it.each([{ filter: { allow: ["list_issues"] }, hidden: ["subscribe"] }])(
-  "hides and refuses the event action the connection's tool filter excludes: %j",
-  async ({ filter, hidden }) => {
-    connection = { ...connection, headers: { account: "alice" }, tools: filter };
-    const registry = new ConnectionRegistryImpl([connection]);
-    try {
-      await contextStorage.run(ctx, async () => {
-        const unfiltered = await listToolMetadata(
-          { connectionName: connection.connectionName },
-          registry.getClient(connection.connectionName),
-        );
-        const subscribe = unfiltered.find((tool) =>
-          tool.name.startsWith("events_subscribe_"),
-        )!.name;
-        const names = hidden.map((name) => (name === "subscribe" ? subscribe : name));
-        const listed = await listToolMetadata(
-          connection,
-          registry.getClient(connection.connectionName),
-        );
-        for (const name of names) {
-          expect(listed.some((tool) => tool.name === name)).toBe(false);
-          await expect(
-            connectionEntry(registry, connection, name).execute!(
-              { id: "watch", arguments: { project: "ABC" }, ttlMs: TTL_MS },
-              { toolCallId: name, messages: [] },
-            ),
-          ).rejects.toThrow('Connection "issues" lists no events to subscribe to.');
-        }
-        expect(subscriber).not.toHaveBeenCalled();
-        expect(retired.size).toBe(0);
-      });
-    } finally {
-      await registry.dispose();
-    }
-  },
-);
+it("lists the connection's events with their descriptions and schemas, and none of them as tools", async () => {
+  eventSchema = { ...eventSchema, description: "Scoped to one project." };
+  createClient.mockImplementation(async (config) => ({
+    close: vi.fn(),
+    listTools: async () => ({ tools: [] }),
+    toolsFromDefinitions: () => ({}),
+    experimental_events: {
+      list: async () => ({
+        events: [
+          {
+            name: `${config.transport.headers.account}.issue.created`,
+            description: "An issue was created.",
+            delivery: ["webhook"],
+            inputSchema: eventSchema,
+          },
+          { name: "polled.only", delivery: ["poll"], inputSchema: eventSchema },
+          { name: "alice.issue.closed", delivery: ["webhook"] },
+        ],
+      }),
+    },
+  }));
+  connection = { ...connection, headers: { account: "alice" } };
+  const registry = new ConnectionRegistryImpl([connection]);
+  try {
+    await contextStorage.run(ctx, async () => {
+      const client = registry.getClient(connection.connectionName);
+      expect(await client.eventActions!.list()).toEqual([
+        {
+          name: "alice.issue.created",
+          description: "An issue was created.",
+          inputSchema: eventSchema,
+        },
+        { name: "alice.issue.closed", description: "", inputSchema: { type: "object" } },
+      ]);
+      expect(await listToolMetadata(connection, client)).toEqual([]);
+    });
+  } finally {
+    await registry.dispose();
+  }
+});
+
+it("rejects an event the connection does not emit, naming the closest events and where to find them", async () => {
+  const error = await watch("watch-1", TTL_MS, "alice.issue.creatd").then(
+    () => undefined,
+    (thrown: unknown) => thrown,
+  );
+  if (!(error instanceof Error)) throw new Error("Expected the subscribe to be refused.");
+  expect(error.message).toContain('Connection "issues" emits no event named "alice.issue.creatd".');
+  expect(error.message).toContain("Closest events: alice.issue.created.");
+  expect(error.message).toContain("eve__search");
+  expect(error.message).toContain("subscriptions__issues__");
+  expect(subscriber).not.toHaveBeenCalled();
+  expect(handlers.size).toBe(0);
+});
 
 it("runs callbacks in the creator's eve context", async () => {
   await watch();
@@ -533,13 +517,19 @@ function setUser(id: string) {
   });
 }
 const TTL_MS = 3_600_000;
-async function watch(callId = "watch-1", ttlMs: number | null = TTL_MS) {
+function eventName() {
+  return `${ctx.require(AuthKey)!.principalId}.issue.created`;
+}
+async function watch(
+  callId = "watch-1",
+  ttlMs: number | null = TTL_MS,
+  event: string = eventName(),
+) {
   return contextStorage.run(ctx, async () => {
-    const tools = await actions.metadata();
     try {
       return (await actions.execute(
-        tools[0]!.name,
-        { arguments: { project: "ABC" }, ttlMs },
+        EVENT_SUBSCRIBE_ACTION,
+        { event, arguments: { project: "ABC" }, ttlMs },
         { callId },
       )) as ManagedEventSubscription & { subscriptionId: string };
     } finally {
@@ -627,12 +617,13 @@ it.each(["user", "app"] as const)(
     }));
     const { id } = await watch();
     setUser("bob");
-    const tools = await contextStorage.run(ctx, () => actions.metadata());
-    expect(tools[0]!.description).toContain("bob.issue.created");
-    for (const action of ["events_get_subscription", "events_unsubscribe"])
-      await expect(
-        contextStorage.run(ctx, () => actions.execute(action, { id }, { callId: action })),
-      ).rejects.toThrow("Unknown subscription");
+    const listed = await contextStorage.run(ctx, () => actions.list());
+    expect(listed.map(({ name }) => name)).toEqual(["bob.issue.created"]);
+    await expect(
+      contextStorage.run(ctx, () =>
+        actions.execute(EVENT_STOP_ACTION, { id }, { callId: EVENT_STOP_ACTION }),
+      ),
+    ).rejects.toThrow("Unknown subscription");
     expect(adapter.unsubscribe).not.toHaveBeenCalled();
     setUser("alice");
     await watch();
@@ -642,11 +633,10 @@ it.each(["user", "app"] as const)(
 
 it("rejects invalid event arguments before subscription and fixes destination/identity outside model input", async () => {
   await contextStorage.run(ctx, async () => {
-    const [tool] = await actions.metadata();
     await expect(
       actions.execute(
-        tool!.name,
-        { arguments: { project: 42 }, ttlMs: TTL_MS },
+        EVENT_SUBSCRIBE_ACTION,
+        { event: eventName(), arguments: { project: 42 }, ttlMs: TTL_MS },
         { callId: "invalid" },
       ),
     ).rejects.toThrow("catalog schema");
@@ -730,10 +720,9 @@ it("returns the same watch when the same event and arguments are watched again",
   };
   const ask = (callId: string, eventArguments: Record<string, string>) =>
     contextStorage.run(ctx, async () => {
-      const [tool] = await actions.metadata();
       return (await actions.execute(
-        tool!.name,
-        { arguments: eventArguments, ttlMs: TTL_MS },
+        EVENT_SUBSCRIBE_ACTION,
+        { event: eventName(), arguments: eventArguments, ttlMs: TTL_MS },
         { callId },
       )) as { id: string };
     });
@@ -765,7 +754,7 @@ it("keys Connect's subscribe by watch and run, so a step retry reuses it and a l
   expect(later).not.toEqual(first);
 });
 
-it("returns a subscribe that outlasts the wait as pending under its id, which get later resolves", async () => {
+it("returns a subscribe that outlasts the wait as pending under its id", async () => {
   vi.mocked(startSubscriptionOwner).mockImplementationOnce(async (binding) => {
     handlers.set(binding.id, { binding: binding as ConnectionBinding, opened: undefined });
     return undefined;
@@ -777,26 +766,6 @@ it("returns a subscribe that outlasts the wait as pending under its id, which ge
     arguments: { project: "ABC" },
     status: "pending",
   });
-  const { id } = pending;
-  const late = { ...saved.values().next().value, id: "sub_late", status: "active" as const };
-  await contextStorage.run(ctx, async () => {
-    expect(await actions.execute(EVENT_GET_ACTION, { id }, { callId: "get" })).toEqual(pending);
-    handlers.set(id, {
-      binding: initial.binding!,
-      opened: {
-        key: "sub_late",
-        expiresAt: null,
-        upstream: late as ManagedEventSubscription,
-      },
-    });
-    vi.mocked(adapter.getSubscription).mockResolvedValue(late as ManagedEventSubscription);
-    expect(await actions.execute(EVENT_GET_ACTION, { id }, { callId: "get-again" })).toMatchObject({
-      id,
-      subscriptionId: "sub_late",
-      status: "active",
-    });
-  });
-  expect(adapter.getSubscription).toHaveBeenCalledWith(expect.objectContaining({ id: "sub_late" }));
 });
 
 it("takes a stop while the subscribe is still in flight, for the watch's run to carry out", async () => {
@@ -849,26 +818,13 @@ it("lets the creator stop a watch from a later session by its id", async () => {
   expect(retired.has(id)).toBe(true);
 });
 
-it("reports a stopped watch until its run finishes Connect's cleanup", async () => {
+it("refuses a stop of a watch whose run has finished", async () => {
   const { id } = await watch();
-  const cleaning = {
-    ...saved.values().next().value!,
-    status: "stopped" as const,
-    cleanupStatus: "pending" as const,
-  };
-  vi.mocked(adapter.getSubscription).mockResolvedValue(cleaning);
   await contextStorage.run(ctx, async () => {
     await actions.execute(EVENT_STOP_ACTION, { id }, { callId: "stop" });
-    expect(await actions.execute(EVENT_GET_ACTION, { id }, { callId: "get" })).toMatchObject({
-      id,
-      cleanupStatus: "pending",
-    });
   });
   handlers.delete(id);
   await contextStorage.run(ctx, async () => {
-    await expect(
-      actions.execute(EVENT_GET_ACTION, { id }, { callId: "get-after" }),
-    ).rejects.toThrow("Unknown subscription");
     await expect(
       actions.execute(EVENT_STOP_ACTION, { id }, { callId: "stop-after" }),
     ).rejects.toThrow("Unknown subscription");

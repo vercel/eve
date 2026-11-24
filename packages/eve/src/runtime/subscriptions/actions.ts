@@ -14,14 +14,13 @@ import { contextStorage } from "#context/container.js";
 import { AuthKey, SessionIdKey, SessionTraceSeedKey } from "#context/keys.js";
 import { requireCompiledBundle, SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedConnectionDefinition, ResolvedConnectionEvents } from "#runtime/types.js";
-import type {
-  ConnectionToolExecuteOptions,
-  ConnectionToolMetadata,
-} from "#shared/connection-types.js";
+import type { ChannelEventDefinition } from "#shared/channel-subscriptions.js";
+import type { ConnectionToolExecuteOptions } from "#shared/connection-types.js";
 import type { ManagedEventSubscribeInput } from "#shared/connection-events.js";
-import { parseJsonObject } from "#shared/json.js";
+import { parseJsonObject, type JsonObject } from "#shared/json.js";
+import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
+import { closestNames } from "#execution/catalog/rank.js";
 import { principalKey, resolveConnectionPrincipal } from "#runtime/connections/principal.js";
-import { connectionEventDestination } from "#runtime/subscriptions/path.js";
 import type {
   ConnectionBinding,
   ConnectionSubscriptionSource,
@@ -29,19 +28,27 @@ import type {
 } from "#runtime/subscriptions/state.js";
 import type { ManagedEventSubscription } from "#shared/connection-events.js";
 
-export const EVENT_GET_ACTION = "events_get_subscription";
 export const EVENT_STOP_ACTION = "events_unsubscribe";
-const PREFIX = "events_subscribe_";
+export const EVENT_SUBSCRIBE_ACTION = "events_subscribe";
 export const MIN_TTL_MS = 120_000;
 export const MAX_TTL_MS = 31_536_000_000;
 type EventCatalog = Pick<MCPEvents, "list">;
 const SUBSCRIBE_INPUT_SCHEMA = defineJsonSchema<
-  Pick<ManagedEventSubscribeInput, "arguments" | "ttlMs">
->(parseJsonObject(subscribeInputSchema()));
-
-export function isEventAction(name: string): boolean {
-  return name === EVENT_GET_ACTION || name === EVENT_STOP_ACTION || name.startsWith(PREFIX);
-}
+  Pick<ManagedEventSubscribeInput, "arguments" | "ttlMs"> & { event: string }
+>({
+  type: "object",
+  additionalProperties: false,
+  required: ["event", "arguments", "ttlMs"],
+  properties: {
+    event: { type: "string" },
+    arguments: { type: "object" },
+    ttlMs: {
+      type: ["integer", "null"],
+      minimum: MIN_TTL_MS,
+      maximum: MAX_TTL_MS,
+    },
+  },
+});
 
 export class ConnectionEventActions {
   private readonly connection: ResolvedConnectionDefinition;
@@ -149,16 +156,14 @@ export class ConnectionEventActions {
     throw new Error("MCP event catalog exceeds the 20-page limit.");
   }
 
-  async metadata(): Promise<ConnectionToolMetadata[]> {
-    return this.withClient(async (events) => {
-      const catalog = await this.catalog(events);
-      return catalog.map((event) => ({
-        name: eventActionName(event.name),
-        event: event.name,
-        description: `Subscribe to ${event.name}.${event.description ? ` ${event.description}` : ""} Events are delivered to this connection's callback for ttlMs milliseconds, or until stopped when ttlMs is null. Subscribing again with the same event and arguments returns the existing subscription.`,
-        inputSchema: subscribeInputSchema(event.inputSchema),
-      }));
-    });
+  async list(): Promise<ChannelEventDefinition[]> {
+    return this.withClient(async (events) =>
+      (await this.catalog(events)).map((event) => ({
+        name: event.name,
+        description: event.description ?? "",
+        inputSchema: objectSchema(event.inputSchema),
+      })),
+    );
   }
 
   async execute(
@@ -167,57 +172,41 @@ export class ConnectionEventActions {
     options: ConnectionToolExecuteOptions,
   ): Promise<unknown> {
     const args = parseJsonObject(input);
-    const { ctx, principal, backend, sessionId, owner, executionPrincipal, caller } = this.scope();
+    const { ctx, sessionId, owner, executionPrincipal, caller } = this.scope();
     const owners = installedDurableHost()?.subscriptions;
     if (owners === undefined)
       throw new Error("Subscriptions are not supported on this host. Run from a deployed agent.");
-    if (name === EVENT_GET_ACTION || name === EVENT_STOP_ACTION) {
+    if (name === EVENT_STOP_ACTION) {
       if (typeof args.id !== "string") throw new Error("id must be a subscription id.");
       const bindingId = args.id;
       const handler = await owners.find(bindingId);
-      if (handler === undefined || !heldBy(handler.binding, caller))
+      if (
+        handler === undefined ||
+        !heldBy(handler.binding, caller) ||
+        !(await owners.retire(bindingId))
+      )
         throw new Error("Unknown subscription for this caller and account.");
-      if (name === EVENT_STOP_ACTION) {
-        if (!(await owners.retire(bindingId)))
-          throw new Error("Unknown subscription for this caller and account.");
-        return { id: bindingId, status: "stopping" as const };
-      }
-      if (handler.opened === undefined) return pendingResult(handler.binding);
-      const subscriptionId = handler.opened.key;
-      const events = await backend.createAdapter({
-        principal,
-        connection: { url: this.connection.url },
-        destination: { path: connectionEventDestination(this.connection.connectionName) },
-      });
-      const subscription = await withConnectionEventSpan(
-        {
-          ctx,
-          connectionName: this.connection.connectionName,
-          bindingId,
-          subscriptionId,
-          operation: "get",
-        },
-        () => events.getSubscription({ id: subscriptionId, options: { timeout: 30_000 } }),
-      );
-      return subscriptionResult(bindingId, subscription);
+      return { id: bindingId, status: "stopping" as const };
     }
+    if (name !== EVENT_SUBSCRIBE_ACTION) throw new Error(`Unknown event action "${name}".`);
     return this.withClient(async (events) => {
-      const definition = (await this.catalog(events)).find(
-        (event) => eventActionName(event.name) === name,
-      );
-      if (definition === undefined)
-        throw new Error("Unknown event subscription action for this account.");
       const inputResult = await SUBSCRIBE_INPUT_SCHEMA["~standard"].validate(args);
       if (inputResult.issues !== undefined)
         throw new Error(
           `Invalid subscription input: ${inputResult.issues.map(({ message }) => message).join("; ")}`,
         );
-      const { arguments: inputArguments, ttlMs } = inputResult.value;
-      const schema =
-        typeof definition.inputSchema === "boolean"
-          ? { allOf: [definition.inputSchema] }
-          : definition.inputSchema;
-      const valid = await toInputSchema(schema)["~standard"].validate(
+      const { event: eventName, arguments: inputArguments, ttlMs } = inputResult.value;
+      const catalog = await this.catalog(events);
+      const definition = catalog.find((event) => event.name === eventName);
+      if (definition === undefined)
+        throw new Error(
+          unknownEventMessage(
+            this.connection.connectionName,
+            eventName,
+            catalog.map((event) => ({ name: event.name, description: event.description ?? "" })),
+          ),
+        );
+      const valid = await toInputSchema(objectSchema(definition.inputSchema))["~standard"].validate(
         parseJsonObject(inputArguments),
       );
       if (valid.issues !== undefined)
@@ -264,23 +253,20 @@ export class ConnectionEventActions {
   }
 }
 
-function subscribeInputSchema(
-  argumentsSchema: EventDefinition["inputSchema"] = { type: "object" },
-) {
-  return {
-    type: "object",
-    additionalProperties: false,
-    required: ["arguments", "ttlMs"],
-    properties: {
-      arguments: argumentsSchema,
-      ttlMs: {
-        type: ["integer", "null"],
-        minimum: MIN_TTL_MS,
-        maximum: MAX_TTL_MS,
-        description: `How long to keep the subscription active, in milliseconds (${MIN_TTL_MS} for 2 minutes up to ${MAX_TTL_MS} for 365 days), or null until stopped.`,
-      },
-    },
-  };
+function objectSchema(schema: EventDefinition["inputSchema"] | undefined): JsonObject {
+  if (schema === undefined) return { type: "object" };
+  return typeof schema === "boolean" ? { allOf: [schema] } : parseJsonObject(schema);
+}
+
+function unknownEventMessage(
+  connectionName: string,
+  event: string,
+  events: readonly { readonly name: string; readonly description: string }[],
+): string {
+  const closest = closestNames(event, events);
+  return `Connection "${connectionName}" emits no event named "${event}".${
+    closest.length > 0 ? ` Closest events: ${closest.join(", ")}.` : ""
+  } Find its events with ${SEARCH_TOOL_NAME}({ query: "subscriptions__${connectionName}__" }).`;
 }
 
 function subscriptionResult(bindingId: string, subscription: ManagedEventSubscription) {
@@ -315,8 +301,4 @@ function canonicalJson(value: unknown): string {
       ? Object.fromEntries(Object.entries(entry).sort(([left], [right]) => (left < right ? -1 : 1)))
       : entry,
   );
-}
-
-export function eventActionName(eventName: string): string {
-  return `${PREFIX}${createHash("sha256").update(eventName).digest("hex").slice(0, 24)}`;
 }

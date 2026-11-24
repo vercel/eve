@@ -302,6 +302,7 @@ export function defineChannel<
     turnPolicy: definition.turnPolicy,
     onEvent: definition.experimental?.subscriptions?.onEvent,
     onSubscribe: definition.experimental?.subscriptions?.onSubscribe,
+    events: definition.experimental?.subscriptions?.events,
   };
 
   return compiled;

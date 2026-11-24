@@ -20,7 +20,6 @@ import { approvalDecision } from "#approval/status.js";
 import { isAuthorizationSignal, type AuthorizationSignal } from "#harness/authorization.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { withConnectionApproval } from "#runtime/connections/approval-scope.js";
-import { isEventAction } from "#runtime/subscriptions/actions.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
 import {
   connectionToolModelOutput,
@@ -170,8 +169,7 @@ async function runConnectionTool(
   if ("authorization" in listing) {
     return await auth.handleError(listing.error, listing.authorization);
   }
-  const isEventAction = client.eventActions?.ownsName(toolName) === true;
-  const modelInput = withoutProvidedArguments(connection, rawInput, !isEventAction);
+  const modelInput = withoutProvidedArguments(connection, rawInput);
   const checked = await checkCall(connection, listing.tools, toolName, modelInput);
   if ("issues" in checked) throw new Error(issuesMessage(checked.issues));
   const { input, tool } = checked;
@@ -180,13 +178,6 @@ async function runConnectionTool(
   try {
     const approved = <T>(fn: () => T) =>
       withConnectionApproval(connection.connectionName, options.approval?.responder, fn);
-    if (isEventAction)
-      return await approved(() =>
-        client.eventActions!.execute(tool.name, input, {
-          abortSignal: options.abortSignal,
-          callId: options.toolCallId,
-        }),
-      );
     raw = await approved(() =>
       executeWithDeadline(connection.connectionName, client, tool.name, input, options),
     );
@@ -242,8 +233,7 @@ async function checkInput(
     if (isConnectionAuthorizationRequiredError(error)) return { value: input };
     return { issues: [{ message: listingFailureMessage(connection.connectionName, error) }] };
   }
-  const remote = client.eventActions?.ownsName(toolName) !== true;
-  const modelInput = withoutProvidedArguments(connection, input, remote);
+  const modelInput = withoutProvidedArguments(connection, input);
   const checked = await checkCall(connection, tools, toolName, modelInput);
   return "issues" in checked ? { issues: checked.issues } : { value: modelInput };
 }
@@ -255,9 +245,8 @@ type CallCheck =
 function withoutProvidedArguments(
   connection: ResolvedConnectionDefinition,
   input: unknown,
-  remote: boolean,
 ): Record<string, unknown> {
-  const provided = remote ? (connection.toolCall?.providedArguments ?? {}) : {};
+  const provided = connection.toolCall?.providedArguments ?? {};
   return Object.fromEntries(
     Object.entries(isObject(input) ? input : {}).filter(([key]) => !Object.hasOwn(provided, key)),
   );
@@ -302,12 +291,6 @@ function unknownToolMessage(
   tools: readonly ConnectionToolMetadata[],
 ): string {
   const { connectionName } = connection;
-  if (isEventAction(toolName)) {
-    const events = tools.flatMap((tool) => (tool.event === undefined ? [] : [tool.event]));
-    return events.length > 0
-      ? `Connection "${connectionName}" emits no such event. Its events: ${events.join(", ")}.`
-      : `Connection "${connectionName}" lists no events to subscribe to.`;
-  }
   const suggestions = closestNames(toolName, tools).map((name) =>
     connectionToolName(connectionName, name),
   );

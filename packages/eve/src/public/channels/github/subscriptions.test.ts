@@ -5,11 +5,10 @@ import { isHttpRouteDefinition } from "#channel/routes.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 import { githubChannel } from "#public/channels/github/githubChannel.js";
-import { subscriptionCatalogOf } from "#shared/channel-subscriptions.js";
 import {
   describeGitHubEvent,
   emitGitHubWebhook,
-  githubChannelOnEvent,
+  githubEventDefinitions,
   type GitHubOnEvent,
 } from "#public/channels/github/subscriptions.js";
 import { signGitHubWebhookBody } from "#public/channels/github/verify.js";
@@ -112,7 +111,6 @@ const scopesOf = (emit: ReturnType<typeof vi.fn<EmitChannelEventFn>>) =>
 
 describe("GitHub channel subscriptions", () => {
   it("makes nothing subscribable and emits nothing without onEvent", async () => {
-    expect(githubChannelOnEvent(undefined)).toBeUndefined();
     const channel = githubChannel({});
     expect(isCompiledChannel(channel) && channel.onEvent).toBeFalsy();
     const emit = await deliver({
@@ -123,28 +121,74 @@ describe("GitHub channel subscriptions", () => {
     expect(emit).not.toHaveBeenCalled();
   });
 
-  it("describes the event names and takes a lowercase repository, with the pull request optional", () => {
-    const catalog = subscriptionCatalogOf(githubChannelOnEvent(SEND_ALL)!)!;
-    expect(catalog.description).toContain("check_suite.completed");
-    expect(catalog.inputSchema).toMatchObject({
-      additionalProperties: false,
-      required: ["owner", "repo"],
-      properties: {
-        owner: { pattern: "^[^A-Z]+$" },
-        repo: { pattern: "^[^A-Z]+$" },
-        pull: { type: "integer" },
-      },
+  describe("githubEventDefinitions", () => {
+    it("defines every event with a name, a description and a lowercase repository input with the pull request optional", () => {
+      const events = githubEventDefinitions();
+      expect(events).toHaveLength(261);
+      for (const event of events) {
+        expect(event.name).toEqual(expect.any(String));
+        expect(event.description).toContain(`\`${event.name.split(".")[0]}\``);
+        expect(event.inputSchema).toMatchObject({
+          additionalProperties: false,
+          required: ["owner", "repo"],
+          properties: {
+            owner: { pattern: "^[^A-Z]+$" },
+            repo: { pattern: "^[^A-Z]+$" },
+            pull: { type: "integer" },
+          },
+        });
+      }
     });
-  });
 
-  it("lists each event by its name and action, with no duplicates and no bare name that has actions", () => {
-    const { events } = subscriptionCatalogOf(githubChannelOnEvent(SEND_ALL)!)!;
-    expect(events).toEqual(
-      expect.arrayContaining(["check_suite.completed", "issue_comment.created", "push"]),
-    );
-    expect(events).not.toContain("check_suite");
-    expect(events).not.toContain("issue_comment");
-    expect(new Set(events).size).toBe(events.length);
+    it("lists each event by its name and action, with no duplicates and no bare name that has actions", () => {
+      const names = githubEventDefinitions().map(({ name }) => name);
+      expect(names).toEqual(
+        expect.arrayContaining(["check_suite.completed", "issue_comment.created", "push"]),
+      );
+      expect(names).not.toContain("check_suite");
+      expect(names).not.toContain("issue_comment");
+      expect(new Set(names).size).toBe(names.length);
+    });
+
+    it("narrows to an event's every action, or to one action", () => {
+      const names = (only: readonly string[]) =>
+        githubEventDefinitions(only).map(({ name }) => name);
+      expect(names(["push"])).toEqual(["push"]);
+      expect(names(["check_suite.completed"])).toEqual(["check_suite.completed"]);
+      const suite = names(["check_suite"]);
+      expect(suite).toContain("check_suite.completed");
+      expect(suite.length).toBeGreaterThan(1);
+      expect(suite.every((name) => name.startsWith("check_suite."))).toBe(true);
+      expect(names(["push", "check_suite.completed"])).toEqual(
+        expect.arrayContaining(["push", "check_suite.completed"]),
+      );
+    });
+
+    it("throws for an entry GitHub does not send, naming it", () => {
+      expect(() => githubEventDefinitions(["push", "check_suit"])).toThrow(
+        'names "check_suit", which GitHub does not send',
+      );
+      expect(() => githubEventDefinitions(["check_suite.invented"])).toThrow(
+        '"check_suite.invented"',
+      );
+    });
+
+    it("is what the channel offers, narrowed by experimental.subscriptions.events", () => {
+      const compiled = (events?: readonly string[]) => {
+        const channel = githubChannel({
+          experimental: { subscriptions: { onEvent: SEND_ALL, events } },
+          credentials: { installationToken: "ghs_test", webhookSecret: SECRET },
+        });
+        if (!isCompiledChannel(channel)) throw new Error("Expected a CompiledChannel.");
+        return channel.events;
+      };
+      expect(compiled()).toHaveLength(261);
+      expect(compiled(["push", "check_suite.completed"])?.map(({ name }) => name)).toEqual([
+        "check_suite.completed",
+        "push",
+      ]);
+      expect(() => compiled(["nope"])).toThrow('"nope"');
+    });
   });
 
   it("emits any event under its name and action, for the repository and each pull request it concerns", async () => {
@@ -292,7 +336,7 @@ describe("GitHub channel subscriptions", () => {
         event: occurrence.name,
         input: {},
       };
-      return githubChannelOnEvent(onEvent)!({
+      return onEvent({
         auth: null,
         sessionId: "s1",
         event: occurrence,
@@ -349,6 +393,6 @@ describe("GitHub channel subscriptions", () => {
     });
     if (!isCompiledChannel(channel)) throw new Error("Expected a CompiledChannel.");
     expect(channel.onSubscribe).toBe(onSubscribe);
-    expect(subscriptionCatalogOf(channel.onEvent!)).toBeDefined();
+    expect(channel.onEvent).toBe(SEND_ALL);
   });
 });

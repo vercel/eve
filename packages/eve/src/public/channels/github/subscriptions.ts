@@ -9,11 +9,10 @@ import { isObject } from "#shared/guards.js";
 import type { JsonObject } from "#shared/json.js";
 import type {
   ChannelEvent,
+  ChannelEventDefinition,
   ChannelOnEvent,
   EmitChannelEventFn,
-  ChannelSubscriptionCatalog,
 } from "#shared/channel-subscriptions.js";
-import { withSubscriptionCatalog } from "#shared/channel-subscriptions.js";
 
 const PAYLOAD_LIMIT = 8_000;
 const LOWERCASE = "^[^A-Z]+$";
@@ -49,20 +48,30 @@ const INPUT_SCHEMA: JsonObject = {
   type: "object",
 };
 
-const DESCRIPTION =
-  "GitHub webhook events for repositories where the GitHub App is installed, named `<event>.<action>` (such as `check_suite.completed` or `issue_comment.created`) or `<event>` when there is no action (such as `push`). Pass `{ owner, repo }` in lowercase for repository-wide events, or include `pull` for events tied to one pull request, including its check suites.";
-
-const GITHUB_SUBSCRIPTION_CATALOG: ChannelSubscriptionCatalog = {
-  description: DESCRIPTION,
-  events: GITHUB_EVENTS,
-  inputSchema: INPUT_SCHEMA,
-};
-
-export function githubChannelOnEvent(
-  onEvent: GitHubOnEvent | undefined,
-): ChannelOnEvent | undefined {
-  if (onEvent === undefined) return undefined;
-  return withSubscriptionCatalog(onEvent, GITHUB_SUBSCRIPTION_CATALOG);
+export function githubEventDefinitions(
+  only?: readonly string[],
+): readonly ChannelEventDefinition[] {
+  const names =
+    only === undefined
+      ? GITHUB_EVENTS
+      : GITHUB_EVENTS.filter((name) =>
+          only.some((entry) => name === entry || name.startsWith(`${entry}.`)),
+        );
+  const unknown = only?.filter(
+    (entry) => !GITHUB_EVENTS.some((name) => name === entry || name.startsWith(`${entry}.`)),
+  );
+  if (unknown !== undefined && unknown.length > 0)
+    throw new Error(
+      `githubChannel: experimental.subscriptions.events names ${unknown.map((entry) => `"${entry}"`).join(", ")}, which GitHub does not send. Use an event such as "check_suite" or an event and action such as "check_suite.completed".`,
+    );
+  return names.map((name) => {
+    const [event = name, action] = name.split(".");
+    return {
+      name,
+      description: `The GitHub \`${event}\` webhook${action === undefined ? "" : ` with action \`${action}\``}. Scope it to a repository with \`owner\` and \`repo\`, or to one pull request with \`pull\`.`,
+      inputSchema: INPUT_SCHEMA,
+    };
+  });
 }
 
 /** The message that names a GitHub event's repository, pull requests and sender, then carries its payload. */

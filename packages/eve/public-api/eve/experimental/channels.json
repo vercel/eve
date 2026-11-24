@@ -1,6 +1,7 @@
 [
   "ChannelEvent",
   "ChannelEventDecision",
+  "ChannelEventDefinition",
   "ChannelOccurrence",
   "ChannelOnEvent",
   "ChannelOnSubscribe",

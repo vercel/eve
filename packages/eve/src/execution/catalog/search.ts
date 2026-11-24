@@ -1,10 +1,14 @@
+import { isConnectionAuthorizationRequiredError } from "#connections/errors.js";
 import { connectionToolName } from "#connections/ownership.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { CALL_TOOL_NAME, SEARCH_TOOL_NAME, SKILL_TOOL_NAME } from "#protocol/catalog-tools.js";
+import { SUBSCRIBE_TOOL } from "#runtime/subscriptions/tools.js";
+import type { ChannelEventDefinition } from "#shared/channel-subscriptions.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import type { ConnectionToolMetadata } from "#shared/connection-types.js";
 import { serializeInputSchema, toInputSchema, type ToolSchemaSource } from "#tools/schema.js";
+import { renderToolSignature } from "#tools/signature.js";
 
 import {
   completeConnectionSignIn,
@@ -16,6 +20,7 @@ import { connectionSignInEntry } from "./connection-entry.js";
 import { closestNames, isEmptyQuery, rankCandidates, type RankCandidate } from "./rank.js";
 import { connectionToolSignature, entrySignature } from "./signatures.js";
 import type { CatalogSkill } from "./skills.js";
+import type { SubscriptionSources } from "./subscription-tools.js";
 
 const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 50;
@@ -23,10 +28,11 @@ const MAX_LIMIT = 50;
 export interface SearchReach {
   readonly connections: boolean;
   readonly skills: boolean;
+  readonly subscriptions: boolean;
   readonly tools: boolean;
 }
 
-function searchDescription({ connections, skills, tools }: SearchReach): string {
+function searchDescription({ connections, skills, subscriptions, tools }: SearchReach): string {
   return [
     "Search your own catalog for tools, agents, skills, and connected services that aren't in your tool list. Use it when nothing in your tool list fits the request; it doesn't search the web.",
     tools
@@ -34,6 +40,9 @@ function searchDescription({ connections, skills, tools }: SearchReach): string 
       : undefined,
     skills
       ? `A result with \`skill\` has the name and description: load it with ${SKILL_TOOL_NAME}({ name }).`
+      : undefined,
+    subscriptions
+      ? `A result with \`event\` is an event you can subscribe to: it has the \`source\`, the exact event name, and the signature of the ${SUBSCRIBE_TOOL} call. Find them with the prefix "subscriptions__<source>__" or with words such as "github check suite".`
       : undefined,
     "`searched` counts the entries the query covered, and `remaining` counts the matches past `limit`: when `remaining` is 0, nothing else the query covered matched. Connections under `unavailable` weren't searched.",
     'When you already know a name or connection, from the catalog listing, an earlier result, or an error, search it directly: the exact name, or "<connection>__", which is faster and returns only that connection\'s tools.',
@@ -72,7 +81,13 @@ interface SearchInput {
 
 type SearchResult =
   | { readonly description: string; readonly signature: string; readonly tool: string }
-  | { readonly description: string; readonly path?: string; readonly skill: string };
+  | { readonly description: string; readonly path?: string; readonly skill: string }
+  | {
+      readonly description: string;
+      readonly event: string;
+      readonly signature: string;
+      readonly source: string;
+    };
 
 interface UnavailableConnection {
   readonly connection: string;
@@ -113,6 +128,7 @@ export function createSearchTool(input: {
   readonly reach: SearchReach;
   readonly registry: ConnectionRegistry | undefined;
   readonly skills: readonly CatalogSkill[];
+  readonly subscriptions: SubscriptionSources;
 }): HarnessToolDefinition {
   return {
     description: searchDescription(input.reach),
@@ -140,6 +156,9 @@ async function search(
   const candidates: SearchCandidate[] = [
     ...catalog.deferred.map((definition) => entryCandidate(definition, catalog.describe)),
     ...catalog.skills.map(skillCandidate),
+    ...catalog.subscriptions.channels.flatMap(({ channelName, events }) =>
+      (events ?? []).map((event) => subscriptionCandidate(channelName, "channel", event)),
+    ),
   ].filter((candidate) => inScope(candidate.fullName));
   const unavailable: UnavailableConnection[] = [];
   const { registry } = catalog;
@@ -156,6 +175,25 @@ async function search(
     for (const connection of found) {
       if ("unavailable" in connection) unavailable.push(connection.unavailable);
       else
+        candidates.push(
+          ...connection.candidates.filter((candidate) => inScope(candidate.fullName)),
+        );
+    }
+  }
+
+  if (registry !== undefined) {
+    const sources = catalog.subscriptions.connections.filter(
+      ({ connectionName }) =>
+        namespace === undefined || mayOwnNamespace(subscriptionName(connectionName), namespace),
+    );
+    const found = await Promise.all(
+      sources.map((connection) => searchConnectionEvents(registry, connection)),
+    );
+    for (const connection of found) {
+      if ("unavailable" in connection) {
+        if (!unavailable.some(({ connection: name }) => name === connection.unavailable.connection))
+          unavailable.push(connection.unavailable);
+      } else
         candidates.push(
           ...connection.candidates.filter((candidate) => inScope(candidate.fullName)),
         );
@@ -231,11 +269,65 @@ async function searchConnection(
   }
   if ("failure" in listing) return { unavailable: { connection: name, error: listing.failure } };
   if ("authorization" in listing) return { candidates: [signInCandidate(registry, connection)] };
-  const actions = registry.getClient(name).eventActions;
+  return { candidates: listing.tools.map((tool) => toolCandidate(connection, tool)) };
+}
+
+async function searchConnectionEvents(
+  registry: ConnectionRegistry,
+  connection: ResolvedConnectionDefinition,
+): Promise<
+  | { readonly candidates: readonly SearchCandidate[] }
+  | { readonly unavailable: UnavailableConnection }
+> {
+  const name = connection.connectionName;
+  try {
+    await completeConnectionSignIn(registry, connection);
+    const events = (await registry.getClient(name).eventActions?.list()) ?? [];
+    return {
+      candidates: events.map((event) => subscriptionCandidate(name, "connection", event)),
+    };
+  } catch (error) {
+    if (isConnectionAuthorizationRequiredError(error)) return { candidates: [] };
+    return { unavailable: { connection: name, error: listingFailureMessage(name, error) } };
+  }
+}
+
+function subscriptionName(source: string): string {
+  return `subscriptions__${source}`;
+}
+
+function subscriptionCandidate(
+  source: string,
+  kind: "channel" | "connection",
+  event: ChannelEventDefinition,
+): SearchCandidate {
+  const description =
+    event.description === "" ? `A ${kind} event of ${source}.` : event.description;
   return {
-    candidates: listing.tools
-      .filter((tool) => actions?.ownsName(tool.name) !== true)
-      .map((tool) => toolCandidate(connection, tool)),
+    connection: { description: `Events from the ${source} ${kind}.`, name: source },
+    description,
+    inputSchema: event.inputSchema,
+    name: event.name,
+    result: () => ({
+      description,
+      event: event.name,
+      signature: renderToolSignature({
+        name: SUBSCRIBE_TOOL,
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          required: ["source", "event", "input", "ttlMs"],
+          properties: {
+            source: { const: source },
+            event: { const: event.name },
+            input: event.inputSchema,
+            ttlMs: { type: ["integer", "null"] },
+          },
+        },
+      }),
+      source,
+    }),
+    fullName: `${subscriptionName(source)}__${event.name}`,
   };
 }
 

@@ -315,22 +315,22 @@ experimental: {
 
 ### What the model can call
 
-The model uses the same three tools as channel subscriptions: `eve__subscribe`, `eve__subscription_get`, and `eve__subscription_stop`. For a connection, `eve__subscribe` takes `{ subscription: { source: "<connection name>", event, input }, ttlMs }`, where `event` is an event name from the server's catalog and `input` holds the event's arguments. Passing an unsupported event name returns the names the server supports.
+The model finds a connection's events with `eve__search`, for example `{ "query": "subscriptions__<connection name>__" }`, which returns each event's name, description, and the shape of its `input`. eve calls the server's `events/list` only when a search covers the connection or a subscribe runs, not on other turns. It subscribes with `eve__subscribe` and ends the subscription with `eve__subscription_stop`, the same tools as channel subscriptions. For a connection, `eve__subscribe` takes `{ source: "<connection name>", event, input, ttlMs }`, where `event` is an event name from the server's catalog and `input` holds the event's arguments. Passing an unsupported event name returns the closest names the server supports.
 
-| Tool                     | Input                                               | Result                                  |
-| ------------------------ | --------------------------------------------------- | --------------------------------------- |
-| `eve__subscribe`         | `{ subscription: { source, event, input }, ttlMs }` | `{ id, status, expiresAt, ... }`        |
-| `eve__subscription_get`  | `{ id }`                                            | The subscription, or unknown once ended |
-| `eve__subscription_stop` | `{ id }`                                            | `{ id, status: "stopping" }`            |
+| Tool                     | Input                                             | Result                                                                     |
+| ------------------------ | ------------------------------------------------- | -------------------------------------------------------------------------- |
+| `eve__search`            | `{ query: "subscriptions__<connection name>__" }` | The connection's events, each with `event`, `description`, and `signature` |
+| `eve__subscribe`         | `{ source, event, input, ttlMs }`                 | `{ id, status, expiresAt, ... }`                                           |
+| `eve__subscription_stop` | `{ id }`                                          | `{ id, status: "stopping" }`                                               |
 
 `eve__subscribe` runs through the connection's event action, so the connection's sign-in, approval policy, and event catalog check still apply. `ttlMs` is required: an integer from `120000` (2 minutes) to `31536000000` (365 days), or `null` until stopped. `expiresAt` is the resulting deadline, or `null`.
 
-- **Pending.** If Connect has not confirmed in time, `eve__subscribe` returns the `id` with `status: "pending"`. Call `eve__subscription_get` with that `id` later.
+- **Pending.** If Connect has not confirmed in time, `eve__subscribe` returns the `id` with `status: "pending"`. Events still arrive once Connect confirms.
 - **Repeats.** Subscribing again to the same event with the same arguments from the same session returns the existing subscription. Another session gets its own subscription.
-- **Stopping.** `eve__subscription_get` and `eve__subscription_stop` accept the `id` from any of the creator's sessions and run through the connection's approval policy, like `eve__subscribe`. Until Connect confirms the unsubscribe, `eve__subscription_get` still reports the subscription and `eve__subscription_stop` can be called again.
+- **Stopping.** `eve__subscription_stop` accepts the `id` from any of the creator's sessions and runs through the connection's approval policy, like `eve__subscribe`. Until Connect confirms the unsubscribe, `eve__subscription_stop` can be called again.
 - **Lifetime.** A subscription outlives the session that created it. It ends when stopped, at `expiresAt`, or when the upstream subscription terminates.
 
-`tools.allow` and `tools.block` can filter generated `events_subscribe_<hash>` entries reached through `eve__subscribe`, where `<hash>` is the first 24 hex characters of the SHA-256 of the event name. These entries do not appear in `eve__search`, and `toolCall.providedArguments` does not apply to them.
+Event subscriptions are not tools of the connection, so `tools.allow`, `tools.block`, and `toolCall.providedArguments` do not apply to them. Use the connection's `approval` to control them.
 
 ### Receiver
 

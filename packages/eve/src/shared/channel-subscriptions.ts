@@ -89,29 +89,19 @@ export type ChannelOnEvent = (
 export interface ChannelSubscriptionsDefinition {
   readonly onEvent: ChannelOnEvent;
   readonly onSubscribe?: ChannelOnSubscribe;
+  /**
+   * The events the channel emits, each with the `input` that scopes it. `eve__search` lists them
+   * and `eve__subscribe` rejects any other event name. Without it the model passes any event name
+   * and input, as the agent's instructions describe them.
+   */
+  readonly events?: readonly ChannelEventDefinition[];
 }
 
-export interface ChannelSubscriptionCatalog {
+/** One event a channel emits: its name, what it means, and the JSON Schema of the `input` that scopes it. */
+export interface ChannelEventDefinition {
+  readonly name: string;
   readonly description: string;
-  readonly events: readonly string[];
   readonly inputSchema: JsonObject;
-}
-
-const CATALOG = Symbol.for("eve.channelSubscriptionCatalog");
-
-export function withSubscriptionCatalog(
-  onEvent: ChannelOnEvent,
-  catalog: ChannelSubscriptionCatalog,
-): ChannelOnEvent {
-  return Object.assign((input: Parameters<ChannelOnEvent>[0]) => onEvent(input), {
-    [CATALOG]: catalog,
-  });
-}
-
-export function subscriptionCatalogOf(
-  onEvent: ChannelOnEvent,
-): ChannelSubscriptionCatalog | undefined {
-  return (onEvent as { [CATALOG]?: ChannelSubscriptionCatalog })[CATALOG];
 }
 
 /**

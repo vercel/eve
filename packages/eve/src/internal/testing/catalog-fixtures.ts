@@ -4,7 +4,6 @@ import { AuthKey, SessionIdKey } from "#context/keys.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import type { StepCatalog } from "#execution/catalog/step-catalog.js";
 import { stepCatalog } from "#definitions/step.js";
-import { eventActionName, isEventAction } from "#runtime/subscriptions/actions.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import { CallbackBaseUrlKey } from "#harness/authorization.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
@@ -144,6 +143,7 @@ export interface FakeConnection {
   readonly calls: { readonly input: unknown; readonly tool: string }[];
   readonly client: ConnectionClient;
   readonly eventCalls: { readonly input: unknown; readonly name: string }[];
+  readonly eventListCalls: number[];
   readonly definition: ResolvedConnectionDefinition;
   listing: ConnectionListing;
   readonly signIns: string[];
@@ -162,17 +162,12 @@ export function fakeConnection(input: {
 }): FakeConnection {
   const calls: FakeConnection["calls"] = [];
   const eventCalls: FakeConnection["eventCalls"] = [];
+  const eventListCalls: number[] = [];
   const signIns: string[] = [];
-  const eventTools = (input.events ?? []).map((event): ConnectionToolMetadata => ({
+  const eventDefinitions = (input.events ?? []).map((event) => ({
     description: `Watch ${event}.`,
-    event,
-    inputSchema: {
-      type: "object",
-      additionalProperties: false,
-      required: ["arguments", "ttlMs"],
-      properties: { arguments: { type: "object" }, ttlMs: { type: ["integer", "null"] } },
-    },
-    name: eventActionName(event),
+    inputSchema: { type: "object" },
+    name: event,
   }));
   const definition: ResolvedConnectionDefinition = {
     approval: input.approval,
@@ -189,6 +184,7 @@ export function fakeConnection(input: {
   const connection: FakeConnection = {
     calls,
     eventCalls,
+    eventListCalls,
     client: {
       close: async () => {},
       connect: async () => {},
@@ -198,8 +194,10 @@ export function fakeConnection(input: {
             eventCalls.push({ input: args, name });
             return { id: "subscription-1", status: "active" };
           },
-          metadata: async () => eventTools,
-          ownsName: isEventAction,
+          list: async () => {
+            eventListCalls.push(eventListCalls.length + 1);
+            return eventDefinitions;
+          },
         },
       }),
       executeTool: async (tool, args) => {

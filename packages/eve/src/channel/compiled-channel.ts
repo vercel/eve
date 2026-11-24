@@ -7,7 +7,11 @@ import type { Delivery } from "#shared/delivery.js";
 import type { TurnPolicy } from "#channel/types.js";
 import type { GenericReceiveInput } from "#shared/channel-definition.js";
 import type { JsonObject } from "#shared/json.js";
-import type { ChannelOnEvent, ChannelOnSubscribe } from "#shared/channel-subscriptions.js";
+import type {
+  ChannelEventDefinition,
+  ChannelOnEvent,
+  ChannelOnSubscribe,
+} from "#shared/channel-subscriptions.js";
 
 export const CHANNEL_SENTINEL = "eve:channel" as const;
 const CHANNEL_BUILD_METADATA = Symbol.for("eve.channel.buildMetadata");
@@ -52,6 +56,7 @@ export interface CompiledChannel<
   readonly turnPolicy?: TurnPolicy;
   readonly onEvent?: ChannelOnEvent;
   readonly onSubscribe?: ChannelOnSubscribe;
+  readonly events?: readonly ChannelEventDefinition[];
 }
 
 export function isCompiledChannel(value: unknown): value is CompiledChannel {

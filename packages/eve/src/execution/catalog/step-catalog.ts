@@ -44,6 +44,7 @@ export interface Callable {
 
 export interface StepCatalog extends HarnessToolLookup {
   readonly advertised: HarnessToolMap;
+  readonly channels: readonly ResolvedChannelDefinition[];
   readonly connections: readonly ResolvedConnectionDefinition[];
   readonly deferred: HarnessToolMap;
   readonly entries: HarnessToolMap;
@@ -109,6 +110,7 @@ export function buildStepCatalog(input: CatalogInput): StepCatalog {
   const advertised: Map<string, HarnessToolDefinition> = new Map();
   const catalog: StepCatalog = {
     advertised,
+    channels: callable.channels,
     connections: callable.connections,
     deferred: callable.deferred,
     describe: callable.describe,

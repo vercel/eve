@@ -3,6 +3,7 @@ import type { ConnectionEventsBackend } from "#shared/connection-events.js";
 import type { ConnectionAuthorizationChallenge } from "#connections/errors.js";
 import type { SessionContext } from "#context/session-context.js";
 import type { ApprovedCall } from "#tools/definition.js";
+import type { ChannelEventDefinition } from "#shared/channel-subscriptions.js";
 import type { JsonValue } from "#shared/json.js";
 
 /**
@@ -411,7 +412,6 @@ export function supportsInteractiveAuthorization(
 export interface ConnectionToolMetadata {
   readonly annotations?: Record<string, unknown>;
   readonly description: string;
-  readonly event?: string;
   readonly inputSchema: Record<string, unknown>;
   readonly name: string;
   readonly operationId?: string;
@@ -436,7 +436,6 @@ export interface ConnectionClient {
 }
 
 export interface ConnectionEventActionHandler {
-  ownsName(name: string): boolean;
-  metadata(): Promise<readonly ConnectionToolMetadata[]>;
+  list(): Promise<readonly ChannelEventDefinition[]>;
   execute(name: string, args: unknown, options: ConnectionToolExecuteOptions): Promise<unknown>;
 }

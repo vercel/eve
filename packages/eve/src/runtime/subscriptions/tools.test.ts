@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { JsonObject } from "#shared/json.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey, SessionIdKey } from "#context/keys.js";
 import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
-import { serializeInputSchema } from "#tools/schema.js";
-import { withSubscriptionCatalog } from "#shared/channel-subscriptions.js";
 import { channelEventKey, channelSubscriptionId } from "./id.js";
+import type { SubscribeInput } from "./tools.js";
 import type { OpenedSubscription, SubscriptionBinding } from "./state.js";
 
 const host = vi.hoisted(() => ({
@@ -33,11 +33,14 @@ vi.mock("#runtime/sessions/runtime-context-keys.js", async (importOriginal) => (
   requireCompiledBundle: () => ({ bundle: true }),
 }));
 
-const { channelSubscribeEntry, offeredSubscriptions, subscriptionManagementEntries } =
+const { offeredSubscriptions, stopSubscriptionEntry, subscribeToChannel } =
   await import("./tools.js");
 
-const channelsOf = (...entries: readonly [string, unknown][]) =>
-  entries.map(([name, onEvent]) => ({ name, definition: { onEvent } })) as never;
+const channelsOf = (...entries: readonly [string, unknown, unknown?][]) =>
+  entries.map(([name, onEvent, events]) => ({
+    name,
+    definition: { onEvent, events },
+  })) as never;
 const channels = channelsOf(["github", () => null]);
 
 const authOf = (id: string) =>
@@ -62,24 +65,19 @@ const gate = {
   run: vi.fn(async (_connection: string, action: string) => ({ via: action })),
 };
 
-const call = (name: string, input: unknown) => {
-  const tool =
-    name === "eve__subscribe"
-      ? channelSubscribeEntry(offeredSubscriptions(channels))
-      : subscriptionManagementEntries(gate).find((entry) => entry.name === name)!;
-  return tool.execute!(input, { messages: [], toolCallId: "call-1" });
-};
+const stop = (id: string) =>
+  stopSubscriptionEntry(gate).execute!({ id }, { messages: [], toolCallId: "call-1" });
 
-const subscribeInput = {
-  subscription: {
-    source: "github",
-    event: "checks_finished",
-    input: { owner: "vercel", pull: 7 },
-  },
+const subscribeInput: SubscribeInput = {
+  source: "github",
+  event: "checks_finished",
+  input: { owner: "vercel", pull: 7 },
   ttlMs: 120_000,
 };
-const subscribeAs = (sessionId: string, user: string, input: unknown = subscribeInput) =>
-  inSession(sessionId, authOf(user), () => call("eve__subscribe", input));
+const subscribeAs = (sessionId: string, user: string, input: SubscribeInput = subscribeInput) =>
+  inSession(sessionId, authOf(user), () =>
+    subscribeToChannel(offeredSubscriptions(channels), input, undefined),
+  );
 
 const opened = (binding: SubscriptionBinding): OpenedSubscription => ({
   key: (binding.source as { key: string }).key,
@@ -144,11 +142,9 @@ it("starts a binding carrying the event, the derived key, ttl and principal", as
 
 it("derives the key emit derives from the input, comparing strings exactly", async () => {
   await subscribeAs("s1", "rui", {
-    subscription: {
-      source: "github",
-      event: "checks_finished",
-      input: { owner: "Vercel", pull: 7 },
-    },
+    source: "github",
+    event: "checks_finished",
+    input: { owner: "Vercel", pull: 7 },
     ttlMs: null,
   });
   await subscribeAs("s1", "rui");
@@ -163,21 +159,17 @@ it("derives the key emit derives from the input, comparing strings exactly", asy
   expect(upper!.id).not.toBe(lower!.id);
 });
 
-it("accepts any event name and any input object, leaving the decision to onEvent", async () => {
+it("accepts any event name and any input object from a channel that declares no events, leaving the decision to onEvent", async () => {
   await expect(
-    subscribeAs("s1", "rui", {
-      subscription: { source: "github", event: "pushed", input: {} },
-      ttlMs: null,
-    }),
+    subscribeAs("s1", "rui", { source: "github", event: "pushed", input: {}, ttlMs: null }),
   ).resolves.toMatchObject({ event: "pushed", input: {}, status: "active" });
   expect(host.start).toHaveBeenCalledTimes(1);
 });
 
-const catalogued = channelsOf([
-  "github",
-  withSubscriptionCatalog(() => null, {
-    description: "GitHub events.",
-    events: ["check_suite.completed"],
+const eventDefinitions = [
+  {
+    name: "check_suite.completed",
+    description: "A check suite finished.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -187,42 +179,68 @@ const catalogued = channelsOf([
         repo: { type: "string", pattern: "^[^A-Z]+$" },
       },
     },
-  }),
-]);
-const subscribeCatalogued = (event: string, input: unknown) =>
+  },
+  {
+    name: "check_suite.requested",
+    description: "A check suite was requested.",
+    inputSchema: { type: "object" },
+  },
+  { name: "push", description: "A push.", inputSchema: { type: "object" } },
+];
+const declared = channelsOf(["github", () => null, eventDefinitions]);
+const subscribeDeclared = (event: string, input: JsonObject) =>
   inSession("s1", authOf("rui"), () =>
-    channelSubscribeEntry(offeredSubscriptions(catalogued)).execute!(
-      { subscription: { source: "github", event, input }, ttlMs: null },
-      { messages: [], toolCallId: "call-1" },
+    subscribeToChannel(
+      offeredSubscriptions(declared),
+      { source: "github", event, input, ttlMs: null },
+      undefined,
     ),
   );
 
-it("puts a published event list and scope in the tool schema, and none for a channel that publishes nothing", () => {
-  const schemaOf = (offered: ReturnType<typeof offeredSubscriptions>) =>
-    JSON.stringify(serializeInputSchema(channelSubscribeEntry(offered).inputSchema as never));
-  expect(schemaOf(offeredSubscriptions(catalogued))).toContain("check_suite.completed");
-  expect(schemaOf(offeredSubscriptions(catalogued))).toContain("^[^A-Z]+$");
-  expect(schemaOf(offeredSubscriptions(channels))).not.toContain("enum");
+it("refuses an event the channel does not declare, naming the closest events and where to find them", async () => {
+  const error = await subscribeDeclared("check_suite.complete", {
+    owner: "vercel",
+    repo: "eve",
+  }).then(
+    () => undefined,
+    (thrown: unknown) => thrown,
+  );
+  if (!(error instanceof Error)) throw new Error("Expected the subscribe to be refused.");
+  expect(error.message).toContain('Channel "github" emits no event named "check_suite.complete".');
+  expect(error.message).toContain("Closest events: ");
+  expect(error.message).toContain("check_suite.completed");
+  expect(error.message).toContain("eve__search");
+  expect(error.message).toContain("subscriptions__github__");
+  expect(host.start).not.toHaveBeenCalled();
 });
 
-it("refuses an event name a published catalog does not list, and a scope its schema rejects", async () => {
-  await expect(subscribeCatalogued("pushed", { owner: "vercel", repo: "eve" })).rejects.toThrow(
-    'Channel "github" emits no event named "pushed".',
-  );
+it("refuses an input the event's schema rejects, and subscribes when it fits", async () => {
   await expect(
-    subscribeCatalogued("check_suite.completed", { owner: "Vercel", repo: "eve" }),
-  ).rejects.toThrow("does not match the channel's schema");
+    subscribeDeclared("check_suite.completed", { owner: "Vercel", repo: "eve" }),
+  ).rejects.toThrow('Subscription input does not match the schema of "check_suite.completed"');
+  await expect(subscribeDeclared("check_suite.completed", { owner: "vercel" })).rejects.toThrow(
+    'Subscription input does not match the schema of "check_suite.completed"',
+  );
   expect(host.start).not.toHaveBeenCalled();
 
   await expect(
-    subscribeCatalogued("check_suite.completed", { owner: "vercel", repo: "eve" }),
+    subscribeDeclared("check_suite.completed", { owner: "vercel", repo: "eve" }),
   ).resolves.toMatchObject({ event: "check_suite.completed", status: "active" });
+});
+
+it("checks an input against the schema of the event named, not of another event", async () => {
+  await expect(subscribeDeclared("push", { owner: "Vercel" })).resolves.toMatchObject({
+    event: "push",
+    input: { owner: "Vercel" },
+  });
 });
 
 it("refuses a channel that offers no subscriptions", async () => {
   await expect(
     subscribeAs("s1", "rui", {
-      subscription: { source: "slack", event: "checks_finished", input: {} },
+      source: "slack",
+      event: "checks_finished",
+      input: {},
       ttlMs: null,
     }),
   ).rejects.toThrow('Channel "slack" offers no subscriptions.');
@@ -238,49 +256,39 @@ it("gives two sessions different ids for one key and one session the same id twi
   expect(await idOf("s2")).not.toBe(first);
 });
 
-it("lets only the principal that subscribed get or stop a subscription", async () => {
+it("lets only the principal that subscribed stop a subscription", async () => {
   const { id } = (await subscribeAs("s1", "rui")) as { id: string };
 
-  await expect(
-    inSession("s9", authOf("someone-else"), () => call("eve__subscription_get", { id })),
-  ).rejects.toThrow("Unknown subscription for this caller.");
-  await expect(
-    inSession("s9", authOf("someone-else"), () => call("eve__subscription_stop", { id })),
-  ).rejects.toThrow("Unknown subscription for this caller.");
+  await expect(inSession("s9", authOf("someone-else"), () => stop(id))).rejects.toThrow(
+    "Unknown subscription for this caller.",
+  );
   expect(host.retire).not.toHaveBeenCalled();
 
-  await expect(
-    inSession("s2", authOf("rui"), () => call("eve__subscription_get", { id })),
-  ).resolves.toMatchObject({ id, status: "pending" });
-  await expect(
-    inSession("s2", authOf("rui"), () => call("eve__subscription_stop", { id })),
-  ).resolves.toEqual({ id, status: "stopping" });
+  await expect(inSession("s2", authOf("rui"), () => stop(id))).resolves.toEqual({
+    id,
+    status: "stopping",
+  });
   expect(host.retire).toHaveBeenCalledWith(id);
 });
 
 it("reports an unknown id and a subscription that already ended", async () => {
-  await expect(
-    inSession("s1", authOf("rui"), () => call("eve__subscription_get", { id: "nope" })),
-  ).rejects.toThrow("Unknown subscription for this caller.");
+  await expect(inSession("s1", authOf("rui"), () => stop("nope"))).rejects.toThrow(
+    "Unknown subscription for this caller.",
+  );
 
   const { id } = (await subscribeAs("s1", "rui")) as { id: string };
   host.retire.mockResolvedValue(false);
-  await expect(
-    inSession("s1", authOf("rui"), () => call("eve__subscription_stop", { id })),
-  ).rejects.toThrow("Unknown subscription for this caller.");
+  await expect(inSession("s1", authOf("rui"), () => stop(id))).rejects.toThrow(
+    "Unknown subscription for this caller.",
+  );
 });
 
 it("reports an opened subscription as active with its expiry", async () => {
-  const { id } = (await subscribeAs("s1", "rui")) as { id: string };
-  const binding = host.bindings.get(id)!;
-  host.find = async () => ({
-    binding,
-    opened: { key: "k", expiresAt: "2030-01-01T00:00:00.000Z" },
-  });
-  await expect(
-    inSession("s1", authOf("rui"), () => call("eve__subscription_get", { id })),
-  ).resolves.toEqual({
-    id,
+  host.start.mockImplementation(async (binding: SubscriptionBinding) => ({
+    ...opened(binding),
+    expiresAt: "2030-01-01T00:00:00.000Z",
+  }));
+  await expect(subscribeAs("s1", "rui")).resolves.toMatchObject({
     source: "github",
     event: "checks_finished",
     input: { owner: "vercel", pull: 7 },
@@ -289,18 +297,24 @@ it("reports an opened subscription as active with its expiry", async () => {
   });
 });
 
-it("hands a connection subscription's get and stop to that connection's gate, with the subscription's id", async () => {
+it("reports a subscription the host has not opened yet as pending", async () => {
+  host.start.mockResolvedValue(undefined);
+  await expect(subscribeAs("s1", "rui")).resolves.toMatchObject({
+    status: "pending",
+    event: "checks_finished",
+  });
+});
+
+it("hands a connection subscription's stop to that connection's gate, with the subscription's id", async () => {
   const { id } = (await subscribeAs("s1", "rui")) as { id: string };
   host.bindings.set(id, {
     ...host.bindings.get(id)!,
     source: { kind: "connection", name: "issues", connector: "linear", principalKey: "p" } as never,
   });
 
-  const get = await inSession("s1", authOf("rui"), () => call("eve__subscription_get", { id }));
-  const stop = await inSession("s1", authOf("rui"), () => call("eve__subscription_stop", { id }));
+  const result = await inSession("s1", authOf("rui"), () => stop(id));
 
-  expect(get).toEqual({ via: "events_get_subscription" });
-  expect(stop).toEqual({ via: "events_unsubscribe" });
+  expect(result).toEqual({ via: "events_unsubscribe" });
   expect(gate.run).toHaveBeenCalledWith(
     "issues",
     "events_unsubscribe",
@@ -310,27 +324,19 @@ it("hands a connection subscription's get and stop to that connection's gate, wi
   expect(host.retire).not.toHaveBeenCalled();
 });
 
-it("marks all three tools as framework tools only the root agent sees", () => {
-  const entries = [
-    channelSubscribeEntry(offeredSubscriptions(channels)),
-    ...subscriptionManagementEntries(gate),
-  ];
-  expect(
-    entries.map(({ name, frameworkTool, rootOnly }) => [name, frameworkTool, rootOnly]),
-  ).toEqual([
-    ["eve__subscribe", true, true],
-    ["eve__subscription_get", true, true],
-    ["eve__subscription_stop", true, true],
+it("marks the stop tool as a framework tool only the root agent sees", () => {
+  const entry = stopSubscriptionEntry(gate);
+  expect([entry.name, entry.frameworkTool, entry.rootOnly]).toEqual([
+    "eve__subscription_stop",
+    true,
+    true,
   ]);
 });
 
-it("asks the gate for each management tool's approval with the connection action it runs", () => {
+it("asks the gate for the stop tool's approval with the connection action it runs", () => {
   gate.approval.mockClear();
-  subscriptionManagementEntries(gate);
-  expect(gate.approval.mock.calls.map(([action]) => action)).toEqual([
-    "events_get_subscription",
-    "events_unsubscribe",
-  ]);
+  stopSubscriptionEntry(gate);
+  expect(gate.approval.mock.calls.map(([action]) => action)).toEqual(["events_unsubscribe"]);
 });
 
 describe("onSubscribe", () => {
@@ -339,10 +345,7 @@ describe("onSubscribe", () => {
       { name: "github", definition: { onEvent: () => null, onSubscribe } },
     ] as never);
     return inSession("s1", authOf(user), () =>
-      channelSubscribeEntry(offered).execute!(subscribeInput, {
-        messages: [],
-        toolCallId: "call-1",
-      }),
+      subscribeToChannel(offered, subscribeInput, undefined),
     );
   };
 
