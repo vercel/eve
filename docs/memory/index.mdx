@@ -72,12 +72,13 @@ in the same agent.
 
 Each file exports one `defineMemory()` value with these fields:
 
-| Field         | Required | Purpose                                                                                  |
-| ------------- | -------- | ---------------------------------------------------------------------------------------- |
-| `provider`    | Yes      | The `MemoryProvider` that stores and retrieves memory for this slot                      |
-| `scope`       | Yes      | Who or what shares this slot's memory; see [Scope](#scope)                               |
-| `description` | No       | Prepended to every provider tool description to tell the model what belongs in this slot |
-| `namespace`   | No       | The application domain the scope lives in; see [Namespace](#namespace)                   |
+| Field         | Required | Purpose                                                                                                   |
+| ------------- | -------- | --------------------------------------------------------------------------------------------------------- |
+| `provider`    | Yes      | The `MemoryProvider` that stores and retrieves memory for this slot                                       |
+| `scope`       | Yes      | Who or what shares this slot's memory; see [Scope](#scope)                                                |
+| `description` | No       | Prepended to every provider tool description to tell the model what belongs in this slot                  |
+| `namespace`   | No       | The application domain the scope lives in; see [Namespace](#namespace)                                    |
+| `supersede`   | No       | Whether to [keep older versions when a keyed recall changes](/docs/memory/custom-provider#recall-results) |
 
 Slots are independent. Two slots can use the same provider, and their recalled
 context and tools stay separate. The default namespace includes the slot name,
