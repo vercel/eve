@@ -92,6 +92,20 @@ test("github config without authorize is rejected, so brokered access never defa
   );
 });
 
+test("a user principal takes exactly one of connector and authorization", () => {
+  const authorization = { principalType: "user", getToken: async () => ({ token: "t" }) };
+  const base = { authorize: () => true, broker: async () => {}, principalType: "user" };
+  assert.throws(
+    () => extension({ github: { ...base, connector: "github/acme-bot", authorization } } as never),
+    /exactly one of `connector` and `authorization`/u,
+  );
+  assert.throws(
+    () => extension({ github: base } as never),
+    /exactly one of `connector` and `authorization`/u,
+  );
+  extension({ github: { ...base, authorization } } as never);
+});
+
 test("with a user principal, guidance describes the caller's token instead of repository scope", async () => {
   extension({
     github: {
