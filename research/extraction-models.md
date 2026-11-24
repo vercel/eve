@@ -1,5 +1,5 @@
 ---
-issue: TBD
+issue: https://github.com/vercel/eve/pull/6809
 status: implemented
 last_updated: "2026-11-24"
 ---
@@ -69,6 +69,5 @@ A refusal (`ExtractionRefusalError`) is a result, not a failure. `decide` and
 ## Compatibility
 
 The AI SDK extraction model specification is experimental and can change in
-patch releases. `extract` looks up the AI SDK export at call time and names
-the missing export when an older `ai` is installed, so apps on earlier `ai`
-7 releases keep working until they call `extract`.
+patch releases. Gateway extraction models and AI SDK's empty-value
+normalization arrive in `ai@7.0.176`, so eve's `ai` peer range starts there.

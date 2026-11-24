@@ -13,7 +13,7 @@ export type ExtractionModel =
       readonly provider: string;
       readonly modelId: string;
       readonly specificationVersion: "v4";
-      readonly supportedFieldTypes: readonly ExtractionField["type"][];
+      readonly supportedFieldTypes: readonly string[];
       readonly doExtract: (...args: never[]) => unknown;
     };
 

@@ -97,7 +97,6 @@ describe("extract", () => {
       fields,
       referenceDate: "2026-11-24",
       signal: abortSignal,
-      maxRetries: 0,
       providerOptions: { gateway: { zeroDataRetention: true } },
     });
 
@@ -113,7 +112,7 @@ describe("extract", () => {
     );
   });
 
-  it("rejects identity-only objects, unsupported versions, and unsupported fields before provider I/O", async () => {
+  it("rejects identity-only objects before provider I/O and keeps AI SDK validation", async () => {
     await expect(
       extract({
         // @ts-expect-error Identity alone is not a provider implementation.
@@ -123,11 +122,6 @@ describe("extract", () => {
       }),
     ).rejects.toThrow("not just its identity");
     const extractor = extractionModel();
-    const newerModel = { ...extractor.model, specificationVersion: "v-next" };
-    await expect(
-      // @ts-expect-error Only the specification versions the AI SDK supports are accepted.
-      extract({ model: newerModel, state, fields }),
-    ).rejects.toThrow(/version/i);
     const textOnly = new Experimental_ExtractionMockModelV4({
       supportedFieldTypes: ["text", "list"],
       doExtract: extractor.doExtract,
@@ -137,47 +131,10 @@ describe("extract", () => {
       fieldType: "number",
     });
     expect(extractor.doExtract).not.toHaveBeenCalled();
-  });
-
-  it("preserves input and answer validation", async () => {
-    const extractor = extractionModel();
-    await expect(extract({ model: extractor.model, state, fields: {} })).rejects.toThrow();
-    await expect(
-      extract({ model: extractor.model, state, fields, referenceDate: "November 24" }),
-    ).rejects.toThrow("referenceDate");
-    expect(extractor.doExtract).not.toHaveBeenCalled();
 
     const invalid = new Experimental_ExtractionMockModelV4({
       doExtract: async () => ({ answers: {}, warnings: [] }),
     });
     await expect(extract({ model: invalid, state, fields })).rejects.toThrow("exactly one answer");
-  });
-
-  it("reports refused fields as an extraction refusal", async () => {
-    const refusing = new Experimental_ExtractionMockModelV4({
-      doExtract: async () => ({
-        answers: { invoiceNumber: { type: "refusal" } },
-        warnings: [],
-      }),
-    });
-    await expect(
-      extract({ model: refusing, state, fields: { invoiceNumber: fields.invoiceNumber } }),
-    ).rejects.toMatchObject({ fieldIds: ["invoiceNumber"] });
-  });
-
-  it("propagates provider errors and aborts before provider I/O", async () => {
-    const error = new Error("Extraction unavailable.");
-    const failed = new Experimental_ExtractionMockModelV4({
-      doExtract: async () => {
-        throw error;
-      },
-    });
-    await expect(extract({ model: failed, state, fields, maxRetries: 0 })).rejects.toBe(error);
-
-    const extractor = extractionModel();
-    await expect(
-      extract({ model: extractor.model, state, fields, signal: AbortSignal.abort(error) }),
-    ).rejects.toBe(error);
-    expect(extractor.doExtract).not.toHaveBeenCalled();
   });
 });

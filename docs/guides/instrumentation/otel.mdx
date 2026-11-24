@@ -182,6 +182,8 @@ invoke_agent <agent>
   └── agent.channel.deliver
 ```
 
+An `extraction <model>` span records a call to [`extract`](/docs/guides/extract). AI SDK extraction has no telemetry hook, so your registered AI SDK telemetry integrations don't receive extraction calls.
+
 A `chat` span directly under `invoke_agent` is a [compaction](../concepts/execution-model-and-durability#compaction-handoff) summary request made during the turn. It carries `ai.settings.context.eve.compaction.request=summary`, so you can sum or exclude compaction usage and cost. A compaction between turns, such as one `session.compact()` starts, has no turn and exports no span.
 
 An `agent.channel.deliver` span records the channel posting something a person reads: the final reply or a request for input, such as an approval. It also records any channel event the channel failed to deliver. `agent.channel.delivery.outcome` is `completed` or `failed`. A failed delivery sets `error.type`, such as `reply_undelivered` or `channel_handler_failed`, and `eve.error.id`, the error ID in the server logs. `completed` means the channel's handler finished without reporting a failure. It doesn't confirm that the provider showed the message.
