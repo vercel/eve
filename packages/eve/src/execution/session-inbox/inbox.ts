@@ -52,6 +52,8 @@ export interface SessionInboxTransport<Hook extends InboxHook = InboxHook> {
   isTakenOver(error: unknown): boolean;
   ownerRunId(): string;
   now(): number;
+  readonly consumedThrough?: number;
+  seqOf?(payload: SessionInboxPayload): number | undefined;
 }
 
 interface Source<Hook extends InboxHook> {
@@ -98,6 +100,7 @@ export interface SessionInboxOwnership {
 }
 export interface SessionInbox extends SessionInboxReader, SessionInboxOwnership {}
 export interface SessionInboxHandle extends SessionInbox {
+  readonly takenThrough: number;
   readonly awaitingHandover: boolean;
   whenHandoverSettled(): Promise<void>;
   whenPendingOrHandoverSettled(): Promise<"pending" | "settled">;
@@ -146,6 +149,7 @@ export function createSessionInbox<Hook extends InboxHook>(
   const arrivalWaiters = new Set<() => void>();
   let takenOver = false;
   let stopped = false;
+  let takenThrough = transport.consumedThrough ?? 0;
 
   const notify = (): void => {
     for (const resolve of waiters) resolve();
@@ -157,6 +161,13 @@ export function createSessionInbox<Hook extends InboxHook>(
   const hasReadable = (): boolean => !gated() && queue.length > 0;
   const throwIfFailed = (): void => {
     if (failure !== undefined) throw failure.error;
+  };
+  const took = <T extends SessionInboxPayload>(payloads: T[]): T[] => {
+    for (const payload of payloads) {
+      const seq = transport.seqOf?.(payload);
+      if (seq !== undefined && seq > takenThrough) takenThrough = seq;
+    }
+    return payloads;
   };
   const observe = (
     handlers: ReadonlySet<(payload: SessionInboxPayload) => void>,
@@ -325,6 +336,9 @@ export function createSessionInbox<Hook extends InboxHook>(
     get claimedTokens() {
       return sources.map(({ token }) => token);
     },
+    get takenThrough() {
+      return takenThrough;
+    },
     get awaitingHandover() {
       return handover !== undefined;
     },
@@ -383,7 +397,7 @@ export function createSessionInbox<Hook extends InboxHook>(
     async next() {
       while (true) {
         throwIfFailed();
-        if (hasReadable()) return queue.shift();
+        if (hasReadable()) return took([queue.shift()!])[0];
         if (closed()) return undefined;
         blockedOnHandover();
         await wait();
@@ -391,7 +405,7 @@ export function createSessionInbox<Hook extends InboxHook>(
     },
     drain() {
       throwIfFailed();
-      return gated() ? [] : queue.splice(0);
+      return gated() ? [] : took(queue.splice(0));
     },
     takeLeading<T extends SessionInboxPayload>(
       accepts: (payload: SessionInboxPayload) => payload is T,
@@ -403,7 +417,7 @@ export function createSessionInbox<Hook extends InboxHook>(
         taken.push(next);
         queue.shift();
       }
-      return taken;
+      return took(taken);
     },
     hasPending() {
       throwIfFailed();

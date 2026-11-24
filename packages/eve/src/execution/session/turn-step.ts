@@ -129,6 +129,7 @@ import type { AuthorizationChallenge } from "#harness/authorization.js";
 import { signInInteractionId } from "#harness/interaction-facts.js";
 import { SIGN_IN_DECLINED } from "#harness/hitl/sign-ins.js";
 import { signInDelivery, type Hosts, type ResumeAddress } from "#execution/hosts.js";
+import type { StepMeta } from "#execution/durable.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 import type { AuthorizationCallback } from "#shared/connection-types.js";
 
@@ -151,23 +152,46 @@ export interface SessionStepHost {
   readonly deliver?: ResumeAddress;
 }
 
+interface TurnStepWork extends TurnStepInput {
+  readonly abortSignal?: AbortSignal;
+  readonly steeringSignal?: AbortSignal;
+  readonly sessionWritable: WritableStream<Uint8Array>;
+}
+
 export function turnStepOn(
   host: SessionStepHost,
-): (input: TurnStepInput) => Promise<TurnStepResult> {
-  return async (input) =>
-    await withSessionStateDelta(host.hosts, input, (state) =>
-      runSessionStep(
-        {
-          ...state,
-          serializedContext: bindTurnCallerContext(state.caller, state.serializedContext),
-        },
-        host,
-      ),
+): (
+  input: TurnStepInput,
+  meta: StepMeta,
+  stream: WritableStream<Uint8Array>,
+) => Promise<TurnStepResult> {
+  return async (input, meta, stream) => {
+    const work: TurnStepWork = {
+      ...input,
+      sessionWritable: stream,
+      ...(meta.signals !== undefined && {
+        abortSignal: meta.signals.cancel,
+        steeringSignal: meta.signals.steer,
+      }),
+    };
+    return await withSessionStateDelta(
+      host.hosts,
+      work,
+      (state) =>
+        runSessionStep(
+          {
+            ...state,
+            serializedContext: bindTurnCallerContext(state.caller, state.serializedContext),
+          },
+          host,
+        ),
+      meta,
     );
+  };
 }
 
 async function runSessionStep(
-  input: Entered<TurnStepInput>,
+  input: Entered<TurnStepWork>,
   host: SessionStepHost,
 ): Promise<DurableStepResult> {
   const pendingAttributes: PendingStepAttributes = {};
@@ -180,7 +204,7 @@ async function runSessionStep(
 }
 
 async function runSessionStepBody(
-  input: Entered<TurnStepInput>,
+  input: Entered<TurnStepWork>,
   pendingAttributes: PendingStepAttributes,
   host: SessionStepHost,
 ): Promise<DurableStepResult> {

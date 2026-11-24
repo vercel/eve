@@ -203,13 +203,13 @@ describe("SessionStateCursor", () => {
     },
   );
 
-  it("records where the open turn goes on before a step runs and once it is adopted", async () => {
+  it("records where the open turn goes before a step runs and once it is adopted, and not for a step that leaves it", async () => {
     const records: unknown[] = [];
     const cursor = new SessionStateCursor({
       history: [],
       inbox: { claimSessionHooks: vi.fn(async () => {}) },
       open: { at: "step" },
-      record: async ({ open }) => {
+      record: async (open) => {
         records.push({ open, sessionState: cursor.sessionState.hasProxyInputRequests });
       },
       sessionWritable: new WritableStream<Uint8Array>(),
@@ -231,7 +231,6 @@ describe("SessionStateCursor", () => {
     expect(records).toEqual([
       { open: { at: "step" }, sessionState: false },
       { open: paused, sessionState: true },
-      { open: paused, sessionState: true },
     ]);
     expect(cursor.open).toEqual(paused);
   });
@@ -251,10 +250,13 @@ describe("SessionStateCursor", () => {
       sessionState: state(""),
     });
     await cursor.settledStep();
-    const step = cursor.advance(async (input) => {
-      await gate;
-      return await withSessionStateDelta(builtInHosts(), input, async () => ({}));
-    });
+    const step = cursor.advance(
+      async (input) => {
+        await gate;
+        return await withSessionStateDelta(builtInHosts(), input, async () => ({}));
+      },
+      { after: () => undefined },
+    );
     let settled = false;
     const waiting = cursor.settledStep().then(() => (settled = true));
     await Promise.resolve();

@@ -1,8 +1,8 @@
-import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
+import { getStepMetadata, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 import { traceSessionHandover } from "#execution/session/handover-tracing.js";
 import { turnStepOn, type SessionStepHost } from "#execution/session/turn-step.js";
 import type { TurnStepInput, TurnStepResult } from "#execution/session/turn-step-types.js";
-import { delivered } from "#execution/durable.js";
+import { delivered, type StepMeta } from "#execution/durable.js";
 import { workflowDurable } from "#execution/workflow-host/host.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
@@ -31,7 +31,13 @@ function workflowStepHost(app: App | undefined): SessionStepHost {
   };
 }
 
-export async function turnStep(input: TurnStepInput): Promise<TurnStepResult> {
+export interface WorkflowTurnStepInput extends TurnStepInput {
+  readonly abortSignal?: AbortSignal;
+  readonly steeringSignal?: AbortSignal;
+  readonly sessionWritable: WritableStream<Uint8Array>;
+}
+
+export async function turnStep(input: WorkflowTurnStepInput): Promise<TurnStepResult> {
   "use step";
   if (input.handover !== undefined) {
     traceSessionHandover(
@@ -45,5 +51,14 @@ export async function turnStep(input: TurnStepInput): Promise<TurnStepResult> {
       },
     );
   }
-  return await turnStepOn(workflowStepHost(processApp().started))(input);
+  const { abortSignal, sessionWritable, steeringSignal, ...data } = input;
+  const step = getStepMetadata();
+  const meta: StepMeta = {
+    attempt: step.attempt,
+    key: step.stepId,
+    sessionId: data.sessionState.sessionId,
+    ...(abortSignal !== undefined &&
+      steeringSignal !== undefined && { signals: { cancel: abortSignal, steer: steeringSignal } }),
+  };
+  return await turnStepOn(workflowStepHost(processApp().started))(data, meta, sessionWritable);
 }

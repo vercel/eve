@@ -37,7 +37,7 @@ import {
   type WorkflowToolRunMessage,
 } from "#execution/tools/workflow/messages.js";
 import type { TurnPause } from "#execution/session/pending-turn-state.js";
-import { openAfter } from "#execution/session/open-turn.js";
+import { openAfter, type OpenTurn } from "#execution/session/open-turn.js";
 import type {
   RuntimeActionResultStepInput,
   TurnOutcome,
@@ -75,7 +75,7 @@ const NO_INPUT_CAPABILITY_ERROR_MESSAGE =
   "This session cannot request human input, so it cannot wait for a tool approval or question. " +
   "Configure unattended tools with an approval policy that does not require human input.";
 
-export type SessionWake = "input" | "due" | "woken";
+export type SessionWake = "input" | "due" | "woken" | "park";
 
 export interface SessionNextOptions {
   readonly until?: number;
@@ -99,12 +99,13 @@ export interface SessionExecutionInput {
   readonly inbox: SessionInboxReader;
   readonly queue: SessionInputQueue;
   readonly sessionId: string;
+  readonly idle?: () => Promise<void>;
 }
 
 export class SessionExecution {
   private readonly input: SessionExecutionInput;
   private observedHandoverAttemptKey: string | undefined;
-  private readonly outcomeMessages = new Map<string, WorkflowToolRunMessage>();
+  private turn: ActiveTurn | undefined;
 
   constructor(input: SessionExecutionInput) {
     this.input = input;
@@ -112,6 +113,10 @@ export class SessionExecution {
 
   get cursor(): SessionStateCursor {
     return this.input.cursor;
+  }
+
+  holdsInput(): boolean {
+    return this.turn?.holdsInput === true;
   }
 
   async runTurn(
@@ -133,6 +138,7 @@ export class SessionExecution {
       },
       options.control,
     );
+    this.turn = turn;
     try {
       const outcome = await this.runTurnSteps(turn, delivery, options.pause);
       await this.handleBoundaryMessages(turn.takeBoundaryMessages(), outcome.kind === "done");
@@ -145,6 +151,7 @@ export class SessionExecution {
         ...(turn.compacted && { compacted: true }),
       };
     } finally {
+      this.turn = undefined;
       turn.dispose();
     }
   }
@@ -164,7 +171,6 @@ export class SessionExecution {
           message,
           steps: this.input,
         });
-        await this.input.cursor.consumed([message]);
       } else if (!ending || !isAgentSessionMessage(message)) {
         applied.push(message);
       }
@@ -177,14 +183,12 @@ export class SessionExecution {
     turn?: ActiveTurn,
   ): Promise<void> {
     if (messages.length === 0) return;
-    const { cancelled } = await this.input.cursor.advance(
-      (state) =>
-        this.input.host.step(
-          "applyRunMessages",
-          { ...state, canCancelTurn: turn !== undefined, messages },
-          this.input.stepKey("applyRunMessages"),
-        ),
-      { consumes: messages },
+    const { cancelled } = await this.input.cursor.advance((state) =>
+      this.input.host.step(
+        "applyRunMessages",
+        { ...state, canCancelTurn: turn !== undefined, messages },
+        this.input.stepKey("applyRunMessages"),
+      ),
     );
     if (cancelled) turn?.abort();
   }
@@ -197,6 +201,7 @@ export class SessionExecution {
     let nextStepInput: TurnStepPayload | undefined = delivery;
     if (pause !== undefined) {
       const resumed = await this.resume(turn, pause, this.input.queue.nextAdmission);
+      turn.awaitingCalls = false;
       if (resumed === "cancelled") return await this.finishCancelledTurn(turn);
       nextStepInput = resumed;
     }
@@ -211,21 +216,20 @@ export class SessionExecution {
         observation?.attemptKey === this.observedHandoverAttemptKey ? undefined : observation;
       const input = nextStepInput;
       const result = await cursor.advanceWithHistory(
-        (state) => {
-          const run = (recover?: TurnStepInput["recover"]) =>
-            this.input.host.step(
+        ({ sessionWritable, ...state }) => {
+          const run = (recover?: TurnStepInput["recover"]) => {
+            const key = this.input.stepKey("turn");
+            return this.input.host.step(
               "turn",
+              { ...state, handover, caller, input, recover },
+              key,
               {
-                ...state,
-                handover,
-                abortSignal: turn.signal,
-                caller,
-                input,
-                recover,
-                steeringSignal: turn.steeringSignal,
+                key,
+                signals: { cancel: turn.signal, steer: turn.steeringSignal },
+                stream: sessionWritable,
               },
-              this.input.stepKey("turn"),
             );
+          };
           return run().catch((error: unknown) => {
             const thrown = exhaustedStepError(error);
             const name = isObject(thrown) ? readNonEmptyString(thrown.name) : undefined;
@@ -236,9 +240,9 @@ export class SessionExecution {
           });
         },
         {
-          after: openAfter,
+          after: (result) =>
+            result.action === "cancelled" ? cancelPointOf(turn) : openAfter(result),
           before: { at: "step", ...(input !== undefined && { input }) },
-          consumes: this.takeOutcomeMessages(input),
         },
       );
       if (handover !== undefined) this.observedHandoverAttemptKey = handover.attemptKey;
@@ -273,6 +277,7 @@ export class SessionExecution {
           return { kind: "park", settled: result.settled };
         case "paused": {
           const resumed = await this.resume(turn, result, stepAdmission);
+          turn.awaitingCalls = false;
           if (resumed === "cancelled") return await this.finishCancelledTurn(turn);
           nextStepInput = resumed;
           continue;
@@ -315,6 +320,7 @@ export class SessionExecution {
         ? { attemptIds: new Set(paused.attemptIds), requestIds: new Set(paused.requestIds) }
         : undefined;
     const calls = paused.on === "calls" ? await this.startCallWait(paused) : undefined;
+    turn.awaitingCalls = calls !== undefined;
     let interrupted = false;
     while (true) {
       if (pendingInteraction !== undefined) {
@@ -438,18 +444,7 @@ export class SessionExecution {
     });
     if (result !== undefined && calls !== undefined) {
       calls.acceptRun(result, message);
-      this.outcomeMessages.set(result.callId, message);
-      return;
     }
-    await this.input.cursor.consumed([message]);
-  }
-
-  private takeOutcomeMessages(input: TurnStepPayload | undefined): WorkflowToolRunMessage[] {
-    return (input?.runtimeResults?.results ?? []).flatMap(({ callId }) => {
-      const message = this.outcomeMessages.get(callId);
-      this.outcomeMessages.delete(callId);
-      return message === undefined ? [] : [message];
-    });
   }
 
   async cancelTurnWork(): Promise<void> {
@@ -459,8 +454,8 @@ export class SessionExecution {
   }
 
   private async finishCancelledTurn(turn: ActiveTurn): Promise<TurnOutcome> {
-    await this.input.cursor.consumed([...this.outcomeMessages.values()]);
-    this.outcomeMessages.clear();
+    const recorded = this.input.cursor.markOpen(cancelPointOf(turn));
+    if (recorded !== undefined) await recorded;
     await this.handleBoundaryMessages(turn.takeBoundaryMessages(isAgentSessionMessage));
     await this.cancelTurnWork();
     const by = turn.cancelledBy;
@@ -468,6 +463,15 @@ export class SessionExecution {
       ? { cancelled: true, kind: "park" }
       : { cancelled: true, cancelledBy: controlDeliveryOf(by), kind: "park" };
   }
+}
+
+function cancelPointOf(turn: ActiveTurn): OpenTurn {
+  const by = turn.cancelledBy;
+  return {
+    at: "cancel",
+    report: turn.caller !== undefined,
+    ...(by !== undefined && { control: controlDeliveryOf(by) }),
+  };
 }
 
 function hasPendingDispatch(pending: PendingDispatch): boolean {

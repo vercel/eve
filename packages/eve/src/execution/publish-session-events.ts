@@ -1,4 +1,4 @@
-import { isRetriedStep, type Hosts } from "#execution/hosts.js";
+import { isRetriedStep, stepAttempt, type Hosts } from "#execution/hosts.js";
 import { readSessionStreamTailIndex, streamSessionLines } from "#execution/session-event-stream.js";
 import type { ControlDelivery } from "#harness/types.js";
 import { buildAdapterContext } from "#channel/adapter-context.js";
@@ -96,8 +96,9 @@ export type SessionHistoryStepState = Entered<SessionHistoryStepInput>;
 export function enterSessionStep<I extends object>(
   hosts: Hosts,
   input: I & { readonly rerun?: true },
+  meta: { readonly attempt: number } = { attempt: stepAttempt(hosts) ?? 1 },
 ): Entered<I> {
-  return { ...input, hosts, rerun: input.rerun === true || isRetriedStep(hosts) };
+  return { ...input, hosts, rerun: input.rerun === true || isRetriedStep(meta) };
 }
 
 export interface PublishedSessionEvents {

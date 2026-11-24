@@ -93,11 +93,11 @@ export function sessionSignInCallbacks(
     : { callbackBaseUrl, deliver: engine.resume };
 }
 
-export function isRetriedStep(hosts: Hosts): boolean {
-  return (stepAttempt(hosts) ?? 1) > 1;
+export function isRetriedStep(meta: { readonly attempt: number }): boolean {
+  return meta.attempt > 1;
 }
 
-function stepAttempt(hosts: Hosts): number | undefined {
+export function stepAttempt(hosts: Hosts): number | undefined {
   for (const route of hosts.routes) {
     const attempt = route.stepAttempt?.();
     if (attempt !== undefined) return attempt;

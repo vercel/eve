@@ -62,6 +62,42 @@ export interface DeliveryAddress {
   readonly key: string;
 }
 
+export interface InboxItem {
+  readonly id: string;
+  readonly seq: number;
+  readonly body:
+    | { readonly kind: "deliver"; readonly to: DeliveryAddress; readonly payload: unknown }
+    | { readonly kind: "cancel"; readonly reason: string };
+}
+
+export interface StepSignals {
+  readonly cancel: AbortSignal;
+  readonly steer: AbortSignal;
+}
+
+export interface StepMeta {
+  readonly key: string;
+  readonly sessionId: string;
+  readonly attempt: number;
+  readonly deadline?: number;
+  readonly signals?: StepSignals;
+}
+
+export interface SessionInterrupts {
+  poll?(sessionId: string, afterSeq: number): Promise<readonly InboxItem[]>;
+}
+
+export interface SessionStreamSink {
+  append(sessionId: string, from: number, lines: readonly string[]): Promise<void>;
+  close(sessionId: string): Promise<void>;
+}
+
+export interface SessionContentStore {
+  put(sessionId: string, content: Uint8Array): Promise<string>;
+  get(sessionId: string, id: string): Promise<Uint8Array>;
+  delete(sessionId: string): Promise<void>;
+}
+
 export interface StreamLine {
   readonly position: number;
   readonly line: string;

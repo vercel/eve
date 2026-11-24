@@ -73,16 +73,18 @@ export async function withSessionStateDelta<
   hosts: Hosts,
   input: I,
   work: (step: Entered<I>) => Promise<R>,
+  meta?: { readonly attempt: number },
 ): Promise<WithSessionStateDelta<R>>;
 export async function withSessionStateDelta(
   hosts: Hosts,
   input: StepValues,
   work: (step: Entered<StepValues>) => Promise<Partial<SessionStateValues>>,
+  meta?: { readonly attempt: number },
 ): Promise<SessionStateTransition> {
   const base = Object.fromEntries(
     SESSION_VALUE_KEYS.map((key) => [key, snapshotValue(input[key])]),
   );
-  const step = enterSessionStep(hosts, input);
+  const step = enterSessionStep(hosts, input, meta);
   const { sessionWritable } = step;
   if (sessionWritable !== undefined && base.sessionState !== undefined) {
     const checkpoint = base.sessionState as DurableSessionState;

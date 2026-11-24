@@ -5,7 +5,6 @@ import {
   installProcessEngine,
   installedDurable,
   installedProcessEngine,
-  isRetriedStep,
   registerHost,
   registerSessionEventStore,
   resumeRoutedHook,
@@ -14,6 +13,7 @@ import {
   routedRunLive,
   sessionEventStore,
   sessionSignInCallbacks,
+  stepAttempt,
   type HostedRoute,
   type Hosts,
   type ProcessEngine,
@@ -109,7 +109,7 @@ describe("the hosts in a realm", () => {
     await expect(resumeRoutedHook(hosts, "hook-alice", {})).rejects.toThrow(HookNotFoundError);
     await expect(routedRunLive(hosts, "run-bob")).resolves.toBe(false);
     await expect(routedRunEnded(hosts, "run-bob")).resolves.toBe(true);
-    expect(isRetriedStep(hosts)).toBe(false);
+    expect(stepAttempt(hosts)).toBeUndefined();
     expect(installedDurable(hosts)).toBeUndefined();
     expect(() => sessionEventStore(hosts, "session-alice")).toThrow(
       'No host in this realm holds session "session-alice".',
@@ -127,14 +127,14 @@ describe("the hosts in a realm", () => {
     expect(installedDurable(hosts)).toBe(first.durable);
   });
 
-  it("reads whether the step running now is a retry from the durable host", () => {
+  it("reads the attempt of the step running now from the durable host", () => {
     installProcessEngine(hosts, processEngine("durable"));
     durable.attempt = 1;
-    expect(isRetriedStep(hosts)).toBe(false);
+    expect(stepAttempt(hosts)).toBe(1);
     durable.attempt = 2;
-    expect(isRetriedStep(hosts)).toBe(true);
+    expect(stepAttempt(hosts)).toBe(2);
     durable.attempt = undefined;
-    expect(isRetriedStep(hosts)).toBe(false);
+    expect(stepAttempt(hosts)).toBeUndefined();
   });
 
   it("asks the route running a session how it's called back, and the durable host for others", () => {

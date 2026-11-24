@@ -41,9 +41,10 @@ import type { SessionStartBody } from "#execution/session-runtime.js";
 import { SHARED_SESSION_STEPS } from "#execution/session/shared-steps.js";
 import { sessionHostClock, settleAll } from "#execution/session/host-clock.js";
 import type { SessionInboxHandle } from "#execution/session-inbox/inbox.js";
-import { dispatchSessionSteps } from "#execution/session/steps.js";
+import { dispatchSessionSteps, type SessionStepCall } from "#execution/session/steps.js";
 import { turnStepOn, type SessionStepHost } from "#execution/session/turn-step.js";
 import { createInProcessToolStubs } from "#execution/in-process/tool-stubs.js";
+import type { ToolStubHost } from "#execution/tool-stub-host.js";
 import { applyRunMessagesOn } from "#execution/tools/workflow/apply-run-messages.js";
 import { HookNotFoundError, isHookNotFound } from "#shared/run-errors.js";
 import { createUlid } from "#shared/ulid.js";
@@ -110,6 +111,8 @@ export interface InProcessHost {
   readonly runs: InProcessRuns;
   readonly running: Map<string, Promise<void>>;
   readonly durable: Durable;
+  readonly step: SessionStepCall;
+  readonly toolStubs: ToolStubHost;
   startEntry(
     entry: Omit<InitialWorkflowEntryInput, "ownerDeploymentId">,
   ): Promise<SessionStartResult>;
@@ -206,25 +209,32 @@ export function createInProcessHost(
     ...SHARED_SESSION_STEPS,
     applyRunMessages: (input) => work.count(() => applyRunMessages(input)),
     dispatchRuns: (input) => work.count(() => dispatchRuns(input)),
-    turn: (input) =>
+    turn: (input, run) =>
       work.count(async () => {
-        const { abortSignal, sessionWritable, steeringSignal, ...data } = input;
         const { sessionId } = input.sessionState;
+        const signals = run?.signals;
+        const sessionWritable = run?.stream;
+        if (sessionWritable === undefined)
+          throw new Error("An in-process turn step needs the stream of its session.");
         steps.set(sessionId, (steps.get(sessionId) ?? 0) + 1);
         try {
           const result = await attempts.run(
             {
               name: "turnStep",
               sessionId,
-              ...(abortSignal !== undefined && { signal: abortSignal }),
+              ...(signals !== undefined && { signal: signals.cancel }),
             },
             async (attempt) => ({
-              ...(await acrossStepBoundary(stepBoundary, data)),
-              abortSignal,
-              sessionWritable: attempts.writable(attempt, sessionWritable),
-              steeringSignal,
+              data: await acrossStepBoundary(stepBoundary, input),
+              meta: {
+                attempt: attempt.attempt,
+                key: run?.key ?? `${sessionId}:turn`,
+                sessionId,
+                ...(signals !== undefined && { signals }),
+              },
+              stream: attempts.writable(attempt, sessionWritable),
             }),
-            runTurnStep,
+            ({ data, meta, stream }) => runTurnStep(data, meta, stream),
           );
           return await acrossStepBoundary(stepBoundary, result);
         } finally {
@@ -319,6 +329,8 @@ export function createInProcessHost(
     lines,
     runs,
     running,
+    step,
+    toolStubs,
     stepsRunning: (sessionId) => steps.get(sessionId) ?? 0,
     working: (counted) => work.count(counted),
     idle: () => work.idle(),

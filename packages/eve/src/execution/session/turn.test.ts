@@ -16,7 +16,7 @@ import { createTurnControl } from "#execution/session/turn-control.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import type { OpenTurn } from "#execution/session/open-turn.js";
 import { cancelTasksStep } from "#execution/tasks/steps.js";
-import { turnStep } from "#execution/workflow-host/turn-step.js";
+import { turnStep, type WorkflowTurnStepInput } from "#execution/workflow-host/turn-step.js";
 import { publishSessionEvents, type Entered } from "#execution/publish-session-events.js";
 import type {
   DeliverHookPayload,
@@ -152,7 +152,7 @@ type TurnStepWorkResult = DurableStepResult extends infer R
     ? Omit<R, "history">
     : never
   : never;
-const turnStepWork = stepWork<TurnStepInput, TurnStepWorkResult>;
+const turnStepWork = stepWork<WorkflowTurnStepInput, TurnStepWorkResult>;
 function dispatchWork(
   work: (
     input: Entered<Parameters<typeof dispatchCoordinationStep>[0]>,
@@ -1609,8 +1609,8 @@ describe("SessionExecution checkpoints", () => {
       new SessionStateCursor({
         history: [],
         inbox,
-        record: async (change) => {
-          records.push({ open: change.open });
+        record: async (open) => {
+          records.push({ open });
         },
         sessionWritable: new WritableStream<Uint8Array>(),
         serializedContext: {},

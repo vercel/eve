@@ -10,7 +10,6 @@ import {
   type SteeringOptions,
   type SteeringTurn,
 } from "#execution/session/input-queue.js";
-import { handedOnBy } from "#execution/session/handed-on.js";
 import { routeSelectedDelivery } from "#execution/session/route-selected-delivery.js";
 import type { SessionExecutionInput, TaskDeadline } from "#execution/session/turn.js";
 import { createTurnControl, type TurnControl } from "#execution/session/turn-control.js";
@@ -57,6 +56,7 @@ export class ActiveTurn {
   private steeringController: AbortController;
   caller: TurnCaller | undefined;
   compacted = false;
+  awaitingCalls = false;
 
   constructor(
     input: SessionExecutionInput,
@@ -83,20 +83,18 @@ export class ActiveTurn {
   }
 
   private readonly signalSteering = (payload: SessionInboxPayload): void => {
-    let delivery;
-    try {
-      delivery = decodeSessionInboxPayload(payload);
-    } catch {
-      return;
-    }
+    const delivery = steeringDeliveryOf(payload, this.identity);
     if (
-      delivery.kind === "deliver" &&
+      delivery !== undefined &&
       !this.input.queue.isDuplicate(delivery) &&
-      isSteeringMessage(delivery, this.identity) &&
       !this.input.cursor.sessionState.hasProxyInputRequests
     )
       this.steeringController.abort();
   };
+
+  get holdsInput(): boolean {
+    return this.awaitingCalls || this.runtimeResults.length > 0;
+  }
 
   get signal(): AbortSignal {
     return this.controller.signal;
@@ -183,6 +181,7 @@ export class ActiveTurn {
       if (event !== undefined) return event;
       const elapsed = await this.waitForInboxOrDeadline(deadlines);
       if (elapsed !== undefined) return { callId: elapsed, kind: "timeout" };
+      if (this.input.idle !== undefined && !this.input.inbox.hasPending()) await this.input.idle();
       const payload = await this.input.inbox.next();
       if (payload === undefined)
         throw new Error("Session inbox closed before runtime actions completed.");
@@ -234,11 +233,7 @@ export class ActiveTurn {
   }
 
   private cancelsThisTurn(payload: SessionInboxPayload): boolean {
-    if (payload.kind === "reset" || payload.kind === "session-failure") return true;
-    if (this.#control) return false;
-    if (payload.kind === "clear") return true;
-    if (payload.kind !== "cancel") return false;
-    return payload.turnId === undefined || payload.turnId === this.expectedTurnId;
+    return cancelsTurn(payload, { control: this.#control, expectedTurnId: this.expectedTurnId });
   }
 
   private settleControlDelivery(settlement: ControlSettlement) {
@@ -299,12 +294,8 @@ export class ActiveTurn {
         continue;
       }
       this.routedToChildren.add(sequence);
-      const routed = await this.input.cursor.advance(
-        (state) => routeDeliverToChildren({ delivery, ...state }, this.input),
-        {
-          handedOn: (result) =>
-            result.kind === "cancel-turn" ? [] : handedOnBy(delivery, result.remainder),
-        },
+      const routed = await this.input.cursor.advance((state) =>
+        routeDeliverToChildren({ delivery, ...state }, this.input),
       );
       if (routed.kind === "cancel-turn") {
         this.input.queue.replaceDelivery(sequence, undefined);
@@ -330,6 +321,32 @@ export class ActiveTurn {
     if (this.controller.signal.aborted) return;
     this.controller.abort(new TurnCancelledError());
   }
+}
+
+export function cancelsTurn(
+  payload: SessionInboxPayload,
+  turn: { readonly control: boolean; readonly expectedTurnId: string },
+): boolean {
+  if (payload.kind === "reset" || payload.kind === "session-failure") return true;
+  if (turn.control) return false;
+  if (payload.kind === "clear") return true;
+  if (payload.kind !== "cancel") return false;
+  return payload.turnId === undefined || payload.turnId === turn.expectedTurnId;
+}
+
+export function steeringDeliveryOf(
+  payload: SessionInboxPayload,
+  identity: SteeringTurn,
+): DeliverHookPayload | undefined {
+  let delivery;
+  try {
+    delivery = decodeSessionInboxPayload(payload);
+  } catch {
+    return undefined;
+  }
+  return delivery.kind === "deliver" && isSteeringMessage(delivery, identity)
+    ? delivery
+    : undefined;
 }
 
 function asBoundaryMessage(event: RuntimeEvent): WorkflowToolRunMessage | undefined {

@@ -24,11 +24,8 @@ export interface TurnStepPayload {
 
 export interface TurnStepInput {
   readonly handover?: SessionHandoverObservation;
-  readonly abortSignal?: AbortSignal;
   readonly caller?: TurnCaller;
-  readonly steeringSignal?: AbortSignal;
   readonly input: TurnStepPayload | undefined;
-  readonly sessionWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
   readonly history: HarnessModelMessage[];

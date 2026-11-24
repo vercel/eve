@@ -6,6 +6,9 @@ import { createSession } from "#channel/session.js";
 import { SessionStrandedError } from "#channel/session-stranded-error.js";
 import { EVE_VERSION_ATTRIBUTE } from "#execution/eve-workflow-attributes.js";
 import { resumeRoutedHook } from "#execution/hosts.js";
+import { DEFAULT_TURN_POLICY } from "#channel/types.js";
+import { sessionAddress } from "#execution/durable.js";
+import { identifyCommand } from "#execution/session-commands.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import {
   finalizeInstrumentationProviders,
@@ -185,7 +188,7 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
             expect(lines).toEqual(
               records.slice(1).map((record, index) => ({ position: index + 1, record })),
             );
-            expect(await durable.status(first.sessionId)).toBe("running");
+            expect(["running", "parked"]).toContain(await durable.status(first.sessionId));
             await runtime.dispatchSession({
               command: { deliveryId: "end", kind: "reset" },
               sessionId: first.sessionId,
@@ -242,6 +245,114 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
     describe("sessions", () => {
       const lookup = { name: "lookup" };
       const isTurnStep = (step: { readonly name: string }) => step.name.includes("turnStep");
+
+      it("stops a turn that runs when a cancel arrives, and serves the next message", async () => {
+        let started!: () => void;
+        const modelCallStarted = new Promise<void>((resolve) => (started = resolve));
+        await withHost(
+          {
+            name: `${name}-interrupt`,
+            respond: async (_prompt, call, signal) => {
+              if (call > 1) return textStreamResult("Here is the summary, Alice.");
+              started();
+              await new Promise<void>((resolve) =>
+                signal?.addEventListener("abort", () => resolve()),
+              );
+              throw signal?.reason;
+            },
+          },
+          async ({ runtime, settled }) => {
+            const thread = alice(runtime, `${name}:interrupt`);
+            const asked = await thread.send("Alice asks for the long report.", { auth: null });
+            await modelCallStarted;
+            await createSession(asked.sessionId, runtime).cancel({ auth: null });
+            const next = await (
+              await thread.send("Alice asks for a summary instead.", { auth: null })
+            ).result();
+            expect(next).toMatchObject({
+              reply: "Here is the summary, Alice.",
+              sessionId: asked.sessionId,
+              status: "completed",
+            });
+            await settled();
+            const events = await recorded(runtime, asked.sessionId);
+            expect(ofType(events, "turn.settled").map(({ data }) => data.outcome)).toEqual([
+              "cancelled",
+              "completed",
+            ]);
+            expect(await violations(runtime, asked.sessionId)).toEqual([]);
+          },
+        );
+      });
+
+      needs(
+        "deliveryKeys",
+        "keeps one item for a delivery key it already holds, whatever the second payload",
+        async () => {
+          const { prompts } = await withHost(
+            { name: `${name}-held-key`, respond: () => textStreamResult("Noted, Alice.") },
+            async ({ durable, runtime, settled }) => {
+              const first = await (
+                await alice(runtime, `${name}:held-key`).send("Alice opens her notes.", {
+                  auth: null,
+                })
+              ).result();
+              await settled();
+              const send = (message: string) =>
+                durable.deliver(
+                  sessionAddress({ sessionId: first.sessionId }),
+                  identifyCommand({
+                    auth: null,
+                    kind: "send",
+                    payload: { message },
+                    turnPolicy: DEFAULT_TURN_POLICY,
+                  }),
+                  { key: `${name}:held-key:reminder` },
+                );
+              await send("Alice adds a reminder.");
+              await send("Bob adds a different reminder.");
+              await settled();
+            },
+          );
+          expect(prompts).toHaveLength(2);
+          expect(prompts.join("")).not.toContain("Bob adds a different reminder.");
+        },
+      );
+
+      it("runs one turn for two deliveries with the same key", async () => {
+        const { prompts } = await withHost(
+          { name: `${name}-same-key`, respond: () => textStreamResult("Noted, Alice.") },
+          async ({ durable, runtime, settled }) => {
+            const first = await (
+              await alice(runtime, `${name}:same-key`).send("Alice opens her notes.", {
+                auth: null,
+              })
+            ).result();
+            await settled();
+            const key = `${name}:same-key:reminder`;
+            const reminder = identifyCommand({
+              auth: null,
+              idempotencyKey: key,
+              kind: "send",
+              payload: { message: "Alice adds a reminder." },
+              turnPolicy: DEFAULT_TURN_POLICY,
+            });
+            for (let delivery = 0; delivery < 2; delivery++)
+              expect(
+                await durable.deliver(sessionAddress({ sessionId: first.sessionId }), reminder, {
+                  key,
+                }),
+              ).toMatchObject({ accepted: true, sessionId: first.sessionId });
+            await settled();
+            const events = await recorded(runtime, first.sessionId);
+            expect(ofType(events, "turn.settled").map(({ data }) => data.outcome)).toEqual([
+              "completed",
+              "completed",
+            ]);
+          },
+        );
+        expect(prompts).toHaveLength(2);
+      });
 
       needs(
         "retries",
@@ -510,11 +621,12 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
 
       const replaysAfterRestart = (
         point: string,
+        capability: keyof HostCapabilities,
         options: CaseOptions,
         body: (host: HostUnderTest, restart: () => Promise<void>, agent: Probe) => Promise<void>,
       ) =>
         needs(
-          "durable",
+          capability,
           `replays a session ${point} after a restart, and continues it`,
           async () => {
             const logs = captureLogRecords();
@@ -541,6 +653,7 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
 
       replaysAfterRestart(
         "parked between turns",
+        "restarts",
         { name: `${name}-replay-parked`, respond: () => textStreamResult("Noted, Alice.") },
         async ({ runtime }, restart, { prompts }) => {
           const thread = alice(runtime, `${name}:replay-parked`);
@@ -564,6 +677,7 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
 
       replaysAfterRestart(
         "paused on an approval",
+        "restarts",
         {
           name: `${name}-replay-approval`,
           respond: (prompt) =>
@@ -597,6 +711,7 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
       const idleTimeoutMs = 3_600_000;
       replaysAfterRestart(
         "waiting out its sandbox's idle window",
+        "durable",
         {
           events: {
             async "turn.started"(_event, ctx) {
@@ -641,6 +756,7 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
 
       replaysAfterRestart(
         "a compaction just handed to a new owner",
+        "durable",
         { name: `${name}-replay-moved`, respond: () => textStreamResult("Noted, Alice.") },
         async ({ runtime, sessionOwner }, restart) => {
           const thread = alice(runtime, `${name}:replay-moved`);

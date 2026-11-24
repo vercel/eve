@@ -257,7 +257,8 @@
  *             and declarations (`entities`, `declaration`, `default`), the
  *             capability modules whose implementations must stay out of
  *             bundles that don't use them (`build`, `hosted-sandbox`,
- *             `document-store`, `schedules`, `models`, `runtime-spans`), and, in the Nitro
+ *             `document-store`, `schedules`, `models`, `runtime-spans`), the
+ *             engine contract (`engine`), and, in the Nitro
  *             build host, the build-output port (`#platform/build-output.js`,
  *             `#platform/types.js`). Platform implementations stay behind
  *             them.
@@ -1638,6 +1639,7 @@ const PLATFORM_CONTRACT_MODULES = new Set([
   "#platform/declaration.js",
   "#platform/default.js",
   "#platform/document-store.js",
+  "#platform/engine.js",
   "#platform/entities.js",
   "#platform/hosted-sandbox.js",
   "#platform/models.js",

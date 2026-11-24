@@ -4,7 +4,6 @@ import type {
   SessionStepInput,
 } from "#execution/publish-session-events.js";
 import { sessionHookTokens } from "#execution/session/hook-tokens.js";
-import type { HandedOn } from "#execution/session/handed-on.js";
 import type { OpenTurn } from "#execution/session/open-turn.js";
 import {
   applySessionStateDelta,
@@ -12,7 +11,6 @@ import {
   type SessionStateValues,
 } from "#execution/session/state-delta.js";
 import type { SessionInboxOwnership } from "#execution/session-inbox/inbox.js";
-import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 
 export class SessionStateCursor {
@@ -22,8 +20,6 @@ export class SessionStateCursor {
   private readonly record: SessionRecordWriter | undefined;
   private values: SessionStateValues;
   private openTurn: OpenTurn | undefined;
-  private consumedSince: WorkflowToolRunMessage[] = [];
-  private handedOnSince: HandedOn[] = [];
   private readonly settledWaiters: (() => void)[] = [];
   private rerunNext: boolean;
   private adopted = 0;
@@ -66,10 +62,9 @@ export class SessionStateCursor {
     return this.openTurn;
   }
 
-  async consumed(messages: readonly WorkflowToolRunMessage[]): Promise<void> {
-    this.consumedSince.push(...messages);
-    const recorded = this.writeRecord();
-    if (recorded !== undefined) await recorded;
+  markOpen(open: OpenTurn | undefined): Promise<void> | undefined {
+    this.openTurn = open;
+    return this.record?.(open);
   }
 
   async settledStep(): Promise<void> {
@@ -119,17 +114,7 @@ export class SessionStateCursor {
     if (sessionHookTokens(next).some((token) => !tokens.has(token))) return false;
     this.values = next;
     this.adopted++;
-    const recorded = this.writeRecord();
-    if (recorded !== undefined) await recorded;
     return true;
-  }
-
-  private writeRecord(): Promise<void> | undefined {
-    const consumed = this.consumedSince;
-    const handedOn = this.handedOnSince;
-    this.consumedSince = [];
-    this.handedOnSince = [];
-    return this.record?.({ consumed, handedOn, open: this.openTurn });
   }
 
   private writing(): Pick<SessionStepInput, "rerun" | "sessionWritable"> {
@@ -144,9 +129,7 @@ export class SessionStateCursor {
     this.running++;
     try {
       if (options.turn?.before !== undefined) {
-        this.openTurn = options.turn.before;
-        this.consumedSince.push(...(options.turn.consumes ?? []));
-        const recorded = this.writeRecord();
+        const recorded = this.markOpen(options.turn.before);
         if (recorded !== undefined) await recorded;
       }
       const base = this.values;
@@ -160,13 +143,14 @@ export class SessionStateCursor {
         throw new Error("Session state changed while a step ran, so its state delta cannot apply.");
       }
       this.values = next;
-      const { turn } = options;
-      if (turn?.after !== undefined) this.openTurn = turn.after(result);
-      if (turn?.before === undefined) this.consumedSince.push(...(turn?.consumes ?? []));
-      this.handedOnSince.push(...(turn?.handedOn?.(result) ?? []));
       this.adopted++;
-      const recorded = this.writeRecord();
-      if (recorded !== undefined) await recorded;
+      const { turn } = options;
+      if (turn !== undefined) {
+        const recorded = this.markOpen(
+          turn.after === undefined ? this.openTurn : turn.after(result),
+        );
+        if (recorded !== undefined) await recorded;
+      }
       return result;
     } finally {
       this.running--;
@@ -175,15 +159,9 @@ export class SessionStateCursor {
   }
 }
 
-type SessionRecordWriter = (record: {
-  readonly open: OpenTurn | undefined;
-  readonly consumed: readonly WorkflowToolRunMessage[];
-  readonly handedOn: readonly HandedOn[];
-}) => Promise<void>;
+type SessionRecordWriter = (open: OpenTurn | undefined) => Promise<void> | undefined;
 
 export interface OpenTurnChange<T> {
   readonly before?: OpenTurn;
   readonly after?: (result: T) => OpenTurn | undefined;
-  readonly consumes?: readonly WorkflowToolRunMessage[];
-  readonly handedOn?: (result: T) => readonly HandedOn[];
 }
