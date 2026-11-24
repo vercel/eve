@@ -17,10 +17,6 @@ export function createEmitChannelEventFn(
     const owners = installedDurableHost()?.subscriptions;
     if (owners === undefined)
       throw new Error("Subscriptions are not supported on this host. Run from a deployed agent.");
-    return owners.emit(
-      { kind: "channel", name: channelName },
-      channelEventKey(event, scope),
-      occurrence,
-    );
+    return owners.emit(channelName, channelEventKey(event, scope), occurrence);
   };
 }

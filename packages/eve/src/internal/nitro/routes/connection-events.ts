@@ -56,15 +56,12 @@ export async function handleConnectionEventRequest(
       const requestTraceContext = connectionEventTraceContext(span?.spanContext());
       const owners = installedDurableHost()?.subscriptions;
       if (owners === undefined) throw new Error("This host keeps no subscriptions.");
-      const emitted = await owners.emit(
-        { kind: "connection", name: input.connectionName },
-        delivery.subscriptionId,
-        { id: delivery.deliveryId, data: parseJsonValue(delivery), requestTraceContext },
-      );
-      if (emitted) return new Response(null, { status: 202 });
-      if ((await owners.find(origin.bindingId)) !== undefined)
-        return new Response(null, { status: 503, headers: { "Retry-After": "5" } });
-      return new Response(null, { status: 410 });
+      const delivered = await owners.deliver(origin.bindingId, {
+        id: delivery.deliveryId,
+        data: parseJsonValue(delivery),
+        requestTraceContext,
+      });
+      return new Response(null, { status: delivered ? 202 : 410 });
     } catch (error) {
       if (isObject(error) && error.code === "invalid_delivery")
         return new Response(null, { status: 401 });

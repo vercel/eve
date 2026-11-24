@@ -250,6 +250,40 @@ it("leaves its key, then closes, when it is retired", async () => {
   expect(world.backoffs).toEqual([]);
 });
 
+const connectionBinding: SubscriptionBinding = {
+  ...binding,
+  id: "binding-mcp",
+  source: {
+    kind: "connection",
+    name: "issues",
+    instanceId: undefined,
+    connector: "issues",
+    principalKey: "principal-1",
+    request: { name: "issue.created", arguments: {} },
+  } as never,
+};
+
+it("delivers a connection's events straight to its own hook without joining or leaving a key", async () => {
+  const run = subscriptionWorkflow({ binding: connectionBinding, serializedContext });
+  await vi.waitFor(() => expect(world.publishOutcome).toHaveBeenCalled());
+  world.resume(subscriptionHookToken(connectionBinding.id), {
+    kind: "delivery",
+    event: event("a"),
+  });
+  await vi.waitFor(() => expect(world.start).toHaveBeenCalledTimes(1));
+  expect(world.start).toHaveBeenCalledWith({
+    binding: connectionBinding,
+    serializedContext,
+    event: event("a"),
+  });
+
+  world.resume(subscriptionHookToken(connectionBinding.id), { kind: "retire" });
+  await run;
+  expect(world.calls).toEqual(["open", "publish", "close"]);
+  expect(world.join).not.toHaveBeenCalled();
+  expect(world.leave).not.toHaveBeenCalled();
+});
+
 it("ends at the expiry the source reported, then leaves and closes", async () => {
   const expiresAt = "2026-10-08T00:00:00.000Z";
   world.outcome = opened(expiresAt);
@@ -459,7 +493,6 @@ it("hands its first subscription to the run that already holds the key, without 
     key,
     bindingId: "b",
     ackId: "ack-b",
-    to: holderHookId,
   });
   expect(world.acknowledge).not.toHaveBeenCalled();
   expect(world.fanOut).not.toHaveBeenCalled();

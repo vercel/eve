@@ -271,7 +271,6 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
     subscriptionsOnEvent === undefined
       ? undefined
       : githubEventDefinitions(config.experimental?.subscriptions?.events);
-  const appSlug = createGitHubBotNameResolver({ credentials: config.credentials });
   const dispatchOptions = { botName };
   const mergedEvents: GitHubChannelEvents = {
     ...createDefaultEvents({
@@ -312,21 +311,22 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
           const missingHeaders = missingGitHubWebhookHeaders(req.headers);
 
           if (subscriptionEvents !== undefined) {
-            waitUntil(
-              emitGitHubWebhook({
+            try {
+              await emitGitHubWebhook({
                 body,
-                appSlug,
+                botName,
                 contentType: req.headers.get("content-type") ?? undefined,
                 declaredEvents: subscriptionEvents,
                 emit: experimental.subscriptions.emit,
                 headers: req.headers,
-              }).catch((error: unknown) => {
-                logError(log, "GitHub subscription delivery failed", error, {
-                  deliveryId: req.headers.get("x-github-delivery"),
-                  event: req.headers.get("x-github-event"),
-                });
-              }),
-            );
+              });
+            } catch (error) {
+              logError(log, "GitHub subscription delivery failed", error, {
+                deliveryId: req.headers.get("x-github-delivery"),
+                event: req.headers.get("x-github-event"),
+              });
+              return new Response("subscription delivery failed", { status: 503 });
+            }
           }
 
           let event: GitHubInboundEvent | null;

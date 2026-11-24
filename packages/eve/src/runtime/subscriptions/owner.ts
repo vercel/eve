@@ -21,7 +21,6 @@ import {
   type SubscriptionKeyMessage,
   type SubscriptionOutcome,
   type SubscriptionOwnerMessage,
-  type SubscriptionSourceRef,
 } from "#runtime/subscriptions/state.js";
 
 export async function bindingContext(
@@ -90,14 +89,24 @@ export function retireSubscriptionOwner(bindingId: string): Promise<boolean> {
 }
 
 export function emitSubscriptionEvent(
-  source: SubscriptionSourceRef,
+  channelName: string,
   key: string,
   event: SubscriptionEvent,
 ): Promise<boolean> {
-  return resume(subscriptionKeyHookToken(source, key), {
+  return resume(subscriptionKeyHookToken({ kind: "channel", name: channelName }, key), {
     kind: "emit",
     event,
   } satisfies SubscriptionKeyMessage);
+}
+
+export function deliverSubscriptionEvent(
+  bindingId: string,
+  event: SubscriptionEvent,
+): Promise<boolean> {
+  return resume(subscriptionHookToken(bindingId), {
+    kind: "delivery",
+    event,
+  } satisfies SubscriptionOwnerMessage);
 }
 
 async function resume(token: string, message: unknown): Promise<boolean> {

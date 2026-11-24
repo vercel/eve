@@ -48,26 +48,34 @@ export type ConnectionListing =
 
 export async function listConnectionTools(
   connection: ResolvedConnectionDefinition,
-  { auth, client, scoped }: ConnectionSession,
+  session: ConnectionSession,
 ): Promise<ConnectionListing> {
   const name = connection.connectionName;
   try {
-    return { tools: await listToolMetadata(connection, client) };
+    return { tools: await listToolMetadata(connection, session.client) };
   } catch (error) {
     if (!isConnectionAuthorizationRequiredError(error)) {
       log.warn("failed to load connection tools", { connection: name, error });
       return { failure: listingFailureMessage(name, error) };
     }
-    if (scoped === undefined) {
-      return { failure: `"${name}" requires authorization and cannot start interactive sign-in.` };
-    }
-    if (auth.isJustAuthorized(scoped)) {
-      return {
-        failure: `Authorization failed for "${name}": the service rejected the token immediately after authorization.`,
-      };
-    }
-    return { authorization: scoped, error };
+    return authorizationRequired(name, session, error);
   }
+}
+
+export function authorizationRequired(
+  name: string,
+  { auth, scoped }: Pick<ConnectionSession, "auth" | "scoped">,
+  error: unknown,
+): Exclude<ConnectionListing, { readonly tools: unknown }> {
+  if (scoped === undefined) {
+    return { failure: `"${name}" requires authorization and cannot start interactive sign-in.` };
+  }
+  if (auth.isJustAuthorized(scoped)) {
+    return {
+      failure: `Authorization failed for "${name}": the service rejected the token immediately after authorization.`,
+    };
+  }
+  return { authorization: scoped, error };
 }
 
 const LISTING_TIMEOUT_MS = 10_000;

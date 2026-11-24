@@ -385,7 +385,6 @@ it("forwards a join to the winning run and publishes where it went", async () =>
     key: "vercel/eve#7",
     bindingId: "binding-1",
     ackId: "ack-1",
-    to: "run-winner",
   });
 
   expect(mocks.resumeHook).toHaveBeenCalledExactlyOnceWith(keyToken, {
@@ -394,7 +393,23 @@ it("forwards a join to the winning run and publishes where it went", async () =>
     ackId: "ack-1",
   });
   expect(mocks.writes).toEqual([
-    { namespace: joinAckNamespace("ack-1"), value: { forwardedTo: "run-winner" } },
+    { namespace: joinAckNamespace("ack-1"), value: { forwardedTo: "run-holding" } },
+  ]);
+});
+
+it("publishes the run that took the forwarded join, not the run that lost the claim", async () => {
+  mocks.hooks.add(keyToken);
+  mocks.getHookByToken.mockResolvedValue({ runId: "run-third" });
+
+  await forwardJoinStep({
+    source,
+    key: "vercel/eve#7",
+    bindingId: "binding-1",
+    ackId: "ack-1",
+  });
+
+  expect(mocks.writes).toEqual([
+    { namespace: joinAckNamespace("ack-1"), value: { forwardedTo: "run-third" } },
   ]);
 });
 
@@ -404,7 +419,6 @@ it("publishes nothing when the winning run is already gone, so the owner joins a
     key: "vercel/eve#7",
     bindingId: "binding-1",
     ackId: "ack-1",
-    to: "run-winner",
   });
 
   expect(mocks.writes).toEqual([]);

@@ -35,6 +35,7 @@ import { defineJsonSchema, refineJsonSchema } from "#tools/schema.js";
 import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
 
 import {
+  authorizationRequired,
   completeConnectionSignIn,
   listConnectionTools,
   listingFailureMessage,
@@ -67,7 +68,9 @@ export function connectionEntry(
   const label = `${displayProperName(connection.connectionName)}: ${displayTitle(toolName)}`;
   const approval = withAgentApproval(agentApproval, connection.approval);
   return {
-    approval: connectionApproval(registry, connection, toolName, approval),
+    approval: connectionApproval(connection, approval, () =>
+      toolAnnotations(registry, connection, toolName),
+    ),
     deferred: true,
     description: "",
     execute: (input: unknown, options: ToolExecuteOptions) =>
@@ -80,14 +83,12 @@ export function connectionEntry(
 }
 
 export function connectionEventActionApproval(
-  registry: ConnectionRegistry,
   connection: ResolvedConnectionDefinition,
-  action: string,
 ): Approval | undefined {
-  return connectionApproval(registry, connection, action, connection.approval);
+  return connectionApproval(connection, connection.approval, async () => undefined);
 }
 
-export function runConnectionEventAction(
+export async function runConnectionEventAction(
   registry: ConnectionRegistry,
   connection: ResolvedConnectionDefinition,
   action: string,
@@ -95,14 +96,28 @@ export function runConnectionEventAction(
   options: ToolExecuteOptions,
 ): Promise<unknown> {
   releaseApprovalPin(options.toolCallId, connection);
-  const actions = registry.getClient(connection.connectionName).eventActions;
+  const session = await completeConnectionSignIn(registry, connection);
+  const actions = session.client.eventActions;
   if (actions === undefined) throw new Error("Unknown subscription for this caller.");
-  return withConnectionApproval(connection.connectionName, options.approval?.responder, () =>
-    actions.execute(action, input, {
-      abortSignal: options.abortSignal,
-      callId: options.toolCallId,
-    }),
-  );
+  try {
+    return await withConnectionApproval(
+      connection.connectionName,
+      options.approval?.responder,
+      () =>
+        actions.execute(action, input, {
+          abortSignal: options.abortSignal,
+          callId: options.toolCallId,
+        }),
+    );
+  } catch (error) {
+    if (!isConnectionAuthorizationRequiredError(error)) throw error;
+    const required = authorizationRequired(connection.connectionName, session, error);
+    if ("failure" in required) throw new Error(required.failure);
+    const signal = await session.auth.handleError(required.error, required.authorization);
+    if (connection.approval !== undefined && isAuthorizationSignal(signal))
+      pinApprovedInstance(options.toolCallId, connection);
+    return signal;
+  }
 }
 
 export function connectionSignInEntry(
@@ -302,19 +317,14 @@ function unknownToolMessage(
 }
 
 function connectionApproval(
-  registry: ConnectionRegistry,
   connection: ResolvedConnectionDefinition,
-  toolName: string,
   approval: Approval | undefined,
+  annotations: () => Promise<ConnectionToolAnnotations | undefined>,
 ): Approval | undefined {
   if (approval === undefined) return undefined;
   const policy = resolveApprovalPolicy(approval);
   const request = async (context: ApprovalContext) =>
-    requestApproval(
-      connection,
-      policy,
-      withToolAnnotations(context, await toolAnnotations(registry, connection, toolName)),
-    );
+    requestApproval(connection, policy, withToolAnnotations(context, await annotations()));
   if (typeof approval === "function") return request;
   const response = approval.response;
   return {

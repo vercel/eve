@@ -117,12 +117,12 @@ export async function forwardJoinStep(input: {
   readonly key: string;
   readonly bindingId: string;
   readonly ackId: string;
-  readonly to: string;
 }): Promise<void> {
   "use step";
   const message = { kind: "join", bindingId: input.bindingId, ackId: input.ackId } as const;
-  if ((await resumeKeyRun(input.source, input.key, message)) === undefined) return;
-  await publishTo(joinAckNamespace(input.ackId), { forwardedTo: input.to } satisfies JoinAck);
+  const forwardedTo = await resumeKeyRun(input.source, input.key, message);
+  if (forwardedTo === undefined) return;
+  await publishTo(joinAckNamespace(input.ackId), { forwardedTo } satisfies JoinAck);
 }
 
 export async function fanOutEventStep(input: {

@@ -11,10 +11,12 @@ import { serializeInputSchema, toInputSchema, type ToolSchemaSource } from "#too
 import { renderToolSignature } from "#tools/signature.js";
 
 import {
+  authorizationRequired,
   completeConnectionSignIn,
   listConnectionTools,
   listingFailureMessage,
   type ConnectionListing,
+  type ConnectionSession,
 } from "./connection-auth.js";
 import { connectionSignInEntry } from "./connection-entry.js";
 import { closestNames, isEmptyQuery, rankCandidates, type RankCandidate } from "./rank.js";
@@ -286,14 +288,18 @@ async function searchConnectionEvents(
   | { readonly unavailable: UnavailableConnection }
 > {
   const name = connection.connectionName;
+  let session: ConnectionSession | undefined;
   try {
-    await completeConnectionSignIn(registry, connection);
+    session = await completeConnectionSignIn(registry, connection);
     const events = (await registry.getClient(name).eventActions?.list()) ?? [];
     return {
       candidates: events.map((event) => subscriptionCandidate(name, "connection", event)),
     };
   } catch (error) {
-    if (isConnectionAuthorizationRequiredError(error)) {
+    if (session !== undefined && isConnectionAuthorizationRequiredError(error)) {
+      const required = authorizationRequired(name, session, error);
+      if ("failure" in required)
+        return { unavailable: { connection: name, error: required.failure } };
       const signIn = signInCandidate(registry, connection);
       return { candidates: [signIn], signIn };
     }

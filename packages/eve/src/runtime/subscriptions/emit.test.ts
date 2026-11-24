@@ -33,7 +33,7 @@ it("hands a declared event to the subscriptions holding its scope", async () => 
   await expect(emit("build.failed", { project: "web" }, occurrence)).resolves.toBe(true);
 
   expect(host.emit).toHaveBeenCalledWith(
-    { kind: "channel", name: "ci" },
+    "ci",
     channelEventKey("build.failed", { project: "web" }),
     occurrence,
   );

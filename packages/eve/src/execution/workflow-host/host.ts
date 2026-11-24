@@ -9,6 +9,7 @@ import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import {
+  deliverSubscriptionEvent,
   emitSubscriptionEvent,
   findSubscriptionOwner,
   retireSubscriptionOwner,
@@ -61,7 +62,8 @@ export const workflowHost: DurableHost = {
     start: (binding, bundle, signal) => startSubscriptionOwner(binding, bundle, signal),
     find: (bindingId) => findSubscriptionOwner(bindingId),
     retire: (bindingId) => retireSubscriptionOwner(bindingId),
-    emit: (source, key, event) => emitSubscriptionEvent(source, key, event),
+    emit: (channelName, key, event) => emitSubscriptionEvent(channelName, key, event),
+    deliver: (bindingId, event) => deliverSubscriptionEvent(bindingId, event),
   },
   callbackBaseUrl() {
     try {

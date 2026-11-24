@@ -36,14 +36,17 @@ function payload(extra: Record<string, unknown>): Record<string, unknown> {
   };
 }
 
-async function deliver(input: {
+async function post(input: {
   readonly event: string | null;
   readonly body: Record<string, unknown>;
   readonly onEvent?: GitHubOnEvent | null;
   readonly appSlug?: string;
+  readonly botName?: string;
   readonly delivery?: string | null;
-}): Promise<ReturnType<typeof vi.fn<EmitChannelEventFn>>> {
+  readonly emitError?: Error;
+}): Promise<{ response: Response; emit: ReturnType<typeof vi.fn<EmitChannelEventFn>> }> {
   const channel = githubChannel({
+    botName: input.botName,
     experimental:
       input.onEvent === null
         ? undefined
@@ -56,6 +59,7 @@ async function deliver(input: {
 
   const body = JSON.stringify(input.body);
   const emit = vi.fn<EmitChannelEventFn>().mockResolvedValue(true);
+  if (input.emitError !== undefined) emit.mockRejectedValue(input.emitError);
   const waitUntil = vi.fn();
   const headers: Record<string, string> = {
     "content-type": "application/json",
@@ -76,8 +80,15 @@ async function deliver(input: {
       waitUntil,
     },
   );
-  expect(response.status).toBe(200);
   await Promise.all(waitUntil.mock.calls.map(([task]) => task as Promise<unknown>));
+  return { response, emit };
+}
+
+async function deliver(
+  input: Parameters<typeof post>[0],
+): Promise<ReturnType<typeof vi.fn<EmitChannelEventFn>>> {
+  const { response, emit } = await post(input);
+  expect(response.status).toBe(200);
   return emit;
 }
 
@@ -237,20 +248,33 @@ describe("GitHub channel subscriptions", () => {
     ]);
   });
 
-  it("throws for an event outside GitHub's catalog instead of reporting that nobody is subscribed", async () => {
+  it("emits nothing for an event newer than the catalog eve knows, without failing the delivery", async () => {
     const emit = vi.fn<EmitChannelEventFn>().mockResolvedValue(true);
-    const body = JSON.stringify(payload({ action: "invented" }));
     await expect(
       emitGitHubWebhook({
-        body,
+        body: JSON.stringify(payload({ action: "invented" })),
         contentType: "application/json",
         headers: new Headers({ "x-github-delivery": "d1", "x-github-event": "release" }),
-        appSlug: async () => undefined,
+        botName: async () => undefined,
         declaredEvents: githubEventDefinitions(),
         emit,
       }),
-    ).rejects.toThrow('GitHub event "release.invented" is not one eve can deliver');
+    ).resolves.toBeUndefined();
     expect(emit).not.toHaveBeenCalled();
+  });
+
+  it("answers 503 when the subscription handoff fails, so GitHub's delivery log shows it failed", async () => {
+    const logging = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const { response } = await post({
+        event: "check_suite",
+        body: checkSuite("failure", [7]),
+        emitError: new Error("workflow service unavailable"),
+      });
+      expect(response.status).toBe(503);
+    } finally {
+      logging.mockRestore();
+    }
   });
 
   it("emits nothing for an event the channel does not declare", async () => {
@@ -259,7 +283,7 @@ describe("GitHub channel subscriptions", () => {
       body: JSON.stringify(checkSuite("failure", [7])),
       contentType: "application/json",
       headers: new Headers({ "x-github-delivery": "d1", "x-github-event": "check_suite" }),
-      appSlug: async () => undefined,
+      botName: async () => undefined,
       declaredEvents: githubEventDefinitions(["pull_request"]),
       emit,
     });
@@ -318,6 +342,21 @@ describe("GitHub channel subscriptions", () => {
       });
       const emit = await deliver({ event: "check_suite", body: own, appSlug: "eve-bot" });
       expect(emit.mock.calls[0]![0]).toBe("check_suite.completed");
+    });
+
+    it("takes the App's name from the channel's botName, not only from the credentials", async () => {
+      const own = appComment("Bot");
+      expect(
+        (await deliver({ event: "issue_comment", body: own, botName: "eve-bot" })).mock.calls,
+      ).toEqual([]);
+      const dependabot = payload({
+        ...commentPayload("hi"),
+        sender: { id: 4, login: "dependabot[bot]", type: "Bot" },
+      });
+      expect(
+        (await deliver({ event: "issue_comment", body: dependabot, botName: "eve-bot" })).mock.calls
+          .length,
+      ).toBeGreaterThan(0);
     });
 
     it("without a resolved slug, skips a comment from a bot account and emits one from a user", async () => {

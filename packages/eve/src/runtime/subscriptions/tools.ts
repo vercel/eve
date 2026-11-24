@@ -54,7 +54,6 @@ export type ConnectionSubscriptionAction = typeof EVENT_SUBSCRIBE_ACTION | typeo
 
 export interface ConnectionSubscriptionGate {
   readonly approval: (
-    action: ConnectionSubscriptionAction,
     connectionOf: (toolInput: unknown) => Promise<string | undefined> | string | undefined,
   ) => HarnessToolDefinition["approval"];
   readonly run: (
@@ -69,7 +68,7 @@ export function stopSubscriptionEntry(gate: ConnectionSubscriptionGate): Harness
   return {
     name: STOP_SUBSCRIPTION_TOOL,
     description: "Stop an active subscription by ID so future events are not delivered.",
-    approval: gate.approval(EVENT_STOP_ACTION, (toolInput) =>
+    approval: gate.approval((toolInput) =>
       connectionOfSubscription(isObject(toolInput) ? toolInput.id : undefined),
     ),
     frameworkTool: true,

@@ -10,7 +10,6 @@ import {
   offeredSubscriptions,
   SUBSCRIBE_TOOL,
   ttlSchema,
-  type ConnectionSubscriptionAction,
   type ConnectionSubscriptionGate,
   type OfferedSubscription,
   type SubscribeInput,
@@ -55,7 +54,7 @@ export function subscriptionTools(
   const subscribe: HarnessToolDefinition = {
     name: SUBSCRIBE_TOOL,
     description: subscribeDescription(channels, connections),
-    approval: gate.approval(EVENT_SUBSCRIBE_ACTION, (toolInput) => {
+    approval: gate.approval((toolInput) => {
       const source = isObject(toolInput) ? toolInput.source : undefined;
       return typeof source === "string" && connectionNames.has(source) ? source : undefined;
     }),
@@ -97,26 +96,22 @@ export function subscriptionTools(
 function connectionGate(
   callable: Pick<Callable, "connections" | "registry">,
 ): ConnectionSubscriptionGate {
-  const gated = async (
-    connectionOf: () => Promise<string | undefined> | string | undefined,
-    action: ConnectionSubscriptionAction,
-  ) => {
+  const gated = async (connectionOf: () => Promise<string | undefined> | string | undefined) => {
     const name = await connectionOf();
     const connection = callable.connections.find(({ connectionName }) => connectionName === name);
     return connection === undefined || callable.registry === undefined
       ? undefined
-      : connectionEventActionApproval(callable.registry, connection, action);
+      : connectionEventActionApproval(connection);
   };
   return {
-    approval: (action, connectionOf) => ({
+    approval: (connectionOf) => ({
       request: async (context) => {
-        const approval = await gated(() => connectionOf(context.toolInput), action);
+        const approval = await gated(() => connectionOf(context.toolInput));
         return approval === undefined ? undefined : resolveApprovalPolicy(approval)(context);
       },
       response: async (context) => {
-        const approval: Approval | undefined = await gated(
-          () => connectionOf(context.request.toolInput),
-          action,
+        const approval: Approval | undefined = await gated(() =>
+          connectionOf(context.request.toolInput),
         );
         return typeof approval === "object" && approval.response !== undefined
           ? approval.response(context)

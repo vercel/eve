@@ -154,18 +154,14 @@ export async function emitGitHubWebhook(input: {
   readonly body: string;
   readonly contentType: string | undefined;
   readonly headers: Headers;
-  readonly appSlug: GitHubBotNameResolver;
+  readonly botName: GitHubBotNameResolver;
   readonly declaredEvents: readonly ChannelEventDefinition[];
   readonly emit: EmitChannelEventFn;
 }): Promise<void> {
   const occurrence = parseGitHubWebhookOccurrence(input);
   if (occurrence === null) return;
-  if (!GITHUB_EVENTS.includes(occurrence.name))
-    throw new Error(
-      `GitHub event "${occurrence.name}" is not one eve can deliver to subscriptions.`,
-    );
   if (!input.declaredEvents.some((declared) => declared.name === occurrence.name)) return;
-  if (occurrence.authored && (await isOwnApp(occurrence, input.appSlug))) return;
+  if (occurrence.authored && (await isOwnApp(occurrence, input.botName))) return;
   await Promise.all(
     occurrence.scopes.map((scope) =>
       input.emit(occurrence.name, scope, { id: occurrence.id, data: occurrence.data }),
@@ -175,9 +171,9 @@ export async function emitGitHubWebhook(input: {
 
 async function isOwnApp(
   occurrence: GitHubWebhookOccurrence,
-  appSlug: GitHubBotNameResolver,
+  botName: GitHubBotNameResolver,
 ): Promise<boolean> {
-  const slug = await appSlug();
+  const slug = await botName();
   return slug === undefined
     ? occurrence.senderIsBot
     : occurrence.sender?.toLowerCase() === `${slug}[bot]`.toLowerCase();

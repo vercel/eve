@@ -44,6 +44,7 @@ vi.mock("#execution/workflow-runtime.js", () => ({
 }));
 
 const {
+  deliverSubscriptionEvent,
   emitSubscriptionEvent,
   findSubscriptionOwner,
   retireSubscriptionOwner,
@@ -156,13 +157,22 @@ it("asks a running owner to retire, and reports one that has ended", async () =>
 it("hands an event to the run holding the key, and reports a key nobody holds", async () => {
   const source = { kind: "channel", name: "github" } as const;
   const event = { id: "e1", data: { ok: true } };
-  expect(await emitSubscriptionEvent(source, "vercel/eve#7", event)).toBe(false);
+  expect(await emitSubscriptionEvent(source.name, "vercel/eve#7", event)).toBe(false);
 
   const keyToken = subscriptionKeyHookToken(source, "vercel/eve#7");
   hooks.set(keyToken, { runId: "key-run", metadata: undefined });
-  expect(await emitSubscriptionEvent(source, "vercel/eve#7", event)).toBe(true);
+  expect(await emitSubscriptionEvent(source.name, "vercel/eve#7", event)).toBe(true);
   expect(resumed).toHaveBeenCalledExactlyOnceWith(keyToken, { kind: "emit", event });
-  expect(await emitSubscriptionEvent(source, "vercel/eve#8", event)).toBe(false);
+  expect(await emitSubscriptionEvent(source.name, "vercel/eve#8", event)).toBe(false);
+});
+
+it("hands an event straight to a watch's own hook, and reports a watch that has ended", async () => {
+  const event = { id: "e1", data: { ok: true } };
+  expect(await deliverSubscriptionEvent(binding.id, event)).toBe(false);
+
+  hooks.set(token, { runId: "owner-run", metadata: binding });
+  expect(await deliverSubscriptionEvent(binding.id, event)).toBe(true);
+  expect(resumed).toHaveBeenCalledExactlyOnceWith(token, { kind: "delivery", event });
 });
 
 it("does not stamp the receiving deployment on an emitted event", async () => {
@@ -172,7 +182,7 @@ it("does not stamp the receiving deployment on an emitted event", async () => {
   hooks.set(keyToken, { runId: "key-run", metadata: undefined });
   const event = { id: "e1", data: {} };
 
-  await emitSubscriptionEvent(source, "vercel/eve#7", event);
+  await emitSubscriptionEvent(source.name, "vercel/eve#7", event);
 
   expect(resumed).toHaveBeenCalledExactlyOnceWith(keyToken, { kind: "emit", event });
   vi.unstubAllEnvs();

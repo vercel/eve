@@ -22,6 +22,8 @@ import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { type ConnectionClient, defineInteractiveAuthorization } from "#shared/connection-types.js";
 
 import { catalogBundle, nativeCatalog } from "#internal/testing/catalog-fixtures.js";
+import { EVENT_SUBSCRIBE_ACTION } from "#runtime/subscriptions/actions.js";
+import { runConnectionEventAction } from "./connection-entry.js";
 import { fromCompiledBundle } from "#definitions/compiled-agent.js";
 import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 
@@ -115,6 +117,10 @@ async function setup(mode: ServerMode, approval?: ApprovalPolicy) {
     url: URL,
   } as ResolvedConnectionDefinition;
 
+  const subscribeUpstream = vi.fn(async () => {
+    if (token === undefined) throw new ConnectionAuthorizationRequiredError("kennel");
+    return { subscribed: true };
+  });
   const clients = new Map<string, ConnectionClient>();
   const registry: ConnectionRegistry = {
     dispose: async () => {
@@ -124,6 +130,9 @@ async function setup(mode: ServerMode, approval?: ApprovalPolicy) {
       let client = clients.get(name);
       if (client === undefined) {
         client = new McpConnectionClient(connection);
+        Object.defineProperty(client, "eventActions", {
+          value: { execute: subscribeUpstream, list: async () => [] },
+        });
         clients.set(name, client);
       }
       return client;
@@ -159,6 +168,10 @@ async function setup(mode: ServerMode, approval?: ApprovalPolicy) {
     switchInstance: (id: string) => {
       instanceId = id;
     },
+    subscribe: () =>
+      contextStorage.run(ctx, () =>
+        runConnectionEventAction(registry, connection, EVENT_SUBSCRIBE_ACTION, {}, options),
+      ),
     search: (query: string) =>
       contextStorage.run(ctx, () =>
         catalog.advertised.get(SEARCH_TOOL_NAME)!.execute!({ query }, options),
@@ -282,6 +295,21 @@ describe("MCP connections sign in only when the server asks", () => {
       results: [{ tool: "kennel__find_pet" }, { tool: "kennel__pet_invoice" }],
       searched: 2,
     });
+  });
+});
+
+describe("subscribing through a connection that needs sign-in", () => {
+  it("answers with the sign-in request instead of failing, then subscribes once signed in", async () => {
+    const kennel = await setup("public-list-401");
+
+    const parked = await kennel.subscribe();
+    expect(isAuthorizationSignal(parked)).toBe(true);
+    expect(parked).toMatchObject({ challenges: [{ name: "kennel" }] });
+    expect(kennel.startAuthorization).toHaveBeenCalledOnce();
+
+    kennel.finishSignIn();
+    expect(await kennel.subscribe()).toEqual({ subscribed: true });
+    expect(kennel.startAuthorization).toHaveBeenCalledOnce();
   });
 });
 

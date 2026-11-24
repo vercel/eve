@@ -64,7 +64,7 @@ function inSession<T>(sessionId: string, auth: SessionAuthContext, run: () => Pr
 }
 
 const gate = {
-  approval: vi.fn((_action: string) => undefined as undefined),
+  approval: vi.fn(() => undefined as undefined),
   run: vi.fn(async (_connection: string, action: string) => ({ via: action })),
 };
 
@@ -333,12 +333,6 @@ it("marks the stop tool as a framework tool only the root agent sees", () => {
     true,
     true,
   ]);
-});
-
-it("asks the gate for the stop tool's approval with the connection action it runs", () => {
-  gate.approval.mockClear();
-  stopSubscriptionEntry(gate);
-  expect(gate.approval.mock.calls.map(([action]) => action)).toEqual(["events_unsubscribe"]);
 });
 
 describe("onSubscribe", () => {

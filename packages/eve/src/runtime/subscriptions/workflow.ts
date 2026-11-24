@@ -52,7 +52,8 @@ export async function subscriptionWorkflow(input: {
     return;
   }
   const { opened } = outcome;
-  await joinKeyStep({ binding, key: opened.key });
+  const sharesKey = binding.source.kind === "channel";
+  if (sharesKey) await joinKeyStep({ binding, key: opened.key });
   await publishOpenOutcomeStep(outcome);
   const expiry = opened.expiresAt === null ? undefined : sleep(new Date(opened.expiresAt));
   while (true) {
@@ -60,7 +61,7 @@ export async function subscriptionWorkflow(input: {
     if (message === undefined || message.kind === "retire") break;
     await startSubscriptionDeliveryStep({ binding, serializedContext, event: message.event });
   }
-  await leaveKeyStep({ binding, key: opened.key });
+  if (sharesKey) await leaveKeyStep({ binding, key: opened.key });
   let retryMs = FIRST_CLOSE_RETRY_MS;
   while ((await closeSubscriptionStep({ binding, serializedContext, opened })) === "pending") {
     await sleep(retryMs);
@@ -86,7 +87,6 @@ export async function subscriptionKeyWorkflow(input: {
       key,
       bindingId: input.first,
       ackId: input.ackId,
-      to: error.conflictingRunId,
     });
     return;
   }

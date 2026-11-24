@@ -91,6 +91,7 @@ function durableHost(name: string): DurableHost {
         return true;
       },
       emit: async () => false,
+      deliver: async () => false,
     },
   };
 }

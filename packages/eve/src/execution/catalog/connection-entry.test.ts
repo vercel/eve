@@ -19,7 +19,11 @@ import type { ToolSchema } from "#tools/schema.js";
 
 import { EVENT_SUBSCRIBE_ACTION } from "#runtime/subscriptions/actions.js";
 
-import { connectionEntry, runConnectionEventAction } from "./connection-entry.js";
+import {
+  connectionEntry,
+  connectionEventActionApproval,
+  runConnectionEventAction,
+} from "./connection-entry.js";
 
 const tools: readonly ConnectionToolMetadata[] = [
   {
@@ -78,8 +82,30 @@ function setup(
       resolveApprovalPolicy(approval)(context),
     );
   };
-  return { request, seen };
+  return { connection, request, seen };
 }
+
+describe("event action approval", () => {
+  it("applies the connection's policy without listing the connection's tools", async () => {
+    const getToolMetadata = vi.fn<ConnectionClient["getToolMetadata"]>(async () => tools);
+    const { connection } = setup(getToolMetadata);
+    const approval = connectionEventActionApproval(connection)!;
+    const context: ApprovalContext = {
+      abortSignal: new AbortController().signal,
+      callId: "call-subscribe",
+      getSandbox: () => Promise.reject(new Error("Approval never opens a sandbox.")),
+      session: {} as ApprovalContext["session"],
+      toolName: "eve__subscribe",
+    };
+
+    const status = await contextStorage.run(new ContextContainer(), () =>
+      resolveApprovalPolicy(approval)(context),
+    );
+
+    expect(status).toBe("user-approval");
+    expect(getToolMetadata).not.toHaveBeenCalled();
+  });
+});
 
 describe("connection approval context", () => {
   it("passes the annotations the server declared for the called tool", async () => {

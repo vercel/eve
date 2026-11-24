@@ -3,7 +3,6 @@ import type {
   OpenedSubscription,
   SubscriptionBinding,
   SubscriptionEvent,
-  SubscriptionSourceRef,
 } from "#runtime/subscriptions/state.js";
 
 export interface SubscriptionOwners {
@@ -16,5 +15,6 @@ export interface SubscriptionOwners {
     signal?: AbortSignal,
   ): Promise<OpenedSubscription | undefined>;
   retire(bindingId: string): Promise<boolean>;
-  emit(source: SubscriptionSourceRef, key: string, event: SubscriptionEvent): Promise<boolean>;
+  emit(channelName: string, key: string, event: SubscriptionEvent): Promise<boolean>;
+  deliver(bindingId: string, event: SubscriptionEvent): Promise<boolean>;
 }

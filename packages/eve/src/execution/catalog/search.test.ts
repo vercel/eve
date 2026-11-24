@@ -264,6 +264,26 @@ describe("search", () => {
       expect(notion.signIns).toEqual([]);
     });
 
+    it("reports a subscriptions__ search for a connection that cannot start sign-in as unavailable, not as a sign-in tool", async () => {
+      const vault = fakeConnection({
+        events: ["secret.rotated"],
+        listing: "sign-in",
+        name: "vault",
+        tools: [],
+      });
+      const search = await searchFor(tools, { connections: [vault] });
+
+      const result = await search({ query: "subscriptions__vault__" });
+
+      expect(result.results).toEqual([]);
+      expect(result.unavailable).toEqual([
+        {
+          connection: "vault",
+          error: '"vault" requires authorization and cannot start interactive sign-in.',
+        },
+      ]);
+    });
+
     it("reports a connection that cannot start sign-in, and one whose tools fail to load, as unavailable", async () => {
       const logs = captureLogRecords();
       const vault = fakeConnection({ listing: "sign-in", name: "vault", tools: [] });

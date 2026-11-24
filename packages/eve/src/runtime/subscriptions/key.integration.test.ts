@@ -37,7 +37,7 @@ it("keeps one run per key that accepts joins and events while any subscription h
     await waitForHook(run, { token });
     await expect(acknowledgement(run.runId, "ack-a")).resolves.toEqual({ joined: true });
     await expect(
-      emitSubscriptionEvent(source, "vercel/eve#8:checks_finished", event("1")),
+      emitSubscriptionEvent(source.name, "vercel/eve#8:checks_finished", event("1")),
     ).resolves.toBe(false);
 
     await message({ kind: "join", bindingId: "b", ackId: "ack-b" });
@@ -47,7 +47,7 @@ it("keeps one run per key that accepts joins and events while any subscription h
 
     await message({ kind: "leave", bindingId: "b" });
     await run.returnValue;
-    await expect(emitSubscriptionEvent(source, key, event("2"))).resolves.toBe(false);
+    await expect(emitSubscriptionEvent(source.name, key, event("2"))).resolves.toBe(false);
   } finally {
     if ((await run.status) === "running") await run.cancel();
   }
@@ -60,9 +60,9 @@ it("drops a subscription whose owner has ended on the next event, and ends once 
   const token = subscriptionKeyHookToken(source, key);
   try {
     await waitForHook(run, { token });
-    await expect(emitSubscriptionEvent(source, key, event("1"))).resolves.toBe(true);
+    await expect(emitSubscriptionEvent(source.name, key, event("1"))).resolves.toBe(true);
     await run.returnValue;
-    await expect(emitSubscriptionEvent(source, key, event("2"))).resolves.toBe(false);
+    await expect(emitSubscriptionEvent(source.name, key, event("2"))).resolves.toBe(false);
   } finally {
     if ((await run.status) === "running") await run.cancel();
   }
