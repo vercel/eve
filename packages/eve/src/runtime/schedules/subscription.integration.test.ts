@@ -203,6 +203,13 @@ describe("schedule creation and invocation", () => {
       expect(responseTargets.at(-1)).toBe("timing-only");
       await update.execute(timingInput, { callId: "timing" } as never);
       expect(updateWrite.mock.calls[1]![2].payload).toBeUndefined();
+      const read = (await tools.schedule__requests__get!.execute(
+        { name: created.name },
+        {} as never,
+      )) as Record<string, unknown>;
+      expect(read).toMatchObject({ name: created.name });
+      expect(read).not.toHaveProperty("payload");
+      expect(read).not.toHaveProperty("creator");
       const invoke = tools.schedule__requests__invoke!;
       const invoked = { name: created.name };
       const invokeContext = { toolName: "schedule__requests__invoke", toolInput: invoked } as never;
