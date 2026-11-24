@@ -306,6 +306,28 @@ export default eveChannel({
 
 `onMessage` must return an auth result, so every accepted message starts or continues a session. Return `title` alongside `auth` to set the session title. It applies when the message creates the session, or is the first message to one created without a message.
 
+### Refuse a message
+
+To refuse a message, throw an [`HttpError`](../guides/auth-and-route-protection#the-ordered-auth-walk) from `onMessage`. eve answers with that error's status and creates no session and sends no message. Any other thrown error answers `500`. Use it for checks that need both the caller and the message, such as a per-user rate limit:
+
+```ts title="agent/channels/eve.ts"
+import { eveChannel, defaultEveAuth } from "eve/channels/eve";
+import { TooManyRequestsError, vercelOidc } from "eve/channels/auth";
+
+import { isOverRateLimit } from "../lib/rate-limit";
+
+export default eveChannel({
+  auth: [vercelOidc()],
+  async onMessage(ctx) {
+    const auth = defaultEveAuth(ctx);
+    if (await isOverRateLimit(auth)) throw new TooManyRequestsError({ retryAfter: 60 });
+    return { auth };
+  },
+});
+```
+
+The client receives `429` with `retry-after: 60` and `{ "ok": false, "code": "rate_limited", "error": "Too many requests. Try again later." }`. Answers to approvals and questions skip `onMessage`, so this check doesn't block them.
+
 ### Turn context
 
 `context` strings are saved as user messages in session history. For context that applies to one turn only, return `clientContext`. It replaces the request's [`clientContext`](../guides/client/messages) for every model call in the turn and isn't kept in session history.

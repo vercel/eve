@@ -24,6 +24,7 @@ import {
   extractBearerToken,
   ForbiddenError,
   httpBasic,
+  HttpError,
   isIpAllowed,
   jwtEcdsa,
   jwtHmac,
@@ -32,6 +33,7 @@ import {
   oidc,
   placeholderAuth,
   routeAuth,
+  TooManyRequestsError,
   type UnauthorizedChallenge,
   UnauthenticatedError,
   vercelOidc,
@@ -335,6 +337,30 @@ describe("ForbiddenError", () => {
   });
 });
 
+describe("HttpError", () => {
+  it("builds a fresh no-store JSON response on every read", async () => {
+    const error = new TooManyRequestsError({ retryAfter: 12.5 });
+
+    expect(error).toBeInstanceOf(HttpError);
+    expect(error.code).toBe("rate_limited");
+    for (const response of [error.response, error.response]) {
+      expect(response.status).toBe(429);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(response.headers.get("retry-after")).toBe("13");
+      await expect(response.json()).resolves.toEqual({
+        code: "rate_limited",
+        error: "Too many requests. Try again later.",
+        ok: false,
+      });
+    }
+  });
+
+  it("rejects statuses that are not client or server errors", () => {
+    expect(() => new HttpError(200)).toThrow(RangeError);
+    expect(() => new HttpError(600)).toThrow(RangeError);
+  });
+});
+
 describe("none", () => {
   it("returns an AuthFn that produces a synthetic anonymous principal", () => {
     const authFn = none<Request>();
@@ -539,11 +565,12 @@ describe("routeAuth", () => {
     expect(never).not.toHaveBeenCalled();
   });
 
-  it("recognizes response-carrying auth errors from another bundle instance", async () => {
-    const response = createUnauthorizedResponse({ message: "Sign in." });
-    const error = Object.assign(new Error("Sign in."), {
-      name: "OtherBundleAuthError",
-      response,
+  it("recognizes HttpErrors from another bundle instance", async () => {
+    const original = new TooManyRequestsError();
+    const response = original.response;
+    const error = Object.assign(new Error(original.message), { response });
+    Object.defineProperty(error, Symbol.for("eve.error.lineage"), {
+      value: Reflect.get(original, Symbol.for("eve.error.lineage")),
     });
 
     const result = await routeAuth(makeRequest(), () => {
@@ -553,8 +580,10 @@ describe("routeAuth", () => {
     expect(result).toBe(response);
   });
 
-  it("propagates untagged AuthFn errors through the channel failure path", async () => {
-    const error = new Error("auth lookup failed");
+  it("propagates AuthFn errors that are not HttpErrors, even when they carry a response", async () => {
+    const error = Object.assign(new Error("auth lookup failed"), {
+      response: new Response("internal upstream body", { status: 418 }),
+    });
 
     await expect(
       routeAuth(makeRequest(), () => {
