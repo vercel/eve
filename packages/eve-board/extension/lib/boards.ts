@@ -1,3 +1,4 @@
+import type { BoardAuthorize } from "./authorize.ts";
 import type { BoardCan, BoardSettings } from "./client.ts";
 import { normalizeBoardRouteBase } from "./route.ts";
 
@@ -13,7 +14,7 @@ export interface ResolvedBoardConfig {
   readonly profile?: string;
   readonly can?: BoardCan;
   readonly watchChannel: string;
-  readonly configurers?: readonly string[];
+  readonly authorize?: BoardAuthorize;
   readonly routeBase: string;
   readonly registrationRouteBase: string;
 }
@@ -29,8 +30,8 @@ export function resolveBoards(settings: BoardSettings): ResolvedBoardSet {
   const routeBase = normalizeBoardRouteBase(settings.route);
   if (settings.boards === undefined) {
     const entry: ResolvedBoardConfig = {
+      authorize: settings.authorize,
       can: settings.can,
-      configurers: settings.configurers,
       key: DEFAULT_BOARD_KEY,
       name: settings.name,
       profile: settings.profile,
@@ -53,8 +54,8 @@ export function resolveBoards(settings: BoardSettings): ResolvedBoardSet {
   const keys: string[] = [];
   for (const [key, entry] of Object.entries(settings.boards)) {
     byKey.set(key, {
+      authorize: entry.authorize ?? settings.authorize,
       can: entry.can,
-      configurers: entry.configurers ?? settings.configurers,
       key,
       name: entry.name,
       profile: entry.profile ?? settings.profile,

@@ -1,8 +1,17 @@
 import { defineExtension } from "eve/extension";
 import { z } from "zod";
 
+import type {
+  BoardAuthorize,
+  BoardAuthorizeAction,
+  BoardAuthorizeRequest,
+} from "./lib/authorize.ts";
 import { BOARD_CHANNEL_SELECTOR, BOARD_NAME_PATTERN, BOARD_PERMISSIONS } from "./lib/client.ts";
 import { isValidBoardRouteBase } from "./lib/route.ts";
+
+export type { BoardAuthorize, BoardAuthorizeAction, BoardAuthorizeRequest };
+
+const fn = <T>() => z.custom<T>((value) => typeof value === "function");
 
 const grant = z.union([z.literal("all"), z.array(z.enum(BOARD_PERMISSIONS)).readonly()]);
 
@@ -29,7 +38,7 @@ const watchChannel = z
   .regex(BOARD_CHANNEL_SELECTOR, "lowercase segments joined by /")
   .refine((channel) => !channel.endsWith("/"), "one channel, not a subtree");
 
-const configurers = z.array(z.string().min(1));
+const authorize = fn<BoardAuthorize>();
 
 const boardUrl = z
   .string()
@@ -49,8 +58,8 @@ const boardEntry = z.object({
   can: can.optional(),
   /** Channel that keeps watch instructions on this board. Defaults to `"eve-config/watches"`. */
   watchChannel: watchChannel.optional(),
-  /** Principal IDs that may configure watches on this board. Defaults to top-level `configurers`. */
-  configurers: configurers.optional(),
+  /** Authorizes watch creation, listing, and removal on this board. Defaults to top-level `authorize`. */
+  authorize: authorize.optional(),
 });
 
 /**
@@ -76,8 +85,8 @@ export default defineExtension({
       can: can.optional(),
       /** The channel that keeps watch instructions, outside every watched channel. Defaults to `"eve-config/watches"`. */
       watchChannel: watchChannel.optional(),
-      /** Principal IDs that may create and remove watches. Defaults to anyone but board actors who aren't people. */
-      configurers: configurers.optional(),
+      /** Authorizes watch creation, listing, and removal. Defaults to any signed-in caller except non-person board actors. */
+      authorize: authorize.optional(),
       /** Base route path for the board wake endpoint (`<route>/wake` or `<route>/:board/wake`). Defaults to `"/eve/v1/board"`. */
       route: z
         .string()

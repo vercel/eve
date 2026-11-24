@@ -353,12 +353,26 @@ test("to(boardChannel(), { board: 'b', ... }) starts a thread on board B and kee
   );
 });
 
-test("per-board registration paths, configurers, instructions, and schema validation work as specified", async () => {
+test("per-board registration paths, async authorize, instructions, and schema validation work as specified", async () => {
   const { a, b } = await startBoards(["a", "b"] as const);
   const config: BoardSettings = {
+    authorize: async ({ auth, board }) => {
+      await Promise.resolve();
+      return board === "a" && auth?.principalId === "vercel:user:alice";
+    },
     boards: {
-      a: { configurers: ["vercel:user:alice"], name: "alpha", url: a.url },
-      b: { configurers: ["vercel:user:bob"], name: "beta", team: "acme-sec", url: b.url },
+      a: { name: "alpha", url: a.url },
+      b: {
+        authorize: async ({ action, auth, boardName, team }) => {
+          await Promise.resolve();
+          assert.equal(boardName, "beta");
+          assert.equal(team, "acme-sec");
+          return action === "watches" && auth?.principalId === "vercel:user:bob";
+        },
+        name: "beta",
+        team: "acme-sec",
+        url: b.url,
+      },
     },
     profile: "helper",
   };
@@ -373,6 +387,26 @@ test("per-board registration paths, configurers, instructions, and schema valida
     },
   );
   assert.deepEqual(Object.keys(aliceList.boards), ["a"]);
+  const bobList = await runTool(
+    watchesTool,
+    {},
+    {
+      auth: { attributes: {}, authenticator: "test", principalId: "vercel:user:bob" },
+      callId: "l1b",
+    },
+  );
+  assert.deepEqual(Object.keys(bobList.boards), ["b"]);
+  await assert.rejects(
+    runTool(
+      defineBoardWatchTool(() => config),
+      { board: "b", channel: "incidents", instructions: "Summarize it." },
+      {
+        auth: { attributes: {}, authenticator: "test", principalId: "vercel:user:bob" },
+        callId: "w-bob",
+      },
+    ),
+    /not authorized to manage board watches/u,
+  );
   await assert.rejects(
     runTool(
       watchesTool,
@@ -382,7 +416,7 @@ test("per-board registration paths, configurers, instructions, and schema valida
         callId: "l2",
       },
     ),
-    /`configurers` names/u,
+    /not authorized to manage board watches/u,
   );
 
   const env = { ...process.env };

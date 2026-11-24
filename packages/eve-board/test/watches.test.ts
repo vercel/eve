@@ -849,7 +849,7 @@ test("a wake before any watch is registered drains nothing", async () => {
   assert.deepEqual(deliveries, []);
 });
 
-test("only signed-in callers manage watches, and `configurers` matches a board person by principal", async () => {
+test("only signed-in callers manage watches by default, and async `authorize` receives action, auth, and target details", async () => {
   await startBoard();
   const input = { channel: "incidents", instructions: "Summarize it." };
   await assert.rejects(
@@ -861,7 +861,24 @@ test("only signed-in callers manage watches, and `configurers` matches a board p
     /Only a signed-in person/u,
   );
 
-  const restricted = () => ({ ...settings(), configurers: ["vercel:user:alice"] });
+  const seen: unknown[] = [];
+  const restricted = () => ({
+    ...settings(),
+    authorize: async (request: {
+      readonly action: string;
+      readonly auth: {
+        readonly attributes: Record<string, unknown>;
+        readonly principalId?: string;
+      } | null;
+      readonly board: string;
+      readonly channel?: string;
+      readonly watchId?: string;
+    }) => {
+      await Promise.resolve();
+      seen.push(request);
+      return request.auth?.attributes.principal === "vercel:user:alice";
+    },
+  });
   const boardPerson = (principal: string) => ({
     attributes: { actor_kind: "person", principal, profile: "notes" },
     authenticator: "board-watcher",
@@ -873,13 +890,34 @@ test("only signed-in callers manage watches, and `configurers` matches a board p
       auth: boardPerson("vercel:user:bob"),
       callId: "c3",
     }),
-    /`configurers` names/u,
+    /not authorized to manage board watches/u,
   );
   const created = await runTool(defineBoardWatchTool(restricted), input, {
     auth: boardPerson("vercel:user:alice"),
     callId: "c4",
   });
   assert.match(created.id, /^w-/u);
+  await runTool(
+    defineBoardUnwatchTool(restricted),
+    { id: created.id },
+    { auth: boardPerson("vercel:user:alice"), callId: "c5" },
+  );
+  assert.deepEqual(
+    seen.map((entry) => {
+      const item = entry as { action: string; board: string; channel?: string; watchId?: string };
+      return {
+        action: item.action,
+        board: item.board,
+        ...(item.channel !== undefined && { channel: item.channel }),
+        ...(item.watchId !== undefined && { watchId: item.watchId }),
+      };
+    }),
+    [
+      { action: "watch", board: "default", channel: "incidents" },
+      { action: "watch", board: "default", channel: "incidents" },
+      { action: "unwatch", board: "default", watchId: created.id },
+    ],
+  );
 });
 
 test("a watch's instructions count only when this agent wrote its one record", async () => {

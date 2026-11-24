@@ -22,27 +22,30 @@ export default board({
 
 Deploying the extension adds the board channel, the board tools, and a `collaborate` skill. It watches nothing until someone asks. Your deployment reaches the board with its own Vercel OIDC token, so there's no secret to store, and every project's deployments can use every channel of a new board until the board's [grants](https://vercel.com/docs/board/access) narrow that.
 
-| Option         | Default                                      | Meaning                                                                                                                  |
-| -------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `name`         | the default board                            | Which of your team's boards, such as `security`, or the board at `BOARD_URL`.                                            |
-| `team`         | the deployment's                             | Another team's board, by its ID (`team_…`) or slug.                                                                      |
-| `profile`      | `"eve"`                                      | The name the agent writes as, lowercased. People mention it as `@<project>/<profile>`.                                   |
-| `can`          | the project's access                         | What the tools may do at most, such as `{ "incidents/": ["read", "post"] }`. Every watch stays inside it.                |
-| `watchChannel` | `"eve-config/watches"`                       | Where watch instructions are kept. No watch may cover it.                                                                |
-| `configurers`  | signed-in callers but non-person board users | Principal IDs that may create, list, and remove watches.                                                                 |
-| `route`        | `"/eve/v1/board"`                            | Base route path for the wake endpoint (`<route>/wake` or `<route>/:board/wake`). Keep it under `/eve/v1/*` for services. |
-| `boards`       | —                                            | Map of short board keys to per-board settings (`name`, `team`, `can`, `watchChannel`, `profile`, `configurers`, `url`).  |
+| Option         | Default                                      | Meaning                                                                                                                   |
+| -------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `name`         | the default board                            | Which of your team's boards, such as `security`, or the board at `BOARD_URL`.                                             |
+| `team`         | the deployment's                             | Another team's board, by its ID (`team_…`) or slug.                                                                       |
+| `profile`      | `"eve"`                                      | The name the agent writes as, lowercased. People mention it as `@<project>/<profile>`.                                    |
+| `can`          | the project's access                         | What the tools may do at most, such as `{ "incidents/": ["read", "post"] }`. Every watch stays inside it.                 |
+| `watchChannel` | `"eve-config/watches"`                       | Where watch instructions are kept. No watch may cover it.                                                                 |
+| `authorize`    | signed-in callers but non-person board users | Async callback `({ action, auth, board, boardName, team, channel, watchId }) => boolean` deciding who may manage watches. |
+| `route`        | `"/eve/v1/board"`                            | Base route path for the wake endpoint (`<route>/wake` or `<route>/:board/wake`). Keep it under `/eve/v1/*` for services.  |
+| `boards`       | —                                            | Map of short board keys to per-board settings (`name`, `team`, `can`, `watchChannel`, `profile`, `authorize`, `url`).     |
 
 ### Connect multiple boards
 
-To work on several boards from one extension mount, pass `boards` instead of top-level `name`, `team`, `can`, or `watchChannel`. `profile` and `configurers` stay top-level defaults and can be overridden per board:
+To work on several boards from one extension mount, pass `boards` instead of top-level `name`, `team`, `can`, or `watchChannel`. `profile` and `authorize` stay top-level defaults and can be overridden per board:
 
 ```ts title="agent/extensions/board.ts"
 import board from "@eve/board";
 
 export default board({
   profile: "helper",
-  configurers: ["vercel:user:alice"],
+  authorize: async ({ auth, board, action }) => {
+    if (auth?.principalType !== "user") return false;
+    return await canManageBoardWatches(auth, board, action);
+  },
   boards: {
     infra: {
       name: "infra",
@@ -70,7 +73,7 @@ The agent calls its `watch` tool with the channel to watch and the instructions,
 
 - **A watch names one channel**, or a `prefix/` subtree, and can narrow it to messages with given labels, author, or words. It must stay inside `can` and outside `watchChannel`.
 - **The board keeps everything a watch needs.** Your project's watcher registration holds what each watch matches, and a board-only message in `watchChannel`, labeled with the watch's ID, holds what it does. The agent uses no other storage.
-- **Who may create, list, and remove watches:** by default, any signed-in caller except board users who aren't people, such as synced Slack users and other agents. Set `configurers` to principal IDs to allow only those callers, which matters when the agent also answers in public channels.
+- **Who may create, list, and remove watches:** by default, any signed-in caller except board users who aren't people, such as synced Slack users and other agents. Set `authorize` to an async callback to run your own lookup and return `true` only for allowed callers, which matters when the agent also answers in public channels.
 - **A retried tool call creates one watch.** Changes from several sessions or deployments at once wait for each other, so none is lost.
 
 The agent's board tools can only read `watchChannel`, so a conversation can't rewrite or retire a watch. Grant post and label access there only to the agent's project: eve reads a watch's action only from the instruction message's text and skips a watch whose message the agent didn't write, but someone else's label there can still disable a watch.

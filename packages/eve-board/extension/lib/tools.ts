@@ -2,6 +2,7 @@ import type { SandboxSession } from "eve/sandbox";
 import { defineTool, type ToolContext } from "eve/tools";
 import { z } from "zod";
 
+import type { BoardAuthorizeAction } from "./authorize.ts";
 import { resolveBoards, selectBoard, type ResolvedBoardConfig } from "./boards.ts";
 import type { BoardChannelMetadata } from "./board-channel.ts";
 import {
@@ -556,15 +557,25 @@ export function defineBoardBlockTaskTool() {
   });
 }
 
-function configurerDenial(board: ResolvedBoardConfig, ctx: ToolContext): string | undefined {
+async function watchAuthorizationDenial(
+  board: ResolvedBoardConfig,
+  action: BoardAuthorizeAction,
+  ctx: ToolContext,
+  details: { readonly channel?: string; readonly watchId?: string } = {},
+): Promise<string | undefined> {
   const caller = ctx.session.auth?.current ?? null;
-  const allowed = board.configurers;
-  if (allowed !== undefined) {
-    const ids = [caller?.principalId, caller?.attributes.principal];
-    if (caller !== null && ids.some((id) => typeof id === "string" && allowed.includes(id))) {
-      return undefined;
-    }
-    return "Only the people this agent's `configurers` names may change its board watches. Ask one of them.";
+  if (board.authorize !== undefined) {
+    const allowed =
+      (await board.authorize({
+        action,
+        auth: caller,
+        board: board.key,
+        ...(board.name !== undefined && { boardName: board.name }),
+        ...(board.team !== undefined && { team: board.team }),
+        ...(details.channel !== undefined && { channel: details.channel }),
+        ...(details.watchId !== undefined && { watchId: details.watchId }),
+      })) === true;
+    return allowed ? undefined : "You are not authorized to manage board watches on this agent.";
   }
   if (caller === null) {
     return "Only a signed-in person may change this agent's board watches. Ask from a channel where you're signed in.";
@@ -575,14 +586,25 @@ function configurerDenial(board: ResolvedBoardConfig, ctx: ToolContext): string 
   return undefined;
 }
 
-function assertConfigurer(board: ResolvedBoardConfig, ctx: ToolContext): void {
-  const denial = configurerDenial(board, ctx);
+async function assertWatchAuthorized(
+  board: ResolvedBoardConfig,
+  action: BoardAuthorizeAction,
+  ctx: ToolContext,
+  details: { readonly channel?: string; readonly watchId?: string } = {},
+): Promise<void> {
+  const denial = await watchAuthorizationDenial(board, action, ctx, details);
   if (denial !== undefined) throw new Error(denial);
 }
 
-function configuring(settings: Settings, board: string | undefined, ctx: ToolContext) {
+async function authorizingWatch(
+  settings: Settings,
+  board: string | undefined,
+  action: BoardAuthorizeAction,
+  ctx: ToolContext,
+  details: { readonly channel?: string; readonly watchId?: string } = {},
+) {
   const resolved = targetBoard(settings, board, ctx);
-  assertConfigurer(resolved, ctx);
+  await assertWatchAuthorized(resolved, action, ctx, details);
   return { config: resolved, ...boardClients(resolved) };
 }
 
@@ -647,7 +669,13 @@ export function defineBoardWatchTool(settings: Settings) {
       claim: queue.optional(),
     }),
     async execute({ board: boardKey, instructions, claim, ...filter }, ctx) {
-      const { config, deployment, watchChannel } = configuring(settings, boardKey, ctx);
+      const { config, deployment, watchChannel } = await authorizingWatch(
+        settings,
+        boardKey,
+        "watch",
+        ctx,
+        { channel: filter.channel },
+      );
       const action: BoardWatchAction =
         claim === undefined ? { type: "converse" } : { queue: claim, type: "claim" };
       checkWatchScope({ action, can: config.can, channel: filter.channel, watchChannel });
@@ -682,7 +710,7 @@ export function defineBoardWatchesTool(settings: Settings) {
       const set = resolveBoards(settings());
       if (boardKey !== undefined || set.byKey.size === 1) {
         const resolved = selectBoard(set, boardKey, sessionBoard(ctx));
-        assertConfigurer(resolved, ctx);
+        await assertWatchAuthorized(resolved, "watches", ctx);
         const { deployment, watchChannel } = boardClients(resolved);
         const watches = await listWatches({
           client: deployment,
@@ -691,11 +719,19 @@ export function defineBoardWatchesTool(settings: Settings) {
         });
         return set.shorthand ? { watches } : { board: resolved.key, watches };
       }
-      const permitted = [...set.byKey.values()].filter(
-        (entry) => configurerDenial(entry, ctx) === undefined,
+      const checked = await Promise.all(
+        [...set.byKey.values()].map(async (entry) => ({
+          denial: await watchAuthorizationDenial(entry, "watches", ctx),
+          entry,
+        })),
       );
+      const permitted = checked
+        .filter((result) => result.denial === undefined)
+        .map((result) => result.entry);
       if (permitted.length === 0) {
-        assertConfigurer(set.byKey.values().next().value!, ctx);
+        throw new Error(
+          checked[0]?.denial ?? "You are not authorized to manage board watches on this agent.",
+        );
       }
       const entries = await Promise.all(
         permitted.map(async (entry) => {
@@ -724,7 +760,13 @@ export function defineBoardUnwatchTool(settings: Settings) {
       id: z.string().regex(BOARD_NAME_PATTERN).describe("The watch's ID, such as `w-7k3p2q`."),
     }),
     async execute({ board: boardKey, id }, ctx) {
-      const { config, deployment, watchChannel } = configuring(settings, boardKey, ctx);
+      const { config, deployment, watchChannel } = await authorizingWatch(
+        settings,
+        boardKey,
+        "unwatch",
+        ctx,
+        { watchId: id },
+      );
       return await removeWatch({
         boardKey: config.key,
         client: deployment,

@@ -2,4 +2,6 @@
 "@eve/board": minor
 ---
 
-Support multiple Vercel Boards from one `@eve/board` extension mount via `boards`, with per-board wake routes (`POST /eve/v1/board/:board/wake`), scoped sessions, per-board permissions and configurers, and an optional `board` parameter on board tools and `BoardReceiveTarget`.
+Support multiple Vercel Boards from one `@eve/board` extension mount via `boards` and replace the static `configurers` list with an async `authorize` callback.
+
+Breaking (pre-1.0): replace `configurers` with `authorize: async ({ action, auth, board, boardName, team, channel, watchId }) => boolean` so watch authorization can perform dynamic lookups.
