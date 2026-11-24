@@ -24,7 +24,7 @@ import type {
 } from "#public/schedules/subscription.js";
 import type { PreparedScheduleWrite } from "#runtime/schedules/collection-client.js";
 import { turnSteeredMessage } from "#runtime/connections/identity-hold.js";
-import { projectScheduleRecord, scheduleDisplayName } from "#runtime/schedules/record.js";
+import { scheduleDisplayName } from "#runtime/schedules/record.js";
 import { MAX_SCHEDULE_DELAY_MINUTES } from "#runtime/schedules/validation.js";
 import { scheduleCollectionToolPrefix } from "#shared/schedule-collection-tools.js";
 import { always } from "#tools/approval/policies.js";
@@ -298,10 +298,7 @@ function scheduleTools(
       "Read schedule",
       "Read timing/state; stored payload is not returned.",
       namedSchema,
-      async (input) => {
-        const detail = await (await client(memberOf(input))).get(input.name);
-        return detail ? projectScheduleRecord(detail) : null;
-      },
+      async (input) => await (await client(memberOf(input))).get(input.name),
       operationApproval("get"),
     ),
     [`${prefix}list`]: define(

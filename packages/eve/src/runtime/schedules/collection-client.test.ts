@@ -1,6 +1,6 @@
 import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import { z } from "#compiled/zod/index.js";
-import { defineDynamicSchedules } from "#public/schedules/subscription.js";
+import { defineDynamicSchedules, type ScheduleRecord } from "#public/schedules/subscription.js";
 import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
 import {
   createScheduleCollectionClient,
@@ -194,7 +194,8 @@ describe("dynamic schedules client", () => {
       client.update(created.name, { expression: { type: "delay", minutes: 0 } }),
     ).rejects.toThrow();
     expect(update).not.toHaveBeenCalled();
-    await expect(client.get(created.name)).resolves.toEqual({
+    await expect(client.get(created.name)).resolves.toEqual(created);
+    await expect(client.get(created.name, { payload: true })).resolves.toEqual({
       ...created,
       creator: { type: "user", authenticator: "test", principalId: "alice" },
       payload,
@@ -218,12 +219,12 @@ describe("dynamic schedules client", () => {
     const created = await alice.create(input);
     const replaced = { ...payload, task: "Summarize the month." };
     await bob.update(created.name, { payload: replaced });
-    await expect(alice.get(created.name)).resolves.toMatchObject({
+    await expect(alice.get(created.name, { payload: true })).resolves.toMatchObject({
       creator: { principalId: "bob" },
       payload: replaced,
     });
     await alice.update(created.name, { expression: { type: "delay", minutes: 10 } });
-    await expect(alice.get(created.name)).resolves.toMatchObject({
+    await expect(alice.get(created.name, { payload: true })).resolves.toMatchObject({
       creator: { principalId: "bob" },
     });
     const [listed] = (await alice.list()).data;
@@ -231,17 +232,33 @@ describe("dynamic schedules client", () => {
     expect(listed).not.toHaveProperty("payload");
   });
 
-  it("asks the provider for the payload on get and never on update", async () => {
+  it("asks the provider for the payload only on get with payload: true, never on update", async () => {
     const { provider, client } = setup();
     const created = await client.create(input);
     const get = vi.spyOn(provider, "get");
-    await client.get(created.name);
+    const record = await client.get(created.name);
+    expect(get.mock.calls.at(-1)).toHaveLength(2);
+    expect(record).toEqual(created);
+    expect(record).not.toHaveProperty("payload");
+    expect(record).not.toHaveProperty("creator");
+    await client.get(created.name, { payload: true });
     expect(get).toHaveBeenLastCalledWith(expect.anything(), created.name, { payload: true });
     get.mockClear();
     await client.update(created.name, { expression: { type: "delay", minutes: 10 } });
     await client.update(created.name, { payload: { ...payload, task: "Summarize the month." } });
     expect(get).toHaveBeenCalledTimes(2);
     for (const call of get.mock.calls) expect(call).toHaveLength(2);
+  });
+
+  it("says the schedule service returned no payload when a requested payload is missing", async () => {
+    const { provider, client } = setup();
+    const created = await client.create(input);
+    const get = provider.get.bind(provider);
+    vi.spyOn(provider, "get").mockImplementation(async (context, name) => get(context, name));
+    await expect(client.get(created.name, { payload: true })).rejects.toThrow(
+      `The schedule service returned no payload for schedule "${created.name}".`,
+    );
+    await expect(client.get(created.name)).resolves.toEqual(created);
   });
 
   it("fails get but still updates a schedule whose stored payload doesn't parse", async () => {
@@ -254,9 +271,10 @@ describe("dynamic schedules client", () => {
         ? stored
         : { ...stored, payload: { eve: "corrupted" } };
     });
-    await expect(client.get(created.name)).rejects.toThrow(
+    await expect(client.get(created.name, { payload: true })).rejects.toThrow(
       "Invalid scheduled collection payload; recreate the schedule.",
     );
+    await expect(client.get(created.name)).resolves.toMatchObject({ name: created.name });
     await expect(
       client.update(created.name, { expression: { type: "delay", minutes: 10 } }),
     ).resolves.toMatchObject({ name: created.name });
@@ -275,7 +293,8 @@ describe("dynamic schedules client", () => {
     });
     const client = createScheduleCollectionClient(prepared, callContext);
     const created = await client.create(input);
-    const detail = await client.get(created.name);
+    expectTypeOf(await client.get(created.name)).toEqualTypeOf<ScheduleRecord | null>();
+    const detail = await client.get(created.name, { payload: true });
     expectTypeOf(detail!.payload).toEqualTypeOf<{ version: 1; instructions: string }>();
     expect(detail?.payload).toEqual({ version: 1, instructions: payload.task });
   });

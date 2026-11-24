@@ -11,7 +11,9 @@ import type {
   ScheduleClient,
   ScheduleClientCreate,
   ScheduleClientUpdate,
+  ScheduleDetail,
   SchedulePatch,
+  ScheduleRecord,
   DynamicSchedulesDefinition,
   ScheduleEnvelope,
   SchedulePage,
@@ -220,6 +222,42 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
     return { prepared, provider };
   };
 
+  async function get(name: string): Promise<ScheduleRecord | null>;
+  async function get(
+    name: string,
+    options: { readonly payload: true },
+  ): Promise<ScheduleDetail<TPrepared> | null>;
+  async function get(
+    name: string,
+    options?: { readonly payload?: boolean },
+  ): Promise<ScheduleRecord | ScheduleDetail<TPrepared> | null>;
+  async function get(
+    name: string,
+    options: { readonly payload?: boolean } = {},
+  ): Promise<ScheduleRecord | ScheduleDetail<TPrepared> | null> {
+    const normalized = validateScheduleName(name);
+    const { provider } = await resolveNamespace("get", normalized);
+    if (options.payload !== true) {
+      const record = await definition.provider.get(provider, normalized);
+      return record === null ? null : projectScheduleRecord(record);
+    }
+    const stored = await definition.provider.get(provider, normalized, { payload: true });
+    if (stored === null) return null;
+    if (stored.payload === undefined)
+      throw new Error(
+        `The schedule service returned no payload for schedule "${normalized}". It may not support reading payloads; Vercel Schedules needs GET /v1/schedules/:name?include=payload.`,
+      );
+    const { envelope } = parseSchedulePayload<TPrepared>(stored.payload, {
+      application: callContext.application,
+      collection: callContext.collection,
+    });
+    return {
+      ...projectScheduleRecord(stored),
+      creator: envelope.principal,
+      payload: envelope.payload,
+    };
+  }
+
   return {
     async prepareCreate(input) {
       return (await prepareCreation(input)).prepared;
@@ -283,22 +321,7 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
       const { provider } = await resolveNamespace("enable", normalized);
       return projectScheduleRecord(await definition.provider.enable(provider, normalized));
     },
-    async get(name) {
-      const normalized = validateScheduleName(name);
-      const { provider } = await resolveNamespace("get", normalized);
-      const stored = await definition.provider.get(provider, normalized, { payload: true });
-      if (stored === null) return null;
-      const { payload, ...record } = stored;
-      const { envelope } = parseSchedulePayload<TPrepared>(payload, {
-        application: callContext.application,
-        collection: callContext.collection,
-      });
-      return {
-        ...projectScheduleRecord(record),
-        creator: envelope.principal,
-        payload: envelope.payload,
-      };
-    },
+    get,
     async invoke(name) {
       const normalized = validateScheduleName(name);
       const { provider } = await resolveNamespace("invoke", normalized);

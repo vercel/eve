@@ -222,14 +222,20 @@ export type ScheduleClientUpdate<TPayload> =
 
 /**
  * Authenticated client; every operation is authorized through `scope`. `TPrepared` is the payload
- * as `preparePayload` stores it, which `get` returns.
+ * as `preparePayload` stores it, which `get(name, { payload: true })` returns.
  */
 export interface ScheduleClient<TPayload, TPrepared = TPayload> {
   create(input: ScheduleClientCreate<TPayload>): Promise<ScheduleRecord>;
   delete(name: string): Promise<boolean>;
   disable(name: string): Promise<ScheduleRecord>;
   enable(name: string): Promise<ScheduleRecord>;
-  get(name: string): Promise<ScheduleDetail<TPrepared> | null>;
+  get(name: string): Promise<ScheduleRecord | null>;
+  /** Also returns the creator and the stored payload. */
+  get(name: string, options: { readonly payload: true }): Promise<ScheduleDetail<TPrepared> | null>;
+  get(
+    name: string,
+    options?: { readonly payload?: boolean },
+  ): Promise<ScheduleRecord | ScheduleDetail<TPrepared> | null>;
   invoke(name: string): Promise<void>;
   list(input?: ScheduleList): Promise<SchedulePage>;
   /** Timing-only updates keep the stored payload and creator; payload replacement captures the updating caller as creator. */

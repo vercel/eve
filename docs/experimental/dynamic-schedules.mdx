@@ -226,7 +226,9 @@ await client.update(created.name, {
 
 ## Update and control schedules
 
-`get` returns identity, timing, state, and timestamps, plus `creator` and the stored `payload` (as `preparePayload` returned it, and typed that way). A caller can check who the schedule runs as and what it runs, or edit the payload and write it back with `update`; without `preparePayload`, the stored payload matches `inputSchema`. `get` throws when the stored payload isn't a valid eve schedule payload; `update` still works on that schedule. `list` returns the same fields without `creator` and `payload`. New schedules are always active. Use `disable` to pause future runs.
+`get(name)` and `list` return identity, timing, state, and timestamps. New schedules are always active. Use `disable` to pause future runs.
+
+`get(name, { payload: true })` also returns `creator` and the stored `payload` (as `preparePayload` returned it, and typed that way). Use it to check who the schedule runs as and what it runs, or to edit the payload and write it back with `update`; without `preparePayload`, the stored payload matches `inputSchema`. It throws when the provider returns no payload, for example a Schedules API without `include=payload` support, and when the stored payload isn't a valid eve schedule payload. `update` works on either schedule.
 
 `client.update(name, patch)` changes timing, replaces the whole payload, or both. Timing-only updates keep the stored payload and creator and skip `preparePayload`. Payload replacement isn't a merge. It validates the complete new input, reruns preparation, and makes the updating caller the new creator. In a shared `scope`, permission to replace the payload is also permission to change who the schedule runs as.
 
