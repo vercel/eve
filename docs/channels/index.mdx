@@ -99,7 +99,7 @@ export default defineChannel({
 });
 ```
 
-Adjacent queued messages combine into one turn only when their full auth contexts match, including identity, issuer, authenticator, and authorization attributes. Their attachments and context stay in payload order. A different auth context ends the batch, and eve doesn't regroup messages across intervening senders. Anonymous messages stay separate. Turns still share the session's conversation history.
+Adjacent queued messages combine into one turn only when they share a principal: the same authenticator, issuer, principal type, and principal ID. Messages that reach an idle session together combine too. The latest message's claims apply. Their attachments and context stay in payload order. A different principal ends the batch, and eve doesn't regroup messages across intervening senders. Anonymous messages stay separate. Turns still share the session's conversation history. To make an idle session wait for more queued messages before it starts, set [`limits.queueHoldMs`](/docs/agent-config#runtime-limits).
 
 By default, a steering message joins only a turn whose caller is its sender. Set `principal` on a steering `turnPolicy` to decide what a message does when the running turn belongs to someone else:
 

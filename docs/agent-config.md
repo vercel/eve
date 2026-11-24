@@ -323,6 +323,15 @@ to the session. The next message at that address starts a new session. To carry 
 [prior history](./channels/eve#start-from-prior-history). A session with
 [zero retention](#run-data-retention) loses its stored payloads when it ends.
 
+`queueHoldMs` makes an idle session wait before it starts a turn for a message
+sent with `turnPolicy: "queue"`. Queued messages that arrive within the wait
+join that turn when they share the first one's principal, so a burst of posts
+becomes one turn. A steering message starts the turn at once, with the held
+messages, and ends the wait. A message that waits behind a running turn starts
+when that turn ends, with no wait. Omit it, or set `0`, to start as soon as the
+message arrives. A cancel that arrives during the wait is ignored, as it is for
+any idle session.
+
 `sessionUsage` gets two `TokenUsage` records, a type exported from `eve`. `total` is everything the session has
 spent, and `window` is what it spent since the last approved continuation. Each
 record has these fields:

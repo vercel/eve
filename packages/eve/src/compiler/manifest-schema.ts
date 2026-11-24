@@ -302,6 +302,7 @@ export const sessionTimeoutSchema = z.union([z.number().int().positive(), z.lite
 
 export const compiledAgentLimitsDefinitionSchema = z
   .object({
+    queueHoldMs: z.number().int().nonnegative().optional(),
     sessionTimeoutMs: sessionTimeoutSchema.optional(),
     sessionUsage: z.boolean().optional(),
   })

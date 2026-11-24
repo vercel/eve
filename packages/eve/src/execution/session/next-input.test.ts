@@ -45,7 +45,17 @@ function createMockInbox(reads: readonly ScriptedRead[]): MockInbox {
     async whenHandoverSettled() {},
     claimedTokens: [],
     ownerRunId: () => "owner-1",
-    takeLeading: () => [],
+    takeLeading<T extends SessionInboxPayload>(
+      accepts: (payload: SessionInboxPayload) => payload is T,
+    ): T[] {
+      const taken: T[] = [];
+      for (let next = remaining[0]?.result.value; next !== undefined && accepts(next);) {
+        taken.push(next);
+        remaining.shift();
+        next = remaining[0]?.result.value;
+      }
+      return taken;
+    },
     async claimSessionHook() {},
     async claimSessionHooks() {},
     drain() {
@@ -276,6 +286,301 @@ describe("nextTurnDelivery", () => {
       kind: "turn",
       handoffEligible: false,
       delivery: { payloads: [{ message: "first" }] },
+    });
+  });
+
+  describe("deliveries the hub sends one after the other", () => {
+    const rosterAuth: SessionAuthContext = {
+      attributes: {},
+      authenticator: "roster",
+      principalId: "roster:me",
+      principalType: "user",
+    };
+    const hubPost = (
+      message: string,
+      auth: SessionAuthContext = rosterAuth,
+    ): SessionInboxPayload => ({
+      auth,
+      idempotencyKey: `post-${message}`,
+      kind: "deliver",
+      payloads: [{ message }],
+      turnPolicy: "queue",
+    });
+    const read = (payload: SessionInboxPayload): ScriptedRead => ({
+      result: { done: false, value: payload },
+    });
+    const inboxOf = (...payloads: SessionInboxPayload[]) => ({
+      ...batchingInputFor([]),
+      inbox: createMockInbox(payloads.map(read)),
+    });
+
+    it("folds two posts that both reached the idle session's inbox before its loop woke", async () => {
+      const input = inboxOf(hubPost("first"), hubPost("second"));
+
+      await expect(nextTurnDelivery(input)).resolves.toMatchObject({
+        delivery: { payloads: [{ message: "first" }, { message: "second" }] },
+        kind: "turn",
+      });
+      expect(input.queue.pendingCount).toBe(0);
+    });
+
+    it("folds the posts still in the inbox into the ones already queued", async () => {
+      const input = batchingInputFor([
+        { ...hubPost("queued"), kind: "deliver" } as DeliverHookPayload,
+      ]);
+      const inbox = createMockInbox([read(hubPost("late"))]);
+
+      await expect(nextTurnDelivery({ ...input, inbox })).resolves.toMatchObject({
+        delivery: { payloads: [{ message: "queued" }, { message: "late" }] },
+        kind: "turn",
+      });
+    });
+
+    it("leaves a cancel that follows a post in the inbox for the turn that post starts", async () => {
+      const input = inboxOf(
+        hubPost("first"),
+        { kind: "cancel", deliveryId: "stop" },
+        hubPost("second"),
+      );
+
+      await expect(nextTurnDelivery(input)).resolves.toMatchObject({
+        delivery: { payloads: [{ message: "first" }] },
+        kind: "turn",
+      });
+      expect(input.inbox.hasPending()).toBe(true);
+    });
+
+    it("keeps a post from another principal out of the turn, whichever order they arrive in", async () => {
+      const other = { ...rosterAuth, principalId: "roster:someone-else" };
+      const input = inboxOf(hubPost("mine"), hubPost("theirs", other), hubPost("mine again"));
+
+      await expect(nextTurnDelivery(input)).resolves.toMatchObject({
+        delivery: { auth: rosterAuth, payloads: [{ message: "mine" }] },
+        kind: "turn",
+      });
+      await expect(nextTurnDelivery(input)).resolves.toMatchObject({
+        delivery: { auth: other, payloads: [{ message: "theirs" }] },
+        kind: "turn",
+      });
+      await expect(nextTurnDelivery(input)).resolves.toMatchObject({
+        delivery: { auth: rosterAuth, payloads: [{ message: "mine again" }] },
+        kind: "turn",
+      });
+    });
+  });
+
+  describe("holding an idle session's queued message", () => {
+    const me = slackAuth("me");
+    const other = slackAuth("someone-else");
+    const post = (
+      message: string,
+      options: { auth?: SessionAuthContext; turnPolicy?: "queue" | "steer" } = {},
+    ): SessionInboxPayload => ({
+      auth: options.auth ?? me,
+      idempotencyKey: `post-${message}`,
+      kind: "deliver",
+      payloads: [{ message }],
+      ...(options.turnPolicy !== undefined && { turnPolicy: options.turnPolicy }),
+    });
+    const queued = (message: string, auth?: SessionAuthContext) =>
+      post(message, { auth, turnPolicy: "queue" });
+
+    function parkedSession(ms: number | undefined) {
+      const arrived: SessionInboxPayload[] = [];
+      const waiters = new Set<() => void>();
+      const wake = () => {
+        for (const waiter of waiters) waiter();
+        waiters.clear();
+      };
+      const base = createMockInbox([]);
+      const inbox: MockInbox = {
+        ...base,
+        hasPending: () => arrived.length > 0,
+        takeLeading<T extends SessionInboxPayload>(
+          accepts: (payload: SessionInboxPayload) => payload is T,
+        ): T[] {
+          const taken: T[] = [];
+          while (arrived[0] !== undefined && accepts(arrived[0])) taken.push(arrived.shift() as T);
+          return taken;
+        },
+        async whenPending() {
+          while (arrived.length === 0) await new Promise<void>((resolve) => waiters.add(resolve));
+        },
+        async next() {
+          while (arrived.length === 0) await new Promise<void>((resolve) => waiters.add(resolve));
+          return arrived.shift();
+        },
+      };
+      let fire!: () => void;
+      const timers: number[] = [];
+      const timer = new Promise<void>((resolve) => (fire = resolve));
+      const input = {
+        ...batchingInputFor([]),
+        inbox,
+        ...(ms !== undefined && {
+          hold: {
+            ms,
+            until: (at: number) => {
+              timers.push(at);
+              return timer;
+            },
+          },
+        }),
+      };
+      const settled = async <T>(promise: Promise<T>): Promise<T | "waiting"> => {
+        const result = await Promise.race([
+          promise,
+          new Promise<"waiting">((resolve) => setTimeout(() => resolve("waiting"), 20)),
+        ]);
+        return result;
+      };
+      return {
+        elapse: () => fire(),
+        input,
+        push(payload: SessionInboxPayload) {
+          arrived.push(payload);
+          wake();
+        },
+        settled,
+        timers,
+      };
+    }
+
+    it("starts the turn only once the hold has elapsed", async () => {
+      const session = parkedSession(120_000);
+      session.push(queued("first"));
+
+      const next = nextTurnDelivery(session.input);
+
+      expect(await session.settled(next)).toBe("waiting");
+      expect(session.timers).toHaveLength(1);
+      expect(session.timers[0]! - Date.now()).toBeGreaterThan(110_000);
+      session.elapse();
+      await expect(next).resolves.toMatchObject({
+        delivery: { payloads: [{ message: "first" }] },
+        kind: "turn",
+      });
+    });
+
+    it("holds a message that reaches the session while it is already waiting for input", async () => {
+      const session = parkedSession(120_000);
+      const next = nextTurnDelivery(session.input);
+      expect(await session.settled(next)).toBe("waiting");
+
+      session.push(queued("first"));
+      expect(await session.settled(next)).toBe("waiting");
+      session.elapse();
+
+      await expect(next).resolves.toMatchObject({
+        delivery: { payloads: [{ message: "first" }] },
+        kind: "turn",
+      });
+    });
+
+    it("folds the queued messages that arrive during the hold into the one turn", async () => {
+      const session = parkedSession(120_000);
+      session.push(queued("first"));
+      const next = nextTurnDelivery(session.input);
+      expect(await session.settled(next)).toBe("waiting");
+
+      session.push(queued("second"));
+      expect(await session.settled(next)).toBe("waiting");
+      session.push(queued("third"));
+      expect(await session.settled(next)).toBe("waiting");
+      session.elapse();
+
+      await expect(next).resolves.toMatchObject({
+        delivery: {
+          payloads: [{ message: "first" }, { message: "second" }, { message: "third" }],
+        },
+        kind: "turn",
+      });
+      expect(session.timers).toHaveLength(1);
+    });
+
+    it("starts at once when a steering message arrives, and ends the hold", async () => {
+      const session = parkedSession(120_000);
+      session.push(queued("first"));
+      const next = nextTurnDelivery(session.input);
+      expect(await session.settled(next)).toBe("waiting");
+
+      session.push(post("steer now"));
+
+      await expect(session.settled(next)).resolves.toMatchObject({
+        delivery: { payloads: [{ message: "first" }, { message: "steer now" }] },
+        kind: "turn",
+      });
+    });
+
+    it("never holds a steering message that reaches the idle session", async () => {
+      const session = parkedSession(120_000);
+      session.push(post("hello"));
+
+      await expect(session.settled(nextTurnDelivery(session.input))).resolves.toMatchObject({
+        delivery: { payloads: [{ message: "hello" }] },
+        kind: "turn",
+      });
+      expect(session.timers).toHaveLength(0);
+    });
+
+    it.each([0, undefined])("starts at once with a hold of %s", async (ms) => {
+      const session = parkedSession(ms);
+      session.push(queued("first"));
+
+      await expect(session.settled(nextTurnDelivery(session.input))).resolves.toMatchObject({
+        delivery: { payloads: [{ message: "first" }] },
+        kind: "turn",
+      });
+      expect(session.timers).toHaveLength(0);
+    });
+
+    it("keeps another principal's message out of the held turn's auth", async () => {
+      const session = parkedSession(120_000);
+      session.push(queued("mine", me));
+      const next = nextTurnDelivery(session.input);
+      expect(await session.settled(next)).toBe("waiting");
+
+      session.push(queued("theirs", other));
+      expect(await session.settled(next)).toBe("waiting");
+      session.elapse();
+
+      await expect(next).resolves.toMatchObject({
+        delivery: { auth: me, payloads: [{ message: "mine" }] },
+        kind: "turn",
+      });
+      await expect(session.settled(nextTurnDelivery(session.input))).resolves.toMatchObject({
+        delivery: { auth: other, payloads: [{ message: "theirs" }] },
+        kind: "turn",
+      });
+    });
+
+    it("lets another principal's steering message end the hold without joining the held turn", async () => {
+      const session = parkedSession(120_000);
+      session.push(queued("bot post", me));
+      const next = nextTurnDelivery(session.input);
+      expect(await session.settled(next)).toBe("waiting");
+
+      session.push(post("human post", { auth: other }));
+
+      await expect(session.settled(next)).resolves.toMatchObject({
+        delivery: { auth: me, payloads: [{ message: "bot post" }] },
+        kind: "turn",
+      });
+      await expect(session.settled(nextTurnDelivery(session.input))).resolves.toMatchObject({
+        delivery: { auth: other, payloads: [{ message: "human post" }] },
+        kind: "turn",
+      });
+    });
+
+    it("does not hold a message that was already waiting behind a running turn", async () => {
+      const session = parkedSession(120_000);
+      session.input.queue.enqueueDelivery(queued("waited") as DeliverHookPayload);
+
+      await expect(session.settled(nextTurnDelivery(session.input))).resolves.toMatchObject({
+        delivery: { payloads: [{ message: "waited" }] },
+        kind: "turn",
+      });
+      expect(session.timers).toHaveLength(0);
     });
   });
 

@@ -46,8 +46,14 @@ export type SessionInputSelection =
   | TurnSelection
   | { readonly control: SessionControl; readonly kind: "control"; readonly origin?: ControlOrigin };
 
+export interface QueueHold {
+  readonly at: number;
+  timer?: Promise<void>;
+}
+
 export class SessionInputQueue {
   private readonly entries: QueuedSessionInput[] = [];
+  private hold: QueueHold | undefined;
   private readonly admittedKeys: Set<string>;
   private nextSequence = 0;
   private prewarmDeploymentId: string | undefined;
@@ -188,7 +194,27 @@ export class SessionInputQueue {
     };
   }
 
+  beginHold(at: number): void {
+    this.hold = { at };
+  }
+
+  endHold(): void {
+    this.hold = undefined;
+  }
+
+  activeHold(): QueueHold | undefined {
+    const queuedOnly = this.entries.every(
+      (entry) =>
+        entry.kind === "authorization" ||
+        (entry.kind === "delivery" &&
+          entry.delivery.turnPolicy === "queue" &&
+          entry.delivery.caller === undefined),
+    );
+    return queuedOnly ? this.hold : undefined;
+  }
+
   takeNext(options?: { readonly freshSequence?: number }): SessionInputSelection | undefined {
+    this.hold = undefined;
     this.retain((entry) => entry.kind !== "authorization");
     const first = this.entries.shift() as QueuedDelivery | QueuedControl | undefined;
     if (first === undefined) return undefined;

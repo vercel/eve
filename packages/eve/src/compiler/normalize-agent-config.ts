@@ -150,6 +150,7 @@ export async function compileAgentConfig(
 
   if (definition.limits !== undefined) {
     compiledConfig.limits = {
+      queueHoldMs: definition.limits.queueHoldMs,
       sessionTimeoutMs: definition.limits.sessionTimeoutMs,
       sessionUsage:
         typeof definition.limits.sessionUsage === "function"

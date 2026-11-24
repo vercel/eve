@@ -12,6 +12,7 @@ export function workflowSessionHost(boot: SessionBoot, inbox: SessionInboxHandle
     moves: new SessionHandoff({
       checkpoint: {
         capabilities: boot.capabilities,
+        queueHoldMs: boot.queueHoldMs,
         retention: boot.retention,
         sessionTimeoutMs: boot.sessionTimeoutMs,
       },

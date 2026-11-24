@@ -10,6 +10,7 @@ export interface SessionCheckpoint {
   readonly version: typeof SESSION_CHECKPOINT_VERSION;
   readonly capabilities?: SessionCapabilities;
   readonly history: HarnessModelMessage[];
+  readonly queueHoldMs?: number;
   readonly retention?: AgentWorkflowRetentionDefinition;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
