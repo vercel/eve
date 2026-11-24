@@ -2,6 +2,7 @@ import { defineExtension } from "eve/extension";
 import { z } from "zod";
 
 import { BOARD_CHANNEL_SELECTOR, BOARD_NAME_PATTERN, BOARD_PERMISSIONS } from "./lib/client.ts";
+import { isValidBoardRouteBase } from "./lib/route.ts";
 
 const grant = z.union([z.literal("all"), z.array(z.enum(BOARD_PERMISSIONS)).readonly()]);
 
@@ -48,5 +49,14 @@ export default defineExtension({
       .optional(),
     /** Principal IDs that may create and remove watches. Defaults to anyone but board actors who aren't people. */
     configurers: z.array(z.string().min(1)).optional(),
+    /** Base route path for the board wake endpoint (`<route>/wake`). Defaults to `"/eve/v1/board"`. */
+    route: z
+      .string()
+      .min(1)
+      .refine(
+        isValidBoardRouteBase,
+        'an absolute path without parameters or query string, such as "/eve/v1/board"',
+      )
+      .optional(),
   }),
 });

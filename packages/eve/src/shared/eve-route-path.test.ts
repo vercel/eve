@@ -13,6 +13,7 @@ describe("joinEveRoutePath", () => {
 
   it("does not duplicate the protocol base", () => {
     expect(joinEveRoutePath("/eve/support/v1", "/eve/v1/session")).toBe("/eve/support/v1/session");
+    expect(joinEveRoutePath("/eve/v1", "/eve/v1/board")).toBe("/eve/v1/board");
   });
 });
 

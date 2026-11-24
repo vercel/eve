@@ -46,7 +46,11 @@ import {
   formatWatchContext,
 } from "./inbound.ts";
 import {
-  BOARD_WAKE_ROUTE,
+  DEFAULT_BOARD_ROUTE_BASE,
+  LEGACY_BOARD_WAKE_ROUTE,
+  normalizeBoardRouteBase,
+} from "./route.ts";
+import {
   boardClients,
   BoardWatchConfigError,
   checkQueueScope,
@@ -117,6 +121,8 @@ export type BoardReceiveTarget =
 
 /** How the board channel runs turns and downloads attachments. Board settings come from the extension's configuration. */
 export interface BoardChannelConfig {
+  /** Base route path for the board wake endpoint (`<route>/wake`). Defaults to the extension's `route` or `"/eve/v1/board"`. */
+  readonly route?: string;
   readonly turnPolicy?: TurnPolicy;
   /** Size and media-type limits for attachments eve downloads from the board. */
   readonly uploadPolicy?: UploadPolicyInput;
@@ -180,6 +186,30 @@ export function createBoardChannel(
     },
   });
 
+  const routeBase = normalizeBoardRouteBase(options.route ?? settings().route);
+  const handleWake = async (
+    _request: Request,
+    {
+      from,
+      waitUntil,
+    }: {
+      readonly from: ChannelFrom<BoardChannelState>;
+      readonly waitUntil: (promise: Promise<unknown>) => void;
+    },
+  ) => {
+    const wake = coalesced(() => drainMatches({ from, settings: settings() }));
+    if (wake !== undefined) {
+      waitUntil(wake.catch((error) => logError("board wake-up failed", error)));
+    }
+    return Response.json({ ok: true }, { status: 202 });
+  };
+  const routes = [
+    POST<BoardChannelState>(`${routeBase}/wake`, handleWake),
+    ...(routeBase === DEFAULT_BOARD_ROUTE_BASE
+      ? [POST<BoardChannelState>(LEGACY_BOARD_WAKE_ROUTE, handleWake)]
+      : []),
+  ];
+
   const channel = defineChannel<
     BoardChannelState,
     BoardChannelContext,
@@ -207,15 +237,7 @@ export function createBoardChannel(
       if (payload.state?.noSync !== undefined) ctx.state.noSync = payload.state.noSync;
     },
 
-    routes: [
-      POST<BoardChannelState>(BOARD_WAKE_ROUTE, async (_request, { from, waitUntil }) => {
-        const wake = coalesced(() => drainMatches({ from, settings: settings() }));
-        if (wake !== undefined) {
-          waitUntil(wake.catch((error) => logError("board wake-up failed", error)));
-        }
-        return Response.json({ ok: true }, { status: 202 });
-      }),
-    ],
+    routes,
 
     async receive({ message, target, ...send }, { from }) {
       const board = boardClients(settings()).model;

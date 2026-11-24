@@ -39,7 +39,10 @@ import {
 import { createProductionNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
 import { runVercelBuildPrewarm } from "#internal/nitro/host/vercel-build-prewarm.js";
 import { prewarmAppSandboxes } from "#execution/sandbox/prewarm.js";
-import type { ApplicationBuildOptions } from "#internal/nitro/host/types.js";
+import type {
+  ApplicationBuildOptions,
+  PreparedApplicationHost,
+} from "#internal/nitro/host/types.js";
 import { findClosestVercelOutputDirectory } from "#shared/vercel-output-directory.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { resolveDiscoveryProject } from "#discover/project.js";
@@ -299,6 +302,10 @@ async function buildApplicationInWorkspace(
     );
   }
   const publicRoutePrefix = options.publicRoutePrefix ?? inferredPublicRoutePrefix;
+  const vercelService = servicePrefix !== undefined || options.vercelServiceOutput !== undefined;
+  if (vercelService) {
+    warnUnreachableVercelServiceChannelRoutes(preparedHost.compileResult.manifest);
+  }
   const sandboxScope = createProductionNitroArtifactsConfig(workspace.appRoot).sandboxScope;
   const spec = createHostSpec(
     preparedHost,
@@ -306,7 +313,7 @@ async function buildApplicationInWorkspace(
       kind: "production",
       preset: isVercelBuild ? "vercel" : undefined,
       publicRoutePrefix,
-      vercelService: servicePrefix !== undefined || options.vercelServiceOutput !== undefined,
+      vercelService,
       workspaceMember: options.workspaceMember,
     },
     { buildDir: workspace.nitro.buildDir, outputDir: workspace.publication.output.stagedDir },
@@ -407,4 +414,19 @@ async function publishCompletedApplicationBuild(
     stagedOutputDir: workspace.publication.output.stagedDir,
     stagedSummaryPath: workspace.publication.summary.stagedPath,
   });
+}
+
+function warnUnreachableVercelServiceChannelRoutes(
+  manifest: PreparedApplicationHost["compileResult"]["manifest"],
+): void {
+  const unreachable = manifest.channelRoutes.effective.filter((route) => {
+    const binding = manifest.bindings[route.sourceId];
+    if (binding?.owner.kind === "framework") return false;
+    return !route.urlPath.startsWith(`${EVE_ROUTE_PREFIX}/`);
+  });
+  for (const route of unreachable) {
+    console.warn(
+      `[eve:build] Channel route ${route.method} ${route.urlPath} (from "${route.logicalPath}") is outside ${EVE_ROUTE_PREFIX}/* and won't be reached through a Vercel service or eve/next. Move it under ${EVE_ROUTE_PREFIX}/<namespace>/* so eve forwards it automatically.`,
+    );
+  }
 }

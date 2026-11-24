@@ -9,7 +9,10 @@ import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import type { CompiledModuleBinding } from "#compiler/source-graph.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { collectRuntimeModuleBindingsForManifest } from "#compiler/module-map.js";
-import { HOST_HTTP_INVENTORY } from "#framework/host-inventory.js";
+import {
+  findReservedEveNamespaceCollision,
+  HOST_HTTP_INVENTORY,
+} from "#framework/host-inventory.js";
 
 type CompiledNode = CompiledAgentNodeManifest | CompiledAgentResources;
 
@@ -318,6 +321,14 @@ function validateChannelRoutePlan(node: CompiledNode): void {
     );
     if (reserved !== undefined) {
       fail(`effective route ${route.method} ${route.urlPath} overlaps reserved host route`);
+    }
+    const binding = node.bindings[route.sourceId];
+    const namespaceCollision = findReservedEveNamespaceCollision(route.urlPath, {
+      allowEveProtocol:
+        route.logicalPath === "channels/eve.ts" && binding?.owner.kind !== "extension",
+    });
+    if (namespaceCollision !== undefined) {
+      fail(`effective route ${route.method} ${route.urlPath} overlaps reserved eve namespace`);
     }
   }
   for (const route of node.channelRoutes.shadowed) {

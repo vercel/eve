@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 
+import { publicRoutePath } from "eve/channels";
+
 import {
   BOARD_CHANNEL_SELECTOR,
   BOARD_TAIL_LIMIT,
@@ -18,10 +20,15 @@ import {
   type BoardRegistrationInput,
   type BoardSettings,
 } from "./client.ts";
+import {
+  BOARD_WAKE_ROUTE,
+  DEFAULT_BOARD_ROUTE_BASE,
+  LEGACY_BOARD_WAKE_ROUTE,
+  normalizeBoardRouteBase,
+} from "./route.ts";
 
+export { BOARD_WAKE_ROUTE, DEFAULT_BOARD_ROUTE_BASE, LEGACY_BOARD_WAKE_ROUTE };
 export const DEFAULT_WATCH_CHANNEL = "eve-config/watches";
-const BOARD_ROUTE_BASE = "/board";
-export const BOARD_WAKE_ROUTE = `${BOARD_ROUTE_BASE}/wake`;
 export const MAX_WATCHES = 32;
 
 const WATCH_LABEL = "eve-watch";
@@ -261,12 +268,12 @@ export async function findWatchRecord(input: {
 
 export function registrationWhere(
   discovery: Pick<BoardDiscovery, "wake_by_path">,
+  routeBase = DEFAULT_BOARD_ROUTE_BASE,
 ): Omit<BoardRegistrationInput, "watch"> {
   const { env } = process;
   const environment = env.VERCEL_ENV;
   if (environment !== "production" && environment !== "preview") return { url: null };
-  const prefix = env.EVE_PUBLIC_ROUTE_PREFIX?.trim().replace(/\/+$/u, "") ?? "";
-  const base = `${prefix === "" || prefix.startsWith("/") ? prefix : `/${prefix}`}${BOARD_ROUTE_BASE}`;
+  const base = publicRoutePath(normalizeBoardRouteBase(routeBase));
   if (discovery.wake_by_path === true) {
     return {
       branch: environment === "preview" ? (env.VERCEL_GIT_COMMIT_REF ?? null) : null,
@@ -361,8 +368,26 @@ async function claimLock(client: BoardClient, taskId: string): Promise<BoardClai
   }
 }
 
+function isVercelDeployment(): boolean {
+  const environment = process.env.VERCEL_ENV;
+  return environment === "production" || environment === "preview";
+}
+
+function registrationDestinationChanged(
+  held: BoardRegistration | undefined,
+  desired: Omit<BoardRegistrationInput, "watch">,
+): boolean {
+  if (held === undefined) return false;
+  return (
+    (held.path ?? null) !== (desired.path ?? null) ||
+    (held.branch ?? null) !== (desired.branch ?? null) ||
+    (held.url ?? null) !== (desired.url ?? null)
+  );
+}
+
 async function updateRegistration(input: {
   readonly client: BoardClient;
+  readonly routeBase?: string;
   readonly watchChannel: string;
   change(watch: Record<string, { readonly tail: string }>): boolean;
 }): Promise<BoardRegistration | undefined> {
@@ -370,10 +395,27 @@ async function updateRegistration(input: {
   return await withRegistrationLock(client, input.watchChannel, async () => {
     const held = await heldRegistration(client);
     const watch = { ...held?.watch };
-    if (!input.change(watch)) return held;
+    const watchChanged = input.change(watch);
+    const deployed = isVercelDeployment();
+    const desired = deployed
+      ? registrationWhere(await client.discovery(), input.routeBase)
+      : undefined;
+    const destinationChanged =
+      desired !== undefined && registrationDestinationChanged(held, desired);
+    if (!watchChanged && !destinationChanged) return held;
+    const where =
+      desired ??
+      (held !== undefined
+        ? {
+            branch: held.branch ?? null,
+            path: held.path ?? null,
+            url: held.url ?? null,
+          }
+        : registrationWhere(await client.discovery(), input.routeBase));
     try {
       return await client.register({
-        ...(held ?? registrationWhere(await client.discovery())),
+        ...where,
+        ...(held?.sync !== undefined && { sync: held.sync }),
         watch,
       });
     } catch (error) {
@@ -393,6 +435,7 @@ export async function createWatch(input: {
   readonly tail: string;
   readonly instructions: string;
   readonly action: BoardWatchAction;
+  readonly routeBase?: string;
 }): Promise<BoardWatch> {
   const { action, client, id, tail } = input;
   const text = watchRecordText(id, action, input.instructions);
@@ -419,6 +462,7 @@ export async function createWatch(input: {
   try {
     await updateRegistration({
       client,
+      routeBase: input.routeBase,
       watchChannel: input.watchChannel,
       change(watch) {
         if (watch[id] === undefined && Object.keys(watch).length >= MAX_WATCHES) {
@@ -485,12 +529,14 @@ export async function removeWatch(input: {
   readonly client: BoardClient;
   readonly watchChannel: string;
   readonly id: string;
+  readonly routeBase?: string;
 }): Promise<{ readonly id: string; readonly removed: boolean }> {
   const { client, id } = input;
   assertWatchId(id);
   let removed = false;
   await updateRegistration({
     client,
+    routeBase: input.routeBase,
     watchChannel: input.watchChannel,
     change(watch) {
       removed = watch[id] !== undefined;

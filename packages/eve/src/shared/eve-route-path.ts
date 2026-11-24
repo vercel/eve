@@ -7,6 +7,9 @@ export function joinEveRoutePath(basePath: string, routePath: string): string {
   const base = trimTrailingSlash(basePath);
   const route = routePath.startsWith("/") ? routePath : `/${routePath}`;
   if (route === EVE_ROUTE_PREFIX || route.startsWith(`${EVE_ROUTE_PREFIX}/`)) {
+    if (base === EVE_ROUTE_PREFIX) {
+      return route;
+    }
     if (EVE_NAMED_AGENT_MOUNT_PATTERN.test(base)) {
       return `${base}${route.slice("/eve".length)}`;
     }

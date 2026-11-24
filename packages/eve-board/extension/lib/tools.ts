@@ -597,6 +597,7 @@ export function defineBoardWatchTool(settings: Settings) {
         client: deployment,
         id: watchIdOf(ctx.session.id, ctx.callId),
         instructions,
+        routeBase: config.route,
         tail: tailOf(filter),
         watchChannel,
       });
@@ -633,8 +634,13 @@ export function defineBoardUnwatchTool(settings: Settings) {
       id: z.string().regex(BOARD_NAME_PATTERN).describe("The watch's ID, such as `w-7k3p2q`."),
     }),
     async execute({ id }, ctx) {
-      const { deployment, watchChannel } = configuring(settings, ctx);
-      return await removeWatch({ client: deployment, id, watchChannel });
+      const { config, deployment, watchChannel } = configuring(settings, ctx);
+      return await removeWatch({
+        client: deployment,
+        id,
+        routeBase: config.route,
+        watchChannel,
+      });
     },
   });
 }
