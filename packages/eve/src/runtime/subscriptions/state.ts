@@ -63,7 +63,6 @@ export interface SubscriptionEvent {
   readonly id: string;
   readonly data: JsonValue;
   readonly requestTraceContext?: SpanContext;
-  readonly acceptedDeploymentId?: string;
 }
 
 export type SubscriptionOwnerMessage =

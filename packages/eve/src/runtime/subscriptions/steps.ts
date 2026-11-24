@@ -8,10 +8,7 @@ import {
   subscriptionDeliveryWorkflowReference,
   subscriptionKeyWorkflowReference,
 } from "#execution/workflow-references.js";
-import {
-  startWorkflowOnCurrentDeployment,
-  startWorkflowOnDeployment,
-} from "#execution/workflow-runtime.js";
+import { startWorkflowOnCurrentDeployment } from "#execution/workflow-runtime.js";
 import { getHookByToken, resumeHook } from "#internal/workflow/runtime.js";
 import { readFirstPublished } from "#runtime/subscriptions/published-outcome.js";
 import { subscriptionSource } from "#runtime/subscriptions/sources/index.js";
@@ -154,15 +151,7 @@ export async function startSubscriptionDeliveryStep(
   input: SubscriptionDeliveryInput,
 ): Promise<void> {
   "use step";
-  const { acceptedDeploymentId } = input.event;
-  if (acceptedDeploymentId === undefined)
-    await startWorkflowOnCurrentDeployment(subscriptionDeliveryWorkflowReference, [input]);
-  else
-    await startWorkflowOnDeployment(
-      subscriptionDeliveryWorkflowReference,
-      [input],
-      acceptedDeploymentId,
-    );
+  await startWorkflowOnCurrentDeployment(subscriptionDeliveryWorkflowReference, [input]);
 }
 
 export async function dispatchSubscriptionStep(input: SubscriptionDeliveryInput): Promise<void> {

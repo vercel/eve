@@ -164,3 +164,16 @@ it("hands an event to the run holding the key, and reports a key nobody holds", 
   expect(resumed).toHaveBeenCalledExactlyOnceWith(keyToken, { kind: "emit", event });
   expect(await emitSubscriptionEvent(source, "vercel/eve#8", event)).toBe(false);
 });
+
+it("does not stamp the receiving deployment on an emitted event", async () => {
+  vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_old");
+  const source = { kind: "channel", name: "github" } as const;
+  const keyToken = subscriptionKeyHookToken(source, "vercel/eve#7");
+  hooks.set(keyToken, { runId: "key-run", metadata: undefined });
+  const event = { id: "e1", data: {} };
+
+  await emitSubscriptionEvent(source, "vercel/eve#7", event);
+
+  expect(resumed).toHaveBeenCalledExactlyOnceWith(keyToken, { kind: "emit", event });
+  vi.unstubAllEnvs();
+});

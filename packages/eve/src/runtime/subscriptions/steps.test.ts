@@ -19,9 +19,7 @@ const mocks = vi.hoisted(() => ({
   getHookByToken: vi.fn(),
   resumeHook: vi.fn(async (_token: string, _message: unknown) => {}),
   startWorkflow: vi.fn(async (_reference: unknown, _args: unknown) => ({ runId: "run-new" })),
-  startWorkflowOnDeployment: vi.fn(
-    async (_reference: unknown, _args: unknown, _deploymentId: string) => ({ runId: "run-new" }),
-  ),
+  startWorkflowOnDeployment: vi.fn(),
   readFirstPublished: vi.fn(),
   writes: [] as { namespace: string; value: unknown }[],
   context: { current: undefined as unknown },
@@ -237,25 +235,12 @@ it("retires the subscription when its session has ended, and fails a send that m
   expect(mocks.resumeHook).not.toHaveBeenCalled();
 });
 
-it("starts the delivery workflow on the deployment that accepted the event", async () => {
-  await startSubscriptionDeliveryStep({
-    ...delivery("e1"),
-    event: { id: "e1", data: {}, acceptedDeploymentId: "dpl_new" },
-  });
-
-  expect(mocks.startWorkflowOnDeployment).toHaveBeenCalledExactlyOnceWith(
-    "delivery-reference",
-    [expect.objectContaining({ event: { id: "e1", data: {}, acceptedDeploymentId: "dpl_new" } })],
-    "dpl_new",
-  );
-  expect(mocks.startWorkflow).not.toHaveBeenCalled();
-});
-
-it("starts the delivery workflow on the current deployment when the event names none", async () => {
-  await startSubscriptionDeliveryStep(delivery("e1"));
+it("starts the delivery workflow on the current deployment, never one the event names", async () => {
+  const event = { id: "e1", data: {}, acceptedDeploymentId: "dpl_old" };
+  await startSubscriptionDeliveryStep({ ...delivery("e1"), event });
 
   expect(mocks.startWorkflow).toHaveBeenCalledExactlyOnceWith("delivery-reference", [
-    expect.objectContaining({ binding }),
+    expect.objectContaining({ binding, event }),
   ]);
   expect(mocks.startWorkflowOnDeployment).not.toHaveBeenCalled();
 });

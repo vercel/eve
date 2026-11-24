@@ -24,10 +24,6 @@ import {
   type SubscriptionSourceRef,
 } from "#runtime/subscriptions/state.js";
 
-export function currentDeploymentId(): string | undefined {
-  return process.env.VERCEL_DEPLOYMENT_ID?.trim() || undefined;
-}
-
 export async function bindingContext(
   binding: Pick<SubscriptionBinding, "auth" | "sessionId" | "traceSeed">,
   bundle: CompiledBundle,
@@ -100,7 +96,7 @@ export function emitSubscriptionEvent(
 ): Promise<boolean> {
   return resume(subscriptionKeyHookToken(source, key), {
     kind: "emit",
-    event: { ...event, acceptedDeploymentId: currentDeploymentId() },
+    event,
   } satisfies SubscriptionKeyMessage);
 }
 
