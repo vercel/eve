@@ -117,9 +117,9 @@ export async function stepMessages(
     for (const [key, announcement] of Object.entries(own ?? {}))
       announcements[key] ??= announcement;
   }
-  const { view, ...record } = announce(drafted, input.call.currentInput, announcements);
+  const record = announce(drafted, input.call.currentInput, announcements);
   return {
     ...record,
-    view: placeAnchored(input.project(view), await draft.context()),
+    view: placeAnchored(input.project(record.record), await draft.context()),
   };
 }

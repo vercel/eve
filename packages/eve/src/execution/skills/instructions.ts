@@ -79,7 +79,6 @@ export function changedSkillAnnouncements(
               changed
                 ? `Skill \`${name}\` changed since you loaded it. Load it again with ${SKILL_TOOL_NAME}({ name: "${name}" }) before relying on it.`
                 : undefined,
-            transient: true,
             value: changed ? current.revision : "",
           },
         ],

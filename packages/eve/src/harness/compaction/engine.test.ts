@@ -763,42 +763,33 @@ describe("compactMessages: capped tool results", () => {
     expect(result.at(-1)).toEqual(user("what did you find?"));
   });
 
-  it.each([
-    ["keeps", 100],
-    ["drops", 4_000],
-  ])(
-    "%s the provenance of a skill in the kept tail according to whether its output fits",
-    async (action, size) => {
-      const part: SkillLoadResultPart = {
-        output: { type: "text", value: "x".repeat(size) },
-        skillLoad: { identity: "skills/release.md", revision: "v1", scope: "application:root" },
-        toolCallId: "call-0",
-        toolName: "eve__skill",
-        type: "tool-result",
-      };
-      const { tool } = await compactWithToolInTail([
-        {
-          content: [
-            {
-              input: { name: "release" },
-              toolCallId: part.toolCallId,
-              toolName: part.toolName,
-              type: "tool-call",
-            },
-          ],
-          role: "assistant",
-        },
-        { content: [part], role: "tool" },
-      ]);
+  it("preserves the loaded skill revision when capping its result", async () => {
+    const size = 4_000;
+    const part: SkillLoadResultPart = {
+      output: { type: "text", value: "x".repeat(size) },
+      skillLoad: { identity: "skills/release.md", revision: "v1", scope: "application:root" },
+      toolCallId: "call-0",
+      toolName: "eve__skill",
+      type: "tool-result",
+    };
+    const { tool } = await compactWithToolInTail([
+      {
+        content: [
+          {
+            input: { name: "release" },
+            toolCallId: part.toolCallId,
+            toolName: part.toolName,
+            type: "tool-call",
+          },
+        ],
+        role: "assistant",
+      },
+      { content: [part], role: "tool" },
+    ]);
 
-      if (action === "keeps") {
-        expect(tool?.content).toEqual([part]);
-      } else {
-        expect(toolResultValue(tool).length).toBeLessThan(size);
-        expect(tool?.content[0]).not.toHaveProperty("skillLoad");
-      }
-    },
-  );
+    expect(toolResultValue(tool).length).toBeLessThan(size);
+    expect(tool?.content[0]).toHaveProperty("skillLoad", part.skillLoad);
+  });
 
   it("does not split a UTF-16 surrogate pair at either cut when capping tool results", async () => {
     for (const offset of [0, 1]) {

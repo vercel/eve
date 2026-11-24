@@ -1,7 +1,5 @@
 import type { ModelMessage } from "ai";
 
-import type { SkillLoadResultPart } from "#execution/catalog/skills.js";
-
 import {
   clipMiddleUtf16Safe,
   COMPACTION_CHECKPOINT_MARKER,
@@ -409,10 +407,8 @@ function capToolResults(messages: readonly ModelMessage[]): ModelMessage[] {
       }
 
       changed = true;
-      const result: SkillLoadResultPart = part;
-      const { skillLoad: _skillLoad, ...retained } = result;
       return {
-        ...retained,
+        ...part,
         output: {
           type: output.type === "error-text" ? ("error-text" as const) : ("text" as const),
           value: `${CAPPED_RESULT_PREFIX}${clipMiddleUtf16Safe(serialized, TRANSCRIPT_PAYLOAD_LIMIT - CAPPED_RESULT_PREFIX.length)}`,

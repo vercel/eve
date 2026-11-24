@@ -1,3 +1,4 @@
+import type { AgentSourceOwner } from "#compiler/source-graph.js";
 import type { ContextContainer } from "#context/container.js";
 import type { ContextReader } from "#context/key.js";
 import {
@@ -35,7 +36,7 @@ export const skills: Definition = {
   contribute: ({ container }) => {
     const bundle = compiledBundleOf(container);
     const own = bundle?.resolvedAgent.skills ?? [];
-    const scope = JSON.stringify(["application", bundle?.nodeId ?? null]);
+    const nodeId = bundle?.nodeId ?? null;
     return {
       tools: () => ({
         skills: new Map(
@@ -48,13 +49,13 @@ export const skills: Definition = {
               name: skill.name,
               path: skillFilePath(skill.name),
               provenance:
-                skill.owner?.kind === "application"
-                  ? {
+                skill.owner === undefined
+                  ? undefined
+                  : {
                       identity: skill.sourceId,
                       revision: announcementDigest("skill", skill.content),
-                      scope,
-                    }
-                  : undefined,
+                      scope: staticSkillScope(skill.owner, nodeId),
+                    },
             },
           ]),
         ),
@@ -73,6 +74,17 @@ export const skills: Definition = {
   id: "eve.skills",
   label: "the agent's skills",
 };
+
+function staticSkillScope(owner: AgentSourceOwner, nodeId: string | null): string {
+  switch (owner.kind) {
+    case "application":
+      return JSON.stringify([owner.kind, nodeId]);
+    case "extension":
+      return JSON.stringify([owner.kind, nodeId, owner.mountId, owner.packageName]);
+    case "framework":
+      return JSON.stringify([owner.kind, nodeId, owner.feature]);
+  }
+}
 
 function skillsSection(
   skills: readonly {

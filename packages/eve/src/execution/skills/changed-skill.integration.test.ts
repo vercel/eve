@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { createChannelAddress } from "#channel/channel-address.js";
 import type { Runtime } from "#channel/types.js";
+import type { AgentSourceOwner } from "#compiler/source-graph.js";
 import { defineDynamic } from "#dynamic/definition.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { markMockModel } from "#internal/mock-model-identity.js";
@@ -24,13 +25,17 @@ type Respond = (lastUserText: string, prompt: string) => ReturnType<typeof textS
 
 function recordingModel(respond: Respond) {
   const prompts: { readonly input: string; readonly prompt: string }[] = [];
+  const toolPrompts: string[] = [];
   const model = markMockModel(
     new MockLanguageModelV4({
       doStream: async (options: LanguageModelV4CallOptions) => {
         const prompt = JSON.stringify(options.prompt);
         if (prompt.includes("CONTEXT CHECKPOINT COMPACTION")) return textStreamResult("Summary.");
         const last = options.prompt.at(-1);
-        if (last?.role === "tool") return textStreamResult("Done.");
+        if (last?.role === "tool") {
+          toolPrompts.push(prompt);
+          return textStreamResult("Done.");
+        }
         const input =
           last?.role === "user"
             ? last.content.map((part) => (part.type === "text" ? part.text : "")).join("")
@@ -42,14 +47,15 @@ function recordingModel(respond: Respond) {
       provider: "eve-test",
     }),
   );
-  return { model, prompts };
+  return { model, prompts, toolPrompts };
 }
 
 async function deployment(
   model: unknown,
   skills: Readonly<Record<string, string>>,
+  owners?: Readonly<Record<string, AgentSourceOwner>>,
 ): Promise<TestRuntime> {
-  return await createTestRuntime({
+  const runtime = await createTestRuntime({
     agent: {
       definition: defineAgent({
         model: defineDynamic(() => ({ model, modelContextWindowTokens: 200_000 })),
@@ -63,6 +69,24 @@ async function deployment(
       logicalPath: `skills/${name}.ts`,
     })),
   });
+  if (owners === undefined) return runtime;
+  return {
+    ...runtime,
+    run: (fn) =>
+      runtime.run(() => {
+        const artifacts = runtime.session.compiledArtifacts!;
+        const bindings = { ...artifacts.manifest.bindings };
+        for (const { name, sourceId } of artifacts.manifest.skills) {
+          const owner = owners[name];
+          if (owner !== undefined) bindings[sourceId] = { ...bindings[sourceId]!, owner };
+        }
+        setRuntimeSessionCompiledArtifacts(runtime.session, {
+          ...artifacts,
+          manifest: { ...artifacts.manifest, bindings },
+        });
+        return fn();
+      }),
+  };
 }
 
 async function redeploy(current: TestRuntime, next: TestRuntime): Promise<void> {
@@ -94,8 +118,8 @@ const loadSkill = (name: string, id: string) =>
   toolCallStreamResult({ input: JSON.stringify({ name }), toolCallId: id, toolName: "eve__skill" });
 
 describe("a skill a new deployment changed", () => {
-  it("asks once to reload it, stops after the reload, and leaves an unchanged skill alone", async () => {
-    const { model, prompts } = recordingModel((input, prompt) => {
+  it("keeps one reload notice across steps and turns, and leaves an unchanged skill alone", async () => {
+    const { model, prompts, toolPrompts } = recordingModel((input, prompt) => {
       if (input === "Load the skills.") {
         return toolCallsStreamResult([
           {
@@ -134,9 +158,56 @@ describe("a skill a new deployment changed", () => {
     expect(notices(loaded!.prompt)).toBe(0);
     expect(notices(next!.prompt)).toBe(1);
     expect(next!.prompt).toContain("Skill `foo` changed");
-    expect(after!.prompt).toContain("Foo procedure v2.");
-    expect(notices(after!.prompt)).toBe(0);
+    const [, reloaded] = toolPrompts;
+    expect(reloaded).toContain("Foo procedure v2.");
+    expect(notices(reloaded!)).toBe(1);
+    expect(notices(after!.prompt)).toBe(1);
     for (const { prompt } of prompts) expect(prompt).not.toContain("Skill `bar` changed");
+  }, 90_000);
+
+  it("notices updates from the same extension or framework feature, but not a replacement package", async () => {
+    const names = ["guide", "review", "report"];
+    const { model, prompts } = recordingModel((input) =>
+      input === "Load the procedures."
+        ? toolCallsStreamResult(
+            names.map((name) => ({
+              input: JSON.stringify({ name }),
+              toolCallId: `call-${name}`,
+              toolName: "eve__skill",
+            })),
+          )
+        : textStreamResult("Ok."),
+    );
+    const extension = (namespace: string, packageName: string): AgentSourceOwner => ({
+      kind: "extension",
+      mountId: `extensions/${namespace}`,
+      namespace,
+      packageName,
+    });
+    const owners = {
+      guide: { feature: "guide", kind: "framework" } as const,
+      review: extension("review", "@example/review"),
+      report: extension("report", "@example/report"),
+    };
+    const procedures = (revision: number) =>
+      Object.fromEntries(names.map((name) => [name, `${name} procedure v${revision}.`]));
+    const first = await deployment(model, procedures(1), owners);
+    const second = await deployment(model, procedures(2), {
+      ...owners,
+      report: extension("report", "@example/replacement-report"),
+    });
+
+    await conversation(first, "changed-packaged-skill", async (say) => {
+      await say("Load the procedures.");
+      await redeploy(first, second);
+      await say("What next?");
+    });
+
+    const next = prompts.at(-1)!;
+    expect(next.input).toBe("What next?");
+    expect(next.prompt).toContain("Skill `guide` changed");
+    expect(next.prompt).toContain("Skill `review` changed");
+    expect(next.prompt).not.toContain("Skill `report` changed");
   }, 90_000);
 
   it("says nothing about a skill the new deployment removed", async () => {

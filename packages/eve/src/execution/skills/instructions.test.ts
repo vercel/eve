@@ -140,34 +140,30 @@ describe("changedSkillAnnouncements", () => {
     return announce(draft, new Set(), changedSkillAnnouncements(catalog, draft.record));
   }
 
-  const added = (after: ReturnType<typeof step>) =>
-    after.view.slice(after.record.length).map(({ content }) => content);
+  const added = (before: CallRecord, after: CallRecord) =>
+    after.record.slice(before.record.length).map(({ content }) => content);
 
-  it("says nothing while the loaded skill matches the current one", () => {
-    const draft: CallRecord = { historyState: {}, record: load("call_1", "v1", provenance("v1")) };
-
-    expect(added(step(draft, "v1"))).toEqual([]);
-  });
-
-  it("asks once to reload a skill whose content changed after it was loaded", () => {
+  it("uses the loaded revision, not the truncated result text, to detect changes", () => {
     const markdown =
       "[Truncated by eve: tool result reduced during context compaction. Re-run the tool if you need the full output.]\n\nRelease procedure.";
     const draft: CallRecord = {
       historyState: {},
       record: load("call_1", markdown, provenance("v1")),
     };
-    const changed = step(draft, "v2");
+    expect(added(draft, step(draft, "v1"))).toEqual([]);
 
-    expect(added(changed)).toEqual([
+    const changed = step(draft, "v2");
+    expect(added(draft, changed)).toEqual([
       'Skill `deploy` changed since you loaded it. Load it again with eve__skill({ name: "deploy" }) before relying on it.',
     ]);
-    expect(changed.record).toEqual(draft.record);
-    expect(added(step(changed, "v2"))).toEqual([]);
+    expect(changed.record.slice(0, draft.record.length)).toEqual(draft.record);
+    expect(added(changed, step(changed, "v2"))).toEqual([]);
   });
 
   it("does not fall back to an earlier proven load when the latest load is unproven", () => {
     const record = [...load("call_1", "v1", provenance("v1")), ...load("call_2", "v2")];
-    expect(added(step({ historyState: {}, record }, "v3"))).toEqual([]);
+    const draft: CallRecord = { historyState: {}, record };
+    expect(added(draft, step(draft, "v3"))).toEqual([]);
   });
 
   it.each([
@@ -175,8 +171,8 @@ describe("changedSkillAnnouncements", () => {
     ["a different scope", { ...provenance("v2"), scope: "application:another-agent" }],
     ["an unproven current skill", undefined],
   ])("does not ask to reload a same-name skill with %s", (_label, current) => {
-    const record = load("call_1", "v1", provenance("v1"));
-    expect(added(step({ historyState: {}, record }, "v2", { provenance: current }))).toEqual([]);
+    const draft: CallRecord = { historyState: {}, record: load("call_1", "v1", provenance("v1")) };
+    expect(added(draft, step(draft, "v2", { provenance: current }))).toEqual([]);
   });
 
   it("goes quiet after a reload and speaks again on the next change", () => {
@@ -190,7 +186,7 @@ describe("changedSkillAnnouncements", () => {
     };
     const quiet = step(reloaded, "v2");
 
-    expect(added(quiet)).toEqual([]);
-    expect(added(step(quiet, "v3"))).toHaveLength(1);
+    expect(added(reloaded, quiet)).toEqual([]);
+    expect(added(quiet, step(quiet, "v3"))).toHaveLength(1);
   });
 });
