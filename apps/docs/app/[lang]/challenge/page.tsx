@@ -18,7 +18,7 @@ import { HarnessLoop } from "./harness-loop-view";
 import { PostBuilder } from "./post-builder";
 
 const credits = "$100 in Vercel AI Gateway credits";
-const swag = "limited-edition swag";
+const swag = "limited-edition eve swag";
 const prizes = `${credits} and ${swag}`;
 const buildLead = "Build an agent with eve.";
 const description = `${buildLead} Submit your project for a chance to win ${prizes}.`;
