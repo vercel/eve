@@ -47,30 +47,101 @@ export const textReply = (text: string) =>
     { type: "response.completed", response: { usage } },
   ]);
 
-export const compactionReply = () =>
+export const compactionReply = (id = "cmp_1", encrypted = "ENCRYPTED-STATE") =>
   sse([
     { type: "response.created", response: { id: "resp_cmp", created_at: 1, model: "gpt-5" } },
     {
       type: "response.output_item.done",
       output_index: 0,
-      item: { type: "compaction", id: "cmp_1", encrypted_content: "ENCRYPTED-STATE" },
+      item: { type: "compaction", id, encrypted_content: encrypted },
     },
     { type: "response.completed", response: { usage } },
   ]);
 
+export const functionCallReply = (callId: string) => {
+  const item = {
+    type: "function_call",
+    id: `fc_${callId}`,
+    call_id: callId,
+    name: "lookup",
+    arguments: "{}",
+    status: "completed",
+  };
+  return sse([
+    { type: "response.created", response: { id: "resp_call", created_at: 1, model: "gpt-5" } },
+    {
+      type: "response.output_item.added",
+      output_index: 0,
+      item: { ...item, arguments: "" },
+    },
+    {
+      type: "response.function_call_arguments.delta",
+      item_id: item.id,
+      output_index: 0,
+      delta: "{}",
+    },
+    { type: "response.output_item.done", output_index: 0, item },
+    { type: "response.completed", response: { usage } },
+  ]);
+};
+
+export const contextOverflowReply = (): globalThis.Response =>
+  new Response(
+    JSON.stringify({
+      error: {
+        code: "context_length_exceeded",
+        message: "Your input exceeds the context window of this model.",
+        type: "invalid_request_error",
+      },
+    }),
+    { headers: { "content-type": "application/json" }, status: 400 },
+  );
+
+const storedIdsOf = async (response: Response): Promise<string[]> =>
+  (await response.clone().text())
+    .split("\n")
+    .filter((line) => line.startsWith("data: "))
+    .map((line) => JSON.parse(line.slice("data: ".length)) as Record<string, unknown>)
+    .flatMap((event) => {
+      const item = event.item as { id?: unknown } | undefined;
+      return event.type === "response.output_item.done" && typeof item?.id === "string"
+        ? [item.id]
+        : [];
+    });
+
+export const isCompactionTrigger = (body: ResponsesBody) =>
+  body.input.at(-1)?.type === "compaction_trigger";
+
 export function openaiWithFetch(
   bodies: ResponsesBody[],
   respond: (body: ResponsesBody) => Response | Promise<Response> = (body) =>
-    body.input.at(-1)?.type === "compaction_trigger"
-      ? compactionReply()
-      : textReply("The second claim cites two cases."),
+    isCompactionTrigger(body) ? compactionReply() : textReply("The second claim cites two cases."),
 ): LanguageModel {
+  const stored = new Set<string>();
   const provider = createOpenAI({
     apiKey: "test",
     fetch: async (_url, init) => {
       const body = JSON.parse(String(init?.body)) as ResponsesBody;
       bodies.push(body);
-      return await respond(body);
+      const missing = body.input.find(
+        (entry) => entry.type === "item_reference" && !stored.has(String(entry.id)),
+      );
+      if (missing !== undefined) {
+        return new Response(
+          JSON.stringify({
+            error: {
+              message: `Item with id '${String(missing.id)}' not found.`,
+              type: "invalid_request_error",
+            },
+          }),
+          { headers: { "content-type": "application/json" }, status: 404 },
+        );
+      }
+      const response = await respond(body);
+      if (body.store !== false && response.ok) {
+        for (const id of await storedIdsOf(response)) stored.add(id);
+      }
+      return response;
     },
   });
   return provider.responses("gpt-5");
@@ -107,7 +178,11 @@ export function kernelFor(
   strategy: CompactionRewrite,
   model: LanguageModel,
   providers: string[] = [],
-  options: { readonly compactOnly?: true; readonly when?: CompactionTrigger } = {},
+  options: {
+    readonly compactOnly?: true;
+    readonly openaiOptions?: { readonly store?: boolean };
+    readonly when?: CompactionTrigger;
+  } = {},
 ) {
   const wrapped: CompactionStrategy = {
     compact: async (history, ctx) => {
@@ -126,7 +201,7 @@ export function kernelFor(
       model: {
         contextWindowTokens: 4_000,
         id: "gpt-5",
-        providerOptions: { openai: { store: false } },
+        providerOptions: { openai: options.openaiOptions ?? { store: false } },
       },
       thresholdPercent: 0.02,
     },
