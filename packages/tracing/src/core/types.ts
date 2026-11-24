@@ -25,6 +25,7 @@ export type SpanType =
   | "approval"
   | "memory"
   | "decision"
+  | "extraction"
   | "channelRequest"
   | "mcp";
 export type SpanKind = "INTERNAL" | "CLIENT" | "SERVER" | "PRODUCER" | "CONSUMER";
@@ -223,6 +224,10 @@ export interface DecisionOptions {
   /** What the decision is for, such as `model-selection` or `tool-approval`. */
   readonly purpose?: string;
 }
+export interface ExtractionOptions {
+  readonly provider?: string;
+  readonly modelId: string;
+}
 export interface ToolOptions {
   readonly callId: string;
   readonly name: string;
@@ -250,6 +255,7 @@ export type ScopeData =
   | { readonly type: "tool"; readonly options: ToolOptions }
   | { readonly type: "approval"; readonly options: ApprovalOptions }
   | { readonly type: "decision"; readonly options: DecisionOptions }
+  | { readonly type: "extraction"; readonly options: ExtractionOptions }
   | {
       readonly type: "memory";
       readonly options: {

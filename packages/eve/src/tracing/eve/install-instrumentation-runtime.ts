@@ -38,6 +38,7 @@ export function installInstrumentationRuntime(input: {
   let prepareTurnTrace: InstrumentationRuntime["prepareTurnTrace"];
   let readTurnTraceContext: InstrumentationRuntime["readTurnTraceContext"];
   let decision: InstrumentationRuntime["decision"];
+  let extraction: InstrumentationRuntime["extraction"];
   let runInContext: InstrumentationRuntime["runInContext"] = (_operation, execute) => execute();
   let idGenerator: AgentSpanIdGenerator;
 
@@ -69,6 +70,7 @@ export function installInstrumentationRuntime(input: {
     prepareTurnTrace = agentOtel.prepareTurnTrace;
     readTurnTraceContext = agentOtel.readTurnTraceContext;
     decision = agentOtel.decision;
+    extraction = agentOtel.extraction;
     runInContext = agentOtel.runInContext;
 
     const releasable = input.collected.configuration.spanProcessors
@@ -99,6 +101,7 @@ export function installInstrumentationRuntime(input: {
     prepareTurnTrace,
     readTurnTraceContext,
     decision,
+    extraction,
     runtimeContextResolvers: input.runtimeContextResolvers,
     runInContext,
     samplesTrace: otelRuntime?.samplesTrace,

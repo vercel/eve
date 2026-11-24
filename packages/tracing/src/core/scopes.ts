@@ -131,7 +131,12 @@ export function createScopes(input: {
   ): TraceReference | undefined {
     const ids = telemetry.ids;
     if (!input.durable || ids === undefined) return undefined;
-    if (data.type === "model" || data.type === "decision" || data.type === "memory")
+    if (
+      data.type === "model" ||
+      data.type === "decision" ||
+      data.type === "extraction" ||
+      data.type === "memory"
+    )
       return undefined;
     if (data.type === "activation" && parent !== undefined)
       return {

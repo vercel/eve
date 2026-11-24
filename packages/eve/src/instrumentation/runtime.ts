@@ -139,6 +139,7 @@ export interface InstrumentationRuntime {
     turnId: string,
   ) => Promise<InstrumentationTraceContext | undefined>;
   readonly decision?: AgentRun["decision"];
+  readonly extraction?: AgentRun["extraction"];
   otelSettings: OtelHarnessSettings | undefined;
   readonly runtimeContextResolvers?: readonly RuntimeContextResolver[];
   readonly runInContext: InstrumentationContextRunner;

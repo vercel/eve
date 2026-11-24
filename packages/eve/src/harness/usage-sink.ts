@@ -37,7 +37,7 @@ export function withUsageInEffect<T>(fn: () => T): T {
 
 export async function recordUsage(
   usage: Partial<Usage>,
-  options: { readonly kind?: "auxiliary" | "decision" } = {},
+  options: { readonly kind?: "auxiliary" | "decision" | "extraction" } = {},
 ): Promise<void> {
   const sink = contextScopeValue<UsageSink>(SINK);
   if (sink === undefined) return;

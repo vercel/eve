@@ -7,5 +7,17 @@
   "DecisionResult",
   "DecisionState",
   "DecisionStatePart",
-  "decide"
+  "ExtractionAnswer",
+  "ExtractionDurationUnit",
+  "ExtractionField",
+  "ExtractionInput",
+  "ExtractionModel",
+  "ExtractionOptions",
+  "ExtractionResult",
+  "ExtractionSource",
+  "ExtractionState",
+  "ExtractionStatePart",
+  "ExtractionValue",
+  "decide",
+  "extract"
 ]
