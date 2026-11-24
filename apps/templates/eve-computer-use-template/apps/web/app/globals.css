@@ -522,14 +522,11 @@ kbd {
 
 /* ---------------------------------------------------------------- Shell */
 
-.brand,
 .brand-lockup {
   display: flex;
+  flex: none;
   align-items: center;
   gap: 10px;
-}
-.brand-lockup {
-  flex: none;
 }
 .brand-triangle {
   width: 20px;
@@ -544,12 +541,6 @@ kbd {
   display: block;
   width: auto;
   height: 14px;
-}
-.brand-name {
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  white-space: nowrap;
 }
 
 /* ---------------------------------------------------------------- Browser */
@@ -1502,13 +1493,9 @@ kbd {
     gap: 6px;
     padding-inline: 10px;
   }
-  .brand,
   .brand-lockup,
   .topbar-actions {
     gap: 6px;
-  }
-  .brand-name {
-    font-size: 14px;
   }
   .brand-triangle {
     width: 16px;
@@ -1516,21 +1503,6 @@ kbd {
   }
   .brand-eve {
     height: 11px;
-  }
-}
-
-@media (max-width: 360px) {
-  .brand,
-  .brand-lockup,
-  .topbar-actions {
-    gap: 4px;
-  }
-  .device-trigger {
-    gap: 4px;
-    padding-inline: 6px;
-  }
-  .device-trigger > svg {
-    display: none;
   }
 }
 

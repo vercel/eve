@@ -84,19 +84,21 @@ export default function Page() {
   return (
     <main className={`app ${expanded ? "app-expanded" : ""}`}>
       <header className="topbar">
-        <div className="brand">
-          <span aria-hidden="true" className="brand-lockup">
-            <svg className="brand-triangle" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M12 3 23 21H1L12 3Z" />
-            </svg>
-            <span className="brand-divider" />
-            <svg className="brand-eve" fill="currentColor" viewBox="0 0 169 53">
-              <path d="M169 8.47h-51.39L81.73 53H70.36L113 0H169zM169 44.51v8.47h-45.87V44.5zM45.87 52.98H0V44.5h45.87zM38.66 30.55H0v-8.47h38.66z" />
-              <path d="M169 30.55h-38.66v-8.47H169zM75.52 8.47H0V0h75.52z" />
-            </svg>
-          </span>
-          <span className="brand-name">Computer use</span>
-        </div>
+        <span aria-label="Vercel and eve" className="brand-lockup" role="img">
+          <svg
+            aria-hidden="true"
+            className="brand-triangle"
+            fill="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path d="M12 3 23 21H1L12 3Z" />
+          </svg>
+          <span className="brand-divider" />
+          <svg aria-hidden="true" className="brand-eve" fill="currentColor" viewBox="0 0 169 53">
+            <path d="M169 8.47h-51.39L81.73 53H70.36L113 0H169zM169 44.51v8.47h-45.87V44.5zM45.87 52.98H0V44.5h45.87zM38.66 30.55H0v-8.47h38.66z" />
+            <path d="M169 30.55h-38.66v-8.47H169zM75.52 8.47H0V0h75.52z" />
+          </svg>
+        </span>
         <div className="topbar-actions">
           <DevicePicker disabled={locked} onChange={setDevice} value={device} />
           <button
