@@ -1,6 +1,6 @@
 import type { ModelMessage } from "ai";
 
-import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
+import { CompactionResultOverLimitError } from "#harness/compaction/over-limit-error.js";
 import { COMPACTION_CHECKPOINT_MARKER } from "#harness/compaction/prompt.js";
 import {
   type HarnessModelMessage,
@@ -49,7 +49,7 @@ export function checkHistory(
   }
   const size = estimateTokens(messages);
   if (size > input.limit) {
-    throw new CompactionOverLimitError(
+    throw new CompactionResultOverLimitError(
       `${subject} is ~${Math.round(size)} tokens; the limit is ~${Math.round(input.limit)}.`,
     );
   }

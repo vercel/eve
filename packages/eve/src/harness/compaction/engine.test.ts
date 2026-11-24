@@ -245,6 +245,35 @@ describe("getInputTokenCount", () => {
   });
 });
 
+describe("a provider's encrypted compaction item", () => {
+  const item = (encryptedContent: string): ModelMessage => ({
+    content: [
+      {
+        kind: "openai.compaction",
+        providerOptions: { openai: { encryptedContent, itemId: "cmp_1" } },
+        type: "custom",
+      },
+    ],
+    role: "assistant",
+  });
+  const tail: ModelMessage = { content: "next question", role: "user" };
+
+  it("is not counted as prompt text", () => {
+    const large = "A".repeat(400_000);
+    expect(estimateTokens([item(large), tail])).toBe(estimateTokens([item("x"), tail]));
+    expect(estimateTokens([item(large), tail])).toBeLessThan(200);
+  });
+
+  it("keeps its other fields in the estimate", () => {
+    expect(estimateTokens([item("x"), tail])).toBeGreaterThan(estimateTokens([tail]));
+  });
+
+  it("does not make a freshly compacted history due for compaction again", () => {
+    const history = [item("A".repeat(400_000)), tail];
+    expect(shouldCompact(history, { ...config, threshold: 1_000 })).toBe(false);
+  });
+});
+
 describe("shouldCompact", () => {
   it("returns false when under threshold", () => {
     const messages: ModelMessage[] = [{ content: "short", role: "user" }];

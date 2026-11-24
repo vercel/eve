@@ -8,7 +8,7 @@ function apiCallError(statusCode: number, body: object): APICallError {
   return new APICallError({
     data: body,
     isRetryable: false,
-    message: "Bad Request",
+    message: (body as { error?: { message?: string } }).error?.message ?? "Bad Request",
     requestBodyValues: {},
     responseBody,
     statusCode,
@@ -65,10 +65,14 @@ describe("isContextOverflowError", () => {
     expect(isContextOverflowError(gateway)).toBe(true);
   });
 
-  it("recognizes a 413 request too large", () => {
-    expect(
-      isContextOverflowError(apiCallError(413, { error: { message: "Request too large" } })),
-    ).toBe(true);
+  it("recognizes Anthropic's exceed-context-limit wording", () => {
+    const error = apiCallError(400, {
+      error: {
+        message: "input length and `max_tokens` exceed context limit: 188240 + 21333 > 200000",
+        type: "invalid_request_error",
+      },
+    });
+    expect(isContextOverflowError(error)).toBe(true);
   });
 
   it("ignores rate limits and other rejections", () => {

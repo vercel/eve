@@ -8,7 +8,11 @@ import type { HarnessModelMessage } from "#harness/messages.js";
 import type { HarnessSession, StepFn } from "#harness/types.js";
 import { createTestKernel } from "#internal/testing/kernel.js";
 import { foldingHandler } from "#internal/testing/session-machine.js";
-import type { CompactionContext, CompactionStrategy } from "#shared/compaction-strategy.js";
+import type {
+  CompactionContext,
+  CompactionStrategy,
+  CompactionTrigger,
+} from "#shared/compaction-strategy.js";
 import type { StoredHistoryMessage } from "#shared/history-message.js";
 
 type CompactionRewrite = (
@@ -116,15 +120,23 @@ async function turn(kernel: StepFn, session: HarnessSession, message: string) {
   return stepped.session;
 }
 
-function kernelFor(strategy: CompactionRewrite, bodies: ResponsesBody[], providers: string[] = []) {
+function kernelFor(
+  strategy: CompactionRewrite,
+  bodies: ResponsesBody[],
+  providers: string[] = [],
+  options: { readonly compactOnly?: true; readonly when?: CompactionTrigger } = {},
+) {
   const wrapped: CompactionStrategy = {
     compact: async (history, ctx) => {
       providers.push(ctx.model.provider);
       return await strategy(history, ctx);
     },
-    when: { "model.requested": ({ inputTokens, threshold }) => inputTokens > threshold },
+    when: options.when ?? {
+      "model.requested": ({ inputTokens, threshold }) => inputTokens > threshold,
+    },
   };
   return createTestKernel({
+    ...(options.compactOnly && { compactOnly: true }),
     agent: {
       compactionStrategy: wrapped,
       instructions: "You help Alice.",
@@ -202,5 +214,36 @@ describe("a strategy that sends the turn's own request", () => {
       type: "compaction",
     });
     expect(JSON.stringify(after)).not.toContain("item_reference");
+  });
+
+  it("sends the same instructions and tools as the turn when it compacts at turn.settled", async () => {
+    const bodies: ResponsesBody[] = [];
+    const kernel = kernelFor(OPENAI_NATIVE, bodies, [], { when: { "turn.settled": true } });
+
+    await contextStorage.run(new ContextContainer(), () =>
+      turn(kernel, fresh(), "Which sources back the claim?"),
+    );
+
+    const [asked, compacting] = bodies;
+    expect(compacting!.input.at(-1)).toEqual({ type: "compaction_trigger" });
+    expect(asked!.tools?.map((tool) => tool.name)).toContain("lookup");
+    expect(compacting!.tools).toEqual(asked!.tools);
+    expect(compacting!.input[0]).toEqual(asked!.input[0]);
+  });
+
+  it("sends the same instructions and tools as the turn when the compaction is manual", async () => {
+    const bodies: ResponsesBody[] = [];
+    const kernel = kernelFor(OPENAI_NATIVE, bodies, [], { compactOnly: true });
+
+    await contextStorage.run(new ContextContainer(), () => kernel(fresh(), {}));
+    await contextStorage.run(new ContextContainer(), () =>
+      turn(kernelFor(OPENAI_NATIVE, bodies), fresh(), "Which sources back the claim?"),
+    );
+
+    const manual = bodies.find((body) => body.input.at(-1)?.type === "compaction_trigger");
+    const ofTurn = bodies.find((body) => body.input.at(-1)?.type !== "compaction_trigger");
+    expect(manual).toBeDefined();
+    expect(manual!.tools).toEqual(ofTurn!.tools);
+    expect(manual!.input[0]).toEqual(ofTurn!.input[0]);
   });
 });

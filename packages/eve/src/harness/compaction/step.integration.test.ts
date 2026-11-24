@@ -1189,13 +1189,18 @@ describe("an authored compaction strategy", () => {
       while (typeof stepped.next === "function") stepped = await stepped.next(stepped.session);
     });
 
-    expect(reasons).toEqual(["automatic", "automatic"]);
+    expect(reasons).toEqual(["automatic"]);
     expect(events.filter((event) => event.type === "context.settled")).toMatchObject([
-      { data: { error: { message: expect.stringContaining("the limit is") }, outcome: "failed" } },
       { data: { error: { message: expect.stringContaining("the limit is") }, outcome: "failed" } },
     ]);
     expect(events.filter((event) => event.type === "model.started")).toHaveLength(1);
-    expect(events.at(-1)).toMatchObject({ data: { outcome: "failed" }, type: "turn.settled" });
+    expect(events.at(-1)).toMatchObject({
+      data: {
+        error: { code: "COMPACTION_FAILED", message: expect.stringContaining("the limit is") },
+        outcome: "failed",
+      },
+      type: "turn.settled",
+    });
     expect(events.some((event) => event.type === "session.ended")).toBe(false);
   });
   async function runTurn(

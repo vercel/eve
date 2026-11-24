@@ -17,6 +17,7 @@ import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { createProjectionRecorder } from "#internal/testing/session-projection-recorder.js";
 import { eachEvent } from "#internal/testing/session-machine.js";
 import type { SessionEvent } from "#protocol/session-event.js";
+import type { CompactionStrategy } from "#shared/compaction-strategy.js";
 
 function local(name: string, extra: Partial<HarnessToolDefinition> = {}): HarnessToolDefinition {
   return {
@@ -70,7 +71,10 @@ function searchResultThenText(text: string) {
   };
 }
 
-function setup(tools: readonly HarnessToolDefinition[], options: { readonly search?: true } = {}) {
+function setup(
+  tools: readonly HarnessToolDefinition[],
+  options: { readonly search?: true; readonly compactionStrategy?: CompactionStrategy } = {},
+) {
   const events: SessionEvent[] = [];
   const calls = [
     ...tools.map((tool) => ({
@@ -95,7 +99,7 @@ function setup(tools: readonly HarnessToolDefinition[], options: { readonly sear
   });
   const recorder = createProjectionRecorder();
   const config: TestKernelConfig = {
-    agent: { model: { id: "ends-turn-model" } },
+    agent: { compactionStrategy: options.compactionStrategy, model: { id: "ends-turn-model" } },
     capabilities: { requestInput: true },
     handleEvent: eachEvent(async (event) => {
       recorder.record(event);
@@ -159,6 +163,23 @@ describe("an endsTurn call beside other calls", () => {
 
     expect(fixture.model.doStreamCalls).toHaveLength(1);
     expect(result.settledTurn?.output).toBe("");
+  });
+
+  it("runs a turn.settled compaction strategy when a parked workflow sibling settles the turn", async () => {
+    const events: string[] = [];
+    const compactionStrategy: CompactionStrategy = {
+      compact: async (history, ctx) => {
+        events.push(`${ctx.event}:${ctx.model.modelId}`);
+        return history;
+      },
+      when: { "turn.settled": () => true },
+    };
+    const fixture = setup([noReply, workflow()], { compactionStrategy });
+    const parked = await fixture.run(fixture.session, { message: "Check the count." });
+
+    await fixture.run(parked.session, deployed);
+
+    expect(events).toEqual(["turn.settled:ends-turn-model"]);
   });
 
   it("lets the model answer when a parked step's endsTurn function rejects the output", async () => {

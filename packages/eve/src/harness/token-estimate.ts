@@ -15,6 +15,7 @@ const REMOTE_URL = /^https?:\/\//i;
 export function estimateTokens(value: unknown): number {
   let mediaTokens = 0;
   const serialized = JSON.stringify(value, (_key, candidate: unknown) => {
+    if (isOpaqueProviderPart(candidate)) return withoutEncryptedContent(candidate);
     const media = estimateFilePartTokens(candidate);
     if (media === undefined) return candidate;
     mediaTokens += media;
@@ -25,6 +26,37 @@ export function estimateTokens(value: unknown): number {
     return { mediaType, type };
   });
   return Math.ceil(Buffer.byteLength(serialized ?? "") / 4) + mediaTokens;
+}
+
+interface OpaqueProviderPart {
+  readonly type: "custom";
+  readonly providerOptions: Readonly<Record<string, unknown>>;
+}
+
+function isOpaqueProviderPart(value: unknown): value is OpaqueProviderPart {
+  if (value === null || typeof value !== "object") return false;
+  const part = value as { readonly type?: unknown; readonly providerOptions?: unknown };
+  return (
+    part.type === "custom" &&
+    part.providerOptions !== null &&
+    typeof part.providerOptions === "object"
+  );
+}
+
+function withoutEncryptedContent(part: OpaqueProviderPart): unknown {
+  return {
+    ...part,
+    providerOptions: Object.fromEntries(
+      Object.entries(part.providerOptions).map(([provider, options]) => [
+        provider,
+        options !== null && typeof options === "object"
+          ? Object.fromEntries(
+              Object.entries(options).filter(([key]) => key !== "encryptedContent"),
+            )
+          : options,
+      ]),
+    ),
+  };
 }
 
 function estimateFilePartTokens(value: unknown): number | undefined {

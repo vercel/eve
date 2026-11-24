@@ -563,34 +563,6 @@ function truncateSnippet(value: string, maxLength: number): string {
   return `${value.slice(0, maxLength)}...<truncated>`;
 }
 
-const CONTEXT_OVERFLOW_PATTERNS: readonly RegExp[] = [
-  /prompt is too long/i,
-  /input is too long/i,
-  /context[_ ]length[_ ]exceeded/i,
-  /maximum context length/i,
-  /context window/i,
-  /exceeds? the context/i,
-  /too many (?:input )?tokens/i,
-  /input token count.*exceeds/i,
-  /request too large/i,
-];
-
 export function isContextOverflowError(error: unknown): boolean {
-  const status = readModelCallErrorSignals(error).statusCode;
-  if (status !== undefined && status !== 400 && status !== 413) return false;
-  for (const candidate of walkCauseChain(error)) {
-    const texts = [
-      readErrorMessage(candidate),
-      readStringField(candidate, "responseBody"),
-      readStringField(candidate, "code"),
-      readStringField(candidate, "type"),
-      ...readNestedApiErrorMessages(candidate),
-      ...readNestedApiErrorMessages(readObjectField(candidate, "data")),
-    ];
-    for (const text of texts) {
-      if (text === undefined || /per min|rate limit/i.test(text)) continue;
-      if (CONTEXT_OVERFLOW_PATTERNS.some((pattern) => pattern.test(text))) return true;
-    }
-  }
-  return false;
+  return summarizeKnownError(error)?.id === "model-context-overflow";
 }

@@ -1,6 +1,9 @@
 import { type LanguageModel, type ModelMessage, streamText, type ToolSet } from "ai";
 
-import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
+import {
+  CompactionOverLimitError,
+  CompactionResultOverLimitError,
+} from "#harness/compaction/over-limit-error.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { AuthKey } from "#context/keys.js";
@@ -17,6 +20,7 @@ import {
   triggersAt,
 } from "#harness/compaction/authored.js";
 import { checkHistory } from "#harness/compaction/check.js";
+import { requestPrefix } from "#harness/compaction/request-prefix.js";
 import type { CompactionContext, CompactionReason } from "#shared/compaction-strategy.js";
 import type { PublicAgentStaticModelDefinition } from "#shared/agent-definition.js";
 import { checksSessionEvents } from "#shared/dev-checks.js";
@@ -30,7 +34,6 @@ import {
   validateHarnessModelMessages,
 } from "#harness/messages.js";
 import { type Step, stepReference } from "#harness/step/context.js";
-import { stepSystem } from "#definitions/step.js";
 import { agentSettings } from "#execution/effective-agent-config.js";
 import { againstWindow, compactionConfig } from "#harness/compaction/config.js";
 import { activeTurnId } from "#harness/session-machine/view.js";
@@ -60,7 +63,6 @@ import {
   gatewayModelId,
   type TokenUsageDelta,
 } from "#harness/model-call/usage.js";
-import { modelInstructions } from "#harness/model-call/request.js";
 import { resolveModelProfile } from "#harness/model-profile.js";
 import { markUsageReported, NO_USAGE } from "#harness/session-usage.js";
 import { addTokenUsage } from "#shared/token-usage-math.js";
@@ -168,6 +170,7 @@ export async function historyBeforeCall(
     return await compactUnder(step, input, prompt, config);
   } catch (error) {
     if (!(error instanceof CompactionOverLimitError)) throw error;
+    if (error instanceof CompactionResultOverLimitError) throw error;
     const window = config.contextWindowTokens;
     const scope = { sessionId: step.session.sessionId, turnId: step.position().turnId };
     if (window === undefined) {
@@ -239,24 +242,25 @@ export async function compactAtTurnEnd(step: Step): Promise<void> {
   if (!triggersAt(resolveStrategy(agentSettings(step).compactionStrategy), "turn.settled")) return;
   if (step.session.history.length === 0) return;
   const messages = validateHarnessModelMessages(step.session.history);
-  const compaction = compactionConfig(step);
-  const envelope = compaction.requestEnvelopeTokens ?? 0;
-  const size = getInputTokenCount(messages, compaction, envelope, envelope);
-  const { projection } = step.view();
-  const change = lazyChange(step, {
-    changeId: nextChangeId(projection),
-    prompt: messages,
-    runId: nextRunId(projection),
-    started: {
-      kind: "compaction",
-      trigger: { inputTokens: size },
-      turnId: step.position().turnId,
-    },
-  });
   try {
     const resolvedModel = await resolveEffectiveRuntimeModel(step, {
       abortSignal: step.config.abortSignal,
       conversation: messages,
+    });
+    step.model ??= resolvedModel.choice;
+    const compaction = compactionConfig(step);
+    const envelope = compaction.requestEnvelopeTokens ?? 0;
+    const size = getInputTokenCount(messages, compaction, envelope, envelope);
+    const { projection } = step.view();
+    const change = lazyChange(step, {
+      changeId: nextChangeId(projection),
+      prompt: messages,
+      runId: nextRunId(projection),
+      started: {
+        kind: "compaction",
+        trigger: { inputTokens: size },
+        turnId: step.position().turnId,
+      },
     });
     await decideHistory(step, {
       change,
@@ -337,12 +341,7 @@ async function decideHistory(
   const turnModel = once(input.turnModel);
   const requestOf = once(
     async (): Promise<RequestPrefix> =>
-      input.request ?? {
-        instructions: modelInstructions({
-          instructions: await stepSystem(step),
-          profile: resolveModelProfile((await turnModel()).model),
-        }),
-      },
+      input.request ?? (await requestPrefix(step, (await turnModel()).model)),
   );
   const executors = new Map<
     PublicAgentStaticModelDefinition | "turn" | undefined,
