@@ -1,4 +1,5 @@
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
+import type { PlatformDeclaration } from "#platform/declaration.js";
 import type { ScheduleRegistration } from "#runtime/schedules/register.js";
 import type { ResolvedScheduleDefinition } from "#runtime/types.js";
 import type { GeneratedCompiledArtifactsFiles } from "#internal/application/compiled-artifacts.js";
@@ -9,6 +10,7 @@ import type { DevelopmentHostWorkspace } from "#internal/nitro/host/dev-host-wor
 import type { WorkspaceExtension } from "#internal/nitro/host/workspace-extensions.js";
 
 export interface ApplicationBuildOptions {
+  readonly platform?: PlatformDeclaration;
   readonly profileOutputPath?: string;
   readonly publicRoutePrefix?: string;
   readonly skipSandboxPrewarm: boolean;

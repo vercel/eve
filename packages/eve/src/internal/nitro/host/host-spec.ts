@@ -20,6 +20,8 @@ export type HostMode =
   | {
       readonly kind: "production";
       readonly preset: "vercel" | undefined;
+      readonly entry?: string;
+      readonly conditions?: readonly string[];
       readonly publicRoutePrefix?: string;
       readonly vercelService?: boolean;
       readonly workspaceMember?: boolean;
@@ -42,12 +44,14 @@ export interface HostSpec {
   readonly agentName: string;
   readonly authored: HostAuthoredSources;
   readonly development: boolean;
+  readonly entry: string | undefined;
+  readonly exportConditions: readonly string[] | undefined;
   readonly extensionMounts: readonly CompiledExtensionMount[];
   readonly extensionOverridePaths: ReadonlyMap<string, string>;
   readonly externals: ExternalsPolicy;
   readonly instrumented: boolean;
   readonly localSchedulesPluginModulePath: string;
-  readonly preset: "vercel" | undefined;
+  readonly preset: "vercel" | "standard" | undefined;
   readonly routes: HostRouteTable;
   readonly runtime: HostRuntime;
   readonly runtimePlugins: readonly HostRuntimePlugin[];
@@ -82,7 +86,11 @@ export function createHostSpec(
   const { manifest, paths } = preparedHost.compileResult;
   const packageRoot = findAuthoredPackageRoot(appRoot) ?? appRoot;
   const development = mode.kind === "development";
-  const preset = mode.kind === "production" ? mode.preset : undefined;
+  const entry = mode.kind === "production" ? mode.entry : undefined;
+  const preset =
+    mode.kind === "production"
+      ? (mode.preset ?? (entry === undefined ? undefined : "standard"))
+      : undefined;
   const instrumented = compiledArtifacts.instrumentationPluginPath !== undefined;
   const nodes = [manifest, ...manifest.subagents.map((subagent) => subagent.agent)];
   const routes = createHostRouteTable({
@@ -93,6 +101,13 @@ export function createHostSpec(
     vercel: preset === "vercel",
     vercelService: mode.kind === "production" && mode.vercelService === true,
   });
+  if (entry !== undefined) assertEntryCanServe(manifest, routes);
+  const conditions = mode.kind === "production" ? mode.conditions : undefined;
+  if (conditions !== undefined && entry === undefined) {
+    throw new Error(
+      "A platform's `build.conditions` needs `build.entry`, because eve's own Node server runs with Node's export conditions. Add `build.entry` or remove `build.conditions`.",
+    );
+  }
   const runtimePlugins: HostRuntimePlugin[] = [
     ...(development ? [] : (["skill-files"] as const)),
     ...(instrumented ? (["instrumentation"] as const) : []),
@@ -105,16 +120,22 @@ export function createHostSpec(
       ? (["timezone-schedules"] as const)
       : []),
     ...(development ? [] : (["sandbox-shutdown"] as const)),
-    ...(!development && preset !== "vercel" ? (["connection-drain"] as const) : []),
+    ...(!development && preset === undefined ? (["connection-drain"] as const) : []),
   ];
 
   return {
     agentName: manifest.config.name,
     authored: { packageRoot, tsconfig: resolveAuthoredTsConfigPath(packageRoot) },
     development,
+    entry,
+    exportConditions: conditions,
     extensionMounts: nodes.flatMap((node) => node.extensionMounts),
     extensionOverridePaths: extensionOverridePaths(manifest),
-    externals: createExternalsPolicy({ development, manifest, preset }),
+    externals: createExternalsPolicy({
+      development,
+      manifest,
+      preset: preset === "vercel" ? preset : undefined,
+    }),
     instrumented,
     localSchedulesPluginModulePath: platform.schedules.localPluginModulePath(),
     locations: {
@@ -147,6 +168,21 @@ export function createHostSpec(
     websocket: development || routes.routes.some((route) => route.method === "WEBSOCKET"),
     world: manifest.config.experimental?.workflow?.world,
   };
+}
+
+function assertEntryCanServe(manifest: CompiledAgentManifest, routes: HostRouteTable): void {
+  const websocket = manifest.channelRoutes.effective.find((route) => route.method === "WEBSOCKET");
+  if (websocket !== undefined) {
+    throw new Error(
+      `A WEBSOCKET channel route needs eve's Node server: WEBSOCKET ${websocket.urlPath} in "${websocket.logicalPath}". Remove the route or build without \`build.entry\`.`,
+    );
+  }
+  const schedule = routes.scheduleTasks[0];
+  if (schedule !== undefined) {
+    throw new Error(
+      `Authored schedules aren't supported with \`Build.entry\` yet: schedule "${schedule.scheduleId}" in "${schedule.logicalPath}". Remove the schedule or build without \`build.entry\`. Dynamic schedules through the platform's \`Triggers\` are supported.`,
+    );
+  }
 }
 
 function hasWorkflowProgram(manifest: CompiledAgentManifest): boolean {

@@ -133,6 +133,26 @@ describe("prewarmAppSandboxes", () => {
     expect(messages[1]).toContain("Original");
     expect(messages[1]).toContain(cause.message);
   });
+
+  it("reports a docker failure through the given build, not Vercel's", async () => {
+    vi.stubEnv("VERCEL", "1");
+    const cause = new Error("provider host check failed");
+
+    await expect(
+      prewarmAppSandboxes({
+        appRoot: process.cwd(),
+        build: {
+          sandboxPrewarmFailure: (providerName, error) =>
+            new Error(`Alice's platform has no ${providerName}.`, { cause: error }),
+        },
+        dispatch: async () => {
+          throw cause;
+        },
+        loadAgentGraph: async () => createGraph({ providerName: "docker" }),
+        preparedArtifactStore: createMemoryArtifactStore(),
+      }),
+    ).rejects.toMatchObject({ cause, message: "Alice's platform has no docker." });
+  });
 });
 
 function createMemoryArtifactStore(): SandboxPreparedArtifactStore {

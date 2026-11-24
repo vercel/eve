@@ -4,6 +4,7 @@ import { resolveCompilerArtifactPaths } from "#compiler/artifacts.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import { createHostSpec, type HostMode } from "#internal/nitro/host/host-spec.js";
 import type { PreparedApplicationHost } from "#internal/nitro/host/types.js";
+import type { ScheduleRegistration } from "#runtime/schedules/register.js";
 import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#platform/vercel/build-output-config.js";
 import { compileFromMemory } from "#internal/testing/compile-from-memory.js";
 import { defineChannel, WS } from "#public/definitions/channel.js";
@@ -21,6 +22,7 @@ const APP_ROOT = "/tmp/weather-agent";
 const DEVELOPMENT: HostMode = { kind: "development" };
 const PRODUCTION: HostMode = { kind: "production", preset: undefined };
 const VERCEL: HostMode = { kind: "production", preset: "vercel" };
+const ENTRY: HostMode = { kind: "production", preset: undefined, entry: `${APP_ROOT}/entry.mjs` };
 
 type Modules = Array<NonNullable<Parameters<typeof compileFromMemory>[0]["modules"]>[number]>;
 
@@ -132,10 +134,22 @@ function withSubagent(root: CompiledAgentManifest, child: CompiledAgentManifest)
   return root;
 }
 
+const DIGEST: ScheduleRegistration = {
+  cron: "0 9 * * *",
+  description: 'Run eve schedule "digest" from "schedules/digest.md".',
+  logicalPath: "schedules/digest.md",
+  scheduleId: "digest",
+  sourceId: "schedules/digest.md",
+  taskName: "eve:schedule:digest",
+};
+
 function spec(
   manifest: CompiledAgentManifest,
   mode: HostMode,
-  options: { readonly instrumented?: boolean } = {},
+  options: {
+    readonly instrumented?: boolean;
+    readonly scheduleRegistrations?: readonly ScheduleRegistration[];
+  } = {},
 ) {
   const host: PreparedApplicationHost = {
     appRoot: APP_ROOT,
@@ -150,7 +164,7 @@ function spec(
         instrumentationPluginPath: `${APP_ROOT}/.eve/instrumentation.mjs`,
       }),
     },
-    scheduleRegistrations: [],
+    scheduleRegistrations: options.scheduleRegistrations ?? [],
     schedules: [],
     workflowBuildDir: `${APP_ROOT}/.eve/workflow`,
   };
@@ -196,7 +210,7 @@ describe("createHostSpec", () => {
     }
   });
 
-  it("adds embedded skill files, sandbox shutdown, and development-runtime pruning only to production hosts", async () => {
+  it("adds embedded skill files, sandbox shutdown, and development-runtime pruning only to production hosts, and connection drain only to eve's Node server", async () => {
     const manifest = await compileAgent();
     const production = spec(manifest, PRODUCTION);
     const development = spec(manifest, DEVELOPMENT);
@@ -207,6 +221,12 @@ describe("createHostSpec", () => {
       "connection-drain",
     ]);
     expect(spec(manifest, VERCEL).runtimePlugins).not.toContain("connection-drain");
+    expect(spec(manifest, ENTRY)).toMatchObject({
+      entry: `${APP_ROOT}/entry.mjs`,
+      preset: "standard",
+      runtimePlugins: ["skill-files", "sandbox-shutdown"],
+    });
+    expect(production.preset).toBeUndefined();
     expect(production.runtime.localTracing).toBe(false);
     expect(production.externals.pruneDevelopmentRuntime).toBe(true);
     expect(development.runtimePlugins).not.toContain("skill-files");
@@ -299,6 +319,30 @@ describe("createHostSpec", () => {
     expect(spec(plain, DEVELOPMENT).websocket).toBe(true);
     expect(spec(plain, VERCEL).websocket).toBe(false);
     expect(spec(await compileAgent({ websocket: true }), VERCEL).websocket).toBe(true);
+  });
+
+  it("refuses a WebSocket route and authored schedules in an entry build", async () => {
+    const websocket = await compileAgent({ websocket: true });
+    const plain = await compileAgent();
+    expect(() => spec(websocket, ENTRY)).toThrow(
+      'A WEBSOCKET channel route needs eve\'s Node server: WEBSOCKET /eve/v1/voice/ws in "channels/voice.ts". Remove the route or build without `build.entry`.',
+    );
+    expect(spec(websocket, PRODUCTION).websocket).toBe(true);
+    const schedules = { scheduleRegistrations: [DIGEST] };
+    expect(() => spec(plain, ENTRY, schedules)).toThrow(
+      'Authored schedules aren\'t supported with `Build.entry` yet: schedule "digest" in "schedules/digest.md". Remove the schedule or build without `build.entry`. Dynamic schedules through the platform\'s `Triggers` are supported.',
+    );
+    expect(spec(plain, PRODUCTION, schedules).routes.scheduleTasks).toHaveLength(1);
+  });
+
+  it("takes a platform's export conditions only with a platform entry", async () => {
+    const manifest = await compileAgent();
+    const conditions = ["worker", "browser"];
+
+    expect(spec(manifest, { ...ENTRY, conditions }).exportConditions).toEqual(conditions);
+    expect(() => spec(manifest, { ...PRODUCTION, conditions })).toThrow(
+      "A platform's `build.conditions` needs `build.entry`, because eve's own Node server runs with Node's export conditions. Add `build.entry` or remove `build.conditions`.",
+    );
   });
 
   it("configures Vercel build output, including the queue-triggered flow function, only on Vercel", async () => {

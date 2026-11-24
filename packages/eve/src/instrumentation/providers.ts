@@ -71,6 +71,21 @@ export async function registerInstrumentationProvider(input: {
   await input.value.setup?.(createInstrumentationSetupContext(input.agentName));
 }
 
+export function deferInstrumentationSetup(input: {
+  readonly serviceName: string;
+  readonly setups: readonly Promise<void>[];
+}): void {
+  const setup = Promise.all(input.setups).then(() => {
+    finalizeInstrumentationProviders({ serviceName: input.serviceName });
+  });
+  setup.catch(() => undefined);
+  processApp().instrumentation.setup = setup;
+}
+
+export function instrumentationSetupDeferred(): boolean {
+  return processApp().instrumentation.setup !== undefined;
+}
+
 /** @internal */
 export function getInstrumentationProviders(): readonly RegisteredInstrumentationProvider[] {
   return [...providerRegistry()]

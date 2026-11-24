@@ -4,6 +4,7 @@ import type { CompiledWorkspaceResourceRoot } from "#compiler/manifest.js";
 import { copyDirectoryAtomically } from "#execution/sandbox/bindings/local-provider-utils.js";
 import { createLoggingSandboxSession } from "#execution/sandbox/logging-session.js";
 import { platformBuild } from "#platform/build.js";
+import type { Build } from "#platform/entities.js";
 import { createSandboxProviderIdentity } from "#execution/sandbox/provider-identity.js";
 import { createConnectionSession } from "#execution/sandbox/session.js";
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
@@ -80,6 +81,7 @@ type SandboxProviderPrepareDispatch = (input: {
 
 interface PrewarmSandboxesInput {
   readonly appRoot: string;
+  readonly build: Build;
   readonly compileDirectoryPath: string;
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
   readonly graph: ResolvedAgentGraphBundle;
@@ -122,6 +124,7 @@ async function prewarmSandboxes(input: PrewarmSandboxesInput): Promise<void> {
         return { nodeId, provider, result };
       } catch (error) {
         const prewarmError = formatPrewarmFailureForEnvironment({
+          build: input.build,
           providerName: provider.providerName,
           error,
         });
@@ -151,6 +154,7 @@ async function prewarmSandboxes(input: PrewarmSandboxesInput): Promise<void> {
 
 export async function prewarmAppSandboxes(input: {
   readonly appRoot: string;
+  readonly build?: Build;
   readonly compiledArtifactsSource?: RuntimeCompiledArtifactsSource;
   readonly loadAgentGraph?: (
     input: Readonly<{
@@ -176,6 +180,7 @@ export async function prewarmAppSandboxes(input: {
 
   await prewarmSandboxes({
     appRoot: getRuntimeCompiledArtifactsSandboxAppRoot(compiledArtifactsSource) ?? input.appRoot,
+    build: input.build ?? platformBuild(),
     compileDirectoryPath: resolveRuntimeCompilerArtifactPaths(compiledArtifactsSource.appRoot)
       .compileDirectoryPath,
     compiledArtifactsSource,
@@ -409,11 +414,12 @@ function shouldLogSandboxPrewarmProgress(message: string): boolean {
 }
 
 function formatPrewarmFailureForEnvironment(input: {
+  readonly build: Build;
   readonly providerName: string;
   readonly error: unknown;
 }): unknown {
   if (!isLocalSandboxProvider(input.providerName)) return input.error;
-  return platformBuild().sandboxPrewarmFailure?.(input.providerName, input.error) ?? input.error;
+  return input.build.sandboxPrewarmFailure?.(input.providerName, input.error) ?? input.error;
 }
 
 function isLocalSandboxProvider(providerName: string): boolean {

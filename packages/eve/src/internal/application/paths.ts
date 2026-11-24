@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 
 import { workflowEntryReference } from "#execution/workflow-references.js";
 import { platformBuild } from "#platform/build.js";
+import type { Build } from "#platform/entities.js";
 import {
   resolveInstalledPackageInfo,
   resolvePackageRoot,
@@ -67,8 +68,8 @@ export function resolveSandboxCacheDirectory(appRoot: string): string {
   return join(appRoot, ".eve", "sandbox-cache");
 }
 
-export function resolveOutputDirectory(appRoot: string): string {
-  return platformBuild().outputDirectory?.(appRoot) ?? join(appRoot, ".output");
+export function resolveOutputDirectory(appRoot: string, build: Build = platformBuild()): string {
+  return build.outputDirectory?.(appRoot) ?? join(appRoot, ".output");
 }
 
 export function getApplicationInfo(appRoot: string): ApplicationInfo {
