@@ -92,15 +92,21 @@ export default defineExtension({
             /**
              * Your own source of each caller's GitHub token, in the shape a
              * connection's `auth` takes: `getToken`, and `startAuthorization`
-             * and `completeAuthorization` to sign the caller in. `connector`
-             * is one such source, made for you; set one or the other.
+             * and `completeAuthorization` to sign the caller in, with
+             * `principalType: "user"`. `connector` is one such source, made for
+             * you; set one or the other.
              */
             authorization: z
               .custom<ToolAuthProvider>(
                 (value) =>
                   typeof value === "object" &&
                   value !== null &&
-                  typeof (value as { getToken?: unknown }).getToken === "function",
+                  typeof (value as { getToken?: unknown }).getToken === "function" &&
+                  (value as { principalType?: unknown }).principalType === "user",
+                {
+                  message:
+                    'github.authorization must be an object with a `getToken` function and `principalType: "user"`; an app-scoped provider would share one token across callers',
+                },
               )
               .optional(),
           })

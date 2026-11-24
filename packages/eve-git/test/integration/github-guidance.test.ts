@@ -106,6 +106,22 @@ test("a user principal takes exactly one of connector and authorization", () => 
   extension({ github: { ...base, authorization } } as never);
 });
 
+test("a user principal's authorization must be a user-scoped provider with getToken", () => {
+  const getToken = async () => ({ token: "t" });
+  const base = { authorize: () => true, broker: async () => {}, principalType: "user" };
+  for (const authorization of [
+    { getToken },
+    { getToken, principalType: "app" },
+    { principalType: "user" },
+    "token",
+  ]) {
+    assert.throws(
+      () => extension({ github: { ...base, authorization } } as never),
+      /github\.authorization must be an object with a `getToken` function and `principalType: "user"`/u,
+    );
+  }
+});
+
 test("with a user principal, guidance describes the caller's token instead of repository scope", async () => {
   extension({
     github: {

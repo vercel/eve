@@ -279,6 +279,45 @@ test("a user token comes from the authorization the config supplies, not a Conne
   assert.equal(runs.length, 1);
 });
 
+test("a supplied authorization is re-authorized through ctx.requireAuth on 401", async () => {
+  const authorization: ToolAuthProvider = {
+    principalType: "user",
+    async getToken() {
+      return { token: "hub-token" };
+    },
+  };
+  const requireAuthCalls: Parameters<ToolContext["requireAuth"]>[] = [];
+  const runs: Parameters<SandboxSession["run"]>[0][] = [];
+  const { connector: _connector, ...withoutConnector } = CONFIG;
+  await assert.rejects(
+    executeGitHubShell(
+      READ,
+      { ...withoutConnector, principalType: "user", authorization, authorize: () => true },
+      {
+        getToken: async () => ({ token: "hub-token" }),
+        requireAuth: (...args) => {
+          requireAuthCalls.push(args);
+          throw new Error("authorization required");
+        },
+        sessionId: "session-supplied-authorization-401",
+        async getConnectToken(): Promise<string> {
+          throw new Error("a supplied authorization must not reach Connect");
+        },
+        async getSandbox() {
+          return fakeSandbox(runs, () => ({
+            exitCode: 1,
+            stdout: "",
+            stderr: "HTTP 401: Bad credentials (https://api.github.com/graphql)",
+          }));
+        },
+      },
+    ),
+    /authorization required/u,
+  );
+  assert.equal(requireAuthCalls.length, 1);
+  assert.equal(requireAuthCalls[0]![0], authorization);
+});
+
 test("user tokens cannot satisfy repository allowlists with a declared target", async () => {
   for (const command of [
     "gh api repos/acme/private",

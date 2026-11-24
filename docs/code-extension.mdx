@@ -106,7 +106,7 @@ Configure `github` to get GitHub tokens through Vercel Connect instead. The exte
 | `github.attribution`   | No            | `attribution(ctx)` returns the current turn's `{ name, email }` co-author, or `null`                  |
 | `github.permissions`   | No            | With `"app"`, the installation permissions each token carries, such as `"contents:write"`             |
 
-With `"user"`, set exactly one of `github.connector` and `github.authorization`. `authorization` takes the shape a connection's `auth` takes (`getToken`, plus `startAuthorization` and `completeAuthorization` to sign the caller in), so a service of your own can supply each caller's token.
+With `"user"`, set exactly one of `github.connector` and `github.authorization`. `authorization` takes the shape a connection's `auth` takes (`getToken` and `principalType: "user"`, plus `startAuthorization` and `completeAuthorization` to sign the caller in), so a service of your own can supply each caller's token. An `authorization` without `principalType: "user"` is rejected, because an app-scoped provider would share one token across callers.
 
 With `"app"`, each token carries every permission the App holds unless `github.permissions` lists the ones it needs. Set it to keep tokens narrower than the App's installation without rewriting the credential rules in your broker.
 
