@@ -63,6 +63,39 @@ describe("trackDeliveries", () => {
     await deliveries.handler(delivery("msg_1", { runId: "run_1", runSpecVersion: 10 }));
     expect(await settles(deliveries.idle())).toBe(true);
   });
+
+  it("ignores a pre-restart delivery paused in request.text() after abandon and reopen", async () => {
+    const reopenCalls: string[] = [];
+    const deliveries = trackDeliveries(async () => Response.json({ ok: true }));
+    const bodyGate = Promise.withResolvers<string>();
+    const staleRequest = new Request("http://localhost/flow", {
+      body: new ReadableStream<Uint8Array>({
+        async start(controller) {
+          controller.enqueue(new TextEncoder().encode(await bodyGate.promise));
+          controller.close();
+        },
+      }),
+      duplex: "half",
+      headers: { "x-vqs-message-id": "stale_msg" },
+      method: "POST",
+    });
+
+    const stale = deliveries.handler(staleRequest);
+    deliveries.abandon();
+    deliveries.reopen(["run_1"], async (request) => {
+      reopenCalls.push(request.headers.get("x-vqs-message-id") ?? "");
+      return Response.json({ ok: true });
+    });
+
+    bodyGate.resolve(JSON.stringify({ runId: "run_1", runSpecVersion: 10 }));
+    await expect(stale).rejects.toThrow("The test workflow world was abandoned.");
+    expect(reopenCalls).toEqual([]);
+    expect(await settles(deliveries.idle())).toBe(false);
+
+    await deliveries.handler(delivery("recovered_msg", { runId: "run_1", runSpecVersion: 10 }));
+    expect(reopenCalls).toEqual(["recovered_msg"]);
+    expect(await settles(deliveries.idle())).toBe(true);
+  });
 });
 
 describe("fenceClosedWorld", () => {

@@ -243,7 +243,9 @@ export function trackDeliveries(initial: Handler): Deliveries {
     try {
       const body = await request.text();
       if (closing) throw new DOMException("The test workflow world is closing.", "AbortError");
-      if (ours !== generation) return new Response(null, { status: 499 });
+      if (ours !== generation) {
+        throw new DOMException("The test workflow world was abandoned.", "AbortError");
+      }
       const payload = parseBody(body);
       const runId = runIdOf(payload);
       if (runId !== undefined) recovering.delete(runId);

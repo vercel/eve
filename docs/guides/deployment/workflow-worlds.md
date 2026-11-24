@@ -107,4 +107,4 @@ See [Workflow Worlds](https://workflow-sdk.dev/worlds) for the Workflow SDK abst
 
 eve uses Workflow's default spec version for new runs, currently spec version 10 on the local world, Vercel Workflow, and `@workflow/world-postgres` 5.5.0 or later. Spec 9 and 10 both drive each run from one orchestrator. To create spec 8 runs instead, set `WORKFLOW_SPEC_VERSION=8` in the runtime environment.
 
-The setting applies only to new runs. Existing runs keep the version they started with. Older worlds that do not support the single-orchestrator engine create spec 8 runs. `eve dev` always creates spec 10 runs on the local world.
+The setting applies only to new runs. Existing runs keep the version they started with. Older worlds that do not default to the single-orchestrator engine—including `@workflow/world-postgres` `5.1.0`–`5.4.0` unless upgraded to `5.5.0` or configured with `WORKFLOW_SPEC_VERSION=9`—create spec 8 runs. `eve dev` always creates spec 10 runs on the local world.
