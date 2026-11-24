@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { readVercelCliToken } from "#internal/model-auth/vercel-cli.js";
+import { readVercelCliToken } from "#platform/vercel/model-auth/cli.js";
 import { provisionWebChatAuth } from "./provision-auth.js";
 
-vi.mock("#internal/model-auth/vercel-cli.js", () => ({ readVercelCliToken: vi.fn() }));
+vi.mock("#platform/vercel/model-auth/cli.js", () => ({ readVercelCliToken: vi.fn() }));
 const project = { orgId: "team_test", projectId: "prj_123" };
 const app = {
   clientId: "cl_test",

@@ -514,8 +514,7 @@ export async function startWorkflowOnDeployment<TArgs extends unknown[], TResult
 }
 
 async function resolveCurrentWorkflowDeploymentId(): Promise<string> {
-  const deploymentId =
-    process.env.VERCEL_DEPLOYMENT_ID?.trim() || (await (await getWorld()).getDeploymentId());
+  const deploymentId = await workflowHost.deploymentId();
   if (deploymentId.length === 0 || deploymentId === "latest") {
     throw new Error("Workflow runtime could not resolve an exact deployment id.");
   }

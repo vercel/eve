@@ -20,8 +20,7 @@ import type { Delivery } from "#shared/delivery.js";
 import { SCHEDULE_COLLECTION_DEFINITION_BRAND } from "#shared/schedule-collection-definition.js";
 import type { ScheduleProviderContext } from "#runtime/schedules/provider-types.js";
 import type { AgentToolExposure } from "#shared/agent-definition.js";
-import { vercelScheduleProvider } from "#public/schedules/providers/vercel.js";
-
+import { defaultScheduleProvider } from "#platform/schedules.js";
 /** A provider namespace scope, represented by one key or a hierarchical key path. */
 export type ScheduleScopeValue = string | readonly string[];
 /** Return `null` to deny the current schedule operation. */
@@ -501,8 +500,13 @@ export function defineDynamicSchedules(
     readonly provider?: ScheduleProvider;
   },
 ): DefinedDynamicSchedules<any, any, any> {
+  let provider = definition.provider;
+  Object.defineProperty(definition, "provider", {
+    configurable: true,
+    enumerable: true,
+    get: () => (provider ??= defaultScheduleProvider()),
+  });
   Object.assign(definition, {
-    provider: definition.provider ?? vercelScheduleProvider(),
     tool: definition.tool ?? true,
     [SCHEDULE_COLLECTION_DEFINITION_BRAND]: true,
   });

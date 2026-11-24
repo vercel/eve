@@ -4,6 +4,7 @@ import type { DescribedAgent } from "#channel/agent-description.js";
 import type { InstalledSkillFiles } from "#channel/skill-files.js";
 import type { BundledCompiledArtifacts } from "#runtime/loaders/bundled-artifacts.js";
 import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
+import { eveRuntime } from "#runtime/eve-runtime.js";
 
 export interface RuntimeSession {
   readonly id: string;
@@ -67,11 +68,9 @@ function isSameCompiledArtifactSnapshot(
 }
 
 const RUNTIME_SESSION_STORAGE_GLOBAL_KEY = Symbol.for("eve.runtime-session-storage");
-const RUNTIME_SESSION_DEFAULT_GLOBAL_KEY = Symbol.for("eve.runtime-session-default");
 
 interface RuntimeSessionGlobal {
   [RUNTIME_SESSION_STORAGE_GLOBAL_KEY]?: AsyncLocalStorage<RuntimeSession>;
-  [RUNTIME_SESSION_DEFAULT_GLOBAL_KEY]?: RuntimeSession;
 }
 
 const globalContainer = globalThis as typeof globalThis & RuntimeSessionGlobal;
@@ -83,10 +82,8 @@ if (globalContainer[RUNTIME_SESSION_STORAGE_GLOBAL_KEY] === undefined) {
 const runtimeSessionStorage = globalContainer[RUNTIME_SESSION_STORAGE_GLOBAL_KEY];
 
 function resolveProcessDefaultSession(): RuntimeSession {
-  if (globalContainer[RUNTIME_SESSION_DEFAULT_GLOBAL_KEY] === undefined) {
-    globalContainer[RUNTIME_SESSION_DEFAULT_GLOBAL_KEY] = createRuntimeSession("process-default");
-  }
-  return globalContainer[RUNTIME_SESSION_DEFAULT_GLOBAL_KEY];
+  const runtime = eveRuntime();
+  return (runtime.defaultSession ??= createRuntimeSession("process-default"));
 }
 
 export function getActiveRuntimeSession(): RuntimeSession {

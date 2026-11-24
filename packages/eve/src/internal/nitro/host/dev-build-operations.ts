@@ -7,6 +7,7 @@ import type {
 import { buildDevelopmentHostCandidate } from "#internal/nitro/host/dev-host-candidate.js";
 import { prepareDevelopmentApplicationHost } from "#internal/nitro/host/prepare-application-host.js";
 import type { PreparedDevelopmentApplicationHost } from "#internal/nitro/host/types.js";
+import { platformBuildOutput } from "#platform/build-output.js";
 
 export async function prepareDevelopmentBuild(
   input: DevelopmentPrepareInput,
@@ -27,6 +28,7 @@ export async function buildDevelopmentHost(
       host,
       { kind: "development" },
       { buildDir: host.workspace.nitroBuildDir, outputDir: host.workspace.nitroOutputDir },
+      platformBuildOutput(),
     ),
   );
   return await buildDevelopmentHostCandidate({ host, nitro });

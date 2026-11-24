@@ -1,5 +1,6 @@
 import { isLinuxDockerDaemonAvailableSync } from "#execution/sandbox/bindings/local.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
+import { hostedSandbox, hostedSandboxEnvironment } from "#platform/hosted-sandbox.js";
 import type { DockerSandboxEnvironmentOptions } from "#public/sandbox/docker-sandbox.js";
 import type { SandboxSession } from "#public/sandbox/index.js";
 import {
@@ -15,7 +16,6 @@ import type { VercelSandboxCreateOptions } from "#public/sandbox/vercel-sandbox.
 import { withAdoptedSandboxSessionStates, withRecordedSandboxProvider } from "#sandbox/state.js";
 import { DockerSandbox } from "#sandbox/providers/docker.js";
 import { JustBashSandbox } from "#sandbox/providers/just-bash.js";
-import { VercelSandbox } from "#sandbox/providers/vercel.js";
 import { isObject } from "#shared/guards.js";
 import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
 import type {
@@ -51,7 +51,7 @@ export interface DefaultSandboxSession extends SandboxSession {
   setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
 }
 
-type SelectedProvider = "docker" | "just-bash" | "vercel";
+type SelectedProvider = string;
 
 type DefaultSandboxPreparedArtifact =
   | { readonly artifact: SandboxJson; readonly provider: SelectedProvider }
@@ -64,8 +64,6 @@ type DefaultSandboxSessionState = {
 };
 
 type NetworkPolicyExtensions = Pick<DefaultSandboxSession, "setNetworkPolicy">;
-
-const SELECTED_PROVIDERS: readonly SelectedProvider[] = ["docker", "just-bash", "vercel"];
 
 const NO_PROVIDER_MESSAGE =
   "DefaultSandbox has no sandbox provider for this build: it did not run on Vercel, no Docker " +
@@ -200,7 +198,8 @@ export const DefaultSandbox: SandboxProvider<
 });
 
 function selectProvider(): SelectedProvider | null {
-  if (process.env.VERCEL?.trim()) return "vercel";
+  const hosted = hostedSandbox();
+  if (hosted?.selectByDefault) return hosted.name;
   if (isLinuxDockerDaemonAvailableSync()) return "docker";
   return isEveDevEnvironment() ? "just-bash" : null;
 }
@@ -214,8 +213,8 @@ function createEnvironment(
       return DockerSandbox.environment(options.docker ?? {});
     case "just-bash":
       return JustBashSandbox.environment(options.justBash ?? {});
-    case "vercel":
-      return VercelSandbox.environment(options.vercel ?? {});
+    default:
+      return hostedSandboxEnvironment(options.vercel ?? {});
   }
 }
 
@@ -246,7 +245,11 @@ async function rejectJustBashNetworkPolicy(policy: SandboxNetworkPolicy): Promis
 }
 
 function isSelectedProvider(value: unknown): value is SelectedProvider {
-  return SELECTED_PROVIDERS.some((name) => name === value);
+  return (
+    value === "docker" ||
+    value === "just-bash" ||
+    (typeof value === "string" && value === hostedSandbox()?.name)
+  );
 }
 
 function isDefaultSandboxSessionState(

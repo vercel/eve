@@ -30,7 +30,7 @@ import { registerInstrumentationRuntime } from "#instrumentation/runtime.js";
 import type { Runtime } from "#channel/types.js";
 import { readVercelProjectLink } from "#internal/vercel/project-link.js";
 import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/application/dev-transport.js";
-import { resolveVercelOidcCurrentProject } from "#channel/auth/vercel-oidc-project.js";
+import { resolveVercelOidcCurrentProject } from "#platform/vercel/oidc-project.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 import { isAgentTraceContext } from "#tracing/eve/agent-trace-context.js";
 import {
@@ -47,8 +47,9 @@ vi.mock("#internal/vercel/project-link.js", () => ({
   readVercelProjectLink: vi.fn(),
 }));
 
-vi.mock("#internal/workflow/runtime.js", () => ({
-  getWorld: async () => ({ getDeploymentId: async () => "dpl_test" }),
+vi.mock("#execution/hosts.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#execution/hosts.js")>()),
+  requireDurableHost: () => ({ deploymentId: async () => "dpl_test" }),
 }));
 
 const mockedResolveNitroChannelRuntimeBundle = vi.mocked(resolveNitroChannelRuntimeBundle);

@@ -227,10 +227,7 @@ it("retries a step whose stream write failed, and each model attempt settles onc
   });
   finalizeInstrumentationProviders({ serviceName: name });
   onTestFinished(() => {
-    delete (globalThis as Record<symbol, unknown>)[
-      Symbol.for("eve.harness-instrumentation-providers")
-    ];
-    delete (globalThis as Record<symbol, unknown>)[Symbol.for("eve.instrumentation-runtime")];
+    delete (globalThis as Record<symbol, unknown>)[Symbol.for("eve.runtime")];
   });
 
   const { prompts } = await withInterruptedSession(

@@ -177,7 +177,7 @@ function toNitroConfig(
     output: { dir: locations.outputDir },
     plugins: [
       EVE_RUNTIME_PLUGIN_ID,
-      ...spec.runtimePlugins.map((plugin) => resolveRuntimePluginPath(plugin, compiledArtifacts)),
+      ...spec.runtimePlugins.map((plugin) => resolveRuntimePluginPath(plugin, spec)),
     ],
     preset: spec.preset,
     publicAssets: [],
@@ -214,14 +214,11 @@ function toNitroConfig(
 
 const EVE_RUNTIME_PLUGIN_PATHS = {
   "connection-drain": "src/internal/nitro/host/connection-drain-plugin.ts",
-  "local-schedules": "src/internal/nitro/host/local-schedules-runtime-plugin.ts",
   "sandbox-shutdown": "src/internal/nitro/host/sandbox-shutdown-plugin.ts",
 } as const;
 
-function resolveRuntimePluginPath(
-  plugin: HostRuntimePlugin,
-  compiledArtifacts: HostSpec["locations"]["compiledArtifacts"],
-): string {
+function resolveRuntimePluginPath(plugin: HostRuntimePlugin, spec: HostSpec): string {
+  const { compiledArtifacts } = spec.locations;
   switch (plugin) {
     case "instrumentation":
       if (compiledArtifacts.instrumentationPluginPath === undefined) {
@@ -232,6 +229,8 @@ function resolveRuntimePluginPath(
       return SKILL_FILES_PLUGIN_ID;
     case "timezone-schedules":
       return TIMEZONE_SCHEDULES_PLUGIN_ID;
+    case "local-schedules":
+      return resolvePackageSourceFilePath(spec.localSchedulesPluginModulePath);
     default:
       return resolvePackageSourceFilePath(EVE_RUNTIME_PLUGIN_PATHS[plugin]);
   }

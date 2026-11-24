@@ -4,6 +4,7 @@ import { isIP, type LookupFunction } from "node:net";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { requestPublicUrl } from "#execution/web-fetch/request.js";
+import { answerDispatcherProbe } from "#internal/testing/node-fetch.js";
 
 const networkMocks = vi.hoisted(() => ({
   agentClose: vi.fn(),
@@ -69,7 +70,7 @@ beforeEach(() => {
   networkMocks.dispatcherInstances.length = 0;
   networkMocks.dispatcherTargets.length = 0;
   networkMocks.fetch.mockReset();
-  vi.stubGlobal("fetch", networkMocks.fetch);
+  vi.stubGlobal("fetch", answerDispatcherProbe(networkMocks.fetch));
   networkMocks.lookup.mockReset();
   networkMocks.lookup.mockImplementation(
     (

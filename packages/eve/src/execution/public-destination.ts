@@ -14,12 +14,32 @@ export class UnsafeDestinationError extends Error {
   }
 }
 
+export class UnguardedRuntimeError extends UnsafeDestinationError {
+  constructor() {
+    super(
+      "This runtime cannot guard outbound requests against private and internal addresses, so eve refuses requests to URLs that users or models supply.",
+    );
+    this.name = "UnguardedRuntimeError";
+  }
+}
+
 export interface PublicDestinationPolicy {
   readonly allowLoopback: boolean;
 }
 
+interface DispatcherHandler {
+  onResponseError?(controller: undefined, error: Error): void;
+  onError?(error: Error): void;
+}
+
+interface ProbeDispatcher {
+  dispatch(options: unknown, handler: DispatcherHandler): boolean;
+  close(): Promise<void>;
+  destroy(): Promise<void>;
+}
+
 type DispatcherRequestInit = Omit<RequestInit, "dispatcher"> & {
-  readonly dispatcher: Dispatcher1Wrapper;
+  readonly dispatcher: Dispatcher1Wrapper | ProbeDispatcher;
 };
 
 export function assertPublicHostname(hostname: string, policy: PublicDestinationPolicy): void {
@@ -28,11 +48,44 @@ export function assertPublicHostname(hostname: string, policy: PublicDestination
   }
 }
 
+export const DISPATCHER_PROBE_URL = "http://dispatcher-probe.invalid/";
+
+const dispatcherSupport = new WeakMap<typeof fetch, Promise<boolean>>();
+
 export async function createPublicDispatcher(
   policy: PublicDestinationPolicy,
 ): Promise<Dispatcher1Wrapper> {
-  const { Agent, Dispatcher1Wrapper } = await import("undici");
+  const undici = await import("undici").catch(() => undefined);
+  if (undici === undefined) throw new UnguardedRuntimeError();
+  let supported = dispatcherSupport.get(fetch);
+  if (supported === undefined) {
+    supported = fetchHonorsDispatcher();
+    dispatcherSupport.set(fetch, supported);
+  }
+  if (!(await supported)) throw new UnguardedRuntimeError();
+  const { Agent, Dispatcher1Wrapper } = undici;
   return new Dispatcher1Wrapper(new Agent({ connect: { lookup: createPublicLookup(policy) } }));
+}
+
+async function fetchHonorsDispatcher(): Promise<boolean> {
+  const probe = new Error("eve dispatcher probe");
+  const dispatcher: ProbeDispatcher = {
+    dispatch(_options, handler) {
+      queueMicrotask(() => {
+        if (handler.onResponseError !== undefined) handler.onResponseError(undefined, probe);
+        else handler.onError?.(probe);
+      });
+      return true;
+    },
+    close: async () => {},
+    destroy: async () => {},
+  };
+  try {
+    await fetchWithDispatcher(DISPATCHER_PROBE_URL, { dispatcher });
+    return false;
+  } catch (error) {
+    return error instanceof Error && error.cause === probe;
+  }
 }
 
 export function findUnsafeDestinationError(error: unknown): UnsafeDestinationError | undefined {

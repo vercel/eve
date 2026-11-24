@@ -6,6 +6,9 @@ import {
 import { createInstrumentationSetupContext } from "#instrumentation/setup-context.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { DEVELOPMENT_WORKER_APP_ROOT_ENV } from "#internal/workflow/development-world-protocol.js";
+import { platformContext } from "#platform/context.js";
+import { hasHostService } from "#platform/services.js";
+import { eveRuntime } from "#runtime/eve-runtime.js";
 import { agentRuns, localTraces } from "#public/instrumentation/otel.js";
 import { installInstrumentationRuntime } from "#tracing/eve/install-instrumentation-runtime.js";
 import {
@@ -18,33 +21,23 @@ import {
   type InstrumentationProvider,
 } from "#instrumentation/provider.js";
 
-const INSTRUMENTATION_PROVIDERS_GLOBAL_KEY = Symbol.for("eve.harness-instrumentation-providers");
-
 export interface RegisteredInstrumentationProvider {
   readonly provider: InstrumentationProvider;
   readonly slot: string;
 }
 
-interface InstrumentationProvidersGlobal {
-  [INSTRUMENTATION_PROVIDERS_GLOBAL_KEY]?: Map<string, InstrumentationProvider>;
-}
-
-const globalContainer = globalThis as typeof globalThis & InstrumentationProvidersGlobal;
-
 function providerRegistry(): Map<string, InstrumentationProvider> {
-  const existing = globalContainer[INSTRUMENTATION_PROVIDERS_GLOBAL_KEY];
-  if (existing !== undefined) {
-    return existing;
-  }
-
-  const created = new Map<string, InstrumentationProvider>();
-  globalContainer[INSTRUMENTATION_PROVIDERS_GLOBAL_KEY] = created;
-  return created;
+  return eveRuntime().instrumentation.providers;
 }
 
 export function seedInstrumentationProviders(): void {
   const registry = providerRegistry();
-  if (process.env.VERCEL_ENV === "preview" || process.env.VERCEL_ENV === "production") {
+  const platform = platformContext();
+  const environmentKind = platform.deployment.environmentKind();
+  if (
+    hasHostService(platform, "agentRuns") &&
+    (environmentKind === "preview" || environmentKind === "production")
+  ) {
     registry.set("agent-runs", agentRuns());
   }
   if (process.env[DEVELOPMENT_WORKER_APP_ROOT_ENV] !== undefined) {

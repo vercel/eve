@@ -1,4 +1,4 @@
-import { readVercelCliToken } from "#internal/model-auth/vercel-cli.js";
+import { readVercelCliToken } from "#platform/vercel/model-auth/cli.js";
 
 import type { VercelProjectReference } from "./project-resolution.js";
 import type { Prompter } from "./prompter.js";

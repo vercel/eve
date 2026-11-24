@@ -8,7 +8,7 @@ import { resolvePackageRoot } from "../../src/internal/application/package.js";
 import { buildApplication } from "../../src/internal/nitro/host.js";
 import { useTemporaryDirectories } from "../../src/internal/testing/use-temporary-app-roots.js";
 
-vi.mock("../../src/internal/nitro/host/vercel-build-prewarm.js", () => ({
+vi.mock("../../src/platform/vercel/build-prewarm.js", () => ({
   runVercelBuildPrewarm: async () => true,
 }));
 

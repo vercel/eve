@@ -1,6 +1,6 @@
+import { hostedSandbox, hostedSandboxEnvironment } from "#platform/hosted-sandbox.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
 import { JustBashSandbox } from "#sandbox/providers/just-bash.js";
-import { VercelSandbox } from "#sandbox/providers/vercel.js";
 import { bindSandboxEnvironment, type SandboxSelector } from "#shared/sandbox-environment.js";
 import { shellQuote } from "#shared/shell-quote.js";
 
@@ -18,7 +18,7 @@ const VERCEL_SANDBOX_REQUIRED_MESSAGE =
 
 export function defineDeployedSelfModificationSandbox(
   config: DeployedSelfModificationConfig,
-  isDeployedOnVercel: () => boolean = () => Boolean(process.env.VERCEL),
+  hasCredentialTransforms: () => boolean = () => hostedSandbox()?.credentialTransforms === true,
 ): SandboxSelector {
   if (!isDeployedRuntime()) {
     const environment = JustBashSandbox.environment();
@@ -29,10 +29,10 @@ export function defineDeployedSelfModificationSandbox(
   }
 
   const deployed = resolveDeployedSelfModificationConfig(config);
-  const environment = VercelSandbox.environment();
+  const environment = hostedSandboxEnvironment();
   return bindSandboxEnvironment(
     defineSandbox(async ({ session }) => {
-      if (!isDeployedOnVercel()) throw new Error(VERCEL_SANDBOX_REQUIRED_MESSAGE);
+      if (!hasCredentialTransforms()) throw new Error(VERCEL_SANDBOX_REQUIRED_MESSAGE);
       const sandbox = await environment.open({
         networkPolicy: SELF_MODIFICATION_BASELINE_NETWORK_POLICY,
       });
