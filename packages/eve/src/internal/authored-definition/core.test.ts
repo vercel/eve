@@ -148,6 +148,53 @@ describe("normalizeAgentDefinition", () => {
     ).toThrow('Rename "compaction.thresholdPercent" to "compaction.threshold"');
   });
 
+  it("keeps an experimental compaction strategy, and rejects what isn't one", () => {
+    const fn = () => undefined;
+    expect(
+      normalizeAgentDefinition(
+        { model: "openai/gpt-5.4", experimental: { compaction: fn } },
+        FAILURE_MESSAGE,
+      ).experimental,
+    ).toEqual({ compaction: fn });
+    for (const compaction of [
+      "defaultCompaction",
+      { compact: () => undefined },
+      { compact: () => undefined, when: { "model.requested": 0.8 } },
+      { when: { "model.requested": 0.8 } },
+    ]) {
+      expect(() =>
+        normalizeAgentDefinition(
+          { model: "openai/gpt-5.4", experimental: { compaction } },
+          FAILURE_MESSAGE,
+        ),
+      ).toThrow('"experimental.compaction" must be a compaction strategy');
+    }
+  });
+
+  it("rejects a strategy set under the stable compaction key", () => {
+    expect(() =>
+      normalizeAgentDefinition(
+        { model: "openai/gpt-5.4", compaction: { compact: () => undefined } },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow(/Unknown key "compact"/);
+  });
+
+  it("rejects a compaction block beside a strategy, which replaces it", () => {
+    for (const compaction of [{ model: "openai/gpt-5-mini" }, { threshold: 0.8 }]) {
+      expect(() =>
+        normalizeAgentDefinition(
+          {
+            model: "openai/gpt-5.4",
+            compaction,
+            experimental: { compaction: () => undefined },
+          },
+          FAILURE_MESSAGE,
+        ),
+      ).toThrow("defaultCompaction({ model, threshold })");
+    }
+  });
+
   it("accepts agent limits and keeps the session usage function", () => {
     const sessionUsage = ({ window }: { window: { inputTokens: number } }) =>
       window.inputTokens >= 1_000;

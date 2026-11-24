@@ -452,6 +452,12 @@
       "import": "./dist/src/public/experimental/channels/discord/gateway.js",
       "default": "./dist/src/public/experimental/channels/discord/gateway.js"
     },
+    "./experimental/compaction": {
+      "eve-source": "./src/public/experimental/compaction/index.ts",
+      "types": "./dist/src/public/experimental/compaction/index.d.ts",
+      "import": "./dist/src/public/experimental/compaction/index.js",
+      "default": "./dist/src/public/experimental/compaction/index.js"
+    },
     "./experimental/schedules/testing": {
       "eve-source": "./src/public/experimental/schedules/testing.ts",
       "types": "./dist/src/public/experimental/schedules/testing.d.ts",

@@ -9,21 +9,15 @@ import type {
   TurnCaller,
 } from "#channel/types.js";
 import type { Answer } from "#shared/input.js";
+import type { HistoryMessageKind } from "#shared/history-message.js";
 import type { HarnessStepInput } from "#harness/types.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 import { attachInputText, readInputText } from "#internal/input-text.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 
-export type FrameworkMessageKind =
-  | "context.instruction"
-  | "context.state"
-  | "context.compaction"
-  | "memory.load"
-  | "execution.continuation"
-  | "execution.retry"
-  | "task.result";
+export type FrameworkMessageKind = Exclude<HistoryMessageKind, "user">;
 
-export type UserMessageKind = "user" | FrameworkMessageKind;
+export type UserMessageKind = HistoryMessageKind;
 
 export type UserModelMessage = Extract<ModelMessage, { readonly role: "user" }> & {
   readonly kind: UserMessageKind;
@@ -118,6 +112,18 @@ export function validateHarnessModelMessages(
     validated.push(message);
   }
   return validated;
+}
+
+const INJECTED_KINDS: ReadonlySet<UserMessageKind> = new Set([
+  "context.compaction",
+  "context.instruction",
+  "context.state",
+  "execution.retry",
+  "memory.load",
+]);
+
+export function isInjectedMessage(message: ModelMessage): boolean {
+  return isUserModelMessage(message) && INJECTED_KINDS.has(message.kind);
 }
 
 export function isFrameworkMessageKind(value: unknown): value is FrameworkMessageKind {

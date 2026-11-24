@@ -1,3 +1,4 @@
+import type { CompactionStrategy } from "#shared/compaction-strategy.js";
 import type {
   CompiledAgentNodeManifest,
   CompiledAgentResources,
@@ -111,6 +112,7 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
 
 interface AgentConfigFunctions {
   readonly approval?: ApprovalPolicy;
+  readonly compact?: CompactionStrategy;
   readonly sessionUsage?: SessionUsageLimit | false;
 }
 
@@ -127,7 +129,13 @@ async function loadAgentConfigFunctions(
       'The compiled agent marks an "approval" policy but has no agent config module.',
     );
   }
-  if ((sessionUsage !== true && !approval) || source === undefined) {
+  const compact = manifest.config.experimental?.compaction === true;
+  if (compact && source === undefined) {
+    throw new Error(
+      'The compiled agent marks an "experimental.compaction" strategy but has no agent config module.',
+    );
+  }
+  if ((sessionUsage !== true && !approval && !compact) || source === undefined) {
     return sessionUsage === false ? { sessionUsage: false } : {};
   }
   const definition = await loadResolvedModuleExport({
@@ -145,8 +153,14 @@ async function loadAgentConfigFunctions(
       `The compiled agent marks an "approval" policy, but "${source.logicalPath}" no longer exports one. Rebuild the agent.`,
     );
   }
+  if (compact && authored.experimental?.compaction === undefined) {
+    throw new Error(
+      `The compiled agent marks an "experimental.compaction" strategy, but "${source.logicalPath}" no longer exports one. Rebuild the agent.`,
+    );
+  }
   return {
     ...(approval && { approval: authored.approval }),
+    ...(compact && { compact: authored.experimental?.compaction }),
     sessionUsage: sessionUsage === false ? false : authored.limits?.sessionUsage,
   };
 }
@@ -191,7 +205,7 @@ function requireCompiledSourceOwner(
 
 function createResolvedAgentConfig(
   manifest: CompiledAgentNodeManifest,
-  { approval, sessionUsage }: AgentConfigFunctions,
+  { approval, compact, sessionUsage }: AgentConfigFunctions,
 ): NonNullable<ResolvedAgent["config"]> {
   const config: {
     approval?: ApprovalPolicy;
@@ -255,6 +269,7 @@ function createResolvedAgentConfig(
 
   if (manifest.config.experimental !== undefined) {
     config.experimental = {
+      ...(compact !== undefined && { compaction: compact }),
       workflow:
         manifest.config.experimental.workflow === undefined
           ? undefined
@@ -298,10 +313,12 @@ function createResolvedAgentConfig(
             id: model.id,
             contextWindowTokens: model.contextWindowTokens,
             promptCache: model.promptCache,
+            maxOutputTokens: model.maxOutputTokens,
             providerOptions: model.providerOptions,
           }
         : {
             contextWindowTokens: model.contextWindowTokens,
+            maxOutputTokens: model.maxOutputTokens,
             id: model.id,
             promptCache: model.promptCache,
             providerOptions: model.providerOptions,

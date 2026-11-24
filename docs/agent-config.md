@@ -291,6 +291,8 @@ export default defineAgent({
 
 See [Default harness](./concepts/default-harness#compaction) for how the loop applies it.
 
+To replace how eve compacts, set [`experimental.compaction`](./experimental/compaction), an experimental API that takes the place of `compaction`.
+
 ## Runtime limits
 
 `limits` sets eve's runtime caps. `sessionUsage` receives the session's usage
@@ -557,7 +559,7 @@ All other `defineAgent` fields are optional. For the exported types, see the [Ty
 | `reasoning`    | `AgentReasoningDefinition`            | provider default | Provider-agnostic reasoning effort forwarded to the agent's turn model calls.                                                                                                                                                                                                                                       |
 | `modelOptions` | `AgentModelOptionsDefinition`         | none             | Provider option overrides forwarded to the model call, and [`promptCache`](#prompt-caching) settings.                                                                                                                                                                                                               |
 | `limits`       | `AgentLimitsDefinition`               | field-specific   | eve's [runtime limits](#runtime-limits).                                                                                                                                                                                                                                                                            |
-| `experimental` | `AgentExperimentalDefinition`         | unset            | Unstable opt-ins: [`workflow.world`](#workflow-world), [`workflow.modelCallsPerStep`](#workflow-checkpoint-batching), and [`workflow.retention`](#run-data-retention).                                                                                                                                              |
+| `experimental` | `AgentExperimentalDefinition`         | unset            | Unstable opt-ins: [`compaction`](./experimental/compaction), [`workflow.world`](#workflow-world), [`workflow.modelCallsPerStep`](#workflow-checkpoint-batching), and [`workflow.retention`](#run-data-retention).                                                                                                   |
 | `build`        | `{ externalDependencies?: string[] }` | none             | Hosted-build packaging controls. `externalDependencies` keeps listed packages unbundled and includes them in the hosted output.                                                                                                                                                                                     |
 | `tool`         | `boolean \| "deferred"`               | `true`           | Exposes this agent to its parent model as a tool. `"deferred"` hides it from the tool list until the model finds it with `eve__search` and calls it with `eve__tool`. On the root agent, controls the built-in `agent` tool. With `false`, authored workflow tools can still call a subagent through `ctx.agent()`. |
 

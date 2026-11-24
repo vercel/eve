@@ -13,6 +13,15 @@ export interface ModelProfile {
   readonly googleSearchDropsTools: boolean;
 }
 
+export function modelIdentity(model: LanguageModel): {
+  readonly provider: string;
+  readonly modelId: string;
+} {
+  return typeof model === "string"
+    ? { provider: "gateway", modelId: model }
+    : { provider: model.provider, modelId: model.modelId };
+}
+
 export function resolveModelProfile(
   model: LanguageModel,
   promptCache?: AgentPromptCacheDefinition,

@@ -1,3 +1,4 @@
+import type { CompactionStrategy } from "#shared/compaction-strategy.js";
 import type { AgentRoster } from "#execution/agent-sessions/roster.js";
 import type { DynamicSubagentSelections } from "#execution/agent-sessions/target.js";
 import type { ContextReader } from "#context/key.js";
@@ -19,6 +20,7 @@ import type { WorkflowAgentMetadata } from "#tools/workflow-definition.js";
 
 export interface SessionAgentSettings {
   readonly compaction?: {
+    readonly strategy?: CompactionStrategy;
     readonly model?: RuntimeModelReference;
     readonly thresholdPercent?: number;
   };

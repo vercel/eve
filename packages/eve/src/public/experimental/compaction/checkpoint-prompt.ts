@@ -1,11 +1,10 @@
 import type { ModelMessage } from "ai";
 
-import { estimateTokens } from "#harness/token-estimate.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
 
-export const COMPACTION_CHECKPOINT_MARKER = "Summary of our conversation so far:";
-
 export const COMPACTION_RESUMPTION_MESSAGE = "Continue.";
+
+export const COMPACTION_PROMPT_OVERHEAD_TOKENS = 406;
 
 const COMPACTION_SYSTEM_PROMPT = `You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff summary for another LLM that will resume the task.
 
@@ -43,6 +42,7 @@ export const COMPACTION_PROMPT_ENVELOPE = {
 } satisfies CompactionPrompt;
 
 export function createCompactionPrompt(input: {
+  readonly estimate: (messages: readonly ModelMessage[]) => number;
   readonly messages: readonly ModelMessage[];
   readonly previousCheckpoint: string | undefined;
   readonly transcriptBudgetTokens?: number;
@@ -65,6 +65,7 @@ export function createCompactionPrompt(input: {
 
 function degradeOversizedTranscript(
   input: {
+    readonly estimate: (messages: readonly ModelMessage[]) => number;
     readonly messages: readonly ModelMessage[];
     readonly previousCheckpoint: string | undefined;
     readonly transcriptBudgetTokens?: number;
@@ -80,7 +81,7 @@ function degradeOversizedTranscript(
     previousCheckpoint: input.previousCheckpoint?.trim() ?? "(none)",
     transcript: formatCompactionTranscript(entries),
   });
-  let excessTokens = estimateTokens(fullPrompt) - budget;
+  let excessTokens = input.estimate([{ content: fullPrompt, role: "user" }]) - budget;
 
   for (let index = 0; index < entries.length && excessTokens > 0; index += 1) {
     const entry = entries[index];

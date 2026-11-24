@@ -7,14 +7,18 @@ import {
   createCompactionPrompt,
   sliceUtf16Safe,
   TRANSCRIPT_PAYLOAD_LIMIT,
-} from "#harness/compaction/prompt.js";
+} from "./checkpoint-prompt.js";
+import { estimateTokens } from "#harness/token-estimate.js";
+
+const createPrompt = (input: Omit<Parameters<typeof createCompactionPrompt>[0], "estimate">) =>
+  createCompactionPrompt({ estimate: estimateTokens, ...input });
 
 describe("createCompactionPrompt", () => {
   it("preserves the previous checkpoint without applying transcript truncation", () => {
     const markerAfterTextLimit = "CRITICAL_STATE_AFTER_280_CHARACTERS";
     const previousCheckpoint = `${"completed work ".repeat(24)}${markerAfterTextLimit}`;
 
-    const result = createCompactionPrompt({
+    const result = createPrompt({
       messages: [{ content: "New evidence", role: "user" }],
       previousCheckpoint,
     });
@@ -53,7 +57,7 @@ describe("createCompactionPrompt", () => {
       },
     ];
 
-    const result = createCompactionPrompt({ messages, previousCheckpoint: undefined });
+    const result = createPrompt({ messages, previousCheckpoint: undefined });
 
     expect(result.prompt).toContain("Conversation transcript:");
     expect(result.prompt).toContain("### assistant");
@@ -78,7 +82,7 @@ describe("createCompactionPrompt", () => {
       },
     ];
 
-    const result = createCompactionPrompt({ messages, previousCheckpoint: undefined });
+    const result = createPrompt({ messages, previousCheckpoint: undefined });
 
     expect(result.prompt).toContain("Tool grep returned");
     expect(result.prompt).toContain("match line");
@@ -105,7 +109,7 @@ describe("createCompactionPrompt", () => {
       },
     ];
 
-    const { prompt } = createCompactionPrompt({ messages, previousCheckpoint: undefined });
+    const { prompt } = createPrompt({ messages, previousCheckpoint: undefined });
 
     expect(prompt).toContain("✓ passing test");
     expect(prompt).toContain("chars omitted");
@@ -131,7 +135,7 @@ describe("createCompactionPrompt", () => {
         },
       ] as ModelMessage[];
 
-      const { prompt } = createCompactionPrompt({ messages, previousCheckpoint: undefined });
+      const { prompt } = createPrompt({ messages, previousCheckpoint: undefined });
 
       expect(prompt).toContain("Tool bash returned ✓ passing test");
       expect(prompt.split("chars omitted").length - 1).toBe(1);
@@ -166,7 +170,7 @@ describe("createCompactionPrompt", () => {
       },
     ];
 
-    const result = createCompactionPrompt({ messages, previousCheckpoint: undefined });
+    const result = createPrompt({ messages, previousCheckpoint: undefined });
 
     expect(result.prompt).toContain(
       "Tool render_pixel returned Rendered pixel for smoke-test: " +
@@ -195,7 +199,7 @@ describe("createCompactionPrompt", () => {
       },
     ];
 
-    const result = createCompactionPrompt({ messages, previousCheckpoint: undefined });
+    const result = createPrompt({ messages, previousCheckpoint: undefined });
 
     expect(result.prompt).toContain(
       "Tool screenshot returned Attached file attachment (image/jpeg)",
@@ -207,7 +211,7 @@ describe("createCompactionPrompt", () => {
     const taskTail = "CRITICAL_REQUIREMENT_AFTER_280_CHARACTERS";
     const task = `${"do the following work item. ".repeat(30)}${taskTail}`;
 
-    const result = createCompactionPrompt({
+    const result = createPrompt({
       messages: [
         { content: task, role: "user" },
         { content: [{ text: task, type: "text" }], role: "assistant" },
@@ -223,7 +227,7 @@ describe("createCompactionPrompt", () => {
     const oldest = `${"oldest message padding. ".repeat(400)}OLDEST_TAIL_MARKER`;
     const newest = `${"newest message padding. ".repeat(400)}NEWEST_TAIL_MARKER`;
 
-    const result = createCompactionPrompt({
+    const result = createPrompt({
       messages: [
         { content: oldest, role: "user" },
         { content: newest, role: "user" },
@@ -238,7 +242,7 @@ describe("createCompactionPrompt", () => {
 
   it("does not split a UTF-16 surrogate pair when capping degraded conversational text", () => {
     const content = "x".repeat(1999) + "📥" + " tail ".repeat(400);
-    const { prompt } = createCompactionPrompt({
+    const { prompt } = createPrompt({
       messages: [{ role: "user", content }],
       previousCheckpoint: undefined,
       transcriptBudgetTokens: 100,

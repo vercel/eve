@@ -562,3 +562,7 @@ function truncateSnippet(value: string, maxLength: number): string {
   }
   return `${value.slice(0, maxLength)}...<truncated>`;
 }
+
+export function isContextOverflowError(error: unknown): boolean {
+  return summarizeKnownError(error)?.id === "model-context-overflow";
+}

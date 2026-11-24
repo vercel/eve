@@ -7,6 +7,7 @@ import { strictestApproval } from "#approval/agent.js";
 import { sessionAgent } from "#definitions/agent.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { SessionAgent } from "#runtime/sessions/session-agent.js";
+import type { CompactionStrategy } from "#shared/compaction-strategy.js";
 import type {
   AgentLimitsDefinition,
   AgentReasoningDefinition,
@@ -14,6 +15,7 @@ import type {
 } from "#shared/agent-definition.js";
 
 export interface AgentSettings {
+  readonly compactionStrategy?: CompactionStrategy;
   readonly compactionModel?: RuntimeModelReference;
   readonly reasoning?: AgentReasoningDefinition;
   readonly thresholdPercent?: number;
@@ -32,6 +34,7 @@ export function agentSettings(step: {
   }
   const { settings } = sessionAgent(step.ctx);
   return {
+    compactionStrategy: settings.compaction?.strategy,
     compactionModel: settings.compaction?.model,
     reasoning: settings.reasoning,
     thresholdPercent: settings.compaction?.thresholdPercent,

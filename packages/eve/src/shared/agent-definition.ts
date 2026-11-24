@@ -1,3 +1,4 @@
+import type { CompactionStrategy } from "#shared/compaction-strategy.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ApprovalPolicy } from "#approval/definition.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
@@ -65,6 +66,7 @@ export type ModelRouting =
 export type InternalAgentModelDefinition = {
   id: string;
   contextWindowTokens?: number;
+  maxOutputTokens?: number;
   source?: ModuleSourceRef;
   sourceField?: "compaction.model";
   sourceModelOption?: string;
@@ -224,6 +226,11 @@ export type SessionUsageLimit = (usage: {
  */
 export interface AgentExperimentalDefinition {
   /**
+   * Replaces how eve compacts the history, and takes the place of `compaction`. Build one with
+   * `defaultCompaction()` from `eve/experimental/compaction`, or write your own.
+   */
+  readonly compaction?: CompactionStrategy;
+  /**
    * Durable Workflow runtime configuration.
    */
   readonly workflow?: AgentWorkflowDefinition;
@@ -331,6 +338,13 @@ export interface AgentWorkflowDefinition {
  */
 export type AgentToolExposure = boolean | "deferred";
 
+export type InternalAgentExperimentalDefinition = Omit<
+  AgentExperimentalDefinition,
+  "compaction"
+> & {
+  readonly compaction?: true;
+};
+
 export type InternalAgentDefinition = {
   name: string;
   approval?: boolean;
@@ -338,7 +352,7 @@ export type InternalAgentDefinition = {
   build?: AgentBuildDefinition;
   compaction?: InternalAgentCompactionDefinition;
   defaultTools?: boolean;
-  experimental?: AgentExperimentalDefinition;
+  experimental?: InternalAgentExperimentalDefinition;
   model: InternalAgentModelDefinition;
   reasoning?: AgentReasoningDefinition;
   source?: ModuleSourceRef;

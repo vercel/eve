@@ -15,6 +15,7 @@ import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import {
   isDynamicModelDefinition,
+  type AgentExperimentalDefinition,
   type AgentPromptCacheDefinition,
   type AgentToolExposure,
   type ModelRouting,
@@ -187,13 +188,17 @@ export async function compileAgentConfig(
 }
 
 function normalizeExperimentalDefinition(
-  experimental: CompiledAgentDefinition["experimental"] | undefined,
+  experimental: AgentExperimentalDefinition | undefined,
 ): CompiledAgentDefinition["experimental"] | undefined {
   if (experimental === undefined) {
     return undefined;
   }
 
   const compiledExperimental: Mutable<NonNullable<CompiledAgentDefinition["experimental"]>> = {};
+
+  if (experimental.compaction !== undefined) {
+    compiledExperimental.compaction = true;
+  }
 
   if (experimental.workflow !== undefined) {
     compiledExperimental.workflow = {
@@ -317,6 +322,7 @@ async function normalizeAuthoredModelReference(input: {
           ...sourceBackedModel,
           id: providerResult.slug,
           contextWindowTokens: providerResult.contextWindowTokens,
+          maxOutputTokens: providerResult.maxOutputTokens,
         };
       }
     } catch {}
@@ -395,6 +401,7 @@ async function withCompiledRuntimeModelLimits(
   return {
     ...model,
     contextWindowTokens: limits.contextWindowTokens,
+    maxOutputTokens: limits.maxOutputTokens,
   };
 }
 

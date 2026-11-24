@@ -1,0 +1,8 @@
+[
+  "CompactionContext",
+  "CompactionOverflowError",
+  "CompactionStrategy",
+  "StoredHistoryMessage",
+  "defaultCompaction",
+  "withoutInjected"
+]
