@@ -35,7 +35,7 @@ To create sessions and send messages, use the [drive API](./cases#the-drive-api)
 
 ## Authentication
 
-Requests to a local target carry no credentials, because `eve eval` started that server.
+Requests to a local target carry no credentials unless you set [`targetAuth`](#short-lived-tokens), because `eve eval` started that server.
 
 For a remote `--url`, eve finds the expected Vercel team and project from `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` when both are nonblank. Otherwise it reads the local Vercel project link: `.vercel/project.json`, or the matching project in `.vercel/repo.json` for a linked monorepo.
 
@@ -46,7 +46,7 @@ After verification, eve sends the available Vercel credentials:
 - The resolved OIDC token as both the bearer and Vercel trusted-IDP header.
 - `VERCEL_AUTOMATION_BYPASS_SECRET`, when set, as the Protection Bypass for Automation header.
 
-Set `EVE_EVAL_AUTH_TOKEN` to send that bearer token instead, for targets that don't use Vercel OIDC. Set `EVE_EVAL_OIDC_TOKEN` to send a token from another issuer, such as GitHub Actions, as both the bearer and the trusted-IDP header for [Trusted Sources](https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection/trusted-sources). Set at most one override; both skip the Vercel lookup. Requests that carry credentials don't follow redirects, so the credentials never reach another origin.
+Set `EVE_EVAL_AUTH_TOKEN` to send that bearer token instead, for targets that don't use Vercel OIDC. For tokens that expire during a run, use [`targetAuth`](#short-lived-tokens). Set `EVE_EVAL_OIDC_TOKEN` to send a token from another issuer, such as GitHub Actions, as both the bearer and the trusted-IDP header for [Trusted Sources](https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection/trusted-sources). Set at most one override; both skip the Vercel lookup. Requests that carry credentials don't follow redirects, so the credentials never reach another origin.
 
 ```yaml
 # GitHub Actions; the job needs `permissions: id-token: write`
@@ -62,9 +62,31 @@ Set `EVE_EVAL_AUTH_TOKEN` to send that bearer token instead, for targets that do
     EVE_EVAL_OIDC_TOKEN: ${{ steps.oidc.outputs.token }}
 ```
 
-`/eve/v1/info` serves only operator callers, so the credential must authenticate with `principalType: "service"`. Vercel OIDC, `jwtHmac()`, `jwtEcdsa()`, or a custom `AuthFn` can provide it. When the target answers `403`, the run fails before any eval starts and names the credential it needs.
+`/eve/v1/info` requires an operator credential by default, such as Vercel OIDC or a credential that authenticates as `principalType: "service"`. The eve channel can instead grant `allowAgentInfo: true` to a specific eval caller. See [Agent info access](../guides/auth-and-route-protection#agent-info-access). A `403` stops the run before any eval starts.
 
 `t.target.fetch(path, init)` sends these same credentials.
+
+### Short-lived tokens
+
+`EVE_EVAL_AUTH_TOKEN` stays the same for the whole run. For short-lived credentials, set `targetAuth` in `evals.config.ts` with a token function. Use the same credential shapes as the [eve client's `auth`](../guides/client#authentication): `bearer`, `basic`, or `vercelOidc`.
+
+For local-only runs, you can pass an object such as `{ bearer: () => getSessionToken() }`. For `--url`, use an HTTPS URL without embedded credentials and pass a function that checks `url.origin` against the origins you trust. The function runs once with the target's `kind` and parsed `URL`. If it returns `undefined`, eve uses the [default authentication behavior](#authentication).
+
+```ts title="evals/evals.config.ts"
+import { defineEvalConfig } from "eve/evals";
+import { getSessionToken } from "./session-token.js";
+
+export default defineEvalConfig({
+  targetAuth: ({ kind, url }) =>
+    kind === "local" || url.origin === "https://agent.example.com"
+      ? { bearer: () => getSessionToken() }
+      : undefined,
+});
+```
+
+`eve eval` calls the token function before every request, including stream reads, approval responses, `t.target.fetch`, and the final [tool stubs](./tool-stubs) check. Return tokens for the same caller throughout the run. eve waits up to five seconds for each `targetAuth` resolver or token function call. Cache the token inside the function if minting one is slow.
+
+For `--url`, either `EVE_EVAL_AUTH_TOKEN` or `EVE_EVAL_OIDC_TOKEN` overrides `targetAuth`. If you also set `targetAuth`, eve prints a warning naming the environment variable it uses. Local runs ignore both environment variables. Requests using `targetAuth` or either override skip the Vercel lookup and don't follow redirects.
 
 ## What to read next
 

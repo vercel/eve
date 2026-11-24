@@ -66,6 +66,7 @@ Every field is optional:
 | `timeoutMs`         | The per-eval timeout.                                                                                          |
 | `repeat`            | How many times each eval runs, to measure repeatability. See [Repeat evals](/docs/evals/running#repeat-evals). |
 | `setup`, `teardown` | Run-wide hooks before and after the run. See [Run setup and teardown](#run-setup-and-teardown).                |
+| `targetAuth`        | Credentials for the target. See [Short-lived tokens](/docs/evals/targets#short-lived-tokens).                  |
 
 CLI flags (`--max-concurrency`, `--timeout`, `--repeat`) and per-eval values take precedence over config defaults.
 
