@@ -1,3 +1,4 @@
+import type { CompactionStrategy } from "#shared/compaction-strategy.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { SessionAgentSettings } from "#runtime/sessions/session-agent.js";
 import type {
@@ -54,6 +55,7 @@ export function agentDefinitionsOf(contents: AgentContents): readonly Definition
 }
 
 export interface AgentSettingsFields {
+  readonly compactionStrategy?: CompactionStrategy;
   readonly compactionModel?: RuntimeModelReference;
   readonly compactionThresholdPercent?: number;
   readonly sessionTimeoutMs?: number | false;
@@ -67,6 +69,7 @@ export function settingsOf(fields: AgentSettingsFields): SessionAgentSettings {
   let sessionUsage: { readonly limit: SessionUsageLimit | undefined } | undefined;
   return {
     compaction: {
+      compact: fields.compactionStrategy,
       model: fields.compactionModel,
       thresholdPercent: fields.compactionThresholdPercent,
     },

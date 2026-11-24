@@ -29,6 +29,7 @@ import {
   EmptyModelResponseError,
   ModelStreamStalledError,
   rejectsCredential,
+  isContextOverflowError,
 } from "#harness/model-call/errors.js";
 import { type ModelProfile, resolveModelProfile } from "#harness/model-profile.js";
 import { awaitsProviderToolResult } from "#harness/provider-tool-history.js";
@@ -91,7 +92,7 @@ const MODEL_OUTPUT_TIMEOUT_MS = 10 * 60_000;
 export interface ModelCallOptions {
   readonly disabledProviderTools?: ReadonlySet<string>;
   readonly extraSystemNote?: string;
-  readonly retryReason?: "empty-response";
+  readonly retryReason?: "empty-response" | "context-overflow";
   readonly trailingUserNote?: string;
 }
 
@@ -118,6 +119,8 @@ export class ModelCaller {
   private system: string | readonly string[] = "";
   private unkeptUsage: Usage | undefined;
   private compactionFailure: { readonly error: unknown } | undefined;
+  private overflowPending = false;
+  private event: "model.requested" | "model.retried" = "model.requested";
   private attemptIndex = 0;
   private started: number | undefined;
   private acceptedOutput = false;
@@ -171,6 +174,16 @@ export class ModelCaller {
           await this.prepareRetry(error);
           continue;
         }
+        if (
+          options.retryReason !== "context-overflow" &&
+          !this.acceptedOutput &&
+          isContextOverflowError(error)
+        ) {
+          await this.prepareRetry(error);
+          options = { ...options, retryReason: "context-overflow" };
+          this.overflowPending = true;
+          continue;
+        }
         const recovery = recoverModelCall(error, options, diagnostics);
         if (recovery === undefined) throw error;
         await this.prepareRetry(error);
@@ -190,10 +203,12 @@ export class ModelCaller {
       await step.apply(discardAttempt(step.view(), { ending: "retried", runId, usage }));
       this.acceptedOutput = false;
       await this.input.newRun();
+      this.event = "model.requested";
       return;
     }
     if (attempt === undefined) return;
     await step.apply(retryRun({ attempt, error: modelCallErrorInfo(error), runId, usage }));
+    this.event = "model.retried";
   }
 
   async failIfCompactionFailed(): Promise<StepResult | undefined> {
@@ -298,12 +313,19 @@ export class ModelCaller {
         model: this.input.model,
         renew: this.input.renewCredential,
         promptMessages: withClientContext(prompt),
+        request: {
+          instructions: this.framing(options, this.request.nonSystemMessages).instructions,
+          tools,
+        },
         requestEnvelopeTokens: this.requestEnvelopeTokens,
+        event: this.event,
+        ...(this.overflowPending && { overflow: true as const }),
       });
     } catch (error) {
       this.compactionFailure = { error };
       throw error;
     }
+    this.overflowPending = false;
     if (compacted === undefined) return tools;
     compactPrompt(step, prompt, compacted);
     const turnInput = compactedTurnInput(prompt.messages);

@@ -1,3 +1,4 @@
+import type { CompactionStrategy } from "#shared/compaction-strategy.js";
 import type { ConnectionEvents } from "#public/definitions/connections/events.js";
 import type { ConnectionEventsBackend } from "#shared/connection-events.js";
 import type { SessionEvent } from "#protocol/session-event.js";
@@ -199,9 +200,12 @@ export type ResolvedDynamicSubagentDefinition = ResolvedDynamicSource;
 
 type ResolvedAgentDefinitionBase = Omit<
   InternalAgentDefinition,
-  "approval" | "build" | "limits" | "model" | "source"
+  "approval" | "build" | "compaction" | "limits" | "model" | "source"
 > & {
   approval?: ApprovalPolicy;
+  compaction?: Omit<NonNullable<InternalAgentDefinition["compaction"]>, "compact"> & {
+    readonly compact?: CompactionStrategy;
+  };
   limits?: AgentLimitsDefinition;
   source?: Readonly<NonNullable<InternalAgentDefinition["source"]>>;
 };

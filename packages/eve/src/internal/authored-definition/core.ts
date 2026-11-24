@@ -1,3 +1,4 @@
+import type { CompactionStrategy } from "#shared/compaction-strategy.js";
 import { validateScheduleTimezone } from "#shared/schedule-timezone.js";
 import { isAgentReasoningDefinition } from "#internal/runtime-model.js";
 import { normalizeAgentApproval } from "#internal/authored-definition/approval.js";
@@ -324,8 +325,33 @@ function normalizeAgentCompactionDefinition(
       `${message} Rename "compaction.thresholdPercent" to "compaction.threshold" (a fraction from 0 to 1).`,
     );
   }
-  expectOnlyKnownKeys(record, ["model", "modelContextWindowTokens", "threshold"], message);
-  const normalizedDefinition: Mutable<NonNullable<NormalizedAgentDefinition["compaction"]>> = {};
+  expectOnlyKnownKeys(
+    record,
+    ["compact", "model", "modelContextWindowTokens", "threshold"],
+    message,
+  );
+  const normalizedDefinition: {
+    compact?: CompactionStrategy;
+    model?: PublicAgentStaticModelDefinition;
+    modelContextWindowTokens?: number;
+    threshold?: number;
+  } = {};
+
+  if (record.compact !== undefined) {
+    if (!isCompactionStrategy(record.compact)) {
+      throw new Error(
+        `${message} "compaction.compact" must be a compaction strategy: a function, such as fixedTail() from "eve/compaction", or { compact, when }.`,
+      );
+    }
+    for (const key of ["model", "modelContextWindowTokens"] as const) {
+      if (record[key] !== undefined) {
+        throw new Error(
+          `${message} "compaction.${key}" configures eve's default strategy. With "compaction.compact", choose the summary model in the strategy, for example fixedTail({ model }).`,
+        );
+      }
+    }
+    normalizedDefinition.compact = record.compact as CompactionStrategy;
+  }
 
   if (record.model !== undefined) {
     if (isDynamicSentinel(record.model)) {
@@ -363,7 +389,7 @@ function normalizeAgentCompactionDefinition(
     normalizedDefinition.threshold = threshold;
   }
 
-  return normalizedDefinition;
+  return normalizedDefinition as NonNullable<NormalizedAgentDefinition["compaction"]>;
 }
 
 export function normalizeInstructionsDefinition(
@@ -477,4 +503,24 @@ export function normalizeScheduleDefinition(value: unknown, message: string): Sc
   }
 
   return definition as ScheduleDefinition;
+}
+
+const COMPACTION_EVENTS: ReadonlySet<string> = new Set([
+  "model.requested",
+  "model.retried",
+  "turn.settled",
+]);
+
+function isCompactionStrategy(value: unknown): value is CompactionStrategy {
+  if (typeof value === "function") return true;
+  if (typeof value !== "object" || value === null) return false;
+  const { compact, when } = value as { readonly compact?: unknown; readonly when?: unknown };
+  if (typeof compact !== "function") return false;
+  if (when === undefined) return true;
+  if (typeof when !== "object" || when === null || Array.isArray(when)) return false;
+  return Object.entries(when).every(
+    ([event, trigger]) =>
+      COMPACTION_EVENTS.has(event) &&
+      (trigger === undefined || trigger === true || typeof trigger === "function"),
+  );
 }

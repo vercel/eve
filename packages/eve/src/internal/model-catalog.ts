@@ -9,6 +9,7 @@ export const catalogModelProviderSchema = z
     provider: z.string().min(1),
     providerModelId: z.string().min(1),
     contextWindowTokens: z.number().int().nonnegative().optional(),
+    maxOutputTokens: z.number().int().nonnegative().optional(),
   })
   .passthrough();
 
@@ -36,6 +37,7 @@ export interface ModelCatalog {
 
 export interface ModelCatalogEntry {
   readonly contextWindowTokens: number;
+  readonly maxOutputTokens?: number;
   readonly slug: string;
 }
 
@@ -52,6 +54,7 @@ export const modelMetadataSchema = z
               z
                 .object({
                   contextWindowTokens: z.number().int().positive(),
+                  maxOutputTokens: z.number().int().positive().optional(),
                   provider: z.string().min(1),
                   providerModelId: z.string().min(1),
                 })
@@ -73,12 +76,18 @@ export function createModelMetadata(
 ): ModelMetadata {
   const models: ModelMetadata["models"] = [];
   for (const model of input?.catalog.models ?? []) {
-    const providers = model.providers.flatMap(
-      ({ contextWindowTokens, provider, providerModelId }) =>
-        contextWindowTokens === undefined || contextWindowTokens <= 0
-          ? []
-          : [{ contextWindowTokens, provider, providerModelId }],
-    );
+    const providers = model.providers.flatMap((entry) => {
+      const contextWindowTokens = contextWindowOf(entry);
+      if (contextWindowTokens === null) return [];
+      const projected: ModelMetadata["models"][number]["providers"][number] = {
+        contextWindowTokens,
+        provider: entry.provider,
+        providerModelId: entry.providerModelId,
+      };
+      const maxOutputTokens = maxOutputOf(entry);
+      if (maxOutputTokens !== undefined) projected.maxOutputTokens = maxOutputTokens;
+      return [projected];
+    });
     if (providers.length > 0) models.push({ slug: model.slug, providers });
   }
   return {
@@ -115,7 +124,7 @@ export function lookupCatalogModelBySlug(
   if (model === undefined) return null;
   for (const provider of model.providers) {
     const contextWindowTokens = contextWindowOf(provider);
-    if (contextWindowTokens !== null) return { contextWindowTokens, slug: model.slug };
+    if (contextWindowTokens !== null) return entryOf(model.slug, contextWindowTokens, provider);
   }
   return null;
 }
@@ -137,7 +146,7 @@ export function lookupCatalogModelByProviderModelId(
         entry.provider === resolvedProvider &&
         normalizeCatalogModelId(entry.providerModelId) === normalizedModelId
       ) {
-        return { contextWindowTokens, slug: model.slug };
+        return entryOf(model.slug, contextWindowTokens, entry);
       }
     }
   }
@@ -149,4 +158,21 @@ function contextWindowOf(provider: CatalogModelProvider): number | null {
   return provider.contextWindowTokens === undefined || provider.contextWindowTokens <= 0
     ? null
     : provider.contextWindowTokens;
+}
+
+function maxOutputOf(provider: CatalogModelProvider): number | undefined {
+  return provider.maxOutputTokens === undefined || provider.maxOutputTokens <= 0
+    ? undefined
+    : provider.maxOutputTokens;
+}
+
+function entryOf(
+  slug: string,
+  contextWindowTokens: number,
+  provider: CatalogModelProvider,
+): ModelCatalogEntry {
+  const maxOutputTokens = maxOutputOf(provider);
+  return maxOutputTokens === undefined
+    ? { contextWindowTokens, slug }
+    : { contextWindowTokens, maxOutputTokens, slug };
 }

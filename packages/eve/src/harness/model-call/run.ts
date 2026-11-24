@@ -120,6 +120,7 @@ export async function runModelStep(
 
   await recordModelUsage(step, { model: resolved.model, tools: catalog.advertised.size });
 
+  step.ctx.set(HistoryStateKey, caller.request.historyState);
   let stepResult: StepResult;
   try {
     generation.check();
@@ -140,7 +141,6 @@ export async function runModelStep(
     if (generation.interrupted) return caller.steered();
     throw error;
   }
-  step.ctx.set(HistoryStateKey, caller.request.historyState);
   return stepResult;
 }
 

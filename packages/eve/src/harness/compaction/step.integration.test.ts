@@ -22,8 +22,15 @@ import { enterSessionProjection } from "#harness/session-machine/current.js";
 import { foldingHandler } from "#internal/testing/session-machine.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { createStreamChecker } from "#protocol/session-events/checker.js";
+import { CompactionOverflowError, fixedTail, turns } from "#public/compaction/index.js";
+import type {
+  CompactionContext,
+  CompactionMeasure,
+  CompactionStrategy,
+} from "#shared/compaction-strategy.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineDynamic as defineDynamicModel } from "#public/definitions/model.js";
+import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { SessionAgent } from "#runtime/sessions/session-agent.js";
 import type { PublicAgentDynamicModelDefinition } from "#shared/agent-definition.js";
@@ -120,6 +127,7 @@ function userTexts(prompt: Prompt): string[] {
 async function compactWith(
   model: MockLanguageModelV3,
   handleEvent: (events: readonly SessionEvent[]) => Promise<void> = async () => {},
+  compactionStrategy?: CompactionStrategy,
   measurement: HarnessSession["compaction"] = {},
 ) {
   const session: HarnessSession = {
@@ -133,7 +141,7 @@ async function compactWith(
     sessionId: "compaction-session",
   };
   return createTestKernel({
-    agent: { model: { id: "summary-model" } },
+    agent: { compactionStrategy, model: { id: "summary-model" } },
     compactOnly: true,
     handleEvent: (publication) => handleEvent(eventsOf(publication)),
     resolveModel: async () => model,
@@ -287,7 +295,7 @@ describe("compaction summary call", () => {
     expect(result.next).toBeNull();
   });
 
-  it("fails only the turn when the provider rejects the request as too long", async () => {
+  it("fails only the turn when the provider still rejects the request as too long after compacting", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.spyOn(console, "error").mockImplementation(() => {});
     const summaries = vi.fn(async () => summaryStream());
@@ -296,7 +304,7 @@ describe("compaction summary call", () => {
       doStream: async ({ prompt }) => {
         const system = prompt[0]?.role === "system" ? prompt[0].content : "";
         if (system.includes("CONTEXT CHECKPOINT COMPACTION")) return await summaries();
-        if ((turnCalls += 1) > 1) return answer();
+        turnCalls += 1;
         throw new APICallError({
           isRetryable: false,
           message: "prompt is too long: 21000 tokens > 20000 maximum",
@@ -326,8 +334,8 @@ describe("compaction summary call", () => {
     );
     const followUp = await untilTurnEnds(kernel, rejected.session, "Please list its parties.");
 
-    expect(summaries).not.toHaveBeenCalled();
-    expect(turnCalls).toBe(2);
+    expect(summaries).toHaveBeenCalledTimes(2);
+    expect(turnCalls).toBe(4);
     expect(rejected.next).toBeNull();
     expect(followUp.next).toBeNull();
     expect(events.filter((event) => event.type === "turn.settled")).toMatchObject([
@@ -340,7 +348,7 @@ describe("compaction summary call", () => {
           },
         },
       },
-      { data: { outcome: "completed" } },
+      { data: { outcome: "failed" } },
     ]);
     expect(events.some((event) => event.type === "session.ended")).toBe(false);
   });
@@ -602,7 +610,7 @@ describe("compaction summary call", () => {
       requestEnvelopeTokens: 1,
     });
 
-    const result = await compactWith(model, undefined, measurement);
+    const result = await compactWith(model, undefined, undefined, measurement);
 
     expect(result.session.history[1]).toMatchObject({ role: "assistant" });
     expect(JSON.stringify(result.session.history)).toContain("Alice prepared");
@@ -695,6 +703,67 @@ describe("announcements after a compaction during a turn", () => {
     expect(requests).toEqual([
       [catalog, question],
       ["Summary of our conversation so far:", catalog, question],
+    ]);
+  });
+
+  it("announces the catalog again on the next turn when a turn-end strategy dropped it", async () => {
+    const requests: string[][] = [];
+    const model = new MockLanguageModelV3({
+      doStream: async ({ prompt }) => {
+        const system = prompt[0]?.role === "system" ? prompt[0].content : "";
+        if (system.includes("CONTEXT CHECKPOINT COMPACTION")) return summaryStream();
+        requests.push(userTexts(prompt));
+        return answer();
+      },
+    });
+    const dropsAnnouncements: CompactionStrategy = {
+      compact: async (history, ctx) => {
+        const summary = await ctx.summarize(history);
+        return [
+          ...ctx.checkpoint(summary),
+          ...history.filter((m) => m.role === "user" && m.kind === "user").slice(-1),
+        ];
+      },
+      when: { "turn.settled": () => true },
+    };
+    const tools: HarnessToolMap = new Map([
+      ["lookup", lookupTool],
+      ["refund_invoice", { ...lookupTool, deferred: true, name: "refund_invoice" }],
+    ]);
+
+    await contextStorage.run(new ContextContainer(), async () => {
+      const kernel = createTestKernel({
+        agent: {
+          compactionStrategy: dropsAnnouncements,
+          model: { contextWindowTokens: 20_000, id: "step-model" },
+        },
+        handleEvent: foldingHandler(),
+        resolveModel: async () => model,
+        tools,
+      });
+      const first = await untilTurnEnds(
+        kernel,
+        {
+          compaction: {},
+          continuationToken: "http:announcement-turn-end",
+          history: [],
+          sessionId: "announcement-turn-end",
+        },
+        "Which sources back the first claim?",
+      );
+      expect(JSON.stringify(first.session.history)).not.toContain("eve__search");
+      await untilTurnEnds(kernel, first.session, "And the second?");
+    });
+
+    const catalog = expect.stringContaining("eve__search");
+    expect(requests).toEqual([
+      [catalog, "Which sources back the first claim?"],
+      [
+        "Summary of our conversation so far:",
+        "Which sources back the first claim?",
+        catalog,
+        "And the second?",
+      ],
     ]);
   });
 });
@@ -965,5 +1034,647 @@ describe("between-turn compaction with dynamic models", () => {
     ]);
     expect(events.some((event) => event.type.startsWith("context."))).toBe(false);
     expect(result.session.history).toEqual(COMPACT_HISTORY);
+  });
+});
+
+describe("an authored compaction strategy", () => {
+  function checkedEvents(input: { readonly started: boolean } = { started: true }) {
+    const events: SessionEvent[] = [];
+    const issues: unknown[] = [];
+    const checker = createStreamChecker();
+    const at = "2026-10-28T00:00:00.000Z";
+    if (input.started) checker.check({ at, facts: [{ type: "session.started", data: {} }] }, 0);
+    let position = input.started ? 1 : 0;
+    const handle = async (facts: readonly SessionEvent[]) => {
+      events.push(...facts);
+      issues.push(...checker.check({ at, facts }, position++));
+    };
+    return { events, handle, issues };
+  }
+
+  it("rewrites the history with its own summary, billed to the change's summary run", async () => {
+    const prompts: string[] = [];
+    const model = new MockLanguageModelV3({
+      doStream: async ({ prompt }) => {
+        prompts.push(prompt[0]?.role === "system" ? prompt[0].content : "");
+        return summaryStream();
+      },
+    });
+    const seen: string[] = [];
+    const strategy: CompactionStrategy = async (history, ctx) => {
+      seen.push(ctx.reason);
+      const kept = turns(history);
+      const summary = await ctx.summarize(kept.slice(0, -1).flat(), {
+        instructions: "Name the report Alice asked for.",
+      });
+      return [...ctx.checkpoint(summary), ...(kept.at(-1) ?? [])];
+    };
+    const { events, handle, issues } = checkedEvents();
+
+    const result = await compactWith(model, handle, strategy);
+
+    expect(seen).toEqual(["manual"]);
+    expect(prompts).toEqual([expect.stringContaining("Name the report Alice asked for.")]);
+    expect(result.session.history).toEqual([
+      expect.objectContaining({ kind: "context.compaction", role: "user" }),
+      { content: "Alice asked for the quarterly report.", role: "assistant" },
+      { content: "Thanks, keep going.", kind: "user", role: "user" },
+    ]);
+    expect(events.filter((event) => event.type === "context.settled")).toMatchObject([
+      { data: { kind: "compaction", outcome: "completed" } },
+    ]);
+    expect(sessionUsage(result.session)).toMatchObject({ inputTokens: 120, outputTokens: 8 });
+    expect(issues).toEqual([]);
+  });
+
+  it("runs eve's default when wrapped in fixedTail()", async () => {
+    const model = new MockLanguageModelV3({ doStream: async () => summaryStream() });
+
+    const result = await compactWith(model, async () => {}, fixedTail());
+
+    expect(result.session.history).toContainEqual({
+      content: "Alice asked for the quarterly report.",
+      role: "assistant",
+    });
+  });
+
+  it("fails the change and keeps the history when the result drops a call's result", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const model = new MockLanguageModelV3({ doStream: async () => summaryStream() });
+    const strategy: CompactionStrategy = () => [
+      {
+        content: [{ input: {}, toolCallId: "lookup-1", toolName: "lookup", type: "tool-call" }],
+        role: "assistant",
+      },
+    ];
+    const { events, handle, issues } = checkedEvents();
+
+    const result = await compactWith(model, handle, strategy);
+
+    expect(events.filter((event) => event.type === "context.settled")).toMatchObject([
+      {
+        data: {
+          error: { message: expect.stringContaining("but not its result") },
+          outcome: "failed",
+        },
+      },
+    ]);
+    expect(result.session.history).toHaveLength(3);
+    expect(issues).toEqual([]);
+  });
+
+  it("fails the change when the strategy rewrites what it returned once asked again", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const model = new MockLanguageModelV3({ doStream: async () => summaryStream() });
+    const strategy: CompactionStrategy = {
+      compact: (history) => [
+        { content: "Alice asked for the report.", kind: "context.compaction", role: "user" },
+        ...history,
+      ],
+      when: { "model.requested": () => true },
+    };
+    const { events, handle, issues } = checkedEvents();
+
+    const result = await compactWith(model, handle, strategy);
+
+    expect(events.filter((event) => event.type === "context.settled")).toMatchObject([
+      {
+        data: {
+          error: { message: expect.stringContaining("changes what it returned when asked again") },
+          outcome: "failed",
+        },
+      },
+    ]);
+    expect(result.session.history).toHaveLength(3);
+    expect(issues).toEqual([]);
+  });
+
+  it("fails the turn before the model call when an automatic result doesn't fit the window", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const model = new MockLanguageModelV3({
+      doStream: async ({ prompt }) =>
+        userTexts(prompt).length === 1
+          ? lookup(`Let me check. ${"lorem ipsum ".repeat(1_500)}`)
+          : answer(),
+    });
+    const session: HarnessSession = {
+      compaction: {},
+      continuationToken: "http:authored-overflow-session",
+      history: [],
+      sessionId: "authored-overflow-session",
+    };
+    const reasons: string[] = [];
+    const dropQuestion: CompactionStrategy = (history, ctx) => {
+      reasons.push(ctx.reason);
+      return history.slice(1);
+    };
+    const events: SessionEvent[] = [];
+
+    await contextStorage.run(new ContextContainer(), async () => {
+      const fold = foldingHandler();
+      let stepped = await createTestKernel({
+        agent: {
+          compactionStrategy: dropQuestion,
+          instructions: "You help Alice.",
+          model: { contextWindowTokens: 2_500, id: "step-model" },
+          thresholdPercent: 0.8,
+        },
+        handleEvent: async (publication, messages) => {
+          events.push(...eventsOf(publication));
+          await fold(publication, messages);
+        },
+        resolveModel: async () => model,
+        tools: new Map([["lookup", lookupTool]]),
+      })(session, { message: "Which sources back the second claim?" });
+      while (typeof stepped.next === "function") stepped = await stepped.next(stepped.session);
+    });
+
+    expect(reasons).toEqual(["automatic", "automatic"]);
+    expect(events.filter((event) => event.type === "context.settled")).toMatchObject([
+      { data: { error: { message: expect.stringContaining("the limit is") }, outcome: "failed" } },
+      { data: { error: { message: expect.stringContaining("the limit is") }, outcome: "failed" } },
+    ]);
+    expect(events.filter((event) => event.type === "model.started")).toHaveLength(1);
+    expect(events.at(-1)).toMatchObject({ data: { outcome: "failed" }, type: "turn.settled" });
+    expect(events.some((event) => event.type === "session.ended")).toBe(false);
+  });
+  async function runTurn(
+    strategy: CompactionStrategy,
+    respond: (prompt: Prompt) => StreamResult,
+    modelReference: RuntimeModelReference = { contextWindowTokens: 4_000, id: "step-model" },
+    system = "You help Alice.",
+  ) {
+    const requests: Parameters<MockLanguageModelV3["doStream"]>[0][] = [];
+    const model = new MockLanguageModelV3({
+      doStream: async (options) => {
+        requests.push(options);
+        return respond(options.prompt);
+      },
+    });
+    const session: HarnessSession = {
+      compaction: {},
+      continuationToken: "http:authored-trigger-session",
+      history: [],
+      sessionId: "authored-trigger-session",
+    };
+    const { events, handle, issues } = checkedEvents({ started: false });
+    let stepped: Awaited<ReturnType<StepFn>> | undefined;
+    await contextStorage.run(new ContextContainer(), async () => {
+      const fold = foldingHandler();
+      stepped = await createTestKernel({
+        agent: {
+          compactionStrategy: strategy,
+          instructions: system,
+          model: modelReference,
+          thresholdPercent: 2_000 / (modelReference.contextWindowTokens ?? 4_000),
+        },
+        handleEvent: async (publication, messages) => {
+          await handle(eventsOf(publication));
+          await fold(publication, messages);
+        },
+        resolveModel: async () => model,
+        tools: new Map([["lookup", lookupTool]]),
+      })(session, { message: "Which sources back the second claim?" });
+      while (typeof stepped.next === "function") stepped = await stepped.next(stepped.session);
+    });
+    return { events, issues, requests, session: stepped!.session };
+  }
+
+  const SUMMARY_PROMPT = "Write a handoff summary for the next model.";
+  const isSummaryRequest = (prompt: Prompt) => userTexts(prompt).at(-1) === SUMMARY_PROMPT;
+
+  it("runs at turn end when its trigger asks there, after the answer and before the turn settles", async () => {
+    const measures: unknown[] = [];
+    const tagged = (event: string, measure: CompactionMeasure) => ({ ...measure, event });
+    const firedAt: CompactionContext["event"][] = [];
+    const strategy: CompactionStrategy = {
+      compact: async (history, ctx) => {
+        firedAt.push(ctx.event);
+        const summary = await ctx.summarize(history, { prompt: SUMMARY_PROMPT });
+        const asked = history.filter(
+          (message) => message.role === "user" && (message as { kind?: string }).kind === "user",
+        );
+        return [...ctx.checkpoint(summary), ...asked];
+      },
+      when: {
+        "model.requested": (measure) => {
+          measures.push(tagged("model.requested", measure));
+          return false;
+        },
+        "turn.settled": (measure) => {
+          measures.push(tagged("turn.settled", measure));
+          return true;
+        },
+      },
+    };
+
+    const { events, issues, requests, session } = await runTurn(strategy, (prompt) =>
+      isSummaryRequest(prompt)
+        ? summaryStream()
+        : userTexts(prompt).length === 1 && !prompt.some((m) => m.role === "tool")
+          ? lookup("Let me check.")
+          : answer(),
+    );
+
+    expect(firedAt).toEqual(["turn.settled"]);
+    expect(measures).toEqual([
+      expect.objectContaining({
+        contextWindowTokens: 4_000,
+        event: "model.requested",
+        threshold: 2_000,
+      }),
+      expect.objectContaining({ event: "model.requested" }),
+      expect.objectContaining({ event: "turn.settled" }),
+      expect.objectContaining({ event: "model.requested" }),
+    ]);
+    const summaryRequest = requests.find((request) => isSummaryRequest(request.prompt))!;
+    expect(summaryRequest.prompt[0]).toEqual({
+      content: expect.stringContaining("You help Alice."),
+      role: "system",
+    });
+    expect(summaryRequest.tools).toBeUndefined();
+    const types = events.map((event) => event.type);
+    expect(types.indexOf("context.settled")).toBeLessThan(types.indexOf("turn.settled"));
+    expect(types.filter((type) => type === "model.started")).toHaveLength(3);
+    expect(session.history).toEqual([
+      expect.objectContaining({ kind: "context.compaction", role: "user" }),
+      { content: "Alice asked for the quarterly report.", role: "assistant" },
+      expect.objectContaining({ content: "Which sources back the second claim?", kind: "user" }),
+    ]);
+    expect(issues).toEqual([]);
+  });
+
+  it("gives its trigger the model's max output when the model metadata has it", async () => {
+    const measures: { maxOutputTokens?: number }[] = [];
+    const strategy: CompactionStrategy = {
+      compact: (history) => [...history],
+      when: {
+        "model.requested": (measure) => {
+          measures.push(measure);
+          return false;
+        },
+      },
+    };
+
+    await runTurn(strategy, () => answer(), {
+      contextWindowTokens: 4_000,
+      id: "step-model",
+      maxOutputTokens: 64_000,
+    });
+
+    expect(measures.length).toBeGreaterThan(0);
+    expect(measures.every((measure) => measure.maxOutputTokens === 64_000)).toBe(true);
+  });
+
+  it("keeps the turn's answer when a turn-end compaction fails", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const strategy: CompactionStrategy = {
+      compact: () => {
+        throw new Error("The notes store is down.");
+      },
+      when: { "turn.settled": () => true },
+    };
+
+    const { events, issues, session } = await runTurn(strategy, () => answer());
+
+    expect(events.filter((event) => event.type === "context.settled")).toMatchObject([
+      { data: { error: { message: "The notes store is down." }, outcome: "failed" } },
+    ]);
+    expect(events.filter((event) => event.type === "turn.settled")).toMatchObject([
+      { data: { outcome: "completed" } },
+    ]);
+    expect(session.history.at(-1)).toMatchObject({ role: "assistant" });
+    expect(issues).toEqual([]);
+  });
+
+  it("sends a custom-prompt summary with the turn's instructions and no tools", async () => {
+    let compacted = false;
+    const strategy: CompactionStrategy = {
+      compact: async (history, ctx) => {
+        compacted = true;
+        const summary = await ctx.summarize(history, { prompt: SUMMARY_PROMPT });
+        return [...ctx.checkpoint(summary), ...history];
+      },
+      when: { "model.requested": () => !compacted },
+    };
+
+    const { requests, session } = await runTurn(strategy, (prompt) =>
+      isSummaryRequest(prompt) ? summaryStream() : answer(),
+    );
+
+    const [summaryRequest, turnRequest] = requests;
+    expect(isSummaryRequest(summaryRequest!.prompt)).toBe(true);
+    expect(summaryRequest!.prompt[0]).toEqual(turnRequest!.prompt[0]);
+    expect(summaryRequest!.tools).toBeUndefined();
+    expect(session.history[0]).toMatchObject({ kind: "context.compaction" });
+  });
+
+  it("sends a strategy's own system in place of the agent's instructions", async () => {
+    let compacted = false;
+    const strategy: CompactionStrategy = {
+      compact: async (history, ctx) => {
+        compacted = true;
+        const summary = await ctx.summarize(history, { prompt: SUMMARY_PROMPT, system: "" });
+        return [...ctx.checkpoint(summary), ...history];
+      },
+      when: { "model.requested": () => !compacted },
+    };
+
+    const { requests } = await runTurn(strategy, (prompt) =>
+      isSummaryRequest(prompt) ? summaryStream() : answer(),
+    );
+
+    const [summaryRequest, turnRequest] = requests;
+    expect(turnRequest!.prompt[0]).toMatchObject({ role: "system" });
+    expect(summaryRequest!.prompt.some((message) => message.role === "system")).toBe(false);
+    expect(summaryRequest!.tools ?? []).toEqual([]);
+  });
+
+  it.each([
+    ["under", 100],
+    ["over", 1_200],
+  ])(
+    "runs when the request's fixed part is %s eve's threshold and fits the window",
+    async (_, repeat) => {
+      let compacted = false;
+      const strategy: CompactionStrategy = {
+        compact: async (history, ctx) => {
+          compacted = true;
+          expect(ctx.tokens.limit).toBeGreaterThan(0);
+          const summary = await ctx.summarize(history, { prompt: SUMMARY_PROMPT, system: "" });
+          return [...ctx.checkpoint(summary), ...history];
+        },
+        when: { "model.requested": () => !compacted },
+      };
+
+      const { events, session } = await runTurn(
+        strategy,
+        (prompt) => (isSummaryRequest(prompt) ? summaryStream() : answer()),
+        { contextWindowTokens: 10_000, id: "step-model" },
+        `You help Alice. ${"Protected instructions. ".repeat(repeat)}`,
+      );
+
+      expect(compacted).toBe(true);
+      expect(events.filter((event) => event.type === "context.settled")).toMatchObject([
+        { data: { kind: "compaction", outcome: "completed" } },
+      ]);
+      expect(session.history[0]).toMatchObject({ kind: "context.compaction" });
+    },
+  );
+
+  it("keeps a summary a strategy places after the messages it keeps", async () => {
+    let compacted = false;
+    const strategy: CompactionStrategy = {
+      compact: (history) => {
+        compacted = true;
+        return [
+          ...history.filter((message) => message.role === "user" && message.kind === "user"),
+          { content: "SUMMARY_LAST", kind: "context.compaction", role: "user" },
+        ];
+      },
+      when: { "model.requested": () => !compacted },
+    };
+
+    const { issues, session } = await runTurn(strategy, () => answer());
+
+    const kinds = session.history.map((message) =>
+      message.role === "user" ? (message as { kind?: string }).kind : message.role,
+    );
+    expect(kinds).toEqual(["user", "context.compaction", "assistant"]);
+    expect(session.history[1]).toMatchObject({ content: "SUMMARY_LAST" });
+    expect(issues).toEqual([]);
+  });
+});
+
+describe("a request over the model's context window", () => {
+  const overflow = () =>
+    new APICallError({
+      isRetryable: false,
+      message: "prompt is too long: 208310 tokens > 200000 maximum",
+      requestBodyValues: {},
+      responseBody: JSON.stringify({
+        error: {
+          message: "prompt is too long: 208310 tokens > 200000 maximum",
+          type: "invalid_request_error",
+        },
+        type: "error",
+      }),
+      statusCode: 400,
+      url: "https://provider.example/v1/messages",
+    });
+  const history: HarnessModelMessage[] = [
+    { content: "Please prepare the quarterly report.", kind: "user", role: "user" },
+    { content: "I started the report.", role: "assistant" },
+    { content: "Thanks, keep going.", kind: "user", role: "user" },
+    { content: "The report is half done.", role: "assistant" },
+  ];
+
+  async function runTurn(input: {
+    readonly turnCall: () => Promise<StreamResult>;
+    readonly summaryCall?: () => Promise<StreamResult>;
+    readonly compactionStrategy?: CompactionStrategy;
+  }) {
+    const model = new MockLanguageModelV3({
+      doStream: async ({ prompt }) => {
+        const system = prompt[0]?.role === "system" ? prompt[0].content : "";
+        return system.includes("You help Alice.")
+          ? await input.turnCall()
+          : await (input.summaryCall ?? summaryStream)();
+      },
+    });
+    const events: SessionEvent[] = [];
+    const result = await contextStorage.run(new ContextContainer(), async () => {
+      let stepped = await createTestKernel({
+        agent: {
+          compactionStrategy: input.compactionStrategy,
+          instructions: "You help Alice.",
+          model: { contextWindowTokens: 200_000, id: "step-model" },
+        },
+        handleEvent: foldingHandler(async (event) => void events.push(event)),
+        resolveModel: async () => model,
+        tools: new Map(),
+      })(
+        {
+          compaction: {},
+          continuationToken: "http:overflow",
+          history,
+          sessionId: "overflow",
+        },
+        { message: "Is it done yet?" },
+      );
+      while (typeof stepped.next === "function") stepped = await stepped.next(stepped.session);
+      return stepped;
+    });
+    return { events, result };
+  }
+
+  it("compacts with reason overflow and retries the step once", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const turnCall = vi
+      .fn<() => Promise<StreamResult>>()
+      .mockRejectedValueOnce(overflow())
+      .mockImplementation(async () => answer());
+    const summaryCall = vi.fn(async () => summaryStream());
+
+    const { events, result } = await runTurn({ summaryCall, turnCall });
+
+    expect(turnCall).toHaveBeenCalledTimes(2);
+    expect(summaryCall).toHaveBeenCalledTimes(1);
+    expect(events.filter((event) => event.type === "context.settled")).toMatchObject([
+      { data: { kind: "compaction", outcome: "completed" } },
+    ]);
+    expect(events.find((event) => event.type === "turn.settled")).toMatchObject({
+      data: { outcome: "completed" },
+    });
+    expect(result.session.history).toContainEqual({
+      content: "Alice asked for the quarterly report.",
+      role: "assistant",
+    });
+  });
+
+  it("passes reason overflow to the agent's strategy, whatever its trigger says", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const seen: string[] = [];
+    const strategy: CompactionStrategy = {
+      compact: async (messages, ctx) => {
+        seen.push(`${ctx.reason} ${ctx.event}`);
+        return messages.slice(-1);
+      },
+      when: { "turn.settled": () => false },
+    };
+    const turnCall = vi
+      .fn<() => Promise<StreamResult>>()
+      .mockRejectedValueOnce(overflow())
+      .mockImplementation(async () => answer());
+
+    const { events } = await runTurn({ compactionStrategy: strategy, turnCall });
+
+    expect(seen).toEqual(["overflow model.retried"]);
+    expect(turnCall).toHaveBeenCalledTimes(2);
+    const order = events
+      .map((event) => event.type)
+      .filter((type) => ["context.started", "model.requested", "model.retried"].includes(type));
+    expect(order).toEqual(["model.requested", "model.retried", "context.started"]);
+    expect(events.find((event) => event.type === "turn.settled")).toMatchObject({
+      data: { outcome: "completed" },
+    });
+  });
+
+  it("asks the trigger at model.retried when a rate-limited attempt retries in its run", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const asked: string[] = [];
+    const strategy: CompactionStrategy = {
+      compact: async (messages) => messages,
+      when: {
+        "model.requested": () => {
+          asked.push("model.requested");
+          return false;
+        },
+        "model.retried": () => {
+          asked.push("model.retried");
+          return false;
+        },
+      },
+    };
+    const turnCall = vi
+      .fn<() => Promise<StreamResult>>()
+      .mockRejectedValueOnce(
+        new APICallError({
+          isRetryable: false,
+          message: "Too Many Requests",
+          requestBodyValues: {},
+          statusCode: 429,
+          url: "https://provider.example/v1/messages",
+        }),
+      )
+      .mockImplementation(async () => answer());
+
+    const { events } = await runTurn({ compactionStrategy: strategy, turnCall });
+
+    expect(turnCall).toHaveBeenCalledTimes(2);
+    expect(asked).toEqual(["model.requested", "model.retried"]);
+    expect(
+      events
+        .map((event) => event.type)
+        .filter((type) => ["model.requested", "model.retried"].includes(type)),
+    ).toEqual(["model.requested", "model.retried"]);
+  });
+
+  it("asks a model.requested trigger once per request when an empty response retries", async () => {
+    const seen: string[] = [];
+    const strategy: CompactionStrategy = {
+      compact: async (messages, ctx) => {
+        seen.push(`${ctx.reason} ${ctx.event}`);
+        return messages;
+      },
+      when: { "model.requested": () => true },
+    };
+    const empty = async (): Promise<StreamResult> => ({
+      stream: new ReadableStream({
+        start(controller) {
+          controller.enqueue({ type: "stream-start", warnings: [] });
+          controller.close();
+        },
+      }),
+    });
+    const turnCall = vi
+      .fn<() => Promise<StreamResult>>()
+      .mockImplementationOnce(empty)
+      .mockImplementation(async () => answer());
+
+    const { events } = await runTurn({ compactionStrategy: strategy, turnCall });
+
+    expect(turnCall).toHaveBeenCalledTimes(2);
+    expect(events.filter((event) => event.type === "model.retried")).toHaveLength(1);
+    expect(events.filter((event) => event.type === "model.requested")).toHaveLength(1);
+    expect(seen).toEqual(["automatic model.requested"]);
+  });
+
+  it("fails the turn when the retried call overflows again", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const turnCall = vi.fn(async (): Promise<StreamResult> => {
+      throw overflow();
+    });
+
+    const { events } = await runTurn({ turnCall });
+
+    expect(turnCall).toHaveBeenCalledTimes(2);
+    expect(events.filter((event) => event.type === "context.settled")).toHaveLength(1);
+    expect(JSON.stringify(events)).toContain('"code":"MODEL_CALL_FAILED"');
+    expect(JSON.stringify(events)).toContain("The request exceeds the model's context window.");
+  });
+
+  it("rejects summarize() with CompactionOverflowError, so a strategy can shrink and retry", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const errors: unknown[] = [];
+    const strategy: CompactionStrategy = async (messages, ctx) => {
+      let older = messages.slice(0, -1);
+      for (;;) {
+        try {
+          return [...ctx.checkpoint(await ctx.summarize(older)), ...messages.slice(-1)];
+        } catch (error) {
+          errors.push(error);
+          if (!(error instanceof CompactionOverflowError)) throw error;
+          older = older.slice(1);
+        }
+      }
+    };
+    const summaryCall = vi
+      .fn<() => Promise<StreamResult>>()
+      .mockRejectedValueOnce(overflow())
+      .mockImplementation(async () => summaryStream());
+    const turnCall = vi
+      .fn<() => Promise<StreamResult>>()
+      .mockRejectedValueOnce(overflow())
+      .mockImplementation(async () => answer());
+
+    const { events } = await runTurn({ compactionStrategy: strategy, summaryCall, turnCall });
+
+    expect(errors).toEqual([expect.any(CompactionOverflowError)]);
+    expect(summaryCall).toHaveBeenCalledTimes(2);
+    expect(events.find((event) => event.type === "turn.settled")).toMatchObject({
+      data: { outcome: "completed" },
+    });
   });
 });
