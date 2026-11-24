@@ -108,8 +108,8 @@ export function buildRuntimeIdentity(
     eveVersion: installedEveVersion(),
   };
 
-  const build = platform.deployment.build?.();
-  return build === undefined ? identity : { ...identity, build };
+  const revision = platform.deployment.revision?.();
+  return revision === undefined ? identity : { ...identity, build: revision };
 }
 
 function createRuntimeModelResolver(

@@ -5,7 +5,12 @@ import { isRunTargetGone } from "#shared/run-errors.js";
 import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 import { runtimeWait, storedProjection, turnPosition } from "#harness/session-machine/view.js";
 import type { SessionStateMap } from "#harness/types.js";
-import { cancelRoutedRun, resumeRoutedHook, routedRunLive, type Hosts } from "#execution/hosts.js";
+import {
+  cancelRoutedRun,
+  resumeRoutedHook,
+  routedRunLive,
+  type RouteHosts,
+} from "#execution/hosts.js";
 import { createLogger, logError } from "#internal/logging.js";
 
 const log = createLogger("execution.stop-runs");
@@ -38,7 +43,7 @@ export function waitedCallRuns(session: {
 }
 
 export async function stopRuns(
-  hosts: Hosts,
+  hosts: RouteHosts,
   targets: readonly RunStopTarget[],
   stop: RunStop,
   options: { readonly waitForEnd?: boolean } = {},
@@ -63,7 +68,11 @@ export async function stopRuns(
   return cancelled.flat();
 }
 
-async function tell(hosts: Hosts, run: WorkflowToolRunAddress, stop: RunStop): Promise<boolean> {
+async function tell(
+  hosts: RouteHosts,
+  run: WorkflowToolRunAddress,
+  stop: RunStop,
+): Promise<boolean> {
   try {
     await resumeRoutedHook(hosts, run.hookToken, stop);
     return true;
@@ -78,7 +87,7 @@ async function tell(hosts: Hosts, run: WorkflowToolRunAddress, stop: RunStop): P
 }
 
 async function runsStillRunning(
-  hosts: Hosts,
+  hosts: RouteHosts,
   runIds: readonly string[],
 ): Promise<readonly string[]> {
   let running = runIds;
@@ -93,7 +102,7 @@ async function runsStillRunning(
   return running;
 }
 
-async function cancelOutright(hosts: Hosts, runId: string, reason: string): Promise<boolean> {
+async function cancelOutright(hosts: RouteHosts, runId: string, reason: string): Promise<boolean> {
   try {
     return await cancelRoutedRun(hosts, runId, reason);
   } catch (error) {

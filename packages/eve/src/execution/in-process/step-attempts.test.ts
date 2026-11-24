@@ -1,6 +1,6 @@
 import { builtInHosts } from "#runtime/app.js";
 import { describe, expect, it } from "vitest";
-import { isRetriedStep, stepAttempt, registerHost } from "#execution/hosts.js";
+import { isRetriedStep, stepAttempt, registerHostedRoute } from "#execution/hosts.js";
 import { NonRetryableError } from "#shared/run-errors.js";
 import { createStepAttempts, type StepFaults } from "./step-attempts.js";
 
@@ -9,7 +9,7 @@ async function runStep(
   throws: (attempt: number) => unknown = () => undefined,
 ) {
   const attempts = createStepAttempts(faults);
-  const release = registerHost(builtInHosts(), {
+  const release = registerHostedRoute(builtInHosts(), {
     deliver: async () => undefined,
     runEnded: () => undefined,
     cancelRun: () => undefined,

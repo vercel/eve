@@ -1,4 +1,4 @@
-import type { Hosts } from "#execution/hosts.js";
+import type { RouteHosts } from "#execution/hosts.js";
 import type { Runtime } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import {
@@ -25,7 +25,7 @@ import type { InProcessTimers } from "./timers.js";
 const log = createLogger("execution.in-process.runs");
 
 export interface InProcessRunsHost {
-  readonly hosts: Hosts;
+  readonly hosts: RouteHosts;
   readonly inboxes: MemoryInboxRegistry;
   readonly stepBoundary: StepBoundary;
   readonly timers: InProcessTimers;

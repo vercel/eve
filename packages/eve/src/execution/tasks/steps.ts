@@ -47,7 +47,7 @@ import { endTask, finishRun, settleTask } from "#harness/session-machine/transit
 import { lateTaskSpend, taskSpend } from "#harness/session-machine/runs.js";
 import { storedProjection, type SessionView } from "#harness/session-machine/view.js";
 import { stopRuns, waitedCallRuns, type RunStopTarget } from "#execution/stop-runs.js";
-import { resumeRoutedHook, type Hosts } from "#execution/hosts.js";
+import { resumeRoutedHook, type RouteHosts } from "#execution/hosts.js";
 import type { TaskCancelReason } from "#execution/tasks/table.js";
 
 export type TaskRunMessage = Extract<
@@ -256,7 +256,10 @@ function taskSettled(
   return [(view) => settleTask(view, { calls, outcome })];
 }
 
-export async function sendTaskRunCommands(hosts: Hosts, commands: TaskRunCommands): Promise<void> {
+export async function sendTaskRunCommands(
+  hosts: RouteHosts,
+  commands: TaskRunCommands,
+): Promise<void> {
   for (const command of commands.commands) {
     await ignoreGoneTarget(
       resumeRoutedHook(hosts, commands.run.hookToken, toControlMessage(command)),

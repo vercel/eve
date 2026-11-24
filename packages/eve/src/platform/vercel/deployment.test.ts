@@ -72,14 +72,14 @@ describe("Vercel platform deployment facts", () => {
     expect(deployment().deploymentId()).toBeUndefined();
   });
 
-  it("reports build identity only when one of its fields is set", () => {
+  it("reports the revision only when one of its fields is set", () => {
     vi.stubEnv("VERCEL_GIT_COMMIT_SHA", "");
     vi.stubEnv("VERCEL_GIT_COMMIT_REF", "   ");
     vi.stubEnv("VERCEL_DEPLOYMENT_CREATED_AT", "");
-    expect(deployment().build?.()).toBeUndefined();
+    expect(deployment().revision?.()).toBeUndefined();
 
     vi.stubEnv("VERCEL_GIT_COMMIT_SHA", " abc123 ");
-    expect(deployment().build?.()).toStrictEqual({
+    expect(deployment().revision?.()).toStrictEqual({
       deployedAt: undefined,
       gitBranch: undefined,
       gitSha: "abc123",

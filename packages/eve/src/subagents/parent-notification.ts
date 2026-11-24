@@ -16,7 +16,7 @@ import type { AgentTurnOutcome } from "#shared/agent-turn-outcome.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { parseJsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
-import { resumeRoutedHook, type Hosts } from "#execution/hosts.js";
+import { resumeRoutedHook, type RouteHosts } from "#execution/hosts.js";
 import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
 import type { Entities } from "#platform/entities.js";
 import { processApp, startedApp } from "#runtime/app.js";
@@ -312,7 +312,7 @@ async function isCallbackNotPending(response: Response): Promise<boolean> {
 }
 
 async function resumeSettledTurnHook(
-  hosts: Hosts,
+  hosts: RouteHosts,
   token: string,
   result: RuntimeSubagentChildResult,
 ): Promise<void> {

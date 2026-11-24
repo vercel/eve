@@ -558,8 +558,8 @@ class AgentGraphCompiler {
           break;
         }
         case "sandbox":
-          const { compute } = await loadPlatformBuild(input.manifest.appRoot);
-          sandbox = await withBuildCompute(compute, () =>
+          const { prewarm } = await loadPlatformBuild(input.manifest.appRoot);
+          sandbox = await withBuildCompute(prewarm?.compute, () =>
             compileSandboxDefinition(input.manifest.agentRoot, entry.source, {
               binding: binding!,
               loadNamespace,

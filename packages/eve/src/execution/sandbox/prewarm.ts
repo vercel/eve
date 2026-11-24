@@ -167,7 +167,7 @@ export async function prewarmAppSandboxes(input: {
   readonly dispatch?: SandboxProviderPrepareDispatch;
   readonly preparedArtifactStore?: SandboxPreparedArtifactStore;
 }): Promise<void> {
-  await withBuildCompute(input.build.compute, () => prewarmBuiltAppSandboxes(input));
+  await withBuildCompute(input.build.prewarm?.compute, () => prewarmBuiltAppSandboxes(input));
 }
 
 async function prewarmBuiltAppSandboxes(
@@ -425,7 +425,7 @@ function formatPrewarmFailureForEnvironment(input: {
   readonly error: unknown;
 }): unknown {
   if (!isLocalSandboxProvider(input.providerName)) return input.error;
-  return input.build.sandboxPrewarmFailure?.(input.providerName, input.error) ?? input.error;
+  return input.build.prewarm?.failure?.(input.providerName, input.error) ?? input.error;
 }
 
 function isLocalSandboxProvider(providerName: string): boolean {

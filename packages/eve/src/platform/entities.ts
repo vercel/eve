@@ -14,7 +14,7 @@ import type { SpanProcessor } from "#tracing/eve/otel-configuration.js";
 
 export type DeploymentEnvironment = "development" | "preview" | "production";
 
-export interface DeploymentBuild {
+export interface DeploymentRevision {
   readonly deployedAt: string | undefined;
   readonly gitBranch: string | undefined;
   readonly gitSha: string | undefined;
@@ -34,7 +34,7 @@ export interface Deployment {
   publicHost(): string | undefined;
   scope(): DeploymentScope | undefined;
   invocationData?(): Readonly<Record<string, string>>;
-  build?(): DeploymentBuild | undefined;
+  revision?(): DeploymentRevision | undefined;
   localDevelopment?(): boolean;
 }
 
@@ -88,14 +88,18 @@ export interface Telemetry {
   spanProcessor?(): SpanProcessor;
 }
 
+export interface BuildPrewarm {
+  readonly compute: Compute;
+  failure?(providerName: string, error: unknown): Error | undefined;
+}
+
 export interface Build {
-  readonly compute?: Compute;
+  readonly prewarm?: BuildPrewarm;
   readonly schedules?: { readonly kind: string };
   readonly entry?: string;
   readonly conditions?: readonly string[];
   platformOutput?(): boolean;
   outputDirectory?(appRoot: string): string | undefined;
-  sandboxPrewarmFailure?(providerName: string, error: unknown): Error | undefined;
 }
 
 export interface ModelCredentials {

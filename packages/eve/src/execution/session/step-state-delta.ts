@@ -1,5 +1,5 @@
 import { readDurableSession, type DurableSessionState } from "#execution/durable-session-store.js";
-import type { Hosts } from "#execution/hosts.js";
+import type { AppHosts } from "#execution/hosts.js";
 import {
   enterSessionStep,
   followInterruptedAttempt,
@@ -70,13 +70,13 @@ export async function withSessionStateDelta<
   I extends Partial<SessionStateValues> & { readonly rerun?: true },
   R extends Partial<SessionStateValues>,
 >(
-  hosts: Hosts,
+  hosts: AppHosts,
   input: I,
   work: (step: Entered<I>) => Promise<R>,
   meta?: { readonly attempt: number },
 ): Promise<WithSessionStateDelta<R>>;
 export async function withSessionStateDelta(
-  hosts: Hosts,
+  hosts: AppHosts,
   input: StepValues,
   work: (step: Entered<StepValues>) => Promise<Partial<SessionStateValues>>,
   meta?: { readonly attempt: number },

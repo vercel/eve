@@ -1,4 +1,4 @@
-import { isRetriedStep, stepAttempt, type Hosts } from "#execution/hosts.js";
+import { isRetriedStep, stepAttempt, type AppHosts } from "#execution/hosts.js";
 import { readSessionStreamTailIndex, streamSessionLines } from "#execution/session-event-stream.js";
 import type { ControlDelivery } from "#harness/types.js";
 import { buildAdapterContext } from "#channel/adapter-context.js";
@@ -85,7 +85,7 @@ export interface SessionHistoryStepInput extends SessionStepInput {
 }
 
 export type Entered<I extends object> = Omit<I, "rerun"> & {
-  readonly hosts: Hosts;
+  readonly hosts: AppHosts;
   readonly rerun: boolean;
 };
 
@@ -94,7 +94,7 @@ export type SessionStepState = Entered<SessionStepInput>;
 export type SessionHistoryStepState = Entered<SessionHistoryStepInput>;
 
 export function enterSessionStep<I extends object>(
-  hosts: Hosts,
+  hosts: AppHosts,
   input: I & { readonly rerun?: true },
   meta: { readonly attempt: number } = { attempt: stepAttempt(hosts) ?? 1 },
 ): Entered<I> {
@@ -151,7 +151,7 @@ export interface RestoredSessionStep {
   readonly ctx: ContextContainer;
   readonly durableSession: DurableSession;
   readonly sessionWritable: WritableStream<Uint8Array>;
-  readonly hosts: Hosts;
+  readonly hosts: AppHosts;
   readonly rerun: boolean;
 }
 
@@ -323,7 +323,7 @@ export interface OrphanedLine {
 const interruptedAttempts = new WeakMap<WritableStream<Uint8Array>, readonly OrphanedLine[]>();
 
 export async function readOrphanedLines(input: {
-  readonly hosts: Hosts;
+  readonly hosts: AppHosts;
   readonly sessionId: string;
   readonly position: number;
   readonly sessionWritable: WritableStream<Uint8Array>;
@@ -369,7 +369,7 @@ export function followInterruptedAttempt(
 }
 
 async function readLinesFrom(
-  hosts: Hosts,
+  hosts: AppHosts,
   sessionId: string,
   first: number,
 ): Promise<OrphanedLine[]> {
@@ -405,7 +405,7 @@ export function foldOrphanedLines(
 }
 
 async function reconcilePublishedSessionLines(
-  hosts: Hosts,
+  hosts: AppHosts,
   checkpoint: SessionProjection | undefined,
   sessionId: string,
 ): Promise<SessionProjection> {
@@ -636,7 +636,7 @@ export interface SessionEnding {
 }
 
 export async function publishTerminalSessionEvent(input: {
-  readonly hosts: Hosts;
+  readonly hosts: AppHosts;
   readonly errorId?: string;
   readonly ending: SessionEnding;
   readonly serializedContext: Record<string, unknown>;

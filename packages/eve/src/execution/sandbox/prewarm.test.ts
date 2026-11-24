@@ -148,8 +148,19 @@ describe("prewarmAppSandboxes", () => {
       prewarmAppSandboxes({
         appRoot: process.cwd(),
         build: {
-          sandboxPrewarmFailure: (providerName, error) =>
-            new Error(`Alice's platform has no ${providerName}.`, { cause: error }),
+          prewarm: {
+            compute: {
+              name: "alice-compute",
+              selectByDefault: false,
+              credentialTransforms: false,
+              platformStopsSandboxes: false,
+              environment: () => {
+                throw new Error("Alice's build opens no hosted sandbox.");
+              },
+            },
+            failure: (providerName, error) =>
+              new Error(`Alice's platform has no ${providerName}.`, { cause: error }),
+          },
         },
         dispatch: async () => {
           throw cause;

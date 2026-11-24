@@ -1,4 +1,4 @@
-import type { Hosts } from "#execution/hosts.js";
+import type { RouteHosts } from "#execution/hosts.js";
 import {
   renderTaskReceipt,
   renderTaskSentReceipt,
@@ -95,7 +95,7 @@ export async function startTaskRun(
 }
 
 export async function sendToTask(
-  hosts: Hosts,
+  hosts: RouteHosts,
   input: TaskDispatchInput,
   admissionView = storedProjection(input.session.state).view,
 ): Promise<TaskDispatchResult> {

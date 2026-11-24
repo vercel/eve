@@ -1,4 +1,4 @@
-import type { Hosts } from "#execution/hosts.js";
+import type { AppHosts } from "#execution/hosts.js";
 import { processApp } from "#runtime/app.js";
 import {
   prepareCoordinationDispatch,
@@ -53,7 +53,7 @@ import { copyView, foldLine } from "#protocol/session-projection/fold.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 
 export function dispatchCoordinationOn(
-  hosts: Hosts,
+  hosts: AppHosts,
   startRun: StartWorkflowToolRun,
 ): (
   input: CoordinationDispatchInput,
@@ -211,7 +211,7 @@ function withPrestartedRuns(
 }
 
 async function dispatchWorkflowCall(
-  hosts: Hosts,
+  hosts: AppHosts,
   start: StartWorkflowTaskInput,
   admissionView: SessionView,
 ): Promise<{

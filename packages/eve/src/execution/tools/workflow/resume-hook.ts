@@ -1,8 +1,8 @@
 import { isRunTargetGone } from "#shared/run-errors.js";
-import { resumeRoutedHook, type Hosts } from "#execution/hosts.js";
+import { resumeRoutedHook, type RouteHosts } from "#execution/hosts.js";
 
 export async function resumeHookWherever(
-  hosts: Hosts,
+  hosts: RouteHosts,
   token: string,
   payload: unknown,
   options?: { readonly ifPresent?: boolean },

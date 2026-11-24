@@ -127,7 +127,7 @@ import {
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import { signInInteractionId } from "#harness/interaction-facts.js";
 import { SIGN_IN_DECLINED } from "#harness/hitl/sign-ins.js";
-import { signInDelivery, type Hosts, type ResumeAddress } from "#execution/hosts.js";
+import { signInDelivery, type AppHosts, type ResumeAddress } from "#execution/hosts.js";
 import type { StepMeta } from "#execution/durable.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 import type { AuthorizationCallback } from "#shared/connection-types.js";
@@ -143,7 +143,7 @@ interface PendingStepAttributes {
 
 export interface SessionStepHost {
   readonly app: App;
-  readonly hosts: Hosts;
+  readonly hosts: AppHosts;
   readonly callbackBaseUrl?: string;
   setAttributes(attributes: Record<string, EveAttributeValue>): Promise<void>;
   createRuntime(config: CreateRuntimeConfig): Runtime;

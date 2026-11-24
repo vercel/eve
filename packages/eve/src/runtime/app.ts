@@ -3,14 +3,19 @@ import type { InstrumentationProvider } from "#instrumentation/provider.js";
 import type { InstrumentationRuntime } from "#instrumentation/runtime.js";
 import type { PlatformDeclaration } from "#platform/declaration.js";
 import type { Entities } from "#platform/entities.js";
-import { stepAttempt, type Hosts } from "#execution/hosts.js";
+import {
+  createProcessHosts,
+  stepAttempt,
+  type AppHosts,
+  type ProcessHosts,
+} from "#execution/hosts.js";
 import { createLifetime, type Lifetime } from "#runtime/lifetime.js";
 import type { RuntimeSession } from "#runtime/sessions/runtime-session.js";
 
 export interface App {
   readonly platform: Entities;
   readonly durable: Durable;
-  readonly hosts: Hosts;
+  readonly hosts: AppHosts;
   readonly lifetime: Lifetime;
 }
 
@@ -34,7 +39,7 @@ export interface ProcessApp {
   platform: Entities | undefined;
   durable: Durable | undefined;
   defaultSession: RuntimeSession | undefined;
-  readonly hosts: Hosts;
+  readonly hosts: ProcessHosts;
   readonly instrumentation: AppInstrumentation;
   readonly lifetime: Lifetime;
 }
@@ -49,7 +54,7 @@ export function createProcessApp(): ProcessApp {
     platform: undefined,
     durable: undefined,
     defaultSession: undefined,
-    hosts: { routes: new Set(), sessionEventStores: new Map() },
+    hosts: createProcessHosts(),
     instrumentation: { providers: new Map(), runtime: undefined, setup: undefined },
     lifetime: createLifetime(),
   };
@@ -87,12 +92,8 @@ export function stepApp(): App | undefined {
   return stepAttempt(hosts) === undefined ? undefined : started;
 }
 
-export function builtInHosts(): Hosts {
+export function builtInHosts(): ProcessHosts {
   return processApp().hosts;
-}
-
-export function hostsOf(app: { readonly hosts: Hosts } | undefined): Hosts {
-  return app?.hosts ?? builtInHosts();
 }
 
 export function installProcessApp(app: ProcessApp): () => void {

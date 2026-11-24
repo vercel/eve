@@ -275,8 +275,9 @@
  *             function (a file with a `"use step"` directive) reads
  *             `processApp()` or `startedApp()`, and it passes the app down. The process app's
  *             other internals have one owner module each, and everything
- *             else uses that owner's accessor (`hostsOf(app)`,
- *             `getInstrumentationRuntime()`, ...). The process-app values of
+ *             else uses that owner's accessor (`app.hosts.routes` or
+ *             `app.hosts.streams`, `getInstrumentationRuntime()`, ...), or
+ *             `builtInHosts()` only in a process with no app. The process-app values of
  *             `#runtime/app.js` appear only in step functions, the boot
  *             lifecycle, the owners, and test helpers, and the `eve.app` key
  *             only in `#runtime/app.js` and test helpers. Type imports and
@@ -1799,7 +1800,7 @@ const NAMESPACE_OR_DYNAMIC_IMPORT_RE =
 function checkRule72(posix, content, violations) {
   if (!posix.startsWith(EVE_SRC) || posix.endsWith(".test.ts")) return;
   if (posix.startsWith(`${EVE_SRC}internal/testing/`)) return;
-  const message = `reaches the process app directly. Receive the app from your caller (a route, a boot phase, or the turn's context through \`requireApp(ctx)\`) and read its platform as \`app.platform\`; only a Workflow step function (a file with a \`"use step"\` directive) reads \`processApp()\` or \`startedApp()\`, and it passes the app down. Other internals of the app have one owner module each; use its accessor (\`hostsOf(app)\`, \`getInstrumentationRuntime()\`, \`getActiveRuntimeSession()\`), or add an internal and its owner to \`PROCESS_APP_OWNERS\`. Type imports from \`${PROCESS_APP_MODULE}\` are fine.`;
+  const message = `reaches the process app directly. Receive the app from your caller (a route, a boot phase, or the turn's context through \`requireApp(ctx)\`) and read its platform as \`app.platform\`; only a Workflow step function (a file with a \`"use step"\` directive) reads \`processApp()\` or \`startedApp()\`, and it passes the app down. Other internals of the app have one owner module each; use its accessor (\`app.hosts.routes\` or \`app.hosts.streams\`, \`getInstrumentationRuntime()\`, \`getActiveRuntimeSession()\`), or add an internal and its owner to \`PROCESS_APP_OWNERS\`. Only code in a process with no app reads \`builtInHosts()\`. Type imports from \`${PROCESS_APP_MODULE}\` are fine.`;
   const lineOf = (index) => content.slice(0, index).split("\n").length;
   const key = content.indexOf('Symbol.for("eve.app")');
   if (key >= 0 && posix !== `${EVE_SRC}runtime/app.ts`)

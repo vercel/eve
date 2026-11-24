@@ -3,7 +3,11 @@ import { createLifetime } from "#runtime/lifetime.js";
 import { testEntities } from "#internal/testing/test-platform.js";
 import type { Runtime } from "#channel/types.js";
 import { hookAddress, type Durable } from "#execution/durable.js";
-import { registerHost, registerSessionEventStore, resumeRoutedHook } from "#execution/hosts.js";
+import {
+  registerHostedRoute,
+  registerSessionEventStore,
+  resumeRoutedHook,
+} from "#execution/hosts.js";
 import { IN_PROCESS_DEPLOYMENT_ID, createInProcessHost } from "#execution/in-process/host.js";
 import type { InProcessHostOptions } from "#execution/in-process/host.js";
 import type { WorkflowFunction } from "#execution/in-process/runs.js";
@@ -227,7 +231,7 @@ export function createStoreEngine(
   };
 
   releases.push(
-    registerHost(hosts, {
+    registerHostedRoute(hosts, {
       async deliver(token, payload) {
         const to = hookAddress(token);
         if ((await engine.durable.sessionFor(to)) === undefined) return undefined;

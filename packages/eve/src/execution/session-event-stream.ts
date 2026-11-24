@@ -1,6 +1,6 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { parseNdjsonStream } from "#execution/ndjson-stream.js";
-import { sessionEventStore, type Hosts } from "#execution/hosts.js";
+import { sessionEventStore, type StreamHosts } from "#execution/hosts.js";
 import { createEventReader } from "#protocol/session-lines.js";
 import { createV26HistoryReader, type V26HistoryReader } from "#execution/v26-history.js";
 import { isV26Line } from "#protocol/v26-lines.js";
@@ -19,7 +19,7 @@ export interface PositionedLine {
 }
 
 export function readSessionRecords(
-  hosts: Hosts,
+  hosts: StreamHosts,
   sessionId: string,
   startIndex?: number,
 ): ReadableStream<unknown> {
@@ -29,7 +29,7 @@ export function readSessionRecords(
 }
 
 export function readSessionEventStream(
-  hosts: Hosts,
+  hosts: StreamHosts,
   sessionId: string,
   startIndex?: number,
   signal?: AbortSignal,
@@ -63,7 +63,7 @@ export function readSessionEventStream(
 }
 
 export function readSessionEventHistory(
-  hosts: Hosts,
+  hosts: StreamHosts,
   sessionId: string,
   startIndex?: number,
   signal?: AbortSignal,
@@ -82,7 +82,7 @@ export function readSessionEventHistory(
 }
 
 export function readSessionRecordHistory(
-  hosts: Hosts,
+  hosts: StreamHosts,
   sessionId: string,
   startIndex?: number,
 ): ReadableStream<unknown> {
@@ -117,16 +117,22 @@ export function readSessionRecordHistory(
   });
 }
 
-export async function readSessionStreamTailIndex(hosts: Hosts, sessionId: string): Promise<number> {
+export async function readSessionStreamTailIndex(
+  hosts: StreamHosts,
+  sessionId: string,
+): Promise<number> {
   return await sessionEventStore(hosts, sessionId).tail(sessionId);
 }
 
-export async function assertSessionHistoryReadable(hosts: Hosts, sessionId: string): Promise<void> {
+export async function assertSessionHistoryReadable(
+  hosts: StreamHosts,
+  sessionId: string,
+): Promise<void> {
   await sessionEventStore(hosts, sessionId).assertReadable(sessionId);
 }
 
 export async function* streamSessionLines(
-  hosts: Hosts,
+  hosts: StreamHosts,
   sessionId: string,
   options: SessionEventStreamOptions = {},
 ): AsyncGenerator<PositionedLine, void, undefined> {
@@ -162,7 +168,7 @@ export async function* streamSessionLines(
 }
 
 export async function* streamSessionEvents(
-  hosts: Hosts,
+  hosts: StreamHosts,
   sessionId: string,
   options: SessionEventStreamOptions = {},
 ): AsyncGenerator<SessionStreamEvent, void, undefined> {
@@ -179,7 +185,7 @@ export async function* streamSessionEvents(
 }
 
 async function readV26Prefix(
-  hosts: Hosts,
+  hosts: StreamHosts,
   history: V26HistoryReader,
   sessionId: string,
   end: number,

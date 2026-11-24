@@ -5,6 +5,7 @@ import { closeWorkflowWorld, installWorkflowWorld } from "#execution/install-wor
 import { WORKFLOW_ENGINE_BUILD } from "#execution/workflow-host/build.js";
 import { installWorkflowEngine } from "#execution/workflow-host/host.js";
 import { applyWorkflowSpecVersionDefault } from "#internal/workflow/spec-version-default.js";
+import { builtInHosts } from "#runtime/app.js";
 import { registerCleanup, type Lifetime } from "#runtime/lifetime.js";
 
 export interface WorkflowEngineOptions {
@@ -39,7 +40,7 @@ export function workflowEngine(options: WorkflowEngineOptions): DurableEngine {
         }
         const world = await options.world(app);
         await installWorkflowWorld({ packageName: options.configuredWorld, world });
-        const durable = installWorkflowEngine(app.hosts, app.platform);
+        const durable = installWorkflowEngine(builtInHosts(), app.platform);
         registerCleanup(app.lifetime, release);
         registerCleanup(app.lifetime, closeWorkflowWorld);
         return durable;

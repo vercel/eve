@@ -11,7 +11,7 @@ import type { App } from "#runtime/app.js";
 const config = {
   publicUrl: "https://agents.internal.example.com",
   deploymentId: "build-2026-11-20.3",
-  build: { deployedAt: "2026-11-20T00:00:00.000Z", gitBranch: "main", gitSha: "abc1234" },
+  revision: { deployedAt: "2026-11-20T00:00:00.000Z", gitBranch: "main", gitSha: "abc1234" },
   gatewayApiKey: "host-provided-key",
 };
 const publicHost = new URL(config.publicUrl).host;
@@ -21,7 +21,7 @@ const selfHostedPlatform = definePlatform({
   deployment: () => ({
     environment: () => "production",
     deploymentId: () => config.deploymentId,
-    build: () => config.build,
+    revision: () => config.revision,
     productionHost: () => publicHost,
     publicHost: () => publicHost,
     scope: () => ({
@@ -50,10 +50,10 @@ afterAll(() => {
 });
 
 describe("a self-hosted platform given to eve", () => {
-  it("supplies the runtime identity's build", async () => {
+  it("supplies the runtime identity's build from its revision", async () => {
     const { buildRuntimeIdentity } = await import("#execution/node-step.js");
     expect(buildRuntimeIdentity({ id: "agent", name: "agent" }, platform).build).toEqual(
-      config.build,
+      config.revision,
     );
   });
 

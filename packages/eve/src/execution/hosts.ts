@@ -13,6 +13,7 @@ import {
 } from "#execution/session-inbox/address.js";
 import type { AuthorizationCallbackPayload } from "#execution/session-inbox/inbox.js";
 import type { SessionEventStore } from "#execution/session-event-store.js";
+import { registerCleanup, type Lifetime } from "#runtime/lifetime.js";
 import { HookNotFoundError, isRunNotFound, isRunTargetGone } from "#shared/run-errors.js";
 
 export interface HostedRoute {
@@ -30,63 +31,109 @@ export interface SignInCallbacks {
   readonly deliver: ResumeAddress;
 }
 
-export interface ProcessEngine {
-  readonly name: string;
-  readonly durable: Durable;
+export interface EngineRoutes {
   readonly resume: ResumeAddress;
-  deploymentId(): Promise<string>;
   runStatus(runId: string): Promise<string>;
   cancelRun(runId: string, reason: string): Promise<void>;
-  readonly sessionEvents: SessionEventStore;
   stepAttempt(): number | undefined;
   callbackBaseUrl(): string | undefined;
 }
 
-export interface Hosts {
-  readonly routes: Set<HostedRoute>;
-  readonly sessionEventStores: Map<string, SessionEventStore>;
+export interface HookRoutes {
+  readonly hosted: Set<HostedRoute>;
+  engine?: EngineRoutes;
+}
+
+export interface SessionStreams {
+  readonly bySession: Map<string, SessionEventStore>;
+  engine?: SessionEventStore;
+}
+
+export interface AppHosts {
+  readonly routes: HookRoutes;
+  readonly streams: SessionStreams;
+}
+
+export type RouteHosts = Pick<AppHosts, "routes">;
+export type StreamHosts = Pick<AppHosts, "streams">;
+
+export interface ProcessEngine extends EngineRoutes {
+  readonly name: string;
+  readonly durable: Durable;
+  readonly sessionEvents: SessionEventStore;
+  deploymentId(): Promise<string>;
+}
+
+export interface ProcessHosts extends AppHosts {
   engine?: ProcessEngine;
 }
 
-export function registerHost(hosts: Hosts, route: HostedRoute): () => void {
-  hosts.routes.add(route);
-  return () => {
-    hosts.routes.delete(route);
+export function createProcessHosts(): ProcessHosts {
+  return { routes: { hosted: new Set() }, streams: { bySession: new Map() } };
+}
+
+export interface EngineHosting {
+  route(route: HostedRoute): void;
+  session(sessionId: string, events: SessionEventStore): void;
+}
+
+export function hostEngine(app: {
+  readonly hosts: AppHosts;
+  readonly lifetime: Lifetime;
+}): EngineHosting {
+  return {
+    route: (route) => registerCleanup(app.lifetime, registerHostedRoute(app.hosts, route)),
+    session: (sessionId, events) =>
+      registerCleanup(app.lifetime, registerSessionEventStore(app.hosts, sessionId, events)),
   };
 }
 
-export function installProcessEngine(hosts: Hosts, engine: ProcessEngine): ProcessEngine {
+export function registerHostedRoute({ routes }: RouteHosts, route: HostedRoute): () => void {
+  routes.hosted.add(route);
+  return () => {
+    routes.hosted.delete(route);
+  };
+}
+
+export function installProcessEngine(hosts: ProcessHosts, engine: ProcessEngine): ProcessEngine {
   hosts.engine ??= engine;
   if (hosts.engine.name !== engine.name)
     throw new Error(
       `This realm's durable engine is "${hosts.engine.name}"; "${engine.name}" can't replace it.`,
     );
+  hosts.routes.engine = hosts.engine;
+  hosts.streams.engine = hosts.engine.sessionEvents;
   return hosts.engine;
 }
 
-export function installedProcessEngine(hosts: Hosts): ProcessEngine | undefined {
+export function replaceProcessEngine(hosts: ProcessHosts, engine: ProcessEngine): ProcessEngine {
+  if (hosts.engine?.name === engine.name) hosts.engine = engine;
+  return installProcessEngine(hosts, engine);
+}
+
+export function installedProcessEngine(hosts: ProcessHosts): ProcessEngine | undefined {
   return hosts.engine;
 }
 
-function engineFor(hosts: Hosts, id: string): ProcessEngine {
-  const { engine } = hosts;
+function engineFor({ routes }: RouteHosts, id: string): EngineRoutes {
+  const { engine } = routes;
   if (engine === undefined) throw new HookNotFoundError(id);
   return engine;
 }
 
-export function installedDurable(hosts: Hosts): Durable | undefined {
+export function installedDurable(hosts: ProcessHosts): Durable | undefined {
   return hosts.engine?.durable;
 }
 
 export function sessionSignInCallbacks(
-  hosts: Hosts,
+  { routes }: RouteHosts,
   sessionId: string,
 ): SignInCallbacks | undefined {
-  for (const route of hosts.routes) {
+  for (const route of routes.hosted) {
     const callbacks = route.signInCallbacks?.(sessionId);
     if (callbacks !== undefined) return callbacks;
   }
-  const { engine } = hosts;
+  const { engine } = routes;
   const callbackBaseUrl = engine?.callbackBaseUrl();
   return engine === undefined || callbackBaseUrl === undefined
     ? undefined
@@ -97,20 +144,20 @@ export function isRetriedStep(meta: { readonly attempt: number }): boolean {
   return meta.attempt > 1;
 }
 
-export function stepAttempt(hosts: Hosts): number | undefined {
-  for (const route of hosts.routes) {
+export function stepAttempt({ routes }: RouteHosts): number | undefined {
+  for (const route of routes.hosted) {
     const attempt = route.stepAttempt?.();
     if (attempt !== undefined) return attempt;
   }
-  return hosts.engine?.stepAttempt();
+  return routes.engine?.stepAttempt();
 }
 
 export async function deliverToHostedHook(
-  hosts: Hosts,
+  { routes }: RouteHosts,
   token: string,
   payload: unknown,
 ): Promise<boolean> {
-  for (const route of hosts.routes) {
+  for (const route of routes.hosted) {
     const delivered = await route.deliver(token, payload);
     if (delivered === "delivered") return true;
     if (delivered === "gone") throw new HookNotFoundError(token);
@@ -125,7 +172,7 @@ export function signInDelivery(
 }
 
 export async function resumeRoutedHook(
-  hosts: Hosts,
+  hosts: RouteHosts,
   token: string,
   payload: unknown,
 ): Promise<void> {
@@ -134,7 +181,7 @@ export async function resumeRoutedHook(
 }
 
 export async function resumeRoutedSessionInbox(
-  hosts: Hosts,
+  hosts: RouteHosts,
   address: string | SessionInboxAddress,
   delivery: DeliverHookPayload,
 ): Promise<void> {
@@ -143,8 +190,8 @@ export async function resumeRoutedSessionInbox(
     await engineFor(hosts, token).resume(sessionAddress(address), delivery);
 }
 
-function hostedRunEnded(hosts: Hosts, runId: string): boolean | undefined {
-  for (const route of hosts.routes) {
+function hostedRunEnded({ routes }: RouteHosts, runId: string): boolean | undefined {
+  for (const route of routes.hosted) {
     const ended = route.runEnded(runId);
     if (ended !== undefined) return ended;
   }
@@ -155,15 +202,15 @@ function isRunning(status: string): boolean {
   return status === "pending" || status === "running";
 }
 
-export async function routedRunEnded(hosts: Hosts, runId: string): Promise<boolean> {
+export async function routedRunEnded(hosts: RouteHosts, runId: string): Promise<boolean> {
   const hosted = hostedRunEnded(hosts, runId);
   if (hosted !== undefined) return hosted;
-  const { engine } = hosts;
+  const { engine } = hosts.routes;
   return engine === undefined ? true : await durableRunEnded(engine.runStatus, runId);
 }
 
 export async function durableRunEnded(
-  runStatus: ProcessEngine["runStatus"],
+  runStatus: EngineRoutes["runStatus"],
   runId: string,
 ): Promise<boolean> {
   try {
@@ -175,7 +222,7 @@ export async function durableRunEnded(
   }
 }
 
-export async function routedRunLive(hosts: Hosts, runId: string): Promise<boolean> {
+export async function routedRunLive(hosts: RouteHosts, runId: string): Promise<boolean> {
   const hosted = hostedRunEnded(hosts, runId);
   if (hosted !== undefined) return !hosted;
   try {
@@ -186,11 +233,11 @@ export async function routedRunLive(hosts: Hosts, runId: string): Promise<boolea
 }
 
 export async function cancelRoutedRun(
-  hosts: Hosts,
+  hosts: RouteHosts,
   runId: string,
   reason: string,
 ): Promise<boolean> {
-  for (const route of hosts.routes) {
+  for (const route of hosts.routes.hosted) {
     const cancelled = route.cancelRun(runId, reason);
     if (cancelled !== undefined) return cancelled;
   }
@@ -199,23 +246,23 @@ export async function cancelRoutedRun(
 }
 
 export function registerSessionEventStore(
-  hosts: Hosts,
+  { streams }: StreamHosts,
   sessionId: string,
   store: SessionEventStore,
 ): () => void {
-  const { sessionEventStores } = hosts;
-  if (sessionEventStores.has(sessionId))
+  const { bySession } = streams;
+  if (bySession.has(sessionId))
     throw new Error(`Session "${sessionId}" already has a session event store.`);
-  sessionEventStores.set(sessionId, store);
+  bySession.set(sessionId, store);
   return () => {
-    if (sessionEventStores.get(sessionId) === store) sessionEventStores.delete(sessionId);
+    if (bySession.get(sessionId) === store) bySession.delete(sessionId);
   };
 }
 
-export function sessionEventStore(hosts: Hosts, sessionId: string): SessionEventStore {
-  const registered = hosts.sessionEventStores.get(sessionId);
+export function sessionEventStore({ streams }: StreamHosts, sessionId: string): SessionEventStore {
+  const registered = streams.bySession.get(sessionId);
   if (registered !== undefined) return registered;
-  const { engine } = hosts;
-  if (engine === undefined) throw new Error(`No host in this realm holds session "${sessionId}".`);
-  return engine.sessionEvents;
+  if (streams.engine === undefined)
+    throw new Error(`No host in this realm holds session "${sessionId}".`);
+  return streams.engine;
 }

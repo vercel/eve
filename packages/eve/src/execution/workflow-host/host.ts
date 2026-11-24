@@ -1,7 +1,12 @@
 import { getStepMetadata, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 import { RunExpiredError, WorkflowRunNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { readStreamLines, type Durable, type SessionStatus } from "#execution/durable.js";
-import { installProcessEngine, type Hosts, type ProcessEngine } from "#execution/hosts.js";
+import {
+  installProcessEngine,
+  replaceProcessEngine,
+  type ProcessEngine,
+  type ProcessHosts,
+} from "#execution/hosts.js";
 import type { SessionEventStore } from "#execution/session-event-store.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import {
@@ -172,12 +177,10 @@ export function fallbackWorkflowEngine(): ProcessEngine {
   return workflowProcessEngine({ now: processPlatformNow, resolved: processPlatform });
 }
 
-export function installWorkflowEngine(hosts: Hosts, platform: Entities): Durable {
-  const engine = workflowProcessEngine(APP_PLATFORM(platform));
-  if (hosts.engine?.name === engine.name) hosts.engine = engine;
-  return installProcessEngine(hosts, engine).durable;
+export function installWorkflowEngine(hosts: ProcessHosts, platform: Entities): Durable {
+  return replaceProcessEngine(hosts, workflowProcessEngine(APP_PLATFORM(platform))).durable;
 }
 
-export function installFallbackWorkflowEngine(hosts: Hosts): void {
+export function installFallbackWorkflowEngine(hosts: ProcessHosts): void {
   installProcessEngine(hosts, fallbackWorkflowEngine());
 }

@@ -2,10 +2,12 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   cancelRoutedRun,
+  createProcessHosts,
+  hostEngine,
   installProcessEngine,
   installedDurable,
   installedProcessEngine,
-  registerHost,
+  registerHostedRoute,
   registerSessionEventStore,
   resumeRoutedHook,
   resumeRoutedSessionInbox,
@@ -15,8 +17,8 @@ import {
   sessionSignInCallbacks,
   stepAttempt,
   type HostedRoute,
-  type Hosts,
   type ProcessEngine,
+  type ProcessHosts,
   type ResumeAddress,
 } from "#execution/hosts.js";
 import { decodeDeliveryAddress } from "#execution/durable.js";
@@ -30,6 +32,7 @@ import {
   sessionInboxHookToken,
 } from "#execution/session-inbox/address.js";
 import type { SessionEventStore } from "#execution/session-event-store.js";
+import { createLifetime, endLifetime } from "#runtime/lifetime.js";
 import { HookNotFoundError } from "#shared/run-errors.js";
 
 function fixedStore(records: readonly unknown[]): SessionEventStore {
@@ -97,9 +100,9 @@ function processEngine(name: string): ProcessEngine {
 }
 
 describe("the hosts in a realm", () => {
-  let hosts: Hosts;
+  let hosts: ProcessHosts;
   beforeEach(() => {
-    hosts = { routes: new Set(), sessionEventStores: new Map() };
+    hosts = createProcessHosts();
     durable.reached = [];
     durable.attempt = undefined;
     durable.callbackBaseUrl = undefined;
@@ -140,7 +143,7 @@ describe("the hosts in a realm", () => {
   it("asks the route running a session how it's called back, and the durable host for others", () => {
     installProcessEngine(hosts, processEngine("durable"));
     const deliver: ResumeAddress = async () => {};
-    const release = registerHost(hosts, {
+    const release = registerHostedRoute(hosts, {
       deliver: async () => undefined,
       runEnded: () => undefined,
       cancelRun: () => undefined,
@@ -183,7 +186,7 @@ describe("the hosts in a realm", () => {
       cancelRun: (runId) =>
         runId === "run-held" ? true : runId === "run-held-ended" ? false : undefined,
     };
-    const release = registerHost(hosts, route);
+    const release = registerHostedRoute(hosts, route);
     try {
       await resumeRoutedHook(hosts, "hook-held", {});
       await expect(resumeRoutedHook(hosts, "hook-gone", {})).rejects.toThrow(HookNotFoundError);
@@ -246,5 +249,31 @@ describe("the hosts in a realm", () => {
     } finally {
       release();
     }
+  });
+
+  it("keeps what an engine hosts until the app's lifetime ends", async () => {
+    const lifetime = createLifetime();
+    const engine = hostEngine({ hosts, lifetime });
+    const reached: string[] = [];
+    engine.route({
+      deliver: async (token) => {
+        reached.push(token);
+        return "delivered";
+      },
+      runEnded: () => undefined,
+      cancelRun: () => undefined,
+    });
+    const store = fixedStore([{ type: "session.started" }]);
+    engine.session("session-alice", store);
+
+    await resumeRoutedHook(hosts, "hook-alice", {});
+    expect(reached).toEqual(["hook-alice"]);
+    expect(sessionEventStore(hosts, "session-alice")).toBe(store);
+
+    await endLifetime(lifetime);
+    await expect(resumeRoutedHook(hosts, "hook-alice", {})).rejects.toThrow(HookNotFoundError);
+    expect(() => sessionEventStore(hosts, "session-alice")).toThrow(
+      'No host in this realm holds session "session-alice".',
+    );
   });
 });

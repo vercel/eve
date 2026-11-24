@@ -3,14 +3,14 @@ import type {
   WorkflowToolRunControlMessage,
 } from "#execution/tools/workflow/messages.js";
 import type { WorkflowAskRoute } from "#harness/hitl/relays.js";
-import { resumeRoutedHook, type Hosts } from "#execution/hosts.js";
+import { resumeRoutedHook, type RouteHosts } from "#execution/hosts.js";
 import type { Answer } from "#shared/input.js";
 import type { Principal } from "#protocol/session-events/envelope.js";
 
 export { principalOf } from "#execution/session/delivery-facts.js";
 
 export async function sendWorkflowAskAnswers(
-  hosts: Hosts,
+  hosts: RouteHosts,
   route: WorkflowAskRoute,
   responses: readonly Answer[] | undefined,
   responder?: Principal,

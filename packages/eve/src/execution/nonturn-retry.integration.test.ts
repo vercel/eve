@@ -1,6 +1,6 @@
 import { builtInHosts } from "#runtime/app.js";
 import { expect, it, onTestFinished } from "vitest";
-import { registerHost, registerSessionEventStore } from "#execution/hosts.js";
+import { registerHostedRoute, registerSessionEventStore } from "#execution/hosts.js";
 import { createMemorySessionEventStore } from "#execution/in-process/session-event-store.js";
 import { createStepAttempts } from "#execution/in-process/step-attempts.js";
 import { streamSessionEvents } from "#execution/session-event-stream.js";
@@ -34,7 +34,7 @@ function sessionSteps() {
   const attempts = createStepAttempts(undefined);
   const releases = [
     registerSessionEventStore(builtInHosts(), sessionId, lines),
-    registerHost(builtInHosts(), {
+    registerHostedRoute(builtInHosts(), {
       deliver: async () => undefined,
       runEnded: () => undefined,
       cancelRun: () => undefined,

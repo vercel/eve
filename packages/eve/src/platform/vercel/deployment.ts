@@ -1,4 +1,4 @@
-import type { Deployment, DeploymentBuild } from "#platform/entities.js";
+import type { Deployment, DeploymentRevision } from "#platform/entities.js";
 import { isVercelEnvironment } from "#platform/vercel/environment.js";
 import { resolveVercelProjectIdFromEnvironment } from "#platform/vercel/project.js";
 
@@ -14,7 +14,7 @@ export function vercelEnvironmentName(): string | undefined {
   return readTrimmed("VERCEL_TARGET_ENV") ?? readTrimmed("VERCEL_ENV");
 }
 
-function vercelDeploymentBuild(): DeploymentBuild | undefined {
+function vercelDeploymentRevision(): DeploymentRevision | undefined {
   const gitSha = readTrimmed("VERCEL_GIT_COMMIT_SHA");
   const gitBranch = readTrimmed("VERCEL_GIT_COMMIT_REF");
   const deployedAt = readTrimmed("VERCEL_DEPLOYMENT_CREATED_AT");
@@ -43,7 +43,7 @@ export const vercelDeployment = {
       process.env.VERCEL === "1" ? readTrimmed("VERCEL_DEPLOYMENT_ID") : undefined;
     return deploymentId === undefined ? {} : { vercelDeploymentId: deploymentId };
   },
-  build: vercelDeploymentBuild,
+  revision: vercelDeploymentRevision,
   productionHost: () => readRaw("VERCEL_PROJECT_PRODUCTION_URL"),
   publicHost: () => readRaw("VERCEL_PROJECT_PRODUCTION_URL") ?? readRaw("VERCEL_URL"),
   localDevelopment: () => isVercelEnvironment() && process.env.VERCEL_ENV === "development",
@@ -53,7 +53,7 @@ export const vercelDeployment = {
     const environment = vercelEnvironmentName() ?? "production";
     const variant =
       environment === "preview"
-        ? vercelDeploymentBuild()?.gitBranch ||
+        ? vercelDeploymentRevision()?.gitBranch ||
           readTrimmed("VERCEL_DEPLOYMENT_ID") ||
           readRaw("VERCEL_URL")?.trim() ||
           "unknown-preview"

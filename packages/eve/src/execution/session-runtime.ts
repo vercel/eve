@@ -30,7 +30,7 @@ import {
   readSessionRecords,
   readSessionStreamTailIndex,
 } from "#execution/session-event-stream.js";
-import type { Hosts } from "#execution/hosts.js";
+import type { StreamHosts } from "#execution/hosts.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { SessionPredecessor } from "#protocol/session-events/families/session.js";
 import { runtimeNodeId } from "#runtime/sessions/session-agent.js";
@@ -54,7 +54,7 @@ export function sessionStrandedError(
 }
 
 function sessionHandle(
-  hosts: Hosts,
+  hosts: StreamHosts,
   sessionId: string,
   deliveryId: string | undefined,
   claimedContinuation?: boolean,
@@ -73,7 +73,7 @@ function sessionHandle(
 
 export function sessionRuntime(
   durable: Durable,
-  hosts: Hosts,
+  hosts: StreamHosts,
   config: SessionRuntimeConfig,
 ): Runtime {
   const startSession = async (

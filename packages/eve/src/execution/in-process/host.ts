@@ -17,11 +17,12 @@ import {
   type SessionStartResult,
 } from "#execution/durable.js";
 import {
-  registerHost,
+  registerHostedRoute,
   resumeRoutedHook,
   registerSessionEventStore,
   resumeRoutedSessionInbox,
-  type Hosts,
+  type AppHosts,
+  type RouteHosts,
   type ResumeAddress,
   type SignInCallbacks,
 } from "#execution/hosts.js";
@@ -82,7 +83,7 @@ const NO_STEP_RUNTIME: Runtime = {
   resolveContinuation: async () => unavailable("Resolving another session"),
 };
 
-function deliverRoutedOn(hosts: Hosts): ResumeAddress {
+function deliverRoutedOn(hosts: RouteHosts): ResumeAddress {
   return async (to, payload) => {
     const address = decodeDeliveryAddress(to);
     if (address.kind === "hook") return await resumeRoutedHook(hosts, address.token, payload);
@@ -108,7 +109,7 @@ export interface InProcessHostOptions {
 
 export interface InProcessHost {
   readonly deploymentId: string;
-  readonly hosts: Hosts;
+  readonly hosts: AppHosts;
   readonly lines: MemorySessionEventStore;
   readonly inboxes: MemoryInboxRegistry;
   readonly runs: InProcessRuns;
@@ -319,7 +320,7 @@ export function createInProcessHost(
   };
 
   releases.push(
-    registerHost(hosts, {
+    registerHostedRoute(hosts, {
       async deliver(token, payload) {
         const delivery = await inboxes.deliver(logicalSessionInboxToken(token) ?? token, payload);
         return delivery?.kind;

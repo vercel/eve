@@ -1,11 +1,10 @@
 import type { Durable, EngineApp } from "#execution/durable.js";
-import { registerSessionEventStore } from "#execution/hosts.js";
+import { hostEngine } from "#execution/hosts.js";
 import type { SessionEventStore } from "#execution/session-event-store.js";
 import type { SessionStepCall } from "#execution/session/steps.js";
 import { definePlatform } from "#platform/declaration.js";
 import { sessionSteps, storeDurable, type StoreDurable } from "#platform/engine.js";
 import type { App } from "#runtime/app.js";
-import { registerCleanup } from "#runtime/lifetime.js";
 import { createUlid } from "#shared/ulid.js";
 
 import { createMemorySessionStore } from "./session-host/memory-session-store.js";
@@ -13,7 +12,7 @@ import { createMemorySessionStore } from "./session-host/memory-session-store.js
 export interface StorePlatformContext {
   readonly deploymentId: string;
   readonly sessionPrefix: string;
-  readonly build: {
+  readonly revision: {
     readonly deployedAt: string;
     readonly gitBranch: string;
     readonly gitSha: string;
@@ -24,7 +23,7 @@ export default definePlatform<StorePlatformContext>({
   context: async () => ({
     deploymentId: "dpl_alice_store",
     sessionPrefix: "alice_",
-    build: {
+    revision: {
       deployedAt: "2026-11-23T09:30:00.000Z",
       gitBranch: "alice/store-engine",
       gitSha: "a11ce5702e",
@@ -36,13 +35,14 @@ export default definePlatform<StorePlatformContext>({
     productionHost: () => undefined,
     publicHost: () => undefined,
     scope: () => undefined,
-    build: () => context.build,
+    revision: () => context.revision,
   }),
   durable: () => ({ start: startMemoryStoreEngine }),
 });
 
 function startMemoryStoreEngine(app: EngineApp, context: StorePlatformContext): Durable {
   const store = createMemorySessionStore();
+  const hosting = hostEngine(app);
   const encoder = new TextEncoder();
   const kept = new Map<string, unknown>();
   const known = new Set<string>();
@@ -108,10 +108,7 @@ function startMemoryStoreEngine(app: EngineApp, context: StorePlatformContext): 
   const wake = async (sessionId: string): Promise<void> => {
     if (!known.has(sessionId)) {
       known.add(sessionId);
-      registerCleanup(
-        app.lifetime,
-        registerSessionEventStore(app.hosts, sessionId, events(sessionId)),
-      );
+      hosting.session(sessionId, events(sessionId));
     }
     if (running.has(sessionId)) {
       woken.add(sessionId);

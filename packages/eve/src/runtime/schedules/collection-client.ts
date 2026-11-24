@@ -1,9 +1,9 @@
-import { appOf, currentApp } from "#context/app.js";
-import { hostsOf } from "#runtime/app.js";
+import { currentApp } from "#context/app.js";
+import { builtInHosts } from "#runtime/app.js";
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import { contextStorage, loadContext } from "#context/container.js";
+import { loadContext } from "#context/container.js";
 import { createScheduleProviderContext } from "#runtime/schedules/dispatch-occurrence.js";
 import { requireCompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { Runtime } from "#channel/types.js";
@@ -126,7 +126,7 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
       bundle: () => requireCompiledBundle(loadContext()),
       collection: callContext.collection,
       runtime: () =>
-        installedDurable(hostsOf(appOf(contextStorage.getStore()))) === undefined
+        installedDurable(builtInHosts()) === undefined
           ? NO_SCHEDULED_RUNS
           : createWorkflowRuntime({
               compiledArtifactsSource: requireCompiledBundle(loadContext()).compiledArtifactsSource,

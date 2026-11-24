@@ -27,7 +27,7 @@ describe("the app of a step", () => {
     const process = createProcessApp();
     const app = { platform: {} } as App;
     process.started = app;
-    Object.assign(process.hosts, { engine: { stepAttempt: () => attempt } });
+    Object.assign(process.hosts.routes, { engine: { stepAttempt: () => attempt } });
     restore = installProcessApp(process);
     return app;
   }
