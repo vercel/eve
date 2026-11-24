@@ -632,6 +632,17 @@ describe("createDevelopmentServer", () => {
     expect(pruningStopped ?? Infinity).toBeLessThan(worldClosed ?? 0);
   });
 
+  it("keeps a newer server's state record when an older server closes", async () => {
+    const startDevelopmentServer = await loadStartDevelopmentServer();
+    const server = await startDevelopmentServer("/tmp/eve-test");
+    const newer = { url: "http://localhost:3000/", pid: process.pid + 1, id: "newer-server" };
+    seedStateRecord(newer);
+
+    await server.close();
+
+    expect(readStateRecord()).toEqual(newer);
+  });
+
   it("keeps the state record when the listener fails to close", async () => {
     const startDevelopmentServer = await loadStartDevelopmentServer();
     const server = await startDevelopmentServer("/tmp/eve-test");

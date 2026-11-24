@@ -310,7 +310,10 @@ async function startNitroDevelopmentServer(
   let listenerClosed = true;
   cleanup.defer(async () => {
     if (listenerClosed) {
-      await state.remove().catch(() => {});
+      const current = await state.read().catch(() => undefined);
+      if (current?.id === serverId) {
+        await state.remove().catch(() => {});
+      }
     }
   });
   let restoreLocalDevCapabilityEnvironment: (() => void) | undefined;
