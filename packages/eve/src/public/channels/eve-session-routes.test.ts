@@ -1077,6 +1077,29 @@ describe("eve channel onMessage client context", () => {
     expect(readClientContext(input)).toBeUndefined();
   });
 
+  it("sends the response onMessage refuses a new session's message with, and creates no session", async () => {
+    const refusal = Response.json(
+      { code: "rate_limited", error: "Too many messages.", ok: false },
+      { headers: { "retry-after": "30" }, status: 429 },
+    );
+
+    const { input, response } = await create(() => refusal, { message: "hi" });
+
+    expect(response).toBe(refusal);
+    expect(input).toBeUndefined();
+  });
+
+  it("sends the response onMessage refuses a follow-up with, and sends no message", async () => {
+    const refusal = new Response(null, { status: 429 });
+
+    const { options, response } = await continueSession(async () => refusal, {
+      message: "hi again",
+    });
+
+    expect(response).toBe(refusal);
+    expect(options).toBeUndefined();
+  });
+
   it("replaces the client's context on continue requests", async () => {
     const { options, response } = await continueSession(
       (ctx) => ({ auth: defaultEveAuth(ctx), clientContext: ["Verified team: acme"] }),

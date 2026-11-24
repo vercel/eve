@@ -104,8 +104,14 @@ export type EveMessageResult = {
   readonly turnPolicy?: TurnPolicy;
 };
 
-/** Synchronous or asynchronous `onMessage` result. */
-export type EveMessageResultOrPromise = EveMessageResult | Promise<EveMessageResult>;
+/**
+ * Synchronous or asynchronous `onMessage` result: an {@link EveMessageResult} that dispatches the
+ * message, or a `Response` that refuses it.
+ */
+export type EveMessageResultOrPromise =
+  | EveMessageResult
+  | Response
+  | Promise<EveMessageResult | Response>;
 
 /**
  * Default `onMessage` auth projection: returns {@link EveHandle.caller} unchanged as the
@@ -200,7 +206,9 @@ export interface EveChannelConfig {
    * Pre-dispatch hook for inbound eve HTTP messages. Runs after route auth and body
    * parsing, before runtime dispatch. Message-free creation skips this hook and
    * parks before session initialization. The first message supplies auth and context
-   * for initialization and its first turn.
+   * for initialization and its first turn. Return a `Response` to refuse the message,
+   * such as a `429` for a caller over its rate limit: eve sends it unchanged, and
+   * creates no session and sends no message.
    */
   readonly onMessage?: (
     ctx: EveMessageContext,

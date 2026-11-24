@@ -139,7 +139,7 @@ export async function resolveOnMessage(input: {
 }): Promise<OnMessageOutcome | Response> {
   const handler = input.config.onMessage ?? defaultOnMessage;
 
-  let result: EveMessageResult;
+  let result: EveMessageResult | Response;
   try {
     const base: EveHandle = {
       caller: input.auth,
@@ -168,6 +168,7 @@ export async function resolveOnMessage(input: {
     );
   }
 
+  if (result instanceof Response) return result;
   return {
     auth: result.auth,
     clientContext: resolveTurnClientContext(result.clientContext, input.clientContext),

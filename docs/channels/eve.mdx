@@ -304,7 +304,22 @@ export default eveChannel({
 });
 ```
 
-`onMessage` must return an auth result, so every accepted message starts or continues a session. Return `title` alongside `auth` to set the session title. It applies when the message creates the session, or is the first message to one created without a message.
+`onMessage` returns an auth result, so every message it accepts starts or continues a session, or a `Response` that refuses the message. eve sends that response unchanged, and creates no session and sends no message. Use it for checks that need the caller and the message, such as a per-user rate limit:
+
+```ts title="agent/channels/eve.ts"
+async onMessage(ctx) {
+  const auth = defaultEveAuth(ctx);
+  if (await isOverRateLimit(auth)) {
+    return Response.json(
+      { ok: false, code: "rate_limited", error: "Too many messages. Try again later." },
+      { status: 429, headers: { "retry-after": "60" } },
+    );
+  }
+  return { auth };
+},
+```
+
+Return `title` alongside `auth` to set the session title. It applies when the message creates the session, or is the first message to one created without a message.
 
 ### Turn context
 
