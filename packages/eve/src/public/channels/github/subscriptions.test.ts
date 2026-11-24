@@ -519,11 +519,14 @@ describe("GitHub channel subscriptions", () => {
         privateKeyEncoding: { format: "pem", type: "pkcs8" },
         publicKeyEncoding: { format: "pem", type: "spki" },
       });
+      const botName = vi.fn<() => Promise<string>>().mockRejectedValue(new Error("unused"));
       const { fetchMock, subscribe } = subscribeTo({
+        botName,
         credentials: { appId: 42, privateKey, webhookSecret: SECRET },
         events: ["check_run"],
       });
       await expect(subscribe()).resolves.toBeUndefined();
+      expect(botName).not.toHaveBeenCalled();
       const [url, init] = fetchMock.mock.calls[0]!;
       expect(url).toBe("https://api.github.com/app");
       expect(new Headers(init?.headers).get("authorization")).toMatch(
@@ -568,6 +571,21 @@ describe("GitHub channel subscriptions", () => {
       });
       await expect(subscribe()).resolves.toBeUndefined();
       expect(fetchMock.mock.calls[0]![0]).toBe("https://api.github.com/apps/my-agent");
+    });
+
+    it("skips an empty GITHUB_APP_SLUG and falls through to botName", async () => {
+      vi.stubEnv("GITHUB_APP_SLUG", "");
+      try {
+        const { fetchMock, subscribe } = subscribeTo({
+          botName: "my-agent",
+          credentials: { installationToken: "ghs_test", webhookSecret: SECRET },
+          events: ["check_run"],
+        });
+        await expect(subscribe()).resolves.toBeUndefined();
+        expect(fetchMock.mock.calls[0]![0]).toBe("https://api.github.com/apps/my-agent");
+      } finally {
+        vi.unstubAllEnvs();
+      }
     });
 
     it("surfaces the failure of a lazy credentials.appSlug instead of reporting a missing slug", async () => {

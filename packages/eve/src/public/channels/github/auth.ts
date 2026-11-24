@@ -139,9 +139,14 @@ export async function resolveGitHubAppSlug(input: {
   readonly botName?: GitHubBotName;
   readonly credentials?: GitHubChannelCredentials;
 }): Promise<string | undefined> {
-  const source = input.credentials?.appSlug ?? process.env.GITHUB_APP_SLUG ?? input.botName;
-  const slug = typeof source === "function" ? await source() : source;
-  return slug === undefined ? undefined : normalizeBotName(slug);
+  for (const source of [input.credentials?.appSlug, process.env.GITHUB_APP_SLUG, input.botName]) {
+    const slug = typeof source === "function" ? await source() : source;
+    const normalized = slug === undefined ? undefined : normalizeBotName(slug);
+    if (normalized !== undefined) {
+      return normalized;
+    }
+  }
+  return undefined;
 }
 
 function normalizeBotName(value: string): string | undefined {

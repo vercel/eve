@@ -95,10 +95,8 @@ export async function requireAppReceivesWebhook(input: {
   try {
     received = await getGitHubAppWebhookEvents({
       api: input.api,
-      appSlug: await resolveGitHubAppSlug({
-        botName: input.botName,
-        credentials: input.credentials,
-      }),
+      appSlug: () =>
+        resolveGitHubAppSlug({ botName: input.botName, credentials: input.credentials }),
       credentials: input.credentials,
     });
   } catch (error) {

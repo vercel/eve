@@ -313,12 +313,13 @@ export async function getGitHubRepository(
 
 export async function getGitHubAppWebhookEvents(input: {
   readonly api?: GitHubApiOptions;
-  readonly appSlug: string | undefined;
+  readonly appSlug: () => Promise<string | undefined>;
   readonly credentials?: GitHubChannelCredentials;
 }): Promise<readonly string[]> {
   let response: GitHubApiResponse;
   if (input.credentials?.installationToken !== undefined) {
-    if (input.appSlug === undefined) {
+    const appSlug = await input.appSlug();
+    if (appSlug === undefined) {
       throw new Error(
         "githubChannel: the App's slug is required to read its webhook events. Set credentials.appSlug, GITHUB_APP_SLUG or botName.",
       );
@@ -327,7 +328,7 @@ export async function getGitHubAppWebhookEvents(input: {
       api: input.api,
       credentials: input.credentials,
       method: "GET",
-      path: `/apps/${encodePath(input.appSlug)}`,
+      path: `/apps/${encodePath(appSlug)}`,
     });
   } else {
     const jwt = await createGitHubAppJwt({
