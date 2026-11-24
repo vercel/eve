@@ -193,10 +193,16 @@ async function search(
       if ("unavailable" in connection) {
         if (!unavailable.some(({ connection: name }) => name === connection.unavailable.connection))
           unavailable.push(connection.unavailable);
-      } else
+      } else {
+        const known = new Set(candidates.map(({ fullName }) => fullName));
         candidates.push(
-          ...connection.candidates.filter((candidate) => inScope(candidate.fullName)),
+          ...connection.candidates.filter(
+            (candidate) =>
+              !known.has(candidate.fullName) &&
+              (connection.signIn === candidate || inScope(candidate.fullName)),
+          ),
         );
+      }
     }
   }
 
@@ -276,7 +282,7 @@ async function searchConnectionEvents(
   registry: ConnectionRegistry,
   connection: ResolvedConnectionDefinition,
 ): Promise<
-  | { readonly candidates: readonly SearchCandidate[] }
+  | { readonly candidates: readonly SearchCandidate[]; readonly signIn?: SearchCandidate }
   | { readonly unavailable: UnavailableConnection }
 > {
   const name = connection.connectionName;
@@ -287,7 +293,10 @@ async function searchConnectionEvents(
       candidates: events.map((event) => subscriptionCandidate(name, "connection", event)),
     };
   } catch (error) {
-    if (isConnectionAuthorizationRequiredError(error)) return { candidates: [] };
+    if (isConnectionAuthorizationRequiredError(error)) {
+      const signIn = signInCandidate(registry, connection);
+      return { candidates: [signIn], signIn };
+    }
     return { unavailable: { connection: name, error: listingFailureMessage(name, error) } };
   }
 }

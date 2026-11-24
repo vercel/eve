@@ -196,6 +196,9 @@ export function fakeConnection(input: {
           },
           list: async () => {
             eventListCalls.push(eventListCalls.length + 1);
+            if (connection.listing === "sign-in") {
+              throw new ConnectionAuthorizationRequiredError(input.name);
+            }
             return eventDefinitions;
           },
         },

@@ -241,6 +241,29 @@ describe("search", () => {
       expect(notion.signIns).toEqual([]);
     });
 
+    it("answers a subscriptions__ search for a connection that needs sign-in with the sign-in result", async () => {
+      const notion = fakeConnection({
+        description: "Notion pages and databases",
+        events: ["page.updated"],
+        listing: "sign-in",
+        name: "notion",
+        signIn: true,
+        tools: [connectionTool("search_pages")],
+      });
+      const search = await searchFor(tools, { connections: [notion] });
+
+      const result = await search({ query: "subscriptions__notion__" });
+
+      expect(result.results).toEqual([
+        {
+          description: "Sign in to use the Notion tools: Notion pages and databases",
+          signature: "notion(input: {}): Promise<unknown>",
+          tool: "notion",
+        },
+      ]);
+      expect(notion.signIns).toEqual([]);
+    });
+
     it("reports a connection that cannot start sign-in, and one whose tools fail to load, as unavailable", async () => {
       const logs = captureLogRecords();
       const vault = fakeConnection({ listing: "sign-in", name: "vault", tools: [] });
