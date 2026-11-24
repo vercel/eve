@@ -1,3 +1,4 @@
+import { builtInHosts } from "#runtime/app.js";
 import { describe, expect, it } from "vitest";
 
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
@@ -39,10 +40,14 @@ describe("sign-in signals in tool output", () => {
       try {
         const asked = await stream.nextUntil("first sign-in", isSignInOpened);
         await stream.nextUntil("sign-in hold", (event) => event.type === "turn.paused");
-        await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
-          kind: "authorization-callback",
-          payloads: [docsCallback(signInId(asked))],
-        });
+        await resumeRoutedHook(
+          builtInHosts(),
+          sessionInboxHookToken(sessionCommandHookToken(run.runId)),
+          {
+            kind: "authorization-callback",
+            payloads: [docsCallback(signInId(asked))],
+          },
+        );
         const resumed = await stream.nextUntil("turn after sign-in", isTurnSettled);
 
         expect(docsReads(), "Docs reads in Alice's turn").toEqual([

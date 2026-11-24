@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import { assembleEveVercelServices } from "#internal/vercel/assemble-eve-services.js";
+import { loadPlatformBuild } from "#platform/selection.js";
 import {
   findConfiguredEveServiceEntry,
   resolveServicePrefix,
@@ -62,7 +63,9 @@ async function resolveVercelOutputConfigLocation(nextRoot: string): Promise<{
   }
 
   return {
-    canWriteGeneratedOutput: vercelDirectory !== undefined || Boolean(process.env.VERCEL),
+    canWriteGeneratedOutput:
+      vercelDirectory !== undefined ||
+      (await loadPlatformBuild(nextRoot)).platformOutput?.() === true,
     outputConfigPath: join(nextRoot, VERCEL_OUTPUT_CONFIG_FILE_NAME),
     projectRoot,
   };

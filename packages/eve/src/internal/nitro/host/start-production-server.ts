@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -23,6 +24,19 @@ const WILDCARD_LISTEN_HOSTNAMES: ReadonlySet<string> = new Set(["[::]", "::", "0
 
 function resolveOutputServerEntry(appRoot: string): string {
   return join(resolve(appRoot), ".output", "server", "index.mjs");
+}
+
+async function assertBuildServesItself(appRoot: string): Promise<void> {
+  const nitroInfo = await readFile(join(appRoot, ".output", "nitro.json"), "utf8").catch(
+    () => undefined,
+  );
+  if (nitroInfo === undefined) return;
+  const { preset } = JSON.parse(nitroInfo) as { readonly preset?: unknown };
+  if (preset === "standard") {
+    throw new Error(
+      "This build has a platform entry and no server of its own. Run it with the platform's runtime instead of eve start.",
+    );
+  }
 }
 
 function readEnvironmentPort(): number | undefined {
@@ -181,6 +195,7 @@ export async function startProductionServer(
       `Missing eve build output at ${serverEntry}. Run "eve build" before "eve start".`,
     );
   }
+  await assertBuildServesItself(appRoot);
 
   await loadDevelopmentEnvironmentFiles(appRoot);
 

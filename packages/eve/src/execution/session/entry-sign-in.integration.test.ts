@@ -1,3 +1,4 @@
+import { builtInHosts } from "#runtime/app.js";
 import { describe, expect, it } from "vitest";
 
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
@@ -34,10 +35,14 @@ describe("workflowEntry sign-ins", () => {
         const asked = await stream.nextUntil("sign-in", isSignInOpened);
         await stream.nextUntil("sign-in hold", (event) => event.type === "turn.paused");
 
-        await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
-          kind: "authorization-callback",
-          payloads: [weatherCallback(signInId(asked), { error: "access_denied" })],
-        });
+        await resumeRoutedHook(
+          builtInHosts(),
+          sessionInboxHookToken(sessionCommandHookToken(run.runId)),
+          {
+            kind: "authorization-callback",
+            payloads: [weatherCallback(signInId(asked), { error: "access_denied" })],
+          },
+        );
 
         const resumed = await stream.nextUntil("resumed turn", isTurnSettled);
         expect(completeCalls()).toBe(0);
@@ -63,10 +68,14 @@ describe("workflowEntry sign-ins", () => {
       try {
         const beforeSignIn = await stream.nextUntil("sign-in", isSignInOpened);
         await stream.nextUntil("sign-in hold", (event) => event.type === "turn.paused");
-        await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
-          kind: "authorization-callback",
-          payloads: [weatherCallback(signInId(beforeSignIn))],
-        });
+        await resumeRoutedHook(
+          builtInHosts(),
+          sessionInboxHookToken(sessionCommandHookToken(run.runId)),
+          {
+            kind: "authorization-callback",
+            payloads: [weatherCallback(signInId(beforeSignIn))],
+          },
+        );
         const afterSignIn = await stream.nextUntil("turn after sign-in", isTurnSettled);
 
         const signedInAt = afterSignIn.findIndex(
@@ -111,10 +120,14 @@ describe("workflowEntry sign-ins", () => {
       try {
         const beforeSignIn = await stream.nextUntil("sign-in", isSignInOpened);
         await stream.nextUntil("sign-in hold", (event) => event.type === "turn.paused");
-        await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
-          kind: "authorization-callback",
-          payloads: [weatherCallback(signInId(beforeSignIn))],
-        });
+        await resumeRoutedHook(
+          builtInHosts(),
+          sessionInboxHookToken(sessionCommandHookToken(run.runId)),
+          {
+            kind: "authorization-callback",
+            payloads: [weatherCallback(signInId(beforeSignIn))],
+          },
+        );
         const afterSignIn = await stream.nextUntil("turn after sign-in", isTurnSettled);
 
         const events = [...beforeSignIn, ...afterSignIn];
@@ -147,7 +160,7 @@ describe("workflowEntry sign-ins", () => {
         const asked = await stream.nextUntil("sign-in", isSignInOpened);
         await stream.nextUntil("sign-in hold", (event) => event.type === "turn.paused");
 
-        await resumeRoutedHook(sessionInboxHookToken(continuationToken), {
+        await resumeRoutedHook(builtInHosts(), sessionInboxHookToken(continuationToken), {
           auth: userAuth("user-1"),
           kind: "send",
           delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),

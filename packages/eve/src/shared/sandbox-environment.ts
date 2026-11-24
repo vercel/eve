@@ -106,6 +106,14 @@ export function bindSandboxEnvironment(
   return selector;
 }
 
+export function bindLazySandboxEnvironment(
+  selector: SandboxSelector,
+  environment: () => SandboxEnvironmentIdentity,
+): SandboxSelector {
+  Object.defineProperty(selector, SELECTOR_ENVIRONMENT, { get: environment });
+  return selector;
+}
+
 export function getBoundSandboxEnvironment(value: unknown): SandboxEnvironmentIdentity | undefined {
   const environment =
     typeof value === "function" ? Reflect.get(value, SELECTOR_ENVIRONMENT) : undefined;

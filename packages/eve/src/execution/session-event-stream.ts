@@ -1,6 +1,6 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { parseNdjsonStream } from "#execution/ndjson-stream.js";
-import { sessionLineStore } from "#execution/hosts.js";
+import { sessionEventStore, type StreamHosts } from "#execution/hosts.js";
 import { createEventReader } from "#protocol/session-lines.js";
 import { createV26HistoryReader, type V26HistoryReader } from "#execution/v26-history.js";
 import { isV26Line } from "#protocol/v26-lines.js";
@@ -19,15 +19,17 @@ export interface PositionedLine {
 }
 
 export function readSessionRecords(
+  hosts: StreamHosts,
   sessionId: string,
   startIndex?: number,
 ): ReadableStream<unknown> {
   return parseNdjsonStream<unknown>(() =>
-    sessionLineStore(sessionId).readable(sessionId, startIndex),
+    sessionEventStore(hosts, sessionId).readable(sessionId, startIndex),
   );
 }
 
 export function readSessionEventStream(
+  hosts: StreamHosts,
   sessionId: string,
   startIndex?: number,
   signal?: AbortSignal,
@@ -35,7 +37,7 @@ export function readSessionEventStream(
   const cancellation = new AbortController();
   const readSignal =
     signal === undefined ? cancellation.signal : AbortSignal.any([signal, cancellation.signal]);
-  const lines = streamSessionLines(sessionId, { startIndex, signal: readSignal });
+  const lines = streamSessionLines(hosts, sessionId, { startIndex, signal: readSignal });
   const reader = createEventReader();
   return new ReadableStream<SessionStreamEvent>({
     async pull(controller) {
@@ -61,11 +63,12 @@ export function readSessionEventStream(
 }
 
 export function readSessionEventHistory(
+  hosts: StreamHosts,
   sessionId: string,
   startIndex?: number,
   signal?: AbortSignal,
 ): ReadableStream<SessionStreamEvent> {
-  const events = streamSessionEvents(sessionId, { follow: false, startIndex, signal });
+  const events = streamSessionEvents(hosts, sessionId, { follow: false, startIndex, signal });
   return new ReadableStream<SessionStreamEvent>({
     async pull(controller) {
       const next = await events.next();
@@ -79,6 +82,7 @@ export function readSessionEventHistory(
 }
 
 export function readSessionRecordHistory(
+  hosts: StreamHosts,
   sessionId: string,
   startIndex?: number,
 ): ReadableStream<unknown> {
@@ -87,10 +91,11 @@ export function readSessionRecordHistory(
   let tailIndex = -1;
   return new ReadableStream<unknown>({
     async start() {
-      tailIndex = await readSessionStreamTailIndex(sessionId);
+      tailIndex = await readSessionStreamTailIndex(hosts, sessionId);
       const requested = startIndex ?? 0;
       position = requested < 0 ? Math.max(0, tailIndex + 1 + requested) : requested;
-      if (position <= tailIndex) reader = readSessionRecords(sessionId, position).getReader();
+      if (position <= tailIndex)
+        reader = readSessionRecords(hosts, sessionId, position).getReader();
     },
     async pull(controller) {
       if (reader === undefined || position > tailIndex) {
@@ -112,15 +117,22 @@ export function readSessionRecordHistory(
   });
 }
 
-export async function readSessionStreamTailIndex(sessionId: string): Promise<number> {
-  return await sessionLineStore(sessionId).tail(sessionId);
+export async function readSessionStreamTailIndex(
+  hosts: StreamHosts,
+  sessionId: string,
+): Promise<number> {
+  return await sessionEventStore(hosts, sessionId).tail(sessionId);
 }
 
-export async function assertSessionHistoryReadable(sessionId: string): Promise<void> {
-  await sessionLineStore(sessionId).assertReadable(sessionId);
+export async function assertSessionFollowable(
+  hosts: StreamHosts,
+  sessionId: string,
+): Promise<void> {
+  await sessionEventStore(hosts, sessionId).assertFollowable(sessionId);
 }
 
 export async function* streamSessionLines(
+  hosts: StreamHosts,
   sessionId: string,
   options: SessionEventStreamOptions = {},
 ): AsyncGenerator<PositionedLine, void, undefined> {
@@ -131,12 +143,12 @@ export async function* streamSessionLines(
   let tailIndex: number | undefined;
   let startIndex = requestedStartIndex;
   if (!follow || requestedStartIndex < 0) {
-    tailIndex = await readSessionStreamTailIndex(sessionId);
+    tailIndex = await readSessionStreamTailIndex(hosts, sessionId);
     if (requestedStartIndex < 0) startIndex = Math.max(0, tailIndex + 1 + requestedStartIndex);
   }
   if (!follow && tailIndex !== undefined && startIndex > tailIndex) return;
 
-  const reader = readSessionRecords(sessionId, startIndex).getReader();
+  const reader = readSessionRecords(hosts, sessionId, startIndex).getReader();
   const cancel = () => void reader.cancel(signal?.reason).catch(() => {});
   signal?.addEventListener("abort", cancel, { once: true });
   try {
@@ -156,15 +168,16 @@ export async function* streamSessionLines(
 }
 
 export async function* streamSessionEvents(
+  hosts: StreamHosts,
   sessionId: string,
   options: SessionEventStreamOptions = {},
 ): AsyncGenerator<SessionStreamEvent, void, undefined> {
   const reader = createEventReader();
   let history: V26HistoryReader | undefined;
-  for await (const { line, position, record } of streamSessionLines(sessionId, options)) {
+  for await (const { line, position, record } of streamSessionLines(hosts, sessionId, options)) {
     if (history === undefined && isV26Line(record)) {
       history = createV26HistoryReader();
-      if (position > 0) await readV26Prefix(history, sessionId, position, options.signal);
+      if (position > 0) await readV26Prefix(hosts, history, sessionId, position, options.signal);
     }
     const read = history === undefined ? line : history.read(record, position);
     if (read !== undefined) yield* reader.read(read, position);
@@ -172,12 +185,13 @@ export async function* streamSessionEvents(
 }
 
 async function readV26Prefix(
+  hosts: StreamHosts,
   history: V26HistoryReader,
   sessionId: string,
   end: number,
   signal: AbortSignal | undefined,
 ): Promise<void> {
-  for await (const { position, record } of streamSessionLines(sessionId, {
+  for await (const { position, record } of streamSessionLines(hosts, sessionId, {
     follow: false,
     signal,
     startIndex: 0,

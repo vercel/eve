@@ -45,12 +45,11 @@ import type {
   KernelConfig,
 } from "#harness/types.js";
 import type { InstrumentationStepScope } from "#instrumentation/runtime.js";
-import { resolveInstalledPackageInfo } from "#internal/application/package.js";
+import { installedEveVersion } from "#runtime-env/package-info.js";
 import { eventsOf } from "#harness/publication.js";
 import { awaitsProviderToolResult } from "#harness/provider-tool-history.js";
 
 const environment = process.env.NODE_ENV ?? "unknown";
-const eveVersion = resolveInstalledPackageInfo().version;
 
 export function createKernel(config: KernelConfig): StepFn {
   config.instrumentation?.installAiSdkWarningLogger();
@@ -78,7 +77,12 @@ export function createKernel(config: KernelConfig): StepFn {
     };
     return (
       config.instrumentation?.runStep(
-        { environment, eveVersion, hasInput: hasStepInput(input), session: initialSession },
+        {
+          environment,
+          eveVersion: installedEveVersion(),
+          hasInput: hasStepInput(input),
+          session: initialSession,
+        },
         executeStep,
       ) ?? executeStep()
     );

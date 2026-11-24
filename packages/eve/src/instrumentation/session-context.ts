@@ -1,3 +1,4 @@
+import type { InstrumentationRuntime } from "#instrumentation/runtime.js";
 import type { AlsContext } from "#context/container.js";
 import {
   ChannelInstrumentationKey,
@@ -13,7 +14,6 @@ import {
   ConversationContextKey,
   resolveConversationContext,
 } from "#shared/conversation-context.js";
-import { resolveInstrumentationEnvironment } from "#internal/application/dev-environment.js";
 import { resolveParentLineage } from "#instrumentation/parent-lineage.js";
 import { readInstrumentationPrincipals } from "#instrumentation/principal-summary.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
@@ -22,7 +22,10 @@ import {
   resolveForwardedTraceSeed,
 } from "#shared/forwarded-trace-policy.js";
 
-export function readInstrumentationSessionContext(context: AlsContext) {
+export function readInstrumentationSessionContext(
+  context: AlsContext,
+  environment: InstrumentationRuntime["environment"],
+) {
   const storedTraceSeed = context.get(SessionTraceSeedKey);
   const resolvedTraceState = resolveForwardedTraceSeed(storedTraceSeed);
   const traceSeed =
@@ -35,7 +38,7 @@ export function readInstrumentationSessionContext(context: AlsContext) {
   const forwardedTracePolicy = readForwardedTraceAssertion(traceSeed?.forwardedTracePolicy);
   const conversation = resolveConversationContext(context.get(ConversationContextKey), {
     channelKind: instrumentation?.kind,
-    environment: resolveInstrumentationEnvironment(),
+    environment,
     forwardedTracePolicy,
     principalType: context.get(AuthKey)?.principalType,
   });

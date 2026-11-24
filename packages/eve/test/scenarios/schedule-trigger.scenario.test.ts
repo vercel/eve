@@ -23,6 +23,7 @@ import { loadResolvedCompiledSchedules } from "#runtime/schedules/resolve-schedu
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { createRuntimeSession, withRuntimeSession } from "#runtime/sessions/runtime-session.js";
 import { useTemporaryAppRoots } from "#internal/testing/use-temporary-app-roots.js";
+import { testApp } from "#internal/testing/test-platform.js";
 
 const createAppRoot = useTemporaryAppRoots();
 const APP_ROOT_OPTIONS = { packageName: "schedule-trigger-test-agent" } as const;
@@ -120,6 +121,7 @@ describe("schedule trigger end-to-end (channel-less schedules)", () => {
 
       const captured: CapturedRun[] = [];
       const dispatcher = new ScheduleDispatcher({
+        app: testApp(),
         runtime: createCapturingRuntime(captured),
         channels: bundle.graph.root.channels,
       });
@@ -177,6 +179,7 @@ describe("schedule trigger end-to-end (channel-less schedules)", () => {
 
       const captured: CapturedRun[] = [];
       const dispatcher = new ScheduleDispatcher({
+        app: testApp(),
         runtime: createCapturingRuntime(captured),
         channels: bundle.graph.root.channels,
       });
@@ -253,6 +256,7 @@ describe("schedule trigger end-to-end (channel-less schedules)", () => {
 
       const captured: CapturedRun[] = [];
       const dispatcher = new ScheduleDispatcher({
+        app: testApp(),
         runtime: createCapturingRuntime(captured),
         channels: bundle.graph.root.channels,
       });

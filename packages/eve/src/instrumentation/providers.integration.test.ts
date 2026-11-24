@@ -5,10 +5,11 @@ import {
   finalizeInstrumentationProviders,
   registerInstrumentationProvider,
 } from "#instrumentation/providers.js";
+import { testEntities } from "#internal/testing/test-platform.js";
 import { defineInstrumentation } from "#public/instrumentation/index.js";
 
-const REGISTRY_GLOBAL_KEY = Symbol.for("eve.harness-instrumentation-providers");
-const RUNTIME_GLOBAL_KEY = Symbol.for("eve.instrumentation-runtime");
+const PROCESS_APP_KEY = Symbol.for("eve.app");
+const platform = testEntities();
 
 const traceContext = (audience: "public" | "private" | "unknown") => ({
   agentName: "weather",
@@ -28,8 +29,7 @@ function deferred(): { readonly promise: Promise<void>; readonly resolve: () => 
 
 describe("authored instrumentation provider dispatch", () => {
   beforeEach(() => {
-    delete (globalThis as Record<symbol, unknown>)[REGISTRY_GLOBAL_KEY];
-    delete (globalThis as Record<symbol, unknown>)[RUNTIME_GLOBAL_KEY];
+    delete (globalThis as Record<symbol, unknown>)[PROCESS_APP_KEY];
   });
 
   it("awaits setup in slot order while event handlers overlap", async () => {
@@ -40,6 +40,7 @@ describe("authored instrumentation provider dispatch", () => {
 
     const firstRegistration = registerInstrumentationProvider({
       agentName: "weather",
+      platform,
       slot: "first",
       value: defineInstrumentation({
         events: {
@@ -62,6 +63,7 @@ describe("authored instrumentation provider dispatch", () => {
 
     await registerInstrumentationProvider({
       agentName: "weather",
+      platform,
       slot: "second",
       value: defineInstrumentation({
         events: {
@@ -76,7 +78,7 @@ describe("authored instrumentation provider dispatch", () => {
 
     expect(order).toEqual(["first:setup", "first:setup-complete", "second:setup"]);
 
-    const runtime = finalizeInstrumentationProviders({ serviceName: "weather" });
+    const runtime = finalizeInstrumentationProviders({ platform, serviceName: "weather" });
     const hooks = runtime.hooks.forTrace!(traceContext("unknown"));
     const publication = hooks.publish({
       idempotencyKey: turnIdempotencyKey("session-1", "turn-1"),

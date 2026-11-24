@@ -1,14 +1,12 @@
-import { Buffer } from "node:buffer";
-import { createHash } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-
+import { hostBytes } from "#runtime-env/host-bytes.js";
+import { concatBytes, utf8Bytes } from "#shared/bytes.js";
+import { sha256Hex } from "#shared/digest.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 import type { NamedSkillDefinition } from "#shared/skill-definition.js";
 import { resolveSandboxSkillRoot, resolveSandboxSkillWritePath } from "#shared/skill-paths.js";
 
 export interface NormalizedSkillPackageFile {
-  readonly content: Buffer;
+  readonly content: Uint8Array;
   readonly relativePath: string;
 }
 
@@ -27,11 +25,14 @@ export function stripSkillFrontmatter(content: string): string {
 }
 
 export function skillPackageRevision(skill: MaterializableSkillPackage): string {
-  const hash = createHash("sha256");
-  for (const file of skill.files) {
-    hash.update(`${file.relativePath}\0${file.content.byteLength}\0`).update(file.content);
-  }
-  return hash.digest("hex");
+  return sha256Hex(
+    concatBytes(
+      skill.files.flatMap((file) => [
+        utf8Bytes(`${file.relativePath}\0${file.content.byteLength}\0`),
+        file.content,
+      ]),
+    ),
+  );
 }
 
 export function normalizeSkillPackage(input: NamedSkillDefinition): MaterializableSkillPackage {
@@ -39,7 +40,7 @@ export function normalizeSkillPackage(input: NamedSkillDefinition): Materializab
 
   const files: NormalizedSkillPackageFile[] = [
     {
-      content: Buffer.from(input.content, "utf8"),
+      content: hostBytes(utf8Bytes(input.content)),
       relativePath: "SKILL.md",
     },
   ];
@@ -63,17 +64,6 @@ export function normalizeSkillPackage(input: NamedSkillDefinition): Materializab
     metadata: input.metadata === undefined ? undefined : { ...input.metadata },
     name: input.name,
   };
-}
-
-export async function writeSkillPackageDirectory(input: {
-  readonly rootPath: string;
-  readonly skill: MaterializableSkillPackage;
-}): Promise<void> {
-  for (const file of input.skill.files) {
-    const filePath = join(input.rootPath, "skills", input.skill.name, file.relativePath);
-    await mkdir(dirname(filePath), { recursive: true });
-    await writeFile(filePath, file.content);
-  }
 }
 
 export async function writeSkillPackageToSandbox(input: {
@@ -141,12 +131,8 @@ function assertSafeSkillPackageFilePath(relativePath: string): void {
   }
 }
 
-function contentToBuffer(content: string | Uint8Array): Buffer {
-  if (typeof content === "string") {
-    return Buffer.from(content, "utf8");
-  }
-
-  return Buffer.from(content);
+function contentToBuffer(content: string | Uint8Array): Uint8Array {
+  return hostBytes(typeof content === "string" ? utf8Bytes(content) : content);
 }
 
 function comparePaths(left: string, right: string): number {

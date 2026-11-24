@@ -54,6 +54,7 @@ export const PRODUCTION_BUILD_SCENARIO_FILES = [
   "src/internal/external-resources.scenario.test.ts",
   "src/internal/nitro/host/authored-workflow-scope.scenario.test.ts",
   "src/internal/nitro/host/build-deployment-id.scenario.test.ts",
+  "src/internal/nitro/host/build-entry.scenario.test.ts",
   "src/internal/nitro/host/build-extension.scenario.test.ts",
   "src/internal/nitro/host/generated-host-data.scenario.test.ts",
   "src/internal/nitro/host/host-config-isolation.scenario.test.ts",

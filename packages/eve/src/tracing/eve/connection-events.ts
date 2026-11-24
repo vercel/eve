@@ -199,11 +199,12 @@ export function sideSpanHost(
   ctx: AlsContext,
   requestTraceContext?: SpanContext,
 ): Context | undefined {
-  const settings = getInstrumentationRuntime()?.otelSettings;
-  if (settings === undefined) return undefined;
+  const runtime = getInstrumentationRuntime();
+  const settings = runtime?.otelSettings;
+  if (runtime === undefined || settings === undefined) return undefined;
   const sessionId = ctx.require(SessionIdKey);
   const saved = new ContextAgentTraceStateStore().get("session", sessionId);
-  const session = readInstrumentationSessionContext(ctx);
+  const session = readInstrumentationSessionContext(ctx, runtime.environment);
   const decision =
     session.traceSeed?.decision ??
     saved?.decision ??

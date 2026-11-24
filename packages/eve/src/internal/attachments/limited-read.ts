@@ -1,9 +1,4 @@
 import { EveAttachmentError } from "#internal/attachments/errors.js";
-import type { UploadPolicy } from "#public/channels/upload-policy.js";
-
-export function maxBytesOf(policy: UploadPolicy): number {
-  return policy === "disabled" ? 0 : policy.maxBytes;
-}
 
 export async function readLimitedBytes(
   response: Pick<Response, "body" | "headers">,

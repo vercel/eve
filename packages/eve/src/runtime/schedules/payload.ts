@@ -1,5 +1,6 @@
 import { z } from "#compiled/zod/index.js";
 import type { ScheduleEnvelope } from "#public/schedules/subscription.js";
+import { utf8ByteLength } from "#shared/bytes.js";
 
 const referenceSchema = z.string().min(1).max(2048);
 const principalReferenceSchema = z
@@ -50,7 +51,7 @@ export function parseSchedulePayload<TPayload = unknown>(
   let snapshot: unknown;
   try {
     const json = JSON.stringify(value);
-    if (json === undefined || Buffer.byteLength(json) > 64 * 1024) throw new Error();
+    if (json === undefined || utf8ByteLength(json) > 64 * 1024) throw new Error();
     snapshot = JSON.parse(json);
   } catch {
     throw new Error("Invalid scheduled collection payload; recreate the schedule.");

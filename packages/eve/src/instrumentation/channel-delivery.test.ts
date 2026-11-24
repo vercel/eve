@@ -52,6 +52,7 @@ function session(audience: "public" | "private") {
   ]);
   const runtime = bindInstrumentationRuntime(
     {
+      environment: "production",
       hooks,
       forceFlush: async () => {},
       shutdown: async () => {},

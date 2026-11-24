@@ -2,7 +2,8 @@ import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 import { taskToolResult, type TaskToolCall } from "#execution/tasks/calls.js";
 import { renderTaskCancelResult, renderUnknownCancelTaskError } from "#execution/tasks/render.js";
-import { cancelTasksStep, type TaskRunMessage } from "#execution/tasks/steps.js";
+import type { SessionStepRunner } from "#execution/session/steps.js";
+import type { TaskRunMessage } from "#execution/tasks/steps.js";
 import {
   readTaskTable,
   taskCancelResult,
@@ -29,6 +30,7 @@ export function sessionTaskTable(cursor: SessionStateCursor): TaskTable {
 }
 
 export async function cancelWorkingTasks(
+  steps: SessionStepRunner,
   cursor: SessionStateCursor,
   reason: Exclude<TaskCancelReason, "task-cancel">,
   options: { readonly turnCalls?: boolean } = {},
@@ -36,7 +38,13 @@ export async function cancelWorkingTasks(
   const taskIds = workingTasks(sessionTaskTable(cursor)).map((record) => record.id);
   const turnCalls = options.turnCalls === true && mayWaitOnWorkflowToolRuns(cursor);
   if (taskIds.length === 0 && !turnCalls) return;
-  await cursor.advance((state) => cancelTasksStep({ ...state, reason, taskIds, turnCalls }));
+  await cursor.advance((state) =>
+    steps.host.step(
+      "cancelTasks",
+      { ...state, reason, taskIds, turnCalls },
+      steps.stepCall("cancelTasks"),
+    ),
+  );
 }
 
 function mayWaitOnWorkflowToolRuns(cursor: SessionStateCursor): boolean {
@@ -48,6 +56,7 @@ function mayWaitOnWorkflowToolRuns(cursor: SessionStateCursor): boolean {
 }
 
 export async function answerTaskCancel(
+  steps: SessionStepRunner,
   cursor: SessionStateCursor,
   call: Extract<TaskToolCall, { readonly kind: typeof TASK_CANCEL_TOOL_NAME }>,
 ): Promise<RuntimeActionResult> {
@@ -61,7 +70,11 @@ export async function answerTaskCancel(
   }
   if (result.status === "cancelled") {
     await cursor.advance((state) =>
-      cancelTasksStep({ ...state, reason: "task-cancel", taskIds: [call.taskId] }),
+      steps.host.step(
+        "cancelTasks",
+        { ...state, reason: "task-cancel", taskIds: [call.taskId] },
+        steps.stepCall("cancelTasks"),
+      ),
     );
   }
   return taskToolResult(

@@ -11,7 +11,6 @@ import {
   type InstrumentationHooks,
 } from "#instrumentation/lifecycle.js";
 import { getInstrumentationRuntime } from "#instrumentation/runtime-global.js";
-import { resolveInstrumentationEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger, formatError } from "#internal/logging.js";
 import { applyLiveDeliveryAudienceCeiling } from "#shared/forwarded-trace-policy.js";
 import { resolveTracePolicy } from "#shared/trace-policy.js";
@@ -34,7 +33,6 @@ import {
 } from "#tracing/eve/conversation-context.js";
 import { MCP_SERIALIZER } from "#tracing/eve/mcp.js";
 import { eveOutputMapping } from "#tracing/eve/profile.js";
-
 const log = createLogger("invoke-tool");
 const agentTelemetry = () =>
   otelTelemetry({ tracerName: "eve.agent", mapping: eveOutputMapping() });
@@ -94,7 +92,7 @@ async function traced(
       auth: input.auth,
       channelName: input.origin?.channelName,
     },
-    resolveInstrumentationEnvironment(),
+    runtime.environment,
   );
   const hooks =
     runtime.hooks.forTrace?.({ agentName: input.agentName, ...conversation }) ?? runtime.hooks;
@@ -151,7 +149,8 @@ async function traced(
     "agent.trace.schema.version": 4,
     "gen_ai.conversation.id": operationConversationId({ sessionId: input.sessionId }),
   };
-  if (process.env.VERCEL_ENV !== undefined) attributes["vercel.session_id"] = input.sessionId;
+  const traceSessionAttribute = getInstrumentationRuntime()?.sessionAttribute;
+  if (traceSessionAttribute !== undefined) attributes[traceSessionAttribute] = input.sessionId;
   if (input.origin !== undefined) {
     attributes["eve.channel.kind"] = conversation.channel.kind;
     attributes["eve.channel.name"] = input.origin.channelName;

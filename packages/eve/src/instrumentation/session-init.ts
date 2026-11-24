@@ -1,3 +1,4 @@
+import { requireApp } from "#context/app.js";
 import type { ContextContainer } from "#context/container.js";
 import {
   AuthKey,
@@ -50,7 +51,7 @@ export function initializeSessionInstrumentation(input: {
     storedConversation,
     {
       channelKind: input.ctx.get(ChannelInstrumentationKey)?.kind,
-      environment: resolveInstrumentationEnvironment(),
+      environment: resolveInstrumentationEnvironment(requireApp(input.ctx).platform),
       forwardedTracePolicy,
       principalType: input.ctx.get(AuthKey)?.principalType,
     },

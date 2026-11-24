@@ -1,3 +1,4 @@
+import { builtInHosts } from "#runtime/app.js";
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
 import { startTestSession } from "#internal/testing/test-session-hosts.js";
 import { MockLanguageModelV4 } from "ai/test";
@@ -212,7 +213,7 @@ async function withChainRun(
             .filter((entry) => toolName === undefined || entry.toolName === toolName)
             .at(toolName === undefined ? -1 : 0);
           expect(request).toBeDefined();
-          await resumeRoutedHook(commandInbox, {
+          await resumeRoutedHook(builtInHosts(), commandInbox, {
             auth: approver,
             kind: "send",
             delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
@@ -231,7 +232,7 @@ async function withChainRun(
           return await next("approved");
         },
         async deliver(auth, payload, until) {
-          await resumeRoutedHook(commandInbox, {
+          await resumeRoutedHook(builtInHosts(), commandInbox, {
             auth,
             kind: "send",
             delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
@@ -248,7 +249,7 @@ async function withChainRun(
           return await next("delivered");
         },
         async send(auth, message) {
-          await resumeRoutedHook(sessionInboxHookToken(continuationToken), {
+          await resumeRoutedHook(builtInHosts(), sessionInboxHookToken(continuationToken), {
             auth,
             kind: "send",
             delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),

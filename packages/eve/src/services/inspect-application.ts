@@ -25,7 +25,7 @@ export interface ApplicationInspection {
 
 export async function inspectApplication(appRoot: string): Promise<ApplicationInspection> {
   const compiledState = await loadCompiledApplicationState(appRoot);
-  const application = getApplicationInfo(compiledState?.project.appRoot ?? appRoot);
+  const application = await getApplicationInfo(compiledState?.project.appRoot ?? appRoot);
 
   return {
     application,

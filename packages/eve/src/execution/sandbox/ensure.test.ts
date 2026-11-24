@@ -136,6 +136,7 @@ async function open(
   });
   return await contextStorage.run(context, async () => {
     const access = await ensureSandboxAccess({
+      build: () => ({}),
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       nodeId,
       ownsSandbox,
@@ -174,6 +175,7 @@ describe("ensureSandboxAccess", () => {
   it("does not prepare or start anything until the sandbox is requested", async () => {
     const value = fixture();
     await ensureSandboxAccess({
+      build: () => ({}),
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       nodeId: "__root__",
       registry: value.registry,
@@ -195,6 +197,7 @@ describe("ensureSandboxAccess", () => {
       return await createNow();
     });
     const access = await ensureSandboxAccess({
+      build: () => ({}),
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       nodeId: "__root__",
       registry: value.registry,
@@ -224,6 +227,7 @@ describe("ensureSandboxAccess", () => {
   it("retries failed queued work once before later work, then drops it without failing", async () => {
     const value = fixture();
     const access = await ensureSandboxAccess({
+      build: () => ({}),
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       nodeId: "__root__",
       registry: value.registry,
@@ -348,6 +352,7 @@ describe("ensureSandboxAccess", () => {
       session: { providerName: "test", state: { key: "old" }, stateProtocolVersion: 1 },
     };
     const access = await ensureSandboxAccess({
+      build: () => ({}),
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       nodeId: "__root__",
       registry: value.registry,
@@ -424,6 +429,7 @@ describe("ensureSandboxAccess", () => {
     });
     await contextStorage.run(context, async () => {
       const access = await ensureSandboxAccess({
+        build: () => ({}),
         compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
         nodeId: "__root__",
         registry: value.registry,
@@ -491,6 +497,7 @@ describe("ensureSandboxAccess", () => {
     });
     await contextStorage.run(context, async () => {
       const access = await ensureSandboxAccess({
+        build: () => ({}),
         compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
         nodeId: "__root__",
         registry: value.registry,
@@ -557,6 +564,7 @@ describe("ensureSandboxAccess", () => {
     async (shutdownTracking, closable, expected) => {
       const value = fixture({ closable });
       const access = await ensureSandboxAccess({
+        build: () => ({}),
         compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
         nodeId: "__root__",
         registry: value.registry,
@@ -606,6 +614,7 @@ describe("ensureSandboxAccess", () => {
   it("removes a sandbox a sharing child opened when the parent session ends without opening it", async () => {
     const value = upsertingFixture();
     const child = await ensureSandboxAccess({
+      build: () => ({}),
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       nodeId: "child",
       ownsSandbox: false,
@@ -618,6 +627,7 @@ describe("ensureSandboxAccess", () => {
     expect([...value.live.keys()]).toEqual(["parent-session"]);
 
     const parent = await ensureSandboxAccess({
+      build: () => ({}),
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       nodeId: "__root__",
       registry: value.registry,
@@ -632,6 +642,7 @@ describe("ensureSandboxAccess", () => {
   it("cleans up an unrecorded key at session end without starting a sandbox", async () => {
     const value = fixture();
     const access = await ensureSandboxAccess({
+      build: () => ({}),
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       nodeId: "__root__",
       registry: value.registry,
@@ -654,6 +665,7 @@ describe("ensureSandboxAccess", () => {
     const value = fixture();
     const { onSessionEnd } = value;
     const access = await ensureSandboxAccess({
+      build: () => ({}),
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       nodeId: "__root__",
       ownsSandbox: false,
@@ -678,6 +690,7 @@ describe("idle stop marker", () => {
     ownsSandbox?: boolean,
   ) {
     return ensureSandboxAccess({
+      build: () => ({}),
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       nodeId: "__root__",
       ownsSandbox,

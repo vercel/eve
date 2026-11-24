@@ -1,5 +1,8 @@
+import { builtInHosts } from "#runtime/app.js";
 import * as workflowRuntime from "#execution/workflow-runtime.js";
-import { installWorkflowHost } from "#execution/workflow-host/host.js";
+import { installWorkflowEngine } from "#execution/workflow-host/host.js";
+import { startTestApp, testEntities } from "#internal/testing/test-platform.js";
+import { bindApp } from "#context/app.js";
 import { eventTracing } from "#internal/testing/event-tracing.js";
 import { trace } from "@opentelemetry/api";
 import { connectionEntry } from "#execution/catalog/connection-entry.js";
@@ -81,7 +84,8 @@ vi.mock("#runtime/sessions/compiled-agent-cache.js", () => ({
 vi.mock("#execution/terminal-session-completion-step.js", () => ({
   emitTerminalSessionCompletionStep: vi.fn(),
 }));
-installWorkflowHost();
+installWorkflowEngine(builtInHosts(), testEntities());
+const app = startTestApp();
 
 let ctx: ContextContainer;
 let actions: ConnectionEventActions;
@@ -201,6 +205,7 @@ beforeEach(async () => {
     },
   }));
   ctx = new ContextContainer();
+  bindApp(ctx, app);
   ctx.set(SessionAgentKey, fromCompiledBundle(bundle));
   ctx.set(SessionIdKey, "session-1");
   setUser("alice");

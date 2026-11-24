@@ -3,17 +3,7 @@ import type { ControlSettlement } from "#harness/facts.js";
 import { latestTurnIdOf, turnCoordinatesOf } from "#protocol/session-projection.js";
 import type { TurnCaller } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import { closeSessionStreamStep } from "#execution/close-session-stream-step.js";
-import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
-import {
-  endSessionSandboxStep,
-  reportSessionSandboxCleanupFailureStep,
-} from "#execution/session/end-sandbox-step.js";
-import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
-import {
-  reportChildSessionTeardownFailureStep,
-  terminateChildSessionsStep,
-} from "#execution/terminate-child-sessions-step.js";
+import type { SessionStepRunner } from "#execution/session/steps.js";
 import { liveRuns } from "#execution/tasks/table.js";
 import type { TurnOutcome } from "#execution/session/turn-step-types.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
@@ -21,7 +11,6 @@ import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import { sessionUsage, takeSessionUsageDelta } from "#harness/session-usage.js";
-import { notifyTurnCallerStep } from "#subagents/parent-notification.js";
 
 export type SessionTerminalOutcome =
   | { readonly kind: "done"; readonly action: TurnOutcome & { readonly kind: "done" } }
@@ -39,6 +28,7 @@ interface SessionFinalizationContext {
     readonly sessionState: DurableSessionState | undefined;
   };
   readonly sessionWritable: WritableStream<Uint8Array>;
+  readonly steps: SessionStepRunner;
 }
 
 function mayHaveLiveRuns(sessionState: DurableSessionState): boolean {
@@ -54,29 +44,47 @@ export async function finalizeSession(
   context: SessionFinalizationContext,
 ): Promise<WorkflowEntryResult> {
   const { serializedContext, sessionState } = context.cursor;
+  const { host, stepCall } = context.steps;
   if (sessionState !== undefined && mayHaveLiveRuns(sessionState)) {
     try {
-      await terminateChildSessionsStep({ sessionState });
+      await host.step(
+        "terminateChildSessions",
+        { sessionState },
+        stepCall("terminateChildSessions"),
+      );
     } catch (error) {
-      await reportChildSessionTeardownFailureStep({
-        error: normalizeSerializableError(error),
-        parentSessionId: sessionState.sessionId,
-      }).catch(() => undefined);
+      await host
+        .step(
+          "reportChildSessionTeardownFailure",
+          { error: normalizeSerializableError(error), parentSessionId: sessionState.sessionId },
+          stepCall("reportChildSessionTeardownFailure"),
+        )
+        .catch(() => undefined);
     }
   }
   if (sessionState !== undefined) {
     try {
-      await endSessionSandboxStep({
-        reason: outcome.kind === "done" ? "completed" : outcome.kind,
-        serializedContext,
-        sessionState,
-      });
+      await host.step(
+        "endSessionSandbox",
+        {
+          reason: outcome.kind === "done" ? "completed" : outcome.kind,
+          serializedContext,
+          sessionState,
+        },
+        stepCall("endSessionSandbox"),
+      );
     } catch (error) {
-      await reportSessionSandboxCleanupFailureStep({
-        error: normalizeSerializableError(error),
-        outcome: outcome.kind,
-        sessionId: sessionState.sessionId,
-      }).catch(() => undefined);
+      await host
+        .step(
+          "reportSessionSandboxCleanupFailure",
+          {
+            error: normalizeSerializableError(error),
+            outcome: outcome.kind,
+            sessionId: sessionState.sessionId,
+          },
+          stepCall("reportSessionSandboxCleanupFailure"),
+        )
+        .catch(() => undefined);
     }
   }
   const session = sessionState?.snapshot.session;
@@ -85,28 +93,40 @@ export async function finalizeSession(
   const latestTurnId = latestTurnIdOf(stored);
   const latest = latestTurnId === undefined ? undefined : turnCoordinatesOf(stored, latestTurnId);
   if (outcome.kind === "expired") {
-    await emitTerminalSessionCompletionStep({
-      control: outcome.control,
-      settles: outcome.settles,
-      projection: stored,
-      sessionState,
-      sessionWritable: context.sessionWritable,
-      serializedContext,
-      turn: latest && { id: latest.turnId, sequence: latest.sequence },
-      usage,
-    });
+    await host.step(
+      "emitTerminalSessionCompletion",
+      {
+        control: outcome.control,
+        settles: outcome.settles,
+        projection: stored,
+        sessionState,
+        sessionWritable: context.sessionWritable,
+        serializedContext,
+        turn: latest && { id: latest.turnId, sequence: latest.sequence },
+        usage,
+      },
+      stepCall("emitTerminalSessionCompletion"),
+    );
   } else if (outcome.kind === "failed") {
-    await emitTerminalSessionFailureStep({
-      error: normalizeSerializableError(outcome.error),
-      sessionState,
-      projection: stored,
-      sessionWritable: context.sessionWritable,
-      serializedContext,
-      turnId: outcome.turnId ?? latest?.turnId,
-      usage,
-    });
+    await host.step(
+      "emitTerminalSessionFailure",
+      {
+        error: normalizeSerializableError(outcome.error),
+        sessionState,
+        projection: stored,
+        sessionWritable: context.sessionWritable,
+        serializedContext,
+        turnId: outcome.turnId ?? latest?.turnId,
+        usage,
+      },
+      stepCall("emitTerminalSessionFailure"),
+    );
   } else {
-    await closeSessionStreamStep({ sessionWritable: context.sessionWritable });
+    await host.step(
+      "closeSessionStream",
+      { sessionWritable: context.sessionWritable },
+      stepCall("closeSessionStream"),
+    );
   }
 
   const settled = settledResult(outcome, context);
@@ -116,12 +136,16 @@ export async function finalizeSession(
       usage: settled.turnUsage,
     };
     if (settled.isError) notification.isError = true;
-    await notifyTurnCallerStep({
-      caller: context.caller,
-      lifecycle: "terminal",
-      sessionId: sessionState?.sessionId ?? (serializedContext["eve.sessionId"] as string),
-      settled: notification,
-    });
+    await host.step(
+      "notifyTurnCaller",
+      {
+        caller: context.caller,
+        lifecycle: "terminal",
+        sessionId: sessionState?.sessionId ?? (serializedContext["eve.sessionId"] as string),
+        settled: notification,
+      },
+      stepCall("notifyTurnCaller"),
+    );
   }
   return outcome.kind === "done"
     ? {

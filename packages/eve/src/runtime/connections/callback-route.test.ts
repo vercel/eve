@@ -1,9 +1,10 @@
+import { builtInHosts } from "#runtime/app.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 import type { RouteContext } from "#public/definitions/channel.js";
 import { handleConnectionCallbackRequest } from "#execution/connections/callback-route.js";
-import { registerHost } from "#execution/hosts.js";
+import { registerHostedRoute } from "#execution/hosts.js";
 
 const resumeHookMock = vi.fn();
 
@@ -155,7 +156,7 @@ describe("handleConnectionCallbackRequest", () => {
 
   it("delivers to a session a host runs in this process, without asking Workflow", async () => {
     const delivered: unknown[] = [];
-    const release = registerHost({
+    const release = registerHostedRoute(builtInHosts(), {
       deliver: async (token, sent) => {
         if (token !== INBOX) return undefined;
         delivered.push(sent);
@@ -193,7 +194,7 @@ describe("handleConnectionCallbackRequest", () => {
   });
 
   it("answers not pending for a hosted session that ended, without asking Workflow", async () => {
-    const release = registerHost({
+    const release = registerHostedRoute(builtInHosts(), {
       deliver: async (token) => (token === INBOX ? "gone" : undefined),
       runEnded: () => undefined,
       cancelRun: () => undefined,

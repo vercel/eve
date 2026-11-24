@@ -1,3 +1,4 @@
+import { builtInHosts } from "#runtime/app.js";
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
 import type { DeliverPayload, SessionAuthContext, SessionParent } from "#channel/types.js";
 import { attemptIdempotencyKey } from "#instrumentation/lifecycle.js";
@@ -35,6 +36,7 @@ import {
   usage,
 } from "#internal/testing/approval-resume.js";
 import { buildSerializedContext } from "#internal/testing/entry-test-helpers.js";
+import { startTestApp, testEntities } from "#internal/testing/test-platform.js";
 import { captureTurnEvents } from "#internal/testing/events.js";
 import { getWorld, start } from "#internal/workflow/runtime.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
@@ -60,11 +62,10 @@ import {
 
 vi.setConfig({ testTimeout: 90_000 });
 
-const REGISTRY_GLOBAL_KEY = Symbol.for("eve.harness-instrumentation-providers");
-const RUNTIME_GLOBAL_KEY = Symbol.for("eve.instrumentation-runtime");
+const PROCESS_APP_KEY = Symbol.for("eve.app");
 afterEach(() => {
-  delete (globalThis as Record<symbol, unknown>)[REGISTRY_GLOBAL_KEY];
-  delete (globalThis as Record<symbol, unknown>)[RUNTIME_GLOBAL_KEY];
+  delete (globalThis as Record<symbol, unknown>)[PROCESS_APP_KEY];
+  startTestApp();
 });
 
 const HEARD_TYPES = [
@@ -86,12 +87,13 @@ async function hearInstrumentation(agentName: string): Promise<InstrumentationEv
   const record = (event: InstrumentationEvent) => void heard.push(event);
   await registerInstrumentationProvider({
     agentName,
+    platform: testEntities(),
     slot: "capture",
     value: defineInstrumentation({
       events: Object.fromEntries(HEARD_TYPES.map((type) => [type, record])),
     }),
   });
-  finalizeInstrumentationProviders({ serviceName: agentName });
+  finalizeInstrumentationProviders({ platform: testEntities(), serviceName: agentName });
   return heard;
 }
 
@@ -440,7 +442,7 @@ async function withSession(
             channelKind: "http",
             channelName: "test",
           });
-          await resumeRoutedHook(commandInbox, {
+          await resumeRoutedHook(builtInHosts(), commandInbox, {
             auth,
             kind: "send",
             delivery,
@@ -456,7 +458,7 @@ async function withSession(
             channelKind: "http",
             channelName: "test",
           });
-          await resumeRoutedHook(commandInbox, {
+          await resumeRoutedHook(builtInHosts(), commandInbox, {
             auth: BOB,
             kind: "send",
             delivery,
@@ -465,7 +467,7 @@ async function withSession(
           return delivery.deliveryId;
         },
         async control(kind, extra = {}) {
-          await resumeRoutedHook(commandInbox, {
+          await resumeRoutedHook(builtInHosts(), commandInbox, {
             auth: ALICE,
             deliveryId: `control_${deliveries++}`,
             kind,
@@ -476,7 +478,7 @@ async function withSession(
         async forward(callId, message) {
           const { parent } = options;
           if (parent === undefined) throw new Error("A forwarded call needs a parent session.");
-          await resumeRoutedHook(commandInbox, {
+          await resumeRoutedHook(builtInHosts(), commandInbox, {
             auth: ALICE,
             caller: {
               callId: parent.callId,
@@ -493,7 +495,7 @@ async function withSession(
         },
         next: (label) => read(label, stream.nextTurn()),
         async send(message, auth = ALICE) {
-          await resumeRoutedHook(sessionInboxHookToken(continuationToken), {
+          await resumeRoutedHook(builtInHosts(), sessionInboxHookToken(continuationToken), {
             auth,
             kind: "send",
             delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
@@ -910,24 +912,28 @@ describe("calls in flight", () => {
         const runIds = (await workflowToolRunIds()).filter((id) => !earlierRuns.includes(id));
         expect(runIds).toHaveLength(1);
         await waitForOwnerGate(
-          resumeRoutedHook(sessionInboxHookToken(`http:edge-cancel-late-workflow-question`), {
-            kind: "request",
-            from: {
-              callId: "call_prepare",
-              input: {},
-              runId: runIds[0]!,
-              sequence: 0,
-              stepIndex: 0,
-              toolName: "prepare",
-              turnId: "turn_0",
+          resumeRoutedHook(
+            builtInHosts(),
+            sessionInboxHookToken(`http:edge-cancel-late-workflow-question`),
+            {
+              kind: "request",
+              from: {
+                callId: "call_prepare",
+                input: {},
+                runId: runIds[0]!,
+                sequence: 0,
+                stepIndex: 0,
+                toolName: "prepare",
+                turnId: "turn_0",
+              },
+              replyTo: "late-question",
+              request: {
+                kind: "ask",
+                control: "late-control",
+                request: { prompt: "A late question", title: "Late question", options: [] },
+              },
             },
-            replyTo: "late-question",
-            request: {
-              kind: "ask",
-              control: "late-control",
-              request: { prompt: "A late question", title: "Late question", options: [] },
-            },
-          }),
+          ),
           "late question delivery",
           session.events,
         );
@@ -1746,7 +1752,7 @@ describe("work delegated to a child session", () => {
         const runIds = (await workflowToolRunIds()).filter((id) => !earlierRuns.includes(id));
         expect(runIds).toHaveLength(1);
         await waitForOwnerGate(
-          resumeRoutedHook(sessionInboxHookToken(`http:edge-cancel-hung-task`), {
+          resumeRoutedHook(builtInHosts(), sessionInboxHookToken(`http:edge-cancel-hung-task`), {
             kind: "request",
             from: {
               callId: "call_agent",
@@ -2085,7 +2091,7 @@ describe("work delegated to a child session", () => {
         for (const child of childSessions(session.events())) {
           const inbox = sessionInboxHookToken(sessionCommandHookToken(child));
           for (const { data } of receipts.of(child, "response.submitted"))
-            await resumeRoutedHook(inbox, {
+            await resumeRoutedHook(builtInHosts(), inbox, {
               auth: ALICE,
               deliveryMetadata: [
                 {
@@ -2102,7 +2108,7 @@ describe("work delegated to a child session", () => {
                 },
               ],
             });
-          await resumeRoutedHook(inbox, {
+          await resumeRoutedHook(builtInHosts(), inbox, {
             auth: ALICE,
             deliveryId: `probe_${child}`,
             kind: "cancel",
@@ -2452,7 +2458,7 @@ describe("deliveries a child session reads", () => {
       async (session) => {
         await session.until("done", (event) => event.type === "turn.settled");
         const [opened] = ofType(session.events(), "child.opened");
-        const read = readSessionEventHistory(opened!.data.sessionId).getReader();
+        const read = readSessionEventHistory(builtInHosts(), opened!.data.sessionId).getReader();
         for (let next = await read.read(); !next.done; next = await read.read())
           childEvents.push(next.value);
       },

@@ -1,5 +1,3 @@
-import { randomUUID } from "node:crypto";
-
 import type { SandboxSession } from "#shared/sandbox-session.js";
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
 import {
@@ -10,6 +8,8 @@ import {
   truncateTail,
 } from "#execution/sandbox/truncate-output.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
+import { randomUUID } from "#runtime-env/uuid.js";
+import { utf8ByteLength } from "#shared/bytes.js";
 
 /** How long a `bash` call waits by default before it leaves the command running in the background. */
 export const BASH_YIELD_SECONDS = 60;
@@ -185,11 +185,11 @@ async function claimRunningJob(
   const stdout = raw.stdout.slice(match.index + match[0].length);
   const tails = {
     stderr: {
-      omittedBytes: Math.max(0, Number(match[3]) - Buffer.byteLength(raw.stderr)),
+      omittedBytes: Math.max(0, Number(match[3]) - utf8ByteLength(raw.stderr)),
       text: raw.stderr,
     },
     stdout: {
-      omittedBytes: Math.max(0, Number(match[2]) - Buffer.byteLength(stdout)),
+      omittedBytes: Math.max(0, Number(match[2]) - utf8ByteLength(stdout)),
       text: stdout,
     },
   };
@@ -218,7 +218,7 @@ async function readTail(stream: ReadableStream<Uint8Array>): Promise<StreamTail>
       current += text.slice(0, MAX_LINE_LENGTH + 1 - current.length);
   };
   const finishLine = () => {
-    const bytes = Buffer.byteLength(capLineLength(current)) + 1;
+    const bytes = utf8ByteLength(capLineLength(current)) + 1;
     lines.push({ bytes, text: current });
     keptBytes += bytes;
     current = "";

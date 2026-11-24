@@ -3,6 +3,7 @@ import type { SubagentInteractionHookPayload } from "#channel/types.js";
 import type { SessionAuth } from "#context/session-context.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import type { AgentSessionAddress } from "#execution/agent-sessions/start.js";
+import { isObject } from "#shared/guards.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { ToolQuestion, ToolAnswer } from "#tools/definition.js";
@@ -113,6 +114,31 @@ export interface WorkflowToolRunMessageBatch {
   readonly messages: readonly WorkflowToolRunMessage[];
 }
 
+const RUN_MESSAGE_KINDS: Readonly<Record<WorkflowToolRunMessage["kind"], true>> = {
+  "agent-sent": true,
+  "agent-started": true,
+  outcome: true,
+  reply: true,
+  report: true,
+  request: true,
+  started: true,
+  usage: true,
+  withdraw: true,
+};
+
+export function isWorkflowToolRunMessage(value: unknown): value is WorkflowToolRunMessage {
+  return (
+    isObject(value) &&
+    typeof value.kind === "string" &&
+    Object.hasOwn(RUN_MESSAGE_KINDS, value.kind)
+  );
+}
+
+export function runMessagesIn(payload: unknown): readonly WorkflowToolRunMessage[] {
+  if (isObject(payload) && payload.kind === "workflow-batch" && Array.isArray(payload.messages))
+    return payload.messages.filter(isWorkflowToolRunMessage);
+  return isWorkflowToolRunMessage(payload) ? [payload] : [];
+}
 const RUN_MESSAGE_BATCH_MAX_CHARS = 64_000;
 
 export function runMessageBatchBudget(): (message: WorkflowToolRunMessage) => boolean {

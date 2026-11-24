@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-import { readVercelCliToken } from "#internal/model-auth/vercel-cli.js";
+import { readVercelCliToken } from "#platform/vercel/model-auth/cli.js";
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 
 import { configureTraceSampling } from "./vercel-trace-sampling.js";
 
-vi.mock("#internal/model-auth/vercel-cli.js", () => ({
+vi.mock("#platform/vercel/model-auth/cli.js", () => ({
   readVercelCliToken: vi.fn(),
 }));
 

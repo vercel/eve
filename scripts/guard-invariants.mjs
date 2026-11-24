@@ -92,9 +92,10 @@
  *             import subagent modules; session/turn composition roots may
  *             compose built-in executors directly.
  *   rule 44 — Sandbox providers are built on the public provider contract.
- *             Files under `src/execution/sandbox/bindings/` and
- *             `src/sandbox/providers/` reach the contract only through
- *             `#public/sandbox/*` and never import core sandbox modules
+ *             Files under `src/execution/sandbox/bindings/`,
+ *             `src/platform/vercel/sandbox/`, and `src/sandbox/providers/`
+ *             reach the contract only through `#public/sandbox/*` and never
+ *             import core sandbox modules
  *             (session construction, ensure, prewarm, sandbox state, the
  *             shutdown registry, tool sessions, the runtime sandbox
  *             registry, or the shared provider and session internals).
@@ -239,12 +240,85 @@
  *   rule 68 — Every export of a published package entry has JSDoc. Users
  *             read these docs in their editor and in the generated API
  *             reference.
+ *   rule 69 — Vercel platform knowledge lives in `packages/eve/src/platform/`,
+ *             so eve can run on other hosts. Elsewhere in `packages/eve/src`,
+ *             source doesn't read `VERCEL*` environment variables, import a
+ *             vendored `#compiled/@vercel/*` package, or import
+ *             `#platform/vercel/*` directly. Exempt: the Vercel-only CLI
+ *             (`src/cli/`, `src/evals/cli/`), setup, and dev-client code; the
+ *             gitignored extension copies that builds generate; the Vercel-only
+ *             public files that re-export `src/platform/vercel/`; and the
+ *             self-modification setup template, which generates Vercel-specific
+ *             user code; and the Discord gateway relay, a Vercel Daemon that runs
+ *             outside any eve app. The eve-owned `@vercel/agent-runs` library and the
+ *             `@vercel/otel` OpenTelemetry bootstrap run on any host, so they
+ *             are exempt.
+ *   rule 70 — Outside `packages/eve/src/platform/`, eve depends only on the
+ *             platform contract: the entity types and declarations
+ *             (`entities`, `declaration`), the capability modules whose
+ *             implementations must stay out of bundles that don't use them
+ *             (`hosted-sandbox`, `document-store`, `schedules`, `models`,
+ *             `runtime-spans`), the platform selection of a build
+ *             (`selection`), the entities of a process with no app
+ *             (`process`), the engine contract (`engine`), and, in the Nitro
+ *             build host, the build-output port (`#platform/build-output.js`,
+ *             `#platform/types.js`). Platform implementations stay behind
+ *             them.
+ *   rule 71 — Only the Workflow engine reaches the Workflow SDK's World:
+ *             `getWorld`/`setWorld` from `#internal/workflow/runtime.js`
+ *             (named imports, or namespace and dynamic imports used for
+ *             them) appear
+ *             only in the Workflow binding, the named engine modules whose
+ *             step IDs pin their paths, and test helpers. Everything else
+ *             goes through `Durable`.
+ *   rule 72 — Code receives the app from its caller; only a Workflow step
+ *             function (a file with a `"use step"` directive) reads
+ *             `processApp()` or `startedApp()`, and it passes the app down. The process app's
+ *             other internals have one owner module each, and everything
+ *             else uses that owner's accessor (`app.hosts.routes` or
+ *             `app.hosts.streams`, `getInstrumentationRuntime()`, ...), or
+ *             `builtInHosts()` only in a process with no app. The process-app values of
+ *             `#runtime/app.js` appear only in step functions, the boot
+ *             lifecycle, the owners, and test helpers, and the `eve.app` key
+ *             only in `#runtime/app.js` and test helpers. Type imports and
+ *             `openSession()`, which takes the app as an argument, stay
+ *             allowed.
+ *   rule 73 — Each web twin in `src/runtime-env/` (`x.web.ts`) loads without
+ *             Node: following its value imports, with `#runtime-env/*` resolved
+ *             to web twins, it reaches no Node builtin and no Node-only package
+ *             (`undici`, `nitro`, `rolldown`, and the vendored CLI and watcher
+ *             packages). Code outside `src/runtime-env/` imports those modules
+ *             through `#runtime-env/*`, never by a relative path, so the build
+ *             chooses the Node or the web version.
+ *   rule 74 — The session program (rule 66's files) loads without Node: the
+ *             same walk from those files reaches no Node-only import.
+ *   rule 75 — The session program imports no step function: rule 66's files
+ *             (except `turn-step.ts` and `step-state-delta.ts`, which are step
+ *             code) and the program's finalization, admission and task modules
+ *             reach no module with a `"use step"` directive by following value
+ *             imports, directly or through other modules. Each step goes through
+ *             `ProgramHost.step()`, whose engine tables name the step functions.
+ *             The same files read no clock and make no race: no `Date.now`,
+ *             `new Date()` without an argument, `Promise.race`, `.all`,
+ *             `.allSettled` or `.any`, `setTimeout`, `setInterval`, or
+ *             `Math.random`. They use `ProgramHost.now()`, `.all()` and
+ *             `.next({ until })`, which an engine makes replay-safe.
+ *   rule 76 — eve reaches its built-in Vercel declaration only through the
+ *             generated platform module, which the build points at the
+ *             selected declaration. No source under `packages/eve/src`
+ *             imports `#platform/vercel/declaration.js` or
+ *             `#platform/vercel/core.js` (static, dynamic, or by a relative
+ *             path), and none imports the retired `#platform/builtin.js`.
+ *             The build names the declaration's path in
+ *             `platform/selection.ts`; tests and `src/internal/testing/` may
+ *             import the declaration to test it.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
  * may only shrink (as offenders are removed) — they may never grow.
- * Rules 67 and 68 have no baseline.
+ * Rules 67, 68, 69, 70, 71, 72, 73, 74, 75, and 76 have no baseline.
  */
+import { existsSync } from "node:fs";
 import { glob, readFile, readdir, lstat } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join, posix, relative, resolve, sep } from "node:path";
@@ -373,6 +447,11 @@ function isTsLike(relPath) {
  *   rule63: Violation[];
  *   rule64: Violation[];
  *   rule66: Violation[];
+ *   rule69: Map<string, number>;
+ *   rule70: Violation[];
+ *   rule71: Violation[];
+ *   rule72: Violation[];
+ *   rule76: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -408,6 +487,11 @@ async function scanRepo(state) {
     checkRule47(posix, lines, state.rule47);
     checkRule50(posix, lines, state.rule50);
     checkRule51(posix, content, lines, state.rule51);
+    checkRule69(posix, content, state.rule69);
+    checkRule70(posix, lines, state.rule70);
+    checkRule71(posix, content, state.rule71);
+    checkRule72(posix, content, state.rule72);
+    checkRule76(posix, lines, state.rule76);
     if (posix.startsWith("packages/tracing/src/")) {
       for (const [index, line] of lines.entries()) {
         const imports = [...line.matchAll(/(?:from\s+|import\s*\()(["'])([^"']+)\1/g)];
@@ -533,8 +617,13 @@ function checkLegacySessionImports(posix, lines, violations) {
 
 const SANDBOX_PROVIDER_DIRS = [
   "packages/eve/src/execution/sandbox/bindings/",
+  "packages/eve/src/platform/vercel/sandbox/",
   "packages/eve/src/sandbox/providers/",
 ];
+
+const BUILT_IN_SANDBOX_PROVIDER_FILES = new Set([
+  "packages/eve/src/platform/vercel/sandbox/provider.ts",
+]);
 
 const SANDBOX_CORE_IMPORT_RE =
   /(?:from\s+|import\s*\()["']#(?:sandbox\/(?:provider|state)|execution\/sandbox\/(?:active-connections|ensure|prewarm|session|logging-session)|execution\/tool-session\/[^"']*|runtime\/sandbox\/[^"']*|shared\/sandbox-(?:provider|session|write-files))\.js["']/;
@@ -558,7 +647,11 @@ function checkRule44(posix, lines, violations) {
         "Sandbox providers reach the provider contract only through #public/sandbox/* and may not import core sandbox modules. Use the public contract, or an engine helper such as another binding module.",
     });
   });
-  if (!posix.startsWith("packages/eve/src/sandbox/providers/")) return;
+  if (
+    !posix.startsWith("packages/eve/src/sandbox/providers/") &&
+    !BUILT_IN_SANDBOX_PROVIDER_FILES.has(posix)
+  )
+    return;
   const source = lines.join("\n");
   if (!/\bdefineSandboxProvider\(/.test(source)) {
     violations.push({
@@ -1097,6 +1190,235 @@ async function checkRule65() {
   return violations;
 }
 
+// ---------- Rules 73 and 74: host-neutral code reaches no Node-only import ----------
+
+const RUNTIME_ENV_DIR = "packages/eve/src/runtime-env/";
+/** Packages that only load in Node. Bare names match the package and its subpaths. */
+const NODE_ONLY_PACKAGES = ["undici", "nitro", "rolldown"];
+const NODE_ONLY_COMPILED = [
+  "#compiled/chokidar/",
+  "#compiled/commander/",
+  "#compiled/@clack/",
+  "#compiled/env-runner/",
+];
+
+/** @param {string} specifier */
+function nodeOnlySpecifier(specifier) {
+  if (NODE_BUILTINS.has(specifier) || specifier.startsWith("node:")) return true;
+  if (NODE_ONLY_COMPILED.some((prefix) => specifier.startsWith(prefix))) return true;
+  return NODE_ONLY_PACKAGES.some((name) => specifier === name || specifier.startsWith(`${name}/`));
+}
+
+/**
+ * The file a build without the `node` condition loads for a specifier: the web twin of a
+ * `#runtime-env/*` module, or the eve source file it names.
+ * @param {string} specifier
+ * @param {string} from
+ */
+function resolveWithoutNode(specifier, from) {
+  const file = resolveEveSource(specifier, from);
+  if (file === undefined) return undefined;
+  if (specifier.startsWith("#runtime-env/")) {
+    const web = file.replace(/\.ts$/, ".web.ts");
+    if (existsSync(join(REPO_ROOT, web))) return web;
+  }
+  return existsSync(join(REPO_ROOT, file)) ? file : undefined;
+}
+
+/**
+ * Each Node-only import that `entries` reach through value imports, with its import chain.
+ * @param {readonly string[]} entries
+ */
+async function nodeOnlyReach(entries) {
+  /** @type {{ file: string; specifier: string; chain: string[] }[]} */
+  const found = [];
+  /** @type {Map<string, string | undefined>} */
+  const parents = new Map(entries.map((entry) => [entry, undefined]));
+  const queue = [...entries];
+  while (queue.length > 0) {
+    const file = /** @type {string} */ (queue.shift());
+    const content = await readFile(join(REPO_ROOT, file), "utf8");
+    const source = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true);
+    for (const specifier of valueImportSpecifiers(source)) {
+      if (nodeOnlySpecifier(specifier)) {
+        const chain = [file];
+        for (let at = parents.get(file); at !== undefined; at = parents.get(at)) chain.push(at);
+        found.push({ file, specifier, chain: chain.reverse() });
+        continue;
+      }
+      const next = resolveWithoutNode(specifier, file);
+      if (next === undefined || parents.has(next)) continue;
+      parents.set(next, file);
+      queue.push(next);
+    }
+  }
+  return found;
+}
+
+async function checkRule73() {
+  /** @type {Violation[]} */
+  const violations = [];
+  const twins = [];
+  for await (const file of glob(`${RUNTIME_ENV_DIR}*.web.ts`, { cwd: REPO_ROOT }))
+    twins.push(toPosix(file));
+  twins.sort();
+  for (const { file, specifier, chain } of await nodeOnlyReach(twins)) {
+    violations.push({
+      rule: 73,
+      file,
+      message: `imports "${specifier}", which only loads in Node, so the web twin ${chain[0]} doesn't load without Node. Import chain: ${chain.join(" -> ")}. Keep Node-only code in the Node twin (\`x.ts\`), and give the web twin (\`x.web.ts\`) a version without it.`,
+    });
+  }
+  for await (const path of glob("packages/eve/src/**/*.ts", { cwd: REPO_ROOT })) {
+    const file = toPosix(path);
+    if (file.startsWith(RUNTIME_ENV_DIR)) continue;
+    const content = await readFile(join(REPO_ROOT, file), "utf8");
+    if (!content.includes("runtime-env/")) continue;
+    const source = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true);
+    for (const specifier of valueImportSpecifiers(source)) {
+      if (!specifier.startsWith(".") || !specifier.includes("runtime-env/")) continue;
+      violations.push({
+        rule: 73,
+        file,
+        message: `imports "${specifier}" by a relative path, which always loads the Node twin. Import \`#runtime-env/*\` so the build chooses the Node or the web version.`,
+      });
+    }
+  }
+  return violations;
+}
+
+async function checkRule74() {
+  /** @type {Violation[]} */
+  const violations = [];
+  for (const { file, specifier, chain } of await nodeOnlyReach([...HOST_NEUTRAL_FILES].sort())) {
+    violations.push({
+      rule: 74,
+      file,
+      message: `imports "${specifier}", which only loads in Node, and the session program reaches it. Import chain: ${chain.join(" -> ")}. The session program must load without Node: reach Node through a \`#runtime-env/*\` module, or move the work into a session step.`,
+    });
+  }
+  return violations;
+}
+
+const SESSION_STEP_CODE = new Set([
+  "packages/eve/src/execution/session/turn-step.ts",
+  "packages/eve/src/execution/session/step-state-delta.ts",
+]);
+
+function sessionProgramFiles() {
+  return [
+    ...[...HOST_NEUTRAL_FILES].filter((file) => !SESSION_STEP_CODE.has(file)),
+    `${EVE_SRC}execution/session/admission.ts`,
+    `${EVE_SRC}execution/session/finalization.ts`,
+    `${EVE_SRC}execution/tasks/session.ts`,
+  ].sort();
+}
+
+const PROGRAM_NONDETERMINISM = new Map([
+  ["Date.now", "`host.now()`"],
+  ["Math.random", "a value from a step"],
+  ["Promise.all", "`host.all()`"],
+  ["Promise.allSettled", "`host.all()`"],
+  ["Promise.any", "`host.next()` or `host.all()`"],
+  ["Promise.race", "`host.next({ until })`"],
+  ["setInterval", "`host.next({ until })`"],
+  ["setTimeout", "`host.next({ until })`"],
+]);
+
+/** @param {import("typescript").SourceFile} source @returns {{ name: string; line: number }[]} */
+function programNondeterminism(source) {
+  /** @type {{ name: string; line: number }[]} */
+  const found = [];
+  /** @param {import("typescript").Node} node */
+  const visit = (node) => {
+    let name;
+    if (ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.expression)) {
+      name = `${node.expression.text}.${node.name.text}`;
+    } else if (
+      ts.isIdentifier(node) &&
+      (node.text === "setTimeout" || node.text === "setInterval") &&
+      !(ts.isPropertyAccessExpression(node.parent) && node.parent.name === node)
+    ) {
+      name = node.text;
+    } else if (
+      ts.isNewExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === "Date" &&
+      (node.arguments === undefined || node.arguments.length === 0)
+    ) {
+      found.push({ name: "new Date()", line: lineOf(source, node) });
+    }
+    if (name !== undefined && PROGRAM_NONDETERMINISM.has(name)) {
+      found.push({ name, line: lineOf(source, node) });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return found;
+}
+
+/** @param {import("typescript").SourceFile} source @param {import("typescript").Node} node */
+function lineOf(source, node) {
+  return source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
+}
+
+async function checkRule75() {
+  /** @type {Violation[]} */
+  const violations = [];
+  for (const file of sessionProgramFiles()) {
+    const content = await readFile(join(REPO_ROOT, file), "utf8");
+    const source = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true);
+    for (const { name, line } of programNondeterminism(source)) {
+      violations.push({
+        rule: 75,
+        file,
+        line,
+        message: `uses \`${name}\` in the session program, which an engine replays. Use ${PROGRAM_NONDETERMINISM.get(name) ?? "`host.now()`"} so the engine gives a replay the same value.`,
+      });
+    }
+  }
+  for (const { file, chain } of await stepModuleReach(sessionProgramFiles())) {
+    violations.push({
+      rule: 75,
+      file: chain[chain.length - 2] ?? file,
+      message: `reaches "${file}", a module with \`"use step"\` functions, from the session program. Import chain: ${chain.join(" -> ")}. Call the step through \`host.step(name, input, key)\`: add its name to \`SessionStepTypes\` (\`execution/session/steps.ts\`) and its function to the engine step tables (\`execution/session/shared-steps.ts\`), and pass the program's step runner to the module that called it. Type-only imports are fine.`,
+    });
+  }
+  return violations;
+}
+
+/**
+ * Follows value imports from the session program and stops at each module with a
+ * `"use step"` directive, which it reports with the chain that reached it.
+ *
+ * @param {readonly string[]} entries
+ */
+async function stepModuleReach(entries) {
+  /** @type {{ file: string; chain: string[] }[]} */
+  const found = [];
+  /** @type {Map<string, string | undefined>} */
+  const parents = new Map(entries.map((entry) => [entry, undefined]));
+  const queue = [...entries];
+  while (queue.length > 0) {
+    const file = /** @type {string} */ (queue.shift());
+    const content = await readFile(join(REPO_ROOT, file), "utf8");
+    if (parents.get(file) !== undefined && STEP_DIRECTIVE_RE.test(content)) {
+      const chain = [file];
+      for (let at = parents.get(file); at !== undefined; at = parents.get(at)) chain.push(at);
+      found.push({ file, chain: chain.reverse() });
+      continue;
+    }
+    const source = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true);
+    for (const specifier of valueImportSpecifiers(source)) {
+      const next = resolveEveSource(specifier, file);
+      if (next === undefined || parents.has(next) || !existsSync(join(REPO_ROOT, next))) continue;
+      parents.set(next, file);
+      queue.push(next);
+    }
+  }
+  return found;
+}
+
 /**
  * @param {string} posix
  * @param {string[]} lines
@@ -1278,6 +1600,229 @@ function checkRule66(posix, lines, violations) {
       message:
         "imports Workflow into the host-neutral core. Reach Workflow through a host port or the host registry (`execution/hosts.ts`), and implement Workflow's side under `execution/workflow-host/`.",
     });
+  }
+}
+
+// ---------- Rule 69: Vercel platform access stays in src/platform ----------
+
+const VERCEL_PLATFORM_ACCESS_DIRS = [
+  "packages/eve/src/platform/",
+  "packages/eve/src/cli/",
+  "packages/eve/src/evals/cli/",
+  "packages/eve/src/setup/",
+  "packages/eve/src/services/dev-client/",
+  "packages/eve/src/extensions/code/extension/",
+  "packages/eve/src/extensions/git/extension/",
+  "packages/eve/src/extensions/custom-skills/extension/",
+  "packages/eve/src/computer-use/extension/",
+];
+const VERCEL_PLATFORM_ACCESS_FILES = new Set([
+  "packages/eve/src/public/agents/vercel-oidc.ts",
+  "packages/eve/src/public/channels/discord/gateway/relay.ts",
+  "packages/eve/src/public/channels/vercel-oidc.ts",
+  "packages/eve/src/public/experimental/schedules/vercel.ts",
+  "packages/eve/src/public/memory/file/vercel.ts",
+  "packages/eve/src/public/sandbox/vercel.ts",
+  "packages/eve/src/self-modification/setup.ts",
+]);
+const VERCEL_ENV_READ_RE = /\benv\.VERCEL\w*|["']VERCEL(?:_[A-Z0-9]+)*["']/g;
+const VERCEL_PLATFORM_IMPORT_RE =
+  /["'](?:#compiled\/@vercel\/(?!agent-runs\/|otel\/)[^"']+|[^"']*(?:#|\/)platform\/vercel\/[^"']+)["']/g;
+
+/**
+ * Counts a file's `VERCEL*` environment reads and vendored Vercel platform imports.
+ *
+ * @param {string} posix
+ * @param {string} content
+ * @param {Map<string, number>} current
+ */
+function checkRule69(posix, content, current) {
+  if (!posix.startsWith("packages/eve/src/") || posix.endsWith(".test.ts")) return;
+  if (VERCEL_PLATFORM_ACCESS_DIRS.some((dir) => posix.startsWith(dir))) return;
+  if (VERCEL_PLATFORM_ACCESS_FILES.has(posix)) return;
+  const count =
+    [...content.matchAll(VERCEL_ENV_READ_RE)].length +
+    [...content.matchAll(VERCEL_PLATFORM_IMPORT_RE)].length;
+  if (count > 0) current.set(posix, count);
+}
+
+// ---------- Rule 70: eve depends on the platform contract, not its implementations ----------
+
+const PLATFORM_CONTRACT_MODULES = new Set([
+  "#platform/declaration.js",
+  "#platform/document-store.js",
+  "#platform/engine.js",
+  "#platform/entities.js",
+  "#platform/hosted-sandbox.js",
+  "#platform/models.js",
+  "#platform/process.js",
+  "#platform/runtime-spans.js",
+  "#platform/schedules.js",
+  "#platform/selection.js",
+]);
+const PLATFORM_BUILD_HOST_DIR = "packages/eve/src/internal/nitro/host/";
+const PLATFORM_BUILD_HOST_MODULES = new Set(["#platform/build-output.js", "#platform/types.js"]);
+
+/**
+ * Flags imports of `src/platform/` modules other than the contract from outside the platform layer.
+ * `#platform/vercel/*` imports are rule 69's.
+ *
+ * @param {string} posix
+ * @param {string[]} lines
+ * @param {Violation[]} violations
+ */
+function checkRule70(posix, lines, violations) {
+  if (!posix.startsWith(EVE_SRC) || posix.startsWith(`${EVE_SRC}platform/`)) return;
+  for (const [index, line] of lines.entries()) {
+    for (const match of line.matchAll(
+      /(?:from\s+|import\s*\(\s*|^\s*import\s+)(["'])([^"']+)\1/g,
+    )) {
+      const specifier = aliasOfSpecifier(posix, match[2]);
+      if (!specifier.startsWith("#platform/") || specifier.startsWith("#platform/vercel/"))
+        continue;
+      if (PLATFORM_CONTRACT_MODULES.has(specifier)) continue;
+      if (posix.startsWith(PLATFORM_BUILD_HOST_DIR) && PLATFORM_BUILD_HOST_MODULES.has(specifier)) {
+        continue;
+      }
+      violations.push({
+        rule: 70,
+        file: `${posix}:${index + 1}`,
+        message: `imports \`${specifier}\`. Outside \`packages/eve/src/platform/\`, eve depends only on the platform contract (\`#platform/entities.js\` and its capability modules), plus the build-output port in the Nitro build host. Add what you need to the platform entities (\`#platform/entities.js\`) and the Vercel declaration (\`platform/vercel/declaration.ts\`).`,
+      });
+    }
+  }
+}
+
+// ---------- Rule 76: the declaration is reached through the generated platform module ----------
+
+const SEAM_ONLY_MODULES = new Set([
+  "#platform/vercel/declaration.js",
+  "#platform/vercel/core.js",
+  "#platform/builtin.js",
+]);
+
+/**
+ * Flags imports of eve's built-in declaration outside the generated platform module.
+ *
+ * @param {string} posix
+ * @param {string[]} lines
+ * @param {Violation[]} violations
+ */
+function checkRule76(posix, lines, violations) {
+  if (!posix.startsWith(EVE_SRC) || posix.endsWith(".test.ts")) return;
+  if (posix.startsWith(`${EVE_SRC}internal/testing/`)) return;
+  for (const [index, line] of lines.entries()) {
+    for (const match of line.matchAll(
+      /(?:from\s+|import\s*\(\s*|^\s*import\s+)(["'])([^"']+)\1/g,
+    )) {
+      const specifier = aliasOfSpecifier(posix, match[2]).replace(/\.ts$/, ".js");
+      if (!SEAM_ONLY_MODULES.has(specifier)) continue;
+      violations.push({
+        rule: 76,
+        file: `${posix}:${index + 1}`,
+        message: `imports \`${specifier}\`. eve reaches its platform declaration only through the generated platform module, so a platform the build selects takes the same path as eve's own. Read the platform from the app (\`app.platform\`, \`currentApp().platform\`), from the build's selected declaration (\`#platform/selection.js\`), or, in a process with no app, from \`#platform/process.js\`.`,
+      });
+    }
+  }
+}
+
+// ---------- Rule 71: the World stays behind Durable ----------
+
+const WORKFLOW_RUNTIME_FACADE = "#internal/workflow/runtime.js";
+const WORKFLOW_ENGINE_DIRS = [
+  `${EVE_SRC}execution/workflow-host/`,
+  `${EVE_SRC}internal/workflow/`,
+  `${EVE_SRC}internal/testing/`,
+];
+const WORKFLOW_ENGINE_MODULES = new Set(
+  [
+    "cli/commands/logs-events.ts",
+    "execution/install-workflow-world.ts",
+    "execution/legacy-session/interrupt-step.ts",
+    "execution/legacy-session/prepare-step.ts",
+    "execution/session-inbox/end-stranded-session.ts",
+    "execution/session-inbox/owner.ts",
+    "execution/session-inbox/resume.ts",
+    "execution/session-prewarm.ts",
+    "execution/session/handoff-steps.ts",
+    "execution/session/timeout-steps.ts",
+    "execution/workflow-runtime.ts",
+  ].map((file) => `${EVE_SRC}${file}`),
+);
+const WORLD_IMPORT_RE =
+  /import\s*\{([^}]*)\}\s*from\s*(["'])([^"']+)\2|import\s*\*\s*as\s+\w+\s+from\s*(["'])([^"']+)\4|import\s*\(\s*(["'])([^"']+)\6\s*\)/g;
+
+function checkRule71(posix, content, violations) {
+  if (!posix.startsWith(EVE_SRC) || posix.endsWith(".test.ts")) return;
+  if (WORKFLOW_ENGINE_MODULES.has(posix)) return;
+  if (WORKFLOW_ENGINE_DIRS.some((dir) => posix.startsWith(dir))) return;
+  for (const match of content.matchAll(WORLD_IMPORT_RE)) {
+    const specifier = aliasOfSpecifier(posix, match[3] ?? match[5] ?? match[7]);
+    if (specifier !== WORKFLOW_RUNTIME_FACADE) continue;
+    const reachesWorld =
+      match[1] === undefined
+        ? /\.(?:getWorld|setWorld)\b/.test(content)
+        : /\b(?:getWorld|setWorld)\b/.test(match[1]);
+    if (!reachesWorld) continue;
+    violations.push({
+      rule: 71,
+      file: `${posix}:${content.slice(0, match.index).split("\n").length}`,
+      message: `reaches the Workflow SDK's World through \`${WORKFLOW_RUNTIME_FACADE}\`. Outside the Workflow engine, eve uses durable execution through \`Durable\` (\`app.durable\`, typed in \`#execution/durable.js\`); add the eve-level operation you need there and implement it in the Workflow engine under \`execution/workflow-host/\`.`,
+    });
+  }
+}
+
+// ---------- Rule 72: one owner per process-app internal ----------
+
+const PROCESS_APP_MODULE = "#runtime/app.js";
+const PROCESS_APP_VALUES = new Set([
+  "createProcessApp",
+  "installProcessApp",
+  "processApp",
+  "startedApp",
+]);
+const PROCESS_APP_OWNERS = new Set(
+  [
+    "execution/tools/workflow/step-execution.ts",
+    "instrumentation/providers.ts",
+    "instrumentation/runtime-global.ts",
+    "runtime/app.ts",
+    "runtime/lifecycle.ts",
+    "runtime/sessions/runtime-session.ts",
+    "runtime/start.ts",
+  ].map((file) => `${EVE_SRC}${file}`),
+);
+const NAMED_IMPORT_RE = /import\s*\{([^}]*)\}\s*from\s*(["'])([^"']+)\2/g;
+const STEP_DIRECTIVE_RE = /^\s*(["'])use step\1;?\s*$/m;
+const NAMESPACE_OR_DYNAMIC_IMPORT_RE =
+  /(?:import\s*\*\s*as\s+\w+\s+from\s*|import\s*\(\s*)(["'])([^"']+)\1/g;
+
+function checkRule72(posix, content, violations) {
+  if (!posix.startsWith(EVE_SRC) || posix.endsWith(".test.ts")) return;
+  if (posix.startsWith(`${EVE_SRC}internal/testing/`)) return;
+  const message = `reaches the process app directly. Receive the app from your caller (a route, a boot phase, or the turn's context through \`requireApp(ctx)\`) and read its platform as \`app.platform\`; only a Workflow step function (a file with a \`"use step"\` directive) reads \`processApp()\` or \`startedApp()\`, and it passes the app down. Other internals of the app have one owner module each; use its accessor (\`app.hosts.routes\` or \`app.hosts.streams\`, \`getInstrumentationRuntime()\`, \`getActiveRuntimeSession()\`), or add an internal and its owner to \`PROCESS_APP_OWNERS\`. Only code in a process with no app reads \`builtInHosts()\`. Type imports from \`${PROCESS_APP_MODULE}\` are fine.`;
+  const lineOf = (index) => content.slice(0, index).split("\n").length;
+  const key = content.indexOf('Symbol.for("eve.app")');
+  if (key >= 0 && posix !== `${EVE_SRC}runtime/app.ts`)
+    violations.push({ rule: 72, file: `${posix}:${lineOf(key)}`, message });
+  if (PROCESS_APP_OWNERS.has(posix)) return;
+  const stepFile = STEP_DIRECTIVE_RE.test(content);
+  for (const match of content.matchAll(NAMED_IMPORT_RE)) {
+    if (aliasOfSpecifier(posix, match[3]) !== PROCESS_APP_MODULE) continue;
+    const reachesProcessApp = match[1]
+      .split(",")
+      .map((name) => name.trim().split(/\s+as\s+/)[0])
+      .some(
+        (name) =>
+          PROCESS_APP_VALUES.has(name) &&
+          !(stepFile && (name === "processApp" || name === "startedApp")),
+      );
+    if (reachesProcessApp)
+      violations.push({ rule: 72, file: `${posix}:${lineOf(match.index)}`, message });
+  }
+  for (const match of content.matchAll(NAMESPACE_OR_DYNAMIC_IMPORT_RE)) {
+    if (aliasOfSpecifier(posix, match[2]) !== PROCESS_APP_MODULE) continue;
+    violations.push({ rule: 72, file: `${posix}:${lineOf(match.index)}`, message });
   }
 }
 
@@ -2367,6 +2912,11 @@ async function main() {
     rule63: /** @type {Violation[]} */ ([]),
     rule64: /** @type {Violation[]} */ ([]),
     rule66: /** @type {Violation[]} */ ([]),
+    rule69: /** @type {Map<string, number>} */ (new Map()),
+    rule70: /** @type {Violation[]} */ ([]),
+    rule71: /** @type {Violation[]} */ ([]),
+    rule72: /** @type {Violation[]} */ ([]),
+    rule76: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -2501,6 +3051,20 @@ async function main() {
   violations.push(...state.rule64);
   violations.push(...(await checkRule65()));
   violations.push(...state.rule66);
+  violations.push(...state.rule70);
+  violations.push(...state.rule71);
+  violations.push(...state.rule72);
+  violations.push(...state.rule76);
+  violations.push(...(await checkRule73()));
+  violations.push(...(await checkRule74()));
+  violations.push(...(await checkRule75()));
+  for (const [file, count] of state.rule69) {
+    violations.push({
+      rule: 69,
+      file,
+      message: `reads \`VERCEL*\` environment variables or imports \`#compiled/@vercel/*\` or \`#platform/vercel/*\` in ${count} place${count === 1 ? "" : "s"}. Vercel platform knowledge lives in \`packages/eve/src/platform/\` so eve can run on other hosts. Read platform facts from the app's platform (\`app.platform\`, or \`currentApp().platform\` in code that eve runs inside a request, a turn, or a step), or add the capability to the platform entities (\`#platform/entities.js\`) and the Vercel declaration (\`platform/vercel/declaration.ts\`).`,
+    });
+  }
 
   for (const issue of await checkPublicExports()) {
     violations.push({ rule: 55, ...issue });

@@ -1,4 +1,6 @@
+import { AppKey, bindApp } from "#context/app.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
+import { testApp } from "#internal/testing/test-platform.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import type { AgentSettings } from "#execution/effective-agent-config.js";
 import { createKernel } from "#harness/kernel.js";
@@ -20,6 +22,7 @@ export function createTestKernel({ agent, ...config }: TestKernelConfig): StepFn
     const ctx = contextStorage.getStore();
     if (ctx !== undefined) {
       if (!ctx.has(SessionAgentKey)) ctx.set(SessionAgentKey, testAgent(agent));
+      if (!ctx.has(AppKey)) bindApp(ctx, testApp());
       if (!ctx.has(ConnectionRegistryKey)) {
         ctx.set(ConnectionRegistryKey, new ConnectionRegistryImpl([]));
       }
@@ -27,6 +30,7 @@ export function createTestKernel({ agent, ...config }: TestKernelConfig): StepFn
     }
     const own = new ContextContainer();
     own.set(SessionAgentKey, testAgent(agent));
+    bindApp(own, testApp());
     own.set(ConnectionRegistryKey, new ConnectionRegistryImpl([]));
     const folding = createKernel({
       ...config,

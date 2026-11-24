@@ -1,3 +1,5 @@
+import type { AppHosts } from "#execution/hosts.js";
+import { processApp } from "#runtime/app.js";
 import {
   prepareCoordinationDispatch,
   type CoordinationDispatchInput,
@@ -6,7 +8,11 @@ import {
 import { sessionSandboxIdleTimeoutMs } from "#context/providers/sandbox.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import { markSandboxRunning } from "#sandbox/state.js";
-import { commitSessionStep, type SessionStepInput } from "#execution/publish-session-events.js";
+import {
+  commitSessionStep,
+  type Entered,
+  type SessionStepInput,
+} from "#execution/publish-session-events.js";
 import {
   type SessionStateTransition,
   type WithSessionStateDelta,
@@ -47,25 +53,26 @@ import { copyView, foldLine } from "#protocol/session-projection/fold.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 
 export function dispatchCoordinationOn(
+  hosts: AppHosts,
   startRun: StartWorkflowToolRun,
 ): (
   input: CoordinationDispatchInput,
 ) => Promise<WithSessionStateDelta<CoordinationDispatchResult>> {
   return async (input) =>
-    await withSessionStateDelta(input, (state) => dispatchCoordination(state, startRun));
+    await withSessionStateDelta(hosts, input, (state) => dispatchCoordination(state, startRun));
 }
 
 export async function publishDispatchedCallsStep(
   input: SessionStepInput & { readonly pending: PendingDispatch },
 ): Promise<SessionStateTransition> {
   "use step";
-  return await withSessionStateDelta(input, ({ pending, ...target }) =>
+  return await withSessionStateDelta(processApp().hosts, input, ({ pending, ...target }) =>
     commitSessionStep(target, (view) => [startDispatchedCalls(view, pending)], { origin: "own" }),
   );
 }
 
 async function dispatchCoordination(
-  input: CoordinationDispatchInput,
+  input: Entered<CoordinationDispatchInput>,
   startRun: StartWorkflowToolRun,
 ): Promise<CoordinationDispatchResult> {
   const prepared = await prepareCoordinationDispatch({
@@ -137,6 +144,7 @@ async function dispatchCoordination(
   for (const start of starts) {
     const { task } = start;
     const dispatched = await dispatchWorkflowCall(
+      input.hosts,
       { ...start, session: nextSession },
       admissionView,
     );
@@ -203,6 +211,7 @@ function withPrestartedRuns(
 }
 
 async function dispatchWorkflowCall(
+  hosts: AppHosts,
   start: StartWorkflowTaskInput,
   admissionView: SessionView,
 ): Promise<{
@@ -219,6 +228,6 @@ async function dispatchWorkflowCall(
     case "serve":
       return await startTaskRun({ ...start, entry }, admissionView);
     case "receive":
-      return await sendToTask({ ...start, taskId: entry.taskId }, admissionView);
+      return await sendToTask(hosts, { ...start, taskId: entry.taskId }, admissionView);
   }
 }

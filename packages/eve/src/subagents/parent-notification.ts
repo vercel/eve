@@ -1,3 +1,4 @@
+import { bindApp } from "#context/app.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { deserializeContext } from "#context/serialize.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
@@ -15,8 +16,10 @@ import type { AgentTurnOutcome } from "#shared/agent-turn-outcome.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { parseJsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
-import { resumeRoutedHook } from "#execution/hosts.js";
+import { resumeRoutedHook, type RouteHosts } from "#execution/hosts.js";
 import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
+import type { Entities } from "#platform/entities.js";
+import { processApp, startedApp } from "#runtime/app.js";
 import {
   REMOTE_CALLBACK_NOT_PENDING,
   REMOTE_CALLBACK_NOT_PENDING_MESSAGE,
@@ -46,6 +49,7 @@ export async function notifyTurnCallerStep(input: {
   readonly settled: SettledTurnNotification;
 }): Promise<void> {
   "use step";
+  const platform = startedApp().platform;
 
   if (input.caller === undefined) {
     return;
@@ -60,6 +64,7 @@ export async function notifyTurnCallerStep(input: {
 
   if (input.caller.replyTo.kind === "callback") {
     await postSettledTurnCallback({
+      platform,
       result,
       sessionId: input.sessionId,
       url: input.caller.replyTo.url,
@@ -67,7 +72,7 @@ export async function notifyTurnCallerStep(input: {
     return;
   }
 
-  await resumeSettledTurnHook(input.caller.replyTo.token, result);
+  await resumeSettledTurnHook(processApp().hosts, input.caller.replyTo.token, result);
 }
 
 export async function notifyCancelledTaskCallerStep(input: {
@@ -76,6 +81,7 @@ export async function notifyCancelledTaskCallerStep(input: {
   readonly usage?: TokenUsage;
 }): Promise<void> {
   "use step";
+  const platform = startedApp().platform;
 
   const usageDelta = input.usage ?? ZERO_TOKEN_USAGE;
   const error = {
@@ -98,13 +104,14 @@ export async function notifyCancelledTaskCallerStep(input: {
   const result = input.usage === undefined ? base : { ...base, usage: input.usage };
   if (input.caller.replyTo.kind === "callback") {
     await postSettledTurnCallback({
+      platform,
       result,
       sessionId: input.sessionId,
       url: input.caller.replyTo.url,
     });
     return;
   }
-  await resumeSettledTurnHook(input.caller.replyTo.token, result);
+  await resumeSettledTurnHook(processApp().hosts, input.caller.replyTo.token, result);
 }
 
 function createSettledTurnResult(input: {
@@ -158,7 +165,7 @@ export async function resolveInitialTurnCallerStep(input: {
 
   const callbackValue = input.serializedContext[SessionCallbackKey.name];
   if (callbackValue !== undefined) {
-    const parsed = parseSessionCallback(callbackValue);
+    const parsed = parseSessionCallback(callbackValue, startedApp().platform);
     if (!parsed.ok) {
       throw new Error("Serialized session callback is invalid.", {
         cause: parsed.cause,
@@ -176,6 +183,7 @@ export async function resolveInitialTurnCallerStep(input: {
   }
 
   const ctx = await deserializeContext(input.serializedContext);
+  bindApp(ctx, startedApp());
   const adapter = ctx.get(ChannelKey);
   if (adapter?.kind !== SUBAGENT_ADAPTER_KIND || !isSubagentAdapterState(adapter.state)) {
     return undefined;
@@ -229,6 +237,7 @@ export function bindTurnCallerContext(
 }
 
 async function postSettledTurnCallback(input: {
+  readonly platform: Entities;
   readonly result: RuntimeSubagentChildResult;
   readonly sessionId: string;
   readonly url: string;
@@ -244,6 +253,7 @@ async function postSettledTurnCallback(input: {
         sessionId,
         subagentName: input.result.subagentName,
       },
+      platform: input.platform,
       url: input.url,
     });
     return;
@@ -258,6 +268,7 @@ async function postSettledTurnCallback(input: {
       sessionId,
       subagentName: input.result.subagentName,
     },
+    platform: input.platform,
     url: input.url,
   });
 }
@@ -266,11 +277,13 @@ export const NOT_PENDING_RETRY_DELAYS_MS: readonly number[] = [250, 500, 1000, 2
 
 async function postCallbackPayload(input: {
   readonly payload: unknown;
+  readonly platform: Entities;
   readonly url: string;
 }): Promise<void> {
   for (let attempt = 0; ; attempt += 1) {
     const response = await postSessionCallbackRequest({
       body: input.payload,
+      platform: input.platform,
       url: input.url,
     });
     if (response.ok) return;
@@ -299,11 +312,12 @@ async function isCallbackNotPending(response: Response): Promise<boolean> {
 }
 
 async function resumeSettledTurnHook(
+  hosts: RouteHosts,
   token: string,
   result: RuntimeSubagentChildResult,
 ): Promise<void> {
   try {
-    await resumeRoutedHook(token, {
+    await resumeRoutedHook(hosts, token, {
       kind: "runtime-action-result",
       results: [result],
     });

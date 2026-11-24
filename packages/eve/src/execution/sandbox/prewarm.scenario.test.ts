@@ -10,6 +10,10 @@ import { populatedPaths } from "#internal/testing/sandbox-provider-harness.js";
 import type { SandboxPrepareContext } from "#sandbox/provider.js";
 import { prewarmAppSandboxes } from "#execution/sandbox/prewarm.js";
 import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import { createEntities } from "#platform/entities.js";
+import vercelPlatform from "#platform/vercel/declaration.js";
+
+const vercelBuild = createEntities(vercelPlatform, undefined).build;
 
 const createScratchDirectory = useTemporaryDirectories();
 
@@ -54,6 +58,7 @@ describe("prewarmAppSandboxes", () => {
 
     await prewarmAppSandboxes({
       appRoot,
+      build: {},
       compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(compilerAppRoot, {
         moduleMapLoaderPath: resolvePackageSourceFilePath(
           "src/internal/authored-module-map-loader.ts",
@@ -104,6 +109,7 @@ describe("prewarmAppSandboxes", () => {
 
     await prewarmAppSandboxes({
       appRoot,
+      build: vercelBuild,
       compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(compilerAppRoot, {
         moduleMapLoaderPath: resolvePackageSourceFilePath(
           "src/internal/authored-module-map-loader.ts",

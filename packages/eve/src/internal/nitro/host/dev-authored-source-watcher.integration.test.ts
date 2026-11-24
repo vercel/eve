@@ -423,6 +423,7 @@ async function createPreparedHost(
     },
     compiledArtifacts: {
       bootstrapPath: join(appRoot, ".eve", "dev-hosts", "test", "bootstrap.mjs"),
+      platformModulePath: join(appRoot, ".eve", "dev-hosts", "test", "platform.mjs"),
       workflowWorldPluginPath: join(appRoot, ".eve", "dev-hosts", "test", "world.mjs"),
     },
     generation: {

@@ -1,17 +1,24 @@
+import { builtInHosts } from "../../src/runtime/app.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { H3Event } from "nitro";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { compileAgent } from "../../src/compiler/compile-agent.js";
 import { createDevelopmentNitroArtifactsConfig } from "../../src/internal/nitro/host/artifacts-config.js";
 import type { AgentInfoResponse } from "../../src/internal/nitro/routes/agent-info/build-agent-info-response.js";
+import { installWorkflowEngine } from "../../src/execution/workflow-host/host.js";
+import { createEntities } from "../../src/platform/entities.js";
+import vercelPlatform from "../../src/platform/vercel/declaration.js";
+import { testApp } from "../../src/internal/testing/test-platform.js";
 import { dispatchChannelRequest } from "../../src/internal/nitro/routes/channel-dispatch.js";
 import { EVE_INFO_ROUTE_PATH, EVE_SESSION_ROUTE_PATH } from "../../src/protocol/routes.js";
 import { useTemporaryAppRoots } from "../../src/internal/testing/use-temporary-app-roots.js";
 
 const createAppRoot = useTemporaryAppRoots();
+const platform = createEntities(vercelPlatform, undefined);
+const app = testApp({ platform });
 
 const APP_ROOT_OPTIONS = { packageName: "agent-info-route-test-agent" } as const;
 const INFO_ROUTE_KEY = `GET ${EVE_INFO_ROUTE_PATH}`;
@@ -44,10 +51,15 @@ async function requestAgentInfo(appRoot: string, request: Request): Promise<Resp
     createInfoEvent(request),
     INFO_ROUTE_KEY,
     createDevelopmentNitroArtifactsConfig({ configuredWorld: undefined, appRoot }),
+    app,
   );
 }
 
 describe("eve agent info route", () => {
+  beforeAll(() => {
+    installWorkflowEngine(builtInHosts(), platform);
+  });
+
   afterEach(() => {
     vi.unstubAllEnvs();
   });

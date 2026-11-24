@@ -10,7 +10,7 @@ import type { ReadFileResult } from "../src/execution/sandbox/read-file.js";
 import { executeReadFileOnSandbox } from "../src/execution/sandbox/read-file.js";
 import type { SandboxAccess } from "../src/sandbox/state.js";
 import type { SandboxSession } from "../src/shared/sandbox-session.js";
-import { ReadFileStateKey } from "../src/execution/tools/file-state.js";
+import { ReadFileStateKey } from "../src/context/keys.js";
 
 const HOME_PROBE_COMMAND = `printf '%s\\n' "$HOME"`;
 

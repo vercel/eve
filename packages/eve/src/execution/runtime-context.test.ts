@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { fromCompiledBundle } from "#definitions/compiled-agent.js";
+import { bindApp } from "#context/app.js";
 import { ContextContainer, contextStorage, loadContext } from "#context/container.js";
 import {
   AuthKey,
@@ -16,8 +17,13 @@ import {
   SessionTitleKey,
 } from "#context/keys.js";
 import { setChannelContext } from "#execution/channel-context.js";
-import { buildRunContext } from "#execution/runtime-context.js";
+import { buildRunContext as buildRunContextInContext } from "#execution/runtime-context.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
+import { inTestApp, testApp } from "#internal/testing/test-platform.js";
+
+function buildRunContext(input: Parameters<typeof buildRunContextInContext>[0]) {
+  return inTestApp(() => buildRunContextInContext(input));
+}
 
 function createTestSession(
   input: { readonly auth?: SessionAuthContext | null; readonly parent?: Session["parent"] } = {},
@@ -202,9 +208,10 @@ describe("buildRunContext", () => {
   it("inherits schedule provenance independently from run auth", () => {
     const scope = new ContextContainer();
     scope.set(ScheduleIdKey, "dynamic-tasks");
+    bindApp(scope, testApp());
 
     const ctx = contextStorage.run(scope, () =>
-      buildRunContext({
+      buildRunContextInContext({
         agent: createMinimalAgent(),
         run: {
           auth: testAuth,
@@ -221,8 +228,9 @@ describe("buildRunContext", () => {
   it("inherits schedule provenance in child sessions", () => {
     const scope = new ContextContainer();
     scope.set(ScheduleIdKey, "automatic-reports");
+    bindApp(scope, testApp());
     const ctx = contextStorage.run(scope, () =>
-      buildRunContext({
+      buildRunContextInContext({
         agent: createMinimalAgent(),
         run: {
           auth: testAuth,

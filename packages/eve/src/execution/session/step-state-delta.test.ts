@@ -1,3 +1,4 @@
+import { builtInHosts } from "#runtime/app.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { applySessionStateDelta } from "#execution/session/state-delta.js";
@@ -20,7 +21,7 @@ async function run(
   input: Record<string, unknown>,
   work: (input: any) => Promise<Record<string, unknown>>,
 ): Promise<{ readonly stateDelta: Record<string, any> }> {
-  return withSessionStateDelta(input as never, work as never);
+  return withSessionStateDelta(builtInHosts(), input as never, work as never);
 }
 
 describe("withSessionStateDelta", () => {

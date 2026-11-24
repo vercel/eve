@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
+import { createEntities } from "#platform/entities.js";
+import vercelPlatform from "#platform/vercel/declaration.js";
+import { answerDispatcherProbe } from "#internal/testing/node-fetch.js";
 
+const platform = createEntities(vercelPlatform, undefined);
 const callbackUrl = "https://agent.example.com/eve/v1/activity/opaque-token";
 const requestContextSymbol = Symbol.for("@vercel/request-context");
 const requestContextGlobal = globalThis as typeof globalThis & { [key: symbol]: unknown };
@@ -25,9 +29,10 @@ describe("postSessionCallbackRequest", () => {
     "logs %s HTTP failures with correlation fields and a redacted destination",
     async (kind) => {
       const response = new Response("private response body", { status: 404 });
-      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+      vi.stubGlobal("fetch", answerDispatcherProbe(vi.fn().mockResolvedValue(response)));
 
       const delivered = await postSessionCallbackRequest({
+        platform,
         body: {
           kind,
           callId: "call-1",
@@ -72,10 +77,11 @@ describe("postSessionCallbackRequest", () => {
       if (failure === "timeout") {
         vi.spyOn(AbortSignal, "timeout").mockReturnValue(AbortSignal.abort());
       }
-      vi.stubGlobal("fetch", vi.fn().mockRejectedValue(error));
+      vi.stubGlobal("fetch", answerDispatcherProbe(vi.fn().mockRejectedValue(error)));
 
       await expect(
         postSessionCallbackRequest({
+          platform,
           body: { kind: "session.completed" },
           url: callbackUrl,
           timeoutMs: 123,
@@ -99,7 +105,7 @@ describe("postSessionCallbackRequest", () => {
     };
     const fetchMock = stubFetch();
 
-    await postSessionCallbackRequest({ body: { ok: true }, url: callbackUrl });
+    await postSessionCallbackRequest({ platform, body: { ok: true }, url: callbackUrl });
 
     expect(errorSpy).not.toHaveBeenCalled();
 
@@ -138,6 +144,7 @@ describe("postSessionCallbackRequest", () => {
       const fetchMock = stubFetch();
 
       await postSessionCallbackRequest({
+        platform,
         body: { ok: true },
         url: `${origin}/eve/v1/callback/token`,
       });
@@ -163,9 +170,9 @@ describe("postSessionCallbackRequest", () => {
     vi.stubEnv("EVE_CALLBACK_TRUSTED_ORIGINS", entry);
     const fetchMock = stubFetch();
 
-    await expect(postSessionCallbackRequest({ body: {}, url: callbackUrl })).rejects.toThrow(
-      "EVE_CALLBACK_TRUSTED_ORIGINS",
-    );
+    await expect(
+      postSessionCallbackRequest({ platform, body: {}, url: callbackUrl }),
+    ).rejects.toThrow("EVE_CALLBACK_TRUSTED_ORIGINS");
     expect(fetchMock).not.toHaveBeenCalled();
     expect(errorSpy).not.toHaveBeenCalled();
   });
@@ -177,7 +184,7 @@ describe("postSessionCallbackRequest", () => {
     vi.stubEnv("EVE_CALLBACK_TRUSTED_ORIGINS", "invalid-config,");
     const fetchMock = stubFetch();
 
-    await postSessionCallbackRequest({ body: {}, url: callbackUrl });
+    await postSessionCallbackRequest({ platform, body: {}, url: callbackUrl });
 
     expect(
       new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("x-vercel-trusted-oidc-idp-token"),
@@ -190,7 +197,7 @@ describe("postSessionCallbackRequest", () => {
     vi.stubEnv("VERCEL_OIDC_TOKEN", "environment-token");
     const fetchMock = stubFetch();
 
-    await postSessionCallbackRequest({ body: { ok: true }, url: callbackUrl });
+    await postSessionCallbackRequest({ platform, body: { ok: true }, url: callbackUrl });
 
     expect(
       new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("x-vercel-trusted-oidc-idp-token"),
@@ -214,7 +221,7 @@ describe("postSessionCallbackRequest", () => {
     for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
     const fetchMock = stubFetch();
 
-    await postSessionCallbackRequest({ body: { ok: true }, url });
+    await postSessionCallbackRequest({ platform, body: { ok: true }, url });
 
     expect(
       new Headers(fetchMock.mock.calls[0]?.[1]?.headers).has("x-vercel-trusted-oidc-idp-token"),
@@ -233,7 +240,9 @@ describe("postSessionCallbackRequest", () => {
     for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
     const fetchMock = stubFetch();
 
-    await expect(postSessionCallbackRequest({ body: { ok: true }, url })).rejects.toMatchObject({
+    await expect(
+      postSessionCallbackRequest({ platform, body: { ok: true }, url }),
+    ).rejects.toMatchObject({
       message: expect.stringMatching(/must not target localhost, private|must use http or https/),
       name: "FatalError",
     });
@@ -250,7 +259,7 @@ describe("postSessionCallbackRequest", () => {
     const fetchMock = stubFetch();
     const url = "http://127.0.0.1:3000/eve/v1/callback/token";
 
-    const delivered = await postSessionCallbackRequest({ body: { ok: true }, url });
+    const delivered = await postSessionCallbackRequest({ platform, body: { ok: true }, url });
 
     expect(delivered.status).toBe(202);
 
@@ -269,6 +278,6 @@ function stubFetch() {
     async (_url: string | URL | Request, _init?: RequestInit) =>
       new Response(null, { status: 202 }),
   );
-  vi.stubGlobal("fetch", fetchMock);
+  vi.stubGlobal("fetch", answerDispatcherProbe(fetchMock));
   return fetchMock;
 }

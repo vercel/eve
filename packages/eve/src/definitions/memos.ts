@@ -4,6 +4,7 @@ import type { DynamicKey, Memo, Occurrence } from "#dynamic/definition.js";
 import { createLogger } from "#internal/logging.js";
 import type { JsonValue } from "#shared/json.js";
 import { MEMOS_CAP, canonicalJson, digestOf, memoBytes } from "./state.js";
+import { utf8ByteLength } from "#shared/bytes.js";
 
 const KEY_CAP = 64 * 1024;
 const RESULT_CAP = 1024 * 1024;
@@ -14,7 +15,7 @@ const RUNNING_GLOBAL_KEY = Symbol.for("eve.reactions.memo-running");
 
 export function keyOf(key: DynamicKey, label: string, method: string): { readonly digest: string } {
   const json = toJson(key ?? null, `"${label}": ${method} key`, { key: true });
-  const size = Buffer.byteLength(canonicalJson(json));
+  const size = utf8ByteLength(canonicalJson(json));
   if (size > KEY_CAP) {
     throw new Error(
       `"${label}": ${method} received a ${Math.ceil(size / 1024)} KB key; a key is at most 64 KB. Key on an ID, such as a tenant or turn ID.`,

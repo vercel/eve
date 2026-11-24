@@ -10,9 +10,11 @@ import {
   registerInstrumentationProvider,
   seedInstrumentationProviders,
 } from "#instrumentation/providers.js";
+import { testEntities } from "#internal/testing/test-platform.js";
 import { DEVELOPMENT_WORKER_APP_ROOT_ENV } from "#internal/workflow/development-world-protocol.js";
 import { otelIntegration } from "#public/instrumentation/otel.js";
 
+const platform = testEntities();
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
@@ -29,14 +31,15 @@ describe("instrumentation provider local default", () => {
     vi.stubEnv(DEVELOPMENT_WORKER_APP_ROOT_ENV, appRoot);
     vi.stubEnv("EVE_TRACES", "off");
 
-    seedInstrumentationProviders();
+    seedInstrumentationProviders(platform);
     await registerInstrumentationProvider({
       agentName: "weather",
+      platform,
       slot: "backend",
       value: otelIntegration(),
     });
 
-    const runtime = finalizeInstrumentationProviders({ serviceName: "weather" });
+    const runtime = finalizeInstrumentationProviders({ platform, serviceName: "weather" });
     await runtime.forceFlush();
     await runtime.shutdown();
 

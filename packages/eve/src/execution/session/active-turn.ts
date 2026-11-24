@@ -1,8 +1,7 @@
 import { controlDeliveryOf } from "#execution/session/control-delivery.js";
-import { settleControlDeliveryStep } from "#execution/session/settle-control-delivery-step.js";
 import type { ControlOrigin } from "#execution/session/input-queue.js";
+import type { ControlSettlement } from "#harness/facts.js";
 import type { DeliverHookPayload, TurnCaller } from "#channel/types.js";
-import { mapHeldAnswersStep } from "#execution/proxied-deliver-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { admitSessionInboxPayload } from "#execution/session/admission.js";
 import {
@@ -12,7 +11,7 @@ import {
   type SteeringTurn,
 } from "#execution/session/input-queue.js";
 import { routeSelectedDelivery } from "#execution/session/route-selected-delivery.js";
-import type { SessionExecutionInput } from "#execution/session/turn.js";
+import type { SessionExecutionInput, TaskDeadline } from "#execution/session/turn.js";
 import { createTurnControl, type TurnControl } from "#execution/session/turn-control.js";
 import type { SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import { decodeSessionInboxPayload } from "#execution/session-inbox/protocol.js";
@@ -57,6 +56,7 @@ export class ActiveTurn {
   private steeringController: AbortController;
   caller: TurnCaller | undefined;
   compacted = false;
+  awaitingCalls = false;
 
   constructor(
     input: SessionExecutionInput,
@@ -83,20 +83,18 @@ export class ActiveTurn {
   }
 
   private readonly signalSteering = (payload: SessionInboxPayload): void => {
-    let delivery;
-    try {
-      delivery = decodeSessionInboxPayload(payload);
-    } catch {
-      return;
-    }
+    const delivery = steeringDeliveryOf(payload, this.identity);
     if (
-      delivery.kind === "deliver" &&
+      delivery !== undefined &&
       !this.input.queue.isDuplicate(delivery) &&
-      isSteeringMessage(delivery, this.identity) &&
       !this.input.cursor.sessionState.hasProxyInputRequests
     )
       this.steeringController.abort();
   };
+
+  get holdsInput(): boolean {
+    return this.awaitingCalls || this.runtimeResults.length > 0;
+  }
 
   get signal(): AbortSignal {
     return this.controller.signal;
@@ -129,7 +127,7 @@ export class ActiveTurn {
       const selection = this.input.queue.takeSteering(this.admitted, this.identity, options);
       if (selection === undefined) break;
       for (const sequence of selection.sequences) this.admitted.delete(sequence);
-      const routed = await routeSelectedDelivery(selection, this.input.cursor);
+      const routed = await routeSelectedDelivery(selection, this.input.cursor, this.input);
       if (routed.kind === "cancel-turn") {
         this.abort();
         break;
@@ -174,15 +172,16 @@ export class ActiveTurn {
     return [...taken, ...takeLeadingAppliedRunMessages(this.input.inbox, admits)];
   }
 
-  async nextRuntimeEvent(timers: readonly Promise<string>[]): Promise<RuntimeEvent> {
+  async nextRuntimeEvent(deadlines: readonly TaskDeadline[]): Promise<RuntimeEvent> {
     while (true) {
       const steered = await this.routeAdmittedToChildren();
       if (this.signal.aborted) return "cancelled";
       if (steered) return { kind: "steering" };
       const event = this.runtimeResults.shift();
       if (event !== undefined) return event;
-      const elapsed = await this.waitForInboxOrTimer(timers);
+      const elapsed = await this.waitForInboxOrDeadline(deadlines);
       if (elapsed !== undefined) return { callId: elapsed, kind: "timeout" };
+      if (this.input.idle !== undefined && !this.input.inbox.hasPending()) await this.input.idle();
       const payload = await this.input.inbox.next();
       if (payload === undefined)
         throw new Error("Session inbox closed before runtime actions completed.");
@@ -201,7 +200,11 @@ export class ActiveTurn {
         this.mappedForHeldRequest.add(sequence);
         const target = delivery;
         const mapped = await this.input.cursor.advance((state) =>
-          mapHeldAnswersStep({ delivery: target, requestIds: [...requestIds], ...state }),
+          this.input.host.step(
+            "mapHeldAnswers",
+            { delivery: target, requestIds: [...requestIds], ...state },
+            this.input.stepCall("mapHeldAnswers"),
+          ),
         );
         if (mapped.delivery === undefined) continue;
         delivery = mapped.delivery;
@@ -216,20 +219,31 @@ export class ActiveTurn {
     return undefined;
   }
 
-  private async waitForInboxOrTimer(
-    timers: readonly Promise<string>[],
+  private async waitForInboxOrDeadline(
+    deadlines: readonly TaskDeadline[],
   ): Promise<string | undefined> {
-    if (timers.length === 0 || this.input.inbox.hasPending()) return undefined;
-    const inboxReady = this.input.inbox.whenPending().then(() => undefined);
-    return await Promise.race([inboxReady, ...timers]);
+    const first = deadlines.reduce<TaskDeadline | undefined>(
+      (earliest, deadline) =>
+        earliest === undefined || deadline.at < earliest.at ? deadline : earliest,
+      undefined,
+    );
+    if (first === undefined || this.input.inbox.hasPending()) return undefined;
+    const woken = await this.input.host.next({ until: first.at });
+    return woken === "due" ? first.callId : undefined;
   }
 
   private cancelsThisTurn(payload: SessionInboxPayload): boolean {
-    if (payload.kind === "reset" || payload.kind === "session-failure") return true;
-    if (this.#control) return false;
-    if (payload.kind === "clear") return true;
-    if (payload.kind !== "cancel") return false;
-    return payload.turnId === undefined || payload.turnId === this.expectedTurnId;
+    return cancelsTurn(payload, { control: this.#control, expectedTurnId: this.expectedTurnId });
+  }
+
+  private settleControlDelivery(settlement: ControlSettlement) {
+    return this.input.cursor.advance((state) =>
+      this.input.host.step(
+        "settleControlDelivery",
+        { ...state, settlement },
+        this.input.stepCall("settleControlDelivery"),
+      ),
+    );
   }
 
   private async admit(value: SessionInboxPayload, settled = false): Promise<boolean> {
@@ -257,19 +271,12 @@ export class ActiveTurn {
           this.abort();
         } else if (admitted.origin !== undefined) {
           const control = controlDeliveryOf(admitted.origin);
-          await this.input.cursor.advance((state) =>
-            settleControlDeliveryStep({
-              ...state,
-              settlement: { control, outcome: "ignored", source: "cancel" },
-            }),
-          );
+          await this.settleControlDelivery({ control, outcome: "ignored", source: "cancel" });
         }
         return false;
       case "unsupported": {
         const { settlement } = admitted;
-        await this.input.cursor.advance((state) =>
-          settleControlDeliveryStep({ ...state, settlement }),
-        );
+        await this.settleControlDelivery(settlement);
         return false;
       }
       case "consumed":
@@ -288,7 +295,7 @@ export class ActiveTurn {
       }
       this.routedToChildren.add(sequence);
       const routed = await this.input.cursor.advance((state) =>
-        routeDeliverToChildren({ delivery, ...state }),
+        routeDeliverToChildren({ delivery, ...state }, this.input),
       );
       if (routed.kind === "cancel-turn") {
         this.input.queue.replaceDelivery(sequence, undefined);
@@ -314,6 +321,32 @@ export class ActiveTurn {
     if (this.controller.signal.aborted) return;
     this.controller.abort(new TurnCancelledError());
   }
+}
+
+export function cancelsTurn(
+  payload: SessionInboxPayload,
+  turn: { readonly control: boolean; readonly expectedTurnId: string },
+): boolean {
+  if (payload.kind === "reset" || payload.kind === "session-failure") return true;
+  if (turn.control) return false;
+  if (payload.kind === "clear") return true;
+  if (payload.kind !== "cancel") return false;
+  return payload.turnId === undefined || payload.turnId === turn.expectedTurnId;
+}
+
+export function steeringDeliveryOf(
+  payload: SessionInboxPayload,
+  identity: SteeringTurn,
+): DeliverHookPayload | undefined {
+  let delivery;
+  try {
+    delivery = decodeSessionInboxPayload(payload);
+  } catch {
+    return undefined;
+  }
+  return delivery.kind === "deliver" && isSteeringMessage(delivery, identity)
+    ? delivery
+    : undefined;
 }
 
 function asBoundaryMessage(event: RuntimeEvent): WorkflowToolRunMessage | undefined {

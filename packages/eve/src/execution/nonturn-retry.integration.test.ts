@@ -1,6 +1,7 @@
+import { builtInHosts } from "#runtime/app.js";
 import { expect, it, onTestFinished } from "vitest";
-import { registerHost, registerSessionLineStore } from "#execution/hosts.js";
-import { createMemoryLineStore } from "#execution/in-process/line-store.js";
+import { registerHostedRoute, registerSessionEventStore } from "#execution/hosts.js";
+import { createMemorySessionEventStore } from "#execution/in-process/session-event-store.js";
 import { createStepAttempts } from "#execution/in-process/step-attempts.js";
 import { streamSessionEvents } from "#execution/session-event-stream.js";
 import { applySessionStateDelta } from "#execution/session/state-delta.js";
@@ -28,12 +29,12 @@ let nextSession = 0;
 
 function sessionSteps() {
   const sessionId = `session-nonturn-${++nextSession}`;
-  const lines = createMemoryLineStore();
+  const lines = createMemorySessionEventStore();
   const stream = lines.open(sessionId);
   const attempts = createStepAttempts(undefined);
   const releases = [
-    registerSessionLineStore(sessionId, lines),
-    registerHost({
+    registerSessionEventStore(builtInHosts(), sessionId, lines),
+    registerHostedRoute(builtInHosts(), {
       deliver: async () => undefined,
       runEnded: () => undefined,
       cancelRun: () => undefined,
@@ -74,7 +75,7 @@ function sessionSteps() {
     },
     async lines() {
       const events = [];
-      for await (const event of streamSessionEvents(sessionId, { follow: false })) {
+      for await (const event of streamSessionEvents(builtInHosts(), sessionId, { follow: false })) {
         events.push(event);
       }
       return events;

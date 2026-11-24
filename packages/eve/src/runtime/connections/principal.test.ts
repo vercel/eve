@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { bindApp } from "#context/app.js";
 import { contextStorage, ContextContainer } from "#context/container.js";
 import { AuthKey, type SessionAuthContext } from "#context/keys.js";
 import {
@@ -8,9 +9,15 @@ import {
 } from "#connections/errors.js";
 import { principalKey, resolveConnectionPrincipal } from "#runtime/connections/principal.js";
 import type { AuthorizationDefinition } from "#shared/connection-types.js";
+import { testApp } from "#internal/testing/test-platform.js";
+import { createEntities } from "#platform/entities.js";
+import vercelPlatform from "#platform/vercel/declaration.js";
+
+const vercelApp = testApp({ platform: createEntities(vercelPlatform, undefined) });
 
 function ctxWithAuth(current: SessionAuthContext | null): ContextContainer {
   const ctx = new ContextContainer();
+  bindApp(ctx, vercelApp);
   ctx.set(AuthKey, current);
   return ctx;
 }

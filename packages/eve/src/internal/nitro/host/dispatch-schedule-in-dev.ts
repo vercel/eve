@@ -1,5 +1,6 @@
 import type { DevelopmentNitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
 import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runtime-artifacts.js";
+import type { App } from "#runtime/app.js";
 import { createScheduleRegistrations } from "#runtime/schedules/register.js";
 import { loadResolvedCompiledSchedules } from "#runtime/schedules/resolve-schedule.js";
 
@@ -25,6 +26,7 @@ export class UnknownDevScheduleError extends Error {
 }
 
 export async function dispatchScheduleInDev(input: {
+  readonly app: App;
   readonly artifactsConfig: DevelopmentNitroArtifactsConfig;
   readonly scheduleId: string;
 }): Promise<DispatchScheduleInDevResult> {
@@ -52,6 +54,7 @@ export async function dispatchScheduleInDev(input: {
   const result = await dispatchScheduleTaskFromArtifacts(
     registration.taskName,
     compiledArtifactsSource,
+    input.app,
   );
 
   return {

@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import type { World } from "#compiled/@workflow/world/index.js";
-import { EVE_VERSION_ATTRIBUTE } from "#execution/eve-workflow-attributes.js";
+import {
+  EVE_SESSION_CODE_ATTRIBUTE,
+  EVE_VERSION_ATTRIBUTE,
+} from "#execution/eve-workflow-attributes.js";
 import {
   SESSION_TIMEOUT_WORKFLOW_NAME,
   WORKFLOW_ENTRY_NAME,
@@ -56,11 +59,19 @@ async function guardedDelivery(capabilities?: World["capabilities"]) {
 }
 
 describe("guardStrandedSessionReplay", () => {
-  it.each([{ eveVersion: "0.0.1" }, { eveVersion: undefined }])(
-    "acknowledges a stranded session from eve $eveVersion without replaying it",
-    async ({ eveVersion }) => {
+  it.each([
+    { eveVersion: "0.0.1", from: "eve 0.0.1" },
+    { eveVersion: undefined, from: "an unknown eve" },
+    {
+      attributes: { [EVE_SESSION_CODE_ATTRIBUTE]: "0123456789abcdef" },
+      eveVersion: currentEveVersion,
+      from: "a build of this eve version with other session code",
+    },
+  ])(
+    "acknowledges a stranded session from $from without replaying it",
+    async ({ attributes, eveVersion, from }) => {
       const logs = captureLogRecords();
-      const run = await parkRun(`replay-guard:stranded:${eveVersion}`, eveVersion);
+      const run = await parkRun(`replay-guard:stranded:${from}`, eveVersion, attributes);
       try {
         const { deliver, handler } = await guardedDelivery();
 

@@ -36,7 +36,7 @@ export async function decideWithTracing<
   const runtime = getInstrumentationRuntime();
   if (runtime === undefined) return decideWithMetadata(options);
   const ctx = contextStorage.getStore() ?? new ContextContainer();
-  const session = readInstrumentationSessionContext(ctx);
+  const session = readInstrumentationSessionContext(ctx, runtime.environment);
   const agentName = ctx.get(SessionAgentKey)?.name ?? "eve";
   const ceiling = session.forwardedTracePolicy?.ceiling;
   const hooks =

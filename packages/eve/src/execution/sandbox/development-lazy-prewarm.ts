@@ -7,6 +7,7 @@ import {
   startPublicationJournalHeartbeat,
 } from "#internal/application/output-publication-lock.js";
 import type { RuntimeDiskCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import type { Build } from "#platform/entities.js";
 import { loadSandboxPreparedArtifact } from "#runtime/sandbox/prepared-artifacts.js";
 import { resolveRuntimeCompilerArtifactPaths } from "#runtime/loaders/artifact-paths.js";
 import { prewarmAppSandboxes } from "./prewarm.js";
@@ -14,6 +15,7 @@ import { prewarmAppSandboxes } from "./prewarm.js";
 const PREPARATION_WAIT_TIMEOUT_MS = 10 * 60 * 1000;
 
 export async function ensureDevelopmentSandboxesPrepared(input: {
+  readonly build: Build;
   readonly compiledArtifactsSource: RuntimeDiskCompiledArtifactsSource;
   readonly nodeId: string;
   readonly providerName: string;
@@ -42,6 +44,7 @@ export async function ensureDevelopmentSandboxesPrepared(input: {
     if ((await loadSandboxPreparedArtifact(input)) !== undefined) return;
     await prewarmAppSandboxes({
       appRoot: source.sandboxAppRoot ?? source.appRoot,
+      build: input.build,
       compiledArtifactsSource: source,
       log: (message) => console.info(message),
     });

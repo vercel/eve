@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RunInput, SessionAuthContext } from "#channel/types.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { resolveInstrumentationEnvironment } from "#internal/application/dev-environment.js";
+import { createEntities } from "#platform/entities.js";
+import vercelPlatform from "#platform/vercel/declaration.js";
 import { buildConversationContext, toAudienceCaller } from "#channel/conversation-context.js";
 import {
   ConversationContextKey,
@@ -29,18 +31,19 @@ describe("resolveInstrumentationEnvironment", () => {
   afterEach(() => vi.unstubAllEnvs());
 
   it("resolves development, preview, and production", () => {
+    const platform = createEntities(vercelPlatform, undefined);
     vi.stubEnv("EVE_DEV", "1");
-    expect(resolveInstrumentationEnvironment()).toBe("development");
+    expect(resolveInstrumentationEnvironment(platform)).toBe("development");
 
     vi.stubEnv("EVE_DEV", "0");
     vi.stubEnv("VERCEL_ENV", "development");
-    expect(resolveInstrumentationEnvironment()).toBe("development");
+    expect(resolveInstrumentationEnvironment(platform)).toBe("development");
 
     vi.stubEnv("VERCEL_ENV", "preview");
-    expect(resolveInstrumentationEnvironment()).toBe("preview");
+    expect(resolveInstrumentationEnvironment(platform)).toBe("preview");
 
     vi.stubEnv("VERCEL_ENV", "production");
-    expect(resolveInstrumentationEnvironment()).toBe("production");
+    expect(resolveInstrumentationEnvironment(platform)).toBe("production");
   });
 });
 

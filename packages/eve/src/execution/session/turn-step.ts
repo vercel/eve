@@ -34,6 +34,8 @@ import {
 } from "#context/keys.js";
 import { ChannelKey, requireCompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { sessionAgent } from "#definitions/agent.js";
+import { bindApp } from "#context/app.js";
+import type { App } from "#runtime/app.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
@@ -62,7 +64,7 @@ import {
   sessionView,
 } from "#harness/session-machine/commit.js";
 import { matchSignIns, receive } from "#harness/session-machine/transitions.js";
-import type { DeliverPayload } from "#channel/types.js";
+import type { DeliverPayload, Runtime } from "#channel/types.js";
 import { coalesceTurnInputs, validateHarnessModelMessages } from "#harness/messages.js";
 import type { HarnessSession, HarnessStepInput, StepInput, StepResult } from "#harness/types.js";
 import { attributeAnswers } from "#execution/session/answer-caller.js";
@@ -110,7 +112,7 @@ import {
 import {
   buildRuntimeIdentity,
   createExecutionNodeStep,
-  type CreateRuntime,
+  type CreateRuntimeConfig,
 } from "#execution/node-step.js";
 import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
@@ -125,7 +127,8 @@ import {
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import { signInInteractionId } from "#harness/interaction-facts.js";
 import { SIGN_IN_DECLINED } from "#harness/hitl/sign-ins.js";
-import { signInDelivery, type DurableHost } from "#execution/hosts.js";
+import { signInDelivery, type AppHosts, type ResumeAddress } from "#execution/hosts.js";
+import type { StepMeta } from "#execution/durable.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 import type { AuthorizationCallback } from "#shared/connection-types.js";
 
@@ -139,30 +142,49 @@ interface PendingStepAttributes {
 }
 
 export interface SessionStepHost {
+  readonly app: App;
+  readonly hosts: AppHosts;
   readonly callbackBaseUrl?: string;
   setAttributes(attributes: Record<string, EveAttributeValue>): Promise<void>;
-  readonly createRuntime: CreateRuntime;
+  createRuntime(config: CreateRuntimeConfig): Runtime;
   readonly toolStubs?: ToolStubHost;
-  readonly deliver?: DurableHost["deliver"];
+  readonly deliver?: ResumeAddress;
+}
+
+interface TurnStepWork extends TurnStepInput {
+  readonly abortSignal?: AbortSignal;
+  readonly steeringSignal?: AbortSignal;
 }
 
 export function turnStepOn(
   host: SessionStepHost,
-): (input: TurnStepInput) => Promise<TurnStepResult> {
-  return async (input) =>
-    await withSessionStateDelta(input, (state) =>
-      runSessionStep(
-        {
-          ...state,
-          serializedContext: bindTurnCallerContext(state.caller, state.serializedContext),
-        },
-        host,
-      ),
+): (input: TurnStepInput, meta: StepMeta) => Promise<TurnStepResult> {
+  return async (input, meta) => {
+    const work: TurnStepWork = {
+      ...input,
+      ...(meta.signals !== undefined && {
+        abortSignal: meta.signals.cancel,
+        steeringSignal: meta.signals.steer,
+      }),
+    };
+    return await withSessionStateDelta(
+      host.hosts,
+      work,
+      (state) =>
+        runSessionStep(
+          {
+            ...state,
+            serializedContext: bindTurnCallerContext(state.caller, state.serializedContext),
+          },
+          host,
+        ),
+      meta,
     );
+  };
 }
 
 async function runSessionStep(
-  input: Entered<TurnStepInput>,
+  input: Entered<TurnStepWork>,
   host: SessionStepHost,
 ): Promise<DurableStepResult> {
   const pendingAttributes: PendingStepAttributes = {};
@@ -175,7 +197,7 @@ async function runSessionStep(
 }
 
 async function runSessionStepBody(
-  input: Entered<TurnStepInput>,
+  input: Entered<TurnStepWork>,
   pendingAttributes: PendingStepAttributes,
   host: SessionStepHost,
 ): Promise<DurableStepResult> {
@@ -185,8 +207,10 @@ async function runSessionStepBody(
 
   let durableSession = readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
+  bindApp(ctx, host.app);
   enterSessionProjection(ctx, durableSession.state);
   const orphaned = await readOrphanedLines({
+    hosts: input.hosts,
     sessionId: durableSession.sessionId,
     position: nextLinePosition(ctx),
     sessionWritable: input.sessionWritable,
@@ -509,7 +533,9 @@ async function runSessionStepBody(
     };
 
     if (delivery !== undefined && resolved === undefined && startedBetweenTurns) {
-      await publishAdmission(buildRuntimeIdentity(agent)).catch(ignoreTurnCancellation);
+      await publishAdmission(buildRuntimeIdentity(agent, host.app.platform)).catch(
+        ignoreTurnCancellation,
+      );
       await instrumentation?.flush();
       const aliased = saveSessionProjection(
         reconcileSessionContinuationToken(ctx, initialSession),
@@ -527,12 +553,12 @@ async function runSessionStepBody(
       });
     }
 
-    const runtimeIdentity = buildRuntimeIdentity(agent);
+    const runtimeIdentity = buildRuntimeIdentity(agent, host.app.platform);
     let restoration: Promise<void> | undefined;
     const prepareDefinitions = (session: HarnessSession): Promise<void> => {
       return (restoration ??= (async () => {
         try {
-          const revision = await agent.revision();
+          const revision = await agent.revision(host.app.platform);
           await contextStorage.run(ctx, () =>
             restoreDefinitions(ctx, { abortSignal, conversation: session.history, revision }),
           );
@@ -611,13 +637,14 @@ async function runSessionStepBody(
       signInCompletions: readonly AuthorizationChallenge[] | undefined,
     ): Promise<StepResult> => {
       const step = createExecutionNodeStep({
+        platform: host.app.platform,
         steeringSignal: input.steeringSignal,
         abortSignal,
         capabilities,
         clearOnly: input.input?.control === "clear",
         compactOnly: input.input?.control === "compact",
         controlDelivery: input.input?.controlDelivery,
-        createRuntime: host.createRuntime,
+        createRuntime: (config) => host.createRuntime(config),
         handleEvent,
         signInCompletions,
         typedAnswers: !hasDelegatedSessionContext(input.serializedContext),
@@ -667,7 +694,7 @@ async function runSessionStepBody(
               ctx.setVirtualContext(ToolChannelKey, {
                 channel: channelOf(ctx),
                 to: createToolChannelTo({
-                  createRuntime: host.createRuntime,
+                  createRuntime: (config) => host.createRuntime(config),
                   delegated: hasDelegatedSessionContext(input.serializedContext),
                   loadAgent: () => agent,
                 }),

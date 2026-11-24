@@ -1,3 +1,4 @@
+import { builtInHosts } from "#runtime/app.js";
 import type { LanguageModelV4Prompt } from "@ai-sdk/provider";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
@@ -193,7 +194,7 @@ describe("hook ctx.continue()", () => {
     const { inputs } = await runSession({
       drive: async ({ inbox, log }) => {
         await until(log, 'admitted:{"channel":"http"}', 1);
-        await resumeRoutedHook(inbox, {
+        await resumeRoutedHook(builtInHosts(), inbox, {
           auth: ALICE,
           delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
           kind: "send",
@@ -231,7 +232,7 @@ describe("hook ctx.continue()", () => {
     const { inputs, log } = await runSession({
       drive: async ({ inbox, log }) => {
         await until(log, 'admitted:{"channel":"http"}', 1);
-        await resumeRoutedHook(inbox, { deliveryId: "clear-1", kind: "clear" });
+        await resumeRoutedHook(builtInHosts(), inbox, { deliveryId: "clear-1", kind: "clear" });
         await until(log, "turn:cancelled", 1);
         release();
         await until(log, 'admitted:{"control":"clear"}', 1);

@@ -134,11 +134,11 @@ describe("createSessionStreamResponse", () => {
 
   it("ends a follow of an earlier eve's session at the tail once nothing owns it", async () => {
     const v26 = { data: {}, meta: { at }, type: "session.started" };
-    const followed = async (hasRunnableOwner: boolean) => {
-      const { follows, session } = sessionOf([v26], { open: hasRunnableOwner });
+    const followed = async (isLive: boolean) => {
+      const { follows, session } = sessionOf([v26], { open: isLive });
       const response = await createSessionStreamResponse(
         new Request("https://eve.test/eve/v1/session/session_1/stream"),
-        { ...session, hasRunnableOwner: async () => hasRunnableOwner } as Session,
+        { ...session, isLive: async () => isLive } as Session,
       );
       return { follows, response };
     };
@@ -187,7 +187,7 @@ describe("createSessionStreamResponse", () => {
         options.follow === false
           ? session.getLineStream(options)
           : Promise.reject(new SessionStrandedError({ eveVersion: "0.0.1" }, "Reset it.")),
-      hasRunnableOwner: async () => false,
+      isLive: async () => false,
     } as Session;
     const response = await createSessionStreamResponse(
       new Request("https://eve.test/eve/v1/session/session_1/stream?startIndex=2"),
@@ -233,7 +233,7 @@ describe("createSessionStreamResponse", () => {
       v26("message.received", { message: "Alice asks." }),
     ];
     const { session, starts } = sessionOf(stored, { open: true });
-    const owned = { ...session, hasRunnableOwner: async () => true, id: "session_v26" } as Session;
+    const owned = { ...session, isLive: async () => true, id: "session_v26" } as Session;
     const followedLease = async (startIndex: number) => {
       const response = await createSessionStreamResponse(
         new Request(`https://eve.test/eve/v1/session/session_v26/stream?startIndex=${startIndex}`),

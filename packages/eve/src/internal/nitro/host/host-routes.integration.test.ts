@@ -11,9 +11,11 @@ import { EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN } from "#protocol/routes.js";
 import type { ScheduleRegistration } from "#runtime/schedules/register.js";
 import { resolveWorkflowModulePath } from "#internal/application/package.js";
 import { createDevelopmentNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
+import { WORKFLOW_ENGINE_BUILD } from "#execution/workflow-host/build.js";
 import { createHostRouteTable, renderHostRoutes } from "#internal/nitro/host/host-routes.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#internal/workflow-bundle/flow-route.js";
+import { platformBuildOutput } from "#platform/build-output.js";
 
 const routeModules = vi.hoisted(() => ({
   dispatchChannelRequest: vi.fn(
@@ -107,12 +109,14 @@ async function serve(input: {
     workflowsPath,
     "export async function POST(request) { return new Response(`flow ${request.method}`); }\n",
   );
-  await writeFile(workflowWorldPluginPath, "export default function plugin() {}\n");
+  await writeFile(workflowWorldPluginPath, "export const app = undefined;\n");
 
   const routes = await renderHostRoutes(
     createHostRouteTable({
+      durable: WORKFLOW_ENGINE_BUILD,
       manifest: manifest(input.world),
       mode: input.mode,
+      platform: platformBuildOutput(),
       scheduleRegistrations: input.scheduleRegistrations ?? [],
       vercel: false,
     }),
@@ -185,6 +189,7 @@ describe("rendered host routes", () => {
       expect.anything(),
       "HEAD /health",
       artifactsConfig,
+      undefined,
     );
   });
 
@@ -239,6 +244,7 @@ describe("rendered host routes", () => {
       expect.anything(),
       "WEBSOCKET /rooms/:id",
       artifactsConfig,
+      undefined,
     );
     expect(upgradeParams).toEqual({ id: "1" });
     expect(routeModules.dispatchChannelRequest).not.toHaveBeenCalled();
@@ -269,6 +275,7 @@ describe("rendered host routes", () => {
     expect(routeModules.handleConnectionEventRequest).toHaveBeenCalledWith(
       { artifactsConfig, connectionName: "issues" },
       expect.any(Request),
+      undefined,
     );
 
     const devSchedulePath = EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN.replace(/:[^/]+/g, "daily");
@@ -278,6 +285,7 @@ describe("rendered host routes", () => {
     expect(routeModules.handleDevScheduleDispatchRequest).toHaveBeenCalledWith(
       artifactsConfig,
       expect.any(Request),
+      undefined,
     );
   });
 
@@ -332,6 +340,10 @@ describe("rendered host routes", () => {
       run(event: { name: string }): Promise<unknown>;
     };
     expect(await task.run({ name: "any-nitro-name" })).toEqual({ result: "ran pacific" });
-    expect(routeModules.dispatchScheduleTask).toHaveBeenCalledWith("pacific", artifactsConfig);
+    expect(routeModules.dispatchScheduleTask).toHaveBeenCalledWith(
+      "pacific",
+      artifactsConfig,
+      undefined,
+    );
   });
 });

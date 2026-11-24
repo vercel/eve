@@ -6,7 +6,9 @@ import { EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN } from "#protocol/routes.js";
 import type { ScheduleRegistration } from "#runtime/schedules/register.js";
 import { createHostRouteTable } from "#internal/nitro/host/host-routes.js";
 import { EVE_SCHEDULE_COLLECTION_CONSUMER_ROUTE_PATH } from "#internal/schedules/consumer-route.js";
+import { WORKFLOW_ENGINE_BUILD } from "#execution/workflow-host/build.js";
 import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#internal/workflow-bundle/flow-route.js";
+import { platformBuildOutput } from "#platform/build-output.js";
 
 type TableInput = Parameters<typeof createHostRouteTable>[0];
 
@@ -64,8 +66,10 @@ const DAILY: ScheduleRegistration = {
 
 function table(input: Partial<TableInput> = {}) {
   return createHostRouteTable({
+    durable: WORKFLOW_ENGINE_BUILD,
     manifest: manifest(),
     mode: "production",
+    platform: platformBuildOutput(),
     scheduleRegistrations: [],
     vercel: false,
     ...input,
@@ -101,6 +105,13 @@ describe("createHostRouteTable", () => {
       `development-schedule POST ${EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN}`,
       `workflow ALL ${EVE_WORKFLOW_FLOW_ROUTE_PATH}`,
     ]);
+  });
+
+  it("adds the Workflow queue route only from the Workflow engine's build", () => {
+    expect(summarize(table().routes)).toContain(`workflow ALL ${EVE_WORKFLOW_FLOW_ROUTE_PATH}`);
+    expect(summarize(table({ durable: {} }).routes)).not.toContain(
+      `workflow ALL ${EVE_WORKFLOW_FLOW_ROUTE_PATH}`,
+    );
   });
 
   it("gives GET routes without a HEAD sibling the methods their path allows", () => {
@@ -201,6 +212,7 @@ describe("createHostRouteTable", () => {
           ? {
               kind: "schedule-consumer",
               method: "POST",
+              modulePath: "src/platform/vercel/schedules/consumer.ts",
               path: EVE_SCHEDULE_COLLECTION_CONSUMER_ROUTE_PATH,
               vercelFunction: "schedule-queue",
             }

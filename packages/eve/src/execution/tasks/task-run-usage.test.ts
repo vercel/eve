@@ -1,6 +1,7 @@
-import { applyRunMessagesStep } from "#execution/tools/workflow/apply-run-messages-step.js";
+import { builtInHosts } from "#runtime/app.js";
 import { describe, expect, it, vi } from "vitest";
-import { installWorkflowHost } from "#execution/workflow-host/host.js";
+import { installWorkflowEngine } from "#execution/workflow-host/host.js";
+import { testEntities } from "#internal/testing/test-platform.js";
 
 import type { DurableSession, DurableSessionState } from "#execution/durable-session-store.js";
 import type { SessionView } from "#harness/session-machine/view.js";
@@ -8,10 +9,11 @@ import type { SessionEvent } from "#protocol/session-event.js";
 import type { SessionInbox } from "#execution/session-inbox/inbox.js";
 import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
-import { SessionExecution, type SessionTurnHost } from "#execution/session/turn.js";
+import { SessionExecution } from "#execution/session/turn.js";
+import { sessionHostClock } from "#execution/session/host-clock.js";
+import { dispatchSessionSteps, sessionStepCalls } from "#execution/session/steps.js";
+import { WORKFLOW_SESSION_STEPS } from "#execution/workflow-host/session-steps.js";
 import { sleep } from "#compiled/@workflow/core/index.js";
-import { dispatchCoordinationStep } from "#execution/workflow-host/dispatch-step.js";
-import { turnStep } from "#execution/workflow-host/turn-step.js";
 import { cancelTasksStep } from "#execution/tasks/steps.js";
 import {
   cancelTask,
@@ -27,13 +29,6 @@ import { createTestSessionState } from "#internal/testing/session-state.js";
 import { withSessionUsage } from "#internal/testing/session-usage.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
-const WORKFLOW_TURN_HOST: SessionTurnHost = {
-  applyRunMessages: (input) => applyRunMessagesStep(input),
-  dispatchRuns: (input) => dispatchCoordinationStep(input),
-  runTurnStep: (input) => turnStep(input),
-  until: (at) => sleep(new Date(at)),
-};
-
 const publishedFacts = vi.hoisted((): SessionEvent[] => []);
 const sentCommands = vi.hoisted(() => vi.fn(async (_token: string, _message: unknown) => {}));
 
@@ -41,6 +36,7 @@ vi.mock("#internal/workflow/runtime.js", () => ({ resumeHook: sentCommands }));
 
 vi.mock("#execution/stop-runs.js", () => ({
   stopRuns: async (
+    _hosts: unknown,
     targets: readonly { readonly run: { readonly runId: string }; readonly ends: boolean }[],
   ) => targets.filter((target) => target.ends).map((target) => target.run.runId),
   waitedCallRuns: () => [],
@@ -56,7 +52,7 @@ vi.mock("#execution/publish-session-events.js", async () => {
   return {
     followInterruptedAttempt: (_writable: unknown, state: DurableSessionState) => state,
     readOrphanedLines: async () => [],
-    enterSessionStep: (input: object) => ({ ...input, rerun: false }),
+    enterSessionStep: (hosts: unknown, input: object) => ({ ...input, hosts, rerun: false }),
     commitSessionStep: async (
       target: { serializedContext: Record<string, unknown>; sessionState: DurableSessionState },
       decide: (view: SessionView) => readonly { readonly events: readonly SessionEvent[] }[],
@@ -81,7 +77,7 @@ vi.mock("#execution/publish-session-events.js", async () => {
   };
 });
 
-installWorkflowHost();
+installWorkflowEngine(builtInHosts(), testEntities());
 
 function usage(inputTokens: number, costUsd?: number): TokenUsage {
   return { cacheReadTokens: 0, cacheWriteTokens: 0, costUsd, inputTokens, outputTokens: 0 };
@@ -127,11 +123,15 @@ function sessionWithTask(input: {
     sessionWritable: new WritableStream<Uint8Array>(),
   });
   const execution = new SessionExecution({
-    host: WORKFLOW_TURN_HOST,
+    host: {
+      ...sessionHostClock(inbox, (at) => sleep(new Date(at))),
+      step: dispatchSessionSteps(WORKFLOW_SESSION_STEPS),
+    },
     cursor,
     inbox,
     queue: new SessionInputQueue([]),
     sessionId: base.sessionId,
+    stepCall: sessionStepCalls(base.sessionId),
   });
   const from: WorkflowToolRunRef = {
     callId: `${input.name}-call`,

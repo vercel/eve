@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { parseSessionCallback } from "#channel/session-callback.js";
+import { testEntities } from "#internal/testing/test-platform.js";
+
+const platform = testEntities();
 
 function createCallback(url: string, token = "tok123"): Record<string, unknown> {
   return {
@@ -14,7 +17,10 @@ function createCallback(url: string, token = "tok123"): Record<string, unknown> 
 describe("parseSessionCallback callback-URL token extraction", () => {
   it("accepts a callback URL mounted at the origin root", () => {
     expect(
-      parseSessionCallback(createCallback("https://agent.example.com/eve/v1/callback/tok123")),
+      parseSessionCallback(
+        createCallback("https://agent.example.com/eve/v1/callback/tok123"),
+        platform,
+      ),
     ).toMatchObject({ ok: true });
   });
 
@@ -22,6 +28,7 @@ describe("parseSessionCallback callback-URL token extraction", () => {
     expect(
       parseSessionCallback(
         createCallback("https://agent.example.com/eve/support/v1/callback/tok123"),
+        platform,
       ),
     ).toMatchObject({ ok: true });
   });
@@ -30,6 +37,7 @@ describe("parseSessionCallback callback-URL token extraction", () => {
     expect(
       parseSessionCallback(
         createCallback("https://agent.example.com/eve/v1/callback/x/eve/v1/callback/tok123"),
+        platform,
       ),
     ).toMatchObject({ ok: true });
   });
@@ -41,13 +49,17 @@ describe("parseSessionCallback callback-URL token extraction", () => {
           "https://agent.example.com/eve/support/v1/callback/eve%3Aparent-token",
           "eve:parent-token",
         ),
+        platform,
       ),
     ).toMatchObject({ ok: true });
   });
 
   it("rejects a URL without the callback route", () => {
     expect(
-      parseSessionCallback(createCallback("https://agent.example.com/eve/support/v1/session")),
+      parseSessionCallback(
+        createCallback("https://agent.example.com/eve/support/v1/session"),
+        platform,
+      ),
     ).toMatchObject({
       message: expect.stringContaining("Callback url token must match callback token"),
       ok: false,
@@ -58,25 +70,32 @@ describe("parseSessionCallback callback-URL token extraction", () => {
     expect(
       parseSessionCallback(
         createCallback("https://agent.example.com/eve/support/v1/callback/other-token"),
+        platform,
       ),
     ).toMatchObject({ ok: false });
   });
 
   it("rejects an empty token segment", () => {
     expect(
-      parseSessionCallback(createCallback("https://agent.example.com/eve/v1/callback/")),
+      parseSessionCallback(createCallback("https://agent.example.com/eve/v1/callback/"), platform),
     ).toMatchObject({ ok: false });
   });
 
   it("rejects extra path segments after the token", () => {
     expect(
-      parseSessionCallback(createCallback("https://agent.example.com/eve/v1/callback/tok123/more")),
+      parseSessionCallback(
+        createCallback("https://agent.example.com/eve/v1/callback/tok123/more"),
+        platform,
+      ),
     ).toMatchObject({ ok: false });
   });
 
   it("rejects a token segment with invalid percent-encoding", () => {
     expect(
-      parseSessionCallback(createCallback("https://agent.example.com/eve/v1/callback/%E0%A4%A")),
+      parseSessionCallback(
+        createCallback("https://agent.example.com/eve/v1/callback/%E0%A4%A"),
+        platform,
+      ),
     ).toMatchObject({ ok: false });
   });
 });
@@ -97,7 +116,9 @@ describe("parseSessionCallback destination guard", () => {
     vi.stubEnv("EVE_DEV", "");
     vi.stubEnv("VERCEL", "");
     vi.stubEnv("VERCEL_ENV", "");
-    expect(parseSessionCallback(createCallback(`${origin}/eve/v1/callback/tok123`))).toMatchObject({
+    expect(
+      parseSessionCallback(createCallback(`${origin}/eve/v1/callback/tok123`), platform),
+    ).toMatchObject({
       message: expect.stringContaining("must not be a loopback, private, link-local, or reserved"),
       ok: false,
     });
@@ -108,13 +129,13 @@ describe("parseSessionCallback destination guard", () => {
 
     for (const origin of ["http://127.0.0.1:3000", "http://[::1]:3000", "http://localhost:3000"]) {
       expect(
-        parseSessionCallback(createCallback(`${origin}/eve/v1/callback/tok123`)),
+        parseSessionCallback(createCallback(`${origin}/eve/v1/callback/tok123`), platform),
         origin,
       ).toMatchObject({ ok: true });
     }
     for (const origin of ["http://10.0.0.5", "http://169.254.169.254"]) {
       expect(
-        parseSessionCallback(createCallback(`${origin}/eve/v1/callback/tok123`)),
+        parseSessionCallback(createCallback(`${origin}/eve/v1/callback/tok123`), platform),
         origin,
       ).toMatchObject({ ok: false });
     }
@@ -122,7 +143,10 @@ describe("parseSessionCallback destination guard", () => {
 
   it("rejects non-HTTP schemes", () => {
     expect(
-      parseSessionCallback(createCallback("ftp://agent.example.com/eve/v1/callback/tok123")),
+      parseSessionCallback(
+        createCallback("ftp://agent.example.com/eve/v1/callback/tok123"),
+        platform,
+      ),
     ).toMatchObject({ message: expect.stringContaining("must use http or https"), ok: false });
   });
 });

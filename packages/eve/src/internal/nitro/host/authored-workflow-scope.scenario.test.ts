@@ -120,7 +120,7 @@ export async function deliver() {
     const appRoot = await realpath(app.appRoot);
     const workspace = await createApplicationBuildWorkspace(appRoot);
     try {
-      const host = await prepareProductionApplicationHost(workspace);
+      const host = await prepareProductionApplicationHost(workspace, "local");
       const builder = new WorkflowBundleBuilder({
         agentName: host.compileResult.manifest.config.name,
         appRoot,

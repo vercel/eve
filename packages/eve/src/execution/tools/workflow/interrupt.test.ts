@@ -1,5 +1,7 @@
+import { builtInHosts } from "#runtime/app.js";
 import { beforeEach, expect, it, vi } from "vitest";
-import { installWorkflowHost } from "#execution/workflow-host/host.js";
+import { installWorkflowEngine } from "#execution/workflow-host/host.js";
+import { testEntities } from "#internal/testing/test-platform.js";
 
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { interruptWorkflowToolRun } from "#execution/tools/workflow/interrupt.js";
@@ -12,7 +14,7 @@ vi.mock("#internal/workflow/runtime.js", async (importOriginal) => ({
   resumeHook: mocks.resumeHook,
 }));
 
-installWorkflowHost();
+installWorkflowEngine(builtInHosts(), testEntities());
 
 const run = { hookToken: "hold-control", runId: "hold-run" };
 

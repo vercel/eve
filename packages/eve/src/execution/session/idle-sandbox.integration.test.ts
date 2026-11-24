@@ -1,3 +1,4 @@
+import { builtInHosts } from "#runtime/app.js";
 import { MockLanguageModelV4 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -164,7 +165,8 @@ async function withSession(
     const id = run.runId;
     try {
       await body({
-        cancel: () => resumeRoutedHook(inbox, { deliveryId: "cancel-turn", kind: "cancel" }),
+        cancel: () =>
+          resumeRoutedHook(builtInHosts(), inbox, { deliveryId: "cancel-turn", kind: "cancel" }),
         id,
         events: () =>
           runtime.sandboxEvents
@@ -178,11 +180,16 @@ async function withSession(
             channelName: "test",
           });
           await vi.waitFor(() =>
-            resumeRoutedHook(inbox, { auth: ALICE, delivery, kind: "send", payload: { message } }),
+            resumeRoutedHook(builtInHosts(), inbox, {
+              auth: ALICE,
+              delivery,
+              kind: "send",
+              payload: { message },
+            }),
           );
         },
         answer: async (interactionId) => {
-          await resumeRoutedHook(inbox, {
+          await resumeRoutedHook(builtInHosts(), inbox, {
             auth: ALICE,
             delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
             kind: "send",

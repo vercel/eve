@@ -384,7 +384,7 @@ export interface Runtime {
 
   resolveContinuation(
     continuationToken: string,
-    options?: { readonly runnable?: boolean },
+    options?: { readonly live?: boolean },
   ): Promise<{ sessionId: string } | undefined>;
 
   getEventStream(
@@ -404,7 +404,7 @@ export interface Runtime {
     childSessionId: string,
   ): Promise<RemoteChildBinding | undefined>;
 
-  hasRunnableOwner?(sessionId: string): Promise<boolean>;
+  isLive?(sessionId: string): Promise<boolean>;
 }
 
 export type { SessionStreamOptions } from "#shared/session.js";

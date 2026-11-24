@@ -1,28 +1,34 @@
+import { ambientPlatform } from "#context/app.js";
+import type { Entities } from "#platform/entities.js";
 import { joinEveRoutePath } from "#shared/eve-route-path.js";
 import {
   EVE_PUBLIC_ROUTE_PREFIX_ENV,
   normalizePublicRoutePrefix,
 } from "#shared/public-route-prefix.js";
+import { readEnv } from "#runtime-env/env.js";
 
-const PRODUCTION_ENVIRONMENT = "production";
 const WORKFLOW_LOCAL_BASE_URL_ENV = "WORKFLOW_LOCAL_BASE_URL";
 
-export function resolveVercelProductionCallbackBaseUrl(): string | null {
-  if (
-    process.env.VERCEL_ENV === PRODUCTION_ENVIRONMENT &&
-    process.env.VERCEL_PROJECT_PRODUCTION_URL
-  ) {
-    return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
+export function resolveVercelProductionCallbackBaseUrl(platform: Entities): string | null {
+  const { deployment } = platform;
+  const productionHost = deployment.productionHost();
+  if (deployment.environment() === "production" && productionHost !== undefined) {
+    return `https://${productionHost}`;
   }
   return null;
 }
 
-export function resolveWorkflowCallbackBaseUrl(metadataUrl: string): string {
-  const configuredLocalBaseUrl = process.env[WORKFLOW_LOCAL_BASE_URL_ENV]?.trim();
+export function resolveWorkflowCallbackBaseUrl(
+  metadataUrl: string,
+  platform: Entities | undefined = ambientPlatform(),
+): string {
+  const configuredLocalBaseUrl = readEnv(WORKFLOW_LOCAL_BASE_URL_ENV)?.trim();
   const localBaseUrl = configuredLocalBaseUrl ? configuredLocalBaseUrl : undefined;
-  const resolved = resolveVercelProductionCallbackBaseUrl() ?? localBaseUrl ?? metadataUrl;
+  const productionBaseUrl =
+    platform === undefined ? null : resolveVercelProductionCallbackBaseUrl(platform);
+  const resolved = productionBaseUrl ?? localBaseUrl ?? metadataUrl;
   const baseUrl = resolved.replace(/\/$/, "");
-  const publicRoutePrefix = normalizePublicRoutePrefix(process.env[EVE_PUBLIC_ROUTE_PREFIX_ENV]);
+  const publicRoutePrefix = normalizePublicRoutePrefix(readEnv(EVE_PUBLIC_ROUTE_PREFIX_ENV));
   return publicRoutePrefix === undefined ? baseUrl : `${baseUrl}${publicRoutePrefix}`;
 }
 

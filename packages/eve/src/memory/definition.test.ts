@@ -8,8 +8,10 @@ import {
 import { describe, expect, it, vi } from "vitest";
 
 import { createAgentRun, otelTelemetry } from "#compiled/@vercel/agent-runs/index.js";
+import { AppKey } from "#context/app.js";
 import { ContextContainer } from "#context/container.js";
 import { defineTool } from "#tools/definition.js";
+import { testApp } from "#internal/testing/test-platform.js";
 
 import {
   accumulate,
@@ -114,10 +116,11 @@ describe("memoryTools", () => {
       scope: "alice",
       slot: "profile",
     };
+    const app = testApp();
     const ctx = {
       abortSignal: new AbortController().signal,
       channel: undefined,
-      ctx: { get: () => undefined },
+      ctx: { get: (key: unknown) => (key === AppKey ? app : undefined) },
       memo: (_key: unknown, compute: () => unknown) => compute(),
       session: { auth: { current: null, initiator: null }, id: "session-1" },
     };

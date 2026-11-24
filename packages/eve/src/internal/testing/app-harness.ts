@@ -1,10 +1,11 @@
+import { inTestApp } from "#internal/testing/test-platform.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import {
   compileFromMemory,
   type CompileFromMemoryInput,
 } from "#internal/testing/compile-from-memory.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
-import type { CompiledModuleMap } from "#compiler/module-map.js";
+import type { CompiledModuleMap } from "#compiler/module-map-schema.js";
 import type { ProgrammaticAgentModule } from "#compiler/source-graph.js";
 import type { SessionParent, SessionTurn } from "#context/keys.js";
 import { installBundledCompiledArtifacts } from "#runtime/loaders/bundled-artifacts.js";
@@ -214,7 +215,7 @@ export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Pro
   async function run<T>(fn: () => Promise<T> | T): Promise<T> {
     return await withRuntimeSession(session, async () => {
       install();
-      return await fn();
+      return await inTestApp(fn);
     });
   }
 

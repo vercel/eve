@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createVercelStatusTracker, type VercelStatusSnapshot } from "./vercel-status.js";
 
-vi.mock("#internal/model-auth/vercel-team.js", () => ({
+vi.mock("#platform/vercel/model-auth/team.js", () => ({
   resolveModelTeamSlug: async () => undefined,
 }));
 

@@ -15,6 +15,7 @@ import { type Step, stepReference } from "#harness/step/context.js";
 import { agentSettings } from "#execution/effective-agent-config.js";
 import { againstWindow, compactionConfig } from "#harness/compaction/config.js";
 import { activeTurnId } from "#harness/session-machine/view.js";
+import { requireApp } from "#context/app.js";
 import {
   buildGatewayAttributionHeaders,
   resolveEffectiveRuntimeModel,
@@ -30,7 +31,6 @@ import {
   shouldCompact,
 } from "#harness/compaction/engine.js";
 import { takeBlockingFailure } from "#definitions/kernel.js";
-import { isDeepStrictEqual } from "node:util";
 import type { Usage } from "#protocol/session-events/envelope.js";
 import { nextChangeId, nextRunId } from "#protocol/session-projection.js";
 import { normalizeModelStreamError, rejectsCredential } from "#harness/model-call/errors.js";
@@ -55,6 +55,7 @@ import {
 import { admitControl, settleDelivery } from "#harness/session-machine/deliveries.js";
 import { resolveCallProviderOptions } from "#harness/provider-safety.js";
 import { throwIfSessionStreamDead } from "#harness/session-stream-write-error.js";
+import { isDeepStrictEqual } from "#runtime-env/deep-equal.js";
 
 const log = createLogger("harness.tool-loop");
 export function assertFixedPartFits(input: {
@@ -379,7 +380,11 @@ async function summaryExecutor(
   const profile = resolveModelProfile(model);
   const call = {
     abortSignal: config.abortSignal,
-    headers: buildGatewayAttributionHeaders(profile, config.runtimeIdentity),
+    headers: buildGatewayAttributionHeaders(
+      profile,
+      config.runtimeIdentity,
+      requireApp(step.ctx).platform,
+    ),
     model: withGatewayTraceContext(
       model,
       profile,

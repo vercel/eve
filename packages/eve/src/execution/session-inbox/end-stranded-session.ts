@@ -1,3 +1,4 @@
+import { builtInHosts } from "#runtime/app.js";
 import type { SessionControlIdentity } from "#channel/types.js";
 import { principalOf } from "#execution/session/delivery-facts.js";
 import { EVE_SESSION_ATTRIBUTE, EVE_TYPE_ATTRIBUTE } from "#execution/eve-workflow-attributes.js";
@@ -127,7 +128,7 @@ async function readRecordedView(sessionId: string): Promise<SessionView | undefi
   const view = emptySessionView();
   const controller = new AbortController();
   const read = (async () => {
-    for await (const event of streamSessionEvents(sessionId, {
+    for await (const event of streamSessionEvents(builtInHosts(), sessionId, {
       follow: false,
       signal: controller.signal,
     })) {

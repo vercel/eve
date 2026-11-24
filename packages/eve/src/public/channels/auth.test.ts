@@ -15,7 +15,10 @@ import { stampDevelopmentClientAddress } from "#internal/nitro/dev-client-addres
 import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/application/dev-transport.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { EveAuthFn, EveAuthResult } from "#public/channels/eve.js";
-import { withVercelOidcProjectResolver } from "#channel/auth/vercel-oidc-project.js";
+import { withVercelOidcProjectResolver } from "#platform/vercel/oidc-project.js";
+import { inTestApp, testApp } from "#internal/testing/test-platform.js";
+import { createEntities } from "#platform/entities.js";
+import vercelPlatform from "#platform/vercel/declaration.js";
 import {
   type AuthFn,
   type AuthResult,
@@ -45,6 +48,10 @@ import {
 } from "#public/channels/auth.js";
 
 const TEST_ROUTE_URL = `https://example.com${EVE_SESSION_ROUTE_PATH}`;
+
+function inVercelApp<T>(fn: () => T): T {
+  return inTestApp(fn, testApp({ platform: createEntities(vercelPlatform, undefined) }));
+}
 
 describe("auth types", () => {
   it("keeps shared identity separate from eve-channel permissions", () => {
@@ -360,6 +367,8 @@ describe("none", () => {
 });
 
 describe("localDev", () => {
+  const authenticateLocalDev = (request: Request) => inVercelApp(() => localDev()(request));
+
   function requestFor(url: string): Request {
     return new Request(url, { method: "POST" });
   }
@@ -372,7 +381,7 @@ describe("localDev", () => {
     vi.stubEnv("EVE_DEV", "1");
     vi.stubEnv("VERCEL", "");
     vi.stubEnv("VERCEL_ENV", "");
-    expect(localDev()(requestFor("http://localhost:3000/eve/v1/info"))).toEqual({
+    expect(authenticateLocalDev(requestFor("http://localhost:3000/eve/v1/info"))).toEqual({
       attributes: {},
       authenticator: "local-dev",
       principalId: "local-dev",
@@ -384,7 +393,7 @@ describe("localDev", () => {
     vi.stubEnv("EVE_DEV", "");
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_ENV", "development");
-    expect(localDev()(requestFor("http://localhost:3000/"))).toMatchObject({
+    expect(authenticateLocalDev(requestFor("http://localhost:3000/"))).toMatchObject({
       principalType: "local-dev",
     });
   });
@@ -399,7 +408,7 @@ describe("localDev", () => {
     ["a DNS-rebound host name", "http://attacker.example:3000/eve/v1/session/s/stream", {}],
   ])("refuses %s on an `eve dev` server", (_case, url, headers) => {
     vi.stubEnv("EVE_DEV", "1");
-    expect(localDev()(new Request(url, { headers, method: "POST" }))).toBeNull();
+    expect(authenticateLocalDev(new Request(url, { headers, method: "POST" }))).toBeNull();
   });
 
   it.each([
@@ -412,7 +421,7 @@ describe("localDev", () => {
       headers: { origin, "sec-fetch-site": fetchSite },
       method: "POST",
     });
-    expect(localDev()(request)).toMatchObject({ principalType: "local-dev" });
+    expect(authenticateLocalDev(request)).toMatchObject({ principalType: "local-dev" });
   });
 
   it.each([
@@ -427,7 +436,7 @@ describe("localDev", () => {
     vi.stubEnv(DEVELOPMENT_WORKFLOW_SECRET_ENV, "transport-secret");
     const headers = new Headers();
     stampDevelopmentClientAddress(headers, address, "transport-secret");
-    const result = await localDev()(
+    const result = await authenticateLocalDev(
       new Request("http://localhost:3000/eve/v1/session", { headers }),
     );
     expect(result instanceof Response ? result : (result?.principalType ?? null)).toBe(
@@ -444,26 +453,26 @@ describe("localDev", () => {
       headers,
       method: "POST",
     });
-    expect(await localDev()(request)).toMatchObject({ principalType: "local-dev" });
+    expect(await authenticateLocalDev(request)).toMatchObject({ principalType: "local-dev" });
   });
 
   it("rejects a `Host: localhost` request on a production deployment", () => {
     vi.stubEnv("EVE_DEV", "");
     vi.stubEnv("VERCEL", "");
     vi.stubEnv("VERCEL_ENV", "");
-    expect(localDev()(requestFor("http://localhost:3000/eve/v1/info"))).toBeNull();
-    expect(localDev()(requestFor("http://127.0.0.1:3000/"))).toBeNull();
-    expect(localDev()(requestFor("http://[::1]:3000/"))).toBeNull();
-    expect(localDev()(requestFor("http://agent.localhost:3000/"))).toBeNull();
+    expect(authenticateLocalDev(requestFor("http://localhost:3000/eve/v1/info"))).toBeNull();
+    expect(authenticateLocalDev(requestFor("http://127.0.0.1:3000/"))).toBeNull();
+    expect(authenticateLocalDev(requestFor("http://[::1]:3000/"))).toBeNull();
+    expect(authenticateLocalDev(requestFor("http://agent.localhost:3000/"))).toBeNull();
   });
 
   it("rejects public and preview requests when no dev flag is set", () => {
     vi.stubEnv("EVE_DEV", "");
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_ENV", "production");
-    expect(localDev()(requestFor("https://example.com/eve/v1/info"))).toBeNull();
+    expect(authenticateLocalDev(requestFor("https://example.com/eve/v1/info"))).toBeNull();
     vi.stubEnv("VERCEL_ENV", "preview");
-    expect(localDev()(requestFor("https://myapp.fly.dev/"))).toBeNull();
+    expect(authenticateLocalDev(requestFor("https://myapp.fly.dev/"))).toBeNull();
   });
 });
 
@@ -825,7 +834,7 @@ describe("placeholderAuth", () => {
   it("skips the auth walk outside production", async () => {
     process.env.VERCEL_ENV = "preview";
 
-    const result = await placeholderAuth()(new Request(TEST_ROUTE_URL));
+    const result = await inVercelApp(() => placeholderAuth()(new Request(TEST_ROUTE_URL)));
 
     expect(result).toBeNull();
   });
@@ -833,13 +842,17 @@ describe("placeholderAuth", () => {
   it("throws a structured auth rejection in production", async () => {
     process.env.VERCEL_ENV = "production";
 
-    expect(() => placeholderAuth()(new Request(TEST_ROUTE_URL))).toThrow(UnauthenticatedError);
+    expect(() => inVercelApp(() => placeholderAuth()(new Request(TEST_ROUTE_URL)))).toThrow(
+      UnauthenticatedError,
+    );
   });
 
   it("routes the production placeholder as a structured 401", async () => {
     process.env.VERCEL_ENV = "production";
 
-    const result = await routeAuth(new Request(TEST_ROUTE_URL), placeholderAuth());
+    const result = await inVercelApp(() =>
+      routeAuth(new Request(TEST_ROUTE_URL), placeholderAuth()),
+    );
 
     expect(result).toBeInstanceOf(Response);
     if (result instanceof Response) {
@@ -855,18 +868,78 @@ describe("placeholderAuth", () => {
   });
 });
 
+describe("auth that reads the platform in a process without an app or a platform module", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("lets localDev() accept an eve dev server and see no platform facts", () => {
+    vi.stubEnv("EVE_DEV", "1");
+    expect(localDev()(new Request("http://localhost:3000/"))).toMatchObject({
+      principalType: "local-dev",
+    });
+
+    vi.stubEnv("EVE_DEV", "");
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_ENV", "development");
+    expect(localDev()(new Request("http://localhost:3000/"))).toBeNull();
+    expect(inVercelApp(() => localDev()(new Request("http://localhost:3000/")))).toMatchObject({
+      principalType: "local-dev",
+    });
+  });
+
+  it("lets placeholderAuth() skip the walk without a production platform", () => {
+    vi.stubEnv("VERCEL_ENV", "production");
+    expect(placeholderAuth()(new Request(TEST_ROUTE_URL))).toBeNull();
+    expect(() => inVercelApp(() => placeholderAuth()(new Request(TEST_ROUTE_URL)))).toThrow(
+      UnauthenticatedError,
+    );
+  });
+
+  it("verifies OIDC callers without accepting the platform's current project", async () => {
+    vi.stubEnv("VERCEL_PROJECT_ID", "prj_current");
+    vi.stubEnv("VERCEL_TARGET_ENV", "production");
+    const issuer = await installMockedVercelIssuer("plain-process-current-project");
+    try {
+      const token = await issuer.signToken({
+        environment: "production",
+        owner: "acme",
+        owner_id: "team_acme",
+        project: "weather-agent",
+        project_id: "prj_current",
+        sub: "owner:acme:project:weather-agent:environment:production",
+      });
+
+      await expect(verifyVercelOidc(token)).resolves.toEqual({ ok: false });
+      await expect(
+        verifyVercelOidc(token, {
+          subjects: ["owner:acme:project:weather-agent:environment:production"],
+        }),
+      ).resolves.toMatchObject({ ok: true });
+      await expect(inVercelApp(() => verifyVercelOidc(token))).resolves.toMatchObject({
+        ok: true,
+      });
+    } finally {
+      issuer.restore();
+    }
+  });
+});
+
 describe("verifyVercelOidc", () => {
+  const verifyVercelOidcInApp: typeof verifyVercelOidc = (...args) =>
+    inVercelApp(() => verifyVercelOidc(...args));
+
   afterEach(() => {
     vi.unstubAllEnvs();
   });
 
   it("rejects null and empty tokens without throwing", async () => {
-    await expect(verifyVercelOidc(null)).resolves.toEqual({ ok: false });
-    await expect(verifyVercelOidc("")).resolves.toEqual({ ok: false });
+    await expect(verifyVercelOidcInApp(null)).resolves.toEqual({ ok: false });
+    await expect(verifyVercelOidcInApp("")).resolves.toEqual({ ok: false });
   });
 
   it("rejects tokens that fail to decode", async () => {
-    await expect(verifyVercelOidc("not.a.real.jwt")).resolves.toEqual({ ok: false });
+    await expect(verifyVercelOidcInApp("not.a.real.jwt")).resolves.toEqual({ ok: false });
   });
 
   it("rejects tokens whose issuer is not on the Vercel OIDC prefix", async () => {
@@ -880,7 +953,7 @@ describe("verifyVercelOidc", () => {
       .setSubject("acme")
       .sign(privateKey);
 
-    await expect(verifyVercelOidc(token)).resolves.toEqual({ ok: false });
+    await expect(verifyVercelOidcInApp(token)).resolves.toEqual({ ok: false });
   });
 
   it("rejects tokens with no audience claim", async () => {
@@ -893,7 +966,7 @@ describe("verifyVercelOidc", () => {
       .setSubject("acme")
       .sign(privateKey);
 
-    await expect(verifyVercelOidc(token)).resolves.toEqual({ ok: false });
+    await expect(verifyVercelOidcInApp(token)).resolves.toEqual({ ok: false });
   });
 
   it("emits debug logs on the auth.vercel-oidc namespace for rejection paths", async () => {
@@ -901,8 +974,8 @@ describe("verifyVercelOidc", () => {
     const debugSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
     try {
-      await verifyVercelOidc(null);
-      await verifyVercelOidc("not.a.real.jwt");
+      await verifyVercelOidcInApp(null);
+      await verifyVercelOidcInApp("not.a.real.jwt");
 
       const lines = debugSpy.mock.calls.map((args) => String(args[0]));
       expect(lines).toContain(
@@ -929,7 +1002,7 @@ describe("verifyVercelOidc", () => {
         sub: "owner:acme:project:weather-agent:environment:production",
       });
 
-      const result = await verifyVercelOidc(token);
+      const result = await verifyVercelOidcInApp(token);
 
       expect(result.ok).toBe(true);
       if (result.ok) {
@@ -951,7 +1024,7 @@ describe("verifyVercelOidc", () => {
       const token = await issuer.signToken({ project_id: "prj_current" });
 
       await expect(
-        verifyVercelOidc(token, { currentVercelProject: { projectId: "prj_current" } }),
+        verifyVercelOidcInApp(token, { currentVercelProject: { projectId: "prj_current" } }),
       ).resolves.toMatchObject({ ok: true });
     } finally {
       issuer.restore();
@@ -974,7 +1047,7 @@ describe("verifyVercelOidc", () => {
         user_id: "user_ada",
       });
 
-      const result = await verifyVercelOidc(token);
+      const result = await verifyVercelOidcInApp(token);
 
       expect(result.ok).toBe(true);
       if (result.ok) {
@@ -1003,7 +1076,7 @@ describe("verifyVercelOidc", () => {
         user_id: "user_ada",
       });
 
-      const result = await verifyVercelOidc(token, {
+      const result = await verifyVercelOidcInApp(token, {
         currentVercelProject: {
           environment: "development",
           projectId: "prj_current",
@@ -1035,7 +1108,7 @@ describe("verifyVercelOidc", () => {
         user_id: "user_ada",
       });
 
-      const result = await verifyVercelOidc(token);
+      const result = await verifyVercelOidcInApp(token);
 
       expect(result.ok).toBe(true);
       if (result.ok) {
@@ -1062,7 +1135,7 @@ describe("verifyVercelOidc", () => {
         user_id: "user_ada",
       });
 
-      const result = await verifyVercelOidc(token);
+      const result = await verifyVercelOidcInApp(token);
 
       expect(result.ok).toBe(true);
       if (result.ok) {
@@ -1089,7 +1162,7 @@ describe("verifyVercelOidc", () => {
         user_id: "user_ada",
       });
 
-      await expect(verifyVercelOidc(token)).resolves.toEqual({ ok: false });
+      await expect(verifyVercelOidcInApp(token)).resolves.toEqual({ ok: false });
     } finally {
       issuer.restore();
     }
@@ -1110,7 +1183,7 @@ describe("verifyVercelOidc", () => {
         sub: "owner:stranger:project:stranger-agent:environment:production",
       });
 
-      await expect(verifyVercelOidc(token)).resolves.toEqual({ ok: false });
+      await expect(verifyVercelOidcInApp(token)).resolves.toEqual({ ok: false });
     } finally {
       issuer.restore();
     }
@@ -1128,7 +1201,7 @@ describe("verifyVercelOidc", () => {
         sub: "owner:ghost:project:ghost-agent:environment:production",
       });
 
-      await expect(verifyVercelOidc(token)).resolves.toEqual({ ok: false });
+      await expect(verifyVercelOidcInApp(token)).resolves.toEqual({ ok: false });
     } finally {
       issuer.restore();
     }
@@ -1155,7 +1228,7 @@ describe("verifyVercelOidc", () => {
         sub: "owner:acme:project:weather-agent:environment:preview",
       });
 
-      const result = await verifyVercelOidc(token);
+      const result = await verifyVercelOidcInApp(token);
 
       expect(result.ok).toBe(true);
       if (result.ok) {
@@ -1195,7 +1268,7 @@ describe("verifyVercelOidc", () => {
         sub: "owner:acme:project:weather-agent:environment:production",
       });
 
-      const result = await verifyVercelOidc(token);
+      const result = await verifyVercelOidcInApp(token);
 
       expect(result.ok).toBe(true);
       if (result.ok) {
@@ -1226,7 +1299,7 @@ describe("verifyVercelOidc", () => {
         sub: "owner:acme:project:weather-agent:environment:production",
       });
 
-      const result = await verifyVercelOidc(token);
+      const result = await verifyVercelOidcInApp(token);
 
       expect(result.ok).toBe(true);
       if (result.ok) {
@@ -1257,7 +1330,7 @@ describe("verifyVercelOidc", () => {
         sub: "owner:acme:project:weather-agent:environment:production",
       });
 
-      await expect(verifyVercelOidc(token)).resolves.toEqual({ ok: false });
+      await expect(verifyVercelOidcInApp(token)).resolves.toEqual({ ok: false });
     } finally {
       issuer.restore();
     }
@@ -1277,7 +1350,7 @@ describe("verifyVercelOidc", () => {
         sub: "owner:acme:project:weather-agent:environment:preview",
       });
 
-      await expect(verifyVercelOidc(token)).resolves.toEqual({ ok: false });
+      await expect(verifyVercelOidcInApp(token)).resolves.toEqual({ ok: false });
     } finally {
       issuer.restore();
     }
@@ -1301,7 +1374,7 @@ describe("verifyVercelOidc", () => {
         sub: "owner:acme:project:weather-agent:environment:preview",
       });
 
-      await expect(verifyVercelOidc(token)).resolves.toEqual({ ok: false });
+      await expect(verifyVercelOidcInApp(token)).resolves.toEqual({ ok: false });
     } finally {
       issuer.restore();
     }
@@ -1325,7 +1398,7 @@ describe("verifyVercelOidc", () => {
         sub: "owner:acme:project:weather-agent:environment:production",
       });
 
-      await expect(verifyVercelOidc(token)).resolves.toEqual({ ok: false });
+      await expect(verifyVercelOidcInApp(token)).resolves.toEqual({ ok: false });
     } finally {
       issuer.restore();
     }
@@ -1348,7 +1421,7 @@ describe("verifyVercelOidc", () => {
         { audience: "sts.amazonaws.com" },
       );
 
-      await expect(verifyVercelOidc(token)).resolves.toEqual({ ok: false });
+      await expect(verifyVercelOidcInApp(token)).resolves.toEqual({ ok: false });
     } finally {
       issuer.restore();
     }
@@ -1356,10 +1429,12 @@ describe("verifyVercelOidc", () => {
 });
 
 describe("verifyOidc", () => {
+  const verifyOidcInApp: typeof verifyOidc = (...args) => inVercelApp(() => verifyOidc(...args));
+
   it("authenticates a token from its issuer through discovery", async () => {
     const issuer = await installMockedVercelIssuer("same-issuer");
     try {
-      const result = await verifyOidc(
+      const result = await verifyOidcInApp(
         await issuer.signToken({}, { audience: "agent-framework-bench" }),
         { audiences: ["agent-framework-bench"], issuer: issuer.issuer },
       );
@@ -1387,7 +1462,7 @@ describe("verifyOidc", () => {
     const issuer = await installMockedVercelIssuer("another-issuer");
     try {
       await expect(
-        verifyOidc(await createToken(issuer.signToken), {
+        verifyOidcInApp(await createToken(issuer.signToken), {
           audiences: ["agent-framework-bench"],
           issuer: "https://token.actions.githubusercontent.com",
         }),
@@ -1477,7 +1552,7 @@ describe("vercelOidc strategy helper", () => {
     const request = new Request(TEST_ROUTE_URL, {
       method: "POST",
     });
-    await expect(Promise.resolve(authFn(request))).resolves.toBeNull();
+    await expect(inVercelApp(async () => await authFn(request))).resolves.toBeNull();
   });
 
   it("points object subject entries to eveVercelOidc instead of never matching them", () => {
@@ -1507,10 +1582,12 @@ describe("vercelOidc strategy helper", () => {
         { projectId: "prj_other", subjects: ["another-project"], principalType: null },
       ];
       for (const { projectId, subjects, principalType } of cases) {
-        const auth = await vercelOidc({
-          currentVercelProject: { projectId, environment: "preview" },
-          subjects,
-        })(request);
+        const auth = await inVercelApp(() =>
+          vercelOidc({
+            currentVercelProject: { projectId, environment: "preview" },
+            subjects,
+          })(request),
+        );
         if (principalType === null) {
           expect(auth).toBeNull();
         } else {
@@ -1540,7 +1617,7 @@ describe("vercelOidc strategy helper", () => {
       await expect(
         withVercelOidcProjectResolver(
           { request: unauthenticatedRequest, resolveCurrentProject },
-          async () => await authFn(unauthenticatedRequest),
+          async () => await inVercelApp(() => authFn(unauthenticatedRequest)),
         ),
       ).resolves.toBeNull();
       expect(resolveCurrentProject).not.toHaveBeenCalled();
@@ -1559,7 +1636,7 @@ describe("vercelOidc strategy helper", () => {
           request,
           resolveCurrentProject,
         },
-        async () => await authFn(request),
+        async () => await inVercelApp(() => authFn(request)),
       );
 
       expect(result).toMatchObject({ principalType: "user", subject: "user_ada" });

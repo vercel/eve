@@ -35,6 +35,12 @@ describe("workflow admission", () => {
     );
   });
 
+  it("keeps the fingerprint that admissions already stored in step inputs", () => {
+    expect(admitWorkflowTask(request, mintClearance("deploy-1")).admission?.fingerprint).toBe(
+      "711acedd2a576f65f081960098c1ab421b928dba17711f0d06cdf71058155ebc",
+    );
+  });
+
   it("refuses a request that never went through the gate", () => {
     expect(hasWorkflowAdmission(request)).toBe(false);
   });

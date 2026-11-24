@@ -64,6 +64,7 @@ const tools = [
 ];
 
 const runtime: InvokeToolRuntime = {
+  build: {},
   agentName: "compiled-agent",
   callbackBaseUrl: "https://agent.example",
   compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
@@ -92,6 +93,7 @@ beforeEach(() => {
   apiContext.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
   apiTrace.setGlobalTracerProvider(provider);
   registerInstrumentationRuntime({
+    environment: "production",
     forceFlush: async () => {
       await processor.forceFlush();
       processor.releaseCompletedTraces();

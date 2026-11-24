@@ -2,37 +2,43 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   cancelRoutedRun,
-  installDurableHost,
-  installedDurableHost,
-  isRetriedStep,
-  registerHost,
-  registerSessionLineStore,
+  createProcessHosts,
+  hostEngine,
+  installProcessEngine,
+  installedDurable,
+  installedProcessEngine,
+  registerHostedRoute,
+  registerSessionEventStore,
   resumeRoutedHook,
   resumeRoutedSessionInbox,
   routedRunEnded,
   routedRunLive,
-  sessionLineStore,
+  sessionEventStore,
   sessionSignInCallbacks,
-  type DurableHost,
+  stepAttempt,
   type HostedRoute,
+  type ProcessEngine,
+  type ProcessHosts,
+  type ResumeAddress,
 } from "#execution/hosts.js";
+import { decodeDeliveryAddress } from "#execution/durable.js";
 import {
   readSessionRecordHistory,
   readSessionStreamTailIndex,
 } from "#execution/session-event-stream.js";
-import { resetTestRealm } from "#internal/testing/reset-test-realm.js";
 import type { DeliverHookPayload } from "#channel/types.js";
 import {
   sessionCommandHookToken,
   sessionInboxHookToken,
 } from "#execution/session-inbox/address.js";
-import type { SessionLineStore } from "#execution/session-line-store.js";
+import type { SessionEventStore } from "#execution/session-event-store.js";
+import { createLifetime, endLifetime } from "#runtime/lifetime.js";
 import { HookNotFoundError } from "#shared/run-errors.js";
 
-function fixedStore(records: readonly unknown[]): SessionLineStore {
+function fixedStore(records: readonly unknown[]): SessionEventStore {
   const encoder = new TextEncoder();
   return {
-    assertReadable: async () => {},
+    assertFollowable: async () => {},
     readable: (_sessionId, startIndex = 0) =>
       new ReadableStream({
         start(controller) {
@@ -59,16 +65,26 @@ const durable = {
   callbackBaseUrl: undefined as string | undefined,
 };
 
-function durableHost(name: string): DurableHost {
+function processEngine(name: string): ProcessEngine {
   return {
     name,
-    deliver: async (to) => {
-      if ("hook" in to) durable.reached.push(`resume ${to.hook}`);
-      else if ("session" in to)
+    durable: {
+      start: async () => ({ kind: "held" }),
+      deliver: async () => ({ accepted: true }),
+      sessionFor: async () => undefined,
+      readStream: async function* () {},
+      tail: async () => -1,
+      status: async () => undefined,
+    },
+    resume: async (to) => {
+      const address = decodeDeliveryAddress(to);
+      if (address.kind === "hook") durable.reached.push(`resume ${address.token}`);
+      else if (address.kind === "session")
         durable.reached.push(
-          `inbox ${typeof to.session === "string" ? to.session : to.session.sessionId}`,
+          `inbox ${typeof address.address === "string" ? address.address : address.address.sessionId}`,
         );
     },
+    deploymentId: async () => "dpl_durable",
     runStatus: async (runId) => {
       if (runId === "run-gone") throw new HookNotFoundError(runId);
       if (runId === "run-unreadable") throw new Error("the World is down");
@@ -77,65 +93,57 @@ function durableHost(name: string): DurableHost {
     cancelRun: async (runId) => {
       durable.reached.push(`cancel ${runId}`);
     },
-    lineStore: fixedStore([{ line: "kept by the durable host" }]),
+    sessionEvents: fixedStore([{ line: "kept by the durable host" }]),
     stepAttempt: () => durable.attempt,
     callbackBaseUrl: () => durable.callbackBaseUrl,
-    createRuntime: () => {
-      throw new Error("no runtime in this test");
-    },
-    connectionEvents: {
-      start: async () => undefined,
-      find: async () => undefined,
-      retire: async (bindingId) => {
-        durable.reached.push(`retire ${bindingId}`);
-        return true;
-      },
-    },
   };
 }
 
 describe("the hosts in a realm", () => {
+  let hosts: ProcessHosts;
   beforeEach(() => {
-    resetTestRealm();
+    hosts = createProcessHosts();
     durable.reached = [];
     durable.attempt = undefined;
     durable.callbackBaseUrl = undefined;
   });
 
   it("without a durable host, an id no route holds is gone and no step is a retry", async () => {
-    await expect(resumeRoutedHook("hook-alice", {})).rejects.toThrow(HookNotFoundError);
-    await expect(routedRunLive("run-bob")).resolves.toBe(false);
-    await expect(routedRunEnded("run-bob")).resolves.toBe(true);
-    expect(isRetriedStep()).toBe(false);
-    expect(installedDurableHost()).toBeUndefined();
-    expect(() => sessionLineStore("session-alice")).toThrow(
+    await expect(resumeRoutedHook(hosts, "hook-alice", {})).rejects.toThrow(HookNotFoundError);
+    await expect(routedRunLive(hosts, "run-bob")).resolves.toBe(false);
+    await expect(routedRunEnded(hosts, "run-bob")).resolves.toBe(true);
+    expect(stepAttempt(hosts)).toBeUndefined();
+    expect(installedDurable(hosts)).toBeUndefined();
+    expect(() => sessionEventStore(hosts, "session-alice")).toThrow(
       'No host in this realm holds session "session-alice".',
     );
   });
 
-  it("keeps the first durable host, and refuses a different one", () => {
-    installDurableHost(durableHost("durable"));
-    installDurableHost(durableHost("durable"));
-    expect(() => installDurableHost(durableHost("other"))).toThrow(
-      `This realm's durable host is "durable"; "other" can't replace it.`,
+  it("keeps the first durable engine, and refuses a different one", () => {
+    const first = processEngine("durable");
+    installProcessEngine(hosts, first);
+    expect(installProcessEngine(hosts, processEngine("durable"))).toBe(first);
+    expect(() => installProcessEngine(hosts, processEngine("other"))).toThrow(
+      `This realm's durable engine is "durable"; "other" can't replace it.`,
     );
-    expect(installedDurableHost()?.name).toBe("durable");
+    expect(installedProcessEngine(hosts)).toBe(first);
+    expect(installedDurable(hosts)).toBe(first.durable);
   });
 
-  it("reads whether the step running now is a retry from the durable host", () => {
-    installDurableHost(durableHost("durable"));
+  it("reads the attempt of the step running now from the durable host", () => {
+    installProcessEngine(hosts, processEngine("durable"));
     durable.attempt = 1;
-    expect(isRetriedStep()).toBe(false);
+    expect(stepAttempt(hosts)).toBe(1);
     durable.attempt = 2;
-    expect(isRetriedStep()).toBe(true);
+    expect(stepAttempt(hosts)).toBe(2);
     durable.attempt = undefined;
-    expect(isRetriedStep()).toBe(false);
+    expect(stepAttempt(hosts)).toBeUndefined();
   });
 
   it("asks the route running a session how it's called back, and the durable host for others", () => {
-    installDurableHost(durableHost("durable"));
-    const deliver: DurableHost["deliver"] = async () => {};
-    const release = registerHost({
+    installProcessEngine(hosts, processEngine("durable"));
+    const deliver: ResumeAddress = async () => {};
+    const release = registerHostedRoute(hosts, {
       deliver: async () => undefined,
       runEnded: () => undefined,
       cancelRun: () => undefined,
@@ -145,13 +153,15 @@ describe("the hosts in a realm", () => {
           : undefined,
     });
     try {
-      expect(sessionSignInCallbacks("session-alice")).toEqual({
+      expect(sessionSignInCallbacks(hosts, "session-alice")).toEqual({
         callbackBaseUrl: "http://alice.example",
         deliver,
       });
-      expect(sessionSignInCallbacks("session-bob")).toBeUndefined();
+      expect(sessionSignInCallbacks(hosts, "session-bob")).toBeUndefined();
       durable.callbackBaseUrl = "https://bob.example";
-      expect(sessionSignInCallbacks("session-bob")?.callbackBaseUrl).toBe("https://bob.example");
+      expect(sessionSignInCallbacks(hosts, "session-bob")?.callbackBaseUrl).toBe(
+        "https://bob.example",
+      );
     } finally {
       durable.callbackBaseUrl = undefined;
       release();
@@ -159,7 +169,7 @@ describe("the hosts in a realm", () => {
   });
 
   it("asks the routes first, and the durable host for what no route holds", async () => {
-    installDurableHost(durableHost("durable"));
+    installProcessEngine(hosts, processEngine("durable"));
     const delivered: string[] = [];
     const route: HostedRoute = {
       deliver: async (token) => {
@@ -176,21 +186,21 @@ describe("the hosts in a realm", () => {
       cancelRun: (runId) =>
         runId === "run-held" ? true : runId === "run-held-ended" ? false : undefined,
     };
-    const release = registerHost(route);
+    const release = registerHostedRoute(hosts, route);
     try {
-      await resumeRoutedHook("hook-held", {});
-      await expect(resumeRoutedHook("hook-gone", {})).rejects.toThrow(HookNotFoundError);
-      await expect(routedRunEnded("run-held")).resolves.toBe(true);
-      await expect(routedRunLive("run-held")).resolves.toBe(false);
-      await expect(cancelRoutedRun("run-held", "stop")).resolves.toBe(true);
-      await expect(cancelRoutedRun("run-held-ended", "stop")).resolves.toBe(false);
-      await resumeRoutedSessionInbox({ sessionId: "session-alice" }, delivery);
+      await resumeRoutedHook(hosts, "hook-held", {});
+      await expect(resumeRoutedHook(hosts, "hook-gone", {})).rejects.toThrow(HookNotFoundError);
+      await expect(routedRunEnded(hosts, "run-held")).resolves.toBe(true);
+      await expect(routedRunLive(hosts, "run-held")).resolves.toBe(false);
+      await expect(cancelRoutedRun(hosts, "run-held", "stop")).resolves.toBe(true);
+      await expect(cancelRoutedRun(hosts, "run-held-ended", "stop")).resolves.toBe(false);
+      await resumeRoutedSessionInbox(hosts, { sessionId: "session-alice" }, delivery);
       expect(delivered).toEqual(["hook-held", "inbox session-alice"]);
       expect(durable.reached).toEqual([]);
 
-      await resumeRoutedHook("hook-durable", {});
-      await expect(cancelRoutedRun("run-durable", "stop")).resolves.toBe(true);
-      await resumeRoutedSessionInbox({ sessionId: "session-bob" }, delivery);
+      await resumeRoutedHook(hosts, "hook-durable", {});
+      await expect(cancelRoutedRun(hosts, "run-durable", "stop")).resolves.toBe(true);
+      await resumeRoutedSessionInbox(hosts, { sessionId: "session-bob" }, delivery);
       expect(durable.reached).toEqual([
         "resume hook-durable",
         "cancel run-durable",
@@ -202,42 +212,68 @@ describe("the hosts in a realm", () => {
   });
 
   it("reads a durable run's end and liveness from its status", async () => {
-    installDurableHost(durableHost("durable"));
-    await expect(routedRunEnded("run-done")).resolves.toBe(true);
-    await expect(routedRunEnded("run-open")).resolves.toBe(false);
-    await expect(routedRunEnded("run-gone")).resolves.toBe(true);
-    await expect(routedRunEnded("run-unreadable")).rejects.toThrow("the World is down");
-    await expect(routedRunLive("run-open")).resolves.toBe(true);
-    await expect(routedRunLive("run-gone")).resolves.toBe(false);
-    await expect(routedRunLive("run-unreadable")).resolves.toBe(true);
+    installProcessEngine(hosts, processEngine("durable"));
+    await expect(routedRunEnded(hosts, "run-done")).resolves.toBe(true);
+    await expect(routedRunEnded(hosts, "run-open")).resolves.toBe(false);
+    await expect(routedRunEnded(hosts, "run-gone")).resolves.toBe(true);
+    await expect(routedRunEnded(hosts, "run-unreadable")).rejects.toThrow("the World is down");
+    await expect(routedRunLive(hosts, "run-open")).resolves.toBe(true);
+    await expect(routedRunLive(hosts, "run-gone")).resolves.toBe(false);
+    await expect(routedRunLive(hosts, "run-unreadable")).resolves.toBe(true);
   });
 
   it("reads a registered session from its store, and the durable host's once released", async () => {
-    installDurableHost(durableHost("durable"));
+    installProcessEngine(hosts, processEngine("durable"));
     const store = fixedStore([{ line: "Alice" }, { line: "Bob" }]);
-    const release = registerSessionLineStore("session-alice", store);
+    const release = registerSessionEventStore(hosts, "session-alice", store);
     try {
-      expect(sessionLineStore("session-alice")).toBe(store);
-      await expect(readSessionStreamTailIndex("session-alice")).resolves.toBe(1);
-      await expect(readAll(readSessionRecordHistory("session-alice", -1))).resolves.toEqual([
+      expect(sessionEventStore(hosts, "session-alice")).toBe(store);
+      await expect(readSessionStreamTailIndex(hosts, "session-alice")).resolves.toBe(1);
+      await expect(readAll(readSessionRecordHistory(hosts, "session-alice", -1))).resolves.toEqual([
         { line: "Bob" },
       ]);
     } finally {
       release();
     }
-    await expect(readAll(readSessionRecordHistory("session-alice", 0))).resolves.toEqual([
+    await expect(readAll(readSessionRecordHistory(hosts, "session-alice", 0))).resolves.toEqual([
       { line: "kept by the durable host" },
     ]);
   });
 
   it("refuses a second store for the same session", () => {
-    const release = registerSessionLineStore("session-alice", fixedStore([]));
+    const release = registerSessionEventStore(hosts, "session-alice", fixedStore([]));
     try {
-      expect(() => registerSessionLineStore("session-alice", fixedStore([]))).toThrow(
-        'Session "session-alice" already has a line store.',
+      expect(() => registerSessionEventStore(hosts, "session-alice", fixedStore([]))).toThrow(
+        'Session "session-alice" already has a session event store.',
       );
     } finally {
       release();
     }
+  });
+
+  it("keeps what an engine hosts until the app's lifetime ends", async () => {
+    const lifetime = createLifetime();
+    const engine = hostEngine({ hosts, lifetime });
+    const reached: string[] = [];
+    engine.route({
+      deliver: async (token) => {
+        reached.push(token);
+        return "delivered";
+      },
+      runEnded: () => undefined,
+      cancelRun: () => undefined,
+    });
+    const store = fixedStore([{ type: "session.started" }]);
+    engine.session("session-alice", store);
+
+    await resumeRoutedHook(hosts, "hook-alice", {});
+    expect(reached).toEqual(["hook-alice"]);
+    expect(sessionEventStore(hosts, "session-alice")).toBe(store);
+
+    await endLifetime(lifetime);
+    await expect(resumeRoutedHook(hosts, "hook-alice", {})).rejects.toThrow(HookNotFoundError);
+    expect(() => sessionEventStore(hosts, "session-alice")).toThrow(
+      'No host in this realm holds session "session-alice".',
+    );
   });
 });
