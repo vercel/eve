@@ -17,6 +17,7 @@ describe("eve/workflow", () => {
     expect(workflow.createWebhook).toBe(sdk.createWebhook);
     expect(workflow.sleep).toBe(sdk.sleep);
     expect(workflow.getWorkflowMetadata).toBe(sdk.getWorkflowMetadata);
+    expect(workflow.getStepMetadata).toBe(sdk.getStepMetadata);
     expect(workflow.FatalError).toBe(sdk.FatalError);
     expect(workflow.RetryableError).toBe(sdk.RetryableError);
     expect(new workflow.FatalError("stop")).toBeInstanceOf(sdk.FatalError);
@@ -25,6 +26,7 @@ describe("eve/workflow", () => {
   it("declares signatures the SDK values satisfy", () => {
     expectTypeOf(sdk.createWebhook).toExtend<typeof workflow.createWebhook>();
     expectTypeOf(sdk.getWorkflowMetadata).toExtend<typeof workflow.getWorkflowMetadata>();
+    expectTypeOf(sdk.getStepMetadata).toExtend<typeof workflow.getStepMetadata>();
     expectTypeOf(sdk.FatalError).toExtend<typeof workflow.FatalError>();
     expectTypeOf(sdk.RetryableError).toExtend<typeof workflow.RetryableError>();
 
