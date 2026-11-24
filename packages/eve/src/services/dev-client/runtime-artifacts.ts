@@ -117,7 +117,8 @@ async function parseDevelopmentRuntimeArtifactsBody(
   }
   return {
     revision: body.revision,
-    serverId: typeof body.serverId === "string" ? body.serverId : undefined,
+    serverId:
+      typeof body.serverId === "string" && body.serverId.length > 0 ? body.serverId : undefined,
   };
 }
 
