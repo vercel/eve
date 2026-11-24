@@ -1,5 +1,5 @@
 import type { HeadersValue } from "#client/types.js";
-import { builtInPlatform } from "#platform/context.js";
+import { currentApp } from "#context/app.js";
 import type { OutboundAuthFn } from "#public/agents/auth.js";
 import {
   defineRemoteAgent,
@@ -67,13 +67,13 @@ function workspaceAgentRoutePrefix(name: string): string {
   const callerRoutePrefix = normalizePublicRoutePrefix(process.env.EVE_PUBLIC_ROUTE_PREFIX);
   const namespace =
     callerRoutePrefix?.slice(0, callerRoutePrefix.lastIndexOf("/")) ??
-    (builtInPlatform().deployment.environment() === "development" ? "" : "/eve");
+    (currentApp().platform.deployment.environment() === "development" ? "" : "/eve");
   return `${namespace}/${name}`;
 }
 
 function defaultWorkspaceAgentTransport(name: string): WorkspaceAgentTransport {
   const platformTransport = (): WorkspaceAgentTransport => {
-    const transport = builtInPlatform().network.peer?.(workspaceAgentRoutePrefix(name));
+    const transport = currentApp().platform.network.peer?.(workspaceAgentRoutePrefix(name));
     if (transport !== undefined) return transport;
     throw new Error(
       "No default workspace-agent transport is available in this environment. Provide transport to defineWorkspaceAgent().",

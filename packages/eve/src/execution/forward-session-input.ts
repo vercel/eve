@@ -10,9 +10,8 @@ import {
 import { relayedInteractionEvents } from "#harness/interaction-relay.js";
 import type { SubagentInteractionHookPayload } from "#channel/types.js";
 import { currentView } from "#harness/session-machine/current.js";
-import { appOf } from "#context/app.js";
+import { requireApp } from "#context/app.js";
 import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
-import { platformOf } from "#platform/context.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 
 export async function forwardSessionInput(
@@ -45,7 +44,7 @@ export async function forwardSessionInput(
   };
   const response = await postSessionCallbackRequest({
     body,
-    platform: platformOf(appOf(ctx)),
+    platform: requireApp(ctx).platform,
     url: callback.url,
   });
   if (!response.ok) throw new Error(`Remote input callback failed with HTTP ${response.status}.`);

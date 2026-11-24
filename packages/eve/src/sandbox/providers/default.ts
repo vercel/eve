@@ -1,8 +1,7 @@
 import { isLinuxDockerDaemonAvailableSync } from "#execution/sandbox/bindings/local.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
-import { appOf } from "#context/app.js";
-import { contextStorage } from "#context/container.js";
-import { hostedSandboxEnvironment, hostedSandboxOf } from "#platform/hosted-sandbox.js";
+import { hostedSandboxEnvironment } from "#platform/hosted-sandbox.js";
+import { hostedCompute } from "#sandbox/hosted-compute.js";
 import type { DockerSandboxEnvironmentOptions } from "#public/sandbox/docker-sandbox.js";
 import type { SandboxSession } from "#public/sandbox/index.js";
 import {
@@ -199,12 +198,8 @@ export const DefaultSandbox: SandboxProvider<
   },
 });
 
-function turnPlatform() {
-  return appOf(contextStorage.getStore())?.platform;
-}
-
 function selectProvider(): SelectedProvider | null {
-  const hosted = hostedSandboxOf(turnPlatform());
+  const hosted = hostedCompute();
   if (hosted?.selectByDefault) return hosted.name;
   if (isLinuxDockerDaemonAvailableSync()) return "docker";
   return isEveDevEnvironment() ? "just-bash" : null;
@@ -220,7 +215,7 @@ function createEnvironment(
     case "just-bash":
       return JustBashSandbox.environment(options.justBash ?? {});
     default:
-      return hostedSandboxEnvironment(turnPlatform(), options.vercel ?? {});
+      return hostedSandboxEnvironment(hostedCompute(), options.vercel ?? {});
   }
 }
 
@@ -254,7 +249,7 @@ function isSelectedProvider(value: unknown): value is SelectedProvider {
   return (
     value === "docker" ||
     value === "just-bash" ||
-    (typeof value === "string" && value === hostedSandboxOf(turnPlatform())?.name)
+    (typeof value === "string" && value === hostedCompute()?.name)
   );
 }
 

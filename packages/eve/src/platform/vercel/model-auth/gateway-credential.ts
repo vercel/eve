@@ -1,4 +1,4 @@
-import { builtInPlatform } from "#platform/context.js";
+import type { Network } from "#platform/entities.js";
 import { MODEL_CONNECTION_ENV } from "#shared/model-helper.js";
 import { resolveModelApiKey } from "#internal/model-auth/api-key.js";
 import {
@@ -9,6 +9,7 @@ import { resolveVercelSession } from "#internal/model-auth/vercel.js";
 import type { DevelopmentModelCredential } from "#internal/model-auth/development-broker-protocol.js";
 
 export async function resolveGatewayModelCredential(
+  network: Network,
   rejectedToken?: string,
 ): Promise<DevelopmentModelCredential> {
   const selected = process.env[MODEL_CONNECTION_ENV];
@@ -32,7 +33,6 @@ export async function resolveGatewayModelCredential(
     return { kind: "api-key", token: await resolveModelApiKey("ai-gateway-key") };
   if (selected !== "ai-gateway-project" && process.env.AI_GATEWAY_API_KEY?.trim())
     return { kind: "api-key", token: process.env.AI_GATEWAY_API_KEY };
-  const { network } = builtInPlatform();
   if (network.token === undefined) {
     throw new Error(
       "The installed eve platform gives no workload token for AI Gateway. Configure the model with an AI Gateway API key.",

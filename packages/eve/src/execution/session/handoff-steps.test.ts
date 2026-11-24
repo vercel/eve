@@ -21,6 +21,9 @@ import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { AgentSandbox, SessionAgent } from "#runtime/sessions/session-agent.js";
 import { DefaultSandbox } from "#sandbox/providers/default.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
+import { inTestApp, startTestApp, testApp } from "#internal/testing/test-platform.js";
+import { createEntities } from "#platform/entities.js";
+import vercelPlatform from "#platform/vercel/declaration.js";
 
 const deserializeContextMock = vi.fn();
 const readDurableSessionMock = vi.fn();
@@ -127,15 +130,20 @@ function contextWithAgent(registry?: AgentSandbox["registry"]) {
         ? undefined
         : { registry, template: { compiledArtifactsSource: { kind: "bundled" } } },
   };
-  const get = vi.fn((key: unknown) => (key === SessionAgentKey ? agent : undefined));
-  return { context: { get }, get };
+  const values = new Map<unknown, unknown>();
+  const get = vi.fn((key: unknown) => (key === SessionAgentKey ? agent : values.get(key)));
+  const set = (key: unknown, value: unknown) => values.set(key, value);
+  return { context: { get, set }, get };
 }
 
 const SOURCE_TOKENS = ["eve:session:session-1", "channel:alias"];
 
+const vercelApp = testApp({ platform: createEntities(vercelPlatform, undefined) });
+
 describe("prepareSuccessorStep", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    startTestApp(vercelApp);
   });
 
   it("hydrates the target bundle and durable state, then records this owner", async () => {
@@ -209,7 +217,9 @@ describe("prepareSuccessorStep", () => {
       },
     });
 
-    await expect(validate(createCheckpoint())).resolves.toEqual({ kind: "valid" });
+    await expect(inTestApp(() => validate(createCheckpoint()), vercelApp)).resolves.toEqual({
+      kind: "valid",
+    });
   });
 
   it("rejects an incompatible workflow tool run with the current checkpoint version", async () => {

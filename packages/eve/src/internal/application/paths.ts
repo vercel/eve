@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import { workflowEntryReference } from "#execution/workflow-references.js";
-import { platformBuild } from "#platform/build.js";
+import { loadPlatformBuild } from "#platform/selection.js";
 import type { Build } from "#platform/entities.js";
 import {
   resolveInstalledPackageInfo,
@@ -68,14 +68,14 @@ export function resolveSandboxCacheDirectory(appRoot: string): string {
   return join(appRoot, ".eve", "sandbox-cache");
 }
 
-export function resolveOutputDirectory(appRoot: string, build: Build = platformBuild()): string {
+export function resolveOutputDirectory(appRoot: string, build: Build): string {
   return build.outputDirectory?.(appRoot) ?? join(appRoot, ".output");
 }
 
-export function getApplicationInfo(appRoot: string): ApplicationInfo {
+export async function getApplicationInfo(appRoot: string): Promise<ApplicationInfo> {
   return {
     appRoot,
-    outputDir: resolveOutputDirectory(appRoot),
+    outputDir: resolveOutputDirectory(appRoot, await loadPlatformBuild(appRoot)),
     workflowId: workflowEntryReference.workflowId,
     workflowBuildDir: resolveWorkflowBuildDirectory(appRoot),
     workflowSourceDir: resolvePackageSourceDirectoryPath("src/execution"),

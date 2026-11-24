@@ -1,3 +1,5 @@
+import { startedApp } from "#runtime/app.js";
+import { bindApp } from "#context/app.js";
 import { deserializeContext } from "#context/serialize.js";
 import { AuthKey } from "#context/keys.js";
 import { withConnectionEventSpan } from "#tracing/eve/connection-events.js";
@@ -29,6 +31,7 @@ export function resolveBinding(ctx: AlsContext, binding: EventBinding) {
     binding.connectionName,
     events.authorization,
     binding.auth,
+    ctx,
   );
   if (principalKey(principal) !== binding.principalKey) return undefined;
   return { binding, connection, events, principal };
@@ -49,6 +52,7 @@ export async function dispatchConnectionEventStep(input: {
 }): Promise<void> {
   "use step";
   const ctx = await deserializeContext(input.serializedContext);
+  bindApp(ctx, startedApp());
   const { delivery } = input.payload;
   const resolved = accepts(input.binding, input.payload)
     ? resolveBinding(ctx, input.binding)

@@ -7,6 +7,10 @@ import {
   seedInstrumentationProviders,
 } from "#instrumentation/providers.js";
 import { localTraces } from "#public/instrumentation/otel.js";
+import { createEntities } from "#platform/entities.js";
+import vercelPlatform from "#platform/vercel/declaration.js";
+
+const platform = createEntities(vercelPlatform, undefined);
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -17,14 +21,15 @@ describe("instrumentation provider production defaults", () => {
     vi.stubEnv("EVE_DEV_WORKER_APP_ROOT", undefined);
     vi.stubEnv("VERCEL_ENV", "production");
 
-    seedInstrumentationProviders();
+    seedInstrumentationProviders(platform);
     await registerInstrumentationProvider({
       agentName: "weather",
+      platform,
       slot: "local",
       value: localTraces(),
     });
 
-    const runtime = finalizeInstrumentationProviders({ serviceName: "weather" });
+    const runtime = finalizeInstrumentationProviders({ platform, serviceName: "weather" });
     await runtime.forceFlush();
     await runtime.shutdown();
 

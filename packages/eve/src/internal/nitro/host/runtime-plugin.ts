@@ -31,7 +31,7 @@ export function createRuntimePluginSource(
     "",
     "export default function eveRuntimePlugin(nitroApp) {",
     '  nitroApp.hooks.hook("close", () => endLifetime(app.lifetime));',
-    ...(runtime.localTracing ? ["  installLocalTracing(nitroApp);"] : []),
+    ...(runtime.localTracing ? ["  installLocalTracing(nitroApp, app.platform);"] : []),
     ...(runtime.workflowSandbox ? ["  installWorkflowSandboxRuntime();"] : []),
     "}",
     "",

@@ -5,7 +5,7 @@ import type { NextConfig } from "next";
 import { assertValidPublicAgentName } from "#internal/agent-name.js";
 import { type AgentWorkspace, findEveProjectContext } from "#internal/project-context.js";
 import { writeMultiAgentSummary } from "#internal/vercel-agent-summary.js";
-import { platformBuild } from "#platform/build.js";
+import { loadPlatformBuild } from "#platform/selection.js";
 import { quoteVercelShellArgument, toVercelRelativePath } from "#internal/vercel/build-command.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import { joinEveRoutePath } from "#shared/eve-route-path.js";
@@ -210,12 +210,13 @@ function readLocalProductionPort(portOffset: number): number {
 
 function resolveProductionDestination(input: {
   readonly localProductionPortOffset: number;
+  readonly platformOutput: boolean;
   readonly servicePrefix: string;
 }): {
   readonly destinationPrefix: string;
   readonly localServerOrigin?: string;
 } {
-  if (platformBuild().platformOutput?.() === true) {
+  if (input.platformOutput) {
     return {
       destinationPrefix: input.servicePrefix,
     };
@@ -464,7 +465,8 @@ export function withEve<TConfig extends object>(
       nextRoot,
     });
 
-    if (platformBuild().platformOutput?.() === true) {
+    const platformOutput = (await loadPlatformBuild(nextRoot)).platformOutput?.() === true;
+    if (platformOutput) {
       return nextConfig;
     }
 
@@ -475,6 +477,7 @@ export function withEve<TConfig extends object>(
       const configuredAgent = configuredAgentByName.get(agent.name);
       const productionDestination = resolveProductionDestination({
         localProductionPortOffset: agent.localProductionPortOffset,
+        platformOutput,
         servicePrefix: configuredAgent?.servicePrefix ?? agent.servicePrefix,
       });
 

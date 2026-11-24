@@ -5,8 +5,7 @@ import { readLegacyTurnInput, type LegacyTurnInput } from "./input.js";
 import { readLegacySnapshot, importConversation } from "./snapshot.js";
 import { SESSION_INBOX_CONTEXT_KEY } from "#execution/session-inbox/address.js";
 import { isObject } from "#shared/guards.js";
-import { platformOf } from "#platform/context.js";
-import { processApp } from "#runtime/app.js";
+import { startedApp } from "#runtime/app.js";
 
 const RETIRED_CONTEXT_KEYS = [
   "eve.activityObserver",
@@ -26,7 +25,7 @@ const RETIRED_CONTEXT_KEYS = [
 
 export async function prepareLegacySessionStep(rawInput: unknown) {
   "use step";
-  const app = processApp().started;
+  const app = startedApp();
   const input = readLegacyTurnInput(rawInput);
   const originalSession = readLegacySnapshot(input.sessionState);
   const { history, sessionState } = importConversation(originalSession);
@@ -71,7 +70,7 @@ export async function prepareLegacySessionStep(rawInput: unknown) {
     sessionState,
     serializedContext,
     sessionTimeoutMs: sessionTimeoutMs as number | false,
-    deploymentId: platformOf(app).deployment.deploymentId() ?? (await world.getDeploymentId()),
+    deploymentId: app.platform.deployment.deploymentId() ?? (await world.getDeploymentId()),
   };
 }
 export type PreparedLegacySession = Awaited<ReturnType<typeof prepareLegacySessionStep>>;

@@ -3,26 +3,24 @@ import { traceSessionHandover } from "#execution/session/handover-tracing.js";
 import { turnStepOn, type SessionStepHost } from "#execution/session/turn-step.js";
 import type { TurnStepInput, TurnStepResult } from "#execution/session/turn-step-types.js";
 import { delivered, type StepMeta } from "#execution/durable.js";
-import { workflowDurable } from "#execution/workflow-host/host.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { workflowToolStubs } from "#execution/workflow-host/tool-stubs.js";
-import { platformOf } from "#platform/context.js";
-import { hostsOf, processApp, type App } from "#runtime/app.js";
+import { startedApp, type App } from "#runtime/app.js";
 import { setEveAttributes } from "#runtime/attributes/emit.js";
 
-function workflowStepHost(app: App | undefined): SessionStepHost {
-  const platform = platformOf(app);
+function workflowStepHost(app: App): SessionStepHost {
+  const { platform } = app;
   let callbackBaseUrl: string | undefined;
   try {
     const metadata = getWorkflowMetadata();
     if (typeof metadata.url === "string")
       callbackBaseUrl = resolveWorkflowCallbackBaseUrl(metadata.url, platform);
   } catch {}
-  const durable = app?.durable ?? workflowDurable();
+  const { durable } = app;
   return {
     app,
-    hosts: hostsOf(app),
+    hosts: app.hosts,
     callbackBaseUrl,
     createRuntime: createWorkflowRuntime,
     setAttributes: setEveAttributes,
@@ -60,5 +58,5 @@ export async function turnStep(input: WorkflowTurnStepInput): Promise<TurnStepRe
     ...(abortSignal !== undefined &&
       steeringSignal !== undefined && { signals: { cancel: abortSignal, steer: steeringSignal } }),
   };
-  return await turnStepOn(workflowStepHost(processApp().started))(data, meta, sessionWritable);
+  return await turnStepOn(workflowStepHost(startedApp()))(data, meta, sessionWritable);
 }

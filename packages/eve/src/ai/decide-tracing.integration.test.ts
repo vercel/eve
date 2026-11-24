@@ -76,6 +76,7 @@ function useRuntime(
   });
   return registerInstrumentationRuntime({
     ...agent,
+    environment: "production",
     hooks: createInstrumentationHooks({
       serialBefore: [{ ...agent.hook, name: "internal:otel" }],
       parallel: authored,

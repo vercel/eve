@@ -8,7 +8,7 @@ import {
   type NitroArtifactsConfig,
   resolveNitroCompiledArtifactsSource,
 } from "#internal/nitro/routes/runtime-artifacts.js";
-import { platformOf } from "#platform/context.js";
+import type { Build } from "#platform/entities.js";
 import type { App } from "#runtime/app.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
@@ -17,7 +17,7 @@ import type { InvokeToolTraceOrigin } from "#tracing/eve/invoke-tool-span.js";
 
 export function createRouteInvokeTool(input: {
   readonly agentName: string;
-  readonly app: App | undefined;
+  readonly app: App;
   readonly config: NitroArtifactsConfig;
   readonly origin?: InvokeToolTraceOrigin;
   readonly requestUrl: string;
@@ -25,9 +25,10 @@ export function createRouteInvokeTool(input: {
   let runtime: Promise<LoadedInvokeToolRuntime> | undefined;
   return async (name, toolInput, options) => {
     runtime ??= loadInvokeToolRuntime({
+      build: input.app.platform.build,
       callbackBaseUrl: resolveWorkflowCallbackBaseUrl(
         new URL(input.requestUrl).origin,
-        platformOf(input.app),
+        input.app.platform,
       ),
       compiledArtifactsSource: resolveNitroCompiledArtifactsSource(input.config),
     }).catch((error: unknown) => {
@@ -47,6 +48,7 @@ export function createRouteInvokeTool(input: {
 export type LoadedInvokeToolRuntime = Omit<InvokeToolRuntime, "agentName" | "origin">;
 
 export async function loadInvokeToolRuntime(input: {
+  readonly build: Build;
   readonly callbackBaseUrl: string;
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
 }): Promise<LoadedInvokeToolRuntime> {
@@ -61,6 +63,7 @@ export async function loadInvokeToolRuntime(input: {
     resolveAgentApproval(bundle),
   );
   return {
+    build: input.build,
     bundle,
     callbackBaseUrl: input.callbackBaseUrl,
     compiledArtifactsSource,

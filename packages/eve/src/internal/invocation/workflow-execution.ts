@@ -17,7 +17,7 @@ import type {
   AgentInvocationStatus,
 } from "#internal/invocation/agent-invocation.js";
 import { invocationOwnerKey } from "#internal/invocation/metadata.js";
-import { builtInPlatform } from "#platform/context.js";
+import { currentApp } from "#context/app.js";
 import {
   invocationContinuationToken,
   readOwnedInvocationRun,
@@ -414,7 +414,7 @@ function publicInvocationFailure(
   error: ErrorInfo | undefined,
 ): Extract<AgentInvocation, { readonly status: "failed" }>["error"] {
   const data: Record<string, string> = { runId };
-  Object.assign(data, builtInPlatform().deployment.invocationData?.());
+  Object.assign(data, currentApp().platform.deployment.invocationData?.());
   if (error !== undefined) {
     data.eveCode = error.code;
     if (error.id !== undefined) data.errorId = error.id;

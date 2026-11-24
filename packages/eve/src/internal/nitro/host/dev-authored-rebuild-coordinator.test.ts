@@ -77,6 +77,7 @@ function createHost(
     } as CompileAgentResult,
     compiledArtifacts: {
       bootstrapPath: `/tmp/eve-test/.eve/dev-hosts/${id}/bootstrap.mjs`,
+      platformModulePath: `/tmp/eve-test/.eve/dev-hosts/${id}/platform.mjs`,
       workflowWorldPluginPath: `/tmp/eve-test/.eve/dev-hosts/${id}/workflow-world.mjs`,
     },
     generation: {

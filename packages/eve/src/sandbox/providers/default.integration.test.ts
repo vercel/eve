@@ -88,6 +88,7 @@ async function access(input: {
   readonly state?: SandboxState;
 }) {
   return await ensureSandboxAccess({
+    build: () => ({}),
     compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(input.appRoot),
     nodeId: "__root__",
     registry: registryOf(input.environment, input.selector),

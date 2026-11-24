@@ -1,5 +1,5 @@
 import { createLogger } from "#internal/logging.js";
-import { builtInPlatform } from "#platform/context.js";
+import { vercelDeployment } from "#platform/vercel/deployment.js";
 import { type OutboundAuthFn, vercelOidc } from "#public/agents/auth.js";
 import {
   resolveDiscordBotToken,
@@ -103,7 +103,7 @@ export async function runDiscordGatewayRelay(
 
 function resolveBaseUrl(url: string | URL | undefined): URL {
   if (url !== undefined) return new URL(url);
-  const production = builtInPlatform().deployment.productionHost()?.trim();
+  const production = vercelDeployment.productionHost()?.trim();
   if (production) return new URL(`https://${production}`);
   throw new Error(
     "runDiscordGatewayRelay needs the eve deployment's URL: pass `url`, such as " +

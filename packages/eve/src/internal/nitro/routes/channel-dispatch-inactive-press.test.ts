@@ -5,6 +5,7 @@ import { type CompiledChannel, isCompiledChannel } from "#channel/compiled-chann
 import type { Runtime } from "#channel/types.js";
 import { dispatchChannelRequest } from "#internal/nitro/routes/channel-dispatch.js";
 import { resolveNitroChannelRuntimeBundle } from "#internal/nitro/routes/runtime-stack.js";
+import { testApp } from "#internal/testing/test-platform.js";
 import { slackChannel } from "#public/channels/slack/index.js";
 import { ANSWER_ACTION_PREFIX } from "#public/channels/slack/hitl.js";
 import { teamsChannel } from "#public/channels/teams/index.js";
@@ -94,7 +95,7 @@ describe("an inactive press through the production dispatcher", () => {
     Object.assign(request, { ip: "127.0.0.1" });
     const handOff: (task: Promise<unknown>) => void = waitUntil;
     const event = { context: { params: {} }, req: request, waitUntil: handOff } as H3Event;
-    await dispatchChannelRequest(event, "POST /press", {} as never);
+    await dispatchChannelRequest(event, "POST /press", {} as never, testApp());
     acknowledged.resolve();
     expect(waitUntil).toHaveBeenCalledTimes(1);
     return { task: waitUntil.mock.calls[0]![0] };

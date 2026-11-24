@@ -5,14 +5,13 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
+import { writeFile } from "node:fs/promises";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { resolvePackageSourceFilePath } from "#internal/application/package.js";
 import { buildApplication, startProductionServer } from "#internal/nitro/host.js";
 import { useTemporaryAppRoots } from "#internal/testing/use-temporary-app-roots.js";
-import { definePlatform } from "#platform/declaration.js";
-import { defaultPlatform } from "#platform/default.js";
-import type { Build, Triggers } from "#platform/entities.js";
-import type { DurableEngine } from "#execution/durable.js";
 
 const execFileAsync = promisify(execFile);
 const createAppRoot = useTemporaryAppRoots();
@@ -161,16 +160,10 @@ async function runEntry(appRoot: string, outputDir: string, driver: string): Pro
   return JSON.parse(result!.slice("RESULT ".length));
 }
 
-const triggers = vi.fn((): Triggers => {
-  throw new Error("The platform's triggers factory ran during the build.");
-});
-
-const workerEngine = (): DurableEngine => ({
+const WORKER_ENGINE = `() => ({
   build: { entries: { "engine-worker": "platform/engine-worker.mjs" } },
-  start() {
-    throw new Error("The test engine only contributes build data.");
-  },
-});
+  start: () => ({}) as never,
+})`;
 
 const HEALTH_FROM_WORKER = `
 const worker = await import(process.env.WORKER_URL);
@@ -182,20 +175,41 @@ process.exit(0);
 
 async function buildWithPlatform(
   appRoot: string,
-  build: Build,
-  options: { readonly durable?: () => DurableEngine; readonly profileOutputPath?: string } = {},
+  build: string,
+  options: { readonly durable?: string; readonly profileOutputPath?: string } = {},
 ): Promise<string> {
   const { durable, ...buildOptions } = options;
+  const declaration = resolvePackageSourceFilePath("src/platform/declaration.ts");
+  await writeFile(
+    join(appRoot, "platform", "declaration.ts"),
+    [
+      'import { join } from "node:path";',
+      `import { definePlatform } from ${JSON.stringify(declaration)};`,
+      "export default definePlatform({",
+      "  deployment: () => ({",
+      "    environment: () => undefined,",
+      `    deploymentId: () => ${durable === undefined ? "undefined" : '"dpl_alice"'},`,
+      "    productionHost: () => undefined,",
+      "    publicHost: () => undefined,",
+      "    scope: () => undefined,",
+      "  }),",
+      "  triggers: () => {",
+      `    throw new Error("The platform's triggers factory ran during the build.");`,
+      "  },",
+      `  build: ${build},`,
+      ...(durable === undefined ? [] : [`  durable: ${durable},`]),
+      "});",
+    ].join("\n"),
+  );
   return await buildApplication(appRoot, {
     ...buildOptions,
-    platform: definePlatform({ deployment: defaultPlatform.deployment, build, durable, triggers }),
+    platformModule: "platform/declaration.ts",
     skipSandboxPrewarm: true,
   });
 }
 
 afterEach(() => {
   vi.unstubAllEnvs();
-  triggers.mockClear();
 });
 
 describe("a build with a platform entry", () => {
@@ -205,11 +219,9 @@ describe("a build with a platform entry", () => {
     const { appRoot } = await createAppRoot("eve-build-entry-", { files: AGENT_FILES });
     const profileOutputPath = join(appRoot, "build-profile.json");
 
-    const outputDir = await buildWithPlatform(
-      appRoot,
-      { entry: "platform/entry.mjs" },
-      { profileOutputPath },
-    );
+    const outputDir = await buildWithPlatform(appRoot, '{ entry: "platform/entry.mjs" }', {
+      profileOutputPath,
+    });
 
     const profile = JSON.parse(await readFile(profileOutputPath, "utf8")) as {
       deploymentId?: string;
@@ -230,7 +242,6 @@ describe("a build with a platform entry", () => {
         "start() from eve:app was already called. Keep the app from the first call and pass it to the code that serves requests.",
       loggedCause: "node twin",
     });
-    expect(triggers).not.toHaveBeenCalled();
     await expect(startProductionServer(appRoot)).rejects.toThrow(
       "This build has a platform entry and no server of its own. Run it with the platform's runtime instead of eve start.",
     );
@@ -241,10 +252,10 @@ describe("a build with a platform entry", () => {
     const { appRoot } = await createAppRoot("eve-build-entry-vercel-", { files: AGENT_FILES });
     const workerOutput = join(appRoot, "dist", "worker");
 
-    const outputDir = await buildWithPlatform(appRoot, {
-      entry: "platform/entry.mjs",
-      outputDirectory: (root) => join(root, "dist", "worker"),
-    });
+    const outputDir = await buildWithPlatform(
+      appRoot,
+      '{ entry: "platform/entry.mjs", outputDirectory: (root) => join(root, "dist", "worker") }',
+    );
 
     expect(outputDir).toBe(workerOutput);
     expect(JSON.parse(await readFile(join(outputDir, "nitro.json"), "utf8"))).toMatchObject({
@@ -256,10 +267,10 @@ describe("a build with a platform entry", () => {
   it("resolves the runtime-env web twins when the platform's conditions omit node", async () => {
     const { appRoot } = await createAppRoot("eve-build-entry-conditions-", { files: AGENT_FILES });
 
-    const outputDir = await buildWithPlatform(appRoot, {
-      entry: "platform/entry.mjs",
-      conditions: ["worker", "browser"],
-    });
+    const outputDir = await buildWithPlatform(
+      appRoot,
+      '{ entry: "platform/entry.mjs", conditions: ["worker", "browser"] }',
+    );
 
     expect(
       await runEntry(
@@ -281,11 +292,9 @@ ${DRIVER}`,
 
   it("builds an engine's entry beside a platform entry, and both share the one module that calls start()", async () => {
     const { appRoot } = await createAppRoot("eve-build-engine-entry-", { files: AGENT_FILES });
-    const outputDir = await buildWithPlatform(
-      appRoot,
-      { entry: "platform/served-entry.mjs" },
-      { durable: workerEngine },
-    );
+    const outputDir = await buildWithPlatform(appRoot, '{ entry: "platform/served-entry.mjs" }', {
+      durable: WORKER_ENGINE,
+    });
 
     expect(
       await runEntry(
@@ -308,7 +317,7 @@ process.exit(0);`,
 
   it("builds an engine's entry beside eve's Node server without starting the server", async () => {
     const { appRoot } = await createAppRoot("eve-build-engine-entry-node-", { files: AGENT_FILES });
-    const outputDir = await buildWithPlatform(appRoot, {}, { durable: workerEngine });
+    const outputDir = await buildWithPlatform(appRoot, "{}", { durable: WORKER_ENGINE });
 
     expect(JSON.parse(await readFile(join(outputDir, "nitro.json"), "utf8"))).toMatchObject({
       preset: "node-server",
@@ -322,10 +331,10 @@ process.exit(0);`,
 
   it("refuses to serve a build without node on a runtime with no AsyncLocalStorage", async () => {
     const { appRoot } = await createAppRoot("eve-build-entry-no-als-", { files: AGENT_FILES });
-    const outputDir = await buildWithPlatform(appRoot, {
-      entry: "platform/entry.mjs",
-      conditions: ["worker", "browser"],
-    });
+    const outputDir = await buildWithPlatform(
+      appRoot,
+      '{ entry: "platform/entry.mjs", conditions: ["worker", "browser"] }',
+    );
 
     expect(
       await runEntry(
@@ -343,7 +352,7 @@ process.exit(0);`,
 
   it("refuses to start an app whose entry did not import eve:instrumentation first", async () => {
     const { appRoot } = await createAppRoot("eve-build-entry-bare-", { files: AGENT_FILES });
-    const outputDir = await buildWithPlatform(appRoot, { entry: "platform/bare-entry.mjs" });
+    const outputDir = await buildWithPlatform(appRoot, '{ entry: "platform/bare-entry.mjs" }');
 
     expect(
       await runEntry(
@@ -369,9 +378,8 @@ process.exit(0);`,
       },
     });
 
-    await expect(buildWithPlatform(appRoot, { entry: "platform/entry.mjs" })).rejects.toThrow(
+    await expect(buildWithPlatform(appRoot, '{ entry: "platform/entry.mjs" }')).rejects.toThrow(
       'Authored schedules aren\'t supported with `Build.entry` yet: schedule "digest" in "schedules/digest.md". Remove the schedule or build without `build.entry`. Dynamic schedules through the platform\'s `Triggers` are supported.',
     );
-    expect(triggers).not.toHaveBeenCalled();
   });
 });

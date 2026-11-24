@@ -28,6 +28,7 @@ import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agen
 import type { DynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import type { DynamicRemoteBinding } from "#definitions/remote.js";
 import type { SandboxAccess, SandboxSessionEndReason } from "#sandbox/state.js";
+import type { App } from "#runtime/app.js";
 import type { ReadFileState } from "#execution/tools/file-state.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { RuntimeModel } from "#runtime/agent/resolve-model.js";
@@ -61,6 +62,7 @@ export interface Session {
   readonly turn: SessionTurn;
 }
 
+export const AppKey = new ContextKey<App>("eve.app");
 export const AuthKey = new ContextKey<SessionAuthContext | null>("eve.auth");
 export const ToolStubsKey = new ContextKey<StubScope>(STUB_CONTEXT_KEY);
 export const InitiatorAuthKey = new ContextKey<SessionAuthContext | null>("eve.initiatorAuth");

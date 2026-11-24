@@ -2,9 +2,8 @@ import { type AlsContext, contextStorage } from "#context/container.js";
 import { AuthKey, type SessionAuthContext } from "#context/keys.js";
 import { ConnectionAuthorizationFailedError } from "#connections/errors.js";
 import type { AuthorizationDefinition, ConnectionPrincipal } from "#shared/connection-types.js";
-import { appOf } from "#context/app.js";
+import { currentApp, requireApp } from "#context/app.js";
 import type { ContextReader } from "#context/key.js";
-import { platformOf } from "#platform/context.js";
 
 export function principalKey(principal: ConnectionPrincipal): string {
   if (principal.type === "app") {
@@ -59,7 +58,8 @@ export function isPlatformDevelopmentCaller(
   current: SessionAuthContext,
   ctx?: ContextReader,
 ): boolean {
-  return platformOf(appOf(ctx)).identity.developmentCaller?.(current) ?? false;
+  const app = ctx === undefined ? currentApp() : requireApp(ctx);
+  return app.platform.identity.developmentCaller?.(current) ?? false;
 }
 
 function buildUserPrincipalRequiredMessage(

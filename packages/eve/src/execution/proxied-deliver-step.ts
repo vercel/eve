@@ -1,4 +1,5 @@
-import { processApp } from "#runtime/app.js";
+import { bindApp } from "#context/app.js";
+import { processApp, startedApp } from "#runtime/app.js";
 import { userPartsOf } from "#harness/user-parts.js";
 import { selectDeliveryPayloads } from "#harness/messages.js";
 import { routeAnswer } from "#harness/session-machine/transitions.js";
@@ -286,6 +287,7 @@ async function routeProxiedDeliver(
       const remote = child.remote;
       if (remote !== undefined) {
         const ctx = await deserializeContext(serializedContext);
+        bindApp(ctx, startedApp());
         const headers = await resolveRemoteAgentStreamHeaders({
           bundle: requireCompiledBundle(ctx),
           name: remote.name,
@@ -428,6 +430,7 @@ async function deliverChannelAnswers(
   );
   if (!unrouted) return input;
   const ctx = await deserializeContext(input.serializedContext);
+  bindApp(ctx, startedApp());
   const adapter = ctx.require(ChannelKey);
   if (adapter.deliver === undefined) return input;
 
@@ -465,6 +468,7 @@ async function deliverChannelAnswers(
   if (!mapped) return input;
 
   const session = await deserializeContext(input.serializedContext);
+  bindApp(session, startedApp());
   setChannelContext(session, { ...adapter, state });
   return {
     delivery: { ...input.delivery, payloads },

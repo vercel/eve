@@ -1,6 +1,6 @@
 import { readEnv } from "#runtime-env/env.js";
 import { join, resolve } from "#runtime-env/host-path.js";
-import { builtInPlatform } from "#platform/context.js";
+import type { Entities } from "#platform/entities.js";
 
 export const EVE_DEV_ENV_FLAG = "EVE_DEV";
 
@@ -20,12 +20,12 @@ export function isEveDevEnvironment(): boolean {
   return readEnv(EVE_DEV_ENV_FLAG) === "1";
 }
 
-export function isLocalDevelopmentServer(): boolean {
-  return (builtInPlatform().deployment.localDevelopment?.() ?? false) || isEveDevEnvironment();
+export function isLocalDevelopmentServer(platform: Entities | undefined): boolean {
+  return (platform?.deployment.localDevelopment?.() ?? false) || isEveDevEnvironment();
 }
 
-export function resolveInstrumentationEnvironment(): ConversationEnvironment {
-  const environmentKind = builtInPlatform().deployment.environment();
+export function resolveInstrumentationEnvironment(platform: Entities): ConversationEnvironment {
+  const environmentKind = platform.deployment.environment();
   if (isEveDevEnvironment() || environmentKind === "development") return "development";
   return environmentKind === "preview" ? "preview" : "production";
 }

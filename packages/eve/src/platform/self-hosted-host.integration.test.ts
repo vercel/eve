@@ -4,6 +4,7 @@ import { bindApp } from "#context/app.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { definePlatform } from "#platform/declaration.js";
 import { createEntities } from "#platform/entities.js";
+import { inTestApp, testApp } from "#internal/testing/test-platform.js";
 import type { MemoryDocumentBackend } from "#public/memory/file/backend.js";
 import type { App } from "#runtime/app.js";
 
@@ -103,10 +104,11 @@ describe("a self-hosted platform given to eve", () => {
   });
 
   it("has no hosted sandbox, so eve never selects one", async () => {
-    const { hostedSandboxOf, hostedSandboxEnvironment } =
-      await import("#platform/hosted-sandbox.js");
-    expect(hostedSandboxOf(platform)).toBeUndefined();
-    expect(() => hostedSandboxEnvironment(platform)).toThrow("has no hosted sandbox");
+    const { hostedSandboxEnvironment } = await import("#platform/hosted-sandbox.js");
+    const { hostedCompute } = await import("#sandbox/hosted-compute.js");
+    const compute = inTestApp(() => hostedCompute(), testApp({ platform }));
+    expect(compute).toBeUndefined();
+    expect(() => hostedSandboxEnvironment(compute)).toThrow("has no hosted sandbox");
   });
 
   it("asks for an explicit schedules provider", async () => {

@@ -110,7 +110,7 @@ it("reads current host credentials and teams without restarting workers", async 
     teamId: "team_b",
     teamName: "bob",
   });
-  expect(mocks.gateway.mock.calls).toEqual([[], []]);
+  expect(mocks.gateway.mock.calls.map(([, rejected]) => rejected)).toEqual([undefined, undefined]);
   expect(mocks.environment).toHaveBeenCalledWith("/fixture");
   expect(upstream).not.toHaveBeenCalled();
 });
@@ -122,7 +122,10 @@ it("refreshes only the rejected token and never puts tokens in URLs", async () =
   expect(await readDevelopmentModelCredential("gateway", "old-token")).toMatchObject({
     token: "new-token",
   });
-  expect(mocks.gateway.mock.calls).toEqual([[], ["old-token"]]);
+  expect(mocks.gateway.mock.calls.map(([, rejected]) => rejected)).toEqual([
+    undefined,
+    "old-token",
+  ]);
   expect(brokerRequests[0]?.headers.get(DEVELOPMENT_MODEL_REJECTED_HEADER)).toBe(
     createHash("sha256").update("old-token").digest("hex"),
   );

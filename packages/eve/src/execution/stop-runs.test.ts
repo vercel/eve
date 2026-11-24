@@ -1,7 +1,7 @@
 import { builtInHosts } from "#runtime/app.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { installWorkflowEngine } from "#execution/workflow-host/host.js";
-import { builtInPlatform } from "#platform/context.js";
+import { testEntities } from "#internal/testing/test-platform.js";
 
 import { EntityConflictError, HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { cancelRun, getRun, getWorld, resumeHook } from "#internal/workflow/runtime.js";
@@ -20,7 +20,7 @@ vi.mock("#internal/logging.js", () => ({
   logError: vi.fn(),
 }));
 
-installWorkflowEngine(builtInHosts(), builtInPlatform());
+installWorkflowEngine(builtInHosts(), testEntities());
 
 const world = {} as Awaited<ReturnType<typeof getWorld>>;
 const address = { hookToken: "generated-control-token", runId: "tool-run" };

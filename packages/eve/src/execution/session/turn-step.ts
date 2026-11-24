@@ -35,7 +35,6 @@ import {
 import { ChannelKey, requireCompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { sessionAgent } from "#definitions/agent.js";
 import { bindApp } from "#context/app.js";
-import { platformOf } from "#platform/context.js";
 import type { App } from "#runtime/app.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
@@ -143,7 +142,7 @@ interface PendingStepAttributes {
 }
 
 export interface SessionStepHost {
-  readonly app?: App;
+  readonly app: App;
   readonly hosts: Hosts;
   readonly callbackBaseUrl?: string;
   setAttributes(attributes: Record<string, EveAttributeValue>): Promise<void>;
@@ -540,7 +539,7 @@ async function runSessionStepBody(
     };
 
     if (delivery !== undefined && resolved === undefined && startedBetweenTurns) {
-      await publishAdmission(buildRuntimeIdentity(agent, platformOf(host.app))).catch(
+      await publishAdmission(buildRuntimeIdentity(agent, host.app.platform)).catch(
         ignoreTurnCancellation,
       );
       await instrumentation?.flush();
@@ -560,12 +559,12 @@ async function runSessionStepBody(
       });
     }
 
-    const runtimeIdentity = buildRuntimeIdentity(agent, platformOf(host.app));
+    const runtimeIdentity = buildRuntimeIdentity(agent, host.app.platform);
     let restoration: Promise<void> | undefined;
     const prepareDefinitions = (session: HarnessSession): Promise<void> => {
       return (restoration ??= (async () => {
         try {
-          const revision = await agent.revision(platformOf(host.app));
+          const revision = await agent.revision(host.app.platform);
           await contextStorage.run(ctx, () =>
             restoreDefinitions(ctx, { abortSignal, conversation: session.history, revision }),
           );
@@ -644,7 +643,7 @@ async function runSessionStepBody(
       signInCompletions: readonly AuthorizationChallenge[] | undefined,
     ): Promise<StepResult> => {
       const step = createExecutionNodeStep({
-        platform: platformOf(host.app),
+        platform: host.app.platform,
         steeringSignal: input.steeringSignal,
         abortSignal,
         capabilities,

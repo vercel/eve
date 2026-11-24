@@ -3,6 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 import type { ScheduleOccurrenceEvent } from "#public/schedules/subscription.js";
 import { createScheduleCollectionPayload } from "#runtime/schedules/payload.js";
 import { deriveEveScheduleQueueTopic } from "#runtime/schedules/queue-namespace.js";
+import { installWorkflowEngine } from "#execution/workflow-host/host.js";
+import { testApp, testEntities } from "#internal/testing/test-platform.js";
+import { builtInHosts } from "#runtime/app.js";
 
 const mocks = vi.hoisted(() => ({
   admit: vi.fn(),
@@ -56,6 +59,8 @@ const { dispatchScheduledOccurrence } = await vi.importActual<
   typeof import("#runtime/schedules/dispatch-occurrence.js")
 >("#runtime/schedules/dispatch-occurrence.js");
 
+installWorkflowEngine(builtInHosts(), testEntities());
+
 const payload = createScheduleCollectionPayload({
   application: "fixture",
   collection: "requests",
@@ -68,10 +73,13 @@ const payload = createScheduleCollectionPayload({
 });
 
 async function deliver(deliveryCount: number) {
-  const consumer = createScheduleCollectionConsumer({
-    kind: "production",
-    sandboxScope: "fixture",
-  });
+  const consumer = createScheduleCollectionConsumer(
+    {
+      kind: "production",
+      sandboxScope: "fixture",
+    },
+    testApp(),
+  );
   const message = {
     source: "dynamic",
     scheduleId: "sch-1",

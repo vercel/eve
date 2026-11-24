@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { aroundEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 
@@ -17,7 +17,9 @@ import {
   INVOCATION_TOKEN_ATTRIBUTE,
   invocationOwnerKey,
 } from "#internal/invocation/metadata.js";
+import { inTestApp } from "#internal/testing/test-platform.js";
 
+aroundEach(async (runTest) => await inTestApp(runTest));
 beforeEach(() => vi.resetAllMocks());
 
 const auth: SessionAuthContext = {

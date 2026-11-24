@@ -19,6 +19,7 @@ import { buildSerializedContext, withTimeout } from "#internal/testing/entry-tes
 import { captureTurnEvents } from "#internal/testing/events.js";
 import { resumeRoutedHook } from "#execution/hosts.js";
 import { startTestSession } from "#internal/testing/test-session-hosts.js";
+import { testEntities } from "#internal/testing/test-platform.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineHook } from "#public/definitions/hook.js";
 import { defineDynamic as defineDynamicModel } from "#public/definitions/model.js";
@@ -148,8 +149,10 @@ describe("state a turn.started hook writes", () => {
 
   it("reaches each call's telemetry runtime context, beside the turn's caller", async () => {
     const reported: { readonly choice: Choice; readonly plan: unknown }[] = [];
+    const platform = testEntities();
     await registerInstrumentationProvider({
       agentName: "hook-state",
+      platform,
       slot: "otel",
       value: otelIntegration({
         runtimeContext(input) {
@@ -159,7 +162,7 @@ describe("state a turn.started hook writes", () => {
         },
       }),
     });
-    finalizeInstrumentationProviders({ serviceName: "hook-state" });
+    finalizeInstrumentationProviders({ platform, serviceName: "hook-state" });
 
     const served = await runTwoTurns();
 

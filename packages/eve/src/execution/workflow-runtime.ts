@@ -12,7 +12,7 @@ import { eveBuildAttributes } from "#execution/eve-workflow-attributes.js";
 import {
   installFallbackWorkflowEngine,
   workflowDurable,
-  workflowProcessEngine,
+  fallbackWorkflowEngine,
   workflowRunStatus,
 } from "#execution/workflow-host/host.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
@@ -25,7 +25,6 @@ import {
   type WorkflowMetadata,
 } from "#internal/workflow/runtime.js";
 import { pinRunId } from "#internal/workflow/start-claim.js";
-import { builtInPlatform } from "#platform/context.js";
 import { builtInHosts } from "#runtime/app.js";
 import { isAgentTraceContext } from "#tracing/eve/agent-trace-context.js";
 
@@ -100,7 +99,7 @@ export async function startWorkflowOnDeployment<TArgs extends unknown[], TResult
 export async function resolveCurrentWorkflowDeploymentId(): Promise<string> {
   const engine = installedProcessEngine(builtInHosts());
   const deploymentId = await (
-    engine?.name === "workflow" ? engine : workflowProcessEngine(builtInPlatform())
+    engine?.name === "workflow" ? engine : fallbackWorkflowEngine()
   ).deploymentId();
   if (deploymentId.length === 0 || deploymentId === "latest") {
     throw new Error("Workflow runtime could not resolve an exact deployment id.");

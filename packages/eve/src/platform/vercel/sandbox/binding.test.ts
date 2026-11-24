@@ -24,6 +24,9 @@ import type { VercelSandboxRuntimeOptions } from "#public/sandbox/vercel-sandbox
 import { VercelSandbox } from "#platform/vercel/sandbox/provider.js";
 import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
 import { DefaultSandbox } from "#sandbox/providers/default.js";
+import { inTestApp, testApp } from "#internal/testing/test-platform.js";
+import { createEntities } from "#platform/entities.js";
+import vercelPlatform from "#platform/vercel/declaration.js";
 
 vi.mock("#runtime/sandbox/prepared-artifacts.js", () => ({
   loadSandboxPreparedArtifact: vi.fn(async () => ({ snapshotId: "prepared-snapshot" })),
@@ -34,6 +37,10 @@ vi.mock("#compiled/@vercel/oidc/index.js", () => ({
     throw new Error("No ambient Vercel OIDC token in unit tests.");
   }),
 }));
+
+function inVercelApp<T>(fn: () => T): T {
+  return inTestApp(fn, testApp({ platform: createEntities(vercelPlatform, undefined) }));
+}
 
 const sdk = vi.hoisted(() => ({
   module: undefined as { Sandbox: object; Snapshot: object } | undefined,
@@ -815,58 +822,60 @@ describe("createVercelSandbox", () => {
       });
     });
 
-    it("records DefaultSandbox's Vercel artifact and state as before", async () => {
-      vi.stubEnv("VERCEL", "1");
-      vi.stubEnv("VERCEL_PROJECT_ID", "prj_golden");
-      vi.stubEnv("VERCEL_TEAM_ID", "team_golden");
-      vi.stubEnv("VERCEL_TOKEN", "token_golden");
-      const fake = createFakeVercelProvider();
-      sdk.module = fake.sandboxModule;
-      const provider = createSandboxEnvironmentHarness(DefaultSandbox.environment());
+    it("records DefaultSandbox's Vercel artifact and state as before", () =>
+      inVercelApp(async () => {
+        vi.stubEnv("VERCEL", "1");
+        vi.stubEnv("VERCEL_PROJECT_ID", "prj_golden");
+        vi.stubEnv("VERCEL_TEAM_ID", "team_golden");
+        vi.stubEnv("VERCEL_TOKEN", "token_golden");
+        const fake = createFakeVercelProvider();
+        sdk.module = fake.sandboxModule;
+        const provider = createSandboxEnvironmentHarness(DefaultSandbox.environment());
 
-      const artifact = await provider.prepare({ appRoot });
-      const session = await provider.start({ appRoot, sandboxName: "session_golden" });
-      const toolSession = await provider.start({ appRoot, sandboxName: "tool_session_golden" });
+        const artifact = await provider.prepare({ appRoot });
+        const session = await provider.start({ appRoot, sandboxName: "session_golden" });
+        const toolSession = await provider.start({ appRoot, sandboxName: "tool_session_golden" });
 
-      expect(artifact).toEqual({ artifact: {}, provider: "vercel" });
-      expect([session.state, toolSession.state]).toEqual([
-        {
-          provider: "vercel",
-          state: { sandboxName: "eve-sbx-vercel-e87bbba07bceb2ae5b77ad771b299317", version: 3 },
-          stateProtocolVersion: 1,
-        },
-        {
-          provider: "vercel",
-          state: { sandboxName: "eve-sbx-vercel-05f9b7e93088c2627297d73f2e7e04cb", version: 3 },
-          stateProtocolVersion: 1,
-        },
-      ]);
-      expect(fake.sandboxModule.Sandbox.create).toHaveBeenLastCalledWith(
-        expect.objectContaining({ snapshotExpiration: 24 * 60 * 60 * 1000 }),
-      );
-    });
+        expect(artifact).toEqual({ artifact: {}, provider: "vercel" });
+        expect([session.state, toolSession.state]).toEqual([
+          {
+            provider: "vercel",
+            state: { sandboxName: "eve-sbx-vercel-e87bbba07bceb2ae5b77ad771b299317", version: 3 },
+            stateProtocolVersion: 1,
+          },
+          {
+            provider: "vercel",
+            state: { sandboxName: "eve-sbx-vercel-05f9b7e93088c2627297d73f2e7e04cb", version: 3 },
+            stateProtocolVersion: 1,
+          },
+        ]);
+        expect(fake.sandboxModule.Sandbox.create).toHaveBeenLastCalledWith(
+          expect.objectContaining({ snapshotExpiration: 24 * 60 * 60 * 1000 }),
+        );
+      }));
 
-    it("lets DefaultSandbox stop the Vercel sandbox it selected, from recorded state or from its prepared artifact", async () => {
-      vi.stubEnv("VERCEL", "1");
-      vi.stubEnv("VERCEL_PROJECT_ID", "prj_golden");
-      vi.stubEnv("VERCEL_TEAM_ID", "team_golden");
-      vi.stubEnv("VERCEL_TOKEN", "token_golden");
-      const fake = createFakeVercelProvider();
-      sdk.module = fake.sandboxModule;
-      const provider = createSandboxEnvironmentHarness(DefaultSandbox.environment());
-      await provider.prepare({ appRoot });
-      const { state } = await provider.start({ appRoot, sandboxName: "session_golden" });
-      const [sandbox] = fake.sandboxes.values();
+    it("lets DefaultSandbox stop the Vercel sandbox it selected, from recorded state or from its prepared artifact", () =>
+      inVercelApp(async () => {
+        vi.stubEnv("VERCEL", "1");
+        vi.stubEnv("VERCEL_PROJECT_ID", "prj_golden");
+        vi.stubEnv("VERCEL_TEAM_ID", "team_golden");
+        vi.stubEnv("VERCEL_TOKEN", "token_golden");
+        const fake = createFakeVercelProvider();
+        sdk.module = fake.sandboxModule;
+        const provider = createSandboxEnvironmentHarness(DefaultSandbox.environment());
+        await provider.prepare({ appRoot });
+        const { state } = await provider.start({ appRoot, sandboxName: "session_golden" });
+        const [sandbox] = fake.sandboxes.values();
 
-      const { signal } = new AbortController();
-      await provider.idleSession({ appRoot, sandboxName: "session_golden", signal, state });
-      await provider.idleSession({ appRoot, sandboxName: "session_golden", signal, state: null });
+        const { signal } = new AbortController();
+        await provider.idleSession({ appRoot, sandboxName: "session_golden", signal, state });
+        await provider.idleSession({ appRoot, sandboxName: "session_golden", signal, state: null });
 
-      expect(sandbox?.stop).toHaveBeenCalledTimes(2);
-      expect(sandbox?.stop).toHaveBeenNthCalledWith(1, { signal });
-      expect(sandbox?.stop).toHaveBeenNthCalledWith(2, { signal });
-      expect(fake.sandboxModule.Sandbox.create).toHaveBeenCalledOnce();
-    });
+        expect(sandbox?.stop).toHaveBeenCalledTimes(2);
+        expect(sandbox?.stop).toHaveBeenNthCalledWith(1, { signal });
+        expect(sandbox?.stop).toHaveBeenNthCalledWith(2, { signal });
+        expect(fake.sandboxModule.Sandbox.create).toHaveBeenCalledOnce();
+      }));
 
     it("resumes state and a prepared snapshot recorded by an earlier release", async () => {
       const sandboxName = "eve-sbx-vercel-e87bbba07bceb2ae5b77ad771b299317";
@@ -2279,6 +2288,7 @@ describe("Vercel active timeout", () => {
         }),
     }).environment();
     const access = await ensureSandboxAccess({
+      build: () => ({}),
       compiledArtifactsSource: { kind: "bundled" },
       nodeId: "__root__",
       sessionId: "timeout-test",

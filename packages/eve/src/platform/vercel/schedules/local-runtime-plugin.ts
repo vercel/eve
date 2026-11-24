@@ -11,11 +11,13 @@ import {
   hasVercelScheduleCollections,
 } from "#platform/vercel/schedules/routing.js";
 import { DEVELOPMENT_WORKER_APP_ROOT_ENV } from "#internal/workflow/development-world-protocol.js";
+import type { App } from "#runtime/app.js";
 import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
 
-export default function installLocalSchedulesRuntimePlugin(nitroApp: {
-  readonly hooks: { hook(name: "close", handler: () => void): unknown };
-}): void {
+export default function installLocalSchedulesRuntimePlugin(
+  nitroApp: { readonly hooks: { hook(name: "close", handler: () => void): unknown } },
+  app: App,
+): void {
   const appRoot = process.env[DEVELOPMENT_WORKER_APP_ROOT_ENV];
   const baseUrl = process.env.VERCEL_QUEUE_BASE_URL;
   const token = process.env.VERCEL_QUEUE_TOKEN;
@@ -64,6 +66,7 @@ export default function installLocalSchedulesRuntimePlugin(nitroApp: {
               appRoot,
               configuredWorld: manifest.config.experimental?.workflow?.world,
             }),
+            app,
           ),
           trigger: hasVercelScheduleCollections(manifest)
             ? createEveScheduleQueueTrigger(manifest.config.name)

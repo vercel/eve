@@ -170,7 +170,11 @@ function toNitroConfig(
       instrumentationEntryPlugin: instrumentationEntry?.plugin,
       instrumentationSourcePaths: compiledArtifacts.instrumentationSourcePaths,
       hostBundledPackageRoots: compiledArtifacts.hostBundledPackageRoots,
-      runtimeModules: [compiledArtifacts.bootstrapPath, compiledArtifacts.workflowWorldPluginPath],
+      runtimeModules: [
+        compiledArtifacts.bootstrapPath,
+        compiledArtifacts.platformModulePath,
+        compiledArtifacts.workflowWorldPluginPath,
+      ],
       workflowArtifacts: built.workflowArtifacts,
     }),
     compatibilityDate: EVE_NITRO_COMPATIBILITY_DATE,
@@ -226,7 +230,14 @@ function toNitroConfig(
         [TIMEZONE_SCHEDULES_PLUGIN_ID]: built.timezoneSchedulesPlugin,
       }),
       ...(spec.runtimePlugins.includes("sandbox-shutdown") && {
-        [SANDBOX_SHUTDOWN_PLUGIN_ID]: createSandboxShutdownPlugin(),
+        [SANDBOX_SHUTDOWN_PLUGIN_ID]: createAppPlugin(
+          resolvePackageSourceFilePath("src/internal/nitro/host/sandbox-shutdown-plugin.ts"),
+        ),
+      }),
+      ...(spec.runtimePlugins.includes("local-schedules") && {
+        [LOCAL_SCHEDULES_PLUGIN_ID]: createAppPlugin(
+          resolvePackageSourceFilePath(spec.localSchedulesPluginModulePath),
+        ),
       }),
       ...(built.skillFilesPlugin !== undefined && {
         [SKILL_FILES_PLUGIN_ID]: built.skillFilesPlugin,
@@ -240,12 +251,13 @@ const EVE_RUNTIME_PLUGIN_PATHS = {
 } as const;
 
 const SANDBOX_SHUTDOWN_PLUGIN_ID = "#eve/sandbox-shutdown.mjs";
+const LOCAL_SCHEDULES_PLUGIN_ID = "#eve/local-schedules.mjs";
 
-function createSandboxShutdownPlugin(): string {
+function createAppPlugin(pluginPath: string): string {
   return [
     `import { app } from ${JSON.stringify(ROUTE_APP_ID)};`,
-    `import sandboxShutdownPlugin from ${stringifyEsmImportSpecifier(resolvePackageSourceFilePath("src/internal/nitro/host/sandbox-shutdown-plugin.ts"))};`,
-    "export default function eveSandboxShutdownPlugin(nitroApp) { sandboxShutdownPlugin(nitroApp, app); }",
+    `import plugin from ${stringifyEsmImportSpecifier(pluginPath)};`,
+    "export default function eveAppPlugin(nitroApp) { plugin(nitroApp, app); }",
   ].join("\n");
 }
 
@@ -264,7 +276,7 @@ function resolveRuntimePluginPath(plugin: HostRuntimePlugin, spec: HostSpec): st
     case "sandbox-shutdown":
       return SANDBOX_SHUTDOWN_PLUGIN_ID;
     case "local-schedules":
-      return resolvePackageSourceFilePath(spec.localSchedulesPluginModulePath);
+      return LOCAL_SCHEDULES_PLUGIN_ID;
     default:
       return resolvePackageSourceFilePath(EVE_RUNTIME_PLUGIN_PATHS[plugin]);
   }

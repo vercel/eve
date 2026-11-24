@@ -4,7 +4,6 @@ import {
 } from "#internal/model-auth/development-broker-client.js";
 import type { ChatGptAuthState } from "#public/models/openai/chatgpt/token-broker.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
-import { platformOf } from "#platform/context.js";
 import type { App } from "#runtime/app.js";
 import { gatewayCredential } from "#platform/models.js";
 import { hasEnvValue } from "#internal/resolve-model-endpoint-status.js";
@@ -19,7 +18,7 @@ import { getDefaultCodexTokenBroker } from "#public/models/openai/chatgpt/token-
 import type { ModelRouting } from "#shared/agent-definition.js";
 import { isChatGptModelRouting } from "#shared/chatgpt-model.js";
 
-async function createAgentInfoPayload(input: NitroArtifactsConfig, app: App | undefined) {
+async function createAgentInfoPayload(input: NitroArtifactsConfig, app: App) {
   const data = await loadAgentInfoManifestData({
     compiledArtifactsSource: resolveAgentInfoCompiledArtifactsSource(input),
   });
@@ -50,13 +49,13 @@ async function resolveChatGptAuthState(): Promise<ChatGptAuthState> {
 
 async function resolveGatewayCredentialPresence(
   routing: ModelRouting,
-  app: App | undefined,
+  app: App,
 ): Promise<GatewayCredentialPresence> {
   if (routing.kind === "gateway" && isEveDevEnvironment()) {
     try {
       const credential =
         (await readDevelopmentModelCredential("gateway")) ??
-        (await gatewayCredential(app?.platform));
+        (await gatewayCredential(app.platform));
       return {
         apiKey: credential.kind === "api-key",
         oidc: credential.kind === "oidc",
@@ -73,7 +72,7 @@ async function resolveGatewayCredentialPresence(
     return { apiKey, oidc: false };
   }
 
-  const { network } = platformOf(app);
+  const { network } = app.platform;
   if (network.token === undefined) return { apiKey: false, oidc: false };
   try {
     await network.token();
@@ -85,8 +84,8 @@ async function resolveGatewayCredentialPresence(
 
 export async function handleAgentInfoRequest(
   input: NitroArtifactsConfig,
-  _request?: Request,
-  app?: App,
+  _request: Request | undefined,
+  app: App,
 ): Promise<Response> {
   return new Response(JSON.stringify(await createAgentInfoPayload(input, app)), {
     headers: {

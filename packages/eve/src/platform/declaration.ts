@@ -12,23 +12,21 @@ import type {
   Triggers,
 } from "#platform/entities.js";
 
-type Factory<Entity, Context> = (app: PlatformApp, context: Context) => Entity;
-
 export interface PlatformFields<Context> {
   context?(): Context | Promise<Context>;
-  deployment: Factory<Deployment, Context>;
-  durable?(): DurableEngine;
-  triggers?: Factory<Triggers, Context>;
-  compute?: Factory<Compute, Context>;
-  storage?: Factory<Storage, Context>;
-  identity?: Factory<Identity, Context>;
-  network?: Factory<Network, Context>;
-  telemetry?: Factory<Telemetry, Context>;
-  models?: Factory<ModelCredentials, Context>;
+  deployment(app: PlatformApp, context: Context): Deployment;
+  durable?(): DurableEngine<Context>;
+  triggers?(app: PlatformApp, context: Context): Triggers;
+  compute?(app: PlatformApp, context: Context): Compute;
+  storage?(app: PlatformApp, context: Context): Storage;
+  identity?(app: PlatformApp, context: Context): Identity;
+  network?(app: PlatformApp, context: Context): Network;
+  telemetry?(app: PlatformApp, context: Context): Telemetry;
+  models?(app: PlatformApp, context: Context): ModelCredentials;
   build?: Build;
 }
 
-const DECLARATION: unique symbol = Symbol("eve platform declaration");
+const DECLARATION: unique symbol = Symbol.for("eve.platform-declaration");
 
 export type PlatformDeclaration<Context = undefined> = Readonly<PlatformFields<Context>> & {
   readonly [DECLARATION]: true;

@@ -104,11 +104,9 @@ const POLL_INTERVAL_MS = 50;
 const YIELD_MARGIN_MS = 1_000;
 const YIELDED = Symbol("yielded");
 
-export function sessionSteps(
-  app: Pick<App, "durable" | "hosts">,
-  options: SessionStepsOptions,
-): SessionSteps {
+export function sessionSteps(app: App, options: SessionStepsOptions): SessionSteps {
   const host: SessionStepHost = {
+    app,
     hosts: app.hosts,
     createRuntime: (config) => sessionRuntime(app.durable, app.hosts, config),
     setAttributes: async () => {},

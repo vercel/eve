@@ -1,4 +1,5 @@
 import { builtInHosts } from "#runtime/app.js";
+import { testEntities } from "#internal/testing/test-platform.js";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 
 import { startsNewAddress } from "#channel/channel-address.js";
@@ -882,6 +883,7 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
           const failedTurnIds: (string | undefined)[] = [];
           await registerInstrumentationProvider({
             agentName,
+            platform: testEntities(),
             slot: "capture",
             value: defineInstrumentation({
               events: {
@@ -891,7 +893,7 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
               },
             }),
           });
-          finalizeInstrumentationProviders({ serviceName: agentName });
+          finalizeInstrumentationProviders({ platform: testEntities(), serviceName: agentName });
           onTestFinished(() => {
             delete (globalThis as Record<symbol, unknown>)[Symbol.for("eve.app")];
           });

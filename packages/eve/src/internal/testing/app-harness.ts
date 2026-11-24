@@ -1,3 +1,4 @@
+import { inTestApp } from "#internal/testing/test-platform.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import {
   compileFromMemory,
@@ -214,7 +215,7 @@ export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Pro
   async function run<T>(fn: () => Promise<T> | T): Promise<T> {
     return await withRuntimeSession(session, async () => {
       install();
-      return await fn();
+      return await inTestApp(fn);
     });
   }
 

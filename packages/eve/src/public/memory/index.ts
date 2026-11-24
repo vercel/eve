@@ -8,10 +8,8 @@ import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ExactDefinition } from "#public/definitions/exact.js";
 import type { SessionFrame } from "#dynamic/definition.js";
 import { MEMORY_DEFINITION_BRAND } from "#shared/memory-definition.js";
-import { appOf } from "#context/app.js";
-import { contextStorage } from "#context/container.js";
+import { currentApp } from "#context/app.js";
 import { memoryNamespaceIn } from "#memory/default-namespace.js";
-import { platformOf } from "#platform/context.js";
 import type { ToolDefinition } from "#tools/definition.js";
 
 /**
@@ -233,8 +231,5 @@ export function defineMemory(definition: MemoryDefinition): DefinedMemory {
  * local application roots do not share memory.
  */
 export function defaultNamespace(context: MemoryNamespaceContext): string {
-  return memoryNamespaceIn(
-    platformOf(appOf(contextStorage.getStore())).deployment.scope(),
-    context,
-  );
+  return memoryNamespaceIn(currentApp().platform.deployment.scope(), context);
 }

@@ -1,8 +1,9 @@
 import type { Durable } from "#execution/durable.js";
-import type { Hosts } from "#execution/hosts.js";
 import type { InstrumentationProvider } from "#instrumentation/provider.js";
 import type { InstrumentationRuntime } from "#instrumentation/runtime.js";
+import type { PlatformDeclaration } from "#platform/declaration.js";
 import type { Entities } from "#platform/entities.js";
+import { stepAttempt, type Hosts } from "#execution/hosts.js";
 import { createLifetime, type Lifetime } from "#runtime/lifetime.js";
 import type { RuntimeSession } from "#runtime/sessions/runtime-session.js";
 
@@ -26,7 +27,10 @@ export interface AppInstrumentation {
 
 export interface ProcessApp {
   bootedPhases: number;
+  booting: Promise<void>;
   started: App | undefined;
+  declaration: PlatformDeclaration<unknown> | undefined;
+  context: unknown;
   platform: Entities | undefined;
   durable: Durable | undefined;
   defaultSession: RuntimeSession | undefined;
@@ -38,7 +42,10 @@ export interface ProcessApp {
 export function createProcessApp(): ProcessApp {
   return {
     bootedPhases: 0,
+    booting: Promise.resolve(),
     started: undefined,
+    declaration: undefined,
+    context: undefined,
     platform: undefined,
     durable: undefined,
     defaultSession: undefined,
@@ -62,6 +69,22 @@ const holder = globalThis as ProcessAppHolder;
 
 export function processApp(): ProcessApp {
   return (holder[PROCESS_APP] ??= createProcessApp());
+}
+
+export function startedApp(): App {
+  const { started } = processApp();
+  if (started === undefined) {
+    throw new Error(
+      "A Workflow step ran in a process that has not started its eve app. The step bundle must load the generated boot modules, which start the app before any step runs.",
+    );
+  }
+  return started;
+}
+
+export function stepApp(): App | undefined {
+  const { started, hosts } = processApp();
+  if (started === undefined) return undefined;
+  return stepAttempt(hosts) === undefined ? undefined : started;
 }
 
 export function builtInHosts(): Hosts {

@@ -12,7 +12,8 @@ import { EVE_WORKFLOW_SPEC_VERSION } from "#internal/workflow/spec-version-defau
 import { createProcessApp, installProcessApp, processApp } from "#runtime/app.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { definePlatform } from "#platform/declaration.js";
-import { defaultPlatform } from "#platform/default.js";
+import { defineInstrumentation } from "#public/instrumentation/index.js";
+import { testPlatform } from "#internal/testing/test-platform.js";
 import { bootProcess } from "#runtime/lifecycle.js";
 import { endLifetime } from "#runtime/lifetime.js";
 import { BOOT_PHASES, start } from "#runtime/start.js";
@@ -29,7 +30,7 @@ function readWorkflowEnvironment() {
 
 let uninstallApp: (() => void) | undefined;
 
-beforeEach(() => {
+beforeEach(async () => {
   uninstallApp = installProcessApp(createProcessApp());
   for (const name of [
     "VERCEL",
@@ -41,7 +42,7 @@ beforeEach(() => {
   ]) {
     vi.stubEnv(name, undefined);
   }
-  bootProcess({ agentName: "weather", platform: defaultPlatform }, "artifacts");
+  await bootProcess({ agentName: "weather", platform: testPlatform() }, "artifacts");
 });
 
 afterEach(async () => {
@@ -63,7 +64,18 @@ describe("start", () => {
 
   it("ends with the instrumentation setup that the entry module deferred, and rejects with its failure", async () => {
     const failure = new Error("The audit exporter is unreachable.");
-    deferInstrumentationSetup({ serviceName: "weather", setups: [Promise.reject(failure)] });
+    deferInstrumentationSetup({
+      agentName: "weather",
+      platform: testPlatform(),
+      providers: [
+        {
+          slot: "audit",
+          value: defineInstrumentation({
+            setup: () => Promise.reject(failure),
+          }),
+        },
+      ],
+    });
     await new Promise((resolve) => setImmediate(resolve));
     const world = {
       close: async () => {},
@@ -72,9 +84,9 @@ describe("start", () => {
       specVersion: 9,
     };
 
-    await expect(start({ durable: workflowEngine({ world: () => world as never }) })).rejects.toBe(
-      failure,
-    );
+    await expect(
+      start({ defaultDurable: () => workflowEngine({ world: () => world as never }) }),
+    ).rejects.toBe(failure);
   });
 
   it("configures the Workflow environment before it creates a World eve owns", async () => {
@@ -82,13 +94,14 @@ describe("start", () => {
 
     await expect(
       start({
-        durable: workflowEngine({
-          buildDeploymentId: BUILD_DEPLOYMENT_ID,
-          world() {
-            seen = readWorkflowEnvironment();
-            throw STOP;
-          },
-        }),
+        defaultDurable: () =>
+          workflowEngine({
+            buildDeploymentId: BUILD_DEPLOYMENT_ID,
+            world() {
+              seen = readWorkflowEnvironment();
+              throw STOP;
+            },
+          }),
       }),
     ).rejects.toBe(STOP);
 
@@ -103,7 +116,7 @@ describe("start", () => {
     uninstallApp = installProcessApp(createProcessApp());
     const world = vi.fn((): Promise<World> => Promise.reject(STOP));
 
-    await expect(start({ durable: workflowEngine({ world }) })).rejects.toThrow(
+    await expect(start({ defaultDurable: () => workflowEngine({ world }) })).rejects.toThrow(
       "before installing its platform",
     );
     expect(world).not.toHaveBeenCalled();
@@ -114,23 +127,56 @@ describe("start", () => {
 
     await expect(
       start({
-        durable: workflowEngine({
-          world() {
-            seen = readWorkflowEnvironment();
-            throw STOP;
-          },
-        }),
+        defaultDurable: () =>
+          workflowEngine({
+            world() {
+              seen = readWorkflowEnvironment();
+              throw STOP;
+            },
+          }),
       }),
     ).rejects.toBe(STOP);
 
     expect(seen).toEqual({ deploymentId: undefined, specVersion: undefined });
   });
 
+  it("starts the platform's own engine with the context that its entity factories read, instead of the default", async () => {
+    uninstallApp?.();
+    uninstallApp = installProcessApp(createProcessApp());
+    const durable = { kind: "alice's engine" } as never;
+    const started = vi.fn((_app: unknown, _context: { readonly region: string }) => durable);
+    const platform = definePlatform({
+      context: async () => ({ region: "iad1" }),
+      deployment: (_app, context) => ({
+        environment: () => "production",
+        deploymentId: () => `dpl_${context.region}`,
+        productionHost: () => undefined,
+        publicHost: () => undefined,
+        scope: () => undefined,
+      }),
+      durable: () => ({ start: started }),
+    });
+    await bootProcess({ agentName: "weather", platform }, "artifacts");
+    const defaultDurable = vi.fn(() => workflowEngine({ world: () => Promise.reject(STOP) }));
+
+    const app = await start({ defaultDurable });
+
+    expect(app.durable).toBe(durable);
+    expect(app.platform.deployment.deploymentId()).toBe("dpl_iad1");
+    expect(started).toHaveBeenCalledWith(
+      { platform: app.platform, lifetime: app.lifetime, hosts: app.hosts },
+      { region: "iad1" },
+    );
+    expect(defaultDurable).not.toHaveBeenCalled();
+  });
+
   it("returns the booted app and closes its World when the app's lifetime ends", async () => {
     const close = vi.fn(async () => {});
     const world = { close, createQueueHandler: () => undefined, events: {}, specVersion: 9 };
 
-    const app = await start({ durable: workflowEngine({ world: () => world as never }) });
+    const app = await start({
+      defaultDurable: () => workflowEngine({ world: () => world as never }),
+    });
 
     expect(processApp().started).toBe(app);
     expect(app.platform).toBe(processApp().platform);
@@ -158,14 +204,15 @@ describe("start", () => {
           scope: () => undefined,
         }),
       });
-      bootProcess({ agentName: "weather", platform }, "artifacts");
+      await bootProcess({ agentName: "weather", platform }, "artifacts");
       const world = {
         close: async () => {},
         createQueueHandler: () => undefined,
         events: {},
         specVersion: 9,
       };
-      const startApp = () => start({ durable: workflowEngine({ world: () => world as never }) });
+      const startApp = () =>
+        start({ defaultDurable: () => workflowEngine({ world: () => world as never }) });
 
       if (order === "after") await startApp();
       createWorkflowRuntime({ compiledArtifactsSource: {} as RuntimeCompiledArtifactsSource });
@@ -183,19 +230,21 @@ describe("start", () => {
       specVersion: 9,
     };
     const engine = workflowEngine({ world: () => world as never });
-    const first = await start({ durable: engine });
+    const first = await start({ defaultDurable: () => engine });
     const second = createProcessApp();
 
     await expect(
-      engine.start({ platform: first.platform, lifetime: second.lifetime, hosts: first.hosts }),
+      engine.start(
+        { platform: first.platform, lifetime: second.lifetime, hosts: first.hosts },
+        undefined,
+      ),
     ).rejects.toThrow("another app in this process already started it");
 
     await endLifetime(first.lifetime);
-    const next = await engine.start({
-      platform: first.platform,
-      lifetime: second.lifetime,
-      hosts: first.hosts,
-    });
+    const next = await engine.start(
+      { platform: first.platform, lifetime: second.lifetime, hosts: first.hosts },
+      undefined,
+    );
     expect(next).toBe(installedDurable(first.hosts));
     await endLifetime(second.lifetime);
   });

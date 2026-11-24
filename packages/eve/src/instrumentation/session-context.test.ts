@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import type { SessionAuthContext } from "#channel/types.js";
 import { ContextContainer } from "#context/container.js";
@@ -36,17 +36,15 @@ function setConversation(context: ContextContainer, audience: "public" | "privat
 }
 
 describe("readInstrumentationSessionContext", () => {
-  afterEach(() => vi.unstubAllEnvs());
-
   it("keeps the initiator stable while the current principal changes", () => {
     const context = new ContextContainer();
     context.set(AuthKey, current);
     setConversation(context, "public");
     context.set(InitiatorAuthKey, initiator);
 
-    const first = readInstrumentationSessionContext(context);
+    const first = readInstrumentationSessionContext(context, "production");
     context.set(AuthKey, initiator);
-    const continuation = readInstrumentationSessionContext(context);
+    const continuation = readInstrumentationSessionContext(context, "production");
 
     expect(first.principals.currentPrincipal).toEqual({
       id: "service-secret",
@@ -73,8 +71,10 @@ describe("readInstrumentationSessionContext", () => {
       turn: { id: "turn-1", sequence: 0 },
     });
 
-    const parentSummary = readInstrumentationSessionContext(parent).principals.currentPrincipal;
-    const childSummary = readInstrumentationSessionContext(child).principals.currentPrincipal;
+    const parentSummary = readInstrumentationSessionContext(parent, "production").principals
+      .currentPrincipal;
+    const childSummary = readInstrumentationSessionContext(child, "production").principals
+      .currentPrincipal;
 
     expect(childSummary).toEqual(parentSummary);
     expect(childSummary).toEqual({ id: "initiator-secret", type: "user" });
@@ -87,19 +87,18 @@ describe("readInstrumentationSessionContext", () => {
     setConversation(context, "private");
     context.set(InitiatorAuthKey, initiator);
 
-    expect(readInstrumentationSessionContext(context).principals).toEqual({
+    expect(readInstrumentationSessionContext(context, "production").principals).toEqual({
       currentPrincipal: { type: "service" },
       initiatorPrincipal: { type: "user" },
     });
   });
 
   it("resolves legacy sessions consistently in development", () => {
-    vi.stubEnv("EVE_DEV", "1");
     const context = new ContextContainer();
     context.set(ChannelInstrumentationKey, { kind: "channel:test", metadata: {} });
     context.set(AuthKey, current);
 
-    const { conversation } = readInstrumentationSessionContext(context);
+    const { conversation } = readInstrumentationSessionContext(context, "development");
 
     expect(conversation).toEqual({
       audience: "unknown",

@@ -20,7 +20,7 @@ import {
   startConnectionEventOwner,
 } from "#runtime/connections/events/owner.js";
 import { cancelRun, getRun, getWorld } from "#internal/workflow/runtime.js";
-import { builtInPlatform } from "#platform/context.js";
+import { processPlatform, processPlatformNow } from "#platform/process.js";
 import type { Entities } from "#platform/entities.js";
 
 export interface WorkflowRun {
@@ -146,26 +146,38 @@ export function workflowDurable(): Durable {
   };
 }
 
-export function workflowProcessEngine(platform: Entities): ProcessEngine {
+function workflowProcessEngine(platform: {
+  now(): Entities;
+  resolved(): Promise<Entities>;
+}): ProcessEngine {
   return {
     name: "workflow",
     durable: workflowDurable(),
     resume: resumeWorkflowAddress,
-    deploymentId: () => workflowDeploymentId(platform),
+    deploymentId: async () => await workflowDeploymentId(await platform.resolved()),
     runStatus: workflowRunStatus,
     cancelRun: cancelWorkflowRun,
     sessionEvents: workflowSessionEvents,
-    callbackBaseUrl: () => workflowCallbackBaseUrl(platform),
+    callbackBaseUrl: () => workflowCallbackBaseUrl(platform.now()),
     stepAttempt: workflowStepAttempt,
   };
 }
 
+const APP_PLATFORM = (platform: Entities) => ({
+  now: () => platform,
+  resolved: async () => platform,
+});
+
+export function fallbackWorkflowEngine(): ProcessEngine {
+  return workflowProcessEngine({ now: processPlatformNow, resolved: processPlatform });
+}
+
 export function installWorkflowEngine(hosts: Hosts, platform: Entities): Durable {
-  const engine = workflowProcessEngine(platform);
+  const engine = workflowProcessEngine(APP_PLATFORM(platform));
   if (hosts.engine?.name === engine.name) hosts.engine = engine;
   return installProcessEngine(hosts, engine).durable;
 }
 
 export function installFallbackWorkflowEngine(hosts: Hosts): void {
-  installProcessEngine(hosts, workflowProcessEngine(builtInPlatform()));
+  installProcessEngine(hosts, fallbackWorkflowEngine());
 }

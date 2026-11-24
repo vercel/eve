@@ -16,6 +16,10 @@ import { textStreamResult, toolCallStreamResult } from "#internal/testing/approv
 import { buildSerializedContext } from "#internal/testing/entry-test-helpers.js";
 import { resumeRoutedHook } from "#execution/hosts.js";
 import { startTestSession } from "#internal/testing/test-session-hosts.js";
+import { createTestInProcessRuntime } from "#internal/testing/in-process-runtime.js";
+import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import { createEntities } from "#platform/entities.js";
+import vercelPlatform from "#platform/vercel/declaration.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineHook } from "#public/definitions/hook.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
@@ -921,9 +925,12 @@ describe("reactions", () => {
       const continuationToken = "http:deployments";
 
       await runtime.run(async () => {
-        const run = await startTestSession("in-process", {
+        const inProcess = createTestInProcessRuntime(
+          { compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource() },
+          { platform: createEntities(vercelPlatform, undefined) },
+        );
+        await inProcess.startEntry({
           kind: "initial",
-          ownerDeploymentId: "dpl_inline",
           input: { message: "Look up the first thing." },
           serializedContext: buildSerializedContext({
             auth: ALICE,
@@ -943,7 +950,7 @@ describe("reactions", () => {
           });
           await until(log, "turn:settled", 2);
         } finally {
-          await run.cancel().catch(() => {});
+          await inProcess.dispose().catch(() => {});
         }
       });
 

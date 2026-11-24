@@ -1,4 +1,6 @@
-import { builtInHosts } from "#runtime/app.js";
+import { builtInHosts, type App } from "#runtime/app.js";
+import { createLifetime } from "#runtime/lifetime.js";
+import type { Entities } from "#platform/entities.js";
 import type {
   DeliverHookPayload,
   Runtime,
@@ -95,6 +97,7 @@ function deliverRoutedOn(hosts: Hosts): ResumeAddress {
 }
 
 export interface InProcessHostOptions {
+  readonly platform: Entities;
   readonly stepBoundary?: StepBoundary;
   readonly callbackBaseUrl?: string;
   /** @internal */
@@ -191,7 +194,16 @@ export function createInProcessHost(
           callbackBaseUrl: options.callbackBaseUrl.replace(/\/$/, ""),
           deliver: deliverRoutedOn(hosts),
         };
+  const app: App = {
+    platform: options.platform,
+    hosts,
+    get durable(): Durable {
+      return durable;
+    },
+    lifetime: createLifetime(),
+  };
   const stepHost: SessionStepHost = {
+    app,
     hosts,
     createRuntime: () => NO_STEP_RUNTIME,
     setAttributes: async () => {},

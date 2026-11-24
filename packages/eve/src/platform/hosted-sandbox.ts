@@ -1,20 +1,14 @@
-import type { Compute, Entities } from "#platform/entities.js";
-import { vercelCompute } from "#platform/vercel/compute.js";
+import type { Compute } from "#platform/entities.js";
 import type { VercelSandboxCreateOptions } from "#public/sandbox/vercel-sandbox.js";
 
-export function hostedSandboxOf(platform: Entities | undefined): Compute | undefined {
-  return platform === undefined ? vercelCompute() : platform.compute;
-}
-
 export function hostedSandboxEnvironment(
-  platform: Entities | undefined,
+  compute: Compute | undefined,
   options?: VercelSandboxCreateOptions,
 ) {
-  const sandbox = hostedSandboxOf(platform);
-  if (sandbox === undefined) {
+  if (compute === undefined) {
     throw new Error(
       "The installed eve host has no hosted sandbox. Use DockerSandbox.environment() or JustBashSandbox.environment(), or add `compute` to the platform.",
     );
   }
-  return sandbox.environment(options as never);
+  return compute.environment(options as never);
 }

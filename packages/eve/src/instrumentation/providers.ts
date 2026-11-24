@@ -6,7 +6,9 @@ import {
 import { createInstrumentationSetupContext } from "#instrumentation/setup-context.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { DEVELOPMENT_WORKER_APP_ROOT_ENV } from "#internal/workflow/development-world-protocol.js";
-import { builtInPlatform } from "#platform/context.js";
+import type { PlatformDeclaration } from "#platform/declaration.js";
+import type { Entities } from "#platform/entities.js";
+import { bootProcess } from "#runtime/lifecycle.js";
 import { exportsAgentRuns } from "#platform/runtime-spans.js";
 import { processApp } from "#runtime/app.js";
 import { agentRuns, localTraces } from "#public/instrumentation/otel.js";
@@ -30,11 +32,50 @@ function providerRegistry(): Map<string, InstrumentationProvider> {
   return processApp().instrumentation.providers;
 }
 
-export function seedInstrumentationProviders(): void {
+export interface InstrumentationSetupInput {
+  readonly agentName: string;
+  readonly platform: PlatformDeclaration<unknown>;
+  readonly providers: readonly { readonly slot: string; readonly value: unknown }[];
+}
+
+export async function setUpInstrumentation(input: InstrumentationSetupInput): Promise<void> {
+  const platform = await bootInstrumentationPlatform(input);
+  for (const provider of input.providers) {
+    await registerInstrumentationProvider({ agentName: input.agentName, platform, ...provider });
+  }
+  finalizeInstrumentationProviders({ platform, serviceName: input.agentName });
+}
+
+export function deferInstrumentationSetup(input: InstrumentationSetupInput): void {
+  const setup = bootInstrumentationPlatform(input).then(async (platform) => {
+    await Promise.all(
+      input.providers.map((provider) =>
+        registerInstrumentationProvider({ agentName: input.agentName, platform, ...provider }),
+      ),
+    );
+    finalizeInstrumentationProviders({ platform, serviceName: input.agentName });
+  });
+  setup.catch(() => undefined);
+  processApp().instrumentation.setup = setup;
+}
+
+async function bootInstrumentationPlatform(input: InstrumentationSetupInput): Promise<Entities> {
+  const { platform } = await bootProcess(
+    { agentName: input.agentName, platform: input.platform },
+    "platform",
+  );
+  if (platform === undefined) {
+    throw new Error("eve finished the platform phase without making the platform's entities.");
+  }
+  seedInstrumentationProviders(platform);
+  return platform;
+}
+
+export function seedInstrumentationProviders(platform: Entities): void {
   const registry = providerRegistry();
-  const environmentKind = builtInPlatform().deployment.environment();
+  const environmentKind = platform.deployment.environment();
   if (
-    exportsAgentRuns(undefined) &&
+    exportsAgentRuns(platform) &&
     (environmentKind === "preview" || environmentKind === "production")
   ) {
     registry.set("agent-runs", agentRuns());
@@ -47,6 +88,7 @@ export function seedInstrumentationProviders(): void {
 /** @internal */
 export async function registerInstrumentationProvider(input: {
   readonly agentName: string;
+  readonly platform: Entities;
   readonly slot: string;
   readonly value: unknown;
 }): Promise<void> {
@@ -68,18 +110,7 @@ export async function registerInstrumentationProvider(input: {
   }
 
   providerRegistry().set(input.slot, input.value);
-  await input.value.setup?.(createInstrumentationSetupContext(input.agentName));
-}
-
-export function deferInstrumentationSetup(input: {
-  readonly serviceName: string;
-  readonly setups: readonly Promise<void>[];
-}): void {
-  const setup = Promise.all(input.setups).then(() => {
-    finalizeInstrumentationProviders({ serviceName: input.serviceName });
-  });
-  setup.catch(() => undefined);
-  processApp().instrumentation.setup = setup;
+  await input.value.setup?.(createInstrumentationSetupContext(input.agentName, input.platform));
 }
 
 export function instrumentationLoaded(): boolean {
@@ -96,16 +127,21 @@ export function getInstrumentationProviders(): readonly RegisteredInstrumentatio
 
 /** @internal */
 export function finalizeInstrumentationProviders(input: {
+  readonly platform: Entities;
   readonly serviceName: string;
 }): InstrumentationRuntime {
   const registered = getInstrumentationProviders();
   const providerDefinitions = registered
     .filter((entry) => !isOtelDeclaration(entry.provider) && !isOtelIntegration(entry.provider))
     .map(toProviderDefinition);
-  const collected = collectOtelPipeline(registered.map((entry) => entry.provider));
+  const collected = collectOtelPipeline(
+    registered.map((entry) => entry.provider),
+    input.platform,
+  );
   return installInstrumentationRuntime({
     collected,
     frameworkVersion: resolveInstalledPackageInfo().version,
+    platform: input.platform,
     providers: providerDefinitions,
     runtimeContextResolvers: collected.runtimeContextResolvers,
     serviceName: input.serviceName,

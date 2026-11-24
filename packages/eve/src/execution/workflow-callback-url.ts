@@ -1,4 +1,4 @@
-import { builtInPlatform } from "#platform/context.js";
+import { ambientPlatform } from "#context/app.js";
 import type { Entities } from "#platform/entities.js";
 import { joinEveRoutePath } from "#shared/eve-route-path.js";
 import {
@@ -20,11 +20,13 @@ export function resolveVercelProductionCallbackBaseUrl(platform: Entities): stri
 
 export function resolveWorkflowCallbackBaseUrl(
   metadataUrl: string,
-  platform: Entities = builtInPlatform(),
+  platform: Entities | undefined = ambientPlatform(),
 ): string {
   const configuredLocalBaseUrl = readEnv(WORKFLOW_LOCAL_BASE_URL_ENV)?.trim();
   const localBaseUrl = configuredLocalBaseUrl ? configuredLocalBaseUrl : undefined;
-  const resolved = resolveVercelProductionCallbackBaseUrl(platform) ?? localBaseUrl ?? metadataUrl;
+  const productionBaseUrl =
+    platform === undefined ? null : resolveVercelProductionCallbackBaseUrl(platform);
+  const resolved = productionBaseUrl ?? localBaseUrl ?? metadataUrl;
   const baseUrl = resolved.replace(/\/$/, "");
   const publicRoutePrefix = normalizePublicRoutePrefix(readEnv(EVE_PUBLIC_ROUTE_PREFIX_ENV));
   return publicRoutePrefix === undefined ? baseUrl : `${baseUrl}${publicRoutePrefix}`;

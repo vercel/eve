@@ -36,6 +36,7 @@ import {
   usage,
 } from "#internal/testing/approval-resume.js";
 import { buildSerializedContext } from "#internal/testing/entry-test-helpers.js";
+import { startTestApp, testEntities } from "#internal/testing/test-platform.js";
 import { captureTurnEvents } from "#internal/testing/events.js";
 import { getWorld, start } from "#internal/workflow/runtime.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
@@ -64,6 +65,7 @@ vi.setConfig({ testTimeout: 90_000 });
 const PROCESS_APP_KEY = Symbol.for("eve.app");
 afterEach(() => {
   delete (globalThis as Record<symbol, unknown>)[PROCESS_APP_KEY];
+  startTestApp();
 });
 
 const HEARD_TYPES = [
@@ -85,12 +87,13 @@ async function hearInstrumentation(agentName: string): Promise<InstrumentationEv
   const record = (event: InstrumentationEvent) => void heard.push(event);
   await registerInstrumentationProvider({
     agentName,
+    platform: testEntities(),
     slot: "capture",
     value: defineInstrumentation({
       events: Object.fromEntries(HEARD_TYPES.map((type) => [type, record])),
     }),
   });
-  finalizeInstrumentationProviders({ serviceName: agentName });
+  finalizeInstrumentationProviders({ platform: testEntities(), serviceName: agentName });
   return heard;
 }
 

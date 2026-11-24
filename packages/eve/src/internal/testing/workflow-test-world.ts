@@ -43,6 +43,8 @@ export function currentTestWorld(): TestWorld {
 }
 
 export async function openTestWorld(options: TestWorldOptions): Promise<TestWorld> {
+  const { startTestApp } = await import("#internal/testing/test-platform.js");
+  startTestApp();
   const deliveries = trackDeliveries(lazyHandler(options));
   let world = await startWorld(options, deliveries, {});
   await world.clear();

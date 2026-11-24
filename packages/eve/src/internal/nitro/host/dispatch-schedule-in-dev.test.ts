@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { dispatchScheduleInDev } from "#internal/nitro/host/dispatch-schedule-in-dev.js";
+import { testApp } from "#internal/testing/test-platform.js";
 
 const mocks = vi.hoisted(() => {
   const activeGeneration = {
@@ -61,8 +62,10 @@ beforeEach(() => {
 
 describe("dispatchScheduleInDev", () => {
   it("pins schedule lookup and task dispatch to one active generation", async () => {
+    const app = testApp();
     await expect(
       dispatchScheduleInDev({
+        app,
         artifactsConfig: ARTIFACTS_CONFIG,
         scheduleId: "heartbeat",
       }),
@@ -79,6 +82,7 @@ describe("dispatchScheduleInDev", () => {
     expect(mocks.dispatchScheduleTaskFromArtifacts).toHaveBeenCalledWith(
       "eve.schedule.heartbeat",
       mocks.activeGeneration,
+      app,
     );
     expect(mocks.dispatchScheduleTask).not.toHaveBeenCalled();
   });

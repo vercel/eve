@@ -6,7 +6,7 @@ import { addImports, defineNuxtModule, extendRouteRules } from "@nuxt/kit";
 import type { VercelServicesConfig } from "#internal/vercel/vercel-services-config.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import { joinEveRoutePath } from "#shared/eve-route-path.js";
-import { platformBuild } from "#platform/build.js";
+import { loadPlatformBuild } from "#platform/selection.js";
 import {
   addEveVercelServices,
   readEveBaseUrlOrigin,
@@ -84,7 +84,10 @@ const eveNuxtModule: EveNuxtModule = defineNuxtModule<EveNuxtModuleOptions>({
       include: [...(nuxt.options.vite.optimizeDeps?.include ?? []), "eve/vue"],
     };
 
-    if (!nuxt.options.dev && platformBuild().platformOutput?.() === true) {
+    if (
+      !nuxt.options.dev &&
+      (await loadPlatformBuild(eveProjectRoot)).platformOutput?.() === true
+    ) {
       const nitro = (nuxt.options as typeof nuxt.options & { nitro: NitroVercelConfigHost }).nitro;
       const config = await addEveVercelServices(async () => nitro.vercel?.config ?? {}, {
         agents: await resolveEveAgents(eveProjectRoot),

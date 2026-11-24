@@ -1,10 +1,10 @@
 import { expectScheduleRun, ScheduleDispatcher } from "#channel/schedule.js";
-import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
 import { loadResolvedCompiledScheduleByTaskName } from "#runtime/schedules/resolve-schedule.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
 import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runtime-artifacts.js";
+import { appSessionRuntime } from "#internal/nitro/routes/runtime-stack.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { createLogger } from "#internal/logging.js";
 import type { App } from "#runtime/app.js";
@@ -16,7 +16,7 @@ let loggedSchedulesDisabled = false;
 export async function dispatchScheduleTask(
   taskName: string,
   config: NitroArtifactsConfig,
-  app?: App,
+  app: App,
 ): Promise<
   | { scheduleId: string; sessionIds: readonly string[] }
   | { skipped: "schedules-disabled"; taskName: string }
@@ -41,14 +41,14 @@ export async function dispatchScheduleTask(
 export async function dispatchScheduleTaskFromArtifacts(
   taskName: string,
   compiledArtifactsSource: RuntimeCompiledArtifactsSource,
-  app?: App,
+  app: App,
 ): Promise<{ scheduleId: string; sessionIds: readonly string[] }> {
   const schedule = await loadResolvedCompiledScheduleByTaskName(taskName, {
     compiledArtifactsSource,
   });
 
   const bundle = await getCompiledRuntimeAgentBundle({ compiledArtifactsSource });
-  const runtime = createWorkflowRuntime({ compiledArtifactsSource });
+  const runtime = appSessionRuntime(app, { compiledArtifactsSource });
   const dispatcher = new ScheduleDispatcher({
     app,
     runtime,

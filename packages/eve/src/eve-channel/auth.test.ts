@@ -2,6 +2,12 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { eveVercelOidc, type EveAuthFn, type EveVercelOidcOptions } from "#public/channels/eve.js";
 import { httpBasic, routeAuth } from "#public/channels/auth.js";
 import { installMockedVercelIssuer } from "#internal/testing/mock-vercel-oidc-issuer.js";
+import { inTestApp, testApp } from "#internal/testing/test-platform.js";
+import { createEntities } from "#platform/entities.js";
+import vercelPlatform from "#platform/vercel/declaration.js";
+
+const inVercelApp = <T>(fn: () => T): T =>
+  inTestApp(fn, testApp({ platform: createEntities(vercelPlatform, undefined) }));
 
 const ROUTE_URL = "https://agent.test/eve/v1/session";
 const CURRENT_PROJECT = { projectId: "prj_agent", environment: "preview" };
@@ -113,7 +119,7 @@ describe("eveVercelOidc", () => {
       });
       const auth: EveAuthFn = eveVercelOidc({ currentVercelProject: CURRENT_PROJECT, subjects });
 
-      const result = await auth(request(token));
+      const result = await inVercelApp(() => auth(request(token)));
 
       if (principalType === null) {
         expect(result).toBeNull();
@@ -152,7 +158,7 @@ describe("eveVercelOidc", () => {
         subjects: [{ subject: "*", allowToolStubs: true }],
       });
 
-      const result = await auth(request(token));
+      const result = await inVercelApp(() => auth(request(token)));
 
       expect(result).toMatchObject({ principalType: "user", subject });
       expect(result?.allowToolStubs === true).toBe(false);
@@ -172,7 +178,7 @@ describe("eveVercelOidc", () => {
       subjects: [{ subject: SUBJECT, allowToolStubs: true }],
     });
 
-    await expect(auth(request(parts.join(".")))).resolves.toBeNull();
+    await expect(inVercelApp(() => auth(request(parts.join("."))))).resolves.toBeNull();
   });
 
   it.each([
@@ -180,10 +186,12 @@ describe("eveVercelOidc", () => {
     ["empty", ""],
     ["malformed", "not.a.real.jwt"],
   ] as const)("retains Bearer alongside Basic when the token is %s", async (_case, token) => {
-    const result = await routeAuth(request(token), [
-      httpBasic({ username: "ops", password: "secret" }, { realm: "evals" }),
-      eveVercelOidc({ currentVercelProject: CURRENT_PROJECT }),
-    ]);
+    const result = await inVercelApp(() =>
+      routeAuth(request(token), [
+        httpBasic({ username: "ops", password: "secret" }, { realm: "evals" }),
+        eveVercelOidc({ currentVercelProject: CURRENT_PROJECT }),
+      ]),
+    );
 
     expect(result).toBeInstanceOf(Response);
     if (result instanceof Response) {

@@ -5,7 +5,12 @@ import {
   resolveVercelProductionCallbackBaseUrl,
   resolveWorkflowCallbackBaseUrl,
 } from "#execution/workflow-callback-url.js";
-import { builtInPlatform } from "#platform/context.js";
+import { createEntities } from "#platform/entities.js";
+import vercelPlatform from "#platform/vercel/declaration.js";
+import { runInApp } from "#context/app.js";
+import type { App } from "#runtime/app.js";
+
+const platform = createEntities(vercelPlatform, undefined);
 
 describe("resolveVercelProductionCallbackBaseUrl", () => {
   afterEach(() => {
@@ -16,16 +21,14 @@ describe("resolveVercelProductionCallbackBaseUrl", () => {
     vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", "agent.example.com");
     vi.stubEnv("VERCEL_ENV", "preview");
 
-    expect(resolveVercelProductionCallbackBaseUrl(builtInPlatform())).toBeNull();
+    expect(resolveVercelProductionCallbackBaseUrl(platform)).toBeNull();
   });
 
   it("uses the project production URL in production", () => {
     vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", "agent.example.com");
     vi.stubEnv("VERCEL_ENV", "production");
 
-    expect(resolveVercelProductionCallbackBaseUrl(builtInPlatform())).toBe(
-      "https://agent.example.com",
-    );
+    expect(resolveVercelProductionCallbackBaseUrl(platform)).toBe("https://agent.example.com");
   });
 
   it("keeps the Vercel automation bypass secret out of callback URLs", () => {
@@ -57,14 +60,18 @@ describe("resolveWorkflowCallbackBaseUrl", () => {
     vi.stubEnv("VERCEL_ENV", "");
     vi.stubEnv("WORKFLOW_LOCAL_BASE_URL", "");
 
-    expect(resolveWorkflowCallbackBaseUrl("http://localhost:3000/")).toBe("http://localhost:3000");
+    expect(resolveWorkflowCallbackBaseUrl("http://localhost:3000/", platform)).toBe(
+      "http://localhost:3000",
+    );
   });
 
   it("prefers the active local world base URL and removes its trailing slash", () => {
     vi.stubEnv("VERCEL_ENV", "");
     vi.stubEnv("WORKFLOW_LOCAL_BASE_URL", "http://127.0.0.1:2000/");
 
-    expect(resolveWorkflowCallbackBaseUrl("http://localhost:3000")).toBe("http://127.0.0.1:2000");
+    expect(resolveWorkflowCallbackBaseUrl("http://localhost:3000", platform)).toBe(
+      "http://127.0.0.1:2000",
+    );
   });
 
   it("prefers the stable Vercel production URL over a local world override", () => {
@@ -72,7 +79,7 @@ describe("resolveWorkflowCallbackBaseUrl", () => {
     vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", "agent.example.com");
     vi.stubEnv("WORKFLOW_LOCAL_BASE_URL", "http://127.0.0.1:2000");
 
-    expect(resolveWorkflowCallbackBaseUrl("https://deployment.example.com")).toBe(
+    expect(resolveWorkflowCallbackBaseUrl("https://deployment.example.com", platform)).toBe(
       "https://agent.example.com",
     );
   });
@@ -82,7 +89,7 @@ describe("resolveWorkflowCallbackBaseUrl", () => {
     vi.stubEnv("WORKFLOW_LOCAL_BASE_URL", "");
     vi.stubEnv("EVE_PUBLIC_ROUTE_PREFIX", "/eve/support");
 
-    expect(resolveWorkflowCallbackBaseUrl("https://deployment.example.com/")).toBe(
+    expect(resolveWorkflowCallbackBaseUrl("https://deployment.example.com/", platform)).toBe(
       "https://deployment.example.com/eve/support",
     );
   });
@@ -92,7 +99,7 @@ describe("resolveWorkflowCallbackBaseUrl", () => {
     vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", "agent.example.com");
     vi.stubEnv("EVE_PUBLIC_ROUTE_PREFIX", "eve/support/");
 
-    expect(resolveWorkflowCallbackBaseUrl("https://deployment.example.com")).toBe(
+    expect(resolveWorkflowCallbackBaseUrl("https://deployment.example.com", platform)).toBe(
       "https://agent.example.com/eve/support",
     );
   });
@@ -102,7 +109,9 @@ describe("resolveWorkflowCallbackBaseUrl", () => {
     vi.stubEnv("WORKFLOW_LOCAL_BASE_URL", "");
     vi.stubEnv("EVE_PUBLIC_ROUTE_PREFIX", "/");
 
-    expect(resolveWorkflowCallbackBaseUrl("http://localhost:3000")).toBe("http://localhost:3000");
+    expect(resolveWorkflowCallbackBaseUrl("http://localhost:3000", platform)).toBe(
+      "http://localhost:3000",
+    );
   });
 });
 
@@ -129,5 +138,30 @@ describe("createWorkflowCallbackUrl", () => {
         "/eve/v1/connections/linear/callback/tok123?code=abc",
       ),
     ).toBe("https://agent.example.com/eve/support/v1/connections/linear/callback/tok123?code=abc");
+  });
+});
+
+describe("resolveWorkflowCallbackBaseUrl with one argument", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("uses the metadata URL in a process with no app", () => {
+    vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", "agent.example.com");
+    vi.stubEnv("VERCEL_ENV", "production");
+
+    expect(resolveWorkflowCallbackBaseUrl("https://local.example.com/")).toBe(
+      "https://local.example.com",
+    );
+  });
+
+  it("uses the production host of the app's platform inside the app", () => {
+    vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", "agent.example.com");
+    vi.stubEnv("VERCEL_ENV", "production");
+    const app = { platform } as App;
+
+    expect(runInApp(app, () => resolveWorkflowCallbackBaseUrl("https://local.example.com"))).toBe(
+      "https://agent.example.com",
+    );
   });
 });

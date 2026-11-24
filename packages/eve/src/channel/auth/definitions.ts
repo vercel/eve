@@ -18,7 +18,7 @@ import {
   type ResolvedOidcAuthStrategy,
   type RouteStrategyAuthenticationResult,
 } from "#channel/auth/types.js";
-import { builtInPlatform } from "#platform/context.js";
+import { ambientPlatform } from "#context/app.js";
 
 import {
   createRuntimeIpAllowList,
@@ -713,7 +713,7 @@ function addInvalidBearerTokenError(
  */
 export function placeholderAuth(): AuthFn<Request> {
   return () => {
-    if (builtInPlatform().deployment.environment() !== "production") {
+    if (ambientPlatform()?.deployment.environment() !== "production") {
       return null;
     }
 
@@ -785,7 +785,9 @@ const LOCAL_DEV_AUTH_SYMBOL = Symbol.for("eve.channels.auth.localDev");
  */
 export function localDev(): AuthFn<Request> {
   const authenticate: AuthFn<Request> = (request) =>
-    isLocalDevelopmentServer() && !isCrossSiteBrowserRequest(request) && !isFromRemotePeer(request)
+    isLocalDevelopmentServer(ambientPlatform()) &&
+    !isCrossSiteBrowserRequest(request) &&
+    !isFromRemotePeer(request)
       ? LOCAL_DEV_SESSION_AUTH_CONTEXT
       : null;
   Object.defineProperty(authenticate, LOCAL_DEV_AUTH_SYMBOL, { value: true });

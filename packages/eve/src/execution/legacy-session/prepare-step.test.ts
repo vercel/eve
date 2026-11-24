@@ -1,6 +1,9 @@
 import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session/timeout.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { prepareLegacySessionStep } from "./prepare-step.js";
+import { startTestApp } from "#internal/testing/test-platform.js";
+
+startTestApp();
 const mocks = vi.hoisted(() => ({ run: vi.fn(), hydrate: vi.fn(), encryption: vi.fn() }));
 vi.mock("#internal/workflow/runtime.js", () => ({
   getWorld: async () => ({ runs: { get: mocks.run }, getDeploymentId: async () => "new" }),

@@ -89,6 +89,8 @@ export interface Telemetry {
 }
 
 export interface Build {
+  readonly compute?: Compute;
+  readonly schedules?: { readonly kind: string };
   readonly entry?: string;
   readonly conditions?: readonly string[];
   platformOutput?(): boolean;

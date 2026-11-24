@@ -1,5 +1,5 @@
 import { type ContextAccessor, type ContextKey, resolveKey } from "#context/key.js";
-import { LocalDevRequestKey, type LocalDevRequestProvenance } from "#context/keys.js";
+import { AppKey, LocalDevRequestKey, type LocalDevRequestProvenance } from "#context/keys.js";
 import { createScopeStorage, type ScopeStorage } from "#context/scope-storage.js";
 
 const EVE_CONTEXT_STORAGE_KEY = Symbol.for("eve.context-storage");
@@ -23,6 +23,8 @@ export class ContextContainer implements AlsContext {
     if (localDevRequest !== undefined) {
       this._durableValues.set(LocalDevRequestKey.name, localDevRequest);
     }
+    const app = contextStorage.getStore()?.get(AppKey);
+    if (app !== undefined) this._durableValues.set(AppKey.name, app);
   }
 
   get localDevRequest(): LocalDevRequestProvenance | undefined {

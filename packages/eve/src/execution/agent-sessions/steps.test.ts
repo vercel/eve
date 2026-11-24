@@ -10,6 +10,9 @@ import {
   sendAgentSessionMessageStep,
   stopLateAgentSessionStep,
 } from "#execution/agent-sessions/steps.js";
+import { startTestApp } from "#internal/testing/test-platform.js";
+
+startTestApp();
 
 const mocks = vi.hoisted(() => ({
   bundle: { graph: {} } as Record<string, unknown>,

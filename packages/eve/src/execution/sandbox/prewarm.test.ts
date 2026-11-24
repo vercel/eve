@@ -10,6 +10,8 @@ import { ROOT_RUNTIME_AGENT_NODE_ID, type ResolvedAgentGraphBundle } from "#runt
 import type { ResolvedSandboxDefinition } from "#runtime/types.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
 import { resolveSandboxCacheDirectory } from "#internal/application/paths.js";
+import { createEntities } from "#platform/entities.js";
+import vercelPlatform from "#platform/vercel/declaration.js";
 
 const mocks = vi.hoisted(() => ({
   materializeWorkspaceDirectory: vi.fn(async (_path: string) => ({ skills: [], workspace: [] })),
@@ -40,6 +42,7 @@ describe("prewarmAppSandboxes", () => {
 
     await prewarmAppSandboxes({
       appRoot,
+      build: {},
       compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(firstSnapshotRoot, {
         moduleMapLoaderPath: "/tmp/eve-package/authored-module-map-loader.ts",
         sandboxAppRoot: appRoot,
@@ -50,6 +53,7 @@ describe("prewarmAppSandboxes", () => {
     });
     await prewarmAppSandboxes({
       appRoot,
+      build: {},
       compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(secondSnapshotRoot, {
         moduleMapLoaderPath: "/tmp/eve-package/authored-module-map-loader.ts",
         sandboxAppRoot: appRoot,
@@ -80,6 +84,7 @@ describe("prewarmAppSandboxes", () => {
     let settled = false;
     const preparation = prewarmAppSandboxes({
       appRoot: process.cwd(),
+      build: {},
       loadAgentGraph: async () => ({ ...graph, nodesByNodeId }),
       dispatch: async () => {
         if (++calls === 1) throw new Error("first provider failed");
@@ -107,6 +112,7 @@ describe("prewarmAppSandboxes", () => {
     await expect(
       prewarmAppSandboxes({
         appRoot,
+        build: createEntities(vercelPlatform, undefined).build,
         compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(appRoot),
         dispatch: async () => {
           throw cause;

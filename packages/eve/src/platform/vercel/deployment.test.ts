@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { builtInPlatform } from "#platform/context.js";
+import { createEntities } from "#platform/entities.js";
+import vercelPlatform from "#platform/vercel/declaration.js";
 import { vercelEnvironmentName } from "#platform/vercel/deployment.js";
 
-const deployment = () => builtInPlatform().deployment;
+const deployment = () => createEntities(vercelPlatform, undefined).deployment;
 
 afterEach(() => {
   vi.unstubAllEnvs();

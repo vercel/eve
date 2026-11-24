@@ -19,7 +19,6 @@ import { AuthKey, OccurrenceIdKey, ScheduleIdKey, ScheduleInstanceKey } from "#c
 import { expectFunction } from "#internal/authored-module.js";
 import { PermanentScheduleMessageError } from "#internal/schedules/permanent-error.js";
 import { bindApp } from "#context/app.js";
-import { platformOf } from "#platform/context.js";
 import type { App } from "#runtime/app.js";
 import type {
   ScheduleDefinition,
@@ -68,11 +67,11 @@ export interface ScheduleCollectionDispatchInput {
 }
 
 export class ScheduleDispatcher {
-  private readonly app: App | undefined;
+  private readonly app: App;
   private readonly runtime: Runtime;
   private readonly channels: readonly ResolvedChannelDefinition[];
   constructor(config: {
-    readonly app?: App;
+    readonly app: App;
     readonly runtime: Runtime;
     readonly channels: readonly ResolvedChannelDefinition[];
   }) {
@@ -194,7 +193,7 @@ export class ScheduleDispatcher {
     const sessions: Delivery[] = [];
     const waitUntilTasks: Promise<unknown>[] = [];
     const toChannel = createCrossChannelToFn(runtime, toCrossChannelTargets(this.channels), {
-      acceptedDeploymentId: platformOf(this.app).deployment.deploymentId(),
+      acceptedDeploymentId: this.app.platform.deployment.deploymentId(),
     });
     return {
       args: {

@@ -3,7 +3,7 @@ import { join, relative, resolve } from "node:path";
 import type { CompiledWorkspaceResourceRoot } from "#compiler/manifest.js";
 import { copyDirectoryAtomically } from "#execution/sandbox/bindings/local-provider-utils.js";
 import { createLoggingSandboxSession } from "#execution/sandbox/logging-session.js";
-import { platformBuild } from "#platform/build.js";
+import { withBuildCompute } from "#sandbox/hosted-compute.js";
 import type { Build } from "#platform/entities.js";
 import { createSandboxProviderIdentity } from "#execution/sandbox/provider-identity.js";
 import { createConnectionSession } from "#execution/sandbox/session.js";
@@ -154,7 +154,7 @@ async function prewarmSandboxes(input: PrewarmSandboxesInput): Promise<void> {
 
 export async function prewarmAppSandboxes(input: {
   readonly appRoot: string;
-  readonly build?: Build;
+  readonly build: Build;
   readonly compiledArtifactsSource?: RuntimeCompiledArtifactsSource;
   readonly loadAgentGraph?: (
     input: Readonly<{
@@ -167,6 +167,12 @@ export async function prewarmAppSandboxes(input: {
   readonly dispatch?: SandboxProviderPrepareDispatch;
   readonly preparedArtifactStore?: SandboxPreparedArtifactStore;
 }): Promise<void> {
+  await withBuildCompute(input.build.compute, () => prewarmBuiltAppSandboxes(input));
+}
+
+async function prewarmBuiltAppSandboxes(
+  input: Parameters<typeof prewarmAppSandboxes>[0],
+): Promise<void> {
   const compiledArtifactsSource =
     input.compiledArtifactsSource ??
     createAuthoredSourceRuntimeCompiledArtifactsSource(input.appRoot);
@@ -180,7 +186,7 @@ export async function prewarmAppSandboxes(input: {
 
   await prewarmSandboxes({
     appRoot: getRuntimeCompiledArtifactsSandboxAppRoot(compiledArtifactsSource) ?? input.appRoot,
-    build: input.build ?? platformBuild(),
+    build: input.build,
     compileDirectoryPath: resolveRuntimeCompilerArtifactPaths(compiledArtifactsSource.appRoot)
       .compileDirectoryPath,
     compiledArtifactsSource,

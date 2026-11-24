@@ -183,6 +183,7 @@ function runtimeWith(
   owners: Readonly<Record<string, "application" | "framework">> = {},
 ): InvokeToolRuntime {
   return {
+    build: {},
     agentName: "test-agent",
     callbackBaseUrl: "https://agent.example",
     compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),

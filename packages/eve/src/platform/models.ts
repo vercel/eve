@@ -1,13 +1,13 @@
 import type { DevelopmentModelCredential } from "#internal/model-auth/development-broker-protocol.js";
 import type { Entities } from "#platform/entities.js";
 import { resolveGatewayModelCredential } from "#platform/vercel/model-auth/gateway-credential.js";
+import { vercelNetwork } from "#platform/vercel/network.js";
 
 export function gatewayCredential(
-  platform: Entities | undefined,
+  platform: Entities,
   ...args: [rejectedToken?: string]
 ): Promise<DevelopmentModelCredential> {
-  const modelCredentials =
-    platform === undefined ? { resolve: resolveGatewayModelCredential } : platform.models;
+  const modelCredentials = platform.models;
   if (modelCredentials === undefined) {
     return Promise.reject(
       new Error(
@@ -16,4 +16,10 @@ export function gatewayCredential(
     );
   }
   return modelCredentials.resolve(...args);
+}
+
+export function developmentGatewayCredential(
+  rejectedToken?: string,
+): Promise<DevelopmentModelCredential> {
+  return resolveGatewayModelCredential(vercelNetwork, rejectedToken);
 }

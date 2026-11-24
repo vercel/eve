@@ -26,7 +26,7 @@ import {
 import { stageProductionCompilerArtifacts } from "#internal/application/production-compiler-artifacts.js";
 import { stageBuildDeploymentId } from "#internal/nitro/host/stage-build-deployment-id.js";
 import { createHostNitro } from "#internal/nitro/host/create-host-nitro.js";
-import { platformBuild, platformDurableBuild } from "#platform/build.js";
+import { loadPlatformDeclaration, selectPlatformModule } from "#platform/selection.js";
 import { createHostSpec } from "#internal/nitro/host/host-spec.js";
 import { resolveOutputDirectory } from "#internal/application/paths.js";
 import type { Build } from "#platform/entities.js";
@@ -81,6 +81,7 @@ function assertProfileOutputOutsideBuildOutput(
 }
 
 interface ApplicationBuildPlatform {
+  readonly module: string;
   readonly build: Build;
   readonly conditions: readonly string[] | undefined;
   readonly durable: BuildContribution | undefined;
@@ -232,11 +233,14 @@ export async function buildApplication(
   const profileOutputPath =
     options.profileOutputPath === undefined ? undefined : resolve(options.profileOutputPath);
   const profiler = profileOutputPath === undefined ? undefined : new ApplicationBuildProfiler();
-  const build = platformBuild(options.platform);
+  const platformModule = selectPlatformModule(resolve(rootDir), options.platformModule);
+  const declaration = await loadPlatformDeclaration(platformModule);
+  const build = declaration.build ?? {};
   const platform: ApplicationBuildPlatform = {
+    module: platformModule,
     build,
     conditions: build.conditions,
-    durable: platformDurableBuild(options.platform),
+    durable: declaration.durable === undefined ? undefined : (declaration.durable().build ?? {}),
     entry: build.entry,
     output: platformBuildOutput(),
     target: build.platformOutput?.() === true ? "vercel" : "node",
@@ -305,6 +309,7 @@ async function buildApplicationInWorkspace(
   const preparedHost = await measureBuildPhase(profiler, "host.prepare", () =>
     prepareProductionApplicationHost(workspace, isVercelBuild ? "vercel" : "local", {
       deferInstrumentationSetup: platform.entry !== undefined,
+      platformModule: platform.module,
     }),
   );
 

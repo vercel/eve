@@ -15,6 +15,8 @@ import {
   resolveActiveAuthorizationChallenges,
   supersededChallenges,
 } from "#harness/hitl/sign-ins.js";
+import { createEntities } from "#platform/entities.js";
+import vercelPlatform from "#platform/vercel/declaration.js";
 
 import type { ConnectionPrincipal } from "#shared/connection-types.js";
 
@@ -39,7 +41,13 @@ describe("authorization callback URLs", () => {
     vi.stubEnv("VERCEL_ENV", "production");
     vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", "agent.example.com");
     const ctx = new ContextContainer();
-    ctx.set(CallbackBaseUrlKey, resolveWorkflowCallbackBaseUrl("https://agent-abc123.vercel.app"));
+    ctx.set(
+      CallbackBaseUrlKey,
+      resolveWorkflowCallbackBaseUrl(
+        "https://agent-abc123.vercel.app",
+        createEntities(vercelPlatform, undefined),
+      ),
+    );
     ctx.set(SessionIdKey, "session-1");
 
     expect(contextStorage.run(ctx, () => getHookUrl("linear", "attempt-1"))).toBe(

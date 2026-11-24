@@ -105,9 +105,9 @@ export interface StreamLine {
 
 export type EngineApp = Pick<App, "platform" | "lifetime" | "hosts">;
 
-export interface DurableEngine {
+export interface DurableEngine<Context = undefined> {
   readonly build?: BuildContribution;
-  start(app: EngineApp): Durable | Promise<Durable>;
+  start(app: EngineApp, context: Context): Durable | Promise<Durable>;
 }
 
 export interface BuildContribution {

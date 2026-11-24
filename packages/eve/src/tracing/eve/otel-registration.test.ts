@@ -22,6 +22,7 @@ describe("OTel registration", () => {
           sampler: "always_on",
           spanProcessors: [],
         },
+        sessionAttribute: undefined,
         serviceName: "weather",
       }),
     ).toThrow();
@@ -42,7 +43,11 @@ describe("OTel registration", () => {
     registerOTel.mockImplementation(() => undefined);
 
     expect(() =>
-      registerOtelPipeline({ otel: { spanProcessors: [] }, serviceName: "weather" }),
+      registerOtelPipeline({
+        otel: { spanProcessors: [] },
+        sessionAttribute: undefined,
+        serviceName: "weather",
+      }),
     ).toThrow(/already owns the global tracer provider/u);
 
     const configuration = registerOTel.mock.calls.at(-1)?.[0] as Record<string, unknown>;
@@ -54,7 +59,11 @@ describe("OTel registration", () => {
     registerOTel.mockImplementation(() => undefined);
 
     expect(() =>
-      registerOtelPipeline({ otel: { spanProcessors: ["auto"] }, serviceName: "weather" }),
+      registerOtelPipeline({
+        otel: { spanProcessors: ["auto"] },
+        sessionAttribute: undefined,
+        serviceName: "weather",
+      }),
     ).toThrow();
 
     const configuration = registerOTel.mock.calls.at(-1)?.[0] as {
@@ -81,6 +90,7 @@ describe("OTel registration", () => {
     expect(() =>
       registerOtelPipeline({
         otel: { spanProcessors: [first, second] },
+        sessionAttribute: undefined,
         serviceName: "weather",
       }),
     ).toThrow();
@@ -121,6 +131,7 @@ describe("OTel registration", () => {
     expect(() =>
       registerOtelPipeline({
         otel: { spanProcessors: [downstream] },
+        sessionAttribute: undefined,
         serviceName: "weather",
       }),
     ).toThrow();
@@ -155,6 +166,7 @@ describe("OTel registration", () => {
     expect(() =>
       registerOtelPipeline({
         otel: { spanProcessors: [downstream] },
+        sessionAttribute: undefined,
         serviceName: "weather",
       }),
     ).toThrow();
@@ -179,7 +191,11 @@ describe("OTel registration", () => {
     registerOTel.mockImplementation(() => undefined);
 
     expect(() =>
-      registerOtelPipeline({ otel: { spanProcessors: [] }, serviceName: "weather" }),
+      registerOtelPipeline({
+        otel: { spanProcessors: [] },
+        sessionAttribute: undefined,
+        serviceName: "weather",
+      }),
     ).toThrow(/another runtime already owns/u);
   });
 
@@ -261,6 +277,7 @@ function filteringProcessor() {
   expect(() =>
     registerOtelPipeline({
       otel: { spanProcessors: [downstream] },
+      sessionAttribute: undefined,
       serviceName: "weather",
     }),
   ).toThrow();

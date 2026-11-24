@@ -1,7 +1,7 @@
 import { builtInHosts } from "#runtime/app.js";
 import { describe, expect, it, vi } from "vitest";
 import { installWorkflowEngine } from "#execution/workflow-host/host.js";
-import { builtInPlatform } from "#platform/context.js";
+import { testEntities } from "#internal/testing/test-platform.js";
 
 import type { DurableSession, DurableSessionState } from "#execution/durable-session-store.js";
 import type { SessionView } from "#harness/session-machine/view.js";
@@ -77,7 +77,7 @@ vi.mock("#execution/publish-session-events.js", async () => {
   };
 });
 
-installWorkflowEngine(builtInHosts(), builtInPlatform());
+installWorkflowEngine(builtInHosts(), testEntities());
 
 function usage(inputTokens: number, costUsd?: number): TokenUsage {
   return { cacheReadTokens: 0, cacheWriteTokens: 0, costUsd, inputTokens, outputTokens: 0 };

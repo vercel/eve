@@ -29,7 +29,7 @@ export async function postSessionCallbackRequest(input: {
   const headers = await resolveSessionCallbackHeaders(input.platform, input.url);
   let response: Response;
   try {
-    response = await requestCallback(input.url, {
+    response = await requestCallback(input.url, input.platform, {
       body: JSON.stringify(input.body),
       headers,
       signal,
@@ -69,6 +69,7 @@ export async function postSessionCallbackRequest(input: {
 
 async function requestCallback(
   urlText: string,
+  platform: Entities,
   init: {
     readonly body: string;
     readonly headers: Record<string, string>;
@@ -79,7 +80,7 @@ async function requestCallback(
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new UnsafeDestinationError("Callback URL must use http or https.");
   }
-  const policy = { allowLoopback: isLocalDevelopmentServer() };
+  const policy = { allowLoopback: isLocalDevelopmentServer(platform) };
   assertPublicHostname(url.hostname, policy);
   const dispatcher = await createPublicDispatcher(policy);
   try {

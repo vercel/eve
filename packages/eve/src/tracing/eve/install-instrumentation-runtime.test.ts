@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { ConversationIdKey } from "#context/keys.js";
 import { sessionIdempotencyKey, turnIdempotencyKey } from "#instrumentation/lifecycle.js";
+import { testEntities } from "#internal/testing/test-platform.js";
 import { installInstrumentationRuntime } from "#tracing/eve/install-instrumentation-runtime.js";
 import { otelIntegration, collectOtelPipeline } from "#tracing/eve/otel-declaration.js";
 
@@ -43,6 +44,7 @@ vi.mock("#tracing/eve/agent-otel-provider.js", () => ({
 }));
 
 const PROCESS_APP_KEY = Symbol.for("eve.app");
+const platform = testEntities();
 
 describe("installInstrumentationRuntime", () => {
   beforeEach(() => {
@@ -56,8 +58,9 @@ describe("installInstrumentationRuntime", () => {
     const providerFlush = vi.fn();
     const providerShutdown = vi.fn();
     const runtime = installInstrumentationRuntime({
-      collected: collectOtelPipeline([otelIntegration()]),
+      collected: collectOtelPipeline([otelIntegration()], platform),
       frameworkVersion: "test",
+      platform,
       providers: [{ flush: providerFlush, name: "test", shutdown: providerShutdown }],
       serviceName: "weather",
     });
@@ -80,15 +83,17 @@ describe("installInstrumentationRuntime", () => {
 
   it("enables memory operations only for OTel or a provider that handles them", () => {
     const withoutMemory = installInstrumentationRuntime({
-      collected: collectOtelPipeline([]),
+      collected: collectOtelPipeline([], platform),
       frameworkVersion: "test",
+      platform,
       providers: [{ events: { "turn.started": vi.fn() }, name: "turns" }],
       serviceName: "weather",
     });
     delete (globalThis as Record<symbol, unknown>)[PROCESS_APP_KEY];
     const withMemory = installInstrumentationRuntime({
-      collected: collectOtelPipeline([]),
+      collected: collectOtelPipeline([], platform),
       frameworkVersion: "test",
+      platform,
       providers: [{ events: { "memory.operation.started": vi.fn() }, name: "memory" }],
       serviceName: "weather",
     });
@@ -114,8 +119,12 @@ describe("installInstrumentationRuntime", () => {
         shutdown: vi.fn(async () => undefined),
       };
       const runtime = installInstrumentationRuntime({
-        collected: collectOtelPipeline([otelIntegration({ spanProcessors: [processor] })]),
+        collected: collectOtelPipeline(
+          [otelIntegration({ spanProcessors: [processor] })],
+          platform,
+        ),
         frameworkVersion: "test",
+        platform,
         providers: [],
         serviceName: "weather",
       });
@@ -139,8 +148,9 @@ describe("installInstrumentationRuntime", () => {
   it("isolates authored state from an internal provider with the same name", async () => {
     const authoredTerminalState = vi.fn();
     const runtime = installInstrumentationRuntime({
-      collected: collectOtelPipeline([otelIntegration()]),
+      collected: collectOtelPipeline([otelIntegration()], platform),
       frameworkVersion: "test",
+      platform,
       providers: [
         {
           events: {

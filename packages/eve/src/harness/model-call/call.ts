@@ -61,8 +61,7 @@ import { createLogger, logError } from "#internal/logging.js";
 import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
 import { compactedTurnInput, historyBeforeCall } from "#harness/compaction/step.js";
 import { reportCompactionFailure, reportModelCallFailure } from "./failure.js";
-import { appOf } from "#context/app.js";
-import { platformOf } from "#platform/context.js";
+import { requireApp } from "#context/app.js";
 import { buildGatewayAttributionHeaders, withGatewayTraceContext } from "./model.js";
 import {
   isEmptyModelResponse,
@@ -137,7 +136,7 @@ export class ModelCaller {
     this.attributionHeaders = buildGatewayAttributionHeaders(
       this.profile,
       step.config.runtimeIdentity,
-      platformOf(appOf(step.ctx)),
+      requireApp(step.ctx).platform,
     );
     this.projectedMessages = input.projectedMessages;
     this.turnMessages = input.turnMessages;

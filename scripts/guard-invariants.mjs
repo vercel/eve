@@ -249,16 +249,18 @@
  *             gitignored extension copies that builds generate; the Vercel-only
  *             public files that re-export `src/platform/vercel/`; and the
  *             self-modification setup template, which generates Vercel-specific
- *             user code. The eve-owned `@vercel/agent-runs` library and the
+ *             user code; and the Discord gateway relay, a Vercel Daemon that runs
+ *             outside any eve app. The eve-owned `@vercel/agent-runs` library and the
  *             `@vercel/otel` OpenTelemetry bootstrap run on any host, so they
  *             are exempt.
  *   rule 70 — Outside `packages/eve/src/platform/`, eve depends only on the
- *             platform contract: `#platform/context.js`, the entity types
- *             and declarations (`entities`, `declaration`, `default`), the
- *             capability modules whose implementations must stay out of
- *             bundles that don't use them (`build`, `hosted-sandbox`,
- *             `document-store`, `schedules`, `models`, `runtime-spans`), the
- *             engine contract (`engine`), and, in the Nitro
+ *             platform contract: the entity types and declarations
+ *             (`entities`, `declaration`), the capability modules whose
+ *             implementations must stay out of bundles that don't use them
+ *             (`hosted-sandbox`, `document-store`, `schedules`, `models`,
+ *             `runtime-spans`), the platform selection of a build
+ *             (`selection`), the entities of a process with no app
+ *             (`process`), the engine contract (`engine`), and, in the Nitro
  *             build host, the build-output port (`#platform/build-output.js`,
  *             `#platform/types.js`). Platform implementations stay behind
  *             them.
@@ -271,7 +273,7 @@
  *             goes through `Durable`.
  *   rule 72 — Code receives the app from its caller; only a Workflow step
  *             function (a file with a `"use step"` directive) reads
- *             `processApp()`, and it passes the app down. The process app's
+ *             `processApp()` or `startedApp()`, and it passes the app down. The process app's
  *             other internals have one owner module each, and everything
  *             else uses that owner's accessor (`hostsOf(app)`,
  *             `getInstrumentationRuntime()`, ...). The process-app values of
@@ -300,11 +302,20 @@
  *             `.allSettled` or `.any`, `setTimeout`, `setInterval`, or
  *             `Math.random`. They use `SessionHost.now()`, `.all()` and
  *             `.next({ until })`, which an engine makes replay-safe.
+ *   rule 76 — eve reaches its built-in Vercel declaration only through the
+ *             generated platform module, which the build points at the
+ *             selected declaration. No source under `packages/eve/src`
+ *             imports `#platform/vercel/declaration.js` or
+ *             `#platform/vercel/core.js` (static, dynamic, or by a relative
+ *             path), and none imports the retired `#platform/builtin.js`.
+ *             The build names the declaration's path in
+ *             `platform/selection.ts`; tests and `src/internal/testing/` may
+ *             import the declaration to test it.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
  * may only shrink (as offenders are removed) — they may never grow.
- * Rules 67, 68, 69, 70, 71, 72, 73, 74, and 75 have no baseline.
+ * Rules 67, 68, 69, 70, 71, 72, 73, 74, 75, and 76 have no baseline.
  */
 import { existsSync } from "node:fs";
 import { glob, readFile, readdir, lstat } from "node:fs/promises";
@@ -439,6 +450,7 @@ function isTsLike(relPath) {
  *   rule70: Violation[];
  *   rule71: Violation[];
  *   rule72: Violation[];
+ *   rule76: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -478,6 +490,7 @@ async function scanRepo(state) {
     checkRule70(posix, lines, state.rule70);
     checkRule71(posix, content, state.rule71);
     checkRule72(posix, content, state.rule72);
+    checkRule76(posix, lines, state.rule76);
     if (posix.startsWith("packages/tracing/src/")) {
       for (const [index, line] of lines.entries()) {
         const imports = [...line.matchAll(/(?:from\s+|import\s*\()(["'])([^"']+)\1/g)];
@@ -1604,6 +1617,7 @@ const VERCEL_PLATFORM_ACCESS_DIRS = [
 ];
 const VERCEL_PLATFORM_ACCESS_FILES = new Set([
   "packages/eve/src/public/agents/vercel-oidc.ts",
+  "packages/eve/src/public/channels/discord/gateway/relay.ts",
   "packages/eve/src/public/channels/vercel-oidc.ts",
   "packages/eve/src/public/experimental/schedules/vercel.ts",
   "packages/eve/src/public/memory/file/vercel.ts",
@@ -1634,17 +1648,16 @@ function checkRule69(posix, content, current) {
 // ---------- Rule 70: eve depends on the platform contract, not its implementations ----------
 
 const PLATFORM_CONTRACT_MODULES = new Set([
-  "#platform/build.js",
-  "#platform/context.js",
   "#platform/declaration.js",
-  "#platform/default.js",
   "#platform/document-store.js",
   "#platform/engine.js",
   "#platform/entities.js",
   "#platform/hosted-sandbox.js",
   "#platform/models.js",
+  "#platform/process.js",
   "#platform/runtime-spans.js",
   "#platform/schedules.js",
+  "#platform/selection.js",
 ]);
 const PLATFORM_BUILD_HOST_DIR = "packages/eve/src/internal/nitro/host/";
 const PLATFORM_BUILD_HOST_MODULES = new Set(["#platform/build-output.js", "#platform/types.js"]);
@@ -1673,7 +1686,40 @@ function checkRule70(posix, lines, violations) {
       violations.push({
         rule: 70,
         file: `${posix}:${index + 1}`,
-        message: `imports \`${specifier}\`. Outside \`packages/eve/src/platform/\`, eve depends only on the platform contract (\`#platform/context.js\` and its capability modules), plus the build-output port in the Nitro build host. Add what you need to the platform entities (\`#platform/entities.js\`) and the Vercel declaration (\`platform/vercel/declaration.ts\`).`,
+        message: `imports \`${specifier}\`. Outside \`packages/eve/src/platform/\`, eve depends only on the platform contract (\`#platform/entities.js\` and its capability modules), plus the build-output port in the Nitro build host. Add what you need to the platform entities (\`#platform/entities.js\`) and the Vercel declaration (\`platform/vercel/declaration.ts\`).`,
+      });
+    }
+  }
+}
+
+// ---------- Rule 76: the declaration is reached through the generated platform module ----------
+
+const SEAM_ONLY_MODULES = new Set([
+  "#platform/vercel/declaration.js",
+  "#platform/vercel/core.js",
+  "#platform/builtin.js",
+]);
+
+/**
+ * Flags imports of eve's built-in declaration outside the generated platform module.
+ *
+ * @param {string} posix
+ * @param {string[]} lines
+ * @param {Violation[]} violations
+ */
+function checkRule76(posix, lines, violations) {
+  if (!posix.startsWith(EVE_SRC) || posix.endsWith(".test.ts")) return;
+  if (posix.startsWith(`${EVE_SRC}internal/testing/`)) return;
+  for (const [index, line] of lines.entries()) {
+    for (const match of line.matchAll(
+      /(?:from\s+|import\s*\(\s*|^\s*import\s+)(["'])([^"']+)\1/g,
+    )) {
+      const specifier = aliasOfSpecifier(posix, match[2]).replace(/\.ts$/, ".js");
+      if (!SEAM_ONLY_MODULES.has(specifier)) continue;
+      violations.push({
+        rule: 76,
+        file: `${posix}:${index + 1}`,
+        message: `imports \`${specifier}\`. eve reaches its platform declaration only through the generated platform module, so a platform the build selects takes the same path as eve's own. Read the platform from the app (\`app.platform\`, \`currentApp().platform\`), from the build's selected declaration (\`#platform/selection.js\`), or, in a process with no app, from \`#platform/process.js\`.`,
       });
     }
   }
@@ -1728,7 +1774,12 @@ function checkRule71(posix, content, violations) {
 // ---------- Rule 72: one owner per process-app internal ----------
 
 const PROCESS_APP_MODULE = "#runtime/app.js";
-const PROCESS_APP_VALUES = new Set(["createProcessApp", "installProcessApp", "processApp"]);
+const PROCESS_APP_VALUES = new Set([
+  "createProcessApp",
+  "installProcessApp",
+  "processApp",
+  "startedApp",
+]);
 const PROCESS_APP_OWNERS = new Set(
   [
     "execution/tools/workflow/step-execution.ts",
@@ -1748,7 +1799,7 @@ const NAMESPACE_OR_DYNAMIC_IMPORT_RE =
 function checkRule72(posix, content, violations) {
   if (!posix.startsWith(EVE_SRC) || posix.endsWith(".test.ts")) return;
   if (posix.startsWith(`${EVE_SRC}internal/testing/`)) return;
-  const message = `reaches the process app directly. Receive the app from your caller (a route, a boot phase, or the turn's context through \`appOf(ctx)\`) and read its platform with \`platformOf(app)\`; only a Workflow step function (a file with a \`"use step"\` directive) reads \`processApp()\`, and it passes the app down. Other internals of the app have one owner module each; use its accessor (\`hostsOf(app)\`, \`getInstrumentationRuntime()\`, \`getActiveRuntimeSession()\`), or add an internal and its owner to \`PROCESS_APP_OWNERS\`. Type imports from \`${PROCESS_APP_MODULE}\` are fine.`;
+  const message = `reaches the process app directly. Receive the app from your caller (a route, a boot phase, or the turn's context through \`requireApp(ctx)\`) and read its platform as \`app.platform\`; only a Workflow step function (a file with a \`"use step"\` directive) reads \`processApp()\` or \`startedApp()\`, and it passes the app down. Other internals of the app have one owner module each; use its accessor (\`hostsOf(app)\`, \`getInstrumentationRuntime()\`, \`getActiveRuntimeSession()\`), or add an internal and its owner to \`PROCESS_APP_OWNERS\`. Type imports from \`${PROCESS_APP_MODULE}\` are fine.`;
   const lineOf = (index) => content.slice(0, index).split("\n").length;
   const key = content.indexOf('Symbol.for("eve.app")');
   if (key >= 0 && posix !== `${EVE_SRC}runtime/app.ts`)
@@ -1760,7 +1811,11 @@ function checkRule72(posix, content, violations) {
     const reachesProcessApp = match[1]
       .split(",")
       .map((name) => name.trim().split(/\s+as\s+/)[0])
-      .some((name) => PROCESS_APP_VALUES.has(name) && !(stepFile && name === "processApp"));
+      .some(
+        (name) =>
+          PROCESS_APP_VALUES.has(name) &&
+          !(stepFile && (name === "processApp" || name === "startedApp")),
+      );
     if (reachesProcessApp)
       violations.push({ rule: 72, file: `${posix}:${lineOf(match.index)}`, message });
   }
@@ -2860,6 +2915,7 @@ async function main() {
     rule70: /** @type {Violation[]} */ ([]),
     rule71: /** @type {Violation[]} */ ([]),
     rule72: /** @type {Violation[]} */ ([]),
+    rule76: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -2997,6 +3053,7 @@ async function main() {
   violations.push(...state.rule70);
   violations.push(...state.rule71);
   violations.push(...state.rule72);
+  violations.push(...state.rule76);
   violations.push(...(await checkRule73()));
   violations.push(...(await checkRule74()));
   violations.push(...(await checkRule75()));
@@ -3004,7 +3061,7 @@ async function main() {
     violations.push({
       rule: 69,
       file,
-      message: `reads \`VERCEL*\` environment variables or imports \`#compiled/@vercel/*\` or \`#platform/vercel/*\` in ${count} place${count === 1 ? "" : "s"}. Vercel platform knowledge lives in \`packages/eve/src/platform/\` so eve can run on other hosts. Read platform facts from the app's platform (\`platformOf(app)\` from \`#platform/context.js\`, or \`builtInPlatform()\` where no app exists), or add the capability to the platform entities (\`#platform/entities.js\`) and the Vercel declaration (\`platform/vercel/declaration.ts\`).`,
+      message: `reads \`VERCEL*\` environment variables or imports \`#compiled/@vercel/*\` or \`#platform/vercel/*\` in ${count} place${count === 1 ? "" : "s"}. Vercel platform knowledge lives in \`packages/eve/src/platform/\` so eve can run on other hosts. Read platform facts from the app's platform (\`app.platform\`, or \`currentApp().platform\` in code that eve runs inside a request, a turn, or a step), or add the capability to the platform entities (\`#platform/entities.js\`) and the Vercel declaration (\`platform/vercel/declaration.ts\`).`,
     });
   }
 

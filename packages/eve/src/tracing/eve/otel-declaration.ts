@@ -3,6 +3,7 @@ import type { InstrumentationModelStartedInput } from "#public/instrumentation/i
 import type { JsonObject } from "#shared/json.js";
 import { batchSpanProcessor } from "#tracing/eve/batch-span-processor.js";
 import { contentFilteringProcessor } from "#tracing/eve/content-span-processor.js";
+import type { Entities } from "#platform/entities.js";
 import { runtimeSpanProcessor } from "#platform/runtime-spans.js";
 import type {
   MetricReader,
@@ -213,17 +214,24 @@ function createOtelIntegration(options: OtelIntegrationOptions): OtelIntegration
   };
 }
 
+const platformSpanProcessors = new WeakMap<
+  OtelIntegration,
+  (platform: Entities) => readonly SpanProcessorSetting[]
+>();
+
 /** @internal */
 export function agentRunsIntegration(options: ManagedTraceOptions = {}): OtelIntegration {
   assertNoRemovedContentOptions(options);
-  return {
+  const integration: OtelIntegration = {
     [OTEL_INTEGRATION]: true,
     [PROVIDER]: true,
     metricReaders: [],
-    spanProcessors: [
-      contentFilteringProcessor(runtimeSpanProcessor(undefined), options.exportPolicy),
-    ],
+    spanProcessors: [],
   };
+  platformSpanProcessors.set(integration, (platform) => [
+    contentFilteringProcessor(runtimeSpanProcessor(platform), options.exportPolicy),
+  ]);
+  return integration;
 }
 
 function assertNoRemovedContentOptions(options: object): void {
@@ -267,7 +275,7 @@ export interface CollectedOtel {
 }
 
 /** @internal */
-export function collectOtelPipeline(values: readonly unknown[]): CollectedOtel {
+export function collectOtelPipeline(values: readonly unknown[], platform: Entities): CollectedOtel {
   const spanProcessors: SpanProcessorSetting[] = [];
   const metricReaders: MetricReader[] = [];
   const runtimeContextResolvers: RuntimeContextResolver[] = [];
@@ -277,7 +285,9 @@ export function collectOtelPipeline(values: readonly unknown[]): CollectedOtel {
   for (const value of values) {
     if (isOtelIntegration(value)) {
       declared = true;
-      spanProcessors.push(...value.spanProcessors);
+      spanProcessors.push(
+        ...(platformSpanProcessors.get(value)?.(platform) ?? value.spanProcessors),
+      );
       metricReaders.push(...value.metricReaders);
       if (value.runtimeContext !== undefined) {
         runtimeContextResolvers.push(value.runtimeContext);

@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createEntities } from "#platform/entities.js";
-import { vercelPlatform } from "#platform/vercel/declaration.js";
+import vercelPlatform from "#platform/vercel/declaration.js";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -14,6 +14,13 @@ function vercelEntities() {
 }
 
 describe("the Vercel platform declaration", () => {
+  it("names the schedule provider kind that eve dev and deployments run", () => {
+    vi.stubEnv("EVE_DEV", "");
+    expect(vercelPlatform.build?.schedules?.kind).toBe("vercel");
+    vi.stubEnv("EVE_DEV", "1");
+    expect(vercelPlatform.build?.schedules?.kind).toBe("in-memory");
+  });
+
   it("adds the Vercel deployment to invocation data only on Vercel", () => {
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", " dpl_123 ");
     vi.stubEnv("VERCEL", "1");

@@ -5,6 +5,7 @@ import {
 } from "#execution/sandbox/ensure.js";
 import type { HarnessSessionBase } from "#harness/types.js";
 import type { SandboxAccess, SandboxState } from "#sandbox/state.js";
+import { requireApp } from "#context/app.js";
 import type { ContextContainer } from "#context/container.js";
 import { SandboxKey, SandboxTerminalCleanupKey, SessionIdKey } from "#context/keys.js";
 import { ChannelKey, SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
@@ -77,6 +78,7 @@ export const sandboxProvider: FrameworkContextProvider<SandboxAccess> = {
 
     const access = await ensureSandboxAccess({
       ...sandbox.template,
+      build: () => requireApp(ctx).platform.build,
       nodeId: runtimeNodeId(agent),
       ownsSandbox: selected.ownsSandbox,
       registry: sandbox.registry,

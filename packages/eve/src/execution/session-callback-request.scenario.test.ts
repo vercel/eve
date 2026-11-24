@@ -4,9 +4,9 @@ import { createServer, type Server } from "node:http";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
-import { builtInPlatform } from "#platform/context.js";
+import { testEntities } from "#internal/testing/test-platform.js";
 
-const platform = builtInPlatform();
+const platform = testEntities();
 const dnsMocks = vi.hoisted(() => ({ addresses: [] as LookupAddress[] }));
 
 vi.mock("node:dns", () => ({

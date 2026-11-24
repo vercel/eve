@@ -11,6 +11,7 @@ vi.mock("#platform/schedules.js", () => ({
 }));
 
 import { defineDynamicSchedules } from "#public/schedules/subscription.js";
+import { inTestApp } from "#internal/testing/test-platform.js";
 
 const inputSchema = {
   "~standard": { validate: (value: unknown) => ({ value }), vendor: "test", version: 1 },
@@ -21,8 +22,8 @@ describe("defineDynamicSchedules", () => {
     const schedules = defineDynamicSchedules({ inputSchema, run: async () => {} } as never);
     expect(platform.defaultScheduleProvider).not.toHaveBeenCalled();
 
-    expect(schedules.provider).toBe(platform.provider);
-    expect(schedules.provider).toBe(platform.provider);
+    expect(inTestApp(() => schedules.provider)).toBe(platform.provider);
+    expect(inTestApp(() => schedules.provider)).toBe(platform.provider);
     expect(platform.defaultScheduleProvider).toHaveBeenCalledTimes(1);
   });
 

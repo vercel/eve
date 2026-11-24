@@ -1,5 +1,5 @@
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, aroundEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { context as apiContext } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 
@@ -31,6 +31,14 @@ import { markAgentTraceContext } from "#tracing/eve/agent-trace-context.js";
 import type { TraceCaptureContext, TraceCapturePolicy } from "#shared/trace-policy.js";
 import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
+import { inTestApp, startTestApp, testApp } from "#internal/testing/test-platform.js";
+import { createEntities } from "#platform/entities.js";
+import { selectProcessPlatform } from "#platform/process.js";
+import vercelPlatform from "#platform/vercel/declaration.js";
+
+const app = startTestApp(testApp({ platform: createEntities(vercelPlatform, undefined) }));
+selectProcessPlatform(vercelPlatform);
+aroundEach(async (runTest) => await inTestApp(runTest, app));
 
 const OWNER_RUN_ID = "wrun_owner-run";
 const getHookByTokenMock = vi.fn();

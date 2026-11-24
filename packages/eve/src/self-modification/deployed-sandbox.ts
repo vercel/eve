@@ -1,9 +1,12 @@
-import { appOf } from "#context/app.js";
-import { contextStorage } from "#context/container.js";
-import { hostedSandboxEnvironment, hostedSandboxOf } from "#platform/hosted-sandbox.js";
+import { hostedSandboxEnvironment } from "#platform/hosted-sandbox.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
 import { JustBashSandbox } from "#sandbox/providers/just-bash.js";
-import { bindSandboxEnvironment, type SandboxSelector } from "#shared/sandbox-environment.js";
+import { hostedCompute } from "#sandbox/hosted-compute.js";
+import {
+  bindLazySandboxEnvironment,
+  bindSandboxEnvironment,
+  type SandboxSelector,
+} from "#shared/sandbox-environment.js";
 import { shellQuote } from "#shared/shell-quote.js";
 
 import { createGitHubCredentialProvider } from "./credentials.js";
@@ -20,8 +23,7 @@ const VERCEL_SANDBOX_REQUIRED_MESSAGE =
 
 export function defineDeployedSelfModificationSandbox(
   config: DeployedSelfModificationConfig,
-  hasCredentialTransforms: () => boolean = () =>
-    hostedSandboxOf(appOf(contextStorage.getStore())?.platform)?.credentialTransforms === true,
+  hasCredentialTransforms: () => boolean = () => hostedCompute()?.credentialTransforms === true,
 ): SandboxSelector {
   if (!isDeployedRuntime()) {
     const environment = JustBashSandbox.environment();
@@ -32,11 +34,12 @@ export function defineDeployedSelfModificationSandbox(
   }
 
   const deployed = resolveDeployedSelfModificationConfig(config);
-  const environment = hostedSandboxEnvironment(undefined);
-  return bindSandboxEnvironment(
+  let resolved: ReturnType<typeof hostedSandboxEnvironment> | undefined;
+  const environment = () => (resolved ??= hostedSandboxEnvironment(hostedCompute()));
+  return bindLazySandboxEnvironment(
     defineSandbox(async ({ session }) => {
       if (!hasCredentialTransforms()) throw new Error(VERCEL_SANDBOX_REQUIRED_MESSAGE);
-      const sandbox = await environment.open({
+      const sandbox = await environment().open({
         networkPolicy: SELF_MODIFICATION_BASELINE_NETWORK_POLICY,
       });
       if (session.parent === undefined)

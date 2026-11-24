@@ -57,7 +57,12 @@ import {
   assertScheduleCollectionNamesDistinctFromSchedules,
   compileScheduleCollectionDefinitions,
 } from "#compiler/normalize-schedule-collection.js";
-import { isScheduleCollectionDefinition } from "#shared/schedule-collection-definition.js";
+import { loadPlatformBuild } from "#platform/selection.js";
+import { withBuildCompute } from "#sandbox/hosted-compute.js";
+import {
+  authoredScheduleProvider,
+  isScheduleCollectionDefinition,
+} from "#shared/schedule-collection-definition.js";
 import { assertSkillNameAvailable, compileSkillSource } from "#compiler/normalize-skill.js";
 import {
   assertRemoteAgentDefinitionHasNoLocalPackageEntries,
@@ -553,10 +558,13 @@ class AgentGraphCompiler {
           break;
         }
         case "sandbox":
-          sandbox = await compileSandboxDefinition(input.manifest.agentRoot, entry.source, {
-            binding: binding!,
-            loadNamespace,
-          });
+          const { compute } = await loadPlatformBuild(input.manifest.appRoot);
+          sandbox = await withBuildCompute(compute, () =>
+            compileSandboxDefinition(input.manifest.agentRoot, entry.source, {
+              binding: binding!,
+              loadNamespace,
+            }),
+          );
           if (!sandbox.inheritsParent) {
             state.evaluation.requireRuntimeEntry(candidate.sourceId);
           }
@@ -572,10 +580,15 @@ class AgentGraphCompiler {
                 })
               : entry.source.definition;
           if (isScheduleCollectionDefinition(value)) {
+            const build =
+              authoredScheduleProvider(value as object) === undefined
+                ? await loadPlatformBuild(input.manifest.appRoot)
+                : undefined;
             for (const collection of compileScheduleCollectionDefinitions(
               entry.source,
               value,
               input.manifest.agentId,
+              () => build?.schedules?.kind,
             )) {
               assertScheduleCollectionNameAvailable(scheduleCollections, collection);
               scheduleCollections.push(collection);

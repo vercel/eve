@@ -14,20 +14,24 @@ export interface BootPhase<Input> {
 
 export interface ProcessBootInput {
   readonly agentName: string;
-  readonly platform?: PlatformDeclaration;
+  readonly platform?: PlatformDeclaration<unknown>;
   readonly artifacts?: BundledCompiledArtifacts;
 }
 
 export const PROCESS_PHASES = [
   {
     name: "platform",
-    run(app, input) {
-      if (input.platform === undefined) {
+    async run(app, input) {
+      const declaration = input.platform;
+      if (declaration === undefined) {
         throw new Error(
-          "eve reached the platform phase without a platform declaration. The generated process module must pass the platform to bootProcess().",
+          "eve reached the platform phase without a platform declaration. The generated process module must pass the declaration it imports from the platform module to bootProcess().",
         );
       }
-      app.platform = createEntities(input.platform, undefined);
+      const context = await declaration.context?.();
+      app.platform = createEntities(declaration, context);
+      app.declaration = declaration;
+      app.context = context;
     },
   },
   {
@@ -46,10 +50,17 @@ export const PROCESS_PHASES = [
 
 export type ProcessPhaseName = (typeof PROCESS_PHASES)[number]["name"];
 
-export function bootProcess(input: ProcessBootInput, through: ProcessPhaseName): void {
+export async function bootProcess(
+  input: ProcessBootInput,
+  through: ProcessPhaseName,
+): Promise<ProcessApp> {
   const app = processApp();
   const end = PROCESS_PHASES.findIndex((phase) => phase.name === through) + 1;
-  for (; app.bootedPhases < end; app.bootedPhases += 1) {
-    PROCESS_PHASES[app.bootedPhases]!.run(app, input);
-  }
+  app.booting = app.booting.then(async () => {
+    for (; app.bootedPhases < end; app.bootedPhases += 1) {
+      await PROCESS_PHASES[app.bootedPhases]!.run(app, input);
+    }
+  });
+  await app.booting;
+  return app;
 }

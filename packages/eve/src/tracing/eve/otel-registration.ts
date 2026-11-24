@@ -16,7 +16,6 @@ import { AgentSpanIdGenerator } from "#compiled/@vercel/agent-runs/index.js";
 import type { OtelConfiguration } from "./otel-configuration.js";
 import { type Attributes } from "#compiled/@vercel/agent-runs/index.js";
 import { invocationName } from "#compiled/@vercel/agent-runs/otel.js";
-import { builtInPlatform } from "#platform/context.js";
 export type SamplingOperation = { readonly name: string; readonly attributes?: Attributes };
 
 import {
@@ -66,9 +65,16 @@ class PrivateSpanFilteringProcessor implements SpanProcessor {
   private readonly processors: readonly SpanProcessor[];
   private readonly startedSpans = new Set<string>();
 
-  constructor(processors: readonly SpanProcessor[], endedSpans: Set<string>) {
+  private readonly sessionAttribute: string | undefined;
+
+  constructor(
+    processors: readonly SpanProcessor[],
+    endedSpans: Set<string>,
+    sessionAttribute: string | undefined,
+  ) {
     this.processors = processors;
     this.endedSpans = endedSpans;
+    this.sessionAttribute = sessionAttribute;
   }
 
   async forceFlush(): Promise<void> {
@@ -112,7 +118,7 @@ class PrivateSpanFilteringProcessor implements SpanProcessor {
     )
       mutableSpan.setAttribute("gen_ai.conversation.id", conversationId);
     const traceSessionId = traceSessionIdFromContext(parentContext);
-    const traceSessionAttribute = builtInPlatform().telemetry.sessionAttribute;
+    const traceSessionAttribute = this.sessionAttribute;
     if (
       traceSessionAttribute !== undefined &&
       traceSessionId !== undefined &&
@@ -158,12 +164,13 @@ class PrivateSpanFilteringProcessor implements SpanProcessor {
 export function registerOtelPipeline(input: {
   readonly otel: OtelConfiguration;
   readonly serviceName: string;
+  readonly sessionAttribute: string | undefined;
 }): RegisteredOtelPipeline {
   const pipeline = input.otel;
   const optionalPeerTracerProxy = captureOptionalPeerTracerProxy();
   const idGenerator = new AgentSpanIdGenerator();
   const markerPropagator = new RegistrationMarkerPropagator();
-  const spanProcessors = privateSpanProcessors(pipeline.spanProcessors);
+  const spanProcessors = privateSpanProcessors(pipeline.spanProcessors, input.sessionAttribute);
   const configuration: Configuration = {
     attributes: pipeline.resource,
     autoDetectResources: false,
@@ -216,10 +223,17 @@ export function registerOtelPipeline(input: {
   };
 }
 
-function privateSpanProcessors(processors: readonly SpanProcessorOrName[]): SpanProcessorOrName[] {
+function privateSpanProcessors(
+  processors: readonly SpanProcessorOrName[],
+  sessionAttribute: string | undefined,
+): SpanProcessorOrName[] {
   const concrete = processors.filter(isSpanProcessor);
   if (concrete.length === 0) return [...processors];
-  const filtering = new PrivateSpanFilteringProcessor(concrete, replayDeduplicationRegistry());
+  const filtering = new PrivateSpanFilteringProcessor(
+    concrete,
+    replayDeduplicationRegistry(),
+    sessionAttribute,
+  );
   const result: SpanProcessorOrName[] = [];
   let inserted = false;
   for (const processor of processors) {

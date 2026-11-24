@@ -1,6 +1,7 @@
 import type { SpanExporter, SpanProcessor } from "#compiled/@vercel/otel/index.js";
 import { describe, expect, it } from "vitest";
 
+import { testEntities } from "#internal/testing/test-platform.js";
 import {
   agentRunsIntegration,
   collectOtelPipeline,
@@ -9,6 +10,8 @@ import {
   otel,
   otelIntegration,
 } from "#tracing/eve/otel-declaration.js";
+
+const platform = testEntities();
 
 function processor(): SpanProcessor {
   return {
@@ -127,26 +130,32 @@ describe("destination export policy", () => {
 
 describe("collectOtelPipeline", () => {
   it("reports nothing declared when nothing did", () => {
-    expect(collectOtelPipeline([]).declared).toBe(false);
-    expect(collectOtelPipeline([{ not: "a declaration" }]).declared).toBe(false);
+    expect(collectOtelPipeline([], platform).declared).toBe(false);
+    expect(collectOtelPipeline([{ not: "a declaration" }], platform).declared).toBe(false);
   });
 
   it("concatenates destinations in declaration order", () => {
     const [first, second, third] = [processor(), processor(), processor()];
-    const collected = collectOtelPipeline([
-      otelIntegration({
-        spanProcessors: [first, second],
-      }),
-      otelIntegration({ spanProcessors: [third] }),
-      otel(),
-    ]);
+    const collected = collectOtelPipeline(
+      [
+        otelIntegration({
+          spanProcessors: [first, second],
+        }),
+        otelIntegration({ spanProcessors: [third] }),
+        otel(),
+      ],
+      platform,
+    );
 
     expect(collected.declared).toBe(true);
     expect(collected.configuration.spanProcessors).toStrictEqual([first, second, third]);
   });
 
   it("is declared by a destination alone, with no otel() beside it", () => {
-    const collected = collectOtelPipeline([otelIntegration({ spanProcessors: [processor()] })]);
+    const collected = collectOtelPipeline(
+      [otelIntegration({ spanProcessors: [processor()] })],
+      platform,
+    );
 
     expect(collected.declared).toBe(true);
     expect(collected.settings).toStrictEqual({
@@ -156,15 +165,18 @@ describe("collectOtelPipeline", () => {
   });
 
   it("carries the singletons onto the pipeline and the rest onto the settings", () => {
-    const collected = collectOtelPipeline([
-      otel({
-        functionId: "weather",
-        propagators: ["tracecontext"],
-        resource: { "service.version": "abc" },
-        sampler: "always_on",
-        traceChannelRequests: true,
-      }),
-    ]);
+    const collected = collectOtelPipeline(
+      [
+        otel({
+          functionId: "weather",
+          propagators: ["tracecontext"],
+          resource: { "service.version": "abc" },
+          sampler: "always_on",
+          traceChannelRequests: true,
+        }),
+      ],
+      platform,
+    );
 
     expect(collected.configuration).toMatchObject({
       propagators: ["tracecontext"],
@@ -179,13 +191,19 @@ describe("collectOtelPipeline", () => {
 
   it("refuses a second otel() rather than picking one", () => {
     expect(() =>
-      collectOtelPipeline([otel({ sampler: "always_on" }), otel({ sampler: "always_off" })]),
+      collectOtelPipeline(
+        [otel({ sampler: "always_on" }), otel({ sampler: "always_off" })],
+        platform,
+      ),
     ).toThrow(/declares `otel\(\)` more than once/u);
   });
 
   it("passes declared instrumentations onto the pipeline", () => {
     const instrumentation = { name: "test-instrumentation" };
-    const collected = collectOtelPipeline([otel({ instrumentations: [instrumentation] })]);
+    const collected = collectOtelPipeline(
+      [otel({ instrumentations: [instrumentation] })],
+      platform,
+    );
 
     expect(collected.configuration.instrumentations).toStrictEqual([instrumentation]);
   });

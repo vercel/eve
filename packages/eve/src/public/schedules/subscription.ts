@@ -1,3 +1,4 @@
+import { currentApp } from "#context/app.js";
 import type { SessionSendOptions } from "#channel/session.js";
 import type { InstrumentationChannel } from "#shared/instrumentation-channel.js";
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
@@ -17,7 +18,10 @@ import type { MessageContent } from "#shared/message-content.js";
 import type { ChannelReference } from "#channel/compiled-channel.js";
 import type { InferReceiveTarget } from "#channel/receive-target.js";
 import type { Delivery } from "#shared/delivery.js";
-import { SCHEDULE_COLLECTION_DEFINITION_BRAND } from "#shared/schedule-collection-definition.js";
+import {
+  SCHEDULE_COLLECTION_DEFINITION_BRAND,
+  recordAuthoredScheduleProvider,
+} from "#shared/schedule-collection-definition.js";
 import type { ScheduleProviderContext } from "#runtime/schedules/provider-types.js";
 import type { AgentToolExposure } from "#shared/agent-definition.js";
 import { defaultScheduleProvider } from "#platform/schedules.js";
@@ -501,10 +505,11 @@ export function defineDynamicSchedules(
   },
 ): DefinedDynamicSchedules<any, any, any> {
   let provider = definition.provider;
+  recordAuthoredScheduleProvider(definition, provider);
   Object.defineProperty(definition, "provider", {
     configurable: true,
     enumerable: true,
-    get: () => (provider ??= defaultScheduleProvider(undefined)),
+    get: () => (provider ??= defaultScheduleProvider(currentApp().platform)),
   });
   Object.assign(definition, {
     tool: definition.tool ?? true,

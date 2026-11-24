@@ -1,10 +1,18 @@
 import { join } from "node:path";
 
 import type { Build } from "#platform/entities.js";
+import { vercelCompute } from "#platform/vercel/compute.js";
 import { isVercelEnvironment } from "#platform/vercel/environment.js";
+import { vercelScheduleProvider } from "#platform/vercel/schedules/provider.js";
 import { toErrorMessage } from "#shared/errors.js";
 
 export const vercelBuild = {
+  compute: vercelCompute(),
+  schedules: {
+    get kind() {
+      return vercelScheduleProvider().kind;
+    },
+  },
   platformOutput: () => isVercelEnvironment(),
   outputDirectory: (appRoot) =>
     isVercelEnvironment() ? join(appRoot, ".vercel", "output") : undefined,

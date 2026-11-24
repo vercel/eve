@@ -6,6 +6,7 @@ import {
   finalizeInstrumentationProviders,
   registerInstrumentationProvider,
 } from "#instrumentation/providers.js";
+import { testEntities } from "#internal/testing/test-platform.js";
 import { defineInstrumentation } from "#public/instrumentation/index.js";
 import { otel, type TracePolicyDecision } from "#public/instrumentation/otel.js";
 
@@ -19,6 +20,7 @@ vi.mock("#tracing/eve/otel-registration.js", () => ({
   }),
 }));
 const PROCESS_APP_KEY = Symbol.for("eve.app");
+const platform = testEntities();
 
 const traceContext = (audience: "public" | "private" | "unknown") => ({
   agentName: "weather-agent",
@@ -42,18 +44,20 @@ describe("otel and authored provider composition", () => {
       const modelStarted = vi.fn();
       await registerInstrumentationProvider({
         agentName: "weather-agent",
+        platform,
         slot: "otel",
         value: otel({ tracePolicy: () => policy as TracePolicyDecision }),
       });
       await registerInstrumentationProvider({
         agentName: "weather-agent",
+        platform,
         slot: "rows",
         value: defineInstrumentation({
           tracePolicy: () => ({ emit: true, recordInputs: true, recordOutputs: true }),
           events: { "model.call.started": modelStarted },
         }),
       });
-      const runtime = finalizeInstrumentationProviders({ serviceName: "weather-agent" });
+      const runtime = finalizeInstrumentationProviders({ platform, serviceName: "weather-agent" });
       const hooks = runtime.hooks.forTrace!(traceContext("private"));
 
       await contextStorage.run(new ContextContainer(), () =>

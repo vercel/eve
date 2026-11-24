@@ -1,4 +1,5 @@
-import { processApp } from "#runtime/app.js";
+import { bindApp } from "#context/app.js";
+import { processApp, startedApp } from "#runtime/app.js";
 import { startSessionPrewarmers } from "#context/prewarm.js";
 import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
@@ -34,6 +35,7 @@ async function prewarmSession(input: SessionPrewarmInput): Promise<{
 }> {
   try {
     const ctx = await deserializeContext(input.serializedContext);
+    bindApp(ctx, startedApp());
     const session = hydrateDurableSession(readDurableSession(input.sessionState));
     const scoped = await withContextScope(ctx, session, async (current) => {
       startSessionPrewarmers(ctx, "session");

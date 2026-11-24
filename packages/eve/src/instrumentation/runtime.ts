@@ -123,6 +123,7 @@ export interface BoundInstrumentationSession {
 }
 
 export interface InstrumentationRuntime {
+  readonly environment: "development" | "preview" | "production";
   readonly forceFlush: () => Promise<void>;
   readonly hooks: InstrumentationHooks;
   readonly idGenerator?: AgentSpanIdGenerator;
@@ -143,6 +144,7 @@ export interface InstrumentationRuntime {
   readonly runtimeContextResolvers?: readonly RuntimeContextResolver[];
   readonly runInContext: InstrumentationContextRunner;
   readonly samplesTrace?: (traceId: string, operation?: AgentSamplingOperation) => boolean;
+  readonly sessionAttribute?: string;
   readonly shutdown: () => Promise<void>;
 }
 
@@ -191,7 +193,10 @@ export function bindInstrumentationRuntime(
   const baseHooks = runtime.hooks;
   const traceSessionId = boundSession.traceSessionId;
   const readSessionContext = () => {
-    const sessionContext = readInstrumentationSessionContext(contextStorage.getStore() ?? ctx);
+    const sessionContext = readInstrumentationSessionContext(
+      contextStorage.getStore() ?? ctx,
+      runtime.environment,
+    );
     return {
       ...sessionContext,
       rootSessionId: sessionContext.parent?.rootSessionId ?? boundSession.rootSessionId,

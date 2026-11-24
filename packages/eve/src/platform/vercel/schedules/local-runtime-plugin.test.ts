@@ -23,6 +23,7 @@ vi.mock("#platform/vercel/schedules/consumer.js", () => ({
   createScheduleCollectionConsumer: () => ({ handler: async () => {}, retry: () => undefined }),
 }));
 
+import { testApp } from "#internal/testing/test-platform.js";
 import installLocalSchedulesRuntimePlugin from "./local-runtime-plugin.js";
 
 afterEach(() => {
@@ -40,13 +41,16 @@ it("waits for a snapshot, refreshes only on generation changes, and bounds faile
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
   let close: (() => void) | undefined;
   onTestFinished(() => close?.());
-  installLocalSchedulesRuntimePlugin({
-    hooks: {
-      hook: (_name, handler) => {
-        close = handler;
+  installLocalSchedulesRuntimePlugin(
+    {
+      hooks: {
+        hook: (_name, handler) => {
+          close = handler;
+        },
       },
     },
-  });
+    testApp(),
+  );
 
   expect(mocks.manifest).not.toHaveBeenCalled();
   expect(mocks.receive).not.toHaveBeenCalled();

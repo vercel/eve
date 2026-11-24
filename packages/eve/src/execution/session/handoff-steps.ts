@@ -1,4 +1,5 @@
-import { processApp } from "#runtime/app.js";
+import { bindApp } from "#context/app.js";
+import { processApp, startedApp } from "#runtime/app.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import type { SessionHandoverPayload } from "#execution/session-inbox/inbox.js";
 import { findSessionHookHolder } from "#execution/session-inbox/owner.js";
@@ -141,6 +142,7 @@ export async function prepareSuccessorStep(input: {
   let context: Awaited<ReturnType<typeof deserializeContext>>;
   try {
     context = await deserializeContext(checkpoint.serializedContext);
+    bindApp(context, startedApp());
   } catch (error) {
     if (error instanceof IncompatibleStateLayoutError) return unreadable(error.message);
     throw error;

@@ -27,6 +27,7 @@ import { checkToolCallInput, toolCallModelOutput } from "#harness/tool-call-io.j
 import { normalizeToolJsonOutput } from "#harness/tool-model-output.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import { createLogger, logError } from "#internal/logging.js";
+import type { Build } from "#platform/entities.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import { compiledSessionAgent } from "#runtime/sessions/compiled-session-agent.js";
@@ -49,6 +50,7 @@ import type { ToolModelOutput } from "#tools/model-output.js";
 const log = createLogger("invoke-tool");
 
 export interface InvokeToolRuntime {
+  readonly build: Build;
   readonly bundle?: CompiledRuntimeAgentBundle;
   readonly callbackBaseUrl: string;
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
@@ -198,6 +200,7 @@ interface CallSandbox {
 
 async function keyedSandbox(runtime: InvokeToolRuntime, sessionId: string): Promise<CallSandbox> {
   const access = await ensureSandboxAccess({
+    build: () => runtime.build,
     compiledArtifactsSource: runtime.compiledArtifactsSource,
     nodeId: runtime.nodeId,
     ownsSandbox: false,
@@ -211,6 +214,7 @@ async function keyedSandbox(runtime: InvokeToolRuntime, sessionId: string): Prom
 
 async function callSandbox(runtime: InvokeToolRuntime, sessionId: string): Promise<CallSandbox> {
   const access = await ensureSandboxAccess({
+    build: () => runtime.build,
     compiledArtifactsSource: runtime.compiledArtifactsSource,
     nodeId: runtime.nodeId,
     ownsSandbox: true,

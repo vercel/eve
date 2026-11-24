@@ -1,6 +1,7 @@
 import { ensureDevelopmentSandboxesPrepared } from "#runtime-env/development-sandboxes.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger } from "#internal/logging.js";
+import type { Build } from "#platform/entities.js";
 import { contextStorage } from "#context/container.js";
 import {
   buildCallbackContext,
@@ -50,6 +51,7 @@ import {
 } from "#runtime-env/sandbox-cache.js";
 
 interface EnsureSandboxAccessInput {
+  readonly build: () => Build;
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
   readonly nodeId: string;
   readonly ownsSandbox?: boolean;
@@ -289,6 +291,7 @@ export async function ensureSandboxAccess(
     }
     if (isEveDevEnvironment() && input.compiledArtifactsSource.kind === "disk") {
       await ensureDevelopmentSandboxesPrepared({
+        build: input.build(),
         compiledArtifactsSource: input.compiledArtifactsSource,
         nodeId: ownerNodeId,
         providerName: provider.providerName,

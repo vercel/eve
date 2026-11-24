@@ -3,7 +3,7 @@ import { processApp, type App, type ProcessApp } from "#runtime/app.js";
 import { PROCESS_PHASES, type BootPhase } from "#runtime/lifecycle.js";
 
 export interface StartInput {
-  readonly durable: DurableEngine;
+  defaultDurable(): DurableEngine<unknown>;
 }
 
 const DURABLE_PHASE = {
@@ -15,7 +15,8 @@ const DURABLE_PHASE = {
         "eve reached the durable phase without a platform. The platform phase must run before the durable engine starts.",
       );
     }
-    app.durable = await input.durable.start({ platform, lifetime, hosts: app.hosts });
+    const engine = app.declaration?.durable?.() ?? input.defaultDurable();
+    app.durable = await engine.start({ platform, lifetime, hosts: app.hosts }, app.context);
   },
 } as const satisfies BootPhase<StartInput>;
 

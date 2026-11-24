@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { aroundEach, describe, expect, it, vi } from "vitest";
 import { REMOTE_AGENT_PROTOCOL_VERSION } from "#protocol/remote-agent-protocol.js";
 
 import type { RouteHandlerArgs } from "#channel/routes.js";
@@ -24,6 +24,12 @@ import { eveChannel, type EveChannelConfig } from "#public/channels/eve.js";
 import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
+import { inTestApp, testApp } from "#internal/testing/test-platform.js";
+import { createEntities } from "#platform/entities.js";
+import vercelPlatform from "#platform/vercel/declaration.js";
+
+const app = testApp({ platform: createEntities(vercelPlatform, undefined) });
+aroundEach(async (runTest) => await inTestApp(runTest, app));
 
 const ROUTER_CALLER: SessionAuthContext = {
   attributes: {},

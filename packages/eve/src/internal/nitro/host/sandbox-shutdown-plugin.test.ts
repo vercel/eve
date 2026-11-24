@@ -9,6 +9,9 @@ import {
   runSandboxShutdown,
   shouldInstallSandboxShutdown,
 } from "#internal/nitro/host/sandbox-shutdown-plugin.js";
+import { testApp } from "#internal/testing/test-platform.js";
+import { createEntities } from "#platform/entities.js";
+import vercelPlatform from "#platform/vercel/declaration.js";
 
 function createNitroApp() {
   const closeHandlers: Array<() => Promise<void>> = [];
@@ -33,21 +36,24 @@ afterEach(async () => {
 
 describe("shouldInstallSandboxShutdown", () => {
   it("installs on a plain production server", () => {
-    expect(shouldInstallSandboxShutdown({})).toBe(true);
+    expect(shouldInstallSandboxShutdown({}, testApp())).toBe(true);
   });
 
   it("skips eve dev processes", () => {
     vi.stubEnv("EVE_DEV", "1");
-    expect(shouldInstallSandboxShutdown({})).toBe(false);
+    expect(shouldInstallSandboxShutdown({}, testApp())).toBe(false);
   });
 
   it("skips dev sandbox run workers", () => {
-    expect(shouldInstallSandboxShutdown({ EVE_DEVELOPMENT_SANDBOX_RUN_ID: "dev-run" })).toBe(false);
+    expect(
+      shouldInstallSandboxShutdown({ EVE_DEVELOPMENT_SANDBOX_RUN_ID: "dev-run" }, testApp()),
+    ).toBe(false);
   });
 
   it("skips Vercel serverless instances", () => {
     vi.stubEnv("VERCEL", "1");
-    expect(shouldInstallSandboxShutdown({})).toBe(false);
+    const app = testApp({ platform: createEntities(vercelPlatform, undefined) });
+    expect(shouldInstallSandboxShutdown({}, app)).toBe(false);
   });
 });
 
@@ -56,6 +62,7 @@ describe("installSandboxShutdown", () => {
     const nitroApp = createNitroApp();
 
     installSandboxShutdown({
+      app: testApp(),
       env: { EVE_DEVELOPMENT_SANDBOX_RUN_ID: "dev-run" },
       log: () => {},
       nitroApp,
@@ -69,7 +76,7 @@ describe("installSandboxShutdown", () => {
     trackActiveSandboxConnection({ providerName: "docker", connection, sessionId: "session-1" });
     const nitroApp = createNitroApp();
 
-    installSandboxShutdown({ env: {}, log: () => {}, nitroApp });
+    installSandboxShutdown({ app: testApp(), env: {}, log: () => {}, nitroApp });
     await nitroApp.close();
 
     expect(connection.stop).toHaveBeenCalledTimes(1);

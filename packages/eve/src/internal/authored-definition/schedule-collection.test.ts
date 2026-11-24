@@ -3,6 +3,9 @@ import { z } from "#compiled/zod/index.js";
 import { normalizeScheduleCollectionDefinition } from "#internal/authored-definition/schedule-collection.js";
 import { defineDynamicSchedules } from "#public/schedules/subscription.js";
 import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
+import { inTestApp, testApp } from "#internal/testing/test-platform.js";
+import { createEntities } from "#platform/entities.js";
+import vercelPlatform from "#platform/vercel/declaration.js";
 
 const valid = {
   provider: inMemoryScheduleProvider(),
@@ -78,14 +81,19 @@ describe("normalizeScheduleCollectionDefinition", () => {
   it("defaults to Vercel and preserves an explicit provider override", () => {
     vi.stubEnv("EVE_DEV", "");
     try {
-      const { provider, ...options } = valid;
-      const implicit = defineDynamicSchedules({ ...options });
-      expect(normalizeScheduleCollectionDefinition(implicit, "Invalid.").provider.kind).toBe(
-        "vercel",
+      inTestApp(
+        () => {
+          const { provider, ...options } = valid;
+          const implicit = defineDynamicSchedules({ ...options });
+          expect(normalizeScheduleCollectionDefinition(implicit, "Invalid.").provider.kind).toBe(
+            "vercel",
+          );
+          expect(defineDynamicSchedules({ ...options, provider }).provider).toBe(provider);
+          vi.stubEnv("EVE_DEV", "1");
+          expect(defineDynamicSchedules({ ...options }).provider.kind).toBe("in-memory");
+        },
+        testApp({ platform: createEntities(vercelPlatform, undefined) }),
       );
-      expect(defineDynamicSchedules({ ...options, provider }).provider).toBe(provider);
-      vi.stubEnv("EVE_DEV", "1");
-      expect(defineDynamicSchedules({ ...options }).provider.kind).toBe("in-memory");
     } finally {
       vi.unstubAllEnvs();
     }

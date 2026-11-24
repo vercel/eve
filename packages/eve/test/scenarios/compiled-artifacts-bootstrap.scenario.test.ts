@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { compileAgent } from "../../src/compiler/compile-agent.js";
 import { writeCompiledArtifactsFiles } from "../../src/internal/application/compiled-artifacts.js";
 import { resolvePackageSourceFilePath } from "../../src/internal/application/package.js";
+import { selectPlatformModule } from "../../src/platform/selection.js";
 import { useTemporaryAppRoots } from "../../src/internal/testing/use-temporary-app-roots.js";
 
 const createAppRoot = useTemporaryAppRoots();
@@ -39,6 +40,7 @@ describe("writeCompiledArtifactsFiles", () => {
     const generatedArtifacts = await writeCompiledArtifactsFiles({
       compileResult: await compileAgent({ startPath: appRoot }),
       defaultWorkflowWorld: "local",
+      platformModule: selectPlatformModule(appRoot),
       outDir: join(appRoot, ".workflow-build"),
     });
     const bootstrapSource = await readFile(generatedArtifacts.bootstrapPath, "utf8");
@@ -50,7 +52,7 @@ describe("writeCompiledArtifactsFiles", () => {
 
     expect(bootstrapImports[0]).toContain(processPath.replaceAll("\\", "/"));
     expect(bootstrapImports[1]).toMatch(/^import moduleMap from /);
-    expect(processSource).toContain("/src/platform/builtin.");
+    expect(processSource).toContain("compiled-artifacts-platform.mjs");
     expect(processSource).toContain('  "queue-namespace",');
     expect(processSource).not.toContain("compiled-artifacts-module-map");
   });
@@ -83,6 +85,7 @@ describe("writeCompiledArtifactsFiles", () => {
     const generatedArtifacts = await writeCompiledArtifactsFiles({
       compileResult,
       defaultWorkflowWorld: "local",
+      platformModule: selectPlatformModule(appRoot),
       outDir,
     });
     const bootstrapSource = await readFile(generatedArtifacts.bootstrapPath, "utf8");
@@ -103,7 +106,7 @@ describe("writeCompiledArtifactsFiles", () => {
     expect(instrumentationPluginSource).not.toContain(
       join(agentRoot, "instrumentation", "audit.ts").replaceAll("\\", "/"),
     );
-    expect(instrumentationPluginSource).toContain("registerInstrumentationProvider");
+    expect(instrumentationPluginSource).toContain("await setUpInstrumentation({");
 
     const instrumentationPluginModule = (await import(
       pathToFileURL(instrumentationPluginPath).href
@@ -163,6 +166,7 @@ describe("writeCompiledArtifactsFiles", () => {
     const generatedArtifacts = await writeCompiledArtifactsFiles({
       compileResult,
       defaultWorkflowWorld: "local",
+      platformModule: selectPlatformModule(appRoot),
       outDir,
     });
     const instrumentationPluginPath = generatedArtifacts.instrumentationPluginPath;
@@ -180,7 +184,7 @@ describe("writeCompiledArtifactsFiles", () => {
 
     expect(instrumentationPluginSource).toContain('slot: "local"');
     expect(instrumentationPluginSource).toContain('slot: "otel"');
-    expect(instrumentationPluginSource).toContain("seedInstrumentationProviders();");
+    expect(instrumentationPluginSource).toContain("await setUpInstrumentation({");
     expect(instrumentationPluginSource).toContain("shutdownInstrumentationProviders");
     expect(instrumentationPluginSource).toContain("hooks?.hook('close'");
     expect(instrumentationPluginSource).not.toContain("registerInstrumentationConfig");
@@ -237,6 +241,7 @@ describe("writeCompiledArtifactsFiles", () => {
     const generatedArtifacts = await writeCompiledArtifactsFiles({
       compileResult,
       defaultWorkflowWorld: "local",
+      platformModule: selectPlatformModule(appRoot),
       outDir,
     });
     const instrumentationPluginPath = generatedArtifacts.instrumentationPluginPath;
@@ -246,7 +251,7 @@ describe("writeCompiledArtifactsFiles", () => {
 
     expect(generatedArtifacts.instrumentationSourcePaths).toEqual([]);
     expect(await readFile(instrumentationPluginPath, "utf8")).toContain(
-      "seedInstrumentationProviders();",
+      "await setUpInstrumentation({",
     );
   });
 
@@ -274,6 +279,7 @@ describe("writeCompiledArtifactsFiles", () => {
     const generatedArtifacts = await writeCompiledArtifactsFiles({
       compileResult,
       defaultWorkflowWorld: "local",
+      platformModule: selectPlatformModule(appRoot),
       outDir,
     });
     const instrumentationPluginPath = generatedArtifacts.instrumentationPluginPath;
@@ -324,6 +330,7 @@ describe("writeCompiledArtifactsFiles", () => {
     const generatedArtifacts = await writeCompiledArtifactsFiles({
       compileResult,
       defaultWorkflowWorld: "local",
+      platformModule: selectPlatformModule(appRoot),
       outDir,
     });
 

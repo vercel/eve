@@ -71,7 +71,7 @@ describe("createDevelopmentWorkflowWorldPluginSource", () => {
     });
 
     expect(source).toContain(
-      "durable: workflowEngine({ world: () => createDevelopmentWorkflowWorld() }),",
+      "defaultDurable: () => workflowEngine({ world: () => createDevelopmentWorkflowWorld() }),",
     );
     expect(source).not.toContain("buildDeploymentId");
     expect(source).not.toContain("@workflow/world-local");

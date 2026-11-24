@@ -23,7 +23,7 @@ export interface InProcessRuntime extends Runtime {
 
 export function createInProcessRuntime(
   config: SessionRuntimeConfig,
-  options: InProcessRuntimeOptions = {},
+  options: InProcessRuntimeOptions,
 ): InProcessRuntime {
   const runtimes = new Map<string, InProcessRuntime>();
   const runtimeFor = (child: SessionRuntimeConfig): InProcessRuntime => {

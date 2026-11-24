@@ -23,7 +23,9 @@ import {
   VERCEL_SCHEDULES_CLIENT_HEADERS,
 } from "#platform/vercel/schedules/provider.js";
 import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
-import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
+import { sessionRuntime } from "#execution/session-runtime.js";
+import { runInApp } from "#context/app.js";
+import type { App } from "#runtime/app.js";
 import { dispatchScheduledOccurrence } from "#runtime/schedules/dispatch-occurrence.js";
 import {
   loadScheduleCollectionDefinition,
@@ -36,103 +38,113 @@ import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-
 export async function handleScheduleCollectionConsumer(
   config: NitroArtifactsConfig,
   request: Request,
+  app: App,
 ): Promise<Response> {
-  const { handler, retry } = createScheduleCollectionConsumer(config);
+  const { handler, retry } = createScheduleCollectionConsumer(config, app);
   return await handleCallback(handler, { retry })(request);
 }
 
-export function createScheduleCollectionConsumer(config: NitroArtifactsConfig): {
+export function createScheduleCollectionConsumer(
+  config: NitroArtifactsConfig,
+  app: App,
+): {
   readonly handler: MessageHandler<unknown>;
   readonly retry: RetryHandler;
 } {
   return {
-    handler: async (message, metadata) => {
-      const queue = expectScheduleQueueMessage(message);
-      const application = queue.payload.eve.application;
-      const collection = queue.payload.eve.collection;
-      const source = resolveNitroCompiledArtifactsSource(config);
-      const [bundle, manifest] = await Promise.all([
-        getCompiledRuntimeAgentBundle({ compiledArtifactsSource: source }),
-        loadCompiledManifest({ compiledArtifactsSource: source }),
-      ]);
-      if (manifest.config.name !== application)
-        throw new PermanentScheduleMessageError("Schedule application does not match this agent.");
-      if (
-        !queue.namespace.startsWith("eve-") ||
-        metadata.topicName !== deriveEveScheduleQueueTopic(application)
-      )
-        throw new PermanentScheduleMessageError("Schedule delivery does not match this agent.");
-      let definition: DynamicSchedulesDefinition<unknown>;
-      try {
-        definition = await loadScheduleCollectionDefinition(bundle, collection, {
-          manifest,
-          providerKind: "vercel",
-        });
-      } catch (error) {
-        if (error instanceof ScheduleCollectionNotDeployedError)
-          throw new PermanentScheduleMessageError(error.message);
-        throw error;
-      }
-      const occurrence: ScheduleOccurrenceIdentity = {
-        collection,
-        executionId: queue.executionId ?? metadata.messageId,
-        name: queue.name,
-        scheduleId: queue.scheduleId,
-        scheduledAt: queue.scheduledAt ?? queue.firedAt ?? metadata.createdAt.toISOString(),
-      };
-      try {
-        let payload;
-        try {
-          payload = parseSchedulePayload<unknown>(queue.payload.payload, {
-            application,
-            collection,
-          });
-        } catch {
-          throw new PermanentScheduleMessageError("Scheduled collection request is invalid.");
-        }
-        await dispatchScheduledOccurrence({
-          bundle,
-          runtime: createWorkflowRuntime({
-            compiledArtifactsSource: bundle.compiledArtifactsSource,
-          }),
-          collection,
-          definition,
-          occurrence,
-          payload,
-          namespace: queue.namespace,
-          verifyDelivery: async () =>
-            verifyScheduleDelivery(
-              queue,
-              await getSchedule(definition, queue),
-              application,
-              metadata.topicName,
-            ),
-        });
-      } catch (error) {
-        const final =
-          error instanceof PermanentScheduleMessageError ||
-          metadata.deliveryCount >= EVE_SCHEDULE_CONSUMER_MAX_DELIVERIES;
-        if (final) {
-          await definition.events?.["occurrence.failed"]?.({
-            collection,
-            executionId: occurrence.executionId,
-            name: occurrence.name,
-            occurrence,
-            reason: error instanceof Error ? error.message : "Scheduled occurrence failed.",
-            scheduledAt: occurrence.scheduledAt,
-            scheduleId: occurrence.scheduleId,
-            type: "occurrence.failed",
-          });
-        }
-        throw error;
-      }
-    },
+    handler: (message, metadata) => runInApp(app, () => consume(message, metadata)),
     retry(error) {
       return error instanceof PermanentScheduleMessageError
         ? { acknowledge: true as const }
         : undefined;
     },
   };
+
+  async function consume(
+    message: Parameters<MessageHandler<unknown>>[0],
+    metadata: Parameters<MessageHandler<unknown>>[1],
+  ): Promise<void> {
+    const queue = expectScheduleQueueMessage(message);
+    const application = queue.payload.eve.application;
+    const collection = queue.payload.eve.collection;
+    const source = resolveNitroCompiledArtifactsSource(config);
+    const [bundle, manifest] = await Promise.all([
+      getCompiledRuntimeAgentBundle({ compiledArtifactsSource: source }),
+      loadCompiledManifest({ compiledArtifactsSource: source }),
+    ]);
+    if (manifest.config.name !== application)
+      throw new PermanentScheduleMessageError("Schedule application does not match this agent.");
+    if (
+      !queue.namespace.startsWith("eve-") ||
+      metadata.topicName !== deriveEveScheduleQueueTopic(application)
+    )
+      throw new PermanentScheduleMessageError("Schedule delivery does not match this agent.");
+    let definition: DynamicSchedulesDefinition<unknown>;
+    try {
+      definition = await loadScheduleCollectionDefinition(bundle, collection, {
+        manifest,
+        providerKind: "vercel",
+      });
+    } catch (error) {
+      if (error instanceof ScheduleCollectionNotDeployedError)
+        throw new PermanentScheduleMessageError(error.message);
+      throw error;
+    }
+    const occurrence: ScheduleOccurrenceIdentity = {
+      collection,
+      executionId: queue.executionId ?? metadata.messageId,
+      name: queue.name,
+      scheduleId: queue.scheduleId,
+      scheduledAt: queue.scheduledAt ?? queue.firedAt ?? metadata.createdAt.toISOString(),
+    };
+    try {
+      let payload;
+      try {
+        payload = parseSchedulePayload<unknown>(queue.payload.payload, {
+          application,
+          collection,
+        });
+      } catch {
+        throw new PermanentScheduleMessageError("Scheduled collection request is invalid.");
+      }
+      await dispatchScheduledOccurrence({
+        app,
+        bundle,
+        runtime: sessionRuntime(app.durable, app.hosts, {
+          compiledArtifactsSource: bundle.compiledArtifactsSource,
+        }),
+        collection,
+        definition,
+        occurrence,
+        payload,
+        namespace: queue.namespace,
+        verifyDelivery: async () =>
+          verifyScheduleDelivery(
+            queue,
+            await getSchedule(definition, queue),
+            application,
+            metadata.topicName,
+          ),
+      });
+    } catch (error) {
+      const final =
+        error instanceof PermanentScheduleMessageError ||
+        metadata.deliveryCount >= EVE_SCHEDULE_CONSUMER_MAX_DELIVERIES;
+      if (final) {
+        await definition.events?.["occurrence.failed"]?.({
+          collection,
+          executionId: occurrence.executionId,
+          name: occurrence.name,
+          occurrence,
+          reason: error instanceof Error ? error.message : "Scheduled occurrence failed.",
+          scheduledAt: occurrence.scheduledAt,
+          scheduleId: occurrence.scheduleId,
+          type: "occurrence.failed",
+        });
+      }
+      throw error;
+    }
+  }
 }
 
 async function getSchedule(

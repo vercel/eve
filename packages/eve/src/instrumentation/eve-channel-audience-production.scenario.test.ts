@@ -15,8 +15,12 @@ import {
   seedInstrumentationProviders,
 } from "#instrumentation/providers.js";
 import { none } from "#public/channels/auth.js";
+import { createEntities } from "#platform/entities.js";
+import vercelPlatform from "#platform/vercel/declaration.js";
 import { defineInstrumentation } from "#public/instrumentation/index.js";
 import { buildConversationContext } from "#channel/conversation-context.js";
+
+const platform = createEntities(vercelPlatform, undefined);
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -28,9 +32,10 @@ describe("eve channel production audience", () => {
     vi.stubEnv("VERCEL_ENV", "production");
 
     const events: InstrumentationEvent[] = [];
-    seedInstrumentationProviders();
+    seedInstrumentationProviders(platform);
     await registerInstrumentationProvider({
       agentName: "weather",
+      platform,
       slot: "audit",
       value: defineInstrumentation({
         events: {
@@ -43,7 +48,7 @@ describe("eve channel production audience", () => {
         },
       }),
     });
-    const runtime = finalizeInstrumentationProviders({ serviceName: "weather" });
+    const runtime = finalizeInstrumentationProviders({ platform, serviceName: "weather" });
     const channel = eveChannel({ auth: none() });
     if (!isCompiledChannel(channel)) throw new Error("Expected a compiled eve channel.");
 

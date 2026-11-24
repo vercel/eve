@@ -1,4 +1,6 @@
-import { builtInHosts } from "#runtime/app.js";
+import { builtInHosts, type App } from "#runtime/app.js";
+import { createLifetime } from "#runtime/lifetime.js";
+import { testEntities } from "#internal/testing/test-platform.js";
 import type { Runtime } from "#channel/types.js";
 import { hookAddress, type Durable } from "#execution/durable.js";
 import { registerHost, registerSessionEventStore, resumeRoutedHook } from "#execution/hosts.js";
@@ -24,7 +26,7 @@ import {
 
 import { createMemorySessionStore, type MemorySessionStore } from "./memory-session-store.js";
 
-export interface StoreEngineOptions extends InProcessHostOptions {
+export interface StoreEngineOptions extends Partial<InProcessHostOptions> {
   readonly deadlineMs?: number;
   readonly outOfLine?: boolean;
 }
@@ -56,6 +58,7 @@ export function createStoreEngine(
   options: StoreEngineOptions = {},
 ): StoreEngine {
   const hosts = builtInHosts();
+  const platform = options.platform ?? testEntities();
   const store = createMemorySessionStore();
   const boundary = options.stepBoundary ?? structuredCloneBoundary;
   const kept = new Map<string, { readonly value: unknown }>();
@@ -78,12 +81,17 @@ export function createStoreEngine(
       runtimes.set(key, (runtime = sessionRuntime(engine.durable, hosts, child)));
     return runtime;
   };
-  const inProcess = createInProcessHost({ ...options, stepFaults: undefined }, runtimeFor);
-  const app = {
+  const inProcess = createInProcessHost(
+    { ...options, platform, stepFaults: undefined },
+    runtimeFor,
+  );
+  const app: App = {
+    platform,
     hosts,
     get durable(): Durable {
       return engine.durable;
     },
+    lifetime: createLifetime(),
   };
 
   const lines: SessionEventStore = {

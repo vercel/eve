@@ -164,6 +164,7 @@ function spec(
     } as PreparedApplicationHost["compileResult"],
     compiledArtifacts: {
       bootstrapPath: `${APP_ROOT}/.eve/bootstrap.mjs`,
+      platformModulePath: `${APP_ROOT}/.eve/platform.mjs`,
       workflowWorldPluginPath: `${APP_ROOT}/.eve/workflow-world.mjs`,
       ...(options.instrumented === true && {
         instrumentationPluginPath: `${APP_ROOT}/.eve/instrumentation.mjs`,

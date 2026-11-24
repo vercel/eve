@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
-import { builtInPlatform } from "#platform/context.js";
+import { createEntities } from "#platform/entities.js";
+import vercelPlatform from "#platform/vercel/declaration.js";
 import { answerDispatcherProbe } from "#internal/testing/node-fetch.js";
 
-const platform = builtInPlatform();
+const platform = createEntities(vercelPlatform, undefined);
 const callbackUrl = "https://agent.example.com/eve/v1/activity/opaque-token";
 const requestContextSymbol = Symbol.for("@vercel/request-context");
 const requestContextGlobal = globalThis as typeof globalThis & { [key: symbol]: unknown };

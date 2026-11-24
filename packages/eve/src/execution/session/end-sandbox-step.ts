@@ -1,3 +1,5 @@
+import { startedApp } from "#runtime/app.js";
+import { bindApp } from "#context/app.js";
 import { SandboxTerminalCleanupKey } from "#context/keys.js";
 import { withContextScope } from "#context/run-step.js";
 import { deserializeContext } from "#context/serialize.js";
@@ -29,6 +31,7 @@ export async function endSessionSandboxStep(input: {
   "use step";
 
   const ctx = await deserializeContext(input.serializedContext);
+  bindApp(ctx, startedApp());
   const durable = readDurableSession(input.sessionState);
   const session = hydrateDurableSession(durable);
   await withContextScope(ctx, session, async (enrichedSession) => {

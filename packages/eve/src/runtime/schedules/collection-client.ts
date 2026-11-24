@@ -1,4 +1,4 @@
-import { appOf } from "#context/app.js";
+import { appOf, currentApp } from "#context/app.js";
 import { hostsOf } from "#runtime/app.js";
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import { randomUUID } from "node:crypto";
@@ -121,6 +121,7 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
     validateScope(scope);
     const provider = createScheduleProviderContext({
       abortSignal: callContext.abortSignal,
+      app: currentApp,
       application: callContext.application,
       bundle: () => requireCompiledBundle(loadContext()),
       collection: callContext.collection,

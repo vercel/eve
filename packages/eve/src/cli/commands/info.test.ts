@@ -91,7 +91,7 @@ async function makeCompiledState(): Promise<CompileAgentResult> {
 describe("buildApplicationInfoJson", () => {
   test("projects the effective compiled graph into the JSON contract", async () => {
     const json = buildApplicationInfoJson({
-      application: getApplicationInfo(APP_ROOT),
+      application: await getApplicationInfo(APP_ROOT),
       compiledState: await makeCompiledState(),
       messaging: MESSAGING,
     });
@@ -127,7 +127,7 @@ describe("buildApplicationInfoJson", () => {
       parentNodeId,
     });
     const json = buildApplicationInfoJson({
-      application: getApplicationInfo(APP_ROOT),
+      application: await getApplicationInfo(APP_ROOT),
       compiledState: {
         ...compiledState,
         manifest: {
@@ -156,9 +156,9 @@ describe("buildApplicationInfoJson", () => {
     expect(json.artifacts?.compiledManifest).toContain("compiled-agent-manifest.json");
   });
 
-  test("reports an unavailable contract when the project is not compiled", () => {
+  test("reports an unavailable contract when the project is not compiled", async () => {
     const json = buildApplicationInfoJson({
-      application: getApplicationInfo(APP_ROOT),
+      application: await getApplicationInfo(APP_ROOT),
       compiledState: null,
       messaging: MESSAGING,
     });
@@ -179,7 +179,7 @@ describe("printApplicationInfo", () => {
   test("reports the effective compiled tool count", async () => {
     const compiledState = await makeCompiledState();
     vi.mocked(inspectApplication).mockResolvedValue({
-      application: getApplicationInfo(APP_ROOT),
+      application: await getApplicationInfo(APP_ROOT),
       compiledState,
       messaging: MESSAGING,
     });
