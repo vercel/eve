@@ -32,7 +32,7 @@ export const config = defineConfig({
   webmcp: { enabled: true },
   // Built-in edit link hardcodes `/edit/` and a `content/docs/` prefix; we
   // render our own `/blob/` link instead (see EditOnGithubAction).
-  pageActions: { editSource: false },
+  pageActions: { editSource: false, menu: true },
   content: [{ id: "docs", label: "Docs", dir: "docs", route: "/docs" }],
   ai: {
     eveAgent,

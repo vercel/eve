@@ -91,6 +91,8 @@ export function localAgentSendCommand(
     kind: "send",
     delivery: { channelKind: "subagent", channelName: "subagent", deliveryId },
     payload: { message: input.message, outputSchema: input.outputSchema },
+    ...(input.auth.steeredBy !== undefined &&
+      input.auth.steeredBy.length > 0 && { steeredBy: input.auth.steeredBy }),
   } as const satisfies SessionCommand;
 }
 
@@ -150,6 +152,7 @@ export function prepareLocalAgentSession(
       sessionId: context.parent.sessionId,
     },
     source: target.source,
+    steeredBy: auth.steeredBy,
   });
   let childToolStubs = context.toolStubs;
   if (childToolStubs !== undefined) {

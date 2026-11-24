@@ -33,6 +33,7 @@ import { createLogger, logError } from "#internal/logging.js";
 import { callProgress } from "#harness/call-facts.js";
 import { settleCall, startCall } from "#harness/session-machine/calls.js";
 import { withUsageCall } from "#harness/usage-sink.js";
+import { withModelCall } from "#runtime/connections/identity-hold.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 import { toError } from "#shared/errors.js";
 import type { ApprovalAsk } from "#harness/session-machine/view.js";
@@ -61,6 +62,7 @@ export interface ToolSignIn {
 }
 
 export interface CallOutcome {
+  readonly callerOnly?: true;
   readonly remember?: RememberRequest;
   readonly clearance?: Clearance;
   readonly settled: readonly CallResult[];
@@ -133,7 +135,13 @@ export async function executeToolCall(
       recheck: approval === "recheck",
     });
     if (decision.awaitsPerson === true)
-      return { awaitsApproval: true, remember: decision.remember, settled, toolResults };
+      return {
+        awaitsApproval: true,
+        ...(decision.callerOnly === true && { callerOnly: true as const }),
+        remember: decision.remember,
+        settled,
+        toolResults,
+      };
     if (decision.denied) {
       await input.beforeResult?.({
         failure: decision.reason ?? TOOL_EXECUTION_DENIED_MESSAGE,
@@ -168,7 +176,7 @@ export async function executeToolCall(
         try {
           started = true;
           await input.publish(startCall(clearance));
-          await withUsageCall(callId, async () => {
+          const run = async () => {
             invoked = true;
             const executed = invokeTool(
               definition,
@@ -197,7 +205,8 @@ export async function executeToolCall(
             } else {
               output = await raceAbort(Promise.resolve(executed), abandon);
             }
-          });
+          };
+          await withUsageCall(callId, () => withModelCall(run));
         } finally {
           executionMs = performance.now() - startedAt;
         }
@@ -466,7 +475,11 @@ export async function executeInlineCalls(input: {
             : await decideDeferredCall(action, definition, input);
           const approval =
             executed.awaitsApproval === true
-              ? { ...approvalRequest(call, definition), remember: executed.remember }
+              ? {
+                  ...approvalRequest(call, definition),
+                  ...(executed.callerOnly === true && { callerOnly: true as const }),
+                  remember: executed.remember,
+                }
               : undefined;
           return { call, executed, approval };
         } catch (error) {
@@ -513,7 +526,13 @@ async function decideDeferredCall(
     input: call.input,
   });
   if (decision.awaitsPerson === true)
-    return { awaitsApproval: true, remember: decision.remember, settled: [], toolResults: [] };
+    return {
+      awaitsApproval: true,
+      ...(decision.callerOnly === true && { callerOnly: true as const }),
+      remember: decision.remember,
+      settled: [],
+      toolResults: [],
+    };
   if (!decision.denied)
     return {
       settled: [],
@@ -558,8 +577,8 @@ export async function publishDenial(
   return { settled: [{ part }], toolResults: [] };
 }
 
-function approvalRequest(
-  call: TypedToolCall<ToolSet>,
+export function approvalRequest(
+  call: Pick<TypedToolCall<ToolSet>, "input" | "toolCallId" | "toolName">,
   definition: HarnessToolDefinition | undefined,
 ): ApprovalAsk {
   const { toolCallId: callId, toolName } = call;
@@ -588,7 +607,7 @@ function approvalRequest(
 }
 
 function authoredApprovalPrompt(
-  call: TypedToolCall<ToolSet>,
+  call: Pick<TypedToolCall<ToolSet>, "input" | "toolCallId" | "toolName">,
   definition: HarnessToolDefinition | undefined,
 ): string | undefined {
   const approval = definition?.approval;

@@ -8,7 +8,10 @@ import {
 import { describe, expect, it, vi } from "vitest";
 
 import { createAgentRun, otelTelemetry } from "#compiled/@vercel/agent-runs/index.js";
-import { ContextContainer } from "#context/container.js";
+import { ContextContainer, contextStorage } from "#context/container.js";
+import { AuthKey, SteeredByKey } from "#context/keys.js";
+import { byPrincipal } from "#public/memory/scope.js";
+import { withModelCall } from "#runtime/connections/identity-hold.js";
 import { defineTool } from "#tools/definition.js";
 
 import {
@@ -185,5 +188,123 @@ describe("resolveMemoryScope", () => {
 
     expect(resolver).toHaveReturnedWith("slack:T1:C1");
     expect(scope).not.toBeNull();
+  });
+
+  it("holds byPrincipal memory tools while steered, while leaving shared-scope tools available", async () => {
+    const alice = {
+      attributes: {},
+      authenticator: "slack",
+      principalId: "alice",
+      principalType: "user" as const,
+    };
+    const bob = { ...alice, principalId: "bob" };
+    const provider = {
+      recall: { "turn.started": async () => null },
+      tools: async () => ({
+        save: defineTool({
+          description: "Save a note.",
+          execute: async () => "saved",
+          inputSchema: {} as never,
+        }),
+      }),
+    };
+    const container = new ContextContainer();
+    container.set(AuthKey, alice);
+    container.set(SteeredByKey, [bob]);
+    const evalCtx = {
+      abortSignal: new AbortController().signal,
+      channel: { kind: "channel:slack", metadata: {} },
+      ctx: container,
+      memo: (_key: unknown, compute: () => unknown) => compute(),
+      session: { auth: { current: alice, initiator: alice, steeredBy: [bob] }, id: "session-1" },
+    };
+
+    const personalTools = await memoryTools(
+      { namespace: "team", provider, scope: byPrincipal, slot: "personal" } as never,
+      evalCtx as never,
+    );
+    const sharedTools = await memoryTools(
+      { namespace: "team", provider, scope: "channel:C1", slot: "channel" } as never,
+      evalCtx as never,
+    );
+
+    expect(() =>
+      contextStorage.run(container, () =>
+        withModelCall(() => personalTools!.personal__save!.execute({}, {} as never)),
+      ),
+    ).toThrow(/memory "personal" can't use the caller's identity/u);
+
+    await expect(
+      contextStorage.run(container, () =>
+        withModelCall(() => sharedTools!.channel__save!.execute({}, {} as never)),
+      ),
+    ).resolves.toBe("saved");
+
+    container.delete(SteeredByKey);
+    await expect(
+      contextStorage.run(container, () =>
+        withModelCall(() => personalTools!.personal__save!.execute({}, {} as never)),
+      ),
+    ).resolves.toBe("saved");
+  });
+
+  it("re-evaluates custom memory.scope when steeredBy changes within the same turn", async () => {
+    const alice = {
+      attributes: {},
+      authenticator: "slack",
+      principalId: "alice",
+      principalType: "user" as const,
+    };
+    const bob = { ...alice, principalId: "bob" };
+    const memoCache = new Map<string, unknown>();
+    const provider = {
+      recall: { "turn.started": async () => null },
+      tools: async () => ({
+        save: defineTool({
+          description: "Save.",
+          execute: async () => "saved",
+          inputSchema: {} as never,
+        }),
+      }),
+    };
+    const memory = {
+      namespace: "team",
+      provider,
+      scope: (scopeCtx: { session: { auth: { steeredBy?: readonly unknown[] } } }) =>
+        scopeCtx.session.auth.steeredBy ? null : "alice-only",
+      slot: "custom",
+    };
+    const container = new ContextContainer();
+    const memo = (key: unknown, compute: () => unknown) => {
+      const serialized = JSON.stringify(key);
+      if (memoCache.has(serialized)) return memoCache.get(serialized);
+      const value = compute();
+      memoCache.set(serialized, value);
+      return value;
+    };
+
+    const unsteered = await memoryTools(
+      memory as never,
+      {
+        abortSignal: new AbortController().signal,
+        channel: { kind: "channel:slack", metadata: {} },
+        ctx: container,
+        memo,
+        session: { auth: { current: alice, initiator: alice }, id: "session-1" },
+      } as never,
+    );
+    expect(unsteered?.custom__save).toBeDefined();
+
+    const steered = await memoryTools(
+      memory as never,
+      {
+        abortSignal: new AbortController().signal,
+        channel: { kind: "channel:slack", metadata: {} },
+        ctx: container,
+        memo,
+        session: { auth: { current: alice, initiator: alice, steeredBy: [bob] }, id: "session-1" },
+      } as never,
+    );
+    expect(steered).toBeNull();
   });
 });

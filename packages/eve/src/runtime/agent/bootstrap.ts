@@ -10,7 +10,10 @@ import type { ModuleSourceRef } from "#shared/source-ref.js";
 export const BOOTSTRAP_RUNTIME_MODEL_ID = "eve-bootstrap-model";
 
 export type RuntimeModelReference = Readonly<
-  InternalAgentModelDefinition & { reasoning?: AgentReasoningDefinition }
+  InternalAgentModelDefinition & {
+    reasoning?: AgentReasoningDefinition;
+    sourceNodeId?: string;
+  }
 >;
 
 export type RuntimeDynamicModelReference = Readonly<ModuleSourceRef>;

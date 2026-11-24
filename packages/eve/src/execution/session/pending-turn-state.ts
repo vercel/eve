@@ -1,4 +1,5 @@
 import { sessionView } from "#harness/session-machine/commit.js";
+import { programsOf } from "#harness/session-machine/programs.js";
 import { runtimeWait, ownOpenRequestIds } from "#harness/session-machine/view.js";
 import type { TaskToolCall } from "#execution/tasks/calls.js";
 import type { HarnessSession } from "#harness/types.js";
@@ -49,9 +50,11 @@ export function pausedOnCalls(session: HarnessSession): TurnPause | undefined {
 }
 
 export function waitsOnAnything(session: HarnessSession, projection: SessionProjection): boolean {
+  const view = sessionView(projection, session.state);
   return (
     openSignIns(projection.view).length > 0 ||
-    ownOpenRequestIds(sessionView(projection, session.state)).size > 0 ||
-    (runtimeWait(session.state)?.callIds.length ?? 0) > 0
+    ownOpenRequestIds(view).size > 0 ||
+    (runtimeWait(session.state)?.callIds.length ?? 0) > 0 ||
+    programsOf(view.turn).length > 0
   );
 }

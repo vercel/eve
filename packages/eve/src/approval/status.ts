@@ -33,6 +33,7 @@ export function normalizeApprovalStatus(value: unknown): NormalizedApprovalStatu
 }
 
 export interface ApprovalDecision {
+  readonly callerOnly?: true;
   readonly remember?: RememberRequest;
   readonly clearedBy?: ClearedBy;
   readonly denied: boolean;

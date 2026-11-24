@@ -664,20 +664,53 @@ JavaScript program at runtime:
 ```ts title="agent/tools/workflow.ts"
 import { workflow } from "eve/tools/workflow";
 
-export default workflow({ maxSubagents: 20 });
+export default workflow({
+  maxSubagents: 20, // 1–128; omit for 100
+  mode: "task", // "task" (default) or "execute"
+});
 ```
 
-The model supplies an async function body through the tool's `js` input. Each call runs as a
-[task](#run-calls-as-tasks-task), so the program's return value reaches the model in a
-`task.result` message.
+The model supplies an async function body through the tool's `js` input. Omit `mode` to run each
+call as a [task](#run-calls-as-tasks-task) that delivers its output in a `task.result` message. Set
+`mode: "execute"` to run the program in the foreground so the turn waits for the result directly.
 
-The program can only call `ctx.agent(name, { message, outputSchema? })`. It sends the message to a
-new session with that agent, and resolves to the reply or, when `outputSchema` is set, to the
-structured value. The program can call subagents hidden with `tool: false` or a same-named
-`disableTool()` file, so list their path-derived names in the tool description or agent
-instructions:
+Set `tools: true` alongside `mode: "execute"` to let programs call the agent's tools, connections,
+and agents directly in the turn:
+
+```ts title="agent/tools/workflow.ts"
+import { workflow } from "eve/tools/workflow";
+
+export default workflow({
+  maxSubagents: 20,
+  mode: "execute",
+  tools: true,
+});
+```
+
+Inside a `tools: true` program, call any callable tool, connection tool, or agent as
+`await tools.<name>(input)` (use `tools["name"](input)` when the name isn't a JavaScript
+identifier), find unlisted tools with `await search({ query })`, or use
+`await ctx.agent(name, { message, outputSchema? })` as an alias for agent calls (passing `model`
+when the target tool declares it, such as `agent({ models })`). Programs
+read each tool's raw return value rather than its `toModelOutput` projection, validate outputs
+against declared `outputSchema` definitions (throwing a catchable `InvalidToolOutput` error on
+mismatch), pause cleanly for batched `Promise.all` approvals or connection sign-ins, replay settled
+calls without re-running them after step interruptions, and stop early if a steering message
+arrives. Each program may make up to 1,024 total calls and `maxSubagents` agent calls, and cannot
+call tools that end the turn, `serve` tools, or another `workflow()` tool.
+
+Without `tools: true`, inside the function body, `ctx` exposes the workflow runtime's capabilities:
+
+| Member                                                                              | Behavior                                                                                                                    |
+| ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `ctx.agents`                                                                        | Frozen map of callable `{ [name]: { description } }` agents, including agents hidden with `tool: false` or `disableTool()`. |
+| `ctx.agent(name, { message, outputSchema?, files? })`                               | Starts a new child session and resolves to the reply or structured value. Supports `https://` `files`.                      |
+| `ctx.ask({ prompt, title?, display?, options?, allowFreeform?, initialOptionId? })` | Asks the user on the session's channel and resolves to their answer.                                                        |
+| `ctx.sleep(seconds)`                                                                | Pauses up to 1 year without holding compute and resolves to `{ waitedSeconds }`.                                            |
+| `ctx.progress(update)`                                                              | Emits a JSON-serializable progress report while the workflow runs.                                                          |
 
 ```js
+await ctx.progress({ stage: "triage", agents: Object.keys(ctx.agents) });
 const [triage, review] = await Promise.all([
   ctx.agent("ticket-triage", { message: JSON.stringify(tickets) }),
   ctx.agent("ticket-review", { message: JSON.stringify(tickets) }),
@@ -685,32 +718,43 @@ const [triage, review] = await Promise.all([
 return { triage, review };
 ```
 
-Omit `maxSubagents` to allow `100` agent calls; set an integer from `1` through `128`. The program
-can't use the workflow context, session state, credentials, imports, or ordinary tools. Each
-`ctx.agent` call starts a new child session, so a program can't continue a child from an earlier
-call. Agent authorization, questions, approvals, and cancellation work as they do for sessions an
-authored workflow tool opens with `ctx.agent`.
+The program can't read session state, credentials, imports, or ordinary tools. Each `ctx.agent` call
+starts a new child session, so a program can't continue a child from an earlier call. Agent
+authorization, questions, approvals, and cancellation match sessions opened by authored workflow
+tools.
 
-The program continues after every pending call in the current batch finishes, so `Promise.all`
-supports fan-out followed by fan-in. A `ctx.agent` call still pending when the program returns
-fails the workflow, such as one never awaited or one that loses a `Promise.race` or `Promise.any`.
+`console.log`, `console.info`, `console.warn`, `console.error`, and `console.debug` capture output
+up to 64 KiB. When the program logs nothing, the tool returns the program's value directly. When it
+logs output, the tool returns `{ result, logs }`.
 
-A failed child turn, an invalid call, or a call over the `maxSubagents` budget throws a catchable
-`WorkflowProgramAgentError` at that `ctx.agent` call. The error message names the cause.
+The program resumes after every pending call in the current batch finishes, so `Promise.all`
+supports fan-out followed by fan-in. Await every `ctx.agent`, `ctx.ask`, `ctx.sleep`, and
+`ctx.progress` call before returning; leaving a call pending, such as the loser of `Promise.race` or
+`Promise.any`, fails the workflow.
 
-The return value and each `ctx.agent` input pass through `JSON.stringify`, so a `Date` becomes a
-string, and functions and `undefined` members drop. A return value that converts to nothing, such
-as `undefined`, becomes `null`.
+A failed child turn, an invalid `ctx.agent` call, or a call over `maxSubagents` throws a catchable
+`WorkflowProgramAgentError`. Invalid `ctx.ask`, `ctx.sleep`, or `ctx.progress` calls throw a
+catchable `WorkflowProgramError`. Uncaught errors report the line number, note when earlier calls
+already completed, and attach up to 4,000 characters of console output.
 
-| Limit                                     | Value      |
-| ----------------------------------------- | ---------- |
-| Return value or `ctx.agent` input as JSON | 1 MiB      |
-| Child reply as JSON                       | 4 MiB      |
-| Program source                            | 256 KiB    |
-| JavaScript time per start or resume       | 30 seconds |
-| Total time per start or resume            | 5 minutes  |
+Return values and call inputs pass through `JSON.stringify`, so a `Date` becomes a string and
+functions or `undefined` properties drop. Returning `undefined` yields `null`. Results over
+10,000 estimated tokens are truncated to their head and tail when shown to the model.
 
-Time spent waiting for child agents does not count toward either time limit.
+| Limit                                   | Value                    |
+| --------------------------------------- | ------------------------ |
+| Return value or call input as JSON      | 1 MiB                    |
+| Child reply as JSON                     | 4 MiB                    |
+| Continuation state while waiting        | 8 MiB                    |
+| Program source                          | 256 KiB                  |
+| Captured console output                 | 64 KiB                   |
+| `ctx.progress` per update / per step    | 16 KiB / 64 KiB (64 max) |
+| Model-facing result before truncation   | 10,000 estimated tokens  |
+| JavaScript CPU time per start or resume | 30 seconds               |
+| Wall-clock time per start or resume     | 5 minutes                |
+
+Time spent waiting for child agents, human answers, or `ctx.sleep` does not count toward either time
+limit.
 
 ## Start channel sessions: `ctx.to`
 

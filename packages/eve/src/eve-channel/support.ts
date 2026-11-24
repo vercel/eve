@@ -1,11 +1,12 @@
 import type { JsonValue } from "#shared/json.js";
 import type { MessageContent } from "#shared/message-content.js";
 
+import { HttpError } from "#channel/http-error.js";
 import { SessionStrandedError } from "#channel/session-stranded-error.js";
 import { SessionNotActiveError } from "#channel/session-not-active-error.js";
 import type { DeliveryReceipt } from "#protocol/delivery.js";
 import { EVE_SESSION_ID_HEADER } from "#protocol/session-http.js";
-import type { SessionAuthContext } from "#channel/types.js";
+import type { SessionAuthContext, TurnMode, TurnPolicy } from "#channel/types.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 import { workflowEntryReference } from "#execution/workflow-references.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -124,6 +125,7 @@ interface OnMessageOutcome {
   readonly context?: readonly string[];
   readonly history?: readonly SessionHistoryMessage[];
   readonly title?: string;
+  readonly turnPolicy?: TurnPolicy;
 }
 
 export async function resolveOnMessage(input: {
@@ -134,6 +136,7 @@ export async function resolveOnMessage(input: {
   readonly message: MessageContent;
   readonly request: Request;
   readonly sessionId?: string;
+  readonly turnPolicy?: TurnMode;
 }): Promise<OnMessageOutcome | Response> {
   const handler = input.config.onMessage ?? defaultOnMessage;
 
@@ -143,6 +146,7 @@ export async function resolveOnMessage(input: {
       caller: input.auth,
       clientContext: input.clientContext,
       request: input.request,
+      ...(input.turnPolicy !== undefined && { turnPolicy: input.turnPolicy }),
     };
     const eve: EveHandle =
       input.sessionId === undefined
@@ -156,6 +160,7 @@ export async function resolveOnMessage(input: {
       throw new TypeError("eveChannel onMessage must return an auth result.");
     }
   } catch (error) {
+    if (HttpError.is(error)) return error.response;
     const errorId = logError(log, "onMessage handler failed", error, {
       sessionId: input.sessionId,
     });
@@ -171,6 +176,7 @@ export async function resolveOnMessage(input: {
     context: result.context,
     history: result.history,
     title: result.title,
+    turnPolicy: result.turnPolicy,
   };
 }
 

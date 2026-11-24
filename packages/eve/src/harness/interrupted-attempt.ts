@@ -7,6 +7,8 @@ export interface InterruptedCall {
   readonly input?: JsonValue;
   readonly started: boolean;
   readonly outcome?: CallOutcome;
+  readonly output?: JsonValue;
+  readonly error?: string;
 }
 
 export function interruptedCallResult(call: InterruptedCall | undefined): string {
@@ -24,7 +26,7 @@ export function interruptedCallResult(call: InterruptedCall | undefined): string
   }
 }
 
-const MAX_NOTED_CALLS = 20;
+export const MAX_NOTED_CALLS = 20;
 const MAX_NOTED_INPUT_LENGTH = 500;
 
 export function interruptedAttemptNote(
@@ -33,7 +35,8 @@ export function interruptedAttemptNote(
   const started = [...calls.values()].filter((call) => call.started && call.name !== "");
   if (started.length === 0) return undefined;
   const lines = started.slice(0, MAX_NOTED_CALLS).map((call) => {
-    const input = call.input === undefined ? "" : ` ${truncate(JSON.stringify(call.input))}`;
+    const input =
+      call.input === undefined ? "" : ` ${truncateNotedInput(JSON.stringify(call.input))}`;
     return `- ${call.name}${input}: ${interruptedCallResult(call)}`;
   });
   if (started.length > MAX_NOTED_CALLS) {
@@ -49,7 +52,7 @@ export function interruptedAttemptNote(
   );
 }
 
-function truncate(text: string): string {
+export function truncateNotedInput(text: string): string {
   return text.length <= MAX_NOTED_INPUT_LENGTH
     ? text
     : `${text.slice(0, MAX_NOTED_INPUT_LENGTH)}… (truncated)`;

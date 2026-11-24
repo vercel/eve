@@ -553,6 +553,7 @@ export const compiledToolDefinitionSchema = z
     workflowProgram: z
       .object({
         maxSubagents: z.number().int().positive(),
+        tools: z.literal(true).optional(),
       })
       .strict()
       .optional(),

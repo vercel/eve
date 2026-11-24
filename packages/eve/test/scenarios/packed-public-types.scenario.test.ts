@@ -69,6 +69,7 @@ import type { SessionStoreSnapshot } from "eve/client";
 import { emptySessionView, foldEvents, calls } from "eve/events";
 import type { RequestStatus } from "eve/events";
 import type { Delivery, SessionReader } from "eve/sessions";
+import { sessions as serverSessions, type PrewarmSessionResult, type SessionEndOptions } from "eve/server";
 import type { ChannelContext } from "eve/channels";
 import { z } from "zod";
 import { createHook, sleep, createWebhook, FatalError, RetryableError, getWorkflowMetadata, getStepMetadata } from "eve/workflow";
@@ -152,6 +153,13 @@ async function inferred(client: Client, store: SessionStore) {
   const fromStore = await store.send({ message: "hello", outputSchema: schema });
   const a: boolean | undefined = (await receipt.result()).data?.ok;
   const b: boolean | undefined = (await fromStore.result()).data?.ok;
+  const serverReader: SessionReader = serverSessions.attach("session");
+  const endOptions: SessionEndOptions = { reason: "cleanup" };
+  const ended: Delivery = await serverSessions.end("session", endOptions);
+  const prewarmed: PrewarmSessionResult = await serverSessions.prewarm("session");
+  void serverReader;
+  void ended;
+  void prewarmed;
 }
 `;
 

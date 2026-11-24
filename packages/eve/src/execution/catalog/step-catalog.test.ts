@@ -25,7 +25,8 @@ import { enterSessionProjection } from "#harness/session-machine/current.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { fromCompiledBundle } from "#definitions/compiled-agent.js";
 import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
-import { serializeInputSchema, type ToolSchemaSource } from "#tools/schema.js";
+import { defineJsonSchema, serializeInputSchema, type ToolSchemaSource } from "#tools/schema.js";
+import { always } from "#tools/approval/policies.js";
 
 import type { StepCatalog } from "./step-catalog.js";
 import { labelCallbacks } from "#internal/testing/tool-labels.js";
@@ -845,6 +846,66 @@ describe("buildStepCatalog", () => {
     ])("fails for %s", async (_case, options, message) => {
       captureLogRecords();
       await expect((await notionCatalog(options)).connect()).rejects.toThrow(message);
+    });
+  });
+
+  describe("workflow program tools", () => {
+    it("annotates direct tools with output types only when a tools-enabled workflow tool is present and exempts it from agent-wide approval", async () => {
+      const lookup = inlineTool("lookup_order", {
+        description: "Look up one order.",
+        outputSchema: defineJsonSchema({
+          properties: { status: { type: "string" } },
+          required: ["status"],
+          type: "object",
+        }),
+      });
+      const programTool: HarnessToolDefinition = {
+        ...workflowTool("workflow", "execute"),
+        workflowProgram: { maxSubagents: 10, tools: true },
+      };
+
+      const withoutProgram = await catalogContext({ approval: always(), tools: [lookup] });
+      expect(
+        withoutProgram.catalog.describe(withoutProgram.catalog.advertised.get("lookup_order")!),
+      ).toBe("Look up one order.");
+
+      const withProgram = await catalogContext({
+        approval: always(),
+        tools: [lookup, programTool],
+      });
+      expect(
+        withProgram.catalog.describe(withProgram.catalog.advertised.get("lookup_order")!),
+      ).toBe(
+        "Look up one order.\n\nIn workflow programs, tools.lookup_order(input) resolves to: { status: string }",
+      );
+      expect(withProgram.catalog.advertised.get("lookup_order")?.approval).toBeDefined();
+      const workflowApproval = withProgram.catalog.advertised.get("workflow")?.approval;
+      expect(typeof workflowApproval).toBe("function");
+      if (typeof workflowApproval === "function") {
+        expect(
+          await workflowApproval({
+            callId: "c1",
+            toolInput: { js: "return 1" },
+            toolName: "workflow",
+          } as never),
+        ).toBe("approved");
+      }
+
+      const withDeniedProgram = await catalogContext({
+        approval: () => ({ reason: "Blocked by policy.", type: "denied" }),
+        tools: [programTool],
+      });
+      const deniedApproval = withDeniedProgram.catalog.advertised.get("workflow")?.approval;
+      expect(typeof deniedApproval).toBe("function");
+      if (typeof deniedApproval === "function") {
+        expect(
+          await deniedApproval({
+            callId: "c2",
+            toolInput: { js: "return 1" },
+            toolName: "workflow",
+          } as never),
+        ).toEqual({ reason: "Blocked by policy.", type: "denied" });
+      }
     });
   });
 });

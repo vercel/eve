@@ -49,6 +49,26 @@ export function buildInputSchema(
   return schema;
 }
 
+export function buildOutputSchema(
+  body: unknown,
+  defs: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  const schema: Record<string, unknown> = {
+    type: "object",
+    properties: {
+      status: { type: "integer" },
+      statusText: { type: "string" },
+      body,
+      location: { type: "string" },
+    },
+    required: ["status", "statusText", "body"],
+  };
+  if (Object.keys(defs).length > 0) {
+    schema.$defs = defs;
+  }
+  return schema;
+}
+
 export function deref(document: Record<string, unknown>, node: Record<string, unknown>): unknown {
   if (typeof node.$ref !== "string") {
     return node;

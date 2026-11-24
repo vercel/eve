@@ -40,7 +40,7 @@ export default eveChannel({
 | ---------------------------- | -------------------------------------- |
 | Returns `SessionAuthContext` | Accepts the request and stops the walk |
 | Returns `null` / `undefined` | Skips to the next entry                |
-| Throws                       | Rejects with a specific status         |
+| Throws an `HttpError`        | Rejects with that error's status       |
 
 If every entry skips, the request gets a `401`. Its `WWW-Authenticate` header advertises the schemes the entries declare:
 
@@ -75,19 +75,26 @@ export default eveChannel({
 
 Put your own providers ahead of the catch-all helpers, and `localDev()` last. A `vercelOidc()` before `localDev()` lets a local Vercel OIDC bearer resolve a real user instead of the stand-in `local-dev` caller. On non-Vercel hosts, omit `vercelOidc()` unless you want to accept Vercel-issued tokens.
 
-To reject with a precise status instead of skipping, throw:
+To reject with a precise status instead of skipping, throw an `HttpError` or one of its subclasses:
 
 ```ts
-import { ForbiddenError, UnauthenticatedError } from "eve/channels/auth";
+import {
+  ForbiddenError,
+  HttpError,
+  TooManyRequestsError,
+  UnauthenticatedError,
+} from "eve/channels/auth";
 
 throw new UnauthenticatedError({
   code: "authentication_required",
   message: "Sign in to continue.",
 }); // 401
 throw new ForbiddenError({ message: "Not allowed on this workspace." }); // 403
+throw new TooManyRequestsError({ retryAfter: 60 }); // 429 with retry-after: 60
+throw new HttpError(402, { code: "payment_required", message: "Upgrade your plan." });
 ```
 
-Any other thrown error follows the normal channel failure path. When building a custom channel on `defineChannel`, call `routeAuth(request, auth)` from `eve/channels/auth` to reuse the same walk semantics.
+The response has `cache-control: no-store` and a `{ ok: false, code, error }` JSON body. Any other thrown error follows the normal channel failure path. When building a custom channel on `defineChannel`, call `routeAuth(request, auth)` from `eve/channels/auth` to reuse the same walk semantics.
 
 ## Verifier helpers
 
@@ -210,7 +217,7 @@ export default defineChannel({
 });
 ```
 
-`UnauthenticatedError` (`401`) and `ForbiddenError` (`403`) wrap this builder; throw them from an `AuthFn` that `routeAuth` walks. Call `createUnauthorizedResponse` directly only when returning a `Response` from a hand-rolled route.
+`UnauthenticatedError` (`401`) and `ForbiddenError` (`403`) build the same response; throw them from an `AuthFn` that `routeAuth` walks. Call `createUnauthorizedResponse` directly only when returning a `Response` from a hand-rolled route.
 
 ## Network policy
 
@@ -309,11 +316,12 @@ Inside runtime code, `ctx.session.auth` carries the channel's route-auth result 
 
 - `auth.current`: the caller on the active inbound turn. A follow-up from a different caller replaces it for that turn.
 - `auth.initiator`: the caller that started the session. It never changes.
+- `auth.steeredBy`: the people other than the caller whose messages joined the running turn; present only while at least one exists. A session's own turn starts without it. A local subagent's turn starts with the list its parent turn had when it made the call or sent the message.
 
 The caller stays the same for the whole turn; only its claims can change:
 
 - A message from the turn's own caller joins the turn and updates `auth.current` with its claims. This includes a typed answer to a pending `ctx.ask()` or `ask_question`.
-- A message from anyone else waits for the turn to end and runs as its own turn.
+- By default, a message from anyone else waits for the turn to end and runs as its own turn. A channel can set `principal: "retain"` in its [`turnPolicy`](../concepts/security-model#let-another-persons-message-join) so a signed-in person's message joins as input while retaining the turn's caller.
 - Someone else can still answer a pending request with a button or structured response. The request then records them as its responder, and the turn keeps its `auth.current`.
 
 `auth.current` is whatever `auth` the channel sent the message with. A route handler or channel hook can send with `auth: null`, such as `source.send(message, { auth: null })` or a Slack `onMessage` hook that returns `{ auth: null }`. On a new session, both values are then `null`; on a continuation, only `auth.current` is. Internal runtime paths, such as subagents, can also have no caller auth.

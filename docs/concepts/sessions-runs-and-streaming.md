@@ -289,7 +289,7 @@ Message sends default to `turnPolicy: "steer"`: the new message joins the runnin
 
 A steering message aborts the [`ctx.abortSignal`](/docs/tools/workflows#stop-early-for-a-new-message) of each `execute` workflow tool call the turn is waiting on. The call's questions end `withdrawn`, `sleep` and `ask_question` stop early, and the call ends with what its body returns. Steering ends an `eve__task_wait` but never interrupts a task, and a task's questions stay open.
 
-Only the turn's own caller steers it; another caller's message waits for the turn to end. Channels and TypeScript `Session.send(...)` calls can pass `turnPolicy: "queue"` to let the active turn finish first. Structured `answers` answer the requests they name.
+By default, only the turn's own caller steers it; another caller's message waits for the turn to end. `turnPolicy: { mode: "steer", principal: "retain" }` lets another signed-in person's message join the running turn, which retains its caller. See [A turn runs as one principal](./security-model#a-turn-runs-as-one-principal). Channels and TypeScript `Session.send(...)` calls can pass `turnPolicy: "queue"` to let the active turn finish first. Structured `answers` answer the requests they name.
 
 Answer a human-in-the-loop approval with the channel's Approve or Deny controls; text that doesn't match an option approves nothing. Such text from the person the turn serves steers the turn and cancels the approval, even with `turnPolicy: "queue"`. The turn can't end until that person acts. From anyone else, it waits until the turn ends. Calls already approved in the batch still run. Cancelling the turn withdraws the approval, and a later answer to it approves nothing.
 
@@ -301,7 +301,7 @@ One delivery can answer requests from several batches. Each answer stands as it 
 
 When steering interrupts model generation, the interrupted run ends `interrupted` with any usage the provider reported. The new message's `delivery.consumed` and the next `model.requested` for the same `turnId` follow.
 
-Multiple steering messages keep their arrival order and may be folded into one input at the next boundary. A message accepted after the turn ends starts the next turn.
+Messages from one sender keep their arrival order and may be folded into one input at the next boundary. Another sender's messages are read at a later boundary, and start their own turn if the turn ends first. A message accepted after the turn ends starts the next turn.
 
 ## Cancel the in-flight turn
 
@@ -338,7 +338,7 @@ Clear removes model-message history in place, including static and dynamic user-
 
 A cancel stops turns, not a compaction or clear. A cancel that arrives while either runs ends `ignored`, and the compaction or clear finishes. A cancel, clear, or compact sent to a prewarmed session before its first message ends `ignored` once the session starts.
 
-End permanently retires the session ID; create another session for a fresh conversation. Every control returns a delivery receipt when accepted. An inactive target throws `SessionNotActiveError` from a handle or returns `409 session_not_active` over HTTP.
+End permanently retires the session ID; create another session for a fresh conversation. Every control returns a delivery receipt when accepted. An inactive target throws `SessionNotActiveError` from a handle or returns `409 session_not_active` over HTTP. Authored [hooks](../guides/hooks#end-the-session-from-a-hook) can also retire a session with `ctx.end()`, which records `session.ended` with `cause: { hook }`.
 
 A [stranded session](./execution-model-and-durability#stranded-sessions) can't run commands, so clear and compact can't repair it. End still works: eve retires the stranded session and returns the end's delivery receipt. The delivery ends after the session is retired and its addresses are released.
 
@@ -375,7 +375,7 @@ Requests without the parameter get no header. `follow=false` instead bounds the 
 
 ## Read a session in process
 
-Code inside the agent's deployment, such as a hook, tool, schedule, or channel route, can read a session's stream with `sessions` from `eve/server`. It doesn't call the HTTP route. It has the client's `attach(sessionId).stream(...)` shape and needs no deployment URL, credentials, or stream protocol:
+Code inside the agent's deployment, such as a hook, tool, schedule, or channel route, can read, end, or prewarm sessions by ID with `sessions` from `eve/server`. It runs in process and needs no deployment URL, credentials, or HTTP round trip:
 
 ```ts
 import { sessions } from "eve/server";
@@ -387,9 +387,15 @@ for await (const event of events) {
 }
 ```
 
-`stream()` takes `SessionStreamOptions` from `eve/sessions`: `startIndex` (a line position; negative values count back from the tail), `follow`, and `signal`. Client readers also accept `reconnect: false` or a `ReconnectOptions` object from `eve/client`. With `follow: false`, the read ends at the recorded tail observed when it opens. Otherwise it follows new events until the stream closes or the signal aborts. Key stored events on [`meta.position`](#positions), which stays stable across reads.
+`sessions.attach(sessionId)` returns a read-only `SessionReader`. `stream()` takes `SessionStreamOptions` from `eve/sessions`: `startIndex` (a line position; negative values count back from the tail), `follow`, and `signal`. Client readers also accept `reconnect: false` or a `ReconnectOptions` object from `eve/client`. With `follow: false`, the read ends at the recorded tail observed when it opens. Otherwise it follows new events until the stream closes or the signal aborts. Key stored events on [`meta.position`](#positions), which stays stable across reads.
 
-A read sees only recorded events. A hook runs after its line is written, so a bounded read there includes the event that triggered it. `sessions` reads any session ID without channel auth, so check that a caller may read a session before passing an ID from a request. It's available only in code that runs inside the eve server.
+A read sees only recorded events. A hook runs after its line is written, so a bounded read there includes the event that triggered it.
+
+`sessions.end(sessionId, options?)` retires an active or [stranded](./execution-model-and-durability#stranded-sessions) session without creating a replacement and returns a `Delivery`. Pass `{ auth, reason }` using `SessionEndOptions` from `eve/server`. It throws `SessionNotActiveError` (from `eve/sessions`) when the session is not active.
+
+`sessions.prewarm(sessionId)` prepares an idle session to move onto the current deployment without starting a model turn. It returns a `PrewarmSessionResult` whose `status` is `"ready"`, `"accepted"`, `"unsupported"`, or `"no_active_session"`.
+
+`sessions` operates on any session ID without channel auth, so check that a caller may read, end, or prewarm a session before passing an ID from a request. It's available only in code that runs inside the eve server.
 
 ## Inspect the agent over HTTP
 
@@ -423,7 +429,7 @@ Each new event line goes through these stages in order:
 1. **Write**: the line is written to the stream.
 2. **Channel handler**: the channel's event handler runs for each event and can update adapter state. eve then re-evaluates the channel's `metadata(state)`. Work a handler passes to `ctx.waitUntil()` continues in the background, and eve waits for it, for up to 30 seconds, before the step that ran the handler ends. See [Run platform calls in the background](../channels/custom#run-platform-calls-in-the-background).
 3. **Hooks**: authored [hooks](../guides/hooks) subscribed to each event fire.
-4. **Intents**: eve acts on cancellation requests queued by `ctx.cancel()`.
+4. **Intents**: eve acts on cancellation requests from `ctx.cancel()` and session retirement requests from `ctx.end()`.
 
 Before the next model call, eve evaluates [dynamic values](../guides/dynamic-capabilities) from `defineDynamic`. Hooks and dynamic values read the current `ctx.channel.metadata`.
 

@@ -12,7 +12,10 @@ import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import type { HarnessSession } from "#harness/types.js";
 import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
-import { notifyTurnCallerStep } from "#subagents/parent-notification.js";
+import {
+  notifyCancelledTaskCallerStep,
+  notifyTurnCallerStep,
+} from "#subagents/parent-notification.js";
 import {
   endSessionSandboxStep,
   reportSessionSandboxCleanupFailureStep,
@@ -33,6 +36,7 @@ vi.mock("#execution/terminal-session-failure-step.js", () => ({
   emitTerminalSessionFailureStep: vi.fn(),
 }));
 vi.mock("#subagents/parent-notification.js", () => ({
+  notifyCancelledTaskCallerStep: vi.fn(),
   notifyTurnCallerStep: vi.fn(),
 }));
 
@@ -78,6 +82,7 @@ beforeEach(() => vi.clearAllMocks());
 describe("session finalization", () => {
   it.each([
     { outcome: { kind: "expired" as const }, reason: "expired" },
+    { outcome: { cause: { hook: "finish-job" }, kind: "ended" as const }, reason: "completed" },
     { outcome: { kind: "failed" as const, error: new Error("failed") }, reason: "failed" },
     {
       outcome: {
@@ -99,6 +104,11 @@ describe("session finalization", () => {
       serializedContext: { key: "value" },
       sessionState,
     });
+    if (outcome.kind === "ended") {
+      expect(emitTerminalSessionCompletionStep).toHaveBeenCalledWith(
+        expect.objectContaining({ cause: { hook: "finish-job" } }),
+      );
+    }
   });
 
   it("preserves the terminal outcome when sandbox cleanup fails", async () => {
@@ -243,5 +253,54 @@ describe("session finalization with an unsettled caller", () => {
     );
     expect(result).toMatchObject({ isError: false, output: "" });
     expect(notifyTurnCallerStep).not.toHaveBeenCalled();
+  });
+
+  it("notifies a delegated caller with lifecycle terminal after a hook ends a settled or cancelled turn", async () => {
+    const caller = {
+      callId: "delegate",
+      subagentName: "detector",
+      replyTo: { kind: "hook" as const, token: "parent" },
+    };
+    const usage = { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 150, outputTokens: 10 };
+
+    const settledResult = await finalizeSession(
+      {
+        cause: { hook: "finish-job" },
+        kind: "ended",
+        settled: { output: "Job done.", usage },
+      },
+      {
+        caller,
+        cursor: { serializedContext: {}, sessionState: sessionWithUnreportedUsage() },
+        sessionWritable: new WritableStream(),
+      },
+    );
+    expect(settledResult).toMatchObject({ isError: false, output: "Job done.", usageDelta: usage });
+    expect(notifyTurnCallerStep).toHaveBeenCalledExactlyOnceWith({
+      caller,
+      lifecycle: "terminal",
+      sessionId: "detector",
+      settled: { output: "Job done.", usage },
+    });
+
+    const cancelledResult = await finalizeSession(
+      {
+        cancelled: { usage },
+        cause: { hook: "gate" },
+        kind: "ended",
+      },
+      {
+        caller,
+        cursor: { serializedContext: {}, sessionState: sessionWithUnreportedUsage() },
+        sessionWritable: new WritableStream(),
+      },
+    );
+    expect(cancelledResult).toMatchObject({ isError: true, usageDelta: usage });
+    expect(notifyCancelledTaskCallerStep).toHaveBeenCalledExactlyOnceWith({
+      caller,
+      lifecycle: "terminal",
+      sessionId: "detector",
+      usage,
+    });
   });
 });

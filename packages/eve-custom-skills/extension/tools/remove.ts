@@ -62,6 +62,7 @@ const { approval, execute } = skillChange({
   },
 });
 
+/** Deletes custom skills with every version. */
 export default defineTool({
   deferred: true,
   label: {

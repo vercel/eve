@@ -13,8 +13,8 @@ export function sameResponder(left: SessionAuthContext, right: SessionAuthContex
   );
 }
 
-export function requesterOnlyResponse(
-  context: Pick<ApprovalResponseContext, "request" | "response">,
+export function requesterOnlyResponse<TInput = unknown>(
+  context: Pick<ApprovalResponseContext<TInput>, "request" | "response">,
 ): ApprovalResponseDecision {
   const requester = context.request.principal;
   return requester === null || sameResponder(requester, context.response.principal)

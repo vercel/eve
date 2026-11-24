@@ -52,7 +52,7 @@ export const COMPILED_AGENT_MANIFEST_KIND = "eve-agent-compiled-manifest";
 
 export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 
-export const COMPILED_AGENT_MANIFEST_VERSION = 56;
+export const COMPILED_AGENT_MANIFEST_VERSION = 57;
 
 export interface CompiledChannelDefinition {
   readonly kind: "channel";
@@ -157,6 +157,7 @@ export type CompiledToolDefinition = InternalToolDefinition &
     readonly requiresApproval: boolean;
     readonly workflowProgram?: {
       readonly maxSubagents: number;
+      readonly tools?: true;
     };
   };
 

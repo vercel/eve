@@ -794,6 +794,12 @@ export type SlackMentionResult = {
    * content. Never put user-controlled text in it.
    */
   readonly guidance?: string;
+  /**
+   * How this one message treats a running turn. Replaces the channel's `turnPolicy` as a whole,
+   * so `{ mode: "steer", principal: "retain" }` lets a message join a turn that runs as someone
+   * else even when the channel's other messages wait for it.
+   */
+  readonly turnPolicy?: TurnPolicy;
 } | null;
 
 /**
@@ -1222,7 +1228,11 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       payload,
       channel: SlackChannelContext & { readonly session: ChannelContext["session"] },
     ) {
-      recordSlackPrincipal(channel.state, channel.session.auth.current, payload);
+      recordSlackPrincipal(
+        channel.state,
+        payload.auth !== undefined ? payload.auth : channel.session.auth.current,
+        payload,
+      );
       followReplyThread(channel.state, payload);
       followTriggeringMessage(channel.state, payload);
       followQuietTurn(channel.state, payload);
@@ -2172,6 +2182,7 @@ async function deliverSlackMessage(input: {
         : "";
     const sendOptions: SlackSendOptions = {
       auth: input.result.auth,
+      ...(input.result.turnPolicy !== undefined && { turnPolicy: input.result.turnPolicy }),
       ...(channelContext.length > 0 && { context: channelContext }),
       ...(edit === undefined && { title, ...(history !== undefined && { history }) }),
       ...(fileParts.length === 0 && { answerText: typedText }),

@@ -168,6 +168,8 @@ export type TeamsInboundResult = {
   readonly history?: readonly SessionHistoryMessage[];
   /** Overrides the workflow run title without changing the message sent to the model. */
   readonly title?: string;
+  /** How this one message treats a running turn, replacing the channel's `turnPolicy` as a whole. */
+  readonly turnPolicy?: TurnPolicy;
 } | null;
 
 /** Sync or async {@link TeamsInboundResult}. */
@@ -336,7 +338,7 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
           ...channel.state.pendingPromptCards,
         };
       }
-      const caller = channel.session.auth.current;
+      const caller = payload.auth !== undefined ? payload.auth : channel.session.auth.current;
       const sender = payload.message === undefined ? undefined : state?.triggeringUser;
       const responders =
         caller !== null && sender !== undefined && sender !== null
@@ -682,6 +684,7 @@ async function dispatchMessage(input: {
       history: result.history,
       state,
       title: result.title,
+      ...(result.turnPolicy !== undefined && { turnPolicy: result.turnPolicy }),
     });
   } catch (error) {
     log.error("Teams message delivery failed", { error });

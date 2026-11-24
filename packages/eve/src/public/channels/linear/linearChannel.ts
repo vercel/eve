@@ -165,6 +165,8 @@ export type LinearInboundResult = {
   readonly history?: readonly SessionHistoryMessage[];
   /** Overrides the workflow run title without changing the message sent to the model. */
   readonly title?: string;
+  /** How this one prompt treats a running turn, replacing the channel's `turnPolicy` as a whole. */
+  readonly turnPolicy?: TurnPolicy;
 } | null;
 
 /** Sync or async {@link LinearInboundResult}. */
@@ -367,6 +369,7 @@ async function dispatchAgentSession(input: {
       history: result.history,
       state: stateFromAgentSession(event.agentSession),
       title: result.title,
+      ...(result.turnPolicy !== undefined && { turnPolicy: result.turnPolicy }),
     });
 }
 

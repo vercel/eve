@@ -1,7 +1,8 @@
-import type {
-  ApprovalConfiguration,
-  ApprovalContext,
-  ApprovalResponsePolicy,
+import {
+  steered,
+  type ApprovalConfiguration,
+  type ApprovalContext,
+  type ApprovalResponsePolicy,
 } from "eve/tools/approval";
 
 import { SkillLifecycleError } from "./errors.ts";
@@ -174,6 +175,8 @@ function toEveStatus(decision: SkillApprovalDecision) {
   return { type: "denied", reason: decision.deny } as const;
 }
 
+const whenSteered = steered();
+
 export function skillApproval<TInput extends object, TPlan>(input: {
   readonly plan: (ctx: ApprovalContext<TInput>, input: TInput) => Promise<PlannedChange<TPlan>>;
   readonly rule: () => SkillApprovalRule;
@@ -192,14 +195,24 @@ export function skillApproval<TInput extends object, TPlan>(input: {
         throw error;
       }
       const decision = await input.rule()(planned.request);
-      if (decision === "ask") {
+      const steeredStatus =
+        decision === "allow" || decision === "ask" ? await whenSteered(ctx) : undefined;
+      const status =
+        decision === "allow"
+          ? (steeredStatus ?? toEveStatus(decision))
+          : decision === "ask" &&
+              typeof steeredStatus === "object" &&
+              steeredStatus.type === "denied"
+            ? steeredStatus
+            : toEveStatus(decision);
+      if (status === "user-approval") {
         rememberCard(
           cardKey(ctx.toolName, ctx.callId, toolInput),
           ctx.session.id,
           approvalCard(planned.request),
         );
       }
-      return toEveStatus(decision);
+      return status;
     },
     prompt: ({ callId, input: toolInput, toolName }) =>
       takeCard(cardKey(toolName, callId, toolInput)) ?? input.fallbackCard(toolInput),

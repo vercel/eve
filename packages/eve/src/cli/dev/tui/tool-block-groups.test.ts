@@ -133,6 +133,20 @@ describe("groupToolBlocksForDisplay", () => {
     expect(groups.map((group) => group.members.length)).toEqual([1, 1]);
   });
 
+  it("groups a program's matching calls together, apart from the model's own and another program's", () => {
+    const read = (id: string, parentCallId?: string): Block => ({
+      ...fetchBlock(id, "https://one.example", "done"),
+      ...(parentCallId !== undefined && { parentCallId }),
+    });
+    const groups = groupToolBlocksForDisplay([
+      read("own"),
+      read("run/1", "run"),
+      read("run/2", "run"),
+      read("other/1", "other"),
+    ]);
+    expect(groups.map((group) => group.members.length)).toEqual([1, 2, 1]);
+  });
+
   it("coalesces a contiguous run of same-source log writes into one section", () => {
     const write = (title: string, body: string, live = false): Block => ({
       kind: "log",

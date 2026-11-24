@@ -1,9 +1,17 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 
-import { loadName, scopeField, scopesFor, withSkillScope } from "../lib/tool-support.ts";
+import {
+  loadName,
+  scopeField,
+  scopesFor,
+  steeredPersonalScopeApproval,
+  withSkillScope,
+} from "../lib/tool-support.ts";
 
+/** Lists a scope's custom skills. */
 export default defineTool({
+  approval: steeredPersonalScopeApproval,
   label: {
     start: () => "Listing skills",
     complete: () => "Listed skills",
