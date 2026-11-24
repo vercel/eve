@@ -63,6 +63,9 @@ function createFakeAccess(files: Record<string, string>): {
       open() {
         return this.get();
       },
+      getIfStarted() {
+        return this.get();
+      },
       prepare() {},
       async stop() {},
       async get() {

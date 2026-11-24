@@ -33,6 +33,9 @@ function createFakeAccess(
     open() {
       return this.get();
     },
+    getIfStarted() {
+      return this.get();
+    },
     prepare() {},
     async stop() {},
 

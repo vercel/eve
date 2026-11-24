@@ -6,6 +6,17 @@ import type { SessionSchedule } from "#context/session-schedule.js";
 import type { ConversationContext } from "#shared/conversation-context.js";
 export type { SessionAuth, SessionParent, SessionPredecessor, SessionSchedule, SessionTurn };
 
+/** Options for {@link SessionContext.getSandbox}. */
+export interface GetSandboxOptions {
+  /**
+   * When `true`, resolves to `null` without starting a sandbox if this session
+   * has never started one, if its sandbox was deleted, or if a previously
+   * persisted sandbox is gone; resumes an idle-stopped persisted sandbox if one
+   * exists.
+   */
+  readonly ifStarted?: boolean;
+}
+
 /**
  * Shared runtime context available to all authored callbacks that run
  * inside the ALS-scoped harness step (tools, hooks, channel events).
@@ -46,6 +57,50 @@ export interface SessionContext {
    * in the current authored runtime context.
    */
   getSandbox(): Promise<RuntimeSandboxSession>;
+  /**
+   * Resolves the session's sandbox. Throws when no sandbox is available
+   * in the current authored runtime context.
+   */
+  getSandbox(options: { readonly ifStarted?: false } | undefined): Promise<RuntimeSandboxSession>;
+  /**
+   * Resolves the session's sandbox only if this session has already started
+   * one, returning `null` otherwise without starting a new sandbox.
+   */
+  getSandbox(options: { readonly ifStarted: true }): Promise<RuntimeSandboxSession | null>;
+  /**
+   * Resolves the session's sandbox, or returns `null` without starting one
+   * when `options.ifStarted` is `true` and the session has not started a
+   * sandbox yet.
+   */
+  getSandbox(options?: GetSandboxOptions): Promise<RuntimeSandboxSession | null>;
+  /**
+   * Resolves the session's sandbox with the capabilities declared by its
+   * configured environment only if this session has already started one,
+   * returning `null` otherwise without starting a new sandbox. Throws when the
+   * environment is not active.
+   */
+  getSandbox<Session extends SandboxSession>(
+    environment: SandboxEnvironment<object | undefined, Session>,
+    options: { readonly ifStarted: true },
+  ): Promise<RuntimeSandboxSession<Session> | null>;
+  /**
+   * Resolves the session's sandbox with the capabilities declared by its
+   * configured environment. Throws when the environment is not active.
+   */
+  getSandbox<Session extends SandboxSession>(
+    environment: SandboxEnvironment<object | undefined, Session>,
+    options: { readonly ifStarted?: false } | undefined,
+  ): Promise<RuntimeSandboxSession<Session>>;
+  /**
+   * Resolves the session's sandbox with the capabilities declared by its
+   * configured environment, or returns `null` without starting one when
+   * `options.ifStarted` is `true` and the session has not started a sandbox
+   * yet. Throws when the environment is not active.
+   */
+  getSandbox<Session extends SandboxSession>(
+    environment: SandboxEnvironment<object | undefined, Session>,
+    options: GetSandboxOptions | undefined,
+  ): Promise<RuntimeSandboxSession<Session> | null>;
   /**
    * Resolves the session's sandbox with the capabilities declared by its
    * configured environment. Throws when the environment is not active.

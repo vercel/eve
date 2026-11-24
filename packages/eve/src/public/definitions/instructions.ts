@@ -30,11 +30,14 @@ export function defineInstructions<TInstructions extends InstructionsDefinition>
   return definition;
 }
 
+/** A map of dynamic instructions, keyed by entry name. */
+export type DynamicInstructionsSet = Readonly<Record<string, InstructionsDefinition>>;
+
 /**
  * Value a `defineDynamic` resolver in `agent/instructions/` returns: a {@link defineInstructions}
- * result, or `null` to contribute no instructions.
+ * result, a map of them keyed by entry name, or `null` to contribute no instructions.
  */
-export type DynamicInstructionsResult = InstructionsDefinition | null;
+export type DynamicInstructionsResult = InstructionsDefinition | DynamicInstructionsSet | null;
 
-/** `defineDynamic()` for `agent/instructions/`: returns `defineInstructions()` or `null`. */
+/** `defineDynamic()` for `agent/instructions/`: returns `defineInstructions()`, a map of them, or `null`. */
 export const defineDynamic = defineDynamicDefinition as DefineDynamic<DynamicInstructionsResult>;

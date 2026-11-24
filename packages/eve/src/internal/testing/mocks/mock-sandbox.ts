@@ -229,6 +229,10 @@ export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
       await preparations;
       return session;
     },
+    async getIfStarted(): Promise<NetworkPolicySandboxSession> {
+      await preparations;
+      return session;
+    },
     async open(): Promise<NetworkPolicySandboxSession> {
       return session;
     },

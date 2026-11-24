@@ -324,6 +324,46 @@ describe("workflow step authorization", () => {
     expect(deleted).not.toHaveBeenCalled();
   });
 
+  it("returns null for ctx.getSandbox({ ifStarted: true }) when the agent has no sandbox or it has not started, and resumes once persisted", async () => {
+    const { provider, registry, starts } = upsertSandboxes();
+    bundle.registry = undefined;
+    await expect(runStep((ctx) => ctx.getSandbox({ ifStarted: true }))).resolves.toMatchObject({
+      kind: "result",
+      output: null,
+    });
+    await expect(
+      runStep((ctx) => ctx.getSandbox(provider.environment(), { ifStarted: true })),
+    ).rejects.toMatchObject({
+      fatal: true,
+      message: expect.stringContaining("received a sandbox environment"),
+    });
+
+    bundle.registry = registry;
+    await expect(runStep((ctx) => ctx.getSandbox({ ifStarted: true }))).resolves.toMatchObject({
+      kind: "result",
+      output: null,
+    });
+    expect(starts).toEqual([]);
+
+    const session = await ensureSandboxAccess({
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      nodeId: "__root__",
+      registry,
+      sessionId: "session-1",
+      state: null,
+    });
+    await session.get();
+    const state = await session.captureState();
+    const input = context();
+    await expect(
+      runStep(async (ctx) => (await ctx.getSandbox({ ifStarted: true })) !== null, {
+        ...input,
+        sandbox: { ...input.sandbox, state },
+      }),
+    ).resolves.toMatchObject({ kind: "result", output: true });
+    expect(starts).toEqual(["session-1"]);
+  });
+
   it("does not exchange a consumed code again when the rest of the step retries", async () => {
     let exchanged = false;
     const complete = vi.fn(async () => {

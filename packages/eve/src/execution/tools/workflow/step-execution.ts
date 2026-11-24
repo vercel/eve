@@ -9,7 +9,8 @@ import {
   SteeredByKey,
 } from "#context/keys.js";
 import { runInWorkflowStep } from "#context/workflow-step.js";
-import type { SessionContext } from "#context/session-context.js";
+import { parseGetSandboxArgs } from "#context/build-callback-context.js";
+import type { GetSandboxOptions, SessionContext } from "#context/session-context.js";
 import { ensureSandboxAccess, type EnsuredSandboxAccess } from "#execution/sandbox/ensure.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { ownerReference } from "#execution/agent-sessions/owner.js";
@@ -72,16 +73,21 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
         ...base,
         agent: () => unavailableInStep("ctx.agent()", "Call ctx.agent() in the workflow body."),
         ask: () => unavailableInStep("ctx.ask()", "Call ctx.ask() in the workflow body."),
-        getSandbox: (async (environment?: SandboxEnvironmentIdentity) => {
-          const access = await sandbox.open();
-          if (environment !== undefined && access.environment?.provider !== environment.provider) {
+        getSandbox: (async (
+          first?: SandboxEnvironmentIdentity | GetSandboxOptions,
+          second?: GetSandboxOptions,
+        ) => {
+          const { environment, options } = parseGetSandboxArgs(first, second);
+          const access = await sandbox.open({ allowMissing: options?.ifStarted === true });
+          if (environment !== undefined && access?.environment?.provider !== environment.provider) {
             throw fatal(
               'ctx.getSandbox() in a "use step" function received a sandbox environment the session\'s sandbox does not use. ' +
                 "Pass the environment the agent's sandbox definition opens, or call ctx.getSandbox() without one.",
             );
           }
+          if (access === null) return null;
           context.setVirtualContext(SandboxKey, access);
-          return await base.getSandbox();
+          return options === undefined ? await base.getSandbox() : await base.getSandbox(options);
         }) as SessionContext["getSandbox"],
         getToken: auth.getToken,
         requireAuth: auth.requireAuth,
@@ -151,16 +157,12 @@ function stepAgentLoader(input: WorkflowStepContext): () => Promise<SessionAgent
 
 function openStepSandbox(input: WorkflowStepContext, loadAgent: () => Promise<SessionAgent>) {
   const { sessionId, state } = input.sandbox;
-  let opening: Promise<EnsuredSandboxAccess> | undefined;
+  let opening: Promise<EnsuredSandboxAccess | null> | undefined;
   let released = false;
-  const open = async (): Promise<EnsuredSandboxAccess> => {
+  const open = async (): Promise<EnsuredSandboxAccess | null> => {
     const agent = await loadAgent();
     const sandbox = await agent.sandbox();
-    if (sandbox === undefined) {
-      throw new Error(
-        `ctx.getSandbox() in tool "${input.toolName}": the session's agent has no sandbox.`,
-      );
-    }
+    if (sandbox === undefined || sandbox.registry === undefined) return null;
     return await ensureSandboxAccess({
       ...sandbox.template,
       nodeId: runtimeNodeId(agent),
@@ -171,7 +173,7 @@ function openStepSandbox(input: WorkflowStepContext, loadAgent: () => Promise<Se
       shutdownTracking: "none",
     });
   };
-  const openOnce = (): Promise<EnsuredSandboxAccess> => {
+  const openOnce = (): Promise<EnsuredSandboxAccess | null> => {
     opening ??= open().catch((error: unknown) => {
       opening = undefined;
       throw error;
@@ -179,7 +181,7 @@ function openStepSandbox(input: WorkflowStepContext, loadAgent: () => Promise<Se
     return opening;
   };
   return {
-    async open(): Promise<SandboxAccess> {
+    async open(options?: { readonly allowMissing?: boolean }): Promise<SandboxAccess | null> {
       if (released) {
         throw fatal(
           `ctx.getSandbox() was called after the "use step" function of tool "${input.toolName}" returned. ` +
@@ -187,6 +189,12 @@ function openStepSandbox(input: WorkflowStepContext, loadAgent: () => Promise<Se
         );
       }
       const access = await openOnce();
+      if (access === null) {
+        if (options?.allowMissing === true) return null;
+        throw new Error(
+          `ctx.getSandbox() in tool "${input.toolName}": the session's agent has no sandbox.`,
+        );
+      }
       return {
         ...access,
         delete: () =>

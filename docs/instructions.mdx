@@ -45,7 +45,7 @@ A root `agent/instructions.md` (or `.ts`) can sit beside the directory, and the 
 
 ## Dynamic instructions
 
-To compute instructions from auth, tenant, channel, or external data, use `defineDynamic((ctx) => ...)` and return `defineInstructions(...)` or `null`. The function runs before each ordinary model call, not once per turn, so wrap every fetch, database query, and API call in `ctx.memo(key, fn)` to run it once per key. See [Dynamic capabilities](./guides/dynamic-capabilities#choose-a-lifetime) to choose a key.
+To compute instructions from auth, tenant, channel, or external data, use `defineDynamic((ctx) => ...)` and return `defineInstructions(...)`, a keyed map (`Record<string, InstructionsDefinition>`), or `null`. The function runs before each ordinary model call, not once per turn, so wrap every fetch, database query, and API call in `ctx.memo(key, fn)` to run it once per key. See [Dynamic capabilities](./guides/dynamic-capabilities#choose-a-lifetime) to choose a key.
 
 A dynamic system instruction applies, outside history, while the function returns it.
 
@@ -56,6 +56,13 @@ A dynamic user instruction joins the conversation history only when its content 
 - Returning `null` adds nothing and resets change tracking, so a later return of the earlier text adds it again.
 - Existing history is not removed.
 - Change tracking survives deployments. A compaction or clear that removes the instruction from the history adds it again.
+
+Return a keyed map (`DynamicInstructionsSet`) when one module manages independent entries, such as multiple repositories or scopes. Each key must be a non-empty string without control characters and tracks changes independently:
+
+- Adding or changing one user-role key appends only that key's entry, keeping earlier prompt context cached.
+- Omitting a previously returned key resets change tracking for that key without removing earlier history, so returning the same text under that key later adds it again.
+- Compaction or clear that removes a key's entry from history adds it again before the next model call.
+- System-role entries in a map apply outside history while returned.
 
 See [Dynamic capabilities](./guides/dynamic-capabilities) for examples and failure behavior.
 

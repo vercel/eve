@@ -118,7 +118,9 @@ test("runs clone without approval while retaining repository-scoped write-capabl
       },
     },
   ]);
-  assert.equal(runs.length, 1);
+  assert.equal(runs.length, 2);
+  assert.match(runs[0]!.command, /'repo' 'clone' 'vercel\/internal-agents'/u);
+  assert.match(runs[1]!.command, /rev-parse --show-toplevel/u);
 });
 
 test("asks authorize with the argv, caller, owner, repository, and token before running", async () => {
@@ -1126,4 +1128,146 @@ test("names the refusals the agent can fix by changing its input", async () => {
     executeGitHubShell(READ, undefined, dependencies()),
     (error) => error instanceof Error && !isGitHubCommandInputError(error),
   );
+});
+
+test("prefetches partial-clone instruction files inside the active credential lease", async () => {
+  for (const input of [
+    CLONE,
+    {
+      command:
+        "git clone --filter=blob:none --no-checkout https://github.com/vercel/internal-agents.git",
+      description: "Partial clone repository",
+      repository: "vercel/internal-agents",
+    },
+  ]) {
+    const events: string[] = [];
+    const runs: Parameters<SandboxSession["run"]>[0][] = [];
+    const broker: (typeof CONFIG)["broker"] = async (sandbox, rules) => {
+      events.push(rules ? "lease:install" : "lease:clear");
+      await CONFIG.broker(sandbox, rules);
+    };
+
+    const output = await executeGitHubShell(
+      input,
+      { ...CONFIG, broker },
+      {
+        sessionId: "session-prefetch-lease",
+        async getConnectToken() {
+          return "secret-token";
+        },
+        async getSandbox() {
+          return fakeSandbox(runs, (run) => {
+            events.push(
+              run.command.includes("rev-parse --show-toplevel") ? "run:prefetch" : "run:main",
+            );
+            return { exitCode: 0, stdout: "cloned\n", stderr: "" };
+          });
+        },
+      },
+    );
+
+    assert.deepEqual(events, ["lease:install", "run:main", "run:prefetch", "lease:clear"]);
+    assert.equal(runs.length, 2);
+    const prefetch = runs[1]!;
+    assert.match(
+      prefetch.command,
+      /git -C '\/workspace\/internal-agents' rev-parse --show-toplevel/u,
+    );
+    assert.match(prefetch.command, /'AGENTS\.md' 'CLAUDE\.md'/u);
+    const gitConfig = parseGitConfigEnv(prefetch.env);
+    assert.equal(gitConfig.get("core.hooksPath"), "/dev/null");
+    assert.equal(gitConfig.get("protocol.allow"), "never");
+    assert.equal(gitConfig.get("protocol.https.allow"), "always");
+    assert.match(
+      gitConfig.get("http.https://github.com/.extraheader") ?? "",
+      /^Authorization: Basic /u,
+    );
+    assert.equal(prefetch.env?.GIT_TERMINAL_PROMPT, "0");
+    assert.ok(prefetch.signal instanceof AbortSignal);
+    assert.deepEqual(output, { exitCode: 0, stdout: "cloned\n", stderr: "", truncated: false });
+  }
+});
+
+test("skips prefetch on failed clones, non-clone commands, workspace escapes, or empty prefetchFiles", async () => {
+  const cases: ReadonlyArray<{
+    readonly label: string;
+    readonly input: GitHubShellInput;
+    readonly config: typeof CONFIG & { readonly prefetchFiles?: readonly string[] };
+    readonly exitCode: number;
+  }> = [
+    { label: "failed clone", input: CLONE, config: CONFIG, exitCode: 128 },
+    { label: "gh pr view", input: READ, config: CONFIG, exitCode: 0 },
+    {
+      label: "workspace escape",
+      input: {
+        command: "git -C /tmp/outside fetch origin",
+        description: "Fetch outside workspace",
+        repository: "vercel/internal-agents",
+      },
+      config: CONFIG,
+      exitCode: 0,
+    },
+    {
+      label: "disabled prefetch",
+      input: CLONE,
+      config: { ...CONFIG, prefetchFiles: [] },
+      exitCode: 0,
+    },
+  ];
+
+  for (const { label, input, config, exitCode } of cases) {
+    const runs: Parameters<SandboxSession["run"]>[0][] = [];
+    const output = await executeGitHubShell(input, config, {
+      sessionId: `session-skip-${label}`,
+      async getConnectToken() {
+        return "secret-token";
+      },
+      async getSandbox() {
+        return fakeSandbox(runs, { exitCode, stdout: "", stderr: "" });
+      },
+    });
+    assert.equal(runs.length, 1, label);
+    assert.equal(output.exitCode, exitCode, label);
+  }
+});
+
+function parseGitConfigEnv(env: Readonly<Record<string, string>> | undefined): Map<string, string> {
+  const config = new Map<string, string>();
+  const count = Number(env?.GIT_CONFIG_COUNT ?? 0);
+  for (let index = 0; index < count; index += 1) {
+    const key = env?.[`GIT_CONFIG_KEY_${index}`];
+    const value = env?.[`GIT_CONFIG_VALUE_${index}`];
+    if (key !== undefined && value !== undefined) config.set(key, value);
+  }
+  return config;
+}
+
+test("swallows prefetch errors without altering clone output or skipping lease cleanup", async () => {
+  const runs: Parameters<SandboxSession["run"]>[0][] = [];
+  const policies: NetworkPolicy[] = [];
+
+  const output = await executeGitHubShell(CLONE, CONFIG, {
+    sessionId: "session-prefetch-error",
+    async getConnectToken() {
+      return "secret-token";
+    },
+    async getSandbox() {
+      const base = fakeSandbox(runs, { exitCode: 0, stdout: "ok\n", stderr: "warn\n" }, policies);
+      return {
+        ...base,
+        async run(input) {
+          if (input.command.includes(LEASE_LOCK_PATH)) {
+            return { exitCode: 0, stdout: "", stderr: "" };
+          }
+          runs.push(input);
+          if (runs.length === 2) throw new Error("prefetch timed out");
+          return { exitCode: 0, stdout: "ok\n", stderr: "warn\n" };
+        },
+      };
+    },
+  });
+
+  assert.equal(runs.length, 2);
+  assert.deepEqual(output, { exitCode: 0, stdout: "ok\n", stderr: "warn\n", truncated: false });
+  assert.equal(policies.at(-1), "allow-all");
 });

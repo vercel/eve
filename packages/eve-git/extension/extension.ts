@@ -8,6 +8,7 @@ import type {
   GitHubConfig,
   GitHubUserAuthorizeRequest,
 } from "./lib/github-shell.ts";
+import { isValidPrefetchPath } from "./lib/prefetch.ts";
 
 export type { GitHubLeaseRule } from "./lib/github-shell.ts";
 export type { GitHubCoAuthor } from "./lib/github-shell.ts";
@@ -26,6 +27,10 @@ export type { GitHubAttribution } from "./lib/github-shell.ts";
 
 const fn = <T>() => z.custom<T>((value) => typeof value === "function");
 
+const prefetchPath = z
+  .string()
+  .refine(isValidPrefetchPath, "Prefetch paths must be relative file paths without traversal.");
+
 const githubBase = {
   connector: z.string().min(1),
   broker: fn<GitHubLeaseBroker>(),
@@ -34,6 +39,12 @@ const githubBase = {
    * `Co-authored-by` trailer ends signed commits and new pull requests.
    */
   attribution: fn<GitHubAttribution>().optional(),
+  /**
+   * Relative file paths prefetched into `.git/objects` on partial clones while
+   * the GitHub credential lease is open, without modifying the working tree.
+   * Defaults to `["AGENTS.md", "CLAUDE.md"]`. Pass `[]` to disable.
+   */
+  prefetchFiles: z.array(prefetchPath).readonly().optional(),
 };
 
 /**

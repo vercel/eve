@@ -22,6 +22,7 @@ vi.mock("./sandbox/ensure.js", () => ({
   ensureSandboxAccess: vi.fn().mockResolvedValue({
     captureState: vi.fn().mockResolvedValue({ initialized: false, session: null }),
     get: vi.fn().mockResolvedValue(null),
+    getIfStarted: vi.fn().mockResolvedValue(null),
   }),
 }));
 

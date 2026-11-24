@@ -1,4 +1,5 @@
 export type {
+  GetSandboxOptions,
   SessionAuth,
   SessionContext,
   SessionParent,

@@ -118,6 +118,7 @@ export interface SandboxAccess {
   captureState(): Promise<SandboxState>;
   delete?(options?: SandboxDeleteOptions): Promise<void>;
   get(): Promise<SandboxSession | null>;
+  getIfStarted(): Promise<SandboxSession | null>;
   open(): Promise<SandboxSession | null>;
   prepare(work?: SandboxPreparation): void;
   stop(): Promise<void>;

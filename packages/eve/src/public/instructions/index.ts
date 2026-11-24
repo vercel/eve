@@ -2,6 +2,7 @@ export {
   defineDynamic,
   defineInstructions,
   type DynamicInstructionsResult,
+  type DynamicInstructionsSet,
   type InstructionsDefinition,
 } from "#public/definitions/instructions.js";
 

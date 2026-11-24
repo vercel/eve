@@ -63,6 +63,8 @@ export function prSkillMarkdown(github: boolean): string {
 
 Fetch the current base immediately before publication. Rebase onto it, or replay only the intended diff onto a clean checkout when local commits are unavailable. Stop on conflicts, stale refs, unexpected paths, or unrelated reversions.
 
+Before committing or opening a pull request, verify you followed the repository's \`AGENTS.md\`, \`CLAUDE.md\`, and pull request template guidelines, including required checks and tests.
+
 ${github ? SIGNED_COMMIT : PLAIN_COMMIT}
 
 \`\`\`sh
