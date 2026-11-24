@@ -1,3 +1,6 @@
+import type { ModelMessage } from "ai";
+
+import { isInjectedMessage } from "#harness/messages.js";
 import type { StoredHistoryMessage } from "#shared/history-message.js";
 
 export const OPENAI_DIRECT_PROVIDER = "openai.responses";
@@ -25,10 +28,6 @@ export function holdsOpenAICompaction(history: readonly StoredHistoryMessage[]):
   return history.some(holdsItem);
 }
 
-function isUserTurnInput(message: StoredHistoryMessage): boolean {
-  return message.role === "user" && (message as { kind?: unknown }).kind === "user";
-}
-
-export function compactedSinceLastUserMessage(history: readonly StoredHistoryMessage[]): boolean {
-  return history.slice(history.findLastIndex(isUserTurnInput) + 1).some(holdsItem);
+export function endsWithOpenAICompaction(history: readonly StoredHistoryMessage[]): boolean {
+  return holdsItem(history.findLast((message) => !isInjectedMessage(message as ModelMessage)));
 }

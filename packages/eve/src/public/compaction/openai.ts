@@ -1,7 +1,7 @@
 import { fixedTail } from "./strategies.js";
 import {
   OPENAI_DIRECT_PROVIDER,
-  compactedSinceLastUserMessage,
+  endsWithOpenAICompaction,
 } from "#harness/compaction/openai-item.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { CompactionRewrite } from "#shared/compaction-strategy.js";
@@ -33,10 +33,10 @@ export function openaiCompaction(): CompactionRewrite {
       );
       return await fallback(history, ctx);
     }
-    if (compactedSinceLastUserMessage(history)) return undefined;
+    if (endsWithOpenAICompaction(history)) return undefined;
     try {
       return await ctx.send(history, {
-        providerOptions: { openai: { compactionTrigger: true, store: false } },
+        providerOptions: { openai: { compactionTrigger: true } },
       });
     } catch (error) {
       if (ctx.abortSignal.aborted) throw error;

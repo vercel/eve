@@ -357,10 +357,8 @@ default, and eve rejects them beside `compact`.
 summary. eve sends the turn's request with OpenAI's `compaction_trigger`, and OpenAI answers with
 an encrypted record of the history. eve stores that record as the history and sends it back on
 every later request, so the model keeps its working state where a summary would drop it. It needs
-the OpenAI Responses API called directly, with `openai("gpt-...")`, and the model's `store` option
-set to `false`: OpenAI doesn't keep the compaction call's record, so eve has to send its content
-back, and with `store` left on the SDK sends a reference to a record that doesn't exist. On any
-other model, and when the call fails, it summarizes as text with `fixedTail()` and logs why.
+the OpenAI Responses API called directly, with `openai("gpt-...")`. On any other model, and when
+the call fails, it summarizes as text with `fixedTail()` and logs why.
 
 ```ts title="agent/agent.ts"
 import { defineAgent } from "eve";
@@ -369,7 +367,6 @@ import { openai } from "eve/models/openai";
 
 export default defineAgent({
   model: openai("gpt-5"),
-  modelOptions: { providerOptions: { openai: { store: false } } },
   compaction: { compact: openaiCompaction() },
 });
 ```
@@ -380,6 +377,14 @@ stale copies of them. The first request after a compaction misses the prompt cac
 instructions and tools. Later requests hit it. The record is unreadable to other providers: a
 session that switches models after an OpenAI compaction logs a warning on each request and sends
 the history without the record.
+
+The agent's own `store` setting applies to the compaction call and to every later request. With the
+default, OpenAI keeps the record and eve refers to it by id, for as long as OpenAI keeps the
+response. With `modelOptions: { providerOptions: { openai: { store: false } } }`, eve sends the
+record inline with its encrypted content, so the session stays resumable after OpenAI's retention,
+as it does for the rest of the history. A turn compacts again when its tool results have grown the
+history past the threshold or past the window. The strategy declines only when nothing was added
+after the record.
 
 eve checks each result before it applies it. A result fails the compaction, and leaves the history
 as it was, when it drops a tool call's result or a call, puts a checkpoint after other messages, or

@@ -6,7 +6,11 @@ import type { HarnessSession } from "#harness/types.js";
 import {
   INJECTED,
   type ResponsesBody,
+  compactionReply,
+  contextOverflowReply,
   fresh,
+  functionCallReply,
+  isCompactionTrigger,
   kernelFor,
   openaiWithFetch,
   textReply,
@@ -16,7 +20,7 @@ import { openaiCompaction } from "#public/compaction/index.js";
 
 const run = <T>(fn: () => Promise<T>) => contextStorage.run(new ContextContainer(), fn);
 
-const isTrigger = (body: ResponsesBody) => body.input.at(-1)?.type === "compaction_trigger";
+const isTrigger = isCompactionTrigger;
 
 const item = (body: ResponsesBody) => body.input.find((entry) => entry.type === "compaction");
 
@@ -71,7 +75,7 @@ describe("openaiCompaction()", () => {
     for (const injected of INJECTED) expect(before).not.toContain(String(injected.content));
   });
 
-  it("sends the same item, byte for byte, on every request after a compaction and a reload", async () => {
+  it("sends OpenAI's item inline, byte for byte, on every request after a compaction and a reload, when the agent sets store: false", async () => {
     const bodies: ResponsesBody[] = [];
     const model = openaiWithFetch(bodies);
 
@@ -93,6 +97,123 @@ describe("openaiCompaction()", () => {
       expect(JSON.stringify(item(body))).toBe(JSON.stringify(item(afterCompaction[0]!)));
       expect(JSON.stringify(body.input)).not.toContain("item_reference");
     }
+  });
+
+  it("refers to the item OpenAI kept on every request after a compaction and a reload, with the default openai() settings", async () => {
+    const bodies: ResponsesBody[] = [];
+    const model = openaiWithFetch(bodies);
+    const options = { openaiOptions: {} };
+
+    const first = await run(() =>
+      turn(
+        kernelFor(openaiCompaction(), model, [], options),
+        fresh(),
+        "Which sources back the claim?",
+      ),
+    );
+    const reloaded = JSON.parse(JSON.stringify(first)) as HarnessSession;
+    await run(() =>
+      turn(kernelFor(openaiCompaction(), model, [], options), reloaded, "And the second claim?"),
+    );
+
+    const [compacting] = bodies;
+    expect(compacting!.store).toBeUndefined();
+    const afterCompaction = bodies.filter((body) => !isTrigger(body));
+    expect(afterCompaction.length).toBeGreaterThanOrEqual(2);
+    for (const body of afterCompaction) {
+      expect(body.input).toContainEqual({ id: "cmp_1", type: "item_reference" });
+      expect(item(body)).toBeUndefined();
+    }
+  });
+
+  it("compacts again in the same turn once tool results have been added after the item", async () => {
+    const bodies: ResponsesBody[] = [];
+    let triggers = 0;
+    let calls = 0;
+    const model = openaiWithFetch(bodies, (body) => {
+      if (isTrigger(body)) return compactionReply(`cmp_${++triggers}`, `STATE-${triggers}`);
+      return ++calls === 1 ? functionCallReply("call_1") : textReply("Done.");
+    });
+
+    const session = await run(() =>
+      turn(
+        kernelFor(openaiCompaction(), model, [], {
+          when: { "model.requested": () => true },
+        }),
+        fresh(),
+        "Which sources back the claim?",
+      ),
+    );
+
+    expect(triggers).toBe(2);
+    const last = bodies.at(-1)!;
+    expect(item(last)).toMatchObject({ id: "cmp_2" });
+    expect(last.input.filter((entry) => entry.type === "compaction")).toHaveLength(1);
+    expect(session.history.at(-1)).toMatchObject({ role: "assistant" });
+    expect(JSON.stringify(session.history.at(-1))).toContain("Done.");
+  });
+
+  it("compacts and retries when the turn reaches the window after an earlier compaction", async () => {
+    const bodies: ResponsesBody[] = [];
+    let triggers = 0;
+    let calls = 0;
+    let first = true;
+    const model = openaiWithFetch(bodies, (body) => {
+      if (isTrigger(body)) return compactionReply(`cmp_${++triggers}`, `STATE-${triggers}`);
+      calls += 1;
+      if (calls === 1) return functionCallReply("call_1");
+      return calls === 2 ? contextOverflowReply() : textReply("Done.");
+    });
+
+    const session = await run(() =>
+      turn(
+        kernelFor(openaiCompaction(), model, [], {
+          when: {
+            "model.requested": () => {
+              const due = first;
+              first = false;
+              return due;
+            },
+          },
+        }),
+        fresh(),
+        "Which sources back the claim?",
+      ),
+    );
+
+    expect(triggers).toBe(2);
+    expect(item(bodies.at(-1)!)).toMatchObject({ id: "cmp_2" });
+    expect(JSON.stringify(session.history.at(-1))).toContain("Done.");
+  });
+
+  it("declines to compact when the item is the last thing in the history and nothing was added", async () => {
+    const send = vi.fn();
+    const history = [
+      { content: "Review it.", kind: "user", role: "user" },
+      {
+        content: [
+          {
+            kind: "openai.compaction",
+            providerOptions: { openai: { encryptedContent: "ENC", itemId: "cmp_1" } },
+            type: "custom",
+          },
+        ],
+        role: "assistant",
+      },
+    ] as const;
+
+    const result = await openaiCompaction()(
+      history as never,
+      {
+        abortSignal: new AbortController().signal,
+        model: { provider: "openai.responses", modelId: "gpt-5" },
+        send,
+        session: { id: "s" },
+      } as never,
+    );
+
+    expect(result).toBeUndefined();
+    expect(send).not.toHaveBeenCalled();
   });
 
   it("summarizes as text and says why when OpenAI's compaction call fails", async () => {
