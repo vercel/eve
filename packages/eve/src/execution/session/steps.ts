@@ -100,10 +100,12 @@ export interface SessionStepTypes {
   };
 }
 
+/** The name of a session step. */
 export type SessionStepName = keyof SessionStepTypes;
 export type SessionStepInput<N extends SessionStepName> = SessionStepTypes[N]["input"];
 export type SessionStepResult<N extends SessionStepName> = SessionStepTypes[N]["result"];
 
+/** The facts of a step call that the session program gives to its host. */
 export type StepCall = Pick<StepMeta, "key" | "signals">;
 
 export type SessionStepTable = {
@@ -112,6 +114,7 @@ export type SessionStepTable = {
     : (input: SessionStepInput<N>) => Promise<SessionStepResult<N>>;
 };
 
+/** Runs the session step `name` durably. Pass the call to `SessionSteps.run()` in the step. */
 export type SessionStepCall = <N extends SessionStepName>(
   name: N,
   input: SessionStepInput<N>,

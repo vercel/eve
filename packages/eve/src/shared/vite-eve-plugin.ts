@@ -11,7 +11,7 @@ import {
 } from "#internal/vercel/vercel-services-config.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import { joinEveRoutePath, normalizePublicEveRoutePath } from "#shared/eve-route-path.js";
-import { builtInPlatformBuild } from "#platform/selection.js";
+import { builtInPlatformBuild, loadPlatformBuild } from "#platform/selection.js";
 import {
   addEveVercelServices,
   readEveBaseUrlOrigin,
@@ -90,7 +90,7 @@ export function createEveVitePlugin(input: {
 }): Plugin & { readonly nitro: EveNitroModule } {
   const { host, nitroOnly, options, vercelOutputAfterSsrBundle } = input;
   const devServerTimeoutMs = resolveDevServerTimeout(options.devServerTimeoutMs, host);
-  const isVercel = builtInPlatformBuild().platformOutput?.() === true;
+  const declaresBuildApp = builtInPlatformBuild().platformOutput?.() === true;
   let viteRoot: string;
   let projectRoot: string;
   let agents: readonly EveFrameworkAgent[];
@@ -208,7 +208,10 @@ export function createEveVitePlugin(input: {
         nitroServesPreview =
           isPreview &&
           flattenPlugins(config.plugins ?? []).some((plugin) => plugin.name === "nitro:preview");
-        isVercelBuild = env.command === "build" && isVercel;
+        isVercelBuild =
+          env.command === "build" &&
+          declaresBuildApp &&
+          (await loadPlatformBuild(projectRoot)).platformOutput?.() === true;
         if (env.command !== "serve") {
           agents = isVercelBuild ? await resolveEveAgents(projectRoot) : [];
           return {};
@@ -268,12 +271,12 @@ export function createEveVitePlugin(input: {
         }
       }
     },
-    ...(isVercel
+    ...(declaresBuildApp
       ? {
           buildApp: {
             order: "post",
             async handler(builder: ViteBuilder) {
-              if (nitroModuleInstalled || vercelOutputAfterSsrBundle) {
+              if (!isVercelBuild || nitroModuleInstalled || vercelOutputAfterSsrBundle) {
                 return;
               }
               for (const environment of Object.values(builder.environments)) {

@@ -1,5 +1,6 @@
 import type { Dispatcher1Wrapper } from "undici";
 
+import type { Network } from "#platform/entities.js";
 import { loadAddressGuardedDispatcher } from "#runtime-env/public-dispatcher.js";
 import { isBlockedDestinationHost } from "#shared/network-address.js";
 
@@ -85,6 +86,39 @@ async function fetchHonorsDispatcher(): Promise<boolean> {
     return false;
   } catch (error) {
     return error instanceof Error && error.cause === probe;
+  }
+}
+
+export interface PublicDestinationFetch {
+  readonly response: Response;
+  close(): Promise<void>;
+}
+
+export async function fetchPublicDestination(
+  url: string | URL,
+  init: Omit<RequestInit, "dispatcher">,
+  policy: PublicDestinationPolicy,
+  network: Pick<Network, "fetchUntrusted"> | undefined,
+): Promise<PublicDestinationFetch> {
+  let dispatcher: Dispatcher1Wrapper;
+  try {
+    dispatcher = await createPublicDispatcher(policy);
+  } catch (error) {
+    if (!(error instanceof UnguardedRuntimeError) || network?.fetchUntrusted === undefined)
+      throw error;
+    return {
+      response: await network.fetchUntrusted(new Request(url, init)),
+      close: async () => {},
+    };
+  }
+  try {
+    return {
+      response: await fetchWithDispatcher(url, { ...init, dispatcher }),
+      close: () => dispatcher.close(),
+    };
+  } catch (error) {
+    await dispatcher.close();
+    throw error;
   }
 }
 

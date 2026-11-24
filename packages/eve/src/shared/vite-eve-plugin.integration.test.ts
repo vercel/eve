@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AppType, ConfigEnv, Plugin, UserConfig } from "vite";
 
+import { resolvePackageSourceFilePath } from "#internal/application/package.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import type { VercelServicesConfig } from "#internal/vercel/vercel-services-config.js";
 import { resolveSharedEveDevServer } from "#shared/framework-eve-server.js";
@@ -227,6 +228,35 @@ describe("createEveVitePlugin", () => {
 
     expect(result).toEqual({});
     expect(resolveSharedEveDevServerMock).not.toHaveBeenCalled();
+  });
+
+  it("leaves the build to Vite when the agent's platform writes no platform output", async () => {
+    const root = await createAgentProject();
+    await writeFile(
+      join(root, "package.json"),
+      JSON.stringify({ name: "alice-app", type: "module" }),
+    );
+    await writeFile(
+      join(root, "agent", "platform.ts"),
+      [
+        `import { definePlatform } from ${JSON.stringify(resolvePackageSourceFilePath("src/platform/declaration.ts"))};`,
+        "export default definePlatform({",
+        "  deployment: () => ({",
+        '    environment: () => "production",',
+        '    deploymentId: () => "dpl_alice",',
+        "    productionHost: () => undefined,",
+        "    publicHost: () => undefined,",
+        "    scope: () => undefined,",
+        "  }),",
+        "});",
+        "",
+      ].join("\n"),
+    );
+    await writeClientBuild(root, { "index.html": "<html></html>" });
+
+    await buildForVercel(root);
+
+    expect(existsSync(join(root, ".vercel", "output"))).toBe(false);
   });
 
   it("declares buildApp only for Vercel builds so other plugins can own local builds", () => {

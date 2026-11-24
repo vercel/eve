@@ -25,6 +25,7 @@ export type HostMode =
       readonly entry?: string;
       readonly conditions?: readonly string[];
       readonly durable?: BuildContribution;
+      readonly authoredSchedules?: "triggers";
       readonly publicRoutePrefix?: string;
       readonly vercelService?: boolean;
       readonly workspaceMember?: boolean;
@@ -104,7 +105,10 @@ export function createHostSpec(
     manifest,
     mode: mode.kind,
     platform,
-    scheduleRegistrations: preparedHost.scheduleRegistrations,
+    scheduleRegistrations:
+      mode.kind === "production" && mode.authoredSchedules === "triggers"
+        ? []
+        : preparedHost.scheduleRegistrations,
     vercel: preset === "vercel",
     vercelService: mode.kind === "production" && mode.vercelService === true,
   });
@@ -193,7 +197,7 @@ function assertEntryCanServe(manifest: CompiledAgentManifest, routes: HostRouteT
   const schedule = routes.scheduleTasks[0];
   if (schedule !== undefined) {
     throw new Error(
-      `Authored schedules aren't supported with \`Build.entry\` yet: schedule "${schedule.scheduleId}" in "${schedule.logicalPath}". Remove the schedule or build without \`build.entry\`. Dynamic schedules through the platform's \`Triggers\` are supported.`,
+      `An authored schedule needs eve's Node server or the platform's \`Triggers\`: schedule "${schedule.scheduleId}" in "${schedule.logicalPath}". Set \`build.schedules.authored\` and give \`triggers.register()\` in the platform, remove the schedule, or build without \`build.entry\`.`,
     );
   }
 }

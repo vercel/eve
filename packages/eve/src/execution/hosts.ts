@@ -16,18 +16,31 @@ import type { SessionEventStore } from "#execution/session-event-store.js";
 import { registerCleanup, type Lifetime } from "#runtime/lifetime.js";
 import { HookNotFoundError, isRunNotFound, isRunTargetGone } from "#shared/run-errors.js";
 
+/**
+ * The routes of an engine for hooks, runs, and steps. eve asks each hosted route in turn, and a
+ * route answers `undefined` for what it does not own.
+ */
 export interface HostedRoute {
+  /** Delivers a payload to the hook with `token`. */
   deliver(token: string, payload: unknown): Promise<"delivered" | "gone" | undefined>;
+  /** Returns `true` when the run has ended. */
   runEnded(runId: string): boolean | undefined;
+  /** Cancels a run. Returns `true` when the route owns the run. */
   cancelRun(runId: string, reason: string): boolean | undefined;
+  /** Returns the attempt of the step that runs now. */
   stepAttempt?(): number | undefined;
+  /** Returns the sign-in callbacks of a session. */
   signInCallbacks?(sessionId: string): SignInCallbacks | undefined;
 }
 
+/** Delivers a payload to an address. */
 export type ResumeAddress = (to: DeliveryAddress, payload: unknown) => Promise<void>;
 
+/** How a connection sign-in calls back to a session. */
 export interface SignInCallbacks {
+  /** The base URL of the callback route. */
   readonly callbackBaseUrl: string;
+  /** Delivers the result of the sign-in. */
   readonly deliver: ResumeAddress;
 }
 
@@ -46,6 +59,7 @@ export interface HookRoutes {
 
 export interface SessionStreams {
   readonly bySession: Map<string, SessionEventStore>;
+  app?: SessionEventStore;
   engine?: SessionEventStore;
 }
 
@@ -72,11 +86,18 @@ export function createProcessHosts(): ProcessHosts {
   return { routes: { hosted: new Set() }, streams: { bySession: new Map() } };
 }
 
+/** Registers the routes and streams of an engine with the app. */
 export interface EngineHosting {
+  /** Serves the hooks, runs, and steps of the engine through eve's routes. */
   route(route: HostedRoute): void;
+  /** Serves the stream of a session through eve's stream routes. */
   session(sessionId: string, events: SessionEventStore): void;
 }
 
+/**
+ * Returns the registration functions that a durable engine uses in its `start()`. Each
+ * registration ends with the lifetime of the app.
+ */
 export function hostEngine(app: {
   readonly hosts: AppHosts;
   readonly lifetime: Lifetime;
@@ -260,7 +281,7 @@ export function registerSessionEventStore(
 }
 
 export function sessionEventStore({ streams }: StreamHosts, sessionId: string): SessionEventStore {
-  const registered = streams.bySession.get(sessionId);
+  const registered = streams.bySession.get(sessionId) ?? streams.app;
   if (registered !== undefined) return registered;
   if (streams.engine === undefined)
     throw new Error(`No host in this realm holds session "${sessionId}".`);

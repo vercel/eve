@@ -32,6 +32,7 @@ export interface HostCapabilities {
   readonly moves: boolean;
   readonly externalCancel: boolean;
   readonly stamps: boolean;
+  readonly sessionTimeouts: boolean;
 }
 
 export interface CompletingStep {
@@ -65,6 +66,7 @@ export interface HostUnderTest {
   runSpecVersion?(runId: string): Promise<number | undefined>;
   rewriteRunAttributes?(runId: string, patch: Record<string, string | undefined>): Promise<void>;
   sessionOwner?(sessionId: string): Promise<string>;
+  advanceClock?(ms: number): void;
   dispose(): Promise<void>;
 }
 
@@ -83,6 +85,7 @@ const IN_PROCESS_CAPABILITIES: HostCapabilities = {
   moves: false,
   restarts: false,
   retries: true,
+  sessionTimeouts: false,
   stamps: false,
 };
 
@@ -93,6 +96,7 @@ const WORKFLOW_CAPABILITIES: HostCapabilities = {
   moves: true,
   restarts: true,
   retries: true,
+  sessionTimeouts: false,
   stamps: true,
 };
 
@@ -103,6 +107,7 @@ const STORE_CAPABILITIES: HostCapabilities = {
   moves: false,
   restarts: true,
   retries: true,
+  sessionTimeouts: true,
   stamps: false,
 };
 
@@ -181,6 +186,7 @@ async function makeStoreHost(setup: HostSetup = {}): Promise<HostUnderTest> {
       await options?.beforeStart?.();
       await engine.restart();
     },
+    advanceClock: (ms) => engine.advanceClock(ms),
     dispose: () => engine.dispose(),
   };
 }

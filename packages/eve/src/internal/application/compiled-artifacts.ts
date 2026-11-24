@@ -1,4 +1,5 @@
 import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { ROUTE_CONFIG_ID } from "#internal/nitro/host/route-handlers.js";
 import { join } from "node:path";
 
 import type { AuthoredWorkflowModules } from "#internal/workflow-bundle/builder-support.js";
@@ -325,6 +326,8 @@ function createCompiledArtifactsBootstrapSource(input: {
 
 function bootImportLines(): string[] {
   return [
+    `import artifactsConfig from ${JSON.stringify(ROUTE_CONFIG_ID)};`,
+    `import { resolveNitroCompiledArtifactsSource } from ${stringifyEsmImportSpecifier(resolvePackageSourceFilePath("src/internal/nitro/routes/runtime-artifacts.ts"))};`,
     `import { start } from ${stringifyEsmImportSpecifier(resolvePackageSourceFilePath("src/runtime/start.ts"))};`,
     `import { workflowEngine } from ${stringifyEsmImportSpecifier(resolvePackageSourceFilePath("src/execution/workflow-host/engine.ts"))};`,
   ];
@@ -417,6 +420,7 @@ export function createWorkflowWorldPluginSource(input: {
     ...bootImportLines(),
     "",
     "export const app = await start({",
+    "  artifacts: () => resolveNitroCompiledArtifactsSource(artifactsConfig),",
     "  defaultDurable: () =>",
     "    workflowEngine({",
     `      configuredWorld: ${JSON.stringify(input.configuredWorld)},`,
@@ -451,6 +455,7 @@ export function createDevelopmentWorkflowWorldPluginSource(input: {
     ...bootImportLines(),
     "",
     "export const app = await start({",
+    "  artifacts: () => resolveNitroCompiledArtifactsSource(artifactsConfig),",
     "  defaultDurable: () => workflowEngine({ world: () => createDevelopmentWorkflowWorld() }),",
     "});",
     "",
