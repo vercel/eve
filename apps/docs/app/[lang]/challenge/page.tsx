@@ -55,7 +55,7 @@ const steps = [
         <a className="font-medium text-gray-1000 underline underline-offset-4" href={eveOnX}>
           @eve on X
         </a>
-        . Mention the Builder Showcase in your public post.
+        . Mention the {challengeHeadline} in your public post.
       </>
     ),
   },
@@ -90,7 +90,7 @@ const templates = [
 const faqs = [
   [
     "What counts as an entry?",
-    "Any project built with the eve framework counts, including agents, extensions, integrations, and applications. Follow @eve on X, then publish a public post that tags @eve and mentions the Builder Showcase. Include a short description of your project and a link to its public code repository.",
+    `Any project built with the eve framework counts, including agents, extensions, integrations, and applications. Follow @eve on X, then publish a public post that tags @eve and mentions the ${challengeHeadline}. Include a short description of your project and a link to its public code repository.`,
   ],
   [
     "Do I need to record a video?",
@@ -197,7 +197,7 @@ export default function ChallengePage() {
         </h2>
         <p className="mt-3 text-pretty text-copy-16 text-gray-900">
           Submit before {challengeDeadline}. The eve team will monitor public posts on X that tag
-          @eve and mention the Builder Showcase.
+          @eve and mention the {challengeHeadline}.
         </p>
         <ol className="mt-10 border-t border-gray-400">
           {steps.map((step, index) => (

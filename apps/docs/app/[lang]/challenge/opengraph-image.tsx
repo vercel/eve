@@ -1,6 +1,8 @@
+import { LogoEveSvg } from "@vercel/geistdocs/assets/logos/logo-eve-svg";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ImageResponse } from "next/og";
+import { resolveLogo } from "@/lib/og-logo";
 import { challengeDeadline, challengeHeadline, challengeTitle } from "./challenge-details";
 import { glyphFieldSvg } from "./glyphs";
 import { loopHeight, loopWidth, stillLoop } from "./harness-loop";
@@ -9,6 +11,10 @@ export const alt = challengeTitle;
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
+const inset = 72;
+const titleWidth = 420;
+const artworkWidth = size.width - 2 * inset - titleWidth - 40;
+const artworkHeight = Math.round((artworkWidth * loopHeight) / loopWidth);
 const fonts = Promise.all([
   readFile(join(process.cwd(), "app/[lang]/og/[...slug]/geist-sans-semibold.ttf")),
   readFile(join(process.cwd(), "node_modules/geist/dist/fonts/geist-mono/GeistMono-Regular.ttf")),
@@ -38,9 +44,6 @@ export default async function ChallengeOpenGraphImage() {
         width: "100%",
         height: "100%",
         display: "flex",
-        alignItems: "center",
-        gap: 48,
-        padding: "0 60px",
         background: "#000",
         color: "#fff",
       }}
@@ -52,14 +55,22 @@ export default async function ChallengeOpenGraphImage() {
         style={{ position: "absolute", top: 0, left: 0, opacity: 0.66 }}
         width={1200}
       />
-      <div style={{ display: "flex", flexDirection: "column", width: 480 }}>
-        <div style={{ display: "flex", fontFamily: "Geist Mono", fontSize: 22, color: "#a1a1a1" }}>
-          {`Open until ${challengeDeadline}`}
-        </div>
+      <div style={{ position: "absolute", display: "flex", top: inset, left: inset }}>
+        {resolveLogo(<LogoEveSvg height={36} />)}
+      </div>
+      <div
+        style={{
+          position: "absolute",
+          top: 276,
+          left: inset,
+          display: "flex",
+          flexDirection: "column",
+          width: titleWidth,
+        }}
+      >
         <div
           style={{
             display: "flex",
-            marginTop: 24,
             fontFamily: "Geist",
             fontSize: 82,
             letterSpacing: -4,
@@ -68,8 +79,25 @@ export default async function ChallengeOpenGraphImage() {
         >
           {challengeHeadline}
         </div>
+        <div
+          style={{
+            display: "flex",
+            marginTop: 24,
+            fontFamily: "Geist Mono",
+            fontSize: 22,
+            color: "#a1a1a1",
+          }}
+        >
+          {`Open until ${challengeDeadline}`}
+        </div>
       </div>
-      <img alt="" height={Math.round((640 * loopHeight) / loopWidth)} src={loop} width={640} />
+      <img
+        alt=""
+        height={artworkHeight}
+        src={loop}
+        style={{ position: "absolute", right: inset, top: (size.height - artworkHeight) / 2 }}
+        width={artworkWidth}
+      />
     </div>,
     {
       ...size,

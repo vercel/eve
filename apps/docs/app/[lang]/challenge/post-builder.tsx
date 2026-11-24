@@ -3,6 +3,7 @@
 import { ArrowUpRight } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { buildSubmission, descriptionLimit } from "@/lib/challenge/submission";
+import { challengeHeadline } from "./challenge-details";
 import { PostPreview } from "./post-preview";
 
 const field =
@@ -116,7 +117,7 @@ export function PostBuilder() {
         </button>
         <noscript>
           Enable JavaScript to open a draft, or write a public post on X that tags @eve and mentions
-          the Builder Showcase.
+          the {challengeHeadline}.
         </noscript>
       </form>
       <div className="flex min-w-0 flex-col gap-4 border-t border-gray-400 bg-background-200 p-5 @min-[41rem]:border-t-0 @min-[41rem]:border-l sm:p-6">

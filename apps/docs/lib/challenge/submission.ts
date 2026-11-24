@@ -1,4 +1,4 @@
-export const showcasePostLine = "Built with @eve for the Builder Showcase.";
+export const challengePostLine = "Builder Challenge with @eve.";
 export const eveOnX = "https://x.com/eve";
 export const descriptionLimit = 100;
 
@@ -72,7 +72,7 @@ export function buildSubmission({ repository, description, video }: Submission) 
   const text = [
     preview.summary,
     "",
-    showcasePostLine,
+    challengePostLine,
     "",
     preview.repository,
     ...(preview.video ? [preview.video] : []),
