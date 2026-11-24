@@ -1183,6 +1183,8 @@ describe("scaffoldBaseProject", () => {
     expect(agentsMd).toContain("eve deploy --non-interactive --yes");
     expect(agentsMd).toContain("Use eve to link and deploy Vercel projects");
     expect(agentsMd).toContain("Run the validation the task requests");
+    const gitignore = (await readFile(join(projectRoot, ".gitignore"), "utf8")).split("\n");
+    expect(gitignore.indexOf("!.env.example")).toBeGreaterThan(gitignore.indexOf(".env*"));
     const vercelignore = await readFile(join(projectRoot, ".vercelignore"), "utf8");
     for (const entry of [".env*", ".eve", ".output", ".nitro", "dist"]) {
       expect(vercelignore.split("\n")).toContain(entry);
