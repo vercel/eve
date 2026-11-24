@@ -176,8 +176,8 @@ importers:
   .:
     dependencies:
       '@agent-browser/eve':
-        specifier: 0.40.0
-        version: 0.40.0(@vercel/sandbox@3.9.0)(eve@1.2.0(ai@7.0.137(zod@4.6.7))(just-bash@3.6.0)(next@16.4.6(@types/node@26.2.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8))
+        specifier: 0.44.0
+        version: 0.44.0(@vercel/sandbox@3.9.0)(eve@1.2.0(ai@7.0.137(zod@4.6.7))(just-bash@3.6.0)(next@16.4.6(@types/node@26.2.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8))
       '@ui-sdk/core':
         specifier: 0.1.0-beta.10
         version: 0.1.0-beta.10
@@ -239,14 +239,14 @@ importers:
 
 packages:
 
-  '@agent-browser/eve@0.40.0':
-    resolution: {integrity: sha512-gkGrcMn61WogK39jm04JEc0+j2Ld5URSFUlQ5ds6B2jO71BaLh7HZTPN4P2UYLWYpgDfusiWuWhvGtvxKzEdLw==}
+  '@agent-browser/eve@0.44.0':
+    resolution: {integrity: sha512-YBnfYaLpR8JguQ4j3hjXh4sPsh1Uc56mR9HyxZW01zZF/lAkq4o6g8aLdRoqcchk2RqhFJSuTciiO3kIk1p8SQ==}
     engines: {node: '>=24.0.0'}
     peerDependencies:
       eve: '>=0.84.0'
 
-  '@agent-browser/sandbox@0.40.0':
-    resolution: {integrity: sha512-TBnQCB60ubceeMhuzDP0AUUGibmrNGxIxINDTo/doujeDLpRe9STU68qFFzX+x8MAtXYszEW67piOZ6g9nz9QA==}
+  '@agent-browser/sandbox@0.44.0':
+    resolution: {integrity: sha512-5AAkt8irLH3zmE2ssctn+tKT98NvTbYFIOEvPPLqlS/6cPykQbF9V4uXTuLgClaMhb9U25Lpon8kuyjzlpHhwQ==}
     peerDependencies:
       '@vercel/sandbox': '>=1.0.0'
     peerDependenciesMeta:
@@ -1345,15 +1345,15 @@ ignoredOptionalDependencies:
 
 snapshots:
 
-  '@agent-browser/eve@0.40.0(@vercel/sandbox@3.9.0)(eve@1.2.0(ai@7.0.137(zod@4.6.7))(just-bash@3.6.0)(next@16.4.6(@types/node@26.2.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8))':
+  '@agent-browser/eve@0.44.0(@vercel/sandbox@3.9.0)(eve@1.2.0(ai@7.0.137(zod@4.6.7))(just-bash@3.6.0)(next@16.4.6(@types/node@26.2.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8))':
     dependencies:
-      '@agent-browser/sandbox': 0.40.0(@vercel/sandbox@3.9.0)
+      '@agent-browser/sandbox': 0.44.0(@vercel/sandbox@3.9.0)
       eve: 1.2.0(ai@7.0.137(zod@4.6.7))(just-bash@3.6.0)(next@16.4.6(@types/node@26.2.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8)
       zod: 4.4.3
     transitivePeerDependencies:
       - '@vercel/sandbox'
 
-  '@agent-browser/sandbox@0.40.0(@vercel/sandbox@3.9.0)':
+  '@agent-browser/sandbox@0.44.0(@vercel/sandbox@3.9.0)':
     optionalDependencies:
       '@vercel/sandbox': 3.9.0
 
