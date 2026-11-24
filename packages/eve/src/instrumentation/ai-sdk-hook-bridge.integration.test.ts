@@ -3,12 +3,19 @@ import { APICallError, generateText } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it } from "vitest";
 
+import { ContextContainer } from "#context/container.js";
+import { ChannelInstrumentationKey } from "#context/keys.js";
+import { bindInstrumentationRuntime } from "#instrumentation/runtime.js";
+import { AgentSpanIdGenerator } from "#compiled/@vercel/agent-runs/index.js";
+import { ConversationContextKey } from "#shared/conversation-context.js";
+
 import {
   createInstrumentationHooks as createUnboundInstrumentationHooks,
   modelCallIdempotencyKey,
   type InstrumentationScope,
   type InstrumentationModelCallStartedEvent,
   type InstrumentationModelCallTerminalEvent,
+  type InstrumentationEvent,
 } from "#instrumentation/lifecycle.js";
 import { createAiSdkHookBridge } from "#instrumentation/ai-sdk-hook-bridge.js";
 
@@ -107,5 +114,88 @@ describe("AI SDK model-call retry telemetry", () => {
         usage: { inputTokens: 1, outputTokens: 1 },
       },
     ]);
+  });
+});
+
+describe("AI SDK provider metadata under a content-free trace policy", () => {
+  it("keeps the gateway's cost, generation id, and routing when the AI SDK filters provider metadata", async () => {
+    const published: InstrumentationEvent[] = [];
+    const ctx = new ContextContainer();
+    ctx.set(ChannelInstrumentationKey, { kind: "channel:test", metadata: {} });
+    ctx.set(ConversationContextKey, {
+      audience: "private",
+      channel: { kind: "channel:test", name: "test" },
+      environment: "production",
+      principalType: "anonymous",
+    });
+    const instrumentation = bindInstrumentationRuntime(
+      {
+        forceFlush: async () => undefined,
+        hooks: { capturesContent: false, publish: async (event) => void published.push(event) },
+        idGenerator: new AgentSpanIdGenerator(),
+        otelSettings: undefined,
+        runInContext: (_operation, execute) => execute(),
+        shutdown: async () => undefined,
+      },
+      ctx,
+      { agentName: "test-agent", rootSessionId: "session-1", sessionId: "session-1" },
+    );
+    const gateway = {
+      cost: "0.0421",
+      generationId: "gen_1",
+      marketCost: "0.05",
+      routing: { clientSessionId: "conversation-1", finalProvider: "anthropic", secret: "x" },
+      secret: "hidden",
+    };
+    const model = new MockLanguageModelV3({
+      doGenerate: async () => ({
+        content: [{ text: "Done.", type: "text" }],
+        finishReason: { raw: undefined, unified: "stop" },
+        usage: {
+          inputTokens: { cacheRead: 0, cacheWrite: 0, noCache: 1, total: 1 },
+          outputTokens: { reasoning: 0, text: 1, total: 1 },
+        },
+        warnings: [],
+        providerMetadata: { gateway },
+      }),
+    });
+
+    await instrumentation?.prepareExecution().runStep(
+      {
+        environment: "test",
+        eveVersion: "0.0.0",
+        hasInput: true,
+        session: { sessionId: "session-1" },
+      },
+      async (step) => {
+        const attempt = step.prepareAttempt({
+          attempt: 0,
+          runId: "run_0",
+          stepIndex: 0,
+          turnId: "turn-1",
+        });
+        expect(attempt.telemetry).toMatchObject({ recordInputs: false, recordOutputs: false });
+        await generateText({
+          model,
+          onLanguageModelCallEnd: attempt.onLanguageModelCallEnd,
+          prompt: "Summarize Bob's notes.",
+          telemetry: attempt.telemetry,
+        });
+      },
+    );
+
+    expect(published.find((event) => event.type === "model.call.settled")).toEqual(
+      expect.objectContaining({
+        outcome: "completed",
+        providerMetadata: {
+          gateway: {
+            cost: "0.0421",
+            generationId: "gen_1",
+            marketCost: "0.05",
+            routing: { clientSessionId: "conversation-1", finalProvider: "anthropic" },
+          },
+        },
+      }),
+    );
   });
 });

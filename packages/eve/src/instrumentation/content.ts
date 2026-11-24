@@ -77,7 +77,7 @@ export function structuralProviderMetadata(
     return Object.freeze({});
   const source = gateway as Readonly<Record<string, unknown>>;
   const structural: Record<string, unknown> = {};
-  for (const key of ["cost", "generationId"] as const) {
+  for (const key of ["cost", "generationId", "marketCost"] as const) {
     const value = source[key];
     if (typeof value === "string" || typeof value === "number") structural[key] = value;
   }
