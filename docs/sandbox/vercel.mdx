@@ -121,14 +121,15 @@ export default VercelSandbox.environment({ rebuildable: true });
 const { rebuilt } = await rebuildSandboxTemplate({
   revision: commitSha,
   prepare: async (sandbox) => {
-    await sandbox.run({ command: "git pull", workingDirectory: "/workspace/app" });
+    const result = await sandbox.run({ command: "git pull", workingDirectory: "/workspace/app" });
+    if (result.exitCode !== 0) throw new Error(result.stderr);
   },
 });
 ```
 
 A build with `rebuildable: true` makes each new session look up the template's newest snapshot before it opens. If that lookup fails, the session opens from the snapshot the build captured. A build without it never looks, so those sessions open exactly as before, and `rebuildSandboxTemplate()` throws.
 
-The call returns `{ rebuilt: false }` without running `prepare` when the template already has `revision` or another rebuild of it is running. If `prepare` throws, the template stays as it was. If publishing the new snapshot fails, eve puts the previous pointer back. Snapshots expire 30 days after last use, and eve never deletes a replaced snapshot because another deployment of the same template may still start sessions from it. If the newest snapshot has expired, new sessions start from the snapshot the build captured, which expires 30 days after the deploy, and the next rebuild starts from that snapshot too. A rebuild that finds no snapshot left throws, and a redeploy captures a new one. Sessions already running, and sessions that resume, keep their own sandbox and see the old files. `eve build` captures the first snapshot. A deploy that changes any template input captures a new first snapshot, and other deploys keep the newest one.
+The call returns `{ rebuilt: false }` without running `prepare` when the template already has `revision` or another rebuild of it is running. If `prepare` throws, the template stays as it was. `sandbox.run()` returns the exit code and does not throw, so check `exitCode` and throw when it is not `0`, or eve publishes the result of a failed command. If publishing the new snapshot fails, eve puts the previous pointer back. Snapshots expire 30 days after last use, and eve never deletes a replaced snapshot because another deployment of the same template may still start sessions from it. If the newest snapshot has expired, new sessions start from the snapshot the build captured, which expires 30 days after the deploy, and the next rebuild starts from that snapshot too. A rebuild that finds no snapshot left throws, and a redeploy captures a new one. Sessions already running, and sessions that resume, keep their own sandbox and see the old files. `eve build` captures the first snapshot. A deploy that changes any template input captures a new first snapshot, and other deploys keep the newest one.
 
 ## Initialize after open
 

@@ -199,15 +199,16 @@ export default repoSnapshotSchedule({
   repository: "acme/app",
   directory: "/workspace/app",
   install: async (sandbox) => {
-    await sandbox.run({
+    const result = await sandbox.run({
       command: "pnpm install --frozen-lockfile",
       workingDirectory: "/workspace/app",
     });
+    if (result.exitCode !== 0) throw new Error(result.stderr);
   },
 });
 ```
 
-Every 15 minutes, or on the `cron` you set, it reads the branch head from GitHub with a read-only token that `connector` mints, and does nothing when the template already has that commit. Otherwise it fetches the commit in a temporary sandbox, moves `origin/<branch>` to it, runs `install` only when a lockfile changed, and points the template at the result. `install` runs with outbound network open and without the GitHub token. The template is tied to the repository, branch and directory as well as the commit, so changing one of them rebuilds. A failed fetch or install leaves the template as it was. `refreshRepoSnapshot(options)` runs the same refresh from a channel or a tool. See [rebuild the snapshot after deploy](/docs/sandbox/vercel#rebuild-the-snapshot-after-deploy).
+Every 15 minutes, or on the `cron` you set, it reads the branch head from GitHub with a read-only token that `connector` mints, and does nothing when the template already has that commit. Otherwise it fetches the commit in a temporary sandbox, moves `origin/<branch>` to it, runs `install` only when a lockfile changed, and points the template at the result. `install` runs with outbound network open and without the GitHub token. The template is tied to the repository, branch and directory as well as the commit, so changing one of them rebuilds. A failed fetch leaves the template as it was, and so does an `install` that throws. `sandbox.run()` returns the exit code instead of throwing, so check `exitCode` and throw, as the example does, or a failed install is published. `refreshRepoSnapshot(options)` runs the same refresh from a channel or a tool. See [rebuild the snapshot after deploy](/docs/sandbox/vercel#rebuild-the-snapshot-after-deploy).
 
 ## Troubleshooting
 

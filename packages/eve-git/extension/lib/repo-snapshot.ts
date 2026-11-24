@@ -16,7 +16,8 @@ export interface RepoSnapshotOptions {
    * Installs dependencies in the rebuilt sandbox. It runs only when a lockfile changed between the
    * checkout and the new head, after the fetch. It runs with outbound network open and without the
    * GitHub token, and may replace the sandbox's network policy, for example to reach a private
-   * registry.
+   * registry. `sandbox.run()` does not throw on a nonzero exit code, so throw when `exitCode` is
+   * not `0`: only a thrown error keeps the template as it was.
    */
   readonly install?: (sandbox: VercelSandboxSession) => Promise<void>;
   /**

@@ -205,7 +205,10 @@ export interface SandboxProviderImplementation<
 
 /** The standard `prepare` option every sandbox environment accepts, for customizing its template. */
 export interface SandboxPrepareOption<Session> {
-  /** Runs once per template, after eve seeds workspace and skill files. */
+  /**
+   * Runs once per template, after eve seeds workspace and skill files. `sandbox.run()` does not
+   * throw on a nonzero exit code, so throw when `exitCode` is not `0` to fail the preparation.
+   */
   readonly prepare?: (sandbox: Session) => void | Promise<void>;
 }
 
