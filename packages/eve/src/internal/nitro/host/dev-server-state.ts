@@ -10,8 +10,12 @@ const STATE_FILE_NAME = "dev-server-state.v1.json";
 const developmentServerStateSchema = z
   .object({
     url: httpServerUrlSchema,
+    pid: z.number().int().positive(),
+    id: z.string().min(1),
   })
   .strict();
+
+export type DevelopmentServerRecord = z.infer<typeof developmentServerStateSchema>;
 
 export class DevelopmentServerState {
   readonly appRoot: string;
@@ -24,7 +28,7 @@ export class DevelopmentServerState {
     this.#statePath = join(this.#stateDir, STATE_FILE_NAME);
   }
 
-  async read(): Promise<string | undefined> {
+  async read(): Promise<DevelopmentServerRecord | undefined> {
     let raw: string;
 
     try {
@@ -38,14 +42,14 @@ export class DevelopmentServerState {
 
     try {
       const parsed = developmentServerStateSchema.safeParse(JSON.parse(raw));
-      return parsed.success ? parsed.data.url : undefined;
+      return parsed.success ? parsed.data : undefined;
     } catch {
       return undefined;
     }
   }
 
-  async write(url: string): Promise<void> {
-    const state = developmentServerStateSchema.parse({ url });
+  async write(record: DevelopmentServerRecord): Promise<void> {
+    const state = developmentServerStateSchema.parse(record);
     await mkdir(this.#stateDir, { recursive: true });
     await writeFile(this.#statePath, `${JSON.stringify(state)}\n`, "utf8");
   }

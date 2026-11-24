@@ -4,7 +4,8 @@ import { mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { resolvePackageRoot } from "#internal/application/package.js";
-import { readDevelopmentRuntimeArtifactsRevision } from "#services/dev-client/runtime-artifacts.js";
+import { DevelopmentServerState } from "#internal/nitro/host/dev-server-state.js";
+import { readDevelopmentServerId } from "#services/dev-client/runtime-artifacts.js";
 import { readBuiltServerStartFailure } from "#shared/built-server-start-failure.js";
 import { isLoopbackHostname } from "#shared/network-address.js";
 
@@ -120,11 +121,13 @@ async function readUsableEveDevServerRegistry(
       return undefined;
     }
 
+    const record = await new DevelopmentServerState({ appRoot }).read();
     if (
-      (await readDevelopmentRuntimeArtifactsRevision({
+      record === undefined ||
+      (await readDevelopmentServerId({
         serverUrl: registry.origin,
         timeoutMs: DEV_SERVER_READINESS_TIMEOUT_MS,
-      })) === undefined
+      })) !== record.id
     ) {
       return undefined;
     }
