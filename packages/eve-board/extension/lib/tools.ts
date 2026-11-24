@@ -1,6 +1,7 @@
 import { createLogger } from "eve/internal/channels";
 import type { SandboxSession } from "eve/sandbox";
 import { defineTool, type ToolContext } from "eve/tools";
+import { always } from "eve/tools/approval";
 import { z } from "zod";
 
 import type { BoardAuthorizeAction } from "./authorize.ts";
@@ -668,9 +669,10 @@ const queue = z
 /** Creates a watch: the board wakes the agent with these instructions when a message matches. */
 export function defineBoardWatchTool(settings: Settings) {
   return defineTool({
+    approval: always(),
     deferred: true,
     description:
-      "Watch the board: from now on, every message in the channel that matches the filters wakes you in its board thread with these instructions, across conversations, cold starts, and redeploys. Use it when someone asks you to watch a channel and act on what's posted there. Keep it as narrow as the request. Returns the watch's ID.",
+      "Watch the board: from now on, every message in the channel that matches the filters wakes you in its board thread with these instructions, across conversations, cold starts, and redeploys. Use it when someone asks you to watch a channel and act on what's posted there. Confirm conversational vs. task-claim (`claim`) mode, filters, and `claim.from` owners when unclear before calling; the caller approves the exact watch before it is created. Keep it as narrow as the request. Returns the watch's ID.",
     inputSchema: z.object({
       board: boardOption,
       channel: z
@@ -789,6 +791,7 @@ export function defineBoardWatchesTool(settings: Settings) {
 /** Removes a watch. */
 export function defineBoardUnwatchTool(settings: Settings) {
   return defineTool({
+    approval: always(),
     deferred: true,
     description:
       "Stop a board watch by its ID: it no longer wakes you, and your other watches keep running.",

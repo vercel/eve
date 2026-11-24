@@ -75,7 +75,7 @@ Tell the agent what to watch and what to do:
 
 > Watch `incidents`. When someone posts, summarize the impact and ask who's leading the response.
 
-The agent calls its `watch` tool with the channel to watch and the instructions, and answers with the watch's ID, such as `w-7k3p2q`. The watch survives the conversation, cold starts, and redeploys.
+The agent calls its `watch` tool with the channel to watch and the instructions, asks you to approve the exact watch parameters, and answers with the watch's ID, such as `w-7k3p2q`. The watch survives the conversation, cold starts, and redeploys.
 
 - **A watch names one channel**, or a `prefix/` subtree, and can narrow it to messages with given labels, author, or words. It must stay inside `can` and outside `watchChannel`.
 - **The board keeps everything a watch needs.** Your project's watcher registration holds what each watch matches, and a board-only message in `watchChannel`, labeled with the watch's ID, holds what it does. The agent uses no other storage.

@@ -35,13 +35,16 @@ When this agent is configured with multiple boards, your instructions list their
 
 ## Watch the board
 
-You wake only for your watches. When someone asks you to keep an eye on a channel and act on what's posted there, create a watch with `watch`:
+You wake only for your watches. When someone asks you to keep an eye on a channel and act on what's posted there, prepare the watch before calling `watch`:
 
-- `channel` is the one channel to watch, such as `incidents`, or a subtree such as `work/`. Narrow it with `label`, `by`, or `text`, as far as the request allows.
-- `instructions` is what you'll do each time it matches. Write it for a reader who remembers nothing of this conversation: what to look for, what to do, and what to post.
-- To work a task queue, add `claim` with the queue's channel, labels, and the owners whose tasks you take. Each match then claims one ready task, and you work it in the task's thread.
+1. **Check what exists:** list `channels` if you're unsure of the channel path, and check `watches` so you don't duplicate an existing watch.
+2. **Confirm mode when unclear:** if the request doesn't say, ask whether this is a **conversational watch** (reply in matching threads) or a **task-claim watch** (`claim`, taking ready tasks from a queue and settling them).
+3. **Confirm scope and owners:** narrow `channel` (one channel such as `incidents`, or a subtree such as `work/`) with `label`, `by`, or `text` as far as the request allows. For a `claim` watch, explicitly confirm whose tasks to accept (`claim.from` principal IDs, looked up via `actors`—omitting `from` claims only this deployment's own tasks).
+4. **Write self-contained standing instructions:** write `instructions` for a reader who remembers nothing of this conversation—what to act on vs. skip with `no_reply`, the concrete steps and checks to run, what to post, and for task queues what counts as `complete_task`, `block_task`, or `fail_task`. Keep watch instructions focused on the trigger and outcome, and reference a skill for longer repo or team conventions.
 
-Tell the person the watch's ID. List your watches with `watches`, with `details` to see what each does, and stop one with `unwatch`.
+Both `watch` and `unwatch` ask the caller to approve the exact parameters before applying the change. Don't over-interrogate when the request already answers the points above—ask only for what is genuinely ambiguous, then call `watch` so the approval prompt serves as the final review.
+
+Tell the person the watch's ID once created. List your watches with `watches`, with `details` to see what each does, and stop one with `unwatch`.
 
 ## Come back later
 

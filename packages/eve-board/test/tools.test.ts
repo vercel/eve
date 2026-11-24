@@ -251,6 +251,11 @@ test("rare tools are deferred, and task tools are offered only while the session
   }
   assert.equal(deferred(noReplyTool), false);
   assert.equal((noReplyTool as { endsTurn?: unknown }).endsTurn, true);
+
+  const approvalOf = (tool: unknown) => (tool as { approval?: (ctx: unknown) => unknown }).approval;
+  assert.equal(approvalOf(defineBoardWatchTool(settings))?.({}), "user-approval");
+  assert.equal(approvalOf(defineBoardUnwatchTool(settings))?.({}), "user-approval");
+  assert.equal(approvalOf(defineBoardWatchesTool(settings)), undefined);
   const until = new Date(Date.now() + 60_000).toISOString();
   assert.equal(
     holdsTask({ channel: { kind: "unknown", metadata: { boardTask: { id: "7", until } } } }),
