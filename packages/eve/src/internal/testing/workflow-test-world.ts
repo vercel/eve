@@ -2,6 +2,12 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import {
+  messageRunSpecVersion,
+  orchestratorRunIdOf,
+  singleOrchestratorRunIdOf,
+  SPEC_VERSION_SINGLE_ORCHESTRATOR,
+} from "@workflow/world";
 import { createWorld } from "@workflow/world-local";
 
 import {
@@ -101,9 +107,12 @@ async function startWorld(
   world.registerHandler(options.prefix as never, deliveries.handler);
   const queue = world.queue.bind(world);
   world.queue = async (name, message, opts) => {
+    const delayed = (opts?.delaySeconds ?? 0) > 0;
+    const coalescibleRunId = delayed ? undefined : await coalescibleRunIdOf(world, message);
+    const at = deliveries.checkpoint();
     const queued = await queue(name, message, opts);
     if (queued.messageId !== null)
-      deliveries.queued(queued.messageId, (opts?.delaySeconds ?? 0) > 0);
+      deliveries.queued(queued.messageId, delayed, coalescibleRunId, at);
     return queued;
   };
   setWorld(world);
@@ -155,9 +164,20 @@ function newRealm(): void {
   singleFlight?.inFlight.clear();
 }
 
+export interface QueueCheckpoint {
+  readonly generation: number;
+  readonly seq: number;
+}
+
 export interface Deliveries {
   readonly handler: Handler;
-  queued(messageId: string, delayed: boolean): void;
+  checkpoint(): QueueCheckpoint;
+  queued(
+    messageId: string,
+    delayed: boolean,
+    coalescibleRunId?: string,
+    at?: QueueCheckpoint,
+  ): void;
   idle(): Promise<void>;
   redeliverNextFailure(): void;
   abandon(): void;
@@ -168,15 +188,18 @@ export interface Deliveries {
 export function trackDeliveries(initial: Handler): Deliveries {
   let handle = initial;
   const due = new Set<string>();
+  const dueRuns = new Map<string, number>();
+  const lastRunStart = new Map<string, number>();
   const seen = new Set<string>();
   const recovering = new Set<string>();
   let running = 0;
+  let seq = 0;
   let generation = 0;
   let closing = false;
   let redeliver = 0;
   const waiters = new Set<() => void>();
 
-  const busy = () => running > 0 || recovering.size > 0 || due.size > 0;
+  const busy = () => running > 0 || recovering.size > 0 || due.size > 0 || dueRuns.size > 0;
   const wake = () => {
     if (busy()) return;
     for (const resolve of waiters) resolve();
@@ -205,17 +228,26 @@ export function trackDeliveries(initial: Handler): Deliveries {
     if (closing) throw new DOMException("The test workflow world is closing.", "AbortError");
     const messageId = request.headers.get("x-vqs-message-id") ?? "";
     const ours = generation;
+    const startSeq = ++seq;
     seen.add(messageId);
     due.delete(messageId);
     running += 1;
     try {
-      let delivery = request;
-      if (recovering.size > 0) {
-        const body = await request.text();
-        const runId = runIdOf(body);
-        if (runId !== undefined) recovering.delete(runId);
-        delivery = new Request(request.url, { body, headers: request.headers, method: "POST" });
+      const body = await request.text();
+      const payload = parseBody(body);
+      const runId = runIdOf(payload);
+      if (runId !== undefined) recovering.delete(runId);
+      const orchestratorRunId = singleOrchestratorRunIdOf(payload);
+      if (orchestratorRunId !== undefined) {
+        lastRunStart.set(
+          orchestratorRunId,
+          Math.max(lastRunStart.get(orchestratorRunId) ?? 0, startSeq),
+        );
+        if ((dueRuns.get(orchestratorRunId) ?? Infinity) < startSeq) {
+          dueRuns.delete(orchestratorRunId);
+        }
       }
+      const delivery = new Request(request.url, { body, headers: request.headers, method: "POST" });
       const response = await handle(delivery);
       if (ours !== generation) return response;
       const answer = !response.ok && redeliver > 0 ? redeliverAtOnce() : response;
@@ -231,9 +263,19 @@ export function trackDeliveries(initial: Handler): Deliveries {
 
   return {
     handler,
-    queued(messageId, delayed) {
+    checkpoint() {
+      return { generation, seq };
+    },
+    queued(messageId, delayed, coalescibleRunId, at) {
       if (delayed || seen.has(messageId)) return;
+      if (at !== undefined && at.generation !== generation) return;
       seen.add(messageId);
+      if (coalescibleRunId !== undefined) {
+        const beforeSeq = at?.seq ?? seq;
+        if ((lastRunStart.get(coalescibleRunId) ?? 0) > beforeSeq) return;
+        dueRuns.set(coalescibleRunId, Math.max(dueRuns.get(coalescibleRunId) ?? 0, beforeSeq));
+        return;
+      }
       due.add(messageId);
     },
     async idle() {
@@ -250,6 +292,8 @@ export function trackDeliveries(initial: Handler): Deliveries {
       generation += 1;
       running = 0;
       due.clear();
+      dueRuns.clear();
+      lastRunStart.clear();
       redeliver = 0;
     },
     reopen(runs, next) {
@@ -266,13 +310,44 @@ export function trackDeliveries(initial: Handler): Deliveries {
   };
 }
 
-function runIdOf(body: string): string | undefined {
+async function coalescibleRunIdOf(
+  world: LocalWorld,
+  message: unknown,
+): Promise<string | undefined> {
+  const runId = orchestratorRunIdOf(message);
+  if (runId === undefined || !isCoalescibleMessage(message)) return undefined;
+  const specVersion =
+    messageRunSpecVersion(message) ??
+    (await world.runs.get(runId, { resolveData: "none" }).catch(() => undefined))?.specVersion;
+  return specVersion !== undefined && specVersion >= SPEC_VERSION_SINGLE_ORCHESTRATOR
+    ? runId
+    : undefined;
+}
+
+function isCoalescibleMessage(message: unknown): boolean {
+  if (typeof message !== "object" || message === null) return false;
+  const fields = message as Record<string, unknown>;
+  return !(
+    "runInput" in fields ||
+    "hookInput" in fields ||
+    (Array.isArray(fields.completeWaits) && fields.completeWaits.length > 0) ||
+    fields.recovery === true ||
+    Boolean(fields.invoke)
+  );
+}
+
+function parseBody(body: string): unknown {
   try {
-    const runId = (JSON.parse(body) as { runId?: unknown }).runId;
-    return typeof runId === "string" ? runId : undefined;
+    return JSON.parse(body);
   } catch {
     return undefined;
   }
+}
+
+function runIdOf(payload: unknown): string | undefined {
+  if (typeof payload !== "object" || payload === null) return undefined;
+  const runId = (payload as { runId?: unknown }).runId;
+  return typeof runId === "string" ? runId : undefined;
 }
 
 function lazyHandler(options: TestWorldOptions): Handler {

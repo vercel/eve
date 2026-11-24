@@ -38,6 +38,7 @@ import {
   waitForHook,
   waitForHookOwner,
 } from "#internal/testing/workflow-test-helpers.js";
+import { currentTestWorld } from "#internal/testing/workflow-test-world.js";
 import { getRun, getWorld, start } from "#internal/workflow/runtime.js";
 import { type SessionPredecessor } from "#protocol/session-events/families/session.js";
 import { transcriptOf, type TranscriptData } from "#client/transcript.js";
@@ -1044,6 +1045,7 @@ async function startHandedOffSession(input: {
   });
   await waitForHook(anchor, { token: `${anchor.runId}:anchor` });
   await waitForParkedTurnStep(ownerRunId);
+  await currentTestWorld().idle();
   return {
     anchor,
     owner: getRun(ownerRunId),
