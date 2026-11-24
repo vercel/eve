@@ -179,6 +179,10 @@ export function registerRemoteCommands(input: {
       )
       .option("--name <name>", "Title shown in the terminal UI")
       .option("--input <text>", "Pre-fill the prompt input")
+      .option(
+        "--session <sessionId>",
+        "Open an existing session read-only; your first message forks it",
+      )
       .option("--print", "Send a prompt, print the final assistant text, and exit"),
   ).action(
     async (

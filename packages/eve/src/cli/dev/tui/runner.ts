@@ -173,7 +173,7 @@ export type AgentTUIRenderer = {
   setStartupPhase?(phase: "starting" | "connecting" | "updating" | undefined): void;
   renderNotice?(text: string): void;
   restoreDraft?(text: string): void;
-  renderSessionBoundary?(): void;
+  renderSessionBoundary?(label?: string): void;
   renderSetupWarning?(text: string): void;
   clearSetupWarning?(): void;
   renderCommandInvocation?(text: string): void;
@@ -249,6 +249,7 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   serverUrl?: string;
   appRoot?: string;
   initialInput?: string;
+  viewSessionId?: string;
   onboard?: boolean;
   startupOnboarding?: StartupOnboardingResult;
   onOnboardingStep?: (input: EveCliSetupStepEvent) => void;
@@ -337,15 +338,21 @@ export class EveTUIRunner {
   readonly #recordedAgentToolFailures = new Set<string>();
   readonly #callNames = new Map<string, string>();
   readonly #lifecycle?: CommandLifecycle;
+  #forkSource?: string;
+  #hidesImportedHistory = false;
 
   constructor(options: EveTUIRunnerOptions) {
     this.#client = options.client;
     if (options.lifecycle !== undefined) this.#lifecycle = options.lifecycle;
     if (options.diagnostics !== undefined) this.#diagnostics = options.diagnostics;
     this.#renderer = createRenderer(options);
+    this.#forkSource = options.viewSessionId;
     this.#store = new SessionStore({
       client: options.client,
       followAgents: true,
+      ...(options.viewSessionId !== undefined && {
+        initialSession: { sessionId: options.viewSessionId, streamIndex: 0 },
+      }),
     });
     this.#store.setCallbacks({
       onEvent: (event) => this.#recordDiagnostics(event),
@@ -555,8 +562,17 @@ export class EveTUIRunner {
         this.#finishCommand({ kind: "result", message: startupOutcome.message });
     }
 
+    if (this.#forkSource !== undefined) {
+      this.#renderer.renderNotice?.(
+        `Viewing session ${this.#forkSource} read-only. Your first message forks it into a new session.`,
+      );
+      void this.#store.resume().catch((error: unknown) => {
+        if (!this.#disposed) this.#renderSendError("Couldn't load the session", error);
+      });
+    }
+
     while (this.#lifecycle?.signal.aborted !== true && this.#renderer.exitRequested?.() !== true) {
-      if (this.#sessionFailed()) {
+      if (this.#forkSource === undefined && this.#sessionFailed()) {
         this.#replaceSession();
         continue;
       }
@@ -609,6 +625,26 @@ export class EveTUIRunner {
     command: PromptCommand,
     title: string,
   ): Promise<"exit" | { draft: string } | undefined> {
+    if (
+      this.#forkSource !== undefined &&
+      (command.type === "cancel" ||
+        command.type === "new" ||
+        command.type === "compact" ||
+        command.type === "clear")
+    ) {
+      if (command.type === "new") {
+        this.#forkSource = undefined;
+        this.#store.newSession();
+        this.#clearRunnerState();
+        this.#renderer.reset?.();
+        return;
+      }
+      this.#finishCommand({
+        kind: "result",
+        message: "This session is read-only here. Send a message to fork it.",
+      });
+      return;
+    }
     switch (command.type) {
       case "exit":
         this.#finishCommand({ kind: "dismiss" });
@@ -676,16 +712,28 @@ export class EveTUIRunner {
   }
 
   #submitMessage(message: string): void {
+    const forkFrom = this.#forkSource;
+    if (forkFrom !== undefined) {
+      this.#forkSource = undefined;
+      this.#hidesImportedHistory = true;
+      this.#store.newSession();
+      this.#renderer.renderSessionBoundary?.(
+        `Forked ${forkFrom}; the conversation above continues in a new session.`,
+      );
+    }
     const snapshot = this.#store.snapshot;
     const steering = hasOpenTurn(snapshot);
     const sent: { text: string; deliveryId?: string } = { text: message };
     this.#sentMessage = sent;
     if (!steering) this.#cancelRequested = false;
-    const input: SendTurnPayload = steering
-      ? { message, turnPolicy: "steer" }
-      : snapshot.session === undefined
-        ? { message }
-        : { message, turnPolicy: "queue" };
+    const input: SendTurnPayload =
+      forkFrom !== undefined
+        ? { forkFrom, message }
+        : steering
+          ? { message, turnPolicy: "steer" }
+          : snapshot.session === undefined
+            ? { message }
+            : { message, turnPolicy: "queue" };
     void this.#store
       .send(input)
       .then(({ deliveryId }) => {
@@ -712,7 +760,13 @@ export class EveTUIRunner {
   }
 
   #renderSnapshot(): void {
-    const snapshot = this.#store.snapshot;
+    const current = this.#store.snapshot;
+    const snapshot = this.#hidesImportedHistory
+      ? {
+          ...current,
+          messages: current.messages.filter((message) => message.metadata?.imported !== true),
+        }
+      : current;
     const data = tuiSessionData(snapshot);
     this.#renderer.renderConversation?.(
       conversationView(snapshot, data, this.#appRoot === undefined ? undefined : localFailureHint),
@@ -795,6 +849,7 @@ export class EveTUIRunner {
   }
 
   #answerableInputs(): readonly Interaction[] {
+    if (this.#forkSource !== undefined) return [];
     return openInteractions(this.#store.snapshot.view).filter(
       (input) =>
         input.request.kind !== "sign-in" &&
@@ -878,6 +933,7 @@ export class EveTUIRunner {
   }
 
   #clearRunnerState(): void {
+    this.#hidesImportedHistory = false;
     this.#dismissedInputs.clear();
     this.#answeredInputs.clear();
     this.#handledHandoffs.clear();
@@ -887,6 +943,7 @@ export class EveTUIRunner {
   }
 
   #cancelTurn(): void {
+    if (this.#forkSource !== undefined) return;
     this.#cancelRequested = true;
     void this.#store.cancel().catch((error: unknown) => {
       this.#renderer.renderNotice?.(`Couldn't cancel the turn: ${toErrorMessage(error)}`);

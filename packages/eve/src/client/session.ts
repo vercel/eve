@@ -558,6 +558,9 @@ function createMessageBody(
     body.turnPolicy = input.turnPolicy;
   }
   if (input.clientContext !== undefined) body.clientContext = input.clientContext;
+  if (requireMessage && input.message !== undefined && input.forkFrom !== undefined) {
+    body.forkFrom = input.forkFrom;
+  }
   const outputSchema = serializeOutputSchema(input.outputSchema);
   if (outputSchema !== undefined) body.outputSchema = outputSchema;
 

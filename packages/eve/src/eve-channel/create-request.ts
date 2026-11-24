@@ -11,6 +11,7 @@ export interface ParsedCreateBody {
   capabilities?: SessionCapabilities;
   message?: MessageContent;
   context?: ClientContextValue;
+  forkFrom?: string;
   operationId?: string;
   outputSchema?: JsonObject;
   protocolVersion?: number;

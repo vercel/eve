@@ -21,6 +21,7 @@ import {
   ScheduleInstanceKey,
   EarlierRemoteCallerKey,
   SessionCallbackKey,
+  SessionForkSourceKey,
   SessionTitleKey,
   SteeredByKey,
   TraceRootKey,
@@ -116,6 +117,9 @@ export function buildRunContext(input: {
 
   if (run.parent !== undefined) {
     ctx.set(ParentSessionKey, run.parent);
+  }
+  if (run.input.fork !== undefined) {
+    ctx.set(SessionForkSourceKey, run.input.fork.source);
   }
   if (run.traceRoot !== undefined) {
     ctx.set(TraceRootKey, run.traceRoot);

@@ -7,6 +7,8 @@ import { handleExpiredLegacyAuthorization } from "#execution/legacy-session/auth
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import type { SessionAuthContext, SessionParent, SessionTraceSeed } from "#channel/types.js";
 import { internalSession, type Session } from "#channel/session.js";
+import { readSessionForkSeed, SessionForkError } from "#channel/session-fork.js";
+import type { SessionForkSeed } from "#shared/session-fork.js";
 import { resolveForwardedPrincipal } from "#channel/forwarded-principal.js";
 import { handleConnectionCallbackRequest } from "#execution/connections/callback-route.js";
 import { handleSessionCallbackRequest } from "#subagents/callback-route.js";
@@ -357,6 +359,16 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
                 request: req,
               });
         if (messageResult instanceof Response) return messageResult;
+        const fork =
+          body.forkFrom === undefined
+            ? undefined
+            : await readForkSeed({
+                attachSession: args.attachSession,
+                auth: forwarded.auth,
+                canFork: input.canFork,
+                sourceSessionId: body.forkFrom,
+              });
+        if (fork instanceof Response) return fork;
         const createSession = readRouteSessionCreator(args);
         if (createSession === undefined) {
           return Response.json(
@@ -409,6 +421,7 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
                       "history" in messageResult ? messageResult.history : undefined,
                     ),
                     outputSchema: body.outputSchema,
+                    ...(fork !== undefined && { fork }),
                   },
                   messageResult.clientContext,
                 ),
@@ -792,4 +805,36 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
     fetchFile: input.fetchFile,
     uploadPolicy: input.uploadPolicy,
   });
+}
+
+async function readForkSeed(input: {
+  readonly attachSession: (sessionId: string) => Session;
+  readonly auth: SessionAuthContext;
+  readonly canFork: EveChannelConfig["canFork"];
+  readonly sourceSessionId: string;
+}): Promise<SessionForkSeed | Response> {
+  const allowed =
+    input.canFork === undefined
+      ? input.auth.principalType !== "anonymous"
+      : await input.canFork({ auth: input.auth, sourceSessionId: input.sourceSessionId });
+  if (!allowed) {
+    return Response.json(
+      { error: "This caller may not fork that session.", ok: false },
+      { status: 403 },
+    );
+  }
+  try {
+    return await readSessionForkSeed(input.attachSession(input.sourceSessionId));
+  } catch (error) {
+    if (error instanceof SessionForkError) {
+      return Response.json({ error: error.message, ok: false }, { status: 404 });
+    }
+    const errorId = logError(log, "reading the session to fork failed", error, {
+      sourceSessionId: input.sourceSessionId,
+    });
+    return Response.json(
+      { error: "Failed to read the session to fork.", errorId, ok: false },
+      { status: 500 },
+    );
+  }
 }

@@ -8,6 +8,7 @@ import {
   ParentSessionKey,
   ScheduleIdKey,
   SessionCallbackKey,
+  SessionForkSourceKey,
   SessionPredecessorKey,
 } from "#context/keys.js";
 import { takeTurnFailure } from "#definitions/intents.js";
@@ -131,6 +132,7 @@ export async function openTurn(
       receive(step.view(), {
         deliveries: opened.deliveries,
         predecessor: ctx?.get(SessionPredecessorKey),
+        forkedFrom: ctx?.get(SessionForkSourceKey),
         runtime: config.runtimeIdentity,
         trace,
       }),

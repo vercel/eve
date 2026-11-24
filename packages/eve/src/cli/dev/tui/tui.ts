@@ -34,6 +34,7 @@ export interface RunDevelopmentTuiInput extends TuiDisplayOptions {
   readonly target: DevelopmentTuiTarget;
   readonly headers?: Readonly<Record<string, string>>;
   readonly initialInput?: string;
+  readonly viewSessionId?: string;
   readonly onboard?: boolean;
   readonly onOnboardingStep?: (input: EveCliSetupStepEvent) => void;
   readonly onOnboardingTerminal?: (input: EveCliSetupTerminalEvent) => void;
@@ -89,6 +90,7 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
     target,
     headers,
     initialInput,
+    viewSessionId,
     onboard,
     onOnboardingStep,
     onOnboardingTerminal,
@@ -139,6 +141,7 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
     options.remote = prepared.remote;
   }
   if (initialInput !== undefined) options.initialInput = initialInput;
+  if (viewSessionId !== undefined) options.viewSessionId = viewSessionId;
   if (startup !== undefined) {
     options.renderer = startup.renderer;
     options.startup = startup;

@@ -31,7 +31,10 @@ import type { SandboxAccess, SandboxSessionEndReason } from "#sandbox/state.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { RuntimeModel } from "#runtime/agent/resolve-model.js";
 import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
-import type { SessionPredecessor } from "#protocol/session-events/families/session.js";
+import type {
+  SessionForkSource,
+  SessionPredecessor,
+} from "#protocol/session-events/families/session.js";
 
 export type {
   SessionAuthContext,
@@ -39,7 +42,10 @@ export type {
   SessionTraceRoot,
   SessionTurn,
 } from "#channel/types.js";
-export type { SessionPredecessor } from "#protocol/session-events/families/session.js";
+export type {
+  SessionForkSource,
+  SessionPredecessor,
+} from "#protocol/session-events/families/session.js";
 
 /**
  * Auth metadata on the active session.
@@ -63,6 +69,7 @@ export interface Session {
   readonly auth: SessionAuth;
   readonly parent?: SessionParent;
   readonly predecessor?: SessionPredecessor;
+  readonly forkedFrom?: SessionForkSource;
   readonly sessionId: string;
   readonly turn: SessionTurn;
 }
@@ -110,6 +117,7 @@ export const ChannelInstrumentationKey = new ContextKey<ChannelInstrumentationPr
 );
 export const ParentSessionKey = new ContextKey<SessionParent>("eve.parentSession");
 export const SessionPredecessorKey = new ContextKey<SessionPredecessor>("eve.sessionPredecessor");
+export const SessionForkSourceKey = new ContextKey<SessionForkSource>("eve.sessionForkSource");
 export const TraceRootKey = new ContextKey<SessionTraceRoot>("eve.traceRoot");
 export const ParentTraceContextKey = new ContextKey<SessionTraceSeed>("eve.parentTraceContext");
 

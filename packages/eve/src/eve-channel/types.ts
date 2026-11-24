@@ -197,6 +197,16 @@ export interface EveChannelConfig {
   /** Policy for follow-up messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
   /**
+   * Decides whether a caller may create a session with `forkFrom`, which copies
+   * another session's conversation, tool calls, and sandbox. Receives the caller
+   * and the source session id. Defaults to allowing every authenticated caller
+   * that isn't anonymous.
+   */
+  readonly canFork?: (input: {
+    readonly auth: SessionAuthContext;
+    readonly sourceSessionId: string;
+  }) => boolean | Promise<boolean>;
+  /**
    * Pre-dispatch hook for inbound eve HTTP messages. Runs after route auth and body
    * parsing, before runtime dispatch. Message-free creation skips this hook and
    * parks before session initialization. The first message supplies auth and context

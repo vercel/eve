@@ -22,6 +22,7 @@ import { activeTurn, interactionOwner } from "#protocol/session-projection/selec
 import type {
   RuntimeIdentity,
   TraceContext,
+  SessionForkSource,
   SessionPredecessor,
 } from "#protocol/session-events/families/session.js";
 import type { TaskCancelReason } from "#execution/tasks/table.js";
@@ -117,6 +118,7 @@ export function receive(
     readonly cause?: Cause;
     readonly parent?: { readonly sessionId: string; readonly callId: string };
     readonly predecessor?: SessionPredecessor;
+    readonly forkedFrom?: SessionForkSource;
     readonly runtime?: RuntimeIdentity;
     readonly trace?: TraceContext;
   },
@@ -128,10 +130,10 @@ export function receive(
   const first = deliveries[0];
   const cause: Cause =
     first === undefined ? (input.cause ?? { policy: "system" }) : { deliveryId: first.deliveryId };
-  const { parent, predecessor, runtime, trace } = input;
+  const { forkedFrom, parent, predecessor, runtime, trace } = input;
   const events: SessionEvent[] = [];
   if (!position.sessionStarted) {
-    events.push(fact("session.started", { parent, predecessor, runtime, trace }));
+    events.push(fact("session.started", { forkedFrom, parent, predecessor, runtime, trace }));
   }
   if (position.turnId === "") {
     events.push(fact("turn.started", { cause, follows: followedTurn(projection), trace, turnId }));

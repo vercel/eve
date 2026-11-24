@@ -14,6 +14,8 @@ export interface SandboxSelectorContext {
     readonly id: string;
     readonly parent?: SessionParent;
     readonly turn: SessionTurn;
+    /** The session this one forked from, whose sandbox a provider can copy. */
+    readonly forkedFrom?: { readonly sessionId: string };
   };
 }
 
