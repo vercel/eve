@@ -63,6 +63,7 @@ export type ResolvedSkillDefinition = Readonly<
   NamedSkillDefinition &
     (Omit<MarkdownSourceRef<undefined>, "definition"> | ModuleSourceRef | SkillPackageSourceRef) & {
       metadata?: Readonly<Record<string, string>>;
+      owner?: AgentSourceOwner;
     }
 >;
 

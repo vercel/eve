@@ -1,6 +1,9 @@
+import type { ToolResultPart } from "ai";
+
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { SEARCH_TOOL_NAME, SKILL_ENTRY_NAME } from "#protocol/catalog-tools.js";
 import { skillTarget } from "#shared/action-request-name.js";
+import type { ToolExecuteOptions } from "#tools/definition.js";
 import { toInputSchema } from "#tools/schema.js";
 
 import { closestNames } from "./rank.js";
@@ -12,6 +15,23 @@ export interface CatalogSkill {
   readonly name: string;
   readonly path?: string;
   readonly source?: string;
+  readonly provenance?: SkillLoadProvenance;
+}
+
+export interface SkillLoadProvenance {
+  readonly scope: string;
+  readonly identity: string;
+  readonly revision: string;
+}
+
+export type SkillLoadResultPart = ToolResultPart & {
+  readonly skillLoad?: SkillLoadProvenance;
+};
+
+const successfulLoads = new WeakMap<ToolExecuteOptions, SkillLoadProvenance>();
+
+export function skillLoadProvenance(options: ToolExecuteOptions): SkillLoadProvenance | undefined {
+  return successfulLoads.get(options);
 }
 
 const SKILL_LOAD_LABEL = {
@@ -29,9 +49,12 @@ export function createSkillLoader(
 ): HarnessToolDefinition {
   return {
     description: "Loads a skill's instructions.",
-    execute: (input: { readonly name: string }) => {
+    execute: (input: { readonly name: string }, options: ToolExecuteOptions) => {
       const skill = skills.get(input.name);
       if (skill === undefined) throw new Error(`No skill named "${input.name}".`);
+      if (skill.source === undefined && skill.provenance !== undefined) {
+        successfulLoads.set(options, skill.provenance);
+      }
       return skill.markdown;
     },
     frameworkTool: true,
