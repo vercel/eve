@@ -220,7 +220,9 @@ export function agentRunsIntegration(options: ManagedTraceOptions = {}): OtelInt
     [OTEL_INTEGRATION]: true,
     [PROVIDER]: true,
     metricReaders: [],
-    spanProcessors: [contentFilteringProcessor(runtimeSpanProcessor(), options.exportPolicy)],
+    spanProcessors: [
+      contentFilteringProcessor(runtimeSpanProcessor(undefined), options.exportPolicy),
+    ],
   };
 }
 

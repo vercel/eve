@@ -9,7 +9,7 @@ import {
 } from "#execution/public-destination.js";
 import { isLocalDevelopmentServer } from "#internal/application/dev-environment.js";
 import { createLogger } from "#internal/logging.js";
-import { platformContext } from "#platform/context.js";
+import type { Entities } from "#platform/entities.js";
 import { isObject } from "#shared/guards.js";
 import { readEnv } from "#runtime-env/env.js";
 
@@ -19,13 +19,14 @@ const MAX_CALLBACK_RESPONSE_BYTES = 64 * 1024;
 
 export async function postSessionCallbackRequest(input: {
   readonly body: unknown;
+  readonly platform: Entities;
   readonly logFailures?: boolean;
   readonly timeoutMs?: number;
   readonly url: string;
 }): Promise<Response> {
   const timeoutMs = input.timeoutMs ?? SESSION_CALLBACK_TIMEOUT_MS;
   const signal = AbortSignal.timeout(timeoutMs);
-  const headers = await resolveSessionCallbackHeaders(input.url);
+  const headers = await resolveSessionCallbackHeaders(input.platform, input.url);
   let response: Response;
   try {
     response = await requestCallback(input.url, {
@@ -117,10 +118,13 @@ function callbackLogFields(input: { readonly body: unknown; readonly url: string
   return fields;
 }
 
-async function resolveSessionCallbackHeaders(urlValue: string): Promise<Record<string, string>> {
+async function resolveSessionCallbackHeaders(
+  platform: Entities,
+  urlValue: string,
+): Promise<Record<string, string>> {
   return {
     "content-type": "application/json",
-    ...platformContext().network.self?.(urlValue, (url) =>
+    ...platform.network.self?.(urlValue, (url) =>
       configuredCallbackOrigins().some((matches) => matches(url)),
     ),
   };

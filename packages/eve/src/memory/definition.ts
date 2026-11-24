@@ -1,3 +1,4 @@
+import { appOf } from "#context/app.js";
 import { channelOf } from "#definitions/frame.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { ModelMessage } from "ai";
@@ -16,11 +17,9 @@ import {
 } from "#instrumentation/memory.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger } from "#internal/logging.js";
-import {
-  defaultNamespace,
-  type MemoryScope,
-  type MemoryTurnContext,
-} from "#public/memory/index.js";
+import { memoryNamespaceIn } from "#memory/default-namespace.js";
+import { platformOf } from "#platform/context.js";
+import type { MemoryScope, MemoryTurnContext } from "#public/memory/index.js";
 import { compiledBundleOf, SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import { runtimeNodeId } from "#runtime/sessions/session-agent.js";
 import type { ResolvedMemoryDefinition } from "#runtime/types.js";
@@ -344,7 +343,7 @@ export async function resolveMemoryScope(
   };
   const namespace =
     memory.namespace === undefined
-      ? defaultNamespace(namespaceContext)
+      ? memoryNamespaceIn(platformOf(appOf(ctx.ctx)).deployment.scope(), namespaceContext)
       : typeof memory.namespace === "function"
         ? await memory.namespace(namespaceContext)
         : memory.namespace;

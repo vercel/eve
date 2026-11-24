@@ -2,7 +2,9 @@ import { type AlsContext, contextStorage } from "#context/container.js";
 import { AuthKey, type SessionAuthContext } from "#context/keys.js";
 import { ConnectionAuthorizationFailedError } from "#connections/errors.js";
 import type { AuthorizationDefinition, ConnectionPrincipal } from "#shared/connection-types.js";
-import { platformContext } from "#platform/context.js";
+import { appOf } from "#context/app.js";
+import type { ContextReader } from "#context/key.js";
+import { platformOf } from "#platform/context.js";
 
 export function principalKey(principal: ConnectionPrincipal): string {
   if (principal.type === "app") {
@@ -37,7 +39,7 @@ export function resolveConnectionPrincipalFromAuth(
     });
   }
 
-  if (authorization.vercelConnect !== undefined && isPlatformDevelopmentCaller(current)) {
+  if (authorization.vercelConnect !== undefined && isPlatformDevelopmentCaller(current, ctx)) {
     return {
       attributes: current.attributes,
       id: current.subject ?? current.principalId,
@@ -53,8 +55,11 @@ export function resolveConnectionPrincipalFromAuth(
   };
 }
 
-export function isPlatformDevelopmentCaller(current: SessionAuthContext): boolean {
-  return platformContext().identity.developmentCaller?.(current) ?? false;
+export function isPlatformDevelopmentCaller(
+  current: SessionAuthContext,
+  ctx?: ContextReader,
+): boolean {
+  return platformOf(appOf(ctx)).identity.developmentCaller?.(current) ?? false;
 }
 
 function buildUserPrincipalRequiredMessage(

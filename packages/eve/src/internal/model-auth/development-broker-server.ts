@@ -36,9 +36,9 @@ export async function handleDevelopmentModelCredentialRequest(
     await loadDevelopmentEnvironmentFiles(input.appRoot);
     let credential: DevelopmentModelCredential;
     if (provider === "gateway") {
-      credential = await gatewayCredential();
+      credential = await gatewayCredential(undefined);
       if (wasRejected(credential.token) && credential.kind === "oauth")
-        credential = await gatewayCredential(credential.token);
+        credential = await gatewayCredential(undefined, credential.token);
     } else if (provider === "chatgpt") {
       const broker = getDefaultCodexTokenBroker();
       let token = await broker.getToken({ reason: "request" });

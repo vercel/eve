@@ -1,19 +1,33 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RunExpiredError, WorkflowRunNotFoundError } from "#compiled/@workflow/errors/index.js";
 
 const world = vi.hoisted(() => ({ getDeploymentId: vi.fn(), runs: { get: vi.fn() } }));
 vi.mock("#internal/workflow/runtime.js", () => ({ getWorld: async () => world }));
 
-import { workflowHost } from "#execution/workflow-host/host.js";
+import { createWorkflowHost } from "#execution/workflow-host/host.js";
+import { definePlatform } from "#platform/declaration.js";
+import { createEntities } from "#platform/entities.js";
 
-beforeEach(() => {
-  vi.stubEnv("VERCEL_DEPLOYMENT_ID", "");
-});
+function platformWithDeploymentId(deploymentId: string | undefined) {
+  return createEntities(
+    definePlatform({
+      deployment: () => ({
+        environment: () => undefined,
+        deploymentId: () => deploymentId,
+        productionHost: () => undefined,
+        publicHost: () => undefined,
+        scope: () => undefined,
+      }),
+    }),
+    undefined,
+  );
+}
+
+const workflowHost = createWorkflowHost(platformWithDeploymentId(undefined));
 
 afterEach(() => {
   vi.resetAllMocks();
-  vi.unstubAllEnvs();
 });
 
 describe("the Workflow durable host", () => {
@@ -55,7 +69,7 @@ describe("the Workflow durable host", () => {
     world.getDeploymentId.mockResolvedValue("dpl_world");
     await expect(workflowHost.deploymentId()).resolves.toBe("dpl_world");
 
-    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_platform");
-    await expect(workflowHost.deploymentId()).resolves.toBe("dpl_platform");
+    const hosted = createWorkflowHost(platformWithDeploymentId("dpl_platform"));
+    await expect(hosted.deploymentId()).resolves.toBe("dpl_platform");
   });
 });

@@ -17,6 +17,9 @@ import { parseJsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import { resumeRoutedHook } from "#execution/hosts.js";
 import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
+import { platformOf } from "#platform/context.js";
+import type { Entities } from "#platform/entities.js";
+import { processApp } from "#runtime/app.js";
 import {
   REMOTE_CALLBACK_NOT_PENDING,
   REMOTE_CALLBACK_NOT_PENDING_MESSAGE,
@@ -46,6 +49,7 @@ export async function notifyTurnCallerStep(input: {
   readonly settled: SettledTurnNotification;
 }): Promise<void> {
   "use step";
+  const platform = platformOf(processApp().started);
 
   if (input.caller === undefined) {
     return;
@@ -60,6 +64,7 @@ export async function notifyTurnCallerStep(input: {
 
   if (input.caller.replyTo.kind === "callback") {
     await postSettledTurnCallback({
+      platform,
       result,
       sessionId: input.sessionId,
       url: input.caller.replyTo.url,
@@ -76,6 +81,7 @@ export async function notifyCancelledTaskCallerStep(input: {
   readonly usage?: TokenUsage;
 }): Promise<void> {
   "use step";
+  const platform = platformOf(processApp().started);
 
   const usageDelta = input.usage ?? ZERO_TOKEN_USAGE;
   const error = {
@@ -98,6 +104,7 @@ export async function notifyCancelledTaskCallerStep(input: {
   const result = input.usage === undefined ? base : { ...base, usage: input.usage };
   if (input.caller.replyTo.kind === "callback") {
     await postSettledTurnCallback({
+      platform,
       result,
       sessionId: input.sessionId,
       url: input.caller.replyTo.url,
@@ -229,6 +236,7 @@ export function bindTurnCallerContext(
 }
 
 async function postSettledTurnCallback(input: {
+  readonly platform: Entities;
   readonly result: RuntimeSubagentChildResult;
   readonly sessionId: string;
   readonly url: string;
@@ -244,6 +252,7 @@ async function postSettledTurnCallback(input: {
         sessionId,
         subagentName: input.result.subagentName,
       },
+      platform: input.platform,
       url: input.url,
     });
     return;
@@ -258,6 +267,7 @@ async function postSettledTurnCallback(input: {
       sessionId,
       subagentName: input.result.subagentName,
     },
+    platform: input.platform,
     url: input.url,
   });
 }
@@ -266,11 +276,13 @@ export const NOT_PENDING_RETRY_DELAYS_MS: readonly number[] = [250, 500, 1000, 2
 
 async function postCallbackPayload(input: {
   readonly payload: unknown;
+  readonly platform: Entities;
   readonly url: string;
 }): Promise<void> {
   for (let attempt = 0; ; attempt += 1) {
     const response = await postSessionCallbackRequest({
       body: input.payload,
+      platform: input.platform,
       url: input.url,
     });
     if (response.ok) return;

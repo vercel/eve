@@ -268,12 +268,15 @@
  *             only in the Workflow binding, the named engine modules whose
  *             step IDs pin their paths, and test helpers. Everything else
  *             goes through `DurableHost`.
- *   rule 72 — The process app's internals have one owner module each, and
- *             everything else uses that owner's accessor (`platformContext()`,
- *             `requireDurableHost()`, `getInstrumentationRuntime()`, ...).
- *             `processApp()`, the other process-app values of
- *             `#runtime/app.js`, and the `eve.app` key appear only in
- *             the boot lifecycle, the owners, and test helpers. Type imports and
+ *   rule 72 — Code receives the app from its caller; only a Workflow step
+ *             function (a file with a `"use step"` directive) reads
+ *             `processApp()`, and it passes the app down. The process app's
+ *             other internals have one owner module each, and everything
+ *             else uses that owner's accessor (`requireDurableHost()`,
+ *             `getInstrumentationRuntime()`, ...). The process-app values of
+ *             `#runtime/app.js` appear only in step functions, the boot
+ *             lifecycle, the owners, and test helpers, and the `eve.app` key
+ *             only in `#runtime/app.js` and test helpers. Type imports and
  *             `openSession()`, which takes the app as an argument, stay
  *             allowed.
  *   rule 73 — Each web twin in `src/runtime-env/` (`x.web.ts`) loads without
@@ -1597,9 +1600,9 @@ const PROCESS_APP_VALUES = new Set(["createProcessApp", "installProcessApp", "pr
 const PROCESS_APP_OWNERS = new Set(
   [
     "execution/hosts.ts",
+    "execution/tools/workflow/step-execution.ts",
     "instrumentation/providers.ts",
     "instrumentation/runtime-global.ts",
-    "platform/context.ts",
     "runtime/app.ts",
     "runtime/lifecycle.ts",
     "runtime/sessions/runtime-session.ts",
@@ -1607,20 +1610,26 @@ const PROCESS_APP_OWNERS = new Set(
   ].map((file) => `${EVE_SRC}${file}`),
 );
 const NAMED_IMPORT_RE = /import\s*\{([^}]*)\}\s*from\s*(["'])([^"']+)\2/g;
+const STEP_DIRECTIVE_RE = /^\s*(["'])use step\1;?\s*$/m;
 const NAMESPACE_OR_DYNAMIC_IMPORT_RE =
   /(?:import\s*\*\s*as\s+\w+\s+from\s*|import\s*\(\s*)(["'])([^"']+)\1/g;
 
 function checkRule72(posix, content, violations) {
   if (!posix.startsWith(EVE_SRC) || posix.endsWith(".test.ts")) return;
-  if (PROCESS_APP_OWNERS.has(posix) || posix.startsWith(`${EVE_SRC}internal/testing/`)) return;
-  const message = `reaches the process app directly. Each internal of the app has one owner module; use its accessor (\`platformContext()\`, \`requireDurableHost()\`, \`getInstrumentationRuntime()\`, \`getActiveRuntimeSession()\`), take the \`App\` that \`start()\` returns as an argument, or add an internal and its owner to \`PROCESS_APP_OWNERS\`. Type imports from \`${PROCESS_APP_MODULE}\` are fine.`;
+  if (posix.startsWith(`${EVE_SRC}internal/testing/`)) return;
+  const message = `reaches the process app directly. Receive the app from your caller (a route, a boot phase, or the turn's context through \`appOf(ctx)\`) and read its platform with \`platformOf(app)\`; only a Workflow step function (a file with a \`"use step"\` directive) reads \`processApp()\`, and it passes the app down. Other internals of the app have one owner module each; use its accessor (\`requireDurableHost()\`, \`getInstrumentationRuntime()\`, \`getActiveRuntimeSession()\`), or add an internal and its owner to \`PROCESS_APP_OWNERS\`. Type imports from \`${PROCESS_APP_MODULE}\` are fine.`;
   const lineOf = (index) => content.slice(0, index).split("\n").length;
+  const key = content.indexOf('Symbol.for("eve.app")');
+  if (key >= 0 && posix !== `${EVE_SRC}runtime/app.ts`)
+    violations.push({ rule: 72, file: `${posix}:${lineOf(key)}`, message });
+  if (PROCESS_APP_OWNERS.has(posix)) return;
+  const stepFile = STEP_DIRECTIVE_RE.test(content);
   for (const match of content.matchAll(NAMED_IMPORT_RE)) {
     if (aliasOfSpecifier(posix, match[3]) !== PROCESS_APP_MODULE) continue;
     const reachesProcessApp = match[1]
       .split(",")
       .map((name) => name.trim().split(/\s+as\s+/)[0])
-      .some((name) => PROCESS_APP_VALUES.has(name));
+      .some((name) => PROCESS_APP_VALUES.has(name) && !(stepFile && name === "processApp"));
     if (reachesProcessApp)
       violations.push({ rule: 72, file: `${posix}:${lineOf(match.index)}`, message });
   }
@@ -1628,8 +1637,6 @@ function checkRule72(posix, content, violations) {
     if (aliasOfSpecifier(posix, match[2]) !== PROCESS_APP_MODULE) continue;
     violations.push({ rule: 72, file: `${posix}:${lineOf(match.index)}`, message });
   }
-  const key = content.indexOf('Symbol.for("eve.app")');
-  if (key >= 0) violations.push({ rule: 72, file: `${posix}:${lineOf(key)}`, message });
 }
 
 /**
@@ -2865,7 +2872,7 @@ async function main() {
     violations.push({
       rule: 69,
       file,
-      message: `reads \`VERCEL*\` environment variables or imports \`#compiled/@vercel/*\` or \`#platform/vercel/*\` in ${count} place${count === 1 ? "" : "s"}. Vercel platform knowledge lives in \`packages/eve/src/platform/\` so eve can run on other hosts. Read platform facts and capabilities through \`platformContext()\` from \`#platform/context.js\`, or add the capability to the platform entities (\`#platform/entities.js\`) and the Vercel declaration (\`platform/vercel/declaration.ts\`).`,
+      message: `reads \`VERCEL*\` environment variables or imports \`#compiled/@vercel/*\` or \`#platform/vercel/*\` in ${count} place${count === 1 ? "" : "s"}. Vercel platform knowledge lives in \`packages/eve/src/platform/\` so eve can run on other hosts. Read platform facts from the app's platform (\`platformOf(app)\` from \`#platform/context.js\`, or \`builtInPlatform()\` where no app exists), or add the capability to the platform entities (\`#platform/entities.js\`) and the Vercel declaration (\`platform/vercel/declaration.ts\`).`,
     });
   }
 

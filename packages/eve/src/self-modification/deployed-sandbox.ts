@@ -1,4 +1,6 @@
-import { hostedSandbox, hostedSandboxEnvironment } from "#platform/hosted-sandbox.js";
+import { appOf } from "#context/app.js";
+import { contextStorage } from "#context/container.js";
+import { hostedSandboxEnvironment, hostedSandboxOf } from "#platform/hosted-sandbox.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
 import { JustBashSandbox } from "#sandbox/providers/just-bash.js";
 import { bindSandboxEnvironment, type SandboxSelector } from "#shared/sandbox-environment.js";
@@ -18,7 +20,8 @@ const VERCEL_SANDBOX_REQUIRED_MESSAGE =
 
 export function defineDeployedSelfModificationSandbox(
   config: DeployedSelfModificationConfig,
-  hasCredentialTransforms: () => boolean = () => hostedSandbox()?.credentialTransforms === true,
+  hasCredentialTransforms: () => boolean = () =>
+    hostedSandboxOf(appOf(contextStorage.getStore())?.platform)?.credentialTransforms === true,
 ): SandboxSelector {
   if (!isDeployedRuntime()) {
     const environment = JustBashSandbox.environment();
@@ -29,7 +32,7 @@ export function defineDeployedSelfModificationSandbox(
   }
 
   const deployed = resolveDeployedSelfModificationConfig(config);
-  const environment = hostedSandboxEnvironment();
+  const environment = hostedSandboxEnvironment(undefined);
   return bindSandboxEnvironment(
     defineSandbox(async ({ session }) => {
       if (!hasCredentialTransforms()) throw new Error(VERCEL_SANDBOX_REQUIRED_MESSAGE);

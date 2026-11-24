@@ -4,7 +4,8 @@ import {
 } from "#internal/model-auth/development-broker-client.js";
 import type { ChatGptAuthState } from "#public/models/openai/chatgpt/token-broker.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
-import { platformContext } from "#platform/context.js";
+import { platformOf } from "#platform/context.js";
+import type { App } from "#runtime/app.js";
 import { gatewayCredential } from "#platform/models.js";
 import { hasEnvValue } from "#internal/resolve-model-endpoint-status.js";
 import { buildAgentInfoResponse } from "#internal/nitro/routes/agent-info/build-agent-info-response.js";
@@ -18,7 +19,7 @@ import { getDefaultCodexTokenBroker } from "#public/models/openai/chatgpt/token-
 import type { ModelRouting } from "#shared/agent-definition.js";
 import { isChatGptModelRouting } from "#shared/chatgpt-model.js";
 
-async function createAgentInfoPayload(input: NitroArtifactsConfig) {
+async function createAgentInfoPayload(input: NitroArtifactsConfig, app: App | undefined) {
   const data = await loadAgentInfoManifestData({
     compiledArtifactsSource: resolveAgentInfoCompiledArtifactsSource(input),
   });
@@ -32,7 +33,7 @@ async function createAgentInfoPayload(input: NitroArtifactsConfig) {
     gatewayCredentials:
       routing === undefined
         ? { apiKey: false, oidc: false }
-        : await resolveGatewayCredentialPresence(routing),
+        : await resolveGatewayCredentialPresence(routing, app),
     ...(isChatGptModelRouting(routing) ? { chatgptAuth: await resolveChatGptAuthState() } : {}),
   });
 }
@@ -49,11 +50,13 @@ async function resolveChatGptAuthState(): Promise<ChatGptAuthState> {
 
 async function resolveGatewayCredentialPresence(
   routing: ModelRouting,
+  app: App | undefined,
 ): Promise<GatewayCredentialPresence> {
   if (routing.kind === "gateway" && isEveDevEnvironment()) {
     try {
       const credential =
-        (await readDevelopmentModelCredential("gateway")) ?? (await gatewayCredential());
+        (await readDevelopmentModelCredential("gateway")) ??
+        (await gatewayCredential(app?.platform));
       return {
         apiKey: credential.kind === "api-key",
         oidc: credential.kind === "oidc",
@@ -70,7 +73,7 @@ async function resolveGatewayCredentialPresence(
     return { apiKey, oidc: false };
   }
 
-  const { network } = platformContext();
+  const { network } = platformOf(app);
   if (network.token === undefined) return { apiKey: false, oidc: false };
   try {
     await network.token();
@@ -80,8 +83,12 @@ async function resolveGatewayCredentialPresence(
   }
 }
 
-export async function handleAgentInfoRequest(input: NitroArtifactsConfig): Promise<Response> {
-  return new Response(JSON.stringify(await createAgentInfoPayload(input)), {
+export async function handleAgentInfoRequest(
+  input: NitroArtifactsConfig,
+  _request?: Request,
+  app?: App,
+): Promise<Response> {
+  return new Response(JSON.stringify(await createAgentInfoPayload(input, app)), {
     headers: {
       "cache-control": "no-store",
       "content-type": "application/json; charset=utf-8",

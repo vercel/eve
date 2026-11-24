@@ -25,7 +25,8 @@ import { resolveNitroChannelRuntimeBundle } from "#internal/nitro/routes/runtime
 import { createRouteInvokeTool } from "#internal/nitro/routes/route-invoke-tool.js";
 import { withLocalDevRequestScope } from "#runtime/local-dev-capability.js";
 import { requireDurableHost } from "#execution/hosts.js";
-import { platformContext } from "#platform/context.js";
+import { platformOf } from "#platform/context.js";
+import type { App } from "#runtime/app.js";
 
 const log = createLogger("channel.dispatch");
 
@@ -33,6 +34,7 @@ export async function dispatchChannelRequest(
   event: H3Event,
   routeKey: string,
   config: NitroArtifactsConfig,
+  app?: App,
 ): Promise<Response> {
   const params = getRouterParams(event, { decode: true });
   return await traceChannelRequest({ request: event.req, routeKey }, async (span) => {
@@ -59,6 +61,7 @@ export async function dispatchChannelRequest(
       bundle,
       channel: matchedChannel,
       channelKind: channelKind ?? "channel",
+      app,
       config,
       event,
       params,
@@ -67,7 +70,7 @@ export async function dispatchChannelRequest(
     });
 
     try {
-      return await withDevelopmentPlatformIdentity(config, event.req, async () => {
+      return await withDevelopmentPlatformIdentity(app, config, event.req, async () => {
         if (matchedChannel.handler) {
           return await matchedChannel.handler(event.req, args);
         }
@@ -99,6 +102,7 @@ export async function dispatchChannelWebSocketRequest(
   event: H3Event,
   routeKey: string,
   config: NitroArtifactsConfig,
+  app?: App,
 ): Promise<WebSocketRouteHooks> {
   const params = getRouterParams(event, { decode: true });
   const bundle = await resolveNitroChannelRuntimeBundle(config);
@@ -120,6 +124,7 @@ export async function dispatchChannelWebSocketRequest(
     bundle,
     channel: matchedChannel,
     channelKind,
+    app,
     config,
     event,
     params,
@@ -129,6 +134,7 @@ export async function dispatchChannelWebSocketRequest(
 
   try {
     return await withDevelopmentPlatformIdentity(
+      app,
       config,
       event.req,
       async () => await websocket(event.req, args),
@@ -146,6 +152,7 @@ export async function dispatchChannelWebSocketRequest(
 }
 
 async function withDevelopmentPlatformIdentity<T>(
+  app: App | undefined,
   config: NitroArtifactsConfig,
   request: Request,
   callback: () => Promise<T>,
@@ -157,7 +164,7 @@ async function withDevelopmentPlatformIdentity<T>(
   return await withLocalDevRequestScope(
     request,
     async () =>
-      await (platformContext().identity.developmentScope?.(
+      await (platformOf(app).identity.developmentScope?.(
         { appRoot: config.appRoot, request },
         callback,
       ) ?? callback()),
@@ -165,6 +172,7 @@ async function withDevelopmentPlatformIdentity<T>(
 }
 
 async function buildRouteArgs(input: {
+  readonly app: App | undefined;
   readonly bundle: Awaited<ReturnType<typeof resolveNitroChannelRuntimeBundle>>;
   readonly channel: ResolvedChannelDefinition;
   readonly channelKind: string;
@@ -174,7 +182,7 @@ async function buildRouteArgs(input: {
   readonly requestTraceContext: SpanContext | undefined;
   readonly routeKey: string;
 }): Promise<RouteHandlerArgs> {
-  const { bundle, channel, channelKind, config, event, params, requestTraceContext } = input;
+  const { app, bundle, channel, channelKind, config, event, params, requestTraceContext } = input;
   const channelName = channel.name;
   const requestId = readVercelRequestId(event.req.headers);
   const requestIp = extractRequestIp(event, config);
@@ -189,7 +197,7 @@ async function buildRouteArgs(input: {
     );
   };
   const adapter = channel.adapter ?? { kind: "channel" };
-  const acceptedDeploymentId = await resolveAcceptedDeploymentId(config);
+  const acceptedDeploymentId = await resolveAcceptedDeploymentId(app, config);
   const deliverySource = {
     acceptedDeploymentId,
     channelKind,
@@ -217,6 +225,7 @@ async function buildRouteArgs(input: {
       ...agent.args,
       invokeTool: createRouteInvokeTool({
         agentName: bundle.agentName,
+        app,
         config,
         origin: { adapter, agentName: bundle.agentName, channelName },
         requestUrl: event.req.url,
@@ -224,7 +233,7 @@ async function buildRouteArgs(input: {
     },
     agentInfo: async () => {
       const { handleAgentInfoRequest } = await import("#internal/nitro/routes/info.js");
-      return await handleAgentInfoRequest(config);
+      return await handleAgentInfoRequest(config, undefined, app);
     },
     agentName: bundle.agentName,
     deliverySource,
@@ -240,9 +249,10 @@ async function buildRouteArgs(input: {
 }
 
 async function resolveAcceptedDeploymentId(
+  app: App | undefined,
   config: NitroArtifactsConfig,
 ): Promise<string | undefined> {
-  const hosted = platformContext().deployment.deploymentId();
+  const hosted = platformOf(app).deployment.deploymentId();
   if (hosted !== undefined) return validateDeploymentId(hosted);
 
   if (config.kind === "development" && process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV] === undefined) {

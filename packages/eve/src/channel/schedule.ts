@@ -18,7 +18,9 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey, OccurrenceIdKey, ScheduleIdKey, ScheduleInstanceKey } from "#context/keys.js";
 import { expectFunction } from "#internal/authored-module.js";
 import { PermanentScheduleMessageError } from "#internal/schedules/permanent-error.js";
-import { platformContext } from "#platform/context.js";
+import { bindApp } from "#context/app.js";
+import { platformOf } from "#platform/context.js";
+import type { App } from "#runtime/app.js";
 import type {
   ScheduleDefinition,
   ScheduleHandlerArgs,
@@ -66,18 +68,22 @@ export interface ScheduleCollectionDispatchInput {
 }
 
 export class ScheduleDispatcher {
+  private readonly app: App | undefined;
   private readonly runtime: Runtime;
   private readonly channels: readonly ResolvedChannelDefinition[];
   constructor(config: {
+    readonly app?: App;
     readonly runtime: Runtime;
     readonly channels: readonly ResolvedChannelDefinition[];
   }) {
+    this.app = config.app;
     this.runtime = config.runtime;
     this.channels = config.channels;
   }
 
   async trigger(input: ScheduleDispatchInput): Promise<ScheduleDispatchResult> {
     const scope = new ContextContainer();
+    bindApp(scope, this.app);
     scope.set(ScheduleIdKey, input.scheduleId);
     return await contextStorage.run(scope, () => this.triggerInScope(input));
   }
@@ -188,7 +194,7 @@ export class ScheduleDispatcher {
     const sessions: Delivery[] = [];
     const waitUntilTasks: Promise<unknown>[] = [];
     const toChannel = createCrossChannelToFn(runtime, toCrossChannelTargets(this.channels), {
-      acceptedDeploymentId: platformContext().deployment.deploymentId(),
+      acceptedDeploymentId: platformOf(this.app).deployment.deploymentId(),
     });
     return {
       args: {

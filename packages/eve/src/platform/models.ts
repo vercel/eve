@@ -1,11 +1,11 @@
 import type { DevelopmentModelCredential } from "#internal/model-auth/development-broker-protocol.js";
-import { installedPlatform } from "#platform/context.js";
+import type { Entities } from "#platform/entities.js";
 import { resolveGatewayModelCredential } from "#platform/vercel/model-auth/gateway-credential.js";
 
 export function gatewayCredential(
+  platform: Entities | undefined,
   ...args: [rejectedToken?: string]
 ): Promise<DevelopmentModelCredential> {
-  const platform = installedPlatform();
   const modelCredentials =
     platform === undefined ? { resolve: resolveGatewayModelCredential } : platform.models;
   if (modelCredentials === undefined) {

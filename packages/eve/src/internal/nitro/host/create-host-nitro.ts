@@ -23,6 +23,7 @@ import { onVendoredDependencyLog } from "#internal/bundler/vendored-dependency-l
 import { createHostNoExternals } from "#internal/nitro/host/externals-policy.js";
 import { createHostPlugins } from "#internal/nitro/host/host-plugins.js";
 import { type HostNitroRoutes, renderHostRoutes } from "#internal/nitro/host/host-routes.js";
+import { ROUTE_APP_ID } from "#internal/nitro/host/route-handlers.js";
 import type { HostRuntimePlugin, HostSpec } from "#internal/nitro/host/host-spec.js";
 import { createInstrumentationEntry } from "#internal/nitro/host/instrumentation-entry.js";
 import {
@@ -205,6 +206,9 @@ function toNitroConfig(
       ...(built.timezoneSchedulesPlugin !== undefined && {
         [TIMEZONE_SCHEDULES_PLUGIN_ID]: built.timezoneSchedulesPlugin,
       }),
+      ...(spec.runtimePlugins.includes("sandbox-shutdown") && {
+        [SANDBOX_SHUTDOWN_PLUGIN_ID]: createSandboxShutdownPlugin(),
+      }),
       ...(built.skillFilesPlugin !== undefined && {
         [SKILL_FILES_PLUGIN_ID]: built.skillFilesPlugin,
       }),
@@ -214,8 +218,17 @@ function toNitroConfig(
 
 const EVE_RUNTIME_PLUGIN_PATHS = {
   "connection-drain": "src/internal/nitro/host/connection-drain-plugin.ts",
-  "sandbox-shutdown": "src/internal/nitro/host/sandbox-shutdown-plugin.ts",
 } as const;
+
+const SANDBOX_SHUTDOWN_PLUGIN_ID = "#eve/sandbox-shutdown.mjs";
+
+function createSandboxShutdownPlugin(): string {
+  return [
+    `import { app } from ${JSON.stringify(ROUTE_APP_ID)};`,
+    `import sandboxShutdownPlugin from ${stringifyEsmImportSpecifier(resolvePackageSourceFilePath("src/internal/nitro/host/sandbox-shutdown-plugin.ts"))};`,
+    "export default function eveSandboxShutdownPlugin(nitroApp) { sandboxShutdownPlugin(nitroApp, app); }",
+  ].join("\n");
+}
 
 function resolveRuntimePluginPath(plugin: HostRuntimePlugin, spec: HostSpec): string {
   const { compiledArtifacts } = spec.locations;
@@ -229,6 +242,8 @@ function resolveRuntimePluginPath(plugin: HostRuntimePlugin, spec: HostSpec): st
       return SKILL_FILES_PLUGIN_ID;
     case "timezone-schedules":
       return TIMEZONE_SCHEDULES_PLUGIN_ID;
+    case "sandbox-shutdown":
+      return SANDBOX_SHUTDOWN_PLUGIN_ID;
     case "local-schedules":
       return resolvePackageSourceFilePath(spec.localSchedulesPluginModulePath);
     default:

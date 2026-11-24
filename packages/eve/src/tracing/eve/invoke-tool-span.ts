@@ -34,7 +34,7 @@ import {
 } from "#tracing/eve/conversation-context.js";
 import { MCP_SERIALIZER } from "#tracing/eve/mcp.js";
 import { eveOutputMapping } from "#tracing/eve/profile.js";
-import { platformContext } from "#platform/context.js";
+import { builtInPlatform } from "#platform/context.js";
 const log = createLogger("invoke-tool");
 const agentTelemetry = () =>
   otelTelemetry({ tracerName: "eve.agent", mapping: eveOutputMapping() });
@@ -151,7 +151,7 @@ async function traced(
     "agent.trace.schema.version": 4,
     "gen_ai.conversation.id": operationConversationId({ sessionId: input.sessionId }),
   };
-  const traceSessionAttribute = platformContext().telemetry.sessionAttribute;
+  const traceSessionAttribute = builtInPlatform().telemetry.sessionAttribute;
   if (traceSessionAttribute !== undefined) attributes[traceSessionAttribute] = input.sessionId;
   if (input.origin !== undefined) {
     attributes["eve.channel.kind"] = conversation.channel.kind;

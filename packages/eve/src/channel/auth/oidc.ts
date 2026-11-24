@@ -5,7 +5,7 @@ import {
   areTokenClaimMatchersSatisfied,
   createJwtAuthenticatedCallerPrincipal,
 } from "#channel/auth/token-claims.js";
-import { platformContext } from "#platform/context.js";
+import { builtInPlatform } from "#platform/context.js";
 import type {
   ResolvedOidcAuthStrategy,
   RouteStrategyAuthenticationResult,
@@ -46,7 +46,7 @@ export async function authenticateOidcStrategy(input: {
       issuer: input.strategy.issuer,
     });
 
-    const verdict = platformContext().identity.verifyOidcCaller?.({
+    const verdict = builtInPlatform().identity.verifyOidcCaller?.({
       issuer: input.strategy.issuer,
       payload: verified.payload,
       strategy: input.strategy,

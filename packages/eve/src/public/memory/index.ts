@@ -7,16 +7,12 @@ import type { SessionAuth } from "#context/keys.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ExactDefinition } from "#public/definitions/exact.js";
 import type { SessionFrame } from "#dynamic/definition.js";
-import { EVE_INTERNAL_AGENT_WORKSPACE_MEMBER_ENV } from "#internal/application/build-output-environment.js";
 import { MEMORY_DEFINITION_BRAND } from "#shared/memory-definition.js";
-import {
-  EVE_PUBLIC_ROUTE_PREFIX_ENV,
-  normalizePublicRoutePrefix,
-} from "#shared/public-route-prefix.js";
-import { platformContext } from "#platform/context.js";
+import { appOf } from "#context/app.js";
+import { contextStorage } from "#context/container.js";
+import { memoryNamespaceIn } from "#memory/default-namespace.js";
+import { platformOf } from "#platform/context.js";
 import type { ToolDefinition } from "#tools/definition.js";
-import { readEnv } from "#runtime-env/env.js";
-import { sha256Base64Url } from "#shared/digest.js";
 
 /**
  * What a namespace function receives: the application root, the agent or subagent, and the slot
@@ -237,29 +233,8 @@ export function defineMemory(definition: MemoryDefinition): DefinedMemory {
  * local application roots do not share memory.
  */
 export function defaultNamespace(context: MemoryNamespaceContext): string {
-  const scope = platformContext().deployment.scope();
-  if (scope === undefined) {
-    return JSON.stringify([
-      "eve-memory-default-namespace-v1",
-      "local",
-      sha256Base64Url(context.appRoot),
-      context.node,
-      context.slot,
-    ]);
-  }
-
-  const publicRoutePrefix =
-    readEnv(EVE_INTERNAL_AGENT_WORKSPACE_MEMBER_ENV) === "1"
-      ? normalizePublicRoutePrefix(readEnv(EVE_PUBLIC_ROUTE_PREFIX_ENV))
-      : undefined;
-  return JSON.stringify([
-    "eve-memory-default-namespace-v1",
-    scope.platform,
-    scope.id,
-    scope.environment,
-    scope.variant,
-    ...(publicRoutePrefix === undefined ? [] : [publicRoutePrefix]),
-    context.node,
-    context.slot,
-  ]);
+  return memoryNamespaceIn(
+    platformOf(appOf(contextStorage.getStore())).deployment.scope(),
+    context,
+  );
 }
