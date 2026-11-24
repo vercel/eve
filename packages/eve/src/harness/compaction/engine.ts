@@ -37,6 +37,12 @@ const COMPACTION_PROMPT_OVERHEAD_TOKENS = estimateTokens([
   createFrameworkUserMessage("context.compaction", COMPACTION_PROMPT_ENVELOPE.prompt),
 ] satisfies ModelMessage[]);
 
+const MIN_DENSITY_SAMPLE_TOKENS = 1_000;
+
+function calibrated(estimate: number, config: CompactionState): number {
+  return Math.ceil(estimate * (config.contentRatio ?? 1));
+}
+
 export function getInputTokenCount(
   messages: readonly ModelMessage[],
   config: CompactionState,
@@ -53,14 +59,17 @@ export function getInputTokenCount(
     priorCount < 0 ||
     priorCount > messages.length
   ) {
-    return estimateTokens(messages) + requestEnvelopeTokens;
+    return calibrated(estimateTokens(messages) + requestEnvelopeTokens, config);
   }
 
   const appended = messages.slice(priorCount);
   return (
     prior +
-    (appended.length === 0 ? 0 : estimateTokens(appended)) +
-    Math.max(0, requestEnvelopeTokens - previousEnvelopeTokens)
+    calibrated(
+      (appended.length === 0 ? 0 : estimateTokens(appended)) +
+        Math.max(0, requestEnvelopeTokens - previousEnvelopeTokens),
+      config,
+    )
   );
 }
 
@@ -94,9 +103,19 @@ export function withPromptMeasurement(
     measured.promptMessages === undefined
       ? undefined
       : estimateTokens(measured.promptMessages) + (measured.requestEnvelopeTokens ?? 0);
+  const previous = measurementsByModel?.[measured.modelId];
+  const estimatedGrowth =
+    estimatedTokens === undefined || previous?.estimatedTokens === undefined
+      ? 0
+      : estimatedTokens - previous.estimatedTokens;
+  const contentRatio =
+    previous !== undefined && estimatedGrowth >= MIN_DENSITY_SAMPLE_TOKENS
+      ? Math.max(1, (inputTokens - previous.inputTokens) / estimatedGrowth)
+      : config.contentRatio;
   const measurement: PromptMeasurement = {
     inputTokens: measured.inputTokens,
     promptMessageCount: measured.promptMessageCount,
+    ...(estimatedTokens !== undefined && { estimatedTokens }),
     ...(measured.requestEnvelopeTokens !== undefined && {
       requestEnvelopeTokens: measured.requestEnvelopeTokens,
     }),
@@ -107,6 +126,7 @@ export function withPromptMeasurement(
     ...(estimatedTokens !== undefined &&
       estimatedTokens > 0 &&
       inputTokens > 0 && { estimateRatio: inputTokens / estimatedTokens }),
+    ...(contentRatio !== undefined && { contentRatio }),
     lastKnownInputTokens: measurement.inputTokens,
     lastKnownPromptMessageCount: measurement.promptMessageCount,
     ...(measurement.requestEnvelopeTokens !== undefined && {

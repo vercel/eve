@@ -656,6 +656,102 @@ describe("compaction summary call", () => {
   });
 });
 
+describe("the compaction threshold against provider-counted input", () => {
+  const WINDOW = 200_000;
+  const THRESHOLD = WINDOW * 0.9;
+
+  async function inputsOf(input: {
+    readonly charsPerToken: number;
+    readonly results: readonly number[];
+    readonly seedChars: number;
+  }) {
+    const inputs: number[] = [];
+    let calls = 0;
+    const model = new MockLanguageModelV3({
+      doStream: async ({ prompt, tools }) => {
+        const system = prompt[0]?.role === "system" ? prompt[0].content : "";
+        if (system.includes("CONTEXT CHECKPOINT COMPACTION")) return summaryStream();
+        const counted = Math.ceil(
+          (JSON.stringify(prompt).length + JSON.stringify(tools ?? []).length) /
+            input.charsPerToken,
+        );
+        inputs.push(counted);
+        const more = calls < input.results.length;
+        calls += 1;
+        return streamOf([
+          { type: "stream-start", warnings: [] },
+          { id: "reply", type: "text-start" },
+          { delta: "Noted.", id: "reply", type: "text-delta" },
+          { id: "reply", type: "text-end" },
+          ...(more
+            ? [
+                {
+                  input: "{}",
+                  toolCallId: `lookup-${calls}`,
+                  toolName: "lookup",
+                  type: "tool-call",
+                } as const,
+              ]
+            : []),
+          finish(more ? "tool-calls" : "stop", counted),
+        ]);
+      },
+    });
+    const events: SessionEvent[] = [];
+    const tool: HarnessToolDefinition = {
+      ...lookupTool,
+      description: "Protected policy. ".repeat(18_800),
+      execute: async () => "r".repeat(input.results[calls - 1] ?? 10),
+    };
+    await untilTurnEnds(
+      createTestKernel({
+        agent: { model: { contextWindowTokens: WINDOW, id: "counted-model" } },
+        handleEvent: async (publication) => void events.push(...eventsOf(publication)),
+        resolveModel: async () => model,
+        tools: new Map([["lookup", tool]]),
+      }),
+      {
+        compaction: {},
+        continuationToken: "http:counted-input",
+        history: [
+          {
+            content: "Seed notes. ".repeat(Math.ceil(input.seedChars / 12)),
+            kind: "user",
+            role: "user",
+          },
+          { content: "Noted.", role: "assistant" },
+        ],
+        sessionId: "counted-input",
+      },
+      "Go.",
+    );
+    return {
+      compactions: events.filter((event) => event.type === "context.started").length,
+      inputs,
+    };
+  }
+
+  it("compacts before any call passes the threshold when the estimate counts tokens exactly", async () => {
+    const { compactions, inputs } = await inputsOf({
+      charsPerToken: 4,
+      results: Array.from({ length: 30 }, () => 20_000),
+      seedChars: 100_000,
+    });
+    expect(compactions).toBeGreaterThan(0);
+    expect(Math.max(...inputs)).toBeLessThanOrEqual(THRESHOLD);
+  }, 120_000);
+
+  it("compacts before a call whose tokens run denser than the estimate once the provider has measured two calls", async () => {
+    const { compactions, inputs } = await inputsOf({
+      charsPerToken: 2.5,
+      results: [6_000, 150_000, 10],
+      seedChars: 10_000,
+    });
+    expect(compactions).toBeGreaterThan(0);
+    expect(Math.max(...inputs)).toBeLessThanOrEqual(THRESHOLD);
+  }, 120_000);
+});
+
 describe("announcements after a compaction during a turn", () => {
   it("announces the catalog again before the turn's question, not after it", async () => {
     const question = "Which sources back the second claim?";

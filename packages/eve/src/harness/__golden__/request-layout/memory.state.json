@@ -179,6 +179,7 @@
           "lastStage": "tail",
           "measurementsByModel": {
             "eve-test/layout": {
+              "estimatedTokens": 2628,
               "inputTokens": 1,
               "promptMessageCount": 5,
               "requestEnvelopeTokens": 2549

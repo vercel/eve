@@ -172,6 +172,7 @@
           "lastKnownPromptMessageCount": 4,
           "measurementsByModel": {
             "eve-test/layout": {
+              "estimatedTokens": 3197,
               "inputTokens": 1,
               "promptMessageCount": 4,
               "requestEnvelopeTokens": 3013

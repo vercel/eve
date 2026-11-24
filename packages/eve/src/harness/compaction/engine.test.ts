@@ -228,6 +228,99 @@ describe("getInputTokenCount", () => {
     expect(getInputTokenCount(messages, measured, 1_000, 3_000)).toBe(stable);
   });
 
+  it("scales appended estimates and envelope growth by the content ratio", () => {
+    const messages: ModelMessage[] = [
+      { content: "a".repeat(400), role: "user" },
+      { content: "b".repeat(40_000), role: "assistant" },
+    ];
+    const measured = {
+      ...config,
+      lastKnownInputTokens: 42,
+      lastKnownPromptMessageCount: 1,
+    };
+    const appended = estimateTokens(messages.slice(1));
+    expect(getInputTokenCount(messages, { ...measured, contentRatio: 1.5 }, 3_000, 1_000)).toBe(
+      42 + Math.ceil((appended + 2_000) * 1.5),
+    );
+    expect(getInputTokenCount(messages, { ...measured, contentRatio: 1 }, 3_000, 1_000)).toBe(
+      42 + appended + 2_000,
+    );
+  });
+
+  it("scales a full estimate by the content ratio, and leaves a never-measured session unscaled", () => {
+    const messages: ModelMessage[] = [{ role: "user", content: "x".repeat(4_000) }];
+    const estimate = estimateTokens(messages) + 3_000;
+    expect(getInputTokenCount(messages, { ...config, contentRatio: 1.4 }, 3_000)).toBe(
+      Math.ceil(estimate * 1.4),
+    );
+    expect(getInputTokenCount(messages, config, 3_000)).toBe(estimate);
+  });
+
+  it("does not scale appended content by the provider's hidden overhead on a small prompt", () => {
+    const first: ModelMessage[] = [{ role: "user", content: "x".repeat(2_000) }];
+    const second: ModelMessage[] = [...first, { role: "assistant", content: "y".repeat(2_000) }];
+    const third: ModelMessage[] = [...second, { role: "user", content: "z".repeat(2_000) }];
+    const overhead = 8_000;
+    const measure = (state: CompactionConfig, messages: ModelMessage[]) =>
+      withPromptMeasurement(state, {
+        inputTokens: overhead + estimateTokens(messages),
+        modelId: "model-a",
+        promptMessageCount: messages.length,
+        promptMessages: messages,
+      });
+    const afterFirst = measure(config, first);
+    expect(afterFirst.estimateRatio).toBeGreaterThan(10);
+    expect(afterFirst.contentRatio).toBeUndefined();
+    expect(getInputTokenCount(second, { ...config, ...afterFirst })).toBe(
+      overhead + estimateTokens(first) + estimateTokens(second.slice(1)),
+    );
+    const afterSecond = measure({ ...config, ...afterFirst }, second);
+    expect(afterSecond.contentRatio).toBeUndefined();
+    expect(getInputTokenCount(third, { ...config, ...afterSecond })).toBe(
+      overhead + estimateTokens(second) + estimateTokens(third.slice(2)),
+    );
+  });
+
+  it("learns content density from the growth between two measurements, not from the first", () => {
+    const first: ModelMessage[] = [{ role: "user", content: "x".repeat(400) }];
+    const second: ModelMessage[] = [...first, { role: "assistant", content: "y".repeat(40_000) }];
+    const overhead = 8_000;
+    const density = 1.8;
+    const afterFirst = withPromptMeasurement(config, {
+      inputTokens: overhead + estimateTokens(first),
+      modelId: "model-a",
+      promptMessageCount: 1,
+      promptMessages: first,
+    });
+    const afterSecond = withPromptMeasurement(
+      { ...config, ...afterFirst },
+      {
+        inputTokens:
+          overhead + estimateTokens(first) + Math.round(density * estimateTokens(second.slice(1))),
+        modelId: "model-a",
+        promptMessageCount: 2,
+        promptMessages: second,
+      },
+    );
+    expect(afterSecond.contentRatio).toBeCloseTo(density, 2);
+  });
+
+  it("clamps the content ratio to 1 when the provider counts fewer tokens than the estimate", () => {
+    const first: ModelMessage[] = [{ role: "user", content: "x".repeat(400) }];
+    const second: ModelMessage[] = [...first, { role: "assistant", content: "y".repeat(40_000) }];
+    const afterFirst = withPromptMeasurement(config, {
+      inputTokens: 5_000,
+      modelId: "model-a",
+      promptMessageCount: 1,
+      promptMessages: first,
+    });
+    const afterSecond = withPromptMeasurement(
+      { ...config, ...afterFirst },
+      { inputTokens: 5_100, modelId: "model-a", promptMessageCount: 2, promptMessages: second },
+    );
+    expect(afterSecond.contentRatio).toBe(1);
+  });
+
   it("includes the full envelope when provider usage cannot describe the current history", () => {
     const messages: ModelMessage[] = [{ role: "user", content: "replacement" }];
     expect(getInputTokenCount(messages, config, 3_000)).toBe(estimateTokens(messages) + 3_000);

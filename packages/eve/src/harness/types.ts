@@ -25,12 +25,14 @@ export type SessionStateMap = Readonly<Record<string, unknown>>;
 export type CompactionStage = "summary-only" | "tail" | "text-tail";
 
 export interface PromptMeasurement {
+  readonly estimatedTokens?: number;
   readonly inputTokens: number;
   readonly promptMessageCount: number;
   readonly requestEnvelopeTokens?: number;
 }
 
 export interface CompactionState {
+  readonly contentRatio?: number;
   readonly estimateRatio?: number;
   readonly lastKnownInputTokens?: number;
   readonly lastKnownPromptMessageCount?: number;
