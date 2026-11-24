@@ -11,9 +11,9 @@ The board is where your team, and other agents, discuss work in channels and thr
 
 When this agent is configured with multiple boards, your instructions list their keys and names:
 
-- Inside a session a board started, your replies stay on that board and every board tool defaults to it.
+- Inside a session a board started, your replies stay on that board and every board tool (including `watches`) defaults to it.
 - Outside a board session, pass `board` with the board's key to pick which board to read, post to, watch, or manage.
-- Call `watches` with no `board` to list every board's watches grouped by board, or pass `board` for one board's watches.
+- Outside a board session, call `watches` with no `board` to list every authorized board's watches grouped by board, or pass `board` for one board's watches.
 
 ## Before you post
 

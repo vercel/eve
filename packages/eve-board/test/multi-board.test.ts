@@ -448,5 +448,126 @@ test("per-board registration paths, async authorize, instructions, and schema va
   assert.equal(parses({ boards: {} }), false);
   assert.equal(parses({ boards: { infra: { name: "infra" } }, name: "top" }), false);
   assert.equal(parses({ boards: { a: { name: "same" }, b: { name: "same" } } }), false);
+  assert.equal(
+    parses({
+      boards: {
+        a: { name: "alpha", url: "https://board.example.com/api/board/" },
+        b: { name: "beta", team: "other", url: "https://BOARD.EXAMPLE.COM/api/board" },
+      },
+    }),
+    false,
+  );
   assert.equal(parses({ boards: { "1bad": { name: "x" } } }), false);
+});
+
+test("default watch authorization isolates board callers to their own board, watches defaults to the session's board, and authorize receives claimChannel and fails closed on errors", async () => {
+  const { a, b } = await startBoards(["a", "b"] as const);
+  const config: BoardSettings = {
+    boards: {
+      a: { name: "alpha", url: a.url },
+      b: { name: "beta", url: b.url },
+    },
+    profile: "helper",
+  };
+  const settings = () => config;
+
+  const watchA = await runTool(
+    defineBoardWatchTool(settings),
+    { board: "a", channel: "incidents", instructions: "A watch." },
+    { callId: "wa" },
+  );
+  const watchB = await runTool(
+    defineBoardWatchTool(settings),
+    { board: "b", channel: "sec", instructions: "B watch." },
+    { callId: "wb" },
+  );
+
+  const boardAPerson = {
+    attributes: {
+      actor_kind: "person",
+      board: "a",
+      board_key: "a",
+      principal: "vercel:user:alice",
+    },
+    authenticator: "board-watcher",
+    principalId: "vercel:user:alice+notes",
+    principalType: "user",
+  };
+
+  await assert.rejects(
+    runTool(
+      defineBoardWatchTool(settings),
+      { board: "b", channel: "sec", instructions: "Cross-board." },
+      { auth: boardAPerson, callId: "x1", metadata: { board: "a" } },
+    ),
+    /only manage watches on their own board/u,
+  );
+  await assert.rejects(
+    runTool(
+      defineBoardWatchesTool(settings),
+      { board: "b" },
+      { auth: boardAPerson, callId: "x2", metadata: { board: "a" } },
+    ),
+    /only manage watches on their own board/u,
+  );
+  await assert.rejects(
+    runTool(
+      defineBoardUnwatchTool(settings),
+      { board: "b", id: watchB.id },
+      { auth: boardAPerson, callId: "x3", metadata: { board: "a" } },
+    ),
+    /only manage watches on their own board/u,
+  );
+
+  const inSessionA = await runTool(
+    defineBoardWatchesTool(settings),
+    {},
+    { auth: boardAPerson, callId: "x4", metadata: { board: "a" } },
+  );
+  assert.equal(inSessionA.board, "a");
+  assert.deepEqual(
+    inSessionA.watches.map((entry: { id: string }) => entry.id),
+    [watchA.id],
+  );
+
+  const seenClaimChannels: (string | undefined)[] = [];
+  const withClaimCheck = (): BoardSettings => ({
+    ...config,
+    authorize: async ({ claimChannel }) => {
+      seenClaimChannels.push(claimChannel);
+      return claimChannel === "work/";
+    },
+  });
+  await assert.rejects(
+    runTool(
+      defineBoardWatchTool(withClaimCheck),
+      {
+        board: "a",
+        channel: "public",
+        claim: { channel: "secret/" },
+        instructions: "Claim secret.",
+      },
+      { callId: "cl1" },
+    ),
+    /not authorized to manage board watches/u,
+  );
+  assert.deepEqual(seenClaimChannels, ["secret/"]);
+
+  const throwingAuth = (): BoardSettings => ({
+    ...config,
+    authorize: async () => {
+      throw new Error("postgres://secret-host/db connection failed");
+    },
+  });
+  await assert.rejects(
+    runTool(
+      defineBoardWatchTool(throwingAuth),
+      { board: "a", channel: "incidents", instructions: "Check." },
+      { callId: "err1" },
+    ),
+    (error: unknown) =>
+      error instanceof Error &&
+      /not authorized to manage board watches/u.test(error.message) &&
+      !error.message.includes("secret-host"),
+  );
 });

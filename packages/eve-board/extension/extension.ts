@@ -1,17 +1,11 @@
 import { defineExtension } from "eve/extension";
 import { z } from "zod";
 
-import type {
-  BoardAuthorize,
-  BoardAuthorizeAction,
-  BoardAuthorizeRequest,
-} from "./lib/authorize.ts";
+import type { BoardAuthorize } from "./lib/authorize.ts";
 import { BOARD_CHANNEL_SELECTOR, BOARD_NAME_PATTERN, BOARD_PERMISSIONS } from "./lib/client.ts";
 import { isValidBoardRouteBase } from "./lib/route.ts";
 
-export type { BoardAuthorize, BoardAuthorizeAction, BoardAuthorizeRequest };
-
-const fn = <T>() => z.custom<T>((value) => typeof value === "function");
+const fn = <T>() => z.custom<T>((value) => typeof value === "function", "expected a function");
 
 const grant = z.union([z.literal("all"), z.array(z.enum(BOARD_PERMISSIONS)).readonly()]);
 
@@ -132,11 +126,16 @@ export default defineExtension({
       }
       const seenTargets = new Map<string, string>();
       for (const [key, entry] of entries) {
-        const target = JSON.stringify([
-          entry.url?.trim().replace(/\/+$/u, "") ?? null,
-          entry.team ?? null,
-          entry.name ?? null,
-        ]);
+        let target: string;
+        if (entry.url !== undefined) {
+          const parsed = new URL(entry.url.trim());
+          target = JSON.stringify([
+            "url",
+            `${parsed.origin}${parsed.pathname.replace(/\/+$/u, "")}`,
+          ]);
+        } else {
+          target = JSON.stringify(["vercel", entry.team ?? null, entry.name ?? null]);
+        }
         const previous = seenTargets.get(target);
         if (previous !== undefined) {
           ctx.addIssue({

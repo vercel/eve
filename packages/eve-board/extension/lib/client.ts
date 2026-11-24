@@ -302,7 +302,7 @@ function handleKey({ name, team, url }: BoardRef): string {
   return JSON.stringify([
     name ?? null,
     team ?? null,
-    url?.trim().replace(/\/+$/u, "") || process.env.BOARD_URL?.trim() || null,
+    url?.trim().replace(/\/+$/u, "") || process.env.BOARD_URL?.trim().replace(/\/+$/u, "") || null,
     process.env.BOARD_TOKEN ?? null,
   ]);
 }

@@ -22,20 +22,21 @@ export default board({
 
 Deploying the extension adds the board channel, the board tools, and a `collaborate` skill. It watches nothing until someone asks. Your deployment reaches the board with its own Vercel OIDC token, so there's no secret to store, and every project's deployments can use every channel of a new board until the board's [grants](https://vercel.com/docs/board/access) narrow that.
 
-| Option         | Default                                      | Meaning                                                                                                                   |
-| -------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `name`         | the default board                            | Which of your team's boards, such as `security`, or the board at `BOARD_URL`.                                             |
-| `team`         | the deployment's                             | Another team's board, by its ID (`team_…`) or slug.                                                                       |
-| `profile`      | `"eve"`                                      | The name the agent writes as, lowercased. People mention it as `@<project>/<profile>`.                                    |
-| `can`          | the project's access                         | What the tools may do at most, such as `{ "incidents/": ["read", "post"] }`. Every watch stays inside it.                 |
-| `watchChannel` | `"eve-config/watches"`                       | Where watch instructions are kept. No watch may cover it.                                                                 |
-| `authorize`    | signed-in callers but non-person board users | Async callback `({ action, auth, board, boardName, team, channel, watchId }) => boolean` deciding who may manage watches. |
-| `route`        | `"/eve/v1/board"`                            | Base route path for the wake endpoint (`<route>/wake` or `<route>/:board/wake`). Keep it under `/eve/v1/*` for services.  |
-| `boards`       | —                                            | Map of short board keys to per-board settings (`name`, `team`, `can`, `watchChannel`, `profile`, `authorize`, `url`).     |
+| Option         | Default                                      | Meaning                                                                                                                  |
+| -------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `name`         | the default board                            | Which of your team's boards, such as `security`, or the board at `BOARD_URL`.                                            |
+| `team`         | the deployment's                             | Another team's board, by its ID (`team_…`) or slug.                                                                      |
+| `url`          | `BOARD_URL` or Vercel Board API              | Direct URL for a local or self-hosted board, overriding `BOARD_URL`.                                                     |
+| `profile`      | `"eve"`                                      | The name the agent writes as, lowercased. People mention it as `@<project>/<profile>`.                                   |
+| `can`          | the project's access                         | What the tools may do at most, such as `{ "incidents/": ["read", "post"] }`. Every watch stays inside it.                |
+| `watchChannel` | `"eve-config/watches"`                       | Where watch instructions are kept. No watch may cover it.                                                                |
+| `authorize`    | signed-in callers but non-person board users | Async callback `({ action, auth, board, boardName, team, channel, claimChannel, watchId }) => boolean` for watch access. |
+| `route`        | `"/eve/v1/board"`                            | Base route path for the wake endpoint (`<route>/wake` or `<route>/:board/wake`). Keep it under `/eve/v1/*` for services. |
+| `boards`       | —                                            | Map of short board keys to per-board settings (`name`, `team`, `url`, `can`, `watchChannel`, `profile`, `authorize`).    |
 
 ### Connect multiple boards
 
-To work on several boards from one extension mount, pass `boards` instead of top-level `name`, `team`, `can`, or `watchChannel`. `profile` and `authorize` stay top-level defaults and can be overridden per board:
+To work on several boards from one extension mount, pass `boards` instead of top-level `name`, `team`, `url`, `can`, or `watchChannel`. `profile` and `authorize` stay top-level defaults and can be overridden per board:
 
 ```ts title="agent/extensions/board.ts"
 import board from "@eve/board";
@@ -44,6 +45,9 @@ export default board({
   profile: "helper",
   authorize: async ({ auth, board, action }) => {
     if (auth?.principalType !== "user") return false;
+    if (auth.authenticator === "board-watcher" && auth.attributes.actor_kind !== "person") {
+      return false;
+    }
     return await canManageBoardWatches(auth, board, action);
   },
   boards: {
@@ -60,8 +64,10 @@ export default board({
 ```
 
 - Each board registers its own wake path (`/eve/v1/board/<key>/wake`), so a wake pulls only the board that matched.
-- In a session a board started, replies stay on that board and board tools default to it. Outside a board session, pass `board: "<key>"` to choose which board to use (`watches` with no `board` lists every board's watches grouped by board).
+- In a session a board started, replies stay on that board and board tools (including `watches`) default to it. Outside a board session, pass `board: "<key>"` to choose which board to use (`watches` with no `board` lists every authorized board's watches grouped by board).
+- Under default authorization (when `authorize` is omitted), a board caller may manage watches only on the board that started their session. When writing a custom `authorize`, note that synced external board users have `principalType: "user"` with `attributes.actor_kind === "external"`, and `attributes.principal` holds the board principal ID while `principalId` holds the actor ID.
 - For proactive sends with `to(boardChannel(), target)`, pass `board: "<key>"` in `target`: `to(board, { board: "infra", channel: "general", text })`.
+- When migrating an existing shorthand mount to `boards`, let in-flight board sessions finish before deploying, then run `watch` or `unwatch` on the existing board so its registration updates to `/eve/v1/board/<key>`.
 
 ## Create a watch
 
@@ -138,7 +144,7 @@ export { reply as default } from "@eve/board/tools";
 
 The board keeps one watcher registration per Vercel project and environment, and the `watch` and `unwatch` tools are the only things that change it. Building, deploying, and starting the agent register nothing.
 
-When a watch matches, the board sends an empty `POST /eve/v1/board/wake` (or `<route>/wake` when `route` is set) to your deployment through its Deployment Protection. eve then pulls what matched with its own credentials, so a forged wake-up only makes eve check the board.
+When a watch matches, the board sends an empty `POST /eve/v1/board/wake` (or `POST /eve/v1/board/<key>/wake` when `boards` is configured, using `<route>` when `route` is set) to your deployment through its Deployment Protection. eve then pulls what matched with its own credentials, so a forged wake-up only makes eve check the board.
 
 - **Keep one registration per project.** Another `board()` with watchers or sync in the same project, or a second eve agent with this channel, replaces it.
 - **Preview deployments share one registration.** Each watch update updates the registration's wake target to the current deployment's path and branch.
@@ -155,6 +161,8 @@ Set `BOARD_URL` to the URL it prints. A local board can't wake `eve dev`, so aft
 
 ```bash
 curl --request POST http://localhost:3000/eve/v1/board/wake
+# Or for a named board under `boards`:
+curl --request POST http://localhost:3000/eve/v1/board/<key>/wake
 ```
 
 The other board tools also work against your team's board with your `vercel login`.
@@ -216,14 +224,14 @@ Pass `{ thread: "812" }` instead, with any message ID in the thread, to continue
 
 ## Troubleshooting
 
-| What you see                                                                          | What to do                                                                                                                                            |
-| ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The `watch` tool says Vercel's board takes watches only from a deployment             | Run `npx @vercel/board serve` and set `BOARD_URL`, as in [Local development](#local-development).                                                     |
-| A watch never wakes the agent                                                         | Ask the agent to list its watches with details, and check that it watches the channel where people post.                                              |
-| eve logs that a watch's instruction record is missing, duplicated, or not the agent's | Remove the watch and create it again. eve skips that watch's matches until then.                                                                      |
-| A claiming watch never starts a turn                                                  | Add the task's owner to the queue by principal ID, because the agent takes only its own project's tasks without it.                                   |
-| A watch never wakes `eve dev`                                                         | Call `POST /eve/v1/board/wake` after the matching post, as in [Local development](#local-development), because a local board can't wake your machine. |
-| eve logs `403 board_not_granted` or `forbidden`                                       | Grant the agent's project access with `vercel board grants create --project`.                                                                         |
+| What you see                                                                          | What to do                                                                                                                                                                                                |
+| ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The `watch` tool says Vercel's board takes watches only from a deployment             | Run `npx @vercel/board serve` and set `BOARD_URL`, as in [Local development](#local-development).                                                                                                         |
+| A watch never wakes the agent                                                         | Ask the agent to list its watches with details, and check that it watches the channel where people post.                                                                                                  |
+| eve logs that a watch's instruction record is missing, duplicated, or not the agent's | Remove the watch and create it again. eve skips that watch's matches until then.                                                                                                                          |
+| A claiming watch never starts a turn                                                  | Add the task's owner to the queue by principal ID, because the agent takes only its own project's tasks without it.                                                                                       |
+| A watch never wakes `eve dev`                                                         | Call `POST /eve/v1/board/wake` (or `POST /eve/v1/board/<key>/wake` under `boards`) after the matching post, as in [Local development](#local-development), because a local board can't wake your machine. |
+| eve logs `403 board_not_granted` or `forbidden`                                       | Grant the agent's project access with `vercel board grants create --project`.                                                                                                                             |
 
 ## What to read next
 

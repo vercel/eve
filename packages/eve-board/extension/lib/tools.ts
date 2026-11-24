@@ -1,3 +1,4 @@
+import { createLogger } from "eve/internal/channels";
 import type { SandboxSession } from "eve/sandbox";
 import { defineTool, type ToolContext } from "eve/tools";
 import { z } from "zod";
@@ -557,31 +558,58 @@ export function defineBoardBlockTaskTool() {
   });
 }
 
+const log = createLogger("board.tools");
+
 async function watchAuthorizationDenial(
   board: ResolvedBoardConfig,
   action: BoardAuthorizeAction,
   ctx: ToolContext,
-  details: { readonly channel?: string; readonly watchId?: string } = {},
+  details: {
+    readonly channel?: string;
+    readonly claimChannel?: string;
+    readonly watchId?: string;
+  } = {},
 ): Promise<string | undefined> {
   const caller = ctx.session.auth?.current ?? null;
   if (board.authorize !== undefined) {
-    const allowed =
-      (await board.authorize({
+    try {
+      const allowed =
+        (await board.authorize({
+          action,
+          auth: caller,
+          board: board.key,
+          ...(board.name !== undefined && { boardName: board.name }),
+          ...(board.team !== undefined && { team: board.team }),
+          ...(details.channel !== undefined && { channel: details.channel }),
+          ...(details.claimChannel !== undefined && { claimChannel: details.claimChannel }),
+          ...(details.watchId !== undefined && { watchId: details.watchId }),
+        })) === true;
+      return allowed ? undefined : "You are not authorized to manage board watches on this agent.";
+    } catch (error) {
+      log.error("board watch authorization callback failed", {
         action,
-        auth: caller,
         board: board.key,
-        ...(board.name !== undefined && { boardName: board.name }),
-        ...(board.team !== undefined && { team: board.team }),
-        ...(details.channel !== undefined && { channel: details.channel }),
-        ...(details.watchId !== undefined && { watchId: details.watchId }),
-      })) === true;
-    return allowed ? undefined : "You are not authorized to manage board watches on this agent.";
+        error,
+        errorId: crypto.randomUUID(),
+      });
+      return "You are not authorized to manage board watches on this agent.";
+    }
   }
   if (caller === null) {
     return "Only a signed-in person may change this agent's board watches. Ask from a channel where you're signed in.";
   }
-  if (caller.authenticator === "board-watcher" && caller.attributes.actor_kind !== "person") {
-    return "Only a person on the team may change this agent's board watches, not a synced platform user or another agent.";
+  if (caller.authenticator === "board-watcher") {
+    if (caller.attributes.actor_kind !== "person") {
+      return "Only a person on the team may change this agent's board watches, not a synced platform user or another agent.";
+    }
+    const callerBoard =
+      typeof caller.attributes.board_key === "string" ? caller.attributes.board_key : undefined;
+    if (
+      (callerBoard !== undefined && callerBoard !== board.key) ||
+      (callerBoard === undefined && !board.shorthand)
+    ) {
+      return "Board callers may only manage watches on their own board. Configure `authorize` to allow cross-board watch management.";
+    }
   }
   return undefined;
 }
@@ -590,7 +618,11 @@ async function assertWatchAuthorized(
   board: ResolvedBoardConfig,
   action: BoardAuthorizeAction,
   ctx: ToolContext,
-  details: { readonly channel?: string; readonly watchId?: string } = {},
+  details: {
+    readonly channel?: string;
+    readonly claimChannel?: string;
+    readonly watchId?: string;
+  } = {},
 ): Promise<void> {
   const denial = await watchAuthorizationDenial(board, action, ctx, details);
   if (denial !== undefined) throw new Error(denial);
@@ -601,7 +633,11 @@ async function authorizingWatch(
   board: string | undefined,
   action: BoardAuthorizeAction,
   ctx: ToolContext,
-  details: { readonly channel?: string; readonly watchId?: string } = {},
+  details: {
+    readonly channel?: string;
+    readonly claimChannel?: string;
+    readonly watchId?: string;
+  } = {},
 ) {
   const resolved = targetBoard(settings, board, ctx);
   await assertWatchAuthorized(resolved, action, ctx, details);
@@ -674,7 +710,7 @@ export function defineBoardWatchTool(settings: Settings) {
         boardKey,
         "watch",
         ctx,
-        { channel: filter.channel },
+        { channel: filter.channel, ...(claim !== undefined && { claimChannel: claim.channel }) },
       );
       const action: BoardWatchAction =
         claim === undefined ? { type: "converse" } : { queue: claim, type: "claim" };
@@ -701,15 +737,16 @@ export function defineBoardWatchesTool(settings: Settings) {
   return defineTool({
     deferred: true,
     description:
-      "List your board watches: each one's ID and what it matches, and with `details`, what it does. When multiple boards are configured and `board` is omitted, lists every board's watches grouped by board.",
+      "List your board watches: each one's ID and what it matches, and with `details`, what it does. Defaults to this session's board inside a board session; outside one, omitting `board` when multiple boards are configured lists every authorized board's watches grouped by board.",
     inputSchema: z.object({
       board: boardOption,
       details: z.boolean().optional().describe("Also read each watch's instructions and action."),
     }),
     async execute({ board: boardKey, details }, ctx) {
       const set = resolveBoards(settings());
-      if (boardKey !== undefined || set.byKey.size === 1) {
-        const resolved = selectBoard(set, boardKey, sessionBoard(ctx));
+      const sessionKey = sessionBoard(ctx);
+      if (boardKey !== undefined || sessionKey !== undefined || set.byKey.size === 1) {
+        const resolved = selectBoard(set, boardKey, sessionKey);
         await assertWatchAuthorized(resolved, "watches", ctx);
         const { deployment, watchChannel } = boardClients(resolved);
         const watches = await listWatches({

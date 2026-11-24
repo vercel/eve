@@ -17,6 +17,8 @@ export interface BoardAuthorizeRequest {
   readonly team?: string;
   /** For `"watch"`, the channel selector being watched. */
   readonly channel?: string;
+  /** For `"watch"` with `claim`, the task queue channel selector being claimed from. */
+  readonly claimChannel?: string;
   /** For `"unwatch"`, the watch ID being removed. */
   readonly watchId?: string;
 }
