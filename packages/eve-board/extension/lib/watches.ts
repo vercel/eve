@@ -20,8 +20,11 @@ import {
 } from "./client.ts";
 
 export const DEFAULT_WATCH_CHANNEL = "eve-config/watches";
-const BOARD_ROUTE_BASE = "/board";
+// Under /eve/v1, the only prefix eve/next and Vercel services forward to the agent.
+const BOARD_ROUTE_BASE = "/eve/v1/board";
 export const BOARD_WAKE_ROUTE = `${BOARD_ROUTE_BASE}/wake`;
+// Where 0.1.0 registered. Served for one release so those registrations still wake.
+export const LEGACY_BOARD_WAKE_ROUTE = "/board/wake";
 export const MAX_WATCHES = 32;
 
 const WATCH_LABEL = "eve-watch";
@@ -265,8 +268,7 @@ export function registrationWhere(
   const { env } = process;
   const environment = env.VERCEL_ENV;
   if (environment !== "production" && environment !== "preview") return { url: null };
-  const prefix = env.EVE_PUBLIC_ROUTE_PREFIX?.trim().replace(/\/+$/u, "") ?? "";
-  const base = `${prefix === "" || prefix.startsWith("/") ? prefix : `/${prefix}`}${BOARD_ROUTE_BASE}`;
+  const base = publicRoutePath(env.EVE_PUBLIC_ROUTE_PREFIX, BOARD_ROUTE_BASE);
   if (discovery.wake_by_path === true) {
     return {
       branch: environment === "preview" ? (env.VERCEL_GIT_COMMIT_REF ?? null) : null,
@@ -282,6 +284,37 @@ export function registrationWhere(
     );
   }
   return { url: `https://${host}${base}` };
+}
+
+// Mirrors eve's public route join: a named mount `/eve/<name>` serves `/eve/v1/*` at
+// `/eve/<name>/v1/*`, and any other prefix is prepended.
+function publicRoutePath(rawPrefix: string | undefined, route: string): string {
+  const trimmed = rawPrefix?.trim().replace(/\/+$/u, "") ?? "";
+  const prefix = trimmed === "" || trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+  if (/^\/eve\/[a-z0-9][a-z0-9_-]*$/u.test(prefix)) return `${prefix}${route.slice("/eve".length)}`;
+  if (/^\/eve\/[a-z0-9][a-z0-9_-]*\/v1$/u.test(prefix)) {
+    return `${prefix}${route.slice("/eve/v1".length)}`;
+  }
+  return `${prefix}${route}`;
+}
+
+// Keeps the held wake target (a preview's branch or host) but moves its path to this
+// release's route, so registrations made by an older release stop waking a dead path.
+export function retargetRegistration<T extends Omit<BoardRegistrationInput, "watch">>(
+  held: T,
+  where: Omit<BoardRegistrationInput, "watch">,
+): T {
+  if (typeof held.path === "string" && typeof where.path === "string") {
+    return held.path === where.path ? held : { ...held, path: where.path };
+  }
+  if (typeof held.url === "string" && typeof where.url === "string") {
+    const url = new URL(held.url);
+    const next = new URL(where.url);
+    if (url.pathname === next.pathname) return held;
+    url.pathname = next.pathname;
+    return { ...held, url: url.toString() };
+  }
+  return held;
 }
 
 export async function heldRegistration(
@@ -372,8 +405,9 @@ async function updateRegistration(input: {
     const watch = { ...held?.watch };
     if (!input.change(watch)) return held;
     try {
+      const where = registrationWhere(await client.discovery());
       return await client.register({
-        ...(held ?? registrationWhere(await client.discovery())),
+        ...(held === undefined ? where : retargetRegistration(held, where)),
         watch,
       });
     } catch (error) {
