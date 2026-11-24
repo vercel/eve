@@ -75,7 +75,7 @@ These are the commands `eve add channel/github` runs. `create` adds a default we
 
 Then set these in `.env.local` and your Vercel project:
 
-- `GITHUB_ORG`: the organization or user whose repositories the agent may access
+- `GITHUB_ORG`: the organization or user whose repositories the agent may access. A turn started from a GitHub comment can only act on the repository it came from.
 - `GITHUB_CONNECTOR`: the connector UID, if it is not `github/coding-agent`
 - `GITHUB_BOT_NAME`: your GitHub App's slug, shown on the connector in the Connect dashboard
 
