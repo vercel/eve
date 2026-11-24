@@ -32,6 +32,9 @@ export function resetWorkflowProcessCaches(): void {
     port.inFlight = undefined;
   }
   clearCollections(singleton("@workflow/core//stepSingleFlight", 2));
+  clearCollections(
+    (globalThis as Record<symbol, unknown>)[Symbol.for("@workflow/core//localAbortDelivery")],
+  );
   for (const name of WARNED_ONCE) {
     const warned = singleton(name, 1);
     if (warned === undefined) continue;

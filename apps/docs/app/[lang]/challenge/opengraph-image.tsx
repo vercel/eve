@@ -15,9 +15,10 @@ const inset = 72;
 const titleWidth = 420;
 const artworkWidth = size.width - 2 * inset - titleWidth - 40;
 const artworkHeight = Math.round((artworkWidth * loopHeight) / loopWidth);
+const fontDirectory = join(process.cwd(), "app/[lang]/og/[...slug]");
 const fonts = Promise.all([
-  readFile(join(process.cwd(), "app/[lang]/og/[...slug]/geist-sans-semibold.ttf")),
-  readFile(join(process.cwd(), "node_modules/geist/dist/fonts/geist-mono/GeistMono-Regular.ttf")),
+  readFile(join(fontDirectory, "geist-sans-regular.ttf")),
+  readFile(join(fontDirectory, "geist-sans-semibold.ttf")),
 ]);
 const dataUri = (svg: string) => `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
 const backdrop = dataUri(
@@ -36,7 +37,7 @@ const backdrop = dataUri(
 const loop = dataUri(stillLoop.svg);
 
 export default async function ChallengeOpenGraphImage() {
-  const [sans, mono] = await fonts;
+  const [regularFont, semiboldFont] = await fonts;
   return new ImageResponse(
     <div
       style={{
@@ -44,6 +45,7 @@ export default async function ChallengeOpenGraphImage() {
         width: "100%",
         height: "100%",
         display: "flex",
+        fontFamily: "Geist",
         background: "#000",
         color: "#fff",
       }}
@@ -71,7 +73,7 @@ export default async function ChallengeOpenGraphImage() {
         <div
           style={{
             display: "flex",
-            fontFamily: "Geist",
+            fontWeight: 600,
             fontSize: 82,
             letterSpacing: -4,
             lineHeight: 0.94,
@@ -83,7 +85,6 @@ export default async function ChallengeOpenGraphImage() {
           style={{
             display: "flex",
             marginTop: 24,
-            fontFamily: "Geist Mono",
             fontSize: 22,
             color: "#a1a1a1",
           }}
@@ -102,8 +103,8 @@ export default async function ChallengeOpenGraphImage() {
     {
       ...size,
       fonts: [
-        { name: "Geist", data: sans, weight: 600 },
-        { name: "Geist Mono", data: mono, weight: 400 },
+        { name: "Geist", data: regularFont, weight: 400 },
+        { name: "Geist", data: semiboldFont, weight: 600 },
       ],
     },
   );

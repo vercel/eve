@@ -73,6 +73,7 @@ import { sessions as serverSessions, type PrewarmSessionResult, type SessionEndO
 import type { ChannelContext } from "eve/channels";
 import { z } from "zod";
 import { createHook, sleep, createWebhook, FatalError, RetryableError, getWorkflowMetadata, getStepMetadata } from "eve/workflow";
+import { rateLimit, RateLimitMaxWaitError, type RateLimitOptions } from "eve/experimental/workflow";
 import { start, getRun, resumeHook, type WorkflowRun } from "eve/workflow/api";
 import { eveChannel, eveVercelOidc, type EveAuthFn } from "eve/channels/eve";
 import { vercelOidc } from "eve/channels/auth";
@@ -90,6 +91,17 @@ async function durable() {
   "use workflow";
   using hook = createHook<{ approved: boolean }>({ token: "approval" });
   const answer: { approved: boolean } = await hook;
+  const limitOptions: RateLimitOptions = { key: "approval", limit: 10, period: "1m", maxWait: "5s", burst: 2 };
+  try {
+    await rateLimit(limitOptions);
+  } catch (error) {
+    if (RateLimitMaxWaitError.is(error)) {
+      const _key: string = error.key;
+      const _at: Date | undefined = error.wouldAcquireAt;
+      void _key;
+      void _at;
+    }
+  }
   await sleep("1s");
   return answer.approved;
 }

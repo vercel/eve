@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import { fenceClosedWorld, trackDeliveries } from "#internal/testing/workflow-test-world.js";
 
-function delivery(messageId: string): Request {
+function delivery(messageId: string, body: unknown = {}): Request {
   return new Request("http://localhost/flow", {
-    body: "{}",
+    body: JSON.stringify(body),
     headers: { "x-vqs-message-id": messageId },
     method: "POST",
   });
@@ -38,6 +38,63 @@ describe("trackDeliveries", () => {
     await deliveries.handler(delivery("sleeping"));
 
     expect(await settles(deliveries.idle())).toBe(false);
+  });
+
+  it("settles once a coalesced single-orchestrator wake runs as the holder's re-run", async () => {
+    let releaseFirst!: () => void;
+    let calls = 0;
+    const deliveries = trackDeliveries(async () => {
+      calls += 1;
+      if (calls === 1) await new Promise<void>((resolve) => (releaseFirst = resolve));
+      return Response.json({ ok: true });
+    });
+
+    deliveries.queued("msg_1", false);
+    const first = deliveries.handler(delivery("msg_1", { runId: "run_1", runSpecVersion: 10 }));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const at = deliveries.checkpoint();
+    deliveries.queued("msg_2", false, "run_1", at);
+
+    releaseFirst();
+    await first;
+    expect(await settles(deliveries.idle())).toBe(false);
+
+    await deliveries.handler(delivery("msg_1", { runId: "run_1", runSpecVersion: 10 }));
+    expect(await settles(deliveries.idle())).toBe(true);
+  });
+
+  it("ignores a pre-restart delivery paused in request.text() after abandon and reopen", async () => {
+    const reopenCalls: string[] = [];
+    const deliveries = trackDeliveries(async () => Response.json({ ok: true }));
+    const bodyGate = Promise.withResolvers<string>();
+    const staleRequest = new Request("http://localhost/flow", {
+      body: new ReadableStream<Uint8Array>({
+        async start(controller) {
+          controller.enqueue(new TextEncoder().encode(await bodyGate.promise));
+          controller.close();
+        },
+      }),
+      duplex: "half",
+      headers: { "x-vqs-message-id": "stale_msg" },
+      method: "POST",
+    });
+
+    const stale = deliveries.handler(staleRequest);
+    deliveries.abandon();
+    deliveries.reopen(["run_1"], async (request) => {
+      reopenCalls.push(request.headers.get("x-vqs-message-id") ?? "");
+      return Response.json({ ok: true });
+    });
+
+    bodyGate.resolve(JSON.stringify({ runId: "run_1", runSpecVersion: 10 }));
+    await expect(stale).rejects.toThrow("The test workflow world was abandoned.");
+    expect(reopenCalls).toEqual([]);
+    expect(await settles(deliveries.idle())).toBe(false);
+
+    await deliveries.handler(delivery("recovered_msg", { runId: "run_1", runSpecVersion: 10 }));
+    expect(reopenCalls).toEqual(["recovered_msg"]);
+    expect(await settles(deliveries.idle())).toBe(true);
   });
 });
 
