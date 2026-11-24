@@ -146,11 +146,14 @@ export default function ChallengePage() {
           seed={7}
         />
         <div
-          className={`${container} relative grid items-center gap-12 pt-16 pb-12 sm:pt-24 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] lg:gap-16 lg:pt-28 lg:pb-20`}
+          className={`${container} relative grid items-center pt-6 pb-10 sm:pt-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] lg:gap-16 lg:pt-28 lg:pb-20`}
         >
-          <div className="min-w-0">
+          <div className="mx-auto w-full min-w-0 max-w-[36rem] lg:col-start-2 lg:row-start-1 lg:max-w-none">
+            <HarnessLoop />
+          </div>
+          <div className="relative -mt-8 min-w-0 sm:-mt-12 lg:col-start-1 lg:row-start-1 lg:mt-0">
             <h1
-              className="mt-4 max-w-[11ch] text-balance text-heading-48 text-gray-1000 sm:text-heading-56 xl:text-heading-64"
+              className="max-w-[11ch] text-balance text-heading-48 text-gray-1000 sm:text-heading-56 lg:mt-4 xl:text-heading-64"
               id="challenge-title"
             >
               <span className="sr-only">eve </span>
@@ -169,16 +172,20 @@ export default function ChallengePage() {
               </Link>
             </div>
           </div>
-          <HarnessLoop />
         </div>
         <div className="relative bg-background-200">
           <dl
-            className={`${container} grid gap-x-8 border-t border-gray-400 sm:grid-cols-2 lg:grid-cols-[1fr_0.45fr_1.55fr_0.8fr]`}
+            className={`${container} grid divide-y divide-gray-400 border-t border-gray-400 sm:grid-cols-2 sm:gap-x-8 sm:divide-y-0 lg:grid-cols-[1fr_0.45fr_1.55fr_0.8fr]`}
           >
             {brief.map(([term, value]) => (
-              <div className="min-w-0 py-5 lg:py-7" key={term}>
+              <div
+                className="grid min-w-0 grid-cols-[5rem_minmax(0,1fr)] items-baseline gap-x-3 py-3 sm:block sm:py-5 lg:py-7"
+                key={term}
+              >
                 <dt className="font-mono text-copy-13 text-gray-900">{term}</dt>
-                <dd className="mt-2 text-pretty text-copy-16 text-gray-1000">{value}</dd>
+                <dd className="text-pretty text-copy-14 text-gray-1000 sm:mt-2 sm:text-copy-16">
+                  {value}
+                </dd>
               </div>
             ))}
           </dl>
