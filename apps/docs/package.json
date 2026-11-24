@@ -39,6 +39,7 @@
     "geist": "1.7.1",
     "lil-gui": "0.21.0",
     "lucide-react": "1.72.0",
+    "mermaid": "11.17.2",
     "next": "catalog:",
     "phase": "catalog:",
     "pngjs": "^7.0.0",
