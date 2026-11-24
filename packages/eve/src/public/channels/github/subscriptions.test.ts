@@ -246,9 +246,23 @@ describe("GitHub channel subscriptions", () => {
         contentType: "application/json",
         headers: new Headers({ "x-github-delivery": "d1", "x-github-event": "release" }),
         appSlug: async () => undefined,
+        declaredEvents: githubEventDefinitions(),
         emit,
       }),
     ).rejects.toThrow('GitHub event "release.invented" is not one eve can deliver');
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it("emits nothing for an event the channel does not declare", async () => {
+    const emit = vi.fn<EmitChannelEventFn>().mockResolvedValue(true);
+    await emitGitHubWebhook({
+      body: JSON.stringify(checkSuite("failure", [7])),
+      contentType: "application/json",
+      headers: new Headers({ "x-github-delivery": "d1", "x-github-event": "check_suite" }),
+      appSlug: async () => undefined,
+      declaredEvents: githubEventDefinitions(["pull_request"]),
+      emit,
+    });
     expect(emit).not.toHaveBeenCalled();
   });
 

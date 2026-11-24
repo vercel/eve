@@ -155,6 +155,7 @@ export async function emitGitHubWebhook(input: {
   readonly contentType: string | undefined;
   readonly headers: Headers;
   readonly appSlug: GitHubBotNameResolver;
+  readonly declaredEvents: readonly ChannelEventDefinition[];
   readonly emit: EmitChannelEventFn;
 }): Promise<void> {
   const occurrence = parseGitHubWebhookOccurrence(input);
@@ -163,6 +164,7 @@ export async function emitGitHubWebhook(input: {
     throw new Error(
       `GitHub event "${occurrence.name}" is not one eve can deliver to subscriptions.`,
     );
+  if (!input.declaredEvents.some((declared) => declared.name === occurrence.name)) return;
   if (occurrence.authored && (await isOwnApp(occurrence, input.appSlug))) return;
   await Promise.all(
     occurrence.scopes.map((scope) =>

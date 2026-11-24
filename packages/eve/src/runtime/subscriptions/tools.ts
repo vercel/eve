@@ -13,8 +13,8 @@ import type { ResolvedChannelDefinition } from "#runtime/types.js";
 import type { ChannelEventDefinition, ChannelOnSubscribe } from "#shared/channel-subscriptions.js";
 import { isObject } from "#shared/guards.js";
 import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
-import { closestNames } from "#execution/catalog/rank.js";
-import { parseJsonObject, type JsonObject } from "#shared/json.js";
+import { checkEventInput, closestEventsHint } from "#runtime/subscriptions/event-definitions.js";
+import type { JsonObject } from "#shared/json.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import { defineJsonSchema } from "#tools/schema.js";
@@ -151,16 +151,9 @@ export async function subscribeToChannel(
   const definition = events.find((candidate) => candidate.name === event);
   if (definition === undefined)
     throw new Error(
-      `Channel "${channelName}" emits no event named "${event}".${suggestions(event, events)} Find its events with ${SEARCH_TOOL_NAME}({ query: "subscriptions__${channelName}__" }).`,
+      `Channel "${channelName}" emits no event named "${event}".${closestEventsHint(event, events)} Find its events with ${SEARCH_TOOL_NAME}({ query: "subscriptions__${channelName}__" }).`,
     );
-  const checked = async (value: unknown): Promise<JsonObject> => {
-    const validated = await defineJsonSchema(definition.inputSchema)["~standard"].validate(value);
-    if (validated.issues !== undefined)
-      throw new Error(
-        `Subscription input does not match the schema of "${event}": ${validated.issues.map(({ message }) => message).join("; ")}`,
-      );
-    return parseJsonObject(validated.value);
-  };
+  const checked = (value: unknown): Promise<JsonObject> => checkEventInput(definition, value);
   let subscriptionInput = await checked(eventInput);
   if (onSubscribe !== undefined) {
     const grant = await onSubscribe({
@@ -188,11 +181,6 @@ export async function subscribeToChannel(
   };
   const opened = await host.start(binding, requireCompiledBundle(ctx), signal);
   return opened === undefined ? pending(binding) : active(binding, opened);
-}
-
-function suggestions(name: string, candidates: readonly ChannelEventDefinition[]): string {
-  const closest = closestNames(name, candidates);
-  return closest.length > 0 ? ` Closest events: ${closest.join(", ")}.` : "";
 }
 
 async function stopSubscription(

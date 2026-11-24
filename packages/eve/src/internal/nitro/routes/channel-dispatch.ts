@@ -242,6 +242,7 @@ async function buildRouteArgs(input: {
     requestIp,
     runtime: bundle.runtime,
     skillFiles: agent.skillFiles,
+    subscriptionEvents: channel.definition?.events,
     to,
     turnPolicy: channel.turnPolicy,
     waitUntil,

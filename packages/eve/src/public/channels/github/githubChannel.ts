@@ -267,6 +267,10 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
     credentials: config.credentials,
   });
   const subscriptionsOnEvent = config.experimental?.subscriptions?.onEvent;
+  const subscriptionEvents =
+    subscriptionsOnEvent === undefined
+      ? undefined
+      : githubEventDefinitions(config.experimental?.subscriptions?.events);
   const appSlug = createGitHubBotNameResolver({ credentials: config.credentials });
   const dispatchOptions = { botName };
   const mergedEvents: GitHubChannelEvents = {
@@ -282,13 +286,14 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
   const channel = defineChannel<GitHubChannelState, GitHubChannelContext, GitHubReceiveTarget>({
     turnPolicy: config.turnPolicy,
     state: initialGitHubState(),
-    experimental: subscriptionsOnEvent && {
-      subscriptions: {
-        onEvent: subscriptionsOnEvent,
-        onSubscribe: config.experimental?.subscriptions?.onSubscribe,
-        events: githubEventDefinitions(config.experimental?.subscriptions?.events),
+    experimental: subscriptionsOnEvent &&
+      subscriptionEvents && {
+        subscriptions: {
+          onEvent: subscriptionsOnEvent,
+          onSubscribe: config.experimental?.subscriptions?.onSubscribe,
+          events: subscriptionEvents,
+        },
       },
-    },
 
     context(state, session) {
       return rebuildGitHubContext(state, session, config);
@@ -306,12 +311,13 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
           if (body === null) return new Response("unauthorized", { status: 401 });
           const missingHeaders = missingGitHubWebhookHeaders(req.headers);
 
-          if (subscriptionsOnEvent !== undefined) {
+          if (subscriptionEvents !== undefined) {
             waitUntil(
               emitGitHubWebhook({
                 body,
                 appSlug,
                 contentType: req.headers.get("content-type") ?? undefined,
+                declaredEvents: subscriptionEvents,
                 emit: experimental.subscriptions.emit,
                 headers: req.headers,
               }).catch((error: unknown) => {
