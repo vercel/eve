@@ -1,7 +1,4 @@
-import { randomUUID } from "node:crypto";
-import { resolve } from "node:path";
-
-import { ensureDevelopmentSandboxesPrepared } from "#execution/sandbox/development-lazy-prewarm.js";
+import { ensureDevelopmentSandboxesPrepared } from "#runtime-env/development-sandboxes.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger } from "#internal/logging.js";
 import { contextStorage } from "#context/container.js";
@@ -16,12 +13,10 @@ import {
 import { sandboxConnectionDisposal } from "#execution/sandbox/connection-disposal.js";
 import { createConnectionSession } from "#execution/sandbox/session.js";
 import { isToolSessionId } from "#execution/tool-session/id.js";
-import { resolveSandboxCacheDirectory } from "#internal/application/paths.js";
 import {
   getRuntimeCompiledArtifactsSandboxAppRoot,
   type RuntimeCompiledArtifactsSource,
 } from "#runtime/compiled-artifacts-source.js";
-import { loadSandboxPreparedArtifact } from "#runtime/sandbox/prepared-artifacts.js";
 import { owningSandboxDefinition, type RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import type {
   SandboxConnection,
@@ -47,6 +42,12 @@ import type { RuntimeSandboxSession, SandboxSession } from "#shared/sandbox-sess
 import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
 import { ToolSessionSandboxUnsupportedError } from "#shared/sandbox-tool-session-error.js";
+import { randomUUID } from "#runtime-env/uuid.js";
+import { hostWorkingDirectory, resolve } from "#runtime-env/host-path.js";
+import {
+  loadSandboxPreparedArtifact,
+  resolveSandboxCacheDirectory,
+} from "#runtime-env/sandbox-cache.js";
 
 interface EnsureSandboxAccessInput {
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
@@ -122,7 +123,8 @@ export async function ensureSandboxAccess(
   let requiring: Promise<OpenedSandbox> | undefined;
   const tracking = input.shutdownTracking ?? "session";
   const appRoot =
-    getRuntimeCompiledArtifactsSandboxAppRoot(input.compiledArtifactsSource) ?? process.cwd();
+    getRuntimeCompiledArtifactsSandboxAppRoot(input.compiledArtifactsSource) ??
+    hostWorkingDirectory();
   const idle = input.ownsSandbox === false ? undefined : idleStop(input.registry, input.sessionId);
   const idleTimeoutMs = idle?.idleTimeoutMs;
   let running = input.state?.running !== undefined;

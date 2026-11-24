@@ -8,6 +8,7 @@ import {
   inlinesSandboxRefAsBytes,
   isSandboxRefUrl,
 } from "#internal/attachments/sandbox-refs.js";
+import { fromBase64, utf8ByteLength } from "#shared/bytes.js";
 
 const HEADER_BASE64_CHARS = 96 * 1024;
 const REMOTE_URL = /^https?:\/\//i;
@@ -24,7 +25,7 @@ export function estimateTokens(value: unknown): number {
     };
     return { mediaType, type };
   });
-  return Math.ceil(Buffer.byteLength(serialized ?? "") / 4) + mediaTokens;
+  return Math.ceil(utf8ByteLength(serialized ?? "") / 4) + mediaTokens;
 }
 
 function estimateFilePartTokens(value: unknown): number | undefined {
@@ -103,7 +104,7 @@ function estimateInlineTokens(data: unknown, mediaType: string): number | undefi
 }
 
 function base64Header(base64: string): Uint8Array {
-  return Buffer.from(base64.slice(0, HEADER_BASE64_CHARS), "base64");
+  return fromBase64(base64.slice(0, HEADER_BASE64_CHARS));
 }
 
 function withHeaderMetadata(header: Uint8Array, mediaType: string, size: number): MediaMetadata {

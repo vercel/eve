@@ -45,6 +45,7 @@ import { chooseModel, effectiveModelId } from "./model.js";
 import { sessionDefinitions } from "./agent.js";
 import { bindOpeningCancel, settleHookCommands } from "./hooks.js";
 import { staticUserInstructions } from "./instructions.js";
+import { readEnv } from "#runtime-env/env.js";
 
 const log = createLogger("definitions");
 let neverAbortedSignal: AbortSignal | undefined;
@@ -212,7 +213,7 @@ export async function restoreDefinitions(
       revision: input.revision,
     });
   }
-  if (process.env.NODE_ENV !== "production" && process.env.EVE_DEFINITIONS_COLD === "1") {
+  if (process.env.NODE_ENV !== "production" && readEnv("EVE_DEFINITIONS_COLD") === "1") {
     const sessionId = ctx.get(SessionIdKey);
     if (sessionId !== undefined) forgetSessionLive(sessionId);
   }

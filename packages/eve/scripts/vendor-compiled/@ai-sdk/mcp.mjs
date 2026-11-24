@@ -112,10 +112,26 @@ const boundedSessionTermination = patchMcpSourcePlugin("bounded-session-terminat
   ],
 ]);
 
+const pkceChallengeWebCrypto = {
+  name: "eve-pkce-challenge-web-crypto",
+  async resolveId(source, importer, options) {
+    if (source !== "pkce-challenge") return null;
+    const resolved = await this.resolve(source, importer, { ...options, skipSelf: true });
+    return resolved === null
+      ? null
+      : resolved.id.replace(/index\.node\.(c?js)$/u, "index.browser.js");
+  },
+};
+
 export default {
   packageName: "@ai-sdk/mcp",
   compiledPath: "@ai-sdk/mcp",
-  plugins: [supportedProtocolVersionFallback, singleInboundSseStream, boundedSessionTermination],
+  plugins: [
+    pkceChallengeWebCrypto,
+    supportedProtocolVersionFallback,
+    singleInboundSseStream,
+    boundedSessionTermination,
+  ],
   copyDeclarations: createDeclarationCopier({
     rewrites: {
       "@ai-sdk/provider": { kind: "vendored", compiledPath: "@ai-sdk/provider" },

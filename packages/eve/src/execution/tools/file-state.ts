@@ -1,8 +1,8 @@
-import { createHash } from "node:crypto";
-import { posix } from "node:path";
-
 import type { AlsContext } from "#context/container.js";
-import { ContextKey } from "#context/key.js";
+import { ReadFileStateKey } from "#context/keys.js";
+import { sha256Hex } from "#shared/digest.js";
+import { utf8ByteLength } from "#shared/bytes.js";
+import { normalizePosix } from "#runtime-env/posix-path.js";
 
 export interface ReadFileStamp {
   readonly byteLength: number;
@@ -14,10 +14,8 @@ export interface ReadFileState {
   readonly byTarget: Readonly<Record<string, ReadFileStamp>>;
 }
 
-export const ReadFileStateKey = new ContextKey<ReadFileState>("eve.readFile");
-
 export function normalizeModelPath(path: string): string {
-  return posix.normalize(path);
+  return normalizePosix(path);
 }
 
 export function buildReadFileTargetKey(normalizedPath: string): string {
@@ -25,9 +23,9 @@ export function buildReadFileTargetKey(normalizedPath: string): string {
 }
 
 export function createReadFileStamp(input: { content: string; filePath: string }): ReadFileStamp {
-  const hash = createHash("sha256").update(input.content, "utf8").digest("hex");
+  const hash = sha256Hex(input.content);
   return {
-    byteLength: Buffer.byteLength(input.content, "utf8"),
+    byteLength: utf8ByteLength(input.content),
     contentHash: hash,
     filePath: input.filePath,
   };

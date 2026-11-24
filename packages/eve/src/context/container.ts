@@ -1,7 +1,6 @@
-import { AsyncLocalStorage } from "node:async_hooks";
-
 import { type ContextAccessor, type ContextKey, resolveKey } from "#context/key.js";
 import { LocalDevRequestKey, type LocalDevRequestProvenance } from "#context/keys.js";
+import { createScopeStorage, type ScopeStorage } from "#context/scope-storage.js";
 
 const EVE_CONTEXT_STORAGE_KEY = Symbol.for("eve.context-storage");
 
@@ -94,17 +93,18 @@ interface ContextScope {
 }
 
 type AlsContextStorageGlobal = typeof globalThis & {
-  [EVE_CONTEXT_STORAGE_KEY]?: AsyncLocalStorage<ContextScope>;
+  [EVE_CONTEXT_STORAGE_KEY]?: ScopeStorage<ContextScope>;
 };
 
 const globalContextStorage = globalThis as AlsContextStorageGlobal;
 
 if (globalContextStorage[EVE_CONTEXT_STORAGE_KEY] === undefined) {
-  globalContextStorage[EVE_CONTEXT_STORAGE_KEY] = new AsyncLocalStorage<ContextScope>();
+  globalContextStorage[EVE_CONTEXT_STORAGE_KEY] = createScopeStorage<ContextScope>("context");
 }
 
 const storage = globalContextStorage[EVE_CONTEXT_STORAGE_KEY];
 export const contextStorage = {
+  kind: storage.kind,
   getStore: (): AlsContext | undefined => storage.getStore()?.context,
   run: <T>(context: AlsContext, fn: () => T): T => storage.run({ context }, fn),
 };

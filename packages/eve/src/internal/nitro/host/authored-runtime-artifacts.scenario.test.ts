@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import type { CompiledModuleMap } from "#compiler/module-map.js";
+import type { CompiledModuleMap } from "#compiler/module-map-schema.js";
 import {
   createApplicationBuildWorkspace,
   removeApplicationBuildWorkspace,

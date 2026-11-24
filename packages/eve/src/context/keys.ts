@@ -28,6 +28,7 @@ import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agen
 import type { DynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import type { DynamicRemoteBinding } from "#definitions/remote.js";
 import type { SandboxAccess, SandboxSessionEndReason } from "#sandbox/state.js";
+import type { ReadFileState } from "#execution/tools/file-state.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { RuntimeModel } from "#runtime/agent/resolve-model.js";
 import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
@@ -169,3 +170,5 @@ export interface DurableDynamicSkillMetadata {
 export const DynamicSkillSandboxKey = new ContextKey<Readonly<Record<string, string>>>(
   "eve.dynamicSkillSandbox",
 );
+
+export const ReadFileStateKey = new ContextKey<ReadFileState>("eve.readFile");

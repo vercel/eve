@@ -274,12 +274,24 @@
  *             Value imports of `#runtime/eve-runtime.js` and the
  *             `eve.runtime` key appear only in boot, the slot owners, and
  *             test helpers. Type-only imports of `EveRuntime` stay allowed.
+ *   rule 73 — Each web twin in `src/runtime-env/` (`x.web.ts`) loads without
+ *             Node: following its value imports, with `#runtime-env/*` resolved
+ *             to web twins, it reaches no Node builtin and no Node-only package
+ *             (`undici`, `nitro`, `rolldown`, and the vendored CLI and watcher
+ *             packages). Code outside `src/runtime-env/` imports those modules
+ *             through `#runtime-env/*`, never by a relative path, so the build
+ *             chooses the Node or the web version.
+ *   rule 74 — The session program (rule 66's files) loads without Node: the
+ *             same walk from those files reaches no Node-only import. The
+ *             baseline lists the imports the program still reaches, and may only
+ *             shrink.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
  * may only shrink (as offenders are removed) — they may never grow.
- * Rules 67, 68, 69, 70, 71, and 72 have no baseline.
+ * Rules 67, 68, 69, 70, 71, 72, and 73 have no baseline.
  */
+import { existsSync } from "node:fs";
 import { glob, readFile, readdir, lstat } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join, posix, relative, resolve, sep } from "node:path";
@@ -1145,6 +1157,129 @@ async function checkRule65() {
       parents.set(next, file);
       queue.push(next);
     }
+  }
+  return violations;
+}
+
+// ---------- Rules 73 and 74: host-neutral code reaches no Node-only import ----------
+
+const RUNTIME_ENV_DIR = "packages/eve/src/runtime-env/";
+/** Packages that only load in Node. Bare names match the package and its subpaths. */
+const NODE_ONLY_PACKAGES = ["undici", "nitro", "rolldown"];
+const NODE_ONLY_COMPILED = [
+  "#compiled/chokidar/",
+  "#compiled/commander/",
+  "#compiled/@clack/",
+  "#compiled/env-runner/",
+];
+
+/** @param {string} specifier */
+function nodeOnlySpecifier(specifier) {
+  if (NODE_BUILTINS.has(specifier) || specifier.startsWith("node:")) return true;
+  if (NODE_ONLY_COMPILED.some((prefix) => specifier.startsWith(prefix))) return true;
+  return NODE_ONLY_PACKAGES.some((name) => specifier === name || specifier.startsWith(`${name}/`));
+}
+
+/**
+ * The file a build without the `node` condition loads for a specifier: the web twin of a
+ * `#runtime-env/*` module, or the eve source file it names.
+ * @param {string} specifier
+ * @param {string} from
+ */
+function resolveWithoutNode(specifier, from) {
+  const file = resolveEveSource(specifier, from);
+  if (file === undefined) return undefined;
+  if (specifier.startsWith("#runtime-env/")) {
+    const web = file.replace(/\.ts$/, ".web.ts");
+    if (existsSync(join(REPO_ROOT, web))) return web;
+  }
+  return existsSync(join(REPO_ROOT, file)) ? file : undefined;
+}
+
+/**
+ * Each Node-only import that `entries` reach through value imports, with its import chain.
+ * @param {readonly string[]} entries
+ */
+async function nodeOnlyReach(entries) {
+  /** @type {{ file: string; specifier: string; chain: string[] }[]} */
+  const found = [];
+  /** @type {Map<string, string | undefined>} */
+  const parents = new Map(entries.map((entry) => [entry, undefined]));
+  const queue = [...entries];
+  while (queue.length > 0) {
+    const file = /** @type {string} */ (queue.shift());
+    const content = await readFile(join(REPO_ROOT, file), "utf8");
+    const source = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true);
+    for (const specifier of valueImportSpecifiers(source)) {
+      if (nodeOnlySpecifier(specifier)) {
+        const chain = [file];
+        for (let at = parents.get(file); at !== undefined; at = parents.get(at)) chain.push(at);
+        found.push({ file, specifier, chain: chain.reverse() });
+        continue;
+      }
+      const next = resolveWithoutNode(specifier, file);
+      if (next === undefined || parents.has(next)) continue;
+      parents.set(next, file);
+      queue.push(next);
+    }
+  }
+  return found;
+}
+
+async function checkRule73() {
+  /** @type {Violation[]} */
+  const violations = [];
+  const twins = [];
+  for await (const file of glob(`${RUNTIME_ENV_DIR}*.web.ts`, { cwd: REPO_ROOT }))
+    twins.push(toPosix(file));
+  twins.sort();
+  for (const { file, specifier, chain } of await nodeOnlyReach(twins)) {
+    violations.push({
+      rule: 73,
+      file,
+      message: `imports "${specifier}", which only loads in Node, so the web twin ${chain[0]} doesn't load without Node. Import chain: ${chain.join(" -> ")}. Keep Node-only code in the Node twin (\`x.ts\`), and give the web twin (\`x.web.ts\`) a version without it.`,
+    });
+  }
+  for await (const path of glob("packages/eve/src/**/*.ts", { cwd: REPO_ROOT })) {
+    const file = toPosix(path);
+    if (file.startsWith(RUNTIME_ENV_DIR)) continue;
+    const content = await readFile(join(REPO_ROOT, file), "utf8");
+    if (!content.includes("runtime-env/")) continue;
+    const source = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true);
+    for (const specifier of valueImportSpecifiers(source)) {
+      if (!specifier.startsWith(".") || !specifier.includes("runtime-env/")) continue;
+      violations.push({
+        rule: 73,
+        file,
+        message: `imports "${specifier}" by a relative path, which always loads the Node twin. Import \`#runtime-env/*\` so the build chooses the Node or the web version.`,
+      });
+    }
+  }
+  return violations;
+}
+
+/** @param {Set<string>} allowlist */
+async function checkRule74(allowlist) {
+  /** @type {Violation[]} */
+  const violations = [];
+  const seen = new Set();
+  for (const { file, specifier, chain } of await nodeOnlyReach([...HOST_NEUTRAL_FILES].sort())) {
+    const key = `${file} -> ${specifier}`;
+    seen.add(key);
+    if (allowlist.has(key)) continue;
+    violations.push({
+      rule: 74,
+      file,
+      message: `imports "${specifier}", which only loads in Node, and the session program reaches it. Import chain: ${chain.join(" -> ")}. The session program must load without Node: reach Node through a \`#runtime-env/*\` module, or move the work into a session step.`,
+    });
+  }
+  for (const key of allowlist) {
+    if (seen.has(key)) continue;
+    violations.push({
+      rule: 74,
+      file: "scripts/guard-invariants-baseline.json",
+      message: `"${key}" no longer happens. Remove it from \`rule74_sessionProgramNodeImportAllowlist\`.`,
+    });
   }
   return violations;
 }
@@ -2727,6 +2862,10 @@ async function main() {
   violations.push(...state.rule70);
   violations.push(...state.rule71);
   violations.push(...state.rule72);
+  violations.push(...(await checkRule73()));
+  violations.push(
+    ...(await checkRule74(new Set(baseline.rule74_sessionProgramNodeImportAllowlist ?? []))),
+  );
   for (const [file, count] of state.rule69) {
     violations.push({
       rule: 69,

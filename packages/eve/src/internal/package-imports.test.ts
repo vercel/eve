@@ -10,6 +10,11 @@ describe("resolveEveDistImport", () => {
   it("mirrors the default targets of eve's package imports", () => {
     expect(packageJson.imports).toEqual({
       "#compiled/*": { "eve-source": "./.generated/compiled/*", default: "./dist/src/compiled/*" },
+      "#runtime-env/*.js": {
+        "eve-source": { node: "./src/runtime-env/*.ts", default: "./src/runtime-env/*.web.ts" },
+        node: "./dist/src/runtime-env/*.js",
+        default: "./dist/src/runtime-env/*.web.js",
+      },
       "#*.js": { "eve-source": "./src/*.ts", default: "./dist/src/*.js" },
     });
   });
@@ -19,6 +24,7 @@ describe("resolveEveDistImport", () => {
     ["#compiled/@vercel/oidc/index.js", `${root}compiled/@vercel/oidc/index.js`],
     ["#internal/logging.js", `${root}internal/logging.js`],
     ["#cli/dev/tui/tui.js", `${root}cli/dev/tui/tui.js`],
+    ["#runtime-env/env.js", `${root}runtime-env/env.js`],
     ["#internal/node_modulesx.js", `${root}internal/node_modulesx.js`],
     ["./output.js", `${root}cli/output.js`],
     ["../internal/logging.js", `${root}internal/logging.js`],
