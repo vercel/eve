@@ -7,53 +7,71 @@ import {
   type VerifiedRemoteDevelopmentClientDeps,
 } from "#setup/verified-remote-client.js";
 
+import { validateEvalTargetAuth } from "#evals/define-eval-config.js";
 import type { EveEvalConfigInput, EveEvalTargetHandle } from "#evals/types.js";
 
-type EvalTargetAuthConfig = Pick<EveEvalConfigInput, "targetAuth" | "targetAuthOrigins">;
+interface EvalTargetAuthOptions extends Pick<EveEvalConfigInput, "targetAuth"> {
+  readonly onWarning?: (message: string) => void;
+}
 
-export function resolveEvalClientOptions(
+export async function resolveEvalClientOptions(
   target: Pick<EveEvalTargetHandle, "kind" | "url">,
-  { targetAuth, targetAuthOrigins }: EvalTargetAuthConfig = {},
-): ClientOptions {
-  if (target.kind === "local") {
-    return targetAuth === undefined
-      ? { baseUrl: target.url }
-      : { baseUrl: target.url, auth: targetAuth, redirect: "manual" };
-  }
+  { targetAuth, onWarning }: EvalTargetAuthOptions = {},
+): Promise<ClientOptions> {
+  const options =
+    target.kind === "local" ? { baseUrl: target.url } : resolveDevelopmentClientOptions(target.url);
 
-  const options = resolveDevelopmentClientOptions(target.url);
-  const explicitToken = process.env.EVE_EVAL_AUTH_TOKEN?.trim();
-  const oidcToken = process.env.EVE_EVAL_OIDC_TOKEN?.trim();
-  if (explicitToken && oidcToken) {
-    throw new Error(
-      "Set either EVE_EVAL_AUTH_TOKEN or EVE_EVAL_OIDC_TOKEN, not both: each one replaces the remote target's authorization.",
-    );
-  }
-  if (explicitToken) {
-    return { ...options, auth: { bearer: explicitToken }, redirect: "manual" };
-  }
-  if (oidcToken) {
-    return { ...options, auth: { vercelOidc: { token: oidcToken } }, redirect: "manual" };
+  if (target.kind === "remote") {
+    const explicitToken = process.env.EVE_EVAL_AUTH_TOKEN?.trim();
+    const oidcToken = process.env.EVE_EVAL_OIDC_TOKEN?.trim();
+    if (explicitToken && oidcToken) {
+      throw new Error(
+        "Set either EVE_EVAL_AUTH_TOKEN or EVE_EVAL_OIDC_TOKEN, not both: each one replaces the remote target's authorization.",
+      );
+    }
+    const override = explicitToken
+      ? { source: "EVE_EVAL_AUTH_TOKEN", auth: { bearer: explicitToken } }
+      : oidcToken
+        ? { source: "EVE_EVAL_OIDC_TOKEN", auth: { vercelOidc: { token: oidcToken } } }
+        : undefined;
+    if (override) {
+      if (targetAuth !== undefined) {
+        onWarning?.(
+          `Warning: ${override.source} is set, so this --url run ignores targetAuth in evals.config.ts.`,
+        );
+      }
+      return { ...options, auth: override.auth, redirect: "manual" };
+    }
   }
 
   if (targetAuth === undefined) return options;
+  if (typeof targetAuth !== "function") {
+    if (target.kind === "remote") {
+      throw new Error(
+        "Eval config `targetAuth` objects apply only to the local dev server. For --url, use a `targetAuth` function that checks the target's HTTPS origin before returning credentials.",
+      );
+    }
+    return { ...options, auth: targetAuth, redirect: "manual" };
+  }
 
   const url = URL.parse(target.url);
   if (
-    url?.protocol !== "https:" ||
-    url.username !== "" ||
-    url.password !== "" ||
-    !Array.isArray(targetAuthOrigins) ||
-    !targetAuthOrigins.includes(url.origin)
+    !url ||
+    (target.kind === "remote" && (url.protocol !== "https:" || url.username || url.password))
   ) {
     throw new Error(
-      "Refusing to send workspace targetAuth to this --url. Use an HTTPS URL without embedded credentials and list its exact origin (including any non-default port) in targetAuthOrigins in evals/evals.config.ts.",
+      "Eval config `targetAuth` requires an HTTPS --url without embedded credentials for remote targets.",
     );
   }
-  return { ...options, baseUrl: url.href, auth: targetAuth, redirect: "manual" };
+
+  const baseUrl = url.href;
+  const auth = await targetAuth({ kind: target.kind, url });
+  if (auth === undefined) return options;
+  validateEvalTargetAuth(auth, "The `targetAuth` resolver result");
+  return { ...options, baseUrl, auth, redirect: "manual" };
 }
 
-interface CreateEvalClientOptions extends EvalTargetAuthConfig {
+interface CreateEvalClientOptions extends EvalTargetAuthOptions {
   readonly workspaceRoot?: string;
   readonly deps?: Partial<VerifiedRemoteDevelopmentClientDeps>;
 }
@@ -62,7 +80,7 @@ export async function createEvalClient(
   target: Pick<EveEvalTargetHandle, "kind" | "url">,
   options: CreateEvalClientOptions = {},
 ): Promise<Client> {
-  const base = resolveEvalClientOptions(target, options);
+  const base = await resolveEvalClientOptions(target, options);
   if (target.kind === "local" || base.auth !== undefined || options.workspaceRoot === undefined) {
     return new Client(base);
   }

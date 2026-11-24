@@ -141,7 +141,7 @@ export async function runEvalCommand(
         {
           workspaceRoot: appRoot,
           targetAuth: config.targetAuth,
-          targetAuthOrigins: config.targetAuthOrigins,
+          onWarning: (message) => logger.error(message),
         },
       );
       target = await resolveEvalTargetHandle({

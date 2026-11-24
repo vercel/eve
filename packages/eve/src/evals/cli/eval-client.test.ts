@@ -35,13 +35,13 @@ describe("resolveEvalClientOptions", () => {
     vi.unstubAllEnvs();
   });
 
-  it("uses a bare client for local targets", () => {
-    const options = resolveEvalClientOptions({ kind: "local", url: "http://127.0.0.1:3000" });
+  it("uses a bare client for local targets", async () => {
+    const options = await resolveEvalClientOptions({ kind: "local", url: "http://127.0.0.1:3000" });
     expect(options).toEqual({ baseUrl: "http://127.0.0.1:3000" });
   });
 
-  it("keeps the synchronous remote options anonymous", () => {
-    const options = resolveEvalClientOptions({
+  it("keeps the initial remote options anonymous without configured credentials", async () => {
+    const options = await resolveEvalClientOptions({
       kind: "remote",
       url: "https://example.vercel.app",
     });
@@ -50,9 +50,9 @@ describe("resolveEvalClientOptions", () => {
     expect(options.auth).toBeUndefined();
   });
 
-  it("prefers the EVE_EVAL_AUTH_TOKEN static bearer override", () => {
+  it("prefers the EVE_EVAL_AUTH_TOKEN static bearer override", async () => {
     vi.stubEnv("EVE_EVAL_AUTH_TOKEN", "static-token");
-    const options = resolveEvalClientOptions({
+    const options = await resolveEvalClientOptions({
       kind: "remote",
       url: "https://example.vercel.app",
     });
@@ -61,9 +61,9 @@ describe("resolveEvalClientOptions", () => {
     expect(options.headers).toBeUndefined();
   });
 
-  it("sends EVE_EVAL_OIDC_TOKEN as a Vercel Trusted Sources token", () => {
+  it("sends EVE_EVAL_OIDC_TOKEN as a Vercel Trusted Sources token", async () => {
     vi.stubEnv("EVE_EVAL_OIDC_TOKEN", " ci-oidc-token ");
-    const options = resolveEvalClientOptions({
+    const options = await resolveEvalClientOptions({
       kind: "remote",
       url: "https://example.vercel.app",
     });
@@ -71,15 +71,16 @@ describe("resolveEvalClientOptions", () => {
     expect(options.redirect).toBe("manual");
   });
 
-  it("rejects EVE_EVAL_AUTH_TOKEN and EVE_EVAL_OIDC_TOKEN together", () => {
+  it("rejects EVE_EVAL_AUTH_TOKEN and EVE_EVAL_OIDC_TOKEN together", async () => {
     vi.stubEnv("EVE_EVAL_AUTH_TOKEN", "static-token");
     vi.stubEnv("EVE_EVAL_OIDC_TOKEN", "ci-oidc-token");
-    expect(() =>
+    await expect(
       resolveEvalClientOptions({ kind: "remote", url: "https://example.vercel.app" }),
-    ).toThrow("Set either EVE_EVAL_AUTH_TOKEN or EVE_EVAL_OIDC_TOKEN, not both");
+    ).rejects.toThrow("Set either EVE_EVAL_AUTH_TOKEN or EVE_EVAL_OIDC_TOKEN, not both");
   });
 
-  it("resolves a targetAuth token before every local request", async () => {
+  it("resolves a targetAuth token before every local request, ignoring env overrides", async () => {
+    vi.stubEnv("EVE_EVAL_AUTH_TOKEN", "override-token");
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation(async () =>
@@ -100,25 +101,33 @@ describe("resolveEvalClientOptions", () => {
     expect(first?.redirect).toBe("manual");
   });
 
-  it.each([
-    { url: "https://eval.example.test", allowed: undefined },
-    { url: "https://other.eval.example.test", allowed: ["https://eval.example.test"] },
-    { url: "https://eval.example.test:8443", allowed: ["https://eval.example.test"] },
-    { url: "http://eval.example.test", allowed: ["https://eval.example.test"] },
-  ])("rejects $url without exact HTTPS approval in $allowed", async ({ url, allowed }) => {
-    const bearer = vi.fn(() => "fixture-token");
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockRejectedValue(new Error("Unexpected fetch"));
-
+  it("rejects static targetAuth for a remote target", async () => {
     await expect(
       createEvalClient(
-        { kind: "remote", url },
-        { targetAuth: { bearer }, targetAuthOrigins: allowed },
+        { kind: "remote", url: "https://eval.example.test" },
+        { targetAuth: { bearer: "local-only-token" } },
       ),
-    ).rejects.toThrow("targetAuthOrigins");
-    expect(bearer).not.toHaveBeenCalled();
-    expect(fetchMock).not.toHaveBeenCalled();
+    ).rejects.toThrow("`targetAuth` objects apply only to the local dev server");
+  });
+
+  it.each(["http://eval.example.test", "https://user:pass@eval.example.test"])(
+    "rejects an unsafe remote URL before invoking targetAuth: %s",
+    async (url) => {
+      const targetAuth = vi.fn(() => ({ bearer: "fixture-token" }));
+      await expect(createEvalClient({ kind: "remote", url }, { targetAuth })).rejects.toThrow(
+        "`targetAuth` requires an HTTPS --url without embedded credentials",
+      );
+      expect(targetAuth).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects invalid credentials returned by the resolver before creating a client", async () => {
+    await expect(
+      createEvalClient(
+        { kind: "remote", url: "https://eval.example.test" },
+        { targetAuth: async () => ({ bearer: "token", vercelOidc: undefined }) },
+      ),
+    ).rejects.toThrow("The `targetAuth` resolver result must set exactly one of");
   });
 
   it("refreshes targetAuth per request to an approved HTTPS origin without following redirects", async () => {
@@ -127,18 +136,21 @@ describe("resolveEvalClientOptions", () => {
       .mockResolvedValueOnce(Response.json({ ok: true, status: "ready", workflowId: "wf" }))
       .mockResolvedValueOnce(Response.json({ ok: true, status: "ready", workflowId: "wf" }));
     const bearer = vi.fn().mockReturnValueOnce("first-token").mockReturnValueOnce("second-token");
+    const targetAuth = vi.fn(async ({ kind, url }: { kind: string; url: URL }) => {
+      if (kind !== "remote" || url.origin !== "https://eval.example.test:8443") return;
+      url.hostname = "other.example.test";
+      return { bearer };
+    });
     const client = await createEvalClient(
       { kind: "remote", url: "https://eval.example.test:8443/prefix" },
-      {
-        targetAuth: { bearer },
-        targetAuthOrigins: ["https://other.example.test", "https://eval.example.test:8443"],
-      },
+      { targetAuth },
     );
 
     expect(bearer).not.toHaveBeenCalled();
     await client.health();
     await client.health();
 
+    expect(targetAuth).toHaveBeenCalledTimes(1);
     expect(
       fetchMock.mock.calls.map(([url, init]) => [
         url,
@@ -154,26 +166,32 @@ describe("resolveEvalClientOptions", () => {
   it.each([
     ["EVE_EVAL_AUTH_TOKEN", { bearer: "override-token" }],
     ["EVE_EVAL_OIDC_TOKEN", { vercelOidc: { token: "override-token" } }],
-  ])("lets %s override workspace targetAuth without an allowlist", (env, auth) => {
+  ])("warns when %s overrides the workspace targetAuth resolver", async (env, auth) => {
     vi.stubEnv(env, "override-token");
-    expect(
+    const targetAuth = vi.fn(() => ({ bearer: "fixture-token" }));
+    const onWarning = vi.fn();
+    await expect(
       resolveEvalClientOptions(
         { kind: "remote", url: "https://eval.example.test" },
-        { targetAuth: { bearer: () => "fixture-token" } },
+        { targetAuth, onWarning },
       ),
-    ).toMatchObject({ auth, redirect: "manual" });
+    ).resolves.toMatchObject({ auth, redirect: "manual" });
+    expect(onWarning.mock.calls).toEqual([
+      [`Warning: ${env} is set, so this --url run ignores targetAuth in evals.config.ts.`],
+    ]);
+    expect(targetAuth).not.toHaveBeenCalled();
   });
 
-  it("ignores a blank EVE_EVAL_AUTH_TOKEN", () => {
+  it("ignores a blank EVE_EVAL_AUTH_TOKEN", async () => {
     vi.stubEnv("EVE_EVAL_AUTH_TOKEN", "   ");
-    const options = resolveEvalClientOptions({
+    const options = await resolveEvalClientOptions({
       kind: "remote",
       url: "https://example.vercel.app",
     });
     expect(options.auth).toBeUndefined();
   });
 
-  it("resolves ambient OIDC per request after Vercel verifies the exact remote origin", async () => {
+  it("resolves verified ambient OIDC per request when targetAuth returns undefined", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(Response.json({ ok: true, status: "ready", workflowId: "wf" }))
@@ -190,6 +208,8 @@ describe("resolveEvalClientOptions", () => {
     const client = await createEvalClient(
       { kind: "remote", url: "https://example.vercel.app" },
       {
+        targetAuth: ({ url }) =>
+          url.origin === "https://eval.example.test" ? { bearer: "fixture-token" } : undefined,
         workspaceRoot: "/workspace",
         deps: {
           resolveVercelDeployment: async () => ({

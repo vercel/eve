@@ -785,19 +785,18 @@ export interface EveEvalConfigInput<TContext = unknown> {
    */
   readonly repeat?: number;
   /**
-   * Credentials `eve eval` sends to the target, local or `--url`, in the same
-   * shape as the eve client's `auth`. A token function runs before every
-   * request, so short-lived tokens stay fresh for the whole run. For `--url`,
-   * `targetAuthOrigins` must allow the target unless `EVE_EVAL_AUTH_TOKEN` or
-   * `EVE_EVAL_OIDC_TOKEN` is set and takes precedence.
+   * Client credentials for the local dev server, or a resolver called once with
+   * the target. For `--url`, use a resolver and return credentials only for
+   * trusted HTTPS origins. Return `undefined` to use the default auth behavior.
+   * `EVE_EVAL_AUTH_TOKEN` and `EVE_EVAL_OIDC_TOKEN` override this setting on
+   * `--url` runs. Token functions in the credentials run before each request.
    */
-  readonly targetAuth?: ClientAuth;
-  /**
-   * Exact HTTPS origins allowed to receive `targetAuth` on `--url` runs.
-   * Use serialized origins such as `https://agent.example.com:8443`, without
-   * wildcards, paths, or trailing slashes. Not needed for the local dev server.
-   */
-  readonly targetAuthOrigins?: readonly string[];
+  readonly targetAuth?:
+    | ClientAuth
+    | ((target: {
+        readonly kind: "local" | "remote";
+        readonly url: URL;
+      }) => ClientAuth | undefined | Promise<ClientAuth | undefined>);
 }
 
 /**

@@ -68,21 +68,25 @@ Set `EVE_EVAL_AUTH_TOKEN` to send that bearer token instead, for targets that do
 
 ### Short-lived tokens
 
-`EVE_EVAL_AUTH_TOKEN` stays the same for the whole run. When your target accepts short-lived tokens, such as session tokens that expire after a minute, set `targetAuth` in `evals.config.ts` instead. It takes the same shape as the [eve client's `auth`](../guides/client#authentication): `bearer`, `basic`, or `vercelOidc`.
+`EVE_EVAL_AUTH_TOKEN` stays the same for the whole run. For short-lived credentials, set `targetAuth` in `evals.config.ts` with a token function. Use the same credential shapes as the [eve client's `auth`](../guides/client#authentication): `bearer`, `basic`, or `vercelOidc`.
+
+For local-only runs, you can pass an object such as `{ bearer: () => getSessionToken() }`. For `--url`, use an HTTPS URL without embedded credentials and pass a function that checks `url.origin` against the origins you trust. The function runs once with the target's `kind` and parsed `URL`. If it returns `undefined`, eve uses the [default authentication behavior](#authentication).
 
 ```ts title="evals/evals.config.ts"
 import { defineEvalConfig } from "eve/evals";
 import { getSessionToken } from "./session-token.js";
 
 export default defineEvalConfig({
-  targetAuth: { bearer: () => getSessionToken() },
-  targetAuthOrigins: ["https://agent.example.com"],
+  targetAuth: ({ kind, url }) =>
+    kind === "local" || url.origin === "https://agent.example.com"
+      ? { bearer: () => getSessionToken() }
+      : undefined,
 });
 ```
 
 `eve eval` calls a token function before every request, including stream reads, approval responses, `t.target.fetch`, and the final [tool stubs](./tool-stubs) check, so a multi-turn eval keeps the same caller from start to finish. Cache the token inside the function if minting one is slow.
 
-The local dev server doesn't need `targetAuthOrigins`. For `--url`, list each trusted HTTPS origin in `targetAuthOrigins`, including any non-default port, without wildcards, paths, or trailing slashes. If the origin isn't listed, the run stops before calling the token function or sending a request. `EVE_EVAL_AUTH_TOKEN` and `EVE_EVAL_OIDC_TOKEN` override workspace auth and don't require an allowlist. Allowed `targetAuth` and both overrides skip the Vercel lookup and don't follow redirects.
+For `--url`, either `EVE_EVAL_AUTH_TOKEN` or `EVE_EVAL_OIDC_TOKEN` overrides `targetAuth`. If you also set `targetAuth`, eve prints a warning naming the environment variable it uses. Local runs ignore both environment variables. Requests using `targetAuth` or either override skip the Vercel lookup and don't follow redirects.
 
 ## What to read next
 

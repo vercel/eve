@@ -97,22 +97,11 @@ describe("defineEvalConfig", () => {
     }
   });
 
-  it("accepts exact HTTPS origins with or without a non-default port", () => {
-    const origins = ["https://eval.example.test", "https://preview.example.test:8443"];
-    expect(defineEvalConfig({ targetAuthOrigins: origins }).targetAuthOrigins).toEqual(origins);
-  });
-
-  it("rejects targetAuthOrigins entries that are not exact HTTPS origins", () => {
-    for (const targetAuthOrigins of [
-      "https://eval.example.test",
-      ["http://eval.example.test"],
-      ["https://*.example.test"],
-      ["https://eval.example.test/prefix"],
-    ]) {
-      expect(() => defineInvalidConfig({ targetAuthOrigins: targetAuthOrigins as never })).toThrow(
-        "`targetAuthOrigins` must be an array of exact HTTPS origins",
-      );
-    }
+  it("accepts a targetAuth resolver without calling it at config load", () => {
+    const targetAuth = () => {
+      throw new Error("The target is not yet known");
+    };
+    expect(defineEvalConfig({ targetAuth }).targetAuth).toBe(targetAuth);
   });
 
   it("rejects a targetAuth without exactly one usable scheme", () => {
