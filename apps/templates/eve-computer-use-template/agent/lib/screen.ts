@@ -1,4 +1,4 @@
-import { get, screenshot, wait_for } from "@agent-browser/eve/tools";
+import { get_url, screenshot, wait_for_load, wait_ms } from "@agent-browser/eve/tools";
 import { screenshot as desktopScreenshot } from "@eve/agent-desktop/tools";
 import { defineTool, type ToolContext, type ToolDefinition } from "eve/tools";
 
@@ -52,13 +52,15 @@ export function withScreen<TInput>(
 export async function captureBrowser(ctx: ToolContext): Promise<Screen | undefined> {
   // A click or key press can start a navigation that hasn't painted yet. Give it a moment to
   // start, then wait briefly for it to load, so the screenshot matches the URL.
-  await wait_for.execute({ timeMs: 300, timeoutMs: 3000 }, ctx);
-  await wait_for.execute({ loadState: "load", timeoutMs: 3000 }, ctx);
+  await wait_ms.execute({ ms: 300, timeoutMs: 3000 }, ctx);
+  await Promise.resolve(
+    wait_for_load.execute({ state: "load", waitTimeoutMs: 3000, timeoutMs: 4000 }, ctx),
+  ).catch(() => undefined);
   const shot = (await screenshot.execute({ annotate: false, fullPage: false }, ctx)) as {
     imageDataUrl?: string;
   };
   if (shot.imageDataUrl === undefined) return undefined;
-  const page = (await Promise.resolve(get.execute({ property: "url" }, ctx)).catch(() => null)) as {
+  const page = (await Promise.resolve(get_url.execute({}, ctx)).catch(() => null)) as {
     url?: string;
   } | null;
   const sandbox = await startLiveIfAvailable(ctx, "browser");

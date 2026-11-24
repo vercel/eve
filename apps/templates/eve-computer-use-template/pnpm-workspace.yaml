@@ -10,6 +10,8 @@ minimumReleaseAgeExclude:
   - ai
   - eve
   - workflow
+  - "@agent-browser/eve@0.44.0"
+  - "@agent-browser/sandbox@0.44.0"
 
 ignoredOptionalDependencies:
   - "@mongodb-js/zstd"
