@@ -20,10 +20,8 @@ import {
 } from "./client.ts";
 
 export const DEFAULT_WATCH_CHANNEL = "eve-config/watches";
-// Under /eve/v1, the only prefix eve/next and Vercel services forward to the agent.
 const BOARD_ROUTE_BASE = "/eve/v1/board";
 export const BOARD_WAKE_ROUTE = `${BOARD_ROUTE_BASE}/wake`;
-// Where 0.1.0 registered. Served for one release so those registrations still wake.
 export const LEGACY_BOARD_WAKE_ROUTE = "/board/wake";
 export const MAX_WATCHES = 32;
 
@@ -286,8 +284,6 @@ export function registrationWhere(
   return { url: `https://${host}${base}` };
 }
 
-// Mirrors eve's public route join: a named mount `/eve/<name>` serves `/eve/v1/*` at
-// `/eve/<name>/v1/*`, and any other prefix is prepended.
 function publicRoutePath(rawPrefix: string | undefined, route: string): string {
   const trimmed = rawPrefix?.trim().replace(/\/+$/u, "") ?? "";
   const prefix = trimmed === "" || trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
@@ -298,8 +294,6 @@ function publicRoutePath(rawPrefix: string | undefined, route: string): string {
   return `${prefix}${route}`;
 }
 
-// Keeps the held wake target (a preview's branch or host) but moves its path to this
-// release's route, so registrations made by an older release stop waking a dead path.
 export function retargetRegistration<T extends Omit<BoardRegistrationInput, "watch">>(
   held: T,
   where: Omit<BoardRegistrationInput, "watch">,
