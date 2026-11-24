@@ -154,12 +154,7 @@ export function createVercelSandbox(
     async prepare(context) {
       if (context.isEmpty && createOptions.source === undefined) return {};
       try {
-        const templateKey = vercelTemplateKey(
-          context,
-          createOptions,
-          image,
-          input.rebuildable === true,
-        );
+        const templateKey = vercelTemplateKey(context, createOptions, image);
         const snapshotId = await ensureTemplate({
           context,
           createOptions,
@@ -286,7 +281,6 @@ function vercelTemplateKey(
   context: Pick<SandboxPrepareContext, "templateKey">,
   createOptions: VercelCreateOptions,
   image: string,
-  rebuildable: boolean,
 ): string {
   const excluded = new Set(["fetch", "projectId", "signal", "teamId", "token"]);
   const identityOptions = Object.fromEntries(
@@ -296,9 +290,7 @@ function vercelTemplateKey(
     createOptions: identityOptions,
     resolvedImage: createOptions.source === undefined ? image : undefined,
     version: 4,
-    vercelEnv: rebuildable
-      ? process.env.VERCEL_TARGET_ENV?.trim() || process.env.VERCEL_ENV?.trim() || undefined
-      : undefined,
+    vercelEnv: process.env.VERCEL_TARGET_ENV?.trim() || process.env.VERCEL_ENV?.trim() || undefined,
   });
   return `eve-sbx-tpl-vercel-${hash.slice(0, 32)}`;
 }

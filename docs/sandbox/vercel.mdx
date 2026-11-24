@@ -101,13 +101,13 @@ A new session sandbox from a snapshot of [eve's default image](/docs/sandbox/doc
 | `createOptions`  | The Vercel create options, with eve's env and `timeout` defaults, minus `fetch`, `projectId`, `signal`, `teamId` and `token`. `rebuildable` is not part of it. |
 | `resolvedImage`  | The base image string, or nothing when `source` is set.                                                                                                        |
 | `version`        | The template format number eve ships, currently `4`.                                                                                                           |
-| `vercelEnv`      | Only when `rebuildable: true`: `VERCEL_TARGET_ENV` at build time, such as `staging`, or else `VERCEL_ENV`. Empty otherwise and outside Vercel.                 |
+| `vercelEnv`      | `VERCEL_TARGET_ENV` at build time, such as `staging`, or else `VERCEL_ENV`. Empty outside Vercel.                                                              |
 | `resources`      | A hash of the workspace and skill files.                                                                                                                       |
 | `sourceRevision` | A hash of the bytes of `agent/sandbox.ts`.                                                                                                                     |
 
 The key leaves out files that `agent/sandbox.ts` imports and the contents of an image behind a mutable tag. Edit `agent/sandbox.ts` to force a new template.
 
-A template that `rebuildSandboxTemplate()` can replace after deploy is scoped to its Vercel environment, so a preview or `staging` deployment builds its own template and never reads or replaces the production one. A template that cannot change after deploy is the same in every environment, so a production build reuses the one a preview build made.
+Every template is scoped to its Vercel environment, so a preview or `staging` deployment builds its own template and a production deployment never reuses it. The first deploy after you upgrade eve rebuilds each template once, because `vercelEnv` is new to the key.
 
 ## Rebuild the snapshot after deploy
 

@@ -956,7 +956,7 @@ describe("createVercelSandbox", () => {
   describe("template key and the Vercel environment", () => {
     const keyIn = async (
       env: { readonly target?: string; readonly vercel?: string },
-      rebuildable: boolean,
+      rebuildable = true,
     ) => {
       vi.stubEnv("VERCEL_ENV", env.vercel);
       vi.stubEnv("VERCEL_TARGET_ENV", env.target);
@@ -969,36 +969,34 @@ describe("createVercelSandbox", () => {
       );
     };
 
-    it("gives a rebuildable app its own template per environment", async () => {
+    it("gives each Vercel environment its own template", async () => {
       const keys = [
-        await keyIn({ vercel: "production" }, true),
-        await keyIn({ vercel: "preview" }, true),
-        await keyIn({ vercel: "development" }, true),
+        await keyIn({ vercel: "production" }),
+        await keyIn({ vercel: "preview" }),
+        await keyIn({ vercel: "development" }),
+      ];
+      expect(new Set(keys).size).toBe(3);
+    });
+
+    it("gives an app that is not rebuildable its own template per environment", async () => {
+      const keys = [
+        await keyIn({ vercel: "production" }, false),
+        await keyIn({ vercel: "preview" }, false),
+        await keyIn({ target: "staging", vercel: "preview" }, false),
       ];
       expect(new Set(keys).size).toBe(3);
     });
 
     it("gives a custom environment its own template, apart from preview", async () => {
-      const preview = await keyIn({ target: "preview", vercel: "preview" }, true);
-      const staging = await keyIn({ target: "staging", vercel: "preview" }, true);
+      const preview = await keyIn({ target: "preview", vercel: "preview" });
+      const staging = await keyIn({ target: "staging", vercel: "preview" });
       expect(staging).not.toBe(preview);
-      expect(await keyIn({ vercel: "preview" }, true)).toBe(preview);
+      expect(await keyIn({ vercel: "preview" })).toBe(preview);
     });
 
     it("treats an unset or blank environment alike", async () => {
-      expect(await keyIn({ vercel: " preview " }, true)).toBe(
-        await keyIn({ vercel: "preview" }, true),
-      );
-      expect(await keyIn({}, true)).toBe(await keyIn({ target: "  ", vercel: "  " }, true));
-    });
-
-    it("shares one template across environments for an app that is not rebuildable", async () => {
-      const keys = [
-        await keyIn({ vercel: "production" }, false),
-        await keyIn({ target: "staging", vercel: "preview" }, false),
-        await keyIn({}, false),
-      ];
-      expect(new Set(keys).size).toBe(1);
+      expect(await keyIn({ vercel: " preview " })).toBe(await keyIn({ vercel: "preview" }));
+      expect(await keyIn({})).toBe(await keyIn({ target: "  ", vercel: "  " }));
     });
   });
 
