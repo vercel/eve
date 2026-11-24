@@ -326,7 +326,7 @@ export default eveChannel({
 });
 ```
 
-The client receives `429` with `retry-after: 60` and `{ "ok": false, "code": "rate_limited", "error": "Too many requests. Try again later." }`. Answers to approvals and questions skip `onMessage`, so this check doesn't block them.
+The client receives `429` with `retry-after: 60` and `{ "ok": false, "code": "rate_limited", "error": "Too many requests. Try again later." }`. Answers to approvals and questions skip `onMessage`, so this check doesn't block them. A retry with the same `idempotencyKey` runs `onMessage` again, so it counts against the limit too.
 
 ### Turn context
 

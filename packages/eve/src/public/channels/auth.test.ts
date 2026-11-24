@@ -355,9 +355,11 @@ describe("HttpError", () => {
     }
   });
 
-  it("rejects statuses that are not client or server errors", () => {
+  it("rejects statuses that are not client or server errors, and non-finite retry delays", () => {
     expect(() => new HttpError(200)).toThrow(RangeError);
     expect(() => new HttpError(600)).toThrow(RangeError);
+    expect(() => new TooManyRequestsError({ retryAfter: Number.NaN })).toThrow(RangeError);
+    expect(() => new TooManyRequestsError({ retryAfter: Infinity })).toThrow(RangeError);
   });
 });
 

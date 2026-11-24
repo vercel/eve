@@ -48,7 +48,10 @@ export class HttpError extends EveError {
 
 /** Options for {@link TooManyRequestsError}. */
 export interface TooManyRequestsErrorOptions extends Omit<HttpErrorOptions, "headers"> {
-  /** Seconds until the caller may retry, sent as the `retry-after` header. */
+  /**
+   * Seconds until the caller may retry, rounded up and sent as the `retry-after` header.
+   * Must be finite.
+   */
   readonly retryAfter?: number;
 }
 
@@ -70,7 +73,16 @@ export class TooManyRequestsError extends HttpError {
       headers:
         opts.retryAfter === undefined
           ? undefined
-          : { "retry-after": String(Math.max(0, Math.ceil(opts.retryAfter))) },
+          : { "retry-after": formatRetryAfter(opts.retryAfter) },
     });
   }
+}
+
+function formatRetryAfter(seconds: number): string {
+  if (!Number.isFinite(seconds)) {
+    throw new RangeError(
+      `TooManyRequestsError retryAfter must be a finite number, got ${seconds}.`,
+    );
+  }
+  return String(Math.max(0, Math.ceil(seconds)));
 }
