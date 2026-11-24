@@ -54,7 +54,8 @@ export async function nextTurnDelivery(input: {
     const end = pendingSessionEnd(cursor.serializedContext);
     if (end !== undefined) return { kind: "end", ...end };
 
-    for (const payload of inbox.takeLeading(isDeliveryPayload)) {
+    const leading = inbox.takeLeading(isDeliveryPayload);
+    for (const payload of leading) {
       const idle = queue.pendingCount === 0;
       const admitted = await admitSessionInboxPayload(payload, input);
       if (!idle) continue;
@@ -63,6 +64,7 @@ export async function nextTurnDelivery(input: {
       }
       holdAfter(admitted);
     }
+    if (leading.length === 0 && inbox.hasPending()) queue.endHold();
     const holding = hold === undefined ? undefined : queue.activeHold();
     if (hold !== undefined && holding !== undefined) {
       holding.timer ??= hold.until(holding.at);
@@ -70,10 +72,8 @@ export async function nextTurnDelivery(input: {
         inbox.whenPending().then(() => false),
         holding.timer.then(() => true),
       ]);
-      if (elapsed) {
-        queue.endHold();
-        continue;
-      }
+      if (elapsed || !inbox.hasPending()) queue.endHold();
+      continue;
     }
     const selected =
       holding === undefined

@@ -326,11 +326,18 @@ to the session. The next message at that address starts a new session. To carry 
 `queueHoldMs` makes an idle session wait before it starts a turn for a message
 sent with `turnPolicy: "queue"`. Queued messages that arrive within the wait
 join that turn when they share the first one's principal, so a burst of posts
-becomes one turn. A steering message starts the turn at once, with the held
-messages, and ends the wait. A message that waits behind a running turn starts
-when that turn ends, with no wait. Omit it, or set `0`, to start as soon as the
-message arrives. A cancel that arrives during the wait is ignored, as it is for
-any idle session.
+becomes one turn. A steering message from the same principal starts the turn at
+once, with the held messages, and ends the wait. A message from another
+principal never joins the held turn, because a turn's principal doesn't change.
+A steering message from another principal ends the wait, the held messages start
+their turn alone, and that message waits for the turn to end. A queued message
+from another principal waits the same way, and starts its own turn after. A
+cancel, `reset`, `clear` or session timeout that arrives during the wait ends
+it: the held turn starts and the control applies to that turn, the same as if it
+had arrived while the turn ran. If the session closes during the wait, the held
+messages start their turn first. The turn that starts a session is never held. A
+message that waits behind a running turn starts when that turn ends, with no
+wait. Omit `queueHoldMs`, or set `0`, to start as soon as the message arrives.
 
 `sessionUsage` gets two `TokenUsage` records, a type exported from `eve`. `total` is everything the session has
 spent, and `window` is what it spent since the last approved continuation. Each

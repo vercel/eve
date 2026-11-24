@@ -387,6 +387,7 @@ describe("nextTurnDelivery", () => {
 
     function parkedSession(ms: number | undefined) {
       const arrived: SessionInboxPayload[] = [];
+      let closed = false;
       const waiters = new Set<() => void>();
       const wake = () => {
         for (const waiter of waiters) waiter();
@@ -404,10 +405,12 @@ describe("nextTurnDelivery", () => {
           return taken;
         },
         async whenPending() {
-          while (arrived.length === 0) await new Promise<void>((resolve) => waiters.add(resolve));
+          while (arrived.length === 0 && !closed)
+            await new Promise<void>((resolve) => waiters.add(resolve));
         },
         async next() {
-          while (arrived.length === 0) await new Promise<void>((resolve) => waiters.add(resolve));
+          while (arrived.length === 0 && !closed)
+            await new Promise<void>((resolve) => waiters.add(resolve));
           return arrived.shift();
         },
       };
@@ -435,6 +438,10 @@ describe("nextTurnDelivery", () => {
         return result;
       };
       return {
+        close() {
+          closed = true;
+          wake();
+        },
         elapse: () => fire(),
         input,
         push(payload: SessionInboxPayload) {
@@ -568,6 +575,104 @@ describe("nextTurnDelivery", () => {
       });
       await expect(session.settled(nextTurnDelivery(session.input))).resolves.toMatchObject({
         delivery: { auth: other, payloads: [{ message: "human post" }] },
+        kind: "turn",
+      });
+    });
+
+    it("starts the held turn when the inbox closes during the hold, then reports the closure", async () => {
+      const session = parkedSession(120_000);
+      session.push(queued("first"));
+      const next = nextTurnDelivery(session.input);
+      expect(await session.settled(next)).toBe("waiting");
+
+      session.close();
+
+      await expect(session.settled(next)).resolves.toMatchObject({
+        delivery: { payloads: [{ message: "first" }] },
+        kind: "turn",
+      });
+      expect(session.input.queue.pendingCount).toBe(0);
+      await expect(session.settled(nextTurnDelivery(session.input))).resolves.toEqual({
+        kind: "closed",
+      });
+    });
+
+    describe.each([
+      ["reset", { deliveryId: "ctl", kind: "reset" }],
+      ["clear", { deliveryId: "ctl", kind: "clear" }],
+      ["session-timeout", { kind: "session-timeout", ownerRunId: "owner-1" }],
+    ] as const)("a %s that reaches the inbox", (_name, control) => {
+      it("ends the hold and leaves the control in the inbox for the held turn to see", async () => {
+        const session = parkedSession(120_000);
+        session.push(queued("first"));
+        const next = nextTurnDelivery(session.input);
+        expect(await session.settled(next)).toBe("waiting");
+
+        session.push(control);
+
+        await expect(session.settled(next)).resolves.toMatchObject({
+          delivery: { payloads: [{ message: "first" }] },
+          kind: "turn",
+        });
+        expect(session.input.inbox.hasPending()).toBe(true);
+        expect(session.input.queue.pendingCount).toBe(0);
+      });
+
+      it("ends the hold when it is already behind the held message", async () => {
+        const session = parkedSession(120_000);
+        session.push(queued("first"));
+        session.push(control);
+
+        await expect(session.settled(nextTurnDelivery(session.input))).resolves.toMatchObject({
+          delivery: { payloads: [{ message: "first" }] },
+          kind: "turn",
+        });
+        expect(session.input.inbox.hasPending()).toBe(true);
+        expect(session.input.queue.pendingCount).toBe(0);
+      });
+    });
+
+    it("keeps every held message of one principal in its turn when another principal steers", async () => {
+      const session = parkedSession(120_000);
+      session.push(queued("bot one", me));
+      const next = nextTurnDelivery(session.input);
+      expect(await session.settled(next)).toBe("waiting");
+      session.push(queued("bot two", me));
+      expect(await session.settled(next)).toBe("waiting");
+
+      session.push(post("human steer", { auth: other }));
+
+      await expect(session.settled(next)).resolves.toMatchObject({
+        delivery: { auth: me, payloads: [{ message: "bot one" }, { message: "bot two" }] },
+        kind: "turn",
+      });
+      await expect(session.settled(nextTurnDelivery(session.input))).resolves.toMatchObject({
+        delivery: { auth: other, payloads: [{ message: "human steer" }] },
+        kind: "turn",
+      });
+    });
+
+    it("splits the held messages at another principal's queued message", async () => {
+      const session = parkedSession(120_000);
+      session.push(queued("bot one", me));
+      const next = nextTurnDelivery(session.input);
+      expect(await session.settled(next)).toBe("waiting");
+      session.push(queued("human", other));
+      expect(await session.settled(next)).toBe("waiting");
+      session.push(queued("bot two", me));
+      expect(await session.settled(next)).toBe("waiting");
+      session.elapse();
+
+      await expect(next).resolves.toMatchObject({
+        delivery: { auth: me, payloads: [{ message: "bot one" }] },
+        kind: "turn",
+      });
+      await expect(session.settled(nextTurnDelivery(session.input))).resolves.toMatchObject({
+        delivery: { auth: other, payloads: [{ message: "human" }] },
+        kind: "turn",
+      });
+      await expect(session.settled(nextTurnDelivery(session.input))).resolves.toMatchObject({
+        delivery: { auth: me, payloads: [{ message: "bot two" }] },
         kind: "turn",
       });
     });
