@@ -1,4 +1,5 @@
 import { createHook, sleep, type HookOptions } from "#compiled/@workflow/core/index.js";
+import { isObject } from "#shared/guards.js";
 import { parseJsonObject } from "#shared/json.js";
 import { claimHookOwnership, disposeHook, isHookConflictError } from "#execution/hook-ownership.js";
 import {
@@ -20,6 +21,8 @@ import {
   subscriptionKeyHookToken,
   type SubscriptionBinding,
   type SubscriptionKeyMessage,
+  type OpenedSubscription,
+  type SubscriptionEvent,
   type SubscriptionOwnerMessage,
   type SubscriptionSourceRef,
 } from "#runtime/subscriptions/state.js";
@@ -56,9 +59,14 @@ export async function subscriptionWorkflow(input: {
   if (sharesKey) await joinKeyStep({ binding, key: opened.key });
   await publishOpenOutcomeStep(outcome);
   const expiry = opened.expiresAt === null ? undefined : sleep(new Date(opened.expiresAt));
+  const seen: string[] = [];
   while (true) {
     const message = await (expiry === undefined ? hook : Promise.race([hook, expiry]));
     if (message === undefined || message.kind === "retire") break;
+    if (!fromThisSubscription(binding, opened, message.event) || seen.includes(message.event.id))
+      continue;
+    seen.push(message.event.id);
+    if (seen.length > REMEMBERED_EVENTS) seen.shift();
     await startSubscriptionDeliveryStep({ binding, serializedContext, event: message.event });
   }
   if (sharesKey) await leaveKeyStep({ binding, key: opened.key });
@@ -67,6 +75,15 @@ export async function subscriptionWorkflow(input: {
     await sleep(retryMs);
     retryMs = Math.min(retryMs * 2, LAST_CLOSE_RETRY_MS);
   }
+}
+
+function fromThisSubscription(
+  binding: SubscriptionBinding,
+  opened: OpenedSubscription,
+  event: SubscriptionEvent,
+): boolean {
+  if (binding.source.kind !== "connection") return true;
+  return isObject(event.data) && event.data.subscriptionId === opened.key;
 }
 
 export async function subscriptionKeyWorkflow(input: {
@@ -92,19 +109,15 @@ export async function subscriptionKeyWorkflow(input: {
   }
   const members = new Set([input.first]);
   await acknowledgeJoinStep(input.ackId);
-  const seen: string[] = [];
   while (members.size > 0) {
     const message = await hook;
     if (message.kind === "join") {
       members.add(message.bindingId);
       await acknowledgeJoinStep(message.ackId);
     } else if (message.kind === "leave") members.delete(message.bindingId);
-    else if (!seen.includes(message.event.id)) {
-      seen.push(message.event.id);
-      if (seen.length > REMEMBERED_EVENTS) seen.shift();
+    else
       for (const gone of await fanOutEventStep({ bindingIds: [...members], event: message.event }))
         members.delete(gone);
-    }
   }
   await disposeHook(hook);
 }

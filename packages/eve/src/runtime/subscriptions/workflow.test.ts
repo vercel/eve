@@ -263,18 +263,23 @@ const connectionBinding: SubscriptionBinding = {
   } as never,
 };
 
+const upstream = (id: string, subscriptionId = key) => ({
+  id,
+  data: { subscriptionId, deliveryId: id, event: { name: "issue.created" } },
+});
+
 it("delivers a connection's events straight to its own hook without joining or leaving a key", async () => {
   const run = subscriptionWorkflow({ binding: connectionBinding, serializedContext });
   await vi.waitFor(() => expect(world.publishOutcome).toHaveBeenCalled());
   world.resume(subscriptionHookToken(connectionBinding.id), {
     kind: "delivery",
-    event: event("a"),
+    event: upstream("a"),
   });
   await vi.waitFor(() => expect(world.start).toHaveBeenCalledTimes(1));
   expect(world.start).toHaveBeenCalledWith({
     binding: connectionBinding,
     serializedContext,
-    event: event("a"),
+    event: upstream("a"),
   });
 
   world.resume(subscriptionHookToken(connectionBinding.id), { kind: "retire" });
@@ -282,6 +287,74 @@ it("delivers a connection's events straight to its own hook without joining or l
   expect(world.calls).toEqual(["open", "publish", "close"]);
   expect(world.join).not.toHaveBeenCalled();
   expect(world.leave).not.toHaveBeenCalled();
+});
+
+it("drops a connection delivery from an earlier upstream subscription, control messages included", async () => {
+  const run = subscriptionWorkflow({ binding: connectionBinding, serializedContext });
+  await vi.waitFor(() => expect(world.publishOutcome).toHaveBeenCalled());
+  const token = subscriptionHookToken(connectionBinding.id);
+  world.resume(token, { kind: "delivery", event: upstream("old-event", "sub_old") });
+  world.resume(token, {
+    kind: "delivery",
+    event: {
+      id: "old-end",
+      data: {
+        subscriptionId: "sub_old",
+        deliveryId: "old-end",
+        control: { type: "terminated", error: { code: 1, message: "gone" } },
+      },
+    },
+  });
+  world.resume(token, { kind: "delivery", event: upstream("new-event") });
+  await vi.waitFor(() => expect(world.start).toHaveBeenCalledTimes(1));
+  await settle();
+
+  expect(world.start).toHaveBeenCalledExactlyOnceWith({
+    binding: connectionBinding,
+    serializedContext,
+    event: upstream("new-event"),
+  });
+
+  world.resume(token, { kind: "retire" });
+  await run;
+});
+
+it("starts one delivery when the same event arrives twice", async () => {
+  const run = subscriptionWorkflow({ binding, serializedContext });
+  await vi.waitFor(() => expect(world.join).toHaveBeenCalled());
+  world.resume(ownerToken, { kind: "delivery", event: event("a") });
+  world.resume(ownerToken, { kind: "delivery", event: event("a") });
+  world.resume(ownerToken, { kind: "delivery", event: event("b") });
+  await vi.waitFor(() => expect(world.start).toHaveBeenCalledTimes(2));
+  await settle();
+
+  expect(world.start.mock.calls.map(([input]) => (input as { event: unknown }).event)).toEqual([
+    event("a"),
+    event("b"),
+  ]);
+
+  world.resume(ownerToken, { kind: "retire" });
+  await run;
+});
+
+it("forgets the oldest event id after 256 distinct ones", async () => {
+  const run = subscriptionWorkflow({ binding, serializedContext });
+  await vi.waitFor(() => expect(world.join).toHaveBeenCalled());
+  for (let index = 0; index < 257; index += 1)
+    world.resume(ownerToken, { kind: "delivery", event: event(`e${index}`) });
+  await vi.waitFor(() => expect(world.start).toHaveBeenCalledTimes(257));
+
+  world.resume(ownerToken, { kind: "delivery", event: event("e256") });
+  world.resume(ownerToken, { kind: "delivery", event: event("e1") });
+  world.resume(ownerToken, { kind: "delivery", event: event("e0") });
+  await vi.waitFor(() => expect(world.start).toHaveBeenCalledTimes(258));
+  await settle();
+
+  expect(world.start).toHaveBeenCalledTimes(258);
+  expect(world.start.mock.calls.at(-1)![0]).toMatchObject({ event: event("e0") });
+
+  world.resume(ownerToken, { kind: "retire" });
+  await run;
 });
 
 it("ends at the expiry the source reported, then leaves and closes", async () => {
@@ -357,13 +430,12 @@ it("disposes its hook and ends without joining when the source refuses to open",
   expect(world.close).not.toHaveBeenCalled();
 });
 
-it("acknowledges its first subscription and fans each event out to every member once", async () => {
+it("acknowledges its first subscription and fans each event out to every member", async () => {
   const run = keyRun("a", "ack-a");
   await watching(keyToken);
   await vi.waitFor(() => expect(world.acknowledge).toHaveBeenCalledWith("ack-a"));
 
   world.resume(keyToken, { kind: "join", bindingId: "b", ackId: "ack-b" });
-  world.resume(keyToken, { kind: "emit", event: event("e1") });
   world.resume(keyToken, { kind: "emit", event: event("e1") });
   await vi.waitFor(() => expect(world.fanOut).toHaveBeenCalled());
   await settle();
@@ -395,26 +467,6 @@ it("sends later events to a member that joined after the first", async () => {
 
   world.resume(keyToken, { kind: "leave", bindingId: "a" });
   world.resume(keyToken, { kind: "leave", bindingId: "b" });
-  await run;
-});
-
-it("forgets the oldest event id after 256 distinct ones", async () => {
-  const run = keyRun("a", "ack-a");
-  await watching(keyToken);
-  for (let index = 0; index < 257; index += 1)
-    world.resume(keyToken, { kind: "emit", event: event(`e${index}`) });
-  await vi.waitFor(() => expect(world.fanOut).toHaveBeenCalledTimes(257));
-
-  world.resume(keyToken, { kind: "emit", event: event("e256") });
-  world.resume(keyToken, { kind: "emit", event: event("e1") });
-  world.resume(keyToken, { kind: "emit", event: event("e0") });
-  await vi.waitFor(() => expect(world.fanOut).toHaveBeenCalledTimes(258));
-  await settle();
-
-  expect(world.fanOut).toHaveBeenCalledTimes(258);
-  expect(world.fanOut.mock.calls.at(-1)![0]).toEqual({ bindingIds: ["a"], event: event("e0") });
-
-  world.resume(keyToken, { kind: "leave", bindingId: "a" });
   await run;
 });
 
