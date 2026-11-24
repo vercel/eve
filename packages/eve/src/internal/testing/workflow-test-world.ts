@@ -108,11 +108,14 @@ async function startWorld(
   const queue = world.queue.bind(world);
   world.queue = async (name, message, opts) => {
     const delayed = (opts?.delaySeconds ?? 0) > 0;
-    const coalescibleRunId = delayed ? undefined : await coalescibleRunIdOf(world, message);
-    const at = deliveries.checkpoint();
-    const queued = await queue(name, message, opts);
+    const coalescible = delayed ? undefined : await resolveCoalescible(world, message);
+    const { generation } = deliveries.checkpoint();
+    const queued = await queue(name, coalescible?.stamped ?? message, opts);
     if (queued.messageId !== null)
-      deliveries.queued(queued.messageId, delayed, coalescibleRunId, at);
+      deliveries.queued(queued.messageId, delayed, coalescible?.runId, {
+        generation,
+        seq: deliveries.checkpoint().seq,
+      });
     return queued;
   };
   setWorld(world);
@@ -162,6 +165,11 @@ function newRealm(): void {
     | { inFlight: Map<string, unknown> }
     | undefined;
   singleFlight?.inFlight.clear();
+  const localAbort = store[Symbol.for("@workflow/core//localAbortDelivery")] as
+    | { listeners?: Map<unknown, unknown>; published?: Map<unknown, unknown> }
+    | undefined;
+  localAbort?.listeners?.clear();
+  localAbort?.published?.clear();
 }
 
 export interface QueueCheckpoint {
@@ -234,6 +242,8 @@ export function trackDeliveries(initial: Handler): Deliveries {
     running += 1;
     try {
       const body = await request.text();
+      if (closing) throw new DOMException("The test workflow world is closing.", "AbortError");
+      if (ours !== generation) return new Response(null, { status: 499 });
       const payload = parseBody(body);
       const runId = runIdOf(payload);
       if (runId !== undefined) recovering.delete(runId);
@@ -310,18 +320,24 @@ export function trackDeliveries(initial: Handler): Deliveries {
   };
 }
 
-async function coalescibleRunIdOf(
+async function resolveCoalescible<T>(
   world: LocalWorld,
-  message: unknown,
-): Promise<string | undefined> {
+  message: T,
+): Promise<{ readonly runId: string; readonly stamped: T } | undefined> {
   const runId = orchestratorRunIdOf(message);
   if (runId === undefined || !isCoalescibleMessage(message)) return undefined;
+  const existing = messageRunSpecVersion(message);
   const specVersion =
-    messageRunSpecVersion(message) ??
+    existing ??
     (await world.runs.get(runId, { resolveData: "none" }).catch(() => undefined))?.specVersion;
-  return specVersion !== undefined && specVersion >= SPEC_VERSION_SINGLE_ORCHESTRATOR
-    ? runId
-    : undefined;
+  if (specVersion === undefined || specVersion < SPEC_VERSION_SINGLE_ORCHESTRATOR) {
+    return undefined;
+  }
+  const stamped =
+    existing === undefined && typeof message === "object" && message !== null
+      ? ({ ...(message as Record<string, unknown>), runSpecVersion: specVersion } as T)
+      : message;
+  return { runId, stamped };
 }
 
 function isCoalescibleMessage(message: unknown): boolean {

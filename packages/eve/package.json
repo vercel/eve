@@ -434,6 +434,12 @@
       "import": "./dist/src/public/experimental/workspace/index.js",
       "default": "./dist/src/public/experimental/workspace/index.js"
     },
+    "./experimental/workflow": {
+      "eve-source": "./src/public/experimental/workflow/index.ts",
+      "types": "./dist/src/public/experimental/workflow/index.d.ts",
+      "import": "./dist/src/public/experimental/workflow/index.js",
+      "default": "./dist/src/public/experimental/workflow/index.js"
+    },
     "./experimental/sandbox/just-bash": {
       "eve-source": "./src/public/experimental/sandbox/just-bash.ts",
       "types": "./dist/src/public/experimental/sandbox/just-bash.d.ts",

@@ -10,6 +10,7 @@ let cachedPackageInfo: InstalledPackageInfo | undefined;
 let cachedPackageLocation: PackageLocation | undefined;
 const WORKFLOW_SOURCE_MODULE_ALIASES: Readonly<Record<string, string>> = {
   "eve/workflow": "src/internal/workflow/index.ts",
+  "eve/experimental/workflow": "src/public/experimental/workflow/index.ts",
   workflow: "src/internal/workflow/index.ts",
   "eve/workflow/api": "src/public/workflow/api.ts",
   "workflow/api": "src/internal/workflow/runtime.ts",

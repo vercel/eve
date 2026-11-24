@@ -394,7 +394,7 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
         },
       );
 
-      for (const spec of ["8", "9"]) {
+      for (const spec of ["8", "10"]) {
         needs(
           "durable",
           `finishes a turn whose model call was running when the process died (spec ${spec})`,
