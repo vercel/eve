@@ -1,3 +1,4 @@
+import { Mermaid } from "@vercel/geistdocs/components/mermaid";
 import { createMdxComponents } from "@vercel/geistdocs/mdx";
 import { File, Files, Folder } from "fumadocs-ui/components/files";
 import { Step, Steps } from "fumadocs-ui/components/steps";
@@ -33,6 +34,7 @@ const localComponents: MDXComponents = {
   Files,
   Flag,
   Folder,
+  Mermaid,
   AgentRuntimeDiagram,
   AmbientListeningFlow,
   Capabilities,
