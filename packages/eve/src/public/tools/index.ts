@@ -5,6 +5,7 @@ export {
   type ApprovalResponder,
   type ApprovedCall,
   type ToolLabelDefinition,
+  type ToolAuthDefinition,
   type ToolAuthOptions,
   type ToolAuthProvider,
   type ToolDefinition,
