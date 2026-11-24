@@ -1,4 +1,12 @@
-import type { GitHubBotNameResolver } from "#public/channels/github/auth.js";
+import {
+  GitHubApiError,
+  getGitHubAppWebhookEvents,
+  type GitHubApiOptions,
+} from "#public/channels/github/api.js";
+import type {
+  GitHubBotNameResolver,
+  GitHubChannelCredentials,
+} from "#public/channels/github/auth.js";
 import {
   decodePayload,
   inferGitHubDeliveryId,
@@ -72,6 +80,36 @@ export function githubEventDefinitions(
       inputSchema: INPUT_SCHEMA,
     };
   });
+}
+
+export async function requireAppReceivesWebhook(input: {
+  readonly api?: GitHubApiOptions;
+  readonly botName: GitHubBotNameResolver;
+  readonly credentials?: GitHubChannelCredentials;
+  readonly event: string;
+}): Promise<void> {
+  const webhook = input.event.split(".")[0] ?? input.event;
+  let received: readonly string[];
+  try {
+    received = await getGitHubAppWebhookEvents({
+      api: input.api,
+      appSlug: await input.botName(),
+      credentials: input.credentials,
+    });
+  } catch (error) {
+    if (!(error instanceof GitHubApiError)) throw error;
+    const reason =
+      isObject(error.body) && typeof error.body.message === "string"
+        ? error.body.message
+        : undefined;
+    throw new Error(
+      `Could not check which webhooks the GitHub App receives, so "${input.event}" was not subscribed. GitHub answered ${error.method} ${error.path} with HTTP ${error.status}${reason === undefined ? "" : `: ${reason}`}.`,
+    );
+  }
+  if (!received.includes(webhook))
+    throw new Error(
+      `This GitHub App does not receive the "${webhook}" webhook, so "${input.event}" can't be delivered. Enable it in the App's settings under Permissions & events.`,
+    );
 }
 
 /** The message that names a GitHub event's repository, pull requests and sender, then carries its payload. */

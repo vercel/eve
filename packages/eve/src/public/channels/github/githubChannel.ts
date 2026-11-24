@@ -11,6 +11,7 @@ import {
   type GitHubOnEvent,
   emitGitHubWebhook,
   githubEventDefinitions,
+  requireAppReceivesWebhook,
 } from "#public/channels/github/subscriptions.js";
 import {
   buildGitHubBinding,
@@ -289,7 +290,15 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
       subscriptionEvents && {
         subscriptions: {
           onEvent: subscriptionsOnEvent,
-          onSubscribe: config.experimental?.subscriptions?.onSubscribe,
+          onSubscribe: async (subscriber) => {
+            await requireAppReceivesWebhook({
+              api: config.api,
+              botName,
+              credentials: config.credentials,
+              event: subscriber.subscription.event,
+            });
+            return config.experimental?.subscriptions?.onSubscribe?.(subscriber);
+          },
           events: subscriptionEvents,
         },
       },

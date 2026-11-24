@@ -1,4 +1,5 @@
 import {
+  createGitHubAppJwt,
   resolveGitHubInstallationToken,
   type GitHubAuthApiOptions,
   type GitHubChannelCredentials,
@@ -308,6 +309,43 @@ export async function getGitHubRepository(
   const id = typeof body.id === "number" ? body.id : 0;
   const defaultBranch = typeof body.default_branch === "string" ? body.default_branch : undefined;
   return { defaultBranch, id };
+}
+
+export async function getGitHubAppWebhookEvents(input: {
+  readonly api?: GitHubApiOptions;
+  readonly appSlug: string | undefined;
+  readonly credentials?: GitHubChannelCredentials;
+}): Promise<readonly string[]> {
+  let response: GitHubApiResponse;
+  if (input.credentials?.installationToken !== undefined) {
+    if (input.appSlug === undefined) {
+      throw new Error(
+        "githubChannel: the App's slug is required to read its webhook events. Set credentials.appSlug, botName or GITHUB_APP_SLUG.",
+      );
+    }
+    response = await callGitHubApi({
+      api: input.api,
+      credentials: input.credentials,
+      method: "GET",
+      path: `/apps/${encodePath(input.appSlug)}`,
+    });
+  } else {
+    const jwt = await createGitHubAppJwt({
+      appId: input.credentials?.appId,
+      privateKey: input.credentials?.privateKey,
+    });
+    response = await callGitHubApi({
+      api: input.api,
+      method: "GET",
+      options: { auth: false, headers: { authorization: `Bearer ${jwt}` } },
+      path: "/app",
+    });
+  }
+  const events = isObject(response.body) ? response.body.events : undefined;
+  if (!Array.isArray(events) || !events.every((event) => typeof event === "string")) {
+    throw new Error("githubChannel: GitHub's App response did not list its webhook events.");
+  }
+  return events;
 }
 
 function normalizeCommentBody(body: string | GitHubCommentBody): GitHubJsonObject {

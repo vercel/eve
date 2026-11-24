@@ -1,9 +1,12 @@
+import { generateKeyPairSync } from "node:crypto";
+
 import { describe, expect, it, vi } from "vitest";
 
 import { isCompiledChannel } from "#channel/compiled-channel.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
+import type { GitHubChannelCredentials } from "#public/channels/github/auth.js";
 import { githubChannel } from "#public/channels/github/githubChannel.js";
 import {
   describeGitHubEvent,
@@ -14,6 +17,7 @@ import {
 import { signGitHubWebhookBody } from "#public/channels/github/verify.js";
 import type {
   ChannelEvent,
+  ChannelOnSubscribe,
   ChannelSubscription,
   EmitChannelEventFn,
 } from "#shared/channel-subscriptions.js";
@@ -438,14 +442,108 @@ describe("GitHub channel subscriptions", () => {
     });
   });
 
-  it("hands onSubscribe to the compiled channel beside onEvent", () => {
-    const onSubscribe = vi.fn();
-    const channel = githubChannel({
-      experimental: { subscriptions: { onEvent: SEND_ALL, onSubscribe } },
-      credentials: { installationToken: "ghs_test", webhookSecret: SECRET },
+  describe("subscribing", () => {
+    const REQUEST = {
+      channelName: "github",
+      event: "check_run.completed",
+      input: { owner: "vercel", repo: "eve" },
+    };
+
+    function subscribeTo(input: {
+      readonly credentials: GitHubChannelCredentials;
+      readonly events: readonly string[] | Response;
+      readonly onSubscribe?: ChannelOnSubscribe;
+      readonly event?: string;
+    }) {
+      const fetchMock = vi.fn<typeof fetch>(async () =>
+        input.events instanceof Response ? input.events : Response.json({ events: input.events }),
+      );
+      const channel = githubChannel({
+        api: { fetch: fetchMock },
+        credentials: input.credentials,
+        experimental: { subscriptions: { onEvent: SEND_ALL, onSubscribe: input.onSubscribe } },
+      });
+      if (!isCompiledChannel(channel) || channel.onSubscribe === undefined)
+        throw new Error("Expected a CompiledChannel with onSubscribe.");
+      expect(channel.onEvent).toBe(SEND_ALL);
+      const subscribe = () =>
+        channel.onSubscribe!({
+          auth: null,
+          sessionId: "s1",
+          subscription: { ...REQUEST, event: input.event ?? REQUEST.event },
+        });
+      return { fetchMock, subscribe };
+    }
+
+    const connect = { appSlug: "my-app", installationToken: "ghs_test", webhookSecret: SECRET };
+
+    it("accepts an event whose webhook the App receives, reading the App by slug with the installation token", async () => {
+      const { fetchMock, subscribe } = subscribeTo({
+        credentials: connect,
+        events: ["check_run", "push"],
+      });
+      await expect(subscribe()).resolves.toBeUndefined();
+      const [url, init] = fetchMock.mock.calls[0]!;
+      expect(url).toBe("https://api.github.com/apps/my-app");
+      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer ghs_test");
     });
-    if (!isCompiledChannel(channel)) throw new Error("Expected a CompiledChannel.");
-    expect(channel.onSubscribe).toBe(onSubscribe);
-    expect(channel.onEvent).toBe(SEND_ALL);
+
+    it("rejects an event whose webhook the App does not receive, naming the webhook", async () => {
+      const { subscribe } = subscribeTo({ credentials: connect, events: ["pull_request"] });
+      await expect(subscribe()).rejects.toThrow(
+        'This GitHub App does not receive the "check_run" webhook, so "check_run.completed" can\'t be delivered.',
+      );
+    });
+
+    it("rejects with GitHub's own status and message when the App can't be read", async () => {
+      const { subscribe } = subscribeTo({
+        credentials: connect,
+        events: Response.json({ message: "Not Found" }, { status: 404 }),
+      });
+      await expect(subscribe()).rejects.toThrow("GET /apps/my-app with HTTP 404: Not Found.");
+    });
+
+    it("rejects when the App's slug is unknown", async () => {
+      const { subscribe } = subscribeTo({
+        credentials: { installationToken: "ghs_test", webhookSecret: SECRET },
+        events: ["check_run"],
+      });
+      await expect(subscribe()).rejects.toThrow("the App's slug is required");
+    });
+
+    it("reads the App as itself with its key when there is no installation token", async () => {
+      const { privateKey } = generateKeyPairSync("rsa", {
+        modulusLength: 2048,
+        privateKeyEncoding: { format: "pem", type: "pkcs8" },
+        publicKeyEncoding: { format: "pem", type: "spki" },
+      });
+      const { fetchMock, subscribe } = subscribeTo({
+        credentials: { appId: 42, privateKey, webhookSecret: SECRET },
+        events: ["check_run"],
+      });
+      await expect(subscribe()).resolves.toBeUndefined();
+      const [url, init] = fetchMock.mock.calls[0]!;
+      expect(url).toBe("https://api.github.com/app");
+      expect(new Headers(init?.headers).get("authorization")).toMatch(
+        /^Bearer [\w-]+\.[\w-]+\.[\w-]+$/,
+      );
+    });
+
+    it("checks the webhook before the author's onSubscribe, then returns what it returns", async () => {
+      const grant = { input: { owner: "vercel", repo: "eve" } };
+      const onSubscribe = vi.fn<ChannelOnSubscribe>().mockResolvedValue(grant);
+      const missing = subscribeTo({ credentials: connect, events: [], onSubscribe });
+      await expect(missing.subscribe()).rejects.toThrow("check_run");
+      expect(onSubscribe).not.toHaveBeenCalled();
+
+      const present = subscribeTo({ credentials: connect, events: ["check_run"], onSubscribe });
+      await expect(present.subscribe()).resolves.toBe(grant);
+      expect(onSubscribe).toHaveBeenCalledOnce();
+    });
+
+    it("checks a webhook with no action by its own name", async () => {
+      const { subscribe } = subscribeTo({ credentials: connect, events: ["push"], event: "push" });
+      await expect(subscribe()).resolves.toBeUndefined();
+    });
   });
 });
