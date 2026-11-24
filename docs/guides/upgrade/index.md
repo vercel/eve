@@ -6,7 +6,7 @@ navTitle: "Overview"
 
 This guide moves a project from eve 0.91 or earlier to 1.0. On eve 0.84 through 0.91, start with [Upgrade from 0.84 through 0.91](#upgrade-from-084-through-091). From 0.83 or earlier, most of the work is mechanical: renamed APIs, moved imports, and stricter definitions that `eve build` and your typechecker point out. Two areas need more care, because mistakes there compile cleanly:
 
-- **Code that reads session events.** The session stream moves from format v26 to v27, and most event names change. A hook, dashboard, or stream reader that still matches v26 names builds without errors and then matches nothing.
+- **Code that reads session events.** The session stream moves from format v26 to v27, and most event names change. A hook or channel `events` handler keyed on a removed v26 name such as `message.completed` fails to load, and the error names the v27 replacement. A dashboard, stream reader, or string filter that still matches v26 names builds without errors and then matches nothing.
 - **Session history your application stores.** Events saved from eve 0.69 through 0.83 are in v26 format. Re-read or convert them before you load them into a v27 client.
 
 This page gives the order of work and links to a page for each part of a project. Read only the pages that apply to you. After the upgrade, the [stability policy](/docs/reference/typescript-api#stability-policy) tells you which APIs are stable and which are experimental.
@@ -30,7 +30,7 @@ The pages are ordered from the changes that affect most projects to the ones tha
 | [Upgrade agent files](/docs/guides/upgrade/agent-files)              | Any agent. Covers `agent.ts`, connections, tools, sandboxes, memory, imports, and Workflow tools.         |
 | [Upgrade to v27 session events](/docs/guides/upgrade/session-events) | Hooks, channel `events` handlers, instrumentation, stream readers, or approvals, questions, and sign-ins. |
 | [Upgrade clients and frontends](/docs/guides/upgrade/clients)        | `eve/client`, `useEveAgent`, `SessionStore`, or HTTP callers.                                             |
-| [Upgrade channels](/docs/guides/upgrade/channels)                    | Slack, Teams, MCP, Chat SDK, or custom channels.                                                          |
+| [Upgrade channels](/docs/guides/upgrade/channels)                    | Slack, Teams, MCP, Chat SDK, or custom channels, including proactive `from(address)` sends.               |
 | [Upgrade evals and CLI scripts](/docs/guides/upgrade/evals-and-cli)  | Evals, or scripts that call the `eve` CLI.                                                                |
 | [Migrate saved history](/docs/guides/upgrade/saved-history)          | Session events saved in your own storage, or your own reducers and stream followers.                      |
 
@@ -91,6 +91,7 @@ Review [run-data retention](/docs/agent-config#run-data-retention) before you re
 | `Rename "compaction.thresholdPercent" to "compaction.threshold"`                | [Rename the field](/docs/guides/upgrade/agent-files#rename-compactionthresholdpercent) and keep its value.                          |
 | ``Import from `eve/workflow` (or `eve/workflow/api`) instead of "workflow"``    | [Update Workflow imports](/docs/guides/upgrade/agent-files#workflow-imports).                                                       |
 | Sandbox commands fail with `pnpm: command not found` or a refused `pip install` | [Install them in `prepare`](/docs/guides/upgrade/agent-files#choose-one-sandbox-layout-and-install-your-tools).                     |
+| `handles "<event>" was removed in session stream version 27`                    | Use the v27 event the error names; see [Event mapping](/docs/guides/upgrade/session-events#event-mapping).                          |
 | Hooks, dashboards, or UI show nothing after the upgrade, with no errors         | A consumer still matches v26 event names; see [Find every consumer](/docs/guides/upgrade/session-events#find-every-consumer).       |
 | `end()` or `POST /eve/v1/session/:sessionId/end` fails against an older server  | Deploy the upgraded server before the upgraded client.                                                                              |
 | `400` naming unknown fields from the eve channel                                | Remove or correct the fields, or upgrade the server; see [Check request shapes](/docs/guides/upgrade/clients#check-request-shapes). |

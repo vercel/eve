@@ -15,6 +15,7 @@ Eval assertions match v27 events and read session state from `view`. Rename the 
 | Before                                                           | After                                                         |
 | ---------------------------------------------------------------- | ------------------------------------------------------------- |
 | `inputRequests`, `pendingInputRequests`, `requireInputRequest()` | `interactions`, `pendingInteractions`, `requireInteraction()` |
+| `turn.message`                                                   | `turn.reply`                                                  |
 | `loadedSkill`                                                    | `calledSkill`                                                 |
 | `calledSubagent`                                                 | `calledAgent`                                                 |
 | `noFailedActions`                                                | `noFailedCalls`                                               |

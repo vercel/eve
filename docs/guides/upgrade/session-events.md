@@ -32,6 +32,7 @@ Use this table to rename handlers and filters. When a row says to check a field,
 | v26 event                                                         | v27 event                                                                                                         |
 | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `message.received`                                                | `delivery.consumed`                                                                                               |
+| `history.imported`                                                | `delivery.consumed`; read imported messages from `data.history` instead of `data.messages`                        |
 | `message.appended`, `reasoning.appended`                          | `content.delta` (progress; check `kind`)                                                                          |
 | `message.completed`, `reasoning.completed`, `result.completed`    | `content.completed` (check `kind`; text with `phase: "reply"` is the answer)                                      |
 | `step.started`, `step.completed`, `step.failed`                   | `model.started`, `model.settled` (check `outcome`); `model.requested` comes before model selection                |
@@ -56,7 +57,13 @@ v27 also adds events with no v26 equivalent:
 
 ## Hooks
 
-Hooks keep the `(event, ctx)` signature. To update a hook:
+Hooks keep the `(event, ctx)` signature. eve refuses to load a hook or channel `events` handler keyed on a removed v26 event, and the error names the replacement:
+
+```text
+Hook "hooks/old.ts" handles "message.completed" was removed in session stream version 27. Key on `content.completed`; `phase: "reply"` marks the reply, instead of `finishReason`.
+```
+
+Not every v26 key is rejected. A hook keyed on `history.imported` still loads and never fires, so check the [event mapping](#event-mapping) for every key. To update a hook:
 
 - Rename its event keys using the [event mapping](#event-mapping).
 - Read the session's recorded state from `ctx.view` instead of tracking it yourself, and identify the event with `ctx.position`.
@@ -133,7 +140,7 @@ Type providers with `InstrumentationEvent<K>` and rename their handlers using th
 
 A clean typecheck doesn't find every v26 consumer. Code that parses NDJSON or saved JSON with its own event types compiles against any eve version, and it ignores events it doesn't recognize without an error.
 
-- Search for v26 event names such as `message.completed`, `action.result`, `actions.requested`, and `authorization.required`, not only for `eve` imports. Include scripts, test helpers, and server routes that proxy streams.
+- Search for v26 event names such as `message.completed`, `action.result`, `actions.requested`, `authorization.required`, and `history.imported`, not only for `eve` imports. Include scripts, test helpers, and server routes that proxy streams.
 - Run a recorded v27 stream through each consumer and check its output. A reducer that returns nothing, or a filter that matches nothing, still compiles.
 - Check server code that filters or redacts streamed content before it reaches a browser. A filter keyed on v26 event types passes `content.delta` and `content.completed` through unchanged.
 - Check consumers in other deployments, such as remote agents and their callers.

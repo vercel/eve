@@ -30,6 +30,14 @@ This page is part of [Upgrade to 1.0](/docs/guides/upgrade).
 - Channel delivery hooks receive typed `ChannelDelivery` payloads and return replacements. Use `channel.state` for state changes. Remove `kindHint`.
 - Rename the CORS options `allowedHeaders`, `exposedHeaders`, and `preflightStatus` to `allowHeaders`, `exposeHeaders`, and `preflight.statusCode`.
 - Sends, channels, and schedules accept `MessageContent`; send images as file parts. In Chat SDK channels, rename `messageToUserContent` to `messageContentOf`.
+- `from(address).send()` returns a `Delivery` receipt instead of a `Session`. Read the session ID from `delivery.sessionId` instead of `session.id`, and wait for the reply with `delivery.result()`. See [Read results from a delivery](/docs/guides/upgrade/clients#read-results-from-a-delivery).
+
+  ```ts
+  const session = await from(address).send(message, { auth: null }); // [!code --]
+  console.log(session.id); // [!code --]
+  const delivery = await from(address).send(message, { auth: null }); // [!code ++]
+  console.log(delivery.sessionId); // [!code ++]
+  ```
 
 See [Custom channels](/docs/channels/custom).
 
