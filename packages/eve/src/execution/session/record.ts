@@ -6,6 +6,7 @@ export const SESSION_LIMITS = { stepResultBytes: 262_144, recordBytes: 262_144 }
 
 export const SESSION_RECORD_VERSION = 1;
 
+/** The record of a session that an engine keeps. It is JSON, and an engine passes it back as is. */
 export type SessionRecord = Opaque<"eve.session-record">;
 
 export interface SessionRecordContents {
@@ -13,6 +14,8 @@ export interface SessionRecordContents {
   readonly generation: number;
   readonly transfer: SessionTransferState;
   readonly open: OpenTurn | undefined;
+  readonly timeoutDeadline?: number;
+  readonly sessionCode?: string;
 }
 
 export class SessionRecordTooNew extends Error {

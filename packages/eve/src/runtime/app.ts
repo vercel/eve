@@ -1,4 +1,5 @@
 import type { Durable } from "#execution/durable.js";
+import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { InstrumentationProvider } from "#instrumentation/provider.js";
 import type { InstrumentationRuntime } from "#instrumentation/runtime.js";
 import type { PlatformDeclaration } from "#platform/declaration.js";
@@ -12,10 +13,15 @@ import {
 import { createLifetime, type Lifetime } from "#runtime/lifetime.js";
 import type { RuntimeSession } from "#runtime/sessions/runtime-session.js";
 
+/** A booted eve application. */
 export interface App {
+  /** The entities that eve made from the platform declaration. */
   readonly platform: Entities;
+  /** The started durable engine. */
   readonly durable: Durable;
+  /** The routes and streams that engines registered. Register them with `hostEngine()`. */
   readonly hosts: AppHosts;
+  /** The lifetime of the app. */
   readonly lifetime: Lifetime;
 }
 
@@ -39,6 +45,7 @@ export interface ProcessApp {
   platform: Entities | undefined;
   durable: Durable | undefined;
   defaultSession: RuntimeSession | undefined;
+  artifacts: (() => RuntimeCompiledArtifactsSource) | undefined;
   readonly hosts: ProcessHosts;
   readonly instrumentation: AppInstrumentation;
   readonly lifetime: Lifetime;
@@ -54,10 +61,15 @@ export function createProcessApp(): ProcessApp {
     platform: undefined,
     durable: undefined,
     defaultSession: undefined,
+    artifacts: undefined,
     hosts: createProcessHosts(),
     instrumentation: { providers: new Map(), runtime: undefined, setup: undefined },
     lifetime: createLifetime(),
   };
+}
+
+export function processArtifacts(): (() => RuntimeCompiledArtifactsSource) | undefined {
+  return processApp().artifacts;
 }
 
 export function openSession(app: App, id: string): Session {

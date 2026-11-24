@@ -57,7 +57,8 @@ import {
   assertScheduleCollectionNamesDistinctFromSchedules,
   compileScheduleCollectionDefinitions,
 } from "#compiler/normalize-schedule-collection.js";
-import { loadPlatformBuild } from "#platform/selection.js";
+import { loadPlatformBuild, loadPlatformEngineBuild } from "#platform/selection.js";
+import { workflowEngineWorld } from "#execution/workflow-host/build.js";
 import { withBuildCompute } from "#sandbox/hosted-compute.js";
 import {
   authoredScheduleProvider,
@@ -209,6 +210,7 @@ class AgentGraphCompiler {
       source: phaseOne.selectedConfig.source,
     });
     assertRootOnlyConfig(config, input.isRoot, input.manifest.agentId);
+    if (input.isRoot) config = await withPlatformWorkflowWorld(config, input.manifest.appRoot);
     applyAgentToolPolicy(phaseOne, config);
     applyDefaultToolPolicy(phaseOne, config);
 
@@ -695,4 +697,25 @@ class AgentGraphCompiler {
       tools,
     });
   }
+}
+
+async function withPlatformWorkflowWorld(
+  config: CompiledAgentDefinition,
+  appRoot: string,
+): Promise<CompiledAgentDefinition> {
+  const world = workflowEngineWorld(await loadPlatformEngineBuild(appRoot));
+  if (world === undefined) return config;
+  const configured = config.experimental?.workflow?.world;
+  if (configured !== undefined && configured !== world) {
+    throw new Error(
+      `agent.ts sets experimental.workflow.world to "${configured}", and agent/platform.ts gives workflowEngine({ world: "${world}" }). Set the World in one of the two files.`,
+    );
+  }
+  return {
+    ...config,
+    experimental: {
+      ...config.experimental,
+      workflow: { ...config.experimental?.workflow, world },
+    },
+  };
 }

@@ -467,6 +467,18 @@
       "import": "./dist/src/public/experimental/schedules/vercel.js",
       "default": "./dist/src/public/experimental/schedules/vercel.js"
     },
+    "./experimental/platform": {
+      "eve-source": "./src/public/experimental/platform/index.ts",
+      "types": "./dist/src/public/experimental/platform/index.d.ts",
+      "import": "./dist/src/public/experimental/platform/index.js",
+      "default": "./dist/src/public/experimental/platform/index.js"
+    },
+    "./experimental/session": {
+      "eve-source": "./src/public/experimental/session/index.ts",
+      "types": "./dist/src/public/experimental/session/index.d.ts",
+      "import": "./dist/src/public/experimental/session/index.js",
+      "default": "./dist/src/public/experimental/session/index.js"
+    },
     "./channels": {
       "types": "./dist/src/public/channels/index.d.ts",
       "import": "./dist/src/public/channels/index.js",

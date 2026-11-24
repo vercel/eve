@@ -234,7 +234,7 @@ export async function buildApplication(
     options.profileOutputPath === undefined ? undefined : resolve(options.profileOutputPath);
   const profiler = profileOutputPath === undefined ? undefined : new ApplicationBuildProfiler();
   const platformModule = selectPlatformModule(resolve(rootDir), options.platformModule);
-  const declaration = await loadPlatformDeclaration(platformModule);
+  const declaration = await loadPlatformDeclaration(platformModule, resolve(rootDir));
   const build = declaration.build ?? {};
   const platform: ApplicationBuildPlatform = {
     module: platformModule,
@@ -344,6 +344,9 @@ async function buildApplicationInWorkspace(
         platform.entry === undefined ? undefined : resolve(preparedHost.appRoot, platform.entry),
       conditions: platform.conditions,
       durable: platform.durable,
+      ...(platform.build.schedules?.authored === true && {
+        authoredSchedules: "triggers" as const,
+      }),
       publicRoutePrefix,
       vercelService: servicePrefix !== undefined || options.vercelServiceOutput !== undefined,
       workspaceMember: options.workspaceMember,

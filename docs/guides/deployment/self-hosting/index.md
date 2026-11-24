@@ -91,6 +91,8 @@ eve remote connect --url https://your_agent.example.com
 | Agents in a workspace that call each other                         | Configure a [workspace-peer transport](/docs/subagents#vercel-workspace-peers)                                    |
 | Traces                                                             | Configure an [OpenTelemetry](/docs/observability/otel) destination                                                |
 
+To give eve the services of your host, such as its document store or a durable engine other than Workflow, declare an experimental [platform](/docs/experimental/platforms) in `agent/platform.ts`.
+
 ## Run the sandbox
 
 eve runs the sandbox in Docker when `eve build` can reach a Docker daemon, and records that choice in the build.

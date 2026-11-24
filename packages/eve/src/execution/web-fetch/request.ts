@@ -1,11 +1,10 @@
-import type { Dispatcher1Wrapper } from "undici";
-
+import { ambientPlatform } from "#context/app.js";
 import {
   assertPublicHostname,
   cancelResponseBody,
-  createPublicDispatcher,
-  fetchWithDispatcher,
+  fetchPublicDestination,
   readBoundedResponse,
+  type PublicDestinationFetch,
 } from "#execution/public-destination.js";
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
@@ -25,7 +24,7 @@ export async function requestPublicUrl(
   let url = parseHttpsUrl(urlText);
 
   for (let redirectCount = 0; ; redirectCount++) {
-    const { dispatcher, response } = await requestOnce(url, options);
+    const { close, response } = await requestOnce(url, options);
 
     try {
       const location = response.headers.get("location");
@@ -42,7 +41,7 @@ export async function requestPublicUrl(
 
       return await readBoundedResponse(response, options.maxResponseSize);
     } finally {
-      await dispatcher.close();
+      await close();
     }
   }
 }
@@ -66,20 +65,12 @@ function parseHttpsUrl(urlText: string): URL {
 async function requestOnce(
   url: URL,
   options: PublicUrlRequestOptions,
-): Promise<{ readonly dispatcher: Dispatcher1Wrapper; readonly response: Response }> {
+): Promise<PublicDestinationFetch> {
   assertPublicHostname(url.hostname, WEB_FETCH_DESTINATION_POLICY);
-  const dispatcher = await createPublicDispatcher(WEB_FETCH_DESTINATION_POLICY);
-
-  try {
-    const response = await fetchWithDispatcher(url, {
-      dispatcher,
-      headers: options.headers,
-      redirect: "manual",
-      signal: options.signal,
-    });
-    return { dispatcher, response };
-  } catch (error) {
-    await dispatcher.close();
-    throw error;
-  }
+  return await fetchPublicDestination(
+    url,
+    { headers: options.headers, redirect: "manual", signal: options.signal },
+    WEB_FETCH_DESTINATION_POLICY,
+    ambientPlatform()?.network,
+  );
 }

@@ -1659,6 +1659,7 @@ const PLATFORM_CONTRACT_MODULES = new Set([
   "#platform/runtime-spans.js",
   "#platform/schedules.js",
   "#platform/selection.js",
+  "#platform/workflow-engine.js",
 ]);
 const PLATFORM_BUILD_HOST_DIR = "packages/eve/src/internal/nitro/host/";
 const PLATFORM_BUILD_HOST_MODULES = new Set(["#platform/build-output.js", "#platform/types.js"]);

@@ -76,17 +76,29 @@ const NO_INPUT_CAPABILITY_ERROR_MESSAGE =
   "This session cannot request human input, so it cannot wait for a tool approval or question. " +
   "Configure unattended tools with an approval policy that does not require human input.";
 
+/**
+ * Why {@link SessionTurnHost.next} returned: new input, the time `until` came, the `wake` promise
+ * settled, or the host lets the run park because it waits for nothing.
+ */
 export type SessionWake = "input" | "due" | "woken" | "park";
 
+/** The options of {@link SessionTurnHost.next}. */
 export interface SessionNextOptions {
+  /** The time, in milliseconds since the epoch, when the wait ends with `"due"`. */
   readonly until?: number;
+  /** A promise that ends the wait with `"woken"` when it settles. */
   readonly wake?: Promise<unknown>;
 }
 
+/** The durable operations that the session program calls on its host. */
 export interface SessionTurnHost {
+  /** Runs a step durably, and returns its result. A replay returns the kept result. */
   readonly step: SessionStepCall;
+  /** Waits for new input, the time `until`, or the `wake` promise. */
   next(options?: SessionNextOptions): Promise<SessionWake>;
+  /** Returns the current time, in milliseconds since the epoch. A replay returns the same time. */
   now(): number;
+  /** Runs work in parallel, and settles each part. */
   all<T extends readonly unknown[] | []>(
     work: T,
   ): Promise<{ -readonly [K in keyof T]: PromiseSettledResult<Awaited<T[K]>> }>;

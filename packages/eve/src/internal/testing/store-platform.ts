@@ -1,10 +1,17 @@
 import type { Durable, EngineApp } from "#execution/durable.js";
+import { wakeAt } from "./wake-timer.js";
+import { durableSessionEvents } from "#execution/durable-session-events.js";
 import { hostEngine } from "#execution/hosts.js";
-import type { SessionEventStore } from "#execution/session-event-store.js";
 import type { SessionStepCall } from "#execution/session/steps.js";
 import type { TurnStepInput } from "#execution/session/turn-step-types.js";
 import { definePlatform } from "#platform/declaration.js";
-import { sessionSteps, storeDurable, type StoreDurable } from "#platform/engine.js";
+import {
+  sessionSteps,
+  storeDurable,
+  type StoreDurable,
+  type StoreWakeOptions,
+} from "#platform/engine.js";
+import { registerCleanup } from "#runtime/lifetime.js";
 import type { App } from "#runtime/app.js";
 import { createUlid } from "#shared/ulid.js";
 
@@ -48,7 +55,6 @@ function acrossBoundary({ sessionWritable, ...input }: TurnStepInput): TurnStepI
 function startMemoryStoreEngine(app: EngineApp, context: StorePlatformContext): Durable {
   const store = createMemorySessionStore();
   const hosting = hostEngine(app);
-  const encoder = new TextEncoder();
   const kept = new Map<string, unknown>();
   const known = new Set<string>();
   const running = new Set<string>();
@@ -59,27 +65,6 @@ function startMemoryStoreEngine(app: EngineApp, context: StorePlatformContext): 
       return durable;
     },
   };
-
-  const events = (sessionId: string): SessionEventStore => ({
-    async assertFollowable() {
-      if ((await store.status(sessionId)) === undefined)
-        throw new Error(`Session "${sessionId}" isn't in the store.`);
-    },
-    tail: () => store.streams.tail(sessionId),
-    readable(_sessionId, startIndex = 0) {
-      const lines = store.streams.read(sessionId, startIndex)[Symbol.asyncIterator]();
-      return new ReadableStream<Uint8Array>({
-        async pull(controller) {
-          const next = await lines.next();
-          if (next.done) controller.close();
-          else controller.enqueue(encoder.encode(`${next.value.line}\n`));
-        },
-        cancel() {
-          void lines.return?.();
-        },
-      });
-    },
-  });
 
   const step: SessionStepCall = async (name, input, { key }) => {
     const sessionId = key.slice(0, key.indexOf(":"));
@@ -110,10 +95,16 @@ function startMemoryStoreEngine(app: EngineApp, context: StorePlatformContext): 
     }
   };
 
-  const wake = async (sessionId: string): Promise<void> => {
+  const wake = async (sessionId: string, options: StoreWakeOptions = {}): Promise<void> => {
+    if (options.at !== undefined) {
+      let cancel: (() => void) | undefined;
+      registerCleanup(app.lifetime, () => cancel?.());
+      cancel = wakeAt(options.at, () => void wake(sessionId));
+      return;
+    }
     if (!known.has(sessionId)) {
       known.add(sessionId);
-      hosting.session(sessionId, events(sessionId));
+      hosting.session(sessionId, durableSessionEvents(durable));
     }
     if (running.has(sessionId)) {
       woken.add(sessionId);

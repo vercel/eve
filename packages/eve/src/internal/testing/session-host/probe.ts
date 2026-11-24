@@ -39,6 +39,7 @@ export interface ProbeOptions {
   readonly events?: HookDefinition["events"];
   readonly modules?: NonNullable<Parameters<typeof createTestRuntime>[0]>["modules"];
   readonly sandboxIdle?: NonNullable<Parameters<typeof createTestRuntime>[0]>["sandboxIdle"];
+  readonly sessionTimeoutMs?: number;
 }
 
 export interface Probe {
@@ -65,6 +66,9 @@ export async function probe(options: ProbeOptions): Promise<Probe> {
     agent: {
       definition: defineAgent({
         model: defineDynamic(() => ({ model, modelContextWindowTokens: 200_000 })),
+        ...(options.sessionTimeoutMs !== undefined && {
+          limits: { sessionTimeoutMs: options.sessionTimeoutMs },
+        }),
       }),
       name: options.name,
     },
