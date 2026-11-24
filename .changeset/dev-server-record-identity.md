@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-`eve dev` now starts when its leftover state record names a port that another eve server holds, because the record carries the server's pid and a random id and is deleted when the server answering on its URL returns a different id.
+`eve dev` and the framework hosts now reuse a recorded dev server only when the server answering on its port is the one that wrote the record, because each server stamps the record with a random id.

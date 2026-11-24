@@ -66,7 +66,7 @@ describe("eve dev state record", () => {
     const app = await scenarioApp(WEATHER_AGENT_DESCRIPTOR);
     const first = await startEveDev(app.appRoot);
 
-    await expect(startEveDev(app.appRoot)).rejects.toThrow();
+    await expect(startEveDev(app.appRoot)).rejects.toThrow("A dev server is already running");
 
     expect((await fetch(first.url)).status).toBeLessThan(500);
     await first.stop();
