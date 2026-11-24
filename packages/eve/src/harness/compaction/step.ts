@@ -63,7 +63,7 @@ import {
   gatewayModelId,
   type TokenUsageDelta,
 } from "#harness/model-call/usage.js";
-import { resolveModelProfile } from "#harness/model-profile.js";
+import { modelIdentity, resolveModelProfile } from "#harness/model-profile.js";
 import { markUsageReported, NO_USAGE } from "#harness/session-usage.js";
 import { addTokenUsage } from "#shared/token-usage-math.js";
 import { controlDeliveryFor } from "#harness/session-machine/transitions.js";
@@ -416,7 +416,7 @@ async function decideHistory(
           abortSignal: step.config.abortSignal ?? new AbortController().signal,
           changeId: change.changeId,
           event,
-          identity: async () => identityOf((await turnModel()).model),
+          identity: async () => modelIdentity((await turnModel()).model),
           limit: fitLimit(input),
           model: {
             ...(compaction.contextWindowTokens !== undefined && {
@@ -488,12 +488,6 @@ async function decideHistory(
 function once<T>(produce: () => Promise<T>): () => Promise<T> {
   let value: Promise<T> | undefined;
   return () => (value ??= produce());
-}
-
-function identityOf(model: LanguageModel): { readonly provider: string; readonly modelId: string } {
-  return typeof model === "string"
-    ? { provider: "gateway", modelId: model }
-    : { provider: model.provider, modelId: model.modelId };
 }
 
 function withInstructions(

@@ -1,3 +1,4 @@
+export { openaiCompaction } from "./openai.js";
 export { fixedTail, turns } from "./strategies.js";
 export { CompactionOverflowError } from "#harness/compaction/overflow-error.js";
 export type { FixedTailOptions } from "#harness/compaction/authored.js";

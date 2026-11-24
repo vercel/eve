@@ -353,6 +353,31 @@ or wrap it to keep part of the history out of its reach. With `compact`, choose 
 in the strategy: `compaction.model` and `compaction.modelContextWindowTokens` configure only eve's
 default, and eve rejects them beside `compact`.
 
+`openaiCompaction()` from `eve/compaction` compacts with OpenAI's own compaction instead of a text
+summary. eve sends the turn's request with OpenAI's `compaction_trigger`, and OpenAI answers with
+an encrypted record of the history. eve stores that record as the history and sends it back on
+every later request, so the model keeps its working state where a summary would drop it. It needs
+the OpenAI Responses API called directly, with `openai("gpt-...")`. On any other model, and when the
+call fails, it summarizes as text with `fixedTail()` and logs why.
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+import { openaiCompaction } from "eve/compaction";
+import { openai } from "eve/models/openai";
+
+export default defineAgent({
+  model: openai("gpt-5"),
+  compaction: { compact: openaiCompaction() },
+});
+```
+
+The request leaves out the messages eve adds to every request (memory, instructions, state and the
+previous checkpoint), and eve adds them again after the compaction, because the record would hold
+stale copies of them. The first request after a compaction misses the prompt cache past the
+instructions and tools. Later requests hit it. The record is unreadable to other providers: a
+session that switches models after an OpenAI compaction logs a warning on each request and sends
+the history without the record.
+
 eve checks each result before it applies it. A result fails the compaction, and leaves the history
 as it was, when it drops a tool call's result or a call, puts a checkpoint after other messages, or
 removes a user message's `kind`. An automatic result must also fit within `ctx.tokens.limit`. What

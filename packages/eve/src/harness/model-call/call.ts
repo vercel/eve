@@ -31,7 +31,8 @@ import {
   rejectsCredential,
   isContextOverflowError,
 } from "#harness/model-call/errors.js";
-import { type ModelProfile, resolveModelProfile } from "#harness/model-profile.js";
+import { holdsOpenAICompaction, OPENAI_DIRECT_PROVIDER } from "#harness/compaction/openai-item.js";
+import { modelIdentity, type ModelProfile, resolveModelProfile } from "#harness/model-profile.js";
 import { awaitsProviderToolResult } from "#harness/provider-tool-history.js";
 import { estimateRequestEnvelope } from "#harness/request-envelope.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
@@ -135,6 +136,13 @@ export class ModelCaller {
     this.input = input;
 
     this.profile = resolveModelProfile(input.model, stepReference(step).promptCache);
+    const { provider, modelId } = modelIdentity(input.model);
+    if (provider !== OPENAI_DIRECT_PROVIDER && holdsOpenAICompaction(prompt.messages)) {
+      log.warn(
+        `The history holds an OpenAI compaction record that ${provider} ${modelId} cannot read, so the request leaves it out and the model loses what it held. Switch back to the OpenAI Responses API, or compact again with a text strategy.`,
+        { sessionId: step.session.sessionId },
+      );
+    }
     this.attributionHeaders = buildGatewayAttributionHeaders(
       this.profile,
       step.config.runtimeIdentity,

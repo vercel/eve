@@ -1,3 +1,4 @@
+import { simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import type { LanguageModelV4CallOptions } from "@ai-sdk/provider";
 import { describe, expect, it } from "vitest";
@@ -7,9 +8,14 @@ import type { Runtime } from "#channel/types.js";
 import { defineDynamic } from "#dynamic/definition.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { markMockModel } from "#internal/mock-model-identity.js";
-import { textStreamResult, toolCallStreamResult } from "#internal/testing/approval-resume.js";
+import {
+  textStreamResult,
+  toolCallStreamResult,
+  usage,
+} from "#internal/testing/approval-resume.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { readStoredTurnState } from "#internal/testing/session-test-helpers.js";
+import { openaiCompaction } from "#public/compaction/index.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineInstructions } from "#public/instructions/index.js";
 import { defineMemory, defineMemoryProvider } from "#public/memory/index.js";
@@ -27,19 +33,26 @@ type Respond = (
   n: number,
 ) => ReturnType<typeof textStreamResult>;
 
-function recordingModel(respond: Respond) {
-  const calls: { readonly prompt: unknown; readonly tools: readonly string[] }[] = [];
+function recordingModel(respond: Respond, provider = "eve-test") {
+  const calls: {
+    readonly prompt: unknown;
+    readonly providerOptions?: unknown;
+    readonly tools: readonly string[];
+  }[] = [];
   const model = markMockModel(
     new MockLanguageModelV4({
       doStream: async (options) => {
         calls.push({
           prompt: options.prompt,
+          ...(options.providerOptions === undefined
+            ? {}
+            : { providerOptions: options.providerOptions }),
           tools: (options.tools ?? []).map((tool) => tool.name),
         });
         return respond(options, calls.length);
       },
       modelId: "layout",
-      provider: "eve-test",
+      provider,
     }),
   );
   return { calls, model };
@@ -254,6 +267,94 @@ describe("what eve sends the model", () => {
         await (await alice.send("Is it out?", { auth: null })).result();
         await golden("memory.requests", calls);
         await golden("memory.state", await storedState(first.sessionId));
+      }),
+    );
+  });
+
+  it("sends OpenAI's compaction request without eve's injected messages and replays the item after it", async () => {
+    const { calls, model } = recordingModel((options) => {
+      const openai = (options.providerOptions as { openai?: { compactionTrigger?: boolean } })
+        ?.openai;
+      if (openai?.compactionTrigger === true) {
+        return {
+          stream: simulateReadableStream({
+            chunks: [
+              { type: "stream-start", warnings: [] },
+              {
+                kind: "openai.compaction",
+                providerMetadata: {
+                  openai: {
+                    encryptedContent: "ENCRYPTED-STATE",
+                    itemId: "cmp_1",
+                    type: "compaction",
+                  },
+                },
+                type: "custom",
+              },
+              {
+                finishReason: { raw: undefined, unified: "stop" },
+                type: "finish",
+                usage,
+              },
+            ],
+          }),
+        } as ReturnType<typeof textStreamResult>;
+      }
+      return textStreamResult(
+        JSON.stringify(options.prompt).includes("Is it out?") ? "Yes." : "QA passed.",
+      );
+    }, "openai.responses");
+    const test = await createTestRuntime({
+      agent: {
+        definition: defineAgent({
+          compaction: { compact: openaiCompaction() },
+          model: defineDynamic(() => ({ model, modelContextWindowTokens: 200_000 })),
+        } as never),
+        name: "layout-native-compaction",
+      },
+      modules: [
+        mod(
+          "instructions/agent.ts",
+          defineInstructions({ content: "You are Ada, a release assistant." }),
+        ),
+        mod(
+          "memory/team.ts",
+          defineMemory({
+            namespace: "layout-native-compaction",
+            provider: defineMemoryProvider({
+              recall: {
+                "turn.started": async () => ({
+                  messages: [{ content: "Alice prefers short answers.", id: "pref" }],
+                }),
+              },
+            }),
+            scope: () => "team",
+          }),
+        ),
+      ],
+    });
+    await test.run(() =>
+      onWorkflow(async (runtime) => {
+        const alice = address(runtime, "layout-native-compaction");
+        const first = await (await alice.send("Did QA pass?", { auth: null })).result();
+        await runtime.dispatchSession({
+          command: { deliveryId: "layout-native-compact", kind: "compact" },
+          sessionId: first.sessionId,
+        });
+        await (await alice.send("Is it out?", { auth: null })).result();
+        const keys = new Set(
+          calls.map(
+            (call) =>
+              (call.providerOptions as { openai: { promptCacheKey: string } }).openai
+                .promptCacheKey,
+          ),
+        );
+        expect(keys.size).toBe(1);
+        await golden(
+          "native-compaction.requests",
+          JSON.parse(JSON.stringify(calls).replaceAll([...keys][0]!, "<promptCacheKey>")),
+        );
+        await golden("native-compaction.state", await storedState(first.sessionId));
       }),
     );
   });

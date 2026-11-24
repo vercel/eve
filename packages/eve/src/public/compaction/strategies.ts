@@ -1,6 +1,6 @@
 import { fixedTailOf, type FixedTailOptions } from "#harness/compaction/authored.js";
 import { awaitsResult } from "#harness/compaction/check.js";
-import type { CompactionStrategy } from "#shared/compaction-strategy.js";
+import type { CompactionRewrite } from "#shared/compaction-strategy.js";
 import type { StoredHistoryMessage } from "#shared/history-message.js";
 
 /**
@@ -17,7 +17,7 @@ import type { StoredHistoryMessage } from "#shared/history-message.js";
  * },
  * ```
  */
-export function fixedTail(options: FixedTailOptions = {}): CompactionStrategy {
+export function fixedTail(options: FixedTailOptions = {}): CompactionRewrite {
   return async (history, ctx) => {
     const run = fixedTailOf(ctx);
     if (run === undefined) {
