@@ -13,6 +13,7 @@ export interface AvailableSkillDescription {
 }
 
 const ANNOUNCEMENT_KEY = "skills";
+const SKILL_RELOAD_KEY = "eve.skill-reload";
 const NO_SKILLS = "Available skills: none";
 
 export function formatAvailableSkillsSection(
@@ -59,22 +60,18 @@ export function changedSkillAnnouncements(
 ): Readonly<Record<string, Announcement>> {
   return Object.fromEntries(
     [...loadedSkills(record)].flatMap(([name, loaded]) => {
-      const skill = skills.get(name);
-      const current = skill?.provenance;
-      if (
-        current === undefined ||
-        skill?.source !== undefined ||
-        current.identity !== loaded.identity ||
-        current.scope !== loaded.scope
-      )
-        return [];
+      const current = staticSkillProvenance(skills.get(name));
+      if (current === undefined) return [];
+      const source = skillSourceKey(current);
+      if (source !== skillSourceKey(loaded)) return [];
       const changed = loaded.revision !== current.revision;
       return [
         [
-          `skills.loaded:${JSON.stringify([current.scope, current.identity])}`,
+          `skills.loaded:${source}`,
           {
             initial: "",
             kind: "context.instruction",
+            metadata: { [SKILL_RELOAD_KEY]: { name, source } },
             render: () =>
               changed
                 ? `Skill \`${name}\` changed since you loaded it. Load it again with ${SKILL_TOOL_NAME}({ name: "${name}" }) before relying on it.`
@@ -85,6 +82,26 @@ export function changedSkillAnnouncements(
       ];
     }),
   );
+}
+
+export function visibleSkillNotice(
+  message: HarnessModelMessage,
+  skills: ReadonlyMap<string, CatalogSkill>,
+): boolean {
+  if (message.role !== "user" || message.kind !== "context.instruction") return true;
+  const notice = message.metadata?.[SKILL_RELOAD_KEY];
+  if (notice === undefined) return true;
+  if (!isObject(notice) || typeof notice.name !== "string") return false;
+  const current = staticSkillProvenance(skills.get(notice.name));
+  return current !== undefined && skillSourceKey(current) === notice.source;
+}
+
+function staticSkillProvenance(skill: CatalogSkill | undefined): SkillLoadProvenance | undefined {
+  return skill?.source === undefined ? skill?.provenance : undefined;
+}
+
+function skillSourceKey(source: SkillLoadProvenance): string {
+  return JSON.stringify([source.scope, source.identity]);
 }
 
 function loadedSkills(
@@ -103,9 +120,10 @@ function loadedSkills(
     if (message.role !== "tool") continue;
     for (const part of message.content) {
       if (part.type !== "tool-result" || part.toolName !== SKILL_TOOL_NAME) continue;
+      if (part.output.type !== "text") continue;
       const name = names.get(part.toolCallId);
       if (name === undefined) continue;
-      const load = part.output.type === "text" && "skillLoad" in part ? part.skillLoad : undefined;
+      const load = "skillLoad" in part ? part.skillLoad : undefined;
       if (
         isObject(load) &&
         typeof load.identity === "string" &&

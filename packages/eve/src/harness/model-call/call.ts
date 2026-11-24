@@ -13,6 +13,7 @@ import {
 
 import { AuthKey, HistoryStateKey } from "#context/keys.js";
 import type { StepCatalog } from "#execution/catalog/step-catalog.js";
+import { visibleSkillNotice } from "#execution/skills/instructions.js";
 import { workingTaskIds } from "#execution/tasks/model-step.js";
 import {
   hydrateSandboxAttachments,
@@ -252,7 +253,10 @@ export class ModelCaller {
     this.system = await stepSystem(step, draft);
     const messages = await stepMessages(draft, {
       call,
-      project: (record) => projectPrompt({ ...prompt, messages: [...record] }),
+      project: (record) =>
+        projectPrompt({ ...prompt, messages: [...record] }).filter((message) =>
+          visibleSkillNotice(message, catalog.skills),
+        ),
     });
     this.request = {
       history: messages.record,

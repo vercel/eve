@@ -165,7 +165,7 @@ describe("a skill a new deployment changed", () => {
     for (const { prompt } of prompts) expect(prompt).not.toContain("Skill `bar` changed");
   }, 90_000);
 
-  it("notices updates from the same extension or framework feature, but not a replacement package", async () => {
+  it("notices updates from the same source and hides old notices when that source goes away", async () => {
     const names = ["guide", "review", "report"];
     const { model, prompts } = recordingModel((input) =>
       input === "Load the procedures."
@@ -192,22 +192,31 @@ describe("a skill a new deployment changed", () => {
     const procedures = (revision: number) =>
       Object.fromEntries(names.map((name) => [name, `${name} procedure v${revision}.`]));
     const first = await deployment(model, procedures(1), owners);
-    const second = await deployment(model, procedures(2), {
-      ...owners,
-      report: extension("report", "@example/replacement-report"),
-    });
+    const second = await deployment(model, procedures(2), owners);
+    const third = await deployment(
+      model,
+      { report: "Replacement procedure.", review: "review procedure v2." },
+      {
+        ...owners,
+        report: extension("report", "@example/replacement-report"),
+      },
+    );
 
     await conversation(first, "changed-packaged-skill", async (say) => {
       await say("Load the procedures.");
       await redeploy(first, second);
       await say("What next?");
+      await redeploy(first, third);
+      await say("Anything else?");
     });
 
-    const next = prompts.at(-1)!;
-    expect(next.input).toBe("What next?");
-    expect(next.prompt).toContain("Skill `guide` changed");
-    expect(next.prompt).toContain("Skill `review` changed");
-    expect(next.prompt).not.toContain("Skill `report` changed");
+    const [, next, after] = prompts;
+    expect(next!.input).toBe("What next?");
+    for (const name of names) expect(next!.prompt).toContain(`Skill \`${name}\` changed`);
+    expect(after!.input).toBe("Anything else?");
+    expect(after!.prompt).toContain("Skill `review` changed");
+    expect(after!.prompt).not.toContain("Skill `guide` changed");
+    expect(after!.prompt).not.toContain("Skill `report` changed");
   }, 90_000);
 
   it("says nothing about a skill the new deployment removed", async () => {

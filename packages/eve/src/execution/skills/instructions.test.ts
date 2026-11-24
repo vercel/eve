@@ -94,11 +94,11 @@ describe("changedSkillAnnouncements", () => {
 
   function load(
     callId: string,
-    markdown: string,
+    markdown: string | SkillLoadResultPart["output"],
     skillLoad?: SkillLoadProvenance,
   ): HarnessModelMessage[] {
     const result: SkillLoadResultPart = {
-      output: { type: "text", value: markdown },
+      output: typeof markdown === "string" ? { type: "text", value: markdown } : markdown,
       ...(skillLoad !== undefined && { skillLoad }),
       toolCallId: callId,
       toolName: "eve__skill",
@@ -164,6 +164,15 @@ describe("changedSkillAnnouncements", () => {
     const record = [...load("call_1", "v1", provenance("v1")), ...load("call_2", "v2")];
     const draft: CallRecord = { historyState: {}, record };
     expect(added(draft, step(draft, "v3"))).toEqual([]);
+  });
+
+  it("keeps the last successful load when a later load fails", () => {
+    const record = [
+      ...load("call_1", "v1", provenance("v1")),
+      ...load("call_2", { type: "error-text", value: "This call was skipped." }),
+    ];
+    const draft: CallRecord = { historyState: {}, record };
+    expect(added(draft, step(draft, "v2"))).toHaveLength(1);
   });
 
   it.each([
