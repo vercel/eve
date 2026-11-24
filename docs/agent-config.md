@@ -357,8 +357,10 @@ default, and eve rejects them beside `compact`.
 summary. eve sends the turn's request with OpenAI's `compaction_trigger`, and OpenAI answers with
 an encrypted record of the history. eve stores that record as the history and sends it back on
 every later request, so the model keeps its working state where a summary would drop it. It needs
-the OpenAI Responses API called directly, with `openai("gpt-...")`. On any other model, and when the
-call fails, it summarizes as text with `fixedTail()` and logs why.
+the OpenAI Responses API called directly, with `openai("gpt-...")`, and the model's `store` option
+set to `false`: OpenAI doesn't keep the compaction call's record, so eve has to send its content
+back, and with `store` left on the SDK sends a reference to a record that doesn't exist. On any
+other model, and when the call fails, it summarizes as text with `fixedTail()` and logs why.
 
 ```ts title="agent/agent.ts"
 import { defineAgent } from "eve";
@@ -367,6 +369,7 @@ import { openai } from "eve/models/openai";
 
 export default defineAgent({
   model: openai("gpt-5"),
+  modelOptions: { providerOptions: { openai: { store: false } } },
   compaction: { compact: openaiCompaction() },
 });
 ```
