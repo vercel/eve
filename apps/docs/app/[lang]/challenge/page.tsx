@@ -2,7 +2,7 @@ import { ArrowRight, ArrowUpRight, Plus } from "lucide-react";
 import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
-import { challengeHashtag, eveOnX } from "@/lib/challenge/submission";
+import { eveOnX } from "@/lib/challenge/submission";
 import { canonicalAlternates } from "@/lib/geistdocs/canonical";
 import { pageTitleMetadata } from "@/lib/geistdocs/metadata-title";
 import { templateGalleryUrl } from "@/lib/templates/links";
@@ -17,8 +17,8 @@ import { GlyphField } from "./glyph-field";
 import { HarnessLoop } from "./harness-loop-view";
 import { PostBuilder } from "./post-builder";
 
-const description =
-  "Build with the eve framework and showcase your project for a chance to win limited edition swag.";
+const prizes = "$100 in Vercel AI Gateway credits and limited-edition swag";
+const description = `Build with the eve framework and showcase your project for a chance to win ${prizes}.`;
 const title = pageTitleMetadata(challengeTitle);
 
 export const metadata: Metadata = {
@@ -30,7 +30,7 @@ export const metadata: Metadata = {
 };
 
 const brief = [
-  ["Prizes", "Limited edition eve-branded swag."],
+  ["Prizes", `${prizes}.`],
   ["Winners", String(winnerCount)],
   ["Judging", "Technical complexity, usefulness, and creativity."],
   ["Deadline", challengeDeadline],
@@ -51,10 +51,11 @@ const steps = [
     title: "Share your project",
     detail: (
       <>
+        Follow and tag{" "}
         <a className="font-medium text-gray-1000 underline underline-offset-4" href={eveOnX}>
-          Follow @eve
+          @eve on X
         </a>
-        , and then share your project with the world!
+        . Mention the Builder Showcase in your public post.
       </>
     ),
   },
@@ -89,7 +90,7 @@ const templates = [
 const faqs = [
   [
     "What counts as an entry?",
-    `Any project built with the eve framework counts, including agents, extensions, integrations, and applications. To enter, follow @eve on X and publish a public post with ${challengeHashtag}, a short description of your project, and a link to its public code repository.`,
+    "Any project built with the eve framework counts, including agents, extensions, integrations, and applications. Follow @eve on X, then publish a public post that tags @eve and mentions the Builder Showcase. Include a short description of your project and a link to its public code repository.",
   ],
   [
     "Do I need to record a video?",
@@ -103,7 +104,7 @@ const faqs = [
     "How will winners hear from the eve team?",
     "The eve team will follow up with winners on X with details.",
   ],
-  ["What do winners receive?", "Each winner will receive limited edition eve-branded swag."],
+  ["What do winners receive?", `Each winner will receive ${prizes}.`],
   [
     "Where can I get help?",
     <>
@@ -194,9 +195,9 @@ export default function ChallengePage() {
         <h2 className={heading} id="how-to-enter">
           How to enter
         </h2>
-        <p className="mt-3 max-w-[64ch] text-pretty text-copy-16 text-gray-900">
-          Submit before {challengeDeadline}, and include{" "}
-          <span className="font-mono text-gray-1000">{challengeHashtag}</span> in your post on X.
+        <p className="mt-3 text-pretty text-copy-16 text-gray-900">
+          Submit before {challengeDeadline}. The eve team will monitor public posts on X that tag
+          @eve and mention the Builder Showcase.
         </p>
         <ol className="mt-10 border-t border-gray-400">
           {steps.map((step, index) => (

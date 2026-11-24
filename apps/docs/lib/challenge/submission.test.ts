@@ -8,12 +8,12 @@ const entry = {
 };
 
 describe("challenge post draft", () => {
-  it("opens an editable X draft containing the preview and hashtag without requiring a video", () => {
+  it("opens an editable X draft that tags @eve and names the Builder Showcase without requiring a video", () => {
     const result = buildSubmission(entry);
     const url = new URL(result.intent ?? "");
     expect(url.origin + url.pathname).toBe("https://x.com/intent/tweet");
     expect(url.searchParams.get("text")).toBe(
-      "My agent posts tomorrow’s forecast in Slack.\n\nhttps://github.com/example/weather-agent\n\n#eveProjectShowcase",
+      "My agent posts tomorrow’s forecast in Slack.\n\nBuilt with @eve for the Builder Showcase.\n\nhttps://github.com/example/weather-agent",
     );
     expect(result.preview.media).toEqual({ kind: "github", path: "/example/weather-agent" });
   });
@@ -25,7 +25,7 @@ describe("challenge post draft", () => {
     });
     expect(result.preview.media).toEqual({ kind: "youtube", id: "dQw4w9WgXcQ" });
     expect(new URL(result.intent ?? "").searchParams.get("text")).toContain(
-      "\nhttps://youtu.be/dQw4w9WgXcQ\n\n#eveProjectShowcase",
+      "\nhttps://github.com/example/weather-agent\nhttps://youtu.be/dQw4w9WgXcQ",
     );
   });
 
@@ -36,7 +36,7 @@ describe("challenge post draft", () => {
     });
     expect(result.preview.media).toBeNull();
     expect(new URL(result.intent ?? "").searchParams.get("text")).toContain(
-      "\nhttps://gitlab.com/example/weather-agent\n",
+      "\nhttps://gitlab.com/example/weather-agent",
     );
   });
 

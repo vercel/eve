@@ -2,7 +2,7 @@
 
 import { ArrowUpRight } from "lucide-react";
 import { type FormEvent, useState } from "react";
-import { buildSubmission, challengeHashtag, descriptionLimit } from "@/lib/challenge/submission";
+import { buildSubmission, descriptionLimit } from "@/lib/challenge/submission";
 import { PostPreview } from "./post-preview";
 
 const field =
@@ -115,7 +115,8 @@ export function PostBuilder() {
           <ArrowUpRight aria-hidden size={16} />
         </button>
         <noscript>
-          Enable JavaScript to open a draft, or write a post directly on X with {challengeHashtag}.
+          Enable JavaScript to open a draft, or write a public post on X that tags @eve and mentions
+          the Builder Showcase.
         </noscript>
       </form>
       <div className="flex min-w-0 flex-col gap-4 border-t border-gray-400 bg-background-200 p-5 @min-[41rem]:border-t-0 @min-[41rem]:border-l sm:p-6">

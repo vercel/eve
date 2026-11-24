@@ -1,4 +1,4 @@
-export const challengeHashtag = "#eveProjectShowcase";
+export const showcasePostLine = "Built with @eve for the Builder Showcase.";
 export const eveOnX = "https://x.com/eve";
 export const descriptionLimit = 100;
 
@@ -72,10 +72,10 @@ export function buildSubmission({ repository, description, video }: Submission) 
   const text = [
     preview.summary,
     "",
+    showcasePostLine,
+    "",
     preview.repository,
     ...(preview.video ? [preview.video] : []),
-    "",
-    challengeHashtag,
   ].join("\n");
   const intent = Object.keys(errors).length
     ? null

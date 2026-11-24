@@ -3,7 +3,7 @@
 import { ArrowUpRight, Play, UserRound } from "lucide-react";
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
-import { challengeHashtag, type SubmissionPreview } from "@/lib/challenge/submission";
+import { type SubmissionPreview, showcasePostLine } from "@/lib/challenge/submission";
 
 export function PostPreview({ preview }: { preview: SubmissionPreview }) {
   const { summary, repository, video, media } = preview;
@@ -30,10 +30,10 @@ export function PostPreview({ preview }: { preview: SubmissionPreview }) {
       </div>
       <div className="mt-3 text-[15px] leading-5 [overflow-wrap:anywhere]">
         <p className="whitespace-pre-wrap">{summary}</p>
-        <div className="mt-3 text-blue-900">
+        <p className="mt-5">{showcasePostLine}</p>
+        <div className="mt-5 text-blue-900">
           <p>{repository}</p>
           {video && <p>{video}</p>}
-          <p className="mt-5">{challengeHashtag}</p>
         </div>
       </div>
       {media?.kind === "youtube" && <VideoCard id={media.id} key={media.id} />}
