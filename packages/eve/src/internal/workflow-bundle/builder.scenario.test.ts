@@ -559,8 +559,10 @@ describe("WorkflowBundleBuilder", () => {
           flowFilePath,
           [
             'import { createHook } from "eve/workflow";',
+            'import { rateLimit, RateLimitMaxWaitError } from "eve/experimental/workflow";',
             "export async function claimHook() {",
             '  "use workflow";',
+            '  try { await rateLimit({ key: "shared", limit: 1, period: "1s" }); } catch (error) { if (!RateLimitMaxWaitError.is(error)) throw error; }',
             '  const hook = createHook({ token: "shared-token" });',
             "  const conflict = await hook.getConflict();",
             "  return conflict?.runId ?? null;",
@@ -587,6 +589,8 @@ describe("WorkflowBundleBuilder", () => {
 
       expect(decodedWorkflowCode).toContain("getConflict");
       expect(decodedWorkflowCode).toContain("WORKFLOW_CREATE_HOOK");
+      expect(decodedWorkflowCode).toContain("WORKFLOW_RATE_LIMIT");
+      expect(decodedWorkflowCode).toContain("RateLimitMaxWaitError");
       expect(decodedWorkflowCode).not.toContain("runtime/run.js");
     } finally {
       await rm(tempRoot, { force: true, recursive: true });

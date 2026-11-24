@@ -434,6 +434,12 @@
       "import": "./dist/src/public/experimental/workspace/index.js",
       "default": "./dist/src/public/experimental/workspace/index.js"
     },
+    "./experimental/workflow": {
+      "eve-source": "./src/public/experimental/workflow/index.ts",
+      "types": "./dist/src/public/experimental/workflow/index.d.ts",
+      "import": "./dist/src/public/experimental/workflow/index.js",
+      "default": "./dist/src/public/experimental/workflow/index.js"
+    },
     "./experimental/sandbox/just-bash": {
       "eve-source": "./src/public/experimental/sandbox/just-bash.ts",
       "types": "./dist/src/public/experimental/sandbox/just-bash.d.ts",
@@ -684,12 +690,12 @@
     "@vercel/sandbox": "catalog:",
     "@vercel/schedules": "0.0.3",
     "@vercel/sdk": "1.28.63",
-    "@workflow/core": "5.7.0",
-    "@workflow/errors": "5.1.4",
+    "@workflow/core": "5.8.0",
+    "@workflow/errors": "5.2.0",
     "@workflow/serde": "5.0.1",
-    "@workflow/world": "5.3.0",
-    "@workflow/world-local": "5.5.0",
-    "@workflow/world-vercel": "5.7.0",
+    "@workflow/world": "5.4.0",
+    "@workflow/world-local": "5.6.0",
+    "@workflow/world-vercel": "5.8.0",
     "ai": "catalog:",
     "chat": "4.44.0",
     "chokidar": "6.0.0",
