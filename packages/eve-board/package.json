@@ -59,7 +59,7 @@
     "typescript": "catalog:"
   },
   "peerDependencies": {
-    "eve": ">=1.0.0"
+    "eve": ">=1.5.0"
   },
   "engines": {
     "node": ">=24"

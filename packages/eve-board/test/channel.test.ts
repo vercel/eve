@@ -101,8 +101,8 @@ test("the wake route answers at once and drains matches in the background, one d
   });
   const posted = (await as("alice", "/messages", { channel: "incidents", text: "Down." })).message;
   const { deliveries, from } = recorder();
-  const wake = compiled().routes.find((route) => route.path === "/board/wake")!;
-  const request = () => new Request("https://agent.test/board/wake", { method: "POST" });
+  const wake = compiled().routes.find((route) => route.path === "/eve/v1/board/wake")!;
+  const request = () => new Request("https://agent.test/eve/v1/board/wake", { method: "POST" });
 
   const pending: Promise<unknown>[] = [];
   const args = { from, waitUntil: (promise: Promise<unknown>) => void pending.push(promise) };
@@ -123,6 +123,51 @@ test("the wake route answers at once and drains matches in the background, one d
   assert.deepEqual(
     deliveries.map((entry) => [entry.address, entry.message, entry.options.state?.watch]),
     [[`w-wake01:thread:${posted.thread}`, "Down.", "w-wake01"]],
+  );
+});
+
+test("the default channel also serves legacy POST /board/wake, and a custom route replaces both", async () => {
+  const { as } = await startBoard();
+  await createWatch({
+    action: { type: "converse" },
+    client: client(),
+    id: "w-legacy",
+    instructions: "Summarize it.",
+    tail: "incidents",
+    watchChannel: DEFAULT_WATCH_CHANNEL,
+  });
+  const posted = (await as("alice", "/messages", { channel: "incidents", text: "Legacy wake." }))
+    .message;
+  const { deliveries, from } = recorder();
+  const defaultRoutes = compiled().routes;
+  assert.deepEqual(
+    defaultRoutes.map((route) => `${route.method} ${route.path}`),
+    ["POST /eve/v1/board/wake", "POST /board/wake"],
+  );
+  const legacy = defaultRoutes.find((route) => route.path === "/board/wake")!;
+  const pending: Promise<unknown>[] = [];
+  const args = { from, waitUntil: (promise: Promise<unknown>) => void pending.push(promise) };
+  for (let attempt = 0; attempt < 10 && deliveries.length === 0; attempt += 1) {
+    pending.length = 0;
+    const response = await legacy.handler(
+      new Request("https://agent.test/board/wake", { method: "POST" }),
+      args,
+    );
+    assert.equal(response.status, 202);
+    await Promise.all(pending);
+    if (deliveries.length === 0) await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  assert.deepEqual(
+    deliveries.map((entry) => entry.address),
+    [`w-legacy:thread:${posted.thread}`],
+  );
+
+  const customFromSettings = compiledOf(
+    createBoardChannel(() => ({ ...settings(), route: "/eve/v1/team-board/" })),
+  );
+  assert.deepEqual(
+    customFromSettings.routes.map((route) => `${route.method} ${route.path}`),
+    ["POST /eve/v1/team-board/wake"],
   );
 });
 

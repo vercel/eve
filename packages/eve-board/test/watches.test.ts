@@ -9,7 +9,11 @@ import {
   settlementOf,
   type BoardChannelState,
 } from "../extension/lib/board-channel.ts";
-import { BOARD_TEXT_LIMIT, createBoardClient } from "../extension/lib/client.ts";
+import {
+  BOARD_TEXT_LIMIT,
+  createBoardClient,
+  type BoardRegistrationInput,
+} from "../extension/lib/client.ts";
 import {
   defineBoardCreateTaskTool,
   defineBoardLabelTool,
@@ -911,40 +915,126 @@ test("a deployment registers the wake route the board can reach", () => {
   const env = { ...process.env };
   try {
     delete process.env.VERCEL_ENV;
+    delete process.env.EVE_PUBLIC_ROUTE_PREFIX;
     assert.deepEqual(registrationWhere({ wake_by_path: true }), { url: null });
 
     process.env.VERCEL_ENV = "production";
-    process.env.EVE_PUBLIC_ROUTE_PREFIX = "api/eve/";
     process.env.VERCEL_PROJECT_PRODUCTION_URL = "agent.example.com";
     assert.deepEqual(registrationWhere({ wake_by_path: true }), {
       branch: null,
-      path: "/api/eve/board",
+      path: "/eve/v1/board",
       url: null,
     });
-    assert.deepEqual(registrationWhere({}), { url: "https://agent.example.com/api/eve/board" });
+    assert.deepEqual(registrationWhere({}), { url: "https://agent.example.com/eve/v1/board" });
+
+    process.env.EVE_PUBLIC_ROUTE_PREFIX = "/eve/support";
+    assert.deepEqual(registrationWhere({ wake_by_path: true }), {
+      branch: null,
+      path: "/eve/support/v1/board",
+      url: null,
+    });
+    assert.deepEqual(registrationWhere({ wake_by_path: true }, "/eve/v1/custom"), {
+      branch: null,
+      path: "/eve/support/v1/custom",
+      url: null,
+    });
+
+    process.env.EVE_PUBLIC_ROUTE_PREFIX = "api/eve/";
+    assert.deepEqual(registrationWhere({ wake_by_path: true }), {
+      branch: null,
+      path: "/api/eve/eve/v1/board",
+      url: null,
+    });
+    assert.deepEqual(registrationWhere({}), {
+      url: "https://agent.example.com/api/eve/eve/v1/board",
+    });
 
     process.env.VERCEL_ENV = "preview";
     process.env.VERCEL_GIT_COMMIT_REF = "feat/board";
     assert.deepEqual(registrationWhere({ wake_by_path: true }), {
       branch: "feat/board",
-      path: "/api/eve/board",
+      path: "/api/eve/eve/v1/board",
       url: null,
     });
     assert.throws(() => registrationWhere({}), /VERCEL_BRANCH_URL is unset/u);
     process.env.VERCEL_BRANCH_URL = "agent-git-feat-board.vercel.app";
     assert.deepEqual(registrationWhere({}), {
-      url: "https://agent-git-feat-board.vercel.app/api/eve/board",
+      url: "https://agent-git-feat-board.vercel.app/api/eve/eve/v1/board",
     });
   } finally {
     process.env = env;
   }
 });
 
-test("the extension refuses `can` patterns the board can't read", () => {
-  const parses = (can: unknown) =>
-    (extension.schema as { safeParse(input: unknown): { success: boolean } }).safeParse({ can })
+test("updating a watch rewrites a stale held registration path and branch while keeping sync", async () => {
+  await startBoard();
+  const board = client();
+  const originalRegister = board.register.bind(board);
+  const originalDiscovery = board.discovery.bind(board);
+  const registeredInputs: BoardRegistrationInput[] = [];
+  const wrapped: typeof board = {
+    ...board,
+    discovery: async () => ({ ...(await originalDiscovery()), wake_by_path: true }),
+    watchers: async () => [
+      {
+        branch: "old-branch",
+        hash: "h-1",
+        owner: EVE_PRINCIPAL,
+        path: "/board",
+        sync: [{ key: "slack:C123", platform: "slack" }],
+        url: null,
+        watch: { "w-old001": { tail: "incidents" } },
+      },
+    ],
+    register: async (input) => {
+      registeredInputs.push(input);
+      return await originalRegister({ url: null, watch: input.watch });
+    },
+  };
+
+  const env = { ...process.env };
+  try {
+    delete process.env.EVE_PUBLIC_ROUTE_PREFIX;
+    process.env.VERCEL_ENV = "preview";
+    process.env.VERCEL_GIT_COMMIT_REF = "feat/new-branch";
+    await createWatch({
+      action: converse,
+      client: wrapped,
+      id: "w-new001",
+      instructions: "Summarize it.",
+      tail: "deploys",
+      watchChannel: DEFAULT_WATCH_CHANNEL,
+    });
+  } finally {
+    process.env = env;
+  }
+
+  assert.equal(registeredInputs.length, 1);
+  assert.deepEqual(registeredInputs[0], {
+    branch: "feat/new-branch",
+    path: "/eve/v1/board",
+    sync: [{ key: "slack:C123", platform: "slack" }],
+    url: null,
+    watch: {
+      "w-new001": { tail: "deploys" },
+      "w-old001": { tail: "incidents" },
+    },
+  });
+});
+
+test("the extension refuses `can` patterns the board can't read and invalid `route` paths", () => {
+  const parses = (input: unknown) =>
+    (extension.schema as { safeParse(input: unknown): { success: boolean } }).safeParse(input)
       .success;
-  assert.equal(parses({ "*": ["read"], "work/": ["read", "label"], incidents: "all" }), true);
-  assert.equal(parses({ "Bad Key": ["read"] }), false);
-  assert.equal(parses({ "work//": ["read"] }), false);
+  assert.equal(
+    parses({ can: { "*": ["read"], "work/": ["read", "label"], incidents: "all" } }),
+    true,
+  );
+  assert.equal(parses({ can: { "Bad Key": ["read"] } }), false);
+  assert.equal(parses({ can: { "work//": ["read"] } }), false);
+  assert.equal(parses({ route: "/eve/v1/board" }), true);
+  assert.equal(parses({ route: "/eve/v1/custom-board/" }), true);
+  assert.equal(parses({ route: "eve/v1/board" }), false);
+  assert.equal(parses({ route: "/" }), false);
+  assert.equal(parses({ route: "/eve/v1/:board" }), false);
 });
