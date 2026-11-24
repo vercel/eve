@@ -15,7 +15,7 @@ import type { AgentTurnOutcome } from "#shared/agent-turn-outcome.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { parseJsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
-import { resumeRoutedHook } from "#execution/hosts.js";
+import { resumeRoutedHook, type Hosts } from "#execution/hosts.js";
 import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
 import { platformOf } from "#platform/context.js";
 import type { Entities } from "#platform/entities.js";
@@ -72,7 +72,7 @@ export async function notifyTurnCallerStep(input: {
     return;
   }
 
-  await resumeSettledTurnHook(input.caller.replyTo.token, result);
+  await resumeSettledTurnHook(processApp().hosts, input.caller.replyTo.token, result);
 }
 
 export async function notifyCancelledTaskCallerStep(input: {
@@ -111,7 +111,7 @@ export async function notifyCancelledTaskCallerStep(input: {
     });
     return;
   }
-  await resumeSettledTurnHook(input.caller.replyTo.token, result);
+  await resumeSettledTurnHook(processApp().hosts, input.caller.replyTo.token, result);
 }
 
 function createSettledTurnResult(input: {
@@ -311,11 +311,12 @@ async function isCallbackNotPending(response: Response): Promise<boolean> {
 }
 
 async function resumeSettledTurnHook(
+  hosts: Hosts,
   token: string,
   result: RuntimeSubagentChildResult,
 ): Promise<void> {
   try {
-    await resumeRoutedHook(token, {
+    await resumeRoutedHook(hosts, token, {
       kind: "runtime-action-result",
       results: [result],
     });

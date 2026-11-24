@@ -1,3 +1,4 @@
+import { builtInHosts } from "#runtime/app.js";
 import { describe, expect, it } from "vitest";
 import { defineChannel, POST } from "#public/definitions/channel.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
@@ -45,7 +46,7 @@ describe("pending session history", () => {
       try {
         const inbox = sessionInboxHookToken(continuationToken);
         const send = (message: string) =>
-          resumeRoutedHook(inbox, {
+          resumeRoutedHook(builtInHosts(), inbox, {
             kind: "send",
             payload: { message },
             delivery: createChannelDeliveryMetadata({

@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { extensionOverridePaths } from "#compiler/extension-mount-bindings.js";
 import type { CompiledAgentManifest, CompiledExtensionMount } from "#compiler/manifest.js";
@@ -9,6 +9,8 @@ import {
   createExternalsPolicy,
   type ExternalsPolicy,
 } from "#internal/nitro/host/externals-policy.js";
+import type { BuildContribution } from "#execution/durable.js";
+import { isWorkflowEngineBuild, WORKFLOW_ENGINE_BUILD } from "#execution/workflow-host/build.js";
 import { createHostRouteTable, type HostRouteTable } from "#internal/nitro/host/host-routes.js";
 import type { PreparedApplicationHost } from "#internal/nitro/host/types.js";
 import type { HostRuntime } from "#internal/nitro/host/runtime-plugin.js";
@@ -22,6 +24,7 @@ export type HostMode =
       readonly preset: "vercel" | undefined;
       readonly entry?: string;
       readonly conditions?: readonly string[];
+      readonly durable?: BuildContribution;
       readonly publicRoutePrefix?: string;
       readonly vercelService?: boolean;
       readonly workspaceMember?: boolean;
@@ -45,6 +48,7 @@ export interface HostSpec {
   readonly authored: HostAuthoredSources;
   readonly development: boolean;
   readonly entry: string | undefined;
+  readonly entries: Readonly<Record<string, string>>;
   readonly exportConditions: readonly string[] | undefined;
   readonly extensionMounts: readonly CompiledExtensionMount[];
   readonly extensionOverridePaths: ReadonlyMap<string, string>;
@@ -93,7 +97,10 @@ export function createHostSpec(
       : undefined;
   const instrumented = compiledArtifacts.instrumentationPluginPath !== undefined;
   const nodes = [manifest, ...manifest.subagents.map((subagent) => subagent.agent)];
+  const durable = (mode.kind === "production" ? mode.durable : undefined) ?? WORKFLOW_ENGINE_BUILD;
+  assertEngineBuilds(manifest, durable);
   const routes = createHostRouteTable({
+    durable,
     manifest,
     mode: mode.kind,
     platform,
@@ -128,6 +135,12 @@ export function createHostSpec(
     authored: { packageRoot, tsconfig: resolveAuthoredTsConfigPath(packageRoot) },
     development,
     entry,
+    entries: Object.fromEntries(
+      Object.entries(durable.entries ?? {}).map(([name, module]) => [
+        name,
+        resolve(appRoot, module),
+      ]),
+    ),
     exportConditions: conditions,
     extensionMounts: nodes.flatMap((node) => node.extensionMounts),
     extensionOverridePaths: extensionOverridePaths(manifest),
@@ -183,6 +196,36 @@ function assertEntryCanServe(manifest: CompiledAgentManifest, routes: HostRouteT
       `Authored schedules aren't supported with \`Build.entry\` yet: schedule "${schedule.scheduleId}" in "${schedule.logicalPath}". Remove the schedule or build without \`build.entry\`. Dynamic schedules through the platform's \`Triggers\` are supported.`,
     );
   }
+}
+
+export const MAIN_ENTRY_NAME = "index";
+
+export function assertEngineBuilds(
+  manifest: CompiledAgentManifest,
+  durable: BuildContribution,
+): void {
+  if (hasAuthoredWorkflows(manifest) && durable.runs !== true) {
+    throw new Error(
+      "This agent has authored workflows, and its durable engine can't run them. Remove the workflow tools, or use an engine that runs workflows, such as the Workflow engine.",
+    );
+  }
+  if (!isWorkflowEngineBuild(durable) && (durable.routes?.length ?? 0) > 0) {
+    throw new Error(
+      "eve builds only the Workflow engine's routes so far, and this durable engine contributes its own. Serve the engine through `entries` instead, or use the Workflow engine.",
+    );
+  }
+  if (durable.entries !== undefined && Object.hasOwn(durable.entries, MAIN_ENTRY_NAME)) {
+    throw new Error(
+      `The durable engine's entry "${MAIN_ENTRY_NAME}" has the name of the main entry, server/${MAIN_ENTRY_NAME}.mjs. Rename the engine's entry.`,
+    );
+  }
+}
+
+function hasAuthoredWorkflows(manifest: CompiledAgentManifest): boolean {
+  const nodes = [manifest, ...manifest.subagents.map((subagent) => subagent.agent)];
+  return nodes.some((node) =>
+    node.tools.some((tool) => tool.behavior?.handling?.kind === "workflow-tool"),
+  );
 }
 
 function hasWorkflowProgram(manifest: CompiledAgentManifest): boolean {

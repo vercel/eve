@@ -128,7 +128,7 @@ import {
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import { signInInteractionId } from "#harness/interaction-facts.js";
 import { SIGN_IN_DECLINED } from "#harness/hitl/sign-ins.js";
-import { signInDelivery, type DurableHost } from "#execution/hosts.js";
+import { signInDelivery, type Hosts, type ResumeAddress } from "#execution/hosts.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 import type { AuthorizationCallback } from "#shared/connection-types.js";
 
@@ -143,18 +143,19 @@ interface PendingStepAttributes {
 
 export interface SessionStepHost {
   readonly app?: App;
+  readonly hosts: Hosts;
   readonly callbackBaseUrl?: string;
   setAttributes(attributes: Record<string, EveAttributeValue>): Promise<void>;
   createRuntime(config: CreateRuntimeConfig): Runtime;
   readonly toolStubs?: ToolStubHost;
-  readonly deliver?: DurableHost["deliver"];
+  readonly deliver?: ResumeAddress;
 }
 
 export function turnStepOn(
   host: SessionStepHost,
 ): (input: TurnStepInput) => Promise<TurnStepResult> {
   return async (input) =>
-    await withSessionStateDelta(input, (state) =>
+    await withSessionStateDelta(host.hosts, input, (state) =>
       runSessionStep(
         {
           ...state,
@@ -192,6 +193,7 @@ async function runSessionStepBody(
   bindApp(ctx, host.app);
   enterSessionProjection(ctx, durableSession.state);
   const orphaned = await readOrphanedLines({
+    hosts: input.hosts,
     sessionId: durableSession.sessionId,
     position: nextLinePosition(ctx),
     sessionWritable: input.sessionWritable,

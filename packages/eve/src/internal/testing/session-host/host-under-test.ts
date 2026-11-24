@@ -2,6 +2,8 @@ import type { AnyEventRequest } from "@workflow/world";
 import { vi } from "vitest";
 
 import type { Runtime } from "#channel/types.js";
+import type { Durable } from "#execution/durable.js";
+import { workflowDurable } from "#execution/workflow-host/host.js";
 import { forgetSessionLive } from "#definitions/state.js";
 import {
   sessionCommandHookToken,
@@ -47,6 +49,7 @@ export interface HostSetup {
 export interface HostUnderTest {
   readonly name: HostName;
   readonly runtime: Runtime;
+  readonly durable: Durable;
   readonly capabilities: HostCapabilities;
   settled(): Promise<void>;
   failedWrites(): number;
@@ -115,6 +118,7 @@ async function makeInProcessHost(setup: HostSetup = {}): Promise<HostUnderTest> 
   return {
     name: "in-process",
     runtime,
+    durable: runtime.durable,
     capabilities: IN_PROCESS_CAPABILITIES,
     settled: () => runtime.idle(),
     failedWrites: () => failed.writes,
@@ -145,6 +149,7 @@ async function makeWorkflowHost(setup: HostSetup = {}): Promise<HostUnderTest> {
   return {
     name: "workflow",
     runtime,
+    durable: workflowDurable(),
     capabilities: WORKFLOW_CAPABILITIES,
     settled: () => testWorld.idle(),
     failedWrites: () => failed.writes,

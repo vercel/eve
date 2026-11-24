@@ -1,3 +1,4 @@
+import { builtInHosts } from "#runtime/app.js";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { SessionIdKey } from "#context/keys.js";
@@ -47,7 +48,7 @@ async function forwardingParent() {
   };
   const relayed = async (events: SubagentInteractionHookPayload["events"]) => {
     const published = await emitProxiedSubagentEvent({
-      ...(await restoreSessionStep({ ...step, rerun: false })),
+      ...(await restoreSessionStep({ ...step, hosts: builtInHosts(), rerun: false })),
       hookPayload: {
         callId: "probe",
         childSessionId: remote.sessionId,

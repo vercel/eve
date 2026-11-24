@@ -5,6 +5,7 @@ import {
 import { runPreparedSession } from "#execution/session/program.js";
 import { bootFromCheckpoint } from "#execution/session/checkpoint-boot.js";
 import { workflowSessionHost } from "#execution/session/workflow-host.js";
+import { workflowSessionStep } from "#execution/workflow-host/session-steps.js";
 import { createHook, getWorkflowMetadata, getWritable } from "#compiled/@workflow/core/index.js";
 import {
   bootInitialOwner,
@@ -70,6 +71,7 @@ export function workflowOwnerPorts(sessionId: string): InitialOwnerPorts<Session
     sessionWritable: getWritable<Uint8Array>(),
     inboxTransport: workflowInboxTransport(sessionId),
     timeouts: createSessionTimeoutControl,
+    step: workflowSessionStep,
     settleContinuationConflict: (conflict) => settleContinuationConflictStep(conflict),
   };
 }

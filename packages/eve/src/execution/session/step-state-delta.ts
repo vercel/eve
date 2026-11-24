@@ -1,4 +1,5 @@
 import { readDurableSession, type DurableSessionState } from "#execution/durable-session-store.js";
+import type { Hosts } from "#execution/hosts.js";
 import {
   enterSessionStep,
   followInterruptedAttempt,
@@ -68,20 +69,26 @@ function sameOrder(left: readonly string[], right: readonly string[]): boolean {
 export async function withSessionStateDelta<
   I extends Partial<SessionStateValues> & { readonly rerun?: true },
   R extends Partial<SessionStateValues>,
->(input: I, work: (step: Entered<I>) => Promise<R>): Promise<WithSessionStateDelta<R>>;
+>(
+  hosts: Hosts,
+  input: I,
+  work: (step: Entered<I>) => Promise<R>,
+): Promise<WithSessionStateDelta<R>>;
 export async function withSessionStateDelta(
+  hosts: Hosts,
   input: StepValues,
   work: (step: Entered<StepValues>) => Promise<Partial<SessionStateValues>>,
 ): Promise<SessionStateTransition> {
   const base = Object.fromEntries(
     SESSION_VALUE_KEYS.map((key) => [key, snapshotValue(input[key])]),
   );
-  const step = enterSessionStep(input);
+  const step = enterSessionStep(hosts, input);
   const { sessionWritable } = step;
   if (sessionWritable !== undefined && base.sessionState !== undefined) {
     const checkpoint = base.sessionState as DurableSessionState;
     const session = readDurableSession(checkpoint);
     await readOrphanedLines({
+      hosts,
       rerun: step.rerun,
       sessionId: checkpoint.sessionId,
       position: storedProjection(session.state).view.position,

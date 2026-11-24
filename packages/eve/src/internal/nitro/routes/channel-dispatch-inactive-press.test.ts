@@ -15,9 +15,9 @@ vi.mock("#internal/nitro/routes/runtime-stack.js", () => ({
   resolveNitroChannelRuntimeBundle: vi.fn(),
 }));
 
-vi.mock("#execution/hosts.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("#execution/hosts.js")>()),
-  requireDurableHost: () => ({ deploymentId: async () => "dpl_test" }),
+vi.mock("#execution/workflow-host/host.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#execution/workflow-host/host.js")>()),
+  workflowDeploymentId: async () => "dpl_test",
 }));
 
 const mockedResolveNitroChannelRuntimeBundle = vi.mocked(resolveNitroChannelRuntimeBundle);

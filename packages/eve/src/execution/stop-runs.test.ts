@@ -1,5 +1,6 @@
+import { builtInHosts } from "#runtime/app.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { installWorkflowHost } from "#execution/workflow-host/host.js";
+import { installWorkflowEngine } from "#execution/workflow-host/host.js";
 import { builtInPlatform } from "#platform/context.js";
 
 import { EntityConflictError, HookNotFoundError } from "#compiled/@workflow/errors/index.js";
@@ -19,7 +20,7 @@ vi.mock("#internal/logging.js", () => ({
   logError: vi.fn(),
 }));
 
-installWorkflowHost(builtInPlatform());
+installWorkflowEngine(builtInHosts(), builtInPlatform());
 
 const world = {} as Awaited<ReturnType<typeof getWorld>>;
 const address = { hookToken: "generated-control-token", runId: "tool-run" };
@@ -39,7 +40,7 @@ describe("stopRuns", () => {
   afterEach(() => vi.useRealTimers());
 
   it("lets a registered workflow cancel cooperatively", async () => {
-    await stopRuns([{ ends: true, run: address }], cancel);
+    await stopRuns(builtInHosts(), [{ ends: true, run: address }], cancel);
 
     expect(resumeHook).toHaveBeenCalledWith(address.hookToken, { kind: "cancel", reason });
     expect(cancelRun).not.toHaveBeenCalled();
@@ -49,7 +50,7 @@ describe("stopRuns", () => {
     vi.mocked(getRun).mockReturnValue({ status: Promise.resolve("running") } as ReturnType<
       typeof getRun
     >);
-    const cancelled = stopRuns([{ ends: true, run: address }], cancel);
+    const cancelled = stopRuns(builtInHosts(), [{ ends: true, run: address }], cancel);
     await vi.advanceTimersByTimeAsync(2_000);
     expect(cancelRun).not.toHaveBeenCalled();
     await vi.runAllTimersAsync();
@@ -63,7 +64,7 @@ describe("stopRuns", () => {
     vi.mocked(getRun).mockImplementation(() => {
       throw new Error("status unavailable");
     });
-    const stopped = stopRuns([{ ends: true, run: address }], cancel);
+    const stopped = stopRuns(builtInHosts(), [{ ends: true, run: address }], cancel);
     await vi.runAllTimersAsync();
 
     await expect(stopped).resolves.toEqual([address.runId]);
@@ -75,7 +76,9 @@ describe("stopRuns", () => {
       typeof getRun
     >);
 
-    await expect(stopRuns([{ ends: false, run: address }], cancel)).resolves.toEqual([]);
+    await expect(
+      stopRuns(builtInHosts(), [{ ends: false, run: address }], cancel),
+    ).resolves.toEqual([]);
 
     expect(resumeHook).toHaveBeenCalledOnce();
     expect(cancelRun).not.toHaveBeenCalled();
@@ -84,7 +87,7 @@ describe("stopRuns", () => {
   it("cancels by run ID before the control hook is registered", async () => {
     vi.mocked(resumeHook).mockRejectedValue(new HookNotFoundError(address.hookToken));
 
-    await stopRuns([{ ends: true, run: address }], cancel);
+    await stopRuns(builtInHosts(), [{ ends: true, run: address }], cancel);
 
     expect(cancelRun).toHaveBeenCalledWith(world, address.runId, { cancelReason: reason });
     expect(logError).not.toHaveBeenCalled();
@@ -94,7 +97,9 @@ describe("stopRuns", () => {
     vi.mocked(resumeHook).mockRejectedValue(new HookNotFoundError(address.hookToken));
     vi.mocked(cancelRun).mockRejectedValue(new EntityConflictError("Run already completed"));
 
-    await expect(stopRuns([{ ends: true, run: address }], cancel)).resolves.toEqual([]);
+    await expect(stopRuns(builtInHosts(), [{ ends: true, run: address }], cancel)).resolves.toEqual(
+      [],
+    );
 
     expect(cancelRun).toHaveBeenCalledOnce();
     expect(logError).not.toHaveBeenCalled();
@@ -104,7 +109,9 @@ describe("stopRuns", () => {
     vi.mocked(resumeHook).mockRejectedValue(new Error("hook delivery unavailable"));
     vi.mocked(cancelRun).mockRejectedValue(new Error("run cancellation unavailable"));
 
-    await expect(stopRuns([{ ends: true, run: address }], cancel)).resolves.toEqual([]);
+    await expect(stopRuns(builtInHosts(), [{ ends: true, run: address }], cancel)).resolves.toEqual(
+      [],
+    );
 
     expect(cancelRun).toHaveBeenCalledWith(world, address.runId, { cancelReason: reason });
     expect(logError).toHaveBeenCalledTimes(2);

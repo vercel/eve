@@ -1,4 +1,5 @@
-import type { DurableHost, Hosts } from "#execution/hosts.js";
+import type { Durable } from "#execution/durable.js";
+import type { Hosts } from "#execution/hosts.js";
 import type { InstrumentationProvider } from "#instrumentation/provider.js";
 import type { InstrumentationRuntime } from "#instrumentation/runtime.js";
 import type { Entities } from "#platform/entities.js";
@@ -7,7 +8,8 @@ import type { RuntimeSession } from "#runtime/sessions/runtime-session.js";
 
 export interface App {
   readonly platform: Entities;
-  readonly durable: DurableHost;
+  readonly durable: Durable;
+  readonly hosts: Hosts;
   readonly lifetime: Lifetime;
 }
 
@@ -26,6 +28,7 @@ export interface ProcessApp {
   bootedPhases: number;
   started: App | undefined;
   platform: Entities | undefined;
+  durable: Durable | undefined;
   defaultSession: RuntimeSession | undefined;
   readonly hosts: Hosts;
   readonly instrumentation: AppInstrumentation;
@@ -37,6 +40,7 @@ export function createProcessApp(): ProcessApp {
     bootedPhases: 0,
     started: undefined,
     platform: undefined,
+    durable: undefined,
     defaultSession: undefined,
     hosts: { routes: new Set(), sessionEventStores: new Map() },
     instrumentation: { providers: new Map(), runtime: undefined, setup: undefined },
@@ -58,6 +62,14 @@ const holder = globalThis as ProcessAppHolder;
 
 export function processApp(): ProcessApp {
   return (holder[PROCESS_APP] ??= createProcessApp());
+}
+
+export function builtInHosts(): Hosts {
+  return processApp().hosts;
+}
+
+export function hostsOf(app: { readonly hosts: Hosts } | undefined): Hosts {
+  return app?.hosts ?? builtInHosts();
 }
 
 export function installProcessApp(app: ProcessApp): () => void {

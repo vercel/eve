@@ -24,7 +24,11 @@ import { createHostNoExternals } from "#internal/nitro/host/externals-policy.js"
 import { createHostPlugins } from "#internal/nitro/host/host-plugins.js";
 import { type HostNitroRoutes, renderHostRoutes } from "#internal/nitro/host/host-routes.js";
 import { ROUTE_APP_ID } from "#internal/nitro/host/route-handlers.js";
-import type { HostRuntimePlugin, HostSpec } from "#internal/nitro/host/host-spec.js";
+import {
+  MAIN_ENTRY_NAME,
+  type HostRuntimePlugin,
+  type HostSpec,
+} from "#internal/nitro/host/host-spec.js";
 import { createInstrumentationEntry } from "#internal/nitro/host/instrumentation-entry.js";
 import {
   createRuntimePluginSource,
@@ -132,7 +136,11 @@ function toNitroConfig(
   const instrumentationEntry =
     compiledArtifacts.instrumentationPluginPath === undefined
       ? undefined
-      : createInstrumentationEntry(compiledArtifacts.instrumentationPluginPath, spec.entry);
+      : createInstrumentationEntry(compiledArtifacts.instrumentationPluginPath, {
+          appImports: Object.keys(spec.entries).length > 0,
+          platformEntry: spec.entry,
+        });
+  const engineEntries = instrumentationEntry !== undefined && Object.keys(spec.entries).length > 0;
 
   return {
     ...built.routes,
@@ -190,7 +198,13 @@ function toNitroConfig(
     rolldownConfig: {
       checks: { bundlerTimings: false },
       onLog: onVendoredDependencyLog,
-      output: { sourcemapIgnoreList: /node_modules/ },
+      output: {
+        sourcemapIgnoreList: /node_modules/,
+        ...(engineEntries && { entryFileNames: "[name].mjs" }),
+      },
+      ...(engineEntries && {
+        input: { [MAIN_ENTRY_NAME]: instrumentationEntry.hostEntry, ...spec.entries },
+      }),
       transform: {
         define: { __dirname: "import.meta.dirname", __filename: "import.meta.filename" },
       },

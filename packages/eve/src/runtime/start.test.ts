@@ -1,9 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { requireDurableHost } from "#execution/hosts.js";
+import type { World } from "#compiled/@workflow/world/index.js";
+import { installedDurable } from "#execution/hosts.js";
+import { workflowEngine } from "#execution/workflow-host/engine.js";
+import {
+  createWorkflowRuntime,
+  resolveCurrentWorkflowDeploymentId,
+} from "#execution/workflow-runtime.js";
 import { deferInstrumentationSetup } from "#instrumentation/providers.js";
 import { EVE_WORKFLOW_SPEC_VERSION } from "#internal/workflow/spec-version-default.js";
 import { createProcessApp, installProcessApp, processApp } from "#runtime/app.js";
+import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import { definePlatform } from "#platform/declaration.js";
 import { defaultPlatform } from "#platform/default.js";
 import { bootProcess } from "#runtime/lifecycle.js";
 import { endLifetime } from "#runtime/lifetime.js";
@@ -36,7 +44,8 @@ beforeEach(() => {
   bootProcess({ agentName: "weather", platform: defaultPlatform }, "artifacts");
 });
 
-afterEach(() => {
+afterEach(async () => {
+  await endLifetime(processApp().lifetime);
   uninstallApp?.();
   vi.unstubAllEnvs();
 });
@@ -63,7 +72,9 @@ describe("start", () => {
       specVersion: 9,
     };
 
-    await expect(start({ createWorld: () => world as never })).rejects.toBe(failure);
+    await expect(start({ durable: workflowEngine({ world: () => world as never }) })).rejects.toBe(
+      failure,
+    );
   });
 
   it("configures the Workflow environment before it creates a World eve owns", async () => {
@@ -71,11 +82,13 @@ describe("start", () => {
 
     await expect(
       start({
-        workflowEnvironment: { buildDeploymentId: BUILD_DEPLOYMENT_ID },
-        createWorld() {
-          seen = readWorkflowEnvironment();
-          throw STOP;
-        },
+        durable: workflowEngine({
+          buildDeploymentId: BUILD_DEPLOYMENT_ID,
+          world() {
+            seen = readWorkflowEnvironment();
+            throw STOP;
+          },
+        }),
       }),
     ).rejects.toBe(STOP);
 
@@ -88,10 +101,12 @@ describe("start", () => {
   it("refuses to boot the World before the earlier phases installed the platform", async () => {
     uninstallApp?.();
     uninstallApp = installProcessApp(createProcessApp());
-    const createWorld = vi.fn(() => Promise.reject(STOP));
+    const world = vi.fn((): Promise<World> => Promise.reject(STOP));
 
-    await expect(start({ createWorld })).rejects.toThrow("before installing its platform");
-    expect(createWorld).not.toHaveBeenCalled();
+    await expect(start({ durable: workflowEngine({ world }) })).rejects.toThrow(
+      "before installing its platform",
+    );
+    expect(world).not.toHaveBeenCalled();
   });
 
   it("leaves the Workflow environment alone for a parent-backed World", async () => {
@@ -99,10 +114,12 @@ describe("start", () => {
 
     await expect(
       start({
-        createWorld() {
-          seen = readWorkflowEnvironment();
-          throw STOP;
-        },
+        durable: workflowEngine({
+          world() {
+            seen = readWorkflowEnvironment();
+            throw STOP;
+          },
+        }),
       }),
     ).rejects.toBe(STOP);
 
@@ -113,15 +130,73 @@ describe("start", () => {
     const close = vi.fn(async () => {});
     const world = { close, createQueueHandler: () => undefined, events: {}, specVersion: 9 };
 
-    const app = await start({ createWorld: () => world as never });
+    const app = await start({ durable: workflowEngine({ world: () => world as never }) });
 
     expect(processApp().started).toBe(app);
     expect(app.platform).toBe(processApp().platform);
-    expect(app.durable).toBe(requireDurableHost());
+    expect(app.hosts).toBe(processApp().hosts);
+    expect(app.durable).toBe(installedDurable(app.hosts));
     expect(close).not.toHaveBeenCalled();
 
     await endLifetime(app.lifetime);
 
     expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["before", "after"] as const)(
+    "keeps the app's platform for the Workflow engine when a runtime is made %s start",
+    async (order) => {
+      uninstallApp?.();
+      uninstallApp = installProcessApp(createProcessApp());
+      vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_vercel");
+      const platform = definePlatform({
+        deployment: () => ({
+          environment: () => "production",
+          deploymentId: () => "dpl_custom",
+          productionHost: () => undefined,
+          publicHost: () => undefined,
+          scope: () => undefined,
+        }),
+      });
+      bootProcess({ agentName: "weather", platform }, "artifacts");
+      const world = {
+        close: async () => {},
+        createQueueHandler: () => undefined,
+        events: {},
+        specVersion: 9,
+      };
+      const startApp = () => start({ durable: workflowEngine({ world: () => world as never }) });
+
+      if (order === "after") await startApp();
+      createWorkflowRuntime({ compiledArtifactsSource: {} as RuntimeCompiledArtifactsSource });
+      if (order === "before") await startApp();
+
+      await expect(resolveCurrentWorkflowDeploymentId()).resolves.toBe("dpl_custom");
+    },
+  );
+
+  it("refuses a second live app, and serves the next app once the first ends", async () => {
+    const world = {
+      close: async () => {},
+      createQueueHandler: () => undefined,
+      events: {},
+      specVersion: 9,
+    };
+    const engine = workflowEngine({ world: () => world as never });
+    const first = await start({ durable: engine });
+    const second = createProcessApp();
+
+    await expect(
+      engine.start({ platform: first.platform, lifetime: second.lifetime, hosts: first.hosts }),
+    ).rejects.toThrow("another app in this process already started it");
+
+    await endLifetime(first.lifetime);
+    const next = await engine.start({
+      platform: first.platform,
+      lifetime: second.lifetime,
+      hosts: first.hosts,
+    });
+    expect(next).toBe(installedDurable(first.hosts));
+    await endLifetime(second.lifetime);
   });
 });

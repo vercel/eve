@@ -287,9 +287,9 @@ function lazyHandler(options: TestWorldOptions): Handler {
 
 async function loadFlowRoute({ namespace, outDir }: TestWorldOptions): Promise<Handler> {
   await import(/* @vite-ignore */ pathToFileURL(join(outDir, "steps.mjs")).href);
-  const { installWorkflowHost } = await import("#execution/workflow-host/host.js");
-  const { builtInPlatform } = await import("#platform/context.js");
-  installWorkflowHost(builtInPlatform());
+  const { installFallbackWorkflowEngine } = await import("#execution/workflow-host/host.js");
+  const { builtInHosts } = await import("#runtime/app.js");
+  installFallbackWorkflowEngine(builtInHosts());
   const code = await readFile(workflowDriverCodePath(join(outDir, "workflows.mjs")), "utf8");
   return workflowEntrypoint(code, { namespace });
 }

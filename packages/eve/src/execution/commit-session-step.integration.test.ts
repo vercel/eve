@@ -1,3 +1,4 @@
+import { builtInHosts } from "#runtime/app.js";
 import { transition } from "#harness/session-machine/commit.js";
 import { expect, it, vi } from "vitest";
 
@@ -33,6 +34,7 @@ it("keeps what the sandbox provider commits when a session step saves a transiti
           serializedContext,
           sessionState: createTestSessionState(),
           sessionWritable,
+          hosts: builtInHosts(),
           rerun: false,
         },
         (view) => [

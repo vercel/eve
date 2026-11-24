@@ -1,3 +1,4 @@
+import { processApp } from "#runtime/app.js";
 import { SandboxKey } from "#context/keys.js";
 import { withContextScope } from "#context/run-step.js";
 import { deserializeContext } from "#context/serialize.js";
@@ -45,7 +46,7 @@ export async function stopIdleSessionSandboxStep(
   input: IdleSandboxInput,
 ): Promise<SessionStateTransition> {
   "use step";
-  return await withSessionStateDelta(input, stopIdleSessionSandbox);
+  return await withSessionStateDelta(processApp().hosts, input, stopIdleSessionSandbox);
 }
 
 async function stopIdleSessionSandbox(

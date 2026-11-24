@@ -1,3 +1,4 @@
+import { processApp } from "#runtime/app.js";
 import type { SubagentInteractionHookPayload } from "#channel/types.js";
 import {
   commitSessionStep,
@@ -33,7 +34,7 @@ export async function runProxySubagentEventStep(
 ): Promise<SessionStateTransition> {
   "use step";
 
-  return await withSessionStateDelta(input, async (target) =>
+  return await withSessionStateDelta(processApp().hosts, input, async (target) =>
     emitProxiedSubagentEvent({
       ...(await restoreSessionStep(target)),
       workflowAsk: target.workflowAsk,
@@ -52,7 +53,7 @@ export async function emitProxiedSubagentEvent(
 ): Promise<PublishedSessionEvents> {
   const { hookPayload, runId, workflowAsk } = input;
   const { sessionId } = input.durableSession;
-  const callbacks = sessionSignInCallbacks(sessionId);
+  const callbacks = sessionSignInCallbacks(input.hosts, sessionId);
   const own =
     callbacks === undefined ? undefined : ownCallbacks(sessionId, callbacks.callbackBaseUrl);
   if (callbacks !== undefined && own !== undefined) {

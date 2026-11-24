@@ -1,5 +1,6 @@
+import { builtInHosts } from "#runtime/app.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { installWorkflowHost } from "#execution/workflow-host/host.js";
+import { installWorkflowEngine } from "#execution/workflow-host/host.js";
 import { builtInPlatform } from "#platform/context.js";
 
 import { ContextContainer } from "#context/container.js";
@@ -28,7 +29,7 @@ vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   resumeHook: vi.fn(),
 }));
 
-installWorkflowHost(builtInPlatform());
+installWorkflowEngine(builtInHosts(), builtInPlatform());
 
 const resumeHookMock = vi.mocked(resumeHook);
 const fetchMock = vi.fn();

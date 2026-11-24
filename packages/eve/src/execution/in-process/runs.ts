@@ -1,3 +1,4 @@
+import type { Hosts } from "#execution/hosts.js";
 import type { Runtime } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import {
@@ -24,6 +25,7 @@ import type { InProcessTimers } from "./timers.js";
 const log = createLogger("execution.in-process.runs");
 
 export interface InProcessRunsHost {
+  readonly hosts: Hosts;
   readonly inboxes: MemoryInboxRegistry;
   readonly stepBoundary: StepBoundary;
   readonly timers: InProcessTimers;
@@ -87,7 +89,7 @@ export function createInProcessRuns(host: InProcessRunsHost): InProcessRuns {
       createRemoteReplyHook: async <T>() => createHook<T>(),
       sleep: (ms) => host.timers.until(Date.now() + ms),
       resumeHook: async (token, payload, options) =>
-        await resumeHookWherever(token, payload, options),
+        await resumeHookWherever(host.hosts, token, payload, options),
       resolveWorkflow: (workflowId) => bodies.get(workflowId) ?? FRAMEWORK_BODIES.get(workflowId),
       toolStubs: host.toolStubs,
       agentSessions: agentSessionsOver({

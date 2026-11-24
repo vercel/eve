@@ -1,3 +1,4 @@
+import { builtInHosts } from "#runtime/app.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { describe, expect, it, vi } from "vitest";
 
@@ -28,7 +29,7 @@ describe("SessionStateCursor", () => {
     const nextState = state("channel:third");
 
     await cursor.advance((input) =>
-      withSessionStateDelta(input, async () => ({
+      withSessionStateDelta(builtInHosts(), input, async () => ({
         serializedContext: {
           [ContinuationHookTokensKey.name]: ["channel:initial", "channel:second", "channel:third"],
         },
@@ -55,7 +56,9 @@ describe("SessionStateCursor", () => {
     });
 
     await cursor.advance((input) =>
-      withSessionStateDelta(input, async () => ({ sessionState: state("channel:current") })),
+      withSessionStateDelta(builtInHosts(), input, async () => ({
+        sessionState: state("channel:current"),
+      })),
     );
 
     expect(claimSessionHooks).toHaveBeenCalledWith([stableToken, "channel:current"]);
@@ -73,7 +76,7 @@ describe("SessionStateCursor", () => {
 
     await cursor.advanceWithHistory(async ({ history, serializedContext, sessionState }) => {
       const input = structuredClone({ history, serializedContext, sessionState });
-      const result = await withSessionStateDelta(input, async (values) => {
+      const result = await withSessionStateDelta(builtInHosts(), input, async (values) => {
         const channel = values.serializedContext["eve.channel"] as {
           state: Record<string, unknown>;
         };
@@ -109,7 +112,9 @@ describe("SessionStateCursor", () => {
     });
 
     await expect(
-      cursor.advance((input) => withSessionStateDelta(input, async () => ({ history: [] }))),
+      cursor.advance((input) =>
+        withSessionStateDelta(builtInHosts(), input, async () => ({ history: [] })),
+      ),
     ).rejects.toThrow("not given the history cannot change it");
     expect(cursor.history).toBe(history);
   });
@@ -125,13 +130,15 @@ describe("SessionStateCursor", () => {
     const { promise: released, resolve: release } = Promise.withResolvers<void>();
 
     const slow = cursor.advance((input) =>
-      withSessionStateDelta(input, async () => {
+      withSessionStateDelta(builtInHosts(), input, async () => {
         await released;
         return { sessionState: state("channel:slow") };
       }),
     );
     await cursor.advance((input) =>
-      withSessionStateDelta(input, async () => ({ sessionState: state("channel:fast") })),
+      withSessionStateDelta(builtInHosts(), input, async () => ({
+        sessionState: state("channel:fast"),
+      })),
     );
     release();
 
@@ -165,7 +172,7 @@ describe("SessionStateCursor", () => {
           : { ...state("channel:initial"), hasProxyInputRequests: true };
       const result = cursor.advanceBeside(
         (input) =>
-          withSessionStateDelta(input, async () => {
+          withSessionStateDelta(builtInHosts(), input, async () => {
             await beside.promise;
             return { sessionState: besideState };
           }),
@@ -173,7 +180,7 @@ describe("SessionStateCursor", () => {
       );
       const ownStep = () =>
         cursor.advance((input) =>
-          withSessionStateDelta(input, async () => {
+          withSessionStateDelta(builtInHosts(), input, async () => {
             await step.promise;
             return { sessionState: state("channel:step") };
           }),
@@ -213,13 +220,13 @@ describe("SessionStateCursor", () => {
 
     await cursor.advance(
       (input) =>
-        withSessionStateDelta(input, async () => {
+        withSessionStateDelta(builtInHosts(), input, async () => {
           expect(records).toEqual([{ open: { at: "step" }, sessionState: false }]);
           return { sessionState: { ...state(""), hasProxyInputRequests: true } };
         }),
       { after: () => paused, before: { at: "step" } },
     );
-    await cursor.advance((input) => withSessionStateDelta(input, async () => ({})));
+    await cursor.advance((input) => withSessionStateDelta(builtInHosts(), input, async () => ({})));
 
     expect(records).toEqual([
       { open: { at: "step" }, sessionState: false },
@@ -246,7 +253,7 @@ describe("SessionStateCursor", () => {
     await cursor.settledStep();
     const step = cursor.advance(async (input) => {
       await gate;
-      return await withSessionStateDelta(input, async () => ({}));
+      return await withSessionStateDelta(builtInHosts(), input, async () => ({}));
     });
     let settled = false;
     const waiting = cursor.settledStep().then(() => (settled = true));

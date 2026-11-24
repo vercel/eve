@@ -1,3 +1,4 @@
+import { builtInHosts } from "#runtime/app.js";
 import { isSignInCallbackToken } from "#execution/callback-hook-tokens.js";
 import { deliverToHostedHook } from "#execution/hosts.js";
 import type { AuthorizationCallbackPayload } from "#execution/session-inbox/inbox.js";
@@ -36,7 +37,8 @@ export async function handleConnectionCallbackRequest(
     payloads: [{ authorizationCallback: { attemptId, callback, connectionName: name } }],
   };
   try {
-    if (!(await deliverToHostedHook(token, payload))) await resumeRunnableHook(token, payload);
+    if (!(await deliverToHostedHook(builtInHosts(), token, payload)))
+      await resumeRunnableHook(token, payload);
   } catch {
     return callbackNotPending();
   }

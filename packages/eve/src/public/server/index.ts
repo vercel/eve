@@ -1,3 +1,4 @@
+import { builtInHosts } from "#runtime/app.js";
 import { streamSessionEvents } from "#execution/session-event-stream.js";
 import type { SessionReader } from "#shared/session.js";
 
@@ -13,7 +14,7 @@ export const sessions = {
   attach(sessionId: string): SessionReader {
     return {
       id: sessionId,
-      stream: (options) => streamSessionEvents(sessionId, options),
+      stream: (options) => streamSessionEvents(builtInHosts(), sessionId, options),
     };
   },
 };

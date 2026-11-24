@@ -1,8 +1,7 @@
 import { controlDeliveryOf } from "#execution/session/control-delivery.js";
-import { settleControlDeliveryStep } from "#execution/session/settle-control-delivery-step.js";
 import type { ControlOrigin } from "#execution/session/input-queue.js";
+import type { ControlSettlement } from "#harness/facts.js";
 import type { DeliverHookPayload, TurnCaller } from "#channel/types.js";
-import { mapHeldAnswersStep } from "#execution/proxied-deliver-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { admitSessionInboxPayload } from "#execution/session/admission.js";
 import {
@@ -202,7 +201,11 @@ export class ActiveTurn {
         this.mappedForHeldRequest.add(sequence);
         const target = delivery;
         const mapped = await this.input.cursor.advance((state) =>
-          mapHeldAnswersStep({ delivery: target, requestIds: [...requestIds], ...state }),
+          this.input.host.step(
+            "mapHeldAnswers",
+            { delivery: target, requestIds: [...requestIds], ...state },
+            this.input.stepKey("mapHeldAnswers"),
+          ),
         );
         if (mapped.delivery === undefined) continue;
         delivery = mapped.delivery;
@@ -233,6 +236,16 @@ export class ActiveTurn {
     return payload.turnId === undefined || payload.turnId === this.expectedTurnId;
   }
 
+  private settleControlDelivery(settlement: ControlSettlement) {
+    return this.input.cursor.advance((state) =>
+      this.input.host.step(
+        "settleControlDelivery",
+        { ...state, settlement },
+        this.input.stepKey("settleControlDelivery"),
+      ),
+    );
+  }
+
   private async admit(value: SessionInboxPayload, settled = false): Promise<boolean> {
     const admitted = await admitSessionInboxPayload(value, this.input);
     switch (admitted.kind) {
@@ -258,19 +271,12 @@ export class ActiveTurn {
           this.abort();
         } else if (admitted.origin !== undefined) {
           const control = controlDeliveryOf(admitted.origin);
-          await this.input.cursor.advance((state) =>
-            settleControlDeliveryStep({
-              ...state,
-              settlement: { control, outcome: "ignored", source: "cancel" },
-            }),
-          );
+          await this.settleControlDelivery({ control, outcome: "ignored", source: "cancel" });
         }
         return false;
       case "unsupported": {
         const { settlement } = admitted;
-        await this.input.cursor.advance((state) =>
-          settleControlDeliveryStep({ ...state, settlement }),
-        );
+        await this.settleControlDelivery(settlement);
         return false;
       }
       case "consumed":

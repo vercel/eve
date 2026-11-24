@@ -1,3 +1,4 @@
+import { builtInHosts } from "#runtime/app.js";
 import type { LanguageModelV4CallOptions } from "@ai-sdk/provider";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
@@ -384,7 +385,7 @@ describe("one sign-in answer for parallel children", () => {
       try {
         const before = await parentCardFirst(app, stream);
         const inbox = sessionInboxHookToken(`http:${app.name}`);
-        await resumeRoutedHook(inbox, {
+        await resumeRoutedHook(builtInHosts(), inbox, {
           auth: ALICE,
           kind: "send",
           delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),

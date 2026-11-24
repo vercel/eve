@@ -1,3 +1,4 @@
+import { builtInHosts } from "#runtime/app.js";
 import type { Runtime } from "#channel/types.js";
 import type { StepFaults } from "#execution/in-process/step-attempts.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
@@ -51,7 +52,7 @@ export async function startTestSession(
   const { sessionId } = await runtime.startEntry(initial);
   return {
     runId: sessionId,
-    readable: sessionEventStore(sessionId).readable(sessionId),
+    readable: sessionEventStore(builtInHosts(), sessionId).readable(sessionId),
     cancel: () => runtime.dispose(),
     runtime,
   };

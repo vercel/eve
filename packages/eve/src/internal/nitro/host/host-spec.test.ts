@@ -2,7 +2,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { resolveCompilerArtifactPaths } from "#compiler/artifacts.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
-import { createHostSpec, type HostMode } from "#internal/nitro/host/host-spec.js";
+import {
+  assertEngineBuilds,
+  createHostSpec,
+  type HostMode,
+} from "#internal/nitro/host/host-spec.js";
+import { WORKFLOW_ENGINE_BUILD } from "#execution/workflow-host/build.js";
 import type { PreparedApplicationHost } from "#internal/nitro/host/types.js";
 import type { ScheduleRegistration } from "#runtime/schedules/register.js";
 import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#platform/vercel/build-output-config.js";
@@ -245,6 +250,34 @@ describe("createHostSpec", () => {
       expect(runtime.workflowSandbox).toBe(expected);
     },
   );
+
+  it("stops a build whose durable engine can't run the agent's authored workflows", async () => {
+    const withWorkflow = withSubagent(
+      await compileAgent(),
+      await compileAgent({ tool: "workflow" }, "researcher"),
+    );
+    expect(() => assertEngineBuilds(withWorkflow, { runs: false })).toThrow(
+      "This agent has authored workflows, and its durable engine can't run them.",
+    );
+    expect(() => assertEngineBuilds(withWorkflow, WORKFLOW_ENGINE_BUILD)).not.toThrow();
+  });
+
+  it("builds a platform engine's entries, and stops at an entry named like the main entry or at engine routes", async () => {
+    const manifest = await compileAgent();
+    const entries = { worker: "platform/worker.mjs" };
+
+    expect(spec(manifest, { ...ENTRY, durable: { entries } }).entries).toEqual({
+      worker: `${APP_ROOT}/platform/worker.mjs`,
+    });
+    expect(() =>
+      assertEngineBuilds(manifest, { entries: { index: "platform/index.mjs" } }),
+    ).toThrow(
+      "The durable engine's entry \"index\" has the name of the main entry, server/index.mjs. Rename the engine's entry.",
+    );
+    expect(() =>
+      assertEngineBuilds(manifest, { routes: [{ path: "/queue", handler: "platform/queue.mjs" }] }),
+    ).toThrow("eve builds only the Workflow engine's routes so far");
+  });
 
   it("installs the workflow sandbox runtime for a subagent's generated-program tool", async () => {
     const manifest = withSubagent(

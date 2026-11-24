@@ -1,3 +1,4 @@
+import { sharedSessionSteps } from "#internal/testing/session-steps.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -105,6 +106,7 @@ type WaitInput = {
 function waitInput(inbox: MockInbox): WaitInput {
   const cursor = createCursor(inbox);
   return {
+    ...sharedSessionSteps(),
     hasWorkingTasks: () => false,
     ignore: async () => {},
     inbox: inbox,

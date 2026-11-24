@@ -1,3 +1,4 @@
+import { processApp } from "#runtime/app.js";
 import type { WorkflowToolRunControlMessage } from "#execution/tools/workflow/messages.js";
 import type { WorkflowToolRunAddress } from "#execution/tools/workflow/types.js";
 import { isRunTargetGone } from "#shared/run-errors.js";
@@ -11,14 +12,15 @@ const RUN_START_TIMEOUT_MS = 30_000;
 export async function interruptWorkflowToolRun(run: WorkflowToolRunAddress): Promise<void> {
   "use step";
 
+  const { hosts } = processApp();
   const settled = await pollUntil(async () => {
     try {
-      await resumeRoutedHook(run.hookToken, INTERRUPT);
+      await resumeRoutedHook(hosts, run.hookToken, INTERRUPT);
       return true;
     } catch (error) {
       if (!isRunTargetGone(error)) throw error;
     }
-    return (await routedRunEnded(run.runId)) ? true : undefined;
+    return (await routedRunEnded(hosts, run.runId)) ? true : undefined;
   }, RUN_START_TIMEOUT_MS);
   if (settled === undefined) {
     throw new Error(

@@ -1,3 +1,4 @@
+import { builtInHosts } from "#runtime/app.js";
 import type { LanguageModelV4CallOptions } from "@ai-sdk/provider";
 import { MockLanguageModelV4 } from "ai/test";
 import { expect } from "vitest";
@@ -159,7 +160,7 @@ export async function withInterruptedSession(
     try {
       await body({
         async answer(interactionId, optionId) {
-          await resumeRoutedHook(commandInbox, {
+          await resumeRoutedHook(builtInHosts(), commandInbox, {
             auth: ALICE,
             delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
             kind: "send",
@@ -167,7 +168,7 @@ export async function withInterruptedSession(
           });
         },
         async cancel() {
-          await resumeRoutedHook(sessionInboxHookToken(continuationToken), {
+          await resumeRoutedHook(builtInHosts(), sessionInboxHookToken(continuationToken), {
             auth: ALICE,
             deliveryId: "alice-stop",
             kind: "cancel",
@@ -196,7 +197,7 @@ export async function withInterruptedSession(
           return read;
         },
         async send(message) {
-          await resumeRoutedHook(sessionInboxHookToken(continuationToken), {
+          await resumeRoutedHook(builtInHosts(), sessionInboxHookToken(continuationToken), {
             auth: ALICE,
             delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
             kind: "send",

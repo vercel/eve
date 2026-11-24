@@ -24,7 +24,7 @@ import { traceChannelRequest } from "#internal/nitro/routes/channel-request-inst
 import { resolveNitroChannelRuntimeBundle } from "#internal/nitro/routes/runtime-stack.js";
 import { createRouteInvokeTool } from "#internal/nitro/routes/route-invoke-tool.js";
 import { withLocalDevRequestScope } from "#runtime/local-dev-capability.js";
-import { requireDurableHost } from "#execution/hosts.js";
+import { workflowDeploymentId } from "#execution/workflow-host/host.js";
 import { platformOf } from "#platform/context.js";
 import type { App } from "#runtime/app.js";
 
@@ -252,13 +252,14 @@ async function resolveAcceptedDeploymentId(
   app: App | undefined,
   config: NitroArtifactsConfig,
 ): Promise<string | undefined> {
-  const hosted = platformOf(app).deployment.deploymentId();
+  const platform = platformOf(app);
+  const hosted = platform.deployment.deploymentId();
   if (hosted !== undefined) return validateDeploymentId(hosted);
 
   if (config.kind === "development" && process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV] === undefined) {
     return undefined;
   }
-  return validateDeploymentId(await requireDurableHost().deploymentId());
+  return validateDeploymentId(await workflowDeploymentId(platform));
 }
 
 function validateDeploymentId(deploymentId: string): string {

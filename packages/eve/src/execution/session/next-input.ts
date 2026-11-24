@@ -14,6 +14,7 @@ import type {
 } from "#execution/session/input-queue.js";
 import type { SessionInboxHandle, SessionInboxReader } from "#execution/session-inbox/inbox.js";
 import { admitSessionInboxPayload } from "#execution/session/admission.js";
+import type { SessionStepRunner } from "#execution/session/steps.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 
@@ -26,15 +27,17 @@ export type NextTurnInstruction =
   | { readonly kind: "cancel-working-tasks"; readonly origin?: ControlOrigin }
   | TurnSelection;
 
-export async function nextTurnDelivery(input: {
-  readonly inbox: SessionInboxReader &
-    Pick<SessionInboxHandle, "awaitingHandover" | "whenHandoverSettled">;
-  readonly cursor: SessionStateCursor;
-  readonly hasWorkingTasks: () => boolean;
-  readonly queue: SessionInputQueue;
-  readonly ignore: (settlement: ControlSettlement) => Promise<void>;
-  readonly whileWaiting?: () => Promise<void>;
-}): Promise<NextTurnInstruction> {
+export async function nextTurnDelivery(
+  input: SessionStepRunner & {
+    readonly inbox: SessionInboxReader &
+      Pick<SessionInboxHandle, "awaitingHandover" | "whenHandoverSettled">;
+    readonly cursor: SessionStateCursor;
+    readonly hasWorkingTasks: () => boolean;
+    readonly queue: SessionInputQueue;
+    readonly ignore: (settlement: ControlSettlement) => Promise<void>;
+    readonly whileWaiting?: () => Promise<void>;
+  },
+): Promise<NextTurnInstruction> {
   const { inbox, cursor, queue } = input;
   let freshSequence: number | undefined;
   while (true) {

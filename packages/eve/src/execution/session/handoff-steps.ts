@@ -1,3 +1,4 @@
+import { processApp } from "#runtime/app.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import type { SessionHandoverPayload } from "#execution/session-inbox/inbox.js";
 import { findSessionHookHolder } from "#execution/session-inbox/owner.js";
@@ -295,7 +296,7 @@ export async function readSessionStreamTailStep(input: {
   readonly sessionId: string;
 }): Promise<number> {
   "use step";
-  return await readSessionStreamTailIndex(input.sessionId);
+  return await readSessionStreamTailIndex(processApp().hosts, input.sessionId);
 }
 
 export async function endRetiredTaskRunsStep(input: {
@@ -308,6 +309,7 @@ export async function endRetiredTaskRunsStep(input: {
     sessionId: input.sessionId,
   });
   await stopRuns(
+    processApp().hosts,
     input.runs.map((run) => ({ ends: true, run })),
     { kind: "end", reason: "The session moved to a new deployment." },
     { waitForEnd: false },

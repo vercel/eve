@@ -1,3 +1,4 @@
+import { processApp } from "#runtime/app.js";
 import { readDurableSession } from "#execution/durable-session-store.js";
 import { enterSessionStep } from "#execution/publish-session-events.js";
 import { isBetweenTurns, storedProjection } from "#harness/session-machine/view.js";
@@ -86,5 +87,5 @@ export async function interruptLegacySessionStep(prepared: PreparedLegacySession
     serializedContext: prepared.serializedContext,
     sessionState: prepared.sessionState,
   };
-  return await settleCancelledTurn(enterSessionStep(settle));
+  return await settleCancelledTurn(enterSessionStep(processApp().hosts, settle));
 }

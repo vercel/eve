@@ -1,3 +1,4 @@
+import { processApp } from "#runtime/app.js";
 import { stopLateAgentSessionStep } from "#execution/agent-sessions/steps.js";
 import { recordRemoteChildBinding } from "#execution/child-binding.js";
 import {
@@ -16,5 +17,5 @@ export async function applyRunMessagesStep(
   input: ApplyRunMessagesInput,
 ): Promise<ApplyRunMessagesResult> {
   "use step";
-  return await applyRunMessagesOn(WORKFLOW_CHILDREN)(input);
+  return await applyRunMessagesOn(processApp().hosts, WORKFLOW_CHILDREN)(input);
 }

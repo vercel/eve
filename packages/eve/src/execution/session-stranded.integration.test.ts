@@ -1,3 +1,4 @@
+import { builtInHosts } from "#runtime/app.js";
 import { describe, expect, it, vi } from "vitest";
 
 import { createChannelAddress } from "#channel/channel-address.js";
@@ -106,7 +107,7 @@ async function cancelIfActive(...runs: readonly ParkedRun[]): Promise<void> {
 }
 
 async function waitForReceivedMessages(sessionId: string, expected: readonly string[]) {
-  const reader = readSessionEventStream(sessionId).getReader();
+  const reader = readSessionEventStream(builtInHosts(), sessionId).getReader();
   const pending = new Set(expected);
   try {
     while (pending.size > 0) {
@@ -126,7 +127,7 @@ async function waitForReceivedMessages(sessionId: string, expected: readonly str
 }
 
 async function readSessionStarted(sessionId: string) {
-  const reader = readSessionEventStream(sessionId).getReader();
+  const reader = readSessionEventStream(builtInHosts(), sessionId).getReader();
   try {
     while (true) {
       const { done, value } = await reader.read();
@@ -218,7 +219,7 @@ describe("stranded sessions", () => {
       const { anchor, owner } = await parkStrandedSuccessor(continuationToken);
       const runtime = channelRuntime();
       let freshSessionId: string | undefined;
-      const reader = readSessionEventStream(anchor.runId).getReader();
+      const reader = readSessionEventStream(builtInHosts(), anchor.runId).getReader();
       try {
         const waiting = reader.read();
         const fresh = await httpAddress(runtime, "stranded-session-alias").send(
@@ -404,7 +405,7 @@ describe("stranded sessions", () => {
         ).rejects.toBeInstanceOf(SessionStrandedError);
         await expect(stranded.status).resolves.toBe("running");
 
-        const reader = readSessionEventStream(stranded.runId).getReader();
+        const reader = readSessionEventStream(builtInHosts(), stranded.runId).getReader();
         const started = reader.read();
         await expect(
           runtime.dispatchSession({
@@ -472,7 +473,9 @@ describe("stranded sessions", () => {
 
         await expect(stranded.status).resolves.toBe("running");
         const types: string[] = [];
-        for await (const event of streamSessionEvents(stranded.runId, { follow: false })) {
+        for await (const event of streamSessionEvents(builtInHosts(), stranded.runId, {
+          follow: false,
+        })) {
           types.push(event.type);
         }
         expect(types).not.toContain("session.ended");
@@ -520,7 +523,9 @@ describe("stranded sessions", () => {
 
         const view = emptySessionView();
         const types: string[] = [];
-        for await (const event of streamSessionEvents(stranded.runId, { follow: false })) {
+        for await (const event of streamSessionEvents(builtInHosts(), stranded.runId, {
+          follow: false,
+        })) {
           foldReceivedEvent(view, event);
           types.push(event.type);
         }

@@ -1,5 +1,5 @@
 import { expectScheduleRun, ScheduleDispatcher } from "#channel/schedule.js";
-import { requireDurableHost } from "#execution/hosts.js";
+import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
 import { loadResolvedCompiledScheduleByTaskName } from "#runtime/schedules/resolve-schedule.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
@@ -48,7 +48,7 @@ export async function dispatchScheduleTaskFromArtifacts(
   });
 
   const bundle = await getCompiledRuntimeAgentBundle({ compiledArtifactsSource });
-  const runtime = requireDurableHost().createRuntime({ compiledArtifactsSource });
+  const runtime = createWorkflowRuntime({ compiledArtifactsSource });
   const dispatcher = new ScheduleDispatcher({
     app,
     runtime,

@@ -1,3 +1,4 @@
+import { builtInHosts } from "#runtime/app.js";
 import type { LanguageModelV4Prompt } from "@ai-sdk/provider";
 import { context, propagation, trace } from "@opentelemetry/api";
 import { MockLanguageModelV4 } from "ai/test";
@@ -117,7 +118,7 @@ async function runTwoTurns(): Promise<readonly Choice[]> {
     const stream = captureTurnEvents(run);
     try {
       await withTimeout(stream.nextTurn(), "first turn");
-      await resumeRoutedHook(sessionInboxHookToken(continuationToken), {
+      await resumeRoutedHook(builtInHosts(), sessionInboxHookToken(continuationToken), {
         auth: caller("team"),
         delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
         kind: "send",

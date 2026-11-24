@@ -1,3 +1,4 @@
+import { processApp } from "#runtime/app.js";
 import { startSessionPrewarmers } from "#context/prewarm.js";
 import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
@@ -23,7 +24,7 @@ export async function prewarmSessionStep(
   input: SessionPrewarmInput,
 ): Promise<SessionStateTransition & { readonly sandboxRunning?: SandboxRunning }> {
   "use step";
-  return await withSessionStateDelta(input, prewarmSession);
+  return await withSessionStateDelta(processApp().hosts, input, prewarmSession);
 }
 
 async function prewarmSession(input: SessionPrewarmInput): Promise<{

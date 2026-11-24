@@ -1,3 +1,4 @@
+import type { Hosts } from "#execution/hosts.js";
 import { readDurableSession } from "#execution/durable-session-store.js";
 import type { OpenedAgentSession } from "#execution/agent-sessions/start.js";
 import type { RemoteChildBinding } from "#execution/child-binding.js";
@@ -95,10 +96,11 @@ export type ApplyRunMessagesInput = SessionStepInput & {
 export type ApplyRunMessagesResult = SessionStateTransition & { readonly cancelled: boolean };
 
 export function applyRunMessagesOn(
+  hosts: Hosts,
   children: RunMessageChildren,
 ): (input: ApplyRunMessagesInput) => Promise<ApplyRunMessagesResult> {
   return async (input) =>
-    await withSessionStateDelta(input, async ({ canCancelTurn, messages, ...target }) => {
+    await withSessionStateDelta(hosts, input, async ({ canCancelTurn, messages, ...target }) => {
       let state: SessionStepState = target;
       let cancelled = false;
       let events: SessionPublication[] = [];

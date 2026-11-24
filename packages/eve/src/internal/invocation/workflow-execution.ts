@@ -1,3 +1,4 @@
+import { builtInHosts } from "#runtime/app.js";
 import { interactionJson } from "#protocol/interaction-json.js";
 import type { ErrorInfo } from "#protocol/session-events/envelope.js";
 import type { MessageContent } from "#shared/message-content.js";
@@ -200,7 +201,7 @@ async function readInvocationStream(invocationId: string): Promise<InvocationStr
   const view = emptySessionView();
   const previews = emptyPreviews();
   const reader = createEventReader();
-  for await (const { line, position, record } of streamSessionLines(invocationId, {
+  for await (const { line, position, record } of streamSessionLines(builtInHosts(), invocationId, {
     follow: false,
   })) {
     if (line === undefined) {

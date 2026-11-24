@@ -1,3 +1,4 @@
+import { builtInHosts } from "#runtime/app.js";
 import { expect, it, vi } from "vitest";
 
 import type { DeliverHookPayload } from "#channel/types.js";
@@ -67,7 +68,7 @@ it("continues an idle session from an eve 0.83 owner on the same stream", async 
       const commandToken = sessionInboxHookToken(sessionCommandHookToken(sessionId));
       expect((await findSessionHookHolder(commandToken))?.runId).toBe(successor.runId);
       const history: SessionStreamEvent[] = [];
-      for await (const event of streamSessionEvents(sessionId, { follow: false })) {
+      for await (const event of streamSessionEvents(builtInHosts(), sessionId, { follow: false })) {
         history.push(event);
       }
       const lines = history.map((event) => event.meta.position.line);
@@ -232,7 +233,7 @@ async function readTailIndex(sessionId: string): Promise<number> {
 }
 
 async function readTurn(sessionId: string, startIndex: number): Promise<SessionStreamEvent[]> {
-  const reader = readSessionEventStream(sessionId, startIndex).getReader();
+  const reader = readSessionEventStream(builtInHosts(), sessionId, startIndex).getReader();
   const events: SessionStreamEvent[] = [];
   try {
     while (true) {

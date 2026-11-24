@@ -1,6 +1,6 @@
-import { applyRunMessagesStep } from "#execution/tools/workflow/apply-run-messages-step.js";
+import { builtInHosts } from "#runtime/app.js";
 import { describe, expect, it, vi } from "vitest";
-import { installWorkflowHost } from "#execution/workflow-host/host.js";
+import { installWorkflowEngine } from "#execution/workflow-host/host.js";
 import { builtInPlatform } from "#platform/context.js";
 
 import type { DurableSession, DurableSessionState } from "#execution/durable-session-store.js";
@@ -10,9 +10,9 @@ import type { SessionInbox } from "#execution/session-inbox/inbox.js";
 import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { SessionExecution, type SessionTurnHost } from "#execution/session/turn.js";
+import { dispatchSessionSteps, sessionStepKeys } from "#execution/session/steps.js";
+import { WORKFLOW_SESSION_STEPS } from "#execution/workflow-host/session-steps.js";
 import { sleep } from "#compiled/@workflow/core/index.js";
-import { dispatchCoordinationStep } from "#execution/workflow-host/dispatch-step.js";
-import { turnStep } from "#execution/workflow-host/turn-step.js";
 import { cancelTasksStep } from "#execution/tasks/steps.js";
 import {
   cancelTask,
@@ -29,9 +29,7 @@ import { withSessionUsage } from "#internal/testing/session-usage.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
 const WORKFLOW_TURN_HOST: SessionTurnHost = {
-  applyRunMessages: (input) => applyRunMessagesStep(input),
-  dispatchRuns: (input) => dispatchCoordinationStep(input),
-  runTurnStep: (input) => turnStep(input),
+  step: dispatchSessionSteps(WORKFLOW_SESSION_STEPS),
   until: (at) => sleep(new Date(at)),
 };
 
@@ -42,6 +40,7 @@ vi.mock("#internal/workflow/runtime.js", () => ({ resumeHook: sentCommands }));
 
 vi.mock("#execution/stop-runs.js", () => ({
   stopRuns: async (
+    _hosts: unknown,
     targets: readonly { readonly run: { readonly runId: string }; readonly ends: boolean }[],
   ) => targets.filter((target) => target.ends).map((target) => target.run.runId),
   waitedCallRuns: () => [],
@@ -57,7 +56,7 @@ vi.mock("#execution/publish-session-events.js", async () => {
   return {
     followInterruptedAttempt: (_writable: unknown, state: DurableSessionState) => state,
     readOrphanedLines: async () => [],
-    enterSessionStep: (input: object) => ({ ...input, rerun: false }),
+    enterSessionStep: (hosts: unknown, input: object) => ({ ...input, hosts, rerun: false }),
     commitSessionStep: async (
       target: { serializedContext: Record<string, unknown>; sessionState: DurableSessionState },
       decide: (view: SessionView) => readonly { readonly events: readonly SessionEvent[] }[],
@@ -82,7 +81,7 @@ vi.mock("#execution/publish-session-events.js", async () => {
   };
 });
 
-installWorkflowHost(builtInPlatform());
+installWorkflowEngine(builtInHosts(), builtInPlatform());
 
 function usage(inputTokens: number, costUsd?: number): TokenUsage {
   return { cacheReadTokens: 0, cacheWriteTokens: 0, costUsd, inputTokens, outputTokens: 0 };
@@ -133,6 +132,7 @@ function sessionWithTask(input: {
     inbox,
     queue: new SessionInputQueue([]),
     sessionId: base.sessionId,
+    stepKey: sessionStepKeys(base.sessionId),
   });
   const from: WorkflowToolRunRef = {
     callId: `${input.name}-call`,

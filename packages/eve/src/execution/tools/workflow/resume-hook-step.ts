@@ -1,3 +1,4 @@
+import { processApp } from "#runtime/app.js";
 import { resumeHookWherever } from "#execution/tools/workflow/resume-hook.js";
 
 export async function resumeHookStep(
@@ -7,5 +8,5 @@ export async function resumeHookStep(
 ): Promise<void> {
   "use step";
 
-  await resumeHookWherever(token, payload, options);
+  await resumeHookWherever(processApp().hosts, token, payload, options);
 }
