@@ -89,6 +89,13 @@ function noteRecorder() {
   return { board: board as never, notes };
 }
 
+// Pins #6838: node:test has no strict expected-failure marker, so this asserts the buggy
+// route. The fix restores `assert.ok(wake.includes("POST /eve/v1/board/wake"))`.
+test("the wake route lives under /eve/v1, the only prefix eve/next and Vercel services forward to the agent", () => {
+  const wake = compiled().routes.map((route) => `${route.method} ${route.path}`);
+  assert.deepEqual(wake, ["POST /board/wake"]);
+});
+
 test("the wake route answers at once and drains matches in the background, one drain at a time", async () => {
   const { as } = await startBoard();
   await createWatch({
