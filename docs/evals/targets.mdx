@@ -62,7 +62,7 @@ Set `EVE_EVAL_AUTH_TOKEN` to send that bearer token instead, for targets that do
     EVE_EVAL_OIDC_TOKEN: ${{ steps.oidc.outputs.token }}
 ```
 
-`/eve/v1/info` serves only operator callers, so the credential must authenticate with `principalType: "service"`. Vercel OIDC, `jwtHmac()`, `jwtEcdsa()`, or a custom `AuthFn` can provide it. When the target answers `403`, the run fails before any eval starts and names the credential it needs.
+`/eve/v1/info` requires an operator credential by default, such as Vercel OIDC or a credential that authenticates as `principalType: "service"`. The eve channel can instead grant `allowAgentInfo: true` to a specific eval caller. See [Agent info access](../guides/auth-and-route-protection#agent-info-access). A `403` stops the run before any eval starts.
 
 `t.target.fetch(path, init)` sends these same credentials.
 
@@ -84,7 +84,7 @@ export default defineEvalConfig({
 });
 ```
 
-`eve eval` calls a token function before every request, including stream reads, approval responses, `t.target.fetch`, and the final [tool stubs](./tool-stubs) check, so a multi-turn eval keeps the same caller from start to finish. Cache the token inside the function if minting one is slow.
+`eve eval` calls the token function before every request, including stream reads, approval responses, `t.target.fetch`, and the final [tool stubs](./tool-stubs) check. Return tokens for the same caller throughout the run. eve waits up to five seconds for each `targetAuth` resolver or token function call. Cache the token inside the function if minting one is slow.
 
 For `--url`, either `EVE_EVAL_AUTH_TOKEN` or `EVE_EVAL_OIDC_TOKEN` overrides `targetAuth`. If you also set `targetAuth`, eve prints a warning naming the environment variable it uses. Local runs ignore both environment variables. Requests using `targetAuth` or either override skip the Vercel lookup and don't follow redirects.
 

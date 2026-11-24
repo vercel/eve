@@ -33,6 +33,7 @@ describe("resolveEvalClientOptions", () => {
     vi.mocked(readFile).mockReset();
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
+    vi.useRealTimers();
   });
 
   it("uses a bare client for local targets", async () => {
@@ -99,6 +100,49 @@ describe("resolveEvalClientOptions", () => {
     expect(new Headers(first?.headers).get("authorization")).toBe("Bearer token-1");
     expect(new Headers(second?.headers).get("authorization")).toBe("Bearer token-2");
     expect(first?.redirect).toBe("manual");
+  });
+
+  it("does not include a malformed token in the request error", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    const client = await createEvalClient(
+      { kind: "local", url: "http://127.0.0.1:3000" },
+      { targetAuth: { bearer: () => "secret-token\r\ninvalid" } },
+    );
+
+    await expect(client.health()).rejects.toEqual(
+      new Error("Eval config `targetAuth` provided an invalid token for the selected auth scheme."),
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("reports a resolver failure without exposing the provider error", async () => {
+    await expect(
+      createEvalClient(
+        { kind: "remote", url: "https://eval.example.test" },
+        {
+          targetAuth: () => {
+            throw new Error("provider error containing a secret");
+          },
+        },
+      ),
+    ).rejects.toEqual(
+      new Error("Eval config `targetAuth` resolver failed. Check the credential provider."),
+    );
+  });
+
+  it("bounds how long it waits for a workspace auth resolver or token function", async () => {
+    vi.useFakeTimers();
+    const stall = () => new Promise<never>(() => {});
+    const target = { kind: "local", url: "http://127.0.0.1:3000" } as const;
+    const client = await createEvalClient(target, { targetAuth: { bearer: stall } });
+    const resolverResult = expect(createEvalClient(target, { targetAuth: stall })).rejects.toThrow(
+      "`targetAuth` resolver timed out",
+    );
+    const tokenResult = expect(client.health()).rejects.toThrow(
+      "`targetAuth` token function timed out",
+    );
+    await vi.advanceTimersByTimeAsync(5_000);
+    await Promise.all([resolverResult, tokenResult]);
   });
 
   it("rejects static targetAuth for a remote target", async () => {
