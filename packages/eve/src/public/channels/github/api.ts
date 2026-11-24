@@ -320,7 +320,7 @@ export async function getGitHubAppWebhookEvents(input: {
   if (input.credentials?.installationToken !== undefined) {
     if (input.appSlug === undefined) {
       throw new Error(
-        "githubChannel: the App's slug is required to read its webhook events. Set credentials.appSlug, botName or GITHUB_APP_SLUG.",
+        "githubChannel: the App's slug is required to read its webhook events. Set credentials.appSlug, GITHUB_APP_SLUG or botName.",
       );
     }
     response = await callGitHubApi({

@@ -6,7 +6,7 @@ import { isCompiledChannel } from "#channel/compiled-channel.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
-import type { GitHubChannelCredentials } from "#public/channels/github/auth.js";
+import type { GitHubBotName, GitHubChannelCredentials } from "#public/channels/github/auth.js";
 import { githubChannel } from "#public/channels/github/githubChannel.js";
 import {
   describeGitHubEvent,
@@ -454,12 +454,14 @@ describe("GitHub channel subscriptions", () => {
       readonly events: readonly string[] | Response;
       readonly onSubscribe?: ChannelOnSubscribe;
       readonly event?: string;
+      readonly botName?: GitHubBotName;
     }) {
       const fetchMock = vi.fn<typeof fetch>(async () =>
         input.events instanceof Response ? input.events : Response.json({ events: input.events }),
       );
       const channel = githubChannel({
         api: { fetch: fetchMock },
+        botName: input.botName,
         credentials: input.credentials,
         experimental: { subscriptions: { onEvent: SEND_ALL, onSubscribe: input.onSubscribe } },
       });
@@ -529,16 +531,58 @@ describe("GitHub channel subscriptions", () => {
       );
     });
 
-    it("checks the webhook before the author's onSubscribe, then returns what it returns", async () => {
+    it("runs the author's onSubscribe first, so a denied subscriber never reaches GitHub, then returns its grant", async () => {
+      const denied = subscribeTo({
+        credentials: connect,
+        events: ["check_run"],
+        onSubscribe: vi.fn<ChannelOnSubscribe>().mockRejectedValue(new Error("not allowed")),
+      });
+      await expect(denied.subscribe()).rejects.toThrow("not allowed");
+      expect(denied.fetchMock).not.toHaveBeenCalled();
+
       const grant = { input: { owner: "vercel", repo: "eve" } };
       const onSubscribe = vi.fn<ChannelOnSubscribe>().mockResolvedValue(grant);
       const missing = subscribeTo({ credentials: connect, events: [], onSubscribe });
       await expect(missing.subscribe()).rejects.toThrow("check_run");
-      expect(onSubscribe).not.toHaveBeenCalled();
+      expect(onSubscribe).toHaveBeenCalledOnce();
 
       const present = subscribeTo({ credentials: connect, events: ["check_run"], onSubscribe });
       await expect(present.subscribe()).resolves.toBe(grant);
-      expect(onSubscribe).toHaveBeenCalledOnce();
+    });
+
+    it("reads the App by credentials.appSlug even when botName is the invocation name", async () => {
+      const { fetchMock, subscribe } = subscribeTo({
+        botName: "my-agent",
+        credentials: connect,
+        events: ["check_run"],
+      });
+      await expect(subscribe()).resolves.toBeUndefined();
+      expect(fetchMock.mock.calls[0]![0]).toBe("https://api.github.com/apps/my-app");
+    });
+
+    it("falls back to botName when no other source names the App", async () => {
+      const { fetchMock, subscribe } = subscribeTo({
+        botName: "my-agent",
+        credentials: { installationToken: "ghs_test", webhookSecret: SECRET },
+        events: ["check_run"],
+      });
+      await expect(subscribe()).resolves.toBeUndefined();
+      expect(fetchMock.mock.calls[0]![0]).toBe("https://api.github.com/apps/my-agent");
+    });
+
+    it("surfaces the failure of a lazy credentials.appSlug instead of reporting a missing slug", async () => {
+      const { fetchMock, subscribe } = subscribeTo({
+        credentials: {
+          appSlug: async () => {
+            throw new Error("Connect is unreachable");
+          },
+          installationToken: "ghs_test",
+          webhookSecret: SECRET,
+        },
+        events: ["check_run"],
+      });
+      await expect(subscribe()).rejects.toThrow("Connect is unreachable");
+      expect(fetchMock).not.toHaveBeenCalled();
     });
 
     it("checks a webhook with no action by its own name", async () => {

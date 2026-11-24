@@ -291,13 +291,14 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
         subscriptions: {
           onEvent: subscriptionsOnEvent,
           onSubscribe: async (subscriber) => {
+            const grant = await config.experimental?.subscriptions?.onSubscribe?.(subscriber);
             await requireAppReceivesWebhook({
               api: config.api,
-              botName,
+              botName: config.botName,
               credentials: config.credentials,
               event: subscriber.subscription.event,
             });
-            return config.experimental?.subscriptions?.onSubscribe?.(subscriber);
+            return grant;
           },
           events: subscriptionEvents,
         },

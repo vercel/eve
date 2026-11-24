@@ -135,6 +135,15 @@ export function createGitHubBotNameResolver(input: {
   };
 }
 
+export async function resolveGitHubAppSlug(input: {
+  readonly botName?: GitHubBotName;
+  readonly credentials?: GitHubChannelCredentials;
+}): Promise<string | undefined> {
+  const source = input.credentials?.appSlug ?? process.env.GITHUB_APP_SLUG ?? input.botName;
+  const slug = typeof source === "function" ? await source() : source;
+  return slug === undefined ? undefined : normalizeBotName(slug);
+}
+
 function normalizeBotName(value: string): string | undefined {
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;

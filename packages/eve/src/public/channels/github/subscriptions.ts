@@ -3,9 +3,11 @@ import {
   getGitHubAppWebhookEvents,
   type GitHubApiOptions,
 } from "#public/channels/github/api.js";
-import type {
-  GitHubBotNameResolver,
-  GitHubChannelCredentials,
+import {
+  resolveGitHubAppSlug,
+  type GitHubBotName,
+  type GitHubBotNameResolver,
+  type GitHubChannelCredentials,
 } from "#public/channels/github/auth.js";
 import {
   decodePayload,
@@ -84,7 +86,7 @@ export function githubEventDefinitions(
 
 export async function requireAppReceivesWebhook(input: {
   readonly api?: GitHubApiOptions;
-  readonly botName: GitHubBotNameResolver;
+  readonly botName?: GitHubBotName;
   readonly credentials?: GitHubChannelCredentials;
   readonly event: string;
 }): Promise<void> {
@@ -93,7 +95,10 @@ export async function requireAppReceivesWebhook(input: {
   try {
     received = await getGitHubAppWebhookEvents({
       api: input.api,
-      appSlug: await input.botName(),
+      appSlug: await resolveGitHubAppSlug({
+        botName: input.botName,
+        credentials: input.credentials,
+      }),
       credentials: input.credentials,
     });
   } catch (error) {
