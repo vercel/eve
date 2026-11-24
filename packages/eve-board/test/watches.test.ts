@@ -26,6 +26,7 @@ import {
   heldRegistration,
   listWatches,
   registrationWhere,
+  retargetRegistration,
   removeWatch,
   tailOf,
 } from "../extension/lib/watches.ts";
@@ -918,26 +919,57 @@ test("a deployment registers the wake route the board can reach", () => {
     process.env.VERCEL_PROJECT_PRODUCTION_URL = "agent.example.com";
     assert.deepEqual(registrationWhere({ wake_by_path: true }), {
       branch: null,
-      path: "/api/eve/board",
+      path: "/api/eve/eve/v1/board",
       url: null,
     });
-    assert.deepEqual(registrationWhere({}), { url: "https://agent.example.com/api/eve/board" });
+    assert.deepEqual(registrationWhere({}), {
+      url: "https://agent.example.com/api/eve/eve/v1/board",
+    });
 
     process.env.VERCEL_ENV = "preview";
     process.env.VERCEL_GIT_COMMIT_REF = "feat/board";
     assert.deepEqual(registrationWhere({ wake_by_path: true }), {
       branch: "feat/board",
-      path: "/api/eve/board",
+      path: "/api/eve/eve/v1/board",
       url: null,
     });
     assert.throws(() => registrationWhere({}), /VERCEL_BRANCH_URL is unset/u);
     process.env.VERCEL_BRANCH_URL = "agent-git-feat-board.vercel.app";
     assert.deepEqual(registrationWhere({}), {
-      url: "https://agent-git-feat-board.vercel.app/api/eve/board",
+      url: "https://agent-git-feat-board.vercel.app/api/eve/eve/v1/board",
     });
+
+    process.env.VERCEL_ENV = "production";
+    const pathFor = (prefix: string | undefined) => {
+      if (prefix === undefined) delete process.env.EVE_PUBLIC_ROUTE_PREFIX;
+      else process.env.EVE_PUBLIC_ROUTE_PREFIX = prefix;
+      return registrationWhere({ wake_by_path: true }).path;
+    };
+    assert.deepEqual(
+      [pathFor(undefined), pathFor("/eve/support"), pathFor("/eve/support/v1")],
+      ["/eve/v1/board", "/eve/support/v1/board", "/eve/support/v1/board"],
+    );
   } finally {
     process.env = env;
   }
+});
+
+test("a held registration moves to this release's wake path and keeps its target", () => {
+  const held = { branch: "feat/a", owner: "o", hash: "h", path: "/board", url: null, watch: {} };
+  assert.deepEqual(
+    retargetRegistration(held, { branch: "feat/b", path: "/eve/v1/board", url: null }),
+    { ...held, path: "/eve/v1/board" },
+  );
+  const current = { ...held, path: "/eve/v1/board" };
+  assert.equal(retargetRegistration(current, { path: "/eve/v1/board", url: null }), current);
+  assert.deepEqual(
+    retargetRegistration(
+      { path: null, url: "https://agent-git-a.vercel.app/board", watch: {} },
+      { url: "https://agent-git-b.vercel.app/eve/v1/board" },
+    ),
+    { path: null, url: "https://agent-git-a.vercel.app/eve/v1/board", watch: {} },
+  );
+  assert.deepEqual(retargetRegistration(held, { url: null }), held);
 });
 
 test("the extension refuses `can` patterns the board can't read", () => {

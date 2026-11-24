@@ -47,6 +47,7 @@ import {
 } from "./inbound.ts";
 import {
   BOARD_WAKE_ROUTE,
+  LEGACY_BOARD_WAKE_ROUTE,
   boardClients,
   BoardWatchConfigError,
   checkQueueScope,
@@ -207,15 +208,15 @@ export function createBoardChannel(
       if (payload.state?.noSync !== undefined) ctx.state.noSync = payload.state.noSync;
     },
 
-    routes: [
-      POST<BoardChannelState>(BOARD_WAKE_ROUTE, async (_request, { from, waitUntil }) => {
+    routes: [BOARD_WAKE_ROUTE, LEGACY_BOARD_WAKE_ROUTE].map((path) =>
+      POST<BoardChannelState>(path, async (_request, { from, waitUntil }) => {
         const wake = coalesced(() => drainMatches({ from, settings: settings() }));
         if (wake !== undefined) {
           waitUntil(wake.catch((error) => logError("board wake-up failed", error)));
         }
         return Response.json({ ok: true }, { status: 202 });
       }),
-    ],
+    ),
 
     async receive({ message, target, ...send }, { from }) {
       const board = boardClients(settings()).model;

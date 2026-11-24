@@ -91,7 +91,7 @@ function noteRecorder() {
 
 test("the wake route lives under /eve/v1, the only prefix eve/next and Vercel services forward to the agent", () => {
   const wake = compiled().routes.map((route) => `${route.method} ${route.path}`);
-  assert.deepEqual(wake, ["POST /board/wake"]);
+  assert.ok(wake.includes("POST /eve/v1/board/wake"), `wake routes: ${wake.join(", ")}`);
 });
 
 test("the wake route answers at once and drains matches in the background, one drain at a time", async () => {
@@ -106,8 +106,8 @@ test("the wake route answers at once and drains matches in the background, one d
   });
   const posted = (await as("alice", "/messages", { channel: "incidents", text: "Down." })).message;
   const { deliveries, from } = recorder();
-  const wake = compiled().routes.find((route) => route.path === "/board/wake")!;
-  const request = () => new Request("https://agent.test/board/wake", { method: "POST" });
+  const wake = compiled().routes.find((route) => route.path === "/eve/v1/board/wake")!;
+  const request = () => new Request("https://agent.test/eve/v1/board/wake", { method: "POST" });
 
   const pending: Promise<unknown>[] = [];
   const args = { from, waitUntil: (promise: Promise<unknown>) => void pending.push(promise) };
