@@ -28,6 +28,13 @@ export const EVE_PROTOCOL_RESERVED_NAMESPACES: ReadonlySet<string> = new Set([
   "session",
 ]);
 
+export function isRootEveChannel(
+  channel: { readonly name: string },
+  ownerKind: string | undefined,
+): boolean {
+  return channel.name === "eve" && ownerKind !== "extension";
+}
+
 export function findReservedEveNamespaceCollision(
   urlPath: string,
   options: { readonly allowEveProtocol: boolean },
@@ -44,7 +51,7 @@ export function findReservedEveNamespaceCollision(
     return undefined;
   }
   const namespace = segments[prefixSegments.length]!;
-  if (namespace.startsWith(":") || /^\[[^\]]+\]$/.test(namespace)) {
+  if (namespace.startsWith(":") || namespace.includes("*") || /^\[[^\]]+\]$/.test(namespace)) {
     return { kind: "dynamic" };
   }
   if (EVE_HOST_RESERVED_NAMESPACES.has(namespace)) {

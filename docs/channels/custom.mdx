@@ -53,7 +53,7 @@ import { defineChannel, GET, POST } from "eve/channels";
 
 export default defineChannel({
   routes: [
-    POST("/threads/:threadId/messages", async (request, { from, params }) => {
+    POST("/eve/v1/support/threads/:threadId/messages", async (request, { from, params }) => {
       const body = await request.json();
       const source = from(params.threadId);
 
@@ -65,40 +65,43 @@ export default defineChannel({
       return Response.json(delivery, { status: 202 });
     }),
 
-    POST("/threads/:threadId/cancel", async (_request, { from, params }) =>
+    POST("/eve/v1/support/threads/:threadId/cancel", async (_request, { from, params }) =>
       Response.json(await from(params.threadId).cancel()),
     ),
-    POST("/threads/:threadId/compact", async (_request, { from, params }) =>
+    POST("/eve/v1/support/threads/:threadId/compact", async (_request, { from, params }) =>
       Response.json(await from(params.threadId).compact()),
     ),
-    POST("/threads/:threadId/clear", async (_request, { from, params }) =>
+    POST("/eve/v1/support/threads/:threadId/clear", async (_request, { from, params }) =>
       Response.json(await from(params.threadId).clear()),
     ),
 
-    GET("/sessions/:sessionId/stream", async (request, { attachSession, params }) => {
-      const iterator = attachSession(params.sessionId)
-        .stream({ signal: request.signal })
-        [Symbol.asyncIterator]();
-      // This custom event-NDJSON route is not the built-in eve/client wire endpoint.
-      // Read before sending headers so stranded-session errors reach the route.
-      const first = await iterator.next();
-      let firstPending = true;
-      const encoder = new TextEncoder();
-      const stream = new ReadableStream<Uint8Array>({
-        async pull(controller) {
-          const next = firstPending ? first : await iterator.next();
-          firstPending = false;
-          if (next.done) controller.close();
-          else controller.enqueue(encoder.encode(JSON.stringify(next.value) + "\n"));
-        },
-        async cancel() {
-          await iterator.return?.();
-        },
-      });
-      return new Response(stream, {
-        headers: { "content-type": "application/x-ndjson; charset=utf-8" },
-      });
-    }),
+    GET(
+      "/eve/v1/support/sessions/:sessionId/stream",
+      async (request, { attachSession, params }) => {
+        const iterator = attachSession(params.sessionId)
+          .stream({ signal: request.signal })
+          [Symbol.asyncIterator]();
+        // This custom event-NDJSON route is not the built-in eve/client wire endpoint.
+        // Read before sending headers so stranded-session errors reach the route.
+        const first = await iterator.next();
+        let firstPending = true;
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream<Uint8Array>({
+          async pull(controller) {
+            const next = firstPending ? first : await iterator.next();
+            firstPending = false;
+            if (next.done) controller.close();
+            else controller.enqueue(encoder.encode(JSON.stringify(next.value) + "\n"));
+          },
+          async cancel() {
+            await iterator.return?.();
+          },
+        });
+        return new Response(stream, {
+          headers: { "content-type": "application/x-ndjson; charset=utf-8" },
+        });
+      },
+    ),
   ],
 
   events: {

@@ -12,6 +12,7 @@ import { collectRuntimeModuleBindingsForManifest } from "#compiler/module-map.js
 import {
   findReservedEveNamespaceCollision,
   HOST_HTTP_INVENTORY,
+  isRootEveChannel,
 } from "#framework/host-inventory.js";
 
 type CompiledNode = CompiledAgentNodeManifest | CompiledAgentResources;
@@ -324,8 +325,7 @@ function validateChannelRoutePlan(node: CompiledNode): void {
     }
     const binding = node.bindings[route.sourceId];
     const namespaceCollision = findReservedEveNamespaceCollision(route.urlPath, {
-      allowEveProtocol:
-        route.logicalPath === "channels/eve.ts" && binding?.owner.kind !== "extension",
+      allowEveProtocol: isRootEveChannel(route, binding?.owner.kind),
     });
     if (namespaceCollision !== undefined) {
       fail(`effective route ${route.method} ${route.urlPath} overlaps reserved eve namespace`);

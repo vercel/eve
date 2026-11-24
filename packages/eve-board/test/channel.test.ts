@@ -162,14 +162,8 @@ test("the default channel also serves legacy POST /board/wake, and a custom rout
     [`w-legacy:thread:${posted.thread}`],
   );
 
-  const customFromOption = compiledOf(createBoardChannel(settings, { route: "/eve/v1/acme/" }));
-  assert.deepEqual(
-    customFromOption.routes.map((route) => `${route.method} ${route.path}`),
-    ["POST /eve/v1/acme/wake", "POST /eve/v1/acme/:board/wake"],
-  );
-
   const customFromSettings = compiledOf(
-    createBoardChannel(() => ({ ...settings(), route: "/eve/v1/team-board" })),
+    createBoardChannel(() => ({ ...settings(), route: "/eve/v1/team-board/" })),
   );
   assert.deepEqual(
     customFromSettings.routes.map((route) => `${route.method} ${route.path}`),

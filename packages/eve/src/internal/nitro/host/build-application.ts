@@ -27,7 +27,10 @@ import { stageProductionCompilerArtifacts } from "#internal/application/producti
 import { stageBuildDeploymentId } from "#internal/nitro/host/stage-build-deployment-id.js";
 import { createHostNitro } from "#internal/nitro/host/create-host-nitro.js";
 import { createHostSpec } from "#internal/nitro/host/host-spec.js";
-import { normalizeVercelServiceOutput } from "#internal/nitro/host/vercel-output.js";
+import {
+  isForwardedVercelServiceRoute,
+  normalizeVercelServiceOutput,
+} from "#internal/nitro/host/vercel-output.js";
 import { emitVercelAgentSummary } from "#internal/nitro/host/build-vercel-agent-summary.js";
 import { emitConnectManifest } from "#internal/external-resources.js";
 import { tryReadExtensionBuildConfig } from "#internal/nitro/host/build-extension.js";
@@ -419,10 +422,19 @@ async function publishCompletedApplicationBuild(
 function warnUnreachableVercelServiceChannelRoutes(
   manifest: PreparedApplicationHost["compileResult"]["manifest"],
 ): void {
-  const unreachable = manifest.channelRoutes.effective.filter((route) => {
+  const effective = manifest.channelRoutes.effective;
+  const effectiveBySourceAndMethod = new Set(
+    effective.map((route) => `${route.sourceId}\0${route.method}\0${route.urlPath}`),
+  );
+  const unreachable = effective.filter((route) => {
     const binding = manifest.bindings[route.sourceId];
     if (binding?.owner.kind === "framework") return false;
-    return !route.urlPath.startsWith(`${EVE_ROUTE_PREFIX}/`);
+    if (isForwardedVercelServiceRoute(route.urlPath)) return false;
+    const prefixed = `${EVE_ROUTE_PREFIX}${route.urlPath.startsWith("/") ? route.urlPath : `/${route.urlPath}`}`;
+    if (effectiveBySourceAndMethod.has(`${route.sourceId}\0${route.method}\0${prefixed}`)) {
+      return false;
+    }
+    return true;
   });
   for (const route of unreachable) {
     console.warn(
