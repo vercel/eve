@@ -4,16 +4,12 @@ import { activeTurn } from "eve/events";
 import { useEveAgent } from "eve/react";
 import { useMemo, useState } from "react";
 
-import {
-  DEFAULT_DEVICE,
-  DEVICES,
-  deviceContext,
-  type DeviceName,
-} from "../../../agent/lib/devices";
+import { DEFAULT_DEVICE, deviceContext, type DeviceName } from "../../../agent/lib/devices";
 import { hasLiveStream, latestScreen, toActivity, toolParts, type ToolActivity } from "./activity";
 import { ApprovalBanner } from "./approval";
 import { Chat } from "./chat";
-import { AgentIndicator, ChevronDown, Monitor, Plus } from "./icons";
+import { DevicePicker } from "./device-picker";
+import { Plus } from "./icons";
 import { LiveView, type Control } from "./live-view";
 
 const TAKEOVER_CONTEXT =
@@ -89,29 +85,20 @@ export default function Page() {
     <main className={`app ${expanded ? "app-expanded" : ""}`}>
       <header className="topbar">
         <div className="brand">
-          <AgentIndicator active={busy} size={18} />
+          <span aria-hidden="true" className="brand-lockup">
+            <svg className="brand-triangle" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M12 3 23 21H1L12 3Z" />
+            </svg>
+            <span className="brand-divider" />
+            <svg className="brand-eve" fill="currentColor" viewBox="0 0 169 53">
+              <path d="M169 8.47h-51.39L81.73 53H70.36L113 0H169zM169 44.51v8.47h-45.87V44.5zM45.87 52.98H0V44.5h45.87zM38.66 30.55H0v-8.47h38.66z" />
+              <path d="M169 30.55h-38.66v-8.47H169zM75.52 8.47H0V0h75.52z" />
+            </svg>
+          </span>
           <span className="brand-name">Computer use</span>
-          <span className="badge badge-gray badge-sm">eve</span>
         </div>
         <div className="topbar-actions">
-          <label
-            className="select"
-            title={locked ? "Start a new chat to use another device" : DEVICES[device].description}
-          >
-            <Monitor size={14} />
-            <select
-              disabled={locked}
-              onChange={(event) => setDevice(event.currentTarget.value as DeviceName)}
-              value={device}
-            >
-              {Object.entries(DEVICES).map(([name, option]) => (
-                <option key={name} value={name}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-            <ChevronDown className="select-chevron" size={14} />
-          </label>
+          <DevicePicker disabled={locked} onChange={setDevice} value={device} />
           <button
             aria-label="New chat"
             className="icon-button icon-button-tertiary"
