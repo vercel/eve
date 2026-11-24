@@ -17,8 +17,11 @@ import { GlyphField } from "./glyph-field";
 import { HarnessLoop } from "./harness-loop-view";
 import { PostBuilder } from "./post-builder";
 
-const prizes = "$100 in Vercel AI Gateway credits and limited-edition swag";
-const description = `Build with the eve framework and showcase your project for a chance to win ${prizes}.`;
+const credits = "$100 in Vercel AI Gateway credits";
+const swag = "limited-edition swag";
+const prizes = `${credits} and ${swag}`;
+const buildLead = "Build an agent with eve.";
+const description = `${buildLead} Submit your project for a chance to win ${prizes}.`;
 const title = pageTitleMetadata(challengeTitle);
 
 export const metadata: Metadata = {
@@ -29,26 +32,43 @@ export const metadata: Metadata = {
   twitter: { ...title.twitter, description, card: "summary_large_image" },
 };
 
+const briefValue = "text-pretty text-heading-16 text-gray-1000 sm:text-heading-20";
 const brief = [
-  ["Prizes", `${prizes}.`],
-  ["Winners", String(winnerCount)],
-  ["Judging", "Technical complexity, usefulness, and creativity."],
-  ["Deadline", challengeDeadline],
+  [
+    "Prizes",
+    <>
+      <span className={briefValue}>{credits}</span>
+      <span className="block pt-1 text-copy-14 text-gray-900">Plus {swag}</span>
+    </>,
+  ],
+  ["Winners", <span className={briefValue}>{winnerCount}</span>],
+  [
+    "Judging",
+    <ul className="space-y-1 text-copy-14 text-gray-900 sm:text-copy-16" role="list">
+      <li>Technical complexity</li>
+      <li>Usefulness</li>
+      <li>Creativity</li>
+    </ul>,
+  ],
+  ["Deadline", <span className={briefValue}>{challengeDeadline}</span>],
 ] as const;
 
 const steps = [
   {
-    title: "Build with eve",
+    id: "what-to-build",
+    title: "What to build",
     detail:
-      "Build an agent, extension, integration, or application with the eve framework and publish it to a public code repository.",
+      "Pick a task and build an agent that can do it. For example, turn Slack threads into a weekly brief or give someone a voice interface to ask questions. You can also build an extension, integration, or app with eve. Publish your code in a public repository.",
   },
   {
+    id: "demo",
     title: "Record a demo",
     detail:
       "Optionally showcase your project by recording a quick video. Projects with a video will be prioritized in judging.",
   },
   {
-    title: "Share your project",
+    id: "submit",
+    title: "Submit your project",
     detail: (
       <>
         Follow and tag{" "}
@@ -159,32 +179,31 @@ export default function ChallengePage() {
               <span className="sr-only">eve </span>
               {challengeHeadline}
             </h1>
-            <p className="mt-6 max-w-[36rem] text-pretty text-copy-18 text-gray-900">
-              {description}
+            <p className="mt-5 max-w-[36rem] text-pretty text-copy-18 text-gray-900">
+              {buildLead} Give it a real task to do. Agents, extensions, integrations, and apps
+              built with eve are all welcome.
             </p>
             <div className="mt-6 flex flex-col gap-3 sm:flex-row">
               <a className={primaryAction} href="#submit">
-                Share your project
+                Submit your project
               </a>
-              <Link className={secondaryAction} href="/docs/getting-started" prefetch={true}>
-                Read the docs <ArrowRight aria-hidden size={16} />
-              </Link>
+              <a className={secondaryAction} href="#what-to-build">
+                What to build <ArrowRight aria-hidden size={16} />
+              </a>
             </div>
           </div>
         </div>
         <div className="relative bg-background-200">
           <dl
-            className={`${container} grid divide-y divide-gray-400 border-t border-gray-400 sm:grid-cols-2 sm:gap-x-8 sm:divide-y-0 lg:grid-cols-[1fr_0.45fr_1.55fr_0.8fr]`}
+            className={`${container} grid divide-y divide-gray-400 border-t border-gray-400 sm:grid-cols-2 sm:gap-x-8 sm:divide-y-0 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,0.5fr)_minmax(0,1fr)_minmax(0,0.9fr)]`}
           >
             {brief.map(([term, value]) => (
               <div
-                className="grid min-w-0 grid-cols-[5rem_minmax(0,1fr)] items-baseline gap-x-3 py-3 sm:block sm:py-5 lg:py-7"
+                className="grid min-w-0 grid-cols-[5rem_minmax(0,1fr)] items-baseline gap-x-3 py-4 sm:block sm:py-5 lg:py-7"
                 key={term}
               >
-                <dt className="font-mono text-copy-13 text-gray-900">{term}</dt>
-                <dd className="text-pretty text-copy-14 text-gray-1000 sm:mt-2 sm:text-copy-16">
-                  {value}
-                </dd>
+                <dt className="text-heading-16 text-gray-1000">{term}</dt>
+                <dd className="min-w-0 sm:mt-2">{value}</dd>
               </div>
             ))}
           </dl>
@@ -203,17 +222,36 @@ export default function ChallengePage() {
           {steps.map((step, index) => (
             <li
               className="grid scroll-mt-24 gap-x-6 gap-y-3 border-b border-gray-400 py-7 sm:grid-cols-[3rem_minmax(0,1fr)] lg:grid-cols-[3rem_minmax(0,18rem)_minmax(0,1fr)] lg:gap-x-10"
-              id={index === steps.length - 1 ? "submit" : undefined}
-              key={step.title}
+              id={step.id}
+              key={step.id}
             >
               <span aria-hidden="true" className="font-mono text-copy-14 text-gray-900">
                 {index + 1}
               </span>
               <h3 className="text-heading-24 text-gray-1000">{step.title}</h3>
-              <p className="max-w-[62ch] min-w-0 text-pretty text-copy-16 text-gray-900 sm:col-start-2 lg:col-start-3">
-                {step.detail}
-              </p>
-              {index === steps.length - 1 && (
+              <div className="max-w-[62ch] min-w-0 text-pretty text-copy-16 text-gray-900 sm:col-start-2 lg:col-start-3">
+                <p>{step.detail}</p>
+                {step.id === "what-to-build" && (
+                  <p className="mt-3">
+                    <a
+                      className="font-medium text-gray-1000 underline underline-offset-4"
+                      href="#inspiration"
+                    >
+                      Explore example projects
+                    </a>{" "}
+                    or{" "}
+                    <Link
+                      className="font-medium text-gray-1000 underline underline-offset-4"
+                      href="/docs/getting-started#create-a-project"
+                      prefetch={true}
+                    >
+                      create your first eve project
+                    </Link>
+                    .
+                  </p>
+                )}
+              </div>
+              {step.id === "submit" && (
                 <div className="@container mx-auto mt-6 w-full max-w-[60rem] sm:col-span-full">
                   <PostBuilder />
                 </div>
