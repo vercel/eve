@@ -15,7 +15,7 @@ import type { TraceCapturePolicy } from "#tracing/eve/otel-declaration.js";
 
 afterEach(() => {
   vi.unstubAllEnvs();
-  delete (globalThis as Record<symbol, unknown>)[Symbol.for("eve.runtime")];
+  delete (globalThis as Record<symbol, unknown>)[Symbol.for("eve.app")];
 });
 
 function createRuntime(tracePolicy: TraceCapturePolicy): InstrumentationRuntime {

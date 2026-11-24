@@ -18,8 +18,8 @@ describe("createWorkflowWorldPluginSource", () => {
 
     expect(source).toContain('import "/app/.eve/compile/compiled-artifacts-bootstrap.mjs";');
     expect(source).toContain('import * as workflowWorldModule from "@acme/eve-world";');
-    expect(source).toContain("import { bootEve } from ");
-    expect(source).toContain("export const eveRuntime = await bootEve({");
+    expect(source).toContain("import { start } from ");
+    expect(source).toContain("export const app = await start({");
     expect(source).toContain('configuredWorld: "@acme/eve-world",');
     expect(source).toContain(BUILD_DEPLOYMENT_ID);
     expect(source).toContain(
@@ -72,7 +72,7 @@ describe("createDevelopmentWorkflowWorldPluginSource", () => {
     });
 
     expect(source).toContain(
-      "export const eveRuntime = await bootEve({ createWorld: () => createDevelopmentWorkflowWorld() });",
+      "export const app = await start({ createWorld: () => createDevelopmentWorkflowWorld() });",
     );
     expect(source).not.toContain("workflowEnvironment");
     expect(source).not.toContain("@workflow/world-local");

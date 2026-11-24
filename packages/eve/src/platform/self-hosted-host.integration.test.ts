@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { PlatformContext } from "#platform/context.js";
 import { hostServices } from "#platform/services.js";
 import type { MemoryDocumentBackend } from "#public/memory/file/backend.js";
-import { createEveRuntime, installEveRuntime } from "#runtime/eve-runtime.js";
+import { createProcessApp, installProcessApp } from "#runtime/app.js";
 
 const config = {
   publicUrl: "https://agents.internal.example.com",
@@ -66,9 +66,9 @@ beforeAll(() => {
   vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_vercel_should_not_be_used");
   vi.stubEnv("VERCEL_URL", "vercel-should-not-be-used.vercel.app");
   vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", "vercel-prod-should-not-be-used.vercel.app");
-  const runtime = createEveRuntime();
+  const runtime = createProcessApp();
   runtime.platform = selfHostedPlatform;
-  uninstall = installEveRuntime(runtime);
+  uninstall = installProcessApp(runtime);
 });
 afterAll(() => {
   uninstall();

@@ -990,7 +990,7 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
 
   afterEach(() => {
     const global = globalThis as Record<symbol, unknown>;
-    delete global[Symbol.for("eve.runtime")];
+    delete global[Symbol.for("eve.app")];
   });
 
   it.each<{

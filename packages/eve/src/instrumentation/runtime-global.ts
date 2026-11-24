@@ -1,10 +1,10 @@
 import type { InstrumentationRuntime } from "#instrumentation/runtime.js";
-import { eveRuntime } from "#runtime/eve-runtime.js";
+import { processApp } from "#runtime/app.js";
 
 export function registerInstrumentationRuntime(
   runtime: InstrumentationRuntime,
 ): InstrumentationRuntime {
-  const instrumentation = eveRuntime().instrumentation;
+  const instrumentation = processApp().instrumentation;
   if (instrumentation.runtime !== undefined) {
     instrumentation.runtime.otelSettings = runtime.otelSettings;
     return instrumentation.runtime;
@@ -14,5 +14,5 @@ export function registerInstrumentationRuntime(
 }
 
 export function getInstrumentationRuntime(): InstrumentationRuntime | undefined {
-  return eveRuntime().instrumentation.runtime;
+  return processApp().instrumentation.runtime;
 }

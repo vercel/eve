@@ -26,7 +26,7 @@
     "packages/eve/src/execution/harness-tool-execution.integration.test.ts",
     "packages/eve/src/internal/nitro/routes/runtime-artifacts.test.ts",
     "packages/eve/src/internal/testing/app-harness.ts",
-    "packages/eve/src/runtime/boot-process.ts",
+    "packages/eve/src/runtime/lifecycle.ts",
     "packages/eve/src/runtime/loaders/bundled-artifacts.ts",
     "packages/eve/src/runtime/sessions/runtime-session.ts",
     "packages/eve/test/scenarios/load-agent-info-data.scenario.test.ts",

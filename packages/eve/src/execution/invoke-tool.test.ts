@@ -14,7 +14,7 @@ import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
-import { createEveRuntime, installEveRuntime } from "#runtime/eve-runtime.js";
+import { createProcessApp, installProcessApp } from "#runtime/app.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import { defineSandboxProvider, type SandboxConnection } from "#sandbox/provider.js";
@@ -228,9 +228,9 @@ describe("invokeTool", () => {
           },
         },
       ]);
-      const eve = createEveRuntime();
+      const eve = createProcessApp();
       eve.instrumentation.runtime = { hooks, forceFlush, otelSettings: undefined } as never;
-      onTestFinished(installEveRuntime(eve));
+      onTestFinished(installProcessApp(eve));
       const runtime = runtimeWith([
         tool("echo", (value) => value),
         tool("approve", () => "not executed", { approval: () => "user-approval" }),

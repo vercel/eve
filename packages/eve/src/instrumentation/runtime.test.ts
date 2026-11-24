@@ -93,7 +93,7 @@ async function readTelemetry(instrumentation: ExecutionInstrumentation | undefin
 }
 
 beforeEach(() => {
-  delete (globalThis as Record<symbol, unknown>)[Symbol.for("eve.runtime")];
+  delete (globalThis as Record<symbol, unknown>)[Symbol.for("eve.app")];
 });
 
 function initializeRemoteSession(

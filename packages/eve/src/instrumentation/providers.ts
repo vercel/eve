@@ -8,7 +8,7 @@ import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { DEVELOPMENT_WORKER_APP_ROOT_ENV } from "#internal/workflow/development-world-protocol.js";
 import { platformContext } from "#platform/context.js";
 import { hasHostService } from "#platform/services.js";
-import { eveRuntime } from "#runtime/eve-runtime.js";
+import { processApp } from "#runtime/app.js";
 import { agentRuns, localTraces } from "#public/instrumentation/otel.js";
 import { installInstrumentationRuntime } from "#tracing/eve/install-instrumentation-runtime.js";
 import {
@@ -27,7 +27,7 @@ export interface RegisteredInstrumentationProvider {
 }
 
 function providerRegistry(): Map<string, InstrumentationProvider> {
-  return eveRuntime().instrumentation.providers;
+  return processApp().instrumentation.providers;
 }
 
 export function seedInstrumentationProviders(): void {

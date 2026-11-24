@@ -23,7 +23,7 @@ describe("writeCompiledArtifactsFiles", () => {
   afterEach(() => {
     delete (globalThis as Record<string, unknown>).__eveInstrumentationLoaded;
     delete (globalThis as Record<string, unknown>).__eveProviderSetups;
-    delete (globalThis as Record<symbol, unknown>)[Symbol.for("eve.runtime")];
+    delete (globalThis as Record<symbol, unknown>)[Symbol.for("eve.app")];
   });
 
   it("installs the platform before the module map loads authored modules", async () => {
@@ -42,11 +42,18 @@ describe("writeCompiledArtifactsFiles", () => {
       outDir: join(appRoot, ".workflow-build"),
     });
     const bootstrapSource = await readFile(generatedArtifacts.bootstrapPath, "utf8");
+    const processPath = join(appRoot, ".workflow-build", "compiled-artifacts-process.mjs");
+    const processSource = await readFile(processPath, "utf8");
+    const bootstrapImports = bootstrapSource
+      .split("\n")
+      .filter((line) => line.startsWith("import "));
 
-    expect(bootstrapSource.indexOf("/src/platform/install-runtime.ts")).toBeGreaterThan(-1);
-    expect(bootstrapSource.indexOf("/src/platform/install-runtime.ts")).toBeLessThan(
-      bootstrapSource.indexOf("import moduleMap from"),
+    expect(bootstrapImports[0]).toContain(processPath.replaceAll("\\", "/"));
+    expect(bootstrapImports[1]).toMatch(/^import moduleMap from /);
+    expect(processSource).toContain(
+      'bootProcess({ agentName: artifacts.manifest.config.name }, "queue-namespace");',
     );
+    expect(processSource).not.toContain("compiled-artifacts-module-map");
   });
 
   it("writes instrumentation into a dedicated Nitro plugin instead of inlining it", async () => {

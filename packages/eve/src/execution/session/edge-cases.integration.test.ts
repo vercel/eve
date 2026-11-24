@@ -60,9 +60,9 @@ import {
 
 vi.setConfig({ testTimeout: 90_000 });
 
-const EVE_RUNTIME_KEY = Symbol.for("eve.runtime");
+const PROCESS_APP_KEY = Symbol.for("eve.app");
 afterEach(() => {
-  delete (globalThis as Record<symbol, unknown>)[EVE_RUNTIME_KEY];
+  delete (globalThis as Record<symbol, unknown>)[PROCESS_APP_KEY];
 });
 
 const HEARD_TYPES = [

@@ -42,14 +42,14 @@ vi.mock("#tracing/eve/agent-otel-provider.js", () => ({
   }),
 }));
 
-const EVE_RUNTIME_KEY = Symbol.for("eve.runtime");
+const PROCESS_APP_KEY = Symbol.for("eve.app");
 
 describe("installInstrumentationRuntime", () => {
   beforeEach(() => {
     forceFlush.mockClear();
     internalTerminalState.mockClear();
     shutdown.mockClear();
-    delete (globalThis as Record<symbol, unknown>)[EVE_RUNTIME_KEY];
+    delete (globalThis as Record<symbol, unknown>)[PROCESS_APP_KEY];
   });
 
   it("flushes and shuts down the registered tracer provider", async () => {
@@ -85,7 +85,7 @@ describe("installInstrumentationRuntime", () => {
       providers: [{ events: { "turn.started": vi.fn() }, name: "turns" }],
       serviceName: "weather",
     });
-    delete (globalThis as Record<symbol, unknown>)[EVE_RUNTIME_KEY];
+    delete (globalThis as Record<symbol, unknown>)[PROCESS_APP_KEY];
     const withMemory = installInstrumentationRuntime({
       collected: collectOtelPipeline([]),
       frameworkVersion: "test",

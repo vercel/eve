@@ -38,6 +38,7 @@ export interface ProbeOptions {
   readonly tools?: readonly ProbeTool[];
   readonly events?: HookDefinition["events"];
   readonly modules?: NonNullable<Parameters<typeof createTestRuntime>[0]>["modules"];
+  readonly sandboxIdle?: NonNullable<Parameters<typeof createTestRuntime>[0]>["sandboxIdle"];
 }
 
 export interface Probe {
@@ -99,6 +100,7 @@ export async function probe(options: ProbeOptions): Promise<Probe> {
       })),
       ...(options.modules ?? []),
     ],
+    sandboxIdle: options.sandboxIdle,
   });
   return { prompts, ran, test };
 }

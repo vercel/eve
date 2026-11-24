@@ -469,6 +469,163 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
         });
       });
 
+      const replaysAfterRestart = (
+        point: string,
+        options: CaseOptions,
+        body: (host: HostUnderTest, restart: () => Promise<void>, agent: Probe) => Promise<void>,
+      ) =>
+        needs(
+          "durable",
+          `replays a session ${point} after a restart, and continues it`,
+          async () => {
+            const logs = captureLogRecords();
+            const output = captureConsoleOutput();
+            onTestFinished(() => {
+              const lines = [
+                ...logs.records.map((record) => JSON.stringify(record)),
+                ...output.lines,
+              ];
+              expect(
+                lines.filter((line) => /REPLAY_DIVERGENCE|CORRUPTED_EVENT_LOG/.test(line)),
+              ).toEqual([]);
+            });
+            await withHost(options, async (host, agent) => {
+              const restart = async () => {
+                await host.settled();
+                await host.restart!();
+              };
+              await body(host, restart, agent);
+              await host.settled();
+            });
+          },
+        );
+
+      replaysAfterRestart(
+        "parked between turns",
+        { name: `${name}-replay-parked`, respond: () => textStreamResult("Noted, Alice.") },
+        async ({ runtime }, restart, { prompts }) => {
+          const thread = alice(runtime, `${name}:replay-parked`);
+          const first = await (
+            await thread.send("Alice opens the thread.", { auth: null })
+          ).result();
+          await restart();
+          const next = await (
+            await thread.send("Alice continues the thread.", { auth: null })
+          ).result();
+          expect(next).toMatchObject({ sessionId: first.sessionId, status: "completed" });
+          expect(prompts.at(-1)).toContain("Alice opens the thread.");
+          const events = await recorded(runtime, first.sessionId);
+          expect(ofType(events, "turn.settled").map(({ data }) => data.outcome)).toEqual([
+            "completed",
+            "completed",
+          ]);
+          expect(await violations(runtime, first.sessionId)).toEqual([]);
+        },
+      );
+
+      replaysAfterRestart(
+        "paused on an approval",
+        {
+          name: `${name}-replay-approval`,
+          respond: (prompt) =>
+            prompt.includes('"role":"tool"')
+              ? textStreamResult("Deployed, Alice.")
+              : toolCallStreamResult({ input: "{}", toolCallId: "deploy", toolName: "deploy" }),
+          tools: [{ approval: true, name: "deploy" }],
+        },
+        async ({ runtime }, restart, { ran }) => {
+          const thread = alice(runtime, `${name}:replay-approval`);
+          const asked = await (await thread.send("Deploy, please.", { auth: null })).result();
+          expect(asked.interactions).toHaveLength(1);
+          await restart();
+          expect(ran).toEqual([]);
+          const answered = await (
+            await thread.respond(
+              [{ interactionId: asked.interactions[0]!.interactionId, optionId: "approve" }],
+              { auth: null },
+            )
+          ).result();
+          expect(answered).toMatchObject({
+            reply: "Deployed, Alice.",
+            sessionId: asked.sessionId,
+            status: "completed",
+          });
+          expect(ran).toEqual(["deploy"]);
+          expect(await violations(runtime, asked.sessionId)).toEqual([]);
+        },
+      );
+
+      const idleTimeoutMs = 3_600_000;
+      replaysAfterRestart(
+        "waiting out its sandbox's idle window",
+        {
+          events: {
+            async "turn.started"(_event, ctx) {
+              await ctx.getSandbox();
+            },
+          },
+          name: `${name}-replay-idle`,
+          respond: () => textStreamResult("Noted, Alice."),
+          sandboxIdle: { idleTimeoutMs },
+        },
+        async ({ runtime, storedWaits }, restart, { test }) => {
+          const thread = alice(runtime, `${name}:replay-idle`);
+          const first = await (
+            await thread.send("Alice opens the notes.", { auth: null })
+          ).result();
+          const idleWindow = (waits: readonly StoredWait[]) =>
+            waits.find(
+              (wait) =>
+                wait.runId === first.sessionId &&
+                wait.status !== "completed" &&
+                Math.abs(Date.parse(wait.resumeAt!) - Date.parse(wait.createdAt) - idleTimeoutMs) <
+                  60_000,
+            );
+          await vi.waitFor(
+            async () => {
+              expect(idleWindow(await storedWaits!())).toBeDefined();
+            },
+            { interval: 20, timeout: 10_000 },
+          );
+          await restart();
+          const next = await (
+            await thread.send("Alice asks for a summary.", { auth: null })
+          ).result();
+          expect(next).toMatchObject({ sessionId: first.sessionId, status: "completed" });
+          const sandbox = test.sandboxEvents
+            .filter((event) => event.endsWith(`:${first.sessionId}`))
+            .map((event) => event.split(":")[0]);
+          expect(sandbox).toContain("start");
+          expect(sandbox).not.toContain("idle");
+        },
+      );
+
+      replaysAfterRestart(
+        "a compaction just handed to a new owner",
+        { name: `${name}-replay-moved`, respond: () => textStreamResult("Noted, Alice.") },
+        async ({ runtime, sessionOwner }, restart) => {
+          const thread = alice(runtime, `${name}:replay-moved`);
+          const first = await (
+            await thread.send("Alice asks for the summary.", { auth: null })
+          ).result();
+          await createSession(first.sessionId, runtime).compact();
+          await vi.waitFor(async () => {
+            expect(await sessionOwner!(first.sessionId)).not.toBe(first.sessionId);
+          });
+          await restart();
+          const next = await (await thread.send("Bob asks again.", { auth: null })).result();
+          expect(next).toMatchObject({ sessionId: first.sessionId, status: "completed" });
+          const events = await recorded(runtime, first.sessionId);
+          expect(ofType(events, "context.settled")).toMatchObject([
+            { data: { kind: "compaction", outcome: "completed" } },
+          ]);
+          expect(ofType(events, "turn.settled").map(({ data }) => data.outcome)).toEqual([
+            "completed",
+            "completed",
+          ]);
+        },
+      );
+
       needs(
         "stamps",
         "parks a run another eve version owns at a restart, and resets it on its thread's next message",
@@ -581,7 +738,7 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
           });
           finalizeInstrumentationProviders({ serviceName: agentName });
           onTestFinished(() => {
-            delete (globalThis as Record<symbol, unknown>)[Symbol.for("eve.runtime")];
+            delete (globalThis as Record<symbol, unknown>)[Symbol.for("eve.app")];
           });
           await withHost(
             {
