@@ -97,6 +97,8 @@
   --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
 
   --bar-height: 56px;
+  --chat-copy-size: 16px;
+  --chat-copy-line: 24px;
 }
 
 * {
@@ -133,7 +135,6 @@ button {
 }
 
 button:focus-visible,
-select:focus-visible,
 a:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
@@ -321,49 +322,89 @@ kbd {
   color: var(--red-900);
 }
 
-.select {
-  position: relative;
+.device-trigger {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  height: 32px;
-  padding: 0 30px 0 10px;
-  border-radius: 6px;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 9px;
+  border: 1px solid var(--gray-alpha-400);
+  border-radius: 7px;
   background: var(--bg-100);
-  box-shadow: 0 0 0 1px var(--gray-alpha-400);
-  color: var(--gray-900);
-  transition:
-    box-shadow 200ms,
-    color 200ms;
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
 }
-.select:hover {
-  box-shadow: 0 0 0 1px var(--gray-alpha-500);
-  color: var(--gray-1000);
+.device-trigger:hover:not(:disabled),
+.device-trigger[data-popup-open] {
+  border-color: var(--gray-alpha-500);
+  background: var(--gray-100);
 }
-.select:focus-within {
-  box-shadow: var(--input-focus);
-}
-.select select {
-  appearance: none;
-  border: none;
-  outline: none;
-  background: transparent;
-  color: var(--gray-1000);
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
-}
-.select select:disabled {
+.device-trigger:disabled {
   cursor: not-allowed;
-  color: var(--gray-700);
+  color: var(--gray-900);
 }
-.select select option {
+.device-trigger > svg,
+.device-option > svg,
+.device-chevron {
+  flex: none;
+  color: var(--gray-900);
+}
+.device-chevron {
+  display: grid;
+  place-items: center;
+}
+.device-positioner {
+  z-index: 60;
+}
+.device-popup {
+  min-width: 230px;
+  max-height: var(--available-height);
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--gray-400);
+  border-radius: 9px;
   background: var(--bg-100);
+  box-shadow: var(--shadow-float);
+  outline: none;
 }
-.select-chevron {
-  position: absolute;
-  right: 10px;
-  pointer-events: none;
+.device-option {
+  display: grid;
+  grid-template-columns: 16px 1fr 16px;
+  align-items: center;
+  gap: 9px;
+  padding: 8px;
+  border-radius: 5px;
+  outline: none;
+  cursor: default;
+}
+.device-option[data-highlighted] {
+  background: var(--gray-alpha-200);
+}
+.device-option-copy {
+  display: grid;
+  gap: 1px;
+  grid-column: 2;
+}
+.device-option-description {
+  color: var(--gray-900);
+  font-size: 12px;
+  line-height: 16px;
+}
+.device-option-check {
+  display: grid;
+  place-items: center;
+  grid-column: 3;
+}
+@media (pointer: coarse) {
+  .device-trigger,
+  .topbar-actions .icon-button {
+    min-height: 44px;
+  }
+  .topbar-actions .icon-button {
+    width: 44px;
+  }
 }
 
 /* Geist spinner: 12 bars fading in turn. */
@@ -481,15 +522,25 @@ kbd {
 
 /* ---------------------------------------------------------------- Shell */
 
-.brand {
+.brand-lockup {
   display: flex;
+  flex: none;
   align-items: center;
   gap: 10px;
 }
-.brand-name {
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: -0.28px;
+.brand-triangle {
+  width: 20px;
+  height: 20px;
+}
+.brand-divider {
+  width: 1px;
+  height: 16px;
+  background: var(--gray-alpha-400);
+}
+.brand-eve {
+  display: block;
+  width: auto;
+  height: 14px;
 }
 
 /* ---------------------------------------------------------------- Browser */
@@ -902,8 +953,8 @@ kbd {
   padding: 8px 14px;
   border-radius: 20px;
   background: var(--gray-200);
-  font-size: 14px;
-  line-height: 1.625;
+  font-size: var(--chat-copy-size);
+  line-height: var(--chat-copy-line);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -926,8 +977,8 @@ kbd {
   gap: 8px;
   padding: 0 4px;
   color: var(--gray-1000);
-  font-size: 14px;
-  line-height: 1.625;
+  font-size: var(--chat-copy-size);
+  line-height: var(--chat-copy-line);
   overflow-wrap: anywhere;
 }
 .markdown ul,
@@ -949,7 +1000,7 @@ kbd {
   border-radius: 4px;
   background: var(--gray-alpha-200);
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: 0.875em;
 }
 .markdown a {
   color: var(--blue-900);
@@ -1003,8 +1054,8 @@ kbd {
   background: transparent;
   color: var(--gray-1000);
   font: inherit;
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--chat-copy-size);
+  line-height: var(--chat-copy-line);
 }
 .composer textarea::placeholder {
   color: var(--gray-700);
@@ -1059,15 +1110,15 @@ kbd {
   gap: 8px;
 }
 .empty-title h2 {
-  font-size: 20px;
+  font-size: 24px;
   font-weight: 600;
-  line-height: 26px;
-  letter-spacing: -0.4px;
+  line-height: 30px;
+  letter-spacing: -0.02em;
 }
 .empty-blurb {
   color: var(--gray-900);
-  font-size: 14px;
-  line-height: 22px;
+  font-size: var(--chat-copy-size);
+  line-height: var(--chat-copy-line);
 }
 .empty-blurb strong {
   color: var(--gray-1000);
@@ -1089,8 +1140,8 @@ kbd {
   border: 1px solid var(--gray-400);
   border-radius: 20px 8px 8px 20px;
   color: var(--gray-1000);
-  font-size: 13px;
-  line-height: 18px;
+  font-size: 14px;
+  line-height: 20px;
   text-align: left;
   transition:
     border-color 150ms,
@@ -1104,6 +1155,16 @@ kbd {
   display: inline-flex;
   flex: none;
   gap: 3px;
+}
+
+@media (pointer: coarse) {
+  .suggestion-keys,
+  .composer-hint {
+    display: none;
+  }
+  .composer-bar {
+    justify-content: flex-end;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1403,6 +1464,7 @@ kbd {
 
 .app {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: var(--bar-height) minmax(0, 1fr);
   grid-template-areas:
     "top"
@@ -1424,6 +1486,24 @@ kbd {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+@media (max-width: 420px) {
+  .topbar {
+    gap: 6px;
+    padding-inline: 10px;
+  }
+  .brand-lockup,
+  .topbar-actions {
+    gap: 6px;
+  }
+  .brand-triangle {
+    width: 16px;
+    height: 16px;
+  }
+  .brand-eve {
+    height: 11px;
+  }
 }
 
 .main {
@@ -1496,6 +1576,10 @@ kbd {
   left: 8px;
   height: 22px;
   font-size: 11px;
+}
+.browser-docked .mode-agent {
+  top: auto;
+  bottom: 8px;
 }
 .browser-docked .mode-replay {
   top: auto;
@@ -1575,9 +1659,6 @@ kbd {
   }
 }
 
-.brand-name {
-  white-space: nowrap;
-}
 .backdrop-closing {
   opacity: 0;
   transition: opacity 380ms ease-out;
