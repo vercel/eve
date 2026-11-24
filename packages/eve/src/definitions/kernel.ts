@@ -45,9 +45,15 @@ import { chooseModel, effectiveModelId } from "./model.js";
 import { sessionDefinitions } from "./agent.js";
 import { bindOpeningCancel, settleHookCommands } from "./hooks.js";
 import { staticUserInstructions } from "./instructions.js";
+import { readEnv } from "#runtime-env/env.js";
 
 const log = createLogger("definitions");
-const neverAborted = new AbortController().signal;
+let neverAbortedSignal: AbortSignal | undefined;
+
+function neverAborted(): AbortSignal {
+  neverAbortedSignal ??= new AbortController().signal;
+  return neverAbortedSignal;
+}
 
 export type Where = Pick<DefinitionContext, "step" | "call" | "commit"> &
   Partial<Pick<DefinitionContext, "history" | "signal">>;
@@ -59,7 +65,7 @@ export function contributionsOf(
   mode: "evaluate" | "read" = "read",
 ): Contribution[] {
   const kept = new Map<string, Promise<Kept | undefined>>();
-  const signal = where.signal ?? neverAborted;
+  const signal = where.signal ?? neverAborted();
   return definitions.map((definition) =>
     definition.contribute({
       ...where,
@@ -207,7 +213,7 @@ export async function restoreDefinitions(
       revision: input.revision,
     });
   }
-  if (process.env.NODE_ENV !== "production" && process.env.EVE_DEFINITIONS_COLD === "1") {
+  if (process.env.NODE_ENV !== "production" && readEnv("EVE_DEFINITIONS_COLD") === "1") {
     const sessionId = ctx.get(SessionIdKey);
     if (sessionId !== undefined) forgetSessionLive(sessionId);
   }
@@ -366,7 +372,7 @@ async function withMemos<T>(
   fn: (memo: InternalContext["memo"]) => Promise<T>,
 ): Promise<{ readonly result: T; readonly used: Readonly<Record<string, JsonValue>> }> {
   const memos = openMemos({
-    abortSignal: input.abortSignal ?? neverAborted,
+    abortSignal: input.abortSignal ?? neverAborted(),
     afterDeployment: discardedByDeployment(ctx, input.scope),
     kept: readDefinitionsState(ctx).memos?.[input.scope],
     label: input.label,

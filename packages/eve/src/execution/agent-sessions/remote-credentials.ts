@@ -1,3 +1,4 @@
+import { builtInHosts } from "#runtime/app.js";
 import type { DynamicContext, SessionFrame } from "#dynamic/definition.js";
 import { streamSessionLines } from "#execution/session-event-stream.js";
 import { emptySessionView, foldLine } from "#protocol/session-projection/fold.js";
@@ -82,7 +83,9 @@ function destinationChanged(name: string): Error {
 
 async function foldSessionViewTo(sessionId: string, position: number): Promise<SessionView> {
   const view = emptySessionView();
-  for await (const { line, position: at } of streamSessionLines(sessionId, { follow: false })) {
+  for await (const { line, position: at } of streamSessionLines(builtInHosts(), sessionId, {
+    follow: false,
+  })) {
     if (at > position) break;
     if (line !== undefined) foldLine(view, line, at);
   }

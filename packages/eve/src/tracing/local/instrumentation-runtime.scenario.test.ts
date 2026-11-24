@@ -15,6 +15,7 @@ import {
 } from "#compiled/@opentelemetry/api/index.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { createAiSdkHookBridge } from "#instrumentation/ai-sdk-hook-bridge.js";
+import { testEntities } from "#internal/testing/test-platform.js";
 import { listLocalTraces } from "#tracing/local/trace-reader.js";
 import type { InstrumentationScope } from "#instrumentation/lifecycle.js";
 import {
@@ -57,6 +58,7 @@ describe("local instrumentation runtime", () => {
     const runtime = installLocalInstrumentationRuntime({
       appRoot,
       frameworkVersion: "test",
+      platform: testEntities(),
       serviceName: "test-agent",
     });
     const scope: InstrumentationScope = instrumentationScope(

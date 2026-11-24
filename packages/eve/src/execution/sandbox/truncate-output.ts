@@ -1,3 +1,5 @@
+import { utf8ByteLength } from "#shared/bytes.js";
+
 export const MAX_OUTPUT_LINES = 2000;
 
 export const MAX_OUTPUT_BYTES = 50 * 1024;
@@ -34,7 +36,7 @@ function truncateByDirection(text: string, direction: "head" | "tail"): Truncati
 
   for (let i = start; i >= 0 && i < rawLines.length && kept.length < MAX_OUTPUT_LINES; i += step) {
     const line = capLineLength(rawLines[i] ?? "");
-    const lineBytes = Buffer.byteLength(line, "utf8") + 1;
+    const lineBytes = utf8ByteLength(line) + 1;
 
     if (bytes + lineBytes > MAX_OUTPUT_BYTES && kept.length > 0) {
       break;

@@ -1,8 +1,10 @@
+import { builtInHosts } from "#runtime/app.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { describe, expect, it, vi } from "vitest";
 
 import { ContinuationHookTokensKey } from "#context/keys.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+import type { OpenTurn } from "#execution/session/open-turn.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
 
@@ -27,7 +29,7 @@ describe("SessionStateCursor", () => {
     const nextState = state("channel:third");
 
     await cursor.advance((input) =>
-      withSessionStateDelta(input, async () => ({
+      withSessionStateDelta(builtInHosts(), input, async () => ({
         serializedContext: {
           [ContinuationHookTokensKey.name]: ["channel:initial", "channel:second", "channel:third"],
         },
@@ -54,7 +56,9 @@ describe("SessionStateCursor", () => {
     });
 
     await cursor.advance((input) =>
-      withSessionStateDelta(input, async () => ({ sessionState: state("channel:current") })),
+      withSessionStateDelta(builtInHosts(), input, async () => ({
+        sessionState: state("channel:current"),
+      })),
     );
 
     expect(claimSessionHooks).toHaveBeenCalledWith([stableToken, "channel:current"]);
@@ -72,7 +76,7 @@ describe("SessionStateCursor", () => {
 
     await cursor.advanceWithHistory(async ({ history, serializedContext, sessionState }) => {
       const input = structuredClone({ history, serializedContext, sessionState });
-      const result = await withSessionStateDelta(input, async (values) => {
+      const result = await withSessionStateDelta(builtInHosts(), input, async (values) => {
         const channel = values.serializedContext["eve.channel"] as {
           state: Record<string, unknown>;
         };
@@ -108,7 +112,9 @@ describe("SessionStateCursor", () => {
     });
 
     await expect(
-      cursor.advance((input) => withSessionStateDelta(input, async () => ({ history: [] }))),
+      cursor.advance((input) =>
+        withSessionStateDelta(builtInHosts(), input, async () => ({ history: [] })),
+      ),
     ).rejects.toThrow("not given the history cannot change it");
     expect(cursor.history).toBe(history);
   });
@@ -124,13 +130,15 @@ describe("SessionStateCursor", () => {
     const { promise: released, resolve: release } = Promise.withResolvers<void>();
 
     const slow = cursor.advance((input) =>
-      withSessionStateDelta(input, async () => {
+      withSessionStateDelta(builtInHosts(), input, async () => {
         await released;
         return { sessionState: state("channel:slow") };
       }),
     );
     await cursor.advance((input) =>
-      withSessionStateDelta(input, async () => ({ sessionState: state("channel:fast") })),
+      withSessionStateDelta(builtInHosts(), input, async () => ({
+        sessionState: state("channel:fast"),
+      })),
     );
     release();
 
@@ -164,7 +172,7 @@ describe("SessionStateCursor", () => {
           : { ...state("channel:initial"), hasProxyInputRequests: true };
       const result = cursor.advanceBeside(
         (input) =>
-          withSessionStateDelta(input, async () => {
+          withSessionStateDelta(builtInHosts(), input, async () => {
             await beside.promise;
             return { sessionState: besideState };
           }),
@@ -172,7 +180,7 @@ describe("SessionStateCursor", () => {
       );
       const ownStep = () =>
         cursor.advance((input) =>
-          withSessionStateDelta(input, async () => {
+          withSessionStateDelta(builtInHosts(), input, async () => {
             await step.promise;
             return { sessionState: state("channel:step") };
           }),
@@ -194,6 +202,109 @@ describe("SessionStateCursor", () => {
       if (meanwhile === "nothing") expect(claimSessionHooks).not.toHaveBeenCalled();
     },
   );
+
+  it("records where the open turn goes before a step runs and once it is adopted, and not for a step that leaves it", async () => {
+    const records: unknown[] = [];
+    const cursor = new SessionStateCursor({
+      history: [],
+      inbox: { claimSessionHooks: vi.fn(async () => {}) },
+      open: { at: "step" },
+      record: async (open) => {
+        records.push({ open, sessionState: cursor.sessionState.hasProxyInputRequests });
+      },
+      sessionWritable: new WritableStream<Uint8Array>(),
+      serializedContext: {},
+      sessionState: state(""),
+    });
+    const paused: OpenTurn = { at: "pause", pause: { on: "tasks", taskIds: ["task-1"] } };
+
+    await cursor.advance(
+      (input) =>
+        withSessionStateDelta(builtInHosts(), input, async () => {
+          expect(records).toEqual([{ open: { at: "step" }, sessionState: false }]);
+          return { sessionState: { ...state(""), hasProxyInputRequests: true } };
+        }),
+      { after: () => paused, before: { at: "step" } },
+    );
+    await cursor.advance((input) => withSessionStateDelta(builtInHosts(), input, async () => ({})));
+
+    expect(records).toEqual([
+      { open: { at: "step" }, sessionState: false },
+      { open: paused, sessionState: true },
+    ]);
+    expect(cursor.open).toEqual(paused);
+  });
+
+  it("settles once no step runs, after the last one is recorded", async () => {
+    let recorded = 0;
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const cursor = new SessionStateCursor({
+      history: [],
+      inbox: { claimSessionHooks: vi.fn(async () => {}) },
+      record: async () => {
+        recorded += 1;
+      },
+      sessionWritable: new WritableStream<Uint8Array>(),
+      serializedContext: {},
+      sessionState: state(""),
+    });
+    await cursor.settledStep();
+    const step = cursor.advance(
+      async (input) => {
+        await gate;
+        return await withSessionStateDelta(builtInHosts(), input, async () => ({}));
+      },
+      { after: () => undefined },
+    );
+    let settled = false;
+    const waiting = cursor.settledStep().then(() => (settled = true));
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    release();
+    await step;
+    await waiting;
+    expect(recorded).toBe(1);
+  });
+
+  it("marks only the first step a rerun of the one a stopped process left", async () => {
+    const reruns: unknown[] = [];
+    const cursor = new SessionStateCursor({
+      history: [],
+      inbox: { claimSessionHooks: vi.fn(async () => {}) },
+      rerunFirst: true,
+      sessionWritable: new WritableStream<Uint8Array>(),
+      serializedContext: {},
+      sessionState: state(""),
+    });
+    for (let index = 0; index < 2; index++)
+      await cursor.advance(async ({ rerun }) => {
+        reruns.push(rerun);
+        return { stateDelta: {} };
+      });
+    expect(reruns).toEqual([true, undefined]);
+  });
+});
+
+describe("SessionStateCursor without a recorder", () => {
+  it("calls a turn's step before it awaits anything", () => {
+    const cursor = new SessionStateCursor({
+      history: [],
+      inbox: { claimSessionHooks: async () => {} },
+      sessionWritable: new WritableStream<Uint8Array>(),
+      serializedContext: {},
+      sessionState: state(""),
+    });
+    let called = false;
+    void cursor.advanceWithHistory(
+      async () => {
+        called = true;
+        return { stateDelta: {} };
+      },
+      { before: { at: "step" } },
+    );
+    expect(called).toBe(true);
+  });
 });
 
 function state(continuationToken: string): DurableSessionState {

@@ -4,6 +4,7 @@ import {
 } from "#internal/nitro/host/dispatch-schedule-in-dev.js";
 import type { DevelopmentNitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
+import type { App } from "#runtime/app.js";
 
 const DEV_DISPATCH_SCHEDULE_PATH_PATTERN = new RegExp(
   `^${EVE_ROUTE_PREFIX.replace(/\//g, "\\/")}\\/dev\\/schedules\\/([^/]+)$`,
@@ -12,6 +13,7 @@ const DEV_DISPATCH_SCHEDULE_PATH_PATTERN = new RegExp(
 export async function handleDevScheduleDispatchRequest(
   input: DevelopmentNitroArtifactsConfig,
   request: Request,
+  app: App,
 ): Promise<Response> {
   const url = new URL(request.url);
   const match = url.pathname.match(DEV_DISPATCH_SCHEDULE_PATH_PATTERN);
@@ -33,6 +35,7 @@ export async function handleDevScheduleDispatchRequest(
 
   try {
     const result = await dispatchScheduleInDev({
+      app,
       artifactsConfig: input,
       scheduleId,
     });

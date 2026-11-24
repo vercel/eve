@@ -1,3 +1,4 @@
+import { builtInHosts } from "#runtime/app.js";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
@@ -88,7 +89,7 @@ async function issuesRuntime(name: string) {
 }
 
 function send(runId: string, message: string, scheduled: boolean) {
-  return resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(runId)), {
+  return resumeRoutedHook(builtInHosts(), sessionInboxHookToken(sessionCommandHookToken(runId)), {
     auth: alice,
     kind: "send",
     delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),

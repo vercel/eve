@@ -1,12 +1,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { defineWorkspaceAgent } from "#public/experimental/workspace/index.js";
+import { inTestApp, testApp } from "#internal/testing/test-platform.js";
+import { createEntities } from "#platform/entities.js";
+import vercelPlatform from "#platform/vercel/declaration.js";
 
 const { getVercelOidcToken } = vi.hoisted(() => ({
   getVercelOidcToken: vi.fn().mockResolvedValue("oidc-token"),
 }));
 
 vi.mock("#compiled/@vercel/oidc/index.js", () => ({ getVercelOidcToken }));
+
+function inVercelApp<T>(fn: () => T): T {
+  return inTestApp(fn, testApp({ platform: createEntities(vercelPlatform, undefined) }));
+}
 
 afterEach(() => {
   getVercelOidcToken.mockClear();
@@ -21,10 +28,10 @@ describe("defineWorkspaceAgent", () => {
     const subagent = defineWorkspaceAgent({ name: "research" });
 
     expect(subagent).toMatchObject({ description: "", kind: "remote", path: "/eve/v1/session" });
-    expect(await (subagent.url as () => Promise<string>)()).toBe(
+    expect(await inVercelApp(subagent.url as () => Promise<string>)).toBe(
       "https://preview.example.com/eve/research",
     );
-    await expect(subagent.auth?.()).resolves.toEqual({
+    await expect(inVercelApp(() => subagent.auth?.())).resolves.toEqual({
       headers: {
         authorization: "Bearer oidc-token",
         "x-vercel-trusted-oidc-idp-token": "oidc-token",
@@ -48,8 +55,8 @@ describe("defineWorkspaceAgent", () => {
     vi.stubEnv("VERCEL_URL", "localhost:3000");
     const subagent = defineWorkspaceAgent({ name: "research" });
 
-    expect((subagent.url as () => string)()).toBe("http://localhost:3000/research");
-    await expect(subagent.auth?.()).resolves.toEqual({ headers: {} });
+    expect(inVercelApp(subagent.url as () => string)).toBe("http://localhost:3000/research");
+    await expect(inVercelApp(() => subagent.auth?.())).resolves.toEqual({ headers: {} });
     expect(getVercelOidcToken).not.toHaveBeenCalled();
   });
 
@@ -76,7 +83,7 @@ describe("defineWorkspaceAgent", () => {
 
       const subagent = defineWorkspaceAgent({ name: "research" });
 
-      expect((subagent.url as () => string)()).toBe(expected);
+      expect(inVercelApp(subagent.url as () => string)).toBe(expected);
     },
   );
 
@@ -84,7 +91,7 @@ describe("defineWorkspaceAgent", () => {
     vi.stubEnv("VERCEL", undefined);
     const subagent = defineWorkspaceAgent({ name: "research" });
 
-    expect(() => (subagent.url as () => string)()).toThrow(
+    expect(() => inVercelApp(subagent.url as () => string)).toThrow(
       "No default workspace-agent transport is available",
     );
   });

@@ -1,3 +1,4 @@
+import { builtInHosts } from "#runtime/app.js";
 import type { LanguageModelV4Prompt } from "@ai-sdk/provider";
 import { context, propagation, trace } from "@opentelemetry/api";
 import { MockLanguageModelV4 } from "ai/test";
@@ -18,6 +19,7 @@ import { buildSerializedContext, withTimeout } from "#internal/testing/entry-tes
 import { captureTurnEvents } from "#internal/testing/events.js";
 import { resumeRoutedHook } from "#execution/hosts.js";
 import { startTestSession } from "#internal/testing/test-session-hosts.js";
+import { testEntities } from "#internal/testing/test-platform.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineHook } from "#public/definitions/hook.js";
 import { defineDynamic as defineDynamicModel } from "#public/definitions/model.js";
@@ -27,8 +29,7 @@ import { defineTool } from "#tools/definition.js";
 
 type Choice = "first" | "second";
 
-const REGISTRY_GLOBAL_KEY = Symbol.for("eve.harness-instrumentation-providers");
-const RUNTIME_GLOBAL_KEY = Symbol.for("eve.instrumentation-runtime");
+const PROCESS_APP_KEY = Symbol.for("eve.app");
 
 const choice = defineState<Choice>("test.turn-choice", () => "first");
 
@@ -118,7 +119,7 @@ async function runTwoTurns(): Promise<readonly Choice[]> {
     const stream = captureTurnEvents(run);
     try {
       await withTimeout(stream.nextTurn(), "first turn");
-      await resumeRoutedHook(sessionInboxHookToken(continuationToken), {
+      await resumeRoutedHook(builtInHosts(), sessionInboxHookToken(continuationToken), {
         auth: caller("team"),
         delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
         kind: "send",
@@ -139,8 +140,7 @@ describe("state a turn.started hook writes", () => {
     trace.disable();
     context.disable();
     propagation.disable();
-    delete (globalThis as Record<symbol, unknown>)[REGISTRY_GLOBAL_KEY];
-    delete (globalThis as Record<symbol, unknown>)[RUNTIME_GLOBAL_KEY];
+    delete (globalThis as Record<symbol, unknown>)[PROCESS_APP_KEY];
   });
 
   it("chooses the model for every call of that turn, starting with the first", async () => {
@@ -149,8 +149,10 @@ describe("state a turn.started hook writes", () => {
 
   it("reaches each call's telemetry runtime context, beside the turn's caller", async () => {
     const reported: { readonly choice: Choice; readonly plan: unknown }[] = [];
+    const platform = testEntities();
     await registerInstrumentationProvider({
       agentName: "hook-state",
+      platform,
       slot: "otel",
       value: otelIntegration({
         runtimeContext(input) {
@@ -160,7 +162,7 @@ describe("state a turn.started hook writes", () => {
         },
       }),
     });
-    finalizeInstrumentationProviders({ serviceName: "hook-state" });
+    finalizeInstrumentationProviders({ platform, serviceName: "hook-state" });
 
     const served = await runTwoTurns();
 

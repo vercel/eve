@@ -1,3 +1,4 @@
+import { processApp } from "#runtime/app.js";
 import { activeTurnIdOf } from "#protocol/session-projection.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import {
@@ -33,7 +34,7 @@ export async function settleCancelledTurnStep(
   input: CancelledTurnSettleInput,
 ): Promise<WithSessionStateDelta<CancelledTurnSettleResult>> {
   "use step";
-  return await withSessionStateDelta(input, settleCancelledTurn);
+  return await withSessionStateDelta(processApp().hosts, input, settleCancelledTurn);
 }
 
 export async function settleCancelledTurn(

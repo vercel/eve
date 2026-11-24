@@ -1,4 +1,5 @@
 import { getStepMetadata } from "#compiled/@workflow/core/index.js";
+import { bindApp } from "#context/app.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey, InitiatorAuthKey, SandboxKey, SessionIdKey, SessionKey } from "#context/keys.js";
 import { runInWorkflowStep } from "#context/workflow-step.js";
@@ -7,6 +8,7 @@ import { ensureSandboxAccess, type EnsuredSandboxAccess } from "#execution/sandb
 import { createLogger, logError } from "#internal/logging.js";
 import { ownerReference } from "#execution/agent-sessions/owner.js";
 import { resolveSessionAgent } from "#runtime/sessions/runtime-context-keys.js";
+import type { Build } from "#platform/entities.js";
 import { runtimeNodeId, type SessionAgent } from "#runtime/sessions/session-agent.js";
 import type { SandboxEnvironmentIdentity } from "#shared/sandbox-environment.js";
 import type { SandboxAccess } from "#sandbox/state.js";
@@ -17,6 +19,7 @@ import {
   AuthorizationHookKey,
   CallbackBaseUrlKey,
 } from "#harness/authorization.js";
+import { startedApp } from "#runtime/app.js";
 import { createAuthorizationContext } from "#runtime/authorization-context.js";
 import { buildBaseToolContext } from "#context/build-base-tool-context.js";
 import { createToolChannelTo } from "#execution/tools/channel-to.js";
@@ -38,17 +41,19 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
   ): Promise<unknown> {
     const { args, context: input } = invocation;
     getStepMetadata();
+    const app = startedApp();
     const context = new ContextContainer();
+    bindApp(context, app);
     context.set(AuthKey, input.session.auth.current);
     context.set(InitiatorAuthKey, input.session.auth.initiator);
     context.set(SessionIdKey, input.session.id);
     context.setVirtualContext(SessionKey, { ...input.session, sessionId: input.session.id });
-    context.set(CallbackBaseUrlKey, resolveWorkflowCallbackBaseUrl(input.baseUrl));
+    context.set(CallbackBaseUrlKey, resolveWorkflowCallbackBaseUrl(input.baseUrl, app.platform));
     context.setVirtualContext(AuthorizationHookKey, input.token);
     context.setVirtualContext(PendingAuthorizationResultKey, input.authorizationResults);
 
     const loadAgent = stepAgentLoader(input);
-    const sandbox = openStepSandbox(input, loadAgent);
+    const sandbox = openStepSandbox(input, loadAgent, app.platform.build);
     return contextStorage.run(context, async (): Promise<WorkflowStepResult> => {
       const auth = createAuthorizationContext({
         scope: input.toolName,
@@ -138,7 +143,11 @@ function stepAgentLoader(input: WorkflowStepContext): () => Promise<SessionAgent
       : await contextStorage.run(delivery, () => resolveSessionAgent(reference));
 }
 
-function openStepSandbox(input: WorkflowStepContext, loadAgent: () => Promise<SessionAgent>) {
+function openStepSandbox(
+  input: WorkflowStepContext,
+  loadAgent: () => Promise<SessionAgent>,
+  build: Build,
+) {
   const { sessionId, state } = input.sandbox;
   let opening: Promise<EnsuredSandboxAccess> | undefined;
   let released = false;
@@ -152,6 +161,7 @@ function openStepSandbox(input: WorkflowStepContext, loadAgent: () => Promise<Se
     }
     return await ensureSandboxAccess({
       ...sandbox.template,
+      build: () => build,
       nodeId: runtimeNodeId(agent),
       ownsSandbox: false,
       registry: sandbox.registry,

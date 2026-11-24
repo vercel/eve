@@ -1,8 +1,8 @@
-import { createHash } from "node:crypto";
 import type { ModelMessage } from "ai";
 
 import type { HistoryState } from "#context/keys.js";
 import type { UserMessageKind } from "#harness/messages.js";
+import { sha256Base64Url } from "#shared/digest.js";
 
 export interface Announcement {
   readonly value: string;
@@ -12,10 +12,7 @@ export interface Announcement {
 }
 
 export function announcementDigest(kind: unknown, content: unknown): string {
-  return createHash("sha256")
-    .update(JSON.stringify([kind, content]))
-    .digest("base64url")
-    .slice(0, 22);
+  return sha256Base64Url(JSON.stringify([kind, content])).slice(0, 22);
 }
 
 export function keptAnnouncements(

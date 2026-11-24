@@ -1,3 +1,4 @@
+import { builtInHosts } from "#runtime/app.js";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
@@ -141,7 +142,7 @@ async function withDynamicRun(
         offered,
         first: () => withTimeout(stream.nextTurn(), "first turn"),
         async deliver(message) {
-          await resumeRoutedHook(sessionInboxHookToken(continuationToken), {
+          await resumeRoutedHook(builtInHosts(), sessionInboxHookToken(continuationToken), {
             auth: ALICE,
             kind: "send",
             delivery,
@@ -151,18 +152,22 @@ async function withDynamicRun(
         async answer(stage) {
           const question = questionsIn(stage)[0];
           expect(question).toBeDefined();
-          await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
-            auth: ALICE,
-            kind: "send",
-            delivery,
-            payload: {
-              answers: [{ interactionId: question!.data.interactionId, optionId: "approve" }],
+          await resumeRoutedHook(
+            builtInHosts(),
+            sessionInboxHookToken(sessionCommandHookToken(run.runId)),
+            {
+              auth: ALICE,
+              kind: "send",
+              delivery,
+              payload: {
+                answers: [{ interactionId: question!.data.interactionId, optionId: "approve" }],
+              },
             },
-          });
+          );
           return await withTimeout(stream.nextTurn(), "answered");
         },
         async send(message) {
-          await resumeRoutedHook(sessionInboxHookToken(continuationToken), {
+          await resumeRoutedHook(builtInHosts(), sessionInboxHookToken(continuationToken), {
             auth: ALICE,
             kind: "send",
             delivery,

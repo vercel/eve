@@ -1,4 +1,3 @@
-import type { JWTPayload } from "#compiled/jose/index.js";
 import { createRemoteJWKSet, decodeJwt, jwtVerify } from "#compiled/jose/index.js";
 import { z } from "#compiled/zod/index.js";
 
@@ -6,7 +5,7 @@ import {
   areTokenClaimMatchersSatisfied,
   createJwtAuthenticatedCallerPrincipal,
 } from "#channel/auth/token-claims.js";
-import { isVercelOidcIssuer } from "#shared/vercel-project.js";
+import { ambientPlatform } from "#context/app.js";
 import type {
   ResolvedOidcAuthStrategy,
   RouteStrategyAuthenticationResult,
@@ -47,64 +46,12 @@ export async function authenticateOidcStrategy(input: {
       issuer: input.strategy.issuer,
     });
 
-    const hasExternalSubject =
-      input.strategy.acceptCurrentVercelProject &&
-      isVercelOidcIssuer(input.strategy.issuer) &&
-      verified.payload.external_sub !== undefined;
-    if (hasExternalSubject) {
-      if (
-        typeof verified.payload.external_sub !== "string" ||
-        verified.payload.external_sub.length === 0 ||
-        !currentVercelProjectMatches({ payload: verified.payload, strategy: input.strategy }) ||
-        !currentVercelEnvironmentMatches({ payload: verified.payload, strategy: input.strategy })
-      ) {
-        return {
-          kind: "caller-not-allowed",
-        };
-      }
-
-      return {
-        kind: "authenticated",
-        principal: createJwtAuthenticatedCallerPrincipal({
-          authenticator: "oidc",
-          issuerClaims: ["external_iss", "connector_id"],
-          payload: verified.payload,
-          principalType: "user",
-          subjectClaim: "external_sub",
-        }),
-      };
-    }
-
-    const hasDevelopmentUserSubject =
-      input.strategy.acceptCurrentVercelProject &&
-      isVercelOidcIssuer(input.strategy.issuer) &&
-      verified.payload.user_id !== undefined;
-    if (hasDevelopmentUserSubject) {
-      if (
-        typeof verified.payload.user_id !== "string" ||
-        verified.payload.user_id.length === 0 ||
-        verified.payload.environment !== "development" ||
-        !currentVercelProjectMatches({ payload: verified.payload, strategy: input.strategy })
-      ) {
-        return {
-          kind: "caller-not-allowed",
-        };
-      }
-
-      if (
-        currentVercelEnvironmentMatches({ payload: verified.payload, strategy: input.strategy })
-      ) {
-        return {
-          kind: "authenticated",
-          principal: createJwtAuthenticatedCallerPrincipal({
-            authenticator: "oidc",
-            payload: verified.payload,
-            principalType: "user",
-            subjectClaim: "user_id",
-          }),
-        };
-      }
-    }
+    const verdict = ambientPlatform()?.identity.verifyOidcCaller?.({
+      issuer: input.strategy.issuer,
+      payload: verified.payload,
+      strategy: input.strategy,
+    }) ?? { kind: "continue", currentProject: false, runtime: false };
+    if (verdict.kind !== "continue") return verdict;
 
     if (typeof verified.payload.sub !== "string" || verified.payload.sub.length === 0) {
       return {
@@ -112,19 +59,8 @@ export async function authenticateOidcStrategy(input: {
       };
     }
 
-    const isCurrentProjectToken =
-      input.strategy.acceptCurrentVercelProject &&
-      isCurrentVercelProjectToken({
-        issuer: input.strategy.issuer,
-        payload: verified.payload,
-        strategy: input.strategy,
-      });
-    const isCurrentVercelRuntimeToken =
-      isCurrentProjectToken &&
-      isCurrentVercelEnvironmentToken({ payload: verified.payload, strategy: input.strategy });
-
     if (
-      !isCurrentProjectToken &&
+      !verdict.currentProject &&
       !areTokenClaimMatchersSatisfied(verified.payload, input.strategy)
     ) {
       return {
@@ -137,7 +73,7 @@ export async function authenticateOidcStrategy(input: {
       principal: createJwtAuthenticatedCallerPrincipal({
         authenticator: "oidc",
         payload: verified.payload,
-        principalType: isCurrentVercelRuntimeToken ? "runtime" : "service",
+        principalType: verdict.runtime ? "runtime" : "service",
       }),
     };
   } catch {
@@ -200,69 +136,4 @@ async function getOidcDiscoveryDocument(
   oidcDiscoveryDocumentCache.set(discoveryUrl, discoveryPromise);
 
   return await discoveryPromise;
-}
-
-function isCurrentVercelProjectToken(input: {
-  readonly issuer: string;
-  readonly payload: JWTPayload;
-  readonly strategy: ResolvedOidcAuthStrategy;
-}): boolean {
-  if (!isVercelOidcIssuer(input.issuer)) {
-    return false;
-  }
-
-  const currentProject = input.strategy.currentVercelProject;
-  if (currentProject === undefined) {
-    return false;
-  }
-
-  return (
-    typeof input.payload.project_id === "string" &&
-    input.payload.project_id === currentProject.projectId
-  );
-}
-
-function currentVercelProjectMatches(input: {
-  readonly payload: JWTPayload;
-  readonly strategy: ResolvedOidcAuthStrategy;
-}): boolean {
-  const currentProject = input.strategy.currentVercelProject;
-  if (currentProject === undefined) {
-    return false;
-  }
-
-  return (
-    typeof input.payload.project_id === "string" &&
-    input.payload.project_id === currentProject.projectId
-  );
-}
-
-function isCurrentVercelEnvironmentToken(input: {
-  readonly payload: JWTPayload;
-  readonly strategy: ResolvedOidcAuthStrategy;
-}): boolean {
-  const currentEnvironment = input.strategy.currentVercelProject?.environment;
-  if (currentEnvironment === undefined || currentEnvironment.length === 0) {
-    return false;
-  }
-
-  return (
-    typeof input.payload.environment === "string" &&
-    input.payload.environment === currentEnvironment
-  );
-}
-
-function currentVercelEnvironmentMatches(input: {
-  readonly payload: JWTPayload;
-  readonly strategy: ResolvedOidcAuthStrategy;
-}): boolean {
-  const currentEnvironment = input.strategy.currentVercelProject?.environment;
-  if (currentEnvironment === undefined || currentEnvironment.length === 0) {
-    return false;
-  }
-
-  return (
-    typeof input.payload.environment === "string" &&
-    input.payload.environment === currentEnvironment
-  );
 }

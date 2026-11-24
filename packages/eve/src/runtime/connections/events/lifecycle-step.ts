@@ -1,3 +1,5 @@
+import { startedApp } from "#runtime/app.js";
+import { bindApp } from "#context/app.js";
 import { createHash } from "node:crypto";
 import { getWorkflowMetadata, getWritable } from "#compiled/@workflow/core/index.js";
 import { deserializeContext } from "#context/serialize.js";
@@ -37,6 +39,7 @@ export async function subscribeConnectionEvent(
   idempotencyKey: string,
 ): Promise<ConnectionEventSubscribeResult> {
   const ctx = await deserializeContext(serializedContext);
+  bindApp(ctx, startedApp());
   const resolved = resolveBinding(ctx, binding);
   if (resolved === undefined)
     return { error: "This connection no longer accepts the subscription's binding." };
@@ -73,6 +76,7 @@ export async function unsubscribeConnectionEventStep(input: {
 }): Promise<"pending" | "done"> {
   "use step";
   const ctx = await deserializeContext(input.serializedContext);
+  bindApp(ctx, startedApp());
   const resolved = resolveBinding(ctx, input.binding);
   if (resolved === undefined) return "pending";
   try {

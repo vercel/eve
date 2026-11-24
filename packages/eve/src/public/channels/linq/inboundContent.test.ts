@@ -5,8 +5,12 @@ import {
   linqQuotedMessage,
   rehydrateLinqAttachment,
 } from "#public/channels/linq/inboundContent.js";
+import { answerDispatcherProbe } from "#internal/testing/node-fetch.js";
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe("Linq attachment downloads", () => {
   it.each(["http://files.example/photo.png", "https://localhost/photo.png"])(
@@ -21,10 +25,15 @@ describe("Linq attachment downloads", () => {
   );
 
   it("preserves the upload-limit explanation for oversized downloads", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(null, {
-        headers: { "content-length": String(25 * 1024 * 1024 + 1) },
-      }),
+    vi.stubGlobal(
+      "fetch",
+      answerDispatcherProbe(
+        vi.fn().mockResolvedValue(
+          new Response(null, {
+            headers: { "content-length": String(25 * 1024 * 1024 + 1) },
+          }),
+        ),
+      ),
     );
     const attachment = rehydrateLinqAttachment({
       type: "image",
@@ -38,7 +47,8 @@ describe("Linq attachment downloads", () => {
   });
 
   it("downloads public HTTPS attachments as bytes without credentials", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("photo"));
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response("photo"));
+    vi.stubGlobal("fetch", answerDispatcherProbe(fetchMock));
     const attachment = rehydrateLinqAttachment({
       type: "image",
       url: "https://files.example/photo.png",

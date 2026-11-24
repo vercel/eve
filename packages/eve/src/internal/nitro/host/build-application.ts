@@ -26,8 +26,10 @@ import {
 import { stageProductionCompilerArtifacts } from "#internal/application/production-compiler-artifacts.js";
 import { stageBuildDeploymentId } from "#internal/nitro/host/stage-build-deployment-id.js";
 import { createHostNitro } from "#internal/nitro/host/create-host-nitro.js";
+import { loadPlatformDeclaration, selectPlatformModule } from "#platform/selection.js";
 import { createHostSpec } from "#internal/nitro/host/host-spec.js";
-import { normalizeVercelServiceOutput } from "#internal/nitro/host/vercel-output.js";
+import { resolveOutputDirectory } from "#internal/application/paths.js";
+import type { Build } from "#platform/entities.js";
 import { emitVercelAgentSummary } from "#internal/nitro/host/build-vercel-agent-summary.js";
 import { emitConnectManifest } from "#internal/external-resources.js";
 import { tryReadExtensionBuildConfig } from "#internal/nitro/host/build-extension.js";
@@ -37,9 +39,11 @@ import {
   refreshProductionCompiledArtifacts,
 } from "#internal/nitro/host/prepare-application-host.js";
 import { createProductionNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
-import { runVercelBuildPrewarm } from "#internal/nitro/host/vercel-build-prewarm.js";
+import { platformBuildOutput } from "#platform/build-output.js";
+import type { PlatformBuildOutput } from "#platform/types.js";
 import { prewarmAppSandboxes } from "#execution/sandbox/prewarm.js";
 import type { ApplicationBuildOptions } from "#internal/nitro/host/types.js";
+import type { BuildContribution } from "#execution/durable.js";
 import { findClosestVercelOutputDirectory } from "#shared/vercel-output-directory.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { resolveDiscoveryProject } from "#discover/project.js";
@@ -50,6 +54,8 @@ import { isObject } from "#shared/guards.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import { normalizePublicRoutePrefix } from "#shared/public-route-prefix.js";
 import { isPathInsideOrEqual } from "#shared/path-inside.js";
+
+type BuildTarget = "vercel" | "node";
 
 function trimTrailingSlash(path: string): string {
   return path.replace(/[\\/]+$/, "");
@@ -74,8 +80,19 @@ function assertProfileOutputOutsideBuildOutput(
   }
 }
 
+interface ApplicationBuildPlatform {
+  readonly module: string;
+  readonly build: Build;
+  readonly conditions: readonly string[] | undefined;
+  readonly durable: BuildContribution | undefined;
+  readonly entry: string | undefined;
+  readonly output: PlatformBuildOutput;
+  readonly target: BuildTarget;
+}
+
 async function writeOptionalApplicationBuildProfile(input: {
   readonly deploymentId: string | undefined;
+  readonly target: BuildTarget;
   readonly outputDirectory: string;
   readonly profileOutputPath: string;
   readonly profiler: ApplicationBuildProfiler;
@@ -89,7 +106,7 @@ async function writeOptionalApplicationBuildProfile(input: {
       createApplicationBuildProfile({
         deploymentId: input.deploymentId,
         output,
-        target: process.env.VERCEL ? "vercel" : "local",
+        target: input.target === "vercel" ? "vercel" : "local",
         timing,
       }),
     );
@@ -216,6 +233,18 @@ export async function buildApplication(
   const profileOutputPath =
     options.profileOutputPath === undefined ? undefined : resolve(options.profileOutputPath);
   const profiler = profileOutputPath === undefined ? undefined : new ApplicationBuildProfiler();
+  const platformModule = selectPlatformModule(resolve(rootDir), options.platformModule);
+  const declaration = await loadPlatformDeclaration(platformModule);
+  const build = declaration.build ?? {};
+  const platform: ApplicationBuildPlatform = {
+    module: platformModule,
+    build,
+    conditions: build.conditions,
+    durable: declaration.durable === undefined ? undefined : (declaration.durable().build ?? {}),
+    entry: build.entry,
+    output: platformBuildOutput(),
+    target: build.platformOutput?.() === true ? "vercel" : "node",
+  };
 
   const extensionBuild = await measureBuildPhase(profiler, "extension.check", () =>
     tryReadExtensionBuildConfig(rootDir),
@@ -232,14 +261,15 @@ export async function buildApplication(
   const workspace = await measureBuildPhase(profiler, "workspace.create", () =>
     createApplicationBuildWorkspace(
       project.appRoot,
-      options.vercelServiceOutput?.serviceOutputDirectory,
+      options.vercelServiceOutput?.serviceOutputDirectory ??
+        resolveOutputDirectory(resolve(project.appRoot), build),
     ),
   );
 
   let preserveWorkspaceForRecovery = false;
   let built: BuiltApplicationOutput;
   try {
-    built = await buildApplicationInWorkspace(workspace, options, profiler);
+    built = await buildApplicationInWorkspace(workspace, options, profiler, platform);
   } catch (error) {
     preserveWorkspaceForRecovery = error instanceof RecoverablePublicationError;
     throw error;
@@ -257,6 +287,7 @@ export async function buildApplication(
       outputDirectory: built.outputDirectory,
       profileOutputPath,
       profiler,
+      target: platform.target,
     });
   }
 
@@ -272,11 +303,15 @@ async function buildApplicationInWorkspace(
   workspace: ApplicationBuildWorkspace,
   options: ApplicationBuildOptions,
   profiler: ApplicationBuildProfiler | undefined,
+  platform: ApplicationBuildPlatform,
 ): Promise<BuiltApplicationOutput> {
+  const isVercelBuild = platform.target === "vercel";
   const preparedHost = await measureBuildPhase(profiler, "host.prepare", () =>
-    prepareProductionApplicationHost(workspace),
+    prepareProductionApplicationHost(workspace, isVercelBuild ? "vercel" : "local", {
+      deferInstrumentationSetup: platform.entry !== undefined,
+      platformModule: platform.module,
+    }),
   );
-  const isVercelBuild = Boolean(process.env.VERCEL);
 
   const servicePrefix = isVercelBuild
     ? await measureBuildPhase(profiler, "vercel.service-prefix.resolve", () =>
@@ -305,11 +340,16 @@ async function buildApplicationInWorkspace(
     {
       kind: "production",
       preset: isVercelBuild ? "vercel" : undefined,
+      entry:
+        platform.entry === undefined ? undefined : resolve(preparedHost.appRoot, platform.entry),
+      conditions: platform.conditions,
+      durable: platform.durable,
       publicRoutePrefix,
       vercelService: servicePrefix !== undefined || options.vercelServiceOutput !== undefined,
       workspaceMember: options.workspaceMember,
     },
     { buildDir: workspace.nitro.buildDir, outputDir: workspace.publication.output.stagedDir },
+    platform.output,
   );
   const nitro = await measureBuildPhase(profiler, "nitro.create", () => createHostNitro(spec));
 
@@ -317,6 +357,7 @@ async function buildApplicationInWorkspace(
     if (!options.skipSandboxPrewarm) {
       const prewarmInput = {
         appRoot: preparedHost.appRoot,
+        build: platform.build,
         compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(
           workspace.compiler.rootDir,
           {
@@ -334,7 +375,7 @@ async function buildApplicationInWorkspace(
       };
       await measureBuildPhase(profiler, "sandbox.prewarm", async () => {
         if (isVercelBuild) {
-          await runVercelBuildPrewarm(prewarmInput);
+          await platform.output.prewarmSandboxes(prewarmInput);
         } else {
           await prewarmAppSandboxes(prewarmInput);
         }
@@ -344,7 +385,7 @@ async function buildApplicationInWorkspace(
     await buildNitroOutput(nitro, profiler, "nitro");
     if (servicePrefix !== undefined) {
       await measureBuildPhase(profiler, "vercel.functions.normalize", () =>
-        normalizeVercelServiceOutput(workspace.publication.output.stagedDir, spec.routes),
+        platform.output.normalizeServiceOutput(workspace.publication.output.stagedDir, spec.routes),
       );
     }
     const vercelServiceOutput = options.vercelServiceOutput;
@@ -384,7 +425,7 @@ async function buildApplicationInWorkspace(
   }
 
   const deploymentId =
-    nitro.options.preset === "node-server"
+    nitro.options.preset === "node-server" || spec.entry !== undefined
       ? await measureBuildPhase(profiler, "id.compute", () =>
           stageBuildDeploymentId(workspace.publication.output.stagedDir),
         )

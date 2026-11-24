@@ -10,11 +10,8 @@ import {
   getSupportedModuleBaseName,
   normalizeLogicalPath,
 } from "#discover/filesystem.js";
-import {
-  readSortedDirectoryEntries,
-  SKILL_NAME_PATTERN,
-  SKILL_NAME_RULE,
-} from "#discover/grammar.js";
+import { readSortedDirectoryEntries } from "#discover/grammar.js";
+import { SKILL_NAME_PATTERN, SKILL_NAME_RULE } from "#shared/name-grammar.js";
 import {
   createModuleSourceRef,
   createPathDerivedSourceId,

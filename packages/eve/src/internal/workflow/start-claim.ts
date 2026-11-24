@@ -7,11 +7,20 @@ export function assertStartClaims(world: World): void {
   );
 }
 
+const RUN_ID_PREFIX = "wrun_";
+
+export function createRunId(world: World, options: Readonly<Record<string, unknown>>): string {
+  return `${RUN_ID_PREFIX}${world.createRunId?.(options) ?? monotonicUlid()}`;
+}
+
 export function pinRunId(
   world: World,
   options: Readonly<Record<string, unknown>>,
+  runId = createRunId(world, options),
 ): { readonly runId: string; readonly world: World } {
-  const bareId = world.createRunId?.(options) ?? monotonicUlid();
+  if (!runId.startsWith(RUN_ID_PREFIX))
+    throw new Error(`"${runId}" is not a Workflow run ID, so a run can't start with it.`);
+  const bareId = runId.slice(RUN_ID_PREFIX.length);
   const pinned = new Proxy(world, {
     get(target, key) {
       if (key === "createRunId") return () => bareId;
@@ -19,7 +28,7 @@ export function pinRunId(
       return typeof value === "function" ? value.bind(target) : value;
     },
   });
-  return { runId: `wrun_${bareId}`, world: pinned };
+  return { runId, world: pinned };
 }
 
 const ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";

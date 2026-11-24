@@ -2,7 +2,7 @@ import type {
   CompiledDefinition,
   CompiledScheduleCollectionDefinition,
 } from "#compiler/manifest.js";
-import type { CompiledModuleMap } from "#compiler/module-map.js";
+import type { CompiledModuleMap } from "#compiler/module-map-schema.js";
 import {
   assertDynamicSentinelKeys,
   dynamicEvaluate,

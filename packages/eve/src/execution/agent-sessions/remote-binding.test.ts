@@ -5,6 +5,9 @@ import type { AgentSessionAddress } from "#execution/agent-sessions/start.js";
 import { defineRemoteAgent } from "#public/definitions/remote-agent.js";
 import type { DynamicRemoteBinding } from "#definitions/remote.js";
 import { digestOf } from "#definitions/state.js";
+import { startTestApp } from "#internal/testing/test-platform.js";
+
+startTestApp();
 
 const continueRemoteAgentSession = vi.fn();
 

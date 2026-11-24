@@ -27,7 +27,6 @@ import type {
   InstrumentationTraceContext,
   InstrumentationTurnStartedEvent,
 } from "#instrumentation/lifecycle.js";
-import { resolveInstrumentationEnvironment } from "#internal/application/dev-environment.js";
 import type { ConversationEnvironment } from "#shared/conversation-context.js";
 import { createEveTracing } from "#tracing/eve/operation-input.js";
 import {
@@ -48,7 +47,7 @@ import { isObject } from "#shared/guards.js";
 export interface AgentOtelInstrumentationInput {
   readonly telemetry: AgentTelemetry;
   readonly idGenerator: AgentSpanIdGenerator;
-  readonly environment?: ConversationEnvironment;
+  readonly environment: ConversationEnvironment;
   readonly recordInputs?: boolean;
   readonly recordOutputs?: boolean;
   readonly frameworkVersion: string;
@@ -75,7 +74,7 @@ interface AgentOtelInstrumentation {
 export function createAgentOtelInstrumentation(
   input: AgentOtelInstrumentationInput,
 ): AgentOtelInstrumentation {
-  const environment = input.environment ?? resolveInstrumentationEnvironment();
+  const { environment } = input;
   const recordInputs = input.recordInputs ?? false;
   const recordOutputs = input.recordOutputs ?? false;
   const tracing = createEveTracing(input);

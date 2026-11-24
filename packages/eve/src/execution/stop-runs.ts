@@ -5,7 +5,12 @@ import { isRunTargetGone } from "#shared/run-errors.js";
 import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 import { runtimeWait, storedProjection, turnPosition } from "#harness/session-machine/view.js";
 import type { SessionStateMap } from "#harness/types.js";
-import { cancelRoutedRun, resumeRoutedHook, routedRunLive } from "#execution/hosts.js";
+import {
+  cancelRoutedRun,
+  resumeRoutedHook,
+  routedRunLive,
+  type RouteHosts,
+} from "#execution/hosts.js";
 import { createLogger, logError } from "#internal/logging.js";
 
 const log = createLogger("execution.stop-runs");
@@ -38,32 +43,38 @@ export function waitedCallRuns(session: {
 }
 
 export async function stopRuns(
+  hosts: RouteHosts,
   targets: readonly RunStopTarget[],
   stop: RunStop,
   options: { readonly waitForEnd?: boolean } = {},
 ): Promise<readonly string[]> {
   const signalled = await Promise.all(
-    targets.map(async (target) => ({ target, told: await tell(target.run, stop) })),
+    targets.map(async (target) => ({ target, told: await tell(hosts, target.run, stop) })),
   );
   const ending = signalled.filter(({ target }) => target.ends);
   const lingering =
     options.waitForEnd === false
       ? []
       : await runsStillRunning(
+          hosts,
           ending.filter(({ told }) => told).map(({ target }) => target.run.runId),
         );
   const unreachable = ending.filter(({ told }) => !told).map(({ target }) => target.run.runId);
   const cancelled = await Promise.all(
     [...unreachable, ...lingering].map(async (runId) =>
-      (await cancelOutright(runId, stop.reason)) ? [runId] : [],
+      (await cancelOutright(hosts, runId, stop.reason)) ? [runId] : [],
     ),
   );
   return cancelled.flat();
 }
 
-async function tell(run: WorkflowToolRunAddress, stop: RunStop): Promise<boolean> {
+async function tell(
+  hosts: RouteHosts,
+  run: WorkflowToolRunAddress,
+  stop: RunStop,
+): Promise<boolean> {
   try {
-    await resumeRoutedHook(run.hookToken, stop);
+    await resumeRoutedHook(hosts, run.hookToken, stop);
     return true;
   } catch (error) {
     if (!isRunTargetGone(error)) {
@@ -75,12 +86,15 @@ async function tell(run: WorkflowToolRunAddress, stop: RunStop): Promise<boolean
   }
 }
 
-async function runsStillRunning(runIds: readonly string[]): Promise<readonly string[]> {
+async function runsStillRunning(
+  hosts: RouteHosts,
+  runIds: readonly string[],
+): Promise<readonly string[]> {
   let running = runIds;
   const deadline = Date.now() + WORKFLOW_CANCELLATION_SETTLE_MS;
   while (running.length > 0 && Date.now() < deadline) {
     const statuses = await Promise.all(
-      running.map(async (runId) => ({ runId, live: await routedRunLive(runId) })),
+      running.map(async (runId) => ({ runId, live: await routedRunLive(hosts, runId) })),
     );
     running = statuses.filter(({ live }) => live).map(({ runId }) => runId);
     if (running.length > 0) await new Promise((resolve) => setTimeout(resolve, 250));
@@ -88,9 +102,9 @@ async function runsStillRunning(runIds: readonly string[]): Promise<readonly str
   return running;
 }
 
-async function cancelOutright(runId: string, reason: string): Promise<boolean> {
+async function cancelOutright(hosts: RouteHosts, runId: string, reason: string): Promise<boolean> {
   try {
-    return await cancelRoutedRun(runId, reason);
+    return await cancelRoutedRun(hosts, runId, reason);
   } catch (error) {
     if (!isRunTargetGone(error)) {
       logError(log, "failed to cancel a run; it may run to completion", error, { runId });

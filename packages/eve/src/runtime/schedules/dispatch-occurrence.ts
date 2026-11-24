@@ -9,11 +9,13 @@ import type {
 } from "#public/schedules/subscription.js";
 import type { ScheduleCollectionPayload } from "#runtime/schedules/payload.js";
 import type { ScheduleProviderContext } from "#runtime/schedules/provider-types.js";
+import type { App } from "#runtime/app.js";
 import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 
 type ScheduleDispatchBundle = Pick<CompiledRuntimeAgentBundle, "compiledArtifactsSource" | "graph">;
 
 export async function dispatchScheduledOccurrence(input: {
+  readonly app: App;
   readonly bundle: ScheduleDispatchBundle;
   readonly runtime: Runtime;
   readonly collection: string;
@@ -31,6 +33,7 @@ export async function dispatchScheduledOccurrence(input: {
   const providerContext = () =>
     createScheduleProviderContext({
       abortSignal: new AbortController().signal,
+      app: () => input.app,
       application: input.payload.eve.application,
       bundle: () => input.bundle,
       collection: input.collection,
@@ -41,6 +44,7 @@ export async function dispatchScheduledOccurrence(input: {
       scope: input.payload.envelope.scope,
     });
   const result = await new ScheduleDispatcher({
+    app: input.app,
     runtime: input.runtime,
     channels: input.bundle.graph.root.channels,
   }).triggerCollection({
@@ -73,6 +77,7 @@ export async function dispatchScheduledOccurrence(input: {
 
 export function createScheduleProviderContext(input: {
   readonly abortSignal: AbortSignal;
+  readonly app: () => App;
   readonly application: string;
   readonly bundle: () => ScheduleDispatchBundle;
   readonly collection: string;
@@ -92,6 +97,7 @@ export function createScheduleProviderContext(input: {
       key: input.application,
       deliver: async ({ payload, occurrence }) => {
         await dispatchScheduledOccurrence({
+          app: input.app(),
           bundle: input.bundle(),
           collection: input.collection,
           runtime: input.runtime(),

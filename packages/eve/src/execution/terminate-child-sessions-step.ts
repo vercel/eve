@@ -1,3 +1,4 @@
+import { processApp } from "#runtime/app.js";
 import { readDurableSession, type DurableSessionState } from "#execution/durable-session-store.js";
 import { stopRuns } from "#execution/stop-runs.js";
 import { liveRuns } from "#execution/tasks/table.js";
@@ -20,6 +21,7 @@ export async function terminateChildSessionsStep(input: {
     return;
   }
   await stopRuns(
+    processApp().hosts,
     runs.map((run) => ({ ends: true, run })),
     { kind: "end", reason: "The session ended." },
   );

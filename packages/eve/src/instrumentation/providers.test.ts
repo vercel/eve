@@ -14,6 +14,8 @@ import {
   shutdownInstrumentationProviders,
 } from "#instrumentation/providers.js";
 import { DEVELOPMENT_WORKER_APP_ROOT_ENV } from "#internal/workflow/development-world-protocol.js";
+import { createEntities } from "#platform/entities.js";
+import vercelPlatform from "#platform/vercel/declaration.js";
 import { defineInstrumentation } from "#public/instrumentation/index.js";
 import { agentRuns, localTraces, otelIntegration } from "#public/instrumentation/otel.js";
 import {
@@ -21,8 +23,8 @@ import {
   type InstrumentationSetupContext,
 } from "#public/instrumentation/provider.js";
 
-const REGISTRY_GLOBAL_KEY = Symbol.for("eve.harness-instrumentation-providers");
-const RUNTIME_GLOBAL_KEY = Symbol.for("eve.instrumentation-runtime");
+const PROCESS_APP_KEY = Symbol.for("eve.app");
+const vercel = createEntities(vercelPlatform, undefined);
 
 const traceContext = (audience: "public" | "private" | "unknown") => ({
   agentName: "weather",
@@ -33,14 +35,18 @@ const traceContext = (audience: "public" | "private" | "unknown") => ({
 });
 
 function register(slot: string, value: unknown): Promise<void> {
-  return registerInstrumentationProvider({ agentName: "weather-agent", slot, value });
+  return registerInstrumentationProvider({
+    agentName: "weather-agent",
+    platform: vercel,
+    slot,
+    value,
+  });
 }
 
 describe("registerInstrumentationProvider", () => {
   beforeEach(() => {
     vi.unstubAllEnvs();
-    delete (globalThis as Record<symbol, unknown>)[REGISTRY_GLOBAL_KEY];
-    delete (globalThis as Record<symbol, unknown>)[RUNTIME_GLOBAL_KEY];
+    delete (globalThis as Record<symbol, unknown>)[PROCESS_APP_KEY];
   });
 
   it("registers a provider under its slot", async () => {
@@ -142,15 +148,14 @@ describe("registerInstrumentationProvider", () => {
 describe("seedInstrumentationProviders", () => {
   beforeEach(() => {
     vi.unstubAllEnvs();
-    delete (globalThis as Record<symbol, unknown>)[REGISTRY_GLOBAL_KEY];
-    delete (globalThis as Record<symbol, unknown>)[RUNTIME_GLOBAL_KEY];
+    delete (globalThis as Record<symbol, unknown>)[PROCESS_APP_KEY];
     vi.stubEnv("EVE_TRACES", "off");
     vi.stubEnv("VERCEL_ENV", undefined);
     vi.stubEnv(DEVELOPMENT_WORKER_APP_ROOT_ENV, "/tmp/eve-seed-test");
   });
 
   it("sorts default local traces with authored destinations", async () => {
-    seedInstrumentationProviders();
+    seedInstrumentationProviders(vercel);
     await register("backend", otelIntegration());
 
     expect(getInstrumentationProviders().map(({ slot }) => slot)).toEqual(["backend", "local"]);
@@ -160,7 +165,7 @@ describe("seedInstrumentationProviders", () => {
     vi.stubEnv(DEVELOPMENT_WORKER_APP_ROOT_ENV, undefined);
     vi.stubEnv("VERCEL_ENV", environment);
 
-    seedInstrumentationProviders();
+    seedInstrumentationProviders(vercel);
 
     expect(getInstrumentationProviders().map(({ slot }) => slot)).toEqual(["agent-runs"]);
   });
@@ -169,13 +174,13 @@ describe("seedInstrumentationProviders", () => {
     vi.stubEnv(DEVELOPMENT_WORKER_APP_ROOT_ENV, undefined);
     vi.stubEnv("VERCEL_ENV", "development");
 
-    seedInstrumentationProviders();
+    seedInstrumentationProviders(vercel);
 
     expect(getInstrumentationProviders()).toEqual([]);
   });
 
   it("lets an authored reserved slot reconfigure or disable its default", async () => {
-    seedInstrumentationProviders();
+    seedInstrumentationProviders(vercel);
     const authored = localTraces({ exportPolicy: { span: () => ({ emit: false }) } });
     await register("local", authored);
     expect(getInstrumentationProviders()).toEqual([{ provider: authored, slot: "local" }]);
@@ -187,7 +192,7 @@ describe("seedInstrumentationProviders", () => {
   it("lets an authored Agent Runs slot reconfigure the hosted default", async () => {
     vi.stubEnv(DEVELOPMENT_WORKER_APP_ROOT_ENV, undefined);
     vi.stubEnv("VERCEL_ENV", "production");
-    seedInstrumentationProviders();
+    seedInstrumentationProviders(vercel);
     const authored = agentRuns({ exportPolicy: { span: () => ({ emit: false }) } });
 
     await register("agent-runs", authored);
@@ -197,7 +202,7 @@ describe("seedInstrumentationProviders", () => {
 
   it("sorts built-ins, authored slots, and reserved-slot replacements together", async () => {
     vi.stubEnv("VERCEL_ENV", "production");
-    seedInstrumentationProviders();
+    seedInstrumentationProviders(vercel);
     await register("zeta", defineInstrumentation({}));
     await register("audit", defineInstrumentation({}));
     await register("local", localTraces({ exportPolicy: { span: () => ({ emit: false }) } }));
@@ -223,15 +228,17 @@ describe("finalizeInstrumentationProviders", () => {
 
   beforeEach(() => {
     vi.unstubAllEnvs();
-    delete (globalThis as Record<symbol, unknown>)[REGISTRY_GLOBAL_KEY];
-    delete (globalThis as Record<symbol, unknown>)[RUNTIME_GLOBAL_KEY];
+    delete (globalThis as Record<symbol, unknown>)[PROCESS_APP_KEY];
   });
 
   it("publishes to an authored handler", async () => {
     const started = vi.fn();
     await register("rows", defineInstrumentation({ events: { "turn.started": started } }));
 
-    const runtime = finalizeInstrumentationProviders({ serviceName: "weather-agent" });
+    const runtime = finalizeInstrumentationProviders({
+      platform: vercel,
+      serviceName: "weather-agent",
+    });
     await runtime.hooks.forTrace!(traceContext("unknown")).publish(turnStarted);
 
     expect(started).toHaveBeenCalledOnce();
@@ -250,7 +257,10 @@ describe("finalizeInstrumentationProviders", () => {
         },
       }),
     );
-    const runtime = finalizeInstrumentationProviders({ serviceName: "weather-agent" });
+    const runtime = finalizeInstrumentationProviders({
+      platform: vercel,
+      serviceName: "weather-agent",
+    });
     const hooks = runtime.hooks.forTrace!(traceContext("unknown"));
     const scope = instrumentationScope(
       {
@@ -306,7 +316,10 @@ describe("finalizeInstrumentationProviders", () => {
   it("still runs execution when no destination was declared", async () => {
     await register("rows", defineInstrumentation({}));
 
-    const runtime = finalizeInstrumentationProviders({ serviceName: "weather-agent" });
+    const runtime = finalizeInstrumentationProviders({
+      platform: vercel,
+      serviceName: "weather-agent",
+    });
     const result = await runtime.runInContext(
       {
         idempotencyKey: "tool:session-1:turn-1:0:0:call-1:0",
@@ -332,7 +345,10 @@ describe("finalizeInstrumentationProviders", () => {
     const shutdown = vi.fn();
     await register("rows", defineInstrumentation({ flush, shutdown }));
 
-    const runtime = finalizeInstrumentationProviders({ serviceName: "weather-agent" });
+    const runtime = finalizeInstrumentationProviders({
+      platform: vercel,
+      serviceName: "weather-agent",
+    });
     await runtime.forceFlush();
     await shutdownInstrumentationProviders();
     await shutdownInstrumentationProviders();

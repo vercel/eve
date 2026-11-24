@@ -55,6 +55,7 @@ describe("OTel registration", () => {
     };
     const runtime = registerOtelPipeline({
       otel: { sampler, spanProcessors: [new SimpleSpanProcessor(exporter)] },
+      sessionAttribute: undefined,
       serviceName: "researcher",
     });
     const operation = {
@@ -83,6 +84,7 @@ describe("OTel registration", () => {
       vi.stubEnv("OTEL_TRACES_SAMPLER_ARG", "0");
       const runtime = registerOtelPipeline({
         otel: { sampler, spanProcessors: [] },
+        sessionAttribute: undefined,
         serviceName: "test",
       });
       expect(runtime.samplesTrace("a".repeat(32), { name: "invoke_agent test" })).toBe(false);
@@ -91,7 +93,6 @@ describe("OTel registration", () => {
   );
 
   it("delegates an authored tracer cached before registration", async () => {
-    vi.stubEnv("VERCEL_ENV", "preview");
     const authoredTracer = authoredApi.trace.getTracer("authored");
     expect(authoredTracer.startSpan("before-registration").isRecording()).toBe(false);
 
@@ -99,6 +100,7 @@ describe("OTel registration", () => {
     const processor = new SimpleSpanProcessor(exporter);
     const runtime = registerOtelPipeline({
       otel: { spanProcessors: [processor] },
+      sessionAttribute: "vercel.session_id",
       serviceName: "weather",
     });
     const parent = runtimeTrace.getTracer("eve").startSpan("eve.parent");
@@ -163,6 +165,7 @@ describe("OTel registration", () => {
         sampler,
         spanProcessors: [processor],
       },
+      sessionAttribute: undefined,
       serviceName: "weather",
     });
 
@@ -196,6 +199,7 @@ describe("OTel registration", () => {
             { forceFlush: async () => {}, onEnd: () => {}, onStart: () => {}, shutdown },
           ],
         },
+        sessionAttribute: undefined,
         serviceName: "weather",
       }),
     ).toThrow(/another runtime already owns the global propagator/u);
@@ -221,6 +225,7 @@ describe("OTel registration", () => {
     expect(() =>
       registerOtelPipeline({
         otel: { spanProcessors: [] },
+        sessionAttribute: undefined,
         serviceName: "weather",
       }),
     ).toThrow(/another runtime already owns the global tracer provider/u);
@@ -245,6 +250,7 @@ describe("OTel registration", () => {
     };
     const runtime = registerOtelPipeline({
       otel: { metricReaders: [reader], spanProcessors: [] },
+      sessionAttribute: undefined,
       serviceName: "weather",
     });
 
@@ -266,6 +272,7 @@ describe("OTel registration", () => {
     };
     const runtime = registerOtelPipeline({
       otel: { instrumentations: [instrumentation], spanProcessors: [] },
+      sessionAttribute: undefined,
       serviceName: "weather",
     });
     expect(instrumentation.enable).toHaveBeenCalledOnce();

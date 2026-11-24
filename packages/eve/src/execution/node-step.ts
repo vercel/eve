@@ -5,8 +5,9 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { ExecutionInstrumentation } from "#instrumentation/runtime.js";
 import { createKernel } from "#harness/kernel.js";
 import type { HandleEventFn, HarnessToolMap, StepFn } from "#harness/types.js";
-import { resolveInstalledPackageInfo } from "#internal/application/package.js";
+import { installedEveVersion } from "#runtime-env/package-info.js";
 import { createLogger } from "#internal/logging.js";
+import type { Entities } from "#platform/entities.js";
 import type { RuntimeIdentity } from "#protocol/session-events/families/session.js";
 import { UNSPECIFIED_INPUT_SCHEMA } from "#tools/schema.js";
 import {
@@ -33,12 +34,15 @@ import type { KernelConfig } from "#harness/types.js";
 
 const log = createLogger("execution.node-step");
 
-export type CreateRuntime = (config: {
+export interface CreateRuntimeConfig {
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
   readonly nodeId?: string;
-}) => Runtime;
+}
+
+export type CreateRuntime = (config: CreateRuntimeConfig) => Runtime;
 
 interface CreateExecutionNodeStepInput {
+  readonly platform: Entities;
   readonly steeringSignal?: AbortSignal;
   readonly abortSignal?: AbortSignal;
   readonly capabilities?: SessionCapabilities;
@@ -74,7 +78,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     signInCompletions: input.signInCompletions,
     typedAnswers: input.typedAnswers,
     resolveModel,
-    runtimeIdentity: buildRuntimeIdentity(input.agent),
+    runtimeIdentity: buildRuntimeIdentity(input.agent, input.platform),
     sessionUsageLimit: input.sessionUsageLimit,
     tools,
     setAttributes: input.setAttributes,
@@ -94,31 +98,18 @@ export interface RuntimeAgentIdentity {
   readonly name?: string;
 }
 
-export function buildRuntimeIdentity(agent: RuntimeAgentIdentity): RuntimeIdentity {
-  const packageInfo = resolveInstalledPackageInfo();
-
+export function buildRuntimeIdentity(
+  agent: RuntimeAgentIdentity,
+  platform: Entities,
+): RuntimeIdentity {
   const identity: RuntimeIdentity = {
     agentId: agent.id,
     agentName: agent.name,
-    eveVersion: packageInfo.version,
+    eveVersion: installedEveVersion(),
   };
 
-  const gitSha = process.env.VERCEL_GIT_COMMIT_SHA?.trim();
-  const gitBranch = process.env.VERCEL_GIT_COMMIT_REF?.trim();
-  const deployedAt = process.env.VERCEL_DEPLOYMENT_CREATED_AT?.trim();
-
-  if (gitSha || gitBranch || deployedAt) {
-    return {
-      ...identity,
-      build: {
-        deployedAt: deployedAt || undefined,
-        gitBranch: gitBranch || undefined,
-        gitSha: gitSha || undefined,
-      },
-    };
-  }
-
-  return identity;
+  const revision = platform.deployment.revision?.();
+  return revision === undefined ? identity : { ...identity, build: revision };
 }
 
 function createRuntimeModelResolver(

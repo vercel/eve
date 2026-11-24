@@ -1,3 +1,4 @@
+import { builtInHosts } from "#runtime/app.js";
 import { calls, deliveries } from "#protocol/session-projection/public-view.js";
 import type { LanguageModelV4Prompt } from "@ai-sdk/provider";
 import { MockLanguageModelV4 } from "ai/test";
@@ -15,6 +16,10 @@ import { textStreamResult, toolCallStreamResult } from "#internal/testing/approv
 import { buildSerializedContext } from "#internal/testing/entry-test-helpers.js";
 import { resumeRoutedHook } from "#execution/hosts.js";
 import { startTestSession } from "#internal/testing/test-session-hosts.js";
+import { createTestInProcessRuntime } from "#internal/testing/in-process-runtime.js";
+import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import { createEntities } from "#platform/entities.js";
+import vercelPlatform from "#platform/vercel/declaration.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineHook } from "#public/definitions/hook.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
@@ -214,16 +219,19 @@ describe("reactions", () => {
       const inbox = sessionInboxHookToken(continuationToken);
       try {
         await until(log, "capture:turn", 1);
-        await resumeRoutedHook(inbox, { kind: "compact", deliveryId: "compact-second-turn" });
+        await resumeRoutedHook(builtInHosts(), inbox, {
+          kind: "compact",
+          deliveryId: "compact-second-turn",
+        });
         await until(log, "context:compaction:completed", 1);
-        await resumeRoutedHook(inbox, {
+        await resumeRoutedHook(builtInHosts(), inbox, {
           auth: ALICE,
           delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
           kind: "send",
           payload: { message: "Look up the second thing." },
         });
         await until(log, "capture:turn", 2);
-        await resumeRoutedHook(inbox, {
+        await resumeRoutedHook(builtInHosts(), inbox, {
           auth: ALICE,
           delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
           kind: "send",
@@ -352,7 +360,10 @@ describe("reactions", () => {
       const inbox = sessionInboxHookToken(continuationToken);
       try {
         await until(log, "turn:completed", 1);
-        await resumeRoutedHook(inbox, { kind: "compact", deliveryId: "compact-fails" });
+        await resumeRoutedHook(builtInHosts(), inbox, {
+          kind: "compact",
+          deliveryId: "compact-fails",
+        });
         await until(log, "context:compaction:failed", 1);
       } finally {
         await run.cancel().catch(() => {});
@@ -443,9 +454,9 @@ describe("reactions", () => {
       const inbox = sessionInboxHookToken(continuationToken);
       try {
         await until(log, "turn:completed", 1);
-        await resumeRoutedHook(inbox, { kind: "compact", deliveryId: "compact" });
+        await resumeRoutedHook(builtInHosts(), inbox, { kind: "compact", deliveryId: "compact" });
         await until(log, "capture:compaction", 1);
-        await resumeRoutedHook(inbox, { kind: "cancel", deliveryId: "cancel" });
+        await resumeRoutedHook(builtInHosts(), inbox, { kind: "cancel", deliveryId: "cancel" });
         await new Promise((resolve) => setTimeout(resolve, 200));
         release();
         await until(log, "settled:cancel:ignored", 1);
@@ -527,7 +538,7 @@ describe("reactions", () => {
       try {
         await until(log, "turn:settled", 1);
         thread = "thread-2";
-        await resumeRoutedHook(inbox, {
+        await resumeRoutedHook(builtInHosts(), inbox, {
           auth: ALICE,
           delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
           kind: "send",
@@ -769,7 +780,7 @@ describe("reactions", () => {
       });
       try {
         await until(log, "turn:settled", 1);
-        await resumeRoutedHook(sessionInboxHookToken(continuationToken), {
+        await resumeRoutedHook(builtInHosts(), sessionInboxHookToken(continuationToken), {
           auth: ALICE,
           delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
           kind: "send",
@@ -914,9 +925,12 @@ describe("reactions", () => {
       const continuationToken = "http:deployments";
 
       await runtime.run(async () => {
-        const run = await startTestSession("in-process", {
+        const inProcess = createTestInProcessRuntime(
+          { compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource() },
+          { platform: createEntities(vercelPlatform, undefined) },
+        );
+        await inProcess.startEntry({
           kind: "initial",
-          ownerDeploymentId: "dpl_inline",
           input: { message: "Look up the first thing." },
           serializedContext: buildSerializedContext({
             auth: ALICE,
@@ -928,7 +942,7 @@ describe("reactions", () => {
         try {
           await until(log, "turn:settled", 1);
           vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_second");
-          await resumeRoutedHook(inbox, {
+          await resumeRoutedHook(builtInHosts(), inbox, {
             auth: ALICE,
             delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
             kind: "send",
@@ -936,7 +950,7 @@ describe("reactions", () => {
           });
           await until(log, "turn:settled", 2);
         } finally {
-          await run.cancel().catch(() => {});
+          await inProcess.dispose().catch(() => {});
         }
       });
 

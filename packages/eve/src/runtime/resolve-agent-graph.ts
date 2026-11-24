@@ -6,7 +6,7 @@ import type {
   CompiledSubagentNode,
 } from "#compiler/manifest.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
-import type { CompiledModuleMap } from "#compiler/module-map.js";
+import type { CompiledModuleMap } from "#compiler/module-map-schema.js";
 import { validateCompiledModuleMap } from "#compiler/validate-artifact.js";
 import type { HeadersValue } from "#client/types.js";
 import { expectObjectRecord } from "#internal/authored-module.js";

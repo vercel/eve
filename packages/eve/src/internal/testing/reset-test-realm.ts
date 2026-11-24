@@ -1,9 +1,7 @@
-const REALM_KEYS = [Symbol.for("eve.hosts"), Symbol.for("eve.instrumentation-runtime")] as const;
+const PROCESS_APP = Symbol.for("eve.app");
 
 export function resetTestRealm(): void {
-  for (const key of REALM_KEYS) {
-    delete (globalThis as Record<symbol, unknown>)[key];
-  }
+  delete (globalThis as Record<symbol, unknown>)[PROCESS_APP];
 }
 
 resetTestRealm();

@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import type { CompiledModuleMap } from "#compiler/module-map.js";
+import type { CompiledModuleMap } from "#compiler/module-map-schema.js";
 import {
   createApplicationBuildWorkspace,
   removeApplicationBuildWorkspace,
@@ -62,7 +62,7 @@ describe("authored runtime artifacts", () => {
     let developmentGeneration: Awaited<ReturnType<typeof stageDevelopmentGeneration>> | undefined;
 
     try {
-      const productionHost = await prepareProductionApplicationHost(workspace);
+      const productionHost = await prepareProductionApplicationHost(workspace, "local");
       const manifest = productionHost.compileResult.manifest;
       const instructions = manifest.instructions.find(
         (entry) => entry.logicalPath === "instructions.ts",
@@ -145,7 +145,7 @@ describe("authored runtime artifacts", () => {
     let developmentGeneration: Awaited<ReturnType<typeof stageDevelopmentGeneration>> | undefined;
 
     try {
-      const productionHost = await prepareProductionApplicationHost(workspace);
+      const productionHost = await prepareProductionApplicationHost(workspace, "local");
       const productionProviderPath =
         productionHost.compiledArtifacts.instrumentationSourcePaths?.[0];
       expect(productionProviderPath).toBe(

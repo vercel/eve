@@ -1,4 +1,3 @@
-import { settleControlDeliveryStep } from "#execution/session/settle-control-delivery-step.js";
 import type { ControlSettlement } from "#harness/facts.js";
 import { controlDeliveryOf } from "#execution/session/control-delivery.js";
 import type { ControlDelivery } from "#harness/types.js";
@@ -6,11 +5,6 @@ import { STUB_CONTEXT_KEY, type StubScope } from "#tool-stubs/types.js";
 import { runServingToolStubs, type ToolStubHost } from "#execution/tool-stub-host.js";
 import type { DeliverHookPayload, SessionCapabilities, TurnCaller } from "#channel/types.js";
 import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
-import {
-  notifyCancelledTaskCallerStep,
-  notifyTurnCallerStep,
-  resolveInitialTurnCallerStep,
-} from "#subagents/parent-notification.js";
 import { readDurableSession } from "#execution/durable-session-read.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { isBetweenTurns, storedProjection } from "#harness/session-machine/view.js";
@@ -24,17 +18,25 @@ import {
   nextTurnControl,
   type TurnControl,
 } from "#execution/session/turn-control.js";
+import { openedBy, type OpenTurn } from "#execution/session/open-turn.js";
+import { sealSessionRecord, type SessionRecord } from "#execution/session/record.js";
+import type { TurnPause } from "#execution/session/pending-turn-state.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { cancelWorkingTasks, sessionTaskTable } from "#execution/tasks/session.js";
 import { workingTasks } from "#execution/tasks/table.js";
 import type { TurnOutcome, TurnStepPayload } from "#execution/session/turn-step-types.js";
-import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
 import { finalizeSession, type SessionTerminalOutcome } from "#execution/session/finalization.js";
 import { type SessionInboxHandle } from "#execution/session-inbox/inbox.js";
 import type { SessionTimeoutControl } from "#execution/session/timeout-control.js";
 import type { SessionHandoff } from "#execution/session/handoff.js";
-import { prewarmSessionStep } from "#execution/session/prewarm-step.js";
-import { stopIdleSessionSandboxStep } from "#execution/session/idle-sandbox-step.js";
+import type { SessionTransferState } from "#execution/session/checkpoint.js";
+import {
+  sessionStepCalls,
+  type SessionStepCall,
+  type SessionStepName,
+  type SessionStepRunner,
+  type StepCall,
+} from "#execution/session/steps.js";
 import type { SandboxRunning } from "#sandbox/state.js";
 import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
 
@@ -57,7 +59,8 @@ export type SessionAnchor =
 export type SessionStart =
   | { readonly kind: "turn"; readonly input: DeliverHookPayload | undefined }
   | { readonly kind: "first-message" }
-  | { readonly kind: "parked" };
+  | { readonly kind: "parked" }
+  | { readonly kind: "resume"; readonly from: OpenTurn };
 
 export interface SessionBoot {
   readonly admittedDeliveryKeys: readonly string[];
@@ -66,6 +69,7 @@ export interface SessionBoot {
   readonly capabilities?: SessionCapabilities;
   readonly compactFirst?: boolean;
   readonly deploymentId: string;
+  readonly generation?: number;
   readonly history: HarnessModelMessage[];
   readonly initialTurnControl?: TurnControl;
   readonly start: SessionStart;
@@ -76,6 +80,7 @@ export interface SessionBoot {
   readonly sessionTimeoutControl?: SessionTimeoutControl;
   readonly sessionTimeoutMs: number | false;
   readonly sessionWritable: WritableStream<Uint8Array>;
+  readonly rerunFirst?: boolean;
 }
 
 type SessionLoopOutcome =
@@ -114,40 +119,189 @@ const RETAINED: SessionMoves = {
   tryTransfer: async () => ({ kind: "retained", reason: "same-deployment" }),
 };
 
-export interface SessionHost extends SessionTurnHost {
+export interface ProgramHost extends SessionTurnHost {
   readonly moves?: SessionMoves;
   readonly toolStubs?: ToolStubHost;
+}
+
+export type AdoptRecord = (
+  record: SessionRecord,
+  consumed: { readonly throughSeq: number },
+) => Promise<void>;
+
+export type SessionRunResult =
+  | { readonly kind: "ended"; readonly outcome: "completed" | "failed" | "cancelled" }
+  | { readonly kind: "parked"; readonly record: SessionRecord; readonly wakeAt?: number }
+  | { readonly kind: "moved" };
+
+export interface StartedSession {
+  readonly finished: Promise<WorkflowEntryResult>;
+  readonly result: Promise<SessionRunResult>;
+  settledStep(): Promise<void>;
 }
 
 export async function runPreparedSession(
   boot: SessionBoot,
   inbox: SessionInboxHandle,
-  host: SessionHost,
+  host: ProgramHost,
 ): Promise<WorkflowEntryResult> {
+  return await startPreparedSession(boot, inbox, host).finished;
+}
+
+export function startPreparedSession(
+  boot: SessionBoot,
+  inbox: SessionInboxHandle,
+  host: ProgramHost,
+  adopted?: AdoptRecord,
+): StartedSession {
   const scope = boot.serializedContext[STUB_CONTEXT_KEY] as StubScope | undefined;
   if (scope !== undefined && scope.rootSessionId === undefined) {
     boot.serializedContext[STUB_CONTEXT_KEY] = { ...scope, rootSessionId: boot.sessionId };
   }
-  const cursor = new SessionStateCursor({
+  const queue = new SessionInputQueue(boot.admittedDeliveryKeys);
+  const records = adopted === undefined ? undefined : recordsOf(boot, adopted, inbox, queue);
+  const cursor: SessionStateCursor = new SessionStateCursor({
     history: boot.history,
     inbox,
+    open: openTurnOf(boot.start),
     sessionWritable: boot.sessionWritable,
     serializedContext: boot.serializedContext,
     sessionState: boot.sessionState,
+    ...(records !== undefined && { record: () => records.write(cursor) }),
+    ...(boot.rerunFirst === true && { rerunFirst: true }),
   });
+  const outcome = Promise.withResolvers<SessionRunResult>();
+  const finished = runBootedSession(boot, {
+    cursor,
+    host,
+    inbox,
+    queue,
+    records,
+    scope,
+    settle: outcome.resolve,
+  });
+  return {
+    finished,
+    result: finished.then(
+      async () => await outcome.promise,
+      () => ({ kind: "ended", outcome: "failed" }) as const,
+    ),
+    settledStep: () => cursor.settledStep(),
+  };
+}
+
+interface SessionRecords {
+  quiet(): boolean;
+  write(cursor: SessionStateCursor): Promise<void> | undefined;
+  keep(cursor: SessionStateCursor): Promise<SessionRecord>;
+  watch(execution: SessionExecution): void;
+}
+
+function recordsOf(
+  boot: SessionBoot,
+  adopted: AdoptRecord,
+  inbox: SessionInboxHandle,
+  queue: SessionInputQueue,
+): SessionRecords {
+  let generation = boot.generation ?? 0;
+  let execution: SessionExecution | undefined;
+  const seal = (cursor: SessionStateCursor): SessionRecord =>
+    sealSessionRecord({
+      generation: ++generation,
+      open: cursor.open,
+      transfer: transferStateOf(cursor, queue),
+    });
+  const records: SessionRecords = {
+    quiet: () => queue.pendingCount === 0 && execution?.holdsInput() !== true,
+    write(cursor) {
+      if (!records.quiet()) return undefined;
+      return adopted(seal(cursor), { throughSeq: inbox.takenThrough });
+    },
+    async keep(cursor) {
+      const record = seal(cursor);
+      await adopted(record, { throughSeq: inbox.takenThrough });
+      return record;
+    },
+    watch(watched) {
+      execution = watched;
+    },
+  };
+  return records;
+}
+
+function openTurnOf(start: SessionStart): OpenTurn | undefined {
+  switch (start.kind) {
+    case "resume":
+      return start.from;
+    case "turn":
+      return openedBy(start.input);
+    default:
+      return undefined;
+  }
+}
+
+function transferStateOf(
+  cursor: SessionStateCursor,
+  queue: SessionInputQueue,
+): SessionTransferState {
+  return {
+    admittedDeliveryKeys: queue.admittedDeliveryKeys,
+    history: cursor.history,
+    serializedContext: cursor.serializedContext,
+    sessionState: cursor.sessionState,
+  };
+}
+
+class SessionParked {
+  readonly result: Extract<SessionRunResult, { readonly kind: "parked" }>;
+
+  constructor(result: Extract<SessionRunResult, { readonly kind: "parked" }>) {
+    this.result = result;
+  }
+}
+
+const PARKED_RESULT: WorkflowEntryResult = { output: "" };
+
+async function runBootedSession(
+  boot: SessionBoot,
+  deps: {
+    readonly cursor: SessionStateCursor;
+    readonly host: ProgramHost;
+    readonly inbox: SessionInboxHandle;
+    readonly queue: SessionInputQueue;
+    readonly records: SessionRecords | undefined;
+    readonly scope: StubScope | undefined;
+    readonly settle: (result: SessionRunResult) => void;
+  },
+): Promise<WorkflowEntryResult> {
+  const { cursor, host, inbox, queue, records, scope, settle } = deps;
+  const stepCall = sessionStepCalls(
+    boot.generation === undefined ? boot.sessionId : `${boot.sessionId}:${boot.generation}`,
+  );
+  const steps: SessionStepRunner = { host, stepCall };
   const progress: SessionProgress = { caller: boot.caller };
   const handoff = host.moves ?? RETAINED;
   let result: WorkflowEntryResult = { output: "", isError: true };
   let loop: SessionLoopOutcome | undefined;
   let finalizing = false;
+  let parked = false;
   try {
     result = await runServingToolStubs(host.toolStubs, scope, boot.sessionId, async () => {
       try {
-        loop = await runSessionLoop(boot, { cursor, host, inbox, progress });
+        loop = await runSessionLoop(boot, {
+          cursor,
+          host,
+          inbox,
+          progress,
+          queue,
+          records,
+          stepCall,
+        });
       } finally {
         await inbox.dispose();
       }
       if (loop.kind === "transferred") {
+        settle({ kind: "moved" });
         if (boot.anchor.kind !== "self") return { output: "" };
         result = await handoff.awaitAnchoredResult();
         return result;
@@ -157,22 +311,38 @@ export async function runPreparedSession(
         caller: progress.caller,
         cursor,
         sessionWritable: boot.sessionWritable,
+        steps,
       });
+      settle({ kind: "ended", outcome: endedOutcomeOf(loop.outcome, result) });
       return result;
     });
     return result;
   } catch (error) {
+    if (error instanceof SessionParked) {
+      parked = true;
+      settle(error.result);
+      return PARKED_RESULT;
+    }
     if (!finalizing) {
       await finalizeSession(
         { error, kind: "failed", turnId: progress.turnId },
-        { caller: progress.caller, cursor, sessionWritable: boot.sessionWritable },
+        { caller: progress.caller, cursor, sessionWritable: boot.sessionWritable, steps },
       );
     }
     throw createSafeOuterWorkflowError();
   } finally {
     await inbox.dispose();
-    await reportResultToAnchor(boot, result, handoff, loop);
+    if (!parked) await reportResultToAnchor(boot, result, handoff, loop);
   }
+}
+
+function endedOutcomeOf(
+  outcome: SessionTerminalOutcome,
+  result: WorkflowEntryResult,
+): "completed" | "failed" | "cancelled" {
+  if (outcome.kind === "expired") return "cancelled";
+  if (outcome.kind === "failed" || result.isError === true) return "failed";
+  return "completed";
 }
 
 export async function failSession(input: {
@@ -181,10 +351,19 @@ export async function failSession(input: {
   readonly sessionId: string;
   readonly sessionState: DurableSessionState | undefined;
   readonly sessionWritable: WritableStream<Uint8Array>;
+  readonly step: SessionStepCall;
 }): Promise<never> {
+  const steps: SessionStepRunner = {
+    host: { step: input.step },
+    stepCall: sessionStepCalls(`${input.sessionId}:fail`),
+  };
   let caller: TurnCaller | undefined;
   try {
-    caller = await resolveInitialTurnCallerStep({ serializedContext: input.serializedContext });
+    caller = await steps.host.step(
+      "resolveInitialTurnCaller",
+      { serializedContext: input.serializedContext },
+      steps.stepCall("resolveInitialTurnCaller"),
+    );
   } catch {}
   await finalizeSession(
     { error: input.error, kind: "failed" },
@@ -195,6 +374,7 @@ export async function failSession(input: {
         sessionState: input.sessionState,
       },
       sessionWritable: input.sessionWritable,
+      steps,
     },
   );
   throw createSafeOuterWorkflowError();
@@ -222,14 +402,35 @@ async function runSessionLoop(
   boot: SessionBoot,
   deps: {
     readonly cursor: SessionStateCursor;
-    readonly host: SessionHost;
+    readonly host: ProgramHost;
     readonly inbox: SessionInboxHandle;
     readonly progress: SessionProgress;
+    readonly queue: SessionInputQueue;
+    readonly records: SessionRecords | undefined;
+    readonly stepCall: (name: SessionStepName) => StepCall;
   },
 ): Promise<SessionLoopOutcome> {
-  const { cursor, host, inbox, progress } = deps;
+  const { cursor, host, inbox, progress, queue, records, stepCall } = deps;
   const handoff = host.moves ?? RETAINED;
-  const queue = new SessionInputQueue(boot.admittedDeliveryKeys);
+  const sessionTimeout = boot.sessionTimeoutControl;
+  let idleWindow: number | "attempted" | undefined;
+  const idle =
+    records === undefined
+      ? undefined
+      : async (): Promise<void> => {
+          if (inbox.hasPending() || !records.quiet()) return;
+          if ((await host.next()) !== "park" || inbox.hasPending() || !records.quiet()) return;
+          const wakes = [
+            sessionTimeout?.getDeadline().getTime(),
+            typeof idleWindow === "number" ? idleWindow : undefined,
+          ].filter((at): at is number => at !== undefined);
+          const wakeAt = wakes.length === 0 ? undefined : Math.min(...wakes);
+          throw new SessionParked({
+            kind: "parked",
+            record: await records.keep(cursor),
+            ...(wakeAt !== undefined && { wakeAt }),
+          });
+        };
   const execution = new SessionExecution({
     capabilities: boot.capabilities,
     cursor,
@@ -237,8 +438,18 @@ async function runSessionLoop(
     inbox,
     queue,
     sessionId: boot.sessionId,
+    stepCall,
+    ...(idle !== undefined && { idle }),
   });
-  const sessionTimeout = boot.sessionTimeoutControl;
+  records?.watch(execution);
+  const settleControlDelivery = (settlement: ControlSettlement) =>
+    cursor.advance((state) =>
+      host.step(
+        "settleControlDelivery",
+        { ...state, settlement },
+        stepCall("settleControlDelivery"),
+      ),
+    );
   let prewarming: Promise<void> = Promise.resolve();
   let prewarmSettled = true;
   let awaitingFirstInput = false;
@@ -250,12 +461,11 @@ async function runSessionLoop(
       unstarted.push(settlement);
       return;
     }
-    await cursor.advance((state) => settleControlDeliveryStep({ ...state, settlement }));
+    await settleControlDelivery(settlement);
   };
   const settleUnstarted = async (): Promise<void> => {
     if (!started()) return;
-    for (const settlement of unstarted.splice(0))
-      await cursor.advance((state) => settleControlDeliveryStep({ ...state, settlement }));
+    for (const settlement of unstarted.splice(0)) await settleControlDelivery(settlement);
   };
   const expired = (control?: ControlDelivery): SessionTerminalOutcome => ({
     kind: "expired",
@@ -264,37 +474,39 @@ async function runSessionLoop(
   });
 
   let prewarmedSandbox: SandboxRunning | undefined;
-  let idleWindow: Promise<void> | "attempted" | undefined;
   const sandboxMayBeRunning = (): SandboxRunning | undefined =>
     readDurableSession(cursor.sessionState).sandboxState?.running ?? prewarmedSandbox;
   const sessionBusy = (): boolean =>
     queue.pendingCount > 0 ||
     workingTasks(sessionTaskTable(cursor)).length > 0 ||
     !isBetweenTurns(storedProjection(cursor.sessionState.snapshot.session.state));
-  const beforeInbox = async (other: Promise<unknown>): Promise<boolean> =>
-    await Promise.race([inbox.whenPending().then(() => false), other.then(() => true)]);
   const stopSandboxOnceIdle = async (): Promise<void> => {
     while (!inbox.hasPending()) {
       if (!prewarmSettled) {
-        if (!(await beforeInbox(prewarming))) return;
+        const woken = await host.next({ wake: prewarming });
+        if (woken === "input" || woken === "park") return;
         continue;
       }
       const running = sandboxMayBeRunning();
       if (running === undefined) idleWindow = undefined;
       if (running === undefined || idleWindow === "attempted" || sessionBusy()) return;
       if (inbox.awaitingHandover) {
-        if (!(await beforeInbox(inbox.whenHandoverSettled()))) return;
+        if ((await inbox.whenPendingOrHandoverSettled()) === "pending") return;
         continue;
       }
       if (running.idleTimeoutMs > 0) {
-        idleWindow ??= host.until(Date.now() + running.idleTimeoutMs);
-        if (!(await beforeInbox(idleWindow)) || inbox.hasPending()) return;
+        idleWindow ??= host.now() + running.idleTimeoutMs;
+        if ((await host.next({ until: idleWindow })) !== "due" || inbox.hasPending()) return;
       }
       idleWindow = "attempted";
       prewarmedSandbox = undefined;
       await cursor
         .advance(({ serializedContext, sessionState }) =>
-          stopIdleSessionSandboxStep({ serializedContext, sessionState }),
+          host.step(
+            "stopIdleSandbox",
+            { serializedContext, sessionState },
+            stepCall("stopIdleSandbox"),
+          ),
         )
         .catch(() => undefined);
       return;
@@ -307,12 +519,20 @@ async function runSessionLoop(
   > => {
     while (true) {
       const next = await nextTurnDelivery({
+        host,
+        stepCall,
         cursor,
         hasWorkingTasks: () => workingTasks(sessionTaskTable(cursor)).length > 0,
         ignore,
         inbox,
         queue,
-        whileWaiting: stopSandboxOnceIdle,
+        whileWaiting:
+          idle === undefined
+            ? stopSandboxOnceIdle
+            : async () => {
+                await stopSandboxOnceIdle();
+                await idle();
+              },
       });
       if (next.kind === "prewarm") {
         if (
@@ -337,15 +557,10 @@ async function runSessionLoop(
         continue;
       }
       if (next.kind === "cancel-working-tasks") {
-        await cancelWorkingTasks(cursor, "turn-cancelled");
+        await cancelWorkingTasks({ host, stepCall }, cursor, "turn-cancelled");
         if (next.origin !== undefined) {
           const control = controlDeliveryOf(next.origin);
-          await cursor.advance((state) =>
-            settleControlDeliveryStep({
-              ...state,
-              settlement: { control, outcome: "applied", source: "cancel" },
-            }),
-          );
+          await settleControlDelivery({ control, outcome: "applied", source: "cancel" });
         }
         continue;
       }
@@ -360,7 +575,10 @@ async function runSessionLoop(
   let turnControl =
     boot.initialTurnControl ?? (boot.anchor.kind === "self" ? createTurnControl() : undefined);
   let compactionHandoffDue = false;
-  const runTurn = async (payload: TurnStepPayload | undefined): Promise<TurnOutcome> => {
+  const runTurn = async (
+    payload: TurnStepPayload | undefined,
+    pause?: TurnPause,
+  ): Promise<TurnOutcome> => {
     const caller = progress.caller;
     const control = turnControl;
     turnControl = undefined;
@@ -369,7 +587,11 @@ async function runSessionLoop(
       payload?.control === undefined
         ? turnCoordinates(storedProjection(cursor.sessionState.snapshot.session.state)).turnId
         : undefined;
-    const outcome = await execution.runTurn(payload, { caller, control });
+    const outcome = await execution.runTurn(payload, {
+      caller,
+      control,
+      ...(pause !== undefined && { pause }),
+    });
     if (control !== undefined) turnControl ??= nextTurnControl(control);
     progress.turnId = undefined;
     sessionTimeout?.recordActivity();
@@ -377,12 +599,7 @@ async function runSessionLoop(
     if (outcome.compacted === true) compactionHandoffDue = true;
     return outcome;
   };
-  const transferState = () => ({
-    admittedDeliveryKeys: queue.admittedDeliveryKeys,
-    history: cursor.history,
-    serializedContext: cursor.serializedContext,
-    sessionState: cursor.sessionState,
-  });
+  const transferState = (): SessionTransferState => transferStateOf(cursor, queue);
   const compactionHandoffReady = (): boolean =>
     compactionHandoffDue &&
     progress.caller === undefined &&
@@ -400,12 +617,26 @@ async function runSessionLoop(
     if (next.delivery.caller !== undefined) progress.caller = next.delivery.caller;
     return { action: await runTurn({ delivery: next.delivery }), kind: "action" };
   };
-  const settleCancelledTurn = async (reportUsage: boolean, control?: ControlDelivery) => {
-    const settled = await cursor.advanceWithHistory((state) =>
-      settleCancelledTurnStep({ ...state, control, reportUsage }),
+  const settleCancelledTurn = async (report: boolean, control?: ControlDelivery) => {
+    const { caller } = progress;
+    const settled = await cursor.advanceWithHistory(
+      (state) =>
+        host.step(
+          "settleCancelledTurn",
+          { ...state, control, reportUsage: report },
+          stepCall("settleCancelledTurn"),
+        ),
+      { after: () => undefined, before: { at: "cancel", report, ...(control && { control }) } },
     );
     progress.caller = undefined;
-    return settled;
+    if (report && caller !== undefined) {
+      const notification = { caller, sessionId: boot.sessionId };
+      await host.step(
+        "notifyCancelledTaskCaller",
+        settled.usage === undefined ? notification : { ...notification, usage: settled.usage },
+        stepCall("notifyCancelledTaskCaller"),
+      );
+    }
   };
   const awaitPrewarmedAction = async (): Promise<SessionActionResult> => {
     while (true) {
@@ -452,7 +683,11 @@ async function runSessionLoop(
         prewarming = cursor
           .advanceBeside(
             async ({ serializedContext, sessionState }) => {
-              const prewarmed = await prewarmSessionStep({ serializedContext, sessionState });
+              const prewarmed = await host.step(
+                "prewarmSession",
+                { serializedContext, sessionState },
+                stepCall("prewarmSession"),
+              );
               prewarmedSandbox = prewarmed.sandboxRunning;
               return prewarmed;
             },
@@ -473,11 +708,28 @@ async function runSessionLoop(
         const action = await runTurn(input === undefined ? undefined : { delivery: input });
         return { action, kind: "action" };
       }
+      case "resume": {
+        const { from } = boot.start;
+        progress.caller ??=
+          (from.at === "step" ? from.input?.delivery?.caller : undefined) ??
+          (await host.step(
+            "resolveInitialTurnCaller",
+            { serializedContext: cursor.serializedContext },
+            stepCall("resolveInitialTurnCaller"),
+          ));
+        if (from.at === "cancel") {
+          await settleCancelledTurn(from.report, from.control);
+          return { action: { kind: "park" }, kind: "action" };
+        }
+        const action =
+          from.at === "step" ? await runTurn(from.input) : await runTurn(undefined, from.pause);
+        return { action, kind: "action" };
+      }
     }
   };
 
   try {
-    const [actionResult, timerResult] = await Promise.allSettled([
+    const [actionResult, timerResult] = await host.all([
       runInitialAction(),
       sessionTimeout?.start(),
     ]);
@@ -494,22 +746,19 @@ async function runSessionLoop(
       await settleUnstarted();
 
       if (action.cancelled === true) {
-        const { caller } = progress;
-        const settled = await settleCancelledTurn(caller !== undefined, action.cancelledBy);
-        if (caller !== undefined) {
-          const notification = { caller, sessionId: boot.sessionId };
-          await notifyCancelledTaskCallerStep(
-            settled.usage === undefined ? notification : { ...notification, usage: settled.usage },
-          );
-        }
+        await settleCancelledTurn(progress.caller !== undefined, action.cancelledBy);
       } else if (action.settled !== undefined) {
         if (progress.caller !== undefined) {
-          await notifyTurnCallerStep({
-            caller: progress.caller,
-            lifecycle: "parked",
-            sessionId: boot.sessionId,
-            settled: action.settled,
-          });
+          await host.step(
+            "notifyTurnCaller",
+            {
+              caller: progress.caller,
+              lifecycle: "parked",
+              sessionId: boot.sessionId,
+              settled: action.settled,
+            },
+            stepCall("notifyTurnCaller"),
+          );
         }
         progress.caller = undefined;
       }
@@ -533,7 +782,9 @@ async function runSessionLoop(
         case "clear":
         case "compact":
           if (next.kind === "clear")
-            await cancelWorkingTasks(cursor, "turn-cancelled", { turnCalls: true });
+            await cancelWorkingTasks({ host, stepCall }, cursor, "turn-cancelled", {
+              turnCalls: true,
+            });
           action = await runTurn(
             next.origin === undefined
               ? { control: next.kind }

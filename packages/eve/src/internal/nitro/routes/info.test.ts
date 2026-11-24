@@ -68,8 +68,15 @@ const CHATGPT_MANIFEST_DATA = {
 
 async function requestAgentInfo(): Promise<Response> {
   const { handleAgentInfoRequest } = await import("#internal/nitro/routes/info.js");
+  const { testApp } = await import("#internal/testing/test-platform.js");
+  const { createEntities } = await import("#platform/entities.js");
+  const { default: vercelPlatform } = await import("#platform/vercel/declaration.js");
 
-  return await handleAgentInfoRequest(ROUTE_INPUT);
+  return await handleAgentInfoRequest(
+    ROUTE_INPUT,
+    undefined,
+    testApp({ platform: createEntities(vercelPlatform, undefined) }),
+  );
 }
 
 describe("handleAgentInfoRequest", () => {

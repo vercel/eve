@@ -6,10 +6,10 @@ import {
   finalizeInstrumentationProviders,
   registerInstrumentationProvider,
 } from "#instrumentation/providers.js";
+import { testEntities } from "#internal/testing/test-platform.js";
 import { defineInstrumentation } from "#public/instrumentation/index.js";
 import { otel, type TracePolicyDecision } from "#public/instrumentation/otel.js";
 
-const REGISTRY_GLOBAL_KEY = Symbol.for("eve.harness-instrumentation-providers");
 vi.mock("#tracing/eve/otel-registration.js", () => ({
   registerOtel: () => ({
     provider: { getTracer: () => ({}) },
@@ -19,7 +19,8 @@ vi.mock("#tracing/eve/otel-registration.js", () => ({
     shutdown: async () => {},
   }),
 }));
-const RUNTIME_GLOBAL_KEY = Symbol.for("eve.instrumentation-runtime");
+const PROCESS_APP_KEY = Symbol.for("eve.app");
+const platform = testEntities();
 
 const traceContext = (audience: "public" | "private" | "unknown") => ({
   agentName: "weather-agent",
@@ -31,8 +32,7 @@ const traceContext = (audience: "public" | "private" | "unknown") => ({
 
 describe("otel and authored provider composition", () => {
   beforeEach(() => {
-    delete (globalThis as Record<symbol, unknown>)[REGISTRY_GLOBAL_KEY];
-    delete (globalThis as Record<symbol, unknown>)[RUNTIME_GLOBAL_KEY];
+    delete (globalThis as Record<symbol, unknown>)[PROCESS_APP_KEY];
   });
 
   it.each([
@@ -44,18 +44,20 @@ describe("otel and authored provider composition", () => {
       const modelStarted = vi.fn();
       await registerInstrumentationProvider({
         agentName: "weather-agent",
+        platform,
         slot: "otel",
         value: otel({ tracePolicy: () => policy as TracePolicyDecision }),
       });
       await registerInstrumentationProvider({
         agentName: "weather-agent",
+        platform,
         slot: "rows",
         value: defineInstrumentation({
           tracePolicy: () => ({ emit: true, recordInputs: true, recordOutputs: true }),
           events: { "model.call.started": modelStarted },
         }),
       });
-      const runtime = finalizeInstrumentationProviders({ serviceName: "weather-agent" });
+      const runtime = finalizeInstrumentationProviders({ platform, serviceName: "weather-agent" });
       const hooks = runtime.hooks.forTrace!(traceContext("private"));
 
       await contextStorage.run(new ContextContainer(), () =>

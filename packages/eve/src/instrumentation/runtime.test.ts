@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { bindApp } from "#context/app.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import {
   AuthKey,
@@ -35,6 +36,7 @@ import type { TraceCapturePolicy } from "#tracing/eve/otel-declaration.js";
 import { readForwardedAudienceBaggage, writeForwardedAudienceBaggage } from "#protocol/baggage.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
+import { testApp } from "#internal/testing/test-platform.js";
 
 const boundSession = {
   agentName: "test-agent",
@@ -53,6 +55,7 @@ function createRuntime(
   tracePolicy?: TraceCapturePolicy,
 ): InstrumentationRuntime {
   return {
+    environment: "production",
     forceFlush: async () => undefined,
     idGenerator: new AgentSpanIdGenerator(),
     hooks,
@@ -67,6 +70,7 @@ function createRuntime(
 
 function createContext(audience: "private" | "public" | "unknown" = "public"): ContextContainer {
   const ctx = new ContextContainer();
+  bindApp(ctx, testApp());
   ctx.set(ChannelInstrumentationKey, {
     kind: "channel:test",
     metadata: {},
@@ -93,7 +97,7 @@ async function readTelemetry(instrumentation: ExecutionInstrumentation | undefin
 }
 
 beforeEach(() => {
-  delete (globalThis as Record<symbol, unknown>)[Symbol.for("eve.instrumentation-runtime")];
+  delete (globalThis as Record<symbol, unknown>)[Symbol.for("eve.app")];
 });
 
 function initializeRemoteSession(

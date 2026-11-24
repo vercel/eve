@@ -1,3 +1,4 @@
+import { processApp } from "#runtime/app.js";
 import { errorInfoOf } from "#harness/facts.js";
 import { publishTerminalSessionEvent } from "#execution/publish-session-events.js";
 import type { TokenUsage } from "#shared/token-usage.js";
@@ -28,6 +29,7 @@ export async function emitTerminalSessionFailureStep(input: {
   });
 
   await publishTerminalSessionEvent({
+    hosts: processApp().hosts,
     ending: {
       cause: input.turnId === undefined ? undefined : { turnId: input.turnId },
       error: errorInfoOf({ code, details, message }),

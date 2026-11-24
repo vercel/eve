@@ -1,3 +1,4 @@
+import { builtInHosts } from "#runtime/app.js";
 import { describe, expect, it, vi } from "vitest";
 import { startTestSession } from "#internal/testing/test-session-hosts.js";
 import { resumeRoutedHook } from "#execution/hosts.js";
@@ -63,17 +64,23 @@ describe("workflow hook cancellation", () => {
             (event) => event.data.request.kind === "question",
           );
           expect(question).toBeDefined();
-          await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
-            kind: "send",
-            auth: alice,
-            delivery: { channelKind: "http", channelName: "test", deliveryId: "answer-delivery" },
-            payload:
-              mode === "button"
-                ? {
-                    answers: [{ interactionId: question!.data.interactionId, optionId: "approve" }],
-                  }
-                : { message: "Deploy" },
-          });
+          await resumeRoutedHook(
+            builtInHosts(),
+            sessionInboxHookToken(sessionCommandHookToken(run.runId)),
+            {
+              kind: "send",
+              auth: alice,
+              delivery: { channelKind: "http", channelName: "test", deliveryId: "answer-delivery" },
+              payload:
+                mode === "button"
+                  ? {
+                      answers: [
+                        { interactionId: question!.data.interactionId, optionId: "approve" },
+                      ],
+                    }
+                  : { message: "Deploy" },
+            },
+          );
           const answered = await stream.nextUntil(
             (event) =>
               event.type === "delivery.settled" && event.data.deliveryId === "answer-delivery",
@@ -164,11 +171,15 @@ describe("workflow hook cancellation", () => {
       try {
         const asked = await stream.nextTurn();
         expect(filterEventsByType(asked, "interaction.opened")).toHaveLength(1);
-        await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
-          delivery: { channelKind: "http", channelName: "test", deliveryId: "delivery-answer" },
-          kind: "send",
-          payload: { message: "Deploy" },
-        });
+        await resumeRoutedHook(
+          builtInHosts(),
+          sessionInboxHookToken(sessionCommandHookToken(run.runId)),
+          {
+            delivery: { channelKind: "http", channelName: "test", deliveryId: "delivery-answer" },
+            kind: "send",
+            payload: { message: "Deploy" },
+          },
+        );
 
         const answered = await stream.nextTurn();
         expect(hooksAfterCancel).toEqual(["Deploy"]);
@@ -229,24 +240,28 @@ describe("workflow hook cancellation", () => {
       const stream = captureTurnEvents(run);
       try {
         await stream.nextTurn();
-        await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
-          deliveryMetadata: [
-            {
-              channelKind: "http",
-              channelName: "test",
-              deliveryId: "delivery-answer",
-              payloadIndex: 0,
-            },
-            {
-              channelKind: "http",
-              channelName: "test",
-              deliveryId: "delivery-note",
-              payloadIndex: 1,
-            },
-          ],
-          kind: "deliver",
-          payloads: [{ message: "Deploy" }, { message: "Thanks, and please post the summary." }],
-        });
+        await resumeRoutedHook(
+          builtInHosts(),
+          sessionInboxHookToken(sessionCommandHookToken(run.runId)),
+          {
+            deliveryMetadata: [
+              {
+                channelKind: "http",
+                channelName: "test",
+                deliveryId: "delivery-answer",
+                payloadIndex: 0,
+              },
+              {
+                channelKind: "http",
+                channelName: "test",
+                deliveryId: "delivery-note",
+                payloadIndex: 1,
+              },
+            ],
+            kind: "deliver",
+            payloads: [{ message: "Deploy" }, { message: "Thanks, and please post the summary." }],
+          },
+        );
 
         const answered = await stream.nextUntil(
           (event) => event.type === "turn.settled" && event.data.outcome === "cancelled",
@@ -374,12 +389,16 @@ describe("workflow typed answers", () => {
         try {
           await stream.nextTurn();
           seen.length = 0;
-          await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
-            auth: { ...asker, attributes: { msg: "answering request" } },
-            delivery: { channelKind: "http", channelName: "test", deliveryId: "delivery-answer" },
-            kind: "send",
-            payload: { message: "Deploy", ...extra },
-          });
+          await resumeRoutedHook(
+            builtInHosts(),
+            sessionInboxHookToken(sessionCommandHookToken(run.runId)),
+            {
+              auth: { ...asker, attributes: { msg: "answering request" } },
+              delivery: { channelKind: "http", channelName: "test", deliveryId: "delivery-answer" },
+              kind: "send",
+              payload: { message: "Deploy", ...extra },
+            },
+          );
 
           await stream.nextTurn();
           await vi.waitFor(() =>
@@ -476,7 +495,7 @@ describe("workflow typed answers", () => {
             [bob, answers.bob],
             [alice, answers.alice],
           ] as const) {
-            await resumeRoutedHook(sessionInboxHookToken(inbox), {
+            await resumeRoutedHook(builtInHosts(), sessionInboxHookToken(inbox), {
               auth,
               delivery: { channelKind: "http", channelName: "test", deliveryId: auth.principalId },
               kind: "send",

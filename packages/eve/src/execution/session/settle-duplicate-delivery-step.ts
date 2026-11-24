@@ -1,3 +1,4 @@
+import { processApp } from "#runtime/app.js";
 import type { DeliverHookPayload } from "#channel/types.js";
 import { readDurableSession } from "#execution/durable-session-store.js";
 import { publishSessionEvents, type SessionStepInput } from "#execution/publish-session-events.js";
@@ -10,7 +11,7 @@ export async function settleDuplicateDeliveryStep(
   input: SessionStepInput & { readonly delivery: DeliverHookPayload },
 ) {
   "use step";
-  return await withSessionStateDelta(input, (state) => {
+  return await withSessionStateDelta(processApp().hosts, input, (state) => {
     const view = storedProjection(readDurableSession(state.sessionState).state).view;
     const { deliveries } = planAdmission({
       channelKind: "http",

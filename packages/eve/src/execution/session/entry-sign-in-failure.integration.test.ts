@@ -1,3 +1,4 @@
+import { builtInHosts } from "#runtime/app.js";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
@@ -126,18 +127,22 @@ describe("workflowEntry sign-in failure", () => {
         )!.data;
         await stream.nextUntil("sign-in hold", (event) => event.type === "turn.paused");
 
-        await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
-          kind: "authorization-callback",
-          payloads: [
-            {
-              authorizationCallback: {
-                attemptId: required.interactionId,
-                callback: { method: "GET", params: { code: "oauth-code" } },
-                connectionName: required.request.signIn!.name,
+        await resumeRoutedHook(
+          builtInHosts(),
+          sessionInboxHookToken(sessionCommandHookToken(run.runId)),
+          {
+            kind: "authorization-callback",
+            payloads: [
+              {
+                authorizationCallback: {
+                  attemptId: required.interactionId,
+                  callback: { method: "GET", params: { code: "oauth-code" } },
+                  connectionName: required.request.signIn!.name,
+                },
               },
-            },
-          ],
-        });
+            ],
+          },
+        );
 
         const resumed = await stream.nextUntil(
           "turn after the failed sign-in",
@@ -165,12 +170,16 @@ describe("workflowEntry sign-in failure", () => {
         expect(refused?.data.outcome).toBe("failed");
         expect(JSON.stringify(refused?.data)).toContain("already failed in this turn");
 
-        await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
-          auth: alice,
-          kind: "send",
-          delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
-          payload: { message: "Create one more." },
-        });
+        await resumeRoutedHook(
+          builtInHosts(),
+          sessionInboxHookToken(sessionCommandHookToken(run.runId)),
+          {
+            auth: alice,
+            kind: "send",
+            delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
+            payload: { message: "Create one more." },
+          },
+        );
         const nextTurn = await stream.nextUntil("next turn's sign-in", isSignInOpened);
         expect(nextTurn.filter(isSignInOpened)).toHaveLength(1);
         expect(starts).toBe(2);

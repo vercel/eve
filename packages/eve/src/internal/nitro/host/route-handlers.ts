@@ -18,7 +18,20 @@ function importNitroModule(specifier: "nitro" | "nitro/h3"): string {
 
 export const ROUTE_CONFIG_ID = "#eve/route-config";
 
-const importRouteConfig = `import config from ${JSON.stringify(ROUTE_CONFIG_ID)};`;
+export const ROUTE_APP_ID = "#eve/route-app.mjs";
+
+const importRouteConfig = [
+  `import config from ${JSON.stringify(ROUTE_CONFIG_ID)};`,
+  `import { app } from ${JSON.stringify(ROUTE_APP_ID)};`,
+].join("\n");
+
+export function renderRouteAppModule(input: {
+  readonly appModulePath: string | undefined;
+}): string {
+  return input.appModulePath === undefined
+    ? "export const app = undefined;"
+    : `export { app } from ${stringifyEsmImportSpecifier(input.appModulePath)};`;
+}
 
 export function renderRouteConfigModule(input: { readonly configPath: string }): string {
   return [
@@ -47,7 +60,7 @@ export function renderChannelHandler(input: {
   readonly websocketRouteKey?: string;
 }): string {
   const guard = headGuard(input.allow);
-  const dispatch = `dispatchChannelRequest(event, ${JSON.stringify(input.routeKey)}, config)`;
+  const dispatch = `dispatchChannelRequest(event, ${JSON.stringify(input.routeKey)}, config, app)`;
   const body = [
     ...(input.cors === undefined
       ? []
@@ -80,7 +93,7 @@ export function renderChannelHandler(input: {
     importRouteConfig,
     input.websocketRouteKey === undefined
       ? `export default ${handler};`
-      : `export default defineWebSocketHandler((event) => dispatchChannelWebSocketRequest(event, ${JSON.stringify(input.websocketRouteKey)}, config), ${handler});`,
+      : `export default defineWebSocketHandler((event) => dispatchChannelWebSocketRequest(event, ${JSON.stringify(input.websocketRouteKey)}, config, app), ${handler});`,
   ].join("\n");
 }
 
@@ -103,7 +116,7 @@ export function renderChannelWebSocketHandler(input: {
   readonly routeKey: string;
 }): string {
   const guard = headGuard(input.allow);
-  const dispatch = `dispatchChannelWebSocketRequest(event, ${JSON.stringify(input.routeKey)}, config)`;
+  const dispatch = `dispatchChannelWebSocketRequest(event, ${JSON.stringify(input.routeKey)}, config, app)`;
   const hooks =
     guard.statements.length === 0
       ? `(event) => ${dispatch}`
@@ -129,7 +142,7 @@ export function renderHostHandler(input: {
   return [
     `import { ${input.handlerExport} } from ${importSourceModule(input.modulePath)};`,
     importRouteConfig,
-    `export default async (event) => ${input.handlerExport}(${args}, event.req);`,
+    `export default async (event) => ${input.handlerExport}(${args}, event.req, app);`,
   ].join("\n");
 }
 
@@ -143,7 +156,7 @@ export function renderScheduleTaskModule(input: {
     `export default {`,
     `  meta: { description: ${JSON.stringify(input.description)} },`,
     `  async run(event) {`,
-    `    return { result: await dispatchScheduleTask(${JSON.stringify(input.taskName)}, config) };`,
+    `    return { result: await dispatchScheduleTask(${JSON.stringify(input.taskName)}, config, app) };`,
     `  },`,
     `};`,
   ].join("\n");

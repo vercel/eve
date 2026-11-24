@@ -4,7 +4,8 @@ import { sessionHookTokens } from "#execution/session/hook-tokens.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import { createSessionInbox } from "#execution/session-inbox/inbox.js";
 import { failSession, runPreparedSession, type SessionBoot } from "#execution/session/program.js";
-import { workflowSessionHost } from "#execution/session/workflow-host.js";
+import { workflowProgramHost } from "#execution/session/workflow-host.js";
+import { workflowSessionStep } from "#execution/workflow-host/session-steps.js";
 import { createSessionTimeoutControl } from "#execution/session/timeout-control.js";
 import { recordSessionOwnerStep } from "#execution/session/handoff-steps.js";
 import { completeLegacyDriverStep } from "./completion-step.js";
@@ -36,6 +37,7 @@ export async function turnWorkflow(rawInput: unknown): Promise<void> {
       sessionId,
       sessionState: prepared.sessionState,
       sessionWritable,
+      step: workflowSessionStep,
     });
   }
   const initialDeliveryKey = prepared.input.delivery?.idempotencyKey;
@@ -75,5 +77,5 @@ export async function turnWorkflow(rawInput: unknown): Promise<void> {
     sessionTimeoutMs: prepared.sessionTimeoutMs,
     sessionWritable,
   };
-  await runPreparedSession(boot, inbox, workflowSessionHost(boot, inbox));
+  await runPreparedSession(boot, inbox, workflowProgramHost(boot, inbox));
 }

@@ -1,4 +1,5 @@
 import { readDurableSession, type DurableSessionState } from "#execution/durable-session-store.js";
+import type { AppHosts } from "#execution/hosts.js";
 import {
   enterSessionStep,
   followInterruptedAttempt,
@@ -19,6 +20,7 @@ const SESSION_VALUE_KEYS = ["serializedContext", "sessionState", "history"] as c
 
 type StepValues = Partial<SessionStateValues> & {
   readonly sessionWritable?: WritableStream<Uint8Array>;
+  readonly rerun?: true;
 };
 
 function storedByReference(): boolean {
@@ -65,22 +67,30 @@ function sameOrder(left: readonly string[], right: readonly string[]): boolean {
 }
 
 export async function withSessionStateDelta<
-  I extends Partial<SessionStateValues>,
+  I extends Partial<SessionStateValues> & { readonly rerun?: true },
   R extends Partial<SessionStateValues>,
->(input: I, work: (step: Entered<I>) => Promise<R>): Promise<WithSessionStateDelta<R>>;
+>(
+  hosts: AppHosts,
+  input: I,
+  work: (step: Entered<I>) => Promise<R>,
+  meta?: { readonly attempt: number },
+): Promise<WithSessionStateDelta<R>>;
 export async function withSessionStateDelta(
+  hosts: AppHosts,
   input: StepValues,
   work: (step: Entered<StepValues>) => Promise<Partial<SessionStateValues>>,
+  meta?: { readonly attempt: number },
 ): Promise<SessionStateTransition> {
   const base = Object.fromEntries(
     SESSION_VALUE_KEYS.map((key) => [key, snapshotValue(input[key])]),
   );
-  const step = enterSessionStep(input);
+  const step = enterSessionStep(hosts, input, meta);
   const { sessionWritable } = step;
   if (sessionWritable !== undefined && base.sessionState !== undefined) {
     const checkpoint = base.sessionState as DurableSessionState;
     const session = readDurableSession(checkpoint);
     await readOrphanedLines({
+      hosts,
       rerun: step.rerun,
       sessionId: checkpoint.sessionId,
       position: storedProjection(session.state).view.position,

@@ -4,13 +4,15 @@ import {
   type InProcessRuntime,
   type InProcessRuntimeOptions,
 } from "#execution/in-process/runtime.js";
+import { testEntities } from "#internal/testing/test-platform.js";
 import { workflowStepBoundary } from "#execution/workflow-host/step-boundary.js";
 
 export function createTestInProcessRuntime(
   config: SessionRuntimeConfig,
-  options: InProcessRuntimeOptions = {},
+  options: Partial<InProcessRuntimeOptions> = {},
 ): InProcessRuntime {
   return createInProcessRuntime(config, {
+    platform: testEntities(),
     deliveries: "batched",
     stepBoundary: workflowStepBoundary,
     ...options,

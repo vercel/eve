@@ -1,5 +1,5 @@
 import { ROOT_COMPILED_AGENT_NODE_ID, type CompiledSandboxDefinition } from "#compiler/manifest.js";
-import type { CompiledModuleMap } from "#compiler/module-map.js";
+import type { CompiledModuleMap } from "#compiler/module-map-schema.js";
 import { expectObjectRecord, getAuthoredModuleExport } from "#internal/authored-module.js";
 import { defineParentSandbox } from "#public/definitions/sandbox.js";
 import { ResolveAgentError } from "#runtime/resolve-helpers.js";

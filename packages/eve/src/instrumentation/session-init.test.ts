@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { bindApp } from "#context/app.js";
 import { ContextContainer } from "#context/container.js";
 import {
   AuthKey,
@@ -11,15 +12,23 @@ import { initializeSessionInstrumentation } from "#instrumentation/session-init.
 import { registerInstrumentationRuntime } from "#instrumentation/runtime-global.js";
 import type { InstrumentationRuntime } from "#instrumentation/runtime.js";
 import { AgentSpanIdGenerator } from "#compiled/@vercel/agent-runs/index.js";
+import { testApp } from "#internal/testing/test-platform.js";
 import type { TraceCapturePolicy } from "#tracing/eve/otel-declaration.js";
 
 afterEach(() => {
   vi.unstubAllEnvs();
-  delete (globalThis as Record<symbol, unknown>)[Symbol.for("eve.instrumentation-runtime")];
+  delete (globalThis as Record<symbol, unknown>)[Symbol.for("eve.app")];
 });
+
+function appContext(): ContextContainer {
+  const ctx = new ContextContainer();
+  bindApp(ctx, testApp());
+  return ctx;
+}
 
 function createRuntime(tracePolicy: TraceCapturePolicy): InstrumentationRuntime {
   return {
+    environment: "production",
     forceFlush: async () => undefined,
     hooks: { capturesContent: true, publish: async () => undefined },
     otelSettings: {
@@ -37,7 +46,7 @@ describe("initializeSessionInstrumentation", () => {
       ...createRuntime(() => false),
       idGenerator: new AgentSpanIdGenerator(),
     });
-    const ctx = new ContextContainer();
+    const ctx = appContext();
     ctx.set(ParentTraceContextKey, {
       isRemote: true,
       spanId: "a".repeat(16),
@@ -52,7 +61,7 @@ describe("initializeSessionInstrumentation", () => {
   it.each([0, 1])(
     "preserves the caller's trace and sampling flag %s at child creation",
     (traceFlags) => {
-      const ctx = new ContextContainer();
+      const ctx = appContext();
       const parent = { spanId: "a".repeat(16), traceFlags, traceId: "b".repeat(32) };
       ctx.set(ParentTraceContextKey, parent);
 
@@ -75,7 +84,7 @@ describe("initializeSessionInstrumentation", () => {
       idGenerator: new AgentSpanIdGenerator(),
       prepareSessionTrace: async () => ({ spanId: "", traceFlags: 0, traceId: "" }),
     });
-    const ctx = new ContextContainer();
+    const ctx = appContext();
     ctx.set(ChannelInstrumentationKey, { kind: "channel:test", metadata: {} });
     ctx.set(AuthKey, {
       attributes: {},

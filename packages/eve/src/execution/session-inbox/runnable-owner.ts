@@ -1,5 +1,5 @@
 import type { World } from "#compiled/@workflow/world/index.js";
-import { EVE_VERSION_ATTRIBUTE } from "#execution/eve-workflow-attributes.js";
+import { isBuiltByThisEve } from "#execution/eve-workflow-attributes.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 
 export type OwnerRun = Awaited<ReturnType<World["runs"]["get"]>>;
@@ -18,7 +18,7 @@ export function routesToOwnerDeployment(world: Pick<World, "capabilities">): boo
 }
 
 function isRunnableOwnerRun(run: Pick<OwnerRun, "attributes">): boolean {
-  return run.attributes[EVE_VERSION_ATTRIBUTE] === resolveInstalledPackageInfo().version;
+  return isBuiltByThisEve(run.attributes, resolveInstalledPackageInfo().version);
 }
 
 export async function findRetiredOwnerRun(

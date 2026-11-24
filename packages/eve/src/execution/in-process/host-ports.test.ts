@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { SessionCommand } from "#channel/types.js";
 import { createSessionInbox } from "#execution/session-inbox/inbox.js";
 import { createMemoryInboxRegistry } from "./inbox-transport.js";
-import { createMemoryLineStore } from "./line-store.js";
+import { createMemorySessionEventStore } from "./session-event-store.js";
 import { structuredCloneBoundary } from "./step-boundary.js";
 
 const send = (text: string): SessionCommand => ({ kind: "send", payload: { message: text } });
@@ -16,9 +16,9 @@ async function chunksOf(stream: ReadableStream<Uint8Array>): Promise<string[]> {
   return chunks;
 }
 
-describe("the in-process line store", () => {
+describe("the in-process session event store", () => {
   it("keeps each line as written, and follows a stream until its writer closes it", async () => {
-    const store = createMemoryLineStore();
+    const store = createMemorySessionEventStore();
     const writer = store.open("session-alice").getWriter();
     const encoder = new TextEncoder();
     const buffer = encoder.encode("alice\n");
@@ -32,7 +32,7 @@ describe("the in-process line store", () => {
 
     await expect(following).resolves.toEqual(["alice\n", "carol\n"]);
     await expect(chunksOf(store.readable("session-alice", -1))).resolves.toEqual(["carol\n"]);
-    await expect(store.assertReadable("session-bob")).rejects.toThrow(
+    await expect(store.assertFollowable("session-bob")).rejects.toThrow(
       'Session "session-bob" has no stream here.',
     );
   });

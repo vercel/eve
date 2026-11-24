@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { compileAgentInWorkspace } from "#compiler/compile-agent.js";
 import { prewarmAppSandboxes } from "#execution/sandbox/prewarm.js";
 import { resolvePackageSourceFilePath } from "#internal/application/package.js";
+import { createEntities } from "#platform/entities.js";
+import vercelPlatform from "#platform/vercel/declaration.js";
 import { useTemporaryAppRoots } from "#internal/testing/use-temporary-app-roots.js";
 import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 
@@ -48,6 +50,7 @@ describe("deployed self-modification prewarm", () => {
 
     await prewarmAppSandboxes({
       appRoot,
+      build: createEntities(vercelPlatform, undefined).build,
       compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(appRoot, {
         moduleMapLoaderPath: resolvePackageSourceFilePath(
           "src/internal/authored-module-map-loader.ts",

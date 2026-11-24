@@ -1,3 +1,4 @@
+import { builtInHosts } from "#runtime/app.js";
 import { simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -613,11 +614,15 @@ describe("a model sign-in that ends without a credential", () => {
   it("cancels the turn when the person cancels it during the sign-in", async () => {
     await withSession(billingProvider(), async (session) => {
       await session.asked();
-      await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(session.run.runId)), {
-        auth: alice,
-        deliveryId: "alice-cancel",
-        kind: "cancel",
-      });
+      await resumeRoutedHook(
+        builtInHosts(),
+        sessionInboxHookToken(sessionCommandHookToken(session.run.runId)),
+        {
+          auth: alice,
+          deliveryId: "alice-cancel",
+          kind: "cancel",
+        },
+      );
       const settled = await session.stream.nextUntil("cancel", isTurnSettled);
       expect(filterEventsByType(settled, "model.requested")).toHaveLength(0);
       expect(turnSettled(settled)).toMatchObject({ outcome: "cancelled" });
@@ -739,29 +744,37 @@ function openSession(run: Awaited<ReturnType<typeof startTestSession>>, continua
     async callBack(params: Readonly<Record<string, string>> = { code: "oauth-code" }) {
       const attemptId = opened(latest)!.data.interactionId;
       const callback = { method: "GET" as const, params };
-      await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
-        kind: "authorization-callback",
-        payloads: [
-          {
-            authorizationCallback: {
-              attemptId,
-              callback,
-              connectionName: BILLING_SIGN_IN,
+      await resumeRoutedHook(
+        builtInHosts(),
+        sessionInboxHookToken(sessionCommandHookToken(run.runId)),
+        {
+          kind: "authorization-callback",
+          payloads: [
+            {
+              authorizationCallback: {
+                attemptId,
+                callback,
+                connectionName: BILLING_SIGN_IN,
+              },
             },
-          },
-        ],
-      });
+          ],
+        },
+      );
       return await stream.nextUntil("settled turn", isTurnSettled);
     },
     async compact() {
-      await resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
-        auth: alice,
-        deliveryId: "control_compact",
-        kind: "compact",
-      });
+      await resumeRoutedHook(
+        builtInHosts(),
+        sessionInboxHookToken(sessionCommandHookToken(run.runId)),
+        {
+          auth: alice,
+          deliveryId: "control_compact",
+          kind: "compact",
+        },
+      );
     },
     async send(message: string) {
-      await resumeRoutedHook(sessionInboxHookToken(continuationToken), {
+      await resumeRoutedHook(builtInHosts(), sessionInboxHookToken(continuationToken), {
         auth: alice,
         kind: "send",
         delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),

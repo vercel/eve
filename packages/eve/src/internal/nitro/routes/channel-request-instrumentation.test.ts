@@ -40,6 +40,7 @@ describe("traceChannelRequest span lifetime", () => {
       instrumentations: [],
     } as never);
     registerInstrumentationRuntime({
+      environment: "production",
       forceFlush: async () => undefined,
       idGenerator: new AgentSpanIdGenerator(),
       hooks: createInstrumentationHooks([]),

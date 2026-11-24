@@ -1,3 +1,4 @@
+import { builtInHosts } from "#runtime/app.js";
 import {
   commitSessionStep,
   enterSessionStep,
@@ -30,7 +31,7 @@ export async function publishStart(
     throw new Error("Transient failure before publication");
   }
   return await publishSessionEvents(
-    enterSessionStep({
+    enterSessionStep(builtInHosts(), {
       serializedContext: { ...context, "eve.sessionId": step.sessionId },
       sessionState: createTestSessionState({ sessionId: step.sessionId }),
       sessionWritable: step.sessionWritable,
@@ -41,7 +42,7 @@ export async function publishStart(
 
 export async function publishNext(step: TestStepAttempt, input: PublishedState): Promise<void> {
   await publishSessionEvents(
-    enterSessionStep({ ...input, sessionWritable: step.sessionWritable }),
+    enterSessionStep(builtInHosts(), { ...input, sessionWritable: step.sessionWritable }),
     [commitOf([turnStarted()])],
   );
 }
@@ -50,7 +51,7 @@ export async function commitTwice(
   step: TestStepAttempt,
   context: Record<string, unknown>,
 ): Promise<void> {
-  const initial = enterSessionStep({
+  const initial = enterSessionStep(builtInHosts(), {
     serializedContext: { ...context, "eve.sessionId": step.sessionId },
     sessionState: createTestSessionState({ sessionId: step.sessionId }),
     sessionWritable: step.sessionWritable,
@@ -72,7 +73,7 @@ export async function publishRunning(
   start: PublishedState,
 ): Promise<Published> {
   return await publishSessionEvents(
-    enterSessionStep({ ...start, sessionWritable: step.sessionWritable }),
+    enterSessionStep(builtInHosts(), { ...start, sessionWritable: step.sessionWritable }),
     [
       commitOf([
         turnStarted(),
@@ -94,7 +95,7 @@ export async function publishProgress(
   count: number,
 ): Promise<Published> {
   return await publishSessionEvents(
-    enterSessionStep({ ...state, sessionWritable: step.sessionWritable }),
+    enterSessionStep(builtInHosts(), { ...state, sessionWritable: step.sessionWritable }),
     Array.from({ length: count }, (_, index) => ({
       type: "call.progress" as const,
       data: { callId: "long_call", output: { index } },
@@ -116,6 +117,7 @@ export async function publishLessOnRetry(
   replay: "prefix" | "none",
 ) {
   return await withSessionStateDelta(
+    builtInHosts(),
     { ...values, sessionWritable: step.sessionWritable },
     async (state) => {
       if (step.attempt > 1 && replay === "none") return {};
@@ -137,7 +139,7 @@ export async function publishLessOnRetry(
 
 export async function settleTurn(step: TestStepAttempt, input: PublishedState): Promise<void> {
   await publishSessionEvents(
-    enterSessionStep({ ...input, sessionWritable: step.sessionWritable }),
+    enterSessionStep(builtInHosts(), { ...input, sessionWritable: step.sessionWritable }),
     [commitOf([fact("turn.settled", { turnId: "turn_0", outcome: "completed" })])],
   );
 }

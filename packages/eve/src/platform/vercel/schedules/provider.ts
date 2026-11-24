@@ -1,0 +1,241 @@
+import type {
+  Schedule as VercelSchedule,
+  SchedulesClient,
+  UpdateScheduleParams,
+} from "#compiled/@vercel/schedules/index.js";
+
+import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
+import { isVercelSchedulesDevEnvironment } from "#platform/vercel/schedules/dev-environment.js";
+import type {
+  ScheduleExpression,
+  SchedulePage,
+  ScheduleProvider,
+  ScheduleRecord,
+} from "#public/schedules/subscription.js";
+import type { ScheduleProviderContext } from "#runtime/schedules/provider-types.js";
+import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
+import { deriveEveScheduleQueueTopic } from "#runtime/schedules/queue-namespace.js";
+
+const DEVELOPMENT_PROVIDER: ScheduleProvider = {
+  ...inMemoryScheduleProvider(),
+  validateExpression: validateVercelExpression,
+};
+const CLIENT_OPTIONS = new WeakMap<ScheduleProvider, VercelScheduleProviderOptions>();
+
+export function readVercelScheduleClientOptions(
+  provider: ScheduleProvider,
+): VercelScheduleProviderOptions | undefined {
+  return CLIENT_OPTIONS.get(provider);
+}
+
+export const VERCEL_SCHEDULES_CLIENT_HEADERS: Readonly<Record<string, string>> = {
+  "x-vss-framework": "eve",
+};
+
+/**
+ * Options for `vercelScheduleProvider()`, which stores and fires schedules with Vercel Schedules.
+ */
+export interface VercelScheduleProviderOptions {
+  /** Overrides the public Vercel Schedules endpoint. */
+  readonly baseUrl?: string;
+  readonly fetch?: typeof fetch;
+}
+
+/** Uses ambient OIDC on Vercel and process-local storage under `eve dev`. */
+export function vercelScheduleProvider(
+  options: VercelScheduleProviderOptions = {},
+): ScheduleProvider {
+  if (isEveDevEnvironment() && !isVercelSchedulesDevEnvironment()) return DEVELOPMENT_PROVIDER;
+
+  const client = (signal: AbortSignal) => createClient(options, signal);
+
+  const provider: ScheduleProvider = {
+    kind: "vercel",
+    validateExpression: validateVercelExpression,
+    async create(context, input) {
+      const schedules = await client(context.abortSignal);
+      const schedule: VercelSchedule = await schedules.create({
+        expression: toVercelExpression(input.expression),
+        jitter: input.expression.type === "cron" ? input.expression.jitter : undefined,
+        name: input.name,
+        namespace: context.namespace,
+        payload: createDispatchPayload(context, input.payload),
+        target: { topic: deriveEveScheduleQueueTopic(context.target.key) },
+        timezone: input.expression.timezone,
+      });
+      return fromVercelSchedule(schedule);
+    },
+    async list(context, input): Promise<SchedulePage> {
+      const cursor = input.cursor?.trim() || undefined;
+      const params: { namespace: string; cursor?: string; limit?: number } = {
+        namespace: context.namespace,
+      };
+      if (cursor !== undefined) params.cursor = cursor;
+      if (input.limit !== undefined) params.limit = input.limit;
+      const page = await (await client(context.abortSignal)).list(params);
+      return { cursor: page.cursor, data: page.data.map(fromVercelSchedule) };
+    },
+    async get(context, name) {
+      const response = await getScheduleOrNull(
+        await client(context.abortSignal),
+        name,
+        context.namespace,
+      );
+      return response === null ? null : fromVercelSchedule(response);
+    },
+    async update(context, name, patch) {
+      const expression = patch.expression;
+      const params: UpdateScheduleParams = { name, namespace: context.namespace };
+      if (expression !== undefined) {
+        params.expression = toVercelExpression(expression);
+        params.timezone = expression.timezone ?? "UTC";
+        params.jitter = expression.type === "cron" ? (expression.jitter ?? null) : null;
+      }
+      if (patch.payload !== undefined)
+        params.payload = createDispatchPayload(context, patch.payload);
+      const schedule = await (await client(context.abortSignal)).update(params);
+      return fromVercelSchedule(schedule);
+    },
+    async enable(context, name) {
+      return fromVercelSchedule(
+        await (await client(context.abortSignal)).enable({ name, namespace: context.namespace }),
+      );
+    },
+    async disable(context, name) {
+      return fromVercelSchedule(
+        await (await client(context.abortSignal)).disable({ name, namespace: context.namespace }),
+      );
+    },
+    async invoke(context, name) {
+      await (await client(context.abortSignal)).invoke({ name, namespace: context.namespace });
+    },
+    async delete(context, name) {
+      try {
+        await (await client(context.abortSignal)).delete({ name, namespace: context.namespace });
+        return true;
+      } catch (error) {
+        if (isNotFoundError(error)) return false;
+        throw error;
+      }
+    },
+  };
+  CLIENT_OPTIONS.set(provider, options);
+  return provider;
+}
+
+async function createClient(
+  options: VercelScheduleProviderOptions,
+  signal: AbortSignal,
+): Promise<SchedulesClient> {
+  assertSupportedVercelEnvironment();
+  const { SchedulesClient } = await import("#compiled/@vercel/schedules/index.js");
+  signal.throwIfAborted();
+  const fetchImpl = options.fetch ?? fetch;
+  return new SchedulesClient({
+    ...options,
+    headers: VERCEL_SCHEDULES_CLIENT_HEADERS,
+    fetch: (input, init) => fetchImpl(input, { ...init, signal }),
+  });
+}
+
+function createDispatchPayload(context: ScheduleProviderContext, payload: unknown) {
+  return {
+    eve: {
+      application: context.target.key,
+      collection: context.collection,
+      version: 1,
+    },
+    payload,
+  };
+}
+
+const VERCEL_CRON_FIELDS = [
+  { name: "minute", min: 0, max: 59 },
+  { name: "hour", min: 0, max: 23 },
+  { name: "day-of-month", min: 1, max: 31 },
+  { name: "month", min: 1, max: 12 },
+  { name: "day-of-week", min: 0, max: 6 },
+] as const;
+
+function validateVercelExpression(expression: ScheduleExpression): void {
+  if (expression.type !== "cron") return;
+  const invalid = (reason: string) =>
+    new Error(
+      `Vercel Schedules can't run the cron expression "${expression.cron}": ${reason} Use numbers with "*", ",", "-", and "/"; write months as 1-12 and weekdays as 0-6, where 0 is Sunday.`,
+    );
+  if (!/^[0-9*,/ -]+$/u.test(expression.cron))
+    throw invalid("it accepts no names or special characters such as MON, JAN, ?, or L.");
+  const fields = expression.cron.split(" ");
+  for (const [index, field] of fields.entries()) {
+    const { name, min, max } = VERCEL_CRON_FIELDS[index]!;
+    for (const part of field.split(",")) {
+      const match = /^(?:\*|(\d+)(?:-(\d+))?)(?:\/(\d+))?$/u.exec(part);
+      if (match === null) throw invalid(`the ${name} field "${field}" is malformed.`);
+      const [, start, end, step] = match;
+      const from = start === undefined ? min : Number(start);
+      const to = end === undefined ? from : Number(end);
+      if (from < min || to > max || from > to || (step !== undefined && Number(step) < 1))
+        throw invalid(`the ${name} field "${field}" is outside ${min}-${max}.`);
+    }
+  }
+  if (fields[2] !== "*" && fields[4] !== "*")
+    throw invalid("it can't set both a day of the month and a day of the week.");
+}
+
+function toVercelExpression(expression: ScheduleExpression) {
+  return expression.type === "cron"
+    ? { type: "cron" as const, cron: expression.cron }
+    : { type: "single" as const, at: expression.at };
+}
+
+function fromVercelSchedule(schedule: VercelSchedule): ScheduleRecord {
+  let expression: ScheduleExpression;
+  if (schedule.expression.type === "cron") {
+    const cron: { type: "cron"; cron: string; timezone: string; jitter?: number } = {
+      type: "cron",
+      cron: schedule.expression.cron,
+      timezone: schedule.timezone,
+    };
+    if (schedule.jitter !== undefined) cron.jitter = schedule.jitter;
+    expression = cron;
+  } else {
+    expression = { type: "single", at: schedule.expression.at, timezone: schedule.timezone };
+  }
+  return {
+    createdAt: schedule.createdAt,
+    expression,
+    name: schedule.name,
+    scheduleId: schedule.scheduleId,
+    state: schedule.state,
+    updatedAt: schedule.updatedAt,
+  };
+}
+
+async function getScheduleOrNull(
+  client: SchedulesClient,
+  name: string,
+  namespace: string,
+): Promise<VercelSchedule | null> {
+  try {
+    return await client.get({ name, namespace });
+  } catch (error) {
+    if (isNotFoundError(error)) return null;
+    throw error;
+  }
+}
+
+function isNotFoundError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    Reflect.get(error, "name") === "SchedulesApiError" &&
+    Reflect.get(error, "status") === 404
+  );
+}
+
+function assertSupportedVercelEnvironment(): void {
+  if (isVercelSchedulesDevEnvironment()) return;
+  if (!process.env.VERCEL?.trim()) {
+    throw new Error("vercelScheduleProvider() requires a Vercel deployment or eve dev.");
+  }
+}

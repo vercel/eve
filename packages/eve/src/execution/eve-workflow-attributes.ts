@@ -9,6 +9,7 @@ import {
 } from "#context/keys.js";
 import type { EveAttributeValue } from "#runtime/attributes/normalize.js";
 import { isNonEmptyString } from "#shared/guards.js";
+import { readStampedSessionCodeHash } from "#internal/application/stamped-package-version.js";
 import { shouldCaptureInstrumentationContent } from "#shared/instrumentation-content.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import {
@@ -21,6 +22,26 @@ import { resolveForwardedTraceSeed } from "#shared/forwarded-trace-policy.js";
 export const EVE_PREWARM_ATTRIBUTE = "$eve.prewarm";
 
 export const EVE_VERSION_ATTRIBUTE = "$eve.version";
+
+export const EVE_SESSION_CODE_ATTRIBUTE = "$eve.session_code";
+
+export function eveBuildAttributes(version: string): Record<string, string> {
+  const sessionCode = readStampedSessionCodeHash();
+  return {
+    [EVE_VERSION_ATTRIBUTE]: version,
+    ...(sessionCode !== undefined && { [EVE_SESSION_CODE_ATTRIBUTE]: sessionCode }),
+  };
+}
+
+export function isBuiltByThisEve(
+  attributes: Readonly<Record<string, string | undefined>>,
+  version: string,
+): boolean {
+  return (
+    attributes[EVE_VERSION_ATTRIBUTE] === version &&
+    attributes[EVE_SESSION_CODE_ATTRIBUTE] === readStampedSessionCodeHash()
+  );
+}
 
 export const EVE_TYPE_ATTRIBUTE = "$eve.type";
 

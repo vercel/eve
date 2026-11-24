@@ -1,9 +1,11 @@
-export async function streamToBuffer(stream: ReadableStream<Uint8Array>): Promise<Buffer> {
+import { concatHostBytes } from "#runtime-env/host-bytes.js";
+
+export async function streamToBuffer(stream: ReadableStream<Uint8Array>): Promise<Uint8Array> {
   const chunks: Uint8Array[] = [];
   for await (const chunk of stream) {
     chunks.push(chunk);
   }
-  return Buffer.concat(chunks);
+  return concatHostBytes(chunks);
 }
 
 export function bufferToStream(buf: Uint8Array): ReadableStream<Uint8Array> {

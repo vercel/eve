@@ -17,7 +17,10 @@ const preserveApiSingleton = {
 export default {
   packageName: "@opentelemetry/api",
   compiledPath: "@opentelemetry/api",
+  chunkGroup: "client",
   entry: "build/esm/index.js",
   declaration: await loadDeclaration("@opentelemetry/api.d.ts"),
+  platform: "neutral",
   plugins: [preserveApiSingleton],
+  sharedSpecifiers: { "@opentelemetry/api": "index" },
 };

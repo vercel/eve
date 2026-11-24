@@ -5,12 +5,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { compileAgent } from "../../src/compiler/compile-agent.js";
 import { prewarmAppSandboxes } from "../../src/execution/sandbox/prewarm.js";
-import { runVercelBuildPrewarm } from "../../src/internal/nitro/host/vercel-build-prewarm.js";
+import { runVercelBuildPrewarm } from "../../src/platform/vercel/build-prewarm.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "../../src/runtime/graph.js";
 import { populatedPaths } from "../../src/internal/testing/sandbox-provider-harness.js";
 import type { SandboxPrepareContext } from "../../src/sandbox/provider.js";
 import type { SandboxPreparedArtifactEntry } from "../../src/shared/sandbox-prepared-artifacts.js";
 import { useTemporaryDirectories } from "../../src/internal/testing/use-temporary-app-roots.js";
+import { createEntities } from "../../src/platform/entities.js";
+import vercelPlatform from "../../src/platform/vercel/declaration.js";
+
+const vercelBuild = createEntities(vercelPlatform, undefined).build;
 
 const createScratchDirectory = useTemporaryDirectories();
 
@@ -24,6 +28,7 @@ describe("Vercel build-time sandbox prewarm", () => {
     await expect(
       runVercelBuildPrewarm({
         appRoot: "/unused",
+        build: vercelBuild,
       }),
     ).resolves.toBe(false);
   });
@@ -42,6 +47,7 @@ describe("Vercel build-time sandbox prewarm", () => {
     await expect(
       runVercelBuildPrewarm({
         appRoot,
+        build: vercelBuild,
       }),
     ).rejects.toThrow(
       "Cannot build deployable Vercel output because this app's sandbox templates need preparation and VERCEL_OIDC_TOKEN is missing. Run `vercel link` and `vercel pull`, then retry `vercel build`. Do not deploy the generated .vercel/output.",
@@ -63,6 +69,7 @@ describe("Vercel build-time sandbox prewarm", () => {
     await expect(
       runVercelBuildPrewarm({
         appRoot,
+        build: vercelBuild,
         preparedArtifactStore: {
           async write(input) {
             entries.push(...input.entries);
@@ -106,6 +113,7 @@ describe("Vercel build-time sandbox prewarm", () => {
     await expect(
       runVercelBuildPrewarm({
         appRoot,
+        build: vercelBuild,
         preparedArtifactStore: { write },
       }),
     ).rejects.toThrow("VERCEL_OIDC_TOKEN is missing");
@@ -139,7 +147,7 @@ describe("Vercel build-time sandbox prewarm", () => {
     await compileAgent({ startPath: appRoot });
     const log = vi.fn();
 
-    await expect(runVercelBuildPrewarm({ appRoot, log })).rejects.toThrow(
+    await expect(runVercelBuildPrewarm({ appRoot, build: vercelBuild, log })).rejects.toThrow(
       "Custom provider API unavailable; retry later.",
     );
     expect(log).toHaveBeenCalledWith(
@@ -163,6 +171,7 @@ describe("Vercel build-time sandbox prewarm", () => {
     await expect(
       runVercelBuildPrewarm({
         appRoot,
+        build: vercelBuild,
         dispatch: createRecordingDispatch(events),
       }),
     ).resolves.toBe(true);
@@ -183,6 +192,7 @@ describe("Vercel build-time sandbox prewarm", () => {
     });
     await prewarmAppSandboxes({
       appRoot,
+      build: vercelBuild,
       dispatch: createRecordingDispatch(events),
     });
 

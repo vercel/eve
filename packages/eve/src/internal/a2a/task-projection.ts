@@ -1,3 +1,4 @@
+import { builtInHosts } from "#runtime/app.js";
 import { renderTextInteraction } from "#channel/resolve-text.js";
 import { signInChallengeText, signInOf } from "#channel/sign-in.js";
 import { readSessionStreamTailIndex, streamSessionLines } from "#execution/session-event-stream.js";
@@ -42,7 +43,7 @@ function legacySession(): A2aError {
 
 export async function readSessionView(sessionId: string): Promise<SessionView> {
   const view = emptySessionView();
-  for await (const { line, position, record } of streamSessionLines(sessionId, {
+  for await (const { line, position, record } of streamSessionLines(builtInHosts(), sessionId, {
     follow: false,
   })) {
     if (line === undefined) {
@@ -58,10 +59,10 @@ export async function* followSessionView(
   sessionId: string,
   signal: AbortSignal,
 ): AsyncGenerator<SessionView, void, undefined> {
-  const tail = await readSessionStreamTailIndex(sessionId);
+  const tail = await readSessionStreamTailIndex(builtInHosts(), sessionId);
   const view = emptySessionView();
   if (tail < 0) yield view;
-  for await (const { line, position, record } of streamSessionLines(sessionId, {
+  for await (const { line, position, record } of streamSessionLines(builtInHosts(), sessionId, {
     follow: true,
     signal,
   })) {

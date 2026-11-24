@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { sharedSessionSteps } from "#internal/testing/session-steps.js";
 import { finalizeSession } from "#execution/session/finalization.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import { writeTaskTable } from "#execution/tasks/table.js";
@@ -33,7 +34,9 @@ vi.mock("#execution/terminal-session-failure-step.js", () => ({
   emitTerminalSessionFailureStep: vi.fn(),
 }));
 vi.mock("#subagents/parent-notification.js", () => ({
+  notifyCancelledTaskCallerStep: vi.fn(),
   notifyTurnCallerStep: vi.fn(),
+  resolveInitialTurnCallerStep: vi.fn(),
 }));
 
 function withUsage(session: HarnessSession, inputTokens: number): HarnessSession {
@@ -92,6 +95,7 @@ describe("session finalization", () => {
       caller: undefined,
       cursor: { serializedContext: { key: "value" }, sessionState },
       sessionWritable: new WritableStream(),
+      steps: sharedSessionSteps(),
     });
 
     expect(endSessionSandboxStep).toHaveBeenCalledExactlyOnceWith({
@@ -111,6 +115,7 @@ describe("session finalization", () => {
           caller: undefined,
           cursor: { serializedContext: {}, sessionState: sessionWithUnreportedUsage() },
           sessionWritable: new WritableStream(),
+          steps: sharedSessionSteps(),
         },
       ),
     ).resolves.toMatchObject({ isError: false });
@@ -135,6 +140,7 @@ describe("session finalization with an unsettled caller", () => {
         caller,
         cursor: { serializedContext: {}, sessionState: sessionWithUnreportedUsage() },
         sessionWritable: new WritableStream(),
+        steps: sharedSessionSteps(),
       });
       expect(result).toMatchObject({
         isError: true,
@@ -167,6 +173,7 @@ describe("session finalization with an unsettled caller", () => {
       caller: undefined,
       cursor: { serializedContext: {}, sessionState: sessionWithUnreportedUsage() },
       sessionWritable: new WritableStream(),
+      steps: sharedSessionSteps(),
     });
 
     expect(vi.mocked(step).mock.calls[0]?.[0].usage).toEqual({
@@ -186,6 +193,7 @@ describe("session finalization with an unsettled caller", () => {
         caller: undefined,
         cursor: { serializedContext: {}, sessionState },
         sessionWritable: new WritableStream(),
+        steps: sharedSessionSteps(),
       },
     );
     expect(terminateChildSessionsStep).toHaveBeenCalledExactlyOnceWith({ sessionState });
@@ -202,6 +210,7 @@ describe("session finalization with an unsettled caller", () => {
           caller: undefined,
           cursor: { serializedContext: {}, sessionState },
           sessionWritable: new WritableStream(),
+          steps: sharedSessionSteps(),
         },
       ),
     ).resolves.toMatchObject({ isError: false });
@@ -227,6 +236,7 @@ describe("session finalization with an unsettled caller", () => {
         caller: undefined,
         cursor: { serializedContext: {}, sessionState },
         sessionWritable: new WritableStream(),
+        steps: sharedSessionSteps(),
       },
     );
     expect(terminateChildSessionsStep).toHaveBeenCalledExactlyOnceWith({ sessionState });
@@ -239,6 +249,7 @@ describe("session finalization with an unsettled caller", () => {
         caller: undefined,
         cursor: { serializedContext: {}, sessionState: sessionWithUnreportedUsage() },
         sessionWritable: new WritableStream(),
+        steps: sharedSessionSteps(),
       },
     );
     expect(result).toMatchObject({ isError: false, output: "" });

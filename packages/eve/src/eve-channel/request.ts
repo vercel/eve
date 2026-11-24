@@ -1,3 +1,4 @@
+import { currentApp } from "#context/app.js";
 import { internalSession } from "#channel/session.js";
 import { MAX_DELIVERY_IDEMPOTENCY_KEY_LENGTH } from "#channel/delivery-idempotency.js";
 import { parseToolStubs } from "#tool-stubs/rules.js";
@@ -375,7 +376,7 @@ export async function createSessionStreamResponse(
       includeTailIndex && tailIndex !== undefined ? Math.max(0, tailIndex - from + 1) : undefined;
     if (await earlierEve) {
       void early?.then((opened) => opened.cancel()).catch(() => {});
-      const live = follow && (await internalSession(session).hasRunnableOwner());
+      const live = follow && (await internalSession(session).isLive());
       if (follow && !live) lineLimit = undefined;
       lines = v26LineStream(
         await internalSession(session).getLineStream({ follow: live, startIndex: 0 }),
@@ -476,7 +477,7 @@ function parseOutputSchemaField(value: unknown): JsonObject | Response | undefin
 
 function parseCallbackField(value: unknown): SessionCallback | Response | undefined {
   if (value === undefined) return undefined;
-  const parsed = parseSessionCallback(value);
+  const parsed = parseSessionCallback(value, currentApp().platform);
   if (parsed.ok) return parsed.callback;
 
   return Response.json({ error: parsed.message, ok: false }, { status: 400 });

@@ -20,10 +20,12 @@ import { resumeHook } from "#internal/workflow/runtime.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { resumeSessionStartHook } from "#execution/session-inbox/resume.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
+import { startedApp, type App } from "#runtime/app.js";
+import { sessionAddress } from "#execution/durable.js";
+import { workflowSessionFor } from "#execution/workflow-host/session-durable.js";
 import {
   createWorkflowRuntime,
   dispatchWorkflowSessionCommand,
-  resolveContinuation,
 } from "#execution/workflow-runtime.js";
 
 const WORKFLOW_LOCAL_SESSIONS: LocalAgentSessions = {
@@ -39,7 +41,7 @@ const WORKFLOW_LOCAL_SESSIONS: LocalAgentSessions = {
     const { continuationToken, sessionId } = opened.address;
     const result = await dispatchWorkflowSessionCommand({ command, sessionId });
     if (result.status === "accepted" || result.status === "reset") return result;
-    const current = (await resolveContinuation(continuationToken))?.sessionId;
+    const current = await workflowSessionFor(sessionAddress(continuationToken));
     if (current === undefined || current === sessionId) return result;
     return await dispatchWorkflowSessionCommand({ command, sessionId: current });
   },
@@ -53,19 +55,24 @@ const WORKFLOW_LOCAL_SESSIONS: LocalAgentSessions = {
   },
 };
 
-const workflowAgentSessions = agentSessionsOver({
-  deliveryId: (kind, sessionId) =>
-    `agent-session:${getWorkflowMetadata().workflowRunId}:${getStepMetadata().stepId}:${sessionId}:${kind}`,
-  local: WORKFLOW_LOCAL_SESSIONS,
-  remote: { callbackBaseUrl: () => resolveWorkflowCallbackBaseUrl(getWorkflowMetadata().url) },
-});
+function workflowAgentSessions(app: App) {
+  return agentSessionsOver({
+    deliveryId: (kind, sessionId) =>
+      `agent-session:${getWorkflowMetadata().workflowRunId}:${getStepMetadata().stepId}:${sessionId}:${kind}`,
+    local: WORKFLOW_LOCAL_SESSIONS,
+    remote: {
+      callbackBaseUrl: () =>
+        resolveWorkflowCallbackBaseUrl(getWorkflowMetadata().url, app.platform),
+    },
+  });
+}
 
 export async function openAgentSessionStep(
   input: AgentSessionOpenInput,
 ): Promise<StartedAgentSession> {
   "use step";
 
-  return await workflowAgentSessions.open(input);
+  return await workflowAgentSessions(startedApp()).open(input);
 }
 
 export async function sendAgentSessionMessageStep(
@@ -73,7 +80,7 @@ export async function sendAgentSessionMessageStep(
 ): Promise<AgentSessionReceipt> {
   "use step";
 
-  return await workflowAgentSessions.send(input);
+  return await workflowAgentSessions(startedApp()).send(input);
 }
 
 export async function createRemoteReplyTokenStep(): Promise<string> {
@@ -85,7 +92,7 @@ export async function createRemoteReplyTokenStep(): Promise<string> {
 export async function cancelAgentSessionTurnStep(input: OpenedAgentSession): Promise<void> {
   "use step";
 
-  await workflowAgentSessions.cancelTurn(input);
+  await workflowAgentSessions(startedApp()).cancelTurn(input);
 }
 
 export async function endAgentSessionsStep(input: {
@@ -93,11 +100,11 @@ export async function endAgentSessionsStep(input: {
 }): Promise<void> {
   "use step";
 
-  await workflowAgentSessions.end(input);
+  await workflowAgentSessions(startedApp()).end(input);
 }
 
 export async function stopLateAgentSessionStep(opened: OpenedAgentSession): Promise<void> {
   "use step";
 
-  await workflowAgentSessions.stopLate(opened);
+  await workflowAgentSessions(startedApp()).stopLate(opened);
 }

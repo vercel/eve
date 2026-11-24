@@ -1,3 +1,4 @@
+import { processApp } from "#runtime/app.js";
 import { readDurableSession } from "#execution/durable-session-store.js";
 import type {
   Entered,
@@ -19,7 +20,7 @@ export async function withdrawWorkflowToolRunQuestionStep(
   input: WithdrawQuestionInput,
 ): Promise<SessionStateTransition> {
   "use step";
-  return await withSessionStateDelta(input, withdrawWorkflowToolRunQuestion);
+  return await withSessionStateDelta(processApp().hosts, input, withdrawWorkflowToolRunQuestion);
 }
 
 type WithdrawQuestionInput = SessionStepInput & {
@@ -35,7 +36,7 @@ async function withdrawWorkflowToolRunQuestion(
     kind: "withdrawn",
     requestId: input.requestId,
   };
-  await ignoreGoneTarget(resumeRoutedHook(input.control, decision));
+  await ignoreGoneTarget(resumeRoutedHook(processApp().hosts, input.control, decision));
   return await relayWithdrawnRequests(
     input,
     (requestId, route) =>
@@ -49,7 +50,7 @@ export async function withdrawFinishedRunQuestionsStep(
   input: SessionStepInput & { readonly runId: string },
 ): Promise<SessionStateTransition> {
   "use step";
-  return await withSessionStateDelta(input, (target) =>
+  return await withSessionStateDelta(processApp().hosts, input, (target) =>
     relayWithdrawnRequests(target, (_requestId, route) => route.runId === target.runId),
   );
 }

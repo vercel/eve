@@ -10,6 +10,7 @@ import { getRun, getWorld } from "#internal/workflow/runtime.js";
 import { captureTurnEvents } from "#internal/testing/events.js";
 import { waitForParkedTurnStep } from "#internal/testing/session-test-helpers.js";
 import { ScheduleDispatcher } from "#channel/schedule.js";
+import { currentApp } from "#context/app.js";
 import { slackChannel } from "#public/channels/slack/slackChannel.js";
 import { defineChannel, POST } from "#public/definitions/channel.js";
 import { defineHook } from "#public/definitions/hook.js";
@@ -375,6 +376,7 @@ describe("delivery idempotency", () => {
       const compiledArtifactsSource = createBundledRuntimeCompiledArtifactsSource();
       const { graph } = await getCompiledRuntimeAgentBundle({ compiledArtifactsSource });
       const dispatcher = new ScheduleDispatcher({
+        app: currentApp(),
         runtime: createWorkflowRuntime({ compiledArtifactsSource }),
         channels: graph.root.channels,
       });

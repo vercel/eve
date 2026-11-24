@@ -1,6 +1,9 @@
 import type { SessionAuthContext } from "#context/keys.js";
 import { dynamicEvaluate } from "#dynamic/definition.js";
 import { installLocalDevCapabilityEnvironment } from "#runtime/local-dev-capability.js";
+import { inTestApp, testApp } from "#internal/testing/test-platform.js";
+import { createEntities } from "#platform/entities.js";
+import vercelPlatform from "#platform/vercel/declaration.js";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { defineSelfModificationAgent, type SelfModificationAgentOptions } from "./agent.js";
@@ -49,7 +52,10 @@ async function withDevHost<T>(callback: () => Promise<T>): Promise<T> {
   process.env.EVE_DEV = "1";
   const restore = installLocalDevCapabilityEnvironment({ appRoot: "/workspace/app", serverUrl });
   try {
-    return await callback();
+    return await inTestApp(
+      callback,
+      testApp({ platform: createEntities(vercelPlatform, undefined) }),
+    );
   } finally {
     restore();
   }

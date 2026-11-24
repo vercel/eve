@@ -9,6 +9,7 @@ import type { DevelopmentHostWorkspace } from "#internal/nitro/host/dev-host-wor
 import type { WorkspaceExtension } from "#internal/nitro/host/workspace-extensions.js";
 
 export interface ApplicationBuildOptions {
+  readonly platformModule?: string;
   readonly profileOutputPath?: string;
   readonly publicRoutePrefix?: string;
   readonly skipSandboxPrewarm: boolean;

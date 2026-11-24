@@ -1,3 +1,4 @@
+import { builtInHosts } from "#runtime/app.js";
 import { interactionJson } from "#protocol/interaction-json.js";
 import type { ErrorInfo } from "#protocol/session-events/envelope.js";
 import type { MessageContent } from "#shared/message-content.js";
@@ -16,6 +17,7 @@ import type {
   AgentInvocationStatus,
 } from "#internal/invocation/agent-invocation.js";
 import { invocationOwnerKey } from "#internal/invocation/metadata.js";
+import { currentApp } from "#context/app.js";
 import {
   invocationContinuationToken,
   readOwnedInvocationRun,
@@ -199,7 +201,7 @@ async function readInvocationStream(invocationId: string): Promise<InvocationStr
   const view = emptySessionView();
   const previews = emptyPreviews();
   const reader = createEventReader();
-  for await (const { line, position, record } of streamSessionLines(invocationId, {
+  for await (const { line, position, record } of streamSessionLines(builtInHosts(), invocationId, {
     follow: false,
   })) {
     if (line === undefined) {
@@ -412,20 +414,13 @@ function publicInvocationFailure(
   error: ErrorInfo | undefined,
 ): Extract<AgentInvocation, { readonly status: "failed" }>["error"] {
   const data: Record<string, string> = { runId };
-  const deploymentId = vercelDeploymentId();
-  if (deploymentId !== undefined) data.vercelDeploymentId = deploymentId;
+  Object.assign(data, currentApp().platform.deployment.invocationData?.());
   if (error !== undefined) {
     data.eveCode = error.code;
     if (error.id !== undefined) data.errorId = error.id;
     if (error.hint !== undefined) data.hint = error.hint;
   }
   return { code: -32603, data, message: error?.message ?? "Invocation failed." };
-}
-
-function vercelDeploymentId(): string | undefined {
-  if (process.env.VERCEL !== "1") return undefined;
-  const deploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim();
-  return deploymentId && deploymentId.length > 0 ? deploymentId : undefined;
 }
 
 function conflict(message: string): AgentInvocationMutationResult {

@@ -13,9 +13,6 @@ export {
   placeholderAuth,
   none,
   localDev,
-  verifyVercelOidc,
-  vercelSubject,
-  vercelOidc,
   httpBasic,
   jwtHmac,
   jwtEcdsa,
@@ -35,9 +32,14 @@ export {
   type AuthFn,
   type OAuthResourceOptions,
   type OAuthResourceAuth,
+  type HttpBasicAuthOptions,
+} from "#channel/auth/definitions.js";
+export {
+  verifyVercelOidc,
+  vercelSubject,
+  vercelOidc,
   type VerifyVercelOidcOptions,
   type VercelSubjectEnvironment,
   type VercelSubjectInput,
   type VercelOidcOptions,
-  type HttpBasicAuthOptions,
-} from "#channel/auth/definitions.js";
+} from "#public/channels/vercel-oidc.js";

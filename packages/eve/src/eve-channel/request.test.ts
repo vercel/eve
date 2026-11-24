@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { parseCreateBody, parseSessionMessageBody } from "#eve-channel/request.js";
 import { REMOTE_AGENT_PROTOCOL_VERSION } from "#protocol/remote-agent-protocol.js";
+import { inTestApp } from "#internal/testing/test-platform.js";
 
 describe("HTTP attachment reference boundary", () => {
   it.each(["chat-sdk-file:?p=placeholder", "CHAT-SDK-FILE:?p=placeholder", "eve-url://["])(
@@ -51,14 +52,16 @@ describe("parseCreateBody", () => {
         token: "parent-callback-token",
         url: "https://parent.example.com/eve/v1/callback/parent-callback-token",
       };
-      const body = parseCreateBody({
-        activityObserver: {
-          sink: { url: "https://parent.example.com/eve/v1/activity/x", version: 1 },
-        },
-        callback,
-        message: "research this",
-        protocolVersion,
-      });
+      const body = inTestApp(() =>
+        parseCreateBody({
+          activityObserver: {
+            sink: { url: "https://parent.example.com/eve/v1/activity/x", version: 1 },
+          },
+          callback,
+          message: "research this",
+          protocolVersion,
+        }),
+      );
 
       expect(body).toEqual(expect.objectContaining({ callback, message: "research this" }));
       expect(body).not.toHaveProperty("activityObserver");
@@ -71,7 +74,7 @@ describe("parseCreateBody", () => {
   ])("serves %s", (_name, sent, served) => {
     const payload: Record<string, unknown> = { callback: CALLBACK, message: "research this" };
     if (sent !== undefined) payload.protocolVersion = sent;
-    const body = parseCreateBody(payload);
+    const body = inTestApp(() => parseCreateBody(payload));
     expect(body).toEqual(expect.objectContaining({ callback: CALLBACK, protocolVersion: served }));
   });
 

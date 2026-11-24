@@ -43,8 +43,8 @@ export function fromCompiledBundle(bundle: CompiledBundle): SessionAgent {
       nodeId: bundle.nodeId,
       source: serializeDurableCompiledArtifactsSource(bundle.compiledArtifactsSource),
     }),
-    revision: async () => {
-      const deploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim();
+    revision: async (platform) => {
+      const deploymentId = platform.deployment.deploymentId();
       return deploymentId
         ? `deployment:${deploymentId}`
         : await resolveRuntimeCompiledArtifactsVersionedCacheKey(bundle.compiledArtifactsSource);

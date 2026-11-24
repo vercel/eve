@@ -6,6 +6,7 @@ import { isAbsolute, relative } from "node:path";
 import { readDevelopmentEnvironmentHostValues } from "#cli/dev/environment.js";
 import { createHostSpec } from "#internal/nitro/host/host-spec.js";
 import type { PreparedDevelopmentApplicationHost } from "#internal/nitro/host/types.js";
+import { platformBuildOutput } from "#platform/build-output.js";
 
 export async function computeDevelopmentHostFingerprint(
   host: PreparedDevelopmentApplicationHost,
@@ -21,6 +22,7 @@ export async function computeDevelopmentHostFingerprint(
     host,
     { kind: "development" },
     { buildDir: workspace.nitroBuildDir, outputDir: workspace.nitroOutputDir },
+    platformBuildOutput(),
   );
   const roots = [appRoot, realpathSync(appRoot)];
   const portable = (path: string) =>

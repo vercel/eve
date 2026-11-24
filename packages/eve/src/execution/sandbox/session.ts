@@ -1,4 +1,4 @@
-import { posix } from "node:path";
+import { isAbsolutePosix, resolvePosix } from "#runtime-env/posix-path.js";
 
 import type { SandboxConnection } from "#sandbox/provider.js";
 import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
@@ -16,6 +16,8 @@ import type {
   SandboxWriteTextFileOptions,
 } from "#shared/sandbox-session.js";
 import { bufferToStream, streamToBuffer } from "./stream-utils.js";
+import { hostBytes } from "#runtime-env/host-bytes.js";
+import { decodeString, encodeString } from "#shared/bytes.js";
 
 /**
  * Tells agent-aware CLIs (such as `vercel`) that an automated agent runs
@@ -28,12 +30,12 @@ export function createConnectionSession<Extensions extends object>(
   connection: SandboxConnection<Extensions>,
 ): SandboxSession & Extensions {
   const workspaceRoot = connection.workspaceRoot ?? WORKSPACE_ROOT;
-  if (!posix.isAbsolute(workspaceRoot)) {
+  if (!isAbsolutePosix(workspaceRoot)) {
     throw new Error(
       `Sandbox connection workspaceRoot must be an absolute path, but received "${workspaceRoot}".`,
     );
   }
-  const resolveSandboxPath = (path: string) => posix.resolve(workspaceRoot, path);
+  const resolveSandboxPath = (path: string) => resolvePosix(workspaceRoot, path);
   async function read(options: { readonly signal?: AbortSignal; readonly path: string }) {
     return await connection.readFile({
       signal: options.signal,
@@ -43,7 +45,9 @@ export function createConnectionSession<Extensions extends object>(
   async function readBytes(options: { readonly signal?: AbortSignal; readonly path: string }) {
     const content = await read(options);
     if (content === null) return null;
-    return ArrayBuffer.isView(content) ? Buffer.from(content) : await streamToBuffer(content);
+    return ArrayBuffer.isView(content)
+      ? hostBytes(new Uint8Array(content.buffer, content.byteOffset, content.byteLength))
+      : await streamToBuffer(content);
   }
   async function write(
     options: { readonly signal?: AbortSignal; readonly path: string },
@@ -96,11 +100,10 @@ export function createConnectionSession<Extensions extends object>(
       await write(options, await streamToBuffer(options.content));
     },
     async writeBinaryFile(options: SandboxWriteBinaryFileOptions) {
-      await write(options, Buffer.from(options.content));
+      await write(options, hostBytes(options.content));
     },
     async writeTextFile(options: SandboxWriteTextFileOptions) {
-      const encoding = (options.encoding ?? "utf-8") as BufferEncoding;
-      await write(options, Buffer.from(options.content, encoding));
+      await write(options, hostBytes(encodeString(options.content, options.encoding ?? "utf-8")));
     },
     async writeFiles(options: SandboxWriteFilesOptions) {
       await connection.writeFiles({
@@ -192,7 +195,5 @@ function decodeBytes(buf: Uint8Array, encoding: string): string {
   if (encoding === "utf-8" || encoding === "utf8") {
     return new TextDecoder("utf-8", { fatal: true }).decode(buf);
   }
-  return Buffer.from(buf.buffer, buf.byteOffset, buf.byteLength).toString(
-    encoding as BufferEncoding,
-  );
+  return decodeString(buf, encoding);
 }

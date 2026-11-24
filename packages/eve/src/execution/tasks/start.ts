@@ -1,3 +1,4 @@
+import type { RouteHosts } from "#execution/hosts.js";
 import {
   renderTaskReceipt,
   renderTaskSentReceipt,
@@ -94,6 +95,7 @@ export async function startTaskRun(
 }
 
 export async function sendToTask(
+  hosts: RouteHosts,
   input: TaskDispatchInput,
   admissionView = storedProjection(input.session.state).view,
 ): Promise<TaskDispatchResult> {
@@ -122,7 +124,7 @@ export async function sendToTask(
     stepIndex: input.batchEvent.stepIndex,
     turnId: input.batchEvent.turnId,
   });
-  if (recorded.send !== undefined) await sendTaskRunCommands(recorded.send);
+  if (recorded.send !== undefined) await sendTaskRunCommands(hosts, recorded.send);
   return {
     result: toolResult(input, renderTaskSentReceipt(taskId)),
     session: writeTaskTable(session, recorded.table),
