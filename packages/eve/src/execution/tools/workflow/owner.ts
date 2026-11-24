@@ -66,6 +66,6 @@ export async function deliverWorkflowRelay(
     await steps.host.step(
       "resumeHook",
       { options: { ifPresent: true }, payload: null, token: message.replyTo },
-      steps.stepKey("resumeHook"),
+      steps.stepCall("resumeHook"),
     );
 }

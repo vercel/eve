@@ -9,7 +9,7 @@ import type { SessionInbox, SessionInboxPayload } from "#execution/session-inbox
 import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { SessionExecution, type SessionTurnHost } from "#execution/session/turn.js";
 import { sessionHostClock } from "#execution/session/host-clock.js";
-import { dispatchSessionSteps, sessionStepKeys } from "#execution/session/steps.js";
+import { dispatchSessionSteps, sessionStepCalls } from "#execution/session/steps.js";
 import { WORKFLOW_SESSION_STEPS } from "#execution/workflow-host/session-steps.js";
 import { sleep } from "#compiled/@workflow/core/index.js";
 import { createTurnControl } from "#execution/session/turn-control.js";
@@ -1403,7 +1403,7 @@ describe("SessionExecution checkpoints", () => {
       inbox,
       queue: new SessionInputQueue([]),
       sessionId: sessionState.sessionId,
-      stepKey: sessionStepKeys(sessionState.sessionId),
+      stepCall: sessionStepCalls(sessionState.sessionId),
     });
 
     await expect(
@@ -2250,7 +2250,7 @@ function createExecution(input: {
     inbox: input.inbox,
     queue: input.queue ?? new SessionInputQueue([]),
     sessionId: input.sessionState.sessionId,
-    stepKey: sessionStepKeys(input.sessionState.sessionId),
+    stepCall: sessionStepCalls(input.sessionState.sessionId),
   });
 }
 

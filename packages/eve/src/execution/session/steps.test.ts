@@ -25,8 +25,10 @@ describe("dispatchSessionSteps", () => {
     const alice = { caller: "alice" };
     const bob = { caller: "bob" };
 
-    void step("resolveInitialTurnCaller", alice as never, "session:0:resolveInitialTurnCaller");
-    void step("notifyTurnCaller", bob as never, "session:1:notifyTurnCaller");
+    void step("resolveInitialTurnCaller", alice as never, {
+      key: "session:0:resolveInitialTurnCaller",
+    });
+    void step("notifyTurnCaller", bob as never, { key: "session:1:notifyTurnCaller" });
 
     expect(calls).toEqual([
       { name: "resolveInitialTurnCaller", receiver: undefined, args: [alice] },

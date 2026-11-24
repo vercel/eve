@@ -1,3 +1,4 @@
+import type { SessionStrandedError } from "#channel/session-stranded-error.js";
 import type { RemoteChildBinding } from "#execution/child-binding.js";
 import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
 import type { PrewarmSessionResult } from "#protocol/prewarm-session.js";
@@ -16,17 +17,11 @@ export interface Durable {
   ): Promise<DeliveryResult>;
   sessionFor(
     address: DeliveryAddress,
-    options?: { readonly runnable?: boolean },
+    options?: { readonly live?: boolean },
   ): Promise<string | undefined>;
   readStream(sessionId: string, from: number): AsyncIterable<StreamLine>;
   tail(sessionId: string): Promise<number>;
   status(sessionId: string): Promise<SessionStatus | undefined>;
-  prewarm?(
-    address: DeliveryAddress,
-    targetDeploymentId: string | undefined,
-  ): Promise<PrewarmSessionResult>;
-  assertFollowable?(sessionId: string): Promise<void>;
-  hasRunnableOwner?(sessionId: string): Promise<boolean>;
   readChildBinding?(
     sessionId: string,
     childSessionId: string,
@@ -39,13 +34,17 @@ export type SessionStartResult =
   | { readonly kind: "held" };
 
 export type DeliveryResult =
-  | { readonly accepted: true; readonly sessionId?: string; readonly inbox?: string }
+  | {
+      readonly accepted: true;
+      readonly sessionId?: string;
+      readonly inbox?: string;
+      readonly prewarm?: Exclude<PrewarmSessionResult["status"], "no_active_session">;
+    }
   | { readonly accepted: false; readonly reason: "inactive"; readonly cause: unknown }
   | {
       readonly accepted: false;
-      readonly reason: "stranded";
-      readonly cause: unknown;
-      readonly eveVersion?: string;
+      readonly reason: "replace";
+      readonly cause: SessionStrandedError;
       end(): Promise<string>;
     };
 
@@ -88,6 +87,7 @@ export interface SessionInterrupts {
 }
 
 export interface SessionStreamSink {
+  tail(sessionId: string): Promise<number>;
   append(sessionId: string, from: number, lines: readonly string[]): Promise<void>;
   close(sessionId: string): Promise<void>;
 }
@@ -165,6 +165,23 @@ export function decodeDeliveryAddress({ key }: DeliveryAddress): DecodedDelivery
 export async function delivered(result: Promise<DeliveryResult>): Promise<void> {
   const settled = await result;
   if (!settled.accepted) throw settled.cause;
+}
+
+export function lineWritable(lines: {
+  write(lines: readonly string[]): Promise<void>;
+  close(): Promise<void>;
+}): WritableStream<Uint8Array> {
+  const decoder = new TextDecoder();
+  let buffered = "";
+  return new WritableStream<Uint8Array>({
+    async write(chunk) {
+      buffered += decoder.decode(chunk, { stream: true });
+      const complete = buffered.split("\n");
+      buffered = complete.pop() ?? "";
+      if (complete.length > 0) await lines.write(complete);
+    },
+    close: () => lines.close(),
+  });
 }
 
 export async function* readStreamLines(

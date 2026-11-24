@@ -4,7 +4,7 @@ import {
 } from "#execution/session-inbox/workflow-transport.js";
 import { runPreparedSession } from "#execution/session/program.js";
 import { bootFromCheckpoint } from "#execution/session/checkpoint-boot.js";
-import { workflowSessionHost } from "#execution/session/workflow-host.js";
+import { workflowProgramHost } from "#execution/session/workflow-host.js";
 import { workflowSessionStep } from "#execution/workflow-host/session-steps.js";
 import { settleAll } from "#execution/session/host-clock.js";
 import { createHook, getWorkflowMetadata, getWritable } from "#compiled/@workflow/core/index.js";
@@ -62,7 +62,7 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
   const result = await runPreparedSession(
     boot.session,
     boot.inbox,
-    workflowSessionHost(boot.session, boot.inbox),
+    workflowProgramHost(boot.session, boot.inbox),
   );
   return { output: result.output };
 }

@@ -32,7 +32,7 @@ describe("the in-process session event store", () => {
 
     await expect(following).resolves.toEqual(["alice\n", "carol\n"]);
     await expect(chunksOf(store.readable("session-alice", -1))).resolves.toEqual(["carol\n"]);
-    await expect(store.assertReadable("session-bob")).rejects.toThrow(
+    await expect(store.assertFollowable("session-bob")).rejects.toThrow(
       'Session "session-bob" has no stream here.',
     );
   });

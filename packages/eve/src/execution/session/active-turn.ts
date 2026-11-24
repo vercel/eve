@@ -203,7 +203,7 @@ export class ActiveTurn {
           this.input.host.step(
             "mapHeldAnswers",
             { delivery: target, requestIds: [...requestIds], ...state },
-            this.input.stepKey("mapHeldAnswers"),
+            this.input.stepCall("mapHeldAnswers"),
           ),
         );
         if (mapped.delivery === undefined) continue;
@@ -241,7 +241,7 @@ export class ActiveTurn {
       this.input.host.step(
         "settleControlDelivery",
         { ...state, settlement },
-        this.input.stepKey("settleControlDelivery"),
+        this.input.stepCall("settleControlDelivery"),
       ),
     );
   }

@@ -23,7 +23,7 @@ import {
 } from "#execution/session-inbox/inbox.js";
 import type { InitialWorkflowEntryInput } from "#execution/session/entry-input.js";
 import { failSession, type SessionBoot } from "#execution/session/program.js";
-import { sessionStepKeys, type SessionStepCall } from "#execution/session/steps.js";
+import { sessionStepCalls, type SessionStepCall } from "#execution/session/steps.js";
 import type { SessionTurnHost } from "#execution/session/turn.js";
 import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session/timeout.js";
 import type { SessionTimeoutControl, SessionTimeouts } from "#execution/session/timeout-control.js";
@@ -122,7 +122,7 @@ export async function bootInitialOwner<Hook extends InboxHook>(
 ): Promise<BootOutcome | undefined> {
   const serializedContext = stampSessionIdentity(input.serializedContext, sessionId);
   const { sessionWritable, step } = ports;
-  const stepKey = sessionStepKeys(`${sessionId}:boot`);
+  const stepCall = sessionStepCalls(`${sessionId}:boot`);
   const inbox = createSessionInbox(ports.inboxTransport);
   const sessionTimeoutMs = input.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS;
   const continuationToken = (serializedContext["eve.continuationToken"] as string) || "";
@@ -160,7 +160,7 @@ export async function bootInitialOwner<Hook extends InboxHook>(
               rootSessionId: readRootSessionId(serializedContext),
               sessionId,
             },
-            stepKey("createSession"),
+            stepCall("createSession"),
           );
     const ownerPreparationPromise = prepareInitialOwner(inbox, {
       all: ports.all,
@@ -172,7 +172,11 @@ export async function bootInitialOwner<Hook extends InboxHook>(
       timeouts: ports.timeouts,
     });
     const callerResolutionPromise = hasDelegatedSessionContext(serializedContext)
-      ? step("resolveInitialTurnCaller", { serializedContext }, stepKey("resolveInitialTurnCaller"))
+      ? step(
+          "resolveInitialTurnCaller",
+          { serializedContext },
+          stepCall("resolveInitialTurnCaller"),
+        )
       : Promise.resolve(undefined);
     const [sessionCreation, ownerPreparation, callerResolution] = await ports.all([
       sessionCreationPromise,
@@ -187,7 +191,7 @@ export async function bootInitialOwner<Hook extends InboxHook>(
         await ports.settleContinuationConflict(conflict);
       }
       await inbox.dispose();
-      await step("closeSessionStream", { sessionWritable }, stepKey("closeSessionStream"));
+      await step("closeSessionStream", { sessionWritable }, stepCall("closeSessionStream"));
       return undefined;
     }
     const caller = unwrapSettled(callerResolution);

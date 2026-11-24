@@ -31,6 +31,7 @@ export interface TurnStepInput {
   readonly history: HarnessModelMessage[];
   readonly recover?: { readonly error: { readonly name?: string }; readonly stopped?: true };
   readonly rerun?: true;
+  readonly sessionWritable: WritableStream<Uint8Array>;
 }
 
 export interface DurableStepResultFields {

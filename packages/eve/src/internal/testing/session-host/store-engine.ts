@@ -99,7 +99,7 @@ export function createStoreEngine(
   };
 
   const lines: SessionEventStore = {
-    async assertReadable(sessionId) {
+    async assertFollowable(sessionId) {
       if ((await store.status(sessionId)) === undefined)
         throw new Error(`Session "${sessionId}" isn't in the store.`);
     },
@@ -125,6 +125,7 @@ export function createStoreEngine(
   };
 
   const faultySink = (attempt: Parameters<typeof attempts.writable>[0]): SessionStreamSink => ({
+    tail: (sessionId) => store.streams.tail(sessionId),
     async append(sessionId, from, appended) {
       if (options.stepFaults?.failWrite?.(attempt, NO_CHUNK) === true)
         throw new Error("The session stream is unavailable");
@@ -135,10 +136,17 @@ export function createStoreEngine(
 
   const content = options.outOfLine === false ? {} : { content: store.content };
 
-  const runTurn = async (input: TurnStepInput, key: string, sessionId: string) =>
+  const runTurn = async (
+    { sessionWritable, ...input }: TurnStepInput,
+    key: string,
+    sessionId: string,
+  ) =>
     await attempts.run(
       { name: "turnStep", sessionId },
-      async (attempt) => ({ attempt, data: await acrossStepBoundary(boundary, input) }),
+      async (attempt) => ({
+        attempt,
+        data: { ...(await acrossStepBoundary(boundary, input)), sessionWritable },
+      }),
       async ({ attempt, data }) => {
         const steps = sessionSteps(app, {
           interrupts: engine.interrupts,
@@ -167,14 +175,15 @@ export function createStoreEngine(
       streams: store.streams,
       ...content,
     });
-    return async (name, input, key, stepRun) => {
+    return async (name, input, call) => {
       if (run.dead) return await never();
+      const { key } = call;
       const sessionId = key.slice(0, key.indexOf(":"));
       let held = kept.get(key);
       if (held === undefined) {
         const value =
           name === "dispatchRuns" || name === "applyRunMessages"
-            ? await inProcess.step(name, input, key, stepRun)
+            ? await inProcess.step(name, input, call)
             : name === "turn"
               ? await runTurn(input as TurnStepInput, key, sessionId)
               : await steps.run(name, input, {

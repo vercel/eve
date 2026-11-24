@@ -31,10 +31,11 @@ import type { SessionTimeoutControl } from "#execution/session/timeout-control.j
 import type { SessionHandoff } from "#execution/session/handoff.js";
 import type { SessionTransferState } from "#execution/session/checkpoint.js";
 import {
-  sessionStepKeys,
+  sessionStepCalls,
   type SessionStepCall,
   type SessionStepName,
   type SessionStepRunner,
+  type StepCall,
 } from "#execution/session/steps.js";
 import type { SandboxRunning } from "#sandbox/state.js";
 import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
@@ -118,11 +119,15 @@ const RETAINED: SessionMoves = {
   tryTransfer: async () => ({ kind: "retained", reason: "same-deployment" }),
 };
 
-export interface SessionHost extends SessionTurnHost {
+export interface ProgramHost extends SessionTurnHost {
   readonly moves?: SessionMoves;
   readonly toolStubs?: ToolStubHost;
-  adopted?(record: SessionRecord, consumed: { readonly throughSeq: number }): Promise<void>;
 }
+
+export type AdoptRecord = (
+  record: SessionRecord,
+  consumed: { readonly throughSeq: number },
+) => Promise<void>;
 
 export type SessionRunResult =
   | { readonly kind: "ended"; readonly outcome: "completed" | "failed" | "cancelled" }
@@ -138,7 +143,7 @@ export interface StartedSession {
 export async function runPreparedSession(
   boot: SessionBoot,
   inbox: SessionInboxHandle,
-  host: SessionHost,
+  host: ProgramHost,
 ): Promise<WorkflowEntryResult> {
   return await startPreparedSession(boot, inbox, host).finished;
 }
@@ -146,14 +151,15 @@ export async function runPreparedSession(
 export function startPreparedSession(
   boot: SessionBoot,
   inbox: SessionInboxHandle,
-  host: SessionHost,
+  host: ProgramHost,
+  adopted?: AdoptRecord,
 ): StartedSession {
   const scope = boot.serializedContext[STUB_CONTEXT_KEY] as StubScope | undefined;
   if (scope !== undefined && scope.rootSessionId === undefined) {
     boot.serializedContext[STUB_CONTEXT_KEY] = { ...scope, rootSessionId: boot.sessionId };
   }
   const queue = new SessionInputQueue(boot.admittedDeliveryKeys);
-  const records = recordsOf(boot, host, inbox, queue);
+  const records = adopted === undefined ? undefined : recordsOf(boot, adopted, inbox, queue);
   const cursor: SessionStateCursor = new SessionStateCursor({
     history: boot.history,
     inbox,
@@ -193,12 +199,10 @@ interface SessionRecords {
 
 function recordsOf(
   boot: SessionBoot,
-  host: SessionHost,
+  adopted: AdoptRecord,
   inbox: SessionInboxHandle,
   queue: SessionInputQueue,
-): SessionRecords | undefined {
-  const { adopted } = host;
-  if (adopted === undefined) return undefined;
+): SessionRecords {
   let generation = boot.generation ?? 0;
   let execution: SessionExecution | undefined;
   const seal = (cursor: SessionStateCursor): SessionRecord =>
@@ -211,11 +215,11 @@ function recordsOf(
     quiet: () => queue.pendingCount === 0 && execution?.holdsInput() !== true,
     write(cursor) {
       if (!records.quiet()) return undefined;
-      return adopted.call(host, seal(cursor), { throughSeq: inbox.takenThrough });
+      return adopted(seal(cursor), { throughSeq: inbox.takenThrough });
     },
     async keep(cursor) {
       const record = seal(cursor);
-      await adopted.call(host, record, { throughSeq: inbox.takenThrough });
+      await adopted(record, { throughSeq: inbox.takenThrough });
       return record;
     },
     watch(watched) {
@@ -262,7 +266,7 @@ async function runBootedSession(
   boot: SessionBoot,
   deps: {
     readonly cursor: SessionStateCursor;
-    readonly host: SessionHost;
+    readonly host: ProgramHost;
     readonly inbox: SessionInboxHandle;
     readonly queue: SessionInputQueue;
     readonly records: SessionRecords | undefined;
@@ -271,10 +275,10 @@ async function runBootedSession(
   },
 ): Promise<WorkflowEntryResult> {
   const { cursor, host, inbox, queue, records, scope, settle } = deps;
-  const stepKey = sessionStepKeys(
+  const stepCall = sessionStepCalls(
     boot.generation === undefined ? boot.sessionId : `${boot.sessionId}:${boot.generation}`,
   );
-  const steps: SessionStepRunner = { host, stepKey };
+  const steps: SessionStepRunner = { host, stepCall };
   const progress: SessionProgress = { caller: boot.caller };
   const handoff = host.moves ?? RETAINED;
   let result: WorkflowEntryResult = { output: "", isError: true };
@@ -291,7 +295,7 @@ async function runBootedSession(
           progress,
           queue,
           records,
-          stepKey,
+          stepCall,
         });
       } finally {
         await inbox.dispose();
@@ -351,14 +355,14 @@ export async function failSession(input: {
 }): Promise<never> {
   const steps: SessionStepRunner = {
     host: { step: input.step },
-    stepKey: sessionStepKeys(`${input.sessionId}:fail`),
+    stepCall: sessionStepCalls(`${input.sessionId}:fail`),
   };
   let caller: TurnCaller | undefined;
   try {
     caller = await steps.host.step(
       "resolveInitialTurnCaller",
       { serializedContext: input.serializedContext },
-      steps.stepKey("resolveInitialTurnCaller"),
+      steps.stepCall("resolveInitialTurnCaller"),
     );
   } catch {}
   await finalizeSession(
@@ -398,15 +402,15 @@ async function runSessionLoop(
   boot: SessionBoot,
   deps: {
     readonly cursor: SessionStateCursor;
-    readonly host: SessionHost;
+    readonly host: ProgramHost;
     readonly inbox: SessionInboxHandle;
     readonly progress: SessionProgress;
     readonly queue: SessionInputQueue;
     readonly records: SessionRecords | undefined;
-    readonly stepKey: (name: SessionStepName) => string;
+    readonly stepCall: (name: SessionStepName) => StepCall;
   },
 ): Promise<SessionLoopOutcome> {
-  const { cursor, host, inbox, progress, queue, records, stepKey } = deps;
+  const { cursor, host, inbox, progress, queue, records, stepCall } = deps;
   const handoff = host.moves ?? RETAINED;
   const sessionTimeout = boot.sessionTimeoutControl;
   let idleWindow: number | "attempted" | undefined;
@@ -434,7 +438,7 @@ async function runSessionLoop(
     inbox,
     queue,
     sessionId: boot.sessionId,
-    stepKey,
+    stepCall,
     ...(idle !== undefined && { idle }),
   });
   records?.watch(execution);
@@ -443,7 +447,7 @@ async function runSessionLoop(
       host.step(
         "settleControlDelivery",
         { ...state, settlement },
-        stepKey("settleControlDelivery"),
+        stepCall("settleControlDelivery"),
       ),
     );
   let prewarming: Promise<void> = Promise.resolve();
@@ -501,7 +505,7 @@ async function runSessionLoop(
           host.step(
             "stopIdleSandbox",
             { serializedContext, sessionState },
-            stepKey("stopIdleSandbox"),
+            stepCall("stopIdleSandbox"),
           ),
         )
         .catch(() => undefined);
@@ -516,7 +520,7 @@ async function runSessionLoop(
     while (true) {
       const next = await nextTurnDelivery({
         host,
-        stepKey,
+        stepCall,
         cursor,
         hasWorkingTasks: () => workingTasks(sessionTaskTable(cursor)).length > 0,
         ignore,
@@ -553,7 +557,7 @@ async function runSessionLoop(
         continue;
       }
       if (next.kind === "cancel-working-tasks") {
-        await cancelWorkingTasks({ host, stepKey }, cursor, "turn-cancelled");
+        await cancelWorkingTasks({ host, stepCall }, cursor, "turn-cancelled");
         if (next.origin !== undefined) {
           const control = controlDeliveryOf(next.origin);
           await settleControlDelivery({ control, outcome: "applied", source: "cancel" });
@@ -620,7 +624,7 @@ async function runSessionLoop(
         host.step(
           "settleCancelledTurn",
           { ...state, control, reportUsage: report },
-          stepKey("settleCancelledTurn"),
+          stepCall("settleCancelledTurn"),
         ),
       { after: () => undefined, before: { at: "cancel", report, ...(control && { control }) } },
     );
@@ -630,7 +634,7 @@ async function runSessionLoop(
       await host.step(
         "notifyCancelledTaskCaller",
         settled.usage === undefined ? notification : { ...notification, usage: settled.usage },
-        stepKey("notifyCancelledTaskCaller"),
+        stepCall("notifyCancelledTaskCaller"),
       );
     }
   };
@@ -682,7 +686,7 @@ async function runSessionLoop(
               const prewarmed = await host.step(
                 "prewarmSession",
                 { serializedContext, sessionState },
-                stepKey("prewarmSession"),
+                stepCall("prewarmSession"),
               );
               prewarmedSandbox = prewarmed.sandboxRunning;
               return prewarmed;
@@ -711,7 +715,7 @@ async function runSessionLoop(
           (await host.step(
             "resolveInitialTurnCaller",
             { serializedContext: cursor.serializedContext },
-            stepKey("resolveInitialTurnCaller"),
+            stepCall("resolveInitialTurnCaller"),
           ));
         if (from.at === "cancel") {
           await settleCancelledTurn(from.report, from.control);
@@ -753,7 +757,7 @@ async function runSessionLoop(
               sessionId: boot.sessionId,
               settled: action.settled,
             },
-            stepKey("notifyTurnCaller"),
+            stepCall("notifyTurnCaller"),
           );
         }
         progress.caller = undefined;
@@ -778,7 +782,7 @@ async function runSessionLoop(
         case "clear":
         case "compact":
           if (next.kind === "clear")
-            await cancelWorkingTasks({ host, stepKey }, cursor, "turn-cancelled", {
+            await cancelWorkingTasks({ host, stepCall }, cursor, "turn-cancelled", {
               turnCalls: true,
             });
           action = await runTurn(

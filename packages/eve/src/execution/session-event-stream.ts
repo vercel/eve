@@ -124,11 +124,11 @@ export async function readSessionStreamTailIndex(
   return await sessionEventStore(hosts, sessionId).tail(sessionId);
 }
 
-export async function assertSessionHistoryReadable(
+export async function assertSessionFollowable(
   hosts: StreamHosts,
   sessionId: string,
 ): Promise<void> {
-  await sessionEventStore(hosts, sessionId).assertReadable(sessionId);
+  await sessionEventStore(hosts, sessionId).assertFollowable(sessionId);
 }
 
 export async function* streamSessionLines(

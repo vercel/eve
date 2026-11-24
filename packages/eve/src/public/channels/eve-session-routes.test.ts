@@ -53,7 +53,7 @@ function createFixedSession(overrides: Partial<Session> = {}): Session {
     end: vi.fn().mockResolvedValue(receipt),
     getLineStream: vi.fn().mockResolvedValue(new ReadableStream()),
     getStreamTailIndex: vi.fn().mockResolvedValue(-1),
-    hasRunnableOwner: vi.fn().mockResolvedValue(true),
+    isLive: vi.fn().mockResolvedValue(true),
     ...overrides,
   };
 }

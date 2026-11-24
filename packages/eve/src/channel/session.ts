@@ -63,7 +63,7 @@ export interface InternalSession extends Session {
   getChildBinding?(childSessionId: string): Promise<RemoteChildBinding | undefined>;
   getLineStream(options?: SessionStreamOptions): Promise<ReadableStream<unknown>>;
   getStreamTailIndex(): Promise<number>;
-  hasRunnableOwner(): Promise<boolean>;
+  isLive(): Promise<boolean>;
 }
 
 export function internalSession(session: Session): InternalSession {
@@ -264,8 +264,8 @@ export function createSession(
     async getStreamTailIndex() {
       return runtime.getStreamTailIndex(id);
     },
-    async hasRunnableOwner() {
-      return (await runtime.hasRunnableOwner?.(id)) ?? true;
+    async isLive() {
+      return (await runtime.isLive?.(id)) ?? true;
     },
     async getChildBinding(childSessionId: string) {
       return await runtime.readChildBinding?.(id, childSessionId);

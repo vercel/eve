@@ -42,7 +42,7 @@ export async function cancelWorkingTasks(
     steps.host.step(
       "cancelTasks",
       { ...state, reason, taskIds, turnCalls },
-      steps.stepKey("cancelTasks"),
+      steps.stepCall("cancelTasks"),
     ),
   );
 }
@@ -73,7 +73,7 @@ export async function answerTaskCancel(
       steps.host.step(
         "cancelTasks",
         { ...state, reason: "task-cancel", taskIds: [call.taskId] },
-        steps.stepKey("cancelTasks"),
+        steps.stepCall("cancelTasks"),
       ),
     );
   }

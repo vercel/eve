@@ -2,6 +2,7 @@ import type { Durable, EngineApp } from "#execution/durable.js";
 import { hostEngine } from "#execution/hosts.js";
 import type { SessionEventStore } from "#execution/session-event-store.js";
 import type { SessionStepCall } from "#execution/session/steps.js";
+import type { TurnStepInput } from "#execution/session/turn-step-types.js";
 import { definePlatform } from "#platform/declaration.js";
 import { sessionSteps, storeDurable, type StoreDurable } from "#platform/engine.js";
 import type { App } from "#runtime/app.js";
@@ -40,6 +41,10 @@ export default definePlatform<StorePlatformContext>({
   durable: () => ({ start: startMemoryStoreEngine }),
 });
 
+function acrossBoundary({ sessionWritable, ...input }: TurnStepInput): TurnStepInput {
+  return { ...structuredClone(input), sessionWritable };
+}
+
 function startMemoryStoreEngine(app: EngineApp, context: StorePlatformContext): Durable {
   const store = createMemorySessionStore();
   const hosting = hostEngine(app);
@@ -56,7 +61,7 @@ function startMemoryStoreEngine(app: EngineApp, context: StorePlatformContext): 
   };
 
   const events = (sessionId: string): SessionEventStore => ({
-    async assertReadable() {
+    async assertFollowable() {
       if ((await store.status(sessionId)) === undefined)
         throw new Error(`Session "${sessionId}" isn't in the store.`);
     },
@@ -76,7 +81,7 @@ function startMemoryStoreEngine(app: EngineApp, context: StorePlatformContext): 
     },
   });
 
-  const step: SessionStepCall = async (name, input, key) => {
+  const step: SessionStepCall = async (name, input, { key }) => {
     const sessionId = key.slice(0, key.indexOf(":"));
     const steps = sessionSteps(engineApp, {
       interrupts: engine.interrupts,
@@ -84,7 +89,7 @@ function startMemoryStoreEngine(app: EngineApp, context: StorePlatformContext): 
       content: store.content,
     });
     if (!kept.has(key)) {
-      const stepInput = name === "turn" ? structuredClone(input) : input;
+      const stepInput = name === "turn" ? acrossBoundary(input as TurnStepInput) : input;
       let result: unknown;
       for (let attempt = 1; ; attempt += 1) {
         result = await steps.run(name, stepInput, { attempt, key, sessionId });

@@ -1,4 +1,3 @@
-import { builtInHosts } from "#runtime/app.js";
 import {
   EntityConflictError,
   HookConflictError,
@@ -6,6 +5,7 @@ import {
   RunExpiredError,
   WorkflowRunNotFoundError,
 } from "#compiled/@workflow/errors/index.js";
+import { SessionStrandedError } from "#channel/session-stranded-error.js";
 import type { DeliverHookPayload, SessionCommand } from "#channel/types.js";
 import { readRemoteChildBinding } from "#execution/child-binding.js";
 import {
@@ -38,8 +38,6 @@ import {
 import type { AuthorizationCallbackPayload } from "#execution/session-inbox/inbox.js";
 import {
   assertRunnableSessionInbox,
-  assertRunnableSessionOwner,
-  findSessionHookHolder,
   resumeSignInCallback,
   StrandedSessionOwnerError,
 } from "#execution/session-inbox/owner.js";
@@ -48,9 +46,8 @@ import {
   resolveSessionInbox,
   resumeSessionInbox,
 } from "#execution/session-inbox/resume.js";
-import { assertSessionHistoryReadable } from "#execution/session-event-stream.js";
 import { prewarmWorkflowSession } from "#execution/session-prewarm.js";
-import { sessionStrandedError, type SessionStartBody } from "#execution/session-runtime.js";
+import type { SessionStartBody } from "#execution/session-runtime.js";
 import { workflowEntryReference } from "#execution/workflow-references.js";
 import {
   resolveCurrentWorkflowDeploymentId,
@@ -67,8 +64,23 @@ import {
 import { assertStartClaims, createRunId } from "#internal/workflow/start-claim.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 import { walkCauseChain } from "#shared/errors.js";
+import { HookNotFoundError as SessionNotFoundError } from "#shared/run-errors.js";
 
 const log = createLogger("execution.workflow-runtime");
+
+export function strandedSessionError(stranded: StrandedSessionOwnerError): SessionStrandedError {
+  const { eveVersion } = stranded;
+  return new SessionStrandedError(eveVersion === undefined ? {} : { eveVersion });
+}
+
+export async function replacingStranded<T>(work: () => Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    if (error instanceof StrandedSessionOwnerError) throw strandedSessionError(error);
+    throw error;
+  }
+}
 
 export async function startWorkflowSession(
   session: SessionStartInput,
@@ -165,8 +177,26 @@ export const deliverToWorkflow: Durable["deliver"] = async (to, payload) => {
     }
     return { accepted: true };
   }
-  return await deliverToSession(address.address, payload as SessionCommand);
+  const command = payload as SessionCommand;
+  return command.kind === "prewarm"
+    ? await prewarmWorkflowAddress(address.address, command.targetDeploymentId)
+    : await deliverToSession(address.address, command);
 };
+
+async function prewarmWorkflowAddress(
+  address: string | SessionInboxAddress,
+  targetDeploymentId: string | undefined,
+): Promise<DeliveryResult> {
+  if (typeof address === "string") return { accepted: true, prewarm: "unsupported" };
+  const { status } = await prewarmWorkflowSession(address.sessionId, targetDeploymentId);
+  return status === "no_active_session"
+    ? {
+        accepted: false,
+        reason: "inactive",
+        cause: new SessionNotFoundError(logicalSessionToken(address)),
+      }
+    : { accepted: true, prewarm: status };
+}
 
 async function deliverToSession(
   address: string | SessionInboxAddress,
@@ -186,9 +216,8 @@ async function deliverToSession(
     if (error instanceof StrandedSessionOwnerError) {
       return {
         accepted: false,
-        reason: "stranded",
-        cause: error,
-        ...(error.eveVersion !== undefined && { eveVersion: error.eveVersion }),
+        reason: "replace",
+        cause: strandedSessionError(error),
         end: () =>
           command.kind === "reset"
             ? endStrandedSession(error, address, "reset", command)
@@ -254,7 +283,7 @@ export const workflowSessionFor: Durable["sessionFor"] = async (to, options) => 
     if (HookNotFoundError.is(error)) return undefined;
     let failure = error;
     if (error instanceof StrandedSessionOwnerError) {
-      if (options?.runnable === true) throw sessionStrandedError(error.eveVersion);
+      if (options?.live === true) throw strandedSessionError(error);
       try {
         return await resolveStrandedSessionId(error);
       } catch (cause) {
@@ -266,51 +295,11 @@ export const workflowSessionFor: Durable["sessionFor"] = async (to, options) => 
     });
     throw failure;
   }
-  if (options?.runnable !== true) return owner.sessionId;
-  try {
-    await assertRunnableSessionInbox(
-      sessionInboxHookToken(sessionCommandHookToken(owner.sessionId)),
-    );
-  } catch (error) {
-    if (error instanceof StrandedSessionOwnerError) throw sessionStrandedError(error.eveVersion);
-    throw error;
-  }
+  if (options?.live !== true) return owner.sessionId;
+  await replacingStranded(() =>
+    assertRunnableSessionInbox(sessionInboxHookToken(sessionCommandHookToken(owner.sessionId))),
+  );
   return owner.sessionId;
 };
-
-export const prewarmWorkflowAddress: NonNullable<Durable["prewarm"]> = async (
-  to,
-  targetDeploymentId,
-) => {
-  const address = decodeDeliveryAddress(to);
-  return address.kind === "session" && typeof address.address !== "string"
-    ? await prewarmWorkflowSession(address.address.sessionId, targetDeploymentId)
-    : { status: "unsupported" };
-};
-
-export async function assertFollowableWorkflowSession(sessionId: string): Promise<void> {
-  try {
-    await Promise.all([
-      assertRunnableSessionInbox(sessionInboxHookToken(sessionCommandHookToken(sessionId))),
-      assertSessionHistoryReadable(builtInHosts(), sessionId),
-    ]);
-  } catch (error) {
-    if (error instanceof StrandedSessionOwnerError) throw sessionStrandedError(error.eveVersion);
-    throw error;
-  }
-}
-
-export async function hasRunnableWorkflowOwner(sessionId: string): Promise<boolean> {
-  const token = sessionInboxHookToken(sessionCommandHookToken(sessionId));
-  const holder = await findSessionHookHolder(token);
-  if (holder === undefined) return false;
-  try {
-    await assertRunnableSessionOwner(holder);
-    return true;
-  } catch (error) {
-    if (error instanceof StrandedSessionOwnerError) return false;
-    throw error;
-  }
-}
 
 export { readRemoteChildBinding as readWorkflowChildBinding };

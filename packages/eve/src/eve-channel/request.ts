@@ -376,7 +376,7 @@ export async function createSessionStreamResponse(
       includeTailIndex && tailIndex !== undefined ? Math.max(0, tailIndex - from + 1) : undefined;
     if (await earlierEve) {
       void early?.then((opened) => opened.cancel()).catch(() => {});
-      const live = follow && (await internalSession(session).hasRunnableOwner());
+      const live = follow && (await internalSession(session).isLive());
       if (follow && !live) lineLimit = undefined;
       lines = v26LineStream(
         await internalSession(session).getLineStream({ follow: live, startIndex: 0 }),

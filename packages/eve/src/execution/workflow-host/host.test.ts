@@ -1,11 +1,31 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { RunExpiredError, WorkflowRunNotFoundError } from "#compiled/@workflow/errors/index.js";
+import {
+  HookNotFoundError,
+  RunExpiredError,
+  WorkflowRunNotFoundError,
+} from "#compiled/@workflow/errors/index.js";
 
-const world = vi.hoisted(() => ({ getDeploymentId: vi.fn(), runs: { get: vi.fn() } }));
-vi.mock("#internal/workflow/runtime.js", () => ({ getWorld: async () => world }));
+const world = vi.hoisted(() => ({
+  capabilities: { deploymentAffinity: false },
+  getDeploymentId: vi.fn(),
+  runs: { get: vi.fn() },
+}));
+const workflow = vi.hoisted(() => ({ getHookByToken: vi.fn(), runStatus: vi.fn() }));
+vi.mock("#internal/workflow/runtime.js", () => ({
+  getWorld: async () => world,
+  getHookByToken: workflow.getHookByToken,
+  getRun: (runId: string) => ({ status: workflow.runStatus(runId) }),
+}));
 
-import { findWorkflowRun, workflowDeploymentId } from "#execution/workflow-host/host.js";
+import type { SessionRuntimeConfig } from "#execution/initial-entry.js";
+import { sessionRuntime } from "#execution/session-runtime.js";
+import {
+  findWorkflowRun,
+  workflowDeploymentId,
+  workflowDurable,
+} from "#execution/workflow-host/host.js";
+import { builtInHosts } from "#runtime/app.js";
 import { definePlatform } from "#platform/declaration.js";
 import { createEntities } from "#platform/entities.js";
 
@@ -61,6 +81,30 @@ describe("the Workflow engine", () => {
     world.runs.get.mockRejectedValue(new Error("the World is down"));
 
     await expect(findWorkflowRun("wrun_1")).rejects.toThrow("the World is down");
+  });
+
+  it.each([
+    {
+      case: "a v26 run that is still running but dropped its hook",
+      holder: undefined,
+      live: false,
+    },
+    { case: "an ended run that released its hook", holder: undefined, live: false },
+    { case: "a run of this eve that holds the hook", holder: "this-eve", live: true },
+    { case: "a run of an earlier eve that holds the hook", holder: "eve 0.26", live: false },
+  ] as const)("calls a session live only while a runnable run holds it: $case", async (row) => {
+    const runId = `wrun_${row.case.replaceAll(" ", "_")}`;
+    workflow.runStatus.mockResolvedValue(row.case.startsWith("an ended") ? "completed" : "running");
+    world.capabilities.deploymentAffinity = row.holder === "this-eve";
+    if (row.holder === undefined) {
+      workflow.getHookByToken.mockRejectedValue(new HookNotFoundError("eve:inbox:v1:gone"));
+    } else {
+      workflow.getHookByToken.mockResolvedValue({ runId });
+      world.runs.get.mockResolvedValue({ attributes: { "$eve.version": "0.26.0" }, runId });
+    }
+    const runtime = sessionRuntime(workflowDurable(), builtInHosts(), {} as SessionRuntimeConfig);
+
+    await expect(runtime.isLive!(runId)).resolves.toBe(row.live);
   });
 
   it("prefers the platform's deployment id over the World's", async () => {

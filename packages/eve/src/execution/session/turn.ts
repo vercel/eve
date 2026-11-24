@@ -7,6 +7,7 @@ import type {
   SessionStepCall,
   SessionStepName,
   SessionStepRunner,
+  StepCall,
 } from "#execution/session/steps.js";
 import type { SessionInputQueue } from "#execution/session/input-queue.js";
 import { taskToolResult, type TaskToolCall } from "#execution/tasks/calls.js";
@@ -95,7 +96,7 @@ export interface SessionExecutionInput {
   readonly capabilities?: SessionCapabilities;
   readonly cursor: SessionStateCursor;
   readonly host: SessionTurnHost;
-  readonly stepKey: (name: SessionStepName) => string;
+  readonly stepCall: (name: SessionStepName) => StepCall;
   readonly inbox: SessionInboxReader;
   readonly queue: SessionInputQueue;
   readonly sessionId: string;
@@ -187,7 +188,7 @@ export class SessionExecution {
       this.input.host.step(
         "applyRunMessages",
         { ...state, canCancelTurn: turn !== undefined, messages },
-        this.input.stepKey("applyRunMessages"),
+        this.input.stepCall("applyRunMessages"),
       ),
     );
     if (cancelled) turn?.abort();
@@ -216,20 +217,16 @@ export class SessionExecution {
         observation?.attemptKey === this.observedHandoverAttemptKey ? undefined : observation;
       const input = nextStepInput;
       const result = await cursor.advanceWithHistory(
-        ({ sessionWritable, ...state }) => {
-          const run = (recover?: TurnStepInput["recover"]) => {
-            const key = this.input.stepKey("turn");
-            return this.input.host.step(
+        (state) => {
+          const run = (recover?: TurnStepInput["recover"]) =>
+            this.input.host.step(
               "turn",
               { ...state, handover, caller, input, recover },
-              key,
               {
-                key,
+                ...this.input.stepCall("turn"),
                 signals: { cancel: turn.signal, steer: turn.steeringSignal },
-                stream: sessionWritable,
               },
             );
-          };
           return run().catch((error: unknown) => {
             const thrown = exhaustedStepError(error);
             const name = isObject(thrown) ? readNonEmptyString(thrown.name) : undefined;
@@ -389,7 +386,7 @@ export class SessionExecution {
               inbox: sessionInboxHookToken(sessionCommandHookToken(this.input.sessionId)),
             },
           },
-          this.input.stepKey("dispatchRuns"),
+          this.input.stepCall("dispatchRuns"),
         ),
       {
         after: (result) => ({
@@ -421,7 +418,7 @@ export class SessionExecution {
         this.input.host.step(
           "publishDispatchedCalls",
           { ...state, pending },
-          this.input.stepKey("publishDispatchedCalls"),
+          this.input.stepCall("publishDispatchedCalls"),
         ),
       { after: () => ({ at: "pause", pause: dispatchedPause(paused, results, undefined) }) },
     );
@@ -503,13 +500,13 @@ class CallWait {
   private taskWaits: TaskWait[] = [];
 
   constructor(
-    session: Pick<SessionExecutionInput, "cursor" | "host" | "stepKey">,
+    session: Pick<SessionExecutionInput, "cursor" | "host" | "stepCall">,
     callIds: readonly string[],
     dispatched: readonly RuntimeActionResult[],
   ) {
     this.cursor = session.cursor;
     this.host = session.host;
-    this.steps = { host: session.host, stepKey: session.stepKey };
+    this.steps = { host: session.host, stepCall: session.stepCall };
     this.callIds = callIds;
     const acceptedAtMs = this.host.now();
     for (const result of dispatched) this.accept(result, acceptedAtMs);
@@ -576,7 +573,7 @@ class CallWait {
     });
     const interrupted = await this.host.all(
       runs.map((run) =>
-        this.steps.host.step("interruptRun", run, this.steps.stepKey("interruptRun")),
+        this.steps.host.step("interruptRun", run, this.steps.stepCall("interruptRun")),
       ),
     );
     for (const result of interrupted) if (result.status === "rejected") throw result.reason;
@@ -590,7 +587,7 @@ class CallWait {
         : await this.steps.host.step(
             "startTaskToolCalls",
             undefined,
-            this.steps.stepKey("startTaskToolCalls"),
+            this.steps.stepCall("startTaskToolCalls"),
           );
     for (const call of calls) {
       if (call.kind === TASK_WAIT_TOOL_NAME) {

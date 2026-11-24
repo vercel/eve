@@ -39,7 +39,7 @@ import {
 } from "#execution/session-inbox/address.js";
 import type { InitialWorkflowEntryInput } from "#execution/session/entry-input.js";
 import { bootInitialOwner } from "#execution/session/owner-boot.js";
-import { runPreparedSession, type SessionHost } from "#execution/session/program.js";
+import { runPreparedSession, type ProgramHost } from "#execution/session/program.js";
 import type { SessionStartBody } from "#execution/session-runtime.js";
 import { SHARED_SESSION_STEPS } from "#execution/session/shared-steps.js";
 import { sessionHostClock, settleAll } from "#execution/session/host-clock.js";
@@ -222,13 +222,10 @@ export function createInProcessHost(
     ...SHARED_SESSION_STEPS,
     applyRunMessages: (input) => work.count(() => applyRunMessages(input)),
     dispatchRuns: (input) => work.count(() => dispatchRuns(input)),
-    turn: (input, run) =>
+    turn: ({ sessionWritable, ...input }, call) =>
       work.count(async () => {
         const { sessionId } = input.sessionState;
-        const signals = run?.signals;
-        const sessionWritable = run?.stream;
-        if (sessionWritable === undefined)
-          throw new Error("An in-process turn step needs the stream of its session.");
+        const { signals } = call;
         steps.set(sessionId, (steps.get(sessionId) ?? 0) + 1);
         try {
           const result = await attempts.run(
@@ -241,13 +238,13 @@ export function createInProcessHost(
               data: await acrossStepBoundary(stepBoundary, input),
               meta: {
                 attempt: attempt.attempt,
-                key: run?.key ?? `${sessionId}:turn`,
+                key: call.key,
                 sessionId,
                 ...(signals !== undefined && { signals }),
               },
               stream: attempts.writable(attempt, sessionWritable),
             }),
-            ({ data, meta, stream }) => runTurnStep(data, meta, stream),
+            ({ data, meta, stream }) => runTurnStep({ ...data, sessionWritable: stream }, meta),
           );
           return await acrossStepBoundary(stepBoundary, result);
         } finally {
@@ -258,7 +255,7 @@ export function createInProcessHost(
         }
       }),
   });
-  const sessionHostFor = (inbox: SessionInboxHandle): SessionHost => ({
+  const programHostFor = (inbox: SessionInboxHandle): ProgramHost => ({
     ...sessionHostClock(inbox, (at) => timers.until(at)),
     step,
     toolStubs,
@@ -291,7 +288,7 @@ export function createInProcessHost(
       },
     );
     if (boot === undefined) return { kind: "held" };
-    const session = runPreparedSession(boot.session, boot.inbox, sessionHostFor(boot.inbox)).then(
+    const session = runPreparedSession(boot.session, boot.inbox, programHostFor(boot.inbox)).then(
       () => undefined,
       () => undefined,
     );

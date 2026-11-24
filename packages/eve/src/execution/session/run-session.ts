@@ -1,4 +1,9 @@
-import { reveal, type SessionStartInput } from "#execution/durable.js";
+import {
+  lineWritable,
+  reveal,
+  type SessionStartInput,
+  type SessionStreamSink,
+} from "#execution/durable.js";
 import type { SessionStartBody } from "#execution/session-runtime.js";
 import { createSessionInbox, type SessionInboxTransport } from "#execution/session-inbox/inbox.js";
 import { bootFromCheckpoint } from "#execution/session/checkpoint-boot.js";
@@ -7,7 +12,8 @@ import { sessionHookTokens } from "#execution/session/hook-tokens.js";
 import { bootInitialOwner, type BootOutcome } from "#execution/session/owner-boot.js";
 import {
   startPreparedSession,
-  type SessionHost,
+  type AdoptRecord,
+  type ProgramHost,
   type SessionRunResult,
 } from "#execution/session/program.js";
 import {
@@ -24,35 +30,46 @@ export interface SessionRun {
   readonly record?: SessionRecord;
 }
 
-export interface SessionRunHost extends SessionHost {
-  adopted(record: SessionRecord, consumed: { readonly throughSeq: number }): Promise<void>;
+export interface RunSessionHost extends ProgramHost {
+  readonly adopted: AdoptRecord;
   readonly deploymentId: string;
   readonly inbox: SessionInboxTransport;
-  readonly stream: WritableStream<Uint8Array>;
+  readonly stream: SessionStreamSink;
 }
 
-export async function runSession(run: SessionRun, host: SessionRunHost): Promise<SessionRunResult> {
+function sessionWritable(sink: SessionStreamSink, sessionId: string): WritableStream<Uint8Array> {
+  return lineWritable({
+    write: async (lines) => await sink.append(sessionId, (await sink.tail(sessionId)) + 1, lines),
+    close: () => sink.close(sessionId),
+  });
+}
+
+export async function runSession(run: SessionRun, host: RunSessionHost): Promise<SessionRunResult> {
   const { entry } = reveal<SessionStartBody>(run.start.body);
+  const stream = sessionWritable(host.stream, run.sessionId);
   const booted =
     run.record === undefined
       ? await bootInitialOwner({ ...entry, ownerDeploymentId: host.deploymentId }, run.sessionId, {
           all: host.all,
           inboxTransport: host.inbox,
-          sessionWritable: host.stream,
+          sessionWritable: stream,
           settleContinuationConflict: async () => {},
           step: host.step,
           timeouts: () => undefined,
         })
-      : await bootFromRecord(run.sessionId, openSessionRecord(run.record), entry, host);
+      : await bootFromRecord(run.sessionId, openSessionRecord(run.record), entry, host, stream);
   if (booted === undefined) return { kind: "ended", outcome: "cancelled" };
-  return await startPreparedSession(booted.session, booted.inbox, host).result;
+  return await startPreparedSession(booted.session, booted.inbox, host, (record, consumed) =>
+    host.adopted(record, consumed),
+  ).result;
 }
 
 async function bootFromRecord(
   sessionId: string,
   record: SessionRecordContents,
   entry: SessionStartBody["entry"],
-  host: SessionRunHost,
+  host: RunSessionHost,
+  stream: WritableStream<Uint8Array>,
 ): Promise<BootOutcome> {
   const { open, transfer } = record;
   const inbox = createSessionInbox(host.inbox);
@@ -72,7 +89,7 @@ async function bootFromRecord(
       deploymentId: host.deploymentId,
       serializedContext: transfer.serializedContext,
       sessionId,
-      sessionWritable: host.stream,
+      sessionWritable: stream,
       ...(open !== undefined && { rerunFirst: true, start: { kind: "resume", from: open } }),
     },
   );

@@ -60,7 +60,7 @@ export async function admitSessionInboxPayload(
     await input.host.step(
       "reportDroppedWirePayload",
       { detail: error.message, family: "session-inbox" },
-      input.stepKey("reportDroppedWirePayload"),
+      input.stepCall("reportDroppedWirePayload"),
     );
     const settlement = unsupportedControl(value, error.message);
     return settlement === undefined ? { kind: "consumed" } : { kind: "unsupported", settlement };
@@ -78,7 +78,7 @@ export async function admitSessionInboxPayload(
           input.host.step(
             "settleDuplicateDelivery",
             { ...state, delivery: command },
-            input.stepKey("settleDuplicateDelivery"),
+            input.stepCall("settleDuplicateDelivery"),
           ),
         );
         return { kind: "consumed" };

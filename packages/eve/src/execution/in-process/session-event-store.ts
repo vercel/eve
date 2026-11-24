@@ -25,7 +25,7 @@ export function createMemorySessionEventStore(): MemorySessionEventStore {
 
   return {
     sessions: () => [...streams.keys()],
-    async assertReadable(sessionId) {
+    async assertFollowable(sessionId) {
       streamOf(sessionId);
     },
     async tail(sessionId) {

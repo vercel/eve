@@ -32,7 +32,6 @@ function workflowStepHost(app: App): SessionStepHost {
 export interface WorkflowTurnStepInput extends TurnStepInput {
   readonly abortSignal?: AbortSignal;
   readonly steeringSignal?: AbortSignal;
-  readonly sessionWritable: WritableStream<Uint8Array>;
 }
 
 export async function turnStep(input: WorkflowTurnStepInput): Promise<TurnStepResult> {
@@ -49,7 +48,7 @@ export async function turnStep(input: WorkflowTurnStepInput): Promise<TurnStepRe
       },
     );
   }
-  const { abortSignal, sessionWritable, steeringSignal, ...data } = input;
+  const { abortSignal, steeringSignal, ...data } = input;
   const step = getStepMetadata();
   const meta: StepMeta = {
     attempt: step.attempt,
@@ -58,5 +57,5 @@ export async function turnStep(input: WorkflowTurnStepInput): Promise<TurnStepRe
     ...(abortSignal !== undefined &&
       steeringSignal !== undefined && { signals: { cancel: abortSignal, steer: steeringSignal } }),
   };
-  return await turnStepOn(workflowStepHost(startedApp()))(data, meta, sessionWritable);
+  return await turnStepOn(workflowStepHost(startedApp()))(data, meta);
 }

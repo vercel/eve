@@ -297,11 +297,11 @@
  *             code) and the program's finalization, admission and task modules
  *             reach no module with a `"use step"` directive by following value
  *             imports, directly or through other modules. Each step goes through
- *             `SessionHost.step()`, whose engine tables name the step functions.
+ *             `ProgramHost.step()`, whose engine tables name the step functions.
  *             The same files read no clock and make no race: no `Date.now`,
  *             `new Date()` without an argument, `Promise.race`, `.all`,
  *             `.allSettled` or `.any`, `setTimeout`, `setInterval`, or
- *             `Math.random`. They use `SessionHost.now()`, `.all()` and
+ *             `Math.random`. They use `ProgramHost.now()`, `.all()` and
  *             `.next({ until })`, which an engine makes replay-safe.
  *   rule 76 — eve reaches its built-in Vercel declaration only through the
  *             generated platform module, which the build points at the

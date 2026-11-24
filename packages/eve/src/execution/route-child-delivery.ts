@@ -17,5 +17,5 @@ export async function routeDeliverToChildren(
     return { kind: "continue", remainder: input.delivery, stateDelta: {} };
   }
 
-  return await steps.host.step("routeProxiedDeliver", input, steps.stepKey("routeProxiedDeliver"));
+  return await steps.host.step("routeProxiedDeliver", input, steps.stepCall("routeProxiedDeliver"));
 }

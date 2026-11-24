@@ -38,7 +38,7 @@ import { HookNotFoundError } from "#shared/run-errors.js";
 function fixedStore(records: readonly unknown[]): SessionEventStore {
   const encoder = new TextEncoder();
   return {
-    assertReadable: async () => {},
+    assertFollowable: async () => {},
     readable: (_sessionId, startIndex = 0) =>
       new ReadableStream({
         start(controller) {

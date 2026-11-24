@@ -10,11 +10,18 @@ import {
 import type { SessionEventStore } from "#execution/session-event-store.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import {
-  assertFollowableWorkflowSession,
+  sessionCommandHookToken,
+  sessionInboxHookToken,
+} from "#execution/session-inbox/address.js";
+import {
+  assertRunnableSessionInbox,
+  assertRunnableSessionOwner,
+  findSessionHookHolder,
+} from "#execution/session-inbox/owner.js";
+import {
   deliverToWorkflow,
-  hasRunnableWorkflowOwner,
-  prewarmWorkflowAddress,
   readWorkflowChildBinding,
+  replacingStranded,
   resumeWorkflowAddress,
   startWorkflowSession,
   workflowSessionFor,
@@ -36,13 +43,30 @@ export interface WorkflowRun {
   readonly attributes: Readonly<Record<string, string | undefined>>;
 }
 
+function commandInboxToken(sessionId: string): string {
+  return sessionInboxHookToken(sessionCommandHookToken(sessionId));
+}
+
+async function assertHistoryReadable(sessionId: string): Promise<void> {
+  const world = await getWorld();
+  const run = await world.runs.get(sessionId, { resolveData: "none" });
+  if (run.expiredAt !== undefined && run.expiredAt.getTime() <= Date.now()) {
+    throw new RunExpiredError(
+      "Session history is no longer available.",
+      sessionId,
+      run.status,
+      run.expiredAt,
+    );
+  }
+}
+
 export const workflowSessionEvents: SessionEventStore = {
   readable: (sessionId, startIndex) => getRun(sessionId).getReadable({ startIndex }),
   async tail(sessionId) {
     const readable = getRun(sessionId).getReadable();
     try {
       const [, tailIndex] = await Promise.all([
-        workflowSessionEvents.assertReadable(sessionId),
+        assertHistoryReadable(sessionId),
         readable.getTailIndex(),
       ]);
       return tailIndex;
@@ -50,17 +74,11 @@ export const workflowSessionEvents: SessionEventStore = {
       await readable.cancel().catch(() => {});
     }
   },
-  async assertReadable(sessionId) {
-    const world = await getWorld();
-    const run = await world.runs.get(sessionId, { resolveData: "none" });
-    if (run.expiredAt !== undefined && run.expiredAt.getTime() <= Date.now()) {
-      throw new RunExpiredError(
-        "Session history is no longer available.",
-        sessionId,
-        run.status,
-        run.expiredAt,
-      );
-    }
+  async assertFollowable(sessionId) {
+    await Promise.all([
+      replacingStranded(() => assertRunnableSessionInbox(commandInboxToken(sessionId))),
+      assertHistoryReadable(sessionId),
+    ]);
   },
 };
 
@@ -113,21 +131,24 @@ export function workflowStepAttempt(): number | undefined {
   }
 }
 
-const SESSION_STATUS: Readonly<Record<string, SessionStatus>> = {
+const UNHELD_SESSION_STATUS: Readonly<Record<string, SessionStatus>> = {
   cancelled: "ended",
   completed: "ended",
   failed: "failed",
-  pending: "running",
-  running: "running",
+  pending: "ended",
+  running: "ended",
 };
 
 async function workflowSessionStatus(sessionId: string): Promise<SessionStatus | undefined> {
-  try {
-    return SESSION_STATUS[await workflowRunStatus(sessionId)];
-  } catch (error) {
-    if (WorkflowRunNotFoundError.is(error)) return undefined;
-    throw error;
+  const holder = await findSessionHookHolder(commandInboxToken(sessionId));
+  if (holder !== undefined) {
+    await replacingStranded(() => assertRunnableSessionOwner(holder));
+    return "running";
   }
+  return await workflowRunStatus(sessionId).then(
+    (status) => UNHELD_SESSION_STATUS[status],
+    () => undefined,
+  );
 }
 
 export function workflowDurable(): Durable {
@@ -139,9 +160,6 @@ export function workflowDurable(): Durable {
       readStreamLines(workflowSessionEvents.readable(sessionId, from), from),
     tail: (sessionId) => workflowSessionEvents.tail(sessionId),
     status: workflowSessionStatus,
-    prewarm: prewarmWorkflowAddress,
-    assertFollowable: assertFollowableWorkflowSession,
-    hasRunnableOwner: hasRunnableWorkflowOwner,
     readChildBinding: readWorkflowChildBinding,
     connectionEvents: {
       start: (binding, bundle, signal) => startConnectionEventOwner(binding, bundle, signal),

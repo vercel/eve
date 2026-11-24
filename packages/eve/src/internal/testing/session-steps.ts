@@ -1,7 +1,7 @@
 import { SHARED_SESSION_STEPS } from "#execution/session/shared-steps.js";
 import {
   dispatchSessionSteps,
-  sessionStepKeys,
+  sessionStepCalls,
   type SessionStepRunner,
 } from "#execution/session/steps.js";
 
@@ -21,6 +21,6 @@ export function sharedSessionSteps(sessionId = "session-test"): SessionStepRunne
         applyRunMessages: unavailable("applyRunMessages"),
       }),
     },
-    stepKey: sessionStepKeys(sessionId),
+    stepCall: sessionStepCalls(sessionId),
   };
 }

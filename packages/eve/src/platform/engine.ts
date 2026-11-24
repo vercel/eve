@@ -9,16 +9,16 @@ import {
   logicalSessionToken,
   sessionCommandHookToken,
 } from "#execution/session-inbox/address.js";
-import { runSession } from "#execution/session/run-session.js";
+import { runSession, type RunSessionHost } from "#execution/session/run-session.js";
 import type { SessionRecord } from "#execution/session/record.js";
 import type { SessionRunResult } from "#execution/session/program.js";
-import type { ToolStubHost } from "#execution/tool-stub-host.js";
 import { HookNotFoundError } from "#shared/run-errors.js";
 import { createUlid } from "#shared/ulid.js";
 import {
   decodeDeliveryAddress,
   delivered,
   hookAddress,
+  lineWritable,
   type DeliveryAddress,
   type Durable,
   type SessionStartInput,
@@ -32,14 +32,12 @@ import {
   type StepSignals,
 } from "#execution/durable.js";
 import { readDurableSession } from "#execution/durable-session-read.js";
-import { readSessionStreamTailIndex } from "#execution/session-event-stream.js";
 import { sessionRuntime } from "#execution/session-runtime.js";
 import { cancelsTurn, steeringDeliveryOf } from "#execution/session/active-turn.js";
 import { SESSION_LIMITS } from "#execution/session/record.js";
 import { resolveTurnPrincipal } from "#execution/session/principal.js";
 import { SHARED_SESSION_STEPS } from "#execution/session/shared-steps.js";
 import type {
-  SessionStepCall,
   SessionStepInput,
   SessionStepName,
   SessionStepResult,
@@ -66,11 +64,11 @@ export type {
 } from "#execution/durable.js";
 export type { SessionRecord } from "#execution/session/record.js";
 export { SESSION_LIMITS, SessionRecordTooNew } from "#execution/session/record.js";
-export type { SessionHost, SessionRunResult } from "#execution/session/program.js";
+export type { ProgramHost, SessionRunResult } from "#execution/session/program.js";
 export {
   runSession,
+  type RunSessionHost,
   type SessionRun,
-  type SessionRunHost,
 } from "#execution/session/run-session.js";
 
 export interface SessionSteps {
@@ -134,8 +132,8 @@ export function sessionSteps(app: App, options: SessionStepsOptions): SessionSte
     async run(name, input, meta) {
       const result =
         name === "turn"
-          ? await runTurn(turn, input as TurnStepInput, meta, app, options)
-          : await table[name](input);
+          ? await runTurn(turn, input as TurnStepInput, meta, options)
+          : await stepOf(table, name)(input);
       if (content === undefined || isYielded(result)) return result as never;
       const stored = await outOfLine(result, content, meta.sessionId);
       if (ENDS_SESSION.has(name)) await content.delete(meta.sessionId);
@@ -145,6 +143,13 @@ export function sessionSteps(app: App, options: SessionStepsOptions): SessionSte
       return content === undefined ? result : await inline(result, content, sessionId);
     },
   };
+}
+
+function stepOf<N extends SessionStepName>(
+  table: SessionStepTable,
+  name: N,
+): (input: SessionStepInput<N>) => Promise<SessionStepResult<N>> {
+  return table[name] as (input: SessionStepInput<N>) => Promise<SessionStepResult<N>>;
 }
 
 function isYielded(result: unknown): result is { readonly yielded: true } {
@@ -186,17 +191,19 @@ async function runTurn(
   turn: ReturnType<typeof turnStepOn>,
   input: TurnStepInput,
   meta: StepMeta,
-  app: Pick<App, "hosts">,
   options: SessionStepsOptions,
 ): Promise<SessionStepResult<"turn"> | { readonly yielded: true }> {
   const stopped = { value: false };
-  const stream = sinkStream(options.streams, app, meta.sessionId, stopped);
+  const stream = sinkStream(options.streams, meta.sessionId, stopped);
   const polled =
     meta.signals === undefined && options.interrupts?.poll !== undefined
       ? pollSignals(options.interrupts.poll.bind(options.interrupts), meta.sessionId, input)
       : undefined;
   const signals = meta.signals ?? polled?.signals;
-  const work = turn(input, { ...meta, ...(signals !== undefined && { signals }) }, stream);
+  const work = turn(
+    { ...input, sessionWritable: stream },
+    { ...meta, ...(signals !== undefined && { signals }) },
+  );
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     if (meta.deadline === undefined) return await work;
@@ -217,21 +224,14 @@ async function runTurn(
 
 function sinkStream(
   streams: SessionStreamSink,
-  app: Pick<App, "hosts">,
   sessionId: string,
   stopped: { readonly value: boolean },
 ): WritableStream<Uint8Array> {
-  const decoder = new TextDecoder();
-  let buffered = "";
   let next: number | undefined;
-  return new WritableStream<Uint8Array>({
-    async write(chunk) {
+  return lineWritable({
+    async write(lines) {
       if (stopped.value) return;
-      buffered += decoder.decode(chunk, { stream: true });
-      const lines = buffered.split("\n");
-      buffered = lines.pop() ?? "";
-      if (lines.length === 0) return;
-      next ??= (await readSessionStreamTailIndex(app.hosts, sessionId)) + 1;
+      next ??= (await streams.tail(sessionId)) + 1;
       await streams.append(sessionId, next, lines);
       next += lines.length;
     },
@@ -323,16 +323,11 @@ export interface SessionStore {
   setStatus(sessionId: string, status: SessionStatus): Promise<void>;
   readonly streams: SessionStreamSink & {
     read(sessionId: string, from: number): AsyncIterable<StreamLine>;
-    tail(sessionId: string): Promise<number>;
   };
   readonly content: SessionContentStore;
 }
 
-export interface StoreRunHost {
-  readonly step: SessionStepCall;
-  readonly deploymentId: string;
-  readonly toolStubs?: ToolStubHost;
-}
+export type StoreRunHost = Pick<RunSessionHost, "step" | "deploymentId" | "toolStubs">;
 
 export interface StoreDurable {
   readonly durable: Durable;
@@ -459,21 +454,6 @@ export function storeDurable(options: {
     };
   };
 
-  const streamOf = (sessionId: string): WritableStream<Uint8Array> => {
-    const decoder = new TextDecoder();
-    let buffered = "";
-    return new WritableStream<Uint8Array>({
-      async write(chunk) {
-        buffered += decoder.decode(chunk, { stream: true });
-        const lines = buffered.split("\n");
-        buffered = lines.pop() ?? "";
-        if (lines.length > 0)
-          await store.streams.append(sessionId, (await store.streams.tail(sessionId)) + 1, lines);
-      },
-      close: () => store.streams.close(sessionId),
-    });
-  };
-
   return {
     durable,
     interrupts: {
@@ -501,7 +481,7 @@ export function storeDurable(options: {
           ...(host.toolStubs !== undefined && { toolStubs: host.toolStubs }),
           deploymentId: host.deploymentId,
           inbox,
-          stream: streamOf(sessionId),
+          stream: store.streams,
           async adopted(record, consumed) {
             await store.saveRecord(sessionId, record, consumed.throughSeq);
           },

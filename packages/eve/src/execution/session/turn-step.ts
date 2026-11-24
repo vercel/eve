@@ -154,20 +154,14 @@ export interface SessionStepHost {
 interface TurnStepWork extends TurnStepInput {
   readonly abortSignal?: AbortSignal;
   readonly steeringSignal?: AbortSignal;
-  readonly sessionWritable: WritableStream<Uint8Array>;
 }
 
 export function turnStepOn(
   host: SessionStepHost,
-): (
-  input: TurnStepInput,
-  meta: StepMeta,
-  stream: WritableStream<Uint8Array>,
-) => Promise<TurnStepResult> {
-  return async (input, meta, stream) => {
+): (input: TurnStepInput, meta: StepMeta) => Promise<TurnStepResult> {
+  return async (input, meta) => {
     const work: TurnStepWork = {
       ...input,
-      sessionWritable: stream,
       ...(meta.signals !== undefined && {
         abortSignal: meta.signals.cancel,
         steeringSignal: meta.signals.steer,

@@ -11,7 +11,7 @@ import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { SessionExecution } from "#execution/session/turn.js";
 import { sessionHostClock } from "#execution/session/host-clock.js";
-import { dispatchSessionSteps, sessionStepKeys } from "#execution/session/steps.js";
+import { dispatchSessionSteps, sessionStepCalls } from "#execution/session/steps.js";
 import { WORKFLOW_SESSION_STEPS } from "#execution/workflow-host/session-steps.js";
 import { sleep } from "#compiled/@workflow/core/index.js";
 import { cancelTasksStep } from "#execution/tasks/steps.js";
@@ -131,7 +131,7 @@ function sessionWithTask(input: {
     inbox,
     queue: new SessionInputQueue([]),
     sessionId: base.sessionId,
-    stepKey: sessionStepKeys(base.sessionId),
+    stepCall: sessionStepCalls(base.sessionId),
   });
   const from: WorkflowToolRunRef = {
     callId: `${input.name}-call`,

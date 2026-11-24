@@ -83,7 +83,7 @@ async function handleWorkflowToolRunOutcome(
       steps.host.step(
         "withdrawFinishedRunQuestions",
         { ...current, runId },
-        steps.stepKey("withdrawFinishedRunQuestions"),
+        steps.stepCall("withdrawFinishedRunQuestions"),
       ),
     );
   }
@@ -111,7 +111,7 @@ async function handleWorkflowToolRunRequest(
           steps.host.step(
             "proxySubagentEvent",
             { hookPayload: request.event, runId, ...state },
-            steps.stepKey("proxySubagentEvent"),
+            steps.stepCall("proxySubagentEvent"),
           ),
         );
       },
@@ -128,7 +128,7 @@ async function handleWorkflowToolRunRequest(
         workflowAsk: createWorkflowAskRoute(request),
         ...state,
       },
-      steps.stepKey("proxySubagentEvent"),
+      steps.stepCall("proxySubagentEvent"),
     ),
   );
 }
@@ -146,7 +146,7 @@ async function handleWorkflowToolRunWithdraw(
         requestId: message.replyTo,
         runId: message.from.runId,
       },
-      steps.stepKey("withdrawRunQuestion"),
+      steps.stepCall("withdrawRunQuestion"),
     ),
   );
 }

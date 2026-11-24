@@ -15,6 +15,7 @@ import {
   type DeliveryAddress,
   type DeliveryResult,
   type Durable,
+  type SessionStatus,
 } from "#execution/durable.js";
 import { prepareInitialEntry, type PreparedInitialEntry } from "#execution/initial-entry.js";
 import type { SessionRuntimeConfig } from "#execution/initial-entry.js";
@@ -24,6 +25,7 @@ import {
   inactiveCommandResult,
 } from "#execution/session-commands.js";
 import {
+  assertSessionFollowable,
   readSessionEventHistory,
   readSessionEventStream,
   readSessionRecordHistory,
@@ -41,16 +43,17 @@ export interface SessionStartBody {
   readonly externalInvocation?: RunInput["externalInvocation"];
 }
 
-type Stranded = Extract<DeliveryResult, { readonly reason: "stranded" }>;
+type Replace = Extract<DeliveryResult, { readonly reason: "replace" }>;
 
 const CONTINUATION_START_ATTEMPTS = 3;
+const LIVE_STATUSES: ReadonlySet<SessionStatus | undefined> = new Set([
+  "running",
+  "parked",
+  "paused",
+]);
 
-export function sessionStrandedError(
-  eveVersion: string | undefined,
-  nextStep?: string,
-): SessionStrandedError {
-  const owner = eveVersion === undefined ? {} : { eveVersion };
-  return new SessionStrandedError(owner, describeStrandedSession(owner, nextStep));
+function strandedWith(cause: SessionStrandedError, nextStep: string): SessionStrandedError {
+  return new SessionStrandedError(cause.owner, describeStrandedSession(cause.owner, nextStep));
 }
 
 function sessionHandle(
@@ -132,17 +135,17 @@ export function sessionRuntime(
     const command = identifyCommand(input.command);
     const dispatched = await dispatchCommand(durable, sessionAddress(continuationToken), command);
     if (dispatched.kind === "result") return dispatched.result;
-    const { stranded } = dispatched;
+    const { replace } = dispatched;
     if (command.kind !== "send" || successor === undefined) {
-      return await settleStrandedCommand(command, stranded);
+      return await settleReplacedCommand(command, replace);
     }
     if ((command.payload.answers?.length ?? 0) > 0) {
-      throw sessionStrandedError(
-        stranded.eveVersion,
+      throw strandedWith(
+        replace.cause,
         "Its pending requests can no longer be answered; send a new message to start a fresh session.",
       );
     }
-    const previousSessionId = await stranded.end();
+    const previousSessionId = await replace.end();
     const started = await startSession(
       { ...successor, delivery: command.delivery },
       { sessionId: previousSessionId },
@@ -162,10 +165,9 @@ export function sessionRuntime(
     return sessionId === undefined ? undefined : { sessionId };
   };
 
-  const followable = async (sessionId: string): Promise<void> => {
-    await durable.assertFollowable?.(sessionId);
-  };
-  const { hasRunnableOwner, readChildBinding } = durable;
+  const followable = (sessionId: string): Promise<void> =>
+    assertSessionFollowable(hosts, sessionId);
+  const { readChildBinding } = durable;
 
   return {
     createSession: (input) => startSession(input),
@@ -195,9 +197,14 @@ export function sessionRuntime(
       readChildBinding: (sessionId: string, childSessionId: string) =>
         readChildBinding(sessionId, childSessionId),
     }),
-    ...(hasRunnableOwner !== undefined && {
-      hasRunnableOwner: (sessionId: string) => hasRunnableOwner(sessionId),
-    }),
+    async isLive(sessionId) {
+      try {
+        return LIVE_STATUSES.has(await durable.status(sessionId));
+      } catch (error) {
+        if (SessionStrandedError.is(error)) return false;
+        throw error;
+      }
+    },
   };
 }
 
@@ -213,27 +220,29 @@ export async function dispatchSessionCommand<TCommand extends SessionCommand>(
   );
   return dispatched.kind === "result"
     ? dispatched.result
-    : await settleStrandedCommand(command, dispatched.stranded);
+    : await settleReplacedCommand(command, dispatched.replace);
 }
 
 type Dispatched<TCommand extends SessionCommand> =
   | { readonly kind: "result"; readonly result: SessionCommandResult<TCommand> }
-  | { readonly kind: "stranded"; readonly stranded: Stranded };
+  | { readonly kind: "replace"; readonly replace: Replace };
 
 async function dispatchCommand<TCommand extends SessionCommand>(
   durable: Durable,
   address: DeliveryAddress,
   command: TCommand,
 ): Promise<Dispatched<TCommand>> {
-  if (command.kind === "prewarm" && durable.prewarm !== undefined) {
-    const prewarmed = await durable.prewarm(address, command.targetDeploymentId);
-    return { kind: "result", result: prewarmed as SessionCommandResult<TCommand> };
-  }
   const delivered = await durable.deliver(address, command);
   if (!delivered.accepted) {
-    return delivered.reason === "stranded"
-      ? { kind: "stranded", stranded: delivered }
+    return delivered.reason === "replace"
+      ? { kind: "replace", replace: delivered }
       : { kind: "result", result: inactiveCommandResult(command) };
+  }
+  if (delivered.prewarm !== undefined) {
+    return {
+      kind: "result",
+      result: { status: delivered.prewarm } as SessionCommandResult<TCommand>,
+    };
   }
   if (delivered.sessionId === undefined) {
     throw new Error("The durable engine accepted a session command without naming its session.");
@@ -247,19 +256,19 @@ async function dispatchCommand<TCommand extends SessionCommand>(
   };
 }
 
-async function settleStrandedCommand<TCommand extends SessionCommand>(
+async function settleReplacedCommand<TCommand extends SessionCommand>(
   command: TCommand,
-  stranded: Stranded,
+  replace: Replace,
 ): Promise<SessionCommandResult<TCommand>> {
   switch (command.kind) {
     case "reset":
       return {
-        previousSessionId: await stranded.end(),
+        previousSessionId: await replace.end(),
         status: "reset",
       } as SessionCommandResult<TCommand>;
     case "send":
     case "clear":
-      throw sessionStrandedError(stranded.eveVersion);
+      throw replace.cause;
     default:
       return inactiveCommandResult(command);
   }

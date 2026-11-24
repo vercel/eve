@@ -26,7 +26,7 @@ import type { stopIdleSessionSandboxStep } from "#execution/session/idle-sandbox
 import type { prewarmSessionStep } from "#execution/session/prewarm-step.js";
 import type { settleControlDeliveryStep } from "#execution/session/settle-control-delivery-step.js";
 import type { WithSessionStateDelta } from "#execution/session/state-delta.js";
-import type { StepSignals } from "#execution/durable.js";
+import type { StepMeta } from "#execution/durable.js";
 import type { startTaskToolCallsStep } from "#execution/session/task-tool-tracing-step.js";
 import type { TurnStepInput, TurnStepResult } from "#execution/session/turn-step-types.js";
 import type { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
@@ -104,39 +104,36 @@ export type SessionStepName = keyof SessionStepTypes;
 export type SessionStepInput<N extends SessionStepName> = SessionStepTypes[N]["input"];
 export type SessionStepResult<N extends SessionStepName> = SessionStepTypes[N]["result"];
 
-export interface StepRun {
-  readonly key?: string;
-  readonly signals?: StepSignals;
-  readonly stream?: WritableStream<Uint8Array>;
-}
+export type StepCall = Pick<StepMeta, "key" | "signals">;
 
 export type SessionStepTable = {
-  readonly [N in SessionStepName]: (
-    input: SessionStepInput<N>,
-    run?: StepRun,
-  ) => Promise<SessionStepResult<N>>;
+  readonly [N in SessionStepName]: N extends "turn"
+    ? (input: SessionStepInput<N>, call: StepCall) => Promise<SessionStepResult<N>>
+    : (input: SessionStepInput<N>) => Promise<SessionStepResult<N>>;
 };
 
 export type SessionStepCall = <N extends SessionStepName>(
   name: N,
   input: SessionStepInput<N>,
-  key: string,
-  run?: StepRun,
+  call: StepCall,
 ) => Promise<SessionStepResult<N>>;
 
 export interface SessionStepRunner {
   readonly host: { readonly step: SessionStepCall };
-  readonly stepKey: (name: SessionStepName) => string;
+  readonly stepCall: (name: SessionStepName) => StepCall;
 }
 
 export function dispatchSessionSteps(table: SessionStepTable): SessionStepCall {
-  return (name, input, _key, run) => {
-    const step = table[name];
-    return run === undefined ? step(input) : step(input, run);
+  return (name, input, call) => {
+    const step = table[name] as (
+      input: SessionStepInput<typeof name>,
+      call?: StepCall,
+    ) => Promise<SessionStepResult<typeof name>>;
+    return name === "turn" ? step(input, call) : step(input);
   };
 }
 
-export function sessionStepKeys(sessionId: string): (name: SessionStepName) => string {
+export function sessionStepCalls(sessionId: string): (name: SessionStepName) => StepCall {
   let next = 0;
-  return (name) => `${sessionId}:${next++}:${name}`;
+  return (name) => ({ key: `${sessionId}:${next++}:${name}` });
 }

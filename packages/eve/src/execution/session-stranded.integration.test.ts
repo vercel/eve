@@ -637,7 +637,7 @@ describe("stranded sessions", () => {
           sessionId: owner.runId,
         });
         await expect(
-          runtime.resolveContinuation(continuationToken, { runnable: true }),
+          runtime.resolveContinuation(continuationToken, { live: true }),
         ).rejects.toBeInstanceOf(SessionStrandedError);
 
         const fresh = await httpAddress(runtime, "stranded-session-deleted").send(

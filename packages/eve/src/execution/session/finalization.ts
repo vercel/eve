@@ -44,20 +44,20 @@ export async function finalizeSession(
   context: SessionFinalizationContext,
 ): Promise<WorkflowEntryResult> {
   const { serializedContext, sessionState } = context.cursor;
-  const { host, stepKey } = context.steps;
+  const { host, stepCall } = context.steps;
   if (sessionState !== undefined && mayHaveLiveRuns(sessionState)) {
     try {
       await host.step(
         "terminateChildSessions",
         { sessionState },
-        stepKey("terminateChildSessions"),
+        stepCall("terminateChildSessions"),
       );
     } catch (error) {
       await host
         .step(
           "reportChildSessionTeardownFailure",
           { error: normalizeSerializableError(error), parentSessionId: sessionState.sessionId },
-          stepKey("reportChildSessionTeardownFailure"),
+          stepCall("reportChildSessionTeardownFailure"),
         )
         .catch(() => undefined);
     }
@@ -71,7 +71,7 @@ export async function finalizeSession(
           serializedContext,
           sessionState,
         },
-        stepKey("endSessionSandbox"),
+        stepCall("endSessionSandbox"),
       );
     } catch (error) {
       await host
@@ -82,7 +82,7 @@ export async function finalizeSession(
             outcome: outcome.kind,
             sessionId: sessionState.sessionId,
           },
-          stepKey("reportSessionSandboxCleanupFailure"),
+          stepCall("reportSessionSandboxCleanupFailure"),
         )
         .catch(() => undefined);
     }
@@ -105,7 +105,7 @@ export async function finalizeSession(
         turn: latest && { id: latest.turnId, sequence: latest.sequence },
         usage,
       },
-      stepKey("emitTerminalSessionCompletion"),
+      stepCall("emitTerminalSessionCompletion"),
     );
   } else if (outcome.kind === "failed") {
     await host.step(
@@ -119,13 +119,13 @@ export async function finalizeSession(
         turnId: outcome.turnId ?? latest?.turnId,
         usage,
       },
-      stepKey("emitTerminalSessionFailure"),
+      stepCall("emitTerminalSessionFailure"),
     );
   } else {
     await host.step(
       "closeSessionStream",
       { sessionWritable: context.sessionWritable },
-      stepKey("closeSessionStream"),
+      stepCall("closeSessionStream"),
     );
   }
 
@@ -144,7 +144,7 @@ export async function finalizeSession(
         sessionId: sessionState?.sessionId ?? (serializedContext["eve.sessionId"] as string),
         settled: notification,
       },
-      stepKey("notifyTurnCaller"),
+      stepCall("notifyTurnCaller"),
     );
   }
   return outcome.kind === "done"
