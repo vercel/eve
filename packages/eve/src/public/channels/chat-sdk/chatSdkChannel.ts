@@ -411,8 +411,9 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
       payload,
       channel: ChatSdkChannelContext<TAdapters> & { readonly session: ChannelContext["session"] },
     ) {
-      recordPrincipalUser(channel.state, channel.session.auth.current, payload);
-      recordPrincipalName(channel.state, channel.session.auth.current, payload);
+      const sender = payload.auth !== undefined ? payload.auth : channel.session.auth.current;
+      recordPrincipalUser(channel.state, sender, payload);
+      recordPrincipalName(channel.state, sender, payload);
       recordLatestMessage(channel.state, payload);
       const answer = resolveInputAnswer(channel.state, payload);
       if (answer !== undefined)
@@ -504,6 +505,7 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
       await safeStartTyping(channel.thread, "Working...");
     },
     async "call.requested"({ data }, { channel }) {
+      if ("callId" in data.owner) return;
       const buffered = channel.state.pendingToolCallMessage;
       channel.state.pendingToolCallMessage = null;
       if (buffered) {

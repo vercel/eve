@@ -107,6 +107,7 @@ export interface StepResult {
   readonly session: HarnessSession;
   readonly settledTurn?: SettledTurn;
   readonly held?: TurnHold;
+  readonly checkpoint?: true;
 }
 
 export type TurnHold =

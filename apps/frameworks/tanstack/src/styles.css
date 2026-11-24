@@ -57,6 +57,10 @@ header {
   overflow-x: auto;
 }
 
+.tool .tool {
+  margin-top: 0.5rem;
+}
+
 .error {
   color: crimson;
 }

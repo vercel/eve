@@ -8,9 +8,11 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { availableParallelism, tmpdir } from "node:os";
 import { basename, delimiter, join, resolve } from "node:path";
 import { execFileSync, spawn } from "node:child_process";
+
+import { resolveSandboxImage } from "./resolve-sandbox-image.mjs";
 
 const repoRoot = resolve(import.meta.dirname, "..");
 const templatesDirectory = join(repoRoot, "apps", "templates");
@@ -21,9 +23,9 @@ const temporaryDirectory = mkdtempSync(join(tmpdir(), "eve-template-compatibilit
 // eve tarball is packed once up front and only read afterwards, and the one
 // template that boots a server (`personal-agent-template`'s smoke test) is the
 // only one that binds a port. That makes it safe to run several templates at
-// once, bounded so an install/build-heavy template cannot starve the others on
-// a 4-vCPU runner.
-const MAX_CONCURRENT_TEMPLATES = 3;
+// once, bounded at one template per two CPUs (at least three) so an
+// install/build-heavy template cannot starve the others.
+const MAX_CONCURRENT_TEMPLATES = Math.max(3, Math.floor(availableParallelism() / 2));
 
 // These values satisfy build-time validation without granting service access.
 // Runtime requests still require the deployment's real configuration.
@@ -59,7 +61,6 @@ const TEMPLATES_BY_EXPECTED_DURATION = [
   "personal-agent-template", // 73s, mostly `nuxt build`
   "eve-chat-template", // 49s, mostly `next build`
   "eve-voice-template", // 31s, mostly `next build`
-  "eve-llm-council-template", // 14s
   "slack-company-brain-template", // 11s, `eve build` only
   "eve-data-agent-template", // 7s, `eve build` only
   "eve-discord-agent-template", // 6s
@@ -297,7 +298,10 @@ const checkTemplate = async (template, tarball, tarballName) => {
   }
 };
 
+// Templates without Vercel Sandbox build their sandbox template from eve's
+// pinned image, so resolve it first.
 try {
+  resolveSandboxImage();
   const packageDirectory = join(repoRoot, "packages", "eve");
   const packedDirectory = join(temporaryDirectory, "packed");
   await run("eve", "pnpm", [

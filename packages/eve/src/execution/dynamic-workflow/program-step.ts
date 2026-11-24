@@ -1,28 +1,43 @@
-import { FatalError, RetryableError } from "#compiled/@workflow/core/index.js";
-import type { RunLimits } from "#compiled/run/index.js";
+import { ProgramCallError, runProgramSandbox } from "#execution/code-mode/sandbox.js";
 import {
-  WORKFLOW_PROGRAM_BRIDGE_REQUEST_LIMIT,
-  WORKFLOW_PROGRAM_MAX_AGENT_OUTPUT_BYTES,
+  WORKFLOW_PROGRAM_MAX_PROGRESS_BYTES,
+  WORKFLOW_PROGRAM_MAX_PROGRESS_UPDATES,
+  WORKFLOW_PROGRAM_MAX_PROGRESS_UPDATE_BYTES,
   readWorkflowProgramAgentCall,
-  type WorkflowProgramAgentCall,
+  readWorkflowProgramAskRequest,
+  readWorkflowProgramProgressUpdate,
+  readWorkflowProgramSleepSeconds,
+  type WorkflowProgramAction,
+  type WorkflowProgramAgents,
   type WorkflowProgramCallResult,
   type WorkflowProgramInput,
-  type WorkflowProgramPendingCall,
+  type WorkflowProgramPendingAction,
   type WorkflowProgramResolution,
 } from "#execution/dynamic-workflow/schema.js";
 import { toErrorMessage } from "#shared/errors.js";
-import { parseJsonValue, type JsonValue } from "#shared/json.js";
-import { loadWorkflowSandboxModule } from "#shared/workflow-sandbox.js";
+import { parseJsonObject, type JsonValue } from "#shared/json.js";
 
 export type WorkflowProgramStepOutcome =
-  | { readonly output: JsonValue; readonly status: "completed" }
+  | {
+      readonly logs: readonly string[];
+      readonly progress: readonly JsonValue[];
+      readonly result: JsonValue;
+      readonly status: "completed";
+    }
+  | {
+      readonly error: string;
+      readonly logs: readonly string[];
+      readonly progress: readonly JsonValue[];
+      readonly status: "failed";
+    }
   | {
       readonly continuation: string;
-      readonly pending: readonly WorkflowProgramPendingCall[];
+      readonly pending: readonly WorkflowProgramPendingAction[];
+      readonly progress: readonly JsonValue[];
       readonly status: "interrupted";
     };
 
-interface WorkflowProgramStepInput {
+export interface WorkflowProgramStepInput {
   readonly callId: string;
   readonly program: WorkflowProgramInput;
   readonly resume?: {
@@ -32,135 +47,153 @@ interface WorkflowProgramStepInput {
 }
 
 const WORKFLOW_PROGRAM_CONTINUATION_AUDIENCE = "eve.workflow-program/v1";
-const WORKFLOW_PROGRAM_HOST_NAMESPACE = "__eveWorkflowProgram";
-const WORKFLOW_PROGRAM_MAX_JSON_BYTES = 1024 * 1024;
-const WORKFLOW_PROGRAM_MAX_SOURCE_BYTES = 256 * 1024;
-const WORKFLOW_PROGRAM_CPU_TIMEOUT_MS = 30_000;
-const WORKFLOW_PROGRAM_TIMEOUT_MS = 300_000;
-
-function wrapWorkflowProgram(js: string): string {
-  return `const ctx = Object.freeze({ agent: (target, input) => ${WORKFLOW_PROGRAM_HOST_NAMESPACE}.agent(JSON.stringify({ target, input })) }); return JSON.stringify(await (async () => {${js}\n})());`;
-}
-
-const runEncodingLimit = (jsonBytes: number) => jsonBytes * 6 + 1024;
-
-const WORKFLOW_PROGRAM_BUSY_RETRY_MS = 5_000;
-
-const WORKFLOW_PROGRAM_LIMITS: RunLimits = {
-  cpuTimeoutMs: WORKFLOW_PROGRAM_CPU_TIMEOUT_MS,
-  maxBridgeRequests: WORKFLOW_PROGRAM_BRIDGE_REQUEST_LIMIT,
-  maxConsoleOutputBytes: 64 * 1024,
-  maxHostFunctionArgumentsBytes: runEncodingLimit(WORKFLOW_PROGRAM_MAX_JSON_BYTES),
-  maxHostFunctionOutputBytes: runEncodingLimit(WORKFLOW_PROGRAM_MAX_AGENT_OUTPUT_BYTES),
-  maxInFlightBridgeRequests: WORKFLOW_PROGRAM_BRIDGE_REQUEST_LIMIT,
-  maxResultBytes: runEncodingLimit(WORKFLOW_PROGRAM_MAX_JSON_BYTES),
-  maxSourceBytes: WORKFLOW_PROGRAM_MAX_SOURCE_BYTES + wrapWorkflowProgram("").length,
-  maxStackSizeBytes: 2 * 1024 * 1024,
-  memoryLimitBytes: 64 * 1024 * 1024,
-  timeoutMs: WORKFLOW_PROGRAM_TIMEOUT_MS,
-};
+const WORKFLOW_PROGRAM_HOST_NAMESPACE = "__eve";
 
 export async function runWorkflowProgramStep(
   input: WorkflowProgramStepInput,
 ): Promise<WorkflowProgramStepOutcome> {
   "use step";
 
-  try {
-    return await runWorkflowProgram(input);
-  } catch (error) {
-    if (RetryableError.is(error)) throw error;
-    throw new FatalError(toErrorMessage(error));
-  }
-}
+  const waiting = new Map<number, WorkflowProgramAction>();
+  const progress: JsonValue[] = [];
+  let progressBytes = 0;
 
-async function runWorkflowProgram(
-  input: WorkflowProgramStepInput,
-): Promise<WorkflowProgramStepOutcome> {
-  const sourceBytes = Buffer.byteLength(input.program.js);
-  if (sourceBytes > WORKFLOW_PROGRAM_MAX_SOURCE_BYTES) {
-    throw new RangeError(
-      `Workflow program source is ${String(sourceBytes)} bytes, over the ${String(WORKFLOW_PROGRAM_MAX_SOURCE_BYTES)} byte limit.`,
-    );
-  }
-  const { createRunner, createSignedContinuationCodec, getHostFunctionContext, RunError } =
-    await loadWorkflowSandboxModule();
-  const { maxAgeMs, signingKey } = input.program.continuationSecurity;
-  const runner = createRunner({
-    continuationAudience: WORKFLOW_PROGRAM_CONTINUATION_AUDIENCE,
-    continuationCodec: createSignedContinuationCodec({ maxAgeMs, secret: signingKey }),
-  });
-
-  const guestError = (message: string) => {
-    const error = new RunError(message, "WORKFLOW_PROGRAM_AGENT_ERROR");
-    error.name = "WorkflowProgramAgentError";
-    return error;
+  const resumeResult = (resolution: unknown): JsonValue => {
+    const outcome = resolution as WorkflowProgramCallResult;
+    if (outcome.status === "failed") throw new ProgramCallError(outcome.error);
+    return outcome.output ?? null;
   };
 
-  const running = runner.run({
-    source: wrapWorkflowProgram(input.program.js),
-    hostFunctions: {
-      [WORKFLOW_PROGRAM_HOST_NAMESPACE]: {
-        agent: async (callJson: unknown) => {
-          let call: WorkflowProgramAgentCall;
+  const outcome = await runProgramSandbox({
+    audience: WORKFLOW_PROGRAM_CONTINUATION_AUDIENCE,
+    callId: input.callId,
+    code: input.program.js,
+    errorCode: "WORKFLOW_PROGRAM_ERROR",
+    errorName: "WorkflowProgramError",
+    handlers: {
+      agent: {
+        errorCode: "WORKFLOW_PROGRAM_AGENT_ERROR",
+        errorName: "WorkflowProgramAgentError",
+        label: "ctx.agent()",
+        handle: async (request, payload) => {
+          if (request.resumed !== undefined) return resumeResult(request.resumed.resolution);
+          let call;
           try {
-            call = readWorkflowProgramAgentCall(
-              parseWorkflowProgramJson(callJson, "ctx.agent() input"),
-            );
+            call = readWorkflowProgramAgentCall(payload);
           } catch (error) {
-            throw guestError(toErrorMessage(error));
+            throw new ProgramCallError(toErrorMessage(error));
           }
-          const { interrupt, resume } = getHostFunctionContext();
-          if (resume === undefined) return interrupt(call);
-          const outcome = resume.resolution as WorkflowProgramCallResult;
-          if (outcome.status === "failed") throw guestError(outcome.error);
-          return outcome.output;
+          waiting.set(request.index, { kind: "agent", ...call });
+          return request.interrupt();
+        },
+      },
+      ask: {
+        label: "ctx.ask()",
+        handle: async (request, payload) => {
+          if (request.resumed !== undefined) return resumeResult(request.resumed.resolution);
+          let askRequest;
+          try {
+            const raw = parseJsonObject(payload);
+            askRequest = readWorkflowProgramAskRequest(raw.request);
+          } catch (error) {
+            throw new ProgramCallError(toErrorMessage(error));
+          }
+          waiting.set(request.index, { kind: "ask", request: askRequest });
+          return request.interrupt();
+        },
+      },
+      progress: {
+        label: "ctx.progress()",
+        handle: async (_request, payload) => {
+          let update: JsonValue;
+          try {
+            const raw = parseJsonObject(payload);
+            if (!Object.hasOwn(raw, "update")) {
+              throw new TypeError(
+                "Workflow program ctx.progress() requires a JSON-serializable update value.",
+              );
+            }
+            update = readWorkflowProgramProgressUpdate(raw.update);
+          } catch (error) {
+            throw new ProgramCallError(toErrorMessage(error));
+          }
+          const updateBytes = Buffer.byteLength(JSON.stringify(update));
+          if (updateBytes > WORKFLOW_PROGRAM_MAX_PROGRESS_UPDATE_BYTES) {
+            throw new ProgramCallError(
+              `WORKFLOW_PROGRAM_PROGRESS_TOO_LARGE: ctx.progress() update is ${String(updateBytes)} bytes of JSON, over the ${String(WORKFLOW_PROGRAM_MAX_PROGRESS_UPDATE_BYTES)} byte limit.`,
+            );
+          }
+          if (progress.length >= WORKFLOW_PROGRAM_MAX_PROGRESS_UPDATES) {
+            throw new ProgramCallError(
+              `WORKFLOW_PROGRAM_PROGRESS_LIMIT_REACHED: ctx.progress() may be called at most ${String(WORKFLOW_PROGRAM_MAX_PROGRESS_UPDATES)} times per step.`,
+            );
+          }
+          if (progressBytes + updateBytes > WORKFLOW_PROGRAM_MAX_PROGRESS_BYTES) {
+            throw new ProgramCallError(
+              `WORKFLOW_PROGRAM_PROGRESS_LIMIT_REACHED: ctx.progress() updates in one step exceed the ${String(WORKFLOW_PROGRAM_MAX_PROGRESS_BYTES)} byte limit.`,
+            );
+          }
+          progressBytes += updateBytes;
+          progress.push(update);
+          return null;
+        },
+      },
+      sleep: {
+        label: "ctx.sleep()",
+        handle: async (request, payload) => {
+          if (request.resumed !== undefined) return resumeResult(request.resumed.resolution);
+          let seconds: number;
+          try {
+            const raw = parseJsonObject(payload);
+            seconds = readWorkflowProgramSleepSeconds(raw.seconds);
+          } catch (error) {
+            throw new ProgramCallError(toErrorMessage(error));
+          }
+          waiting.set(request.index, { kind: "sleep", seconds });
+          return request.interrupt();
         },
       },
     },
-    limits: WORKFLOW_PROGRAM_LIMITS,
-    continuationContext: { callId: input.callId },
-    continuation: input.resume?.continuation,
-    resolutions: input.resume?.resolutions.slice(),
-  });
-  const result = await running.catch((error: unknown) => {
-    if (!RunError.isInstance(error)) throw error;
-    if (error.code === "RUN_CONCURRENCY_LIMIT") {
-      throw new RetryableError(error.message, { retryAfter: WORKFLOW_PROGRAM_BUSY_RETRY_MS });
-    }
-    if (error.code === "RUN_DETACHED_BRIDGE_REQUEST") {
-      throw new Error(
-        "Workflow program returned while a ctx.agent() call was still pending. Await every ctx.agent() call before returning, including calls passed to Promise.race or Promise.any.",
-      );
-    }
-    throw error;
+    hostNamespace: WORKFLOW_PROGRAM_HOST_NAMESPACE,
+    prelude: buildWorkflowProgramPrelude(input.program.agents),
+    resume: input.resume,
+    security: input.program.continuationSecurity,
   });
 
-  if (result.status === "completed") {
-    const output =
-      result.value === undefined
-        ? null
-        : parseJsonValue(parseWorkflowProgramJson(result.value, "result"));
-    return { output, status: "completed" };
+  if (outcome.status === "completed") {
+    return { logs: outcome.logs, progress, result: outcome.result, status: "completed" };
+  }
+  if (outcome.status === "failed") {
+    return { error: outcome.error, logs: outcome.logs, progress, status: "failed" };
   }
   return {
-    continuation: result.continuation,
-    pending: result.interruptions.map((interruption) => ({
-      call: readWorkflowProgramAgentCall(interruption.payload),
-      id: interruption.id,
-    })),
+    continuation: outcome.continuation,
+    pending: outcome.pending.map(({ index, interruptionId }) => {
+      const action = waiting.get(index);
+      if (action === undefined) {
+        throw new Error("A workflow program waits on a call it never made.");
+      }
+      return { action, id: interruptionId };
+    }),
+    progress,
     status: "interrupted",
   };
 }
 
-function parseWorkflowProgramJson(value: unknown, label: string): unknown {
-  if (typeof value !== "string") {
-    throw new TypeError(`Workflow program ${label} must be JSON text.`);
-  }
-  const bytes = Buffer.byteLength(value);
-  if (bytes > WORKFLOW_PROGRAM_MAX_JSON_BYTES) {
-    throw new RangeError(
-      `Workflow program ${label} is ${String(bytes)} bytes of JSON, over the ${String(WORKFLOW_PROGRAM_MAX_JSON_BYTES)} byte limit.`,
-    );
-  }
-  return JSON.parse(value);
+function buildWorkflowProgramPrelude(agents: WorkflowProgramAgents | undefined): string {
+  const frozenAgents = serializeSingleLineJson(agents ?? {});
+  return [
+    `const __agents = Object.freeze(Object.fromEntries(Object.entries(${frozenAgents}).map(([name, meta]) => [name, Object.freeze(meta)])));`,
+    `const ctx = Object.freeze({`,
+    `agents: __agents,`,
+    `agent: (target, input) => __bridge("agent", { target, input }),`,
+    `ask: (request) => __bridge("ask", { request }),`,
+    `sleep: (seconds) => __bridge("sleep", { seconds }),`,
+    `progress: (update) => __bridge("progress", { update }),`,
+    `});`,
+  ].join(" ");
+}
+
+function serializeSingleLineJson(value: unknown): string {
+  return JSON.stringify(value).replaceAll("\u2028", "\\u2028").replaceAll("\u2029", "\\u2029");
 }

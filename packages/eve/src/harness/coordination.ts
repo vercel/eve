@@ -16,7 +16,7 @@ import {
   findBlockingWorkflowToolRun,
   removeBlockingWorkflowToolRuns,
 } from "#harness/workflow-tool-runs.js";
-import { normalizeToolModelOutput } from "#harness/tool-model-output.js";
+import { normalizeToolModelOutput, toolModelOutputContext } from "#harness/tool-model-output.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { commitCallEntry, isTaskTool } from "#execution/tasks/model-step.js";
 import { requireClearance, type Clearance } from "#harness/clearance.js";
@@ -60,6 +60,7 @@ export function forgetFinishedRuns(
 export async function runtimeResultCalls(
   results: readonly RuntimeActionResult[],
   tools: HarnessToolLookup | undefined,
+  programCalls: ReadonlySet<string> = new Set(),
 ): Promise<{ readonly part: ToolResultPart; readonly result: RuntimeActionResult }[]> {
   const settled: { part: ToolResultPart; result: RuntimeActionResult }[] = [];
   for (const result of results) {
@@ -81,7 +82,9 @@ export async function runtimeResultCalls(
           part: toolResult(
             result,
             result.toolName,
-            await projectToolResultOutput(result, tools?.get(result.toolName)),
+            programCalls.has(result.callId)
+              ? toToolResultOutput(result)
+              : await projectToolResultOutput(result, tools?.get(result.toolName)),
           ),
           result,
         });
@@ -248,7 +251,10 @@ async function projectToolResultOutput(
   }
   return await observeToolOutput(result.toolName, [{ callId: result.callId }], async () =>
     normalizeToolModelOutput({
-      output: await definition.toModelOutput!(result.output),
+      output: await definition.toModelOutput!(
+        result.output,
+        toolModelOutputContext(result.toolName, result.callId),
+      ),
       toolCallId: result.callId,
       toolName: result.toolName,
     }),

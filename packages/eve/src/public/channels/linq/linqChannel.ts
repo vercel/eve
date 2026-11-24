@@ -48,6 +48,8 @@ export type LinqInboundResult = {
   readonly history?: readonly SessionHistoryMessage[];
   /** Overrides the workflow run title without changing the message sent to the model. */
   readonly title?: string;
+  /** How this one message treats a running turn, replacing the channel's `turnPolicy` as a whole. */
+  readonly turnPolicy?: TurnPolicy;
 } | null;
 
 /** Sync or async {@link LinqInboundResult}. */
@@ -150,7 +152,13 @@ export function linqChannel(config: LinqChannelConfig): LinqChannel {
   bridge.bot.onNewMessage(/[\s\S]*/, async (thread: Thread, message: Message) => {
     await dispatchMessage(bridge, onMessage, thread, message);
   });
-  if (config.onTapback) dispatchIMessageTapbacks(bridge, config.onTapback);
+  if (config.onTapback) {
+    dispatchIMessageTapbacks(
+      bridge,
+      config.onTapback,
+      (raw) => (raw as { event_id?: string }).event_id,
+    );
+  }
 
   const channel: LinqChannel = Object.assign(bridge.channel, {
     tapbackTool: () =>
@@ -237,6 +245,7 @@ async function dispatchMessage(
   ]);
   if (content === undefined) return;
   await bridge.send(content, {
+    idempotencyKey: message.id,
     auth: result.auth,
     context: [
       ...(result.context ?? []),
@@ -245,6 +254,7 @@ async function dispatchMessage(
     history: result.history,
     thread,
     title: result.title,
+    ...(result.turnPolicy !== undefined && { turnPolicy: result.turnPolicy }),
   });
 }
 

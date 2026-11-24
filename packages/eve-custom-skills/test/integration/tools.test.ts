@@ -8,7 +8,12 @@ import extension from "../../extension/extension.ts";
 import { documentRepository } from "../../extension/lib/document-repository.ts";
 import { loadTurnSkills } from "../../extension/lib/runtime.ts";
 import { spaceScope } from "../../extension/lib/scopes.ts";
-import type { SkillApprovalRule, SkillChangeEvent } from "../../extension/lib/types.ts";
+import type {
+  SkillApprovalRule,
+  SkillChangeEvent,
+  SkillScopeContext,
+} from "../../extension/lib/types.ts";
+import manage from "../../extension/skills/manage.ts";
 import create from "../../extension/tools/create.ts";
 import list from "../../extension/tools/list.ts";
 import publish from "../../extension/tools/publish.ts";
@@ -365,7 +370,7 @@ test("a scope whose storage fails is skipped for the turn, with a note for the m
   const loaded = await loadTurnSkills({
     session: { id: "session-1", auth: { current: alice, initiator: alice } },
     conversation: inChannel,
-    turnId: "turn-9",
+    turn: { id: "turn-9" },
   });
   assert.deepEqual(
     loaded.map(({ scope, skills, unavailable }) => [scope.name, skills.length, unavailable]),
@@ -385,4 +390,126 @@ test("a requester can approve their own shared change", async () => {
   );
   assert.equal(approved.success, true);
   assert.equal(approved.status, "active");
+});
+
+test("scope resolvers see the turn and the parent session, from tools and per-turn loading", async () => {
+  const seen: SkillScopeContext[] = [];
+  extension({
+    storage: inMemory(),
+    scopes: (ctx: SkillScopeContext) => {
+      seen.push(ctx);
+      return [
+        { name: "persona", key: `turn:${ctx.turn?.id}`, label: "this persona", shared: false },
+      ];
+    },
+  });
+  const parent = {
+    callId: "call-0",
+    rootSessionId: "root-1",
+    sessionId: "root-1",
+    turn: { id: "root-turn", sequence: 0 },
+  };
+  const child = { session: { ...(context() as { session: object }).session, parent } };
+  await run(list, {}, { ...(context() as object), ...child });
+  await loadTurnSkills({
+    session: { id: "session-1", auth: { current: alice, initiator: alice }, parent },
+    turn: { id: "turn-2" },
+  });
+  const resolved = seen.map(
+    ({ turn, session }) => `${turn?.id} in ${session.parent?.rootSessionId}`,
+  );
+  assert.deepEqual([...new Set(resolved)], ["turn-1 in root-1", "turn-2 in root-1"]);
+});
+
+test("when another person steers the turn, personal skill reads and writes ask the caller while shared reads stay open", async () => {
+  mount();
+  await run(create, { ...deploy }, context());
+  await run(create, { ...deploy, scope: "channel" }, context({ approvedBy: alice }));
+
+  const steeredCtx = {
+    abortSignal: new AbortController().signal,
+    callId: "call-steered",
+    conversation: inChannel,
+    session: {
+      id: "session-1",
+      turn: { id: "turn-1", sequence: 1 },
+      auth: { current: alice, initiator: alice, steeredBy: [bob] },
+    },
+  };
+  const createApproval =
+    typeof create.approval === "function" ? create.approval : create.approval!.request;
+  assert.equal(
+    await createApproval({
+      ...steeredCtx,
+      toolInput: { ...deploy, name: "steered-personal" },
+      toolName: "create",
+    } as never),
+    "user-approval",
+  );
+  assert.equal(
+    await (list.approval as (ctx: never) => unknown)({
+      ...steeredCtx,
+      toolInput: {},
+      toolName: "list",
+    } as never),
+    "user-approval",
+  );
+  assert.equal(
+    await (read.approval as (ctx: never) => unknown)({
+      ...steeredCtx,
+      toolInput: { name: "deploy" },
+      toolName: "read",
+    } as never),
+    "user-approval",
+  );
+  assert.equal(
+    await (list.approval as (ctx: never) => unknown)({
+      ...steeredCtx,
+      toolInput: { scope: "channel" },
+      toolName: "list",
+    } as never),
+    "not-applicable",
+  );
+  assert.equal(
+    await (read.approval as (ctx: never) => unknown)({
+      ...steeredCtx,
+      toolInput: { name: "deploy", scope: "channel" },
+      toolName: "read",
+    } as never),
+    "not-applicable",
+  );
+});
+
+const resolveManage = Object.getOwnPropertySymbols(manage)
+  .map((key): unknown => Reflect.get(manage, key))
+  .find((value) => typeof value === "function") as (
+  ctx: unknown,
+) => Promise<{ readonly description: string } | null>;
+
+function dynamicContext(turn: { readonly id: string } | null = { id: "turn-1" }) {
+  return {
+    session: { id: "session-1", auth: { current: alice, initiator: alice } },
+    conversation: inChannel,
+    turn,
+  };
+}
+
+test("the manage skill is offered only when the session has a skill scope", async () => {
+  mount();
+  assert.match(String((await resolveManage(dynamicContext()))?.description), /^Lifecycle rules/);
+  extension({ storage: inMemory(), scopes: () => [] });
+  assert.equal(await resolveManage(dynamicContext()), null);
+});
+
+test("the manage skill resolves scopes with the turn", async () => {
+  extension({
+    storage: inMemory(),
+    scopes: (ctx: SkillScopeContext) =>
+      ctx.turn?.id === "persona-turn"
+        ? [{ name: "persona", key: "persona:1", label: "this persona", shared: false }]
+        : [],
+  });
+  assert.ok(await resolveManage(dynamicContext({ id: "persona-turn" })));
+  assert.equal(await resolveManage(dynamicContext({ id: "other-turn" })), null);
+  assert.equal(await resolveManage(dynamicContext(null)), null);
 });

@@ -54,6 +54,7 @@ const { approval, execute } = skillChange({
   },
 });
 
+/** Makes an exact version of a custom skill live. */
 export default defineTool({
   label: {
     start: ({ name, version }) => `Making ${name} v${version} live`,

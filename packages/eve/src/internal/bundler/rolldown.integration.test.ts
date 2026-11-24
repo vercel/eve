@@ -181,4 +181,260 @@ describe("buildSingleRolldownChunk", () => {
 
     expect(chunk.code).toContain("eve-lazy-module-marker");
   });
+
+  it("reports chunks, relative modules, import() chains, and a hint when multiple chunks are emitted", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "eve-rolldown-multi-chunk-"));
+    const srcDir = join(dir, "src");
+    const entryPath = join(srcDir, "entry.ts");
+    const midPath = join(srcDir, "mid.ts");
+    const lazyPath = join(srcDir, "lazy.ts");
+    const leafPath = join(srcDir, "leaf.ts");
+
+    try {
+      mkdirSync(srcDir, { recursive: true });
+      writeFileSync(leafPath, 'export const LEAF_VALUE = "leaf";\n', "utf8");
+      writeFileSync(
+        lazyPath,
+        'import { LEAF_VALUE } from "./leaf";\nexport const LAZY_VALUE = `${LEAF_VALUE}-lazy`;\n',
+        "utf8",
+      );
+      writeFileSync(
+        midPath,
+        'export async function loadLazy(): Promise<string> {\n  const { LAZY_VALUE } = await import("./lazy");\n  return LAZY_VALUE;\n}\n',
+        "utf8",
+      );
+      writeFileSync(entryPath, 'import { loadLazy } from "./mid";\nexport { loadLazy };\n', "utf8");
+
+      let caught: Error | undefined;
+      try {
+        await buildSingleRolldownChunk("multi-chunk fixture", {
+          cwd: dir,
+          input: entryPath,
+          platform: "node",
+          resolve: { extensions: [".ts", ".js", ".mjs"] },
+          plugins: {
+            name: "emit-extra-chunk",
+            buildStart() {
+              this.emitFile({ type: "chunk", id: lazyPath });
+            },
+          },
+          output: { comments: false, format: "esm" },
+        });
+      } catch (error) {
+        caught = error as Error;
+      }
+
+      expect(caught).toBeInstanceOf(Error);
+      const message = caught?.message ?? "";
+      expect(message).toMatch(
+        /^Expected one bundled multi-chunk fixture, but Rolldown emitted \d+ chunks:/,
+      );
+      expect(message).toContain("(entry):");
+      expect(message).toContain("(non-entry):");
+      expect(message).toContain("src/entry.ts");
+      expect(message).toContain("src/mid.ts");
+      expect(message).toContain("src/lazy.ts");
+      expect(message).toContain("src/leaf.ts");
+      expect(message).toContain("src/entry.ts -> src/mid.ts --import()--> src/lazy.ts");
+      expect(message).toContain(
+        "src/entry.ts -> src/mid.ts --import()--> src/lazy.ts -> src/leaf.ts",
+      );
+      expect(message).toContain("Check the non-entry modules and import() edges listed above.");
+      expect(message).not.toContain("\0");
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
+  it("traces every direct importer chain in diamond and dual-edge graphs", async () => {
+    let caught: Error | undefined;
+    try {
+      await buildSingleRolldownChunk("diamond fixture", {
+        input: "\0entry.js",
+        plugins: [
+          {
+            name: "diamond-graph",
+            resolveId(id: string) {
+              return id.startsWith("\0") ? id : undefined;
+            },
+            load(id: string) {
+              if (id === "\0entry.js") {
+                return 'import { s, load, reload } from "\0index.js";\nexport const out = [s, load, reload];\n';
+              }
+              if (id === "\0index.js") {
+                return 'import { surface } from "\0surface.js";\nimport { load } from "\0io.js";\nexport const s = surface;\nexport const reload = () => import("\0surface.js");\nexport { load };\n';
+              }
+              if (id === "\0io.js") {
+                return 'export const load = () => import("\0lazy.js").then((m) => m.lazy);\n';
+              }
+              if (id === "\0lazy.js") {
+                return 'import { surface } from "\0surface.js";\nexport const lazy = surface + 1;\n';
+              }
+              if (id === "\0surface.js") {
+                return "export const surface = 42;\n";
+              }
+              return undefined;
+            },
+            buildStart() {
+              this.emitFile({ type: "chunk", id: "\0surface.js" });
+            },
+          },
+        ],
+        output: { comments: false, format: "esm" },
+      });
+    } catch (error) {
+      caught = error as Error;
+    }
+
+    expect(caught).toBeInstanceOf(Error);
+    const message = caught?.message ?? "";
+    expect(message).toContain("\\0entry.js -> \\0index.js -> \\0surface.js");
+    expect(message).toContain("\\0entry.js -> \\0index.js --import()--> \\0surface.js");
+    expect(message).toContain(
+      "\\0entry.js -> \\0index.js -> \\0io.js --import()--> \\0lazy.js -> \\0surface.js",
+    );
+  });
+
+  it("tailors the hint when all emitted chunks are entry chunks", async () => {
+    let caught: Error | undefined;
+    try {
+      await buildSingleRolldownChunk("all-entry fixture", {
+        input: "\0entry.js",
+        plugins: [
+          {
+            name: "emit-unrelated-entry",
+            resolveId(id: string) {
+              return id.startsWith("\0") ? id : undefined;
+            },
+            load(id: string) {
+              if (id === "\0entry.js") return "export const a = 1;\n";
+              if (id === "\0extra.js") return "export const b = 2;\n";
+              return undefined;
+            },
+            buildStart() {
+              this.emitFile({ type: "chunk", id: "\0extra.js" });
+            },
+          },
+        ],
+        output: { comments: false, format: "esm" },
+      });
+    } catch (error) {
+      caught = error as Error;
+    }
+
+    expect(caught).toBeInstanceOf(Error);
+    const message = caught?.message ?? "";
+    expect(message).toMatch(
+      /^Expected one bundled all-entry fixture, but Rolldown emitted 2 chunks:/,
+    );
+    expect(message).toContain("\\0entry.js");
+    expect(message).toContain("\\0extra.js");
+    expect(message).not.toContain("(non-entry):");
+    expect(message).toContain("Check the extra entry chunks listed above.");
+    expect(message).not.toContain("Check the non-entry modules");
+  });
+
+  it("bounds multi-chunk diagnostics on cyclic graphs and large chunk or module counts", async () => {
+    const extraCount = 12;
+    const extraIds = Array.from({ length: extraCount }, (_, index) => `\0extra-${index}.js`);
+    const helperIds = Array.from({ length: 10 }, (_, index) => `\0helper-${index}.js`);
+
+    let caught: Error | undefined;
+    try {
+      await buildSingleRolldownChunk("cyclic large fixture", {
+        input: "\0entry.js",
+        plugins: [
+          null,
+          false,
+          [
+            {
+              name: "cyclic-virtual-graph",
+              resolveId(id: string) {
+                return id.startsWith("\0") ? id : undefined;
+              },
+              load(id: string) {
+                if (id === "\0entry.js") {
+                  const helperImports = helperIds
+                    .map(
+                      (helperId, index) => `import { h${index} } from ${JSON.stringify(helperId)};`,
+                    )
+                    .join("\n");
+                  const helperList = helperIds.map((_, index) => `h${index}`).join(", ");
+                  return `${helperImports}\nimport { a, loaders } from "\0cycle-a.js";\nexport const value = [a, loaders, ${helperList}];\n`;
+                }
+                const helperIndex = helperIds.indexOf(id);
+                if (helperIndex !== -1) {
+                  return `export function h${helperIndex}() { return ${helperIndex}; }\n`;
+                }
+                if (id === "\0cycle-a.js") {
+                  return 'import { b, loaders } from "\0cycle-b.js";\nexport const a = b + 1;\nexport { loaders };\n';
+                }
+                if (id === "\0cycle-b.js") {
+                  const extraImports = extraIds
+                    .map(
+                      (extraId, index) =>
+                        `() => import(${JSON.stringify(extraId)}).then((m) => m.e${index})`,
+                    )
+                    .join(", ");
+                  return `import { a } from "\0cycle-a.js";\nexport const b = a ? 1 : 0;\nexport const loaders = [${extraImports}];\n`;
+                }
+                const extraIndex = extraIds.indexOf(id);
+                if (extraIndex !== -1) {
+                  return `export const e${extraIndex} = ${extraIndex};\n`;
+                }
+                return undefined;
+              },
+              buildStart() {
+                for (const extraId of extraIds) {
+                  this.emitFile({ type: "chunk", id: extraId });
+                }
+              },
+            },
+          ],
+        ],
+        output: { comments: false, format: "esm" },
+      });
+    } catch (error) {
+      caught = error as Error;
+    }
+
+    expect(caught).toBeInstanceOf(Error);
+    const message = caught?.message ?? "";
+    expect(message).toMatch(
+      /^Expected one bundled cyclic large fixture, but Rolldown emitted \d+ chunks:/,
+    );
+    expect(message).toContain("\\0entry.js");
+    expect(message).not.toContain("\0");
+    expect(message).toContain("more chunks");
+    expect(message).toContain("more non-entry modules");
+    expect(message).toMatch(/\+\d+ more\b/);
+    expect(message).toContain(
+      "\\0entry.js -> \\0cycle-a.js -> \\0cycle-b.js --import()--> \\0extra-0.js",
+    );
+  });
+
+  it("reports when Rolldown emits no chunks", async () => {
+    await expect(
+      buildSingleRolldownChunk("empty fixture", {
+        input: "\0entry.js",
+        plugins: [
+          {
+            name: "drop-emitted-chunks",
+            resolveId(id: string) {
+              return id === "\0entry.js" ? id : undefined;
+            },
+            load(id: string) {
+              return id === "\0entry.js" ? "export const x = 1;" : undefined;
+            },
+            generateBundle(_options, bundle) {
+              for (const key of Object.keys(bundle)) {
+                delete bundle[key];
+              }
+            },
+          },
+        ],
+        output: { comments: false, format: "esm" },
+      }),
+    ).rejects.toThrow("Expected one bundled empty fixture, but Rolldown emitted no chunks.");
+  });
 });

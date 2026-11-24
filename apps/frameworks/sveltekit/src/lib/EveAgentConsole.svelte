@@ -99,6 +99,12 @@
     return `${part.type}:${index}`;
   }
 
+  /** A call made inside another call shows under that call, not as a row of its own. */
+  function isNestedCall(part: EveMessagePart, parts: readonly EveMessagePart[]): boolean {
+    if (part.type !== "tool") return false;
+    return parts.some((other) => other.type === "tool" && other.callId === part.parentCallId);
+  }
+
   function fileLabel(part: EveFilePart): string {
     return part.filename ?? "Attachment";
   }
@@ -247,9 +253,10 @@
                         </span>
                       </div>
                     {/if}
-                  {:else if part.type === "tool"}
+                  {:else if part.type === "tool" && !isNestedCall(part, message.parts)}
                     <ToolBlock
                       {part}
+                      parts={message.parts}
                       canRespond={!isInputDisabled}
                       onAnswers={handleAnswers}
                     />

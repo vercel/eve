@@ -1,4 +1,5 @@
 import { defineDynamic, defineTool, type ToolContext } from "eve/tools";
+import { steered } from "eve/tools/approval";
 
 import { createGitHubCredentialProvider } from "../../../../credentials.js";
 import { readPreparedSelfModificationWorkspace } from "../../../../git-workspace.js";
@@ -58,6 +59,7 @@ const outputSchema = {
 function resolveTool() {
   if (!isDeployedRuntime()) return null;
   return defineTool({
+    approval: steered(),
     description:
       "Publish the complete validated agent source change as one draft pull request. Merge and deployment do not occur.",
     inputSchema,

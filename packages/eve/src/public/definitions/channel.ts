@@ -57,7 +57,9 @@ export type {
   ClearSessionResult,
   CompactSessionResult,
   EndSessionResult,
+  PrincipalPolicy,
   SessionCallback,
+  TurnMode,
   TurnPolicy,
 } from "#channel/types.js";
 export { SessionStrandedError } from "#channel/session-stranded-error.js";

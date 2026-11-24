@@ -1,4 +1,9 @@
-import { REQUESTER_ONLY_FEEDBACK, sameResponder } from "#approval/requester-only.js";
+import {
+  REQUESTER_ONLY_FEEDBACK,
+  requesterOnlyResponse,
+  sameResponder,
+} from "#approval/requester-only.js";
+import { isSteeredApprovalPolicy } from "#tools/approval/policies.js";
 import { transition } from "#harness/session-machine/commit.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
@@ -246,20 +251,37 @@ async function weigh(input: {
   if (policy === undefined) return { kind: "failed", reason: TEMPORARILY_UNAVAILABLE_REASON };
   try {
     const context = buildCallbackContext();
+    const requestContext = {
+      callId: input.request.call.callId,
+      interactionId: input.request.interactionId,
+      principal: input.step.requester ?? null,
+      toolInput: input.request.call.input,
+      toolName: input.request.call.toolName,
+    };
+    const responseContext = { decision: input.decision, principal: input.pending.responder };
+    if (
+      input.request.callerOnly === true ||
+      (approval !== undefined &&
+        typeof approval !== "function" &&
+        isSteeredApprovalPolicy(approval.request) &&
+        (context.session.auth.steeredBy ?? []).length > 0)
+    ) {
+      const callerOnly = requesterOnlyResponse({
+        request: requestContext,
+        response: responseContext,
+      });
+      if (callerOnly.status === "rejected") {
+        return { kind: "refused", reason: callerOnly.reason };
+      }
+    }
     const outcome = await withTimeout(
       policy({
         auth: buildApprovalResponseAuth({
           responder: input.pending.responder,
           scope: input.responseId,
         }),
-        request: {
-          callId: input.request.call.callId,
-          interactionId: input.request.interactionId,
-          principal: input.step.requester ?? null,
-          toolInput: input.request.call.input,
-          toolName: input.request.call.toolName,
-        },
-        response: { decision: input.decision, principal: input.pending.responder },
+        request: requestContext,
+        response: responseContext,
         session: {
           id: context.session.id,
           initiator: context.session.auth.initiator,

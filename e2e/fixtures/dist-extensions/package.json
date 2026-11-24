@@ -8,7 +8,8 @@
     "dev": "eve dev",
     "e2e:dependencies": "pnpm update gizmo-extension gadget-extension",
     "start": "eve start",
-    "test:e2e": "eve eval --strict"
+    "test:e2e": "eve eval --strict",
+    "e2e:postgres": "node ../../../scripts/run-e2e-postgres.mjs"
   },
   "dependencies": {
     "@eve-e2e/config": "workspace:*",

@@ -1,6 +1,9 @@
 {
   "extends": ["//"],
   "tasks": {
+    "build": {
+      "tags": ["ci"]
+    },
     "test:integration": {
       "dependsOn": ["eve#build"]
     },

@@ -1,5 +1,11 @@
 import type { Interaction, InteractionOutcome } from "eve/events";
-import type { EveEvalAssertions, EveEvalContext, EveEvalSession, EveEvalTurn } from "eve/evals";
+import type {
+  EveEvalAssertions,
+  EveEvalContext,
+  EveEvalSession,
+  EveEvalTargetHandle,
+  EveEvalTurn,
+} from "eve/evals";
 
 import { SAY } from "../../agent/lib/hitl/respond.ts";
 
@@ -32,6 +38,33 @@ export function aliceSession(t: EveEvalContext): Promise<EveEvalSession> {
 export const asAlice = as(ALICE);
 export const asBob = as(BOB);
 export const asReleaseManager = as(RELEASE_MANAGER);
+
+/** What a shared-thread route answers with. */
+export interface SharedDelivery {
+  readonly ok: boolean;
+  readonly sessionId?: string;
+}
+
+/**
+ * Posts to the shared channel's thread as `principalId`, the way a teammate
+ * would. The channel retains the running turn's caller.
+ */
+export async function postMessage(
+  target: EveEvalTargetHandle,
+  threadId: string,
+  principalId: string,
+  message: string,
+): Promise<SharedDelivery> {
+  const path = `/shared/${threadId}/messages`;
+  const response = await target.fetch(path, {
+    body: JSON.stringify({ message }),
+    headers: { "content-type": "application/json", "x-eve-fixture-user": principalId },
+    method: "POST",
+  });
+  const text = await response.text();
+  if (!response.ok) throw new Error(`POST ${path} failed (${response.status}): ${text}`);
+  return JSON.parse(text) as SharedDelivery;
+}
 
 /** The one approval request `turn` raised for `toolName`. */
 export function approvalFor(turn: EveEvalTurn, toolName: string): Interaction {

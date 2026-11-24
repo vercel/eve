@@ -46,7 +46,7 @@ import {
   defaultPhotonAuth,
   photonIMessageChannel,
 } from "#public/channels/photon/photonIMessageChannel.js";
-import { Message } from "#compiled/chat/index.js";
+import { getEmoji, Message } from "#compiled/chat/index.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 
@@ -100,6 +100,33 @@ describe("photonIMessageChannel", () => {
       onTapback: (_ctx, tapback) => ({ auth: defaultPhotonAuth(tapback) }),
     });
     expect(reaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("keys tapbacks by the provider's event id so a retried webhook runs one turn", async () => {
+    photonIMessageChannel({
+      credentials: async () => ({ projectId: "project-id", projectSecret: "project-secret" }),
+      onTapback: () => ({ auth: null }),
+    });
+    const handler = reaction.mock.calls[0]?.[0];
+    if (handler === undefined) throw new Error("Expected a tapback handler.");
+    const user = { fullName: "User", isBot: false, isMe: false, userId: "user", userName: "user" };
+
+    await handler({
+      adapter: {},
+      added: true,
+      emoji: getEmoji("heart"),
+      messageId: "message-id",
+      raw: { id: "reaction-message-id" },
+      rawEmoji: "love",
+      thread: { toJSON: () => ({ id: "thread-id" }) },
+      threadId: "thread-id",
+      user,
+    });
+
+    expect(send).toHaveBeenCalledWith(
+      "Tapback: Loved a message",
+      expect.objectContaining({ idempotencyKey: "reaction-message-id" }),
+    );
   });
 
   it("inherits the shared steering default for a direct message", async () => {

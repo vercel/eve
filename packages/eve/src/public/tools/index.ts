@@ -10,10 +10,12 @@ export {
   type ToolDefinition,
   type ToolContext,
   type ToolModelOutput,
+  type ToolModelOutputContext,
   type ToolModelOutputPart,
 } from "#tools/definition.js";
 export { defineDynamic } from "#tools/dynamic.js";
 export { toolOutput, toolOutputPart } from "#tools/model-output.js";
+export { offloadContent, type OffloadContentOptions } from "#tools/offload-content.js";
 export type {
   DynamicContext,
   DynamicKey,

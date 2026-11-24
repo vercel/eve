@@ -66,6 +66,23 @@ export async function evaluateStepValues(step: StepSource, run: ValueRun): Promi
   await draft.announcements();
 }
 
+export async function evaluateStepModel(
+  step: StepSource,
+  run: ValueRun,
+): Promise<ModelChoice | undefined> {
+  const container = step.ctx as ContextContainer;
+  const definitions = await sessionDefinitions(container);
+  return await chooseModel(
+    contributionsOf(
+      definitions,
+      container,
+      { history: run.conversation, signal: run.abortSignal, step: stepInfo(step) },
+      "evaluate",
+    ),
+    container,
+  );
+}
+
 export async function stepModel(step: StepSource): Promise<ModelChoice | undefined> {
   const container = step.ctx as ContextContainer;
   const definitions = await sessionDefinitions(container);

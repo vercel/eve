@@ -433,6 +433,11 @@ export interface InstrumentationCallRequestedEvent {
   readonly startedAtMs?: number;
   readonly type: "call.requested";
   readonly callId: string;
+  /**
+   * The call this call runs inside, when another call made it, such as a workflow program call.
+   * Absent for a call the model made itself.
+   */
+  readonly ownerCallId?: string;
   readonly idempotencyKey: string;
   /** Content. Absent unless this provider's trace policy records inputs. */
   readonly input: unknown;

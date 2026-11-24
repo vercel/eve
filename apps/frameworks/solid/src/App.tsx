@@ -4,10 +4,23 @@ import { createSignal, For, Match, Show, Switch } from "solid-js";
 
 import "./styles.css";
 
+/** The calls a call ran inside it, such as the calls of a `workflow()` program. */
+function nestedCalls(parts: readonly EveMessagePart[], callId: string): EveToolPart[] {
+  return parts.filter(
+    (part): part is EveToolPart => part.type === "tool" && part.parentCallId === callId,
+  );
+}
+
+/** A call made inside another call shows under that call, not as a row of its own. */
+function isNestedCall(part: EveToolPart, parts: readonly EveMessagePart[]): boolean {
+  return parts.some((other) => other.type === "tool" && other.callId === part.parentCallId);
+}
+
 function ToolBlock(props: {
   readonly canRespond: boolean;
   readonly onRespond: (interactionId: string, optionId: string) => void;
   readonly part: EveToolPart;
+  readonly parts: readonly EveMessagePart[];
 }) {
   const openRequest = () =>
     props.part.interaction?.status === "open" ? props.part.interaction : undefined;
@@ -38,6 +51,16 @@ function ToolBlock(props: {
           </div>
         )}
       </Show>
+      <For each={nestedCalls(props.parts, props.part.callId)} keyed={(nested) => nested.callId}>
+        {(nested) => (
+          <ToolBlock
+            canRespond={props.canRespond}
+            onRespond={props.onRespond}
+            part={nested()}
+            parts={props.parts}
+          />
+        )}
+      </For>
     </div>
   );
 }
@@ -46,6 +69,7 @@ function PartView(props: {
   readonly canRespond: boolean;
   readonly onRespond: (interactionId: string, optionId: string) => void;
   readonly part: EveMessagePart;
+  readonly parts: readonly EveMessagePart[];
 }) {
   return (
     <Switch>
@@ -55,9 +79,16 @@ function PartView(props: {
       <Match when={props.part.type === "reasoning" && props.part}>
         {(part) => <div class="reasoning">{part().text}</div>}
       </Match>
-      <Match when={props.part.type === "tool" && props.part}>
+      <Match
+        when={props.part.type === "tool" && !isNestedCall(props.part, props.parts) && props.part}
+      >
         {(part) => (
-          <ToolBlock canRespond={props.canRespond} onRespond={props.onRespond} part={part()} />
+          <ToolBlock
+            canRespond={props.canRespond}
+            onRespond={props.onRespond}
+            part={part()}
+            parts={props.parts}
+          />
         )}
       </Match>
     </Switch>
@@ -106,7 +137,12 @@ export default function App() {
               <div class="message" data-role={message().role}>
                 <For each={message().parts} keyed={false}>
                   {(part) => (
-                    <PartView canRespond={!isInputDisabled()} onRespond={respond} part={part()} />
+                    <PartView
+                      canRespond={!isInputDisabled()}
+                      onRespond={respond}
+                      part={part()}
+                      parts={message().parts}
+                    />
                   )}
                 </For>
               </div>

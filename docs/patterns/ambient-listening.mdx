@@ -267,6 +267,8 @@ Keep `guidance` and `context` limited to text you wrote. Never put message text 
 
 To run without a decision model, remove the two `if (await skip...) return null;` lines. Each accepted unmentioned message then starts or joins an agent turn.
 
+If you enable [multiplayer steering](../concepts/security-model#let-another-persons-message-join) with `turnPolicy: { mode: "steer", principal: "retain" }`, return it only on addressed messages (mentions and DMs) rather than setting it at the channel level. Otherwise unmentioned side-chat can interrupt another person's active turn, trigger the caller identity hold, or end that turn early if the model calls `no_reply`.
+
 ## Tune and monitor
 
 Start with one watched channel. Review skipped messages and the agent's replies before adding more channels.

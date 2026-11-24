@@ -39,6 +39,8 @@ export {
   type ChannelContinuationOps,
   type ChannelEvents,
   type InferChannelMetadata,
+  type PrincipalPolicy,
+  type TurnMode,
   type TurnPolicy,
   type RouteDefinition,
   type RouteHandlerArgs,
