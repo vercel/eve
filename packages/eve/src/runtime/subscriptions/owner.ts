@@ -3,8 +3,13 @@ import { ContextContainer } from "#context/container.js";
 import { AuthKey, SessionIdKey, SessionTraceSeedKey } from "#context/keys.js";
 import { serializeContext } from "#context/serialize.js";
 import { subscriptionWorkflowReference } from "#execution/workflow-references.js";
-import { startWorkflowOnCurrentDeployment } from "#execution/workflow-runtime.js";
+import {
+  resolveCurrentWorkflowDeploymentId,
+  startWorkflowOnCurrentDeployment,
+} from "#execution/workflow-runtime.js";
 import { getHookByToken, resumeHook } from "#internal/workflow/runtime.js";
+import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import { serializeDurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
 import { compiledSessionAgent } from "#runtime/sessions/compiled-session-agent.js";
 import { type CompiledBundle, SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import {
@@ -19,6 +24,7 @@ import {
   type SubscriptionBinding,
   type SubscriptionEvent,
   type SubscriptionKeyMessage,
+  type SubscriptionOccurrence,
   type SubscriptionOutcome,
   type SubscriptionOwnerMessage,
 } from "#runtime/subscriptions/state.js";
@@ -88,24 +94,39 @@ export function retireSubscriptionOwner(bindingId: string): Promise<boolean> {
   } satisfies SubscriptionOwnerMessage);
 }
 
-export function emitSubscriptionEvent(
+async function eventFrom(
+  occurrence: SubscriptionOccurrence,
+  source: RuntimeCompiledArtifactsSource,
+): Promise<SubscriptionEvent> {
+  return {
+    ...occurrence,
+    origin: {
+      deploymentId: await resolveCurrentWorkflowDeploymentId(),
+      compiledArtifactsSource: serializeDurableCompiledArtifactsSource(source),
+    },
+  };
+}
+
+export async function emitSubscriptionEvent(
   channelName: string,
   key: string,
-  event: SubscriptionEvent,
+  occurrence: SubscriptionOccurrence,
+  source: RuntimeCompiledArtifactsSource,
 ): Promise<boolean> {
   return resume(subscriptionKeyHookToken({ kind: "channel", name: channelName }, key), {
     kind: "emit",
-    event,
+    event: await eventFrom(occurrence, source),
   } satisfies SubscriptionKeyMessage);
 }
 
-export function deliverSubscriptionEvent(
+export async function deliverSubscriptionEvent(
   bindingId: string,
-  event: SubscriptionEvent,
+  occurrence: SubscriptionOccurrence,
+  source: RuntimeCompiledArtifactsSource,
 ): Promise<boolean> {
   return resume(subscriptionHookToken(bindingId), {
     kind: "delivery",
-    event,
+    event: await eventFrom(occurrence, source),
   } satisfies SubscriptionOwnerMessage);
 }
 

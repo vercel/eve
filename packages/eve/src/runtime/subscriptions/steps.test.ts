@@ -23,10 +23,32 @@ const mocks = vi.hoisted(() => ({
   readFirstPublished: vi.fn(),
   writes: [] as { namespace: string; value: unknown }[],
   context: { current: undefined as unknown },
+  bundles: new Map<string, unknown>(),
+  loadBundle: vi.fn(async (input: { compiledArtifactsSource: { appRoot: string } }) =>
+    mocks.bundles.get(input.compiledArtifactsSource.appRoot),
+  ),
 }));
 
 vi.mock("#channel/session.js", () => ({ createAttachSessionFn: mocks.attachFactory }));
-vi.mock("#context/serialize.js", () => ({ deserializeContext: async () => mocks.context.current }));
+vi.mock("#context/serialize.js", () => ({
+  deserializeContext: async (data: { bundle: unknown; auth: SessionAuthContext | null }) => {
+    const ctx = new ContextContainer();
+    ctx.setVirtualContext(SessionAgentKey, { compiled: data.bundle } as never);
+    ctx.setVirtualContext(AuthKey, data.auth);
+    mocks.context.current = ctx;
+    return ctx;
+  },
+}));
+vi.mock("#runtime/sessions/compiled-agent-cache.js", () => ({
+  getCompiledRuntimeAgentBundle: mocks.loadBundle,
+}));
+vi.mock("./owner.js", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  bindingContext: async (binding: SubscriptionBinding, bundle: unknown) => ({
+    bundle,
+    auth: binding.auth,
+  }),
+}));
 vi.mock("#execution/workflow-runtime.js", () => ({
   createWorkflowRuntime: (input: unknown) => ({ runtime: input }),
   startWorkflowOnCurrentDeployment: mocks.startWorkflow,
@@ -87,20 +109,21 @@ const binding: SubscriptionBinding = {
   auth: subscriberAuth,
 };
 const keyToken = subscriptionKeyHookToken(source, "vercel/eve#7");
+const currentArtifacts = { kind: "disk", appRoot: "/virtual" } as const;
+const origin = (appRoot = "/virtual") => ({
+  deploymentId: "dpl_receiver",
+  compiledArtifactsSource: { kind: "disk" as const, appRoot },
+});
 const bundleWith = (onEvent: unknown) => ({
-  compiledArtifactsSource: { kind: "disk", appRoot: "/virtual" },
+  compiledArtifactsSource: currentArtifacts,
   resolvedAgent: { channels: [{ name: "github", definition: { onEvent, events: [] } }] },
 });
-const useSubscriptions = (onEvent: unknown, auth: SessionAuthContext | null = null) => {
-  const ctx = new ContextContainer();
-  ctx.setVirtualContext(SessionAgentKey, { compiled: bundleWith(onEvent) } as never);
-  ctx.setVirtualContext(AuthKey, auth);
-  mocks.context.current = ctx;
+const useSubscriptions = (onEvent: unknown) => {
+  mocks.bundles.set("/virtual", bundleWith(onEvent));
 };
-const delivery = (id: string, data: Record<string, unknown> = { id }) => ({
+const delivery = (id: string, data: Record<string, unknown> = { id }, appRoot = "/virtual") => ({
   binding,
-  serializedContext: {},
-  event: { id, data } as never,
+  event: { id, data, origin: origin(appRoot) } as never,
 });
 const notFound = () => new HookNotFoundError("token");
 const joinMessages = () =>
@@ -113,6 +136,7 @@ const ackIdsRead = () =>
 beforeEach(() => {
   for (const mock of Object.values(mocks)) if (vi.isMockFunction(mock)) mock.mockClear();
   mocks.hooks.clear();
+  mocks.bundles.clear();
   mocks.writes.length = 0;
   mocks.getHookByToken.mockReset();
   mocks.getHookByToken.mockImplementation(async (token: string) => {
@@ -164,7 +188,7 @@ it("sends onEvent's message queued, as the subscriber, with an idempotency key p
 });
 
 it("sends under the subscriber's auth even when the event names another principal", async () => {
-  useSubscriptions(() => "Mallory commented", otherAuth);
+  useSubscriptions(() => "Mallory commented");
 
   await dispatchSubscriptionStep(
     delivery("e1", { principalId: "mallory", auth: otherAuth, actor: "mallory" }),
@@ -235,20 +259,52 @@ it("retires the subscription when its session has ended, and fails a send that m
   expect(mocks.resumeHook).not.toHaveBeenCalled();
 });
 
-it("starts the delivery workflow on the current deployment, never one the event names", async () => {
-  const event = { id: "e1", data: {}, acceptedDeploymentId: "dpl_old" };
-  await startSubscriptionDeliveryStep({ ...delivery("e1"), event });
+it("starts the delivery workflow on the deployment that received the event", async () => {
+  await startSubscriptionDeliveryStep(delivery("e1"));
 
-  expect(mocks.startWorkflow).toHaveBeenCalledExactlyOnceWith("delivery-reference", [
-    expect.objectContaining({ binding, event }),
-  ]);
-  expect(mocks.startWorkflowOnDeployment).not.toHaveBeenCalled();
+  expect(mocks.startWorkflowOnDeployment).toHaveBeenCalledExactlyOnceWith(
+    "delivery-reference",
+    [delivery("e1")],
+    "dpl_receiver",
+  );
+  expect(mocks.startWorkflow).not.toHaveBeenCalled();
+});
+
+it("runs onEvent from the bundle of the deployment that received the event, not the one the subscription opened under", async () => {
+  const opened = vi.fn(async () => "Opened under the old callback");
+  const current = vi.fn(async () => null);
+  mocks.bundles.set("/virtual", bundleWith(opened));
+  mocks.bundles.set("/current", {
+    ...bundleWith(current),
+    compiledArtifactsSource: { kind: "disk", appRoot: "/current" },
+  });
+
+  await dispatchSubscriptionStep(delivery("e1", { id: "e1" }, "/current"));
+
+  expect(current).toHaveBeenCalledTimes(1);
+  expect(opened).not.toHaveBeenCalled();
+  expect(mocks.send).not.toHaveBeenCalled();
+});
+
+it("sends nothing when the receiving deployment no longer defines the channel", async () => {
+  mocks.bundles.set(
+    "/virtual",
+    bundleWith(() => "Still permitted"),
+  );
+  mocks.bundles.set("/current", {
+    compiledArtifactsSource: { kind: "disk", appRoot: "/current" },
+    resolvedAgent: { channels: [] },
+  });
+
+  await dispatchSubscriptionStep(delivery("e1", { id: "e1" }, "/current"));
+
+  expect(mocks.send).not.toHaveBeenCalled();
 });
 
 it("hands the event to each owner hook and reports the owners that ended", async () => {
   mocks.hooks.add(subscriptionHookToken("a"));
   mocks.hooks.add(subscriptionHookToken("b"));
-  const event = { id: "e1", data: { ok: true } };
+  const event = { id: "e1", data: { ok: true }, origin: origin() };
 
   const gone = await fanOutEventStep({ bindingIds: ["a", "gone", "b"], event });
 
@@ -263,7 +319,7 @@ it("hands the event to each owner hook and reports the owners that ended", async
 it("rethrows a failure other than a missing hook while fanning out", async () => {
   mocks.resumeHook.mockRejectedValue(new Error("world unavailable"));
   await expect(
-    fanOutEventStep({ bindingIds: ["a"], event: { id: "e1", data: {} } }),
+    fanOutEventStep({ bindingIds: ["a"], event: { id: "e1", data: {}, origin: origin() } }),
   ).rejects.toThrow("world unavailable");
 });
 

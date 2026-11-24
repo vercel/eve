@@ -10,7 +10,7 @@ import { createRuntimeAdapterRegistry } from "#runtime/channels/registry.js";
 import { defineMcpClientConnection } from "#public/definitions/connections/mcp.js";
 import { afterEach, beforeEach, expect, it, vi, onTestFinished } from "vitest";
 import { ContextContainer, contextStorage, loadContext } from "#context/container.js";
-import { AuthKey, SessionIdKey, SessionTraceSeedKey } from "#context/keys.js";
+import { AuthKey, SessionIdKey } from "#context/keys.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { fromCompiledBundle } from "#definitions/compiled-agent.js";
 import { requireCompiledBundle, SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
@@ -49,7 +49,6 @@ const { createClient, loadBundle, handlers, retired, workflowRunId, ownerHooks }
     ownerHooks: {
       routed: false,
       deliveries: [] as Promise<void>[],
-      serializedContext: (_binding: ConnectionBinding): Record<string, unknown> => ({}),
     },
     loadBundle: vi.fn(),
     handlers: new Map<
@@ -77,7 +76,6 @@ vi.mock("#internal/workflow/runtime.js", async (importOriginal) => {
       const { event } = message as { event: SubscriptionEvent };
       ownerHooks.deliveries.push(
         dispatchSubscriptionStep({
-          serializedContext: ownerHooks.serializedContext(handler.binding),
           binding: handler.binding,
           event,
         }),
@@ -568,7 +566,14 @@ function eventOf(
   delivery: ConnectionEventDelivery,
   requestTraceContext?: SubscriptionEvent["requestTraceContext"],
 ): SubscriptionEvent {
-  const base = { id: delivery.deliveryId, data: parseJsonValue(delivery) };
+  const base = {
+    id: delivery.deliveryId,
+    data: parseJsonValue(delivery),
+    origin: {
+      deploymentId: "dpl_receiver",
+      compiledArtifactsSource: { kind: "disk" as const, appRoot: "/virtual/events" },
+    },
+  };
   return requestTraceContext === undefined ? base : { ...base, requestTraceContext };
 }
 function controlOf(
@@ -588,11 +593,7 @@ function payload(): SubscriptionEvent {
   return eventOf(delivery());
 }
 async function dispatch(event: SubscriptionEvent, binding = initial.binding!) {
-  await dispatchSubscriptionStep({
-    serializedContext: initial.serializedContext,
-    binding,
-    event,
-  });
+  await dispatchSubscriptionStep({ binding, event });
 }
 
 it.each(["user", "app"] as const)(
@@ -998,15 +999,15 @@ it("does not let a sampled webhook override the session's saved sampling decisio
   onTestFinished(() => tracing.close());
   await watch();
   tracing.exporter.reset();
-  ctx.set(SessionTraceSeedKey, {
+  const traceSeed = {
     traceId: "3".repeat(32),
     spanId: "4".repeat(16),
     traceFlags: 0,
-    decision: { action: "record", recordInputs: false, recordOutputs: false },
-  });
-  initial = { ...initial, serializedContext: serializeContext(ctx) };
+    decision: { action: "record" as const, recordInputs: false, recordOutputs: false },
+  };
   await dispatch(
     eventOf(delivery(), { traceId: "1".repeat(32), spanId: "2".repeat(16), traceFlags: 1 }),
+    { ...initial.binding!, traceSeed },
   );
   expect(callback).toHaveBeenCalledOnce();
   expect(tracing.exporter.getFinishedSpans()).toEqual([]);
@@ -1021,8 +1022,6 @@ it("delivers one upstream event to every session holding the same upstream subsc
     expiresAt: null,
   }));
   ownerHooks.routed = true;
-  const bundle = requireCompiledBundle(ctx);
-  ownerHooks.serializedContext = (binding) => handlerContext(binding, bundle);
   const bindings: ConnectionBinding[] = [];
   for (const sessionId of ["session-1", "session-2"]) {
     ctx.set(SessionIdKey, sessionId);

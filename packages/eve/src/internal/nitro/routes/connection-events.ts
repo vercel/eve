@@ -56,11 +56,15 @@ export async function handleConnectionEventRequest(
       const requestTraceContext = connectionEventTraceContext(span?.spanContext());
       const owners = installedDurableHost()?.subscriptions;
       if (owners === undefined) throw new Error("This host keeps no subscriptions.");
-      const delivered = await owners.deliver(origin.bindingId, {
-        id: delivery.deliveryId,
-        data: parseJsonValue(delivery),
-        requestTraceContext,
-      });
+      const delivered = await owners.deliver(
+        origin.bindingId,
+        {
+          id: delivery.deliveryId,
+          data: parseJsonValue(delivery),
+          requestTraceContext,
+        },
+        bundle.compiledArtifactsSource,
+      );
       return new Response(null, { status: delivered ? 202 : 410 });
     } catch (error) {
       if (isObject(error) && error.code === "invalid_delivery")

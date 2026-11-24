@@ -67,7 +67,7 @@ export async function subscriptionWorkflow(input: {
       continue;
     seen.push(message.event.id);
     if (seen.length > REMEMBERED_EVENTS) seen.shift();
-    await startSubscriptionDeliveryStep({ binding, serializedContext, event: message.event });
+    await startSubscriptionDeliveryStep({ binding, event: message.event });
   }
   if (sharesKey) await leaveKeyStep({ binding, key: opened.key });
   let retryMs = FIRST_CLOSE_RETRY_MS;

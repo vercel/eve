@@ -222,6 +222,7 @@ async function buildRouteArgs(input: {
   const agent = createAgentDescriptionRouteArgs(() => resolveNitroCompiledArtifactsSource(config));
   return createChannelRouteArgs({
     adapter,
+    compiledArtifactsSource: () => resolveNitroCompiledArtifactsSource(config),
     agent: {
       ...agent.args,
       invokeTool: createRouteInvokeTool({

@@ -41,6 +41,7 @@ vi.mock("#execution/workflow-references.js", () => ({
 }));
 vi.mock("#execution/workflow-runtime.js", () => ({
   startWorkflowOnCurrentDeployment: started,
+  resolveCurrentWorkflowDeploymentId: async () => "dpl_current",
 }));
 
 const {
@@ -154,36 +155,59 @@ it("asks a running owner to retire, and reports one that has ended", async () =>
   expect(resumed).toHaveBeenCalledExactlyOnceWith(token, { kind: "retire" });
 });
 
+const artifacts = { kind: "disk", appRoot: "/virtual/subscriptions" } as const;
+const origin = { deploymentId: "dpl_current", compiledArtifactsSource: artifacts };
+
 it("hands an event to the run holding the key, and reports a key nobody holds", async () => {
   const source = { kind: "channel", name: "github" } as const;
-  const event = { id: "e1", data: { ok: true } };
-  expect(await emitSubscriptionEvent(source.name, "vercel/eve#7", event)).toBe(false);
+  const occurrence = { id: "e1", data: { ok: true } };
+  expect(await emitSubscriptionEvent(source.name, "vercel/eve#7", occurrence, artifacts)).toBe(
+    false,
+  );
 
   const keyToken = subscriptionKeyHookToken(source, "vercel/eve#7");
   hooks.set(keyToken, { runId: "key-run", metadata: undefined });
-  expect(await emitSubscriptionEvent(source.name, "vercel/eve#7", event)).toBe(true);
-  expect(resumed).toHaveBeenCalledExactlyOnceWith(keyToken, { kind: "emit", event });
-  expect(await emitSubscriptionEvent(source.name, "vercel/eve#8", event)).toBe(false);
+  expect(await emitSubscriptionEvent(source.name, "vercel/eve#7", occurrence, artifacts)).toBe(
+    true,
+  );
+  expect(resumed).toHaveBeenCalledExactlyOnceWith(keyToken, {
+    kind: "emit",
+    event: { ...occurrence, origin },
+  });
+  expect(await emitSubscriptionEvent(source.name, "vercel/eve#8", occurrence, artifacts)).toBe(
+    false,
+  );
 });
 
 it("hands an event straight to a watch's own hook, and reports a watch that has ended", async () => {
-  const event = { id: "e1", data: { ok: true } };
-  expect(await deliverSubscriptionEvent(binding.id, event)).toBe(false);
+  const occurrence = { id: "e1", data: { ok: true } };
+  expect(await deliverSubscriptionEvent(binding.id, occurrence, artifacts)).toBe(false);
 
   hooks.set(token, { runId: "owner-run", metadata: binding });
-  expect(await deliverSubscriptionEvent(binding.id, event)).toBe(true);
-  expect(resumed).toHaveBeenCalledExactlyOnceWith(token, { kind: "delivery", event });
+  expect(await deliverSubscriptionEvent(binding.id, occurrence, artifacts)).toBe(true);
+  expect(resumed).toHaveBeenCalledExactlyOnceWith(token, {
+    kind: "delivery",
+    event: { ...occurrence, origin },
+  });
 });
 
-it("does not stamp the receiving deployment on an emitted event", async () => {
-  vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_old");
+it("stamps the emitting deployment and bundle on the event, whatever the occurrence carries", async () => {
   const source = { kind: "channel", name: "github" } as const;
   const keyToken = subscriptionKeyHookToken(source, "vercel/eve#7");
   hooks.set(keyToken, { runId: "key-run", metadata: undefined });
-  const event = { id: "e1", data: {} };
+  const forged = {
+    id: "e1",
+    data: { origin: { deploymentId: "dpl_attacker" } },
+    origin: {
+      deploymentId: "dpl_attacker",
+      compiledArtifactsSource: { kind: "disk", appRoot: "/x" },
+    },
+  };
 
-  await emitSubscriptionEvent(source.name, "vercel/eve#7", event);
+  await emitSubscriptionEvent(source.name, "vercel/eve#7", forged, artifacts);
 
-  expect(resumed).toHaveBeenCalledExactlyOnceWith(keyToken, { kind: "emit", event });
-  vi.unstubAllEnvs();
+  expect(resumed).toHaveBeenCalledExactlyOnceWith(keyToken, {
+    kind: "emit",
+    event: { ...forged, origin },
+  });
 });

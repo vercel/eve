@@ -159,7 +159,14 @@ const key = "vercel/eve#7";
 const ownerToken = subscriptionHookToken(binding.id);
 const keyToken = subscriptionKeyHookToken(source, key);
 const serializedContext = {};
-const event = (id: string) => ({ id, data: { id } });
+const event = (id: string) => ({
+  id,
+  data: { id },
+  origin: {
+    deploymentId: "dpl_receiver",
+    compiledArtifactsSource: { kind: "disk" as const, appRoot: "/virtual" },
+  },
+});
 const opened = (expiresAt: string | null = null): OpenOutcome => ({ opened: { key, expiresAt } });
 const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 const watching = (token: string) => vi.waitFor(() => expect(world.owners.has(token)).toBe(true));
@@ -226,7 +233,7 @@ it("forwards each delivery to the delivery step", async () => {
   await vi.waitFor(() => expect(world.join).toHaveBeenCalled());
   world.resume(ownerToken, { kind: "delivery", event: event("a") });
   await vi.waitFor(() => expect(world.start).toHaveBeenCalledTimes(1));
-  expect(world.start).toHaveBeenCalledWith({ binding, serializedContext, event: event("a") });
+  expect(world.start).toHaveBeenCalledWith({ binding, event: event("a") });
 
   world.resume(ownerToken, { kind: "retire" });
   await run;
@@ -278,7 +285,6 @@ it("delivers a connection's events straight to its own hook without joining or l
   await vi.waitFor(() => expect(world.start).toHaveBeenCalledTimes(1));
   expect(world.start).toHaveBeenCalledWith({
     binding: connectionBinding,
-    serializedContext,
     event: upstream("a"),
   });
 
@@ -311,7 +317,6 @@ it("drops a connection delivery from an earlier upstream subscription, control m
 
   expect(world.start).toHaveBeenCalledExactlyOnceWith({
     binding: connectionBinding,
-    serializedContext,
     event: upstream("new-event"),
   });
 
@@ -555,7 +560,7 @@ it("hands its first subscription to the run that already holds the key, without 
 });
 
 it("dispatches a delivery in its own workflow", async () => {
-  const input = { binding, serializedContext, event: event("a") };
+  const input = { binding, event: event("a") };
   await subscriptionDeliveryWorkflow(input);
   expect(world.dispatch).toHaveBeenCalledExactlyOnceWith(input);
 });
@@ -565,7 +570,7 @@ it("lets a failed delivery fail its own run without touching the owner's hook", 
   await vi.waitFor(() => expect(world.join).toHaveBeenCalled());
   const live = world.owners.get(ownerToken);
   world.dispatch.mockRejectedValueOnce(new Error("callback failed"));
-  const input = { binding, serializedContext, event: event("a") };
+  const input = { binding, event: event("a") };
   await expect(subscriptionDeliveryWorkflow(input)).rejects.toThrow("callback failed");
   expect(world.owners.get(ownerToken)).toBe(live);
 

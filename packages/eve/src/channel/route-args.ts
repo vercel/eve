@@ -5,6 +5,7 @@ import {
   createChannelDeliveryMetadata,
   type ChannelDeliverySource,
 } from "#channel/delivery-metadata.js";
+import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { createEmitChannelEventFn } from "#runtime/subscriptions/emit.js";
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import { createAttachSessionFn } from "#channel/session.js";
@@ -38,6 +39,7 @@ export interface ChannelRoutePorts {
   readonly waitUntil: (task: Promise<unknown>) => void;
   readonly skillFiles?: SkillFileSource;
   readonly subscriptionEvents?: readonly ChannelEventDefinition[];
+  readonly compiledArtifactsSource: () => RuntimeCompiledArtifactsSource;
   readonly remoteAgentStreamHeaders?: RemoteAgentStreamHeadersResolver;
 }
 
@@ -61,7 +63,11 @@ export function createChannelRouteArgs(ports: ChannelRoutePorts): RouteHandlerAr
             params: ports.params,
             experimental: {
               subscriptions: {
-                emit: createEmitChannelEventFn(channelName, ports.subscriptionEvents),
+                emit: createEmitChannelEventFn(
+                  channelName,
+                  ports.subscriptionEvents,
+                  ports.compiledArtifactsSource,
+                ),
               },
             },
             requestIp: ports.requestIp,

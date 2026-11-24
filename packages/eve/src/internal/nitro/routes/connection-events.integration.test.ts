@@ -17,6 +17,7 @@ vi.mock("#runtime/sessions/compiled-agent-cache.js", () => ({
 vi.mock("#internal/nitro/routes/runtime-artifacts.js", () => ({
   resolveNitroCompiledArtifactsSource: () => ({ kind: "disk", appRoot: "/virtual/events" }),
 }));
+const artifacts = { kind: "disk", appRoot: "/virtual/events" };
 const input = {
   artifactsConfig: { kind: "production" as const, sandboxScope: "fixture" },
   connectionName: "issues",
@@ -36,6 +37,7 @@ beforeEach(() => {
   verify.mockResolvedValue(envelope);
   deliver.mockResolvedValue(true);
   load.mockResolvedValue({
+    compiledArtifactsSource: artifacts,
     resolvedAgent: {
       connections: [
         {
@@ -73,11 +75,11 @@ it("verifies the untouched request and acknowledges only once the watch's own ru
   await started;
   expect(settled).toBe(false);
   expect(verify).toHaveBeenCalledWith(req, { path: "/eve/support/v1/hooks/issues" });
-  expect(deliver).toHaveBeenCalledExactlyOnceWith("a".repeat(64), {
-    id: "del_1",
-    data: envelope,
-    requestTraceContext: undefined,
-  });
+  expect(deliver).toHaveBeenCalledExactlyOnceWith(
+    "a".repeat(64),
+    { id: "del_1", data: envelope, requestTraceContext: undefined },
+    artifacts,
+  );
   accepted();
   expect((await response).status).toBe(202);
 });

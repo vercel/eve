@@ -62,8 +62,10 @@ export const workflowHost: DurableHost = {
     start: (binding, bundle, signal) => startSubscriptionOwner(binding, bundle, signal),
     find: (bindingId) => findSubscriptionOwner(bindingId),
     retire: (bindingId) => retireSubscriptionOwner(bindingId),
-    emit: (channelName, key, event) => emitSubscriptionEvent(channelName, key, event),
-    deliver: (bindingId, event) => deliverSubscriptionEvent(bindingId, event),
+    emit: (channelName, key, occurrence, source) =>
+      emitSubscriptionEvent(channelName, key, occurrence, source),
+    deliver: (bindingId, occurrence, source) =>
+      deliverSubscriptionEvent(bindingId, occurrence, source),
   },
   callbackBaseUrl() {
     try {

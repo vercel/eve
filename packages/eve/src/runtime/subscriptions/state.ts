@@ -1,6 +1,7 @@
 import type { SpanContext } from "#compiled/@opentelemetry/api/index.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionTraceSeed } from "#context/keys.js";
+import type { DurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
 import type {
   ManagedEventSubscribeInput,
   ManagedEventSubscription,
@@ -59,10 +60,19 @@ export type SubscriptionOutcome = OpenOutcome | { readonly ownerRunId: string };
 
 export const SUBSCRIPTION_OUTCOME_NAMESPACE = "eve.subscription.outcome";
 
-export interface SubscriptionEvent {
+export interface SubscriptionOccurrence {
   readonly id: string;
   readonly data: JsonValue;
   readonly requestTraceContext?: SpanContext;
+}
+
+export interface SubscriptionEventOrigin {
+  readonly deploymentId: string;
+  readonly compiledArtifactsSource: DurableCompiledArtifactsSource;
+}
+
+export interface SubscriptionEvent extends SubscriptionOccurrence {
+  readonly origin: SubscriptionEventOrigin;
 }
 
 export type SubscriptionOwnerMessage =

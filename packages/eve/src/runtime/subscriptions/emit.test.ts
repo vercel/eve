@@ -22,13 +22,14 @@ const events = [
   },
 ];
 const occurrence = { id: "o1", data: {} };
+const artifacts = { kind: "disk", appRoot: "/virtual" } as const;
 
 beforeEach(() => {
   host.emit.mockReset().mockResolvedValue(true);
 });
 
 it("hands a declared event to the subscriptions holding its scope", async () => {
-  const emit = createEmitChannelEventFn("ci", events);
+  const emit = createEmitChannelEventFn("ci", events, () => artifacts);
 
   await expect(emit("build.failed", { project: "web" }, occurrence)).resolves.toBe(true);
 
@@ -36,11 +37,12 @@ it("hands a declared event to the subscriptions holding its scope", async () => 
     "ci",
     channelEventKey("build.failed", { project: "web" }),
     occurrence,
+    artifacts,
   );
 });
 
 it("throws for an event the channel does not declare, naming the closest ones", async () => {
-  const emit = createEmitChannelEventFn("ci", events);
+  const emit = createEmitChannelEventFn("ci", events, () => artifacts);
 
   await expect(emit("build.faild", { project: "web" }, occurrence)).rejects.toThrow(
     'Channel "ci" does not declare the event "build.faild"',
@@ -52,7 +54,7 @@ it("throws for an event the channel does not declare, naming the closest ones", 
 });
 
 it("throws when the scope does not match the event's input schema", async () => {
-  const emit = createEmitChannelEventFn("ci", events);
+  const emit = createEmitChannelEventFn("ci", events, () => artifacts);
 
   await expect(emit("build.failed", { repo: "web" }, occurrence)).rejects.toThrow(
     'Subscription input does not match the schema of "build.failed"',
@@ -62,6 +64,10 @@ it("throws when the scope does not match the event's input schema", async () => 
 
 it("throws when the channel declares no events at all", async () => {
   await expect(
-    createEmitChannelEventFn("ci", undefined)("build.failed", { project: "web" }, occurrence),
+    createEmitChannelEventFn("ci", undefined, () => artifacts)(
+      "build.failed",
+      { project: "web" },
+      occurrence,
+    ),
   ).rejects.toThrow('Channel "ci" does not declare the event "build.failed"');
 });

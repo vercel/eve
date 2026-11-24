@@ -8,8 +8,14 @@ import {
   subscriptionDeliveryWorkflowReference,
   subscriptionKeyWorkflowReference,
 } from "#execution/workflow-references.js";
-import { startWorkflowOnCurrentDeployment } from "#execution/workflow-runtime.js";
+import {
+  startWorkflowOnCurrentDeployment,
+  startWorkflowOnDeployment,
+} from "#execution/workflow-runtime.js";
 import { getHookByToken, resumeHook } from "#internal/workflow/runtime.js";
+import { resolveDurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
+import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
+import { bindingContext } from "#runtime/subscriptions/owner.js";
 import { readFirstPublished } from "#runtime/subscriptions/published-outcome.js";
 import { subscriptionSource } from "#runtime/subscriptions/sources/index.js";
 import {
@@ -34,7 +40,6 @@ const MAX_JOIN_FORWARDS = 2;
 
 export interface SubscriptionDeliveryInput {
   readonly binding: SubscriptionBinding;
-  readonly serializedContext: Record<string, unknown>;
   readonly event: SubscriptionEvent;
 }
 
@@ -151,14 +156,22 @@ export async function startSubscriptionDeliveryStep(
   input: SubscriptionDeliveryInput,
 ): Promise<void> {
   "use step";
-  await startWorkflowOnCurrentDeployment(subscriptionDeliveryWorkflowReference, [input]);
+  await startWorkflowOnDeployment(
+    subscriptionDeliveryWorkflowReference,
+    [input],
+    input.event.origin.deploymentId,
+  );
 }
 
 export async function dispatchSubscriptionStep(input: SubscriptionDeliveryInput): Promise<void> {
   "use step";
   const { binding, event } = input;
-  const ctx = await deserializeContext(input.serializedContext);
-  ctx.setVirtualContext(AuthKey, binding.auth);
+  const bundle = await getCompiledRuntimeAgentBundle({
+    compiledArtifactsSource: resolveDurableCompiledArtifactsSource(
+      event.origin.compiledArtifactsSource,
+    ),
+  });
+  const ctx = await deserializeContext(await bindingContext(binding, bundle));
   await contextStorage.run(ctx, async () => {
     await subscriptionSource(binding.source.kind).deliver({ ctx, binding, event });
   });

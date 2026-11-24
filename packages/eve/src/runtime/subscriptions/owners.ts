@@ -1,8 +1,9 @@
+import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type {
   OpenedSubscription,
   SubscriptionBinding,
-  SubscriptionEvent,
+  SubscriptionOccurrence,
 } from "#runtime/subscriptions/state.js";
 
 export interface SubscriptionOwners {
@@ -15,6 +16,15 @@ export interface SubscriptionOwners {
     signal?: AbortSignal,
   ): Promise<OpenedSubscription | undefined>;
   retire(bindingId: string): Promise<boolean>;
-  emit(channelName: string, key: string, event: SubscriptionEvent): Promise<boolean>;
-  deliver(bindingId: string, event: SubscriptionEvent): Promise<boolean>;
+  emit(
+    channelName: string,
+    key: string,
+    occurrence: SubscriptionOccurrence,
+    source: RuntimeCompiledArtifactsSource,
+  ): Promise<boolean>;
+  deliver(
+    bindingId: string,
+    occurrence: SubscriptionOccurrence,
+    source: RuntimeCompiledArtifactsSource,
+  ): Promise<boolean>;
 }
