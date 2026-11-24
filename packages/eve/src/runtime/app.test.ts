@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { platformContext } from "#platform/context.js";
-import { createVercelPlatformContext } from "#platform/vercel/context.js";
+import { defaultPlatform } from "#platform/default.js";
+import { createEntities } from "#platform/entities.js";
 import { createProcessApp, installProcessApp, openSession, type App } from "#runtime/app.js";
 import { endLifetime, registerCleanup } from "#runtime/lifetime.js";
 
@@ -11,7 +12,7 @@ afterEach(() => uninstall?.());
 
 describe("processApp", () => {
   it("is where platformContext() reads the platform from", () => {
-    const platform = createVercelPlatformContext();
+    const platform = createEntities(defaultPlatform, undefined);
     const app = createProcessApp();
     app.platform = platform;
     uninstall = installProcessApp(app);

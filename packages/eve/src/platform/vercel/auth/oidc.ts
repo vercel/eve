@@ -264,7 +264,7 @@ export function vercelOidc(opts: VercelOidcOptions = {}): AuthFn<Request> {
 }
 
 function isLocalDevelopmentVercelOidc(): boolean {
-  const environmentKind = vercelDeployment.environmentKind();
+  const environmentKind = vercelDeployment.environment();
   if (environmentKind === "development") return true;
   if (environmentKind === "preview" || environmentKind === "production") return false;
   return isEveDevEnvironment();

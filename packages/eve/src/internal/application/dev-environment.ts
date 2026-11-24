@@ -21,11 +21,11 @@ export function isEveDevEnvironment(): boolean {
 }
 
 export function isLocalDevelopmentServer(): boolean {
-  return platformContext().deployment.isPlatformDevelopmentServer() || isEveDevEnvironment();
+  return (platformContext().deployment.localDevelopment?.() ?? false) || isEveDevEnvironment();
 }
 
 export function resolveInstrumentationEnvironment(): ConversationEnvironment {
-  const environmentKind = platformContext().deployment.environmentKind();
+  const environmentKind = platformContext().deployment.environment();
   if (isEveDevEnvironment() || environmentKind === "development") return "development";
   return environmentKind === "preview" ? "preview" : "production";
 }

@@ -1,8 +1,6 @@
-import { lookup } from "node:dns";
-import type { LookupFunction } from "node:net";
-
 import type { Dispatcher1Wrapper } from "undici";
 
+import { loadAddressGuardedDispatcher } from "#runtime-env/public-dispatcher.js";
 import { isBlockedDestinationHost } from "#shared/network-address.js";
 
 export class UnsafeDestinationError extends Error {
@@ -55,16 +53,18 @@ const dispatcherSupport = new WeakMap<typeof fetch, Promise<boolean>>();
 export async function createPublicDispatcher(
   policy: PublicDestinationPolicy,
 ): Promise<Dispatcher1Wrapper> {
-  const undici = await import("undici").catch(() => undefined);
-  if (undici === undefined) throw new UnguardedRuntimeError();
+  const createDispatcher = await loadAddressGuardedDispatcher({
+    isBlocked: (address) => isBlockedDestinationHost(address, policy),
+    blocked: () => new UnsafeDestinationError(),
+  });
+  if (createDispatcher === undefined) throw new UnguardedRuntimeError();
   let supported = dispatcherSupport.get(fetch);
   if (supported === undefined) {
     supported = fetchHonorsDispatcher();
     dispatcherSupport.set(fetch, supported);
   }
   if (!(await supported)) throw new UnguardedRuntimeError();
-  const { Agent, Dispatcher1Wrapper } = undici;
-  return new Dispatcher1Wrapper(new Agent({ connect: { lookup: createPublicLookup(policy) } }));
+  return createDispatcher();
 }
 
 async function fetchHonorsDispatcher(): Promise<boolean> {
@@ -99,44 +99,6 @@ export function fetchWithDispatcher(url: string | URL, init: DispatcherRequestIn
   const fetchWithUndici = fetch as typeof fetch &
     ((input: string | URL, init: DispatcherRequestInit) => Promise<Response>);
   return fetchWithUndici(url, init);
-}
-
-function createPublicLookup(policy: PublicDestinationPolicy): LookupFunction {
-  return (hostname, lookupOptions, callback) => {
-    lookup(hostname, { all: true, verbatim: true }, (error, addresses) => {
-      if (error !== null) {
-        callback(error, "", 0);
-        return;
-      }
-
-      if (addresses.some(({ address }) => isBlockedDestinationHost(address, policy))) {
-        callback(new UnsafeDestinationError(), "", 0);
-        return;
-      }
-
-      const matchingAddresses =
-        lookupOptions.family === undefined || lookupOptions.family === 0
-          ? addresses
-          : addresses.filter(({ family }) => family === lookupOptions.family);
-
-      if (matchingAddresses.length === 0) {
-        const error = new Error(
-          `Unable to resolve URL hostname "${hostname}" in the requested IP family.`,
-        );
-        Object.assign(error, { code: "ENOTFOUND" });
-        callback(error, "", 0);
-        return;
-      }
-
-      if (lookupOptions.all === true) {
-        callback(null, matchingAddresses);
-        return;
-      }
-
-      const selected = matchingAddresses[0]!;
-      callback(null, selected.address, selected.family);
-    });
-  };
 }
 
 export async function readBoundedResponse(

@@ -26,7 +26,7 @@ import {
 import { stageProductionCompilerArtifacts } from "#internal/application/production-compiler-artifacts.js";
 import { stageBuildDeploymentId } from "#internal/nitro/host/stage-build-deployment-id.js";
 import { createHostNitro } from "#internal/nitro/host/create-host-nitro.js";
-import { platformContext } from "#platform/context.js";
+import { platformBuild } from "#platform/build.js";
 import { createHostSpec } from "#internal/nitro/host/host-spec.js";
 import { emitVercelAgentSummary } from "#internal/nitro/host/build-vercel-agent-summary.js";
 import { emitConnectManifest } from "#internal/external-resources.js";
@@ -39,7 +39,6 @@ import {
 import { createProductionNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
 import { platformBuildOutput } from "#platform/build-output.js";
 import type { PlatformBuildOutput } from "#platform/types.js";
-import type { BuildTarget } from "#platform/context.js";
 import { prewarmAppSandboxes } from "#execution/sandbox/prewarm.js";
 import type { ApplicationBuildOptions } from "#internal/nitro/host/types.js";
 import { findClosestVercelOutputDirectory } from "#shared/vercel-output-directory.js";
@@ -52,6 +51,8 @@ import { isObject } from "#shared/guards.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import { normalizePublicRoutePrefix } from "#shared/public-route-prefix.js";
 import { isPathInsideOrEqual } from "#shared/path-inside.js";
+
+type BuildTarget = "vercel" | "node";
 
 function trimTrailingSlash(path: string): string {
   return path.replace(/[\\/]+$/, "");
@@ -226,7 +227,7 @@ export async function buildApplication(
   const profiler = profileOutputPath === undefined ? undefined : new ApplicationBuildProfiler();
   const platform: ApplicationBuildPlatform = {
     output: platformBuildOutput(),
-    target: platformContext().build.target(),
+    target: platformBuild().platformOutput?.() === true ? "vercel" : "node",
   };
 
   const extensionBuild = await measureBuildPhase(profiler, "extension.check", () =>

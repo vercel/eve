@@ -5,7 +5,7 @@ import type { NextConfig } from "next";
 import { assertValidPublicAgentName } from "#internal/agent-name.js";
 import { type AgentWorkspace, findEveProjectContext } from "#internal/project-context.js";
 import { writeMultiAgentSummary } from "#internal/vercel-agent-summary.js";
-import { platformContext } from "#platform/context.js";
+import { platformBuild } from "#platform/build.js";
 import { quoteVercelShellArgument, toVercelRelativePath } from "#internal/vercel/build-command.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import { joinEveRoutePath } from "#shared/eve-route-path.js";
@@ -215,7 +215,7 @@ function resolveProductionDestination(input: {
   readonly destinationPrefix: string;
   readonly localServerOrigin?: string;
 } {
-  if (platformContext().build.target() === "vercel") {
+  if (platformBuild().platformOutput?.() === true) {
     return {
       destinationPrefix: input.servicePrefix,
     };
@@ -464,7 +464,7 @@ export function withEve<TConfig extends object>(
       nextRoot,
     });
 
-    if (platformContext().build.target() === "vercel") {
+    if (platformBuild().platformOutput?.() === true) {
       return nextConfig;
     }
 

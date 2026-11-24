@@ -253,11 +253,11 @@
  *             `@vercel/otel` OpenTelemetry bootstrap run on any host, so they
  *             are exempt.
  *   rule 70 — Outside `packages/eve/src/platform/`, eve depends only on the
- *             platform contract: `#platform/context.js` and
- *             `#platform/services.js`, the capability
- *             modules whose implementations must stay out of bundles that
- *             don't use them (`hosted-sandbox`, `document-store`,
- *             `schedules`, `models`, `runtime-spans`), and, in the Nitro
+ *             platform contract: `#platform/context.js`, the entity types
+ *             and declarations (`entities`, `declaration`, `default`), the
+ *             capability modules whose implementations must stay out of
+ *             bundles that don't use them (`build`, `hosted-sandbox`,
+ *             `document-store`, `schedules`, `models`, `runtime-spans`), and, in the Nitro
  *             build host, the build-output port (`#platform/build-output.js`,
  *             `#platform/types.js`). Platform implementations stay behind
  *             them.
@@ -284,14 +284,12 @@
  *             through `#runtime-env/*`, never by a relative path, so the build
  *             chooses the Node or the web version.
  *   rule 74 — The session program (rule 66's files) loads without Node: the
- *             same walk from those files reaches no Node-only import. The
- *             baseline lists the imports the program still reaches, and may only
- *             shrink.
+ *             same walk from those files reaches no Node-only import.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
  * may only shrink (as offenders are removed) — they may never grow.
- * Rules 67, 68, 69, 70, 71, 72, and 73 have no baseline.
+ * Rules 67, 68, 69, 70, 71, 72, 73, and 74 have no baseline.
  */
 import { existsSync } from "node:fs";
 import { glob, readFile, readdir, lstat } from "node:fs/promises";
@@ -1260,27 +1258,14 @@ async function checkRule73() {
   return violations;
 }
 
-/** @param {Set<string>} allowlist */
-async function checkRule74(allowlist) {
+async function checkRule74() {
   /** @type {Violation[]} */
   const violations = [];
-  const seen = new Set();
   for (const { file, specifier, chain } of await nodeOnlyReach([...HOST_NEUTRAL_FILES].sort())) {
-    const key = `${file} -> ${specifier}`;
-    seen.add(key);
-    if (allowlist.has(key)) continue;
     violations.push({
       rule: 74,
       file,
       message: `imports "${specifier}", which only loads in Node, and the session program reaches it. Import chain: ${chain.join(" -> ")}. The session program must load without Node: reach Node through a \`#runtime-env/*\` module, or move the work into a session step.`,
-    });
-  }
-  for (const key of allowlist) {
-    if (seen.has(key)) continue;
-    violations.push({
-      rule: 74,
-      file: "scripts/guard-invariants-baseline.json",
-      message: `"${key}" no longer happens. Remove it from \`rule74_sessionProgramNodeImportAllowlist\`.`,
     });
   }
   return violations;
@@ -1515,13 +1500,16 @@ function checkRule69(posix, content, current) {
 // ---------- Rule 70: eve depends on the platform contract, not its implementations ----------
 
 const PLATFORM_CONTRACT_MODULES = new Set([
+  "#platform/build.js",
   "#platform/context.js",
+  "#platform/declaration.js",
+  "#platform/default.js",
   "#platform/document-store.js",
+  "#platform/entities.js",
   "#platform/hosted-sandbox.js",
   "#platform/models.js",
   "#platform/runtime-spans.js",
   "#platform/schedules.js",
-  "#platform/services.js",
 ]);
 const PLATFORM_BUILD_HOST_DIR = "packages/eve/src/internal/nitro/host/";
 const PLATFORM_BUILD_HOST_MODULES = new Set(["#platform/build-output.js", "#platform/types.js"]);
@@ -1550,7 +1538,7 @@ function checkRule70(posix, lines, violations) {
       violations.push({
         rule: 70,
         file: `${posix}:${index + 1}`,
-        message: `imports \`${specifier}\`. Outside \`packages/eve/src/platform/\`, eve depends only on the platform contract (\`#platform/context.js\` and its capability modules), plus the build-output port in the Nitro build host. Add what you need to the \`PlatformContext\` contract and \`platform/vercel/context.ts\`.`,
+        message: `imports \`${specifier}\`. Outside \`packages/eve/src/platform/\`, eve depends only on the platform contract (\`#platform/context.js\` and its capability modules), plus the build-output port in the Nitro build host. Add what you need to the platform entities (\`#platform/entities.js\`) and the Vercel declaration (\`platform/vercel/declaration.ts\`).`,
       });
     }
   }
@@ -2872,14 +2860,12 @@ async function main() {
   violations.push(...state.rule71);
   violations.push(...state.rule72);
   violations.push(...(await checkRule73()));
-  violations.push(
-    ...(await checkRule74(new Set(baseline.rule74_sessionProgramNodeImportAllowlist ?? []))),
-  );
+  violations.push(...(await checkRule74()));
   for (const [file, count] of state.rule69) {
     violations.push({
       rule: 69,
       file,
-      message: `reads \`VERCEL*\` environment variables or imports \`#compiled/@vercel/*\` or \`#platform/vercel/*\` in ${count} place${count === 1 ? "" : "s"}. Vercel platform knowledge lives in \`packages/eve/src/platform/\` so eve can run on other hosts. Read platform facts and capabilities through \`platformContext()\` from \`#platform/context.js\`, or add the capability to the \`PlatformContext\` contract and \`platform/vercel/context.ts\`.`,
+      message: `reads \`VERCEL*\` environment variables or imports \`#compiled/@vercel/*\` or \`#platform/vercel/*\` in ${count} place${count === 1 ? "" : "s"}. Vercel platform knowledge lives in \`packages/eve/src/platform/\` so eve can run on other hosts. Read platform facts and capabilities through \`platformContext()\` from \`#platform/context.js\`, or add the capability to the platform entities (\`#platform/entities.js\`) and the Vercel declaration (\`platform/vercel/declaration.ts\`).`,
     });
   }
 

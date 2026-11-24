@@ -1,5 +1,6 @@
 import { installEveWorkflowQueueNamespace } from "#internal/workflow/queue-namespace.js";
-import { createPlatformContext } from "#platform/context.js";
+import type { PlatformDeclaration } from "#platform/declaration.js";
+import { createEntities } from "#platform/entities.js";
 import { processApp, type ProcessApp } from "#runtime/app.js";
 import {
   installBundledCompiledArtifacts,
@@ -13,14 +14,20 @@ export interface BootPhase<Input> {
 
 export interface ProcessBootInput {
   readonly agentName: string;
+  readonly platform?: PlatformDeclaration;
   readonly artifacts?: BundledCompiledArtifacts;
 }
 
 export const PROCESS_PHASES = [
   {
     name: "platform",
-    run(app) {
-      app.platform = createPlatformContext();
+    run(app, input) {
+      if (input.platform === undefined) {
+        throw new Error(
+          "eve reached the platform phase without a platform declaration. The generated process module must pass the platform to bootProcess().",
+        );
+      }
+      app.platform = createEntities(input.platform, undefined);
     },
   },
   {

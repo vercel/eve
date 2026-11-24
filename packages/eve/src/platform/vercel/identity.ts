@@ -1,28 +1,16 @@
-import type { PlatformIdentity } from "#platform/context.js";
+import type { JWTPayload } from "#compiled/jose/index.js";
+import { createJwtAuthenticatedCallerPrincipal } from "#channel/auth/token-claims.js";
+import type { CurrentVercelProject, ResolvedOidcAuthStrategy } from "#channel/auth/types.js";
+import type { Identity, OidcCallerVerdict } from "#platform/entities.js";
 import { vercelEnvironmentName } from "#platform/vercel/deployment.js";
 import { withVercelOidcProjectResolver } from "#platform/vercel/oidc-project.js";
 import { isVercelOidcIssuer } from "#platform/vercel/project.js";
-import type { CurrentVercelProject } from "#channel/auth/types.js";
 
-const VERCEL_REQUEST_CONTEXT = Symbol.for("@vercel/request-context");
-const VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER = "x-vercel-trusted-oidc-idp-token";
-const VERCEL_CALLBACK_HOST_ENVS = [
-  "VERCEL_URL",
-  "VERCEL_BRANCH_URL",
-  "VERCEL_PROJECT_PRODUCTION_URL",
-] as const;
-
-function readAmbientToken(): string | undefined {
-  const requestContext = (
-    globalThis as typeof globalThis & {
-      [key: symbol]: { get?(): { headers?: Record<string, string> } } | undefined;
-    }
-  )[VERCEL_REQUEST_CONTEXT];
-  const token =
-    requestContext?.get?.().headers?.["x-vercel-oidc-token"] ?? process.env.VERCEL_OIDC_TOKEN;
-  const trimmed = token?.trim();
-  return trimmed === "" ? undefined : trimmed;
-}
+const NOT_CURRENT_PROJECT: OidcCallerVerdict = {
+  kind: "continue",
+  currentProject: false,
+  runtime: false,
+};
 
 export function vercelCurrentProject(): CurrentVercelProject | undefined {
   const projectId = process.env.VERCEL_PROJECT_ID?.trim();
@@ -31,45 +19,102 @@ export function vercelCurrentProject(): CurrentVercelProject | undefined {
   return environment === undefined ? { projectId } : { environment, projectId };
 }
 
-export const vercelIdentity: PlatformIdentity = {
-  async token() {
-    const { getVercelOidcToken } = await import("#compiled/@vercel/oidc/index.js");
-    return await getVercelOidcToken();
+function currentProjectMatches(payload: JWTPayload, strategy: ResolvedOidcAuthStrategy): boolean {
+  const currentProject = strategy.currentVercelProject;
+  if (currentProject === undefined) {
+    return false;
+  }
+
+  return typeof payload.project_id === "string" && payload.project_id === currentProject.projectId;
+}
+
+function currentEnvironmentMatches(
+  payload: JWTPayload,
+  strategy: ResolvedOidcAuthStrategy,
+): boolean {
+  const currentEnvironment = strategy.currentVercelProject?.environment;
+  if (currentEnvironment === undefined || currentEnvironment.length === 0) {
+    return false;
+  }
+
+  return typeof payload.environment === "string" && payload.environment === currentEnvironment;
+}
+
+export const vercelIdentity = {
+  verifyOidcCaller({ issuer, payload, strategy }): OidcCallerVerdict {
+    if (!strategy.acceptCurrentVercelProject || !isVercelOidcIssuer(issuer)) {
+      return NOT_CURRENT_PROJECT;
+    }
+
+    if (payload.external_sub !== undefined) {
+      if (
+        typeof payload.external_sub !== "string" ||
+        payload.external_sub.length === 0 ||
+        !currentProjectMatches(payload, strategy) ||
+        !currentEnvironmentMatches(payload, strategy)
+      ) {
+        return { kind: "caller-not-allowed" };
+      }
+
+      return {
+        kind: "authenticated",
+        principal: createJwtAuthenticatedCallerPrincipal({
+          authenticator: "oidc",
+          issuerClaims: ["external_iss", "connector_id"],
+          payload,
+          principalType: "user",
+          subjectClaim: "external_sub",
+        }),
+      };
+    }
+
+    if (payload.user_id !== undefined) {
+      if (
+        typeof payload.user_id !== "string" ||
+        payload.user_id.length === 0 ||
+        payload.environment !== "development" ||
+        !currentProjectMatches(payload, strategy)
+      ) {
+        return { kind: "caller-not-allowed" };
+      }
+
+      if (currentEnvironmentMatches(payload, strategy)) {
+        return {
+          kind: "authenticated",
+          principal: createJwtAuthenticatedCallerPrincipal({
+            authenticator: "oidc",
+            payload,
+            principalType: "user",
+            subjectClaim: "user_id",
+          }),
+        };
+      }
+    }
+
+    const currentProject = currentProjectMatches(payload, strategy);
+    return {
+      kind: "continue",
+      currentProject,
+      runtime: currentProject && currentEnvironmentMatches(payload, strategy),
+    };
   },
-  isPlatformIssuer: (issuer) => isVercelOidcIssuer(issuer),
-  withDevelopmentRequestScope: (input, callback) =>
+  developmentCaller: (current) =>
+    current.authenticator === "oidc" &&
+    isVercelOidcIssuer(current.issuer) &&
+    current.attributes.environment === "development" &&
+    current.subject === current.attributes.user_id,
+  developmentScope: (input, run) =>
     withVercelOidcProjectResolver(
       {
         request: input.request,
         resolveCurrentProject: async () => {
-          const { readVercelProjectLink } = await import("#internal/vercel/project-link.js");
+          const { readVercelProjectLink } = await import("#runtime-env/vercel-project-link.js");
           const link = await readVercelProjectLink(input.appRoot);
           return link === undefined
             ? undefined
             : { environment: "development", projectId: link.projectId };
         },
       },
-      callback,
+      run,
     ),
-  callbackHeaders(urlValue, isTrustedOrigin) {
-    if (process.env.VERCEL !== "1") return {};
-    let url: URL;
-    try {
-      url = new URL(urlValue);
-    } catch {
-      return {};
-    }
-    const currentHost = VERCEL_CALLBACK_HOST_ENVS.some((name) => {
-      const host = process.env[name]?.trim();
-      return (
-        host !== undefined && host !== "" && URL.parse(`https://${host}`)?.origin === url.origin
-      );
-    });
-    if (url.protocol !== "https:") return {};
-    if (!currentHost && !isTrustedOrigin(url)) return {};
-    const headers: Record<string, string> = {};
-    const token = readAmbientToken();
-    if (token !== undefined) headers[VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER] = token;
-    return headers;
-  },
-};
+} satisfies Identity;

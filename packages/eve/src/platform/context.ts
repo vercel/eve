@@ -1,77 +1,51 @@
-import type { HostServices } from "#platform/services.js";
-import { createVercelPlatformContext } from "#platform/vercel/context.js";
-import type { WorkspaceAgentTransport } from "#public/definitions/workspace-agent.js";
+import { createEntities, type Entities } from "#platform/entities.js";
+import { vercelCorePlatform } from "#platform/vercel/core.js";
 import { processApp } from "#runtime/app.js";
 
-export type BuildTarget = "vercel" | "node";
-
-export type DeploymentEnvironmentKind = "development" | "preview" | "production";
-
-export interface DeploymentBuild {
-  readonly deployedAt: string | undefined;
-  readonly gitBranch: string | undefined;
-  readonly gitSha: string | undefined;
+export function installedPlatform(): Entities | undefined {
+  return processApp().platform;
 }
 
-export interface DeploymentScope {
-  readonly platform: string;
-  readonly id: string;
-  readonly environment: string;
-  readonly variant: string | null;
+let fallbackPlatform: Entities | undefined;
+
+export function platformContext(): Entities {
+  return processApp().platform ?? (fallbackPlatform ??= createFallbackPlatform());
 }
 
-export interface PlatformDeployment {
-  environmentKind(): DeploymentEnvironmentKind | undefined;
-  deploymentId(): string | undefined;
-  hostedDeploymentId(): string | undefined;
-  build(): DeploymentBuild | undefined;
-  productionHost(): string | undefined;
-  deploymentHost(): string | undefined;
-  publicHost(): string | undefined;
-  isPlatformDevelopmentServer(): boolean;
-  scope(): DeploymentScope | undefined;
-  stopsSandboxesOnExit(): boolean;
-}
-
-export interface PlatformIdentity {
-  token(): Promise<string>;
-  isPlatformIssuer(issuer: string | undefined): boolean;
-  withDevelopmentRequestScope<T>(
-    input: { readonly appRoot: string; readonly request: Request },
-    callback: () => Promise<T>,
-  ): Promise<T>;
-  callbackHeaders(url: string, isTrustedOrigin: (url: URL) => boolean): Record<string, string>;
-}
-
-export interface PlatformBuild {
-  target(): BuildTarget;
-  outputDirectory(appRoot: string): string | undefined;
-  localSandboxPrewarmFailure(providerName: string, error: unknown): Error | undefined;
-}
-
-export interface PlatformWorkspace {
-  transport(routePath: string): WorkspaceAgentTransport | undefined;
-}
-
-export interface PlatformTelemetry {
-  traceSessionAttribute(): string | undefined;
-}
-
-export interface PlatformContext {
-  readonly build: PlatformBuild;
-  readonly deployment: PlatformDeployment;
-  readonly identity: PlatformIdentity;
-  readonly services?: HostServices;
-  readonly telemetry: PlatformTelemetry;
-  readonly workspace: PlatformWorkspace;
-}
-
-export function createPlatformContext(): PlatformContext {
-  return createVercelPlatformContext();
-}
-
-let fallbackPlatform: PlatformContext | undefined;
-
-export function platformContext(): PlatformContext {
-  return processApp().platform ?? (fallbackPlatform ??= createPlatformContext());
+function createFallbackPlatform(): Entities {
+  const core = createEntities(vercelCorePlatform, undefined);
+  const readThrough = (entity: string, module: string): never => {
+    throw new Error(
+      `With no app, read the "${entity}" platform entity through ${module}, which falls back to the Vercel built-in.`,
+    );
+  };
+  return Object.freeze({
+    get deployment() {
+      return core.deployment;
+    },
+    get identity() {
+      return core.identity;
+    },
+    get network() {
+      return core.network;
+    },
+    get telemetry() {
+      return core.telemetry;
+    },
+    get build(): never {
+      return readThrough("build", "#platform/build.js");
+    },
+    get compute(): never {
+      return readThrough("compute", "#platform/hosted-sandbox.js");
+    },
+    get models(): never {
+      return readThrough("models", "#platform/models.js");
+    },
+    get storage(): never {
+      return readThrough("storage", "#platform/document-store.js");
+    },
+    get triggers(): never {
+      return readThrough("triggers", "#platform/schedules.js");
+    },
+  });
 }

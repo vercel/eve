@@ -120,7 +120,7 @@ function callbackLogFields(input: { readonly body: unknown; readonly url: string
 async function resolveSessionCallbackHeaders(urlValue: string): Promise<Record<string, string>> {
   return {
     "content-type": "application/json",
-    ...platformContext().identity.callbackHeaders(urlValue, (url) =>
+    ...platformContext().network.self?.(urlValue, (url) =>
       configuredCallbackOrigins().some((matches) => matches(url)),
     ),
   };

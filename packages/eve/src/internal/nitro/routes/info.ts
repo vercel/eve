@@ -70,8 +70,10 @@ async function resolveGatewayCredentialPresence(
     return { apiKey, oidc: false };
   }
 
+  const { network } = platformContext();
+  if (network.token === undefined) return { apiKey: false, oidc: false };
   try {
-    await platformContext().identity.token();
+    await network.token();
     return { apiKey: false, oidc: true };
   } catch {
     return { apiKey: false, oidc: false };

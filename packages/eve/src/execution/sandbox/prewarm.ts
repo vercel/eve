@@ -3,7 +3,7 @@ import { join, relative, resolve } from "node:path";
 import type { CompiledWorkspaceResourceRoot } from "#compiler/manifest.js";
 import { copyDirectoryAtomically } from "#execution/sandbox/bindings/local-provider-utils.js";
 import { createLoggingSandboxSession } from "#execution/sandbox/logging-session.js";
-import { platformContext } from "#platform/context.js";
+import { platformBuild } from "#platform/build.js";
 import { createSandboxProviderIdentity } from "#execution/sandbox/provider-identity.js";
 import { createConnectionSession } from "#execution/sandbox/session.js";
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
@@ -413,10 +413,7 @@ function formatPrewarmFailureForEnvironment(input: {
   readonly error: unknown;
 }): unknown {
   if (!isLocalSandboxProvider(input.providerName)) return input.error;
-  return (
-    platformContext().build.localSandboxPrewarmFailure(input.providerName, input.error) ??
-    input.error
-  );
+  return platformBuild().sandboxPrewarmFailure?.(input.providerName, input.error) ?? input.error;
 }
 
 function isLocalSandboxProvider(providerName: string): boolean {

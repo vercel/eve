@@ -67,13 +67,13 @@ function workspaceAgentRoutePrefix(name: string): string {
   const callerRoutePrefix = normalizePublicRoutePrefix(process.env.EVE_PUBLIC_ROUTE_PREFIX);
   const namespace =
     callerRoutePrefix?.slice(0, callerRoutePrefix.lastIndexOf("/")) ??
-    (platformContext().deployment.environmentKind() === "development" ? "" : "/eve");
+    (platformContext().deployment.environment() === "development" ? "" : "/eve");
   return `${namespace}/${name}`;
 }
 
 function defaultWorkspaceAgentTransport(name: string): WorkspaceAgentTransport {
   const platformTransport = (): WorkspaceAgentTransport => {
-    const transport = platformContext().workspace.transport(workspaceAgentRoutePrefix(name));
+    const transport = platformContext().network.peer?.(workspaceAgentRoutePrefix(name));
     if (transport !== undefined) return transport;
     throw new Error(
       "No default workspace-agent transport is available in this environment. Provide transport to defineWorkspaceAgent().",

@@ -157,10 +157,10 @@ async function withDevelopmentPlatformIdentity<T>(
   return await withLocalDevRequestScope(
     request,
     async () =>
-      await platformContext().identity.withDevelopmentRequestScope(
+      await (platformContext().identity.developmentScope?.(
         { appRoot: config.appRoot, request },
         callback,
-      ),
+      ) ?? callback()),
   );
 }
 

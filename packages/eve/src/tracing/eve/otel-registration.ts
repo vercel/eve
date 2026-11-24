@@ -112,7 +112,7 @@ class PrivateSpanFilteringProcessor implements SpanProcessor {
     )
       mutableSpan.setAttribute("gen_ai.conversation.id", conversationId);
     const traceSessionId = traceSessionIdFromContext(parentContext);
-    const traceSessionAttribute = platformContext().telemetry.traceSessionAttribute();
+    const traceSessionAttribute = platformContext().telemetry.sessionAttribute;
     if (
       traceSessionAttribute !== undefined &&
       traceSessionId !== undefined &&

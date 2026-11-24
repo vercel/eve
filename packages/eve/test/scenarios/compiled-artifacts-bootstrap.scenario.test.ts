@@ -50,9 +50,8 @@ describe("writeCompiledArtifactsFiles", () => {
 
     expect(bootstrapImports[0]).toContain(processPath.replaceAll("\\", "/"));
     expect(bootstrapImports[1]).toMatch(/^import moduleMap from /);
-    expect(processSource).toContain(
-      'bootProcess({ agentName: artifacts.manifest.config.name }, "queue-namespace");',
-    );
+    expect(processSource).toContain("/src/platform/builtin.");
+    expect(processSource).toContain('  "queue-namespace",');
     expect(processSource).not.toContain("compiled-artifacts-module-map");
   });
 

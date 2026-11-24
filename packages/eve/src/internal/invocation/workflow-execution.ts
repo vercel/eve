@@ -413,8 +413,7 @@ function publicInvocationFailure(
   error: ErrorInfo | undefined,
 ): Extract<AgentInvocation, { readonly status: "failed" }>["error"] {
   const data: Record<string, string> = { runId };
-  const deploymentId = platformContext().deployment.hostedDeploymentId();
-  if (deploymentId !== undefined) data.vercelDeploymentId = deploymentId;
+  Object.assign(data, platformContext().deployment.invocationData?.());
   if (error !== undefined) {
     data.eveCode = error.code;
     if (error.id !== undefined) data.errorId = error.id;
