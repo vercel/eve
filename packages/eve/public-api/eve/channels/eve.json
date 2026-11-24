@@ -12,6 +12,7 @@
   "EveMessageResultOrPromise",
   "EveVercelOidcOptions",
   "ForwardedAssertion",
+  "MAX_MESSAGE_PARTS",
   "TrustedForwarders",
   "defaultEveAuth",
   "eveChannel",

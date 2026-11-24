@@ -35,6 +35,7 @@ export type {
   MessagePart,
   MessageTextPart,
 } from "#shared/message-content.js";
+export { MAX_MESSAGE_PARTS } from "#shared/message-content.js";
 export type { ClientAgentSession } from "#client/agent-session.js";
 export type { ClientSession } from "#client/session.js";
 export type {

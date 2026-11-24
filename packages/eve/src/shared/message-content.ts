@@ -1,3 +1,4 @@
+/** The most text and file parts one message can carry. The eve channel rejects a longer message with `400`. */
 export const MAX_MESSAGE_PARTS = 64;
 
 /** Text a person sends. */
