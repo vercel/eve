@@ -954,17 +954,13 @@ describe("createVercelSandbox", () => {
   });
 
   describe("template key and the Vercel environment", () => {
-    const keyIn = async (
-      env: { readonly target?: string; readonly vercel?: string },
-      rebuildable = true,
-    ) => {
+    const keyIn = async (env: { readonly target?: string; readonly vercel?: string }) => {
       vi.stubEnv("VERCEL_ENV", env.vercel);
       vi.stubEnv("VERCEL_TARGET_ENV", env.target);
       return await templateKeyOf(async (sandboxModule) =>
         createTestVercelSandbox({
           loadSandboxModule: async () => sandboxModule as never,
           prepare: async () => {},
-          rebuildable,
         }).prepare({ appRoot: "/tmp/test-app-root", sourceRevision: "revision-golden" }),
       );
     };
@@ -974,15 +970,6 @@ describe("createVercelSandbox", () => {
         await keyIn({ vercel: "production" }),
         await keyIn({ vercel: "preview" }),
         await keyIn({ vercel: "development" }),
-      ];
-      expect(new Set(keys).size).toBe(3);
-    });
-
-    it("gives an app that is not rebuildable its own template per environment", async () => {
-      const keys = [
-        await keyIn({ vercel: "production" }, false),
-        await keyIn({ vercel: "preview" }, false),
-        await keyIn({ target: "staging", vercel: "preview" }, false),
       ];
       expect(new Set(keys).size).toBe(3);
     });
@@ -1332,9 +1319,11 @@ describe("createVercelSandbox", () => {
       const [firstSandbox, secondSandbox] = await Promise.all(privateSandboxes(fake));
       expect(firstResult).toEqual({
         snapshotId: `${firstSandbox?.name}-snapshot`,
+        templateKey: expect.any(String),
       });
       expect(second).toEqual({
         snapshotId: `${secondSandbox?.name}-snapshot`,
+        templateKey: expect.any(String),
       });
       expect(firstSandbox?.snapshot).toHaveBeenCalledTimes(1);
       expect(secondSandbox?.snapshot).toHaveBeenCalledTimes(1);
@@ -1573,7 +1562,10 @@ describe("createVercelSandbox", () => {
     });
     const seeded = await prepareWith({}, [{ content: "notes", relativePath: "notes.md" }]);
     for (const { artifact } of [sourced, seeded]) {
-      expect(artifact).toEqual({ snapshotId: expect.any(String) });
+      expect(artifact).toEqual({
+        snapshotId: expect.any(String),
+        templateKey: expect.any(String),
+      });
     }
   });
 
@@ -2626,36 +2618,30 @@ describe("scheduled template rebuilds", () => {
     return { fake, provider, rebuild, sessionSource };
   }
 
-  it("records the template key in the artifact only when the sandbox is rebuildable", async () => {
-    const prepareWith = async (rebuildable: boolean) => {
-      const fake = createFakeVercelProvider();
-      const provider = createVercelSandbox({
-        createSandbox: async ({ createOptions, sandboxModule }) =>
-          await sandboxModule.Sandbox.create(createOptions),
-        loadSandboxModule: async () => fake.sandboxModule as never,
-        rebuildable,
-      });
-      const prepared = (await provider.prepare({ appRoot })) as VercelSandboxPreparedArtifact;
-      return { fake, prepared };
-    };
-
-    const rebuildable = await prepareWith(true);
-    expect(rebuildable.prepared.templateKey).toBe(rebuildable.fake.pointer()?.name);
-    expect((await prepareWith(false)).prepared).toEqual({ snapshotId: expect.any(String) });
-  });
-
-  it("makes no pointer lookup for a build that is not rebuildable", async () => {
-    const { fake, provider } = setup();
-    await provider.start({
-      appRoot,
-      prepared: { snapshotId: buildSnapshotId },
-      sandboxName: "session-plain",
+  it("records the template key in the artifact", async () => {
+    const fake = createFakeVercelProvider();
+    const provider = createVercelSandbox({
+      createSandbox: async ({ createOptions, sandboxModule }) =>
+        await sandboxModule.Sandbox.create(createOptions),
+      loadSandboxModule: async () => fake.sandboxModule as never,
     });
 
-    const lookedUp = fake.sandboxModule.Sandbox.get.mock.calls.map(
-      ([options]) => (options as { name: string }).name,
+    const prepared = (await provider.prepare({ appRoot })) as VercelSandboxPreparedArtifact;
+
+    expect(prepared).toEqual({
+      snapshotId: expect.any(String),
+      templateKey: fake.pointer()?.name,
+    });
+  });
+
+  it("looks up the template pointer once for each new session", async () => {
+    const { fake, provider } = setup();
+    await provider.start({ appRoot, prepared: artifact, sandboxName: "session-lookup" });
+
+    const lookedUp = fake.sandboxModule.Sandbox.get.mock.calls.filter(
+      ([options]) => (options as { name: string }).name === templateKey,
     );
-    expect(lookedUp).not.toContain(templateKey);
+    expect(lookedUp).toHaveLength(1);
   });
 
   it("opens from the build snapshot when the pointer lookup fails", async () => {
@@ -2699,14 +2685,6 @@ describe("scheduled template rebuilds", () => {
 
     expect(fake.pointer()?.sourceSnapshotId).toBe(buildSnapshotId);
     expect(fake.snapshots.has(buildSnapshotId)).toBe(true);
-  });
-
-  it("says how to make a sandbox rebuildable when the build did not", async () => {
-    const { rebuild } = setup();
-
-    await expect(
-      rebuild({ snapshotId: buildSnapshotId }, { prepare: async () => {}, revision: "rev-1" }),
-    ).rejects.toThrow("rebuildable: true");
   });
 
   it("opens new sessions from the build snapshot until a rebuild publishes a newer one", async () => {

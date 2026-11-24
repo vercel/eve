@@ -116,6 +116,16 @@ test("installs only when a lockfile changed", async () => {
   assert.equal(changed.calls.installs, 1);
 });
 
+test("does not read a commit subject that mentions the marker as a lockfile change", async () => {
+  const { calls, dependencies, options } = harness({
+    stdout: `HEAD is now at ${HEAD} fix lockfile-changed handling\n`,
+  });
+  await refresh(options, dependencies);
+
+  assert.equal(calls.installs, 0);
+  assert.match(calls.runs[0]?.command ?? "", /git reset --hard --quiet /u);
+});
+
 test("drops the GitHub token from the sandbox before install runs", async () => {
   const { calls, dependencies, options } = harness({ stdout: "lockfile-changed\n" });
   const policiesAtInstall: unknown[][] = [];

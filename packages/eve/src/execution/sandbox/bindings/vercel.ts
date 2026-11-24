@@ -100,7 +100,6 @@ interface CreateVercelSandboxInput {
   readonly createSandbox?: CreateVercelSandbox;
   readonly createOptions?: VercelCreateOptions;
   readonly loadSandboxModule?: () => Promise<VercelModule>;
-  readonly rebuildable?: boolean;
 }
 
 export function createVercelSandbox(
@@ -162,7 +161,7 @@ export function createVercelSandbox(
           loadSandboxModule,
           templateKey,
         });
-        return input.rebuildable === true ? { snapshotId, templateKey } : { snapshotId };
+        return { snapshotId, templateKey };
       } catch (error) {
         throw new Error(`Failed to prepare Vercel sandbox snapshot: ${errorMessage(error)}`, {
           cause: error,
@@ -515,18 +514,10 @@ async function rebuildTemplate(
   input: SandboxTemplateRebuilderInput,
 ): Promise<SandboxTemplateRebuildResult> {
   const { templateKey } = artifact;
-  if (artifact.snapshotId === undefined) {
+  if (artifact.snapshotId === undefined || templateKey === undefined) {
     throw new Error(
       "This sandbox environment has no `prepare` callback, workspace files, skills or `source`, so the build captured no snapshot to rebuild. Add one of them, then run `eve build` again.",
     );
-  }
-  if (templateKey === undefined) {
-    throw new SandboxTemplateNotProvisionedError({
-      providerName: "vercel",
-      reason:
-        "This build did not mark the sandbox rebuildable. Set `rebuildable: true` on the Vercel sandbox options, then run `eve build` again.",
-      templateKey: artifact.snapshotId,
-    });
   }
   if (rebuildsInFlight.has(templateKey)) return { rebuilt: false };
   rebuildsInFlight.add(templateKey);

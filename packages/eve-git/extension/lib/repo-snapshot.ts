@@ -167,7 +167,7 @@ async function checkoutHead(
       "set -e",
       "previous=$(git rev-parse HEAD)",
       `git fetch --no-tags ${shellQuote(`https://github.com/${options.repository}.git`)} ${shellQuote(`+${head}:refs/remotes/origin/${branch}`)}`,
-      `git reset --hard ${shellQuote(head)}`,
+      `git reset --hard --quiet ${shellQuote(head)}`,
       `test "$(git rev-parse HEAD)" = ${shellQuote(head)}`,
       ...(checksLockfiles
         ? [
@@ -186,7 +186,7 @@ async function checkoutHead(
       `Fetching ${options.repository}@${head} in the sandbox failed with exit code ${result.exitCode}: ${result.stderr.trim()}`,
     );
   }
-  if (result.stdout.includes("lockfile-changed")) {
+  if (result.stdout.split("\n").some((line) => line.trim() === "lockfile-changed")) {
     await options.install?.(sandbox);
   }
 }

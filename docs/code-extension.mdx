@@ -189,7 +189,9 @@ eve rebuilds a prepared environment only when the sandbox file or environment op
 
 ## Keep a repository checkout current
 
-When `prepare` clones a large repository into the sandbox, sessions start on the commit that was current at deploy. Set `rebuildable: true` in the sandbox options, then add `repoSnapshotSchedule` from `eve/extensions/git`. It rebuilds the snapshot as the branch moves, so new sessions start on a recent commit without a redeploy:
+When `prepare` clones a large repository into the sandbox, sessions start on the commit that was current at deploy. `repoSnapshotSchedule`, exported from `eve/extensions/git`, rebuilds the sandbox snapshot as the branch moves, so new sessions start on a recent commit without a redeploy. The sandbox needs a snapshot with the checkout in it, which means a `prepare` that clones the repository. See [rebuild the snapshot after deploy](/docs/sandbox/vercel#rebuild-the-snapshot-after-deploy).
+
+Add one file that default-exports the schedule:
 
 ```ts title="agent/schedules/refresh-repo.ts"
 import { repoSnapshotSchedule } from "eve/extensions/git";
@@ -208,7 +210,39 @@ export default repoSnapshotSchedule({
 });
 ```
 
-Every 15 minutes, or on the `cron` you set, it reads the branch head from GitHub with a read-only token that `connector` mints, and does nothing when the template already has that commit. Otherwise it fetches the commit in a temporary sandbox, moves `origin/<branch>` to it, runs `install` only when a lockfile changed, and points the template at the result. `install` runs with outbound network open and without the GitHub token. The template is tied to the repository, branch and directory as well as the commit, so changing one of them rebuilds. A failed fetch leaves the template as it was, and so does an `install` that throws. `sandbox.run()` returns the exit code instead of throwing, so check `exitCode` and throw, as the example does, or a failed install is published. `refreshRepoSnapshot(options)` runs the same refresh from a channel or a tool. See [rebuild the snapshot after deploy](/docs/sandbox/vercel#rebuild-the-snapshot-after-deploy).
+| Option       | What it does                                                                                                          |
+| ------------ | --------------------------------------------------------------------------------------------------------------------- |
+| `connector`  | The Connect connector of a GitHub App installed on the repository's owner. eve asks it for a read-only token.         |
+| `repository` | The repository as `owner/name`.                                                                                       |
+| `directory`  | Where the checkout lives in the sandbox.                                                                              |
+| `branch`     | The branch to track. Defaults to `main`.                                                                              |
+| `cron`       | How often to check the branch. Defaults to every 15 minutes.                                                          |
+| `install`    | Installs dependencies. It runs only when a lockfile changed, with outbound network open and without the GitHub token. |
+| `lockfiles`  | The files whose change runs `install`. Defaults to the common JavaScript lockfiles. An empty list never runs it.      |
+
+Each run:
+
+1. Reads the branch head from GitHub, and stops if the template already has that commit.
+2. Fetches the commit in a temporary sandbox and moves `origin/<branch>` to it.
+3. Runs `install` if a lockfile changed.
+4. Points the template at the new snapshot.
+
+A failed fetch leaves the template as it was, and so does an `install` that throws. `sandbox.run()` returns the exit code instead of throwing, so check `exitCode` and throw, as the example does, or a failed install is published.
+
+The template is tied to the repository, branch and directory as well as the commit, so changing one of them rebuilds. Sessions that are already running keep the commit they started on.
+
+To refresh from a webhook or a tool instead, call `refreshRepoSnapshot(options)` with the same options. It does one refresh and returns `{ head, rebuilt }`:
+
+```ts
+import { refreshRepoSnapshot } from "eve/extensions/git";
+
+// inside a tool or channel handler
+const { head, rebuilt } = await refreshRepoSnapshot({
+  connector: "github/my-app",
+  repository: "acme/app",
+  directory: "/workspace/app",
+});
+```
 
 ## Troubleshooting
 
