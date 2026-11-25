@@ -46,21 +46,64 @@ const GIT_CLONE_VALUE_FLAGS = new Set([
 
 const GH_REPO_CLONE_VALUE_FLAGS = new Set(["-u", "--upstream-remote-name"]);
 
+const WINDOWS_DRIVE_PATH = /^([A-Za-z]):([/\\].*)$/u;
+
+function hasControlCharOrBackslash(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code <= 0x1f || code === 0x7f || code === 0x5c) return true;
+  }
+  return false;
+}
+
 export function isValidPrefetchPath(value: string): boolean {
   if (value.trim().length === 0) return false;
-  if (value.startsWith("/") || /[\0\r\n\\]/u.test(value)) return false;
+  if (value.startsWith("/") || hasControlCharOrBackslash(value)) return false;
   const segments = value.split("/");
   return segments.every((segment) => segment.length > 0 && segment !== "." && segment !== "..");
 }
 
+function normalizePath(value: string): string {
+  const match = WINDOWS_DRIVE_PATH.exec(value);
+  if (match) {
+    const drive = match[1]!;
+    const rest = match[2]!.replaceAll("\\", "/");
+    return `${drive}:${posix.resolve("/", rest)}`;
+  }
+  return posix.resolve("/", value);
+}
+
+function resolvePath(base: string, target: string): string {
+  if (WINDOWS_DRIVE_PATH.test(target)) {
+    return normalizePath(target);
+  }
+  const baseMatch = WINDOWS_DRIVE_PATH.exec(base);
+  if (baseMatch) {
+    const normalizedTarget = target.replaceAll("\\", "/");
+    if (normalizedTarget.startsWith("/")) {
+      return posix.resolve("/", normalizedTarget);
+    }
+    const drive = baseMatch[1]!;
+    const baseRest = baseMatch[2]!.replaceAll("\\", "/");
+    return `${drive}:${posix.resolve("/", baseRest, normalizedTarget)}`;
+  }
+  return posix.resolve("/", base, target);
+}
+
+function normalizeForComparison(value: string): string {
+  const normalized = normalizePath(value);
+  const match = WINDOWS_DRIVE_PATH.exec(normalized);
+  return match ? `${match[1]!.toUpperCase()}:${match[2]!}` : normalized;
+}
+
 function isWithinWorkspace(targetPath: string, workspaceRoot: string): boolean {
-  const normalizedWorkspace = posix.resolve("/", workspaceRoot);
-  const normalizedTarget = posix.resolve("/", targetPath);
-  return (
-    normalizedWorkspace === "/" ||
-    normalizedTarget === normalizedWorkspace ||
-    normalizedTarget.startsWith(`${normalizedWorkspace}/`)
-  );
+  const normalizedWorkspace = normalizeForComparison(workspaceRoot);
+  const normalizedTarget = normalizeForComparison(targetPath);
+  if (normalizedWorkspace === "/") return normalizedTarget.startsWith("/");
+  const prefix = normalizedWorkspace.endsWith("/")
+    ? normalizedWorkspace
+    : `${normalizedWorkspace}/`;
+  return normalizedTarget === normalizedWorkspace || normalizedTarget.startsWith(prefix);
 }
 
 export function resolvePrefetchTarget(
@@ -85,7 +128,7 @@ function resolveGitPrefetchTarget(
   workingDirectory: string,
   repository: string | undefined,
 ): string | null {
-  let baseDir = workingDirectory;
+  let baseDir = normalizePath(workingDirectory);
   let index = 1;
   while (index < argv.length) {
     const arg = argv[index]!;
@@ -93,12 +136,12 @@ function resolveGitPrefetchTarget(
     if (!arg.startsWith("-")) break;
     if (arg === "-C") {
       if (index + 1 >= argv.length) return null;
-      baseDir = posix.resolve(baseDir, argv[index + 1]!);
+      baseDir = resolvePath(baseDir, argv[index + 1]!);
       index += 2;
       continue;
     }
     if (arg.startsWith("-C")) {
-      baseDir = posix.resolve(baseDir, arg.slice(2));
+      baseDir = resolvePath(baseDir, arg.slice(2));
       index += 1;
       continue;
     }
@@ -142,10 +185,10 @@ function resolveGitCloneTarget(
     index += 1;
   }
   if (positionals[1]) {
-    return posix.resolve(baseDir, positionals[1]);
+    return resolvePath(baseDir, positionals[1]);
   }
   const repoName = repoNameFromSpec(positionals[0]) ?? repoNameFromSpec(repository);
-  return repoName ? posix.resolve(baseDir, repoName) : null;
+  return repoName ? resolvePath(baseDir, repoName) : null;
 }
 
 function resolveGhRepoCloneTarget(
@@ -166,10 +209,10 @@ function resolveGhRepoCloneTarget(
     index += 1;
   }
   if (positionals[1]) {
-    return posix.resolve(workingDirectory, positionals[1]);
+    return resolvePath(workingDirectory, positionals[1]);
   }
   const repoName = repoNameFromSpec(positionals[0]) ?? repoNameFromSpec(repository);
-  return repoName ? posix.resolve(workingDirectory, repoName) : null;
+  return repoName ? resolvePath(workingDirectory, repoName) : null;
 }
 
 function repoNameFromSpec(spec: string | undefined): string | null {
@@ -193,26 +236,27 @@ export function buildPrefetchCommand(
   const files = [...new Set(prefetchFiles.filter(isValidPrefetchPath))];
   if (files.length === 0) return null;
   const quotedFiles = files.map(shellQuote).join(" ");
+  const safeGit = "git -c core.hooksPath=/dev/null -c core.fsmonitor=false";
   return [
     `canon() { realpath -e -- "$1" 2>/dev/null || (cd -P -- "$1" 2>/dev/null && pwd -P); }`,
     `workspace=$(canon ${shellQuote(workspaceRoot)}) || exit 0`,
-    `top=$(git -C ${shellQuote(targetPath)} rev-parse --show-toplevel 2>/dev/null) || exit 0`,
+    `top=$(GIT_ALLOW_PROTOCOL= ${safeGit} -C ${shellQuote(targetPath)} rev-parse --show-toplevel 2>/dev/null) || exit 0`,
     `top=$(canon "$top") || exit 0`,
     `case "$top" in`,
     `  "$workspace"|"$workspace"/*) ;;`,
     `  *) [ "$workspace" = "/" ] || exit 0 ;;`,
     `esac`,
-    `git -C "$top" config --get-regexp '^remote\\..*\\.promisor$' >/dev/null 2>&1 || exit 0`,
-    `GIT_NO_LAZY_FETCH=1 git -c core.quotePath=false --literal-pathspecs -C "$top" ls-tree HEAD -- ${quotedFiles} 2>/dev/null |`,
+    `GIT_ALLOW_PROTOCOL= ${safeGit} -C "$top" config --get-regexp '^remote\\..*\\.promisor$' >/dev/null 2>&1 || exit 0`,
+    `GIT_ALLOW_PROTOCOL= GIT_NO_LAZY_FETCH=1 ${safeGit} -c core.quotePath=false --literal-pathspecs -C "$top" ls-tree HEAD -- ${quotedFiles} 2>/dev/null |`,
     `  while IFS=' \t' read -r mode kind oid path; do`,
     `    [ "$mode" = "100644" ] || [ "$mode" = "100755" ] || continue`,
     `    [ "$kind" = "blob" ] || continue`,
     `    [ -n "$oid" ] && [ -n "$path" ] || continue`,
     `    [ -f "$top/$path" ] && continue`,
-    `    GIT_NO_LAZY_FETCH=1 git -C "$top" cat-file -e "$oid" 2>/dev/null && continue`,
+    `    GIT_ALLOW_PROTOCOL= GIT_NO_LAZY_FETCH=1 ${safeGit} -C "$top" cat-file -e "$oid" 2>/dev/null && continue`,
     `    printf '%s\\n' "$oid"`,
     `  done |`,
-    `  git -C "$top" cat-file --batch-check >/dev/null 2>&1 || true`,
+    `  env GIT_ALLOW_PROTOCOL=https GIT_TERMINAL_PROMPT=0 ${safeGit} -c credential.helper= -C "$top" cat-file --batch-check >/dev/null 2>&1 || true`,
     `exit 0`,
   ].join("\n");
 }

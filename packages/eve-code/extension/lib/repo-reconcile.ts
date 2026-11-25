@@ -1,6 +1,7 @@
 import { posix } from "node:path";
 import type { CallObservation } from "eve/events";
 import type { RuntimeSandboxSession } from "eve/sandbox";
+import type { SkillDefinition } from "eve/skills";
 import { toolResultFrom, type ToolDefinition } from "eve/tools";
 
 import type {
@@ -14,8 +15,11 @@ import {
   appendCheckedDirs,
   invalidateRepoCheckedDirs,
   isValidRepositorySkillName,
+  MAX_PENDING_BACKGROUND_JOBS,
   repoState,
   serializeSkill,
+  type PendingBackgroundJob,
+  type PendingRepositoryReconcile,
   type RecordedRepository,
   type RecordedScope,
   type RepositorySessionState,
@@ -24,7 +28,9 @@ import {
 import {
   computeAncestorDirs,
   discoverWorkspace,
+  isWindowsDrivePath,
   matchesRepositoryRule,
+  normalizePlatformPath,
   readRepositoryFile,
   readRepositorySpecFiles,
   readScopedDirectoryInstructions,
@@ -65,34 +71,117 @@ export function isBackgroundBashOutput(output: unknown): boolean {
   return isRecord(output) && output.status === "running";
 }
 
+export function extractBackgroundBashJob(
+  output: unknown,
+  extraPaths: readonly string[],
+): PendingBackgroundJob | null {
+  if (!isBackgroundBashOutput(output)) return null;
+  const outputDirectory = readStringField(output, "outputDirectory");
+  if (outputDirectory === undefined) return null;
+  const record = output as Record<string, unknown>;
+  const pid =
+    typeof record.pid === "number" && Number.isInteger(record.pid) && record.pid > 0
+      ? record.pid
+      : undefined;
+  return {
+    outputDirectory,
+    ...(pid !== undefined && { pid }),
+    extraPaths,
+  };
+}
+
+export function upsertPendingBackgroundJob(
+  existing: readonly PendingBackgroundJob[],
+  incoming: PendingBackgroundJob,
+): readonly PendingBackgroundJob[] {
+  const prev = existing.find((job) => job.outputDirectory === incoming.outputDirectory);
+  const filtered = existing.filter((job) => job.outputDirectory !== incoming.outputDirectory);
+  const merged: PendingBackgroundJob = {
+    outputDirectory: incoming.outputDirectory,
+    ...(incoming.pid !== undefined
+      ? { pid: incoming.pid }
+      : prev?.pid !== undefined
+        ? { pid: prev.pid }
+        : {}),
+    extraPaths: mergeExtraPaths(prev?.extraPaths ?? [], incoming.extraPaths),
+  };
+  const next = [...filtered, merged];
+  return next.length > MAX_PENDING_BACKGROUND_JOBS
+    ? next.slice(next.length - MAX_PENDING_BACKGROUND_JOBS)
+    : next;
+}
+
+export function collectPendingExtraPaths(
+  pending: PendingRepositoryReconcile | null,
+): readonly string[] {
+  if (pending === null) return [];
+  let result: readonly string[] = [];
+  for (const job of pending.jobs) {
+    result = mergeExtraPaths(result, job.extraPaths);
+  }
+  return result;
+}
+
+function isDriveOrSlashRoot(value: string): boolean {
+  return value === "/" || /^[A-Za-z]:\/$/u.test(value);
+}
+
+function resolveBaseAndRelative(base: string, relative: string): string {
+  const normalizedBase = normalizePlatformPath(base);
+  const normalizedRel = relative.replaceAll("\\", "/");
+  if (isWindowsDrivePath(normalizedBase)) {
+    const drive = normalizedBase.slice(0, 2);
+    const rest = posix.resolve(normalizedBase.slice(2), normalizedRel);
+    return `${drive}${rest}`;
+  }
+  return posix.resolve(normalizedBase, normalizedRel);
+}
+
+function platformDirname(value: string): string {
+  if (isWindowsDrivePath(value)) {
+    const drive = value.slice(0, 2);
+    const rest = posix.dirname(value.slice(2));
+    return `${drive}${rest}`;
+  }
+  return posix.dirname(value);
+}
+
 export function normalizeKnownPath(
   targetPath: string,
   state: Pick<RepositorySessionState, "workspaceRoot" | "rawWorkspaceRoot" | "homeDir">,
 ): string | null {
-  if (targetPath === "~" || targetPath === "$HOME") {
-    return state.homeDir;
+  const normalizedInput = targetPath.replaceAll("\\", "/");
+  if (normalizedInput === "~" || normalizedInput === "$HOME") {
+    return state.homeDir === null ? null : normalizePlatformPath(state.homeDir);
   }
-  if (targetPath.startsWith("~/")) {
+  if (normalizedInput.startsWith("~/")) {
     if (state.homeDir === null) return null;
-    return posix.resolve(state.homeDir, targetPath.slice(2));
+    return resolveBaseAndRelative(state.homeDir, normalizedInput.slice(2));
   }
-  if (targetPath.startsWith("$HOME/")) {
+  if (normalizedInput.startsWith("$HOME/")) {
     if (state.homeDir === null) return null;
-    return posix.resolve(state.homeDir, targetPath.slice("$HOME/".length));
+    return resolveBaseAndRelative(state.homeDir, normalizedInput.slice("$HOME/".length));
   }
   if (state.workspaceRoot === null) return null;
-  if (targetPath.startsWith("/")) {
-    const normalized = posix.resolve("/", targetPath);
-    if (state.rawWorkspaceRoot !== null && state.rawWorkspaceRoot !== state.workspaceRoot) {
-      const raw = posix.resolve("/", state.rawWorkspaceRoot);
-      if (normalized === raw) return state.workspaceRoot;
-      if (normalized.startsWith(`${raw}/`)) {
-        return `${state.workspaceRoot}${normalized.slice(raw.length)}`;
+  const workspaceRoot = normalizePlatformPath(state.workspaceRoot);
+  if (normalizedInput.startsWith("/") || isWindowsDrivePath(normalizedInput)) {
+    const normalized = normalizePlatformPath(normalizedInput);
+    if (state.rawWorkspaceRoot !== null) {
+      const raw = normalizePlatformPath(state.rawWorkspaceRoot);
+      if (raw !== workspaceRoot) {
+        if (normalized === raw) return workspaceRoot;
+        const rawPrefix = isDriveOrSlashRoot(raw) ? raw : `${raw}/`;
+        if (normalized.startsWith(rawPrefix)) {
+          const suffix = normalized.slice(raw.length);
+          return suffix.startsWith("/")
+            ? `${workspaceRoot}${suffix}`
+            : `${workspaceRoot}/${suffix}`;
+        }
       }
     }
     return normalized;
   }
-  return posix.resolve(state.workspaceRoot, targetPath);
+  return resolveBaseAndRelative(workspaceRoot, normalizedInput);
 }
 
 export function findKnownEnclosingRoot(
@@ -101,8 +190,7 @@ export function findKnownEnclosingRoot(
 ): string | null {
   let match: string | null = null;
   for (const root of Object.keys(byRoot)) {
-    const within =
-      root === "/" ? dirPath.startsWith("/") : dirPath === root || dirPath.startsWith(`${root}/`);
+    const within = isPathWithinRoot(dirPath, root);
     if (within && (match === null || root.length > match.length)) {
       match = root;
     }
@@ -111,7 +199,7 @@ export function findKnownEnclosingRoot(
 }
 
 export function isPathWithinRoot(targetPath: string, root: string): boolean {
-  if (root === "/") return targetPath.startsWith("/");
+  if (isDriveOrSlashRoot(root)) return targetPath.startsWith(root);
   return targetPath === root || targetPath.startsWith(`${root}/`);
 }
 
@@ -181,6 +269,9 @@ function tokenizeShellCommand(command: string): readonly string[] {
 }
 
 function isCandidateExternalPath(token: string): boolean {
+  if (isWindowsDrivePath(token)) {
+    return token.length > 3;
+  }
   if (token.startsWith("/")) {
     return (
       token.length > 1 &&
@@ -291,7 +382,7 @@ export function hasUncheckedFileAncestors(
   if (state.workspaceRoot === null) return true;
   const resolved = normalizeKnownPath(targetPath, state);
   if (resolved === null) return true;
-  const targetDir = isDirectory ? resolved : posix.dirname(resolved);
+  const targetDir = isDirectory ? resolved : platformDirname(resolved);
   const enclosingRoot = findKnownEnclosingRoot(targetDir, state.byRoot);
 
   if (enclosingRoot !== null) {
@@ -345,6 +436,25 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function isValidSkillDefinition(value: unknown): value is SkillDefinition {
+  return (
+    isRecord(value) && typeof value.description === "string" && typeof value.content === "string"
+  );
+}
+
+function computeRemainingPending(
+  current: PendingRepositoryReconcile | null,
+  finishedJobDirs: readonly string[],
+  clearAll: boolean,
+): PendingRepositoryReconcile | null {
+  if (current === null) return null;
+  if (clearAll) return null;
+  if (finishedJobDirs.length === 0) return current;
+  const finished = new Set(finishedJobDirs);
+  const remaining = current.jobs.filter((job) => !finished.has(job.outputDirectory));
+  return remaining.length > 0 ? { jobs: remaining } : null;
+}
+
 export async function onboardRepository(
   sandbox: RuntimeSandboxSession,
   repo: DiscoveredRepository,
@@ -378,18 +488,27 @@ export async function onboardRepository(
       );
       continue;
     }
-    if (contribution === undefined) continue;
+    if (!isRecord(contribution)) continue;
     if (contribution.instructions !== undefined) {
-      const items =
-        typeof contribution.instructions === "string"
-          ? [contribution.instructions]
-          : contribution.instructions;
-      for (const item of items) {
-        const trimmed = item.trim();
-        if (trimmed.length > 0) ruleInstructions.push(trimmed);
+      try {
+        const items =
+          typeof contribution.instructions === "string"
+            ? [contribution.instructions]
+            : Array.isArray(contribution.instructions)
+              ? contribution.instructions
+              : [];
+        for (const item of items) {
+          if (typeof item !== "string") continue;
+          const trimmed = item.trim();
+          if (trimmed.length > 0) ruleInstructions.push(trimmed);
+        }
+      } catch (error) {
+        console.warn(
+          `eve-code skipped invalid repository rule instructions for ${repo.root}: ${errorMessage(error)}`,
+        );
       }
     }
-    if (contribution.skills !== undefined) {
+    if (isRecord(contribution.skills)) {
       for (const [name, skill] of Object.entries(contribution.skills)) {
         if (!isValidRepositorySkillName(name)) {
           console.warn(
@@ -397,8 +516,19 @@ export async function onboardRepository(
           );
           continue;
         }
-        if (!(name in ruleSkills)) {
+        if (name in ruleSkills) continue;
+        if (!isValidSkillDefinition(skill)) {
+          console.warn(
+            `eve-code skipped malformed repository skill ${JSON.stringify(name)} for ${repo.root}: skill must have string description and content.`,
+          );
+          continue;
+        }
+        try {
           ruleSkills[name] = serializeSkill(skill);
+        } catch (error) {
+          console.warn(
+            `eve-code skipped malformed repository skill ${JSON.stringify(name)} for ${repo.root}: ${errorMessage(error)}`,
+          );
         }
       }
     }
@@ -426,7 +556,8 @@ export async function reconcileWorkspace(
   options: {
     readonly turnId?: string | null;
     readonly extraPaths?: readonly string[];
-    readonly clearPendingReconcile?: boolean;
+    readonly pendingJobs?: readonly PendingBackgroundJob[];
+    readonly clearAllPendingJobs?: boolean;
   } = {},
 ): Promise<void> {
   const rawWorkspaceRoot = sandbox.resolvePath(".");
@@ -440,6 +571,7 @@ export async function reconcileWorkspace(
       includeWorkspaceInstructions: true,
       extraPaths: options.extraPaths,
       existingRoots: Object.keys(snapshot.byRoot),
+      pendingJobs: options.pendingJobs,
     });
   } catch {
     return;
@@ -512,7 +644,13 @@ export async function reconcileWorkspace(
   if (nextSyncedTurnId !== snapshot.syncedTurnId) {
     changed = true;
   }
-  if (options.clearPendingReconcile === true && snapshot.pendingReconcile !== null) {
+  const finishedJobDirs = discovery.finishedJobDirs;
+  const finishedSet = new Set(finishedJobDirs);
+  const pendingChanged =
+    snapshot.pendingReconcile !== null &&
+    (options.clearAllPendingJobs === true ||
+      snapshot.pendingReconcile.jobs.some((job) => finishedSet.has(job.outputDirectory)));
+  if (pendingChanged) {
     changed = true;
   }
 
@@ -563,7 +701,11 @@ export async function reconcileWorkspace(
       scopes: nextScopes,
       checkedDirs: nextCheckedDirs,
       syncedTurnId: options.turnId !== undefined ? options.turnId : latest.syncedTurnId,
-      pendingReconcile: options.clearPendingReconcile === true ? null : latest.pendingReconcile,
+      pendingReconcile: computeRemainingPending(
+        latest.pendingReconcile,
+        finishedJobDirs,
+        options.clearAllPendingJobs === true,
+      ),
       revision: latest.revision + 1,
     };
   });

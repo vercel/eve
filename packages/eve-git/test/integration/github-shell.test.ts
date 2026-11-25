@@ -412,19 +412,16 @@ test("mints a repository-scoped token only during execution and redacts output",
     "cd '/workspace/internal-agents' && exec 'git' 'push' 'origin' 'HEAD:refs/heads/rui/my-branch'",
   );
   assert.equal(push.env?.GH_TOKEN, undefined);
-  assert.equal(push.env?.GIT_CONFIG_COUNT, "6");
+  assert.equal(push.env?.GIT_ALLOW_PROTOCOL, "https");
+  assert.equal(push.env?.GIT_CONFIG_COUNT, "7");
   assert.equal(push.env?.GIT_CONFIG_KEY_0, "http.https://github.com/.extraheader");
   assert.match(push.env?.GIT_CONFIG_VALUE_0 ?? "", /^Authorization: Basic /u);
   assert.doesNotMatch(JSON.stringify(push.env), /secret-token/u);
-  assert.equal(push.env?.GIT_CONFIG_VALUE_3, "/dev/null");
-  assert.deepEqual(
-    [push.env?.GIT_CONFIG_KEY_4, push.env?.GIT_CONFIG_VALUE_4],
-    ["protocol.allow", "never"],
-  );
-  assert.deepEqual(
-    [push.env?.GIT_CONFIG_KEY_5, push.env?.GIT_CONFIG_VALUE_5],
-    ["protocol.https.allow", "always"],
-  );
+  const gitConfig = parseGitConfigEnv(push.env);
+  assert.equal(gitConfig.get("core.hooksPath"), "/dev/null");
+  assert.equal(gitConfig.get("core.fsmonitor"), "false");
+  assert.equal(gitConfig.get("protocol.allow"), "never");
+  assert.equal(gitConfig.get("protocol.https.allow"), "always");
   assert.match(JSON.stringify(policies[0]), /secret-token/u);
   assert.equal(policies[1], "allow-all");
   assert.equal(output.stdout, "pushed [redacted]");
@@ -1171,17 +1168,23 @@ test("prefetches partial-clone instruction files inside the active credential le
     const prefetch = runs[1]!;
     assert.match(
       prefetch.command,
-      /git -C '\/workspace\/internal-agents' rev-parse --show-toplevel/u,
+      /GIT_ALLOW_PROTOCOL= git -c core\.hooksPath=\/dev\/null -c core\.fsmonitor=false -C '\/workspace\/internal-agents' rev-parse --show-toplevel/u,
+    );
+    assert.match(
+      prefetch.command,
+      /env GIT_ALLOW_PROTOCOL=https GIT_TERMINAL_PROMPT=0 git -c core\.hooksPath=\/dev\/null -c core\.fsmonitor=false -c credential\.helper= -C "\$top" cat-file --batch-check/u,
     );
     assert.match(prefetch.command, /'AGENTS\.md' 'CLAUDE\.md'/u);
     const gitConfig = parseGitConfigEnv(prefetch.env);
     assert.equal(gitConfig.get("core.hooksPath"), "/dev/null");
+    assert.equal(gitConfig.get("core.fsmonitor"), "false");
     assert.equal(gitConfig.get("protocol.allow"), "never");
     assert.equal(gitConfig.get("protocol.https.allow"), "always");
     assert.match(
       gitConfig.get("http.https://github.com/.extraheader") ?? "",
       /^Authorization: Basic /u,
     );
+    assert.equal(prefetch.env?.GIT_ALLOW_PROTOCOL, "https");
     assert.equal(prefetch.env?.GIT_TERMINAL_PROMPT, "0");
     assert.ok(prefetch.signal instanceof AbortSignal);
     assert.deepEqual(output, { exitCode: 0, stdout: "cloned\n", stderr: "", truncated: false });

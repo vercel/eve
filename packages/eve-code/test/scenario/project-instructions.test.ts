@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
 
@@ -21,7 +21,7 @@ async function withWorkspace(
     for (const [name, content] of Object.entries(files)) await writeFile(join(root, name), content);
     const commands: string[] = [];
     const sandbox = {
-      resolvePath: (path: string) => (path.startsWith("/") ? path : join(root, path)),
+      resolvePath: (path: string) => (isAbsolute(path) ? path : join(root, path)),
       async run({ command }: { command: string }) {
         commands.push(command);
         const { stdout, stderr } = await execFileAsync("bash", ["-c", command]);
@@ -57,7 +57,7 @@ test("reads AGENTS.md, falling back to CLAUDE.md when AGENTS.md is missing, empt
         name === null
           ? null
           : {
-              path: join(root, name),
+              path: join(root, name).replaceAll("\\", "/"),
               relativePath: name,
               source: "worktree",
               content,
@@ -71,7 +71,7 @@ test("reads AGENTS.md, falling back to CLAUDE.md when AGENTS.md is missing, empt
 test("caps a large file in the sandbox and points the model at the rest", async () => {
   await withWorkspace({ "AGENTS.md": "x".repeat(70_000) }, async (read, root) => {
     const file = await read();
-    const note = `\n\n[truncated: read ${join(root, "AGENTS.md")} for the rest]`;
+    const note = `\n\n[truncated: read ${join(root, "AGENTS.md").replaceAll("\\", "/")} for the rest]`;
     assert.equal(file?.truncated, true);
     assert.equal(file?.content, `${"x".repeat(64_000)}${note}`);
   });

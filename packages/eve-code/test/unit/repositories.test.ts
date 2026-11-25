@@ -13,6 +13,7 @@ import {
 } from "../../extension/lib/project-instructions.ts";
 import {
   extractCommandTargetPaths,
+  normalizeKnownPath,
   shouldReconcileCommand,
 } from "../../extension/lib/repo-reconcile.ts";
 import {
@@ -22,6 +23,9 @@ import {
   type RecordedScope,
 } from "../../extension/lib/repo-state.ts";
 import {
+  computeAncestorDirs,
+  isValidRelativePath,
+  isValidRootPath,
   matchesRepositoryRule,
   parseRepositorySlug,
   sanitizeRemoteUrl,
@@ -114,6 +118,78 @@ test("matchesRepositoryRule handles omitted, exact, wildcard, RegExp, and predic
     matchesRepositoryRule(nextRepo, (repo) => repo.sparse),
     false,
   );
+
+  const warnings: string[] = [];
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]) => {
+    warnings.push(args.map(String).join(" "));
+  };
+  try {
+    assert.equal(
+      matchesRepositoryRule(nextRepo, () => {
+        throw new Error("match predicate boom");
+      }),
+      false,
+    );
+  } finally {
+    console.warn = originalWarn;
+  }
+  assert.ok(warnings.some((w) => w.includes("match predicate boom")));
+});
+
+test("computeAncestorDirs, normalizeKnownPath, and extractCommandTargetPaths handle Windows drive-letter paths", () => {
+  assert.deepEqual(computeAncestorDirs("C:/Users/dev/repo", "C:/Users/dev/repo/packages/sub"), [
+    "C:/Users/dev/repo/packages",
+    "C:/Users/dev/repo/packages/sub",
+  ]);
+  assert.deepEqual(
+    computeAncestorDirs("C:\\Users\\dev\\repo", "C:\\Users\\dev\\repo\\packages\\sub"),
+    ["C:/Users/dev/repo/packages", "C:/Users/dev/repo/packages/sub"],
+  );
+  assert.deepEqual(computeAncestorDirs("C:/", "C:/Users/dev"), ["C:/Users", "C:/Users/dev"]);
+  assert.deepEqual(computeAncestorDirs("C:/Users/dev/repo", "C:/Users/dev/repo"), []);
+
+  const winState = {
+    workspaceRoot: "C:/Users/dev/workspace",
+    rawWorkspaceRoot: "C:\\Users\\dev\\workspace",
+    homeDir: "C:/Users/dev",
+  };
+  assert.equal(
+    normalizeKnownPath("C:\\Users\\dev\\repo\\file.ts", winState),
+    "C:/Users/dev/repo/file.ts",
+  );
+  assert.equal(
+    normalizeKnownPath("C:/Users/dev/repo/packages/../file.ts", winState),
+    "C:/Users/dev/repo/file.ts",
+  );
+  assert.equal(
+    normalizeKnownPath("repo\\packages\\sub\\file.ts", winState),
+    "C:/Users/dev/workspace/repo/packages/sub/file.ts",
+  );
+
+  const msysState = {
+    workspaceRoot: "/c/Users/dev/workspace",
+    rawWorkspaceRoot: "C:\\Users\\dev\\workspace",
+    homeDir: "/c/Users/dev",
+  };
+  assert.equal(
+    normalizeKnownPath("C:\\Users\\dev\\workspace\\repoA\\packages\\sub\\index.ts", msysState),
+    "/c/Users/dev/workspace/repoA/packages/sub/index.ts",
+  );
+
+  assert.deepEqual(
+    extractCommandTargetPaths("git clone https://example.com/a C:/Users/dev/repo", undefined),
+    ["C:/Users/dev/repo"],
+  );
+});
+
+test("isValidRelativePath and isValidRootPath reject ASCII control characters and DEL", () => {
+  assert.equal(isValidRelativePath("AGENTS.md"), true);
+  assert.equal(isValidRootPath("."), true);
+  for (const bad of ["a\tb.md", "a\x07b.md", "a\x1bb.md", "a\x7fb.md", "a\0b.md", "a\\b.md"]) {
+    assert.equal(isValidRelativePath(bad), false, JSON.stringify(bad));
+    assert.equal(isValidRootPath(bad), false, JSON.stringify(bad));
+  }
 });
 
 test("shouldReconcileCommand triggers only on repo/checkout/navigation commands or unseen workingDirectory", () => {

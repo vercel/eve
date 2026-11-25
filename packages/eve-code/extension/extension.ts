@@ -127,7 +127,7 @@ export interface RepositoriesConfig {
   readonly instructions?: readonly RepositoryInstructionSpec[];
   /** Whether to load nested directory `AGENTS.md` / `CLAUDE.md` files as files in subdirectories are touched. Defaults to `true`. */
   readonly scopedInstructions?: boolean;
-  /** When to run start-of-turn repository discovery: `"eager"` (default) opens the sandbox; `"on-sandbox-use"` checks only if already started. */
+  /** When to run start-of-turn repository discovery: `"eager"` (default) opens the sandbox; `"on-sandbox-use"` checks via `ctx.getSandbox({ create: false })`, skipping sandbox creation before first use and resuming an idle-stopped persisted sandbox on later turns if the session already has one. */
   readonly discoverOnStart?: "eager" | "on-sandbox-use";
   /** Rules applied to matching repositories when discovered. */
   readonly rules?: readonly RepositoryRule[];

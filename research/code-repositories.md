@@ -1,7 +1,7 @@
 ---
-issue: TBD
+issue: "#6820"
 status: implemented
-last_updated: "2026-11-24"
+last_updated: "2026-11-25"
 ---
 
 # Automatic repository instruction discovery and rules
@@ -99,16 +99,16 @@ export default code({
 });
 ```
 
-| Option               | Default                        | Semantics                                                                                                                                |
-| -------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `roots`              | `["."]`                        | Workspace-relative directories scanned up to depth 3 for `.git` directories or worktree/submodule `.git` files.                          |
-| `instructions`       | `[["AGENTS.md", "CLAUDE.md"]]` | Repository-relative specs. A string loads that path if present; a tuple loads the first present path. Pass `[]` to disable.              |
-| `scopedInstructions` | `true`                         | Load matching ancestor directory instruction files as `read_file`, `edit_file`, `write_file`, `glob`, or `grep` enter subdirectories.    |
-| `discoverOnStart`    | `"eager"`                      | `"eager"` opens the sandbox at turn start if needed; `"on-sandbox-use"` checks via `ctx.getSandbox({ create: false })`.                  |
-| `rules`              | `[]`                           | Rules with optional `match` (`"owner/name"`, `"owner/*"`, `"*"`, `RegExp`, or predicate), extra `files`, and once-per-session `onEnter`. |
-| `syncAfter`          | `[]`                           | Additional `ToolDefinition` values whose completed calls trigger workspace reconciliation.                                               |
-| `maxFileBytes`       | `64_000`                       | Maximum UTF-8 bytes read per file before truncation with a path note.                                                                    |
-| `maxTotalBytes`      | `256_000`                      | Total UTF-8 byte budget across all emitted repository and scoped instruction entries; skipped paths are listed in an `overflow` entry.   |
+| Option               | Default                        | Semantics                                                                                                                                                                                                                                                            |
+| -------------------- | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `roots`              | `["."]`                        | Workspace-relative directories scanned up to depth 3 for `.git` directories or worktree/submodule `.git` files.                                                                                                                                                      |
+| `instructions`       | `[["AGENTS.md", "CLAUDE.md"]]` | Repository-relative specs. A string loads that path if present; a tuple loads the first present path. Pass `[]` to disable.                                                                                                                                          |
+| `scopedInstructions` | `true`                         | Load matching ancestor directory instruction files as `read_file`, `edit_file`, `write_file`, `glob`, or `grep` enter subdirectories.                                                                                                                                |
+| `discoverOnStart`    | `"eager"`                      | `"eager"` opens the sandbox at turn start if needed; `"on-sandbox-use"` checks via `ctx.getSandbox({ create: false })` (skips creating a new sandbox before first use, and resumes an idle-stopped persisted sandbox on later turns if the session already has one). |
+| `rules`              | `[]`                           | Rules with optional `match` (`"owner/name"`, `"owner/*"`, `"*"`, `RegExp`, or predicate), extra `files`, and once-per-session `onEnter`.                                                                                                                             |
+| `syncAfter`          | `[]`                           | Additional `ToolDefinition` values whose completed calls trigger workspace reconciliation.                                                                                                                                                                           |
+| `maxFileBytes`       | `64_000`                       | Maximum UTF-8 bytes read per file before truncation with a path note.                                                                                                                                                                                                |
+| `maxTotalBytes`      | `256_000`                      | Total UTF-8 byte budget across all emitted repository and scoped instruction entries; skipped paths are listed in an `overflow` entry.                                                                                                                               |
 
 Rule `onEnter` callbacks are error-isolated: a throwing rule logs a warning and is skipped without failing the turn or suppressing default instructions or other rules. Contributed `skills` register under the extension namespace (for example, `code__<name>` when mounted at `agent/extensions/code.ts`); skill keys must match `/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,57}$/` and must not start with `eve__` (case-insensitive). Invalid keys are skipped with a warning, and on key collisions across repositories the first-entered repository wins.
 
@@ -136,7 +136,7 @@ call.settled ──► git/bash/syncAfter ──► reconcileWorkspace ┤      
 ## Security and durability invariants
 
 - **Path and symlink containment.** Config paths, `readRepositoryFile`, and `prefetchFiles` accept only relative POSIX paths without leading `/`, `.` or `..` segments, backslashes, or control characters. Worktree reads resolve symlinks with `realpath` and reject targets outside the repository or workspace root.
-- **Untrusted repository hardening.** All git probes pass `GIT_NO_LAZY_FETCH=1`, `-c core.hooksPath=/dev/null`, and `-c protocol.allow=never`. Bounded promisor fallback enables only `protocol.https.allow=always` with `GIT_TERMINAL_PROMPT=0` and `-c credential.helper=`. Git blob reads accept only regular file modes (`100644`, `100755`) and never execute hooks or dereference symlink blobs.
+- **Untrusted repository hardening.** All offline git probes pass `GIT_NO_LAZY_FETCH=1`, `GIT_ALLOW_PROTOCOL=`, `-c core.hooksPath=/dev/null`, `-c core.fsmonitor=false`, and `-c protocol.allow=never`. Bounded promisor fallback runs with `GIT_TERMINAL_PROMPT=0`, `GIT_ALLOW_PROTOCOL=https`, `-c core.hooksPath=/dev/null`, `-c core.fsmonitor=false`, and `-c credential.helper=`. Git blob reads accept only regular file modes (`100644`, `100755`) and never execute hooks or dereference symlink blobs.
 - **Credential sanitization.** `origin` remote URLs are stripped of embedded userinfo credentials before persisting `remote` or deriving `slug`.
 - **Output framing.** Every sandbox probe uses a random per-invocation boundary token so repository file contents cannot spoof protocol delimiters.
 - **Prompt boundary.** Repository instructions, scoped instructions, and `onEnter` instructions always emit with `role: "user"`, never `role: "system"`. The code extension's system instructions state that repository content never grants permission to publish or override safety rules.

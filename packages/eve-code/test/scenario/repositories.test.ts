@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
 
@@ -43,7 +43,7 @@ function createLocalSandbox(
     commands,
     sandbox: {
       resolvePath(path: string) {
-        return path.startsWith("/") ? path : join(root, path);
+        return isAbsolute(path) ? path : join(root, path);
       },
       async run({ command }) {
         commands.push(command);
@@ -113,10 +113,10 @@ test("discovers multiple repos and git worktrees in one command, strips remote c
     assert.equal(commands.length, 1, "discovery runs in a single sandbox command");
     assert.equal(repos.length, 3);
 
-    const byRoot = new Map(repos.map((repo) => [repo.root, repo]));
-    const realA = await realpath(repoA);
-    const realB = await realpath(repoB);
-    const realWt = await realpath(worktreeDir);
+    const byRoot = new Map(repos.map((repo) => [repo.root.replaceAll("\\", "/"), repo]));
+    const realA = (await realpath(repoA)).replaceAll("\\", "/");
+    const realB = (await realpath(repoB)).replaceAll("\\", "/");
+    const realWt = (await realpath(worktreeDir)).replaceAll("\\", "/");
 
     const foundA = byRoot.get(realA);
     assert.ok(foundA);
@@ -231,6 +231,62 @@ test("returns source unavailable for promisor blobs when the remote cannot be re
   }
 });
 
+test("blocks ext:: promisor RCE and core.fsmonitor execution from untrusted .git/config (vercel/eve/407)", async () => {
+  const root = await mkdtemp(join(tmpdir(), "eve-code-repos-rce-407-"));
+  try {
+    const upstream = join(root, "upstream");
+    const workspace = join(root, "ws");
+    await mkdir(workspace, { recursive: true });
+    await initRepo(upstream, {
+      "AGENTS.md": "Promisor instructions\n",
+      "src/app.ts": "export const ok = true;\n",
+    });
+    await git(upstream, ["config", "uploadpack.allowFilter", "true"]);
+
+    const cloneDir = join(workspace, "malicious-partial");
+    await git(workspace, [
+      "clone",
+      "--filter=blob:none",
+      "--no-checkout",
+      `file://${upstream}`,
+      cloneDir,
+    ]);
+    await git(cloneDir, ["sparse-checkout", "init", "--no-cone"]);
+    await git(cloneDir, ["sparse-checkout", "set", "src/app.ts"]);
+    await git(cloneDir, ["checkout"]);
+
+    const marker = join(root, "ext-rce-marker");
+    const fsmonitorMarker = join(root, "fsmonitor-marker");
+    const markerShell = marker.replaceAll("\\", "/");
+    const fsmonitorShell = fsmonitorMarker.replaceAll("\\", "/");
+
+    await git(cloneDir, ["config", "protocol.ext.allow", "always"]);
+    await git(cloneDir, ["config", "remote.origin.promisor", "true"]);
+    await git(cloneDir, ["config", "remote.origin.partialclonefilter", "blob:none"]);
+    await git(cloneDir, ["config", "remote.origin.url", `ext::sh -c 'touch ${markerShell}'`]);
+    await git(cloneDir, ["config", "core.fsmonitor", `touch ${fsmonitorShell}`]);
+
+    const { sandbox } = createLocalSandbox(workspace);
+
+    const repos = await discoverRepositories(sandbox);
+    assert.equal(repos.length, 1);
+    assert.equal(repos[0]?.instructions.length, 1);
+    assert.equal(repos[0]?.instructions[0]?.relativePath, "AGENTS.md");
+    assert.equal(repos[0]?.instructions[0]?.source, "unavailable");
+    assert.equal(repos[0]?.instructions[0]?.content, null);
+
+    const file = await readRepositoryFile(sandbox, cloneDir, "AGENTS.md");
+    assert.ok(file !== null);
+    assert.equal(file.source, "unavailable");
+    assert.equal(file.content, null);
+
+    await assert.rejects(stat(marker), { code: "ENOENT" });
+    await assert.rejects(stat(fsmonitorMarker), { code: "ENOENT" });
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
 test("blocks symlink exfiltration outside the repository and validates public helper options", async () => {
   const root = await mkdtemp(join(tmpdir(), "eve-code-repos-symlink-"));
   try {
@@ -331,7 +387,10 @@ test("discovers enclosing repository outside workspace, expands $HOME paths, and
 
     const enclosing = await findEnclosingRepository(sandbox, externalFile);
     assert.ok(enclosing !== null);
-    assert.equal(enclosing.root, await realpath(externalRepo));
+    assert.equal(
+      enclosing.root.replaceAll("\\", "/"),
+      (await realpath(externalRepo)).replaceAll("\\", "/"),
+    );
     assert.equal(enclosing.slug, "external/tool");
     assert.equal(enclosing.instructions[0]?.content, "External repo rules\n");
 
@@ -357,8 +416,11 @@ test("discovers enclosing repository outside workspace, expands $HOME paths, and
       targetPath: "$HOME/.agents/skills/demo/SKILL.md",
       checkedDirs: new Set(),
     });
-    const canonicalHomeSkillDir = await realpath(homeSkillDir);
-    assert.equal(homeProbe.homeDir, await realpath(fakeHome));
+    const canonicalHomeSkillDir = (await realpath(homeSkillDir)).replaceAll("\\", "/");
+    assert.equal(
+      homeProbe.homeDir?.replaceAll("\\", "/"),
+      (await realpath(fakeHome)).replaceAll("\\", "/"),
+    );
     assert.equal(homeProbe.enclosingRepoRoot, null);
     assert.deepEqual(homeProbe.checkedDirs, [canonicalHomeSkillDir]);
     assert.deepEqual(homeProbe.scopes, []);

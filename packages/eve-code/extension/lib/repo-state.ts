@@ -4,6 +4,7 @@ import type { SkillDefinition, SkillFileContent } from "eve/skills";
 import type { RepositoryInstructionFile } from "../extension.ts";
 
 export const MAX_CHECKED_DIRS = 500;
+export const MAX_PENDING_BACKGROUND_JOBS = 16;
 export const REPOSITORY_SKILL_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,57}$/u;
 
 export function isValidRepositorySkillName(name: string): boolean {
@@ -45,8 +46,14 @@ export interface RecordedScope {
   readonly files: readonly RepositoryInstructionFile[];
 }
 
-export interface PendingRepositoryReconcile {
+export interface PendingBackgroundJob {
+  readonly outputDirectory: string;
+  readonly pid?: number;
   readonly extraPaths: readonly string[];
+}
+
+export interface PendingRepositoryReconcile {
+  readonly jobs: readonly PendingBackgroundJob[];
 }
 
 export interface RepositorySessionState {
@@ -100,7 +107,7 @@ export function invalidateRepoCheckedDirs(
   existing: readonly string[],
   repoRoot: string,
 ): readonly string[] {
-  const prefix = repoRoot === "/" ? "/" : `${repoRoot}/`;
+  const prefix = repoRoot === "/" || /^[A-Za-z]:\/$/u.test(repoRoot) ? repoRoot : `${repoRoot}/`;
   return existing.filter((dir) => dir !== repoRoot && !dir.startsWith(prefix));
 }
 

@@ -5,11 +5,14 @@ import type { RuntimeSandboxSession } from "eve/sandbox";
 import extension from "../extension.ts";
 import {
   classifySettledCall,
+  collectPendingExtraPaths,
+  extractBackgroundBashJob,
   hasUncheckedFileAncestors,
   isBackgroundBashOutput,
   mergeExtraPaths,
   reconcileTouchedFile,
   reconcileWorkspace,
+  upsertPendingBackgroundJob,
 } from "../lib/repo-reconcile.ts";
 import { repoState } from "../lib/repo-state.ts";
 import { resolveRepositoriesConfig } from "../lib/repositories.ts";
@@ -36,10 +39,11 @@ export default defineHook({
         trigger: "turn.started" as const,
         ...(ctx.conversation !== undefined && { conversation: ctx.conversation }),
       };
+      const pendingJobs = state.pendingReconcile?.jobs ?? [];
       await reconcileWorkspace(sandbox, resolved, ruleCtx, {
         turnId: ctx.turn?.id ?? null,
-        extraPaths: state.pendingReconcile?.extraPaths ?? [],
-        clearPendingReconcile: state.pendingReconcile !== null,
+        extraPaths: collectPendingExtraPaths(state.pendingReconcile),
+        pendingJobs,
       });
     },
 
@@ -57,19 +61,21 @@ export default defineHook({
         observed.name === "bash" &&
         isBackgroundBashOutput(observed.output)
       ) {
-        const extraPaths = mergeExtraPaths(
-          state.pendingReconcile?.extraPaths ?? [],
-          action.extraPaths,
-        );
-        repoState.update((latest) => ({
-          ...latest,
-          pendingReconcile: { extraPaths },
-        }));
+        const job = extractBackgroundBashJob(observed.output, action.extraPaths);
+        if (job !== null) {
+          repoState.update((latest) => ({
+            ...latest,
+            pendingReconcile: {
+              jobs: upsertPendingBackgroundJob(latest.pendingReconcile?.jobs ?? [], job),
+            },
+          }));
+        }
         return;
       }
 
       const needsTurnSync = turnId !== null && state.syncedTurnId !== turnId;
-      const hasPending = state.pendingReconcile !== null;
+      const pendingJobs = state.pendingReconcile?.jobs ?? [];
+      const hasPending = pendingJobs.length > 0;
 
       if (!needsTurnSync && !hasPending) {
         if (action.kind === "none") return;
@@ -104,13 +110,13 @@ export default defineHook({
 
       if (needsTurnSync || hasPending || action.kind === "reconcile") {
         const extraPaths = mergeExtraPaths(
-          state.pendingReconcile?.extraPaths ?? [],
+          collectPendingExtraPaths(state.pendingReconcile),
           action.kind === "reconcile" ? action.extraPaths : [],
         );
         await reconcileWorkspace(sandbox, resolved, ruleCtx, {
           turnId: needsTurnSync ? turnId : undefined,
           extraPaths,
-          clearPendingReconcile: hasPending,
+          pendingJobs,
         });
       }
 

@@ -56,6 +56,7 @@ export interface WorkspaceDiscoveryResult {
   readonly homeDir: string | null;
   readonly repositories: readonly DiscoveredRepository[];
   readonly workspaceInstructions: readonly RepositoryInstructionFile[];
+  readonly finishedJobDirs: readonly string[];
 }
 
 export interface ScopedProbeResult {
@@ -87,15 +88,40 @@ export function resolveRepositoriesConfig(
   };
 }
 
+function hasControlOrBackslash(value: string): boolean {
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i);
+    if (code <= 0x1f || code === 0x7f || code === 0x5c) return true;
+  }
+  return false;
+}
+
 export function isValidRelativePath(value: string): boolean {
   if (value.trim().length === 0) return false;
-  if (value.startsWith("/") || /[\0\r\n\\]/u.test(value)) return false;
+  if (value.startsWith("/") || hasControlOrBackslash(value)) return false;
   const segments = value.split("/");
   return segments.every((segment) => segment.length > 0 && segment !== "." && segment !== "..");
 }
 
 export function isValidRootPath(value: string): boolean {
   return value === "." || isValidRelativePath(value);
+}
+
+export function isWindowsDrivePath(value: string): boolean {
+  return /^[A-Za-z]:[/\\]/u.test(value);
+}
+
+export function normalizePlatformPath(value: string): string {
+  const slashed = value.replaceAll("\\", "/");
+  if (/^[A-Za-z]:\//u.test(slashed)) {
+    const drive = slashed.slice(0, 2);
+    const rest = posix.resolve("/", slashed.slice(2));
+    return `${drive}${rest}`;
+  }
+  if (slashed.startsWith("/")) {
+    return posix.resolve("/", slashed);
+  }
+  return posix.normalize(slashed);
 }
 
 function validateMaxFileBytes(maxFileBytes: number | undefined): number {
@@ -225,7 +251,15 @@ export function matchesRepositoryRule(
   match: RepositoryRule["match"],
 ): boolean {
   if (match === undefined) return true;
-  if (typeof match === "function") return Boolean(match(repo));
+  if (typeof match === "function") {
+    try {
+      return Boolean(match(repo));
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      console.warn(`eve-code repository rule match failed for ${repo.root}: ${detail}`);
+      return false;
+    }
+  }
   if (match instanceof RegExp) {
     if (repo.slug !== null) {
       match.lastIndex = 0;
@@ -308,6 +342,9 @@ function shellHelpers(boundary: string, maxFileBytes: number): string {
     `  printf '\\n%s CONTENT_END\\n' "$B"`,
     `  return 0`,
     `}`,
+    `git_offline() {`,
+    `  GIT_NO_LAZY_FETCH=1 GIT_ALLOW_PROTOCOL= git -c core.hooksPath=/dev/null -c core.fsmonitor=false -c protocol.allow=never "$@"`,
+    `}`,
     `emit_file_repo() {`,
     `  _scope="$1"; _repo="$2"; _rel="$3"`,
     `  if [ "$_repo" = "/" ]; then _full="/$_rel"; else _full="$_repo/$_rel"; fi`,
@@ -315,7 +352,7 @@ function shellHelpers(boundary: string, maxFileBytes: number): string {
     `    emit_file_worktree "$_scope" "$_repo" "$_rel" "$_full"`,
     `    return $?`,
     `  fi`,
-    `  _ls=$(GIT_NO_LAZY_FETCH=1 git -c core.hooksPath=/dev/null -c protocol.allow=never -c core.quotePath=false --literal-pathspecs -C "$_repo" ls-tree HEAD -- "$_rel" 2>/dev/null | head -n 1 || true)`,
+    `  _ls=$(git_offline -c core.quotePath=false --literal-pathspecs -C "$_repo" ls-tree HEAD -- "$_rel" 2>/dev/null | head -n 1 || true)`,
     `  [ -n "$_ls" ] || return 1`,
     `  IFS=' \t' read -r _mode _kind _oid _rest <<EOF`,
     `$_ls`,
@@ -323,21 +360,21 @@ function shellHelpers(boundary: string, maxFileBytes: number): string {
     `  [ "$_kind" = "blob" ] || return 1`,
     `  [ "$_mode" = "100644" ] || [ "$_mode" = "100755" ] || return 1`,
     `  [ -n "$_oid" ] || return 1`,
-    `  if GIT_NO_LAZY_FETCH=1 git -c core.hooksPath=/dev/null -c protocol.allow=never -C "$_repo" cat-file -e "$_oid" 2>/dev/null; then`,
-    `    _sz=$(GIT_NO_LAZY_FETCH=1 git -c core.hooksPath=/dev/null -c protocol.allow=never -C "$_repo" cat-file -s "$_oid" 2>/dev/null || echo 0)`,
+    `  if git_offline -C "$_repo" cat-file -e "$_oid" 2>/dev/null; then`,
+    `    _sz=$(git_offline -C "$_repo" cat-file -s "$_oid" 2>/dev/null || echo 0)`,
     `    [ "\${_sz:-0}" -gt 0 ] 2>/dev/null || return 1`,
-    `    GIT_NO_LAZY_FETCH=1 git -c core.hooksPath=/dev/null -c protocol.allow=never -C "$_repo" cat-file -p "$_oid" 2>/dev/null | head -c "$MAX_HEAD" | LC_ALL=C grep -q '[^[:space:]]' 2>/dev/null || return 1`,
+    `    git_offline -C "$_repo" cat-file -p "$_oid" 2>/dev/null | head -c "$MAX_HEAD" | LC_ALL=C grep -q '[^[:space:]]' 2>/dev/null || return 1`,
     `    printf '%s FILE_START\\n%s SCOPE %s\\n%s PATH %s\\n%s REL %s\\n%s SOURCE git\\n%s CONTENT_BEGIN\\n' "$B" "$B" "$_scope" "$B" "$_full" "$B" "$_rel" "$B" "$B"`,
-    `    GIT_NO_LAZY_FETCH=1 git -c core.hooksPath=/dev/null -c protocol.allow=never -C "$_repo" cat-file -p "$_oid" 2>/dev/null | head -c "$MAX_HEAD"`,
+    `    git_offline -C "$_repo" cat-file -p "$_oid" 2>/dev/null | head -c "$MAX_HEAD"`,
     `    printf '\\n%s CONTENT_END\\n' "$B"`,
     `    return 0`,
     `  fi`,
-    `  if run_with_timeout ${PROMISOR_FETCH_TIMEOUT_SECONDS} env GIT_TERMINAL_PROMPT=0 git -c core.hooksPath=/dev/null -c protocol.allow=never -c protocol.https.allow=always -c credential.helper= -C "$_repo" cat-file -e "$_oid" 2>/dev/null; then`,
-    `    _sz=$(GIT_NO_LAZY_FETCH=1 git -c core.hooksPath=/dev/null -c protocol.allow=never -C "$_repo" cat-file -s "$_oid" 2>/dev/null || echo 0)`,
+    `  if run_with_timeout ${PROMISOR_FETCH_TIMEOUT_SECONDS} env GIT_TERMINAL_PROMPT=0 GIT_ALLOW_PROTOCOL=https git -c core.hooksPath=/dev/null -c core.fsmonitor=false -c credential.helper= -C "$_repo" cat-file -e "$_oid" 2>/dev/null; then`,
+    `    _sz=$(git_offline -C "$_repo" cat-file -s "$_oid" 2>/dev/null || echo 0)`,
     `    [ "\${_sz:-0}" -gt 0 ] 2>/dev/null || return 1`,
-    `    GIT_NO_LAZY_FETCH=1 git -c core.hooksPath=/dev/null -c protocol.allow=never -C "$_repo" cat-file -p "$_oid" 2>/dev/null | head -c "$MAX_HEAD" | LC_ALL=C grep -q '[^[:space:]]' 2>/dev/null || return 1`,
+    `    git_offline -C "$_repo" cat-file -p "$_oid" 2>/dev/null | head -c "$MAX_HEAD" | LC_ALL=C grep -q '[^[:space:]]' 2>/dev/null || return 1`,
     `    printf '%s FILE_START\\n%s SCOPE %s\\n%s PATH %s\\n%s REL %s\\n%s SOURCE git\\n%s CONTENT_BEGIN\\n' "$B" "$B" "$_scope" "$B" "$_full" "$B" "$_rel" "$B" "$B"`,
-    `    GIT_NO_LAZY_FETCH=1 git -c core.hooksPath=/dev/null -c protocol.allow=never -C "$_repo" cat-file -p "$_oid" 2>/dev/null | head -c "$MAX_HEAD"`,
+    `    git_offline -C "$_repo" cat-file -p "$_oid" 2>/dev/null | head -c "$MAX_HEAD"`,
     `    printf '\\n%s CONTENT_END\\n' "$B"`,
     `    return 0`,
     `  fi`,
@@ -346,11 +383,11 @@ function shellHelpers(boundary: string, maxFileBytes: number): string {
     `}`,
     `emit_repo_meta() {`,
     `  _r="$1"`,
-    `  _head=$(GIT_NO_LAZY_FETCH=1 git -c core.hooksPath=/dev/null -c protocol.allow=never -C "$_r" rev-parse --verify HEAD 2>/dev/null || true)`,
-    `  _branch=$(GIT_NO_LAZY_FETCH=1 git -c core.hooksPath=/dev/null -c protocol.allow=never -C "$_r" symbolic-ref --short -q HEAD 2>/dev/null || true)`,
-    `  _remote=$(GIT_NO_LAZY_FETCH=1 git -c core.hooksPath=/dev/null -c protocol.allow=never -C "$_r" config --get remote.origin.url 2>/dev/null || true)`,
-    `  _sparse_cfg=$(GIT_NO_LAZY_FETCH=1 git -c core.hooksPath=/dev/null -c protocol.allow=never -C "$_r" config --bool --get core.sparseCheckout 2>/dev/null || true)`,
-    `  _promisor=$(GIT_NO_LAZY_FETCH=1 git -c core.hooksPath=/dev/null -c protocol.allow=never -C "$_r" config --get-regexp '^remote\\..*\\.promisor$' 2>/dev/null || true)`,
+    `  _head=$(git_offline -C "$_r" rev-parse --verify HEAD 2>/dev/null || true)`,
+    `  _branch=$(git_offline -C "$_r" symbolic-ref --short -q HEAD 2>/dev/null || true)`,
+    `  _remote=$(git_offline -C "$_r" config --get remote.origin.url 2>/dev/null || true)`,
+    `  _sparse_cfg=$(git_offline -C "$_r" config --bool --get core.sparseCheckout 2>/dev/null || true)`,
+    `  _promisor=$(git_offline -C "$_r" config --get-regexp '^remote\\..*\\.promisor$' 2>/dev/null || true)`,
     `  _sparse=0`,
     `  if [ "$_sparse_cfg" = "true" ] || [ -n "$_promisor" ]; then _sparse=1; fi`,
     `  printf '%s REPO_START\\n%s ROOT %s\\n%s REMOTE %s\\n%s HEAD %s\\n%s BRANCH %s\\n%s SPARSE %s\\n%s REPO_END\\n' "$B" "$B" "$_r" "$B" "$_remote" "$B" "$_head" "$B" "$_branch" "$B" "$_sparse" "$B"`,
@@ -414,6 +451,7 @@ interface ParsedProtocolOutput {
   readonly repos: readonly ParsedRepoMeta[];
   readonly files: readonly ParsedFileEntry[];
   readonly checkedDirs: readonly string[];
+  readonly finishedJobDirs: readonly string[];
 }
 
 function truncateContent(
@@ -449,6 +487,8 @@ function parseProtocolOutput(
   const files: ParsedFileEntry[] = [];
   const checkedDirs: string[] = [];
   const seenChecked = new Set<string>();
+  const finishedJobDirs: string[] = [];
+  const seenFinished = new Set<string>();
 
   const prefix = `${boundary} `;
   let cursor = 0;
@@ -459,11 +499,11 @@ function parseProtocolOutput(
     if (nl === -1) {
       const line = stdout.slice(cursor);
       cursor = stdout.length;
-      return line;
+      return line.endsWith("\r") ? line.slice(0, -1) : line;
     }
     const line = stdout.slice(cursor, nl);
     cursor = nl + 1;
-    return line;
+    return line.endsWith("\r") ? line.slice(0, -1) : line;
   }
 
   while (cursor < stdout.length) {
@@ -494,6 +534,15 @@ function parseProtocolOutput(
       if (dir.length > 0 && !seenChecked.has(dir)) {
         seenChecked.add(dir);
         checkedDirs.push(dir);
+      }
+      continue;
+    }
+
+    if (rest.startsWith("JOB_DONE ")) {
+      const dir = rest.slice("JOB_DONE ".length);
+      if (dir.length > 0 && !seenFinished.has(dir)) {
+        seenFinished.add(dir);
+        finishedJobDirs.push(dir);
       }
       continue;
     }
@@ -559,6 +608,7 @@ function parseProtocolOutput(
           } else {
             contentRaw = stdout.slice(cursor, endIdx);
             cursor = endIdx + endMarker.length;
+            if (stdout[cursor] === "\r") cursor += 1;
             if (stdout[cursor] === "\n") cursor += 1;
           }
           break;
@@ -593,7 +643,15 @@ function parseProtocolOutput(
     }
   }
 
-  return { workspaceRoot, homeDir, enclosingRepoRoot, repos, files, checkedDirs };
+  return {
+    workspaceRoot,
+    homeDir,
+    enclosingRepoRoot,
+    repos,
+    files,
+    checkedDirs,
+    finishedJobDirs,
+  };
 }
 
 function attachInstructions(
@@ -620,6 +678,10 @@ export async function discoverWorkspace(
     readonly includeWorkspaceInstructions?: boolean;
     readonly extraPaths?: readonly string[];
     readonly existingRoots?: readonly string[];
+    readonly pendingJobs?: readonly {
+      readonly outputDirectory: string;
+      readonly pid?: number;
+    }[];
   } = {},
 ): Promise<WorkspaceDiscoveryResult> {
   const roots = validateRoots(options.roots);
@@ -628,6 +690,7 @@ export async function discoverWorkspace(
   const includeWorkspaceInstructions = options.includeWorkspaceInstructions ?? false;
   const extraPaths = options.extraPaths ?? [];
   const existingRoots = options.existingRoots ?? [];
+  const pendingJobs = options.pendingJobs ?? [];
 
   const boundary = createBoundary();
   const workspacePath = sandbox.resolvePath(".");
@@ -646,11 +709,24 @@ export async function discoverWorkspace(
       `_er=${shellQuote(existing)}; if [ -e "$_er/.git" ]; then printf '%s\\n' "$_er"; fi`,
   );
 
+  const pendingJobLines = pendingJobs.map((job) => {
+    const dirQuoted = shellQuote(job.outputDirectory);
+    const pidQuoted = job.pid !== undefined ? shellQuote(String(job.pid)) : "''";
+    return [
+      `_jdir=${dirQuoted}`,
+      `_jpid=${pidQuoted}`,
+      `if [ -e "$_jdir/exit" ] || [ ! -d "$_jdir" ] || { [ -n "$_jpid" ] && ! kill -0 -- -"$_jpid" 2>/dev/null; }; then`,
+      `  printf '%s JOB_DONE %s\\n' "$B" "$_jdir"`,
+      `fi`,
+    ].join("\n");
+  });
+
   const script = [
     shellHelpers(boundary, maxFileBytes),
     `WS=$(canon_path ${shellQuote(workspacePath)} 2>/dev/null || printf '%s' ${shellQuote(workspacePath)})`,
     `printf '%s WORKSPACE %s\\n' "$B" "$WS"`,
     `if [ -n "\${HOME:-}" ] && [ -d "$HOME" ]; then _hr=$(canon_path "$HOME" 2>/dev/null || printf '%s' "$HOME"); printf '%s HOME %s\\n' "$B" "$_hr"; fi`,
+    ...pendingJobLines,
     `NL='`,
     `'`,
     `SEEN="$NL"`,
@@ -671,7 +747,7 @@ export async function discoverWorkspace(
     `} | while IFS= read -r _cand_dir; do`,
     `  [ -n "$_cand_dir" ] || continue`,
     `  [ -d "$_cand_dir" ] || continue`,
-    `  _top=$(GIT_NO_LAZY_FETCH=1 git -c core.hooksPath=/dev/null -c protocol.allow=never -C "$_cand_dir" rev-parse --show-toplevel 2>/dev/null || true)`,
+    `  _top=$(git_offline -C "$_cand_dir" rev-parse --show-toplevel 2>/dev/null || true)`,
     `  [ -n "$_top" ] || continue`,
     `  _repo_real=$(canon_path "$_top" 2>/dev/null || true)`,
     `  [ -n "$_repo_real" ] || continue`,
@@ -712,6 +788,7 @@ export async function discoverWorkspace(
     homeDir: parsed.homeDir,
     repositories,
     workspaceInstructions,
+    finishedJobDirs: parsed.finishedJobDirs,
   };
 }
 
@@ -807,7 +884,7 @@ export async function findEnclosingRepository(
     `_target=${shellResolveTargetExpr(sandbox, targetPath)}`,
     `if [ -d "$_target" ]; then _dir="$_target"; else _dir=$(dirname -- "$_target"); fi`,
     `[ -d "$_dir" ] || exit 0`,
-    `_top=$(GIT_NO_LAZY_FETCH=1 git -c core.hooksPath=/dev/null -c protocol.allow=never -C "$_dir" rev-parse --show-toplevel 2>/dev/null || true)`,
+    `_top=$(git_offline -C "$_dir" rev-parse --show-toplevel 2>/dev/null || true)`,
     `[ -n "$_top" ] || exit 0`,
     `_repo_real=$(canon_path "$_top" 2>/dev/null || true)`,
     `[ -n "$_repo_real" ] || exit 0`,
@@ -826,10 +903,11 @@ export async function findEnclosingRepository(
 }
 
 export function computeAncestorDirs(rootDir: string, targetDir: string): readonly string[] {
-  const root = posix.resolve("/", rootDir);
-  const target = posix.resolve("/", targetDir);
+  const root = normalizePlatformPath(rootDir);
+  const target = normalizePlatformPath(targetDir);
   if (target === root) return [];
-  const prefix = root === "/" ? "/" : `${root}/`;
+  const rootIsDriveOrSlash = root === "/" || /^[A-Za-z]:\/$/u.test(root);
+  const prefix = rootIsDriveOrSlash ? root : `${root}/`;
   if (!target.startsWith(prefix)) return [];
   const remainder = target.slice(prefix.length);
   if (remainder.length === 0) return [];
@@ -837,7 +915,8 @@ export function computeAncestorDirs(rootDir: string, targetDir: string): readonl
   const dirs: string[] = [];
   let current = root;
   for (const part of parts) {
-    current = current === "/" ? `/${part}` : `${current}/${part}`;
+    const isRoot = current === "/" || /^[A-Za-z]:\/$/u.test(current);
+    current = isRoot ? `${current}${part}` : `${current}/${part}`;
     dirs.push(current);
   }
   return dirs;
@@ -883,7 +962,7 @@ export async function readScopedDirectoryInstructions(
     `  _tdir=$(canon_path "$(dirname -- "$_target")" 2>/dev/null || true)`,
     `fi`,
     `[ -n "$_tdir" ] || exit 0`,
-    `_top=$(GIT_NO_LAZY_FETCH=1 git -c core.hooksPath=/dev/null -c protocol.allow=never -C "$_tdir" rev-parse --show-toplevel 2>/dev/null || true)`,
+    `_top=$(git_offline -C "$_tdir" rev-parse --show-toplevel 2>/dev/null || true)`,
     `_repo_real=""`,
     `if [ -n "$_top" ]; then`,
     `  _repo_real=$(canon_path "$_top" 2>/dev/null || true)`,

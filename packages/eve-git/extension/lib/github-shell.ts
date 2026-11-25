@@ -298,6 +298,7 @@ export async function executeGitHubShell(
           ["url.https://github.com/.insteadOf", "git@github.com:"],
           ["url.https://github.com/.insteadOf", "ssh://git@github.com/"],
           ["core.hooksPath", "/dev/null"],
+          ["core.fsmonitor", "false"],
           ["protocol.allow", "never"],
           ["protocol.https.allow", "always"],
         ];
@@ -306,6 +307,7 @@ export async function executeGitHubShell(
           env[`GIT_CONFIG_KEY_${index}`] = key;
           env[`GIT_CONFIG_VALUE_${index}`] = value;
         });
+        env.GIT_ALLOW_PROTOCOL = "https";
         env.GIT_TERMINAL_PROMPT = "0";
         env.PATH = "/usr/local/bin:/usr/bin:/bin";
         const mainResult = await sandbox.run({ command, env });

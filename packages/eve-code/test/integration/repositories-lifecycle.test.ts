@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
 
@@ -104,14 +104,14 @@ function createRealSandboxAccess(
 
   const session: SandboxSession = {
     resolvePath(path: string) {
-      return path.startsWith("/") ? path : join(workspaceDir, path);
+      return isAbsolute(path) ? path : join(workspaceDir, path);
     },
     async run({ command, workingDirectory }) {
       commands.push(command);
       const cwd =
         workingDirectory === undefined
           ? workspaceDir
-          : workingDirectory.startsWith("/")
+          : isAbsolute(workingDirectory)
             ? workingDirectory
             : join(workspaceDir, workingDirectory);
       try {
@@ -525,7 +525,9 @@ test("post-clone sparse repo A, repo B deduplication, scoped AGENTS.md caching, 
       callId: "call_read_sub_1",
       name: "read_file",
       input: { filePath: "repoA/packages/sub/index.ts" },
-      output: { path: join(workspace, "repoA", "packages", "sub", "index.ts") },
+      output: {
+        path: join(workspace, "repoA", "packages", "sub", "index.ts").replaceAll("\\", "/"),
+      },
     });
 
     const step4 = await parent.nextModelCall();
@@ -539,7 +541,9 @@ test("post-clone sparse repo A, repo B deduplication, scoped AGENTS.md caching, 
       callId: "call_read_sub_2",
       name: "read_file",
       input: { filePath: "repoA/packages/sub/other.ts" },
-      output: { path: join(workspace, "repoA", "packages", "sub", "other.ts") },
+      output: {
+        path: join(workspace, "repoA", "packages", "sub", "other.ts").replaceAll("\\", "/"),
+      },
     });
     const step5 = await parent.nextModelCall();
     assert.equal(
@@ -719,7 +723,7 @@ test("HEAD change prunes deleted scopes, repo delete + re-clone re-runs onEnter,
       callId: "call_grep_sub",
       name: "grep",
       input: { path: "app/sub", pattern: "export" },
-      output: { path: join(workspace, "app", "sub") },
+      output: { path: join(workspace, "app", "sub").replaceAll("\\", "/") },
     });
     const call2 = await session.nextModelCall();
     assert.equal(call2.newUserInstructions.length, 1);
@@ -779,13 +783,15 @@ test("HEAD change prunes deleted scopes, repo delete + re-clone re-runs onEnter,
   }
 });
 
-test("background bash clone defers onboarding, syncAfter triggers reconciliation, and failing onEnter / invalid skill names are isolated", async () => {
+test("background bash clone keeps pending reconcile across polls until exit, syncAfter triggers reconciliation, and throwing match / onEnter / malformed skills are isolated", async () => {
   const root = await mkdtemp(join(tmpdir(), "eve-code-lifecycle-edge-"));
   try {
     const upstreamA = join(root, "upstream-a");
     const upstreamB = join(root, "upstream-b");
     const workspace = join(root, "workspace");
+    const bgOutputDir = join(root, "bg-job-dir");
     await mkdir(workspace, { recursive: true });
+    await mkdir(bgOutputDir, { recursive: true });
     await initUpstreamRepo(upstreamA, { "AGENTS.md": "Background clone A rules.\n" });
     await initUpstreamRepo(upstreamB, { "AGENTS.md": "SyncAfter B rules.\n" });
 
@@ -809,6 +815,14 @@ test("background bash clone defers onboarding, syncAfter triggers reconciliation
           syncAfter: [syncTool],
           rules: [
             {
+              match() {
+                throw new Error("boom in match predicate");
+              },
+              onEnter() {
+                return { instructions: "Should never run" };
+              },
+            },
+            {
               onEnter() {
                 enterCalls += 1;
                 throw new Error("boom in first rule");
@@ -827,6 +841,16 @@ test("background bash clone defers onboarding, syncAfter triggers reconciliation
                       description: "Reserved prefix",
                       content: "Should be skipped",
                     }),
+                    malformed_missing_content: {
+                      description: "Missing content field",
+                    } as never,
+                    malformed_bad_files: {
+                      description: "Bad files payload",
+                      content: "Valid body",
+                      files: {
+                        "broken.bin": 12345,
+                      },
+                    } as never,
                     shared_skill: defineSkill({
                       description: `Skill from ${repo.root.split("/").at(-1)}`,
                       content: `Content from ${repo.root.split("/").at(-1)}`,
@@ -851,8 +875,7 @@ test("background bash clone defers onboarding, syncAfter triggers reconciliation
         input: { command: `git clone file://${upstreamA} bgA` },
         output: {
           status: "running",
-          pid: 1234,
-          outputDirectory: "/tmp/bg",
+          outputDirectory: bgOutputDir.replaceAll("\\", "/"),
           message: "still running",
           stdout: "",
           stderr: "",
@@ -861,7 +884,18 @@ test("background bash clone defers onboarding, syncAfter triggers reconciliation
       });
       assert.equal(enterCalls, 0, "background bash clone must not onboard prematurely");
 
+      await session.settleToolCall({
+        callId: "call_poll_still_running",
+        name: "bash",
+        input: { command: "echo polling" },
+        output: { exitCode: 0, status: "completed", stdout: "polling\n", stderr: "" },
+      });
+      const whileRunning = await session.nextModelCall();
+      assert.equal(enterCalls, 0);
+      assert.deepEqual(whileRunning.newUserInstructions, []);
+
       await git(workspace, ["clone", `file://${upstreamA}`, join(workspace, "bgA")]);
+      await writeFile(join(bgOutputDir, "exit"), "0\n");
 
       await session.settleToolCall({
         callId: "call_poll_done",
@@ -876,9 +910,25 @@ test("background bash clone defers onboarding, syncAfter triggers reconciliation
       assert.match(afterBg.newUserInstructions[0] ?? "", /Background clone A rules\./u);
       assert.match(afterBg.newUserInstructions[0] ?? "", /Second rule ok for bgA\./u);
       assert.deepEqual(afterBg.skillNames, ["code__shared_skill"]);
+      assert.ok(warnings.some((w) => w.includes("boom in match predicate")));
       assert.ok(warnings.some((w) => w.includes("boom in first rule")));
       assert.ok(warnings.some((w) => w.includes("bad name!")));
       assert.ok(warnings.some((w) => w.includes("eve__reserved")));
+      assert.ok(warnings.some((w) => w.includes("malformed_missing_content")));
+      assert.ok(warnings.some((w) => w.includes("malformed_bad_files")));
+
+      const commandsAfterBgCleared = sandbox.commands.length;
+      await session.settleToolCall({
+        callId: "call_idle_after_bg",
+        name: "bash",
+        input: { command: "echo idle" },
+        output: { exitCode: 0, status: "completed", stdout: "idle\n", stderr: "" },
+      });
+      assert.equal(
+        sandbox.commands.length,
+        commandsAfterBgCleared,
+        "pendingReconcile must be cleared once the background job finishes",
+      );
 
       await git(workspace, ["clone", `file://${upstreamB}`, join(workspace, "syncB")]);
       await session.settleToolCall({

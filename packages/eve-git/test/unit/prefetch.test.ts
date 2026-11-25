@@ -3,7 +3,7 @@ import test from "node:test";
 
 import extension from "../../extension/extension.ts";
 import { parseCommand } from "../../extension/lib/github-shell.ts";
-import { resolvePrefetchTarget } from "../../extension/lib/prefetch.ts";
+import { buildPrefetchCommand, resolvePrefetchTarget } from "../../extension/lib/prefetch.ts";
 
 test("extracts target repository paths for clone and ref-changing commands inside the workspace", () => {
   const cases: ReadonlyArray<{
@@ -121,6 +121,48 @@ test("extracts target repository paths for clone and ref-changing commands insid
       command: "gh-signed-commit --repo vercel/eve --branch feat -m msg",
       expected: null,
     },
+    {
+      command: "git clone https://github.com/vercel/eve.git",
+      workingDirectory: "C:\\workspace",
+      workspaceRoot: "C:\\workspace",
+      expected: "C:/workspace/eve",
+    },
+    {
+      command: "git -C sub/nested fetch origin",
+      workingDirectory: "C:\\workspace",
+      workspaceRoot: "C:\\workspace",
+      expected: "C:/workspace/sub/nested",
+    },
+    {
+      command: "git -C C:/workspace/repo checkout main",
+      workingDirectory: "c:/workspace",
+      workspaceRoot: "C:/workspace",
+      expected: "C:/workspace/repo",
+    },
+    {
+      command: "git -C ../outside fetch origin",
+      workingDirectory: "C:\\workspace",
+      workspaceRoot: "C:\\workspace",
+      expected: null,
+    },
+    {
+      command: "git -C D:/workspace/eve fetch origin",
+      workingDirectory: "C:\\workspace",
+      workspaceRoot: "C:\\workspace",
+      expected: null,
+    },
+    {
+      command: "gh repo clone vercel/eve custom",
+      workingDirectory: "C:\\workspace",
+      workspaceRoot: "C:\\workspace",
+      expected: "C:/workspace/custom",
+    },
+    {
+      command: "git pull origin main",
+      workingDirectory: "C:\\workspace\\eve",
+      workspaceRoot: "C:\\workspace",
+      expected: "C:/workspace/eve",
+    },
   ];
 
   for (const {
@@ -169,6 +211,10 @@ test("extension config validates prefetchFiles as safe relative paths", () => {
     "AGENTS.md\n",
     "AGENTS.md\r",
     "AGENTS.md\0",
+    "AGENTS.md\t",
+    "AGENTS\x07.md",
+    "AGENTS\x1b.md",
+    "AGENTS\x7f.md",
   ]) {
     assert.throws(
       () => extension({ github: { ...base, prefetchFiles: [invalid] } }),
@@ -176,4 +222,35 @@ test("extension config validates prefetchFiles as safe relative paths", () => {
       JSON.stringify(invalid),
     );
   }
+});
+
+test("buildPrefetchCommand enforces workspace boundaries for Windows drive paths and hardens git invocations", () => {
+  assert.equal(buildPrefetchCommand("D:\\workspace\\eve", "C:\\workspace", ["AGENTS.md"]), null);
+  assert.equal(
+    buildPrefetchCommand("C:\\workspace-other\\eve", "C:\\workspace", ["AGENTS.md"]),
+    null,
+  );
+
+  const command = buildPrefetchCommand("C:\\workspace\\eve", "C:\\workspace", ["AGENTS.md"]);
+  assert.ok(command);
+  assert.match(
+    command,
+    /GIT_ALLOW_PROTOCOL= git -c core\.hooksPath=\/dev\/null -c core\.fsmonitor=false -C 'C:\\workspace\\eve' rev-parse --show-toplevel/u,
+  );
+  assert.match(
+    command,
+    /GIT_ALLOW_PROTOCOL= git -c core\.hooksPath=\/dev\/null -c core\.fsmonitor=false -C "\$top" config --get-regexp/u,
+  );
+  assert.match(
+    command,
+    /GIT_ALLOW_PROTOCOL= GIT_NO_LAZY_FETCH=1 git -c core\.hooksPath=\/dev\/null -c core\.fsmonitor=false -c core\.quotePath=false --literal-pathspecs -C "\$top" ls-tree/u,
+  );
+  assert.match(
+    command,
+    /GIT_ALLOW_PROTOCOL= GIT_NO_LAZY_FETCH=1 git -c core\.hooksPath=\/dev\/null -c core\.fsmonitor=false -C "\$top" cat-file -e/u,
+  );
+  assert.match(
+    command,
+    /env GIT_ALLOW_PROTOCOL=https GIT_TERMINAL_PROMPT=0 git -c core\.hooksPath=\/dev\/null -c core\.fsmonitor=false -c credential\.helper= -C "\$top" cat-file --batch-check/u,
+  );
 });

@@ -93,16 +93,16 @@ As `read_file`, `edit_file`, `write_file`, `glob`, or `grep` touch files inside 
 
 Configure `repositories` on `code()` to customize discovery roots, instruction files, start-of-turn sandbox behavior, and per-repository rules:
 
-| Option               | Default                        | Effect                                                                                                                  |
-| -------------------- | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
-| `roots`              | `["."]`                        | Workspace-relative directories scanned up to depth 3 for repositories                                                   |
-| `instructions`       | `[["AGENTS.md", "CLAUDE.md"]]` | Repository-relative paths or fallback tuples where the first present file wins; pass `[]` to disable                    |
-| `scopedInstructions` | `true`                         | Load matching instruction files from ancestor directories as file tools enter subdirectories                            |
-| `discoverOnStart`    | `"eager"`                      | `"eager"` opens the sandbox at turn start when needed; `"on-sandbox-use"` checks only if the sandbox is already started |
-| `rules`              | `[]`                           | Rules (`{ match?, files?, onEnter? }`) applied when matching repositories are discovered                                |
-| `syncAfter`          | `[]`                           | Additional `ToolDefinition` values whose completed calls trigger repository discovery                                   |
-| `maxFileBytes`       | `64_000`                       | Maximum UTF-8 bytes read per instruction file before truncation                                                         |
-| `maxTotalBytes`      | `256_000`                      | Maximum total UTF-8 bytes across emitted repository and scoped instructions                                             |
+| Option               | Default                        | Effect                                                                                                                                                                                                                                                                |
+| -------------------- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `roots`              | `["."]`                        | Workspace-relative directories scanned up to depth 3 for repositories                                                                                                                                                                                                 |
+| `instructions`       | `[["AGENTS.md", "CLAUDE.md"]]` | Repository-relative paths or fallback tuples where the first present file wins; pass `[]` to disable                                                                                                                                                                  |
+| `scopedInstructions` | `true`                         | Load matching instruction files from ancestor directories as file tools enter subdirectories                                                                                                                                                                          |
+| `discoverOnStart`    | `"eager"`                      | `"eager"` opens the sandbox at turn start when needed; `"on-sandbox-use"` checks via `ctx.getSandbox({ create: false })` (skips creating a new sandbox before first use, and resumes an idle-stopped persisted sandbox on later turns if the session already has one) |
+| `rules`              | `[]`                           | Rules (`{ match?, files?, onEnter? }`) applied when matching repositories are discovered                                                                                                                                                                              |
+| `syncAfter`          | `[]`                           | Additional `ToolDefinition` values whose completed calls trigger repository discovery                                                                                                                                                                                 |
+| `maxFileBytes`       | `64_000`                       | Maximum UTF-8 bytes read per instruction file before truncation                                                                                                                                                                                                       |
+| `maxTotalBytes`      | `256_000`                      | Maximum total UTF-8 bytes across emitted repository and scoped instructions                                                                                                                                                                                           |
 
 Each entry in `rules` accepts:
 
