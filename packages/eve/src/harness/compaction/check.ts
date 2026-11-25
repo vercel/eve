@@ -1,12 +1,8 @@
 import type { ModelMessage } from "ai";
 
 import { CompactionResultOverLimitError } from "#shared/compaction-over-limit-error.js";
-import { COMPACTION_CHECKPOINT_MARKER } from "#shared/compaction-checkpoint.js";
-import {
-  type HarnessModelMessage,
-  isUserModelMessage,
-  validateHarnessModelMessages,
-} from "#harness/messages.js";
+import { isCheckpointMarker } from "#shared/compaction-checkpoint.js";
+import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
 import { answersFollowCalls } from "#harness/session-machine/history.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 
@@ -41,11 +37,8 @@ export function checkHistory(
       `${subject} is invalid. ${misordered} Keep or remove a call together with its result.`,
     );
   }
-  const checkpoints = messages.flatMap((message, index) =>
-    isCheckpointMarker(message) ? [index] : [],
-  );
-  if (checkpoints.some((index) => index !== 0) || checkpoints.length > 1) {
-    throw new Error(`${subject} has a checkpoint after other messages. A checkpoint goes first.`);
+  if (messages.filter(isCheckpointMarker).length > 1) {
+    throw new Error(`${subject} has more than one checkpoint. Keep at most one.`);
   }
   const size = estimateTokens(messages);
   if (size > input.limit) {
@@ -67,12 +60,4 @@ function callsAndResults(history: readonly ModelMessage[]) {
     }
   }
   return { calls, results };
-}
-
-function isCheckpointMarker(message: ModelMessage): boolean {
-  return (
-    isUserModelMessage(message) &&
-    message.kind === "context.compaction" &&
-    message.content === COMPACTION_CHECKPOINT_MARKER
-  );
 }

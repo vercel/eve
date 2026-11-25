@@ -55,13 +55,13 @@ Without `experimental.compaction`, a provider rejection fails the turn.
 
 ## What eve checks
 
-eve checks every result before it applies it, for every strategy. A result fails the compaction, and leaves the history as it was, when it drops a tool call's result or a call, puts a checkpoint after other messages, removes a user message's `kind`, or doesn't fit within the model's context window beside the instructions, tools and recall. In development and tests, a strategy that compacts what it already returned fails too. eve never falls back to its default when a strategy fails.
+eve checks every result before it applies it, for every strategy. A result fails the compaction, and leaves the history as it was, when it drops a tool call's result or a call, keeps more than one checkpoint, removes a user message's `kind`, or doesn't fit within the model's context window beside the instructions, tools and recall. In development and tests, a strategy that compacts what it already returned fails too. eve never falls back to its default when a strategy fails.
 
 What the model answers next is up to the strategy. Keep the turn's latest user message, or carry it in the summary and add a message, such as an `"execution.continuation"`, that tells the model to go on.
 
 ## Built-in strategies
 
-`defaultCompaction({ model?, instructions?, threshold? })` is eve's compaction when you set none. It caps oversized tool results in older history, and summarizes the older history when capping doesn't fit. `model` writes the summary with another model, `instructions` adds to eve's checkpoint prompt, and `threshold` is the fraction of the window at which it compacts, 0.9 by default. It counts the checkpoint prompt it adds, so it starts before the conversation alone reaches the threshold.
+`defaultCompaction({ model?, instructions?, threshold? })` is eve's compaction when you set none. It caps oversized tool results in older history, and summarizes the older history when capping doesn't fit. On an OpenAI model it keeps the messages it keeps exactly as they were and appends the summary after them, so OpenAI keeps their reasoning. `model` writes the summary with another model, `instructions` adds to eve's checkpoint prompt, and `threshold` is the fraction of the window at which it compacts, 0.9 by default. It counts the checkpoint prompt it adds, so it starts before the conversation alone reaches the threshold.
 
 `withoutInjected(history)` removes the messages eve adds to every request (memory, instructions, state and the previous checkpoint) from a history you send. eve adds them again after the compaction.
 

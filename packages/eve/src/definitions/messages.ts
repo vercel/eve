@@ -4,6 +4,7 @@ import {
   type HarnessModelMessage,
   turnAnchorOf,
 } from "#harness/messages.js";
+import { isCheckpointMarker } from "#shared/compaction-checkpoint.js";
 import { awaitsProviderToolResult } from "#shared/provider-tool-history.js";
 import type { AnchoredEntry, CallRecord } from "./definition.js";
 
@@ -68,10 +69,8 @@ export function placeAnchored(
 }
 
 function checkpointLength(messages: readonly HarnessModelMessage[]): number {
-  const [marker, summary] = messages;
-  return marker?.role === "user" &&
-    marker.kind === "context.compaction" &&
-    summary?.role === "assistant"
-    ? 2
-    : 0;
+  const at = messages.findIndex(
+    (message, index) => isCheckpointMarker(message) && messages[index + 1]?.role === "assistant",
+  );
+  return at === -1 ? 0 : at + 2;
 }

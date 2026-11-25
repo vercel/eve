@@ -9,6 +9,7 @@ import {
   DEFAULT_COMPACTION_THRESHOLD,
 } from "#shared/compaction-strategy.js";
 import type { StoredHistoryMessage } from "#shared/history-message.js";
+import { readsOpenAICompaction } from "#shared/openai-compaction-item.js";
 
 import {
   assertThreshold,
@@ -70,6 +71,7 @@ export function defaultCompaction(options: DefaultCompactionOptions = {}): Compa
     const { messages } = await compactMessages(
       history as ModelMessage[],
       {
+        appendCheckpoint: readsOpenAICompaction(ctx.model),
         estimate: (messages) => ctx.estimate(messages as StoredHistoryMessage[]),
         lastStage: ctx.recompacting && !ctx.requested ? stageOfPreviousResult(history) : undefined,
         recentWindowSize: RECENT_WINDOW_SIZE,

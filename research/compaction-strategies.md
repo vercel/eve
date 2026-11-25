@@ -105,7 +105,7 @@ sequenceDiagram
 ```
 
 - **Overflow.** With a strategy set, a provider's context-overflow error asks the strategy once more with `ctx.overflow` and retries the call once. Without `experimental.compaction`, the error fails the turn, as on `main`.
-- **Checks.** eve checks every result before storing it. A result fails the compaction and leaves the history unchanged when it drops a tool call or its result, answers a call twice or before it is made, drops half of a provider-executed exchange, puts a checkpoint after other messages, removes a user message's `kind`, or doesn't fit the window beside instructions, tools and recall. eve never falls back to its default when a strategy fails.
+- **Checks.** eve checks every result before storing it. A result fails the compaction and leaves the history unchanged when it drops a tool call or its result, answers a call twice or before it is made, drops half of a provider-executed exchange, keeps more than one checkpoint, removes a user message's `kind`, or doesn't fit the window beside instructions, tools and recall. eve never falls back to its default when a strategy fails.
 - **Isolation.** The strategy receives a copy of the history, so mutating it changes nothing.
 - **Repeat detection.** In development and tests, a strategy that rewrites what it just returned fails, which catches the every-step loop from eve#5290.
 
