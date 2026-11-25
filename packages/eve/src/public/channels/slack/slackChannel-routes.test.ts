@@ -1051,6 +1051,32 @@ describe("slackChannel message status and guidance", () => {
     expect(send.mock.calls[0]![1]).toMatchObject({ turnPolicy });
   });
 
+  it("finishes a channel message's received acknowledgement before sending its turn", async () => {
+    const status = Promise.withResolvers<void>();
+    const answer = fetchMock.getMockImplementation() as (
+      request: string | URL | Request,
+      init?: RequestInit,
+    ) => Promise<Response>;
+    fetchMock.mockImplementation(async (request: string | URL | Request, init?: RequestInit) => {
+      if (String(request).endsWith("assistant.threads.setStatus")) await status.promise;
+      return answer(request, init);
+    });
+    const send = vi.fn().mockResolvedValue({ sessionId: "s1" });
+
+    const posted = firePost(
+      slackChannel({ credentials: { botToken: "xoxb-test" }, onMessage: () => ({ auth: null }) }),
+      threadReply(),
+      send,
+    );
+    await vi.waitFor(() => expect(slackCalls("assistant.threads.setStatus")).toHaveLength(1));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(send).not.toHaveBeenCalled();
+    status.resolve();
+    await posted;
+
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
   it("writes a turn's status without holding the turn, and posts the reply after it", async () => {
     const slack = Promise.withResolvers<void>();
     const answer = fetchMock.getMockImplementation() as (

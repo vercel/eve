@@ -1784,13 +1784,19 @@ async function dispatchSlackMessage(input: {
       input.userResolver === undefined
         ? Promise.resolve(input.message)
         : withSlackUserInfo(input.message, input.userResolver, userLookup));
+  const codeChannelLookup =
+    input.detectCodeChannels && input.kind !== "direct_message"
+      ? isSlackCodeChannel(input.message.channelId, conversationRequest)
+      : Promise.resolve(false);
   const [message, codeChannel] = await Promise.all([
     input.kind === "channel_message" || edit !== undefined
       ? Promise.resolve(input.message)
-      : resolveMessage(),
-    input.detectCodeChannels && input.kind !== "direct_message"
-      ? isSlackCodeChannel(input.message.channelId, conversationRequest)
-      : Promise.resolve(false),
+      : input.codeChannelOnly === undefined
+        ? resolveMessage()
+        : codeChannelLookup.then((isCodeChannel) =>
+            isCodeChannel ? resolveMessage() : input.message,
+          ),
+    codeChannelLookup,
   ]);
   const author = message.author;
   if (!codeChannel && input.codeChannelOnly !== undefined) {
@@ -1912,10 +1918,10 @@ async function dispatchSlackMessage(input: {
     return;
   }
   if (edit === undefined && result.status === "deferred") channelState.quiet = true;
-  const postAcknowledged =
+  const acknowledgedBeforeSend =
     acknowledged === undefined && channelState.quiet !== true
       ? acknowledgeMessage(input.received, input.message, { slack, thread })
-      : acknowledged;
+      : undefined;
 
   await deliverSlackMessage({
     startsThread:
@@ -1923,6 +1929,7 @@ async function dispatchSlackMessage(input: {
       !isThreadReply &&
       edit === undefined &&
       (input.kind === "app_mention" || input.kind === "direct_message"),
+    acknowledged: acknowledgedBeforeSend,
     applyConversationKind: ({ isPrivate, spaceType, visibility }) => {
       channelState.audience = input.kind === "direct_message" || isPrivate ? "private" : "public";
       if (spaceType !== undefined) channelState.spaceType = spaceType;
@@ -1944,7 +1951,7 @@ async function dispatchSlackMessage(input: {
     uploadPolicy: input.uploadPolicy,
     users: input.userResolver && { resolver: input.userResolver, ...userLookup },
   });
-  await postAcknowledged;
+  await acknowledged;
 }
 
 async function openCodeChannelFromMessage(input: {
@@ -2085,6 +2092,7 @@ async function verifyInbound(
 }
 
 async function deliverSlackMessage(input: {
+  readonly acknowledged: Promise<void> | undefined;
   readonly applyConversationKind: (kind: SlackConversationKind) => void;
   readonly botUserId: string | undefined;
   readonly conversationKind: Promise<SlackConversationKind>;
@@ -2151,6 +2159,7 @@ async function deliverSlackMessage(input: {
         existingSessionPromise,
         usersPromise,
         filePartsPromise,
+        input.acknowledged,
       ]);
 
     input.applyConversationKind(conversationKind);
