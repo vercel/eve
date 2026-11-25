@@ -340,12 +340,10 @@ async function withRegistrationLock<T>(
   }
 }
 
+const REUSED_CLIENT_ID = new Set(["client_id_taken", "duplicate_id"]);
+
 async function lockTask(client: BoardClient, watchChannel: string): Promise<string> {
-  const self = await client.me();
-  const found = await labeledRoots(client, watchChannel, `${LOCK_LABEL}=registration`, 200);
-  const lock =
-    found.find((message) => message.by.actor === self.actor) ??
-    (await createLock(client, watchChannel));
+  const lock = (await existingLock(client)) ?? (await createLock(client, watchChannel));
   const state = lock.task?.state;
   if (state !== "ready" && state !== "claimed") {
     throw new Error(
@@ -353,6 +351,15 @@ async function lockTask(client: BoardClient, watchChannel: string): Promise<stri
     );
   }
   return lock.id;
+}
+
+async function existingLock(client: BoardClient): Promise<BoardMessage | undefined> {
+  try {
+    return await client.posted(LOCK_CLIENT_ID);
+  } catch (error) {
+    if (boardErrorCode(error) !== "post_not_found") throw error;
+    return undefined;
+  }
 }
 
 async function createLock(client: BoardClient, watchChannel: string): Promise<BoardMessage> {
@@ -364,7 +371,7 @@ async function createLock(client: BoardClient, watchChannel: string): Promise<Bo
       text: "eve holds this task while it changes its board watches, so two changes never overwrite each other. Leave it open.",
     });
   } catch (error) {
-    if (boardErrorCode(error) !== "client_id_taken") throw error;
+    if (!REUSED_CLIENT_ID.has(boardErrorCode(error) ?? "")) throw error;
     return await client.posted(LOCK_CLIENT_ID);
   }
 }

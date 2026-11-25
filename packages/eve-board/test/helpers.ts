@@ -19,9 +19,14 @@ afterEach(() => {
   delete process.env.BOARD_TOKEN;
 });
 
+interface BoardOptions {
+  readonly clientIdTaken?: boolean;
+  readonly leaseCap?: number;
+}
+
 export async function startBoards<const TKey extends string>(
   keys: readonly TKey[],
-  options: { readonly leaseCap?: number } = {},
+  options: BoardOptions = {},
 ): Promise<
   Record<
     TKey,
@@ -93,8 +98,9 @@ export async function startBoards<const TKey extends string>(
       if (!request.url.startsWith(url)) continue;
       const path = new URL(request.url).pathname.slice(new URL(url).pathname.length);
       entry.calls.push(`${request.method} ${path}`);
-      const taken = await clientIdTaken(entry.clientIds, request, path);
-      if (taken !== undefined) return taken;
+      const taken =
+        options.clientIdTaken === true && (await clientIdTaken(entry.clientIds, request, path));
+      if (taken) return taken;
       if (options.leaseCap === undefined || !/^\/tasks\/(?:claim|[^/]+\/renew)$/u.test(path)) {
         return await entry.team.fetch(request);
       }
@@ -139,7 +145,7 @@ async function clientIdTaken(
   );
 }
 
-export async function startBoard(options: { readonly leaseCap?: number } = {}) {
+export async function startBoard(options: BoardOptions = {}) {
   const { default: instance } = await startBoards(["default"] as const, options);
   process.env.BOARD_URL = instance.url;
   return { as: instance.as, calls: instance.calls };
