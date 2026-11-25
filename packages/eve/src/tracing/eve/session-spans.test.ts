@@ -775,6 +775,7 @@ describe("a session's spans, from its committed lines", () => {
     await commit(turnSettled({ outcome: "cancelled" }));
 
     const model = (await spans()).find((span) => span.name === "chat mock-model-id");
+    expect(model?.status.code).toBe(0);
     expect(model?.events.map((event) => event.name)).not.toContain("exception");
   });
 
