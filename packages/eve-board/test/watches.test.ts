@@ -1125,3 +1125,27 @@ test("the extension refuses `can` patterns the board can't read and invalid `rou
   assert.equal(parses({ route: "/" }), false);
   assert.equal(parses({ route: "/eve/v1/:board" }), false);
 });
+
+test("the extension refuses the removed `configurers` option instead of dropping it", () => {
+  const parse = (input: unknown) =>
+    (
+      extension.schema as {
+        safeParse(input: unknown): {
+          success: boolean;
+          error?: { issues: { message: string; path: PropertyKey[] }[] };
+        };
+      }
+    ).safeParse(input);
+  const authorize = () => true;
+  assert.equal(parse({ authorize }).success, true);
+  assert.equal(parse({ boards: { a: { name: "alpha", authorize } } }).success, true);
+
+  const topLevel = parse({ configurers: ["slack:U123"] });
+  assert.equal(topLevel.success, false);
+  assert.deepEqual(topLevel.error?.issues[0]?.path, ["configurers"]);
+  assert.match(topLevel.error?.issues[0]?.message ?? "", /use `authorize`/u);
+
+  const perBoard = parse({ boards: { a: { name: "alpha", configurers: [] } } });
+  assert.equal(perBoard.success, false);
+  assert.deepEqual(perBoard.error?.issues[0]?.path, ["boards", "a", "configurers"]);
+});
