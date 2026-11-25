@@ -73,7 +73,7 @@ await sandbox.setNetworkPolicy("deny-all");
 
 The environment must be the one configured for the current sandbox; eve rejects any other.
 
-Pass `{ ifStarted: true }` as the last argument to `ctx.getSandbox()` to return `null` without starting a sandbox when the session has never started one, deleted it, or its persisted sandbox is gone; an idle-stopped persisted sandbox still resumes.
+Pass `{ create: false }` as the last argument to `ctx.getSandbox()` to return `null` without creating a sandbox when the session has never started one, deleted it, or its persisted sandbox is gone; an idle-stopped persisted sandbox still resumes.
 
 ## Custom state with `defineState`
 

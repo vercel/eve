@@ -78,7 +78,7 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
           second?: GetSandboxOptions,
         ) => {
           const { environment, options } = parseGetSandboxArgs(first, second);
-          const access = await sandbox.open({ allowMissing: options?.ifStarted === true });
+          const access = await sandbox.open({ allowMissing: options?.create === false });
           if (environment !== undefined && access?.environment?.provider !== environment.provider) {
             throw fatal(
               'ctx.getSandbox() in a "use step" function received a sandbox environment the session\'s sandbox does not use. ' +

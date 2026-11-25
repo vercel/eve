@@ -324,22 +324,22 @@ describe("workflow step authorization", () => {
     expect(deleted).not.toHaveBeenCalled();
   });
 
-  it("returns null for ctx.getSandbox({ ifStarted: true }) when the agent has no sandbox or it has not started, and resumes once persisted", async () => {
+  it("returns null for ctx.getSandbox({ create: false }) when the agent has no sandbox or it has not started, and resumes once persisted", async () => {
     const { provider, registry, starts } = upsertSandboxes();
     bundle.registry = undefined;
-    await expect(runStep((ctx) => ctx.getSandbox({ ifStarted: true }))).resolves.toMatchObject({
+    await expect(runStep((ctx) => ctx.getSandbox({ create: false }))).resolves.toMatchObject({
       kind: "result",
       output: null,
     });
     await expect(
-      runStep((ctx) => ctx.getSandbox(provider.environment(), { ifStarted: true })),
+      runStep((ctx) => ctx.getSandbox(provider.environment(), { create: false })),
     ).rejects.toMatchObject({
       fatal: true,
       message: expect.stringContaining("received a sandbox environment"),
     });
 
     bundle.registry = registry;
-    await expect(runStep((ctx) => ctx.getSandbox({ ifStarted: true }))).resolves.toMatchObject({
+    await expect(runStep((ctx) => ctx.getSandbox({ create: false }))).resolves.toMatchObject({
       kind: "result",
       output: null,
     });
@@ -356,7 +356,7 @@ describe("workflow step authorization", () => {
     const state = await session.captureState();
     const input = context();
     await expect(
-      runStep(async (ctx) => (await ctx.getSandbox({ ifStarted: true })) !== null, {
+      runStep(async (ctx) => (await ctx.getSandbox({ create: false })) !== null, {
         ...input,
         sandbox: { ...input.sandbox, state },
       }),

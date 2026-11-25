@@ -9,12 +9,15 @@ export type { SessionAuth, SessionParent, SessionPredecessor, SessionSchedule, S
 /** Options for {@link SessionContext.getSandbox}. */
 export interface GetSandboxOptions {
   /**
-   * When `true`, resolves to `null` without starting a sandbox if this session
-   * has never started one, if its sandbox was deleted, or if a previously
-   * persisted sandbox is gone; resumes an idle-stopped persisted sandbox if one
-   * exists.
+   * Whether to create a new sandbox when the session does not have one yet.
+   * Defaults to `true`.
+   *
+   * When `false`, resolves to `null` instead of creating a new sandbox if this
+   * session has never started one, if its sandbox was deleted, or if a
+   * previously persisted sandbox is gone; resumes an idle-stopped persisted
+   * sandbox if one exists.
    */
-  readonly ifStarted?: boolean;
+  readonly create?: boolean;
 }
 
 /**
@@ -61,27 +64,26 @@ export interface SessionContext {
    * Resolves the session's sandbox. Throws when no sandbox is available
    * in the current authored runtime context.
    */
-  getSandbox(options: { readonly ifStarted?: false } | undefined): Promise<RuntimeSandboxSession>;
+  getSandbox(options: { readonly create?: true } | undefined): Promise<RuntimeSandboxSession>;
   /**
-   * Resolves the session's sandbox only if this session has already started
-   * one, returning `null` otherwise without starting a new sandbox.
+   * Resolves the session's existing sandbox without creating a new one,
+   * returning `null` if this session does not have a sandbox.
    */
-  getSandbox(options: { readonly ifStarted: true }): Promise<RuntimeSandboxSession | null>;
+  getSandbox(options: { readonly create: false }): Promise<RuntimeSandboxSession | null>;
   /**
-   * Resolves the session's sandbox, or returns `null` without starting one
-   * when `options.ifStarted` is `true` and the session has not started a
-   * sandbox yet.
+   * Resolves the session's sandbox, or returns `null` without creating one
+   * when `options.create` is `false` and the session does not have a sandbox.
    */
   getSandbox(options?: GetSandboxOptions): Promise<RuntimeSandboxSession | null>;
   /**
-   * Resolves the session's sandbox with the capabilities declared by its
-   * configured environment only if this session has already started one,
-   * returning `null` otherwise without starting a new sandbox. Throws when the
-   * environment is not active.
+   * Resolves the session's existing sandbox with the capabilities declared by
+   * its configured environment without creating a new one, returning `null` if
+   * this session does not have a sandbox. Throws when the environment is not
+   * active.
    */
   getSandbox<Session extends SandboxSession>(
     environment: SandboxEnvironment<object | undefined, Session>,
-    options: { readonly ifStarted: true },
+    options: { readonly create: false },
   ): Promise<RuntimeSandboxSession<Session> | null>;
   /**
    * Resolves the session's sandbox with the capabilities declared by its
@@ -89,13 +91,13 @@ export interface SessionContext {
    */
   getSandbox<Session extends SandboxSession>(
     environment: SandboxEnvironment<object | undefined, Session>,
-    options: { readonly ifStarted?: false } | undefined,
+    options: { readonly create?: true } | undefined,
   ): Promise<RuntimeSandboxSession<Session>>;
   /**
    * Resolves the session's sandbox with the capabilities declared by its
-   * configured environment, or returns `null` without starting one when
-   * `options.ifStarted` is `true` and the session has not started a sandbox
-   * yet. Throws when the environment is not active.
+   * configured environment, or returns `null` without creating one when
+   * `options.create` is `false` and the session does not have a sandbox. Throws
+   * when the environment is not active.
    */
   getSandbox<Session extends SandboxSession>(
     environment: SandboxEnvironment<object | undefined, Session>,

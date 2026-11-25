@@ -20,11 +20,11 @@ last_updated: "2026-11-24"
 
 The design splits into three layers with strict ownership:
 
-| Layer                 | Surface                                                                                     | Responsibility                                                                                                                          |
-| --------------------- | ------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `eve` core            | `DynamicInstructionsSet` in `eve/instructions`; `GetSandboxOptions` (`{ ifStarted: true }`) | Per-key dynamic instruction tracking and non-starting sandbox probes. No git or repository concepts in core.                            |
-| `eve/extensions/git`  | `github.prefetchFiles` on `GitHubAppConfig` and `GitHubUserConfig`                          | Prefetch configured blobs into `.git/objects` on partial clones while the GitHub Connect credential lease is still open.                |
-| `eve/extensions/code` | `code({ repositories })`; `discoverRepositories`, `readRepositoryFile` in `code/sandbox`    | Repository discovery, 3-tier instruction reading, scoped directory loading, `rules` (`files`, `onEnter`), and durable repository state. |
+| Layer                 | Surface                                                                                   | Responsibility                                                                                                                          |
+| --------------------- | ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `eve` core            | `DynamicInstructionsSet` in `eve/instructions`; `GetSandboxOptions` (`{ create: false }`) | Per-key dynamic instruction tracking and non-creating sandbox lookups. No git or repository concepts in core.                           |
+| `eve/extensions/git`  | `github.prefetchFiles` on `GitHubAppConfig` and `GitHubUserConfig`                        | Prefetch configured blobs into `.git/objects` on partial clones while the GitHub Connect credential lease is still open.                |
+| `eve/extensions/code` | `code({ repositories })`; `discoverRepositories`, `readRepositoryFile` in `code/sandbox`  | Repository discovery, 3-tier instruction reading, scoped directory loading, `rules` (`files`, `onEnter`), and durable repository state. |
 
 ## Authoring API
 
@@ -37,13 +37,13 @@ export type DynamicInstructionsResult = InstructionsDefinition | DynamicInstruct
 
 // eve/context
 export interface GetSandboxOptions {
-  readonly ifStarted?: boolean;
+  readonly create?: boolean;
 }
 ```
 
 - `defineDynamic` in `agent/instructions/` returns a single `defineInstructions(...)`, a keyed map (`DynamicInstructionsSet`), or `null`.
 - Keys must be non-empty strings without control characters. Each key tracks changes independently: adding or changing one key appends only that user-role entry to history, keeping earlier prompt prefixes cached. Removing a key (or returning `null`) resets tracking for that key so a later return adds it again without mutating earlier history. Compaction or clear that drops a key re-injects it before the next model call.
-- `ctx.getSandbox({ ifStarted: true })` returns `null` without starting a sandbox when the session has never started one, deleted it, or its persisted sandbox is gone. If an idle-stopped persisted sandbox exists, it resumes and returns it.
+- `ctx.getSandbox({ create: false })` returns `null` without creating a sandbox when the session has never started one, deleted it, or its persisted sandbox is gone. If an idle-stopped persisted sandbox exists, it resumes and returns it.
 
 ### Git extension prefetching
 
@@ -104,7 +104,7 @@ export default code({
 | `roots`              | `["."]`                        | Workspace-relative directories scanned up to depth 3 for `.git` directories or worktree/submodule `.git` files.                          |
 | `instructions`       | `[["AGENTS.md", "CLAUDE.md"]]` | Repository-relative specs. A string loads that path if present; a tuple loads the first present path. Pass `[]` to disable.              |
 | `scopedInstructions` | `true`                         | Load matching ancestor directory instruction files as `read_file`, `edit_file`, `write_file`, `glob`, or `grep` enter subdirectories.    |
-| `discoverOnStart`    | `"eager"`                      | `"eager"` opens the sandbox at turn start if needed; `"on-sandbox-use"` checks via `ctx.getSandbox({ ifStarted: true })`.                |
+| `discoverOnStart`    | `"eager"`                      | `"eager"` opens the sandbox at turn start if needed; `"on-sandbox-use"` checks via `ctx.getSandbox({ create: false })`.                  |
 | `rules`              | `[]`                           | Rules with optional `match` (`"owner/name"`, `"owner/*"`, `"*"`, `RegExp`, or predicate), extra `files`, and once-per-session `onEnter`. |
 | `syncAfter`          | `[]`                           | Additional `ToolDefinition` values whose completed calls trigger workspace reconciliation.                                               |
 | `maxFileBytes`       | `64_000`                       | Maximum UTF-8 bytes read per file before truncation with a path note.                                                                    |
@@ -117,7 +117,7 @@ Rule `onEnter` callbacks are error-isolated: a throwing rule logs a warning and 
 ## Lifecycle
 
 ```text
-turn.started ──► reconcileWorkspace (eager or ifStarted) ──┐
+turn.started ──► reconcileWorkspace (eager or create: false) ──┐
                                                            ├──► repoState (defineState)
 call.settled ──► git/bash/syncAfter ──► reconcileWorkspace ┤       │
              └──► file tool ──────────► reconcileTouchedFile       ├──► instructions/project.ts (keyed user map)

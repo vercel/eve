@@ -58,11 +58,11 @@ export function sandboxOf(ctx: Pick<ContextReader, "get">): SessionContext["getS
     if (environment !== undefined && access.environment !== environment) {
       throw new Error("The requested sandbox environment is not active for the current session.");
     }
-    const ifStarted = options?.ifStarted === true;
-    const resolve = ifStarted ? access.getIfStarted() : access.get();
+    const create = options?.create !== false;
+    const resolve = create ? access.get() : access.getIfStarted();
     return resolve.then((sandbox) => {
       if (sandbox === null) {
-        if (ifStarted) return null;
+        if (!create) return null;
         throw new Error("The sandbox is not available in the current authored runtime context.");
       }
       return withRuntimeSandboxLifecycle(

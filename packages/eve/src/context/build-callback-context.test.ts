@@ -96,26 +96,26 @@ describe("sandboxOf", () => {
 
     const getSandbox = sandboxOf(ctx);
 
-    await expect(getSandbox({ ifStarted: true })).resolves.toBeNull();
-    await expect(getSandbox(environment, { ifStarted: true })).resolves.toBeNull();
+    await expect(getSandbox({ create: false })).resolves.toBeNull();
+    await expect(getSandbox(environment, { create: false })).resolves.toBeNull();
     expect(get).not.toHaveBeenCalled();
     expect(getIfStarted).toHaveBeenCalledTimes(2);
 
-    expect(() => getSandbox(otherEnvironment, { ifStarted: true })).toThrow(
+    expect(() => getSandbox(otherEnvironment, { create: false })).toThrow(
       "The requested sandbox environment is not active for the current session.",
     );
 
     started = true;
-    const live = await getSandbox(environment, { ifStarted: true });
+    const live = await getSandbox(environment, { create: false });
     expect(live).not.toBeNull();
     expect(get).not.toHaveBeenCalled();
 
     const assertTypes = (sessionCtx: SessionContext, opts: GetSandboxOptions) => {
       expectTypeOf(sessionCtx.getSandbox()).toEqualTypeOf<Promise<RuntimeSandboxSession>>();
-      expectTypeOf(sessionCtx.getSandbox({ ifStarted: false })).toEqualTypeOf<
+      expectTypeOf(sessionCtx.getSandbox({ create: true })).toEqualTypeOf<
         Promise<RuntimeSandboxSession>
       >();
-      expectTypeOf(sessionCtx.getSandbox({ ifStarted: true })).toEqualTypeOf<
+      expectTypeOf(sessionCtx.getSandbox({ create: false })).toEqualTypeOf<
         Promise<RuntimeSandboxSession | null>
       >();
       expectTypeOf(sessionCtx.getSandbox(opts)).toEqualTypeOf<
@@ -124,10 +124,10 @@ describe("sandboxOf", () => {
       expectTypeOf(sessionCtx.getSandbox(environment)).toEqualTypeOf<
         Promise<RuntimeSandboxSession<VercelSandboxSession>>
       >();
-      expectTypeOf(sessionCtx.getSandbox(environment, { ifStarted: false })).toEqualTypeOf<
+      expectTypeOf(sessionCtx.getSandbox(environment, { create: true })).toEqualTypeOf<
         Promise<RuntimeSandboxSession<VercelSandboxSession>>
       >();
-      expectTypeOf(sessionCtx.getSandbox(environment, { ifStarted: true })).toEqualTypeOf<
+      expectTypeOf(sessionCtx.getSandbox(environment, { create: false })).toEqualTypeOf<
         Promise<RuntimeSandboxSession<VercelSandboxSession> | null>
       >();
       expectTypeOf(sessionCtx.getSandbox(environment, opts)).toEqualTypeOf<
@@ -137,7 +137,7 @@ describe("sandboxOf", () => {
     expectTypeOf(assertTypes).toBeFunction();
   });
 
-  it("returns null from buildBaseToolContext.getSandbox({ ifStarted: true }) without binding an abort proxy, and binds once started", async () => {
+  it("returns null from buildBaseToolContext.getSandbox({ create: false }) without binding an abort proxy, and binds once started", async () => {
     const { access, session } = mockSandbox();
     let started = false;
     const ctx = new ContextContainer();
@@ -156,9 +156,9 @@ describe("sandboxOf", () => {
         options: { abortSignal: new AbortController().signal, toolCallId: "call-1" },
         toolName: "probe",
       });
-      await expect(toolCtx.getSandbox({ ifStarted: true })).resolves.toBeNull();
+      await expect(toolCtx.getSandbox({ create: false })).resolves.toBeNull();
       started = true;
-      await expect(toolCtx.getSandbox({ ifStarted: true })).resolves.not.toBeNull();
+      await expect(toolCtx.getSandbox({ create: false })).resolves.not.toBeNull();
     });
   });
 });

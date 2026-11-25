@@ -367,7 +367,7 @@ export async function ensureSandboxAccess(
         return resumed;
       } catch (error) {
         if (!SandboxSessionGoneError.is(error)) throw error;
-        log.warn("session sandbox is gone during ifStarted probe; not starting a fresh one", {
+        log.warn("session sandbox is gone during create: false lookup; not starting a fresh one", {
           error,
           providerName: persisted.providerName,
           sessionId: input.sessionId,

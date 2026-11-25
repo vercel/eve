@@ -23,7 +23,7 @@ export default defineHook({
       try {
         sandbox =
           resolved.discoverOnStart === "on-sandbox-use"
-            ? await ctx.getSandbox({ ifStarted: true })
+            ? await ctx.getSandbox({ create: false })
             : await ctx.getSandbox();
       } catch {
         return;
@@ -88,7 +88,7 @@ export default defineHook({
 
       let sandbox: RuntimeSandboxSession | null = null;
       try {
-        sandbox = await ctx.getSandbox({ ifStarted: true });
+        sandbox = await ctx.getSandbox({ create: false });
       } catch {
         return;
       }

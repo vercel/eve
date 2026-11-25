@@ -50,7 +50,7 @@ export default defineDynamic(async (ctx) => {
     > | null = null;
     try {
       if (resolved.discoverOnStart === "on-sandbox-use") {
-        const startedSandbox = await ctx.getSandbox({ ifStarted: true });
+        const startedSandbox = await ctx.getSandbox({ create: false });
         if (startedSandbox === null) return null;
         fallback = await ctx.memo(["turn-discover", ctx.turn.id], async () =>
           discoverWorkspaceReadOnly(startedSandbox, resolved),
