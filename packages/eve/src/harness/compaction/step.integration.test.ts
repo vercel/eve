@@ -287,6 +287,47 @@ describe("compaction summary call", () => {
     expect(result.next).toBeNull();
   });
 
+  it("uses the full window without summarizing when the threshold cannot fit another tool step", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const summaries = vi.fn(async () => summaryStream());
+    const turnCalls = vi
+      .fn<(_prompt: Prompt) => Promise<StreamResult>>()
+      .mockImplementationOnce(async () => lookup("Let me check.", 6_000))
+      .mockImplementation(async () => answer());
+    const model = new MockLanguageModelV3({
+      doStream: async ({ prompt }) => {
+        const system = prompt[0]?.role === "system" ? prompt[0].content : "";
+        return system.includes("CONTEXT CHECKPOINT COMPACTION") ? summaries() : turnCalls(prompt);
+      },
+    });
+    const events: SessionEvent[] = [];
+    const toolResult = "Source notes. ".repeat(1_200);
+    const kernel = createTestKernel({
+      agent: { model: { contextWindowTokens: 20_000, id: "step-model" }, thresholdPercent: 0.45 },
+      handleEvent: async (publication) => void events.push(...eventsOf(publication)),
+      resolveModel: async () => model,
+      tools: new Map([["lookup", { ...policyTool, execute: async () => toolResult }]]),
+    });
+
+    await untilTurnEnds(
+      kernel,
+      {
+        compaction: {},
+        continuationToken: "http:tight-history-budget",
+        history: [],
+        sessionId: "tight-history-budget",
+      },
+      "Which sources back the second claim?",
+    );
+
+    expect(summaries).not.toHaveBeenCalled();
+    expect(turnCalls).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(turnCalls.mock.calls[1]?.[0])).toContain(toolResult);
+    expect(events.find((event) => event.type === "turn.settled")).toMatchObject({
+      data: { outcome: "completed" },
+    });
+  });
+
   it("fails only the turn when the provider rejects the request as too long", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.spyOn(console, "error").mockImplementation(() => {});

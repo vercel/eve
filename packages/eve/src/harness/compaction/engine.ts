@@ -172,15 +172,31 @@ export type CompactionSummarizer = (prompt: {
   readonly system: string;
 }) => Promise<string>;
 
-function evaluateThreshold(
-  messages: readonly ModelMessage[],
-  config: CompactionConfig,
-): { readonly estimatedTokens: number; readonly type: "over-limit" | "within-limit" } {
-  const estimatedTokens = estimateTokens(messages);
-  return {
-    estimatedTokens,
-    type: estimatedTokens <= config.threshold ? "within-limit" : "over-limit",
-  };
+function latestToolStepTokens(messages: readonly ModelMessage[]): number {
+  let start = messages.length;
+  while (messages[start - 1]?.role === "tool") start -= 1;
+  if (start === messages.length) return 0;
+  if (messages[start - 1]?.role === "assistant") start -= 1;
+  return estimateTokens(messages.slice(start));
+}
+
+export interface HistoryCompactionConfig extends CompactionConfig {
+  readonly fixedPromptTokens?: number;
+}
+
+function compactedHistoryLimit(
+  config: HistoryCompactionConfig,
+  conversation: readonly ModelMessage[],
+  forceSummary: boolean,
+): number {
+  if (forceSummary) return config.threshold;
+  const available = config.threshold - COMPACTION_PROMPT_OVERHEAD_TOKENS;
+  const stepTokens = latestToolStepTokens(conversation);
+  const fixedPromptDominates = (config.fixedPromptTokens ?? 0) >= config.threshold;
+  const stepHeadroom = fixedPromptDominates
+    ? stepTokens
+    : Math.min(stepTokens, Math.max(0, available - config.target));
+  return available - stepHeadroom;
 }
 
 function startStage(lastStage: CompactionStage | undefined): CompactionStage {
@@ -189,9 +205,10 @@ function startStage(lastStage: CompactionStage | undefined): CompactionStage {
 }
 
 interface CompactionHeuristicInput {
-  readonly config: CompactionConfig;
+  readonly config: HistoryCompactionConfig;
   readonly conversation: readonly ModelMessage[];
   readonly forceSummary: boolean;
+  readonly outputLimit: number;
   readonly previousCheckpoint: string | undefined;
   readonly resume: boolean;
   readonly summarize: CompactionSummarizer;
@@ -211,17 +228,23 @@ const COMPACTION_HEURISTICS: readonly CompactionHeuristic[] = [fixedTailHeuristi
 
 export async function compactMessages(
   messages: ModelMessage[],
-  config: CompactionConfig,
+  config: HistoryCompactionConfig,
   summarize: CompactionSummarizer,
   forceSummary = false,
   resume = true,
 ): Promise<{ readonly messages: ModelMessage[]; readonly stage: CompactionStage }> {
   const { conversation, previousCheckpoint } = extractPreviousCheckpoint(messages);
+  const budget = compactedHistoryLimit(config, conversation, forceSummary);
+  const outputLimit =
+    !forceSummary && previousCheckpoint !== undefined
+      ? Math.min(budget, estimateTokens(messages) - 1)
+      : budget;
   for (const heuristic of COMPACTION_HEURISTICS) {
     const outcome = await heuristic({
       config,
       conversation,
       forceSummary,
+      outputLimit,
       previousCheckpoint,
       resume,
       summarize,
@@ -237,12 +260,14 @@ async function fixedTailHeuristic({
   config,
   conversation,
   forceSummary,
+  outputLimit,
   previousCheckpoint,
   resume,
   summarize,
 }: CompactionHeuristicInput): Promise<CompactionHeuristicOutcome> {
   const withResumptionGuard: typeof resumeAfter = (kept, replay, threshold) =>
     resume ? resumeAfter(kept, replay, threshold) : kept;
+  const fits = (candidate: readonly ModelMessage[]) => estimateTokens(candidate) <= outputLimit;
   const budget = keptTailBudget(config);
   const recentConfig = forceSummary ? { ...config, recentWindowSize: 1 } : config;
 
@@ -278,7 +303,7 @@ async function fixedTailHeuristic({
       ? floorCut
       : noFiles;
   const floor = withResumptionGuard(checkpointHead(""), floorRequest, Number.POSITIVE_INFINITY);
-  if (evaluateThreshold(floor, config).type === "over-limit") {
+  if (!fits(floor)) {
     throw overLimitError(config);
   }
 
@@ -298,17 +323,17 @@ async function fixedTailHeuristic({
     system: summaryPrompt.system,
   });
 
-  const fits = (candidate: readonly ModelMessage[]) =>
-    evaluateThreshold(candidate, config).type === "within-limit";
   const ratio = estimateRatio(config);
-  const reachesTarget = (candidate: readonly ModelMessage[]) =>
-    Math.ceil(estimateTokens(candidate) * ratio) <= config.target;
+  const reachesTarget = (candidate: readonly ModelMessage[]) => {
+    const tokens = estimateTokens(candidate);
+    return tokens <= outputLimit && Math.ceil(tokens * ratio) <= config.target;
+  };
 
   if (start === "tail") {
     const verbatim = withResumptionGuard(
       [...checkpointHead(summary), ...recent],
       replay,
-      config.threshold,
+      outputLimit,
     );
     if (reachesTarget(verbatim)) {
       return { messages: verbatim, stage: "tail", type: "compacted" };
@@ -320,14 +345,14 @@ async function fixedTailHeuristic({
     const stripped = withResumptionGuard(
       [...checkpointHead(summary), ...textTail],
       replay,
-      config.threshold,
+      outputLimit,
     );
     if (reachesTarget(stripped)) {
       return { messages: stripped, stage: "text-tail", type: "compacted" };
     }
   }
 
-  const noTail = withResumptionGuard(checkpointHead(summary), replay, config.threshold);
+  const noTail = withResumptionGuard(checkpointHead(summary), replay, outputLimit);
   if (fits(noTail)) {
     return { messages: noTail, stage: "summary-only", type: "compacted" };
   }
@@ -341,7 +366,7 @@ async function fixedTailHeuristic({
             : clipMiddleUtf16Safe(summary, chars),
         ),
         request,
-        config.threshold,
+        outputLimit,
       );
     if (!fits(build(0))) {
       return undefined;
@@ -365,8 +390,7 @@ async function fixedTailHeuristic({
   }
 
   const requestBudget =
-    config.threshold -
-    estimateTokens(withResumptionGuard(checkpointHead(""), undefined, config.threshold));
+    outputLimit - estimateTokens(withResumptionGuard(checkpointHead(""), undefined, outputLimit));
   const request =
     noFiles === undefined
       ? undefined

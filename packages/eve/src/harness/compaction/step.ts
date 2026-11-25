@@ -27,6 +27,7 @@ import {
   type CompactionSummarizer,
   estimateRatio,
   getInputTokenCount,
+  type HistoryCompactionConfig,
   shouldCompact,
 } from "#harness/compaction/engine.js";
 import { takeBlockingFailure } from "#definitions/kernel.js";
@@ -339,7 +340,7 @@ function historyConfig(
     readonly promptMessages: readonly HarnessModelMessage[];
     readonly requestEnvelopeTokens: number | undefined;
   },
-): CompactionConfig {
+): HistoryCompactionConfig {
   const requestEnvelopeTokens = input.requestEnvelopeTokens ?? 0;
   const protectedTokens = Math.max(
     0,
@@ -347,11 +348,15 @@ function historyConfig(
   );
   const { threshold } = compaction;
   assertFixedPartFits({ protectedTokens, requestEnvelopeTokens, threshold });
-  const fixedTokens = requestEnvelopeTokens + protectedTokens;
+  const fixedPromptTokens = requestEnvelopeTokens + protectedTokens;
   return {
     ...compaction,
-    target: Math.max(1, Math.floor(compaction.target - fixedTokens * estimateRatio(compaction))),
-    threshold: Math.max(1, threshold - fixedTokens),
+    fixedPromptTokens,
+    target: Math.max(
+      1,
+      Math.floor(compaction.target - fixedPromptTokens * estimateRatio(compaction)),
+    ),
+    threshold: Math.max(1, threshold - fixedPromptTokens),
   };
 }
 
