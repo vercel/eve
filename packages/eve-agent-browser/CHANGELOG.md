@@ -1,5 +1,18 @@
 # @eve/agent-browser
 
+## 0.3.0
+
+Released 2026-11-25 · [Compare with 0.2.1](https://github.com/vercel/eve/compare/%40eve%2Fagent-browser%400.2.1...%40eve%2Fagent-browser%400.3.0)
+
+### Features
+
+- Update `@eve/agent-browser` to use agent-browser 0.44.0 and its matching tool schemas.
+  The default auto-install replaces older versions in the sandbox. A custom `installSpec` or `binary` must provide agent-browser 0.44.x. ([#6840](https://github.com/vercel/eve/pull/6840))
+
+### Dependencies
+
+- Updated eve to 1.5.0.
+
 ## 0.2.1
 
 Released 2026-11-18 · [Compare with 0.2.0](https://github.com/vercel/eve/compare/%40eve%2Fagent-browser%400.2.0...%40eve%2Fagent-browser%400.2.1)
