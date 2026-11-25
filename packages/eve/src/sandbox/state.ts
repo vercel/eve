@@ -19,10 +19,13 @@ export interface SandboxRunning {
 export interface SandboxState {
   readonly session: SandboxSessionState | null;
   readonly running?: SandboxRunning;
+  readonly sourceCopied?: true;
 }
 
 export function clearSandboxRunning(state: SandboxState | undefined): SandboxState | undefined {
-  return state?.running === undefined ? state : { session: state.session };
+  if (state?.running === undefined) return state;
+  const { running: _running, ...rest } = state;
+  return rest;
 }
 
 export function markSandboxRunning<Session extends { readonly sandboxState?: SandboxState }>(
@@ -32,7 +35,11 @@ export function markSandboxRunning<Session extends { readonly sandboxState?: San
   if (idleTimeoutMs === undefined) return session;
   return {
     ...session,
-    sandboxState: { session: session.sandboxState?.session ?? null, running: { idleTimeoutMs } },
+    sandboxState: {
+      ...session.sandboxState,
+      session: session.sandboxState?.session ?? null,
+      running: { idleTimeoutMs },
+    },
   };
 }
 

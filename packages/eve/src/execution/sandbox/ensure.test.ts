@@ -358,6 +358,30 @@ describe("ensureSandboxAccess", () => {
     });
   });
 
+  it("records the copy, and starts fresh after the copied sandbox was deleted", async () => {
+    const value = fixture({ copy: true });
+    const first = await open(
+      value.registry,
+      "session-1",
+      null,
+      "__root__",
+      undefined,
+      "session_source",
+    );
+    await expect(first.access.captureState()).resolves.toMatchObject({ sourceCopied: true });
+
+    await open(
+      value.registry,
+      "session-1",
+      { session: null, sourceCopied: true },
+      "__root__",
+      undefined,
+      "session_source",
+    );
+    expect(value.copy).toHaveBeenCalledOnce();
+    expect(value.start).toHaveBeenCalledOnce();
+  });
+
   it("starts fresh without copying when the session's earlier sandbox is gone", async () => {
     const value = fixture({ copy: true });
     value.create.mockRejectedValueOnce(new SandboxSessionGoneError("The sandbox is gone."));
