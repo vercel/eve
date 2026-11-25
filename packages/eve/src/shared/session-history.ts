@@ -172,12 +172,17 @@ function textOf(parts: readonly ImportedPart[]): string {
   return parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n");
 }
 
-function isJson(value: unknown): boolean {
-  try {
-    return JSON.stringify(value) !== undefined;
-  } catch {
-    return false;
-  }
+const MAX_JSON_DEPTH = 64;
+
+function isJson(value: unknown, depth = 0): boolean {
+  if (depth > MAX_JSON_DEPTH) return false;
+  if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (Array.isArray(value)) return value.every((item) => isJson(item, depth + 1));
+  if (typeof value !== "object") return false;
+  const prototype: unknown = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return false;
+  return Object.values(value).every((item) => isJson(item, depth + 1));
 }
 
 function rejectUnknownFields(

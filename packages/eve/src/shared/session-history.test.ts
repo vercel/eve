@@ -98,4 +98,14 @@ describe("validateSessionHistory", () => {
     });
     expect(message?.parts?.[1]).toHaveProperty("callId", expect.stringMatching(/^history_/u));
   });
+
+  it.each([
+    ["an undefined field", { rows: undefined }],
+    ["a Date", { at: new Date(0) }],
+    ["NaN", { count: Number.NaN }],
+  ])("rejects tool output with %s, which JSON would change", (_label, output) => {
+    expect(() =>
+      validateSessionHistory([{ parts: [{ name: "x", output, type: "tool" }], role: "assistant" }]),
+    ).toThrow("history[0].parts[0].output must be JSON");
+  });
 });

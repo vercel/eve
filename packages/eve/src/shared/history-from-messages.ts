@@ -43,7 +43,7 @@ export function historyFromMessages(messages: readonly ModelMessage[]): SessionH
           assistant.push({ text: part.text, type: "text" });
         } else if (part.type === "tool-call") {
           const call: MutableToolPart = {
-            input: part.input as JsonValue,
+            input: toJson(part.input),
             name: part.toolName,
             type: "tool",
           };
@@ -82,7 +82,7 @@ function resultOf(
     case "text":
       return { output: output.value };
     case "json":
-      return { output: output.value as JsonValue };
+      return { output: toJson(output.value) };
     case "error-text":
       return { error: output.value };
     case "error-json":
@@ -107,4 +107,9 @@ function resultOf(
     default:
       return { error: "The call's result could not be copied." };
   }
+}
+
+function toJson(value: unknown): JsonValue {
+  const serialized = JSON.stringify(value ?? null);
+  return serialized === undefined ? null : (JSON.parse(serialized) as JsonValue);
 }
