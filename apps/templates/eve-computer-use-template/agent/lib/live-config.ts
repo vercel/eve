@@ -17,15 +17,6 @@ export const RELAY_VERSION = "4";
 
 export type LiveDevice = "browser" | "desktop";
 
-/**
- * The prefix of each device's tools, from the extension mounts in agent/extensions/. The /api/live
- * route trusts a screen only from these tools, so no other tool's output can name a sandbox.
- */
-export const DEVICE_TOOL_PREFIX: Record<LiveDevice, string> = {
-  browser: "browser__",
-  desktop: "desktop__",
-};
-
 export const HISTORY_ACTIONS = ["back", "forward", "reload"] as const;
 export type HistoryAction = (typeof HISTORY_ACTIONS)[number];
 

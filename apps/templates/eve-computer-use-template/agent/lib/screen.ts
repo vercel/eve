@@ -14,8 +14,8 @@ export interface Screen {
   readonly imageDataUrl: string;
   readonly url?: string;
   /**
-   * The sandbox the device's live stream runs in, once it does. Not a credential: the web app's
-   * /api/live route authorizes the viewer against the session before it connects.
+   * The sandbox the device's live stream runs in, once it does, which tells the web app a live
+   * view is available. The web app's /api/live route never uses it to pick a sandbox.
    */
   readonly sandbox?: string;
 }

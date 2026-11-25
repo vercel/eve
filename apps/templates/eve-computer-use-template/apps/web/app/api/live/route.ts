@@ -29,7 +29,7 @@ export async function GET(request: Request) {
 
   let relay: Relay | null;
   try {
-    relay = await findRelay(request, session, device);
+    relay = await findRelay(request, session);
   } catch (error) {
     console.error("Finding the live view relay failed:", error);
     relay = null;

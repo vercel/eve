@@ -25,10 +25,10 @@ const RECHECK_MS = 30_000;
 const checked = new Map<string, number>();
 
 /**
- * Start a device's live stream and the relay in front of it, and return the sandbox's name. The
- * web app's /api/live route finds the sandbox from that name in the session's own tool results,
- * then reads the relay's token from it; neither the token nor the relay's address reaches the
- * browser or the model.
+ * Start a device's live stream and the relay in front of it, and return the sandbox's name, which
+ * tells the web app a live view is available. The web app's /api/live route finds the sandbox by
+ * the session tag eve gives it, never by this name, then reads the relay's token from it; neither
+ * the token nor the relay's address reaches the browser or the model.
  */
 export async function startLive(ctx: ToolContext, device: LiveDevice): Promise<string> {
   const sandbox = await ctx.getSandbox(environment);
