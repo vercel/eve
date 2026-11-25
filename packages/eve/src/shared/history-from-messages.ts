@@ -9,27 +9,30 @@ import type {
 type MutableToolPart = {
   -readonly [Key in keyof SessionHistoryToolPart]: SessionHistoryToolPart[Key];
 };
+type ToolResultOutput = Extract<
+  Extract<ModelMessage, { role: "tool" }>["content"][number],
+  { type: "tool-result" }
+>["output"];
 
 export function historyFromMessages(messages: readonly ModelMessage[]): SessionHistoryMessage[] {
   const history: SessionHistoryMessage[] = [];
-  let assistant: SessionHistoryPart[] | undefined;
-  const calls = new Map<string, MutableToolPart>();
+  const usedCallIds = new Set<string>();
+  let assistant: SessionHistoryPart[] = [];
+  let stepCalls = new Map<string, MutableToolPart>();
   const closeAssistant = () => {
-    const parts = assistant?.filter(
+    const parts = assistant.filter(
       (part) => part.type === "text" || part.output !== undefined || part.error !== undefined,
     );
-    if (parts !== undefined && parts.length > 0) history.push({ parts, role: "assistant" });
-    assistant = undefined;
+    if (parts.length > 0) history.push({ parts, role: "assistant" });
+    assistant = [];
   };
   for (const message of messages) {
     if (message.role === "user") {
       closeAssistant();
       const text = textOf(message.content);
       if (text.length > 0) history.push({ role: "user", text });
-      continue;
-    }
-    if (message.role === "assistant") {
-      assistant ??= [];
+    } else if (message.role === "assistant") {
+      stepCalls = new Map();
       if (typeof message.content === "string") {
         if (message.content.trim().length > 0)
           assistant.push({ text: message.content, type: "text" });
@@ -40,21 +43,22 @@ export function historyFromMessages(messages: readonly ModelMessage[]): SessionH
           assistant.push({ text: part.text, type: "text" });
         } else if (part.type === "tool-call") {
           const call: MutableToolPart = {
-            callId: part.toolCallId,
             input: part.input as JsonValue,
             name: part.toolName,
             type: "tool",
           };
-          calls.set(part.toolCallId, call);
+          if (!usedCallIds.has(part.toolCallId)) {
+            call.callId = part.toolCallId;
+            usedCallIds.add(part.toolCallId);
+          }
+          stepCalls.set(part.toolCallId, call);
           assistant.push(call);
         }
       }
-      continue;
-    }
-    if (message.role === "tool") {
+    } else if (message.role === "tool") {
       for (const part of message.content) {
         if (part.type !== "tool-result") continue;
-        const call = calls.get(part.toolCallId);
+        const call = stepCalls.get(part.toolCallId);
         if (call !== undefined) Object.assign(call, resultOf(part.output));
       }
     }
@@ -72,10 +76,7 @@ function textOf(content: Extract<ModelMessage, { role: "user" }>["content"]): st
 }
 
 function resultOf(
-  output: Extract<
-    Extract<ModelMessage, { role: "tool" }>["content"][number],
-    { type: "tool-result" }
-  >["output"],
+  output: ToolResultOutput,
 ): { readonly output: JsonValue } | { readonly error: string } {
   switch (output.type) {
     case "text":
@@ -86,7 +87,24 @@ function resultOf(
       return { error: output.value };
     case "error-json":
       return { error: JSON.stringify(output.value) };
+    case "execution-denied":
+      return {
+        error:
+          output.reason === undefined
+            ? "The call was denied."
+            : `The call was denied: ${output.reason}`,
+      };
+    case "content":
+      return {
+        output: output.value
+          .map((item) =>
+            item.type === "text"
+              ? item.text
+              : `[${"mediaType" in item ? item.mediaType : "file"} result not copied]`,
+          )
+          .join("\n"),
+      };
     default:
-      return { output: JSON.parse(JSON.stringify(output)) as JsonValue };
+      return { error: "The call's result could not be copied." };
   }
 }

@@ -54,7 +54,6 @@ type ToolImportedPart = Extract<ImportedPart, { readonly type: "tool" }>;
 const HISTORY_FIELDS: readonly string[] = ["id", "role", "text", "parts"];
 const TEXT_PART_FIELDS: readonly string[] = ["type", "text"];
 const TOOL_PART_FIELDS: readonly string[] = ["type", "name", "callId", "input", "output", "error"];
-const MAX_PARTS = 256;
 
 export function validateSessionHistory(history: unknown): readonly ImportedMessage[] | undefined {
   if (history === undefined) return undefined;
@@ -101,10 +100,8 @@ function validateParts(
   role: "user" | "assistant",
   callIds: Set<string>,
 ): ImportedPart[] {
-  if (!Array.isArray(parts) || parts.length === 0 || parts.length > MAX_PARTS) {
-    throw new InvalidSessionHistoryError(
-      `${at} must be an array of 1 to ${String(MAX_PARTS)} parts.`,
-    );
+  if (!Array.isArray(parts) || parts.length === 0) {
+    throw new InvalidSessionHistoryError(`${at} must be a non-empty array of parts.`);
   }
   return parts.map((part: unknown, index): ImportedPart => {
     const partAt = `${at}[${index}]`;
