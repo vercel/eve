@@ -68,6 +68,7 @@ interface StepStream {
   reasoning: string;
   reasoningShownAtMs: number | null;
   replyChars: number;
+  rootGone?: Promise<boolean>;
   readonly runId: string;
   readonly partKinds: Map<string, string>;
 }
@@ -524,6 +525,9 @@ export const defaultEvents: SlackChannelInternalEvents = {
     if (kind !== "text") return;
     const before = stream.replyChars;
     stream.replyChars += data.delta.length;
+    if (before === 0 && stream.replyChars > 0 && stream.rootGone === undefined) {
+      stream.rootGone = checkThreadRootGone(channel);
+    }
     if (before < WRITING_REPLY_MIN_CHARS && stream.replyChars >= WRITING_REPLY_MIN_CHARS) {
       await showStatus(channel, "Writing a reply...");
     }
@@ -600,7 +604,11 @@ export const defaultEvents: SlackChannelInternalEvents = {
       await clearStatus(channel);
       return;
     }
-    const rootGone = checkThreadRootGone(channel);
+    const stream = streamByState.get(channel.state);
+    const prefetched =
+      stream !== undefined && stream.runId === data.runId ? stream.rootGone : undefined;
+    if (prefetched !== undefined && stream !== undefined) stream.rootGone = undefined;
+    const rootGone = prefetched ?? checkThreadRootGone(channel);
     await statusWritesSettled(channel);
     channel.state.threadStatus = null;
     await deliverCompletedSlackReply(channel, text, { rootGone, turnId: ctx.session.turn.id });
