@@ -59,13 +59,15 @@ export default defineEval({
 });
 ```
 
-The reporter takes optional `projectName` and `experimentName`, plus a base experiment (by name or id) to diff against.
+The reporter takes optional `projectName` and `experimentName`, plus a base experiment (by name or id) to diff against. Experiment `metadata` merges over eve's `eveEvalIds`, `eveTargetKind`, `eveTargetUrl`, and `eveTimestamp`, and `tags` are added after eve's `eve`, `target:<kind>`, `eval:<id>`, and eval tags. eve reads the experiment's commit and branch from the git repository at `cwd` (default `process.cwd()`); pass `repoInfo` to report your own git metadata, or `repoInfo: null` to report none.
 
 - Gate assertions log as scores of 0 or 1 under a `gate:` prefix, so experiment diffs show gate regressions like soft-score regressions.
 - Assertions that share a name, such as several unlabeled judges, log the lowest score. The console warns when merged soft scores differ; use `.label(name)` to group or separate them.
 - Errored assertions log no score.
 - Metadata holds assertion scores under `eveAssertionScores`, failed assertion details under `eveFailedAssertions`, and the eval's traces under `eveTraceIds` and `eveTraceContexts`.
 - In a [repeated run](./running#repeat-evals), each attempt logs its own row with the id `<id>#<attempt>` and the attempt number under `eveAttempt`.
+- When the eval recorded [usage](#custom-reporters), its row logs `prompt_tokens`, `completion_tokens`, `tokens`, `prompt_cached_tokens`, and `prompt_cache_creation_tokens` metrics, plus `estimated_cost` when every counted session reported a cost. `prompt_tokens` includes cached and cache-write tokens.
+- Metadata lists the eval's models under `eveModels`, and each captured session's id, models, and usage under `eveSessions`.
 
 Evals that share one reporter instance, through the config, a `shared.ts` export, or a dataset array, land in one experiment. Listing the config reporter on an eval too doesn't report it twice.
 

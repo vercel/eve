@@ -1,5 +1,11 @@
 import { outputOf } from "#evals/output.js";
-import type { EveEval, EveEvalResult, EveEvalRunSummary, EveEvalTarget } from "#evals/types.js";
+import type {
+  EveEval,
+  EveEvalResult,
+  EveEvalRunSummary,
+  EveEvalTarget,
+  EveEvalTaskResult,
+} from "#evals/types.js";
 import {
   composeAssertionScoreMetadata,
   exportedAssertionName,
@@ -8,9 +14,10 @@ import {
 import { resolveLocalGitMetadata } from "#evals/runner/resolve-git-metadata.js";
 import { formatAttemptLabel } from "#evals/runner/attempt-label.js";
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 
 /**
- * Configuration for the Braintrust reporter. Every field is optional and maps
+ * Configuration for the Braintrust reporter. Every field is optional; most map
  * onto the corresponding Braintrust SDK `init` option.
  */
 export interface BraintrustReporterConfig {
@@ -26,6 +33,47 @@ export interface BraintrustReporterConfig {
   readonly baseExperimentId?: string;
   /** When true, update a matching existing experiment instead of creating one. */
   readonly update?: boolean;
+  /**
+   * Experiment metadata merged over the metadata eve sets (`eveEvalIds`,
+   * `eveTargetKind`, `eveTargetUrl`, `eveTimestamp`). A key you set replaces
+   * eve's value for that key.
+   */
+  readonly metadata?: Readonly<Record<string, unknown>>;
+  /** Experiment tags appended after the tags eve sets. Duplicates are dropped. */
+  readonly tags?: readonly string[];
+  /**
+   * Git metadata for the experiment. When omitted, eve reads the commit and
+   * branch from the repository at `cwd`. Pass an object to report it as is, or
+   * `null` to report no git metadata.
+   */
+  readonly repoInfo?: BraintrustRepoInfo | null;
+  /**
+   * Directory eve reads git metadata from when `repoInfo` is omitted.
+   * Defaults to `process.cwd()`.
+   */
+  readonly cwd?: string;
+}
+
+/** Git metadata reported on a Braintrust experiment. Every field is optional. */
+export interface BraintrustRepoInfo {
+  /** Commit SHA. */
+  readonly commit?: string | null;
+  /** Branch name. */
+  readonly branch?: string | null;
+  /** Tag pointing at the commit. */
+  readonly tag?: string | null;
+  /** Whether the working tree had uncommitted changes. */
+  readonly dirty?: boolean | null;
+  /** Commit author name. */
+  readonly author_name?: string | null;
+  /** Commit author email. */
+  readonly author_email?: string | null;
+  /** Commit message. */
+  readonly commit_message?: string | null;
+  /** Commit timestamp. */
+  readonly commit_time?: string | null;
+  /** Diff of uncommitted changes. */
+  readonly git_diff?: string | null;
 }
 
 interface BraintrustSdk {
@@ -38,10 +86,8 @@ interface BraintrustSdk {
     update?: boolean;
     tags?: string[];
     metadata?: Record<string, unknown>;
-    repoInfo?: {
-      commit?: string;
-      branch?: string;
-    } | null;
+    repoInfo?: BraintrustRepoInfo | null;
+    gitMetadataSettings?: { collect: "none" };
     noExitFlush?: boolean;
     setCurrent?: boolean;
   }): Promise<BraintrustExperiment>;
@@ -98,15 +144,17 @@ class BraintrustReporter implements EvalReporter {
   async onRunStart(evaluations: readonly EveEval[], target: EveEvalTarget): Promise<void> {
     const sdk = await loadBraintrustSdk();
     this.#sdk = sdk;
-    const git = resolveLocalGitMetadata(process.cwd());
 
     this.#evaluations.clear();
     for (const evaluation of evaluations) {
       this.#evaluations.set(evaluation.id, evaluation);
     }
 
-    const tags = resolveTags(evaluations, target);
-    const metadata = resolveExperimentMetadata(evaluations, target);
+    const tags = resolveTags(evaluations, target, this.#config.tags ?? []);
+    const metadata = {
+      ...resolveExperimentMetadata(evaluations, target),
+      ...this.#config.metadata,
+    };
 
     this.#experiment = await sdk.init({
       project: this.#config.projectName ?? evaluations[0]?.id ?? "eve evals",
@@ -119,7 +167,7 @@ class BraintrustReporter implements EvalReporter {
       metadata,
       noExitFlush: true,
       setCurrent: false,
-      repoInfo: git.sha ? { commit: git.sha, branch: git.branch } : null,
+      ...resolveRepoInfo(this.#config),
     });
   }
 
@@ -167,11 +215,21 @@ class BraintrustReporter implements EvalReporter {
       metadata.eveFailureCode = result.result.derived.failureCode;
     }
 
+    if (result.result.derived.models.length > 0) {
+      metadata.eveModels = result.result.derived.models;
+    }
+
+    const sessions = sessionMetadata(result.result);
+    if (sessions.length > 0) {
+      metadata.eveSessions = sessions;
+    }
+
     const metrics: Record<string, number> = {
       toolCallCount: result.result.derived.toolCallCount,
       subagentCallCount: result.result.derived.subagentCallCount,
       messageCount: result.result.derived.messageCount,
       reasoningBlockCount: result.result.derived.reasoningBlockCount,
+      ...usageMetrics(result.result.derived.usage),
     };
 
     this.#experiment.log({
@@ -224,7 +282,36 @@ async function loadBraintrustSdk(): Promise<BraintrustSdk> {
   }
 }
 
-function resolveTags(evaluations: readonly EveEval[], target: EveEvalTarget): string[] {
+function usageMetrics(usage: TokenUsage | undefined): Record<string, number> {
+  if (usage === undefined) return {};
+  const metrics: Record<string, number> = {
+    prompt_tokens: usage.inputTokens,
+    completion_tokens: usage.outputTokens,
+    tokens: usage.inputTokens + usage.outputTokens,
+    prompt_cached_tokens: usage.cacheReadTokens,
+    prompt_cache_creation_tokens: usage.cacheWriteTokens,
+  };
+  if (usage.costUsd !== undefined) metrics.estimated_cost = usage.costUsd;
+  return metrics;
+}
+
+function sessionMetadata(result: EveEvalTaskResult): Record<string, unknown>[] {
+  return (result.sessions ?? []).map((session) => {
+    const entry: Record<string, unknown> = {
+      sessionId: session.sessionId,
+      primary: session.primary,
+      models: session.derived.models,
+    };
+    if (session.derived.usage !== undefined) entry.usage = session.derived.usage;
+    return entry;
+  });
+}
+
+function resolveTags(
+  evaluations: readonly EveEval[],
+  target: EveEvalTarget,
+  extra: readonly string[],
+): string[] {
   const tags = new Set<string>(["eve", `target:${target.kind}`]);
 
   for (const evaluation of evaluations) {
@@ -234,7 +321,21 @@ function resolveTags(evaluations: readonly EveEval[], target: EveEvalTarget): st
     }
   }
 
+  for (const tag of extra) {
+    tags.add(tag);
+  }
+
   return [...tags];
+}
+
+function resolveRepoInfo(config: BraintrustReporterConfig): {
+  repoInfo: BraintrustRepoInfo | null;
+  gitMetadataSettings?: { collect: "none" };
+} {
+  if (config.repoInfo === null) return { repoInfo: null, gitMetadataSettings: { collect: "none" } };
+  if (config.repoInfo !== undefined) return { repoInfo: config.repoInfo };
+  const git = resolveLocalGitMetadata(config.cwd ?? process.cwd());
+  return { repoInfo: git.sha ? { commit: git.sha, branch: git.branch } : null };
 }
 
 function resolveExperimentMetadata(
