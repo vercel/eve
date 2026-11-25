@@ -511,9 +511,34 @@ async function runSessionLoop(
     if (initial.kind !== "action") return initial;
     let action = initial.action;
     let timerStarted = !defersTimer;
+    let timerPending: Promise<void> | undefined;
+    let timerRejection: Promise<never> | undefined;
+
+    const armTimer = (): void => {
+      if (timerStarted || sessionTimeout === undefined) return;
+      timerStarted = true;
+      const starting = sessionTimeout.start();
+      timerPending = starting;
+      timerRejection = starting.then(
+        () => {
+          if (timerPending === starting) {
+            timerPending = undefined;
+            timerRejection = undefined;
+          }
+          return new Promise<never>(() => {});
+        },
+        (error: unknown) => Promise.reject(error),
+      );
+      timerRejection.catch(() => undefined);
+    };
+
+    const awaitTimerIfPending = async (): Promise<void> => {
+      if (timerPending !== undefined) await timerPending;
+    };
 
     while (true) {
       if (action.kind === "done") {
+        await awaitTimerIfPending();
         return { kind: "terminal", outcome: { action, kind: "done" } };
       }
       await settleUnstarted();
@@ -523,6 +548,7 @@ async function runSessionLoop(
         const settled = await settleCancelledTurn(caller !== undefined, action.cancelledBy);
         const end = pendingSessionEnd(cursor.serializedContext);
         if (end !== undefined) {
+          await awaitTimerIfPending();
           progress.caller = caller;
           return {
             kind: "terminal",
@@ -538,6 +564,7 @@ async function runSessionLoop(
       } else {
         const end = pendingSessionEnd(cursor.serializedContext);
         if (end !== undefined) {
+          await awaitTimerIfPending();
           return {
             kind: "terminal",
             outcome: hookEnded(end.hook, { settled: action.settled }),
@@ -557,27 +584,35 @@ async function runSessionLoop(
       }
 
       const transferred = await tryCompactionHandoff();
-      if (transferred !== undefined) return transferred;
-
-      if (!timerStarted) {
-        timerStarted = true;
-        void sessionTimeout?.start().catch(() => undefined);
+      if (transferred !== undefined) {
+        await awaitTimerIfPending();
+        return transferred;
       }
 
+      armTimer();
+
       turnControl ??= createTurnControl();
-      const next = await nextParkedActivity();
+      const next =
+        timerRejection === undefined
+          ? await nextParkedActivity()
+          : await Promise.race([nextParkedActivity(), timerRejection]);
 
       switch (next.kind) {
         case "reset":
+          await awaitTimerIfPending();
           return { kind: "terminal", outcome: resetOutcome(next.origin) };
         case "end":
+          await awaitTimerIfPending();
           return { kind: "terminal", outcome: hookEnded(next.hook) };
         case "closed":
+          await awaitTimerIfPending();
           if (inbox.takenOver) return await handoff.adoptTakeover();
           return { kind: "terminal", outcome: { kind: "expired" } };
         case "transferred":
+          await awaitTimerIfPending();
           return next;
         case "expired":
+          await awaitTimerIfPending();
           return { kind: "terminal", outcome: { kind: "expired" } };
         case "clear":
         case "compact":

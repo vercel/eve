@@ -1,9 +1,15 @@
-import type { CreateSessionStepResult } from "#execution/create-session-step.js";
 import { DURABLE_SESSION_VERSION } from "#execution/durable-session-read.js";
+import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { createSession, projectToDurableSession } from "#execution/session.js";
 import { withPendingHistory } from "#execution/session/pending-history.js";
+import type { HarnessModelMessage } from "#harness/messages.js";
 import type { JsonObject } from "#shared/json.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
+
+export interface InitialSessionValues {
+  readonly history: HarnessModelMessage[];
+  readonly state: DurableSessionState;
+}
 
 export function createInitialSessionValues(input: {
   readonly continuationToken: string;
@@ -11,7 +17,7 @@ export function createInitialSessionValues(input: {
   readonly outputSchema?: JsonObject;
   readonly rootSessionId?: string;
   readonly sessionId: string;
-}): CreateSessionStepResult {
+}): InitialSessionValues {
   const created = createSession({
     continuationToken: input.continuationToken,
     outputSchema: input.outputSchema,

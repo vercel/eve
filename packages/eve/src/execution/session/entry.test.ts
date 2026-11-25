@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { workflowOwnerPorts } from "#execution/session/entry.js";
 import { bootInitialOwner } from "#execution/session/owner-boot.js";
-import { createSessionStep } from "#execution/create-session-step.js";
 import { createSessionInbox } from "#execution/session-inbox/inbox.js";
 import { startSessionTimeoutStep } from "#execution/session/timeout-steps.js";
 import { resolveInitialTurnCallerStep } from "#subagents/parent-notification.js";
@@ -36,7 +35,6 @@ vi.mock("./program.js", () => ({
   runPreparedSession: vi.fn(),
 }));
 
-vi.mock("../create-session-step.js", () => ({ createSessionStep: vi.fn() }));
 vi.mock("../session-inbox/inbox.js", () => ({ createSessionInbox: vi.fn() }));
 vi.mock("./timeout-steps.js", () => ({
   cancelSessionTimeoutStep: vi.fn(),
@@ -101,7 +99,6 @@ function createInbox() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(createSessionStep).mockResolvedValue({ history: [], state: {} } as never);
   vi.mocked(startSessionTimeoutStep).mockResolvedValue({ runId: "timeout-run-1" });
   vi.mocked(createTurnControl).mockImplementation(() => ({
     cancellation: new AbortController(),
@@ -158,7 +155,6 @@ describe("bootInitialOwner", () => {
       workflowOwnerPorts("session-1"),
     );
 
-    expect(createSessionStep).not.toHaveBeenCalled();
     expect(resolveInitialTurnCallerStep).not.toHaveBeenCalled();
     expect(inbox.claimSessionHook).toHaveBeenCalledOnce();
     expect(createTurnControl).toHaveBeenCalledOnce();
@@ -183,7 +179,6 @@ describe("bootInitialOwner", () => {
       workflowOwnerPorts("session-1"),
     );
 
-    expect(createSessionStep).not.toHaveBeenCalled();
     expect(boot?.session.history).toEqual([]);
     expect(boot?.session.sessionState).toMatchObject({
       hasProxyInputRequests: false,
