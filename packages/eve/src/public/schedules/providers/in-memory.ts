@@ -10,6 +10,7 @@ import type {
   ScheduleRecord,
 } from "#public/schedules/subscription.js";
 import type { ScheduleProviderContext } from "#runtime/schedules/provider-types.js";
+import { parseScheduleLocalDateTime } from "#shared/schedule-timezone.js";
 
 /**
  * Options for {@link inMemoryScheduleProvider}. `now` replaces the clock, for deterministic tests.
@@ -54,7 +55,9 @@ export function inMemoryScheduleProvider(
           name: schedule.name,
           scheduleId: allocateScheduleId(context, schedule.name, scheduleIds, usedScheduleIds),
           state:
-            schedule.expression.type === "single" && Date.parse(schedule.expression.at) <= timestamp
+            schedule.expression.type === "single" &&
+            parseScheduleLocalDateTime(schedule.expression.at, schedule.expression.timezone) <=
+              timestamp
               ? "completed"
               : "active",
           target: context.target,
