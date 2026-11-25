@@ -11,6 +11,7 @@ const log = createLogger("hooks");
 
 export type Command =
   | { readonly type: "cancel"; readonly reason?: string }
+  | { readonly type: "end"; readonly hook: string; readonly reason?: string }
   | { readonly type: "continue"; readonly turnId: string; readonly delivery: DeliverHookPayload };
 
 export function queueCommands(
@@ -22,11 +23,36 @@ export function queueCommands(
   if (commands.length === 0) return;
   const state = readDefinitionsState(ctx);
   const intents = [...(state.intents ?? [])];
-  let { continuation } = state;
+  let { continuation, sessionEnd } = state;
   const turnId = activeTurnIdOf(currentProjection(ctx));
   let changed = false;
+  const queueTurnCancel = (reason?: string): void => {
+    if (turnId === undefined || state.cancelledTurnId === turnId) return;
+    if (intents.some((queued) => queued.type === "cancel" && queued.turnId === turnId)) return;
+    intents.push({
+      occurrence,
+      reactionId: definition.id,
+      type: "cancel",
+      ...(reason !== undefined && { reason }),
+      turnId,
+    });
+    changed = true;
+  };
   for (const command of commands) {
+    if (command.type === "end") {
+      if (sessionEnd === undefined) {
+        sessionEnd = { hook: command.hook };
+        changed = true;
+      }
+      if (continuation !== undefined) {
+        continuation = undefined;
+        changed = true;
+      }
+      queueTurnCancel(command.reason);
+      continue;
+    }
     if (command.type === "continue") {
+      if (sessionEnd !== undefined) continue;
       const queued = continuation?.turnId === command.turnId ? continuation : undefined;
       continuation = {
         delivery:
@@ -38,22 +64,15 @@ export function queueCommands(
       changed = true;
       continue;
     }
-    if (turnId === undefined || state.cancelledTurnId === turnId) continue;
-    if (intents.some((queued) => queued.type === "cancel" && queued.turnId === turnId)) continue;
-    intents.push({
-      occurrence,
-      reactionId: definition.id,
-      type: command.type,
-      ...(command.reason !== undefined && { reason: command.reason }),
-      turnId,
-    });
-    changed = true;
+    queueTurnCancel(command.reason);
   }
   if (changed) {
+    const { continuation: _dropped, ...rest } = state;
     writeDefinitionsState(ctx, {
-      ...state,
+      ...rest,
       intents,
       ...(continuation !== undefined && { continuation }),
+      ...(sessionEnd !== undefined && { sessionEnd }),
     });
   }
 }

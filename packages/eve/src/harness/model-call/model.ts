@@ -3,7 +3,7 @@ import { gateway, type LanguageModel, type LanguageModelMiddleware, wrapLanguage
 import type { KernelConfig } from "#harness/types.js";
 import type { ModelChoice } from "#definitions/model.js";
 import type { RuntimeModel } from "#runtime/agent/resolve-model.js";
-import { stepModel } from "#definitions/step.js";
+import { evaluateStepModel, stepModel, type ValueRun } from "#definitions/step.js";
 import type { Step } from "#harness/step/context.js";
 import type { ModelProfile } from "#harness/model-profile.js";
 import { appendPackageUserAgent } from "#internal/user-agent.js";
@@ -45,11 +45,14 @@ export function withGatewayTraceContext(
   return wrapLanguageModel({ model: gatewayModel, middleware });
 }
 
-export async function resolveEffectiveRuntimeModel(step: Step): Promise<{
+export async function resolveEffectiveRuntimeModel(
+  step: Step,
+  run?: ValueRun,
+): Promise<{
   readonly choice: ModelChoice;
   readonly model: RuntimeModel;
 }> {
-  const choice = await stepModel(step);
+  const choice = run === undefined ? await stepModel(step) : await evaluateStepModel(step, run);
   if (choice === undefined) {
     throw new Error(
       "The dynamic model returned no model, so there's none to call. Return a model from its render or record.",

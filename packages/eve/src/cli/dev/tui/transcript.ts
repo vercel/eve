@@ -162,6 +162,25 @@ export class ConversationTranscript {
       );
       const states = new Map(tools.map((part) => [part, toolState(part, view.data.view)]));
       const activeSteps = activeToolSteps(states);
+      const nested = nestedCalls(message);
+      const shownCalls = new Set<string>();
+      const showCall = (part: EveToolPart, depth: number): void => {
+        if (shownCalls.has(part.callId)) return;
+        shownCalls.add(part.callId);
+        let block: Block | undefined;
+        const taskCall = taskCalls.get(part.callId);
+        const state = states.get(part);
+        if (taskCall !== undefined) {
+          block = this.#taskStartLine(part, taskCall.task, labels, options, now, view.data.view);
+        } else if (state !== undefined && options.tools !== "hidden") {
+          const cohortActive = activeSteps.has(part.stepIndex);
+          block = this.#toolBlock(part, state, cohortActive, labels(part.callId), options, depth);
+        }
+        if (block !== undefined) blocks.push(block);
+        for (const child of nested.inside.get(part.callId) ?? []) {
+          showCall(child, block === undefined ? depth : depth + 1);
+        }
+      };
 
       for (const [index, part] of message.parts.entries()) {
         if (part.type === "text" || part.type === "reasoning") {
@@ -170,26 +189,8 @@ export class ConversationTranscript {
         } else if (part.type === "interaction") {
           if (part.request.signIn !== undefined && options.connectionAuth !== "hidden")
             blocks.push(this.#signInBlock(part, part.request.signIn));
-        } else if (part.type === "tool") {
-          const taskCall = taskCalls.get(part.callId);
-          if (taskCall !== undefined) {
-            const start = this.#taskStartLine(
-              part,
-              taskCall.task,
-              labels,
-              options,
-              now,
-              view.data.view,
-            );
-            if (start !== undefined) blocks.push(start);
-            continue;
-          }
-          const state = states.get(part);
-          if (state === undefined || options.tools === "hidden") continue;
-          const toolLabels = labels(part.callId);
-          blocks.push(
-            this.#toolBlock(part, state, activeSteps.has(part.stepIndex), toolLabels, options),
-          );
+        } else if (part.type === "tool" && !nested.callIds.has(part.callId)) {
+          showCall(part, 0);
         }
       }
       const turnId = message.metadata?.turnId;
@@ -535,6 +536,7 @@ export class ConversationTranscript {
     cohortActive: boolean,
     labels: ToolLabels | undefined,
     options: TranscriptOptions,
+    depth: number,
   ): Block {
     const live = cohortActive || isActive(state.status);
     return this.#memoize(
@@ -547,6 +549,7 @@ export class ConversationTranscript {
         options.subagentNames,
         labels?.start,
         labels?.complete,
+        depth,
       ],
       () => {
         const context = this.#presentationContext(part.callId, part, state, options, {
@@ -558,6 +561,7 @@ export class ConversationTranscript {
           kind: "tool",
           live,
           expanded: options.tools === "full",
+          ...(depth > 0 && { depth }),
         };
       },
     );
@@ -609,6 +613,7 @@ export class ConversationTranscript {
     } = {};
     if (
       extra.isSubagent === true ||
+      part.kind === "agent" ||
       options.subagentNames?.includes(toolBaseName(part.name)) === true
     ) {
       context.isSubagent = true;
@@ -657,6 +662,25 @@ export function turnActivity(view: AgentTUIConversationView, tasks: readonly Tas
         : "Thinking";
     }
   }
+}
+
+function nestedCalls(message: EveMessage): {
+  readonly inside: ReadonlyMap<string, readonly EveToolPart[]>;
+  readonly callIds: ReadonlySet<string>;
+} {
+  const calls = message.parts.filter((part): part is EveToolPart => part.type === "tool");
+  const shown = new Set(calls.map((part) => part.callId));
+  const inside = new Map<string, EveToolPart[]>();
+  const callIds = new Set<string>();
+  for (const part of calls) {
+    const parent = part.parentCallId;
+    if (parent === undefined || parent === part.callId || !shown.has(parent)) continue;
+    callIds.add(part.callId);
+    const siblings = inside.get(parent);
+    if (siblings === undefined) inside.set(parent, [part]);
+    else siblings.push(part);
+  }
+  return { inside, callIds };
 }
 
 function sameKey(left: readonly unknown[], right: readonly unknown[]): boolean {

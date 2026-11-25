@@ -20,8 +20,8 @@ import { defineChannel, POST } from "eve/channels";
 
 export default defineChannel({
   routes: [
-    // required: one or more routes; the path is the app URL, with no channel prefix
-    POST("/threads/:threadId/messages", async (request, { from, params }) => {
+    // required: one or more routes; put custom routes under /eve/v1/<namespace>/*
+    POST("/eve/v1/support/threads/:threadId/messages", async (request, { from, params }) => {
       const body = await request.json();
       // from(address) names the conversation; the same address reaches the same session
       const delivery = await from(params.threadId).send(body.message, { auth: null });
@@ -31,7 +31,7 @@ export default defineChannel({
 });
 ```
 
-A route's `path` is its app URL, without a channel-name prefix. The route above answers at `POST /threads/:threadId/messages`, not `/support/threads/:threadId/messages`. Give each route a unique method and path outside `/eve/v1/*`, which eve reserves.
+A route's `path` is its app URL, without an automatic channel-name prefix. Put custom channel routes under `/eve/v1/<your-channel>/...` so eve forwards them everywhere—standalone deployments, `eve/next`, Vercel services, and named workspace mounts (`/eve/<name>/v1/<your-channel>/...`). eve reserves its own `/eve/v1/` namespaces (`session`, `health`, `info`, `callback`, `connections`, `hooks`, `dev`) and rejects collisions at compile time. Routes outside `/eve/v1/*` are an advanced option that requires routing of your own behind `eve/next` or Vercel services. When a channel registers its own webhook or callback path with a third party, pass its route to `publicRoutePath("/eve/v1/support")` from `eve/channels` so named mounts and custom prefixes are applied automatically.
 
 A request with a method that its path doesn't declare gets `405 Method Not Allowed`, with an `Allow` header that lists the methods the path declares. `HEAD` works differently: a path answers it only through a route you declare with `HEAD()`. A `HEAD` request to a path that declares `GET` but not `HEAD` gets `405`, and the `GET` handler doesn't run. A `HEAD` request to a path with neither route gets `404`.
 
@@ -53,7 +53,7 @@ import { defineChannel, GET, POST } from "eve/channels";
 
 export default defineChannel({
   routes: [
-    POST("/threads/:threadId/messages", async (request, { from, params }) => {
+    POST("/eve/v1/support/threads/:threadId/messages", async (request, { from, params }) => {
       const body = await request.json();
       const source = from(params.threadId);
 
@@ -65,40 +65,43 @@ export default defineChannel({
       return Response.json(delivery, { status: 202 });
     }),
 
-    POST("/threads/:threadId/cancel", async (_request, { from, params }) =>
+    POST("/eve/v1/support/threads/:threadId/cancel", async (_request, { from, params }) =>
       Response.json(await from(params.threadId).cancel()),
     ),
-    POST("/threads/:threadId/compact", async (_request, { from, params }) =>
+    POST("/eve/v1/support/threads/:threadId/compact", async (_request, { from, params }) =>
       Response.json(await from(params.threadId).compact()),
     ),
-    POST("/threads/:threadId/clear", async (_request, { from, params }) =>
+    POST("/eve/v1/support/threads/:threadId/clear", async (_request, { from, params }) =>
       Response.json(await from(params.threadId).clear()),
     ),
 
-    GET("/sessions/:sessionId/stream", async (request, { attachSession, params }) => {
-      const iterator = attachSession(params.sessionId)
-        .stream({ signal: request.signal })
-        [Symbol.asyncIterator]();
-      // This custom event-NDJSON route is not the built-in eve/client wire endpoint.
-      // Read before sending headers so stranded-session errors reach the route.
-      const first = await iterator.next();
-      let firstPending = true;
-      const encoder = new TextEncoder();
-      const stream = new ReadableStream<Uint8Array>({
-        async pull(controller) {
-          const next = firstPending ? first : await iterator.next();
-          firstPending = false;
-          if (next.done) controller.close();
-          else controller.enqueue(encoder.encode(JSON.stringify(next.value) + "\n"));
-        },
-        async cancel() {
-          await iterator.return?.();
-        },
-      });
-      return new Response(stream, {
-        headers: { "content-type": "application/x-ndjson; charset=utf-8" },
-      });
-    }),
+    GET(
+      "/eve/v1/support/sessions/:sessionId/stream",
+      async (request, { attachSession, params }) => {
+        const iterator = attachSession(params.sessionId)
+          .stream({ signal: request.signal })
+          [Symbol.asyncIterator]();
+        // This custom event-NDJSON route is not the built-in eve/client wire endpoint.
+        // Read before sending headers so stranded-session errors reach the route.
+        const first = await iterator.next();
+        let firstPending = true;
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream<Uint8Array>({
+          async pull(controller) {
+            const next = firstPending ? first : await iterator.next();
+            firstPending = false;
+            if (next.done) controller.close();
+            else controller.enqueue(encoder.encode(JSON.stringify(next.value) + "\n"));
+          },
+          async cancel() {
+            await iterator.return?.();
+          },
+        });
+        return new Response(stream, {
+          headers: { "content-type": "application/x-ndjson; charset=utf-8" },
+        });
+      },
+    ),
   ],
 
   events: {
@@ -225,11 +228,11 @@ const answers = parseAnswers(decodedResponses);
 await source.respond(answers, { auth });
 ```
 
-Message sends use the channel's `turnPolicy`, which defaults to `"steer"`; see [Overlapping messages](/docs/channels#overlapping-messages). A sent message can interrupt the model before your `deliver` hook runs. Filter events before `send(...)` when they should never interrupt the model.
+Message sends use the channel's `turnPolicy`, which defaults to `"steer"`; see [Overlapping messages](/docs/channels#overlapping-messages). A steering policy's `principal`, which defaults to `"match"`, controls whether another signed-in person's message can join a running turn. A sent message can interrupt the model before your `deliver` hook runs. Filter events before `send(...)` when they should never interrupt the model.
 
 Every `send()` and `respond()` passes its `state` option to the channel's `deliver(payload, channel)` hook as `payload.state`, including sends to an existing session. Use it for per-message values such as a message's author. The hook decides what to merge into `channel.state`; eve seeds `channel.state` from `state` only when `send()` creates the session.
 
-The payload is `ChannelDelivery<TState>` from `eve/channels`: `message`, `answers`, `context`, `outputSchema`, `answerText`, and `state?: Partial<TState>`. The hook's return value decides what reaches the session:
+The payload is `ChannelDelivery<TState>` from `eve/channels`: `auth`, `message`, `answers`, `context`, `outputSchema`, `answerText`, and `state?: Partial<TState>`. `payload.auth` is the authenticated sender of this delivery, while `channel.session.auth.current` stays the running turn's caller. The hook's return value decides what reaches the session:
 
 - Return nothing to keep it unchanged.
 - Return a replacement with `message`, `answers`, `context`, `outputSchema`, or `answerText` to change it. Other fields, including `state`, are not accepted; change saved state through `channel.state`. A replacement without `answerText` keeps the delivery's.

@@ -120,6 +120,15 @@ async function runHandler(call: {
     assertOpen("cancel");
     requested.push(reason === undefined ? { type: "cancel" } : { reason, type: "cancel" });
   };
+  const end = (reason?: string): void => {
+    assertOpen("end");
+    if (call.event.type === "session.ended") return;
+    requested.push(
+      reason === undefined
+        ? { hook: call.slug, type: "end" }
+        : { hook: call.slug, reason, type: "end" },
+    );
+  };
   const continueTurn = (
     message: MessageContent,
     options: HookContinueOptions = {},
@@ -172,6 +181,7 @@ async function runHandler(call: {
     ...frame,
     agent: agentOf(ctx),
     cancel,
+    end,
     memo: memos.memo,
     occurrence: { abortSignal, idempotencyKey },
     position: call.position,
@@ -183,26 +193,39 @@ async function runHandler(call: {
     keepMemos(ctx, memoScope, memos.used());
     settled = true;
     const beforeTurn =
-      call.event.type === "delivery.admitted" &&
+      (call.event.type === "delivery.admitted" || call.event.type === "session.started") &&
       activeTurnIdOf(currentProjection(ctx)) === undefined
         ? call.commit.cancelBeforeTurn
         : undefined;
-    if (beforeTurn === undefined) queueCommands(ctx, call.definition, idempotencyKey, requested);
-    else
-      for (const command of requested)
-        if (command.type === "cancel") {
-          const deliveryIds = call.commit.written.flatMap(({ event }) =>
-            event.type === "delivery.admitted" ? [event.data.deliveryId] : [],
-          );
-          writeDefinitionsState(ctx, {
-            ...readDefinitionsState(ctx),
-            cancelledOpening: { by: id, deliveryIds },
-          });
-          beforeTurn({
-            hook: label,
-            ...(command.reason !== undefined && { reason: command.reason }),
-          });
-        }
+    if (beforeTurn === undefined) {
+      queueCommands(ctx, call.definition, idempotencyKey, requested);
+    } else {
+      const endCommand = requested.find(
+        (command): command is Extract<Command, { readonly type: "end" }> => command.type === "end",
+      );
+      if (endCommand !== undefined) {
+        queueCommands(ctx, call.definition, idempotencyKey, [endCommand]);
+        beforeTurn({
+          hook: label,
+          ...(endCommand.reason !== undefined && { reason: endCommand.reason }),
+        });
+      } else if (call.event.type === "delivery.admitted") {
+        for (const command of requested)
+          if (command.type === "cancel") {
+            const deliveryIds = call.commit.written.flatMap(({ event }) =>
+              event.type === "delivery.admitted" ? [event.data.deliveryId] : [],
+            );
+            writeDefinitionsState(ctx, {
+              ...readDefinitionsState(ctx),
+              cancelledOpening: { by: id, deliveryIds },
+            });
+            beforeTurn({
+              hook: label,
+              ...(command.reason !== undefined && { reason: command.reason }),
+            });
+          }
+      }
+    }
   } catch (error) {
     mergeMemos(ctx, memoScope, memos.used());
     reportEffectFailure(ctx, call.definition, error, idempotencyKey);
@@ -298,6 +321,7 @@ function dropYieldedContinuations(ctx: ContextContainer, written: readonly Writt
   if (continuation === undefined) return;
   const latestTurnId = latestTurnIdOf(currentProjection(ctx));
   if (
+    state.sessionEnd === undefined &&
     continuation.turnId === latestTurnId &&
     !written.some(({ event }) => stopsContinuations(event))
   ) {

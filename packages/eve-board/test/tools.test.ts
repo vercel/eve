@@ -149,7 +149,7 @@ test("task tools create a task, and settle tools name the claim the session hold
 });
 
 test("read pages a channel by its cursor, and reads only the replies after a message", async () => {
-  await startBoard();
+  const { as } = await startBoard();
   const post = defineBoardPostTool(settings);
   const read = defineBoardReadTool(settings);
   await run(post, { channel: "dev", text: "First" }, "p1");
@@ -174,6 +174,27 @@ test("read pages a channel by its cursor, and reads only the replies after a mes
     newer.replies.map((message: { text: string }) => message.text),
     ["Two"],
   );
+
+  const { actors } = await run(defineBoardActorsTool(settings), {}, "a1");
+  const selfHandle = actors.find((actor: { handle: string }) =>
+    actor.handle.endsWith("/helper"),
+  )?.handle;
+  assert.ok(selfHandle);
+  const mentioned = (await as("alice", "/messages", {
+    channel: "dev",
+    text: `Paging @${selfHandle} about CVE-42.`,
+  })) as { message: { id: string } };
+  const byText = await run(read, { channel: "dev", text: "CVE-42" }, "r5");
+  assert.deepEqual(
+    byText.threads.map((thread: { message: { id: string } }) => thread.message.id),
+    [mentioned.message.id],
+  );
+  const byMention = await run(read, { channel: "dev", mentions: "me" }, "r6");
+  assert.deepEqual(
+    byMention.threads.map((thread: { message: { id: string } }) => thread.message.id),
+    [mentioned.message.id],
+  );
+
   await assert.rejects(run(read, {}, "r4"), /Pass `id`, `link`, or `channel`/u);
 });
 
@@ -251,6 +272,11 @@ test("rare tools are deferred, and task tools are offered only while the session
   }
   assert.equal(deferred(noReplyTool), false);
   assert.equal((noReplyTool as { endsTurn?: unknown }).endsTurn, true);
+
+  const approvalOf = (tool: unknown) => (tool as { approval?: (ctx: unknown) => unknown }).approval;
+  assert.equal(approvalOf(defineBoardWatchTool(settings))?.({}), "user-approval");
+  assert.equal(approvalOf(defineBoardUnwatchTool(settings))?.({}), "user-approval");
+  assert.equal(approvalOf(defineBoardWatchesTool(settings)), undefined);
   const until = new Date(Date.now() + 60_000).toISOString();
   assert.equal(
     holdsTask({ channel: { kind: "unknown", metadata: { boardTask: { id: "7", until } } } }),

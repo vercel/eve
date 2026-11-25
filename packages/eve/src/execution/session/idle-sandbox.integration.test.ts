@@ -275,6 +275,35 @@ describe.each(["in-process", "workflow"] as const)("idle sandbox stop on the %s 
     );
   });
 
+  it("skips onSessionIdle when a turn.settled hook ends the session with ctx.end()", async () => {
+    await withSession(
+      host,
+      {
+        input: { message: "Alice finishes the job." },
+        modules: [
+          sandboxOnTurns(),
+          hookModule(
+            "finish-job",
+            defineHook({
+              events: {
+                "turn.settled"(event, ctx) {
+                  if (event.data.outcome === "completed") ctx.end("Job completed.");
+                },
+              },
+            }),
+          ),
+        ],
+        name: `idle-end-${host}`,
+        sandboxIdle: { idleTimeoutMs: 0 },
+      },
+      async (session) => {
+        await session.nextUntil((event) => event.type === "session.ended");
+        expect(session.events()).toEqual(["definition", "start", "end"]);
+        expect(await stopStepCount(host, session.id)).toBe(host === "workflow" ? 0 : undefined);
+      },
+    );
+  });
+
   it("clears the marker when the stop fails, without retrying it", async () => {
     await withSession(
       host,
@@ -305,10 +334,29 @@ describe.each(["in-process", "workflow"] as const)("idle sandbox stop on the %s 
 
   it("stops a sandbox that a cancelled turn opened", async () => {
     const opened = Promise.withResolvers<void>();
-    const release = Promise.withResolvers<void>();
     await withSession(
       host,
       {
+        agent: {
+          definition: defineAgent({
+            model: defineDynamic(() => ({
+              model: markMockModel(
+                new MockLanguageModelV4({
+                  doStream: async ({ abortSignal }) =>
+                    await new Promise<StreamResult>((_resolve, reject) => {
+                      const abort = () =>
+                        reject(abortSignal?.reason ?? new DOMException("Aborted", "AbortError"));
+                      if (abortSignal?.aborted) abort();
+                      else abortSignal?.addEventListener("abort", abort, { once: true });
+                    }),
+                  modelId: "scripted",
+                  provider: "eve-test",
+                }),
+              ),
+              modelContextWindowTokens: 200_000,
+            })),
+          }),
+        },
         input: { message: "Alice starts a long data export." },
         modules: [
           hookModule(
@@ -318,7 +366,6 @@ describe.each(["in-process", "workflow"] as const)("idle sandbox stop on the %s 
                 async "model.started"(_event, ctx) {
                   await ctx.getSandbox();
                   opened.resolve();
-                  await release.promise;
                 },
               },
             }),
@@ -330,8 +377,6 @@ describe.each(["in-process", "workflow"] as const)("idle sandbox stop on the %s 
       async (session) => {
         await opened.promise;
         await session.cancel();
-        await settle();
-        release.resolve();
         const turn = await session.nextTurn();
 
         expect(turn).toContainEqual(

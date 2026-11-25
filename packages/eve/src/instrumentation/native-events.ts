@@ -274,11 +274,12 @@ function instrumentationEventsOf(
       const row = line.view?.calls[event.data.callId];
       const scope = row === undefined ? undefined : runAttempt(line, callRun(line.view!, row));
       if (scope === undefined) return [];
-      const { callId, capability } = event.data;
+      const { callId, capability, owner } = event.data;
       const name = capability.name;
       return [
         {
           callId,
+          ...("callId" in owner && { ownerCallId: owner.callId }),
           frameworkTool: capability.kind === "skill" || input.isFrameworkTool?.(name) === true,
           idempotencyKey: actionIdempotencyKey(sessionId, scope.turnId, callId),
           input: line.capturesInputs ? event.data.input : undefined,

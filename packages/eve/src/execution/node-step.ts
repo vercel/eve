@@ -215,6 +215,7 @@ function createRegisteredHarnessToolDefinition(input: {
     outputSchema: def.outputSchema,
     rootOnly: input.rootOnly,
     toModelOutput: def.toModelOutput,
+    ...(def.workflowProgram !== undefined && { workflowProgram: def.workflowProgram }),
   };
   return definition;
 }

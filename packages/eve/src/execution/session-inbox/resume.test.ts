@@ -233,6 +233,50 @@ describe("session inbox resume", () => {
     expect(resumeHookMock).not.toHaveBeenCalled();
   });
 
+  it("refuses a pre-1.0 owner reached through its legacy inbox address", async () => {
+    getWorldMock.mockResolvedValue(singleDeploymentWorld("0.50.0"));
+    getHookByTokenMock.mockImplementation(async (token: string) => {
+      if (token.startsWith(sessionInboxHookToken(""))) throw new HookNotFoundError(token);
+      return sessionHook("wrun_pre_v1", token, { sessionInboxWireVersion: 7 });
+    });
+    resumeHookMock.mockImplementation(async (token: string) => {
+      if (token.startsWith(sessionInboxHookToken(""))) throw new HookNotFoundError(token);
+      return sessionHook("wrun_pre_v1", token, { sessionInboxWireVersion: 7 });
+    });
+
+    const refusal = await resumeSessionInbox("slack:C1:1700000000.000100", {
+      kind: "send",
+      payload: { message: "Alice follows up after the upgrade." },
+    }).catch((error: unknown) => error);
+
+    expect(refusal).toBeInstanceOf(StrandedSessionOwnerError);
+    expect(refusal).toMatchObject({ eveVersion: "0.50.0", ownerRunId: "wrun_pre_v1" });
+    expect(resumeHookMock).not.toHaveBeenCalledWith(
+      "slack:C1:1700000000.000100",
+      expect.anything(),
+    );
+  });
+
+  it("treats a pre-0.45 owner reached through its legacy inbox address as not found", async () => {
+    const world = singleDeploymentWorld("0.40.0");
+    getWorldMock.mockResolvedValue(world);
+    getHookByTokenMock.mockImplementation(async (token: string) => {
+      if (token.startsWith(sessionInboxHookToken(""))) throw new HookNotFoundError(token);
+      return sessionHook("wrun_pre_v045", token, {});
+    });
+    resumeHookMock.mockImplementation(async (token: string) => {
+      throw new HookNotFoundError(token);
+    });
+
+    const refusal = await resumeSessionInbox("slack:C1:1600000000.000100", {
+      kind: "send",
+      payload: { message: "Alice follows up on an old thread." },
+    }).catch((error: unknown) => error);
+
+    expect(HookNotFoundError.is(refusal)).toBe(true);
+    expect(world.runs.get).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["retires a dormant eve dev run another eve version built", "0.0.1", true],
     ["keeps a dormant eve dev run this eve version built", undefined, false],
@@ -321,6 +365,109 @@ describe("remembering a continuation's owner", () => {
     const receipt = await resumeSessionInbox("slack:deleted", send);
     await expect(receipt.sessionId).rejects.toBeInstanceOf(StrandedSessionOwnerError);
     expect(resumeHookMock.mock.calls[1]?.[0]).toEqual(descriptor);
+  });
+
+  it.each([
+    [
+      "reports a sealed-box reset owner whose deployment was deleted as stranded",
+      "Deployment not found.",
+      true,
+    ],
+    ["keeps an accepted sealed-box reset on any other key error", "Project not found.", false],
+  ])("%s", async (_name, reason, stranded) => {
+    const world = {
+      ...guardedWorld,
+      getEncryptionKeyForRun: vi.fn().mockRejectedValue(runKeyFailure(reason)),
+      runs: {
+        get: vi.fn(async (runId: string) => ({ attributes: {}, deploymentId: "dpl_old", runId })),
+      },
+    };
+    getWorldMock.mockResolvedValue(world);
+    const token = sessionInboxHookToken(sessionCommandHookToken("session-reset"));
+    resumeHookMock.mockResolvedValue(routableHook("owner-2", token, "session-reset"));
+
+    const receipt = await resumeSessionInbox(
+      { sessionId: "session-reset" },
+      { deliveryId: "reset-1", kind: "reset" },
+    );
+    if (stranded) {
+      await expect(receipt.sessionId).rejects.toBeInstanceOf(StrandedSessionOwnerError);
+    } else {
+      await expect(receipt.sessionId).resolves.toBe("session-reset");
+    }
+    expect(world.getEncryptionKeyForRun).toHaveBeenCalledWith("owner-2", {
+      deploymentId: "dpl_test",
+    });
+  });
+
+  it("reports a start-hook-only session on a deleted deployment as stranded on reset", async () => {
+    const startToken = sessionInboxHookToken("channel:start-only");
+    const world = {
+      ...guardedWorld,
+      hooks: {
+        get: vi.fn().mockResolvedValue({
+          hookId: "start-hook-1",
+          runId: "wrun_start_only",
+          token: startToken,
+        }),
+      },
+      runs: {
+        get: vi
+          .fn()
+          .mockResolvedValue({ attributes: {}, deploymentId: "dpl_old", runId: "wrun_start_only" }),
+      },
+    };
+    getWorldMock.mockResolvedValue(world);
+    resumeHookMock
+      .mockRejectedValueOnce(
+        new HookNotFoundError(sessionInboxHookToken("eve:session:wrun_start_only")),
+      )
+      .mockRejectedValueOnce(runKeyFailure("Deployment not found."));
+
+    await expect(
+      resumeSessionInbox(
+        { sessionId: "wrun_start_only" },
+        { deliveryId: "reset-start-1", kind: "reset" },
+      ),
+    ).rejects.toBeInstanceOf(StrandedSessionOwnerError);
+  });
+
+  it("reports a sealed-box start-hook-only session on a deleted deployment as stranded on reset", async () => {
+    const startToken = sessionInboxHookToken("channel:start-sealed");
+    const world = {
+      ...guardedWorld,
+      getEncryptionKeyForRun: vi.fn().mockRejectedValue(runKeyFailure("Deployment not found.")),
+      hooks: {
+        get: vi.fn().mockResolvedValue({
+          hookId: "start-hook-2",
+          runId: "wrun_start_sealed",
+          token: startToken,
+        }),
+      },
+      runs: {
+        get: vi.fn().mockResolvedValue({
+          attributes: {},
+          deploymentId: "dpl_old",
+          runId: "wrun_start_sealed",
+        }),
+      },
+    };
+    getWorldMock.mockResolvedValue(world);
+    resumeHookMock
+      .mockRejectedValueOnce(
+        new HookNotFoundError(sessionInboxHookToken("eve:session:wrun_start_sealed")),
+      )
+      .mockResolvedValueOnce(routableHook("wrun_start_sealed", startToken, "wrun_start_sealed"));
+
+    await expect(
+      resumeSessionInbox(
+        { sessionId: "wrun_start_sealed" },
+        { deliveryId: "reset-start-2", kind: "reset" },
+      ),
+    ).rejects.toBeInstanceOf(StrandedSessionOwnerError);
+    expect(world.getEncryptionKeyForRun).toHaveBeenCalledWith("wrun_start_sealed", {
+      deploymentId: "dpl_test",
+    });
   });
 
   it("resolves the owner again after the remembered one refuses", async () => {

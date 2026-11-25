@@ -21,7 +21,7 @@ In local development and a self-deployed `eve start` process, eve uses the SDK's
 
 Nitro hosts eve's HTTP routes and workflow entrypoints, but not the workflow store or the sandbox runtime. Workflow state lives in the active world, and the sandbox comes from `agent/sandbox` or the default sandbox. To choose a world for a self-hosted deployment, see [Workflow worlds](../guides/deployment/workflow-worlds) and [agent.ts](../agent-config#workflow-world).
 
-When a Vercel production deployment changes, the next delivery to an idle session moves the session to the deployment that accepted it. A delivery is anything sent to the session: a message, an answer, or a control. It can arrive by session ID or by any channel address the session claimed. The session keeps its ID and event stream. Its next model turn uses the new deployment's system-role instructions, model, and tools. A static user-role instruction the new deployment changed joins the history again; an unchanged one isn't added again. The delivery restarts the [`sessionTimeoutMs`](../agent-config#runtime-limits) idle window whether or not the move succeeds; disabled timeouts stay disabled.
+When a new Vercel deployment serves the agent, the next delivery to an idle session moves the session to the deployment that accepted it. A delivery is anything sent to the session: a message, an answer, or a control. It can arrive by session ID or by any channel address the session claimed. A message a tool sends with [`ctx.to()`](../tools#start-channel-sessions-ctxto) leaves the target session on its current deployment; its next delivery through a route, webhook, or schedule moves it. The session keeps its ID and event stream. Its next model turn uses the new deployment's system-role instructions, model, and tools. A static user-role instruction the new deployment changed joins the history again; an unchanged one isn't added again. The delivery restarts the [`sessionTimeoutMs`](../agent-config#runtime-limits) idle window whether or not the move succeeds; disabled timeouts stay disabled.
 
 A session whose checkpoint the target deployment can't read stays on its current deployment. An older release can't read a newer checkpoint. After a rollback, a session that already moved to the newer deployment stays there. The target drops state it doesn't define, such as a removed `defineState` key, and its runtime logs name the unknown key. eve doesn't otherwise validate authored session state.
 
@@ -150,15 +150,15 @@ Runs that recorded no eve version are treated as stranded.
 
 #### Sessions on a deleted Vercel deployment
 
-On Vercel Workflow, a session's run executes only on the deployment that started it. If that deployment is deleted, for example by a deployment retention policy, the run can't execute again. eve detects this when a channel address reaches the session:
+On Vercel Workflow, a session's run executes only on the deployment that started it. If that deployment is deleted, for example by a deployment retention policy, the run can't execute again. eve detects this when a channel address or `end()` reaches the session:
 
 - A channel message, such as a new message in a Slack thread, ends the session and starts a fresh one at the same address. The message becomes its first turn, and the fresh session names the session it replaced.
-- `end()` on the address ends the session, and `create()` throws `SessionStrandedError`.
+- `end()` on a channel address or by session ID — including session handles, `POST /eve/v1/session/:sessionId/end`, and `sessions.end()` from `eve/server` — ends the session. `create()` throws `SessionStrandedError`.
 - The replaced session's recorded history can be unreadable, because its encryption key belonged to the deleted deployment. An instruction that reads the predecessor's stream should handle that error.
 
-eve doesn't detect a deleted deployment on other paths. A send by session ID can be accepted and never processed. The session timeout doesn't end the session, because its timer ran on the deleted deployment too.
+eve doesn't detect a deleted deployment on other session-ID paths. A send by session ID can be accepted and never processed. The session timeout doesn't end the session, because its timer ran on the deleted deployment too.
 
-A session that handed off to a newer deployment still records its events on the deployment that started it. If only that first deployment is deleted, the session's current run is still live, so eve doesn't replace it, and its turns fail when they record events. To avoid both cases, keep deployments longer than the session timeout.
+A session that handed off to a newer deployment still records its events on the deployment that started it. If only that first deployment is deleted, `end()` and the [session timeout](../agent-config#runtime-limits) still retire the live run cleanly. eve terminates child sessions, cleans up the sandbox on the live deployment, cancels the original run on the deleted deployment, and releases channel addresses. It skips writing to the dead stream and doesn't run channel `session.ended` handlers. Turns that try to record events on that session still fail, so keep deployments longer than the session timeout to keep conversations running.
 
 #### Sessions from session-driver releases
 

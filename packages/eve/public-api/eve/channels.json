@@ -58,10 +58,12 @@
   "PATCH",
   "POST",
   "PUT",
+  "PrincipalPolicy",
   "RouteDefinition",
   "RouteHandlerArgs",
   "SessionHistoryMessage",
   "SessionStrandedError",
+  "TurnMode",
   "TurnPolicy",
   "UploadPolicyInput",
   "WS",
@@ -77,5 +79,6 @@
   "createWebSocketUpgradeServer",
   "defineChannel",
   "disableRoute",
-  "isChannel"
+  "isChannel",
+  "publicRoutePath"
 ]

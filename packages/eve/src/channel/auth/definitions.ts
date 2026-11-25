@@ -31,6 +31,7 @@ import {
   isRuntimeIpAllowed,
   type RuntimeIpAllowList,
 } from "#channel/ip-allow-list.js";
+import { HttpError } from "#channel/http-error.js";
 import { isLoopbackHostname } from "#shared/network-address.js";
 
 /**
@@ -372,28 +373,16 @@ export interface UnauthorizedResponseOptions {
  * challenge, and a `{ ok: false, code, error }` body.
  */
 export function createUnauthorizedResponse(opts: UnauthorizedResponseOptions = {}): Response {
-  const status = opts.status ?? 401;
-  const code = opts.code ?? (status === 403 ? "forbidden" : "unauthorized");
-  const message =
-    opts.message ?? (status === 403 ? "Forbidden." : "Authorization is required for this route.");
-  const challenges = opts.challenges ?? [];
+  const { status, ...rest } = opts;
+  return (status === 403 ? new ForbiddenError(rest) : new UnauthenticatedError(rest)).response;
+}
 
-  const headers = new Headers({ "cache-control": "no-store" });
+function challengeHeaders(challenges: readonly UnauthorizedChallenge[] = []): Headers {
+  const headers = new Headers();
   for (const challenge of challenges) {
     headers.append("www-authenticate", formatChallenge(challenge));
   }
-
-  return Response.json(
-    {
-      code,
-      error: message,
-      ok: false,
-    },
-    {
-      headers,
-      status,
-    },
-  );
+  return headers;
 }
 
 function formatChallenge(challenge: UnauthorizedChallenge): string {
@@ -440,32 +429,34 @@ function isValidMetadataPath(value: string): boolean {
 export type AuthErrorOptions = Omit<UnauthorizedResponseOptions, "status">;
 
 /**
- * Error thrown by auth callbacks to reject a route with a structured 401
- * response. `routeAuth` catches it and returns its response; other errors
- * propagate through the normal channel failure path.
+ * {@link HttpError} that rejects a route with a structured 401 response and its
+ * `www-authenticate` challenges.
  */
-export class UnauthenticatedError extends Error {
-  readonly response: Response;
+export class UnauthenticatedError extends HttpError {
+  static override readonly errorName = "UnauthenticatedError";
 
   constructor(opts: AuthErrorOptions = {}) {
-    super(opts.message ?? "Authorization is required for this route.");
-    this.name = "UnauthenticatedError";
-    this.response = createUnauthorizedResponse({ ...opts, status: 401 });
+    super(401, {
+      code: opts.code ?? "unauthorized",
+      message: opts.message ?? "Authorization is required for this route.",
+      headers: challengeHeaders(opts.challenges),
+    });
   }
 }
 
 /**
- * Error thrown by auth callbacks to reject a route with a structured 403
- * response. `routeAuth` catches it and returns its response; other errors
- * propagate through the normal channel failure path.
+ * {@link HttpError} that rejects a route with a structured 403 response and its
+ * `www-authenticate` challenges.
  */
-export class ForbiddenError extends Error {
-  readonly response: Response;
+export class ForbiddenError extends HttpError {
+  static override readonly errorName = "ForbiddenError";
 
   constructor(opts: AuthErrorOptions = {}) {
-    super(opts.message ?? "Forbidden.");
-    this.name = "ForbiddenError";
-    this.response = createUnauthorizedResponse({ ...opts, status: 403 });
+    super(403, {
+      code: opts.code ?? "forbidden",
+      message: opts.message ?? "Forbidden.",
+      headers: challengeHeaders(opts.challenges),
+    });
   }
 }
 
@@ -640,7 +631,8 @@ function collectDeclaredChallenges(
  * the empty-array case), returns a 401 {@link createUnauthorizedResponse}
  * whose `www-authenticate` challenges are collected from the entries'
  * declared schemes (see {@link withAuthChallenges}), falling back to
- * `Bearer` when none declared any.
+ * `Bearer` when none declared any. An entry that throws an {@link HttpError}
+ * ends the walk with that error's response; other errors propagate.
  *
  * Channel factories that share this resolution policy (e.g. `eveChannel`, or
  * a custom `defineChannel` route handler) should call `routeAuth` rather than
@@ -660,14 +652,7 @@ export async function routeAuth<TResult extends AuthResult = AuthResult>(
       if (result) return result;
     }
   } catch (error) {
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "response" in error &&
-      error.response instanceof Response
-    ) {
-      return error.response;
-    }
+    if (HttpError.is(error)) return error.response;
     throw error;
   }
 

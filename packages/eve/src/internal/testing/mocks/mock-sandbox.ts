@@ -57,6 +57,8 @@ export interface MockSandbox {
 export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
   const files = new Map<string, string>();
   const fileBytes = new Map<string, Buffer>();
+  const modified = new Map<string, number>();
+  let clock = 0;
   const writes: MockSandboxWrite[] = [];
   const commandLog: string[] = [];
   const removedPaths: string[] = [];
@@ -68,7 +70,19 @@ export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
     fileBytes.set(resolved, Buffer.from(contents, "utf8"));
   }
 
-  async function defaultRun(): Promise<SandboxCommandResult> {
+  async function defaultRun(options: SandboxRunOptions): Promise<SandboxCommandResult> {
+    const find =
+      /^find (\S+) -maxdepth 1 -type f -exec stat -c '%Y %s %n' \{\} \+ 2>\/dev\/null \| head -c (\d+)$/.exec(
+        options.command,
+      );
+    if (find !== null) {
+      const prefix = `${find[1]}/`;
+      const lines = [...fileBytes]
+        .filter(([path]) => path.startsWith(prefix))
+        .map(([path, bytes]) => `${modified.get(path) ?? 0} ${bytes.byteLength} ${path}`);
+      const listing = lines.map((line) => `${line}\n`).join("");
+      return { exitCode: 0, stderr: "", stdout: listing.slice(0, Number(find[2])) };
+    }
     return { exitCode: 0, stderr: "", stdout: "" };
   }
 
@@ -86,7 +100,7 @@ export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
       return await fallback(options);
     }
 
-    return await defaultRun();
+    return await defaultRun(options);
   }
 
   async function removePath(options: SandboxRemovePathOptions): Promise<void> {
@@ -126,6 +140,7 @@ export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
     );
     files.set(resolved, buf.toString("utf8"));
     fileBytes.set(resolved, buf);
+    modified.set(resolved, (clock += 1));
   }
 
   const baseSession: NetworkPolicySandboxSession = {
@@ -176,6 +191,7 @@ export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
       writes.push({ content: buf, path: resolved });
       files.set(resolved, buf.toString("utf8"));
       fileBytes.set(resolved, buf);
+      modified.set(resolved, (clock += 1));
     },
     writeBinaryFile,
     async writeFiles(options: SandboxWriteFilesOptions): Promise<void> {
@@ -186,6 +202,7 @@ export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
       writes.push({ content: options.content, path: resolved });
       files.set(resolved, options.content);
       fileBytes.set(resolved, Buffer.from(options.content, "utf8"));
+      modified.set(resolved, (clock += 1));
     },
   };
   const session = baseSession;

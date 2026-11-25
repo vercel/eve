@@ -2,14 +2,23 @@ import { useEveAgent, type EveToolPart, type EveMessagePart } from "eve/react";
 import { useState } from "react";
 import { activeTurn } from "eve/events";
 
+/** The calls a call ran inside it, such as the calls of a `workflow()` program. */
+function nestedCalls(parts: readonly EveMessagePart[], callId: string): EveToolPart[] {
+  return parts.filter(
+    (part): part is EveToolPart => part.type === "tool" && part.parentCallId === callId,
+  );
+}
+
 function ToolBlock({
   canRespond,
   onRespond,
   part,
+  parts,
 }: Readonly<{
   canRespond: boolean;
   onRespond: (requestId: string, optionId: string) => void;
   part: EveToolPart;
+  parts: readonly EveMessagePart[];
 }>) {
   const interaction = part.interaction;
   const inputRequest = interaction?.request;
@@ -36,6 +45,15 @@ function ToolBlock({
           ))}
         </div>
       ) : null}
+      {nestedCalls(parts, part.callId).map((nested) => (
+        <ToolBlock
+          canRespond={canRespond}
+          key={nested.callId}
+          onRespond={onRespond}
+          part={nested}
+          parts={parts}
+        />
+      ))}
     </div>
   );
 }
@@ -44,10 +62,12 @@ function PartView({
   canRespond,
   onRespond,
   part,
+  parts,
 }: Readonly<{
   canRespond: boolean;
   onRespond: (requestId: string, optionId: string) => void;
   part: EveMessagePart;
+  parts: readonly EveMessagePart[];
 }>) {
   switch (part.type) {
     case "text":
@@ -55,7 +75,10 @@ function PartView({
     case "reasoning":
       return <div className="reasoning">{part.text}</div>;
     case "tool":
-      return <ToolBlock canRespond={canRespond} onRespond={onRespond} part={part} />;
+      // A call made inside another call shows under that call, not as a row of its own.
+      if (parts.some((other) => other.type === "tool" && other.callId === part.parentCallId))
+        return null;
+      return <ToolBlock canRespond={canRespond} onRespond={onRespond} part={part} parts={parts} />;
     default:
       return null;
   }
@@ -98,6 +121,7 @@ export function EveAgentConsole() {
                     void agent.respond([{ interactionId, optionId }])
                   }
                   part={part}
+                  parts={message.parts}
                 />
               ))}
             </div>

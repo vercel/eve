@@ -95,7 +95,7 @@ curl -X POST https://<deployment>/eve/v1/session/wrun_A \
   -d '{"answers":[{"interactionId":"req_A","optionId":"approve"}]}'
 ```
 
-A follow-up message joins the running turn by default; see [Overlapping messages](/docs/channels#overlapping-messages). Set `turnPolicy: "queue"` on `eveChannel(...)` to make follow-ups wait for running turns to finish. `answers` only answer the requests they name.
+A follow-up message joins the running turn by default. Set `turnPolicy: "queue"` on `eveChannel(...)` to make follow-ups wait for running turns to finish. Set `turnPolicy: { mode: "steer", principal }` on `eveChannel(...)` to let a message from someone other than the running turn's caller join it. A request body's `turnPolicy` is `"steer"` or `"queue"`. It cannot set `principal`, and a request that steers keeps the channel's `principal`. See [Overlapping messages](/docs/channels#overlapping-messages). `answers` only answer the requests they name.
 
 | Session state                | Response                                                                                         |
 | ---------------------------- | ------------------------------------------------------------------------------------------------ |
@@ -306,6 +306,28 @@ export default eveChannel({
 
 `onMessage` must return an auth result, so every accepted message starts or continues a session. Return `title` alongside `auth` to set the session title. It applies when the message creates the session, or is the first message to one created without a message.
 
+### Refuse a message
+
+To refuse a message, throw an [`HttpError`](../guides/auth-and-route-protection#the-ordered-auth-walk) from `onMessage`. eve answers with that error's status and creates no session and sends no message. Any other thrown error answers `500`. Use it for checks that need both the caller and the message, such as a per-user rate limit:
+
+```ts title="agent/channels/eve.ts"
+import { eveChannel, defaultEveAuth } from "eve/channels/eve";
+import { TooManyRequestsError, vercelOidc } from "eve/channels/auth";
+
+import { isOverRateLimit } from "../lib/rate-limit";
+
+export default eveChannel({
+  auth: [vercelOidc()],
+  async onMessage(ctx) {
+    const auth = defaultEveAuth(ctx);
+    if (await isOverRateLimit(auth)) throw new TooManyRequestsError({ retryAfter: 60 });
+    return { auth };
+  },
+});
+```
+
+The client receives `429` with `retry-after: 60` and `{ "ok": false, "code": "rate_limited", "error": "Too many requests. Try again later." }`. Answers to approvals and questions skip `onMessage`, so this check doesn't block them. A retry with the same `idempotencyKey` runs `onMessage` again, so it counts against the limit too.
+
 ### Turn context
 
 `context` strings are saved as user messages in session history. For context that applies to one turn only, return `clientContext`. It replaces the request's [`clientContext`](../guides/client/messages) for every model call in the turn and isn't kept in session history.
@@ -332,6 +354,7 @@ export default eveChannel({
 - The returned value has the request's `ClientContextValue` shape, exported from `eve/channels/eve`: a string, an array of strings, or a JSON object.
 - eve labels client-supplied entries `Client context:` for the model. Returned context is sent without the label.
 - `onMessage` runs only for requests with a message. An answer keeps the context its request sent.
+- Return `turnPolicy` from `onMessage` to replace the channel's and request's `turnPolicy` for that message, such as `{ mode: "steer", principal: "retain" }`. Read `ctx.eve.turnPolicy` to inspect the mode (`"steer"` or `"queue"`) the client requested.
 
 ### Start from prior history
 

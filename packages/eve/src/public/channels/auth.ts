@@ -41,3 +41,9 @@ export {
   type VercelOidcOptions,
   type HttpBasicAuthOptions,
 } from "#channel/auth/definitions.js";
+export {
+  HttpError,
+  TooManyRequestsError,
+  type HttpErrorOptions,
+  type TooManyRequestsErrorOptions,
+} from "#channel/http-error.js";

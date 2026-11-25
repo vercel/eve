@@ -22,6 +22,8 @@ import {
   withoutTurnInput,
 } from "#harness/hitl/index.js";
 import { blocked, hasQueuedTurnInput, park } from "#harness/step/park.js";
+import { runProgramStep, stopProgram } from "#harness/program-step.js";
+import { runnableProgram } from "#harness/session-machine/programs.js";
 import {
   clear,
   controlDeliveryFor,
@@ -136,6 +138,13 @@ export function createKernel(config: KernelConfig): StepFn {
     if (hookFailure !== undefined) return hookFailure;
     const stopped = await applyHumanDecisions(step, answered.decided);
     if (stopped !== undefined) return stopped;
+    const steered = turn.messages.length > 0 || step.view().turn.queued?.message !== undefined;
+    for (;;) {
+      const program = runnableProgram(step.view().turn, activeTurnIdOf(step.view().projection));
+      if (program === undefined) break;
+      if (!steered) return runProgramStep(step, program);
+      await stopProgram(step, program);
+    }
     if (blocked(step.view(), step.session.state)) return park(step);
     if (hasQueuedTurnInput(step.view()) && !awaitsProviderToolResult(step.session.history)) {
       const prepared = answered.input && { ...answered.input, message: turn.message };
@@ -192,7 +201,12 @@ async function answers(
     input = withoutTurnInput(input);
     message = undefined;
   }
-  if (decided.approved.length === 0 && blocked(step.view(), step.session.state)) {
+  const program = runnableProgram(step.view().turn, activeTurnIdOf(step.view().projection));
+  if (
+    decided.approved.length === 0 &&
+    program === undefined &&
+    blocked(step.view(), step.session.state)
+  ) {
     await step.apply(queueInput(step.view(), compactInput(input)));
     return { ended: await park(step) } as Ended;
   }

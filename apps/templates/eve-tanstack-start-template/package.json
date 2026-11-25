@@ -43,7 +43,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
-    "eve": "^1.0.0",
+    "eve": "1.2.0",
     "lucide-react": "^1.16.0",
     "motion": "^12.40.0",
     "nanoid": "^5.1.11",

@@ -483,15 +483,18 @@ describe("first turn abort hooks", () => {
             })
           ).data;
           let abortHooks = 0;
+          const seenTurnSteps = new Set<string>();
           const abortHooksBeforeEachTurn: number[] = [];
           for (const event of events) {
             if (event.eventType === "hook_created" && event.eventData.token.startsWith("abrt_")) {
               abortHooks++;
             }
             if (
-              event.eventType === "step_created" &&
-              event.eventData.stepName.endsWith("turnStep")
+              (event.eventType === "step_created" || event.eventType === "step_started") &&
+              event.eventData?.stepName?.endsWith("turnStep") &&
+              !seenTurnSteps.has(event.correlationId)
             ) {
+              seenTurnSteps.add(event.correlationId);
               abortHooksBeforeEachTurn.push(abortHooks);
             }
           }

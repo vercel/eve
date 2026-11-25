@@ -414,6 +414,7 @@ export default linearChannel({
       "nuxt",
       "vue",
       "react",
+      "solid",
     ],
     install: `The eve CLI scaffolds the full Next.js web chat app alongside \`agent/channels/eve.ts\`:
 
@@ -421,7 +422,7 @@ export default linearChannel({
 eve add channel/web
 \`\`\`
 
-To wire it up by hand instead — including into a Svelte, Nuxt, or TanStack Start app you already have — install the framework:
+To wire it up by hand instead — including into a Svelte, Nuxt, Solid, or TanStack Start app you already have — install the framework:
 
 \`\`\`bash
 npm install eve@latest
@@ -444,10 +445,11 @@ Point your frontend at the session routes eve serves (\`/eve/v1/session\`) and s
 - **Nuxt.** Add \`"eve/nuxt"\` to \`modules\` in \`nuxt.config.ts\`; the \`useEveAgent()\` composable from \`eve/vue\` is auto-imported. See the [Nuxt guide](/docs/guides/frontend/nuxt).
 - **Svelte.** Add the \`eveSvelteKit()\` Vite plugin before \`sveltekit()\` in \`vite.config.ts\`, then call \`useEveAgent()\` from \`eve/svelte\`. See the [SvelteKit guide](/docs/guides/frontend/sveltekit).
 - **TanStack Start.** Add the \`eveTanStack()\` Vite plugin to \`vite.config.ts\` next to \`nitro()\`, then call \`useEveAgent()\` from \`eve/react\`. See the [TanStack Start guide](/docs/guides/frontend/tanstack).
+- **Solid.** Add the \`eveVite()\` Vite plugin from \`eve/vite\` to \`vite.config.ts\`, then call \`useEveAgent()\` from \`eve/solid\`. A client-rendered Solid 2 app deploys to Vercel with \`eveVite()\` alone; a server-rendered one also adds \`nitro()\` from \`nitro/vite\`. See the [Solid guide](/docs/guides/frontend/use-eve-agent-solid).
 - **Other Vite apps.** Add the \`eveVite()\` Vite plugin from \`eve/vite\` to \`vite.config.ts\`. See the [Vite guide](/docs/guides/frontend/vite).
 
 On any other stack, wire it up by hand: run the agent as its own service and proxy \`/eve/v1/**\` to it, or pass its origin as \`baseUrl\` to \`useEveAgent()\` and enable \`cors\` on the channel. Server-side code and custom UIs can call the routes through \`Client\` from \`eve/client\`.`,
-    configure: `The eve channel needs no third-party provisioning. Its default auth policy permits local development and verified Vercel OIDC callers, and rejects other production requests. Configure your app's authentication before accepting browser requests in production. Enable \`cors\` only when a browser reaches the channel from another origin. See the [eve channel docs](/docs/channels/eve), the [Frontend guide](/docs/guides/frontend), and the per-framework guides for [Next.js](/docs/guides/frontend/nextjs), [Nuxt](/docs/guides/frontend/nuxt), [SvelteKit](/docs/guides/frontend/sveltekit), and [TanStack Start](/docs/guides/frontend/tanstack).`,
+    configure: `The eve channel needs no third-party provisioning. Its default auth policy permits local development and verified Vercel OIDC callers, and rejects other production requests. Configure your app's authentication before accepting browser requests in production. Enable \`cors\` only when a browser reaches the channel from another origin. See the [eve channel docs](/docs/channels/eve), the [Frontend guide](/docs/guides/frontend), and the per-framework guides for [Next.js](/docs/guides/frontend/nextjs), [Nuxt](/docs/guides/frontend/nuxt), [SvelteKit](/docs/guides/frontend/sveltekit), [Solid](/docs/guides/frontend/use-eve-agent-solid), and [TanStack Start](/docs/guides/frontend/tanstack).`,
   },
   "chat-sdk-gchat": {
     logo: "googlechat",
@@ -2234,6 +2236,58 @@ Keep \`CLAUDE_MEM_API_KEY\` in the environment rather than prompts or source con
 
 const extensionPresentations: Record<string, ExtensionPresentation> = {
   ...baseExtensionPresentations,
+  "agent-desktop": {
+    logo: "eve",
+    docsHref: "/docs/extensions#accessibility-based-desktop-tools",
+    keywords: ["desktop automation", "computer use", "accessibility", "Linux"],
+    install: `Install the experimental agent-desktop extension in your eve project:
+
+\`\`\`bash
+eve add extension/agent-desktop
+\`\`\`
+
+Use an Ubuntu 24.04 or later sandbox with apt and root or passwordless sudo.`,
+    quickStart: `The command creates \`agent/extensions/desktop.ts\`. Before using the tools, call \`installAgentDesktop\` from \`@eve/agent-desktop/sandbox\` in your sandbox environment's \`prepare\` callback. Include \`AGENT_DESKTOP_REVALIDATION_KEY\` in the environment options so eve rebuilds the template when desktop dependencies change.
+
+The extension adds \`desktop__launch\`, \`desktop__snapshot\`, and other tools. The tools start the desktop when needed, but do not install dependencies at tool time.`,
+    configure: `Follow the [desktop sandbox setup](/docs/extensions#accessibility-based-desktop-tools) to install the apps the agent should operate. Accessibility actions are headless by default; enable \`headed\` only if the agent should be allowed to move the pointer or change focus.`,
+  },
+  board: {
+    logo: "vercel",
+    docsHref: "/docs/channels/board",
+    keywords: ["Vercel Board", "watchers", "tasks", "threads"],
+    install: `Add the Vercel Board extension to your eve project:
+
+\`\`\`bash
+eve add extension/board
+\`\`\``,
+    quickStart: `The command creates \`agent/extensions/board.ts\`. Deploy to Vercel so the agent can reach the board using the deployment's OIDC token. The agent watches nothing until you ask it to. Tell it which channel to watch and what to do when a message matches.`,
+    configure: `Limit which channels and actions the agent can use with \`can\`. Set \`authorize\` to control who can manage watches. See the [Board guide](/docs/channels/board) for access, task queues, and local development.`,
+  },
+  code: {
+    logo: "eve",
+    docsHref: "/docs/code-extension",
+    keywords: ["eve-code", "coding agent", "AGENTS.md", "CLAUDE.md", "coding skills"],
+    install: `Mount the Code extension bundled with eve:
+
+\`\`\`bash
+eve add extension/code
+\`\`\``,
+    quickStart: `The command creates \`agent/extensions/code.ts\`. The extension reads \`AGENTS.md\` or \`CLAUDE.md\` from the sandbox workspace root and adds coding skills such as \`code__investigate\`.`,
+    configure: `To install CLI utilities in the sandbox, use \`installCodeTooling\` from \`eve/extensions/code/sandbox\` in your sandbox environment's \`prepare\` callback. For Vercel authentication or the companion Git extension, see the [Code extension guide](/docs/code-extension).`,
+  },
+  "self-improvement": {
+    logo: "eve",
+    docsHref: "/docs/extensions/self-improvement",
+    keywords: ["Agent Runs", "GitHub", "nightly", "telemetry", "evaluations"],
+    install: `Add Self-Improvement to an eve 1.1 or later project deployed on Vercel:
+
+\`\`\`bash
+eve add extension/self-improvement
+\`\`\``,
+    quickStart: `Replace the example project, repository, owner, and models in \`agent/extensions/self-improvement.ts\`. Follow the [setup guide](/docs/extensions/self-improvement) to configure the telemetry policy, private Vercel Blob storage, and credentials before deploying.`,
+    configure: `The schedule uses UTC. Proposal mode is the default: the extension proposes tested GitHub pull requests without shipping changes. After deploying, use \`self-improvement__doctor\` to check setup and \`self-improvement__status\` to inspect the outcome of the first scheduled run.`,
+  },
   "agent-browser": {
     logo: "agent-browser",
     docsHref: "https://github.com/vercel/eve/tree/main/packages/eve-agent-browser",

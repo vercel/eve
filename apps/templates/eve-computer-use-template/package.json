@@ -18,14 +18,14 @@
     "typecheck": "tsc -p apps/web/tsconfig.json"
   },
   "dependencies": {
-    "@agent-browser/eve": "0.40.0",
+    "@agent-browser/eve": "0.44.0",
     "@ui-sdk/core": "0.1.0-beta.10",
     "@ui-sdk/react": "0.1.0-beta.10",
     "@upstash/redis": "1.38.2",
     "@vercel/functions": "3.10.5",
     "@vercel/sandbox": "3.9.0",
     "ai": "7.0.137",
-    "eve": "^1.0.0-rc.10",
+    "eve": "1.2.0",
     "geist": "1.7.2",
     "next": "16.4.6",
     "react": "19.2.8",
@@ -41,5 +41,5 @@
     "just-bash": "^3.6.0",
     "typescript": "7.0.2"
   },
-  "packageManager": "pnpm@11.25.0"
+  "packageManager": "pnpm@12.21.0"
 }

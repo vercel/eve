@@ -1,5 +1,115 @@
 # eve
 
+## 1.5.0
+
+Released 2026-11-25 · [Compare with 1.4.0](https://github.com/vercel/eve/compare/eve%401.4.0...eve%401.5.0)
+
+### Features
+
+- Set `supersede: "append"` on a memory slot to append changed keyed recalls without rewriting the earlier prompt; successful compaction keeps only the latest version of each record.
+  The option and compaction behavior follow [suncyn's proposal in #4506](https://github.com/vercel/eve/issues/4506). ([#6827](https://github.com/vercel/eve/pull/6827))
+- Export `publicRoutePath` from `eve/channels`, reserve eve's own `/eve/v1/` protocol namespaces at compile time, warn on unreachable channel routes in Vercel service builds, and move `@eve/board`'s default wake route to `POST /eve/v1/board/wake` with a `route` option.
+  `@eve/board` continues serving `POST /board/wake` for one release so existing 0.1.0 standalone registrations keep waking until their next watch update rewrites the registration path. ([#6844](https://github.com/vercel/eve/pull/6844))
+- Set `targetAuth` in `evals.config.ts` to send credentials to eval targets, with token functions that `eve eval` calls before every request.
+  For the local dev server, pass client credentials such as `{ bearer: () => getSessionToken() }`. For `--url`, pass a function that checks the target's HTTPS origin before returning credentials. Returning `undefined` keeps the default Vercel credential lookup. Each `targetAuth` resolver or token function has five seconds to return. `EVE_EVAL_AUTH_TOKEN` and `EVE_EVAL_OIDC_TOKEN` still take precedence for `--url` runs, and eve warns when either overrides `targetAuth`. ([#6597](https://github.com/vercel/eve/pull/6597))
+- Throw `HttpError` or `TooManyRequestsError` from `eve/channels/auth` in an auth function or in `eveChannel({ onMessage })` to answer with that status, such as a `429` for a caller over a rate limit; a refused message creates no session and sends no message.
+  `UnauthenticatedError` and `ForbiddenError` now extend `HttpError`. `routeAuth` now honors only `HttpError` instances, from any copy of eve that includes this release, instead of any thrown object with a `response` property, so an unrelated error that carries an upstream `Response` no longer reaches the client. Throw an `HttpError` instead of a custom error with `response`. ([#6814](https://github.com/vercel/eve/pull/6814))
+- `CallObservation` (`eve/events`) and `EveToolPart` (`eve/client` and framework bindings) now expose `parentCallId` for calls run inside another call, and the dev TUI, web chat registry, and framework UIs group nested calls under their parent call. ([#6799](https://github.com/vercel/eve/pull/6799))
+- Update the bundled Workflow runtime and worlds to Workflow 5.8.0, use Workflow's default spec version (spec 10) for new runs, and export `rateLimit` and `RateLimitMaxWaitError` from `eve/experimental/workflow`.
+  Workflow 5.8.0 fixes spec 9 run-ahead log corruption, delivers aborts directly to in-process inline steps, sends wait timers concurrently, and fixes a zero-retention purge deadlock and stream-write completion race on the Postgres world. Set `WORKFLOW_SPEC_VERSION=8` to keep creating spec 8 runs. With `@workflow/world-postgres` 5.5.0, run `bootstrap` before deploying the upgrade so the database has migration 0033; deployments staying on `@workflow/world-postgres` 5.1.0–5.4.0 create spec 8 runs by default unless upgraded to 5.5.0 or configured with `WORKFLOW_SPEC_VERSION=9`. ([#6837](https://github.com/vercel/eve/pull/6837))
+- `eve/workflow` exports `getStepMetadata()`, which returns the current step's `stepId`, `attempt`, and `maxAttempts` inside a `"use step"` function, so a step can log retries, key idempotent side effects, and act on its last attempt.
+  Thanks @SiWarlock for requesting this in #5607. ([#6599](https://github.com/vercel/eve/pull/6599))
+- `workflow({ mode: "execute", tools: true })` from `eve/tools/workflow` runs model-written JavaScript programs on the turn's tool catalog, letting programs call tools, connections, and agents with approvals, sign-ins, output schema validation, and crash-safe replay. ([#6789](https://github.com/vercel/eve/pull/6789))
+
+### Bug Fixes
+
+- Keep the AI Gateway's cost, generation id, and routing on `model.call.settled` instrumentation events and model call spans when the trace policy doesn't record content.
+  The AI SDK now drops `providerMetadata` from telemetry events when inputs or outputs aren't recorded, so eve reads it from its own model call callback instead. The content-free reduction also keeps the gateway's `marketCost` and `routing.finalProvider`.
+  Thanks @zackleman for reporting this in #6537. ([#6598](https://github.com/vercel/eve/pull/6598))
+- Ask the model to reload a static skill when a deploy changes its instructions and the session still holds a confirmed load of that skill.
+  Skill loads recorded before this update do not qualify until the model loads the skill again. ([#6592](https://github.com/vercel/eve/pull/6592))
+- The self-modification subagents, when no model is configured for them, now run on the parent's own provider model.
+  Before, a parent on `chatgpt()`, `mockModel()`, or a direct provider instance sent the subagent's model calls to AI Gateway under the parent's id. A dynamic subagent that names a model string, even one equal to the parent's id, still resolves through AI Gateway. ([#5990](https://github.com/vercel/eve/pull/5990))
+
+## 1.4.0
+
+Released 2026-11-23 · [Compare with 1.3.0](https://github.com/vercel/eve/compare/eve%401.3.0...eve%401.4.0)
+
+### Features
+
+- Import the custom skills tools from `eve/experimental/extensions/custom-skills` to offer them only to some sessions, such as behind a per-user feature flag.
+  Return a tool from `defineDynamic` in a same-named file in the mount directory to hide it, and return no scopes from `scopes` to hide saved skills. The extension's `manage` skill is now offered only when the session has a skill scope, so it disappears along with them. ([#6596](https://github.com/vercel/eve/pull/6596))
+- Add `ctx.end()` to hook handlers so hooks can permanently retire a session from any event.
+  `ctx.end(reason?)` is available on `HookBaseContext` for every hook event. On `turn.settled`, `delivery.settled`, or between turns, the remaining handlers for the event finish, and then eve tears down child sessions and the sandbox (`onSessionEnd` with `reason: "completed"`), records `session.ended` with `outcome: "completed"` and `cause: { hook }`, closes the stream, and releases channel addresses. When called during a running or opening turn, eve stops the turn before its next model call (`turn.settled` with `outcome: "cancelled"`), cancels working tasks, and then ends the session with `outcome: "completed"` and `cause: { hook }`. `ctx.end()` drops any pending `ctx.continue()` continuation on the same turn, acts once with the first hook winning, does nothing on `session.ended`, and throws if called after the handler resolves. ([#6783](https://github.com/vercel/eve/pull/6783))
+- `offloadContent()` from `eve/tools` writes a tool result over `maxBytes` (20,000 by default) to a sandbox file and gives the model a short note with the file's path, so a large MCP or tool result no longer fills the context window.
+  Set it as `toModelOutput` on `defineTool`, including a tool that spreads a built-in definition, or as `toolCall.toModelOutput` on an MCP or OpenAPI connection. `toModelOutput` now receives a second argument, `ctx`, with the `callId`, the `toolName`, `getSandbox()` and `defaultModelOutput()`, and a function that takes only the output keeps working. When the result can't be saved, because there is no sandbox or the sandbox fails to open or write, `fallback` decides what the model gets: `"inline"` (the default) the whole result, or `"summary"` only its size, shape and first lines. eve logs one warning per session.
+  `offloadContent()` never writes a result over 10 MB. A sandbox keeps at most 100 saved results and 100 MB of them, and a new result that takes it over removes the oldest saved results, so the model runs that tool again to get one back. A published MCP tool now returns the model's projection of its output as the result `content` (text, image and file parts), so an offloaded result stays out of it. `structuredContent` is unchanged and carries the tool's full output, so `toModelOutput` does not redact it for MCP callers. ([#6642](https://github.com/vercel/eve/pull/6642))
+- OpenAPI connection tools now derive an `outputSchema` from each operation's JSON success response, so tool signatures type the returned `body`. ([#6787](https://github.com/vercel/eve/pull/6787))
+- Set `principal` on a steering `turnPolicy` to let another person's message join a running turn in a shared session while retaining the turn's caller.
+  `turnPolicy` takes `{ mode: "queue" }` and `{ mode: "steer", principal }` beside `"queue"` and `"steer"`, where `principal` is `"match"` (the default) or `"retain"`. `PrincipalPolicy` and `TurnMode` are exported from `eve/channels`, and `TurnMode` from `eve/client`. Set `turnPolicy` on a channel, on a server-side send, or in a built-in channel's message hook result (including `eveChannel({ onMessage })`, which also receives the client-requested mode on `ctx.eve.turnPolicy`). An HTTP request body and the client SDK take only `"queue"` or `"steer"`.
+  `principal: "retain"` keeps the turn's caller (`ctx.session.auth.current` and the turn ID never change). A channel's `deliver` hook receives the delivery's authenticated sender on `payload.auth` while `channel.session.auth.current` stays the turn's caller. While someone else's message steers the turn, `ctx.session.auth.steeredBy` lists them, and eve holds the caller's identity until the caller sends a message or their approval is accepted. The caller's token for a user-scoped connection or provider fails with `ConnectionAuthorizationFailedError` and `reason: "turn_steered"`. So do MCP tool calls with `forwardPrincipal` and connection event subscriptions. Dynamic schedule tools, remote agent calls with `forwardPrincipal`, and tools of `byPrincipal`-scoped memory slots fail with an error carrying the same message, and `byPrincipal`-scoped memory skips automatic recall and capture while steered.
+  The `steered()` policy from `eve/tools/approval` asks the caller before a call made while steered, enforcing caller-only approval whenever it triggers even if the tool defines a custom `approval.response` policy. Use it for tools or connections that authorize from `ctx.session.auth.current` in their own code. The git extension's `gh` tool (in app-installation mode), the custom skills extension's writes and personal-scope reads, and the deployed self-modification extension's tools ask the same way while steered. The default, `principal: "match"`, keeps current behavior. ([#6312](https://github.com/vercel/eve/pull/6312))
+- Add `sessions.end()` and `sessions.prewarm()` to `eve/server` and retire handed-off sessions cleanly when their anchor Vercel deployment has been deleted.
+  `sessions.end(sessionId, options?)` retires an active or stranded session by ID in process without a request context or channel handle, returning a `Delivery` and throwing `SessionNotActiveError` when inactive. `sessions.prewarm(sessionId)` prepares an idle session to hand off onto the current deployment without starting a model turn. When a handed-off session's initial anchor deployment is deleted on Vercel, both `end()` and `sessionTimeoutMs` preserve sandbox and child-session cleanup on the live deployment, skip the unreadable terminal stream write and channel `session.ended` handlers, and cancel the dead anchor run.
+  Thanks @xcscxr for #6568 and #4603. ([#6784](https://github.com/vercel/eve/pull/6784))
+- `workflow()` from `eve/tools/workflow` now supports foreground `mode: "execute"` (typed as `WorkflowExecuteTool`), `ctx.agents`, `ctx.ask()`, `ctx.sleep()`, `ctx.progress()`, `ctx.agent()` `https://` `files`, captured `console` output with error line numbers, and a 10,000-token model output cap. ([#6788](https://github.com/vercel/eve/pull/6788))
+- Turn steps write their usage attributes once per step, overlapping the stream flush, instead of once per model call in sequence. ([#6720](https://github.com/vercel/eve/pull/6720))
+- MCP tool calls reuse the connection that earlier steps of the same turn opened, instead of repeating the `initialize` handshake and `tools/list` in every step. ([#6746](https://github.com/vercel/eve/pull/6746))
+
+### Bug Fixes
+
+- Between-turn compaction now evaluates an agent's dynamic model with the session conversation before resolving the compaction model, fixing failures when no dynamic model selection was persisted yet or when a live dynamic model rebuilds on a cold invocation.
+  Thanks @xcscxr for reporting this in #6630. ([#6779](https://github.com/vercel/eve/pull/6779))
+- Run one turn, not two, when Linq redelivers a message webhook or when Linq or Photon redelivers a tapback webhook. ([#6593](https://github.com/vercel/eve/pull/6593))
+- Return `not_found` instead of `internal` from MCP invocation tools when the world rejects a malformed `invocationId`.
+  Thanks @pranavmital for reporting this in #6613. ([#6615](https://github.com/vercel/eve/pull/6615))
+- Keep packages host-external in server builds when they only reference a `build.externalDependencies` entry through `optionalDependencies` or an optional `peerDependenciesMeta` peer.
+  Thanks @kachar for reporting this and providing the minimal reproduction in #6554. ([#6611](https://github.com/vercel/eve/pull/6611))
+- Include chunk names, relative module IDs, direct importers, and entry-to-module import chains when a single-chunk Rolldown bundle emits multiple chunks.
+  Thanks @xcscxr for reporting this in #5939. ([#6780](https://github.com/vercel/eve/pull/6780))
+- On self-hosted Workflow Worlds, an eve upgrade no longer replays a legacy session or a connection event subscription that the earlier eve version started.
+  Such runs used to replay against renamed steps and fail with a replay divergence. Legacy sessions are now parked like other sessions, and connection event subscriptions are retired with a cancel reason, so the agent must watch those events again. Session timeouts and connection event deliveries still run after an upgrade, because they start fresh on the new version. ([#6754](https://github.com/vercel/eve/pull/6754))
+- Reading a session started on an earlier eve no longer fails with `session_version_unsupported` when the stream route's check of its first line is slow or fails; the route now answers a retryable `503`, which eve clients retry, instead of serving the session's lines unconverted.
+  Thanks @jimexist for reporting this in #5778. ([#5780](https://github.com/vercel/eve/pull/5780))
+- The dev TUI now marks fast models and Fast mode with `⚡︎` instead of `↯`. ([#6797](https://github.com/vercel/eve/pull/6797))
+
+## 1.3.0
+
+Released 2026-11-20 · [Compare with 1.2.0](https://github.com/vercel/eve/compare/eve%401.2.0...eve%401.3.0)
+
+### Features
+
+- Custom skills scope resolvers now receive the turn being run and, in a delegated session, its parent, so an app can choose a turn's skill scopes from what it records per turn. ([#6727](https://github.com/vercel/eve/pull/6727))
+- Add `eve/solid` with `useEveAgent` for Solid 2 apps.
+  The binding has the same options and methods as the React, Vue, and Svelte bindings, and exposes state as Solid accessors such as `agent.messages()` and `agent.status()`. Register `eveVite()` to mount the agent routes, and add `nitro()` from `nitro/vite` to deploy a server-rendered Solid app to Vercel. `solid-js` 2 is an optional peer dependency. With npm, a Solid 1 project that installs eve adds `"overrides": { "eve": { "solid-js": "$solid-js" } }` to `package.json`, because npm otherwise rejects that peer. ([#6621](https://github.com/vercel/eve/pull/6621))
+- Cold starts load the MCP client only when an agent first connects to an MCP server, so apps pay for its protocol schemas only when they use MCP. ([#6709](https://github.com/vercel/eve/pull/6709))
+
+### Bug Fixes
+
+- A message sent to a pre-1.0 session's original address on a local or self-hosted World now ends that stranded session and starts a fresh one, instead of leaving the session stuck after an upgrade.
+  Thanks @muratsu for reporting this in #6646. ([#6653](https://github.com/vercel/eve/pull/6653))
+- Fix `eve build` for an app that imports `eve/extensions/code/sandbox` and also mounts `@eve/self-improvement`.
+  The self-improvement maintainer mounts its own `code` extension, so the build rejected the app's `installCodeTooling` import as belonging to two mounts. An app import now binds to the app's mount and skips mounts nested inside another extension. The coordinator's `step` tool input is now an object with an `action` enum instead of a root-level union, which Claude rejects. ([#6725](https://github.com/vercel/eve/pull/6725))
+
+## 1.2.0
+
+Released 2026-11-20 · [Compare with 1.1.0](https://github.com/vercel/eve/compare/eve%401.1.0...eve%401.2.0)
+
+### Features
+
+- Traces now include an `agent.channel.deliver` span when a channel posts a final reply or a request for input, or fails to deliver a channel event, so a reply the user never saw shows up as a failed delivery with its error ID. ([#6644](https://github.com/vercel/eve/pull/6644))
+- Agent and task call spans now record the task they started or continued as `agent.task.id`, so the calls that serve one task, including continuations of a remote agent's task, can be grouped in a trace.
+  Instrumentation providers receive the same value as `taskId` on `call.settled`. ([#6654](https://github.com/vercel/eve/pull/6654))
+- `eveVite()` now deploys Vite single-page apps to Vercel without a `vercel.ts`: when no framework or adapter writes `.vercel/output`, it writes a static Build Output from the client build and adds the agents to it.
+  The client build needs a root `index.html`; without one, the build fails and asks for `nitro()` from `nitro/vite` or an adapter that writes `.vercel/output`. ([#6620](https://github.com/vercel/eve/pull/6620))
+
+### Bug Fixes
+
+- Custom skills now let the person who asked approve their own shared skill changes, so a channel skill no longer needs a second person to go live. ([#6532](https://github.com/vercel/eve/pull/6532))
+- `eveVite()`, `eveSvelteKit()`, and `eveTanStack()` no longer stop other Vite plugins, such as Solid start mode, from building their server output outside Vercel builds. ([#6619](https://github.com/vercel/eve/pull/6619))
+- Update the bundled Workflow runtime and worlds to the Workflow 5.7.0 release, which fixes stranded runs after a crashed first delivery and reduces World reads on hook-started runs and hook resumes.
+  The release also lowers the default `WORKFLOW_ORCHESTRATOR_LINGER_MS` to 5 seconds and keeps orchestrator deliveries alive through short sleeps. With the Postgres world, run `bootstrap` before deploying the upgrade so the database has migration 0032. ([#6657](https://github.com/vercel/eve/pull/6657))
+
 ## 1.1.0
 
 Released 2026-11-18 · [Compare with 1.0.2](https://github.com/vercel/eve/compare/eve%401.0.2...eve%401.1.0)

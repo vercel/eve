@@ -19,7 +19,6 @@ import {
 } from "#runtime/development-generation.js";
 import { cancelExpiredDevelopmentRun } from "#internal/workflow/cancel-expired-development-run.js";
 import { isRunMissing } from "#shared/run-errors.js";
-import { EVE_WORKFLOW_SPEC_VERSION } from "#internal/workflow/spec-version-default.js";
 import {
   DEVELOPMENT_WORKFLOW_STREAM_ROUTE,
   DEVELOPMENT_WORKFLOW_WORLD_ROUTE,
@@ -41,6 +40,7 @@ import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-arti
 import { timingSafeEqualStrings } from "#internal/nitro/dev-client-address.js";
 
 const WORKFLOW_LOCAL_BASE_URL_ENV = "WORKFLOW_LOCAL_BASE_URL";
+const DEVELOPMENT_WORKFLOW_SPEC_VERSION = 10 as SpecVersion;
 
 export class MissingDevelopmentGenerationError extends Error {
   constructor(generationId: string, cause?: unknown) {
@@ -82,12 +82,13 @@ async function getGenerationAvailability(
 export function createDevelopmentWorkflowWorld(): World {
   const forwarded = buildForwardedOperations();
   const world = {
-    specVersion: EVE_WORKFLOW_SPEC_VERSION as SpecVersion,
+    specVersion: DEVELOPMENT_WORKFLOW_SPEC_VERSION,
     capabilities: {
       atomicStartHook: { active: true },
       hookForceClaim: true,
       hookRetention: { active: true },
       inBandFence: true,
+      rateLimits: true,
     },
     async getDeploymentId() {
       return (

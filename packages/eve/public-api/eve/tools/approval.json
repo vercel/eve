@@ -18,5 +18,6 @@
   "always",
   "auto",
   "never",
-  "once"
+  "once",
+  "steered"
 ]

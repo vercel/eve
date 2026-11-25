@@ -24,6 +24,7 @@ const integrations: Record<string, readonly string[]> = {
   "eve/react": ["react", "@types/react"],
   "eve/vue": ["vue"],
   "eve/svelte": ["svelte"],
+  "eve/solid": ["solid-js"],
   "eve/sveltekit": ["vite"],
   "eve/tanstack": ["vite"],
   "eve/vite": ["vite"],
@@ -68,9 +69,11 @@ import type { SessionStoreSnapshot } from "eve/client";
 import { emptySessionView, foldEvents, calls } from "eve/events";
 import type { RequestStatus } from "eve/events";
 import type { Delivery, SessionReader } from "eve/sessions";
+import { sessions as serverSessions, type PrewarmSessionResult, type SessionEndOptions } from "eve/server";
 import type { ChannelContext } from "eve/channels";
 import { z } from "zod";
-import { createHook, sleep, createWebhook, FatalError, RetryableError, getWorkflowMetadata } from "eve/workflow";
+import { createHook, sleep, createWebhook, FatalError, RetryableError, getWorkflowMetadata, getStepMetadata } from "eve/workflow";
+import { rateLimit, RateLimitMaxWaitError, type RateLimitOptions } from "eve/experimental/workflow";
 import { start, getRun, resumeHook, type WorkflowRun } from "eve/workflow/api";
 import { eveChannel, eveVercelOidc, type EveAuthFn } from "eve/channels/eve";
 import { vercelOidc } from "eve/channels/auth";
@@ -88,11 +91,24 @@ async function durable() {
   "use workflow";
   using hook = createHook<{ approved: boolean }>({ token: "approval" });
   const answer: { approved: boolean } = await hook;
+  const limitOptions: RateLimitOptions = { key: "approval", limit: 10, period: "1m", maxWait: "5s", burst: 2 };
+  try {
+    await rateLimit(limitOptions);
+  } catch (error) {
+    if (RateLimitMaxWaitError.is(error)) {
+      const _key: string = error.key;
+      const _at: Date | undefined = error.wouldAcquireAt;
+      void _key;
+      void _at;
+    }
+  }
   await sleep("1s");
   return answer.approved;
 }
 async function retryableStep() {
   "use step";
+  const { stepId, attempt, maxAttempts }: { stepId: string; attempt: number; maxAttempts: number } = getStepMetadata();
+  if (attempt >= maxAttempts) throw new FatalError("Step " + stepId + " gave up.");
   throw new RetryableError("Please try again.", { retryAfter: "5s" });
 }
 async function launch() {
@@ -149,6 +165,13 @@ async function inferred(client: Client, store: SessionStore) {
   const fromStore = await store.send({ message: "hello", outputSchema: schema });
   const a: boolean | undefined = (await receipt.result()).data?.ok;
   const b: boolean | undefined = (await fromStore.result()).data?.ok;
+  const serverReader: SessionReader = serverSessions.attach("session");
+  const endOptions: SessionEndOptions = { reason: "cleanup" };
+  const ended: Delivery = await serverSessions.end("session", endOptions);
+  const prewarmed: PrewarmSessionResult = await serverSessions.prewarm("session");
+  void serverReader;
+  void ended;
+  void prewarmed;
 }
 `;
 

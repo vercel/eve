@@ -89,7 +89,10 @@ export async function compactHistory(step: Step): Promise<StepResult> {
   });
   let outcome: "applied" | "failed" = "applied";
   try {
-    const resolvedModel = await resolveEffectiveRuntimeModel(step);
+    const resolvedModel = await resolveEffectiveRuntimeModel(step, {
+      abortSignal: config.abortSignal,
+      conversation: messages,
+    });
     step.model = resolvedModel.choice;
     const compaction = compactionConfig(step);
     await summarizeHistory(step, {
@@ -377,6 +380,12 @@ async function summaryExecutor(
   const { model, renew } =
     reference === turnReference ? await input.turnModel() : await compactionModel(step, reference);
   const profile = resolveModelProfile(model);
+  const attempt = step.instrumentation?.prepareAttempt({
+    attempt: 0,
+    runId: input.change.runId,
+    runtimeContext: { "eve.compaction.request": "summary" },
+    ...(input.telemetryTurnId !== undefined && { turnId: input.telemetryTurnId }),
+  });
   const call = {
     abortSignal: config.abortSignal,
     headers: buildGatewayAttributionHeaders(profile, config.runtimeIdentity),
@@ -391,12 +400,8 @@ async function summaryExecutor(
       providerOptions: reference.providerOptions,
       session,
     }) as Parameters<typeof streamText>[0]["providerOptions"],
-    telemetry: step.instrumentation?.prepareAttempt({
-      attempt: 0,
-      runId: input.change.runId,
-      runtimeContext: { "eve.compaction.request": "summary" },
-      ...(input.telemetryTurnId !== undefined && { turnId: input.telemetryTurnId }),
-    }).telemetry,
+    onLanguageModelCallEnd: attempt?.onLanguageModelCallEnd,
+    telemetry: attempt?.telemetry,
   };
   const retryScope = { sessionId: session.sessionId, turnId: step.position().turnId };
   const summarize = (prompt: CompactionSummaryPrompt) =>
@@ -444,7 +449,12 @@ async function streamCompactionSummary(
   input: CompactionSummaryPrompt &
     Pick<
       Parameters<typeof streamText>[0],
-      "abortSignal" | "headers" | "model" | "providerOptions" | "telemetry"
+      | "abortSignal"
+      | "headers"
+      | "model"
+      | "onLanguageModelCallEnd"
+      | "providerOptions"
+      | "telemetry"
     >,
 ): Promise<{
   readonly finishReason: string;

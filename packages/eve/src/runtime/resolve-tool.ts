@@ -92,6 +92,7 @@ export async function resolveToolDefinition(
       outputSchema,
       sourceId: definition.sourceId,
       sourceKind: "module",
+      ...(workflowProgram !== undefined && { workflowProgram }),
       ...extractOptionalHooks(resolvedRecord, definition),
     };
     const marked = isFrameworkTool(resolvedRecord) ? frameworkTool(resolved) : resolved;

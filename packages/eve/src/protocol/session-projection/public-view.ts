@@ -120,6 +120,7 @@ export function call(view: SessionView, callId: string): CallObservation | undef
     kind: row.capability.kind,
     label: selectors.callLabel(row, snapshotState(view).previews.calls[callId]),
     ...(row.capability.hidden === true && { hidden: true as const }),
+    ...("callId" in row.owner && { parentCallId: row.owner.callId }),
     runId: selectors.callRun(tables, row),
     turnId: selectors.callTurn(tables, row),
     taskId: selectors.callTask(tables, row),

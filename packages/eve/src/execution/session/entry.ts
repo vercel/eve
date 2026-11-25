@@ -238,7 +238,7 @@ async function startSuccessor(
       anchor: {
         kind: "successor",
         notify: (result) =>
-          signalSessionAnchorStep({ result, token: sessionAnchorToken(sessionId) }),
+          signalSessionAnchorStep({ result, sessionId, token: sessionAnchorToken(sessionId) }),
       },
       admittedDeliveryKeys: checkpoint.admittedDeliveryKeys,
       caller: input.delivery?.caller,

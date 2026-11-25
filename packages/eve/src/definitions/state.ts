@@ -2,11 +2,11 @@ import { createHash } from "node:crypto";
 
 import type { ContextReader } from "#context/key.js";
 import { ContextKey } from "#context/key.js";
-import type { AlsContext } from "#context/container.js";
+import type { AlsContext, ContextContainer } from "#context/container.js";
 import { SessionIdKey } from "#context/keys.js";
 import type { JsonValue } from "#shared/json.js";
 import { isNonEmptyString } from "#shared/guards.js";
-import { REACTIONS_STATE_KEY, type Continuation } from "./continuation.js";
+import { REACTIONS_STATE_KEY, type Continuation, type SessionEndRequest } from "./continuation.js";
 
 export interface Slot {
   readonly value: JsonValue;
@@ -24,6 +24,7 @@ export interface DefinitionsState {
   readonly revision?: string;
   readonly intents?: readonly PendingIntent[];
   readonly continuation?: Continuation;
+  readonly sessionEnd?: SessionEndRequest;
   readonly cancelledTurnId?: string;
   readonly cancelledBy?: string;
   readonly cancelledOpening?: { readonly by: string; readonly deliveryIds: readonly string[] };
@@ -200,4 +201,9 @@ export function entryVersions(
 
 export function readSlot(ctx: Pick<ContextReader, "get">, id: string): Slot | undefined {
   return readDefinitionsState(ctx).slots[id];
+}
+
+export function writeSlot(ctx: ContextContainer, id: string, slot: Slot): void {
+  const state = readDefinitionsState(ctx);
+  writeDefinitionsState(ctx, { ...state, slots: { ...state.slots, [id]: slot } });
 }

@@ -1,5 +1,10 @@
-import type { ConversationContext, SessionAuth, SessionAuthContext } from "eve/context";
-import type { ApprovalConfiguration, ApprovalContext } from "eve/tools/approval";
+import type { ConversationContext, SessionAuthContext, SessionInfo } from "eve/context";
+import {
+  steered,
+  type ApprovalConfiguration,
+  type ApprovalContext,
+  type ApprovalStatus,
+} from "eve/tools/approval";
 import { z } from "zod";
 
 import {
@@ -64,7 +69,7 @@ export const modeField = z
   );
 
 export interface SkillCallContext {
-  readonly session: { readonly id: string; readonly auth: SessionAuth };
+  readonly session: Pick<SessionInfo, "id" | "auth" | "turn" | "parent">;
   readonly conversation?: ConversationContext;
 }
 
@@ -76,9 +81,10 @@ export function loadName(scope: SkillScope, name: string): string {
   return scope.loadPrefix ? `${scope.loadPrefix}_${name}` : name;
 }
 
-async function scopesFor(ctx: SkillCallContext) {
+export async function scopesFor(ctx: SkillCallContext): Promise<readonly SkillScope[]> {
   return skillScopes({
     session: ctx.session,
+    turn: ctx.session.turn,
     ...(ctx.conversation !== undefined && { conversation: ctx.conversation }),
   });
 }
@@ -87,6 +93,22 @@ function toFailure(error: unknown, failure: string): Failure {
   if (error instanceof SkillLifecycleError) return { success: false, error: error.message };
   console.error("[custom-skills] tool failed", error);
   return { success: false, error: failure };
+}
+
+const whenSteered = steered();
+
+export async function steeredPersonalScopeApproval(
+  ctx: ApprovalContext<{ readonly scope?: string }>,
+): Promise<ApprovalStatus> {
+  if ((ctx.session.auth.steeredBy ?? []).length === 0) return "not-applicable";
+  const scopes = await scopesFor(ctx);
+  const requested = ctx.toolInput?.scope;
+  const scope =
+    requested === undefined
+      ? scopes.find((candidate) => !candidate.shared)
+      : scopes.find((candidate) => candidate.name === requested);
+  if (scope === undefined || scope.shared) return "not-applicable";
+  return whenSteered(ctx) ?? "not-applicable";
 }
 
 export async function withSkillScope<T extends object>(

@@ -1,6 +1,8 @@
 import { runtimeWait, type SessionView, ownOpenRequestIds } from "#harness/session-machine/view.js";
 import type { HarnessStepInput, StepResult } from "#harness/types.js";
 import { readClientContext } from "#internal/client-context.js";
+import { activeTurnIdOf } from "#protocol/session-projection.js";
+import { runnableProgram } from "#harness/session-machine/programs.js";
 import type { Step } from "./context.js";
 
 const ANSWER_FIRST_KINDS: ReadonlySet<string> = new Set(["budget"]);
@@ -35,6 +37,9 @@ export function blocked(view: SessionView, state: Step["session"]["state"]): boo
 export function park(step: Step): StepResult {
   const view = step.view();
   if (hasQueuedTurnInput(view) && !holdsMessages(view)) {
+    return { next: step.runStep, session: step.session };
+  }
+  if (runnableProgram(view.turn, activeTurnIdOf(view.projection)) !== undefined) {
     return { next: step.runStep, session: step.session };
   }
   if (resumesOnPerson(view))

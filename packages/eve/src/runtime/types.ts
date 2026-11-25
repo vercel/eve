@@ -11,7 +11,8 @@ import type { RouteHandler, WebSocketRouteHandler } from "#channel/routes.js";
 import type { OutboundAuthFn } from "#public/agents/auth.js";
 import type { StreamEventHook } from "#public/definitions/hook.js";
 import type { ApprovalPolicy, Approval } from "#approval/definition.js";
-import type { ToolModelOutput } from "#tools/definition.js";
+import type { ToolModelOutput, ToolModelOutputContext } from "#tools/definition.js";
+import type { WorkflowProgramOptions } from "#tools/workflow-program-input.js";
 import type { ConnectionToolCallDefinition } from "#public/definitions/connections/tool-call.js";
 import type {
   AuthorizationDefinition,
@@ -62,6 +63,7 @@ export type ResolvedSkillDefinition = Readonly<
   NamedSkillDefinition &
     (Omit<MarkdownSourceRef<undefined>, "definition"> | ModuleSourceRef | SkillPackageSourceRef) & {
       metadata?: Readonly<Record<string, string>>;
+      owner?: AgentSourceOwner;
     }
 >;
 
@@ -125,7 +127,11 @@ export type ResolvedToolDefinition = Readonly<
     readonly label?: import("#tools/definition.js").InternalToolLabelDefinition | false;
     readonly outputSchema?: ToolSchema;
     readonly approval?: Approval;
-    readonly toModelOutput?: (output: unknown) => ToolModelOutput | Promise<ToolModelOutput>;
+    readonly toModelOutput?: (
+      output: unknown,
+      ctx: ToolModelOutputContext,
+    ) => ToolModelOutput | Promise<ToolModelOutput>;
+    readonly workflowProgram?: WorkflowProgramOptions;
   };
 
 export interface ResolvedHookDefinition extends ResolvedModuleSourceRef {

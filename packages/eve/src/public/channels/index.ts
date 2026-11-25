@@ -39,6 +39,8 @@ export {
   type ChannelContinuationOps,
   type ChannelEvents,
   type InferChannelMetadata,
+  type PrincipalPolicy,
+  type TurnMode,
   type TurnPolicy,
   type RouteDefinition,
   type RouteHandlerArgs,
@@ -62,6 +64,7 @@ export {
   type CommittedLine,
 } from "#public/definitions/channel.js";
 export { attachmentError } from "#public/channels/attachment-error.js";
+export { publicRoutePath } from "#public/channels/public-route-path.js";
 export type {
   FetchFileContext,
   FetchFileFunction,

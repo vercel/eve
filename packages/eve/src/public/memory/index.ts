@@ -82,8 +82,8 @@ export interface MemoryScope {
 }
 
 /**
- * A message a provider recalls into model context. Give it a stable `id` so a later recall replaces
- * it instead of adding another copy.
+ * A message a provider recalls into model context. A stable `id` lets later recalls update the
+ * same record according to {@link MemoryDefinition.supersede}.
  */
 export interface MemoryRecallMessage {
   readonly content: string;
@@ -201,6 +201,12 @@ export interface MemoryDefinition {
   readonly namespace?: MemoryNamespaceDefinition;
   readonly provider: MemoryProvider;
   readonly scope: MemoryScopeDefinition;
+  /**
+   * How to show changed recalls with the same `id`. `"hide"` (the default) removes older versions.
+   * `"append"` keeps them in the prompt for cache reuse until compaction succeeds. The model is
+   * told to use the latest version. Identical content adds nothing in either mode.
+   */
+  readonly supersede?: "hide" | "append";
 }
 
 /**

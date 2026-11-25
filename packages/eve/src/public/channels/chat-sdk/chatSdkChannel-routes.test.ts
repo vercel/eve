@@ -32,6 +32,13 @@ import { chatSdkChannel, type ChatSdkChannelState } from "#public/channels/chat-
 const THREAD_ID = "test:C01:1700000000.000001";
 const CHANNEL_ID = "test:C01";
 const PRESS = { actionId: "eve_input:request-1:approve", kind: "action", value: "approve" };
+const THREAD: NonNullable<ChatSdkChannelState["thread"]> = {
+  _type: "chat:Thread",
+  adapterName: "test",
+  channelId: CHANNEL_ID,
+  id: THREAD_ID,
+  isDM: false,
+};
 
 async function firePress(channel: unknown, sendError?: Error): Promise<Response> {
   if (!isCompiledChannel(channel)) throw new Error("Expected a compiled channel.");
@@ -329,6 +336,39 @@ describe("chatSdkChannel completing a streamed reply", () => {
   });
 });
 
+describe("chatSdkChannel call status", () => {
+  it("shows top-level tool calls and ignores nested calls made inside a program", async () => {
+    const adapter = testAdapter();
+    const bridge = chatSdkChannel({
+      adapters: { test: adapter },
+      logger: "warn",
+      state: memoryState(),
+      userName: "bot",
+    });
+    const compiled = compiledChannel<ChatSdkChannelState>(bridge.channel);
+    const channel = { ...compiled.adapter, state: { thread: THREAD } };
+    const ctx = buildAdapterContext(channel, stubSessionAccessor());
+    const fire = (type: "call.requested" | "call.progress" | "call.settled", data: unknown) =>
+      callChannelEvent(channel, channelEvent(type, data), ctx);
+
+    await fire("call.requested", {
+      callId: "call_run",
+      capability: { kind: "tool", label: "Run workflow", name: "workflow" },
+      input: {},
+      owner: { runId: "run-1" },
+    });
+    expect(adapter.typing).toEqual(["Run workflow..."]);
+
+    await fire("call.requested", {
+      callId: "call_run/1",
+      capability: { kind: "tool", name: "read_file" },
+      input: {},
+      owner: { callId: "call_run" },
+    });
+    expect(adapter.typing).toEqual(["Run workflow..."]);
+  });
+});
+
 function testAdapter(): TestAdapter & Adapter {
   return new TestAdapter() as TestAdapter & Adapter;
 }
@@ -348,6 +388,7 @@ class TestAdapter {
   chat: ChatInstance | null = null;
   posted: Array<{ message: AdapterPostableMessage; threadId: string }> = [];
   edited: Array<{ message: AdapterPostableMessage; messageId: string; threadId: string }> = [];
+  typing: string[] = [];
   editError: Error | null = null;
   postEphemeral?: (
     threadId: string,
@@ -447,7 +488,9 @@ class TestAdapter {
   async addReaction(): Promise<void> {}
   async deleteMessage(): Promise<void> {}
   async removeReaction(): Promise<void> {}
-  async startTyping(): Promise<void> {}
+  async startTyping(_threadId: string, status = ""): Promise<void> {
+    this.typing.push(status);
+  }
 }
 
 function author() {

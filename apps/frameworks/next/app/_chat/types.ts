@@ -54,6 +54,8 @@ export interface TraceAction {
   readonly kind: TraceActionKind;
   readonly name: string;
   readonly output?: unknown;
+  /** The call this call ran inside, such as a `workflow()` program call. */
+  readonly parentCallId?: string;
   readonly startTime?: string;
   readonly status: TraceActionStatus;
 }

@@ -28,7 +28,10 @@ type Respond = (
 ) => ReturnType<typeof textStreamResult>;
 
 function recordingModel(respond: Respond) {
-  const calls: { readonly prompt: unknown; readonly tools: readonly string[] }[] = [];
+  const calls: {
+    readonly prompt: LanguageModelV4CallOptions["prompt"];
+    readonly tools: readonly string[];
+  }[] = [];
   const model = markMockModel(
     new MockLanguageModelV4({
       doStream: async (options) => {
@@ -254,6 +257,87 @@ describe("what eve sends the model", () => {
         await (await alice.send("Is it out?", { auth: null })).result();
         await golden("memory.requests", calls);
         await golden("memory.state", await storedState(first.sessionId));
+      }),
+    );
+  });
+
+  it("keeps the prompt prefix when memory changes and prunes only after successful compaction", async () => {
+    const { calls, model } = recordingModel((options) =>
+      textStreamResult(
+        JSON.stringify(options.prompt).includes("CHECKPOINT") ? "Project summary." : "Noted.",
+      ),
+    );
+    let failCompaction = true;
+    const test = await createTestRuntime({
+      agent: { definition: dynamicModel(model), name: "layout-memory-append" },
+      modules: [
+        mod(
+          "memory/project.ts",
+          defineMemory({
+            scope: "team",
+            supersede: "append",
+            provider: defineMemoryProvider({
+              capture: {
+                "compaction.requested": async () => {
+                  if (failCompaction) throw new Error("Could not capture project history.");
+                },
+              },
+              recall: {
+                "turn.started": async ({ turn }) => {
+                  if (turn.sequence > 2) return null;
+                  return {
+                    messages:
+                      turn.sequence === 0
+                        ? [
+                            { id: "owner", content: "Project owner: Alice." },
+                            { content: "Project archived on Friday." },
+                          ]
+                        : [{ id: "owner", content: "Project owner: Bob." }],
+                  };
+                },
+              },
+            }),
+          }),
+        ),
+      ],
+    });
+    await test.run(() =>
+      onWorkflow(async (runtime) => {
+        const agent = address(runtime, "layout-memory-append");
+        const send = async (text: string) => (await agent.send(text, { auth: null })).result();
+        const first = await send("Who owns the project?");
+        const original = calls.at(-1)!.prompt;
+        await send("Who is responsible now?");
+        const updated = calls.at(-1)!.prompt;
+        expect(updated.slice(0, original.length)).toEqual(original);
+        const memory = (prompt: typeof updated) =>
+          JSON.stringify(prompt.filter(({ role }) => role === "user"));
+        const updates = Array.from(
+          memory(updated).matchAll(
+            /Memory record (\S+)\. Use only the latest version of this record\..*?Project owner: (Alice|Bob)\./g,
+          ),
+        );
+        expect(updates.map((match) => match[2])).toEqual(["Alice", "Bob"]);
+        expect(updates[1]?.[1]).toBe(updates[0]?.[1]);
+
+        const compact = (deliveryId: string) =>
+          runtime.dispatchSession({
+            command: { deliveryId, kind: "compact" },
+            sessionId: first.sessionId,
+          });
+        await compact("layout-memory-append-failed");
+        await send("Can you confirm the owner?");
+        const afterFailure = memory(calls.at(-1)!.prompt);
+        expect(afterFailure).toContain("Project owner: Alice.");
+        expect(afterFailure.match(/Project owner: Bob\./g)).toHaveLength(1);
+
+        failCompaction = false;
+        await compact("layout-memory-append-completed");
+        await send("Review the project details.");
+        const afterCompaction = memory(calls.at(-1)!.prompt);
+        expect(afterCompaction).not.toContain("Project owner: Alice.");
+        expect(afterCompaction.match(/Project owner: Bob\./g)).toHaveLength(1);
+        expect(afterCompaction).toContain("Project archived on Friday.");
       }),
     );
   });
