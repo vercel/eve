@@ -365,6 +365,13 @@ type Note = 'request from "./not-an-import"';`,
     expect(joinedClasses).toEqual([]);
   });
 
+  it("emits no node_modules path under dist", async () => {
+    // Vercel's build cache restores only paths under node_modules, which leaves a half-restored
+    // dist and .package behind on the next build.
+    const entries = await readdir(join(EVE_PACKAGE_ROOT, "dist"), { recursive: true });
+    expect(entries.filter((entry) => entry.split(/[\\/]/u).includes("node_modules"))).toEqual([]);
+  });
+
   it("copies the complete @vercel/blob declaration tree", async () => {
     const upstreamDeclarations = (await readdir(VERCEL_BLOB_DIST_ROOT, { recursive: true }))
       .filter((entry) => entry.endsWith(".d.ts"))
