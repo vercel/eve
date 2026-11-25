@@ -1,4 +1,5 @@
 import { type GlobInput, executeGlobOnSandbox } from "#execution/sandbox/glob-tool.js";
+import { toolOutput, type ToolModelOutput } from "#tools/model-output.js";
 import { toolLabel } from "#tools/tool-label.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
 import { defineJsonSchema } from "#tools/schema.js";
@@ -82,8 +83,26 @@ export const glob: ToolDefinition<GlobToolInput, GlobToolOutput> = frameworkTool
     },
     inputSchema: GLOB_INPUT_SCHEMA,
     outputSchema: GLOB_OUTPUT_SCHEMA,
+    toModelOutput: globModelOutput,
   }),
 );
+
+function globModelOutput(output: unknown): ToolModelOutput {
+  if (typeof output === "string") return toolOutput.text(output);
+  if (
+    typeof output === "object" &&
+    output !== null &&
+    typeof (output as Record<string, unknown>).content === "string" &&
+    typeof (output as Record<string, unknown>).count === "number" &&
+    typeof (output as Record<string, unknown>).truncated === "boolean"
+  ) {
+    const value = output as GlobToolOutput;
+    if (value.count === 0 && value.content.length === 0)
+      return toolOutput.text("No files matched.");
+    return toolOutput.text(value.content);
+  }
+  return toolOutput.json(output);
+}
 
 export default glob;
 import { frameworkTool } from "./framework-tool.js";

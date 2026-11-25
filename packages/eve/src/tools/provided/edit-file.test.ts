@@ -241,34 +241,34 @@ describe("edit_file", () => {
     await executable.edit("bin/run", [{ oldText: "old", newText: "new" }]);
     await regular.edit("notes.md", [{ oldText: "old", newText: "new" }]);
 
-    expect(executable.commands).toContain("stat -L -c %a -- '/workspace/bin/run'");
+    expect(
+      executable.commands.some((command) =>
+        command.includes("stat -L -c %a -- '/workspace/bin/run'"),
+      ),
+    ).toBe(true);
     expect(executable.commands.at(-1)).toBe("chmod 755 -- '/workspace/bin/run'");
     expect(regular.commands.some((command) => command.startsWith("chmod"))).toBe(false);
   });
 
-  it("still rejects write_file after a change made since read_file", async () => {
-    const sandbox = mockSandbox({ initialFiles: { "notes.md": "draft\n" } });
-    const path = sandbox.session.resolvePath("notes.md");
-    const ctx = {
-      abortSignal: new AbortController().signal,
-      getSandbox: async () => sandbox.session as SandboxSession,
-      session: { id: "session-1" } as ToolContext["session"],
-    } as ToolContext;
+  it("allows an exact match even when fuzzy normalization would also match another line", async () => {
+    const sandbox = createSandbox({ "/workspace/app.txt": "foo  \nfoo\n" });
 
-    const write = contextStorage.run(new ContextContainer(), async () => {
-      await executeReadFileOnSandbox(sandbox.session, { filePath: "notes.md" });
-      await sandbox.session.writeTextFile({ path, content: "draft\nformatted\n" });
-      await editFile.execute(
-        { path: "notes.md", edits: [{ oldText: "draft", newText: "plan" }] },
-        ctx,
-      );
-      await executeWriteFileOnSandbox(sandbox.session, {
-        content: "final\n",
-        filePath: "notes.md",
-      });
+    await sandbox.edit("app.txt", [{ oldText: "foo  ", newText: "bar" }]);
+
+    expect(sandbox.read("/workspace/app.txt")).toBe("bar\nfoo\n");
+  });
+
+  it("accepts filePath as an alias for path", async () => {
+    const validated = await (editFile.inputSchema as ToolSchema)["~standard"].validate({
+      filePath: "notes.md",
+      edits: [{ oldText: "a", newText: "b" }],
     });
 
-    await expect(write).rejects.toThrow("modified since it was last read");
-    expect(sandbox.files.get(path)).toBe("plan\nformatted\n");
+    expect(validated).toEqual({
+      value: {
+        path: "notes.md",
+        edits: [{ oldText: "a", newText: "b" }],
+      },
+    });
   });
 });

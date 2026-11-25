@@ -3,7 +3,6 @@ import {
   buildReadFileTargetKey,
   createReadFileStamp,
   normalizeModelPath,
-  type ReadFileState,
   ReadFileStateKey,
   setReadFileStamp,
 } from "#execution/tools/file-state.js";
@@ -52,45 +51,7 @@ export async function executeWriteFileOnSandbox(
   const normalizedPath = normalizeModelPath(resolvedPath);
   const targetKey = buildReadFileTargetKey(normalizedPath);
 
-  const currentContent = await sandbox.readTextFile({ path: resolvedPath });
-
-  if (currentContent === null) {
-    await sandbox.writeTextFile({ content, path: resolvedPath });
-
-    const freshStamp = createReadFileStamp({
-      content,
-      filePath: normalizedPath,
-    });
-
-    setReadFileStamp(ctx, targetKey, freshStamp);
-
-    return { existed: false, path: normalizedPath };
-  }
-
-  const state = ctx.ensure(ReadFileStateKey, (): ReadFileState => ({ byTarget: {} }));
-  const storedStamp = state.byTarget[targetKey];
-
-  if (storedStamp === undefined) {
-    throw new Error(
-      `You must read file ${filePath} before overwriting it. Use the read_file tool first.`,
-    );
-  }
-
-  const currentStamp = createReadFileStamp({
-    content: currentContent,
-    filePath: normalizedPath,
-  });
-
-  if (
-    currentStamp.contentHash !== storedStamp.contentHash ||
-    currentStamp.byteLength !== storedStamp.byteLength
-  ) {
-    throw new Error(
-      `File ${filePath} has been modified since it was last read. ` +
-        "Please read the file again before modifying it.",
-    );
-  }
-
+  const existed = (await sandbox.readBinaryFile({ path: resolvedPath })) !== null;
   await sandbox.writeTextFile({ content, path: resolvedPath });
 
   const freshStamp = createReadFileStamp({
@@ -100,5 +61,5 @@ export async function executeWriteFileOnSandbox(
 
   setReadFileStamp(ctx, targetKey, freshStamp);
 
-  return { existed: true, path: normalizedPath };
+  return { existed, path: normalizedPath };
 }

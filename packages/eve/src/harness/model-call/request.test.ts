@@ -94,14 +94,14 @@ describe("modelInstructions", () => {
     });
   });
 
-  it("joins the note, base and own parts into one message without a cache profile", () => {
+  it("appends the note after base and own parts so the cached system prefix stays stable", () => {
     expect(
       modelInstructions({
         instructions: ["base", "own"],
         profile: other,
         extraSystemNote: "note",
       }),
-    ).toEqual({ role: "system", content: "note\n\nbase\n\nown" });
+    ).toEqual({ role: "system", content: "base\n\nown\n\nnote" });
   });
 
   it("sends nothing when every part is empty", () => {

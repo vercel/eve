@@ -26,7 +26,7 @@ export function modelInstructions(input: {
     return input.instructions;
   }
   if (anthropicCache === undefined && !gatewayAnchorsFirstMessage) {
-    return systemMessage([note, base, ...own]);
+    return systemMessage([base, ...own, note]);
   }
 
   const baseMessage = systemMessage([base]);

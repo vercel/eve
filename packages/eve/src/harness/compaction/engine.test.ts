@@ -244,6 +244,21 @@ describe("getInputTokenCount", () => {
       ),
     ).toBe(estimateTokens(messages) + 3_000);
   });
+
+  it("scales appended message estimates by calibrated estimateRatio when above 1", () => {
+    const messages: ModelMessage[] = [
+      { role: "user", content: "initial" },
+      { role: "assistant", content: "x".repeat(400) },
+    ];
+    const appendedTokens = estimateTokens([messages[1]!]);
+    const scaled = getInputTokenCount(messages, {
+      ...config,
+      estimateRatio: 1.5,
+      lastKnownInputTokens: 10_000,
+      lastKnownPromptMessageCount: 1,
+    });
+    expect(scaled).toBe(10_000 + Math.ceil(appendedTokens * 1.5));
+  });
 });
 
 describe("shouldCompact", () => {

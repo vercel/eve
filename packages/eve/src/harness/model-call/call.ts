@@ -11,7 +11,7 @@ import {
   type TypedToolCall,
 } from "ai";
 
-import { AuthKey, HistoryStateKey } from "#context/keys.js";
+import { AuthKey, DisabledProviderToolsKey, HistoryStateKey } from "#context/keys.js";
 import type { StepCatalog } from "#execution/catalog/step-catalog.js";
 import { visibleSkillNotice } from "#execution/skills/instructions.js";
 import { workingTaskIds } from "#execution/tasks/model-step.js";
@@ -83,16 +83,26 @@ import {
 } from "#harness/call-executor.js";
 import { extractGatewayCostUsd } from "./usage.js";
 import type { Usage } from "#protocol/session-events/envelope.js";
+import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 
 const environment = process.env.NODE_ENV ?? "unknown";
 
 const log = createLogger("harness.tool-loop");
 
-const MODEL_OUTPUT_TIMEOUT_MS = 10 * 60_000;
+const MODEL_FIRST_CHUNK_TIMEOUT_MS = 5 * 60_000;
+const MODEL_CHUNK_TIMEOUT_MS = 2 * 60_000;
+const DEFAULT_MAX_OUTPUT_TOKENS = 32_768;
+const MIN_MAX_OUTPUT_TOKENS = 4_096;
+const OUTPUT_WINDOW_HEADROOM_TOKENS = 4_096;
+const REASONING_TAIL_CHARS = 1_500;
 
 export interface ModelCallOptions {
+  readonly compactedAfterOverflow?: boolean;
   readonly disabledProviderTools?: ReadonlySet<string>;
+  readonly emptyResponseAttempts?: number;
   readonly extraSystemNote?: string;
+  readonly maxOutputTokensOverride?: number | null;
+  readonly reasoningOverride?: AgentReasoningDefinition;
   readonly retryReason?: "empty-response";
   readonly trailingUserNote?: string;
 }
@@ -148,7 +158,12 @@ export class ModelCaller {
   }
 
   async call(): Promise<HarnessStepResult> {
-    let options: ModelCallOptions = {};
+    const modelId = stepReference(this.step).id;
+    const cachedDisabled = this.step.ctx.get(DisabledProviderToolsKey)?.[modelId];
+    let options: ModelCallOptions =
+      cachedDisabled !== undefined && cachedDisabled.length > 0
+        ? { disabledProviderTools: new Set(cachedDisabled) }
+        : {};
     const diagnostics = {
       policies: [() => (this.compactionFailure === undefined ? ALLOW_RETRY : STOP_RETRY)],
       onRetry: (error: unknown) => this.prepareRetry(error),
@@ -173,8 +188,30 @@ export class ModelCaller {
           await this.prepareRetry(error);
           continue;
         }
+        if (
+          !options.compactedAfterOverflow &&
+          summarizeKnownError(error)?.id === "model-context-overflow"
+        ) {
+          const compacted = await this.compactOnOverflow();
+          if (compacted) {
+            await this.prepareRetry(error);
+            options = { ...options, compactedAfterOverflow: true };
+            continue;
+          }
+        }
         const recovery = recoverModelCall(error, options, diagnostics);
         if (recovery === undefined) throw error;
+        if (
+          recovery.disabledProviderTools !== undefined &&
+          recovery.disabledProviderTools.size > 0 &&
+          recovery.disabledProviderTools !== options.disabledProviderTools
+        ) {
+          const previous = this.step.ctx.get(DisabledProviderToolsKey) ?? {};
+          const merged = [
+            ...new Set([...(previous[modelId] ?? []), ...recovery.disabledProviderTools]),
+          ];
+          this.step.ctx.set(DisabledProviderToolsKey, { ...previous, [modelId]: merged });
+        }
         await this.prepareRetry(error);
         options = recovery;
       }
@@ -320,6 +357,37 @@ export class ModelCaller {
     return await this.prepare(options);
   }
 
+  private async compactOnOverflow(): Promise<boolean> {
+    const { step, prompt } = this;
+    if (prompt.messages.length <= 1) return false;
+    log.warn("model call overflowed context window; running reactive compaction", {
+      sessionId: step.session.sessionId,
+      turnId: step.position().turnId,
+    });
+    let compacted: HarnessModelMessage[] | undefined;
+    try {
+      compacted = await historyBeforeCall(step, {
+        force: true,
+        messages: prompt.messages,
+        model: this.input.model,
+        renew: this.input.renewCredential,
+        promptMessages: withClientContext(prompt),
+        requestEnvelopeTokens: this.requestEnvelopeTokens,
+      });
+    } catch (error) {
+      if (error instanceof CompactionOverLimitError) return false;
+      this.compactionFailure = { error };
+      throw error;
+    }
+    if (compacted === undefined) return false;
+    compactPrompt(step, prompt, compacted);
+    const turnInput = compactedTurnInput(prompt.messages);
+    this.turnMessages =
+      turnInput === undefined ? this.input.turnMessages : [...this.input.turnMessages, turnInput];
+    this.projectedMessages = projectPrompt(prompt);
+    return true;
+  }
+
   private async attempt(options: ModelCallOptions): Promise<HarnessStepResult> {
     const { step } = this;
     const { generation, model } = this.input;
@@ -364,9 +432,19 @@ export class ModelCaller {
       profile: this.profile,
       session: step.session,
     });
+    const estimatedInputTokens = Math.ceil(
+      (this.requestEnvelopeTokens + estimateTokens(this.prompt.messages)) *
+        (step.session.compaction.estimateRatio ?? 1.25),
+    );
+    const maxOutputTokens = resolveMaxOutputTokens(
+      stepReference(step).contextWindowTokens,
+      estimatedInputTokens,
+      options.maxOutputTokensOverride,
+    );
     const settings = {
       headers: this.attributionHeaders,
       instructions,
+      ...(maxOutputTokens !== undefined && { maxOutputTokens }),
       model: withUniqueCallIds(
         withGatewayTraceContext(
           model,
@@ -394,11 +472,12 @@ export class ModelCaller {
       onStepEnd: hooks.onStepEnd,
       onStepStart: hooks.onStepStart,
       prepareStep: hooks.prepareStep,
-      reasoning: stepReference(step).reasoning ?? agentSettings(step).reasoning,
+      reasoning:
+        options.reasoningOverride ?? stepReference(step).reasoning ?? agentSettings(step).reasoning,
       runtimeContext,
       stopWhen: isStepCount(1),
       telemetry: attempt?.telemetry,
-      timeout: { chunkMs: MODEL_OUTPUT_TIMEOUT_MS, firstChunkMs: MODEL_OUTPUT_TIMEOUT_MS },
+      timeout: { chunkMs: MODEL_CHUNK_TIMEOUT_MS, firstChunkMs: MODEL_FIRST_CHUNK_TIMEOUT_MS },
       tools,
     };
     const agent = new ToolLoopAgent(settings);
@@ -515,8 +594,52 @@ function assertUsableResponse(
     extractToolResultCallIds(responseMessages).size === 0 &&
     !options.hasInlineResults
   ) {
-    throw new EmptyModelResponseError();
+    throw new EmptyModelResponseError({
+      finishReason: stepResult.finishReason,
+      reasoningTail: extractReasoningTail(stepResult, responseMessages),
+    });
   }
+}
+
+function resolveMaxOutputTokens(
+  contextWindowTokens: number | undefined,
+  estimatedInputTokens: number,
+  override: number | null | undefined,
+): number | undefined {
+  if (override === null) return undefined;
+  const target = override ?? DEFAULT_MAX_OUTPUT_TOKENS;
+  if (contextWindowTokens === undefined || contextWindowTokens <= 0) {
+    return target;
+  }
+  const windowCap = Math.max(MIN_MAX_OUTPUT_TOKENS, Math.floor(contextWindowTokens / 4));
+  const remaining = contextWindowTokens - estimatedInputTokens - OUTPUT_WINDOW_HEADROOM_TOKENS;
+  const bounded = Math.min(target, windowCap, Math.max(MIN_MAX_OUTPUT_TOKENS, remaining));
+  return Math.max(1, Math.min(bounded, contextWindowTokens));
+}
+
+function extractReasoningTail(
+  stepResult: HarnessStepResult,
+  responseMessages: Parameters<typeof extractToolResultCallIds>[0],
+): string | undefined {
+  const chunks: string[] = [];
+  for (const part of stepResult.content ?? []) {
+    if (part.type === "reasoning" && typeof part.text === "string" && part.text.length > 0) {
+      chunks.push(part.text);
+    }
+  }
+  if (chunks.length === 0) {
+    for (const message of responseMessages) {
+      if (message.role !== "assistant" || !Array.isArray(message.content)) continue;
+      for (const part of message.content) {
+        if (part.type === "reasoning" && typeof part.text === "string" && part.text.length > 0) {
+          chunks.push(part.text);
+        }
+      }
+    }
+  }
+  const combined = chunks.join("\n").trim();
+  if (combined.length === 0) return undefined;
+  return combined.length <= REASONING_TAIL_CHARS ? combined : combined.slice(-REASONING_TAIL_CHARS);
 }
 
 function isAbortError(error: unknown): boolean {

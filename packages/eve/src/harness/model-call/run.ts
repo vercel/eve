@@ -127,7 +127,7 @@ export async function runModelStep(
       catalog,
       durableModelPromptMessageCount:
         prompt.clientContext === undefined || prompt.clientContext.messages.length === 0
-          ? caller.modelMessages.length
+          ? prompt.messages.length
           : undefined,
       endsTurnTools: endsTurnTools(catalog, step.endsTurn),
       promptMessages: caller.request.history,

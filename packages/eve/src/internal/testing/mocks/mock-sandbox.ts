@@ -72,7 +72,7 @@ export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
 
   async function defaultRun(options: SandboxRunOptions): Promise<SandboxCommandResult> {
     const find =
-      /^find (\S+) -maxdepth 1 -type f -exec stat -c '%Y %s %n' \{\} \+ 2>\/dev\/null \| head -c (\d+)$/.exec(
+      /^find (\S+) -maxdepth 1 -type f -exec (?:stat -c '%Y %s %n' \{\} \+ 2>\/dev\/null|sh -c 'stat -c "%Y %s %n" "\$@" 2>\/dev\/null \|\| stat -f "%m %z %N" "\$@" 2>\/dev\/null' _ \{\} \+) \| head -c (\d+)$/.exec(
         options.command,
       );
     if (find !== null) {

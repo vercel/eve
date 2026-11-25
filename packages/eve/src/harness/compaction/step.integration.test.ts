@@ -345,6 +345,105 @@ describe("compaction summary call", () => {
     expect(events.some((event) => event.type === "session.ended")).toBe(false);
   });
 
+  it("recovers a multi-turn session by running reactive compaction on context overflow", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const summaries = vi.fn(async () => summaryStream());
+    let turnCalls = 0;
+    const model = new MockLanguageModelV3({
+      doStream: async ({ prompt }) => {
+        const system = prompt[0]?.role === "system" ? prompt[0].content : "";
+        if (system.includes("CONTEXT CHECKPOINT COMPACTION")) return await summaries();
+        if ((turnCalls += 1) === 1) {
+          throw new APICallError({
+            isRetryable: false,
+            message: "prompt is too long: 21000 tokens > 20000 maximum",
+            requestBodyValues: {},
+            statusCode: 400,
+            url: "https://provider.example/v1/messages",
+          });
+        }
+        return answer();
+      },
+    });
+    const events: SessionEvent[] = [];
+    const kernel = createTestKernel({
+      agent: overThresholdAgent,
+      handleEvent: async (publication) => void events.push(...eventsOf(publication)),
+      resolveModel: async () => model,
+      tools: new Map([["lookup", policyTool]]),
+    });
+
+    const recovered = await untilTurnEnds(
+      kernel,
+      {
+        compaction: {},
+        continuationToken: "http:provider-overflow-recover",
+        history: [
+          { content: "Earlier request.", kind: "user", role: "user" },
+          { content: "Earlier detailed response.", role: "assistant" },
+        ],
+        sessionId: "provider-overflow-recover",
+      },
+      "Continue the task.",
+    );
+
+    expect(summaries).toHaveBeenCalledTimes(1);
+    expect(turnCalls).toBe(2);
+    expect(recovered.next).toBeNull();
+    expect(events.filter((event) => event.type === "turn.settled")).toMatchObject([
+      { data: { outcome: "completed" } },
+    ]);
+  });
+
+  it("continues automatically when a reply stops with finishReason length", async () => {
+    let turnCalls = 0;
+    const model = new MockLanguageModelV3({
+      doStream: async () => {
+        if ((turnCalls += 1) === 1) {
+          return streamOf([
+            { type: "stream-start", warnings: [] },
+            { id: "cut", type: "text-start" },
+            { delta: "First, install the dependency:", id: "cut", type: "text-delta" },
+            { id: "cut", type: "text-end" },
+            {
+              finishReason: { raw: undefined, unified: "length" },
+              type: "finish",
+              usage: {
+                inputTokens: { cacheRead: 0, cacheWrite: 0, noCache: 50, total: 50 },
+                outputTokens: { reasoning: 0, text: 8, total: 8 },
+              },
+            },
+          ]);
+        }
+        return answer();
+      },
+    });
+    const events: SessionEvent[] = [];
+    const kernel = createTestKernel({
+      agent: overThresholdAgent,
+      handleEvent: async (publication) => void events.push(...eventsOf(publication)),
+      resolveModel: async () => model,
+      tools: new Map([["lookup", lookupTool]]),
+    });
+
+    const completed = await untilTurnEnds(
+      kernel,
+      {
+        compaction: {},
+        continuationToken: "http:length-continue",
+        history: [],
+        sessionId: "length-continue",
+      },
+      "Finish the task.",
+    );
+
+    expect(turnCalls).toBe(2);
+    expect(completed.next).toBeNull();
+    expect(events.filter((event) => event.type === "turn.settled")).toMatchObject([
+      { data: { outcome: "completed" } },
+    ]);
+  });
+
   it("fails the turn and keeps the history when the summary call stays rate limited", async () => {
     vi.spyOn(Math, "random").mockReturnValue(0);
     vi.spyOn(console, "warn").mockImplementation(() => {});

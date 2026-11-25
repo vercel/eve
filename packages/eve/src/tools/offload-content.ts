@@ -140,7 +140,7 @@ export function offloadContent<TOutput = unknown>(
 
 async function evictOldest(sandbox: SandboxSession, keep: string): Promise<void> {
   const { stdout } = await sandbox.run({
-    command: `find ${RESULTS_DIRECTORY} -maxdepth 1 -type f -exec stat -c '%Y %s %n' {} + 2>/dev/null | head -c ${MAX_LISTING_BYTES}`,
+    command: `find ${RESULTS_DIRECTORY} -maxdepth 1 -type f -exec sh -c 'stat -c "%Y %s %n" "$@" 2>/dev/null || stat -f "%m %z %N" "$@" 2>/dev/null' _ {} + | head -c ${MAX_LISTING_BYTES}`,
   });
   if (Buffer.byteLength(stdout) >= MAX_LISTING_BYTES) {
     throw new Error("too many saved tool results to measure");

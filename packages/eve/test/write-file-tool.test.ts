@@ -145,8 +145,8 @@ describe("executeWriteFileOnSandbox", () => {
     expect(files["/workspace/empty.ts"]).toBe("updated");
   });
 
-  it("rejects overwrite without prior read", async () => {
-    const { access, session } = createFakeAccess({
+  it("overwrites an existing file without a prior read", async () => {
+    const { access, files, session } = createFakeAccess({
       "/workspace/foo.ts": "original",
     });
 
@@ -154,20 +154,19 @@ describe("executeWriteFileOnSandbox", () => {
     ctx.set(SandboxKey, access);
     ctx.set(ReadFileStateKey, { byTarget: {} });
 
-    await expect(
-      contextStorage.run(ctx, () =>
-        executeWriteFileOnSandbox(session, {
-          filePath: "/workspace/foo.ts",
-          content: "new content",
-        }),
-      ),
-    ).rejects.toThrow(
-      "You must read file /workspace/foo.ts before overwriting it. Use the read_file tool first.",
-    );
+    const result = (await contextStorage.run(ctx, () =>
+      executeWriteFileOnSandbox(session, {
+        filePath: "/workspace/foo.ts",
+        content: "new content",
+      }),
+    )) as WriteFileResult;
+
+    expect(result).toEqual({ existed: true, path: "/workspace/foo.ts" });
+    expect(files["/workspace/foo.ts"]).toBe("new content");
   });
 
-  it("rejects overwrite after external modification", async () => {
-    const { access, session } = createFakeAccess({
+  it("overwrites an existing file even after external modification", async () => {
+    const { access, files, session } = createFakeAccess({
       "/workspace/foo.ts": "externally-modified",
     });
 
@@ -182,16 +181,15 @@ describe("executeWriteFileOnSandbox", () => {
       byTarget: { "/workspace/foo.ts": stamp },
     });
 
-    await expect(
-      contextStorage.run(ctx, () =>
-        executeWriteFileOnSandbox(session, {
-          filePath: "/workspace/foo.ts",
-          content: "new content",
-        }),
-      ),
-    ).rejects.toThrow(
-      "File /workspace/foo.ts has been modified since it was last read. Please read the file again before modifying it.",
-    );
+    const result = (await contextStorage.run(ctx, () =>
+      executeWriteFileOnSandbox(session, {
+        filePath: "/workspace/foo.ts",
+        content: "new content",
+      }),
+    )) as WriteFileResult;
+
+    expect(result).toEqual({ existed: true, path: "/workspace/foo.ts" });
+    expect(files["/workspace/foo.ts"]).toBe("new content");
   });
 
   it("refreshes stamp after successful write", async () => {

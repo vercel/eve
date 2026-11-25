@@ -99,6 +99,9 @@ export interface HistoryState {
   readonly messages?: Readonly<Record<string, string>>;
 }
 export const HistoryStateKey = new ContextKey<HistoryState>("eve.historyState");
+export const DisabledProviderToolsKey = new ContextKey<Readonly<Record<string, readonly string[]>>>(
+  "eve.disabledProviderTools",
+);
 export interface OfferedCatalogTools {
   readonly connections: boolean;
   readonly searchableSkills: boolean;

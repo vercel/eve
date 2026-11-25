@@ -117,6 +117,7 @@ export async function compactHistory(step: Step): Promise<StepResult> {
 }
 
 interface HistoryBeforeCallInput {
+  readonly force?: boolean;
   readonly messages: readonly HarnessModelMessage[];
   readonly promptMessages: readonly HarnessModelMessage[];
   readonly model: LanguageModel;
@@ -170,10 +171,20 @@ async function compactUnder(
   config: CompactionConfig,
 ): Promise<HarnessModelMessage[] | undefined> {
   const previousEnvelope = config.requestEnvelopeTokens;
-  if (!shouldCompact(prompt, config, input.requestEnvelopeTokens, previousEnvelope)) {
+  if (
+    !input.force &&
+    !shouldCompact(prompt, config, input.requestEnvelopeTokens, previousEnvelope)
+  ) {
     return undefined;
   }
   const tokens = getInputTokenCount(prompt, config, input.requestEnvelopeTokens, previousEnvelope);
+  const effectiveConfig =
+    input.force === true
+      ? {
+          ...config,
+          target: Math.max(1, Math.min(config.target, Math.floor(tokens * 0.5))),
+        }
+      : config;
   const { projection } = step.view();
   const turnId = step.position().turnId;
   const change = lazyChange(step, {
@@ -184,7 +195,8 @@ async function compactUnder(
   });
   return await summarizeHistory(step, {
     change,
-    compaction: config,
+    ...(input.force === true && { compact: true as const }),
+    compaction: effectiveConfig,
     messages: input.messages,
     turnModel: async () => ({ model: input.model, renew: input.renew }),
     promptMessages: prompt,
@@ -445,6 +457,10 @@ export function compactedTurnInput<Message extends ModelMessage>(
 
 type CompactionSummaryPrompt = Parameters<CompactionSummarizer>[0];
 
+const COMPACTION_SUMMARY_MAX_OUTPUT_TOKENS = 8_192;
+const COMPACTION_SUMMARY_FIRST_CHUNK_TIMEOUT_MS = 3 * 60_000;
+const COMPACTION_SUMMARY_CHUNK_TIMEOUT_MS = 2 * 60_000;
+
 async function streamCompactionSummary(
   input: CompactionSummaryPrompt &
     Pick<
@@ -461,7 +477,15 @@ async function streamCompactionSummary(
   readonly text: string;
   readonly usage: TokenUsageDelta | undefined;
 }> {
-  const result = streamText({ ...input, onError: () => {} });
+  const result = streamText({
+    ...input,
+    maxOutputTokens: COMPACTION_SUMMARY_MAX_OUTPUT_TOKENS,
+    onError: () => {},
+    timeout: {
+      chunkMs: COMPACTION_SUMMARY_CHUNK_TIMEOUT_MS,
+      firstChunkMs: COMPACTION_SUMMARY_FIRST_CHUNK_TIMEOUT_MS,
+    },
+  });
   for await (const part of result.fullStream) {
     if (part.type === "error") throw normalizeModelStreamError(part.error);
   }

@@ -45,6 +45,12 @@ export function getInputTokenCount(
 ): number {
   const prior = config.lastKnownInputTokens;
   const priorCount = config.lastKnownPromptMessageCount;
+  const scale =
+    config.estimateRatio !== undefined &&
+    Number.isFinite(config.estimateRatio) &&
+    config.estimateRatio > 1
+      ? config.estimateRatio
+      : 1;
 
   if (
     prior === undefined ||
@@ -53,13 +59,13 @@ export function getInputTokenCount(
     priorCount < 0 ||
     priorCount > messages.length
   ) {
-    return estimateTokens(messages) + requestEnvelopeTokens;
+    return Math.ceil((estimateTokens(messages) + requestEnvelopeTokens) * scale);
   }
 
   const appended = messages.slice(priorCount);
   return (
     prior +
-    (appended.length === 0 ? 0 : estimateTokens(appended)) +
+    (appended.length === 0 ? 0 : Math.ceil(estimateTokens(appended) * scale)) +
     Math.max(0, requestEnvelopeTokens - previousEnvelopeTokens)
   );
 }
