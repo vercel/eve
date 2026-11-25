@@ -74,6 +74,31 @@ export default linqChannel({
 
 Set `route` to change the webhook path, or `webhookVerifier` (typed `LinqWebhookVerifier` from `eve/channels/linq`) to use a different trusted-forwarder verifier. A verifier receives the request and its raw body bytes. It rejects a webhook by throwing or returning a falsy value such as `null` or `false`.
 
+## State and adapter
+
+The channel keeps Chat SDK thread state in memory by default, so thread subscriptions and duplicate checks reset on restart. Pass `state` to use any Chat SDK state adapter, such as Redis.
+
+Pass `adapter` to change how the channel talks to Linq. It receives the adapter eve builds, typed `LinqAdapter` from `eve/channels/linq`, and returns the adapter the channel uses. eve still sets up attachment downloads on the returned adapter.
+
+```ts
+import { createRedisState } from "@chat-adapter/state-redis";
+import { connectLinqCredentials } from "@vercel/connect/eve";
+import { linqChannel } from "eve/channels/linq";
+
+export default linqChannel({
+  credentials: connectLinqCredentials("linq/my-agent"),
+  state: createRedisState({ url: process.env.REDIS_URL }),
+  adapter(base) {
+    const postMessage = base.postMessage.bind(base);
+    base.postMessage = (threadId, ...rest) => {
+      console.log("Sending to", threadId);
+      return postMessage(threadId, ...rest);
+    };
+    return base;
+  },
+});
+```
+
 ## Options
 
 `linqChannel(config)` takes these options. All are optional.
@@ -88,6 +113,8 @@ Set `route` to change the webhook path, or `webhookVerifier` (typed `LinqWebhook
 | `onMessage`   | Dispatch with the author's auth       | `(ctx, message)` hook. See [Message hook](#message-hook).                                                                                                                                                           |
 | `onTapback`   | None, so tapbacks are ignored         | `(ctx, tapback)` hook. See [Tapbacks](#tapbacks).                                                                                                                                                                   |
 | `events`      | eve's default handlers                | Per-event handler overrides.                                                                                                                                                                                        |
+| `state`       | In-memory state                       | Chat SDK state adapter. See [State and adapter](#state-and-adapter).                                                                                                                                                |
+| `adapter`     | eve's Linq adapter                    | `(base) => adapter` that replaces the Linq adapter. See [State and adapter](#state-and-adapter).                                                                                                                    |
 
 The channel mounts `GET` and `POST` on `/eve/v1/linq`.
 

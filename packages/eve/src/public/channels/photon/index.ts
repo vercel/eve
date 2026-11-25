@@ -1,6 +1,7 @@
 export {
   defaultPhotonAuth,
   photonIMessageChannel,
+  type PhotonIMessageAdapter,
   type PhotonIMessageChannel,
   type PhotonIMessageChannelConfig,
   type PhotonIMessageChannelCredentials,

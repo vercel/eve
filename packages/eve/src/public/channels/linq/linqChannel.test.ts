@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
+  chatSdkChannel,
   createLinqAdapter,
+  createMemoryState,
   directMessage,
   fetchMessage,
   markRead,
@@ -10,6 +12,7 @@ const {
   send,
   vercelOidc,
 } = vi.hoisted(() => ({
+  chatSdkChannel: vi.fn(),
   createLinqAdapter: vi.fn(
     (
       _config: Parameters<
@@ -19,6 +22,7 @@ const {
       name: "linq",
     }),
   ),
+  createMemoryState: vi.fn(() => ({ kind: "memory-state" })),
   directMessage: vi.fn(),
   fetchMessage: vi.fn(),
   markRead: vi.fn(),
@@ -29,7 +33,7 @@ const {
 }));
 
 vi.mock("#public/channels/chat-sdk/index.js", () => ({
-  chatSdkChannel: () => ({
+  chatSdkChannel: chatSdkChannel.mockImplementation(() => ({
     bot: {
       getAdapter: () => ({ fetchMessage, markRead }),
       onDirectMessage: directMessage,
@@ -38,12 +42,10 @@ vi.mock("#public/channels/chat-sdk/index.js", () => ({
     },
     channel: { routes: [] },
     send,
-  }),
+  })),
   messageContentOf: (message: Message) => message.text,
 }));
-vi.mock("#compiled/@chat-adapter/state-memory/index.js", () => ({
-  createMemoryState: vi.fn(),
-}));
+vi.mock("#compiled/@chat-adapter/state-memory/index.js", () => ({ createMemoryState }));
 vi.mock("#compiled/@linqapp/chat-sdk-adapter/index.js", () => ({
   createLinqAdapter,
 }));
@@ -140,6 +142,42 @@ describe("linqChannel", () => {
         ],
       }),
     );
+  });
+
+  it("defaults to in-memory state and eve's Linq adapter", () => {
+    linqChannel({ credentials: { apiKey: "linq-api-key", signingSecret: "linq-signing-secret" } });
+
+    const config = chatSdkChannel.mock.calls[0]?.[0];
+    expect(config.state).toEqual({ kind: "memory-state" });
+    expect(config.adapters.linq).toBe(createLinqAdapter.mock.results[0]?.value);
+    expect(config.adapters.linq.rehydrateAttachment).toEqual(expect.any(Function));
+  });
+
+  it("uses a supplied state adapter instead of in-memory state", () => {
+    const state = { kind: "durable-state" } as never;
+
+    linqChannel({ credentials: { apiKey: "linq-api-key" }, state });
+
+    expect(createMemoryState).not.toHaveBeenCalled();
+    expect(chatSdkChannel.mock.calls[0]?.[0].state).toBe(state);
+  });
+
+  it("uses the adapter returned by the adapter option, with attachment rehydration", () => {
+    const wrapped = { name: "linq", wrapped: true };
+    const adapter = vi.fn(() => wrapped as never);
+
+    linqChannel({
+      baseURL: "https://linq.example",
+      credentials: { apiKey: "linq-api-key" },
+      adapter,
+    });
+
+    const base = createLinqAdapter.mock.results[0]?.value;
+    expect(createLinqAdapter.mock.calls[0]?.[0]).toMatchObject({ baseURL: "https://linq.example" });
+    expect(adapter).toHaveBeenCalledWith(base);
+    const config = chatSdkChannel.mock.calls[0]?.[0];
+    expect(config.adapters.linq).toBe(wrapped);
+    expect(wrapped).toHaveProperty("rehydrateAttachment", expect.any(Function));
   });
 
   it("uses lazy credentials and the managed credential verifier", async () => {
