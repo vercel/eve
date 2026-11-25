@@ -2,8 +2,9 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ImageResponse } from "next/og";
 import type { NextRequest } from "next/server";
-import { getPageImage, source } from "@/lib/geistdocs/source";
+import { source } from "@/lib/geistdocs/source";
 
+// Docs metadata uses static images. Keep legacy image URLs available on demand.
 export const GET = async (
   _request: NextRequest,
   { params }: RouteContext<"/[lang]/og/[...slug]">,
@@ -81,13 +82,4 @@ export const GET = async (
       ],
     },
   );
-};
-
-export const generateStaticParams = async ({ params }: RouteContext<"/[lang]/og/[...slug]">) => {
-  const { lang } = await params;
-
-  return source.getPages(lang).map((page) => ({
-    lang: page.locale,
-    slug: getPageImage(page).segments,
-  }));
 };
