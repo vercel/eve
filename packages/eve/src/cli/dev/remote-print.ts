@@ -8,7 +8,7 @@ export async function runRemotePrint(input: {
   readonly serverUrl: string;
   readonly signal: AbortSignal;
   readonly workspaceRoot: string;
-}): Promise<string> {
+}): Promise<{ readonly reply: string; readonly sessionId: string }> {
   const { options } = await resolveVerifiedRemoteDevelopmentClient({
     headers: input.headers,
     serverUrl: input.serverUrl,
@@ -51,5 +51,5 @@ export async function runRemotePrint(input: {
         : `Session ${delivery.sessionId} is waiting for input; use the client API to answer it, or start a new conversation with eve remote connect.`,
     );
   }
-  return result.reply ?? "";
+  return { reply: result.reply ?? "", sessionId: delivery.sessionId };
 }

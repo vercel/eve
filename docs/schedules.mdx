@@ -154,7 +154,35 @@ Markdown-form schedules start a new session each time they fire. Handler schedul
 
 ## Trigger a schedule while iterating
 
-`eve dev` never runs schedules on their cadence, so the dev server adds a route that fires a schedule by name once:
+`eve dev` never runs schedules on their cadence. Fire one by name with the CLI:
+
+```sh
+eve schedule run heartbeat
+```
+
+It uses the app's running dev server, or starts one for the run, and prints the started session IDs. The sessions call the model and send to their channels.
+
+### Dry run
+
+To see what a schedule would do without sending anything, add `--dry-run`:
+
+```sh
+eve schedule run weekly-summary --dry-run
+```
+
+eve compiles the app and runs the handler as the app principal. Each `to(channel, target).send(...)` is recorded instead of starting a session, each `fetch` is recorded and answered with `{}` instead of being sent, and no model is called. For each delivery, it prints the channel, target, auth, and message, and then the tools, instructions, and connections that session's first turn would see.
+
+Use it to catch tools a scheduled turn can't see. A `defineDynamic()` tool that checks the caller's groups offers nothing to `appAuth`, which has none:
+
+```text
+Hidden Tools  revenue_forecast (tools/revenue_forecast.ts): defineDynamic returned undefined for principalType runtime
+```
+
+Either let the tool resolve for the app principal (check [`isScheduleAuth`](#detect-the-app-principal)), or fetch the data in the handler and put it in the message. `eve send "<message>" --dry-run --as schedule` lists the same tools without running the handler. Add `--json` to either command for machine-readable output; see the [CLI reference](./reference/cli#eve-schedule-run). For dynamic schedules, see [Preview a run](./experimental/dynamic-schedules#preview-a-run).
+
+### Dispatch route
+
+The dev server also has a route that fires a schedule by name once:
 
 ```sh
 curl -X POST http://localhost:2000/eve/v1/dev/schedules/heartbeat

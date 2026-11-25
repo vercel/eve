@@ -802,7 +802,7 @@ function isFromRemotePeer(request: Request): boolean {
   return readTrustedDevelopmentPeer(request.headers) === "remote";
 }
 
-const LOCAL_DEV_SESSION_AUTH_CONTEXT: SessionAuthContext = {
+export const LOCAL_DEV_SESSION_AUTH_CONTEXT: SessionAuthContext = {
   attributes: {},
   authenticator: "local-dev",
   principalId: "local-dev",

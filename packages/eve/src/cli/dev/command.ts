@@ -202,7 +202,7 @@ export function registerRemoteCommands(input: {
         const projectContext = await findEveProjectContext(applicationContext.root);
         const lifecycle = installShutdownSignal();
         try {
-          const reply = await runRemotePrint({
+          const { reply } = await runRemotePrint({
             headers: remoteTarget.headers,
             prompt,
             serverUrl: remoteTarget.serverUrl,
