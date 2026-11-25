@@ -3,14 +3,14 @@ import { AuthKey, SessionIdKey, SessionTraceSeedKey } from "#context/keys.js";
 import { serializeContext } from "#context/serialize.js";
 import { compiledSessionAgent } from "#runtime/sessions/compiled-session-agent.js";
 import { type CompiledBundle, SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
-import type { ConnectionEventPayload } from "#runtime/connections/events/delivery.js";
+import type { ConnectionEventPayload } from "#runtime/subscriptions/delivery.js";
 import {
   CONNECTION_EVENT_SUBSCRIPTION_NAMESPACE,
   type ConnectionEventSubscribeOutcome,
   type ConnectionEventSubscribeResult,
   type EventBinding,
-} from "#runtime/connections/events/state.js";
-import type { ConnectionEventWatchMessage } from "#runtime/connections/events/workflow.js";
+} from "#runtime/subscriptions/state.js";
+import type { ConnectionEventWatchMessage } from "#runtime/subscriptions/workflow.js";
 import { startWorkflowOnCurrentDeployment } from "#execution/workflow-runtime.js";
 import {
   connectionEventDeliveryWorkflowReference,
@@ -18,7 +18,7 @@ import {
 } from "#execution/workflow-references.js";
 import { getHookByToken, getRun, resumeHook } from "#internal/workflow/runtime.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
-import { connectionEventHookToken } from "#runtime/connections/events/path.js";
+import { connectionEventHookToken } from "#runtime/subscriptions/path.js";
 import type { ManagedEventSubscription } from "#shared/connection-events.js";
 
 const SUBSCRIBE_OUTCOME_TIMEOUT_MS = 90_000;

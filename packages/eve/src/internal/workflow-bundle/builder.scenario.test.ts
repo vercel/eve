@@ -179,7 +179,7 @@ describe("WorkflowBundleBuilder", () => {
     expect(builder.snapshot.dirs).toEqual([
       resolvePackageSourceDirectoryPath("src/execution"),
       resolvePackageSourceDirectoryPath("src/runtime/subagents"),
-      resolvePackageSourceDirectoryPath("src/runtime/connections/events"),
+      resolvePackageSourceDirectoryPath("src/runtime/subscriptions"),
       resolvePackageSourceDirectoryPath("src/subagents"),
       resolvePackageSourceDirectoryPath("src/tools/provided"),
     ]);
@@ -720,7 +720,7 @@ describe("WorkflowBundleBuilder", () => {
     ["workflow tool owner", "src/execution/tools/workflow/workflow.ts", "workflowToolRunWorkflow"],
     [
       "connection event owner",
-      "src/runtime/connections/events/workflow.ts",
+      "src/runtime/subscriptions/workflow.ts",
       "connectionEventWorkflow",
     ],
   ])("keeps the %s schemas out of the workflow driver", async (_name, sourcePath, marker) => {

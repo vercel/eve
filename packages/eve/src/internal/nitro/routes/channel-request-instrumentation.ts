@@ -1,4 +1,4 @@
-import { connectionEventDestination } from "#runtime/connections/events/path.js";
+import { connectionEventDestination } from "#runtime/subscriptions/path.js";
 import {
   context,
   propagation,
