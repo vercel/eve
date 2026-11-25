@@ -35,6 +35,7 @@ import {
 import { type Answer, type StrictAnswers, parseAnswers } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
 import { type SessionHistoryMessage, validateSessionHistory } from "#shared/session-history.js";
+import type { ImportedMessage } from "#protocol/session-events/families/delivery.js";
 import { toChannelLocalContinuationToken } from "#shared/continuation-token.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 
@@ -161,7 +162,7 @@ export function createSession(
       const history = validateSessionHistory(options.history);
       const payload = attachClientContext<{
         context?: readonly string[];
-        history?: readonly SessionHistoryMessage[];
+        history?: readonly ImportedMessage[];
         message: MessageContent | undefined;
         outputSchema?: JsonObject;
       }>({ message: serializeFilePartsInMessage(message) }, readClientContext(options));

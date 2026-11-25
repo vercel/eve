@@ -1,4 +1,4 @@
-import type { ModelMessage, UserContent } from "ai";
+import type { AssistantModelMessage, ModelMessage, ToolResultPart, UserContent } from "ai";
 
 import type { MessageContent, MessagePart } from "#shared/message-content.js";
 
@@ -12,7 +12,7 @@ import type { Answer } from "#shared/input.js";
 import type { HarnessStepInput } from "#harness/types.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 import { attachInputText, readInputText } from "#internal/input-text.js";
-import type { SessionHistoryMessage } from "#shared/session-history.js";
+import type { ImportedMessage, ImportedPart } from "#protocol/session-events/families/delivery.js";
 
 export type FrameworkMessageKind =
   | "context.instruction"
@@ -60,13 +60,53 @@ export function createUserMessage(
 export const IMPORTED_MESSAGE_METADATA_KEY = "eve.imported";
 
 export function createImportedHistoryMessages(
-  history: readonly SessionHistoryMessage[],
+  history: readonly ImportedMessage[],
 ): HarnessModelMessage[] {
-  return history.map((message) =>
+  return history.flatMap((message): HarnessModelMessage[] =>
     message.role === "user"
-      ? createUserMessage("user", message.text, { [IMPORTED_MESSAGE_METADATA_KEY]: true })
-      : { content: message.text, role: "assistant" },
+      ? [createUserMessage("user", message.text, { [IMPORTED_MESSAGE_METADATA_KEY]: true })]
+      : message.parts === undefined
+        ? [{ content: message.text, role: "assistant" }]
+        : importedAssistantSteps(message.parts),
   );
+}
+
+function importedAssistantSteps(parts: readonly ImportedPart[]): HarnessModelMessage[] {
+  const messages: HarnessModelMessage[] = [];
+  let content: Exclude<AssistantModelMessage["content"], string> = [];
+  let results: ToolResultPart[] = [];
+  const flush = () => {
+    if (content.length > 0) messages.push({ content, role: "assistant" });
+    if (results.length > 0) messages.push({ content: results, role: "tool" });
+    content = [];
+    results = [];
+  };
+  for (const part of parts) {
+    if (part.type === "text") {
+      if (results.length > 0) flush();
+      content.push({ text: part.text, type: "text" });
+      continue;
+    }
+    content.push({
+      input: part.input ?? {},
+      toolCallId: part.callId,
+      toolName: part.name,
+      type: "tool-call",
+    });
+    results.push({
+      output:
+        part.error !== undefined
+          ? { type: "error-text", value: part.error }
+          : typeof part.output === "string"
+            ? { type: "text", value: part.output }
+            : { type: "json", value: part.output ?? null },
+      toolCallId: part.callId,
+      toolName: part.name,
+      type: "tool-result",
+    });
+  }
+  flush();
+  return messages;
 }
 
 export function createFrameworkUserMessage(

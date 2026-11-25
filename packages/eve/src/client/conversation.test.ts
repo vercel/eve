@@ -1,3 +1,4 @@
+import type { ImportedMessage } from "#protocol/session-events/families/delivery.js";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -570,11 +571,7 @@ describe("the conversation", () => {
       }));
     const consumed = (
       deliveryId: string,
-      history: readonly {
-        readonly id?: string;
-        readonly role: "user" | "assistant";
-        readonly text: string;
-      }[],
+      history: readonly ImportedMessage[],
       message: string,
     ): SessionEvent => ({
       data: { deliveryId, history, parts: [{ kind: "text", text: message }], turnId },
@@ -598,6 +595,14 @@ describe("the conversation", () => {
           [
             { id: "app-1", role: "user", text: "Earlier question" },
             { role: "assistant", text: "Earlier answer" },
+            {
+              parts: [
+                { callId: "c1", input: { env: "prod" }, name: "check", output: "ok", type: "tool" },
+                { text: "Checked.", type: "text" },
+              ],
+              role: "assistant",
+              text: "Checked.",
+            },
           ],
           "Deploy it.",
         ),
@@ -617,6 +622,7 @@ describe("the conversation", () => {
     ).toEqual([
       "user: Earlier question",
       "assistant: Earlier answer",
+      "assistant: toolChecked.",
       "user: Bob's note",
       "user: Deploy it.",
       "user: Use staging.",
@@ -628,6 +634,17 @@ describe("the conversation", () => {
       status: "complete",
     });
     expect(messages[1]?.metadata).toEqual({ imported: true, status: "complete" });
+    expect(messages[2]?.parts[0]).toEqual({
+      callId: "c1",
+      input: { env: "prod" },
+      kind: "tool",
+      label: "check",
+      name: "check",
+      output: "ok",
+      state: "completed",
+      stepIndex: 0,
+      type: "tool",
+    });
     expect(new Set(messages.map((message) => message.id)).size).toBe(messages.length);
     expect(conversation.view.deliveries.d_0).not.toHaveProperty("history");
   });

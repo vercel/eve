@@ -1,4 +1,9 @@
-export { InvalidSessionHistoryError, type SessionHistoryMessage } from "#shared/session-history.js";
+export {
+  InvalidSessionHistoryError,
+  type SessionHistoryMessage,
+  type SessionHistoryPart,
+  type SessionHistoryToolPart,
+} from "#shared/session-history.js";
 export {
   defineChannel,
   disableRoute,

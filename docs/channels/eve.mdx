@@ -394,11 +394,28 @@ The client then resumes the session by id, for example with `useEveAgent({ initi
 
 `send()` accepts the same `history` option and adds the entries right before that message and its `context`, whether it creates or continues the session. The eve channel's `onMessage` can return `history` too, which applies to every message it's returned for.
 
-Each entry has a `role` of `"user"` or `"assistant"`, non-empty `text`, and an optional `id` unique within the call. eve rejects an entry with any other field, so map your stored messages to these fields. Invalid history throws an `InvalidSessionHistoryError`, exported from `eve/channels`, naming the entry and the broken rule. eve doesn't cap entries or text, so trim long conversations in your route. Tool calls, files, and reasoning are not supported.
+Each entry has a `role` of `"user"` or `"assistant"`, either non-empty `text` or `parts`, and an optional `id` unique within the call. eve rejects an entry with any other field, so map your stored messages to these fields. Invalid history throws an `InvalidSessionHistoryError`, exported from `eve/channels`, naming the entry and the broken rule. eve doesn't cap entries or text, so trim long conversations in your route. Files and reasoning are not supported.
+
+`parts` lists a message in order. A user message takes text parts. An assistant message also takes the tool calls it finished, each with its `name`, `input`, and either `output` or `error`:
+
+```ts
+history: [
+  { role: "user", text: "Roll a d20, but keep the number to yourself." },
+  {
+    role: "assistant",
+    parts: [
+      { type: "tool", name: "roll_dice", input: { sides: 20 }, output: { rolls: [3] } },
+      { type: "text", text: "Done. It's a secret." },
+    ],
+  },
+];
+```
+
+The model sees each call and its result as it would its own, but eve never runs it again or converts its output, and the agent doesn't need the tool anymore. Give a call a `callId` unique within the history to name it; eve assigns one when you leave it out.
 
 eve never accepts `history` from a client request body. Resolve it on the server and authorize the caller against the stored conversation.
 
-The stream records the entries in `data.history` on the `delivery.consumed` of the message that brought them. History from `create()` is recorded with the first accepted message. When one turn takes in several messages, the model reads all their history first. `transcriptOf()` from `eve/client` returns entries in that order as `{ role, text }` messages you can pass back as `history` to branch a session.
+The stream records the entries in `data.history` on the `delivery.consumed` of the message that brought them. History from `create()` is recorded with the first accepted message. When one turn takes in several messages, the model reads all their history first. Entries recorded from `parts` keep them, with each call's `callId`, and `text` holds their text. `transcriptOf()` from `eve/client` returns entries in that order as `{ role, text }` messages you can pass back as `history` to branch a session.
 
 Frontend `messages` show imported entries before their message, with `metadata.imported` set and your `id` in `metadata.historyId`. Imported messages have no `metadata.turnId`, so a turn's reply never streams into one. Their message ids stay unique even when a later call reuses an `id`. Compaction, `clear()`, and handoffs treat them like any other history.
 

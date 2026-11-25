@@ -9,7 +9,7 @@ import type { HarnessModelMessage } from "#harness/messages.js";
 import type { JsonObject } from "#shared/json.js";
 import type { AgentSessionRuntimeOverrides } from "#execution/agent-sessions/runtime-overrides.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
-import type { SessionHistoryMessage } from "#shared/session-history.js";
+import type { ImportedMessage } from "#protocol/session-events/families/delivery.js";
 
 export interface CreateSessionStepResult {
   readonly history: HarnessModelMessage[];
@@ -21,7 +21,7 @@ export async function createSessionStep(input: {
   readonly compiledArtifactsSource: DurableCompiledArtifactsSource;
   readonly continuationToken: string;
   readonly dynamicSubagentAgentConfig?: DynamicSubagentAgentConfig;
-  readonly history?: readonly SessionHistoryMessage[];
+  readonly history?: readonly ImportedMessage[];
   readonly outputSchema?: JsonObject;
   readonly nodeId?: string;
   readonly rootSessionId?: string;

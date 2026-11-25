@@ -1,7 +1,7 @@
 import { z } from "#compiled/zod/index.js";
 
-import { conforming, envelopeOf, id, principal, userPart, known } from "../common.js";
-import type { Envelope, Principal, UserPart } from "../envelope.js";
+import { conforming, envelopeOf, id, jsonValue, principal, userPart, known } from "../common.js";
+import type { Envelope, JsonValue, Principal, UserPart } from "../envelope.js";
 
 /**
  * Where a delivery came from: a channel (with the schedule or hook that sent it), a control, or a
@@ -30,9 +30,25 @@ export interface ImportedMessage {
   /** The app's own id for the message, when it gave one. eve never reads it. */
   readonly id?: string;
   readonly role: "user" | "assistant";
-  /** The message's plain text. */
+  /** The message's plain text: the text of its `parts` when it has them. */
   readonly text: string;
+  /** The message in order, when it was imported with parts, such as an assistant's tool calls. */
+  readonly parts?: readonly ImportedPart[];
 }
+
+/** One part of an {@link ImportedMessage}: text, or a tool call that finished before eve saw it. */
+export type ImportedPart =
+  | { readonly type: "text"; readonly text: string }
+  | {
+      readonly type: "tool";
+      readonly callId: string;
+      readonly name: string;
+      readonly input?: JsonValue;
+      /** What the call returned. Absent when it failed. */
+      readonly output?: JsonValue;
+      /** Why the call failed. */
+      readonly error?: string;
+    };
 
 /** The payload of `delivery.consumed`: a turn took in a delivery and what the person sent. */
 export interface DeliveryConsumedData {
@@ -86,8 +102,25 @@ const deliverySource = conforming<DeliverySource>()(
   ]),
 );
 
+const importedPart = z.union([
+  z.object({ text: z.string(), type: z.literal("text") }),
+  z.object({
+    callId: z.string(),
+    error: z.string().optional(),
+    input: jsonValue.optional(),
+    name: z.string(),
+    output: jsonValue.optional(),
+    type: z.literal("tool"),
+  }),
+]);
+
 const importedMessage = conforming<ImportedMessage>()(
-  z.object({ id: z.string().optional(), role: z.enum(["user", "assistant"]), text: z.string() }),
+  z.object({
+    id: z.string().optional(),
+    parts: z.array(importedPart).optional(),
+    role: z.enum(["user", "assistant"]),
+    text: z.string(),
+  }),
 );
 
 export const deliverySchemas = {
