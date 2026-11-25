@@ -419,9 +419,26 @@
       "default": "./dist/src/public/instrumentation/otel.js"
     },
     "./schedules": {
+      "workflow": {
+        "eve-source": "./src/public/schedules/static.ts",
+        "default": "./dist/src/public/schedules/static.js"
+      },
+      "eve-source": "./src/public/schedules/index.ts",
       "types": "./dist/src/public/schedules/index.d.ts",
       "import": "./dist/src/public/schedules/index.js",
       "default": "./dist/src/public/schedules/index.js"
+    },
+    "./schedules/testing": {
+      "eve-source": "./src/public/schedules/testing.ts",
+      "types": "./dist/src/public/schedules/testing.d.ts",
+      "import": "./dist/src/public/schedules/testing.js",
+      "default": "./dist/src/public/schedules/testing.js"
+    },
+    "./schedules/vercel": {
+      "eve-source": "./src/public/schedules/vercel.ts",
+      "types": "./dist/src/public/schedules/vercel.d.ts",
+      "import": "./dist/src/public/schedules/vercel.js",
+      "default": "./dist/src/public/schedules/vercel.js"
     },
     "./server": {
       "types": "./dist/src/public/server/index.d.ts",
@@ -453,22 +470,22 @@
       "default": "./dist/src/public/experimental/channels/discord/gateway.js"
     },
     "./experimental/schedules/testing": {
-      "eve-source": "./src/public/experimental/schedules/testing.ts",
-      "types": "./dist/src/public/experimental/schedules/testing.d.ts",
-      "import": "./dist/src/public/experimental/schedules/testing.js",
-      "default": "./dist/src/public/experimental/schedules/testing.js"
+      "eve-source": "./src/public/schedules/testing.ts",
+      "types": "./dist/src/public/schedules/testing.d.ts",
+      "import": "./dist/src/public/schedules/testing.js",
+      "default": "./dist/src/public/schedules/testing.js"
     },
     "./experimental/schedules": {
-      "eve-source": "./src/public/experimental/schedules/index.ts",
-      "types": "./dist/src/public/experimental/schedules/index.d.ts",
-      "import": "./dist/src/public/experimental/schedules/index.js",
-      "default": "./dist/src/public/experimental/schedules/index.js"
+      "eve-source": "./src/public/schedules/dynamic.ts",
+      "types": "./dist/src/public/schedules/dynamic.d.ts",
+      "import": "./dist/src/public/schedules/dynamic.js",
+      "default": "./dist/src/public/schedules/dynamic.js"
     },
     "./experimental/schedules/vercel": {
-      "eve-source": "./src/public/experimental/schedules/vercel.ts",
-      "types": "./dist/src/public/experimental/schedules/vercel.d.ts",
-      "import": "./dist/src/public/experimental/schedules/vercel.js",
-      "default": "./dist/src/public/experimental/schedules/vercel.js"
+      "eve-source": "./src/public/schedules/vercel.ts",
+      "types": "./dist/src/public/schedules/vercel.d.ts",
+      "import": "./dist/src/public/schedules/vercel.js",
+      "default": "./dist/src/public/schedules/vercel.js"
     },
     "./channels": {
       "types": "./dist/src/public/channels/index.d.ts",
