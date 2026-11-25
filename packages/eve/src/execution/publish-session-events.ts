@@ -1,4 +1,4 @@
-import { isRetriedStep } from "#execution/hosts.js";
+import { isRetriedStep, stepAttempt, type AppHosts } from "#execution/hosts.js";
 import { readSessionStreamTailIndex, streamSessionLines } from "#execution/session-event-stream.js";
 import type { ControlDelivery } from "#harness/types.js";
 import { buildAdapterContext } from "#channel/adapter-context.js";
@@ -77,6 +77,7 @@ export interface SessionStepInput {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
   readonly sessionWritable: WritableStream<Uint8Array>;
+  readonly rerun?: true;
 }
 
 export interface SessionHistoryStepInput extends SessionStepInput {
@@ -84,6 +85,7 @@ export interface SessionHistoryStepInput extends SessionStepInput {
 }
 
 export type Entered<I extends object> = Omit<I, "rerun"> & {
+  readonly hosts: AppHosts;
   readonly rerun: boolean;
 };
 
@@ -91,8 +93,12 @@ export type SessionStepState = Entered<SessionStepInput>;
 
 export type SessionHistoryStepState = Entered<SessionHistoryStepInput>;
 
-export function enterSessionStep<I extends object>(input: I): Entered<I> {
-  return { ...input, rerun: isRetriedStep() };
+export function enterSessionStep<I extends object>(
+  hosts: AppHosts,
+  input: I & { readonly rerun?: true },
+  meta: { readonly attempt: number } = { attempt: stepAttempt(hosts) ?? 1 },
+): Entered<I> {
+  return { ...input, hosts, rerun: input.rerun === true || isRetriedStep(meta) };
 }
 
 export interface PublishedSessionEvents {
@@ -145,6 +151,7 @@ export interface RestoredSessionStep {
   readonly ctx: ContextContainer;
   readonly durableSession: DurableSession;
   readonly sessionWritable: WritableStream<Uint8Array>;
+  readonly hosts: AppHosts;
   readonly rerun: boolean;
 }
 
@@ -157,6 +164,7 @@ export async function restoreSessionStep(step: SessionStepState): Promise<Restor
     ctx: await deserializeContext(step.serializedContext),
     durableSession: readDurableSession(step.sessionState),
     sessionWritable: step.sessionWritable,
+    hosts: step.hosts,
     rerun: step.rerun,
   };
 }
@@ -219,6 +227,7 @@ async function publishInSessionScope<T>(
   const { ctx } = step;
   enterSessionProjection(ctx, step.durableSession.state);
   const orphaned = await readOrphanedLines({
+    hosts: step.hosts,
     rerun: step.rerun,
     sessionId: step.durableSession.sessionId,
     position: nextLinePosition(ctx),
@@ -314,6 +323,7 @@ export interface OrphanedLine {
 const interruptedAttempts = new WeakMap<WritableStream<Uint8Array>, readonly OrphanedLine[]>();
 
 export async function readOrphanedLines(input: {
+  readonly hosts: AppHosts;
   readonly sessionId: string;
   readonly position: number;
   readonly sessionWritable: WritableStream<Uint8Array>;
@@ -323,7 +333,7 @@ export async function readOrphanedLines(input: {
   const { sessionId, sessionWritable, position: first } = input;
   let lines = interruptedAttempts.get(sessionWritable);
   if (lines === undefined) {
-    lines = await readLinesFrom(sessionId, first);
+    lines = await readLinesFrom(input.hosts, sessionId, first);
     interruptedAttempts.set(sessionWritable, lines);
   }
   return lines.filter(({ position }) => position >= first);
@@ -358,13 +368,20 @@ export function followInterruptedAttempt(
   });
 }
 
-async function readLinesFrom(sessionId: string, first: number): Promise<OrphanedLine[]> {
-  const tail = await readSessionStreamTailIndex(sessionId);
+async function readLinesFrom(
+  hosts: AppHosts,
+  sessionId: string,
+  first: number,
+): Promise<OrphanedLine[]> {
+  const tail = await readSessionStreamTailIndex(hosts, sessionId);
   if (tail + 1 < first) throw new Error("Session checkpoint is ahead of its stream.");
   const lines: OrphanedLine[] = [];
   if (tail < first) return lines;
   let position = first;
-  for await (const record of streamSessionLines(sessionId, { follow: false, startIndex: first })) {
+  for await (const record of streamSessionLines(hosts, sessionId, {
+    follow: false,
+    startIndex: first,
+  })) {
     if (record.position > tail) break;
     if (record.line === undefined || record.position !== position) {
       throw new Error("Cannot reconcile an unreadable or missing session line.");
@@ -388,11 +405,15 @@ export function foldOrphanedLines(
 }
 
 async function reconcilePublishedSessionLines(
+  hosts: AppHosts,
   checkpoint: SessionProjection | undefined,
   sessionId: string,
 ): Promise<SessionProjection> {
   const projection = checkpoint ?? initialSessionProjection();
-  return foldOrphanedLines(projection, await readLinesFrom(sessionId, projection.view.position));
+  return foldOrphanedLines(
+    projection,
+    await readLinesFrom(hosts, sessionId, projection.view.position),
+  );
 }
 
 function sameLine(orphaned: StoredLine, line: StoredLine<SessionEvent, SessionEvent>): boolean {
@@ -615,6 +636,7 @@ export interface SessionEnding {
 }
 
 export async function publishTerminalSessionEvent(input: {
+  readonly hosts: AppHosts;
   readonly errorId?: string;
   readonly ending: SessionEnding;
   readonly serializedContext: Record<string, unknown>;
@@ -633,7 +655,7 @@ export async function publishTerminalSessionEvent(input: {
       ? undefined
       : storedProjection(readDurableSession(input.sessionState).state));
   try {
-    projection = await reconcilePublishedSessionLines(projection, sessionId);
+    projection = await reconcilePublishedSessionLines(input.hosts, projection, sessionId);
   } catch (error) {
     log.error(`failed to fold the published tail for terminal ${type} event`, {
       ...fields,

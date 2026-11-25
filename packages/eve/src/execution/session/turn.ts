@@ -3,12 +3,12 @@ import { formatEarlierRemoteCallerInputError } from "#protocol/remote-agent-prot
 import { controlDeliveryOf } from "#execution/session/control-delivery.js";
 
 import type { SessionCapabilities, TurnCaller } from "#channel/types.js";
-import { publishDispatchedCallsStep } from "#execution/coordination-dispatch-step.js";
 import type {
-  CoordinationDispatchInput,
-  CoordinationDispatchResult,
-} from "#execution/coordination-dispatch-shared.js";
-import type { WithSessionStateDelta } from "#execution/session/state-delta.js";
+  SessionStepCall,
+  SessionStepName,
+  SessionStepRunner,
+  StepCall,
+} from "#execution/session/steps.js";
 import type { SessionInputQueue } from "#execution/session/input-queue.js";
 import { taskToolResult, type TaskToolCall } from "#execution/tasks/calls.js";
 import { TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
@@ -32,23 +32,18 @@ import {
   isAppliedRunMessage,
   takeLeadingAppliedRunMessages,
 } from "#execution/session-workflow-tool-run.js";
-import type {
-  AppliedRunMessage,
-  ApplyRunMessagesInput,
-  ApplyRunMessagesResult,
-} from "#execution/tools/workflow/apply-run-messages.js";
-import { interruptWorkflowToolRun } from "#execution/tools/workflow/interrupt.js";
+import type { AppliedRunMessage } from "#execution/tools/workflow/apply-run-messages.js";
 import {
   isAgentSessionMessage,
   type WorkflowToolRunMessage,
 } from "#execution/tools/workflow/messages.js";
 import type { TurnPause } from "#execution/session/pending-turn-state.js";
+import { openAfter, type OpenTurn } from "#execution/session/open-turn.js";
 import type {
   RuntimeActionResultStepInput,
   TurnOutcome,
   TurnStepInput,
   TurnStepPayload,
-  TurnStepResult,
 } from "#execution/session/turn-step-types.js";
 import { exhaustedStepError } from "#execution/workflow-errors.js";
 import { isObject, readNonEmptyString } from "#shared/guards.js";
@@ -60,8 +55,8 @@ import {
 } from "#harness/workflow-tool-runs.js";
 import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
+import type { PendingDispatch } from "#harness/session-machine/transitions.js";
 import type { TokenUsage } from "#shared/token-usage.js";
-import { startTaskToolCallsStep } from "#execution/session/task-tool-tracing-step.js";
 
 export function hasDelegatedCallerContext(serializedContext: Record<string, unknown>): boolean {
   if (earlierRemoteCaller(serializedContext) !== undefined) return false;
@@ -81,27 +76,37 @@ const NO_INPUT_CAPABILITY_ERROR_MESSAGE =
   "This session cannot request human input, so it cannot wait for a tool approval or question. " +
   "Configure unattended tools with an approval policy that does not require human input.";
 
+export type SessionWake = "input" | "due" | "woken" | "park";
+
+export interface SessionNextOptions {
+  readonly until?: number;
+  readonly wake?: Promise<unknown>;
+}
+
 export interface SessionTurnHost {
-  runTurnStep(input: TurnStepInput): Promise<TurnStepResult>;
-  dispatchRuns(
-    input: CoordinationDispatchInput,
-  ): Promise<WithSessionStateDelta<CoordinationDispatchResult>>;
-  applyRunMessages(input: ApplyRunMessagesInput): Promise<ApplyRunMessagesResult>;
-  until(at: number): Promise<void>;
+  readonly step: SessionStepCall;
+  next(options?: SessionNextOptions): Promise<SessionWake>;
+  now(): number;
+  all<T extends readonly unknown[] | []>(
+    work: T,
+  ): Promise<{ -readonly [K in keyof T]: PromiseSettledResult<Awaited<T[K]>> }>;
 }
 
 export interface SessionExecutionInput {
   readonly capabilities?: SessionCapabilities;
   readonly cursor: SessionStateCursor;
   readonly host: SessionTurnHost;
+  readonly stepCall: (name: SessionStepName) => StepCall;
   readonly inbox: SessionInboxReader;
   readonly queue: SessionInputQueue;
   readonly sessionId: string;
+  readonly idle?: () => Promise<void>;
 }
 
 export class SessionExecution {
   private readonly input: SessionExecutionInput;
   private observedHandoverAttemptKey: string | undefined;
+  private turn: ActiveTurn | undefined;
 
   constructor(input: SessionExecutionInput) {
     this.input = input;
@@ -111,11 +116,16 @@ export class SessionExecution {
     return this.input.cursor;
   }
 
+  holdsInput(): boolean {
+    return this.turn?.holdsInput === true;
+  }
+
   async runTurn(
     delivery: TurnStepPayload | undefined,
     options: {
       readonly caller?: TurnCaller;
       readonly control?: TurnControl;
+      readonly pause?: TurnPause;
     } = {},
   ): Promise<TurnOutcome> {
     const { cursor } = this.input;
@@ -129,11 +139,12 @@ export class SessionExecution {
       },
       options.control,
     );
+    this.turn = turn;
     try {
-      const outcome = await this.runTurnSteps(turn, delivery);
+      const outcome = await this.runTurnSteps(turn, delivery, options.pause);
       await this.handleBoundaryMessages(turn.takeBoundaryMessages(), outcome.kind === "done");
       if (outcome.kind === "park" && outcome.settled !== undefined) {
-        await cancelWorkingTasks(this.input.cursor, "turn-ended");
+        await cancelWorkingTasks(this.input, this.input.cursor, "turn-ended");
       }
       return {
         ...outcome,
@@ -141,6 +152,7 @@ export class SessionExecution {
         ...(turn.compacted && { compacted: true }),
       };
     } finally {
+      this.turn = undefined;
       turn.dispose();
     }
   }
@@ -155,7 +167,11 @@ export class SessionExecution {
       if (!isAppliedRunMessage(message)) {
         await this.applyRunMessages(applied, turn);
         applied = [];
-        await handleWorkflowToolRunMessage({ cursor: this.input.cursor, message });
+        await handleWorkflowToolRunMessage({
+          cursor: this.input.cursor,
+          message,
+          steps: this.input,
+        });
       } else if (!ending || !isAgentSessionMessage(message)) {
         applied.push(message);
       }
@@ -169,7 +185,11 @@ export class SessionExecution {
   ): Promise<void> {
     if (messages.length === 0) return;
     const { cancelled } = await this.input.cursor.advance((state) =>
-      this.input.host.applyRunMessages({ ...state, canCancelTurn: turn !== undefined, messages }),
+      this.input.host.step(
+        "applyRunMessages",
+        { ...state, canCancelTurn: turn !== undefined, messages },
+        this.input.stepCall("applyRunMessages"),
+      ),
     );
     if (cancelled) turn?.abort();
   }
@@ -177,8 +197,15 @@ export class SessionExecution {
   private async runTurnSteps(
     turn: ActiveTurn,
     delivery: TurnStepPayload | undefined,
+    pause: TurnPause | undefined,
   ): Promise<TurnOutcome> {
     let nextStepInput: TurnStepPayload | undefined = delivery;
+    if (pause !== undefined) {
+      const resumed = await this.resume(turn, pause, this.input.queue.nextAdmission);
+      turn.awaitingCalls = false;
+      if (resumed === "cancelled") return await this.finishCancelledTurn(turn);
+      nextStepInput = resumed;
+    }
     let bindCaller = turn.caller;
 
     while (true) {
@@ -188,26 +215,33 @@ export class SessionExecution {
       const observation = this.input.inbox.handoverObservation;
       const handover =
         observation?.attemptKey === this.observedHandoverAttemptKey ? undefined : observation;
-      const result = await cursor.advanceWithHistory((state) => {
-        const run = (recover?: TurnStepInput["recover"]) =>
-          this.input.host.runTurnStep({
-            ...state,
-            handover,
-            abortSignal: turn.signal,
-            caller,
-            input: nextStepInput,
-            recover,
-            steeringSignal: turn.steeringSignal,
+      const input = nextStepInput;
+      const result = await cursor.advanceWithHistory(
+        (state) => {
+          const run = (recover?: TurnStepInput["recover"]) =>
+            this.input.host.step(
+              "turn",
+              { ...state, handover, caller, input, recover },
+              {
+                ...this.input.stepCall("turn"),
+                signals: { cancel: turn.signal, steer: turn.steeringSignal },
+              },
+            );
+          return run().catch((error: unknown) => {
+            const thrown = exhaustedStepError(error);
+            const name = isObject(thrown) ? readNonEmptyString(thrown.name) : undefined;
+            return run({
+              error: name === undefined ? {} : { name },
+              ...(turn.signal.aborted && { stopped: true as const }),
+            });
           });
-        return run().catch((error: unknown) => {
-          const thrown = exhaustedStepError(error);
-          const name = isObject(thrown) ? readNonEmptyString(thrown.name) : undefined;
-          return run({
-            error: name === undefined ? {} : { name },
-            ...(turn.signal.aborted && { stopped: true as const }),
-          });
-        });
-      });
+        },
+        {
+          after: (result) =>
+            result.action === "cancelled" ? cancelPointOf(turn) : openAfter(result),
+          before: { at: "step", ...(input !== undefined && { input }) },
+        },
+      );
       if (handover !== undefined) this.observedHandoverAttemptKey = handover.attemptKey;
       if (result.compacted === true) turn.compacted = true;
 
@@ -240,6 +274,7 @@ export class SessionExecution {
           return { kind: "park", settled: result.settled };
         case "paused": {
           const resumed = await this.resume(turn, result, stepAdmission);
+          turn.awaitingCalls = false;
           if (resumed === "cancelled") return await this.finishCancelledTurn(turn);
           nextStepInput = resumed;
           continue;
@@ -282,6 +317,7 @@ export class SessionExecution {
         ? { attemptIds: new Set(paused.attemptIds), requestIds: new Set(paused.requestIds) }
         : undefined;
     const calls = paused.on === "calls" ? await this.startCallWait(paused) : undefined;
+    turn.awaitingCalls = calls !== undefined;
     let interrupted = false;
     while (true) {
       if (pendingInteraction !== undefined) {
@@ -302,7 +338,7 @@ export class SessionExecution {
       const runtimeResults = await calls?.ready(interrupted);
       if (runtimeResults !== undefined) return await this.withSteering(turn, { runtimeResults });
 
-      const next = await turn.nextRuntimeEvent(calls?.timers() ?? []);
+      const next = await turn.nextRuntimeEvent(calls?.deadlines() ?? []);
       if (next === "cancelled") return next;
       switch (next.kind) {
         case "steering":
@@ -315,11 +351,9 @@ export class SessionExecution {
         case "runtime-action-result":
           calls?.acceptInbox(next.results);
           continue;
-        case "workflow": {
-          const result = await this.handleWorkflowMessage(next.message, turn);
-          if (result !== undefined) calls?.acceptRun(result, next.message);
+        case "workflow":
+          await this.handleWorkflowMessage(next.message, turn, calls);
           continue;
-        }
         case "input":
           continue;
       }
@@ -329,53 +363,96 @@ export class SessionExecution {
   private async startCallWait(
     paused: Extract<TurnPause, { readonly on: "calls" }>,
   ): Promise<CallWait> {
-    const dispatched = paused.dispatch ? await this.dispatchRuns() : [];
+    const dispatched = paused.dispatch
+      ? await this.dispatchRuns(paused)
+      : await this.resumeDispatched(paused);
     const wait = new CallWait(this.input, paused.callIds, dispatched);
     await wait.answerTaskToolCalls(paused.taskToolCalls);
     return wait;
   }
 
-  private async dispatchRuns(): Promise<readonly RuntimeActionResult[]> {
+  private async dispatchRuns(
+    paused: Extract<TurnPause, { readonly on: "calls" }>,
+  ): Promise<readonly RuntimeActionResult[]> {
     const { cursor } = this.input;
-    const dispatched = await cursor.advance(({ serializedContext, sessionState }) =>
-      this.input.host.dispatchRuns({
-        serializedContext,
-        sessionState,
-        workflowToolRunOwner: {
-          inbox: sessionInboxHookToken(sessionCommandHookToken(this.input.sessionId)),
-        },
-      }),
+    const dispatched = await cursor.advance(
+      ({ serializedContext, sessionState }) =>
+        this.input.host.step(
+          "dispatchRuns",
+          {
+            serializedContext,
+            sessionState,
+            workflowToolRunOwner: {
+              inbox: sessionInboxHookToken(sessionCommandHookToken(this.input.sessionId)),
+            },
+          },
+          this.input.stepCall("dispatchRuns"),
+        ),
+      {
+        after: (result) => ({
+          at: "pause",
+          pause: dispatchedPause(paused, result.results, result.pending),
+        }),
+      },
     );
-    const { executing, refused, started } = dispatched.pending;
-    if (executing.length > 0 || started.length > 0 || refused.length > 0) {
-      await cursor.advance((state) =>
-        publishDispatchedCallsStep({ ...state, pending: dispatched.pending }),
-      );
-    }
+    await this.publishDispatched(paused, dispatched.results, dispatched.pending);
     return dispatched.results;
   }
 
+  private async resumeDispatched(
+    paused: Extract<TurnPause, { readonly on: "calls" }>,
+  ): Promise<readonly RuntimeActionResult[]> {
+    const results = paused.results ?? [];
+    if (paused.publish !== undefined) await this.publishDispatched(paused, results, paused.publish);
+    return results;
+  }
+
+  private async publishDispatched(
+    paused: Extract<TurnPause, { readonly on: "calls" }>,
+    results: readonly RuntimeActionResult[],
+    pending: PendingDispatch,
+  ): Promise<void> {
+    if (!hasPendingDispatch(pending)) return;
+    await this.input.cursor.advance(
+      (state) =>
+        this.input.host.step(
+          "publishDispatchedCalls",
+          { ...state, pending },
+          this.input.stepCall("publishDispatchedCalls"),
+        ),
+      { after: () => ({ at: "pause", pause: dispatchedPause(paused, results, undefined) }) },
+    );
+  }
   async handleWorkflowMessage(
     message: WorkflowToolRunMessage,
     turn?: ActiveTurn,
-  ): Promise<RuntimeActionResult | undefined> {
+    calls?: CallWait,
+  ): Promise<void> {
     if (isAppliedRunMessage(message)) {
       const following =
         turn?.takeAppliedRunMessages() ?? takeLeadingAppliedRunMessages(this.input.inbox);
       await this.applyRunMessages([message, ...following], turn);
-      return undefined;
+      return;
     }
-    return await handleWorkflowToolRunMessage({
+    const result = await handleWorkflowToolRunMessage({
       cursor: this.input.cursor,
       message,
+      steps: this.input,
     });
+    if (result !== undefined && calls !== undefined) {
+      calls.acceptRun(result, message);
+    }
   }
 
   async cancelTurnWork(): Promise<void> {
-    await cancelWorkingTasks(this.input.cursor, "turn-cancelled", { turnCalls: true });
+    await cancelWorkingTasks(this.input, this.input.cursor, "turn-cancelled", {
+      turnCalls: true,
+    });
   }
 
   private async finishCancelledTurn(turn: ActiveTurn): Promise<TurnOutcome> {
+    const recorded = this.input.cursor.markOpen(cancelPointOf(turn));
+    if (recorded !== undefined) await recorded;
     await this.handleBoundaryMessages(turn.takeBoundaryMessages(isAgentSessionMessage));
     await this.cancelTurnWork();
     const by = turn.cancelledBy;
@@ -385,9 +462,37 @@ export class SessionExecution {
   }
 }
 
+function cancelPointOf(turn: ActiveTurn): OpenTurn {
+  const by = turn.cancelledBy;
+  return {
+    at: "cancel",
+    report: turn.caller !== undefined,
+    ...(by !== undefined && { control: controlDeliveryOf(by) }),
+  };
+}
+
+function hasPendingDispatch(pending: PendingDispatch): boolean {
+  return pending.executing.length > 0 || pending.started.length > 0 || pending.refused.length > 0;
+}
+
+function dispatchedPause(
+  paused: Extract<TurnPause, { readonly on: "calls" }>,
+  results: readonly RuntimeActionResult[],
+  pending: PendingDispatch | undefined,
+): TurnPause {
+  return {
+    callIds: paused.callIds,
+    dispatch: false,
+    on: "calls",
+    taskToolCalls: paused.taskToolCalls,
+    ...(results.length > 0 && { results }),
+    ...(pending !== undefined && hasPendingDispatch(pending) && { publish: pending }),
+  };
+}
 class CallWait {
   private readonly cursor: SessionStateCursor;
-  private readonly until: SessionTurnHost["until"];
+  private readonly host: SessionTurnHost;
+  private readonly steps: SessionStepRunner;
   private readonly callIds: readonly string[];
   private readonly results: RuntimeActionResult[] = [];
   private readonly acceptedAtMs = new Map<string, number>();
@@ -395,14 +500,15 @@ class CallWait {
   private taskWaits: TaskWait[] = [];
 
   constructor(
-    session: Pick<SessionExecutionInput, "cursor" | "host">,
+    session: Pick<SessionExecutionInput, "cursor" | "host" | "stepCall">,
     callIds: readonly string[],
     dispatched: readonly RuntimeActionResult[],
   ) {
     this.cursor = session.cursor;
-    this.until = session.host.until;
+    this.host = session.host;
+    this.steps = { host: session.host, stepCall: session.stepCall };
     this.callIds = callIds;
-    const acceptedAtMs = Date.now();
+    const acceptedAtMs = this.host.now();
     for (const result of dispatched) this.accept(result, acceptedAtMs);
   }
 
@@ -426,8 +532,10 @@ class CallWait {
     };
   }
 
-  timers(): readonly Promise<string>[] {
-    return this.taskWaits.flatMap((wait) => (wait.timer === undefined ? [] : [wait.timer]));
+  deadlines(): readonly TaskDeadline[] {
+    return this.taskWaits.flatMap(({ callId, deadline }) =>
+      deadline === undefined ? [] : [{ at: deadline, callId }],
+    );
   }
 
   timedOut(callId: string): void {
@@ -438,7 +546,7 @@ class CallWait {
 
   acceptInbox(results: readonly RuntimeActionResult[]): void {
     const snapshot = this.cursor.sessionState.snapshot.session.state;
-    const acceptedAtMs = Date.now();
+    const acceptedAtMs = this.host.now();
     for (const result of results) {
       if (
         result.kind === "tool-result" &&
@@ -463,24 +571,36 @@ class CallWait {
       const run = findBlockingWorkflowToolRun(state, callId);
       return run === undefined ? [] : [run.address];
     });
-    await Promise.all(runs.map((run) => interruptWorkflowToolRun(run)));
+    const interrupted = await this.host.all(
+      runs.map((run) =>
+        this.steps.host.step("interruptRun", run, this.steps.stepCall("interruptRun")),
+      ),
+    );
+    for (const result of interrupted) if (result.status === "rejected") throw result.reason;
   }
 
   async answerTaskToolCalls(calls: readonly TaskToolCall[]): Promise<void> {
     const waits: TaskWait[] = [];
-    const startedAtMs = calls.length === 0 ? 0 : await startTaskToolCallsStep();
+    const startedAtMs =
+      calls.length === 0
+        ? 0
+        : await this.steps.host.step(
+            "startTaskToolCalls",
+            undefined,
+            this.steps.stepCall("startTaskToolCalls"),
+          );
     for (const call of calls) {
       if (call.kind === TASK_WAIT_TOOL_NAME) {
-        waits.push(startTaskWait(call, startedAtMs, this.until));
+        waits.push(startTaskWait(call, startedAtMs));
         continue;
       }
-      this.accept(await answerTaskCancel(this.cursor, call));
+      this.accept(await answerTaskCancel(this.steps, this.cursor, call));
     }
     this.taskWaits = waits;
     this.taskWaits = await this.resolveTaskWaits(false);
   }
 
-  private accept(result: RuntimeActionResult, acceptedAtMs = Date.now()): void {
+  private accept(result: RuntimeActionResult, acceptedAtMs = this.host.now()): void {
     this.results.push(result);
     this.acceptedAtMs.set(result.callId, acceptedAtMs);
   }
@@ -494,32 +614,34 @@ class CallWait {
         waiting.push(wait);
         continue;
       }
-      const text = renderTaskWaitResult(result, Date.now() - wait.startedAtMs);
+      const text = renderTaskWaitResult(result, this.host.now() - wait.startedAtMs);
       this.accept(taskToolResult(wait.callId, TASK_WAIT_TOOL_NAME, text));
     }
     return waiting;
   }
 }
 
+export interface TaskDeadline {
+  readonly at: number;
+  readonly callId: string;
+}
+
 interface TaskWait {
   readonly callId: string;
+  readonly deadline?: number;
   readonly startedAtMs: number;
-  readonly timer?: Promise<string>;
   timedOut: boolean;
 }
 
 function startTaskWait(
   call: Extract<TaskToolCall, { readonly kind: typeof TASK_WAIT_TOOL_NAME }>,
   startedAtMs: number,
-  until: SessionTurnHost["until"],
 ): TaskWait {
   const { callId, timeoutMs } = call;
-  const timer =
-    timeoutMs === undefined ? undefined : until(startedAtMs + timeoutMs).then(() => callId);
   return {
     callId,
+    ...(timeoutMs !== undefined && { deadline: startedAtMs + timeoutMs }),
     startedAtMs,
     timedOut: timeoutMs === 0,
-    timer,
   };
 }

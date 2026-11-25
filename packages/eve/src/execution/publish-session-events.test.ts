@@ -1,3 +1,4 @@
+import { builtInHosts } from "#runtime/app.js";
 import { transition } from "#harness/session-machine/commit.js";
 import { expect, it } from "vitest";
 import { commitSessionStep } from "#execution/publish-session-events.js";
@@ -7,6 +8,7 @@ const target = () => ({
   serializedContext: {},
   sessionState: createTestSessionState(),
   sessionWritable: new WritableStream<Uint8Array>(),
+  hosts: builtInHosts(),
   rerun: false,
 });
 it("rejects overlapping turn snapshots before restoring or publishing", async () => {

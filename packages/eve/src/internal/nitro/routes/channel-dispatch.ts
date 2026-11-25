@@ -23,10 +23,11 @@ import {
 import { traceChannelRequest } from "#internal/nitro/routes/channel-request-instrumentation.js";
 import { resolveNitroChannelRuntimeBundle } from "#internal/nitro/routes/runtime-stack.js";
 import { createRouteInvokeTool } from "#internal/nitro/routes/route-invoke-tool.js";
-import { readVercelProjectLink } from "#internal/vercel/project-link.js";
-import { withVercelOidcProjectResolver } from "#channel/auth/vercel-oidc-project.js";
 import { withLocalDevRequestScope } from "#runtime/local-dev-capability.js";
-import { getWorld } from "#internal/workflow/runtime.js";
+import { workflowDeploymentId } from "#execution/workflow-host/host.js";
+import { runInApp } from "#context/app.js";
+import type { App } from "#runtime/app.js";
+import { developmentIdentity } from "#platform/entities.js";
 
 const log = createLogger("channel.dispatch");
 
@@ -34,12 +35,13 @@ export async function dispatchChannelRequest(
   event: H3Event,
   routeKey: string,
   config: NitroArtifactsConfig,
+  app: App,
 ): Promise<Response> {
   const params = getRouterParams(event, { decode: true });
   return await traceChannelRequest({ request: event.req, routeKey }, async (span) => {
     const requestTraceContext =
       span?.reference ?? otelTrace.getSpan(otelContext.active())?.spanContext();
-    const bundle = await resolveNitroChannelRuntimeBundle(config);
+    const bundle = await resolveNitroChannelRuntimeBundle(config, app);
     const matchedChannel = channelsByRouteKey(bundle.channels).get(routeKey);
 
     if (matchedChannel === undefined) {
@@ -60,6 +62,7 @@ export async function dispatchChannelRequest(
       bundle,
       channel: matchedChannel,
       channelKind: channelKind ?? "channel",
+      app,
       config,
       event,
       params,
@@ -68,7 +71,7 @@ export async function dispatchChannelRequest(
     });
 
     try {
-      return await withDevelopmentVercelOidcContext(config, event.req, async () => {
+      return await withRequestApp(app, config, event.req, async () => {
         if (matchedChannel.handler) {
           return await matchedChannel.handler(event.req, args);
         }
@@ -100,9 +103,10 @@ export async function dispatchChannelWebSocketRequest(
   event: H3Event,
   routeKey: string,
   config: NitroArtifactsConfig,
+  app: App,
 ): Promise<WebSocketRouteHooks> {
   const params = getRouterParams(event, { decode: true });
-  const bundle = await resolveNitroChannelRuntimeBundle(config);
+  const bundle = await resolveNitroChannelRuntimeBundle(config, app);
   const matchedChannel = channelsByRouteKey(bundle.channels).get(routeKey);
 
   if (matchedChannel === undefined || matchedChannel.websocket === undefined) {
@@ -121,6 +125,7 @@ export async function dispatchChannelWebSocketRequest(
     bundle,
     channel: matchedChannel,
     channelKind,
+    app,
     config,
     event,
     params,
@@ -129,7 +134,8 @@ export async function dispatchChannelWebSocketRequest(
   });
 
   try {
-    return await withDevelopmentVercelOidcContext(
+    return await withRequestApp(
+      app,
       config,
       event.req,
       async () => await websocket(event.req, args),
@@ -146,34 +152,29 @@ export async function dispatchChannelWebSocketRequest(
   }
 }
 
-async function withDevelopmentVercelOidcContext<T>(
+async function withRequestApp<T>(
+  app: App,
   config: NitroArtifactsConfig,
   request: Request,
   callback: () => Promise<T>,
 ): Promise<T> {
+  const inApp = () => runInApp(app, callback);
   if (config.kind !== "development") {
-    return await callback();
+    return await inApp();
   }
 
   return await withLocalDevRequestScope(
     request,
     async () =>
-      await withVercelOidcProjectResolver(
-        {
-          request,
-          resolveCurrentProject: async () => {
-            const link = await readVercelProjectLink(config.appRoot);
-            return link === undefined
-              ? undefined
-              : { environment: "development", projectId: link.projectId };
-          },
-        },
-        callback,
-      ),
+      await (developmentIdentity(app.platform.identity)?.scope(
+        { appRoot: config.appRoot, request },
+        inApp,
+      ) ?? inApp()),
   );
 }
 
 async function buildRouteArgs(input: {
+  readonly app: App;
   readonly bundle: Awaited<ReturnType<typeof resolveNitroChannelRuntimeBundle>>;
   readonly channel: ResolvedChannelDefinition;
   readonly channelKind: string;
@@ -183,7 +184,7 @@ async function buildRouteArgs(input: {
   readonly requestTraceContext: SpanContext | undefined;
   readonly routeKey: string;
 }): Promise<RouteHandlerArgs> {
-  const { bundle, channel, channelKind, config, event, params, requestTraceContext } = input;
+  const { app, bundle, channel, channelKind, config, event, params, requestTraceContext } = input;
   const channelName = channel.name;
   const requestId = readVercelRequestId(event.req.headers);
   const requestIp = extractRequestIp(event, config);
@@ -198,7 +199,7 @@ async function buildRouteArgs(input: {
     );
   };
   const adapter = channel.adapter ?? { kind: "channel" };
-  const acceptedDeploymentId = await resolveAcceptedDeploymentId(config);
+  const acceptedDeploymentId = await resolveAcceptedDeploymentId(app, config);
   const deliverySource = {
     acceptedDeploymentId,
     channelKind,
@@ -226,6 +227,7 @@ async function buildRouteArgs(input: {
       ...agent.args,
       invokeTool: createRouteInvokeTool({
         agentName: bundle.agentName,
+        app,
         config,
         origin: { adapter, agentName: bundle.agentName, channelName },
         requestUrl: event.req.url,
@@ -233,7 +235,7 @@ async function buildRouteArgs(input: {
     },
     agentInfo: async () => {
       const { handleAgentInfoRequest } = await import("#internal/nitro/routes/info.js");
-      return await handleAgentInfoRequest(config);
+      return await handleAgentInfoRequest(config, undefined, app);
     },
     agentName: bundle.agentName,
     deliverySource,
@@ -249,15 +251,17 @@ async function buildRouteArgs(input: {
 }
 
 async function resolveAcceptedDeploymentId(
+  app: App,
   config: NitroArtifactsConfig,
 ): Promise<string | undefined> {
-  const hosted = process.env.VERCEL_DEPLOYMENT_ID?.trim();
-  if (hosted !== undefined && hosted.length > 0) return validateDeploymentId(hosted);
+  const { platform } = app;
+  const hosted = platform.deployment.deploymentId();
+  if (hosted !== undefined) return validateDeploymentId(hosted);
 
   if (config.kind === "development" && process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV] === undefined) {
     return undefined;
   }
-  return validateDeploymentId(await (await getWorld()).getDeploymentId());
+  return validateDeploymentId(await workflowDeploymentId(platform));
 }
 
 function validateDeploymentId(deploymentId: string): string {

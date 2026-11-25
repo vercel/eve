@@ -4,6 +4,7 @@ import type {
 } from "#compiler/manifest.js";
 import { stripLogicalPathExtension } from "#discover/filesystem.js";
 import type { ScheduleSourceRef } from "#discover/manifest.js";
+import { authoredScheduleProvider } from "#shared/schedule-collection-definition.js";
 import { scheduleCollectionToolSlot } from "#shared/schedule-collection-tools.js";
 import { normalizeScheduleCollectionDefinition } from "#internal/authored-definition/schedule-collection.js";
 import { namedScopeCollectionName } from "#runtime/schedules/named-scope.js";
@@ -12,6 +13,7 @@ export function compileScheduleCollectionDefinitions(
   source: ScheduleSourceRef,
   value: unknown,
   application: string,
+  defaultProviderKind: () => string | undefined,
 ): CompiledScheduleCollectionDefinition[] {
   if (source.sourceKind !== "module") {
     throw new Error(`Schedule collections must be authored as modules: "${source.logicalPath}".`);
@@ -22,6 +24,13 @@ export function compileScheduleCollectionDefinitions(
   );
   const name =
     definition.id ?? stripLogicalPathExtension(source.logicalPath).replace(/^schedules\//u, "");
+  const authored = authoredScheduleProvider(definition) as { readonly kind: string } | undefined;
+  const providerKind = authored?.kind ?? defaultProviderKind();
+  if (providerKind === undefined) {
+    throw new Error(
+      `The schedule collection in "${source.logicalPath}" has no provider, and the platform names no default. Pass \`provider\` to defineDynamicSchedules(), or give \`build.schedules\` in the platform.`,
+    );
+  }
   const compile = (
     collection: string,
     description: string | undefined,
@@ -30,7 +39,7 @@ export function compileScheduleCollectionDefinitions(
       application,
       logicalPath: source.logicalPath,
       name: collection,
-      providerKind: definition.provider.kind,
+      providerKind,
       sourceId: source.sourceId,
       sourceKind: "module",
     };

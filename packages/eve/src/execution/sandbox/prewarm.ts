@@ -3,6 +3,8 @@ import { join, relative, resolve } from "node:path";
 import type { CompiledWorkspaceResourceRoot } from "#compiler/manifest.js";
 import { copyDirectoryAtomically } from "#execution/sandbox/bindings/local-provider-utils.js";
 import { createLoggingSandboxSession } from "#execution/sandbox/logging-session.js";
+import { withBuildCompute } from "#sandbox/hosted-compute.js";
+import type { Build } from "#platform/entities.js";
 import { createSandboxProviderIdentity } from "#execution/sandbox/provider-identity.js";
 import { createConnectionSession } from "#execution/sandbox/session.js";
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
@@ -79,6 +81,7 @@ type SandboxProviderPrepareDispatch = (input: {
 
 interface PrewarmSandboxesInput {
   readonly appRoot: string;
+  readonly build: Build;
   readonly compileDirectoryPath: string;
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
   readonly graph: ResolvedAgentGraphBundle;
@@ -121,6 +124,7 @@ async function prewarmSandboxes(input: PrewarmSandboxesInput): Promise<void> {
         return { nodeId, provider, result };
       } catch (error) {
         const prewarmError = formatPrewarmFailureForEnvironment({
+          build: input.build,
           providerName: provider.providerName,
           error,
         });
@@ -150,6 +154,7 @@ async function prewarmSandboxes(input: PrewarmSandboxesInput): Promise<void> {
 
 export async function prewarmAppSandboxes(input: {
   readonly appRoot: string;
+  readonly build: Build;
   readonly compiledArtifactsSource?: RuntimeCompiledArtifactsSource;
   readonly loadAgentGraph?: (
     input: Readonly<{
@@ -162,6 +167,12 @@ export async function prewarmAppSandboxes(input: {
   readonly dispatch?: SandboxProviderPrepareDispatch;
   readonly preparedArtifactStore?: SandboxPreparedArtifactStore;
 }): Promise<void> {
+  await withBuildCompute(input.build.prewarm?.compute, () => prewarmBuiltAppSandboxes(input));
+}
+
+async function prewarmBuiltAppSandboxes(
+  input: Parameters<typeof prewarmAppSandboxes>[0],
+): Promise<void> {
   const compiledArtifactsSource =
     input.compiledArtifactsSource ??
     createAuthoredSourceRuntimeCompiledArtifactsSource(input.appRoot);
@@ -175,6 +186,7 @@ export async function prewarmAppSandboxes(input: {
 
   await prewarmSandboxes({
     appRoot: getRuntimeCompiledArtifactsSandboxAppRoot(compiledArtifactsSource) ?? input.appRoot,
+    build: input.build,
     compileDirectoryPath: resolveRuntimeCompilerArtifactPaths(compiledArtifactsSource.appRoot)
       .compileDirectoryPath,
     compiledArtifactsSource,
@@ -408,25 +420,12 @@ function shouldLogSandboxPrewarmProgress(message: string): boolean {
 }
 
 function formatPrewarmFailureForEnvironment(input: {
+  readonly build: Build;
   readonly providerName: string;
   readonly error: unknown;
 }): unknown {
-  if (!isVercelEnvironment() || !isLocalSandboxProvider(input.providerName)) {
-    return input.error;
-  }
-
-  return new Error(
-    `The ${input.providerName} sandbox provider is not available when deploying on Vercel. ` +
-      "Vercel build containers cannot run local Docker containers. " +
-      "Use DefaultSandbox.environment() so eve selects Vercel Sandbox on Vercel, or configure " +
-      "VercelSandbox.environment() explicitly. " +
-      `Original ${input.providerName} error: ${toErrorMessage(input.error)}`,
-    { cause: input.error },
-  );
-}
-
-function isVercelEnvironment(): boolean {
-  return Boolean(process.env.VERCEL?.trim());
+  if (!isLocalSandboxProvider(input.providerName)) return input.error;
+  return input.build.prewarm?.failure?.(input.providerName, input.error) ?? input.error;
 }
 
 function isLocalSandboxProvider(providerName: string): boolean {

@@ -1,3 +1,4 @@
+import type { Entities } from "#platform/entities.js";
 import {
   getInstrumentationRuntime,
   type InstrumentationRuntime,
@@ -20,6 +21,7 @@ export const localTracePolicy: TraceCapturePolicy = () => true;
 export function installLocalInstrumentationRuntime(input: {
   readonly appRoot: string;
   readonly frameworkVersion: string;
+  readonly platform: Entities;
   readonly serviceName: string;
 }): InstrumentationRuntime {
   const existing = getInstrumentationRuntime();
@@ -27,14 +29,18 @@ export function installLocalInstrumentationRuntime(input: {
 
   const spool = createLocalTracesProcessor({ appRoot: input.appRoot });
   return installInstrumentationRuntime({
-    collected: collectOtelPipeline([
-      otel({ tracePolicy: localTracePolicy }),
-      managedOtelIntegration({
-        exportPolicy: resolveLocalTracesExportPolicy(),
-        spanProcessors: [spool],
-      }),
-    ]),
+    collected: collectOtelPipeline(
+      [
+        otel({ tracePolicy: localTracePolicy }),
+        managedOtelIntegration({
+          exportPolicy: resolveLocalTracesExportPolicy(),
+          spanProcessors: [spool],
+        }),
+      ],
+      input.platform,
+    ),
     frameworkVersion: input.frameworkVersion,
+    platform: input.platform,
     providers: [],
     serviceName: input.serviceName,
   });

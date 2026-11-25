@@ -3,6 +3,7 @@ import { mkdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 import { resolveOutputDirectory } from "#internal/application/paths.js";
+import { loadPlatformBuild } from "#platform/selection.js";
 import { VERCEL_EVE_AGENT_SUMMARY_OUTPUT_PATH } from "#internal/vercel-agent-summary.js";
 
 export interface ApplicationBuildWorkspace {
@@ -55,7 +56,9 @@ export async function createApplicationBuildWorkspace(
     },
     publication: {
       output: {
-        finalDir: outputDirectory ?? resolveOutputDirectory(resolvedAppRoot),
+        finalDir:
+          outputDirectory ??
+          resolveOutputDirectory(resolvedAppRoot, await loadPlatformBuild(resolvedAppRoot)),
         stagedDir: join(rootDir, "output"),
       },
       summary: {

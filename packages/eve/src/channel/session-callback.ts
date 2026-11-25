@@ -4,6 +4,7 @@ import type { SessionCallback } from "#channel/types.js";
 import { createEveCallbackRoutePath } from "#protocol/routes.js";
 import { normalizePublicEveRoutePath } from "#shared/eve-route-path.js";
 import { isLocalDevelopmentServer } from "#internal/application/dev-environment.js";
+import type { Entities } from "#platform/entities.js";
 import { isBlockedDestinationHost } from "#shared/network-address.js";
 
 type SessionCallbackParseResult =
@@ -17,55 +18,59 @@ type SessionCallbackParseResult =
       readonly ok: false;
     };
 
-const sessionCallbackSchema = z
-  .object({
-    callId: z.string().min(1),
-    subagentName: z.string().min(1),
-    token: z.string().min(1),
-    url: z.string().min(1),
-  })
-  .strict()
-  .superRefine((callback, ctx) => {
-    let url: URL;
-    try {
-      url = new URL(callback.url);
-    } catch {
-      ctx.addIssue({
-        code: "custom",
-        message: "Callback url must be absolute.",
-        path: ["url"],
-      });
-      return;
-    }
+const sessionCallbackSchema = (allowLoopback: boolean) =>
+  z
+    .object({
+      callId: z.string().min(1),
+      subagentName: z.string().min(1),
+      token: z.string().min(1),
+      url: z.string().min(1),
+    })
+    .strict()
+    .superRefine((callback, ctx) => {
+      let url: URL;
+      try {
+        url = new URL(callback.url);
+      } catch {
+        ctx.addIssue({
+          code: "custom",
+          message: "Callback url must be absolute.",
+          path: ["url"],
+        });
+        return;
+      }
 
-    if (readCallbackUrlToken(url) !== callback.token) {
-      ctx.addIssue({
-        code: "custom",
-        message: "Callback url token must match callback token.",
-        path: ["url"],
-      });
-    }
+      if (readCallbackUrlToken(url) !== callback.token) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Callback url token must match callback token.",
+          path: ["url"],
+        });
+      }
 
-    if (url.protocol !== "http:" && url.protocol !== "https:") {
-      ctx.addIssue({
-        code: "custom",
-        message: "Callback url must use http or https.",
-        path: ["url"],
-      });
-    }
+      if (url.protocol !== "http:" && url.protocol !== "https:") {
+        ctx.addIssue({
+          code: "custom",
+          message: "Callback url must use http or https.",
+          path: ["url"],
+        });
+      }
 
-    if (isBlockedDestinationHost(url.hostname, { allowLoopback: isLocalDevelopmentServer() })) {
-      ctx.addIssue({
-        code: "custom",
-        message:
-          "Callback url host must not be a loopback, private, link-local, or reserved address. Loopback is allowed only on local development servers.",
-        path: ["url"],
-      });
-    }
-  });
+      if (isBlockedDestinationHost(url.hostname, { allowLoopback })) {
+        ctx.addIssue({
+          code: "custom",
+          message:
+            "Callback url host must not be a loopback, private, link-local, or reserved address. Loopback is allowed only on local development servers.",
+          path: ["url"],
+        });
+      }
+    });
 
-export function parseSessionCallback(value: unknown): SessionCallbackParseResult {
-  const parsed = sessionCallbackSchema.safeParse(value);
+export function parseSessionCallback(
+  value: unknown,
+  platform: Entities,
+): SessionCallbackParseResult {
+  const parsed = sessionCallbackSchema(isLocalDevelopmentServer(platform)).safeParse(value);
   if (parsed.success) {
     return { callback: parsed.data, ok: true };
   }

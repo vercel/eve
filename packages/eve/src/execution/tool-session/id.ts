@@ -1,8 +1,7 @@
-import { createHash } from "node:crypto";
-
 import { TOOL_SESSION_KEY_MAX_LENGTH } from "#channel/invoke-tool.js";
 import { principalIdentity } from "#channel/principal-identity.js";
 import type { SessionAuthContext } from "#channel/types.js";
+import { sha256Hex } from "#shared/digest.js";
 
 export const TOOL_SESSION_ID_PREFIX = "tool_session_";
 
@@ -26,5 +25,5 @@ export function deriveToolSessionId(input: {
   const identity: unknown[] = ["eve.tool-session.v1", principalIdentity(input.current), input.key];
   if (input.forwardedBy !== undefined) identity.push(principalIdentity(input.forwardedBy));
   const encoded = JSON.stringify(identity);
-  return `${TOOL_SESSION_ID_PREFIX}${createHash("sha256").update(encoded, "utf8").digest("hex")}`;
+  return `${TOOL_SESSION_ID_PREFIX}${sha256Hex(encoded)}`;
 }

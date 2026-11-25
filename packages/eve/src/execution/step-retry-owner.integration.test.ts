@@ -5,6 +5,7 @@ import {
 } from "#instrumentation/providers.js";
 import { textStreamResult, toolCallStreamResult } from "#internal/testing/approval-resume.js";
 import { withInterruptedSession } from "#internal/testing/interrupted-session.js";
+import { startTestApp, testEntities } from "#internal/testing/test-platform.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { defineInstrumentation } from "#public/instrumentation/index.js";
 
@@ -216,6 +217,7 @@ it("retries a step whose stream write failed, and each model attempt settles onc
   const settled: { readonly key: string; readonly outcome: string }[] = [];
   await registerInstrumentationProvider({
     agentName: name,
+    platform: testEntities(),
     slot: "capture",
     value: defineInstrumentation({
       events: {
@@ -225,12 +227,10 @@ it("retries a step whose stream write failed, and each model attempt settles onc
       },
     }),
   });
-  finalizeInstrumentationProviders({ serviceName: name });
+  finalizeInstrumentationProviders({ platform: testEntities(), serviceName: name });
   onTestFinished(() => {
-    delete (globalThis as Record<symbol, unknown>)[
-      Symbol.for("eve.harness-instrumentation-providers")
-    ];
-    delete (globalThis as Record<symbol, unknown>)[Symbol.for("eve.instrumentation-runtime")];
+    delete (globalThis as Record<symbol, unknown>)[Symbol.for("eve.app")];
+    startTestApp();
   });
 
   const { prompts } = await withInterruptedSession(

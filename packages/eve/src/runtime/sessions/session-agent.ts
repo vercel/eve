@@ -2,6 +2,7 @@ import type { AgentRoster } from "#execution/agent-sessions/roster.js";
 import type { DynamicSubagentSelections } from "#execution/agent-sessions/target.js";
 import type { ContextReader } from "#context/key.js";
 import type { Definition } from "#definitions/definition.js";
+import type { Entities } from "#platform/entities.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { DurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
@@ -49,7 +50,7 @@ export interface SessionAgent {
   readonly name?: string;
   readonly reference: SessionAgentReference;
   readonly nodeId?: string;
-  readonly revision: () => Promise<string>;
+  readonly revision: (platform: Entities) => Promise<string>;
   readonly definitions: () => Promise<readonly Definition[]>;
   readonly settings: SessionAgentSettings;
   readonly adapters: RuntimeAdapterRegistry;

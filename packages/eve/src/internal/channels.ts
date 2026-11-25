@@ -10,7 +10,5 @@ export { renderTextInteraction } from "#channel/resolve-text.js";
 export type { RouteHandler } from "#channel/routes.js";
 export { ContextKey, type ContextAccessor } from "#context/key.js";
 export { createLogger } from "#internal/logging.js";
-export {
-  createWorkflowCallbackUrl,
-  resolveWorkflowCallbackBaseUrl,
-} from "#execution/workflow-callback-url.js";
+export { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
+export { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";

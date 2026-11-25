@@ -1,0 +1,58 @@
+import {
+  getVercelSandboxFetch,
+  resolveVercelSandboxCredentials,
+} from "#platform/vercel/sandbox/credentials.js";
+import { isVercelSandboxMissingError } from "#platform/vercel/sandbox/errors.js";
+import { getNamedVercelSandbox } from "#platform/vercel/sandbox/lookup.js";
+import type {
+  VercelCreateOptions,
+  VercelModule,
+  VercelSandbox,
+} from "#platform/vercel/sandbox/sdk-types.js";
+
+export async function deleteNamedVercelSandbox(input: {
+  readonly createOptions: VercelCreateOptions;
+  readonly sandboxModule: VercelModule;
+  readonly sandboxName: string;
+  readonly signal?: AbortSignal;
+}): Promise<void> {
+  const sandbox = await getNamedVercelSandbox({
+    createOptions:
+      input.signal === undefined
+        ? input.createOptions
+        : { ...input.createOptions, signal: input.signal },
+    sandboxModule: input.sandboxModule,
+    sandboxName: input.sandboxName,
+  });
+  if (sandbox === null) return;
+  try {
+    await stopVercelSandbox(sandbox);
+    await sandbox.delete({ deleteOrphanSnapshots: true, signal: input.signal });
+  } catch (error) {
+    if (!isVercelSandboxMissingError(error)) throw error;
+  }
+}
+
+export async function deleteUnusableVercelSandbox(input: {
+  readonly createOptions: VercelCreateOptions;
+  readonly sandboxModule: VercelModule;
+  readonly sandboxName: string;
+}): Promise<void> {
+  const sandbox = await input.sandboxModule.Sandbox.get({
+    ...(await resolveVercelSandboxCredentials(input.createOptions)),
+    fetch: getVercelSandboxFetch(input.createOptions),
+    name: input.sandboxName,
+    resume: false,
+  });
+  await sandbox.delete({ deleteOrphanSnapshots: true });
+}
+
+export async function stopVercelSandbox(
+  sandbox: VercelSandbox,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (sandbox.status !== "running" && sandbox.status !== "pending") {
+    return;
+  }
+  await sandbox.stop(signal === undefined ? undefined : { signal });
+}

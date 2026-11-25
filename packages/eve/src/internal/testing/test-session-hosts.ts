@@ -1,7 +1,8 @@
+import { builtInHosts } from "#runtime/app.js";
 import type { Runtime } from "#channel/types.js";
 import type { StepFaults } from "#execution/in-process/step-attempts.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
-import { sessionLineStore } from "#execution/hosts.js";
+import { sessionEventStore } from "#execution/hosts.js";
 import type { InitialWorkflowEntryInput } from "#execution/session/entry-input.js";
 import { workflowEntry } from "#execution/session/entry.js";
 import { createTestInProcessRuntime } from "#internal/testing/in-process-runtime.js";
@@ -51,7 +52,7 @@ export async function startTestSession(
   const { sessionId } = await runtime.startEntry(initial);
   return {
     runId: sessionId,
-    readable: sessionLineStore(sessionId).readable(sessionId),
+    readable: sessionEventStore(builtInHosts(), sessionId).readable(sessionId),
     cancel: () => runtime.dispose(),
     runtime,
   };

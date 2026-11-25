@@ -62,7 +62,12 @@ function resolveCurrentModulePathFromStack(): string {
   }
 }
 
-const packageRequire = createRequire(resolveCurrentModulePath());
+let cachedPackageRequire: NodeJS.Require | undefined;
+
+function packageRequire(): NodeJS.Require {
+  cachedPackageRequire ??= createRequire(resolveCurrentModulePath());
+  return cachedPackageRequire;
+}
 
 function tryResolveVerifiedPackageRoot(packageJsonPath: string): string | undefined {
   try {
@@ -276,7 +281,7 @@ export function resolvePackageSourceDirectoryPath(relativeSourcePath: string): s
 
 export function resolvePackageDependencyPath(specifier: string): string {
   try {
-    return packageRequire.resolve(specifier);
+    return packageRequire().resolve(specifier);
   } catch (error) {
     const packageRoot = tryResolvePackageRoot();
     const sourcePath =
@@ -363,7 +368,7 @@ function tryReadInstalledPackageInfo(
 function tryResolveSelfPackageInfo(): InstalledPackageInfo | undefined {
   try {
     return tryReadInstalledPackageInfo(
-      packageRequire.resolve(`${EVE_PACKAGE_NAME}/package.json`),
+      packageRequire().resolve(`${EVE_PACKAGE_NAME}/package.json`),
       EVE_PACKAGE_NAME,
     );
   } catch {
@@ -439,7 +444,9 @@ export function resolveExpectedWorkflowVersion(): string | undefined {
 
   try {
     return readWorkflowVersionFromManifest(
-      JSON.parse(readFileSync(packageRequire.resolve(`${EVE_PACKAGE_NAME}/package.json`), "utf8")),
+      JSON.parse(
+        readFileSync(packageRequire().resolve(`${EVE_PACKAGE_NAME}/package.json`), "utf8"),
+      ),
     );
   } catch {
     return undefined;
@@ -456,5 +463,5 @@ export function resolveWorkflowModulePath(specifier: string): string {
     return resolvePackageCompiledFilePath(alias);
   }
 
-  return packageRequire.resolve(specifier);
+  return packageRequire().resolve(specifier);
 }

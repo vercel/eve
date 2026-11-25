@@ -11,6 +11,8 @@ import {
 } from "#internal/vercel/vercel-services-config.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import { joinEveRoutePath, normalizePublicEveRoutePath } from "#shared/eve-route-path.js";
+import { builtInPlatformBuild } from "#platform/selection.js";
+import { usesPlatformOutput } from "#platform/entities.js";
 import {
   addEveVercelServices,
   readEveBaseUrlOrigin,
@@ -89,7 +91,7 @@ export function createEveVitePlugin(input: {
 }): Plugin & { readonly nitro: EveNitroModule } {
   const { host, nitroOnly, options, vercelOutputAfterSsrBundle } = input;
   const devServerTimeoutMs = resolveDevServerTimeout(options.devServerTimeoutMs, host);
-  const isVercel = Boolean(process.env.VERCEL);
+  const isVercel = usesPlatformOutput(builtInPlatformBuild());
   let viteRoot: string;
   let projectRoot: string;
   let agents: readonly EveFrameworkAgent[];

@@ -1,8 +1,9 @@
 import type { SessionPrewarmPayload } from "#execution/session-prewarm.js";
 import type { DeliverPayload, HookPayload, SessionCommand } from "#channel/types.js";
-import type {
-  WorkflowToolRunMessage,
-  WorkflowToolRunMessageBatch,
+import {
+  isWorkflowToolRunMessage,
+  type WorkflowToolRunMessage,
+  type WorkflowToolRunMessageBatch,
 } from "#execution/tools/workflow/messages.js";
 
 export interface AuthorizationCallbackPayload {
@@ -50,6 +51,9 @@ export interface SessionInboxTransport<Hook extends InboxHook = InboxHook> {
   dispose(hook: Hook): Promise<void>;
   isTakenOver(error: unknown): boolean;
   ownerRunId(): string;
+  now(): number;
+  readonly consumedThrough?: number;
+  seqOf?(payload: SessionInboxPayload): number | undefined;
 }
 
 interface Source<Hook extends InboxHook> {
@@ -96,8 +100,10 @@ export interface SessionInboxOwnership {
 }
 export interface SessionInbox extends SessionInboxReader, SessionInboxOwnership {}
 export interface SessionInboxHandle extends SessionInbox {
+  readonly takenThrough: number;
   readonly awaitingHandover: boolean;
   whenHandoverSettled(): Promise<void>;
+  whenPendingOrHandoverSettled(): Promise<"pending" | "settled">;
   abandonHandover(attemptKey: string): void;
   whenBlockedOnHandover(): Promise<void>;
   whenArrival(): Promise<void>;
@@ -143,6 +149,7 @@ export function createSessionInbox<Hook extends InboxHook>(
   const arrivalWaiters = new Set<() => void>();
   let takenOver = false;
   let stopped = false;
+  let takenThrough = transport.consumedThrough ?? 0;
 
   const notify = (): void => {
     for (const resolve of waiters) resolve();
@@ -154,6 +161,13 @@ export function createSessionInbox<Hook extends InboxHook>(
   const hasReadable = (): boolean => !gated() && queue.length > 0;
   const throwIfFailed = (): void => {
     if (failure !== undefined) throw failure.error;
+  };
+  const took = <T extends SessionInboxPayload>(payloads: T[]): T[] => {
+    for (const payload of payloads) {
+      const seq = transport.seqOf?.(payload);
+      if (seq !== undefined && seq > takenThrough) takenThrough = seq;
+    }
+    return payloads;
   };
   const observe = (
     handlers: ReadonlySet<(payload: SessionInboxPayload) => void>,
@@ -192,7 +206,7 @@ export function createSessionInbox<Hook extends InboxHook>(
         handoverObservation = {
           attemptKey: current.attemptKey,
           payloadCount: current.nextPart,
-          appliedAtMs: Date.now(),
+          appliedAtMs: transport.now(),
         };
         observe(interruptHandlers, restored, isInterrupt);
         openHandover();
@@ -268,7 +282,7 @@ export function createSessionInbox<Hook extends InboxHook>(
     stopped = true;
     for (const source of released) source.stopping = true;
     notify();
-    await Promise.all(released.map(({ hook }) => transport.dispose(hook)));
+    await settled(released.map(({ hook }) => transport.dispose(hook)));
     queue.splice(0);
     notify();
   };
@@ -322,11 +336,22 @@ export function createSessionInbox<Hook extends InboxHook>(
     get claimedTokens() {
       return sources.map(({ token }) => token);
     },
+    get takenThrough() {
+      return takenThrough;
+    },
     get awaitingHandover() {
       return handover !== undefined;
     },
     async whenHandoverSettled() {
       while (handover !== undefined) await wait();
+    },
+    async whenPendingOrHandoverSettled() {
+      while (true) {
+        if (failure !== undefined || hasReadable() || closed()) return "pending";
+        if (handover === undefined) return "settled";
+        blockedOnHandover();
+        await wait();
+      }
     },
     abandonHandover(attemptKey) {
       const current = handover;
@@ -358,10 +383,7 @@ export function createSessionInbox<Hook extends InboxHook>(
           nextPart: 0,
           parts: new Map(),
         };
-      const outcomes = await Promise.allSettled(
-        [...new Set(tokens)].map((token) => claimSessionHook(token, options)),
-      );
-      for (const outcome of outcomes) if (outcome.status === "rejected") throw outcome.reason;
+      await settled([...new Set(tokens)].map((token) => claimSessionHook(token, options)));
     },
     async whenTakenOver(signal) {
       signal?.addEventListener("abort", notify, { once: true });
@@ -375,7 +397,7 @@ export function createSessionInbox<Hook extends InboxHook>(
     async next() {
       while (true) {
         throwIfFailed();
-        if (hasReadable()) return queue.shift();
+        if (hasReadable()) return took([queue.shift()!])[0];
         if (closed()) return undefined;
         blockedOnHandover();
         await wait();
@@ -383,7 +405,7 @@ export function createSessionInbox<Hook extends InboxHook>(
     },
     drain() {
       throwIfFailed();
-      return gated() ? [] : queue.splice(0);
+      return gated() ? [] : took(queue.splice(0));
     },
     takeLeading<T extends SessionInboxPayload>(
       accepts: (payload: SessionInboxPayload) => payload is T,
@@ -395,7 +417,7 @@ export function createSessionInbox<Hook extends InboxHook>(
         taken.push(next);
         queue.shift();
       }
-      return taken;
+      return took(taken);
     },
     hasPending() {
       throwIfFailed();
@@ -429,16 +451,18 @@ export function createSessionInbox<Hook extends InboxHook>(
   };
 }
 
+async function settled(work: readonly Promise<unknown>[]): Promise<void> {
+  let failure: { readonly error: unknown } | undefined;
+  for (const item of work) {
+    try {
+      await item;
+    } catch (error) {
+      failure ??= { error };
+    }
+  }
+  if (failure !== undefined) throw failure.error;
+}
+
 export function isWorkflowMessage(value: SessionInboxPayload): value is WorkflowToolRunMessage {
-  return (
-    value.kind === "agent-started" ||
-    value.kind === "agent-sent" ||
-    value.kind === "started" ||
-    value.kind === "report" ||
-    value.kind === "reply" ||
-    value.kind === "request" ||
-    value.kind === "withdraw" ||
-    value.kind === "usage" ||
-    value.kind === "outcome"
-  );
+  return isWorkflowToolRunMessage(value);
 }

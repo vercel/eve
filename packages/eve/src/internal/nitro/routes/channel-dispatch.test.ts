@@ -30,7 +30,10 @@ import { registerInstrumentationRuntime } from "#instrumentation/runtime.js";
 import type { Runtime } from "#channel/types.js";
 import { readVercelProjectLink } from "#internal/vercel/project-link.js";
 import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/application/dev-transport.js";
-import { resolveVercelOidcCurrentProject } from "#channel/auth/vercel-oidc-project.js";
+import { testApp } from "#internal/testing/test-platform.js";
+import { createEntities } from "#platform/entities.js";
+import vercelPlatform from "#platform/vercel/declaration.js";
+import { resolveVercelOidcCurrentProject } from "#platform/vercel/oidc-project.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 import { isAgentTraceContext } from "#tracing/eve/agent-trace-context.js";
 import {
@@ -47,13 +50,15 @@ vi.mock("#internal/vercel/project-link.js", () => ({
   readVercelProjectLink: vi.fn(),
 }));
 
-vi.mock("#internal/workflow/runtime.js", () => ({
-  getWorld: async () => ({ getDeploymentId: async () => "dpl_test" }),
+vi.mock("#execution/workflow-host/host.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#execution/workflow-host/host.js")>()),
+  workflowDeploymentId: async () => "dpl_test",
 }));
 
 const mockedResolveNitroChannelRuntimeBundle = vi.mocked(resolveNitroChannelRuntimeBundle);
 const mockedReadVercelProjectLink = vi.mocked(readVercelProjectLink);
 const runtime = {} as Runtime;
+const app = testApp({ platform: createEntities(vercelPlatform, undefined) });
 const DEVELOPMENT_ARTIFACTS_CONFIG = {
   appRoot: "/app/agent",
   devRuntimeArtifactsPointerPath: "/app/agent/.eve/dev-runtime/current.json",
@@ -95,6 +100,7 @@ function createDeferred<T>() {
 
 function registerChannelRequestTracing(enabled: boolean): void {
   registerInstrumentationRuntime({
+    environment: "production",
     forceFlush: async () => undefined,
     idGenerator: new AgentSpanIdGenerator(),
     hooks: createInstrumentationHooks([]),
@@ -164,11 +170,13 @@ describe("dispatchChannelRequest", () => {
       createEvent({ waitUntil: vi.fn() }),
       "POST /eve/v1/session",
       DEVELOPMENT_ARTIFACTS_CONFIG,
+      app,
     );
     const nextResponse = await dispatchChannelRequest(
       createEvent({ waitUntil: vi.fn() }),
       "POST /eve/v1/session",
       DEVELOPMENT_ARTIFACTS_CONFIG,
+      app,
     );
 
     expect(response.status).toBe(200);
@@ -206,6 +214,7 @@ describe("dispatchChannelRequest", () => {
       createEvent({ waitUntil }),
       "POST /slack",
       {} as never,
+      app,
     );
 
     await expect(
@@ -311,6 +320,7 @@ describe("dispatchChannelRequest", () => {
       createEvent({ waitUntil: vi.fn() }),
       "POST /webhook",
       {} as never,
+      app,
     );
 
     expect(response.status).toBe(200);
@@ -360,6 +370,7 @@ describe("dispatchChannelRequest", () => {
       }),
       "POST /webhook",
       {} as never,
+      app,
     );
 
     expect(response.status).toBe(200);
@@ -398,7 +409,12 @@ describe("dispatchChannelRequest", () => {
       runtime: runtimeForTest,
     });
 
-    await dispatchChannelRequest(createEvent({ waitUntil: vi.fn() }), "POST /webhook", {} as never);
+    await dispatchChannelRequest(
+      createEvent({ waitUntil: vi.fn() }),
+      "POST /webhook",
+      {} as never,
+      app,
+    );
 
     expect(vi.mocked(runtimeForTest.dispatchContinuation).mock.calls[0]?.[0].command).toMatchObject(
       { delivery: { acceptedDeploymentId: "dpl_current" } },
@@ -455,7 +471,12 @@ describe("dispatchChannelRequest", () => {
       runtime: runtimeForTest,
     });
 
-    await dispatchChannelRequest(createEvent({ waitUntil: vi.fn() }), "POST /webhook", {} as never);
+    await dispatchChannelRequest(
+      createEvent({ waitUntil: vi.fn() }),
+      "POST /webhook",
+      {} as never,
+      app,
+    );
 
     expect(vi.mocked(runtimeForTest.dispatchContinuation).mock.calls[0]?.[0].command).toMatchObject(
       {
@@ -502,6 +523,7 @@ describe("dispatchChannelRequest", () => {
       createEvent({ waitUntil: vi.fn() }),
       "POST /webhook",
       DEVELOPMENT_ARTIFACTS_CONFIG,
+      app,
     );
 
     expect(vi.mocked(runtimeForTest.dispatchContinuation).mock.calls[0]?.[0].command).toMatchObject(
@@ -543,6 +565,7 @@ describe("dispatchChannelRequest", () => {
       createEvent({ waitUntil: vi.fn() }),
       "POST /imessage",
       {} as never,
+      app,
     );
 
     await expect(response.json()).resolves.toEqual({
@@ -584,6 +607,7 @@ describe("dispatchChannelRequest", () => {
       createEvent({ waitUntil: vi.fn() }),
       "POST /imessage",
       {} as never,
+      app,
     );
 
     await expect(response.json()).resolves.toEqual({
@@ -631,6 +655,7 @@ describe("dispatchChannelRequest", () => {
       createEvent({ waitUntil: vi.fn() }),
       "POST /webhook",
       {} as never,
+      app,
     );
 
     expect(response.status).toBe(200);
@@ -673,6 +698,7 @@ describe("dispatchChannelRequest", () => {
       createEvent({ requestIp: "203.0.113.4", waitUntil }),
       "WEBSOCKET /voice",
       {} as never,
+      app,
     );
 
     await expect(
@@ -698,6 +724,7 @@ describe("dispatchChannelRequest", () => {
       createEvent({ waitUntil: vi.fn() }),
       "WEBSOCKET /missing",
       {} as never,
+      app,
     );
 
     let thrown: unknown;
@@ -734,6 +761,7 @@ describe("dispatchChannelRequest", () => {
       createEvent({ waitUntil: vi.fn() }),
       "POST /slack",
       {} as never,
+      app,
     );
 
     expect(response.status).toBe(500);
@@ -779,6 +807,7 @@ describe("dispatchChannelRequest", () => {
       createEvent({ waitUntil }),
       "POST /slack",
       {} as never,
+      app,
     );
 
     expect(await response.text()).toBe("ok");
@@ -818,6 +847,7 @@ describe("dispatchChannelRequest", () => {
       createEvent({ waitUntil }),
       "POST /slack",
       {} as never,
+      app,
     );
 
     expect(await response.text()).toBe("ok");
@@ -854,6 +884,7 @@ describe("dispatchChannelRequest", () => {
       createEvent({ waitUntil }),
       "POST /slack",
       {} as never,
+      app,
     );
     await expect(response.text()).resolves.toBe("ok");
 
@@ -883,6 +914,7 @@ describe("dispatchChannelRequest", () => {
       createEvent({ params: { file: "notes%2Fcaf%C3%A9.md", user: "a%5Cb" }, waitUntil: vi.fn() }),
       "POST /slack",
       {} as never,
+      app,
     );
 
     await expect(response.json()).resolves.toEqual({ file: "notes%2Fcafé.md", user: "a%5Cb" });
@@ -911,6 +943,7 @@ describe("dispatchChannelRequest", () => {
       createEvent({ waitUntil }),
       "POST /slack",
       {} as never,
+      app,
     );
 
     expect(waitUntil).not.toHaveBeenCalled();
@@ -1006,9 +1039,11 @@ describe("dispatchChannelRequest tracing", () => {
   }
 
   async function dispatchAndConsume(
-    ...args: Parameters<typeof dispatchChannelRequest>
+    event: H3Event,
+    routeKey: string,
+    config: Parameters<typeof dispatchChannelRequest>[2],
   ): Promise<Response> {
-    const response = await dispatchChannelRequest(...args);
+    const response = await dispatchChannelRequest(event, routeKey, config, app);
     await response.clone().arrayBuffer();
     return response;
   }
@@ -1122,6 +1157,7 @@ describe("dispatchChannelRequest tracing", () => {
       createEvent({ waitUntil: vi.fn() }),
       "POST /slack",
       {} as never,
+      app,
     );
 
     expect((await finishedSpans()).map((span) => span.name)).toEqual([]);
@@ -1148,6 +1184,7 @@ describe("dispatchChannelRequest tracing", () => {
       createEvent({ waitUntil: vi.fn() }),
       "POST /slack",
       {} as never,
+      app,
     );
     await response.body!.cancel("client gone");
 
@@ -1270,7 +1307,7 @@ describe("dispatchChannelRequest tracing", () => {
     mockedResolveNitroChannelRuntimeBundle.mockRejectedValue(new Error("bundle boom"));
 
     await expect(
-      dispatchChannelRequest(createEvent({ waitUntil: vi.fn() }), "POST /slack", {} as never),
+      dispatchChannelRequest(createEvent({ waitUntil: vi.fn() }), "POST /slack", {} as never, app),
     ).rejects.toThrow("bundle boom");
 
     const [span] = await finishedSpans();
@@ -1379,6 +1416,7 @@ describe("dispatchChannelRequest without an OTel provider", () => {
       createEvent({ waitUntil }),
       "POST /slack",
       {} as never,
+      app,
     );
 
     expect(response.status).toBe(200);
@@ -1420,6 +1458,7 @@ describe("dispatchChannelRequest with request tracing not enabled", () => {
       createEvent({ waitUntil }),
       "POST /slack",
       {} as never,
+      app,
     );
 
     expect(response.status).toBe(200);
@@ -1437,6 +1476,7 @@ describe("dispatchChannelRequest with request tracing not enabled", () => {
         createEvent({ method: "POST", waitUntil: vi.fn() }),
         "POST /slack",
         {} as never,
+        app,
       ),
     );
     platformSpan.end();

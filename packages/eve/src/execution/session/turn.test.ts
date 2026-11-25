@@ -1,3 +1,4 @@
+import { builtInHosts } from "#runtime/app.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import type { TurnPause } from "#execution/session/pending-turn-state.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
@@ -7,11 +8,15 @@ import type { SessionView } from "#harness/session-machine/view.js";
 import type { SessionInbox, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { SessionExecution, type SessionTurnHost } from "#execution/session/turn.js";
+import { sessionHostClock } from "#execution/session/host-clock.js";
+import { dispatchSessionSteps, sessionStepCalls } from "#execution/session/steps.js";
+import { WORKFLOW_SESSION_STEPS } from "#execution/workflow-host/session-steps.js";
 import { sleep } from "#compiled/@workflow/core/index.js";
 import { createTurnControl } from "#execution/session/turn-control.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
+import type { OpenTurn } from "#execution/session/open-turn.js";
 import { cancelTasksStep } from "#execution/tasks/steps.js";
-import { turnStep } from "#execution/workflow-host/turn-step.js";
+import { turnStep, type WorkflowTurnStepInput } from "#execution/workflow-host/turn-step.js";
 import { publishSessionEvents, type Entered } from "#execution/publish-session-events.js";
 import type {
   DeliverHookPayload,
@@ -48,12 +53,15 @@ import type {
 } from "#execution/tools/workflow/messages.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
-const WORKFLOW_TURN_HOST: SessionTurnHost = {
-  applyRunMessages: (input) => applyRunMessagesStep(input),
-  dispatchRuns: (input) => dispatchCoordinationStep(input),
-  runTurnStep: (input) => turnStep(input),
-  until: (at) => sleep(new Date(at)),
-};
+function workflowTurnHost(
+  inbox: Pick<SessionInbox, "whenPending">,
+  sleepUntil: (at: number) => Promise<void> = (at) => sleep(new Date(at)),
+): SessionTurnHost {
+  return {
+    ...sessionHostClock(inbox, sleepUntil),
+    step: dispatchSessionSteps(WORKFLOW_SESSION_STEPS),
+  };
+}
 
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -137,14 +145,14 @@ afterEach(() => vi.restoreAllMocks());
 function stepWork<I extends Partial<SessionStateValues>, R extends Partial<SessionStateValues>>(
   work: (step: Entered<I>) => Promise<R>,
 ): (input: I) => Promise<WithSessionStateDelta<R>> {
-  return (input) => withSessionStateDelta(input, work);
+  return (input) => withSessionStateDelta(builtInHosts(), input, work);
 }
 type TurnStepWorkResult = DurableStepResult extends infer R
   ? R extends unknown
     ? Omit<R, "history">
     : never
   : never;
-const turnStepWork = stepWork<TurnStepInput, TurnStepWorkResult>;
+const turnStepWork = stepWork<WorkflowTurnStepInput, TurnStepWorkResult>;
 function dispatchWork(
   work: (
     input: Entered<Parameters<typeof dispatchCoordinationStep>[0]>,
@@ -1147,6 +1155,7 @@ describe("SessionExecution checkpoints", () => {
 
     expect(routeDeliverToChildren).toHaveBeenCalledWith(
       expect.objectContaining({ delivery: answer }),
+      expect.anything(),
     );
     expect(queue.pendingCount).toBe(0);
   });
@@ -1242,6 +1251,7 @@ describe("SessionExecution checkpoints", () => {
 
     expect(routeDeliverToChildren).toHaveBeenCalledWith(
       expect.objectContaining({ delivery: answerAndCorrection }),
+      expect.anything(),
     );
     expect(interruptWorkflowToolRun).toHaveBeenCalledWith({
       hookToken: "deploy-control",
@@ -1388,11 +1398,12 @@ describe("SessionExecution checkpoints", () => {
       sessionWritable: new WritableStream<Uint8Array>(),
     });
     const execution = new SessionExecution({
-      host: WORKFLOW_TURN_HOST,
+      host: workflowTurnHost(inbox),
       cursor,
       inbox,
       queue: new SessionInputQueue([]),
       sessionId: sessionState.sessionId,
+      stepCall: sessionStepCalls(sessionState.sessionId),
     });
 
     await expect(
@@ -1582,6 +1593,85 @@ describe("SessionExecution checkpoints", () => {
     ]);
     expect(vi.mocked(turnStep).mock.calls[1]?.[0].input?.runtimeResults?.results).toEqual([
       expect.objectContaining({ callId: "hold-call" }),
+    ]);
+  });
+
+  it("records the results a dispatch settled at once, which a turn resumed from its pause keeps", async () => {
+    const sessionState = state("");
+    const receipt = {
+      callId: "task-call",
+      kind: "tool-result" as const,
+      output: { taskId: "task_1" },
+      toolName: "research",
+    };
+    const records: { readonly open: OpenTurn | undefined }[] = [];
+    const recorded = (inbox: SessionInbox) =>
+      new SessionStateCursor({
+        history: [],
+        inbox,
+        record: async (open) => {
+          records.push({ open });
+        },
+        sessionWritable: new WritableStream<Uint8Array>(),
+        serializedContext: {},
+        sessionState,
+      });
+    const doneStep = turnStepWork(async (input) => ({
+      action: "done",
+      output: "done",
+      serializedContext: input.serializedContext,
+      sessionState,
+    }));
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockImplementationOnce(
+        turnStepWork(async () => ({
+          action: "paused",
+          ...callsPause({ callIds: ["task-call"] }),
+          serializedContext: {},
+          sessionState,
+        })),
+      )
+      .mockImplementationOnce(doneStep);
+    vi.mocked(dispatchCoordinationStep)
+      .mockReset()
+      .mockImplementation(
+        dispatchWork(async () => ({ results: [receipt], serializedContext: {}, sessionState })),
+      );
+
+    const first = idleInbox();
+    await expect(
+      createExecution({ cursor: recorded(first), inbox: first, sessionState }).runTurn({
+        delivery: { kind: "deliver", payloads: [{ message: "Research the rollout." }] },
+      }),
+    ).resolves.toMatchObject({ kind: "done" });
+    const pause = records
+      .flatMap(({ open }) =>
+        open?.at === "pause" && open.pause.on === "calls" && !open.pause.dispatch
+          ? [open.pause]
+          : [],
+      )
+      .at(0);
+    expect(pause).toEqual({
+      callIds: ["task-call"],
+      dispatch: false,
+      on: "calls",
+      results: [receipt],
+      taskToolCalls: [],
+    });
+
+    vi.mocked(dispatchCoordinationStep).mockClear();
+    vi.mocked(turnStep).mockReset().mockImplementationOnce(doneStep);
+    const second = idleInbox();
+    await expect(
+      createExecution({ cursor: recorded(second), inbox: second, sessionState }).runTurn(
+        undefined,
+        { pause },
+      ),
+    ).resolves.toMatchObject({ kind: "done" });
+    expect(dispatchCoordinationStep).not.toHaveBeenCalled();
+    expect(vi.mocked(turnStep).mock.calls[0]?.[0].input?.runtimeResults?.results).toEqual([
+      expect.objectContaining({ callId: "task-call" }),
     ]);
   });
 
@@ -1828,15 +1918,12 @@ describe("SessionExecution checkpoints", () => {
     vi.mocked(startTaskToolCallsStep).mockResolvedValueOnce(1_000_000);
     const deadlines: number[] = [];
     let pass: () => void = () => {};
-    const host: SessionTurnHost = {
-      ...WORKFLOW_TURN_HOST,
-      until: (at) => {
-        deadlines.push(at);
-        return new Promise<void>((resolve) => {
-          pass = resolve;
-        });
-      },
-    };
+    const host = workflowTurnHost(inbox, (at) => {
+      deadlines.push(at);
+      return new Promise<void>((resolve) => {
+        pass = resolve;
+      });
+    });
     let continued: unknown;
     vi.mocked(turnStep)
       .mockReset()
@@ -2157,12 +2244,13 @@ function createExecution(input: {
 }): SessionExecution {
   const cursor = input.cursor ?? createCursor(input);
   return new SessionExecution({
-    host: input.host ?? WORKFLOW_TURN_HOST,
+    host: input.host ?? workflowTurnHost(input.inbox),
     capabilities: input.capabilities,
     cursor,
     inbox: input.inbox,
     queue: input.queue ?? new SessionInputQueue([]),
     sessionId: input.sessionState.sessionId,
+    stepCall: sessionStepCalls(input.sessionState.sessionId),
   });
 }
 

@@ -1,11 +1,10 @@
-import { createHash } from "node:crypto";
-
 import { principalIdentity } from "#channel/principal-identity.js";
 import type { RunInput, SessionAuthContext } from "#channel/types.js";
 import {
   INVOCATION_OWNER_ATTRIBUTE,
   INVOCATION_TOKEN_ATTRIBUTE,
 } from "#internal/invocation/attributes.js";
+import { sha256Hex } from "#shared/digest.js";
 
 export { INVOCATION_OWNER_ATTRIBUTE, INVOCATION_TOKEN_ATTRIBUTE };
 
@@ -13,7 +12,7 @@ type ExternalInvocationMetadata = NonNullable<RunInput["externalInvocation"]>;
 
 export function invocationOwnerKey(auth: SessionAuthContext | null): string {
   const identity = auth === null ? ["anonymous"] : principalIdentity(auth);
-  return createHash("sha256").update(JSON.stringify(identity), "utf8").digest("hex");
+  return sha256Hex(JSON.stringify(identity));
 }
 
 export function buildInvocationAttributes(

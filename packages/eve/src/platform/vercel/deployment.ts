@@ -1,0 +1,64 @@
+import type { Deployment, DeploymentRevision } from "#platform/entities.js";
+import { resolveVercelProjectIdFromEnvironment } from "#platform/vercel/project.js";
+
+function readTrimmed(name: string): string | undefined {
+  return process.env[name]?.trim() || undefined;
+}
+
+function readRaw(name: string): string | undefined {
+  return process.env[name] || undefined;
+}
+
+export function vercelEnvironmentName(): string | undefined {
+  return readTrimmed("VERCEL_TARGET_ENV") ?? readTrimmed("VERCEL_ENV");
+}
+
+function vercelDeploymentRevision(): DeploymentRevision | undefined {
+  const gitSha = readTrimmed("VERCEL_GIT_COMMIT_SHA");
+  const gitBranch = readTrimmed("VERCEL_GIT_COMMIT_REF");
+  const deployedAt = readTrimmed("VERCEL_DEPLOYMENT_CREATED_AT");
+  if (gitSha === undefined && gitBranch === undefined && deployedAt === undefined) {
+    return undefined;
+  }
+  return { deployedAt, gitBranch, gitSha };
+}
+
+export function vercelDeploymentHost(): string | undefined {
+  return readRaw("VERCEL_URL");
+}
+
+export function vercelProductionHost(): string | undefined {
+  return readRaw("VERCEL_PROJECT_PRODUCTION_URL");
+}
+
+export const vercelDeployment = {
+  environment() {
+    const environment = process.env.VERCEL_ENV;
+    return environment === "development" ||
+      environment === "preview" ||
+      environment === "production"
+      ? environment
+      : undefined;
+  },
+  deploymentId: () => readTrimmed("VERCEL_DEPLOYMENT_ID"),
+  invocationData(): Readonly<Record<string, string>> {
+    const deploymentId =
+      process.env.VERCEL === "1" ? readTrimmed("VERCEL_DEPLOYMENT_ID") : undefined;
+    return deploymentId === undefined ? {} : { vercelDeploymentId: deploymentId };
+  },
+  revision: vercelDeploymentRevision,
+  host: () => vercelProductionHost() ?? vercelDeploymentHost(),
+  scope() {
+    const projectId = resolveVercelProjectIdFromEnvironment();
+    if (projectId === undefined) return undefined;
+    const environment = vercelEnvironmentName() ?? "production";
+    const variant =
+      environment === "preview"
+        ? vercelDeploymentRevision()?.gitBranch ||
+          readTrimmed("VERCEL_DEPLOYMENT_ID") ||
+          readRaw("VERCEL_URL")?.trim() ||
+          "unknown-preview"
+        : null;
+    return { environment, id: projectId, platform: "vercel", variant };
+  },
+} satisfies Deployment;

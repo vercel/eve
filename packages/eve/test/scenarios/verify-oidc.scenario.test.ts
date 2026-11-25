@@ -4,6 +4,9 @@ import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
 
 import { authenticateOidcStrategy } from "../../src/channel/auth/oidc.js";
+import { inTestApp, testApp } from "../../src/internal/testing/test-platform.js";
+import { createEntities } from "../../src/platform/entities.js";
+import vercelPlatform from "../../src/platform/vercel/declaration.js";
 
 describe("authenticateOidcStrategy", () => {
   it("upgrades a current-project Vercel token to principalType: runtime", async () => {
@@ -24,22 +27,27 @@ describe("authenticateOidcStrategy", () => {
         .setSubject("owner:acme:project:weather-agent:environment:preview")
         .sign(oidcServer.privateKey);
 
-      const result = await authenticateOidcStrategy({
-        strategy: {
-          acceptCurrentVercelProject: true,
-          audiences: ["https://vercel.com/acme"],
-          clockSkewSeconds: 30,
-          currentVercelProject: {
-            environment: "preview",
-            projectId: "prj_test",
-          },
-          discoveryUrl: oidcServer.discoveryUrl,
-          issuer: oidcServer.issuer,
-          kind: "oidc",
-          subjects: ["owner:acme:project:other-agent:environment:preview"],
-        },
-        token,
-      });
+      const vercelApp = testApp({ platform: createEntities(vercelPlatform, undefined) });
+      const result = await inTestApp(
+        () =>
+          authenticateOidcStrategy({
+            strategy: {
+              acceptCurrentVercelProject: true,
+              audiences: ["https://vercel.com/acme"],
+              clockSkewSeconds: 30,
+              currentVercelProject: {
+                environment: "preview",
+                projectId: "prj_test",
+              },
+              discoveryUrl: oidcServer.discoveryUrl,
+              issuer: oidcServer.issuer,
+              kind: "oidc",
+              subjects: ["owner:acme:project:other-agent:environment:preview"],
+            },
+            token,
+          }),
+        vercelApp,
+      );
 
       expect(result.kind).toBe("authenticated");
       if (result.kind === "authenticated") {

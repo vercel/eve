@@ -263,6 +263,7 @@ export function createMemoryInboxRegistry(
         },
         isTakenOver: () => false,
         ownerRunId: () => sessionId,
+        now: () => Date.now(),
       };
     },
   };

@@ -1,5 +1,7 @@
+import { builtInHosts } from "#runtime/app.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { installWorkflowHost } from "#execution/workflow-host/host.js";
+import { installWorkflowEngine } from "#execution/workflow-host/host.js";
+import { testEntities } from "#internal/testing/test-platform.js";
 
 import { RunExpiredError } from "#compiled/@workflow/errors/index.js";
 import type { StoredLine } from "#protocol/session-events/envelope.js";
@@ -13,7 +15,7 @@ vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   getWorld: async () => ({ runs: { get: getRunMetadataMock } }),
 }));
 
-installWorkflowHost();
+installWorkflowEngine(builtInHosts(), testEntities());
 
 const encoder = new TextEncoder();
 

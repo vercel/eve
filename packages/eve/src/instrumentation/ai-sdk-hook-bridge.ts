@@ -16,7 +16,45 @@ import {
   toolCallIdempotencyKey,
 } from "#instrumentation/lifecycle.js";
 import { structuralProviderMetadata } from "#instrumentation/content.js";
-import { modelContent, modelUsage } from "#compiled/@vercel/agent-runs/ai-sdk.js";
+import type { ContentPart, Usage } from "#compiled/@vercel/agent-runs/index.js";
+
+function modelUsage(usage: {
+  readonly inputTokens: number | undefined;
+  readonly outputTokens: number | undefined;
+  readonly inputTokenDetails?: {
+    readonly cacheReadTokens?: number | undefined;
+    readonly cacheWriteTokens?: number | undefined;
+  };
+}): Usage {
+  return Object.freeze({
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    inputTokenDetails: Object.freeze({
+      cacheReadTokens: usage.inputTokenDetails?.cacheReadTokens,
+      cacheWriteTokens: usage.inputTokenDetails?.cacheWriteTokens,
+    }),
+  });
+}
+
+function modelContent(content: ReadonlyArray<unknown>): readonly ContentPart[] {
+  return content.flatMap((part): ContentPart[] => {
+    if (typeof part !== "object" || part === null || !("type" in part)) return [];
+    const entry = part as Record<string, unknown>;
+    if ((entry.type === "text" || entry.type === "reasoning") && typeof entry.text === "string") {
+      return [{ type: entry.type, text: entry.text }];
+    }
+    if (typeof entry.toolCallId !== "string" || typeof entry.toolName !== "string") return [];
+    const base = { callId: entry.toolCallId, toolName: entry.toolName, input: entry.input };
+    if (entry.type === "tool-call") return [{ type: entry.type, ...base }];
+    if (entry.type === "tool-result") {
+      return [{ type: entry.type, ...base, output: entry.output }];
+    }
+    if (entry.type === "tool-error") {
+      return [{ type: entry.type, ...base, error: entry.error }];
+    }
+    return [];
+  });
+}
 
 type TelemetryEvent<TKey extends keyof Telemetry & `on${string}`> = Parameters<
   NonNullable<Telemetry[TKey]>

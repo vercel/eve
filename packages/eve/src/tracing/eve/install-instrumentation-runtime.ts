@@ -21,12 +21,14 @@ import type { RegisteredOtelPipeline } from "#tracing/eve/otel-registration.js";
 import { registerOtel } from "#tracing/eve/otel-registration.js";
 import { eveOutputMapping } from "#tracing/eve/profile.js";
 import { readConversationId } from "#shared/conversation-identity.js";
+import type { Entities } from "#platform/entities.js";
 
 const log = createLogger("tracing.install-instrumentation-runtime");
 
 export function installInstrumentationRuntime(input: {
   readonly collected: CollectedOtel;
   readonly frameworkVersion: string;
+  readonly platform: Entities;
   readonly providers: readonly InstrumentationProviderDefinition[];
   readonly runtimeContextResolvers?: readonly RuntimeContextResolver[];
   readonly serviceName: string;
@@ -40,15 +42,18 @@ export function installInstrumentationRuntime(input: {
   let decision: InstrumentationRuntime["decision"];
   let runInContext: InstrumentationRuntime["runInContext"] = (_operation, execute) => execute();
   let idGenerator: AgentSpanIdGenerator;
+  const environment = resolveInstrumentationEnvironment(input.platform);
+  const { sessionAttribute } = input.platform.telemetry;
 
   if (input.collected.declared) {
     otelRuntime = registerOtel({
       serviceName: input.serviceName,
       otel: input.collected.configuration,
+      sessionAttribute,
     });
     idGenerator = otelRuntime.idGenerator;
     const agentOtel = createAgentOtelInstrumentation({
-      environment: resolveInstrumentationEnvironment(),
+      environment,
       frameworkVersion: input.frameworkVersion,
       telemetry: otelTelemetry({
         provider: otelRuntime.provider,
@@ -82,6 +87,7 @@ export function installInstrumentationRuntime(input: {
   const allProviders = [...serialBefore, ...input.providers, ...serialAfter];
   let shutdown: Promise<void> | undefined;
   return registerInstrumentationRuntime({
+    environment,
     forceFlush: async () => {
       await settleAll(allProviders.map((provider) => () => provider.flush?.()));
       await settleAll(otelRuntime === undefined ? [] : [otelRuntime.forceFlush]);
@@ -102,6 +108,7 @@ export function installInstrumentationRuntime(input: {
     runtimeContextResolvers: input.runtimeContextResolvers,
     runInContext,
     samplesTrace: otelRuntime?.samplesTrace,
+    ...(sessionAttribute !== undefined && { sessionAttribute }),
     shutdown: () => {
       shutdown ??= (async () => {
         await settleAll(allProviders.map((provider) => () => provider.shutdown?.()));

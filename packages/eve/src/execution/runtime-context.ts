@@ -1,3 +1,4 @@
+import { requireApp } from "#context/app.js";
 import type { RunInput, SessionAuthContext } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { setChannelContext } from "#execution/channel-context.js";
@@ -50,7 +51,7 @@ export function buildRunContext(input: {
   setChannelContext(ctx, run.adapter, { channelName: run.channelName });
   ctx.set(
     ConversationContextKey,
-    buildConversationContext(run, resolveInstrumentationEnvironment()),
+    buildConversationContext(run, resolveInstrumentationEnvironment(requireApp(ctx).platform)),
   );
   if (run.parent === undefined || run.traceRoot?.kind === "own") {
     const title = deriveSessionTitle(run.title ?? run.input.message);

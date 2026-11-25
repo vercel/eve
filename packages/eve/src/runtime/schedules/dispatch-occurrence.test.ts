@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "#compiled/zod/index.js";
+import { bindApp } from "#context/app.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
-import { vercelScheduleProvider } from "#public/schedules/providers/vercel.js";
+import { vercelScheduleProvider } from "#platform/vercel/schedules/provider.js";
 import {
   defineDynamicSchedules,
   type DynamicSchedulesRunArgs,
@@ -16,6 +17,7 @@ import {
 import { dispatchScheduledOccurrence } from "#runtime/schedules/dispatch-occurrence.js";
 import { fromCompiledBundle } from "#definitions/compiled-agent.js";
 import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
+import { testApp } from "#internal/testing/test-platform.js";
 
 const bundle = { compiledArtifactsSource: {}, graph: { root: { channels: [] } } } as never;
 const callContext: ScheduleBoundCallContext = {
@@ -73,6 +75,7 @@ describe("the schedule handle an occurrence callback receives", () => {
       const other = await client.create({ name: "other", expression, payload: { task: "b" } });
       const context = new ContextContainer();
       context.set(SessionAgentKey, fromCompiledBundle(bundle));
+      bindApp(context, testApp());
       scope.mockClear();
 
       await contextStorage.run(context, () => client.invoke(fired.name));
@@ -117,6 +120,7 @@ describe("the schedule handle an occurrence callback receives", () => {
     const stored = JSON.parse(String(fetchImpl.mock.calls[0]![1]?.body));
 
     await dispatchScheduledOccurrence({
+      app: testApp(),
       bundle,
       runtime: {} as never,
       collection: "requests",

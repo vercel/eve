@@ -7,8 +7,6 @@ import type {
 } from "#channel/types.js";
 import { readSerializedSessionSchedule } from "#context/session-schedule.js";
 import type { AgentSessionRuntimeOverrides } from "#execution/agent-sessions/runtime-overrides.js";
-import { closeSessionStreamStep } from "#execution/close-session-stream-step.js";
-import { createSessionStep } from "#execution/create-session-step.js";
 import { createInitialSessionValues } from "#execution/initial-session-values.js";
 import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
 import { readChannelRequestId, readRootSessionId } from "#execution/eve-workflow-attributes.js";
@@ -25,6 +23,8 @@ import {
 } from "#execution/session-inbox/inbox.js";
 import type { InitialWorkflowEntryInput } from "#execution/session/entry-input.js";
 import { failSession, type SessionBoot } from "#execution/session/program.js";
+import { sessionStepCalls, type SessionStepCall } from "#execution/session/steps.js";
+import type { SessionTurnHost } from "#execution/session/turn.js";
 import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session/timeout.js";
 import type { SessionTimeoutControl, SessionTimeouts } from "#execution/session/timeout-control.js";
 import { createTurnControl, type TurnControl } from "#execution/session/turn-control.js";
@@ -32,7 +32,6 @@ import { attachClientContext, readClientContext } from "#internal/client-context
 import { attachInputText, readInputText } from "#internal/input-text.js";
 import type { DurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
-import { resolveInitialTurnCallerStep } from "#subagents/parent-notification.js";
 
 export interface BootOutcome {
   readonly inbox: SessionInboxHandle;
@@ -61,6 +60,7 @@ type InitialOwnerPreparation = OwnedInitialSession | { readonly kind: "alias-con
 async function prepareInitialOwner(
   inbox: SessionInboxHandle,
   input: {
+    readonly all: SessionTurnHost["all"];
     readonly continuationToken: string;
     readonly sessionCreation: Promise<unknown>;
     readonly sessionId: string;
@@ -78,7 +78,7 @@ async function prepareInitialOwner(
     turnControl: createTurnControl(),
   };
   const claim = { confirmAfter: input.sessionCreation };
-  const [stableClaim, aliasClaim] = await Promise.allSettled([
+  const [stableClaim, aliasClaim] = await input.all([
     inbox.claimSessionHook(
       sessionCommandHookToken(input.sessionId),
       input.startClaim === "inbox" ? { ...claim, claimedAtStart: true } : claim,
@@ -107,6 +107,8 @@ export interface InitialOwnerPorts<Hook extends InboxHook = InboxHook> {
   readonly sessionWritable: WritableStream<Uint8Array>;
   readonly inboxTransport: SessionInboxTransport<Hook>;
   readonly timeouts: SessionTimeouts;
+  readonly step: SessionStepCall;
+  readonly all: SessionTurnHost["all"];
   settleContinuationConflict(input: {
     readonly command: Extract<SessionCommand, { readonly kind: "send" }>;
     readonly continuationToken: string;
@@ -119,7 +121,8 @@ export async function bootInitialOwner<Hook extends InboxHook>(
   ports: InitialOwnerPorts<Hook>,
 ): Promise<BootOutcome | undefined> {
   const serializedContext = stampSessionIdentity(input.serializedContext, sessionId);
-  const { sessionWritable } = ports;
+  const { sessionWritable, step } = ports;
+  const stepCall = sessionStepCalls(`${sessionId}:boot`);
   const inbox = createSessionInbox(ports.inboxTransport);
   const sessionTimeoutMs = input.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS;
   const continuationToken = (serializedContext["eve.continuationToken"] as string) || "";
@@ -140,22 +143,27 @@ export async function bootInitialOwner<Hook extends InboxHook>(
               sessionId,
             }),
           )
-        : createSessionStep({
-            agentSessionRuntimeOverrides: serializedContext["eve.agentSessionRuntimeOverrides"] as
-              | AgentSessionRuntimeOverrides
-              | undefined,
-            compiledArtifactsSource: serializedBundle.source,
-            continuationToken,
-            dynamicSubagentAgentConfig: serializedContext["eve.dynamicSubagentAgentConfig"] as
-              | DynamicSubagentAgentConfig
-              | undefined,
-            history,
-            nodeId: serializedBundle.nodeId,
-            outputSchema: input.input.outputSchema,
-            rootSessionId: readRootSessionId(serializedContext),
-            sessionId,
-          });
+        : step(
+            "createSession",
+            {
+              agentSessionRuntimeOverrides: serializedContext[
+                "eve.agentSessionRuntimeOverrides"
+              ] as AgentSessionRuntimeOverrides | undefined,
+              compiledArtifactsSource: serializedBundle.source,
+              continuationToken,
+              dynamicSubagentAgentConfig: serializedContext["eve.dynamicSubagentAgentConfig"] as
+                | DynamicSubagentAgentConfig
+                | undefined,
+              history,
+              nodeId: serializedBundle.nodeId,
+              outputSchema: input.input.outputSchema,
+              rootSessionId: readRootSessionId(serializedContext),
+              sessionId,
+            },
+            stepCall("createSession"),
+          );
     const ownerPreparationPromise = prepareInitialOwner(inbox, {
+      all: ports.all,
       continuationToken,
       sessionCreation: sessionCreationPromise,
       sessionId,
@@ -164,9 +172,13 @@ export async function bootInitialOwner<Hook extends InboxHook>(
       timeouts: ports.timeouts,
     });
     const callerResolutionPromise = hasDelegatedSessionContext(serializedContext)
-      ? resolveInitialTurnCallerStep({ serializedContext })
+      ? step(
+          "resolveInitialTurnCaller",
+          { serializedContext },
+          stepCall("resolveInitialTurnCaller"),
+        )
       : Promise.resolve(undefined);
-    const [sessionCreation, ownerPreparation, callerResolution] = await Promise.allSettled([
+    const [sessionCreation, ownerPreparation, callerResolution] = await ports.all([
       sessionCreationPromise,
       ownerPreparationPromise,
       callerResolutionPromise,
@@ -179,7 +191,7 @@ export async function bootInitialOwner<Hook extends InboxHook>(
         await ports.settleContinuationConflict(conflict);
       }
       await inbox.dispose();
-      await closeSessionStreamStep({ sessionWritable });
+      await step("closeSessionStream", { sessionWritable }, stepCall("closeSessionStream"));
       return undefined;
     }
     const caller = unwrapSettled(callerResolution);
@@ -214,6 +226,7 @@ export async function bootInitialOwner<Hook extends InboxHook>(
       sessionId,
       sessionState: undefined,
       sessionWritable,
+      step,
     });
   }
 }

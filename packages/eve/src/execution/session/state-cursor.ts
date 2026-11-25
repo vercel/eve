@@ -4,6 +4,7 @@ import type {
   SessionStepInput,
 } from "#execution/publish-session-events.js";
 import { sessionHookTokens } from "#execution/session/hook-tokens.js";
+import type { OpenTurn } from "#execution/session/open-turn.js";
 import {
   applySessionStateDelta,
   type SessionStateTransition,
@@ -16,7 +17,11 @@ export class SessionStateCursor {
   readonly sessionWritable: WritableStream<Uint8Array>;
 
   private readonly inbox: Pick<SessionInboxOwnership, "claimSessionHooks">;
+  private readonly record: SessionRecordWriter | undefined;
   private values: SessionStateValues;
+  private openTurn: OpenTurn | undefined;
+  private readonly settledWaiters: (() => void)[] = [];
+  private rerunNext: boolean;
   private adopted = 0;
   private running = 0;
 
@@ -24,9 +29,15 @@ export class SessionStateCursor {
     input: SessionStateValues & {
       readonly inbox: Pick<SessionInboxOwnership, "claimSessionHooks">;
       readonly sessionWritable: WritableStream<Uint8Array>;
+      readonly open?: OpenTurn;
+      readonly record?: SessionRecordWriter;
+      readonly rerunFirst?: boolean;
     },
   ) {
     this.inbox = input.inbox;
+    this.record = input.record;
+    this.openTurn = input.open;
+    this.rerunNext = input.rerunFirst === true;
     this.sessionWritable = input.sessionWritable;
     this.values = {
       history: input.history,
@@ -47,20 +58,38 @@ export class SessionStateCursor {
     return this.values.history;
   }
 
+  get open(): OpenTurn | undefined {
+    return this.openTurn;
+  }
+
+  markOpen(open: OpenTurn | undefined): Promise<void> | undefined {
+    this.openTurn = open;
+    return this.record?.(open);
+  }
+
+  async settledStep(): Promise<void> {
+    if (this.running === 0) return;
+    await new Promise<void>((resolve) => this.settledWaiters.push(resolve));
+  }
   async advance<T extends SessionStateTransition>(
     step: (state: SessionStepInput) => Promise<T>,
+    turn?: OpenTurnChange<T>,
   ): Promise<T> {
-    const { serializedContext, sessionState } = this.values;
     return await this.adopt(
-      () => step({ serializedContext, sessionState, sessionWritable: this.sessionWritable }),
-      { withHistory: false },
+      () => {
+        const { serializedContext, sessionState } = this.values;
+        return step({ serializedContext, sessionState, ...this.writing() });
+      },
+      { turn, withHistory: false },
     );
   }
 
   async advanceWithHistory<T extends SessionStateTransition>(
     step: (state: SessionHistoryStepInput) => Promise<T>,
+    turn?: OpenTurnChange<T>,
   ): Promise<T> {
-    return await this.adopt(() => step({ ...this.values, sessionWritable: this.sessionWritable }), {
+    return await this.adopt(() => step({ ...this.values, ...this.writing() }), {
+      turn,
       withHistory: true,
     });
   }
@@ -88,13 +117,22 @@ export class SessionStateCursor {
     return true;
   }
 
+  private writing(): Pick<SessionStepInput, "rerun" | "sessionWritable"> {
+    const rerun = this.rerunNext;
+    this.rerunNext = false;
+    return { sessionWritable: this.sessionWritable, ...(rerun && { rerun: true }) };
+  }
   private async adopt<T extends SessionStateTransition>(
     run: () => Promise<T>,
-    options: { readonly withHistory: boolean },
+    options: { readonly turn: OpenTurnChange<T> | undefined; readonly withHistory: boolean },
   ): Promise<T> {
-    const base = this.values;
     this.running++;
     try {
+      if (options.turn?.before !== undefined) {
+        const recorded = this.markOpen(options.turn.before);
+        if (recorded !== undefined) await recorded;
+      }
+      const base = this.values;
       const result = await run();
       if (!options.withHistory && result.stateDelta.history !== undefined) {
         throw new Error("A session step that was not given the history cannot change it.");
@@ -106,9 +144,24 @@ export class SessionStateCursor {
       }
       this.values = next;
       this.adopted++;
+      const { turn } = options;
+      if (turn !== undefined) {
+        const recorded = this.markOpen(
+          turn.after === undefined ? this.openTurn : turn.after(result),
+        );
+        if (recorded !== undefined) await recorded;
+      }
       return result;
     } finally {
       this.running--;
+      if (this.running === 0) for (const settled of this.settledWaiters.splice(0)) settled();
     }
   }
+}
+
+type SessionRecordWriter = (open: OpenTurn | undefined) => Promise<void> | undefined;
+
+export interface OpenTurnChange<T> {
+  readonly before?: OpenTurn;
+  readonly after?: (result: T) => OpenTurn | undefined;
 }

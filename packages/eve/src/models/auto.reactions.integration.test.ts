@@ -1,3 +1,4 @@
+import { builtInHosts } from "#runtime/app.js";
 import type { LanguageModelV4Prompt } from "@ai-sdk/provider";
 import { Experimental_DecisionMockModelV4, MockLanguageModelV4 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -132,7 +133,7 @@ async function runTwoTurns(): Promise<{ readonly log: string[]; readonly decisio
     const inbox = sessionInboxHookToken(continuationToken);
     try {
       await until(log, "tool:lookup", 1);
-      await resumeRoutedHook(inbox, {
+      await resumeRoutedHook(builtInHosts(), inbox, {
         auth: ALICE,
         delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
         kind: "send",
@@ -141,7 +142,7 @@ async function runTwoTurns(): Promise<{ readonly log: string[]; readonly decisio
       log.push("steered");
       await until(log, "call:small", 2);
       await new Promise((resolve) => setTimeout(resolve, 200));
-      await resumeRoutedHook(inbox, {
+      await resumeRoutedHook(builtInHosts(), inbox, {
         auth: ALICE,
         delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
         kind: "send",

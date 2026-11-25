@@ -5,7 +5,7 @@ import {
   SandboxKey,
   type DurableDynamicSkillMetadata,
 } from "#context/keys.js";
-import { SKILL_NAME_PATTERN, SKILL_NAME_RULE } from "#discover/grammar.js";
+import { SKILL_NAME_PATTERN, SKILL_NAME_RULE } from "#shared/name-grammar.js";
 import { declared, type ResolvedDynamicDefinition } from "#runtime/types.js";
 import type { SandboxState } from "#sandbox/state.js";
 import { parseJsonValue } from "#shared/json.js";

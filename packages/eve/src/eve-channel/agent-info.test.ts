@@ -7,6 +7,7 @@ import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { attachAgentInfoRouteResponse } from "#internal/nitro/routes/channel-route-context.js";
 import { EVE_INFO_ROUTE_PATH } from "#protocol/routes.js";
+import { inTestApp } from "#internal/testing/test-platform.js";
 
 const caller =
   (principalType: string, allowAgentInfo?: boolean): EveAuthFn =>
@@ -73,8 +74,7 @@ async function requestInfo(auth: readonly EveAuthFn[]): Promise<Response> {
     } satisfies RouteHandlerArgs,
     async () => Response.json({ ok: true }),
   );
-  return (await route.handler(
-    new Request(`http://localhost:3000${EVE_INFO_ROUTE_PATH}`),
-    args,
+  return (await inTestApp(() =>
+    route.handler(new Request(`http://localhost:3000${EVE_INFO_ROUTE_PATH}`), args),
   )) as Response;
 }

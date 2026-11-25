@@ -8,7 +8,7 @@ import {
   createChannelReader,
   type ChannelReader,
 } from "#execution/tools/workflow/owner-channels.js";
-import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
+import type { SessionStepRunner } from "#execution/session/steps.js";
 
 export interface WorkflowToolRunInbox {
   readonly sent: number;
@@ -59,8 +59,13 @@ export function openWorkflowToolRunOwnerInbox(): WorkflowToolRunOwnerInbox {
 export async function deliverWorkflowRelay(
   message: WorkflowToolRunRequestMessage & { readonly request: WorkflowToolRelay },
   deliver: () => Promise<void>,
+  steps: SessionStepRunner,
 ): Promise<void> {
   await deliver();
   if (message.request.event.childSessionId === message.from.runId)
-    await resumeHookStep(message.replyTo, null, { ifPresent: true });
+    await steps.host.step(
+      "resumeHook",
+      { options: { ifPresent: true }, payload: null, token: message.replyTo },
+      steps.stepCall("resumeHook"),
+    );
 }

@@ -1,3 +1,4 @@
+import { builtInHosts } from "#runtime/app.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { EntityConflictError } from "#compiled/@workflow/errors/index.js";
 import { interruptLegacySessionStep } from "./interrupt-step.js";
@@ -86,6 +87,7 @@ describe("legacy pending work", () => {
     await interruptLegacySessionStep(prepared);
     expect(mocks.settle).toHaveBeenCalledExactlyOnceWith({
       history: prepared.history,
+      hosts: builtInHosts(),
       reportUsage: false,
       rerun: false,
       sessionWritable: prepared.input.sessionWritable,

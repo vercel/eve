@@ -1,3 +1,5 @@
+import { bindApp } from "#context/app.js";
+import { processApp, startedApp } from "#runtime/app.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import type { SessionHandoverPayload } from "#execution/session-inbox/inbox.js";
 import { findSessionHookHolder } from "#execution/session-inbox/owner.js";
@@ -27,8 +29,8 @@ import {
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
   EVE_SESSION_ATTRIBUTE,
-  EVE_VERSION_ATTRIBUTE,
   EVE_PREWARM_ATTRIBUTE,
+  eveBuildAttributes,
 } from "#execution/eve-workflow-attributes.js";
 import { owningSandboxDefinition } from "#runtime/sandbox/registry.js";
 import {
@@ -140,6 +142,7 @@ export async function prepareSuccessorStep(input: {
   let context: Awaited<ReturnType<typeof deserializeContext>>;
   try {
     context = await deserializeContext(checkpoint.serializedContext);
+    bindApp(context, startedApp());
   } catch (error) {
     if (error instanceof IncompatibleStateLayoutError) return unreadable(error.message);
     throw error;
@@ -214,7 +217,7 @@ async function recordSessionOwner(sessionId: string): Promise<void> {
     {
       [EVE_SESSION_ATTRIBUTE]: sessionId,
       [EVE_PREWARM_ATTRIBUTE]: "1",
-      [EVE_VERSION_ATTRIBUTE]: resolveInstalledPackageInfo().version,
+      ...eveBuildAttributes(resolveInstalledPackageInfo().version),
     },
     { allowReservedAttributes: true },
   );
@@ -295,7 +298,7 @@ export async function readSessionStreamTailStep(input: {
   readonly sessionId: string;
 }): Promise<number> {
   "use step";
-  return await readSessionStreamTailIndex(input.sessionId);
+  return await readSessionStreamTailIndex(processApp().hosts, input.sessionId);
 }
 
 export async function endRetiredTaskRunsStep(input: {
@@ -308,6 +311,7 @@ export async function endRetiredTaskRunsStep(input: {
     sessionId: input.sessionId,
   });
   await stopRuns(
+    processApp().hosts,
     input.runs.map((run) => ({ ends: true, run })),
     { kind: "end", reason: "The session moved to a new deployment." },
     { waitForEnd: false },

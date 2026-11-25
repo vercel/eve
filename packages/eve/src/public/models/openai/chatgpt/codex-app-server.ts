@@ -1,5 +1,6 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { createInterface, type Interface } from "node:readline";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import type { Interface } from "node:readline";
+import { createReadlineInterface, spawn } from "#runtime-env/child-process.js";
 
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { isErrnoCode, isObject } from "#shared/guards.js";
@@ -151,7 +152,7 @@ class CodexAppServerConnection {
     unrefStream(child.stdout);
     unrefStream(child.stderr);
     child.stderr.resume();
-    this.#lines = createInterface({ input: child.stdout });
+    this.#lines = createReadlineInterface({ input: child.stdout });
     this.#lines.on("line", (line) => this.#handleLine(line));
     child.once("error", (error) => this.#fail(error));
     child.once("exit", (code, signal) => {

@@ -2,6 +2,7 @@ export const SCHEDULE_COLLECTION_DEFINITION_BRAND = Symbol.for(
   "eve:schedule-collection-definition",
 );
 export const SCHEDULE_COLLECTION_SOURCE = Symbol.for("eve:schedule-collection-source");
+const AUTHORED_SCHEDULE_PROVIDER = Symbol.for("eve:schedule-collection-authored-provider");
 
 export interface ScheduleCollectionSourceIdentity {
   readonly application: string;
@@ -47,4 +48,18 @@ export function isScheduleCollectionDefinition(value: unknown): boolean {
     value !== null &&
     Reflect.get(value, SCHEDULE_COLLECTION_DEFINITION_BRAND) === true
   );
+}
+
+export function recordAuthoredScheduleProvider(value: object, provider: unknown): void {
+  Object.defineProperty(value, AUTHORED_SCHEDULE_PROVIDER, {
+    configurable: false,
+    enumerable: false,
+    value: provider,
+  });
+}
+
+export function authoredScheduleProvider(value: object): unknown {
+  return Object.hasOwn(value, AUTHORED_SCHEDULE_PROVIDER)
+    ? Reflect.get(value, AUTHORED_SCHEDULE_PROVIDER)
+    : Reflect.get(value, "provider");
 }

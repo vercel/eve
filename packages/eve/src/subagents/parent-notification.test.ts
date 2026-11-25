@@ -1,5 +1,7 @@
+import { builtInHosts } from "#runtime/app.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { installWorkflowHost } from "#execution/workflow-host/host.js";
+import { installWorkflowEngine } from "#execution/workflow-host/host.js";
+import { startTestApp, testEntities } from "#internal/testing/test-platform.js";
 
 import { ContextContainer } from "#context/container.js";
 import { serializeContext } from "#context/serialize.js";
@@ -17,6 +19,7 @@ import { SUBAGENT_ADAPTER } from "#subagents/adapter.js";
 import { SUBAGENT_ADAPTER_KIND } from "#subagents/adapter-state.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
+import { answerDispatcherProbe } from "#internal/testing/node-fetch.js";
 
 vi.mock("../runtime/sessions/compiled-agent-cache.js", () => ({
   getCompiledRuntimeAgentBundle: vi.fn(),
@@ -26,7 +29,8 @@ vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   resumeHook: vi.fn(),
 }));
 
-installWorkflowHost();
+installWorkflowEngine(builtInHosts(), testEntities());
+startTestApp();
 
 const resumeHookMock = vi.mocked(resumeHook);
 const fetchMock = vi.fn();
@@ -68,7 +72,7 @@ describe("turn caller notification", () => {
     resumeHookMock.mockResolvedValue(undefined as never);
     fetchMock.mockReset();
     fetchMock.mockResolvedValue(new Response(null, { status: 202 }));
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", answerDispatcherProbe(fetchMock));
   });
 
   afterEach(() => {

@@ -20,6 +20,7 @@ import { readClientContext } from "#internal/client-context.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 import { SessionStrandedError } from "#channel/session-stranded-error.js";
+import { inTestApp } from "#internal/testing/test-platform.js";
 
 function route(
   method: "GET" | "POST",
@@ -30,7 +31,8 @@ function route(
     (candidate) => candidate.method === method && candidate.path === path,
   );
   if (found === undefined || !("handler" in found)) throw new Error(`Missing ${method} ${path}`);
-  return found.handler as (request: Request, args: RouteHandlerArgs) => Promise<Response>;
+  const handler = found.handler as (request: Request, args: RouteHandlerArgs) => Promise<Response>;
+  return (request: Request, args: RouteHandlerArgs) => inTestApp(() => handler(request, args));
 }
 
 function createFixedSession(overrides: Partial<Session> = {}): Session {
@@ -51,7 +53,7 @@ function createFixedSession(overrides: Partial<Session> = {}): Session {
     end: vi.fn().mockResolvedValue(receipt),
     getLineStream: vi.fn().mockResolvedValue(new ReadableStream()),
     getStreamTailIndex: vi.fn().mockResolvedValue(-1),
-    hasRunnableOwner: vi.fn().mockResolvedValue(true),
+    isLive: vi.fn().mockResolvedValue(true),
     ...overrides,
   };
 }

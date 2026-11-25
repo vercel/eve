@@ -7,7 +7,10 @@ import type {
   DynamicSchedulesDefinition,
   ScheduleProvider,
 } from "#public/schedules/subscription.js";
-import { isScheduleCollectionDefinition } from "#shared/schedule-collection-definition.js";
+import {
+  authoredScheduleProvider,
+  isScheduleCollectionDefinition,
+} from "#shared/schedule-collection-definition.js";
 
 const SCHEDULE_OPERATIONS = [
   "create",
@@ -105,18 +108,21 @@ export function normalizeScheduleCollectionDefinition(
       if (handler !== undefined && typeof handler !== "function")
         throw new Error(`${message} "events.${name}" must be a function.`);
   }
-  const provider = expectObjectRecord(record.provider, `${message} "provider" must be an object.`);
-  expectOnlyKnownKeys(provider, PROVIDER_KEYS, `${message} "provider"`);
-  if (typeof provider.kind !== "string" || provider.kind.trim() === "")
-    throw new Error(`${message} provider.kind must be a non-empty string.`);
-  for (const method of PROVIDER_METHODS)
-    if (typeof provider[method] !== "function")
-      throw new Error(`${message} provider.${method} must be a function.`);
-  if (
-    provider.validateExpression !== undefined &&
-    typeof provider.validateExpression !== "function"
-  )
-    throw new Error(`${message} provider.validateExpression must be a function when provided.`);
+  const authored = authoredScheduleProvider(record);
+  if (authored !== undefined) {
+    const provider = expectObjectRecord(authored, `${message} "provider" must be an object.`);
+    expectOnlyKnownKeys(provider, PROVIDER_KEYS, `${message} "provider"`);
+    if (typeof provider.kind !== "string" || provider.kind.trim() === "")
+      throw new Error(`${message} provider.kind must be a non-empty string.`);
+    for (const method of PROVIDER_METHODS)
+      if (typeof provider[method] !== "function")
+        throw new Error(`${message} provider.${method} must be a function.`);
+    if (
+      provider.validateExpression !== undefined &&
+      typeof provider.validateExpression !== "function"
+    )
+      throw new Error(`${message} provider.validateExpression must be a function when provided.`);
+  }
   if (record.tool !== undefined) expectAgentToolExposure(record.tool, message);
   if (record.scopes !== undefined) {
     if (record.scope !== undefined)

@@ -1,4 +1,3 @@
-import { createHash, randomUUID } from "node:crypto";
 import { scheduleDisplayName } from "#runtime/schedules/record.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
@@ -18,7 +17,9 @@ import type {
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey, OccurrenceIdKey, ScheduleIdKey, ScheduleInstanceKey } from "#context/keys.js";
 import { expectFunction } from "#internal/authored-module.js";
-import { PermanentScheduleMessageError } from "#internal/schedules/verify-delivery.js";
+import { PermanentScheduleMessageError } from "#internal/schedules/permanent-error.js";
+import { bindApp } from "#context/app.js";
+import type { App } from "#runtime/app.js";
 import type {
   ScheduleDefinition,
   ScheduleHandlerArgs,
@@ -36,6 +37,9 @@ import {
   type ScheduleCollectionPayload,
 } from "#runtime/schedules/payload.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
+import { randomUUID } from "#runtime-env/uuid.js";
+import { concatBytes, utf8Bytes } from "#shared/bytes.js";
+import { sha256Hex } from "#shared/digest.js";
 
 export { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
 
@@ -63,18 +67,22 @@ export interface ScheduleCollectionDispatchInput {
 }
 
 export class ScheduleDispatcher {
+  private readonly app: App;
   private readonly runtime: Runtime;
   private readonly channels: readonly ResolvedChannelDefinition[];
   constructor(config: {
+    readonly app: App;
     readonly runtime: Runtime;
     readonly channels: readonly ResolvedChannelDefinition[];
   }) {
+    this.app = config.app;
     this.runtime = config.runtime;
     this.channels = config.channels;
   }
 
   async trigger(input: ScheduleDispatchInput): Promise<ScheduleDispatchResult> {
     const scope = new ContextContainer();
+    bindApp(scope, this.app);
     scope.set(ScheduleIdKey, input.scheduleId);
     return await contextStorage.run(scope, () => this.triggerInScope(input));
   }
@@ -112,9 +120,7 @@ export class ScheduleDispatcher {
     const scheduledToken = (channelToken: string | undefined, key: string | undefined) =>
       key === undefined
         ? `eve-scheduled-send:${randomUUID()}`
-        : `eve-scheduled-send:${createHash("sha256")
-            .update(JSON.stringify([occurrence.scheduleId, channelToken, key]))
-            .digest("hex")}`;
+        : `eve-scheduled-send:${sha256Hex(JSON.stringify([occurrence.scheduleId, channelToken, key]))}`;
     const repeats = new Map<unknown, Map<string, number>>();
     const occurrenceKey = (channel: unknown, target: unknown, message: MessageContent): string => {
       const digest = messageDigest(message);
@@ -123,9 +129,7 @@ export class ScheduleDispatcher {
       const slot = JSON.stringify([target, digest]);
       const repeat = sent.get(slot) ?? 0;
       sent.set(slot, repeat + 1);
-      return `eve-occurrence:${createHash("sha256")
-        .update(JSON.stringify([occurrence.executionId, digest, repeat]))
-        .digest("hex")}`;
+      return `eve-occurrence:${sha256Hex(JSON.stringify([occurrence.executionId, digest, repeat]))}`;
     };
     const freshRun = (run: RunInput): RunInput => ({
       ...run,
@@ -189,7 +193,7 @@ export class ScheduleDispatcher {
     const sessions: Delivery[] = [];
     const waitUntilTasks: Promise<unknown>[] = [];
     const toChannel = createCrossChannelToFn(runtime, toCrossChannelTargets(this.channels), {
-      acceptedDeploymentId: process.env.VERCEL_DEPLOYMENT_ID?.trim() || undefined,
+      acceptedDeploymentId: this.app.platform.deployment.deploymentId(),
     });
     return {
       args: {
@@ -233,10 +237,10 @@ export class ScheduleDispatcher {
 }
 
 function messageDigest(message: MessageContent): string {
-  const hash = createHash("sha256");
+  const chunks: Uint8Array[] = [];
   const field = (value: string | Uint8Array) => {
-    hash.update(`${typeof value === "string" ? Buffer.byteLength(value) : value.byteLength}:`);
-    hash.update(value);
+    const bytes = typeof value === "string" ? utf8Bytes(value) : value;
+    chunks.push(utf8Bytes(`${bytes.byteLength}:`), bytes);
   };
   for (const part of typeof message === "string"
     ? [{ type: "text", text: message } as const]
@@ -260,7 +264,7 @@ function messageDigest(message: MessageContent): string {
       field(data instanceof ArrayBuffer ? new Uint8Array(data) : data);
     }
   }
-  return hash.digest("hex");
+  return sha256Hex(concatBytes(chunks));
 }
 
 function resolveCreatorAuth(

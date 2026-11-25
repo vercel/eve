@@ -131,6 +131,9 @@ export function createRuntimeLoaderPackageBoundaryPlugin(input: {
   return {
     name: "eve-runtime-loader-package-boundary",
     async resolveId(source, importer, options) {
+      if (isRuntimeSchemeImport(source) && !/^(?:data|file):/i.test(source)) {
+        return { external: true, id: source };
+      }
       if (!isPackageImport(source)) {
         return undefined;
       }
@@ -418,12 +421,16 @@ function resolveExistingExternalFilePath(id: string): string | undefined {
   return undefined;
 }
 
+function isRuntimeSchemeImport(source: string): boolean {
+  return !isPathImport(source) && /^[a-z][a-z0-9+.-]*:/i.test(source);
+}
+
 function isPackageImport(source: string): boolean {
   if (isPathImport(source)) {
     return false;
   }
 
-  if (/^(?:node|data|file):/.test(source)) {
+  if (isRuntimeSchemeImport(source)) {
     return false;
   }
 

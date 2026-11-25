@@ -2,12 +2,19 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { defaultNamespace, type MemoryScopeContext } from "#public/memory/index.js";
 import { byPrincipal } from "#public/memory/scope.js";
+import { inTestApp, testApp } from "#internal/testing/test-platform.js";
+import { createEntities } from "#platform/entities.js";
+import vercelPlatform from "#platform/vercel/declaration.js";
 
 const baseContext: MemoryScopeContext = {
   abortSignal: new AbortController().signal,
   channel: { kind: "channel:eve", metadata: {} },
   session: { auth: { current: null, initiator: null }, id: "session_1" },
 };
+
+function inVercelApp<T>(fn: () => T): T {
+  return inTestApp(fn, testApp({ platform: createEntities(vercelPlatform, undefined) }));
+}
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -19,8 +26,8 @@ describe("memory namespaces and scopes", () => {
     vi.stubEnv("VERCEL_OIDC_TOKEN", "");
     const input = { appRoot: "/Users/example/private/app", node: "__root__", slot: "profile" };
 
-    const first = defaultNamespace(input);
-    const second = defaultNamespace(input);
+    const first = inVercelApp(() => defaultNamespace(input));
+    const second = inVercelApp(() => defaultNamespace(input));
 
     expect(first).toBe(second);
     expect(first).not.toContain(input.appRoot);
@@ -37,14 +44,18 @@ describe("memory namespaces and scopes", () => {
     vi.stubEnv("VERCEL_PROJECT_ID", "prj_123");
     vi.stubEnv("VERCEL_ENV", "preview");
     vi.stubEnv("VERCEL_GIT_COMMIT_REF", "feature/memory");
-    const preview = defaultNamespace({ appRoot: "/app", node: "__root__", slot: "profile" });
+    const preview = inVercelApp(() =>
+      defaultNamespace({ appRoot: "/app", node: "__root__", slot: "profile" }),
+    );
 
     vi.stubEnv("VERCEL_ENV", "production");
-    const production = defaultNamespace({
-      appRoot: "/app",
-      node: "__root__",
-      slot: "profile",
-    });
+    const production = inVercelApp(() =>
+      defaultNamespace({
+        appRoot: "/app",
+        node: "__root__",
+        slot: "profile",
+      }),
+    );
 
     expect(JSON.parse(preview)).toEqual([
       "eve-memory-default-namespace-v1",
@@ -63,10 +74,14 @@ describe("memory namespaces and scopes", () => {
     vi.stubEnv("VERCEL_ENV", "production");
     vi.stubEnv("EVE_INTERNAL_AGENT_WORKSPACE_MEMBER", "1");
     vi.stubEnv("EVE_PUBLIC_ROUTE_PREFIX", "/support/");
-    const support = defaultNamespace({ appRoot: "/app", node: "__root__", slot: "profile" });
+    const support = inVercelApp(() =>
+      defaultNamespace({ appRoot: "/app", node: "__root__", slot: "profile" }),
+    );
 
     vi.stubEnv("EVE_PUBLIC_ROUTE_PREFIX", "/research");
-    const research = defaultNamespace({ appRoot: "/app", node: "__root__", slot: "profile" });
+    const research = inVercelApp(() =>
+      defaultNamespace({ appRoot: "/app", node: "__root__", slot: "profile" }),
+    );
 
     expect(JSON.parse(support)).toEqual([
       "eve-memory-default-namespace-v1",
@@ -85,11 +100,11 @@ describe("memory namespaces and scopes", () => {
     vi.stubEnv("VERCEL_PROJECT_ID", "prj_123");
     vi.stubEnv("VERCEL_ENV", "production");
     const input = { appRoot: "/app", node: "__root__", slot: "profile" };
-    const unprefixed = defaultNamespace(input);
+    const unprefixed = inVercelApp(() => defaultNamespace(input));
 
     vi.stubEnv("EVE_PUBLIC_ROUTE_PREFIX", "/support");
 
-    expect(defaultNamespace(input)).toBe(unprefixed);
+    expect(inVercelApp(() => defaultNamespace(input))).toBe(unprefixed);
   });
 
   it("disables anonymous and runtime principals and normalizes local development", () => {

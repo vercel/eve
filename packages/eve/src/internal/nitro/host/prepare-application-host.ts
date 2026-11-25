@@ -6,6 +6,7 @@ import { resolveSchedules } from "#runtime/schedules/resolve-schedule.js";
 import type { ResolvedScheduleDefinition } from "#runtime/types.js";
 import type { ApplicationBuildWorkspace } from "#internal/application/build-workspace.js";
 import { join } from "node:path";
+import { selectPlatformModule } from "#platform/selection.js";
 import {
   type BuiltInWorkflowWorldTarget,
   writeCompiledArtifactsData,
@@ -70,6 +71,7 @@ export async function prepareDevelopmentApplicationHost(
       authoredWorkflowModules: generation.authoredWorkflowModules,
       compileResult,
       outDir: workspace.artifactsDir,
+      platformModule: selectPlatformModule(appRoot),
       runtimeAppRoot: generation.runtimeAppRoot,
     });
     return {
@@ -105,6 +107,8 @@ export async function prepareDevelopmentApplicationHost(
 
 export async function prepareProductionApplicationHost(
   workspace: ApplicationBuildWorkspace,
+  defaultWorkflowWorld: BuiltInWorkflowWorldTarget,
+  options: { readonly deferInstrumentationSetup?: boolean; readonly platformModule?: string } = {},
 ): Promise<PreparedApplicationHost & { readonly moduleGraph: AuthoredModuleGraph }> {
   await buildWorkspaceExtensions(workspace.appRoot);
   const { compileResult, moduleGraph } = await compileAgentInWorkspace({
@@ -118,8 +122,10 @@ export async function prepareProductionApplicationHost(
 
   const compiledArtifacts = await writeCompiledArtifactsFiles({
     compileResult,
-    defaultWorkflowWorld: resolveProductionWorkflowWorldTarget(),
+    defaultWorkflowWorld,
+    deferInstrumentationSetup: options.deferInstrumentationSetup,
     outDir: workspace.host.artifactsDir,
+    platformModule: options.platformModule ?? selectPlatformModule(workspace.appRoot),
   });
 
   return {
@@ -154,12 +160,4 @@ function createPreparedApplicationHost(input: {
     schedules: input.schedules,
     workflowBuildDir: input.workflowBuildDir,
   };
-}
-
-function resolveProductionWorkflowWorldTarget(): BuiltInWorkflowWorldTarget {
-  if (process.env.VERCEL) {
-    return "vercel";
-  }
-
-  return "local";
 }

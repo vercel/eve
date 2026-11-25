@@ -15,6 +15,7 @@ import { ensureDevelopmentSandboxesPrepared } from "./development-lazy-prewarm.j
 
 vi.mock("./prewarm.js", () => ({ prewarmAppSandboxes: vi.fn() }));
 const scratch = useTemporaryDirectories();
+const build = {};
 
 async function fixture() {
   const appRoot = await scratch("eve-lazy-preparation-");
@@ -22,6 +23,7 @@ async function fixture() {
   await mkdir(compileDirectoryPath, { recursive: true });
   return {
     input: {
+      build,
       compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(appRoot),
       nodeId: "__root__",
       providerName: "test",
@@ -60,6 +62,7 @@ describe("lazy development preparation", () => {
     ]);
     await ensureDevelopmentSandboxesPrepared(app.input);
     expect(prewarmAppSandboxes).toHaveBeenCalledTimes(1);
+    expect(prewarmAppSandboxes).toHaveBeenCalledWith(expect.objectContaining({ build }));
   });
 
   it("keeps a live preparation lease beyond the stale-owner interval", async () => {

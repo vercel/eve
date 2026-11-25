@@ -2,6 +2,21 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { resolveRecallWebhookUrl, sendRecallChatMessage } from "./api.js";
 
+vi.mock("eve/internal/channels", async (importOriginal) => {
+  const channels = await importOriginal<typeof import("eve/internal/channels")>();
+  const platform = {
+    deployment: {
+      environment: () => process.env.VERCEL_ENV,
+      host: () => process.env.VERCEL_PROJECT_PRODUCTION_URL,
+    },
+  };
+  return {
+    ...channels,
+    resolveWorkflowCallbackBaseUrl: (url: string) =>
+      channels.resolveWorkflowCallbackBaseUrl(url, platform as never),
+  };
+});
+
 describe("resolveRecallWebhookUrl", () => {
   afterEach(() => vi.unstubAllEnvs());
 

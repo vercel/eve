@@ -1,3 +1,5 @@
+import { bindApp } from "#context/app.js";
+import { processApp, startedApp } from "#runtime/app.js";
 import { SandboxKey } from "#context/keys.js";
 import { withContextScope } from "#context/run-step.js";
 import { deserializeContext } from "#context/serialize.js";
@@ -45,7 +47,7 @@ export async function stopIdleSessionSandboxStep(
   input: IdleSandboxInput,
 ): Promise<SessionStateTransition> {
   "use step";
-  return await withSessionStateDelta(input, stopIdleSessionSandbox);
+  return await withSessionStateDelta(processApp().hosts, input, stopIdleSessionSandbox);
 }
 
 async function stopIdleSessionSandbox(
@@ -54,6 +56,7 @@ async function stopIdleSessionSandbox(
   const durable = readDurableSession(input.sessionState);
   try {
     const ctx = await deserializeContext(input.serializedContext);
+    bindApp(ctx, startedApp());
     await withContextScope(ctx, hydrateDurableSession(durable), async (session) => {
       const access = ctx.get(SandboxKey) as EnsuredSandboxAccess | undefined;
       if (access !== undefined)

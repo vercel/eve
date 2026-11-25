@@ -7,15 +7,17 @@ import { stepModel } from "#definitions/step.js";
 import type { Step } from "#harness/step/context.js";
 import type { ModelProfile } from "#harness/model-profile.js";
 import { appendPackageUserAgent } from "#internal/user-agent.js";
+import type { Entities } from "#platform/entities.js";
 
 export function buildGatewayAttributionHeaders(
   profile: ModelProfile,
   runtimeIdentity: KernelConfig["runtimeIdentity"],
+  platform: Entities,
 ): Record<string, string> | undefined {
   if (!profile.gateway) return undefined;
 
   const title = runtimeIdentity?.agentName ?? runtimeIdentity?.agentId;
-  const deploymentHost = process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL;
+  const deploymentHost = platform.deployment.host();
   const referer = deploymentHost ? `https://${deploymentHost}` : undefined;
 
   const headers: Record<string, string> = Object.fromEntries(appendPackageUserAgent(new Headers()));

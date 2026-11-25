@@ -1,3 +1,5 @@
+import { bindApp } from "#context/app.js";
+import { processApp, startedApp } from "#runtime/app.js";
 import { userPartsOf } from "#harness/user-parts.js";
 import { selectDeliveryPayloads } from "#harness/messages.js";
 import { routeAnswer } from "#harness/session-machine/transitions.js";
@@ -67,7 +69,7 @@ export async function routeProxiedDeliverStep(
   input: SessionStepInput & { readonly delivery: DeliverHookPayload },
 ): Promise<WithSessionStateDelta<RoutedDeliverResult>> {
   "use step";
-  return await withSessionStateDelta(input, routeProxiedDeliver);
+  return await withSessionStateDelta(processApp().hosts, input, routeProxiedDeliver);
 }
 
 async function routeProxiedDeliver(
@@ -217,7 +219,12 @@ async function routeProxiedDeliver(
     consumed.length === 0
       ? published
       : await commitSessionStep(
-          { ...published, rerun: input.rerun, sessionWritable: input.sessionWritable },
+          {
+            ...published,
+            hosts: input.hosts,
+            rerun: input.rerun,
+            sessionWritable: input.sessionWritable,
+          },
           (view) => [routeAnswer(view, { deliveries: consumed, forwarded: [], decided: [] })],
           {
             origin: "own",
@@ -234,7 +241,12 @@ async function routeProxiedDeliver(
     );
     if (ignored.length === 0) return { ...admitted, kind: "cancel-turn" };
     const settled = await publishSessionEvents(
-      { ...admitted, rerun: input.rerun, sessionWritable: input.sessionWritable },
+      {
+        ...admitted,
+        hosts: input.hosts,
+        rerun: input.rerun,
+        sessionWritable: input.sessionWritable,
+      },
       [
         admitDeliveries(
           ignored.map(({ channelKind, deliveryId }) => ({
@@ -260,7 +272,12 @@ async function routeProxiedDeliver(
     if (child.workflowAsk !== undefined) {
       const responses = coalesceDeliverPayloads(child.payloads).answers ?? [];
       decided.push(...responses.map((answer) => ({ answer, outcome: "accepted" as const })));
-      await sendWorkflowAskAnswers(child.workflowAsk, responses, principalOf(sourceDelivery.auth));
+      await sendWorkflowAskAnswers(
+        input.hosts,
+        child.workflowAsk,
+        responses,
+        principalOf(sourceDelivery.auth),
+      );
     } else {
       const childDelivery: DeliverHookPayload = {
         ...sourceDelivery,
@@ -270,6 +287,7 @@ async function routeProxiedDeliver(
       const remote = child.remote;
       if (remote !== undefined) {
         const ctx = await deserializeContext(serializedContext);
+        bindApp(ctx, startedApp());
         const headers = await resolveRemoteAgentStreamHeaders({
           bundle: requireCompiledBundle(ctx),
           name: remote.name,
@@ -305,6 +323,7 @@ async function routeProxiedDeliver(
         }
       } else {
         await resumeRoutedSessionInbox(
+          input.hosts,
           child.childSessionInbox ?? child.childContinuationToken,
           childDelivery,
         );
@@ -313,7 +332,7 @@ async function routeProxiedDeliver(
   }
 
   const context = await commitSessionStep(
-    { ...admitted, rerun: input.rerun, sessionWritable: input.sessionWritable },
+    { ...admitted, hosts: input.hosts, rerun: input.rerun, sessionWritable: input.sessionWritable },
     (view) => [
       routeAnswer(view, {
         decided:
@@ -384,7 +403,7 @@ export async function mapHeldAnswersStep(
   },
 ): Promise<WithSessionStateDelta<{ readonly delivery: DeliverHookPayload | undefined }>> {
   "use step";
-  return await withSessionStateDelta(input, async (step) => {
+  return await withSessionStateDelta(processApp().hosts, input, async (step) => {
     const requestIds = new Set(step.requestIds);
     const mapped = await deliverChannelAnswers({
       ...step,
@@ -411,6 +430,7 @@ async function deliverChannelAnswers(
   );
   if (!unrouted) return input;
   const ctx = await deserializeContext(input.serializedContext);
+  bindApp(ctx, startedApp());
   const adapter = ctx.require(ChannelKey);
   if (adapter.deliver === undefined) return input;
 
@@ -448,6 +468,7 @@ async function deliverChannelAnswers(
   if (!mapped) return input;
 
   const session = await deserializeContext(input.serializedContext);
+  bindApp(session, startedApp());
   setChannelContext(session, { ...adapter, state });
   return {
     delivery: { ...input.delivery, payloads },

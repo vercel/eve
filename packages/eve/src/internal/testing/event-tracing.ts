@@ -17,6 +17,7 @@ export function eventTracing() {
   propagation.setGlobalPropagator(new W3CTraceContextPropagator());
   trace.setGlobalTracerProvider(provider);
   const runtime = registerInstrumentationRuntime({
+    environment: "production",
     forceFlush: async () => provider.forceFlush(),
     hooks: createInstrumentationHooks([]),
     otelSettings: undefined,

@@ -1,0 +1,65 @@
+import type * as AsyncStorage from "./async-storage.js";
+import type * as AsyncStorageWeb from "./async-storage.web.js";
+import type * as ChildProcess from "./child-process.js";
+import type * as ChildProcessWeb from "./child-process.web.js";
+import type * as CompiledAgents from "./compiled-agents.js";
+import type * as CompiledAgentsWeb from "./compiled-agents.web.js";
+import type * as DeepEqual from "./deep-equal.js";
+import type * as DeepEqualWeb from "./deep-equal.web.js";
+import type * as Delay from "./delay.js";
+import type * as DelayWeb from "./delay.web.js";
+import type * as DevelopmentSandboxes from "./development-sandboxes.js";
+import type * as DevelopmentSandboxesWeb from "./development-sandboxes.web.js";
+import type * as Env from "./env.js";
+import type * as EnvWeb from "./env.web.js";
+import type * as HostBytes from "./host-bytes.js";
+import type * as HostBytesWeb from "./host-bytes.web.js";
+import type * as HostPath from "./host-path.js";
+import type * as HostPathWeb from "./host-path.web.js";
+import type * as Inflate from "./inflate.js";
+import type * as InflateWeb from "./inflate.web.js";
+import type * as Inspect from "./inspect.js";
+import type * as InspectWeb from "./inspect.web.js";
+import type * as LocalGateway from "./local-gateway.js";
+import type * as LocalGatewayWeb from "./local-gateway.web.js";
+import type * as OtelRegister from "./otel-register.js";
+import type * as OtelRegisterWeb from "./otel-register.web.js";
+import type * as PackageInfo from "./package-info.js";
+import type * as PackageInfoWeb from "./package-info.web.js";
+import type * as PublicDispatcher from "./public-dispatcher.js";
+import type * as PublicDispatcherWeb from "./public-dispatcher.web.js";
+import type * as PosixPath from "./posix-path.js";
+import type * as PosixPathWeb from "./posix-path.web.js";
+import type * as SandboxCache from "./sandbox-cache.js";
+import type * as SandboxCacheWeb from "./sandbox-cache.web.js";
+import type * as Sha256 from "./sha256.js";
+import type * as Sha256Web from "./sha256.web.js";
+import type * as Uuid from "./uuid.js";
+import type * as UuidWeb from "./uuid.web.js";
+import type * as VercelProjectLink from "./vercel-project-link.js";
+import type * as VercelProjectLinkWeb from "./vercel-project-link.web.js";
+
+type Twin<Web extends Node, Node> = [Web, Node];
+
+export type PlatformTwins = [
+  Twin<typeof AsyncStorageWeb, typeof AsyncStorage>,
+  Twin<typeof ChildProcessWeb, typeof ChildProcess>,
+  Twin<typeof CompiledAgentsWeb, typeof CompiledAgents>,
+  Twin<typeof DeepEqualWeb, typeof DeepEqual>,
+  Twin<typeof DelayWeb, typeof Delay>,
+  Twin<typeof DevelopmentSandboxesWeb, typeof DevelopmentSandboxes>,
+  Twin<typeof EnvWeb, typeof Env>,
+  Twin<typeof HostBytesWeb, typeof HostBytes>,
+  Twin<typeof HostPathWeb, typeof HostPath>,
+  Twin<typeof InflateWeb, typeof Inflate>,
+  Twin<typeof InspectWeb, typeof Inspect>,
+  Twin<typeof LocalGatewayWeb, typeof LocalGateway>,
+  Twin<typeof OtelRegisterWeb, typeof OtelRegister>,
+  Twin<typeof PackageInfoWeb, typeof PackageInfo>,
+  Twin<typeof PosixPathWeb, typeof PosixPath>,
+  Twin<typeof PublicDispatcherWeb, typeof PublicDispatcher>,
+  Twin<typeof SandboxCacheWeb, typeof SandboxCache>,
+  Twin<typeof Sha256Web, typeof Sha256>,
+  Twin<typeof UuidWeb, typeof Uuid>,
+  Twin<typeof VercelProjectLinkWeb, typeof VercelProjectLink>,
+];

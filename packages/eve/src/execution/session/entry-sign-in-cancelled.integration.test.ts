@@ -1,3 +1,4 @@
+import { builtInHosts } from "#runtime/app.js";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
@@ -98,7 +99,7 @@ describe("workflowEntry cancelled sign-in", () => {
       ],
     });
     const send = (runId: string, message: string) =>
-      resumeRoutedHook(sessionInboxHookToken(sessionCommandHookToken(runId)), {
+      resumeRoutedHook(builtInHosts(), sessionInboxHookToken(sessionCommandHookToken(runId)), {
         auth: alice,
         kind: "send",
         delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),

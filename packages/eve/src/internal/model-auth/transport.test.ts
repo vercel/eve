@@ -8,7 +8,7 @@ vi.mock("./vercel.js", () => ({
   VERCEL_TEAM_HEADER: "x-vercel-ai-gateway-team",
   resolveVercelSession: mocks.session,
 }));
-vi.mock("./vercel-cli.js", () => ({ readVercelCliConnection: mocks.cli }));
+vi.mock("#platform/vercel/model-auth/cli.js", () => ({ readVercelCliConnection: mocks.cli }));
 import {
   createDirectModelFetch,
   localGatewayDecisionModel,

@@ -1,6 +1,6 @@
-import { createHash } from "node:crypto";
-
 import { requireClearance, type Clearance } from "#harness/clearance.js";
+import { sha256 } from "#runtime-env/sha256.js";
+import { toHex } from "#shared/bytes.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 
 export function admitWorkflowTask(
@@ -20,8 +20,8 @@ export function hasWorkflowAdmission(task: RuntimeWorkflowTaskRequest): boolean 
 }
 
 function fingerprint(task: RuntimeWorkflowTaskRequest): string {
-  return createHash("sha256")
-    .update(
+  return toHex(
+    sha256(
       stableJson([
         task.callId,
         task.toolName,
@@ -31,8 +31,8 @@ function fingerprint(task: RuntimeWorkflowTaskRequest): string {
         task.executeInput,
         task.clearedBy,
       ]),
-    )
-    .digest("hex");
+    ),
+  );
 }
 
 function stableJson(value: unknown): string {

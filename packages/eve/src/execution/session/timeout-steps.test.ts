@@ -9,6 +9,9 @@ import { sessionTimeoutWorkflowReference } from "#execution/workflow-references.
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
+import { startTestApp } from "#internal/testing/test-platform.js";
+
+startTestApp();
 
 const cancelRunMock = vi.fn();
 const getHookByTokenMock = vi.fn();

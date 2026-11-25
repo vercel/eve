@@ -44,6 +44,8 @@ vi.mock("./timeout-steps.js", () => ({
 }));
 vi.mock("./turn-control.js", () => ({ createTurnControl: vi.fn() }));
 vi.mock("#subagents/parent-notification.js", () => ({
+  notifyCancelledTaskCallerStep: vi.fn(),
+  notifyTurnCallerStep: vi.fn(),
   resolveInitialTurnCallerStep: vi.fn(),
 }));
 vi.mock("../delegated-session-context.js", () => ({ hasDelegatedSessionContext: vi.fn() }));

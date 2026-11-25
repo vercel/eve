@@ -156,6 +156,7 @@ async function createHost(variant: HostVariant = {}): Promise<PreparedDevelopmen
             } as const,
             instrumentationSourcePaths: [instrumentationSourcePath],
           }),
+      platformModulePath: join(appRoot, "platform.mjs"),
       workflowWorldPluginPath: join(appRoot, "workflow-world.mjs"),
     },
     compileResult: {

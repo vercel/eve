@@ -2,6 +2,8 @@ import { readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { sessionCodeHash } from "./session-code-hash.mjs";
+
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 const monorepoRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const workspaceYamlPath = join(monorepoRoot, "pnpm-workspace.yaml");
@@ -36,6 +38,7 @@ const evePackageDependencyVersion = process.env.EVE_PACKAGE_DEPENDENCY_URL ?? pa
 
 const replacements = {
   __EVE_PACKAGE_VERSION__: packageJson.version,
+  __EVE_SESSION_CODE_HASH__: await sessionCodeHash(packageRoot),
   __EVE_PACKAGE_DEPENDENCY_VERSION__: evePackageDependencyVersion,
   __NODE_ENGINE__: nodeEngine,
   __AI_SDK_VERSION__: await resolveCatalogVersion("ai"),

@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "#runtime-env/child-process.js";
 import { Readable, Writable } from "node:stream";
 
 /**

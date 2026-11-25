@@ -3,8 +3,10 @@ import {
   type SessionHook,
 } from "#execution/session-inbox/workflow-transport.js";
 import { runPreparedSession } from "#execution/session/program.js";
-import { storedProjection } from "#harness/session-machine/view.js";
-import { workflowSessionHost } from "#execution/session/workflow-host.js";
+import { bootFromCheckpoint } from "#execution/session/checkpoint-boot.js";
+import { workflowProgramHost } from "#execution/session/workflow-host.js";
+import { workflowSessionStep } from "#execution/workflow-host/session-steps.js";
+import { settleAll } from "#execution/session/host-clock.js";
 import { createHook, getWorkflowMetadata, getWritable } from "#compiled/@workflow/core/index.js";
 import {
   bootInitialOwner,
@@ -60,7 +62,7 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
   const result = await runPreparedSession(
     boot.session,
     boot.inbox,
-    workflowSessionHost(boot.session, boot.inbox),
+    workflowProgramHost(boot.session, boot.inbox),
   );
   return { output: result.output };
 }
@@ -70,6 +72,8 @@ export function workflowOwnerPorts(sessionId: string): InitialOwnerPorts<Session
     sessionWritable: getWritable<Uint8Array>(),
     inboxTransport: workflowInboxTransport(sessionId),
     timeouts: createSessionTimeoutControl,
+    step: workflowSessionStep,
+    all: settleAll,
     settleContinuationConflict: (conflict) => settleContinuationConflictStep(conflict),
   };
 }
@@ -234,36 +238,24 @@ async function startSuccessor(
   const { checkpoint, serializedContext } = prepared;
   return {
     inbox,
-    session: {
+    session: bootFromCheckpoint(checkpoint, {
       anchor: {
         kind: "successor",
         notify: (result) =>
           signalSessionAnchorStep({ result, token: sessionAnchorToken(sessionId) }),
       },
-      admittedDeliveryKeys: checkpoint.admittedDeliveryKeys,
       caller: input.delivery?.caller,
-      capabilities: checkpoint.capabilities,
       compactFirst: prepared.importedTurnCount !== undefined && checkpoint.history.length > 0,
       deploymentId: input.ownerDeploymentId,
-      history: checkpoint.history,
-      start:
-        input.delivery !== undefined
-          ? { input: input.delivery, kind: "turn" }
-          : storedProjection(checkpoint.sessionState.snapshot.session.state).view.session.status ===
-              "new"
-            ? { kind: "first-message" }
-            : { kind: "parked" },
-      retention: checkpoint.retention,
       serializedContext,
       sessionId,
-      sessionState: checkpoint.sessionState,
       sessionTimeoutControl: createSessionTimeoutControl({
         deadline: input.reason === "prewarm" ? input.sessionTimeoutDeadline : undefined,
         sessionId,
         timeoutMs: checkpoint.sessionTimeoutMs,
       }),
-      sessionTimeoutMs: checkpoint.sessionTimeoutMs,
       sessionWritable: input.sessionWritable,
-    },
+      ...(input.delivery !== undefined && { start: { input: input.delivery, kind: "turn" } }),
+    }),
   };
 }

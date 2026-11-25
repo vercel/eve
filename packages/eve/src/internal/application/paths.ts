@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 
 import { workflowEntryReference } from "#execution/workflow-references.js";
+import { loadPlatformBuild } from "#platform/selection.js";
+import type { Build } from "#platform/entities.js";
 import {
   resolveInstalledPackageInfo,
   resolvePackageRoot,
@@ -28,10 +30,6 @@ export function resolveApplicationRoot(cwd: string = process.cwd()): string {
 
 function getWorkflowBuildCacheKey(appRoot: string): string {
   return createHash("sha256").update(appRoot).digest("hex").slice(0, 12);
-}
-
-function isVercelBuildEnvironment(): boolean {
-  return Boolean(process.env.VERCEL);
 }
 
 export function resolveWorkflowBuildDirectory(appRoot: string): string {
@@ -70,18 +68,15 @@ export function resolveSandboxCacheDirectory(appRoot: string): string {
   return join(appRoot, ".eve", "sandbox-cache");
 }
 
-export function resolveOutputDirectory(appRoot: string): string {
-  if (isVercelBuildEnvironment()) {
-    return join(appRoot, ".vercel", "output");
-  }
-
-  return join(appRoot, ".output");
+export function resolveOutputDirectory(appRoot: string, build: Build): string {
+  const directory = build.outputDirectory ?? ".output";
+  return isAbsolute(directory) ? directory : join(appRoot, directory);
 }
 
-export function getApplicationInfo(appRoot: string): ApplicationInfo {
+export async function getApplicationInfo(appRoot: string): Promise<ApplicationInfo> {
   return {
     appRoot,
-    outputDir: resolveOutputDirectory(appRoot),
+    outputDir: resolveOutputDirectory(appRoot, await loadPlatformBuild(appRoot)),
     workflowId: workflowEntryReference.workflowId,
     workflowBuildDir: resolveWorkflowBuildDirectory(appRoot),
     workflowSourceDir: resolvePackageSourceDirectoryPath("src/execution"),

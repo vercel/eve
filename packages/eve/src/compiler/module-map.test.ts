@@ -2,10 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import { compileFromMemory } from "#internal/testing/compile-from-memory.js";
 import {
-  collectRuntimeModuleBindingsForManifest,
   createCompiledModuleMapSource,
   createProgrammaticCompiledModuleMap,
 } from "#compiler/module-map.js";
+import { collectRuntimeModuleBindingsForManifest } from "#compiler/module-map-schema.js";
 
 const mocks = vi.hoisted(() => ({
   loadAuthoredModuleNamespace: vi.fn(

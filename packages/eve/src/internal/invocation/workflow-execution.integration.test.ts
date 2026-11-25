@@ -1,9 +1,12 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { aroundEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 
-const ports = vi.hoisted(() => ({ getWorld: vi.fn(), streamSessionLines: vi.fn() }));
-vi.mock("#internal/workflow/runtime.js", () => ({ getWorld: ports.getWorld }));
+const ports = vi.hoisted(() => ({ findRun: vi.fn(), streamSessionLines: vi.fn() }));
+vi.mock("#execution/workflow-host/host.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#execution/workflow-host/host.js")>()),
+  findWorkflowRun: ports.findRun,
+}));
 vi.mock("#execution/session-event-stream.js", () => ({
   streamSessionLines: ports.streamSessionLines,
 }));
@@ -14,7 +17,9 @@ import {
   INVOCATION_TOKEN_ATTRIBUTE,
   invocationOwnerKey,
 } from "#internal/invocation/metadata.js";
+import { inTestApp } from "#internal/testing/test-platform.js";
 
+aroundEach(async (runTest) => await inTestApp(runTest));
 beforeEach(() => vi.resetAllMocks());
 
 const auth: SessionAuthContext = {
@@ -25,17 +30,14 @@ const auth: SessionAuthContext = {
 };
 
 function serveRun(status: string) {
-  ports.getWorld.mockResolvedValue({
-    runs: {
-      get: async () => ({
-        runId: "invocation-1",
-        createdAt: new Date("2026-10-16T00:00:00.000Z"),
-        status,
-        attributes: {
-          [INVOCATION_OWNER_ATTRIBUTE]: invocationOwnerKey(auth),
-          [INVOCATION_TOKEN_ATTRIBUTE]: "invocation-token",
-        },
-      }),
+  ports.findRun.mockResolvedValue({
+    runId: "invocation-1",
+    createdAt: new Date("2026-10-16T00:00:00.000Z"),
+    expiredAt: undefined,
+    status,
+    attributes: {
+      [INVOCATION_OWNER_ATTRIBUTE]: invocationOwnerKey(auth),
+      [INVOCATION_TOKEN_ATTRIBUTE]: "invocation-token",
     },
   });
 }

@@ -193,7 +193,7 @@ export function createChannelAddress<TState = undefined>(input: {
         createSession(sessionId, input.runtime, { ...metadata, turnPolicy: input.turnPolicy });
       let owner: { readonly sessionId: string } | undefined;
       try {
-        owner = await input.runtime.resolveContinuation(namespacedToken, { runnable: true });
+        owner = await input.runtime.resolveContinuation(namespacedToken, { live: true });
       } catch (error) {
         if (!SessionStrandedError.is(error)) throw error;
         throw new SessionStrandedError(

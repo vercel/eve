@@ -125,6 +125,7 @@ function createSessionSandboxHarness() {
         turn: { id: "turn_0", sequence: 0 },
       });
       const access = await ensureSandboxAccess({
+        build: () => ({}),
         compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
         nodeId: "__root__",
         registry,

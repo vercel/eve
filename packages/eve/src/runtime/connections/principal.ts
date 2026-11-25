@@ -2,7 +2,9 @@ import { type AlsContext, contextStorage } from "#context/container.js";
 import { AuthKey, type SessionAuthContext } from "#context/keys.js";
 import { ConnectionAuthorizationFailedError } from "#connections/errors.js";
 import type { AuthorizationDefinition, ConnectionPrincipal } from "#shared/connection-types.js";
-import { isVercelOidcIssuer } from "#shared/vercel-project.js";
+import { currentApp, requireApp } from "#context/app.js";
+import type { ContextReader } from "#context/key.js";
+import { developmentIdentity } from "#platform/entities.js";
 
 export function principalKey(principal: ConnectionPrincipal): string {
   if (principal.type === "app") {
@@ -37,7 +39,7 @@ export function resolveConnectionPrincipalFromAuth(
     });
   }
 
-  if (authorization.vercelConnect !== undefined && isVercelDevelopmentUser(current)) {
+  if (authorization.vercelConnect !== undefined && isPlatformDevelopmentCaller(current, ctx)) {
     return {
       attributes: current.attributes,
       id: current.subject ?? current.principalId,
@@ -53,13 +55,12 @@ export function resolveConnectionPrincipalFromAuth(
   };
 }
 
-export function isVercelDevelopmentUser(current: SessionAuthContext): boolean {
-  return (
-    current.authenticator === "oidc" &&
-    isVercelOidcIssuer(current.issuer) &&
-    current.attributes.environment === "development" &&
-    current.subject === current.attributes.user_id
-  );
+export function isPlatformDevelopmentCaller(
+  current: SessionAuthContext,
+  ctx?: ContextReader,
+): boolean {
+  const app = ctx === undefined ? currentApp() : requireApp(ctx);
+  return developmentIdentity(app.platform.identity)?.caller(current) ?? false;
 }
 
 function buildUserPrincipalRequiredMessage(

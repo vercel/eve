@@ -1,3 +1,4 @@
+import { processApp } from "#runtime/app.js";
 import type { ChannelAdapter, ChannelAdapterContext } from "#channel/adapter.js";
 import type { SubagentInteractionHookPayload } from "#channel/types.js";
 import { ContinuationTokenKey, SessionIdKey, SessionInboxKey } from "#context/keys.js";
@@ -63,7 +64,7 @@ async function forwardToParentStep(input: {
 
   try {
     const { resumeRoutedHook } = await import("#execution/hosts.js");
-    await resumeRoutedHook(input.parentContinuationToken, input.hookPayload);
+    await resumeRoutedHook(processApp().hosts, input.parentContinuationToken, input.hookPayload);
   } catch (error) {
     log.warn("failed to forward a child's interaction to its parent", {
       callId: input.hookPayload.callId,

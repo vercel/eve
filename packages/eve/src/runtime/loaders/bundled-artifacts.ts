@@ -1,6 +1,6 @@
 import type { CompileMetadata } from "#compiler/artifact-contract.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
-import type { CompiledModuleMap } from "#compiler/module-map.js";
+import type { CompiledModuleMap } from "#compiler/module-map-schema.js";
 import type { ModelMetadata } from "#internal/model-catalog.js";
 import type { SandboxPreparedArtifactsManifest } from "#shared/sandbox-prepared-artifacts.js";
 import {

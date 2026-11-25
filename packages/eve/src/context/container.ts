@@ -1,7 +1,7 @@
-import { AsyncLocalStorage } from "node:async_hooks";
-
 import { type ContextAccessor, type ContextKey, resolveKey } from "#context/key.js";
-import { LocalDevRequestKey, type LocalDevRequestProvenance } from "#context/keys.js";
+import { AppKey, LocalDevRequestKey, type LocalDevRequestProvenance } from "#context/keys.js";
+import { createScopeStorage, type ScopeStorage } from "#context/scope-storage.js";
+import { resolveAsyncLocalStorage } from "#runtime-env/async-storage.js";
 
 const EVE_CONTEXT_STORAGE_KEY = Symbol.for("eve.context-storage");
 
@@ -24,6 +24,8 @@ export class ContextContainer implements AlsContext {
     if (localDevRequest !== undefined) {
       this._durableValues.set(LocalDevRequestKey.name, localDevRequest);
     }
+    const app = contextStorage.getStore()?.get(AppKey);
+    if (app !== undefined) this._durableValues.set(AppKey.name, app);
   }
 
   get localDevRequest(): LocalDevRequestProvenance | undefined {
@@ -94,26 +96,42 @@ interface ContextScope {
 }
 
 type AlsContextStorageGlobal = typeof globalThis & {
-  [EVE_CONTEXT_STORAGE_KEY]?: AsyncLocalStorage<ContextScope>;
+  [EVE_CONTEXT_STORAGE_KEY]?: ScopeStorage<ContextScope>;
 };
 
 const globalContextStorage = globalThis as AlsContextStorageGlobal;
 
-if (globalContextStorage[EVE_CONTEXT_STORAGE_KEY] === undefined) {
-  globalContextStorage[EVE_CONTEXT_STORAGE_KEY] = new AsyncLocalStorage<ContextScope>();
+function currentStorage(): ScopeStorage<ContextScope> {
+  const existing = globalContextStorage[EVE_CONTEXT_STORAGE_KEY];
+  if (
+    existing !== undefined &&
+    !(
+      existing.kind === "settling" &&
+      existing.getStore() === undefined &&
+      resolveAsyncLocalStorage() !== undefined
+    )
+  ) {
+    return existing;
+  }
+  const created = createScopeStorage<ContextScope>("context");
+  globalContextStorage[EVE_CONTEXT_STORAGE_KEY] = created;
+  return created;
 }
 
-const storage = globalContextStorage[EVE_CONTEXT_STORAGE_KEY];
 export const contextStorage = {
-  getStore: (): AlsContext | undefined => storage.getStore()?.context,
-  run: <T>(context: AlsContext, fn: () => T): T => storage.run({ context }, fn),
+  get kind(): ScopeStorage<ContextScope>["kind"] {
+    return currentStorage().kind;
+  },
+  getStore: (): AlsContext | undefined => currentStorage().getStore()?.context,
+  run: <T>(context: AlsContext, fn: () => T): T => currentStorage().run({ context }, fn),
 };
 
 export function contextScopeValue<T>(key: symbol): T | undefined {
-  return storage.getStore()?.values?.get(key) as T | undefined;
+  return currentStorage().getStore()?.values?.get(key) as T | undefined;
 }
 
 export function withContextScopeValue<T>(key: symbol, value: unknown, fn: () => T): T {
+  const storage = currentStorage();
   const parent = storage.getStore();
   const values = new Map(parent?.values);
   values.set(key, value);

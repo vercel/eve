@@ -30,7 +30,10 @@ export interface BashSandbox extends SandboxConnection {
 }
 
 const JUST_BASH_PACKAGE = {
-  importModule: async () => await import("just-bash"),
+  importModule: async () => {
+    const specifier = "just-bash";
+    return (await import(specifier)) as JustBashModule;
+  },
   missingMessage:
     "The just-bash sandbox provider requires the `just-bash` package, which is not bundled " +
     "with eve. Install it in your application (for example `pnpm add -D just-bash`), or use " +

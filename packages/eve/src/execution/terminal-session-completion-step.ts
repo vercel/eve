@@ -1,4 +1,5 @@
 type HarnessTurnRef = { readonly id: string; readonly sequence: number };
+import { processApp } from "#runtime/app.js";
 import type { ControlDelivery } from "#harness/types.js";
 import type { ControlSettlement } from "#harness/facts.js";
 import { publishTerminalSessionEvent } from "#execution/publish-session-events.js";
@@ -21,6 +22,7 @@ export async function emitTerminalSessionCompletionStep(input: {
   const { control, settles, ...rest } = input;
   await publishTerminalSessionEvent({
     ...rest,
+    hosts: processApp().hosts,
     ending: { control, settles, outcome: "completed" },
   });
 }

@@ -1,3 +1,4 @@
+import { builtInHosts } from "#runtime/app.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
@@ -64,7 +65,7 @@ async function converse(input: {
     try {
       await stream.nextTurn();
       for (const message of input.then ?? []) {
-        await resumeRoutedHook(sessionInboxHookToken(token), {
+        await resumeRoutedHook(builtInHosts(), sessionInboxHookToken(token), {
           delivery: createChannelDeliveryMetadata({
             channelKind: "channel:chat",
             channelName: "chat",

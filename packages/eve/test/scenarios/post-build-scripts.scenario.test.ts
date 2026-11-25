@@ -37,6 +37,19 @@ async function createPostBuildFixture(
 
   await copyScript(packageRoot, "copy-docs.mjs");
   await copyScript(packageRoot, "stamp-version-tokens.mjs");
+  await copyScript(packageRoot, "session-code-hash.mjs");
+  await mkdir(join(packageRoot, "src", "execution", "session"), { recursive: true });
+  await mkdir(join(packageRoot, "src", "execution", "legacy-session"), { recursive: true });
+  await writeFile(
+    join(packageRoot, "src", "execution", "session", "entry.ts"),
+    "export {};\n",
+    "utf8",
+  );
+  await writeFile(
+    join(packageRoot, "src", "execution", "legacy-session", "turn-workflow.ts"),
+    "export {};\n",
+    "utf8",
+  );
   await writeFile(join(repoRoot, "README.md"), "# Monorepo README\n", "utf8");
   await writeFile(join(repoRoot, "docs", "guide.md"), "doc\n", "utf8");
   await writeFile(
@@ -154,7 +167,7 @@ describe("post-build scripts", () => {
     const packageRoot = await createPostBuildFixture();
     await writeFile(
       join(packageRoot, "dist", "src", "internal", "application", "package.js"),
-      'export const version = "__EVE_PACKAGE_VERSION__";\n',
+      'export const version = "__EVE_PACKAGE_VERSION__";\nexport const sessionCode = "__EVE_SESSION_CODE_HASH__";\n',
       "utf8",
     );
     await writeFile(
@@ -182,7 +195,9 @@ describe("post-build scripts", () => {
 
     await expect(
       readFile(join(packageRoot, "dist", "src", "internal", "application", "package.js"), "utf8"),
-    ).resolves.toBe('export const version = "1.2.3";\n');
+    ).resolves.toMatch(
+      /^export const version = "1\.2\.3";\nexport const sessionCode = "[0-9a-f]{16}";\n$/,
+    );
     await expect(
       readFile(join(packageRoot, "dist", "src", "chunks", "scaffold-abc123.js"), "utf8"),
     ).resolves.toBe(

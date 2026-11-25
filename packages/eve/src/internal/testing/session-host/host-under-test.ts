@@ -2,23 +2,33 @@ import type { AnyEventRequest } from "@workflow/world";
 import { vi } from "vitest";
 
 import type { Runtime } from "#channel/types.js";
+import type { Durable } from "#execution/durable.js";
+import { workflowDurable } from "#execution/workflow-host/host.js";
 import { forgetSessionLive } from "#definitions/state.js";
+import {
+  sessionCommandHookToken,
+  sessionInboxHookToken,
+} from "#execution/session-inbox/address.js";
 import { forgetRunnableOwnerRun } from "#execution/session-inbox/runnable-owner.js";
 import type { StepFaults } from "#execution/in-process/step-attempts.js";
 import { workflowToolRunWorkflowReference } from "#execution/workflow-references.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { createTestInProcessRuntime } from "#internal/testing/in-process-runtime.js";
+import { workflowStepBoundary } from "#execution/workflow-host/step-boundary.js";
+import { createStoreEngine } from "./store-engine.js";
 import type { StoredWait } from "#internal/testing/local-world-database.js";
 import { currentTestWorld } from "#internal/testing/workflow-test-world.js";
-import { cancelRun } from "#internal/workflow/runtime.js";
+import { cancelRun, getHookByToken } from "#internal/workflow/runtime.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { WorkflowBody } from "#tools/workflow-body.js";
 
-export type HostName = "workflow" | "in-process";
+export type HostName = "workflow" | "in-process" | "store";
 
 export interface HostCapabilities {
   readonly retries: boolean;
   readonly durable: boolean;
+  readonly restarts: boolean;
+  readonly deliveryKeys: boolean;
   readonly moves: boolean;
   readonly externalCancel: boolean;
   readonly stamps: boolean;
@@ -43,6 +53,7 @@ export interface HostSetup {
 export interface HostUnderTest {
   readonly name: HostName;
   readonly runtime: Runtime;
+  readonly durable: Durable;
   readonly capabilities: HostCapabilities;
   settled(): Promise<void>;
   failedWrites(): number;
@@ -53,6 +64,7 @@ export interface HostUnderTest {
   runStatus?(runId: string): Promise<string>;
   runSpecVersion?(runId: string): Promise<number | undefined>;
   rewriteRunAttributes?(runId: string, patch: Record<string, string | undefined>): Promise<void>;
+  sessionOwner?(sessionId: string): Promise<string>;
   dispose(): Promise<void>;
 }
 
@@ -65,24 +77,43 @@ export interface SessionHostKind {
 const IN_PROCESS_CALLBACK_BASE_URL = "http://session-host.in-process";
 
 const IN_PROCESS_CAPABILITIES: HostCapabilities = {
+  deliveryKeys: false,
   externalCancel: false,
   durable: false,
   moves: false,
+  restarts: false,
   retries: true,
   stamps: false,
 };
 
 const WORKFLOW_CAPABILITIES: HostCapabilities = {
+  deliveryKeys: false,
   externalCancel: true,
   durable: true,
   moves: true,
+  restarts: true,
   retries: true,
   stamps: true,
+};
+
+const STORE_CAPABILITIES: HostCapabilities = {
+  deliveryKeys: true,
+  externalCancel: false,
+  durable: false,
+  moves: false,
+  restarts: true,
+  retries: true,
+  stamps: false,
 };
 
 export const inProcessHost: SessionHostKind = {
   capabilities: IN_PROCESS_CAPABILITIES,
   make: makeInProcessHost,
+};
+
+export const storeHost: SessionHostKind = {
+  capabilities: STORE_CAPABILITIES,
+  make: makeStoreHost,
 };
 
 export const workflowHost: SessionHostKind = {
@@ -110,11 +141,47 @@ async function makeInProcessHost(setup: HostSetup = {}): Promise<HostUnderTest> 
   return {
     name: "in-process",
     runtime,
+    durable: runtime.durable,
     capabilities: IN_PROCESS_CAPABILITIES,
     settled: () => runtime.idle(),
     failedWrites: () => failed.writes,
     workflowRunsStarted: async () => started,
     dispose: () => runtime.dispose(),
+  };
+}
+
+async function makeStoreHost(setup: HostSetup = {}): Promise<HostUnderTest> {
+  const failed = { writes: 0 };
+  const engine = createStoreEngine(
+    { compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource() },
+    {
+      callbackBaseUrl: IN_PROCESS_CALLBACK_BASE_URL,
+      deliveries: "batched",
+      stepBoundary: workflowStepBoundary,
+      ...(setup.faults !== undefined && { stepFaults: inProcessFaults(setup.faults, failed) }),
+    },
+  );
+  let started = 0;
+  for (const { body, workflowId } of setup.workflows ?? []) {
+    engine.registerWorkflow(workflowId, (...args: never[]) => {
+      started += 1;
+      return (body as (...args: never[]) => unknown)(...args);
+    });
+  }
+  return {
+    name: "store",
+    runtime: engine.runtime,
+    durable: engine.durable,
+    capabilities: STORE_CAPABILITIES,
+    settled: () => engine.idle(),
+    failedWrites: () => failed.writes,
+    workflowRunsStarted: async () => started,
+    async restart(options) {
+      await engine.idle();
+      await options?.beforeStart?.();
+      await engine.restart();
+    },
+    dispose: () => engine.dispose(),
   };
 }
 
@@ -140,6 +207,7 @@ async function makeWorkflowHost(setup: HostSetup = {}): Promise<HostUnderTest> {
   return {
     name: "workflow",
     runtime,
+    durable: workflowDurable(),
     capabilities: WORKFLOW_CAPABILITIES,
     settled: () => testWorld.idle(),
     failedWrites: () => failed.writes,
@@ -164,6 +232,8 @@ async function makeWorkflowHost(setup: HostSetup = {}): Promise<HostUnderTest> {
     runSpecVersion: async (runId) =>
       (await testWorld.world.runs.get(runId, { resolveData: "none" })).specVersion,
     rewriteRunAttributes: (runId, patch) => testWorld.rewriteRunAttributes(runId, patch),
+    sessionOwner: async (sessionId) =>
+      (await getHookByToken(sessionInboxHookToken(sessionCommandHookToken(sessionId)))).runId,
     async dispose() {
       faults?.restore();
       await testWorld.idle();

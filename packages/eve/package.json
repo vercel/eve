@@ -51,6 +51,14 @@
       "eve-source": "./.generated/compiled/*",
       "default": "./dist/src/compiled/*"
     },
+    "#runtime-env/*.js": {
+      "eve-source": {
+        "node": "./src/runtime-env/*.ts",
+        "default": "./src/runtime-env/*.web.ts"
+      },
+      "node": "./dist/src/runtime-env/*.js",
+      "default": "./dist/src/runtime-env/*.web.js"
+    },
     "#*.js": {
       "eve-source": "./src/*.ts",
       "default": "./dist/src/*.js"

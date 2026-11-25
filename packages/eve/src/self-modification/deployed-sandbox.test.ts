@@ -6,6 +6,9 @@ import {
   type SandboxSelectorContext,
 } from "#shared/sandbox-environment.js";
 import { createSandboxPrepareContext } from "#execution/sandbox/prewarm.js";
+import { inTestApp, testApp } from "#internal/testing/test-platform.js";
+import { createEntities } from "#platform/entities.js";
+import vercelPlatform from "#platform/vercel/declaration.js";
 
 import type { DeployedSelfModificationConfig } from "./remote/config.js";
 import { defineDeployedSelfModificationSandbox } from "./deployed-sandbox.js";
@@ -17,31 +20,36 @@ const connectConfig: DeployedSelfModificationConfig = {
   target: { branch: "main" },
 };
 
+function inVercelApp<T>(fn: () => T): T {
+  return inTestApp(fn, testApp({ platform: createEntities(vercelPlatform, undefined) }));
+}
+
 afterEach(() => vi.unstubAllEnvs());
 
 describe("deployed self-modification sandbox", () => {
-  it("builds off Vercel without probing the host or preparing a snapshot", async () => {
-    vi.stubEnv("EVE_DEV", "0");
-    const isDeployedOnVercel = vi.fn(() => false);
+  it("builds off Vercel without probing the host or preparing a snapshot", () =>
+    inVercelApp(async () => {
+      vi.stubEnv("EVE_DEV", "0");
+      const isDeployedOnVercel = vi.fn(() => false);
 
-    const environment = getBoundSandboxEnvironment(
-      defineDeployedSelfModificationSandbox(connectConfig, isDeployedOnVercel),
-    );
+      const environment = getBoundSandboxEnvironment(
+        defineDeployedSelfModificationSandbox(connectConfig, isDeployedOnVercel),
+      );
 
-    expect(environment?.provider).toBe("vercel");
-    const runtime = getSandboxEnvironmentRuntime(environment!);
-    const prepareContext = createSandboxPrepareContext({
-      appRoot: "/app",
-      files: { list: async () => [], read: vi.fn(), readText: vi.fn() },
-      log: () => {},
-      provider: runtime,
-      resources: {},
-      sourceRevision: "revision",
-      storagePath: "/app/.eve/sandbox",
-    });
-    await expect(runtime.implementation.prepare(prepareContext)).resolves.toEqual({});
-    expect(isDeployedOnVercel).not.toHaveBeenCalled();
-  });
+      expect(environment?.provider).toBe("vercel");
+      const runtime = getSandboxEnvironmentRuntime(environment!);
+      const prepareContext = createSandboxPrepareContext({
+        appRoot: "/app",
+        files: { list: async () => [], read: vi.fn(), readText: vi.fn() },
+        log: () => {},
+        provider: runtime,
+        resources: {},
+        sourceRevision: "revision",
+        storagePath: "/app/.eve/sandbox",
+      });
+      await expect(runtime.implementation.prepare(prepareContext)).resolves.toEqual({});
+      expect(isDeployedOnVercel).not.toHaveBeenCalled();
+    }));
 
   it("requires a Vercel deployment when a deployed child opens its sandbox", async () => {
     vi.stubEnv("EVE_DEV", "0");

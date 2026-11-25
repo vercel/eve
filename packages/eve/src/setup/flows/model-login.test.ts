@@ -45,7 +45,7 @@ vi.mock("./model-source-change.js", () => ({
   changeValidatedAgentModel: mocks.change,
   readAuthoredModelSelection: mocks.authored,
 }));
-vi.mock("#internal/model-auth/vercel-cli.js", () => ({ readVercelCliConnection: mocks.cli }));
+vi.mock("#platform/vercel/model-auth/cli.js", () => ({ readVercelCliConnection: mocks.cli }));
 vi.mock("#internal/model-auth/vercel.js", () => ({
   authJson: mocks.models,
   resolveVercelSession: mocks.session,

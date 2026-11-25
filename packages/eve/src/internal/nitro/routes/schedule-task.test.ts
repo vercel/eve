@@ -16,6 +16,7 @@ vi.mock("#internal/nitro/routes/runtime-artifacts.js", () => ({
   resolveNitroCompiledArtifactsSource: mocks.resolveNitroCompiledArtifactsSource,
 }));
 
+import { testApp } from "#internal/testing/test-platform.js";
 import { dispatchScheduleTask } from "./schedule-task.js";
 
 afterEach(() => {
@@ -26,11 +27,11 @@ it("skips disabled schedules before resolving artifacts and logs only the first 
   vi.stubEnv("EVE_SCHEDULES_DISABLED", "1");
   const config = { kind: "production", sandboxScope: "test" } as const;
 
-  await expect(dispatchScheduleTask("heartbeat", config)).resolves.toEqual({
+  await expect(dispatchScheduleTask("heartbeat", config, testApp())).resolves.toEqual({
     skipped: "schedules-disabled",
     taskName: "heartbeat",
   });
-  await expect(dispatchScheduleTask("digest", config)).resolves.toEqual({
+  await expect(dispatchScheduleTask("digest", config, testApp())).resolves.toEqual({
     skipped: "schedules-disabled",
     taskName: "digest",
   });

@@ -4,7 +4,10 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { resolvePackageRoot } from "#internal/application/package.js";
-import { resolveWorkflowBuildDirectory } from "#internal/application/paths.js";
+import {
+  resolveOutputDirectory,
+  resolveWorkflowBuildDirectory,
+} from "#internal/application/paths.js";
 
 describe("resolveWorkflowBuildDirectory", () => {
   it("keys the workflow build cache by app root only (stable across eve versions)", () => {
@@ -21,5 +24,17 @@ describe("resolveWorkflowBuildDirectory", () => {
     const dirB = resolveWorkflowBuildDirectory("/tmp/app-b");
 
     expect(dirA).not.toBe(dirB);
+  });
+});
+
+describe("resolveOutputDirectory", () => {
+  it("resolves the platform's output directory against the app root unless it is absolute", () => {
+    const appRoot = join("/", "app");
+    expect(resolveOutputDirectory(appRoot, {})).toBe(join(appRoot, ".output"));
+    expect(resolveOutputDirectory(appRoot, { outputDirectory: "dist/worker" })).toBe(
+      join(appRoot, "dist", "worker"),
+    );
+    const absolute = join("/", "srv", "worker");
+    expect(resolveOutputDirectory(appRoot, { outputDirectory: absolute })).toBe(absolute);
   });
 });

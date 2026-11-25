@@ -2,6 +2,9 @@ import { get, put } from "#compiled/@vercel/blob/index.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { defaultFileMemoryBackend } from "#public/memory/file/backends/default.js";
+import { inTestApp, testApp } from "#internal/testing/test-platform.js";
+import { createEntities } from "#platform/entities.js";
+import vercelPlatform from "#platform/vercel/declaration.js";
 
 vi.mock("#compiled/@vercel/blob/index.js", () => ({
   BlobPreconditionFailedError: class BlobPreconditionFailedError extends Error {},
@@ -10,6 +13,10 @@ vi.mock("#compiled/@vercel/blob/index.js", () => ({
 }));
 
 const signal = new AbortController().signal;
+
+function inVercelApp<T>(fn: () => T): T {
+  return inTestApp(fn, testApp({ platform: createEntities(vercelPlatform, undefined) }));
+}
 
 describe("default file-memory backend", () => {
   afterEach(() => {
@@ -24,8 +31,8 @@ describe("default file-memory backend", () => {
     const second = defaultFileMemoryBackend();
     const key = `mem_${crypto.randomUUID()}`;
 
-    await first.write({ content: "local", expectedVersion: null, key, signal });
-    await expect(second.read({ key, signal })).resolves.toMatchObject({
+    await inVercelApp(() => first.write({ content: "local", expectedVersion: null, key, signal }));
+    await expect(inVercelApp(() => second.read({ key, signal }))).resolves.toMatchObject({
       content: "local",
     });
     expect(get).not.toHaveBeenCalled();
@@ -37,11 +44,13 @@ describe("default file-memory backend", () => {
     vi.stubEnv("VERCEL", undefined);
     const backend = defaultFileMemoryBackend();
     const key = `mem_${crypto.randomUUID()}`;
-    await backend.write({ content: "local", expectedVersion: null, key, signal });
+    await inVercelApp(() =>
+      backend.write({ content: "local", expectedVersion: null, key, signal }),
+    );
     vi.stubEnv("EVE_DEV", undefined);
     vi.stubEnv("VERCEL", "1");
 
-    await expect(backend.read({ key, signal })).resolves.toMatchObject({
+    await expect(inVercelApp(() => backend.read({ key, signal }))).resolves.toMatchObject({
       content: "local",
     });
     expect(get).not.toHaveBeenCalled();
@@ -56,7 +65,7 @@ describe("default file-memory backend", () => {
     vi.stubEnv("VERCEL_OIDC_TOKEN", "oidc_test");
     vi.mocked(get).mockResolvedValue(null);
 
-    await expect(backend.read({ key: "mem_a", signal })).resolves.toBeNull();
+    await expect(inVercelApp(() => backend.read({ key: "mem_a", signal }))).resolves.toBeNull();
     expect(get).toHaveBeenCalledWith(
       "eve/memory/file/mem_a/MEMORY.md",
       expect.objectContaining({
@@ -77,9 +86,9 @@ describe("default file-memory backend", () => {
       vi.stubEnv("BLOB_READ_WRITE_TOKEN", "outside-vercel");
       const backend = defaultFileMemoryBackend();
 
-      await expect(async () => await backend.read({ key: "mem_a", signal })).rejects.toThrow(
-        "requires an explicit backend outside Vercel and eve dev",
-      );
+      await expect(
+        async () => await inVercelApp(() => backend.read({ key: "mem_a", signal })),
+      ).rejects.toThrow("requires an explicit backend outside Vercel and eve dev");
       expect(get).not.toHaveBeenCalled();
       expect(put).not.toHaveBeenCalled();
     },
@@ -94,7 +103,7 @@ describe("default file-memory backend", () => {
     vi.mocked(get).mockResolvedValue(null);
 
     const backend = defaultFileMemoryBackend();
-    await expect(backend.read({ key: "mem_a", signal })).resolves.toBeNull();
+    await expect(inVercelApp(() => backend.read({ key: "mem_a", signal }))).resolves.toBeNull();
     expect(get).toHaveBeenCalledWith(
       "eve/memory/file/mem_a/MEMORY.md",
       expect.objectContaining({ token: "vercel_blob_rw_store_test_secret" }),
@@ -109,7 +118,7 @@ describe("default file-memory backend", () => {
     vi.mocked(get).mockResolvedValue(null);
 
     const backend = defaultFileMemoryBackend();
-    await expect(backend.read({ key: "mem_a", signal })).resolves.toBeNull();
+    await expect(inVercelApp(() => backend.read({ key: "mem_a", signal }))).resolves.toBeNull();
     expect(get).toHaveBeenCalledWith(
       "eve/memory/file/mem_a/MEMORY.md",
       expect.objectContaining({ token: "eve-memory-token" }),
@@ -126,7 +135,7 @@ describe("default file-memory backend", () => {
     vi.mocked(get).mockResolvedValue(null);
 
     const backend = defaultFileMemoryBackend();
-    await expect(backend.read({ key: "mem_a", signal })).resolves.toBeNull();
+    await expect(inVercelApp(() => backend.read({ key: "mem_a", signal }))).resolves.toBeNull();
     expect(get).toHaveBeenCalledWith(
       "eve/memory/file/mem_a/MEMORY.md",
       expect.objectContaining({ oidcToken: undefined, storeId: "store_eve_memory" }),
@@ -143,7 +152,7 @@ describe("default file-memory backend", () => {
     vi.mocked(get).mockResolvedValue(null);
 
     const backend = defaultFileMemoryBackend();
-    await expect(backend.read({ key: "mem_a", signal })).resolves.toBeNull();
+    await expect(inVercelApp(() => backend.read({ key: "mem_a", signal }))).resolves.toBeNull();
     expect(get).toHaveBeenCalledWith(
       "eve/memory/file/mem_a/MEMORY.md",
       expect.objectContaining({ storeId: "store_eve_memory" }),
@@ -170,15 +179,17 @@ describe("default file-memory backend", () => {
       });
 
       const backend = defaultFileMemoryBackend();
-      await expect(backend.read({ key: "mem_a", signal })).resolves.toBeNull();
+      await expect(inVercelApp(() => backend.read({ key: "mem_a", signal }))).resolves.toBeNull();
       vi.stubEnv("VERCEL_OIDC_TOKEN", "rotated-oidc-token");
       await expect(
-        backend.write({
-          content: "memory",
-          expectedVersion: null,
-          key: "mem_a",
-          signal,
-        }),
+        inVercelApp(() =>
+          backend.write({
+            content: "memory",
+            expectedVersion: null,
+            key: "mem_a",
+            signal,
+          }),
+        ),
       ).resolves.toEqual({ content: "memory", version: "etag-next" });
 
       const credentials = expect.objectContaining({
@@ -200,7 +211,7 @@ describe("default file-memory backend", () => {
     vi.mocked(get).mockResolvedValue(null);
 
     const backend = defaultFileMemoryBackend();
-    await expect(backend.read({ key: "mem_a", signal })).resolves.toBeNull();
+    await expect(inVercelApp(() => backend.read({ key: "mem_a", signal }))).resolves.toBeNull();
     expect(get).toHaveBeenCalledOnce();
   });
 
@@ -212,9 +223,9 @@ describe("default file-memory backend", () => {
     vi.stubEnv("BLOB_STORE_ID", undefined);
     const backend = defaultFileMemoryBackend();
 
-    await expect(async () => await backend.read({ key: "mem_a", signal })).rejects.toThrow(
-      "/add memory/file",
-    );
+    await expect(
+      async () => await inVercelApp(() => backend.read({ key: "mem_a", signal })),
+    ).rejects.toThrow("/add memory/file");
   });
 
   it.each([
@@ -229,9 +240,9 @@ describe("default file-memory backend", () => {
     vi.stubEnv("BLOB_STORE_ID", environment.storeId);
     const backend = defaultFileMemoryBackend();
 
-    await expect(async () => await backend.read({ key: "mem_a", signal })).rejects.toThrow(
-      /EVE_MEMORY_BLOB_STORE_ID.*eve integration setup file-memory.*redeploy/u,
-    );
+    await expect(
+      async () => await inVercelApp(() => backend.read({ key: "mem_a", signal })),
+    ).rejects.toThrow(/EVE_MEMORY_BLOB_STORE_ID.*eve integration setup file-memory.*redeploy/u);
     expect(get).not.toHaveBeenCalled();
     expect(put).not.toHaveBeenCalled();
   });

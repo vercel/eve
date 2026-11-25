@@ -1,8 +1,6 @@
-import { lookup } from "node:dns";
-import type { LookupFunction } from "node:net";
-
 import type { Dispatcher1Wrapper } from "undici";
 
+import { loadAddressGuardedDispatcher } from "#runtime-env/public-dispatcher.js";
 import { isBlockedDestinationHost } from "#shared/network-address.js";
 
 export class UnsafeDestinationError extends Error {
@@ -14,12 +12,32 @@ export class UnsafeDestinationError extends Error {
   }
 }
 
+export class UnguardedRuntimeError extends UnsafeDestinationError {
+  constructor() {
+    super(
+      "This runtime cannot guard outbound requests against private and internal addresses, so eve refuses requests to URLs that users or models supply.",
+    );
+    this.name = "UnguardedRuntimeError";
+  }
+}
+
 export interface PublicDestinationPolicy {
   readonly allowLoopback: boolean;
 }
 
+interface DispatcherHandler {
+  onResponseError?(controller: undefined, error: Error): void;
+  onError?(error: Error): void;
+}
+
+interface ProbeDispatcher {
+  dispatch(options: unknown, handler: DispatcherHandler): boolean;
+  close(): Promise<void>;
+  destroy(): Promise<void>;
+}
+
 type DispatcherRequestInit = Omit<RequestInit, "dispatcher"> & {
-  readonly dispatcher: Dispatcher1Wrapper;
+  readonly dispatcher: Dispatcher1Wrapper | ProbeDispatcher;
 };
 
 export function assertPublicHostname(hostname: string, policy: PublicDestinationPolicy): void {
@@ -28,11 +46,46 @@ export function assertPublicHostname(hostname: string, policy: PublicDestination
   }
 }
 
+export const DISPATCHER_PROBE_URL = "http://dispatcher-probe.invalid/";
+
+const dispatcherSupport = new WeakMap<typeof fetch, Promise<boolean>>();
+
 export async function createPublicDispatcher(
   policy: PublicDestinationPolicy,
 ): Promise<Dispatcher1Wrapper> {
-  const { Agent, Dispatcher1Wrapper } = await import("undici");
-  return new Dispatcher1Wrapper(new Agent({ connect: { lookup: createPublicLookup(policy) } }));
+  const createDispatcher = await loadAddressGuardedDispatcher({
+    isBlocked: (address) => isBlockedDestinationHost(address, policy),
+    blocked: () => new UnsafeDestinationError(),
+  });
+  if (createDispatcher === undefined) throw new UnguardedRuntimeError();
+  let supported = dispatcherSupport.get(fetch);
+  if (supported === undefined) {
+    supported = fetchHonorsDispatcher();
+    dispatcherSupport.set(fetch, supported);
+  }
+  if (!(await supported)) throw new UnguardedRuntimeError();
+  return createDispatcher();
+}
+
+async function fetchHonorsDispatcher(): Promise<boolean> {
+  const probe = new Error("eve dispatcher probe");
+  const dispatcher: ProbeDispatcher = {
+    dispatch(_options, handler) {
+      queueMicrotask(() => {
+        if (handler.onResponseError !== undefined) handler.onResponseError(undefined, probe);
+        else handler.onError?.(probe);
+      });
+      return true;
+    },
+    close: async () => {},
+    destroy: async () => {},
+  };
+  try {
+    await fetchWithDispatcher(DISPATCHER_PROBE_URL, { dispatcher });
+    return false;
+  } catch (error) {
+    return error instanceof Error && error.cause === probe;
+  }
 }
 
 export function findUnsafeDestinationError(error: unknown): UnsafeDestinationError | undefined {
@@ -46,44 +99,6 @@ export function fetchWithDispatcher(url: string | URL, init: DispatcherRequestIn
   const fetchWithUndici = fetch as typeof fetch &
     ((input: string | URL, init: DispatcherRequestInit) => Promise<Response>);
   return fetchWithUndici(url, init);
-}
-
-function createPublicLookup(policy: PublicDestinationPolicy): LookupFunction {
-  return (hostname, lookupOptions, callback) => {
-    lookup(hostname, { all: true, verbatim: true }, (error, addresses) => {
-      if (error !== null) {
-        callback(error, "", 0);
-        return;
-      }
-
-      if (addresses.some(({ address }) => isBlockedDestinationHost(address, policy))) {
-        callback(new UnsafeDestinationError(), "", 0);
-        return;
-      }
-
-      const matchingAddresses =
-        lookupOptions.family === undefined || lookupOptions.family === 0
-          ? addresses
-          : addresses.filter(({ family }) => family === lookupOptions.family);
-
-      if (matchingAddresses.length === 0) {
-        const error = new Error(
-          `Unable to resolve URL hostname "${hostname}" in the requested IP family.`,
-        );
-        Object.assign(error, { code: "ENOTFOUND" });
-        callback(error, "", 0);
-        return;
-      }
-
-      if (lookupOptions.all === true) {
-        callback(null, matchingAddresses);
-        return;
-      }
-
-      const selected = matchingAddresses[0]!;
-      callback(null, selected.address, selected.family);
-    });
-  };
 }
 
 export async function readBoundedResponse(

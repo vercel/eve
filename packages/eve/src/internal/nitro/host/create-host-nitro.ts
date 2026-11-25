@@ -23,7 +23,12 @@ import { onVendoredDependencyLog } from "#internal/bundler/vendored-dependency-l
 import { createHostNoExternals } from "#internal/nitro/host/externals-policy.js";
 import { createHostPlugins } from "#internal/nitro/host/host-plugins.js";
 import { type HostNitroRoutes, renderHostRoutes } from "#internal/nitro/host/host-routes.js";
-import type { HostRuntimePlugin, HostSpec } from "#internal/nitro/host/host-spec.js";
+import { ROUTE_APP_ID } from "#internal/nitro/host/route-handlers.js";
+import {
+  MAIN_ENTRY_NAME,
+  type HostRuntimePlugin,
+  type HostSpec,
+} from "#internal/nitro/host/host-spec.js";
 import { createInstrumentationEntry } from "#internal/nitro/host/instrumentation-entry.js";
 import {
   createRuntimePluginSource,
@@ -127,10 +132,15 @@ function toNitroConfig(
   },
 ): NitroConfig {
   const { compiledArtifacts, ...locations } = spec.locations;
+  const nodeless = spec.exportConditions !== undefined && !spec.exportConditions.includes("node");
   const instrumentationEntry =
     compiledArtifacts.instrumentationPluginPath === undefined
       ? undefined
-      : createInstrumentationEntry(compiledArtifacts.instrumentationPluginPath);
+      : createInstrumentationEntry(compiledArtifacts.instrumentationPluginPath, {
+          appImports: Object.keys(spec.entries).length > 0,
+          platformEntry: spec.entry,
+        });
+  const engineEntries = instrumentationEntry !== undefined && Object.keys(spec.entries).length > 0;
 
   return {
     ...built.routes,
@@ -160,12 +170,19 @@ function toNitroConfig(
       instrumentationEntryPlugin: instrumentationEntry?.plugin,
       instrumentationSourcePaths: compiledArtifacts.instrumentationSourcePaths,
       hostBundledPackageRoots: compiledArtifacts.hostBundledPackageRoots,
-      runtimeModules: [compiledArtifacts.bootstrapPath, compiledArtifacts.workflowWorldPluginPath],
+      runtimeModules: [
+        compiledArtifacts.bootstrapPath,
+        compiledArtifacts.platformModulePath,
+        compiledArtifacts.workflowWorldPluginPath,
+      ],
       workflowArtifacts: built.workflowArtifacts,
     }),
     compatibilityDate: EVE_NITRO_COMPATIBILITY_DATE,
     deps: { install: false, paths: { rolldown: resolveRolldownPackageDir() } },
     dev: spec.development,
+    ...(spec.exportConditions !== undefined && {
+      exportConditions: nodeless ? [...spec.exportConditions, "!node"] : [...spec.exportConditions],
+    }),
     features: { websocket: spec.websocket },
     ...(instrumentationEntry && {
       inlineDynamicImports: instrumentationEntry.inlineDynamicImports,
@@ -177,7 +194,7 @@ function toNitroConfig(
     output: { dir: locations.outputDir },
     plugins: [
       EVE_RUNTIME_PLUGIN_ID,
-      ...spec.runtimePlugins.map((plugin) => resolveRuntimePluginPath(plugin, compiledArtifacts)),
+      ...spec.runtimePlugins.map((plugin) => resolveRuntimePluginPath(plugin, spec)),
     ],
     preset: spec.preset,
     publicAssets: [],
@@ -185,11 +202,37 @@ function toNitroConfig(
     rolldownConfig: {
       checks: { bundlerTimings: false },
       onLog: onVendoredDependencyLog,
-      output: { sourcemapIgnoreList: /node_modules/ },
+      output: {
+        sourcemapIgnoreList: /node_modules/,
+        ...(engineEntries && { entryFileNames: "[name].mjs" }),
+      },
+      ...(engineEntries && {
+        input: { [MAIN_ENTRY_NAME]: instrumentationEntry.hostEntry, ...spec.entries },
+      }),
       transform: {
         define: { __dirname: "import.meta.dirname", __filename: "import.meta.filename" },
       },
       tsconfig: spec.authored.tsconfig,
+      ...(nodeless && {
+        platform: "neutral" as const,
+        plugins: [
+          {
+            name: "eve-nodeless-import-meta-url",
+            renderChunk(code: string) {
+              if (!code.includes("import.meta.url")) return null;
+              return code
+                .replaceAll(
+                  "createRequire(import.meta.url)",
+                  'createRequire(import.meta.url ?? "file:///entry.mjs")',
+                )
+                .replaceAll(
+                  "fileURLToPath(import.meta.url)",
+                  'fileURLToPath(import.meta.url ?? "file:///entry.mjs")',
+                );
+            },
+          },
+        ],
+      }),
       ...(!spec.development && { experimental: { attachDebugInfo: "none" as const } }),
     },
     rootDir: locations.appRoot,
@@ -205,6 +248,16 @@ function toNitroConfig(
       ...(built.timezoneSchedulesPlugin !== undefined && {
         [TIMEZONE_SCHEDULES_PLUGIN_ID]: built.timezoneSchedulesPlugin,
       }),
+      ...(spec.runtimePlugins.includes("sandbox-shutdown") && {
+        [SANDBOX_SHUTDOWN_PLUGIN_ID]: createAppPlugin(
+          resolvePackageSourceFilePath("src/internal/nitro/host/sandbox-shutdown-plugin.ts"),
+        ),
+      }),
+      ...(spec.runtimePlugins.includes("local-schedules") && {
+        [LOCAL_SCHEDULES_PLUGIN_ID]: createAppPlugin(
+          resolvePackageSourceFilePath(spec.localSchedulesPluginModulePath),
+        ),
+      }),
       ...(built.skillFilesPlugin !== undefined && {
         [SKILL_FILES_PLUGIN_ID]: built.skillFilesPlugin,
       }),
@@ -214,14 +267,21 @@ function toNitroConfig(
 
 const EVE_RUNTIME_PLUGIN_PATHS = {
   "connection-drain": "src/internal/nitro/host/connection-drain-plugin.ts",
-  "local-schedules": "src/internal/nitro/host/local-schedules-runtime-plugin.ts",
-  "sandbox-shutdown": "src/internal/nitro/host/sandbox-shutdown-plugin.ts",
 } as const;
 
-function resolveRuntimePluginPath(
-  plugin: HostRuntimePlugin,
-  compiledArtifacts: HostSpec["locations"]["compiledArtifacts"],
-): string {
+const SANDBOX_SHUTDOWN_PLUGIN_ID = "#eve/sandbox-shutdown.mjs";
+const LOCAL_SCHEDULES_PLUGIN_ID = "#eve/local-schedules.mjs";
+
+function createAppPlugin(pluginPath: string): string {
+  return [
+    `import { app } from ${JSON.stringify(ROUTE_APP_ID)};`,
+    `import plugin from ${stringifyEsmImportSpecifier(pluginPath)};`,
+    "export default function eveAppPlugin(nitroApp) { plugin(nitroApp, app); }",
+  ].join("\n");
+}
+
+function resolveRuntimePluginPath(plugin: HostRuntimePlugin, spec: HostSpec): string {
+  const { compiledArtifacts } = spec.locations;
   switch (plugin) {
     case "instrumentation":
       if (compiledArtifacts.instrumentationPluginPath === undefined) {
@@ -232,6 +292,10 @@ function resolveRuntimePluginPath(
       return SKILL_FILES_PLUGIN_ID;
     case "timezone-schedules":
       return TIMEZONE_SCHEDULES_PLUGIN_ID;
+    case "sandbox-shutdown":
+      return SANDBOX_SHUTDOWN_PLUGIN_ID;
+    case "local-schedules":
+      return LOCAL_SCHEDULES_PLUGIN_ID;
     default:
       return resolvePackageSourceFilePath(EVE_RUNTIME_PLUGIN_PATHS[plugin]);
   }

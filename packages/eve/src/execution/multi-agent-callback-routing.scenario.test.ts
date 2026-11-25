@@ -24,6 +24,9 @@ import {
 import { ensureEveVercelOutputConfig } from "#public/next/vercel-output-config.js";
 import { joinEveRoutePath } from "#shared/eve-route-path.js";
 import type { HarnessSession } from "#harness/types.js";
+import { startTestApp, testApp, testEntities } from "#internal/testing/test-platform.js";
+
+const platform = testEntities();
 
 const DEPLOYMENT_AGENTS = [
   {
@@ -129,6 +132,7 @@ describe("multi-agent callback routing", () => {
   let remoteAgentOrigin: string;
 
   beforeAll(async () => {
+    startTestApp(testApp({ platform }));
     const authorizationAttemptId = "attempt-linear";
     const nextRoot = await mkdtemp(join(tmpdir(), "eve-callback-routing-"));
 
@@ -253,7 +257,7 @@ describe("multi-agent callback routing", () => {
         nodeId: "agent/agents/research.ts",
         remoteAgentName: "research",
       },
-      callbackBaseUrl: resolveWorkflowCallbackBaseUrl(deploymentOrigin),
+      callbackBaseUrl: resolveWorkflowCallbackBaseUrl(deploymentOrigin, platform),
       parent: { continuationToken: callbackToken },
       remote: {
         description: "remote research agent",
@@ -291,7 +295,7 @@ describe("multi-agent callback routing", () => {
         )}?eveRemoteProtocol=${String(REMOTE_AGENT_PROTOCOL_VERSION)}`,
       );
 
-      expect(parseSessionCallback(callback)).toMatchObject({ ok: true });
+      expect(parseSessionCallback(callback, platform)).toMatchObject({ ok: true });
 
       const serializedContext = {
         [SessionCallbackKey.name]: {
@@ -322,7 +326,7 @@ describe("multi-agent callback routing", () => {
       const sessionId = `${agent.name}-session`;
       const ctx = new ContextContainer();
       ctx.set(SessionIdKey, sessionId);
-      ctx.set(CallbackBaseUrlKey, resolveWorkflowCallbackBaseUrl(deploymentOrigin));
+      ctx.set(CallbackBaseUrlKey, resolveWorkflowCallbackBaseUrl(deploymentOrigin, platform));
 
       const attemptId = "attempt-linear";
       const hookUrl = contextStorage.run(ctx, () => getHookUrl("linear", attemptId));
