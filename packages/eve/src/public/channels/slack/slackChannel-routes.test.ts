@@ -621,6 +621,93 @@ describe("slackChannel thread history", () => {
     expect(history?.[1]?.text).toBe("Deploys are green.");
   });
 
+  it("overlaps conversations.info, conversations.replies, and resolveSession before sending a thread reply", async () => {
+    const threadTs = "1700000000.000001";
+    const currentTs = "1700000000.000002";
+    const info = Promise.withResolvers<Response>();
+    const replies = Promise.withResolvers<Response>();
+    const session = Promise.withResolvers<undefined>();
+    const started: string[] = [];
+    const release = () => {
+      if (
+        started.includes("conversations.info") &&
+        started.includes("conversations.replies") &&
+        started.includes("resolveSession")
+      ) {
+        info.resolve(Response.json({ channel: { is_private: false }, ok: true }));
+        replies.resolve(
+          Response.json({
+            messages: [
+              { text: "Root question", thread_ts: threadTs, ts: threadTs, user: "U_ROOT" },
+              { text: "Follow up", thread_ts: threadTs, ts: currentTs, user: "U_CURRENT" },
+            ],
+            ok: true,
+          }),
+        );
+        session.resolve(undefined);
+      }
+    };
+
+    let repliesCount = 0;
+    fetchMock.mockImplementation(async (request: string | URL | Request) => {
+      const url = String(request);
+      if (url.includes("conversations.info")) {
+        started.push("conversations.info");
+        release();
+        return await info.promise;
+      }
+      if (url.includes("conversations.replies")) {
+        repliesCount += 1;
+        started.push("conversations.replies");
+        release();
+        return await replies.promise;
+      }
+      return Response.json({ ok: true, ts: "1700000001.000001" });
+    });
+
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onAppMention: () => ({ auth: null }),
+      threadContext: {},
+    });
+    const send = vi.fn().mockResolvedValue({ sessionId: "s1" });
+    await firePost(
+      channel,
+      signed(
+        JSON.stringify({
+          api_app_id: "A01",
+          authorizations: [{ is_bot: true, user_id: "U_BOT" }],
+          event: {
+            channel: "C01",
+            event_ts: currentTs,
+            text: "Follow up",
+            thread_ts: threadTs,
+            ts: currentTs,
+            type: "app_mention",
+            user: "U_CURRENT",
+          },
+          event_id: "EvOverlap",
+          team_id: "T01",
+          type: "event_callback",
+        }),
+      ),
+      send,
+      () => {
+        started.push("resolveSession");
+        release();
+        return session.promise;
+      },
+    );
+
+    expect(repliesCount).toBe(1);
+    expect(send).toHaveBeenCalledTimes(1);
+    const [, input] = send.mock.calls[0]! as [string, ObservedChannelDelivery<SlackChannelState>];
+    expect(input.state?.audience).toBe("public");
+    expect("history" in input ? input.history : undefined).toEqual([
+      expect.objectContaining({ id: threadTs, role: "user" }),
+    ]);
+  });
+
   it("passes every send option from a generic event's send", async () => {
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
