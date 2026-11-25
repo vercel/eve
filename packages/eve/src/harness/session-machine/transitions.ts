@@ -300,12 +300,20 @@ export interface DirectChildPublication {
   readonly turnId: string;
 }
 
+export interface DirectTaskFailure {
+  readonly error: string;
+  readonly settledCallIds: readonly string[];
+  readonly taskId: string;
+  readonly turnId: string;
+}
+
 export interface PendingDispatch {
   readonly children?: readonly DirectChildPublication[];
   readonly executing: readonly {
     readonly callId: string;
     readonly clearedBy?: import("#protocol/session-events/families/call.js").ClearedBy;
   }[];
+  readonly failedTasks?: readonly DirectTaskFailure[];
   readonly started: readonly TaskCallStart[];
   readonly refused: readonly { readonly result: RuntimeActionResult; readonly policy: string }[];
 }
@@ -342,10 +350,32 @@ export function startDispatchedCalls(view: SessionView, pending: PendingDispatch
       });
     }
   }
+  const failedTaskEvents: SessionEvent[] = [];
+  for (const failed of pending.failedTasks ?? []) {
+    const scope = { taskId: failed.taskId, turnId: failed.turnId };
+    for (const callId of failed.settledCallIds) {
+      failedTaskEvents.push({
+        type: "call.settled",
+        scope,
+        data: {
+          callId,
+          error: { code: "TOOL_EXECUTION_FAILED", message: failed.error },
+          outcome: "failed",
+        },
+      });
+    }
+    failedTaskEvents.push(
+      ...endTask(view, {
+        outcome: { error: failed.error, status: "failed" },
+        taskId: failed.taskId,
+      }).events,
+    );
+  }
   return unchanged(view, [
     ...pending.executing.map(({ callId, clearedBy }) => callStarted(callId, { clearedBy })),
     ...pending.started.flatMap((task) => startTask(view, task, introducedTasks).events),
     ...childEvents,
+    ...failedTaskEvents,
     ...pending.refused.map(({ policy, result }) =>
       callSettledFrom(result, { cause: { policy }, rejected: true }),
     ),

@@ -77,6 +77,15 @@ export class SessionInputQueue {
     return this.entries.length;
   }
 
+  hasDirectTaskMessage(taskId: string): boolean {
+    return this.entries.some(
+      (entry) =>
+        entry.kind === "delivery" &&
+        entry.delivery.caller?.directTask?.taskId === taskId &&
+        entry.delivery.payloads.some((payload) => payload.message !== undefined),
+    );
+  }
+
   get nextAdmission(): number {
     return this.nextSequence;
   }
@@ -216,13 +225,19 @@ export class SessionInputQueue {
     const principal = principalOf(first.delivery.auth);
     const following: QueuedDelivery[] = [];
     let callId = first.delivery.caller?.callId;
+    const directTaskId = first.delivery.caller?.directTask?.taskId;
     while (true) {
       const next = this.entries[0];
+      const sameDirectTask =
+        directTaskId !== undefined &&
+        next?.kind === "delivery" &&
+        next.delivery.caller?.directTask?.taskId === directTaskId;
       if (
         next?.kind !== "delivery" ||
         principal === ANONYMOUS_PRINCIPAL ||
         principalOf(next.delivery.auth) !== principal ||
-        (callId !== undefined &&
+        (!sameDirectTask &&
+          callId !== undefined &&
           next.delivery.caller !== undefined &&
           next.delivery.caller.callId !== callId)
       ) {
@@ -243,6 +258,7 @@ export class SessionInputQueue {
 
 export interface SteeringTurn {
   readonly callerCallId: string | undefined;
+  readonly directTaskId?: string;
   readonly principal: string;
 }
 
@@ -259,7 +275,10 @@ export function isSteeringDelivery(
   const paused = options?.paused === true || options?.heldOnPerson === true;
   return (
     (options?.heldOnPerson === true || (delivery.turnPolicy ?? "steer") === "steer") &&
-    (delivery.caller === undefined || delivery.caller.callId === turn.callerCallId) &&
+    (delivery.caller === undefined ||
+      delivery.caller.callId === turn.callerCallId ||
+      (turn.directTaskId !== undefined &&
+        delivery.caller.directTask?.taskId === turn.directTaskId)) &&
     (delivery.auth === undefined ||
       principalOf(delivery.auth) === turn.principal ||
       (!paused && joinsAnotherTurn(delivery)))

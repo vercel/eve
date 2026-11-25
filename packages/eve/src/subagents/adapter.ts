@@ -61,7 +61,6 @@ async function relay(event: SessionEvent, ctx: ChannelAdapterContext): Promise<v
       : {
           from: {
             callId: state.callId,
-            input: {},
             runId: childSessionId,
             sequence: directTask.sequence,
             stepIndex: directTask.stepIndex,
@@ -70,7 +69,6 @@ async function relay(event: SessionEvent, ctx: ChannelAdapterContext): Promise<v
             turnId: directTask.turnId,
           },
           kind: "request",
-          replyTo: "",
           request: { event: hookPayload, kind: "relay" },
         };
   await forwardToParentStep({

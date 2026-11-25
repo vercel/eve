@@ -20,6 +20,7 @@ const TASK_ID_SUFFIX_LENGTH = 6;
 export interface DirectAgentRun {
   readonly continuationToken: string;
   readonly name: string;
+  readonly nodeId: string;
 }
 
 export interface TaskRunAddress {
@@ -308,10 +309,7 @@ export function applyTaskReplyToTable(
   return { record, settled: settled.settled, table: settled.table };
 }
 
-function directSettledCallIds(
-  record: TaskRecord,
-  callIds: readonly string[],
-): readonly string[] {
+function directSettledCallIds(record: TaskRecord, callIds: readonly string[]): readonly string[] {
   const latest = callIds.at(-1);
   if (latest === undefined) return callIds;
   const index = record.calls.findIndex((call) => call.callId === latest);
@@ -492,7 +490,10 @@ function isTaskResult(value: unknown): value is TaskResult {
 
 function isDirectAgentRun(value: unknown): value is DirectAgentRun {
   return (
-    isObject(value) && isNonEmptyString(value.continuationToken) && isNonEmptyString(value.name)
+    isObject(value) &&
+    isNonEmptyString(value.continuationToken) &&
+    isNonEmptyString(value.name) &&
+    typeof value.nodeId === "string"
   );
 }
 

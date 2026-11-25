@@ -1,3 +1,4 @@
+import { SessionStrandedError } from "#channel/session-stranded-error.js";
 import { normalizeAgentMessage } from "#execution/agent-sessions/message.js";
 import {
   localAgentSendCommand,
@@ -17,6 +18,7 @@ import {
 import { sendTaskRunCommands } from "#execution/tasks/steps.js";
 import {
   findTask,
+  finishTaskRun,
   isTaskAvailable,
   MAX_WORKING_TASKS,
   readTaskTable,
@@ -24,6 +26,7 @@ import {
   recordTaskRun,
   redirectDirectTaskRun,
   removeTask,
+  settleRemainingTaskCalls,
   writeTaskTable,
   type TaskRecord,
   type TaskRunAddress,
@@ -39,6 +42,7 @@ import { createLogger, logError } from "#internal/logging.js";
 import type { HarnessSessionBase } from "#harness/types.js";
 import type {
   DirectChildPublication,
+  DirectTaskFailure,
   TaskCallStart,
 } from "#harness/session-machine/transitions.js";
 import { storedProjection } from "#harness/session-machine/view.js";
@@ -62,6 +66,7 @@ type TaskDispatchInput = StartWorkflowTaskInput & { readonly taskId: string };
 
 interface TaskDispatchResult {
   readonly child?: DirectChildPublication;
+  readonly failedTask?: DirectTaskFailure;
   readonly result: RuntimeToolResultActionResult;
   readonly session: HarnessSessionBase;
   readonly started?: TaskCallStart;
@@ -123,6 +128,7 @@ export async function tryStartDirectLocalAgent(
       directAgent: {
         continuationToken: prepared.childContinuationToken,
         name: start.target.action.name,
+        nodeId: start.target.action.nodeId,
       },
       hookToken: sessionInboxHookToken(sessionCommandHookToken(childSessionId)),
       runId: childSessionId,
@@ -231,7 +237,7 @@ export async function sendToTask(
       continuationToken: directAgent.continuationToken,
       kind: "local" as const,
       name: directAgent.name,
-      nodeId: "",
+      nodeId: directAgent.nodeId,
       sessionId: record.run.runId,
     };
     const command = localAgentSendCommand(
@@ -252,36 +258,62 @@ export async function sendToTask(
       },
       deliveryId,
     );
-    const sent = await input.directAgents.command(
-      {
-        address: localAddress,
-        context: input.agentContext,
-        key: `${session.sessionId}:${taskId}`,
-      },
-      command,
-    );
-    if (sent.status !== "accepted") {
-      throw new Error(
-        `Agent "${directAgent.name}" can no longer receive messages; its session ended.`,
+    let acceptedSessionId: string | undefined;
+    let sendFailure: string | undefined;
+    try {
+      const sent = await input.directAgents.command(
+        {
+          address: localAddress,
+          context: input.agentContext,
+          key: `${session.sessionId}:${taskId}`,
+        },
+        command,
       );
+      if (sent.status === "accepted") {
+        acceptedSessionId = sent.sessionId;
+      } else {
+        sendFailure = `Agent "${directAgent.name}" can no longer receive messages; its session ended.`;
+      }
+    } catch (error) {
+      if (!SessionStrandedError.is(error)) throw error;
+      sendFailure = `Agent "${directAgent.name}" can no longer receive messages: ${error.message}`;
+    }
+    if (sendFailure !== undefined || acceptedSessionId === undefined) {
+      const error =
+        sendFailure ??
+        `Agent "${directAgent.name}" can no longer receive messages; its session ended.`;
+      const settled = settleRemainingTaskCalls(recorded.table, taskId, { error, status: "failed" });
+      const finished = finishTaskRun(settled.table, taskId, record.run.runId);
+      return {
+        failedTask: {
+          error,
+          settledCallIds: settled.settled
+            .map((call) => call.callId)
+            .filter((callId) => callId !== task.callId),
+          taskId,
+          turnId: input.batchEvent.turnId,
+        },
+        result: startFailureResult(task, new Error(error)),
+        session: writeTaskTable(session, finished),
+      };
     }
     const redirected =
-      sent.sessionId === record.run.runId
+      acceptedSessionId === record.run.runId
         ? recorded.table
         : redirectDirectTaskRun(
             recorded.table,
             taskId,
-            sent.sessionId,
-            sessionInboxHookToken(sessionCommandHookToken(sent.sessionId)),
+            acceptedSessionId,
+            sessionInboxHookToken(sessionCommandHookToken(acceptedSessionId)),
           );
     const child: DirectChildPublication = {
       callId: task.callId,
       childDeliveryId: deliveryId,
-      ...(sent.sessionId !== record.run.runId && {
+      ...(acceptedSessionId !== record.run.runId && {
         name: directAgent.name,
-        stream: createEveSessionStreamRoutePath(sent.sessionId),
+        stream: createEveSessionStreamRoutePath(acceptedSessionId),
       }),
-      sessionId: sent.sessionId,
+      sessionId: acceptedSessionId,
       taskId,
       turnId: input.batchEvent.turnId,
     };

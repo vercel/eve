@@ -99,20 +99,29 @@ async function handleWorkflowToolRunRequest(
       storedProjection(state).view?.tasks[taskId]?.status === "ended")
   )
     return;
-  const { request } = message;
-  if (request.kind === "relay") {
-    await deliverWorkflowRelay({ ...message, request }, async () => {
+  if (message.request.kind === "relay") {
+    const relayMessage = {
+      from: message.from,
+      ...(message.replyTo !== undefined && { replyTo: message.replyTo }),
+      request: message.request,
+    };
+    await deliverWorkflowRelay(relayMessage, async () => {
       await cursor.advance((state) =>
-        runProxySubagentEventStep({ hookPayload: request.event, runId, ...state }),
+        runProxySubagentEventStep({ hookPayload: relayMessage.request.event, runId, ...state }),
       );
     });
     return;
   }
+  const askMessage = {
+    from: message.from,
+    replyTo: message.replyTo!,
+    request: message.request,
+  };
   await cursor.advance((state) =>
     runProxySubagentEventStep({
-      hookPayload: workflowAskPayload({ ...message, request }),
+      hookPayload: workflowAskPayload(askMessage),
       runId,
-      workflowAsk: createWorkflowAskRoute(request),
+      workflowAsk: createWorkflowAskRoute(askMessage.request),
       ...state,
     }),
   );

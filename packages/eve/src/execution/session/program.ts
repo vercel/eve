@@ -92,6 +92,7 @@ type SessionActionResult =
 
 interface SessionProgress {
   caller: TurnCaller | undefined;
+  directTaskOwner?: TurnCaller;
   turnId?: string;
 }
 
@@ -139,7 +140,10 @@ export async function runPreparedSession(
     serializedContext: boot.serializedContext,
     sessionState: boot.sessionState,
   });
-  const progress: SessionProgress = { caller: boot.caller };
+  const progress: SessionProgress = {
+    caller: boot.caller,
+    ...(boot.caller?.directTask !== undefined && { directTaskOwner: boot.caller }),
+  };
   const handoff = host.moves ?? RETAINED;
   let result: WorkflowEntryResult = { output: "", isError: true };
   let loop: SessionLoopOutcome | undefined;
@@ -160,6 +164,7 @@ export async function runPreparedSession(
       result = await finalizeSession(loop.outcome, {
         caller: progress.caller,
         cursor,
+        directTaskOwner: progress.directTaskOwner,
         sessionWritable: boot.sessionWritable,
       });
       return result;
@@ -169,7 +174,12 @@ export async function runPreparedSession(
     if (!finalizing) {
       await finalizeSession(
         { error, kind: "failed", turnId: progress.turnId },
-        { caller: progress.caller, cursor, sessionWritable: boot.sessionWritable },
+        {
+          caller: progress.caller,
+          cursor,
+          directTaskOwner: progress.directTaskOwner,
+          sessionWritable: boot.sessionWritable,
+        },
       );
     }
     throw createSafeOuterWorkflowError();
@@ -393,7 +403,10 @@ async function runSessionLoop(
     if (control !== undefined) turnControl ??= nextTurnControl(control);
     progress.turnId = undefined;
     sessionTimeout?.recordActivity();
-    if (outcome.caller !== undefined) progress.caller = outcome.caller;
+    if (outcome.caller !== undefined) {
+      progress.caller = outcome.caller;
+      if (outcome.caller.directTask !== undefined) progress.directTaskOwner = outcome.caller;
+    }
     if (outcome.compacted === true) compactionHandoffDue = true;
     return outcome;
   };
@@ -543,7 +556,15 @@ async function runSessionLoop(
           };
         }
         if (caller !== undefined) {
-          const notification = { caller, sessionId: boot.sessionId };
+          const totalUsage =
+            caller.directTask !== undefined
+              ? sessionUsage(cursor.sessionState.snapshot.session)
+              : undefined;
+          const notification = {
+            caller,
+            sessionId: boot.sessionId,
+            ...(totalUsage !== undefined && { totalUsage }),
+          };
           await notifyCancelledTaskCallerStep(
             settled.usage === undefined ? notification : { ...notification, usage: settled.usage },
           );
@@ -558,17 +579,22 @@ async function runSessionLoop(
         }
         if (action.settled !== undefined) {
           if (progress.caller !== undefined) {
-            const totalUsage =
-              progress.caller.directTask !== undefined
-                ? sessionUsage(cursor.sessionState.snapshot.session)
-                : undefined;
-            await notifyTurnCallerStep({
-              caller: progress.caller,
-              lifecycle: "parked",
-              sessionId: boot.sessionId,
-              settled: action.settled,
-              ...(totalUsage !== undefined && { totalUsage }),
-            });
+            const coalescedFollowUp =
+              progress.caller.directTask !== undefined &&
+              queue.hasDirectTaskMessage(progress.caller.directTask.taskId);
+            if (!coalescedFollowUp) {
+              const totalUsage =
+                progress.caller.directTask !== undefined
+                  ? sessionUsage(cursor.sessionState.snapshot.session)
+                  : undefined;
+              await notifyTurnCallerStep({
+                caller: progress.caller,
+                lifecycle: "parked",
+                sessionId: boot.sessionId,
+                settled: action.settled,
+                ...(totalUsage !== undefined && { totalUsage }),
+              });
+            }
           }
           progress.caller = undefined;
         }

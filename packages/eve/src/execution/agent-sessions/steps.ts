@@ -22,6 +22,7 @@ import { resumeSessionStartHook } from "#execution/session-inbox/resume.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import {
   createWorkflowRuntime,
+  dispatchWorkflowContinuationCommand,
   dispatchWorkflowSessionCommand,
   resolveContinuation,
 } from "#execution/workflow-runtime.js";
@@ -40,8 +41,11 @@ export const WORKFLOW_LOCAL_SESSIONS: LocalAgentSessions = {
     const result = await dispatchWorkflowSessionCommand({ command, sessionId });
     if (result.status === "accepted" || result.status === "reset") return result;
     const current = (await resolveContinuation(continuationToken))?.sessionId;
-    if (current === undefined || current === sessionId) return result;
-    return await dispatchWorkflowSessionCommand({ command, sessionId: current });
+    if (current === undefined) return result;
+    if (current !== sessionId) {
+      return await dispatchWorkflowSessionCommand({ command, sessionId: current });
+    }
+    return await dispatchWorkflowContinuationCommand({ command, continuationToken });
   },
   async commandLate(sessionId, command) {
     try {

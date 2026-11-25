@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Start and message local subagent sessions directly from `dispatchCoordinationStep` instead of routing them through a middleman `workflowToolRunWorkflow` run.
+Local subagents start, receive follow-up messages, and report replies directly between parent and child sessions without an intermediate tool-run workflow.

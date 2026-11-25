@@ -41,6 +41,7 @@ import {
   startDispatchedCalls,
   startTask,
   type DirectChildPublication,
+  type DirectTaskFailure,
   type PendingDispatch,
   type TaskCallStart,
 } from "#harness/session-machine/transitions.js";
@@ -94,6 +95,7 @@ async function dispatchCoordination(
   const results: RuntimeActionResult[] = [];
   const started: TaskCallStart[] = [];
   const children: DirectChildPublication[] = [];
+  const failedTasks: DirectTaskFailure[] = [];
   const refused: PendingDispatch["refused"][number][] = [];
   const executing: PendingDispatch["executing"][number][] = [];
   const admissionView = copyView(storedProjection(session.state).view);
@@ -156,6 +158,7 @@ async function dispatchCoordination(
     else if (task.entry.entryPoint === "execute")
       executing.push({ callId: task.callId, clearedBy: task.clearedBy });
     if (dispatched.child !== undefined) children.push(dispatched.child);
+    if (dispatched.failedTask !== undefined) failedTasks.push(dispatched.failedTask);
     if (dispatched.started !== undefined) {
       started.push(dispatched.started);
       const shadow = sessionView(
@@ -194,6 +197,7 @@ async function dispatchCoordination(
     pending: {
       ...(children.length > 0 && { children }),
       executing,
+      ...(failedTasks.length > 0 && { failedTasks }),
       refused,
       started,
     },
@@ -229,6 +233,7 @@ async function dispatchWorkflowCall(
   admissionView: SessionView,
 ): Promise<{
   readonly child?: DirectChildPublication;
+  readonly failedTask?: DirectTaskFailure;
   readonly result?: RuntimeActionResult;
   readonly session: HarnessSessionBase;
   readonly started?: TaskCallStart;
