@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  createSlackConversationKindReader,
   isPrivateSlackConversation,
   readSlackConversationKind,
   readSlackConversationPrivacy,
@@ -101,5 +102,70 @@ describe("Slack conversation privacy", () => {
       vi.fn().mockResolvedValue({ ok: false, error: "missing_scope" }),
     );
     expect(unknown).toEqual({ isPrivate: true });
+  });
+
+  it("caches conversations.info per team and channel, shares in-flight lookups, and refreshes after TTL", async () => {
+    let time = 1_000;
+    const read = createSlackConversationKindReader(() => time);
+    const pending = Promise.withResolvers<{ ok: boolean; channel: { is_private: boolean } }>();
+    const request = vi.fn().mockReturnValueOnce(pending.promise);
+
+    const first = read({ channelId: "C01", raw: {}, request, teamId: "T01" });
+    const concurrent = read({ channelId: "C01", raw: {}, request, teamId: "T01" });
+    pending.resolve({ ok: true, channel: { is_private: false } });
+    await expect(Promise.all([first, concurrent])).resolves.toEqual([
+      { isPrivate: false, spaceType: "shared", visibility: "public" },
+      { isPrivate: false, spaceType: "shared", visibility: "public" },
+    ]);
+    expect(request).toHaveBeenCalledTimes(1);
+
+    await expect(read({ channelId: "C01", raw: {}, request, teamId: "T01" })).resolves.toEqual({
+      isPrivate: false,
+      spaceType: "shared",
+      visibility: "public",
+    });
+    expect(request).toHaveBeenCalledTimes(1);
+
+    request.mockResolvedValueOnce({ ok: true, channel: { is_private: true } });
+    await expect(read({ channelId: "C01", raw: {}, request, teamId: "T02" })).resolves.toEqual({
+      isPrivate: true,
+      spaceType: "shared",
+      visibility: "private",
+    });
+    expect(request).toHaveBeenCalledTimes(2);
+
+    time += 5 * 60 * 1000 + 1;
+    request.mockResolvedValueOnce({ ok: true, channel: { is_private: true } });
+    await expect(read({ channelId: "C01", raw: {}, request, teamId: "T01" })).resolves.toEqual({
+      isPrivate: true,
+      spaceType: "shared",
+      visibility: "private",
+    });
+    expect(request).toHaveBeenCalledTimes(3);
+  });
+
+  it("retries failed conversations.info lookups after the shorter failure TTL", async () => {
+    let time = 1_000;
+    const read = createSlackConversationKindReader(() => time);
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, error: "missing_scope" })
+      .mockResolvedValueOnce({ ok: true, channel: { is_private: false } });
+
+    await expect(read({ channelId: "C01", raw: {}, request, teamId: "T01" })).resolves.toEqual({
+      isPrivate: true,
+    });
+    await expect(read({ channelId: "C01", raw: {}, request, teamId: "T01" })).resolves.toEqual({
+      isPrivate: true,
+    });
+    expect(request).toHaveBeenCalledTimes(1);
+
+    time += 60_001;
+    await expect(read({ channelId: "C01", raw: {}, request, teamId: "T01" })).resolves.toEqual({
+      isPrivate: false,
+      spaceType: "shared",
+      visibility: "public",
+    });
+    expect(request).toHaveBeenCalledTimes(2);
   });
 });
