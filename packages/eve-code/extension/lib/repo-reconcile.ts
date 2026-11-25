@@ -13,6 +13,7 @@ import type {
 } from "../extension.ts";
 import {
   appendCheckedDirs,
+  appendOverflowPaths,
   invalidateRepoCheckedDirs,
   isValidRepositorySkillName,
   MAX_PENDING_BACKGROUND_JOBS,
@@ -30,6 +31,8 @@ import {
   discoverWorkspace,
   isWindowsDrivePath,
   matchesRepositoryRule,
+  MAX_DISCOVERED_REPOSITORIES,
+  MAX_OVERFLOW_PATHS,
   normalizePlatformPath,
   readRepositoryFile,
   readRepositorySpecFiles,
@@ -407,6 +410,27 @@ export function hasUncheckedFileAncestors(
   return ancestors.some((dir) => !checked.has(dir));
 }
 
+function capRecordedRepositories(byRoot: Readonly<Record<string, RecordedRepository>>): {
+  readonly byRoot: Record<string, RecordedRepository>;
+  readonly overflowRoots: readonly string[];
+} {
+  const entries = Object.entries(byRoot);
+  if (entries.length <= MAX_DISCOVERED_REPOSITORIES) {
+    return { byRoot: { ...byRoot }, overflowRoots: [] };
+  }
+  const kept: Record<string, RecordedRepository> = {};
+  const overflowRoots: string[] = [];
+  for (let i = 0; i < entries.length; i += 1) {
+    const [root, repo] = entries[i]!;
+    if (i < MAX_DISCOVERED_REPOSITORIES) {
+      kept[root] = repo;
+    } else {
+      overflowRoots.push(root);
+    }
+  }
+  return { byRoot: kept, overflowRoots };
+}
+
 async function readMatchingRuleFiles(
   sandbox: RepositorySandbox,
   repo: DiscoveredRepository,
@@ -420,6 +444,7 @@ async function readMatchingRuleFiles(
   if (specs.length === 0) return [];
   const loaded = await readRepositorySpecFiles(sandbox, repo.root, specs, {
     maxFileBytes: resolved.maxFileBytes,
+    maxTotalBytes: resolved.maxTotalBytes,
   });
   const defaultPaths = new Set(repo.instructions.map((file) => file.relativePath));
   const seen = new Set<string>();
@@ -568,6 +593,7 @@ export async function reconcileWorkspace(
       roots: resolved.roots,
       instructions: resolved.instructions,
       maxFileBytes: resolved.maxFileBytes,
+      maxTotalBytes: resolved.maxTotalBytes,
       includeWorkspaceInstructions: true,
       extraPaths: options.extraPaths,
       existingRoots: Object.keys(snapshot.byRoot),
@@ -578,7 +604,13 @@ export async function reconcileWorkspace(
   }
 
   const discoveredRepos = new Map<string, DiscoveredRepository>();
+  const extraOverflowPaths: string[] = [];
   for (const repo of discovery.repositories) {
+    if (discoveredRepos.has(repo.root)) continue;
+    if (discoveredRepos.size >= MAX_DISCOVERED_REPOSITORIES) {
+      extraOverflowPaths.push(repo.root);
+      continue;
+    }
     discoveredRepos.set(repo.root, repo);
   }
 
@@ -654,15 +686,23 @@ export async function reconcileWorkspace(
     changed = true;
   }
 
-  const previewByRoot: Record<string, RecordedRepository> = { ...snapshot.byRoot };
-  for (const deleted of deletedRoots) delete previewByRoot[deleted];
-  Object.assign(previewByRoot, upsertedRepos);
+  const previewByRootUnbounded: Record<string, RecordedRepository> = { ...snapshot.byRoot };
+  for (const deleted of deletedRoots) delete previewByRootUnbounded[deleted];
+  Object.assign(previewByRootUnbounded, upsertedRepos);
+  const previewCapped = capRecordedRepositories(previewByRootUnbounded);
+  const previewByRoot = previewCapped.byRoot;
+  const previewOverflowPaths = appendOverflowPaths(
+    [],
+    [...discovery.overflowPaths, ...extraOverflowPaths, ...previewCapped.overflowRoots],
+    MAX_OVERFLOW_PATHS,
+  );
   const workspaceCovered =
     findKnownEnclosingRoot(discovery.workspaceRoot, previewByRoot) !== null ||
     discovery.workspaceRoot in snapshot.scopes;
   const previewWorkspaceInstruction = workspaceCovered ? [] : discovery.workspaceInstructions;
   if (
-    JSON.stringify(snapshot.workspaceInstruction) !== JSON.stringify(previewWorkspaceInstruction)
+    JSON.stringify(snapshot.workspaceInstruction) !== JSON.stringify(previewWorkspaceInstruction) ||
+    JSON.stringify(snapshot.overflowPaths) !== JSON.stringify(previewOverflowPaths)
   ) {
     changed = true;
   }
@@ -670,11 +710,17 @@ export async function reconcileWorkspace(
   if (!changed) return;
 
   repoState.update((latest) => {
-    const nextByRoot: Record<string, RecordedRepository> = { ...latest.byRoot };
-    for (const deleted of deletedRoots) delete nextByRoot[deleted];
-    Object.assign(nextByRoot, upsertedRepos);
+    const nextByRootUnbounded: Record<string, RecordedRepository> = { ...latest.byRoot };
+    for (const deleted of deletedRoots) delete nextByRootUnbounded[deleted];
+    Object.assign(nextByRootUnbounded, upsertedRepos);
+    const capped = capRecordedRepositories(nextByRootUnbounded);
+    const nextByRoot = capped.byRoot;
 
-    const invalidatedRoots = new Set([...deletedRoots, ...headChangedRoots]);
+    const invalidatedRoots = new Set([
+      ...deletedRoots,
+      ...headChangedRoots,
+      ...capped.overflowRoots,
+    ]);
     const nextScopes: Record<string, RecordedScope> = {};
     for (const [dir, scope] of Object.entries(latest.scopes)) {
       if (scope.repoRoot !== null && invalidatedRoots.has(scope.repoRoot)) continue;
@@ -690,6 +736,11 @@ export async function reconcileWorkspace(
       findKnownEnclosingRoot(discovery.workspaceRoot, nextByRoot) !== null ||
       discovery.workspaceRoot in nextScopes;
     const nextWorkspaceInstruction = latestWorkspaceCovered ? [] : discovery.workspaceInstructions;
+    const nextOverflowPaths = appendOverflowPaths(
+      [],
+      [...discovery.overflowPaths, ...extraOverflowPaths, ...capped.overflowRoots],
+      MAX_OVERFLOW_PATHS,
+    );
 
     return {
       ...latest,
@@ -700,6 +751,7 @@ export async function reconcileWorkspace(
       byRoot: nextByRoot,
       scopes: nextScopes,
       checkedDirs: nextCheckedDirs,
+      overflowPaths: nextOverflowPaths,
       syncedTurnId: options.turnId !== undefined ? options.turnId : latest.syncedTurnId,
       pendingReconcile: computeRemainingPending(
         latest.pendingReconcile,
@@ -727,6 +779,7 @@ export async function reconcileTouchedFile(
       knownRepoRoots: new Set(Object.keys(current.byRoot)),
       instructions: resolved.instructions,
       maxFileBytes: resolved.maxFileBytes,
+      maxTotalBytes: resolved.maxTotalBytes,
       loadScoped: resolved.scopedInstructions,
     });
   } catch {
@@ -734,8 +787,13 @@ export async function reconcileTouchedFile(
   }
 
   let onboarded: RecordedRepository | null = null;
+  const skippedEnclosingRoots: string[] = [];
   if (probe.enclosingRepo !== null && !(probe.enclosingRepo.root in current.byRoot)) {
-    onboarded = await onboardRepository(sandbox, probe.enclosingRepo, resolved, ruleCtx);
+    if (Object.keys(current.byRoot).length < MAX_DISCOVERED_REPOSITORIES) {
+      onboarded = await onboardRepository(sandbox, probe.enclosingRepo, resolved, ruleCtx);
+    } else {
+      skippedEnclosingRoots.push(probe.enclosingRepo.root);
+    }
   }
 
   const scopeHitsByDir = new Map(probe.scopes.map((hit) => [hit.dir, hit.files]));
@@ -748,14 +806,39 @@ export async function reconcileTouchedFile(
     current.workspaceRoot !== probe.workspaceRoot ||
     current.rawWorkspaceRoot !== rawWorkspaceRoot ||
     (probe.homeDir !== null && current.homeDir !== probe.homeDir);
+  const incomingOverflow = [...probe.overflowPaths, ...skippedEnclosingRoots];
+  const previewOverflow = appendOverflowPaths(
+    current.overflowPaths,
+    incomingOverflow,
+    MAX_OVERFLOW_PATHS,
+  );
+  const overflowChanged = JSON.stringify(current.overflowPaths) !== JSON.stringify(previewOverflow);
 
-  if (onboarded === null && !scopesChanged && !checkedChanged && !workspaceChanged) {
+  if (
+    onboarded === null &&
+    !scopesChanged &&
+    !checkedChanged &&
+    !workspaceChanged &&
+    !overflowChanged
+  ) {
     return;
   }
 
   repoState.update((latest) => {
     const nextByRoot: Record<string, RecordedRepository> = { ...latest.byRoot };
-    if (onboarded !== null) nextByRoot[onboarded.root] = onboarded;
+    const extraSkipped: string[] = [...incomingOverflow];
+    let addedOnboarded = false;
+    if (onboarded !== null) {
+      if (
+        onboarded.root in nextByRoot ||
+        Object.keys(nextByRoot).length < MAX_DISCOVERED_REPOSITORIES
+      ) {
+        nextByRoot[onboarded.root] = onboarded;
+        addedOnboarded = true;
+      } else {
+        extraSkipped.push(onboarded.root);
+      }
+    }
 
     const enclosingRoot = probe.enclosingRepoRoot;
     const enclosingSlug = enclosingRoot !== null ? (nextByRoot[enclosingRoot]?.slug ?? null) : null;
@@ -778,6 +861,13 @@ export async function reconcileTouchedFile(
     const workspaceCovered =
       findKnownEnclosingRoot(probe.workspaceRoot, nextByRoot) !== null ||
       probe.workspaceRoot in nextScopes;
+    const nextOverflowPaths = appendOverflowPaths(
+      latest.overflowPaths,
+      extraSkipped,
+      MAX_OVERFLOW_PATHS,
+    );
+    const latestOverflowChanged =
+      JSON.stringify(latest.overflowPaths) !== JSON.stringify(nextOverflowPaths);
 
     return {
       ...latest,
@@ -788,7 +878,11 @@ export async function reconcileTouchedFile(
       byRoot: nextByRoot,
       scopes: nextScopes,
       checkedDirs: appendCheckedDirs(latest.checkedDirs, probe.checkedDirs),
-      revision: onboarded !== null || scopesChanged ? latest.revision + 1 : latest.revision,
+      overflowPaths: nextOverflowPaths,
+      revision:
+        addedOnboarded || scopesChanged || latestOverflowChanged
+          ? latest.revision + 1
+          : latest.revision,
     };
   });
 }
@@ -796,16 +890,28 @@ export async function reconcileTouchedFile(
 export async function discoverWorkspaceReadOnly(
   sandbox: RepositorySandbox,
   resolved: ResolvedRepositoriesConfig,
-): Promise<Pick<RepositorySessionState, "workspaceRoot" | "workspaceInstruction" | "byRoot">> {
+): Promise<
+  Pick<
+    RepositorySessionState,
+    "workspaceRoot" | "workspaceInstruction" | "byRoot" | "overflowPaths"
+  >
+> {
   const discovery = await discoverWorkspace(sandbox, {
     roots: resolved.roots,
     instructions: resolved.instructions,
     maxFileBytes: resolved.maxFileBytes,
+    maxTotalBytes: resolved.maxTotalBytes,
     includeWorkspaceInstructions: true,
   });
 
   const byRoot: Record<string, RecordedRepository> = {};
+  const extraOverflow: string[] = [];
   for (const repo of discovery.repositories) {
+    if (repo.root in byRoot) continue;
+    if (Object.keys(byRoot).length >= MAX_DISCOVERED_REPOSITORIES) {
+      extraOverflow.push(repo.root);
+      continue;
+    }
     let ruleFiles: readonly RepositoryInstructionFile[] = [];
     try {
       ruleFiles = await readMatchingRuleFiles(sandbox, repo, resolved);
@@ -829,5 +935,10 @@ export async function discoverWorkspaceReadOnly(
     workspaceRoot: discovery.workspaceRoot,
     workspaceInstruction: discovery.workspaceInstructions,
     byRoot,
+    overflowPaths: appendOverflowPaths(
+      [],
+      [...discovery.overflowPaths, ...extraOverflow],
+      MAX_OVERFLOW_PATHS,
+    ),
   };
 }

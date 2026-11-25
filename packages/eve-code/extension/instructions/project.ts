@@ -34,6 +34,7 @@ export default defineDynamic(async (ctx) => {
         workspaceInstruction: workspaceCovered ? [] : state.workspaceInstruction,
         byRoot: state.byRoot,
         scopes: state.scopes,
+        overflowPaths: state.overflowPaths,
       },
       resolved.maxTotalBytes,
     );
@@ -46,7 +47,7 @@ export default defineDynamic(async (ctx) => {
   ) {
     let fallback: Pick<
       RepositorySessionState,
-      "workspaceRoot" | "workspaceInstruction" | "byRoot"
+      "workspaceRoot" | "workspaceInstruction" | "byRoot" | "overflowPaths"
     > | null = null;
     try {
       if (resolved.discoverOnStart === "on-sandbox-use") {
@@ -74,6 +75,7 @@ export default defineDynamic(async (ctx) => {
         workspaceInstruction: workspaceCovered ? [] : fallback.workspaceInstruction,
         byRoot: fallback.byRoot,
         scopes: state.scopes,
+        overflowPaths: fallback.overflowPaths,
       },
       resolved.maxTotalBytes,
     );
@@ -88,6 +90,7 @@ export default defineDynamic(async (ctx) => {
       workspaceInstruction: workspaceCovered ? [] : state.workspaceInstruction,
       byRoot: state.byRoot,
       scopes: state.scopes,
+      overflowPaths: state.overflowPaths,
     },
     resolved.maxTotalBytes,
   );

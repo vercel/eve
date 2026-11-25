@@ -64,6 +64,7 @@ export interface RepositorySessionState {
   readonly byRoot: Readonly<Record<string, RecordedRepository>>;
   readonly scopes: Readonly<Record<string, RecordedScope>>;
   readonly checkedDirs: readonly string[];
+  readonly overflowPaths: readonly string[];
   readonly syncedTurnId: string | null;
   readonly pendingReconcile: PendingRepositoryReconcile | null;
   readonly revision: number;
@@ -78,6 +79,7 @@ export function initialRepositorySessionState(): RepositorySessionState {
     byRoot: {},
     scopes: {},
     checkedDirs: [],
+    overflowPaths: [],
     syncedTurnId: null,
     pendingReconcile: null,
     revision: 0,
@@ -88,6 +90,23 @@ export const repoState = defineState<RepositorySessionState>(
   "repositories",
   initialRepositorySessionState,
 );
+
+export function appendOverflowPaths(
+  existing: readonly string[],
+  added: readonly string[],
+  maxPaths: number,
+): readonly string[] {
+  if (added.length === 0 && existing.length <= maxPaths) return existing;
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const p of [...existing, ...added]) {
+    if (result.length >= maxPaths) break;
+    if (p.length === 0 || seen.has(p)) continue;
+    seen.add(p);
+    result.push(p);
+  }
+  return result;
+}
 
 export function appendCheckedDirs(
   existing: readonly string[],

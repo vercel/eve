@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { execFile, spawn as spawnProcess } from "node:child_process";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
+import { Readable } from "node:stream";
 import { promisify } from "node:util";
 import test from "node:test";
 
@@ -129,8 +130,48 @@ function createRealSandboxAccess(
         };
       }
     },
-    async spawn() {
-      throw new Error("spawn not used in lifecycle test");
+    async spawn({ command, workingDirectory, env }) {
+      commands.push(command);
+      const cwd =
+        workingDirectory === undefined
+          ? workspaceDir
+          : isAbsolute(workingDirectory)
+            ? workingDirectory
+            : join(workspaceDir, workingDirectory);
+      const child = spawnProcess("bash", ["-c", command], {
+        cwd,
+        env: { ...GIT_ENV, ...envOverrides, ...env },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      const exitPromise = new Promise<{ exitCode: number }>((resolve) => {
+        let settled = false;
+        const finish = (code: number) => {
+          if (settled) return;
+          settled = true;
+          resolve({ exitCode: code });
+        };
+        child.once("error", () => finish(1));
+        child.once("close", (code) => finish(typeof code === "number" ? code : 1));
+      });
+      const stdout = Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>;
+      const stderr = Readable.toWeb(child.stderr) as ReadableStream<Uint8Array>;
+      return {
+        ...(child.pid !== undefined && { pid: child.pid }),
+        stdout,
+        stderr,
+        wait: () => exitPromise,
+        async kill() {
+          if (child.exitCode === null && child.signalCode === null) {
+            try {
+              if (process.platform === "win32") child.kill();
+              else child.kill("SIGKILL");
+            } catch {}
+          }
+          child.stdout.destroy();
+          child.stderr.destroy();
+          await exitPromise;
+        },
+      };
     },
     async readFile() {
       return null;
@@ -421,7 +462,7 @@ function createSessionHarness(
 }
 
 test("post-clone sparse repo A, repo B deduplication, scoped AGENTS.md caching, compaction re-injection, and subagent sandbox inheritance", async () => {
-  const root = await mkdtemp(join(tmpdir(), "eve-code-lifecycle-full-"));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "eve-code-lifecycle-full-")));
   try {
     const upstreamA = join(root, "upstream-a");
     const upstreamB = join(root, "upstream-b");
@@ -575,7 +616,7 @@ test("post-clone sparse repo A, repo B deduplication, scoped AGENTS.md caching, 
 });
 
 test("deterministic pre-seeded repository runs onEnter and injects AGENTS.md before model call 1 without duplicate scans", async () => {
-  const root = await mkdtemp(join(tmpdir(), "eve-code-lifecycle-preseeded-"));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "eve-code-lifecycle-preseeded-")));
   try {
     const workspace = join(root, "workspace");
     await initUpstreamRepo(workspace, {
@@ -627,7 +668,7 @@ test("deterministic pre-seeded repository runs onEnter and injects AGENTS.md bef
 });
 
 test("discoverOnStart on-sandbox-use stays idle on non-coding turns and syncs once sandbox opens mid-turn", async () => {
-  const root = await mkdtemp(join(tmpdir(), "eve-code-lifecycle-lazy-"));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "eve-code-lifecycle-lazy-")));
   try {
     const workspace = join(root, "workspace");
     await initUpstreamRepo(workspace, { "AGENTS.md": "Lazy workspace rules.\n" });
@@ -677,7 +718,7 @@ test("discoverOnStart on-sandbox-use stays idle on non-coding turns and syncs on
 });
 
 test("HEAD change prunes deleted scopes, repo delete + re-clone re-runs onEnter, and grep on direct subdir loads scoped AGENTS.md", async () => {
-  const root = await mkdtemp(join(tmpdir(), "eve-code-lifecycle-mutations-"));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "eve-code-lifecycle-mutations-")));
   try {
     const upstream = join(root, "upstream");
     const workspace = join(root, "workspace");
@@ -784,7 +825,7 @@ test("HEAD change prunes deleted scopes, repo delete + re-clone re-runs onEnter,
 });
 
 test("background bash clone keeps pending reconcile across polls until exit, syncAfter triggers reconciliation, and throwing match / onEnter / malformed skills are isolated", async () => {
-  const root = await mkdtemp(join(tmpdir(), "eve-code-lifecycle-edge-"));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "eve-code-lifecycle-edge-")));
   try {
     const upstreamA = join(root, "upstream-a");
     const upstreamB = join(root, "upstream-b");

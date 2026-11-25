@@ -24,11 +24,14 @@ import {
 } from "../../extension/lib/repo-state.ts";
 import {
   computeAncestorDirs,
+  computeMaxOutputBytes,
   isValidRelativePath,
   isValidRootPath,
   matchesRepositoryRule,
   parseRepositorySlug,
+  runBoundedSandboxCommand,
   sanitizeRemoteUrl,
+  type RepositorySandbox,
 } from "../../extension/lib/repositories.ts";
 
 function makeRepo(overrides: Partial<DiscoveredRepository> = {}): DiscoveredRepository {
@@ -418,4 +421,86 @@ test("buildKeyedInstructions enforces maxTotalBytes and appends an overflow dire
   assert.match(result.overflow?.content ?? "", /read_file/u);
   assert.match(result.overflow?.content ?? "", /\/workspace\/repoB\/AGENTS\.md/u);
   assert.match(result.overflow?.content ?? "", /\/workspace\/repoA\/sub\/AGENTS\.md/u);
+
+  const overflowOnly = buildKeyedInstructions(
+    {
+      workspaceInstruction: [],
+      byRoot: {},
+      scopes: {},
+      overflowPaths: ["/workspace/repo-33", "/workspace/repo-01/AGENTS.md"],
+    },
+    128,
+  );
+  assert.ok(overflowOnly !== null);
+  assert.deepEqual(Object.keys(overflowOnly), ["overflow"]);
+  assert.match(overflowOnly.overflow?.content ?? "", /\/workspace\/repo-33/u);
+  assert.match(overflowOnly.overflow?.content ?? "", /\/workspace\/repo-01\/AGENTS\.md/u);
+});
+
+test("runBoundedSandboxCommand kills oversized spawn streams early and strictly bounds buffered bytes", async () => {
+  const chunk = new Uint8Array(64 * 1024).fill(0x61);
+  const totalChunksAvailable = 32;
+  let pulledChunks = 0;
+  let killCalls = 0;
+
+  const sandbox: RepositorySandbox = {
+    resolvePath: (p) => p,
+    async run() {
+      throw new Error("run should not be called when spawn is available");
+    },
+    async spawn() {
+      const stdout = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (pulledChunks >= totalChunksAvailable) {
+            controller.close();
+            return;
+          }
+          pulledChunks += 1;
+          controller.enqueue(chunk);
+        },
+      });
+      const stderr = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.close();
+        },
+      });
+      return {
+        stdout,
+        stderr,
+        async wait() {
+          return { exitCode: 137 };
+        },
+        async kill() {
+          killCalls += 1;
+        },
+      };
+    },
+  };
+
+  const maxOutputBytes = 100 * 1024;
+  const result = await runBoundedSandboxCommand(sandbox, "yes", maxOutputBytes);
+  assert.equal(result.overflowed, true);
+  assert.equal(killCalls, 1);
+  assert.ok(
+    Buffer.byteLength(result.stdout, "utf8") <= maxOutputBytes,
+    `expected stdout <= ${maxOutputBytes}, got ${Buffer.byteLength(result.stdout, "utf8")}`,
+  );
+  assert.ok(
+    pulledChunks <= 4,
+    `expected stream to stop early after hitting cap, pulled ${pulledChunks} of ${totalChunksAvailable} chunks`,
+  );
+
+  assert.equal(computeMaxOutputBytes(256_000), 643_072);
+  assert.equal(computeMaxOutputBytes(128), 524_288);
+  assert.equal(computeMaxOutputBytes(10_000_000), 4_194_304);
+
+  const runOnlySandbox: RepositorySandbox = {
+    resolvePath: (p) => p,
+    async run() {
+      return { exitCode: 0, stdout: "b".repeat(2048), stderr: "" };
+    },
+  };
+  const fallback = await runBoundedSandboxCommand(runOnlySandbox, "echo ok", 512);
+  assert.equal(fallback.overflowed, true);
+  assert.equal(Buffer.byteLength(fallback.stdout, "utf8"), 512);
 });

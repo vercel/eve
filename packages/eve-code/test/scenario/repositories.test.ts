@@ -1,14 +1,19 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
+import { execFile, spawn as spawnProcess } from "node:child_process";
 import { mkdir, mkdtemp, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
+import { Readable } from "node:stream";
 import { promisify } from "node:util";
 import test from "node:test";
 
 import {
   discoverRepositories,
+  discoverWorkspace,
   findEnclosingRepository,
+  MAX_DISCOVERED_REPOSITORIES,
+  MAX_META_FIELD_BYTES,
+  MAX_OVERFLOW_PATHS,
   readRepositoryFile,
   readScopedDirectoryInstructions,
   type RepositorySandbox,
@@ -62,6 +67,49 @@ function createLocalSandbox(
           };
         }
       },
+      async spawn({ command, workingDirectory, env }) {
+        commands.push(command);
+        const cwd =
+          workingDirectory === undefined
+            ? root
+            : isAbsolute(workingDirectory)
+              ? workingDirectory
+              : join(root, workingDirectory);
+        const child = spawnProcess("bash", ["-c", command], {
+          cwd,
+          env: { ...GIT_ENV, ...envOverrides, ...env },
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+        const exitPromise = new Promise<{ exitCode: number }>((resolve) => {
+          let settled = false;
+          const finish = (code: number) => {
+            if (settled) return;
+            settled = true;
+            resolve({ exitCode: code });
+          };
+          child.once("error", () => finish(1));
+          child.once("close", (code) => finish(typeof code === "number" ? code : 1));
+        });
+        const stdout = Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>;
+        const stderr = Readable.toWeb(child.stderr) as ReadableStream<Uint8Array>;
+        return {
+          ...(child.pid !== undefined && { pid: child.pid }),
+          stdout,
+          stderr,
+          wait: () => exitPromise,
+          async kill() {
+            if (child.exitCode === null && child.signalCode === null) {
+              try {
+                if (process.platform === "win32") child.kill();
+                else child.kill("SIGKILL");
+              } catch {}
+            }
+            child.stdout.destroy();
+            child.stderr.destroy();
+            await exitPromise;
+          },
+        };
+      },
     },
   };
 }
@@ -87,7 +135,7 @@ async function initRepo(
 }
 
 test("discovers multiple repos and git worktrees in one command, strips remote credentials, and prunes node_modules", async () => {
-  const workspace = await mkdtemp(join(tmpdir(), "eve-code-repos-multi-"));
+  const workspace = await realpath(await mkdtemp(join(tmpdir(), "eve-code-repos-multi-")));
   try {
     const repoA = join(workspace, "repos", "a");
     const repoB = join(workspace, "repos", "b");
@@ -151,7 +199,7 @@ test("discovers multiple repos and git worktrees in one command, strips remote c
 });
 
 test("reads HEAD:AGENTS.md from git when excluded by sparse --no-cone checkout and falls back when whitespace-only", async () => {
-  const root = await mkdtemp(join(tmpdir(), "eve-code-repos-sparse-"));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "eve-code-repos-sparse-")));
   try {
     const upstream = join(root, "upstream");
     const workspace = join(root, "ws");
@@ -195,7 +243,7 @@ test("reads HEAD:AGENTS.md from git when excluded by sparse --no-cone checkout a
 });
 
 test("returns source unavailable for promisor blobs when the remote cannot be reached", async () => {
-  const root = await mkdtemp(join(tmpdir(), "eve-code-repos-partial-"));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "eve-code-repos-partial-")));
   try {
     const upstream = join(root, "upstream");
     const workspace = join(root, "ws");
@@ -232,7 +280,7 @@ test("returns source unavailable for promisor blobs when the remote cannot be re
 });
 
 test("blocks ext:: promisor RCE and core.fsmonitor execution from untrusted .git/config (vercel/eve/407)", async () => {
-  const root = await mkdtemp(join(tmpdir(), "eve-code-repos-rce-407-"));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "eve-code-repos-rce-407-")));
   try {
     const upstream = join(root, "upstream");
     const workspace = join(root, "ws");
@@ -288,7 +336,7 @@ test("blocks ext:: promisor RCE and core.fsmonitor execution from untrusted .git
 });
 
 test("blocks symlink exfiltration outside the repository and validates public helper options", async () => {
-  const root = await mkdtemp(join(tmpdir(), "eve-code-repos-symlink-"));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "eve-code-repos-symlink-")));
   try {
     const outsideSecret = join(root, "outside-secret.txt");
     await writeFile(outsideSecret, "TOP_SECRET_VALUE\n");
@@ -362,7 +410,7 @@ test("blocks symlink exfiltration outside the repository and validates public he
 });
 
 test("discovers enclosing repository outside workspace, expands $HOME paths, and caches external non-git dirs", async () => {
-  const root = await mkdtemp(join(tmpdir(), "eve-code-repos-external-"));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "eve-code-repos-external-")));
   try {
     const workspace = join(root, "ws");
     const fakeHome = join(root, "fake-home");
@@ -426,5 +474,81 @@ test("discovers enclosing repository outside workspace, expands $HOME paths, and
     assert.deepEqual(homeProbe.scopes, []);
   } finally {
     await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("bounds discovered repo count, metadata field size, and aggregate instruction bytes in the sandbox (vercel/eve/459)", async () => {
+  const workspace = await realpath(await mkdtemp(join(tmpdir(), "eve-code-repos-bounds-459-")));
+  try {
+    const repoCount = 36;
+    const hugeRemote = `https://github.com/acme/${"r".repeat(12_000)}.git`;
+    const repoDirs = Array.from({ length: repoCount }, (_, idx) =>
+      join(workspace, `repo-${String(idx).padStart(2, "0")}`),
+    );
+
+    const batchSize = 8;
+    for (let i = 0; i < repoDirs.length; i += batchSize) {
+      await Promise.all(
+        repoDirs.slice(i, i + batchSize).map(async (dir, offset) => {
+          const idx = i + offset;
+          await mkdir(dir, { recursive: true });
+          await git(dir, ["init", "-b", "main"]);
+          if (idx === 0) {
+            await git(dir, ["remote", "add", "origin", hugeRemote]);
+          }
+          await writeFile(
+            join(dir, "AGENTS.md"),
+            `Repo ${String(idx).padStart(2, "0")} instructions: ${"x".repeat(60)}\n`,
+          );
+        }),
+      );
+    }
+
+    const { sandbox } = createLocalSandbox(workspace);
+
+    const fullDiscovery = await discoverWorkspace(sandbox, {
+      extraPaths: [repoDirs[0]!],
+    });
+    assert.equal(fullDiscovery.repositories.length, MAX_DISCOVERED_REPOSITORIES);
+    assert.equal(fullDiscovery.overflowPaths.length, repoCount - MAX_DISCOVERED_REPOSITORIES);
+    assert.ok(fullDiscovery.overflowPaths.length <= MAX_OVERFLOW_PATHS);
+
+    const hugeRepoRoot = (await realpath(repoDirs[0]!)).replaceAll("\\", "/");
+    const hugeRepo = fullDiscovery.repositories.find(
+      (repo) => repo.root.replaceAll("\\", "/") === hugeRepoRoot,
+    );
+    assert.ok(hugeRepo !== undefined, "repo with huge remote is discovered");
+    assert.ok(hugeRepo.remote !== null);
+    assert.ok(
+      Buffer.byteLength(hugeRepo.remote, "utf8") <= MAX_META_FIELD_BYTES,
+      `expected bounded remote length <= ${MAX_META_FIELD_BYTES}, got ${Buffer.byteLength(hugeRepo.remote, "utf8")}`,
+    );
+
+    const budgeted = await discoverWorkspace(sandbox, {
+      extraPaths: [repoDirs[0]!],
+      maxTotalBytes: 128,
+    });
+    assert.equal(budgeted.repositories.length, MAX_DISCOVERED_REPOSITORIES);
+
+    const emittedFiles = budgeted.repositories.flatMap((repo) => repo.instructions);
+    const emittedBytes = emittedFiles.reduce(
+      (sum, file) => sum + Buffer.byteLength(file.content ?? "", "utf8"),
+      0,
+    );
+    assert.ok(
+      emittedFiles.length === 1,
+      `expected only 1 file within 128-byte budget, got ${emittedFiles.length}`,
+    );
+    assert.ok(emittedBytes <= 128, `expected emitted bytes <= 128, got ${emittedBytes}`);
+    assert.ok(
+      budgeted.overflowPaths.some((p) => p.endsWith("/AGENTS.md")),
+      "expected FILE_OVERFLOW paths recorded for skipped AGENTS.md files",
+    );
+    assert.ok(
+      budgeted.overflowPaths.length <= MAX_OVERFLOW_PATHS,
+      `expected overflowPaths <= ${MAX_OVERFLOW_PATHS}, got ${budgeted.overflowPaths.length}`,
+    );
+  } finally {
+    await rm(workspace, { force: true, recursive: true });
   }
 });

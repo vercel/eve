@@ -3,7 +3,7 @@ import { defineInstructions, type InstructionsDefinition } from "eve/instruction
 
 import type { RepositoryInstructionFile } from "../extension.ts";
 import type { RecordedRepository, RecordedScope, RepositorySessionState } from "./repo-state.ts";
-import { DEFAULT_MAX_TOTAL_BYTES } from "./repositories.ts";
+import { DEFAULT_MAX_TOTAL_BYTES, MAX_OVERFLOW_PATHS } from "./repositories.ts";
 
 export interface ProjectInstructionsFile {
   readonly path: string;
@@ -156,7 +156,9 @@ interface CandidateInstructionEntry {
 }
 
 export function buildKeyedInstructions(
-  state: Pick<RepositorySessionState, "workspaceInstruction" | "byRoot" | "scopes">,
+  state: Pick<RepositorySessionState, "workspaceInstruction" | "byRoot" | "scopes"> & {
+    readonly overflowPaths?: readonly string[];
+  },
   maxTotalBytes: number = DEFAULT_MAX_TOTAL_BYTES,
 ): Readonly<Record<string, InstructionsDefinition>> | null {
   const candidates: CandidateInstructionEntry[] = [];
@@ -198,10 +200,16 @@ export function buildKeyedInstructions(
     }
   }
 
-  if (candidates.length === 0) return null;
+  const preOverflow = state.overflowPaths ?? [];
+  if (candidates.length === 0 && preOverflow.length === 0) return null;
 
   const result: Record<string, InstructionsDefinition> = {};
   const overflowPaths: string[] = [];
+  const pushOverflow = (p: string) => {
+    if (p.length === 0 || overflowPaths.includes(p)) return;
+    if (overflowPaths.length >= MAX_OVERFLOW_PATHS) return;
+    overflowPaths.push(p);
+  };
   let usedBytes = 0;
 
   for (const candidate of candidates) {
@@ -211,9 +219,13 @@ export function buildKeyedInstructions(
       usedBytes += entryBytes;
     } else {
       for (const p of candidate.paths) {
-        if (!overflowPaths.includes(p)) overflowPaths.push(p);
+        pushOverflow(p);
       }
     }
+  }
+
+  for (const p of preOverflow) {
+    pushOverflow(p);
   }
 
   if (overflowPaths.length > 0) {

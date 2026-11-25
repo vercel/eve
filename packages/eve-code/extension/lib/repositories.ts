@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { posix } from "node:path";
-import type { SandboxSession } from "eve/sandbox";
+import type { SandboxCommandResult, SandboxSession } from "eve/sandbox";
 
 import type {
   DiscoveredRepository,
@@ -17,7 +17,12 @@ export const DEFAULT_REPOSITORY_INSTRUCTIONS: readonly RepositoryInstructionSpec
 ];
 export const DEFAULT_MAX_FILE_BYTES = 64_000;
 export const DEFAULT_MAX_TOTAL_BYTES = 256_000;
+export const MAX_DISCOVERED_REPOSITORIES = 32;
+export const MAX_SCAN_CANDIDATES = 256;
+export const MAX_META_FIELD_BYTES = 2048;
+export const MAX_OVERFLOW_PATHS = 64;
 
+const MAX_STDERR_BYTES = 65_536;
 const PROMISOR_FETCH_TIMEOUT_SECONDS = 5;
 
 /**
@@ -57,6 +62,7 @@ export interface WorkspaceDiscoveryResult {
   readonly repositories: readonly DiscoveredRepository[];
   readonly workspaceInstructions: readonly RepositoryInstructionFile[];
   readonly finishedJobDirs: readonly string[];
+  readonly overflowPaths: readonly string[];
 }
 
 export interface ScopedProbeResult {
@@ -69,9 +75,15 @@ export interface ScopedProbeResult {
     readonly dir: string;
     readonly files: readonly RepositoryInstructionFile[];
   }[];
+  readonly overflowPaths: readonly string[];
 }
 
-export type RepositorySandbox = Pick<SandboxSession, "resolvePath" | "run">;
+export type RepositorySandbox = Pick<SandboxSession, "resolvePath" | "run"> &
+  Partial<Pick<SandboxSession, "spawn">>;
+
+export interface BoundedCommandResult extends SandboxCommandResult {
+  readonly overflowed: boolean;
+}
 
 export function resolveRepositoriesConfig(
   config: RepositoriesConfig | undefined,
@@ -130,6 +142,149 @@ function validateMaxFileBytes(maxFileBytes: number | undefined): number {
     throw new Error(`Invalid maxFileBytes ${String(maxFileBytes)}: must be a positive integer.`);
   }
   return maxFileBytes;
+}
+
+function validateMaxTotalBytes(maxTotalBytes: number | undefined): number {
+  if (maxTotalBytes === undefined) return DEFAULT_MAX_TOTAL_BYTES;
+  if (!Number.isInteger(maxTotalBytes) || maxTotalBytes <= 0) {
+    throw new Error(`Invalid maxTotalBytes ${String(maxTotalBytes)}: must be a positive integer.`);
+  }
+  return maxTotalBytes;
+}
+
+export function computeMaxOutputBytes(maxTotalBytes: number): number {
+  return Math.min(Math.max(maxTotalBytes * 2 + 131_072, 524_288), 4_194_304);
+}
+
+function decodeUtf8Bounded(
+  bytes: Uint8Array,
+  limit: number,
+  trimTrailingIncomplete: boolean,
+): string {
+  const capped = bytes.byteLength > limit ? bytes.subarray(0, limit) : bytes;
+  let end = capped.byteLength;
+  if (trimTrailingIncomplete && end > 0) {
+    let cont = 0;
+    while (end > 0 && (capped[end - 1]! & 0xc0) === 0x80 && cont < 3) {
+      end -= 1;
+      cont += 1;
+    }
+    if (end > 0) {
+      const lead = capped[end - 1]!;
+      const expected = lead < 0x80 ? 1 : lead < 0xe0 ? 2 : lead < 0xf0 ? 3 : lead < 0xf8 ? 4 : 1;
+      if (1 + cont < expected) {
+        end -= 1;
+      } else {
+        end = capped.byteLength;
+      }
+    }
+  }
+  return Buffer.from(capped.buffer, capped.byteOffset, end).toString("utf8");
+}
+
+function concatUint8Arrays(chunks: readonly Uint8Array[], totalLength: number): Uint8Array {
+  if (chunks.length === 0) return new Uint8Array(0);
+  if (chunks.length === 1) return chunks[0]!;
+  const out = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return out;
+}
+
+export async function runBoundedSandboxCommand(
+  sandbox: RepositorySandbox,
+  command: string,
+  maxOutputBytes: number,
+): Promise<BoundedCommandResult> {
+  const stdoutLimit = Math.max(1, Math.floor(maxOutputBytes));
+  if (typeof sandbox.spawn !== "function") {
+    const result = await sandbox.run({ command });
+    const stdoutBuf = Buffer.from(result.stdout, "utf8");
+    const stderrBuf = Buffer.from(result.stderr, "utf8");
+    const stdoutOverflow = stdoutBuf.byteLength > stdoutLimit;
+    const stderrOverflow = stderrBuf.byteLength > MAX_STDERR_BYTES;
+    return {
+      exitCode: result.exitCode,
+      stdout: stdoutOverflow ? decodeUtf8Bounded(stdoutBuf, stdoutLimit, true) : result.stdout,
+      stderr: stderrOverflow ? decodeUtf8Bounded(stderrBuf, MAX_STDERR_BYTES, true) : result.stderr,
+      overflowed: stdoutOverflow || stderrOverflow,
+    };
+  }
+
+  const proc = await sandbox.spawn({ command });
+  const stdoutReader = proc.stdout.getReader();
+  const stderrReader = proc.stderr.getReader();
+  let overflowed = false;
+  let killPromise: Promise<void> | null = null;
+
+  const triggerOverflow = () => {
+    if (overflowed) return;
+    overflowed = true;
+    void stdoutReader.cancel().catch(() => undefined);
+    void stderrReader.cancel().catch(() => undefined);
+    killPromise = Promise.resolve(proc.kill()).catch(() => undefined);
+  };
+
+  const collectStream = async (
+    reader: ReadableStreamDefaultReader<Uint8Array>,
+    limit: number,
+  ): Promise<{ readonly bytes: Uint8Array; readonly truncated: boolean }> => {
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    let truncated = false;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value === undefined || value.byteLength === 0) continue;
+        if (overflowed) break;
+        const remaining = limit - total;
+        if (value.byteLength > remaining) {
+          if (remaining > 0) {
+            chunks.push(value.slice(0, remaining));
+            total += remaining;
+          }
+          truncated = true;
+          triggerOverflow();
+          break;
+        }
+        chunks.push(value);
+        total += value.byteLength;
+      }
+    } catch (error) {
+      if (!overflowed) throw error;
+    } finally {
+      reader.releaseLock();
+    }
+    return { bytes: concatUint8Arrays(chunks, total), truncated };
+  };
+
+  const [stdoutCollected, stderrCollected] = await Promise.all([
+    collectStream(stdoutReader, stdoutLimit),
+    collectStream(stderrReader, MAX_STDERR_BYTES),
+  ]);
+
+  if (overflowed) {
+    if (killPromise !== null) await killPromise;
+    void Promise.resolve(proc.wait()).catch(() => undefined);
+    return {
+      exitCode: 1,
+      stdout: decodeUtf8Bounded(stdoutCollected.bytes, stdoutLimit, stdoutCollected.truncated),
+      stderr: decodeUtf8Bounded(stderrCollected.bytes, MAX_STDERR_BYTES, stderrCollected.truncated),
+      overflowed: true,
+    };
+  }
+
+  const { exitCode } = await proc.wait();
+  return {
+    exitCode,
+    stdout: decodeUtf8Bounded(stdoutCollected.bytes, stdoutLimit, false),
+    stderr: decodeUtf8Bounded(stderrCollected.bytes, MAX_STDERR_BYTES, false),
+    overflowed: false,
+  };
 }
 
 function validateRoots(roots: readonly string[] | undefined): readonly string[] {
@@ -295,12 +450,24 @@ function createBoundary(): string {
   return `__EVE_REPO_${randomBytes(12).toString("hex")}__`;
 }
 
-function shellHelpers(boundary: string, maxFileBytes: number): string {
+function shellHelpers(boundary: string, maxFileBytes: number, maxTotalBytes: number): string {
   const b = shellQuote(boundary);
-  const headBytes = Math.max(1, Math.floor(maxFileBytes)) + 1;
+  const fileBytes = Math.max(1, Math.floor(maxFileBytes));
+  const headBytes = fileBytes + 1;
+  const totalBytes = Math.max(0, Math.floor(maxTotalBytes));
   return [
     `B=${b}`,
+    `MAX_FILE=${fileBytes}`,
     `MAX_HEAD=${headBytes}`,
+    `MAX_TOTAL_BYTES=${totalBytes}`,
+    `MAX_REPOS=${MAX_DISCOVERED_REPOSITORIES}`,
+    `MAX_META=${MAX_META_FIELD_BYTES}`,
+    `MAX_OVERFLOW=${MAX_OVERFLOW_PATHS}`,
+    `REPO_COUNT=0`,
+    `SKIPPED_REPOS=0`,
+    `TOTAL_BYTES=0`,
+    `BUDGET_EXHAUSTED=0`,
+    `OVERFLOW_COUNT=0`,
     `canon_path() {`,
     `  [ -e "$1" ] || return 1`,
     `  if realpath -e -- "$1" 2>/dev/null; then return 0; fi`,
@@ -330,6 +497,26 @@ function shellHelpers(boundary: string, maxFileBytes: number): string {
     `  fi`,
     `  case "$_child" in "$_parent"/*) return 0 ;; *) return 1 ;; esac`,
     `}`,
+    `emit_overflow() {`,
+    `  _kind="$1"; _opath="$2"`,
+    `  if [ "$OVERFLOW_COUNT" -lt "$MAX_OVERFLOW" ]; then`,
+    `    OVERFLOW_COUNT=$((OVERFLOW_COUNT + 1))`,
+    `    _opath_out=$(printf '%s' "$_opath" | tr -d '\\r\\n' | head -c "$MAX_META")`,
+    `    printf '%s %s %s\\n' "$B" "$_kind" "$_opath_out"`,
+    `  fi`,
+    `}`,
+    `consume_budget() {`,
+    `  _bytes="$1"; _opath="$2"`,
+    `  [ "$MAX_TOTAL_BYTES" -gt 0 ] 2>/dev/null || return 0`,
+    `  if [ "$_bytes" -gt "$MAX_FILE" ] 2>/dev/null; then _bytes="$MAX_FILE"; fi`,
+    `  if [ "$BUDGET_EXHAUSTED" -ne 0 ] || [ $((TOTAL_BYTES + _bytes)) -gt "$MAX_TOTAL_BYTES" ]; then`,
+    `    BUDGET_EXHAUSTED=1`,
+    `    emit_overflow "FILE_OVERFLOW" "$_opath"`,
+    `    return 1`,
+    `  fi`,
+    `  TOTAL_BYTES=$((TOTAL_BYTES + _bytes))`,
+    `  return 0`,
+    `}`,
     `emit_file_worktree() {`,
     `  _scope="$1"; _base="$2"; _rel="$3"; _full="$4"`,
     `  if [ ! -f "$_full" ] || [ ! -s "$_full" ]; then return 1; fi`,
@@ -337,6 +524,9 @@ function shellHelpers(boundary: string, maxFileBytes: number): string {
     `  [ -n "$_real" ] || return 1`,
     `  path_within "$_real" "$_base" || return 1`,
     `  head -c "$MAX_HEAD" -- "$_real" | LC_ALL=C grep -q '[^[:space:]]' 2>/dev/null || return 1`,
+    `  _emit_bytes=$(head -c "$MAX_HEAD" -- "$_real" | wc -c | tr -d '[:space:]')`,
+    `  [ "\${_emit_bytes:-0}" -gt 0 ] 2>/dev/null || return 1`,
+    `  if ! consume_budget "$_emit_bytes" "$_real"; then return 0; fi`,
     `  printf '%s FILE_START\\n%s SCOPE %s\\n%s PATH %s\\n%s REL %s\\n%s SOURCE worktree\\n%s CONTENT_BEGIN\\n' "$B" "$B" "$_scope" "$B" "$_real" "$B" "$_rel" "$B" "$B"`,
     `  head -c "$MAX_HEAD" -- "$_real"`,
     `  printf '\\n%s CONTENT_END\\n' "$B"`,
@@ -364,6 +554,9 @@ function shellHelpers(boundary: string, maxFileBytes: number): string {
     `    _sz=$(git_offline -C "$_repo" cat-file -s "$_oid" 2>/dev/null || echo 0)`,
     `    [ "\${_sz:-0}" -gt 0 ] 2>/dev/null || return 1`,
     `    git_offline -C "$_repo" cat-file -p "$_oid" 2>/dev/null | head -c "$MAX_HEAD" | LC_ALL=C grep -q '[^[:space:]]' 2>/dev/null || return 1`,
+    `    _emit_bytes="$_sz"`,
+    `    if [ "$_emit_bytes" -gt "$MAX_HEAD" ] 2>/dev/null; then _emit_bytes="$MAX_HEAD"; fi`,
+    `    if ! consume_budget "$_emit_bytes" "$_full"; then return 0; fi`,
     `    printf '%s FILE_START\\n%s SCOPE %s\\n%s PATH %s\\n%s REL %s\\n%s SOURCE git\\n%s CONTENT_BEGIN\\n' "$B" "$B" "$_scope" "$B" "$_full" "$B" "$_rel" "$B" "$B"`,
     `    git_offline -C "$_repo" cat-file -p "$_oid" 2>/dev/null | head -c "$MAX_HEAD"`,
     `    printf '\\n%s CONTENT_END\\n' "$B"`,
@@ -373,9 +566,16 @@ function shellHelpers(boundary: string, maxFileBytes: number): string {
     `    _sz=$(git_offline -C "$_repo" cat-file -s "$_oid" 2>/dev/null || echo 0)`,
     `    [ "\${_sz:-0}" -gt 0 ] 2>/dev/null || return 1`,
     `    git_offline -C "$_repo" cat-file -p "$_oid" 2>/dev/null | head -c "$MAX_HEAD" | LC_ALL=C grep -q '[^[:space:]]' 2>/dev/null || return 1`,
+    `    _emit_bytes="$_sz"`,
+    `    if [ "$_emit_bytes" -gt "$MAX_HEAD" ] 2>/dev/null; then _emit_bytes="$MAX_HEAD"; fi`,
+    `    if ! consume_budget "$_emit_bytes" "$_full"; then return 0; fi`,
     `    printf '%s FILE_START\\n%s SCOPE %s\\n%s PATH %s\\n%s REL %s\\n%s SOURCE git\\n%s CONTENT_BEGIN\\n' "$B" "$B" "$_scope" "$B" "$_full" "$B" "$_rel" "$B" "$B"`,
     `    git_offline -C "$_repo" cat-file -p "$_oid" 2>/dev/null | head -c "$MAX_HEAD"`,
     `    printf '\\n%s CONTENT_END\\n' "$B"`,
+    `    return 0`,
+    `  fi`,
+    `  if [ "$MAX_TOTAL_BYTES" -gt 0 ] 2>/dev/null && [ "$BUDGET_EXHAUSTED" -ne 0 ]; then`,
+    `    emit_overflow "FILE_OVERFLOW" "$_full"`,
     `    return 0`,
     `  fi`,
     `  printf '%s FILE_START\\n%s SCOPE %s\\n%s PATH %s\\n%s REL %s\\n%s SOURCE unavailable\\n%s CONTENT_BEGIN\\n\\n%s CONTENT_END\\n' "$B" "$B" "$_scope" "$B" "$_full" "$B" "$_rel" "$B" "$B" "$B"`,
@@ -383,14 +583,15 @@ function shellHelpers(boundary: string, maxFileBytes: number): string {
     `}`,
     `emit_repo_meta() {`,
     `  _r="$1"`,
-    `  _head=$(git_offline -C "$_r" rev-parse --verify HEAD 2>/dev/null || true)`,
-    `  _branch=$(git_offline -C "$_r" symbolic-ref --short -q HEAD 2>/dev/null || true)`,
-    `  _remote=$(git_offline -C "$_r" config --get remote.origin.url 2>/dev/null || true)`,
+    `  _head=$(git_offline -C "$_r" rev-parse --verify HEAD 2>/dev/null | tr -d '\\r\\n' | head -c "$MAX_META" || true)`,
+    `  _branch=$(git_offline -C "$_r" symbolic-ref --short -q HEAD 2>/dev/null | tr -d '\\r\\n' | head -c "$MAX_META" || true)`,
+    `  _remote=$(git_offline -C "$_r" config --get remote.origin.url 2>/dev/null | tr -d '\\r\\n' | head -c "$MAX_META" || true)`,
     `  _sparse_cfg=$(git_offline -C "$_r" config --bool --get core.sparseCheckout 2>/dev/null || true)`,
-    `  _promisor=$(git_offline -C "$_r" config --get-regexp '^remote\\..*\\.promisor$' 2>/dev/null || true)`,
+    `  _promisor=$(git_offline -C "$_r" config --get-regexp '^remote\\..*\\.promisor$' 2>/dev/null | head -n 1 || true)`,
     `  _sparse=0`,
     `  if [ "$_sparse_cfg" = "true" ] || [ -n "$_promisor" ]; then _sparse=1; fi`,
-    `  printf '%s REPO_START\\n%s ROOT %s\\n%s REMOTE %s\\n%s HEAD %s\\n%s BRANCH %s\\n%s SPARSE %s\\n%s REPO_END\\n' "$B" "$B" "$_r" "$B" "$_remote" "$B" "$_head" "$B" "$_branch" "$B" "$_sparse" "$B"`,
+    `  _r_out=$(printf '%s' "$_r" | tr -d '\\r\\n' | head -c "$MAX_META")`,
+    `  printf '%s REPO_START\\n%s ROOT %s\\n%s REMOTE %s\\n%s HEAD %s\\n%s BRANCH %s\\n%s SPARSE %s\\n%s REPO_END\\n' "$B" "$B" "$_r_out" "$B" "$_remote" "$B" "$_head" "$B" "$_branch" "$B" "$_sparse" "$B"`,
     `}`,
   ].join("\n");
 }
@@ -452,6 +653,7 @@ interface ParsedProtocolOutput {
   readonly files: readonly ParsedFileEntry[];
   readonly checkedDirs: readonly string[];
   readonly finishedJobDirs: readonly string[];
+  readonly overflowPaths: readonly string[];
 }
 
 function truncateContent(
@@ -489,6 +691,15 @@ function parseProtocolOutput(
   const seenChecked = new Set<string>();
   const finishedJobDirs: string[] = [];
   const seenFinished = new Set<string>();
+  const overflowPaths: string[] = [];
+  const seenOverflow = new Set<string>();
+
+  const pushOverflow = (opath: string) => {
+    if (opath.length === 0 || seenOverflow.has(opath)) return;
+    if (overflowPaths.length >= MAX_OVERFLOW_PATHS) return;
+    seenOverflow.add(opath);
+    overflowPaths.push(opath);
+  };
 
   const prefix = `${boundary} `;
   let cursor = 0;
@@ -547,37 +758,55 @@ function parseProtocolOutput(
       continue;
     }
 
+    if (rest.startsWith("REPO_OVERFLOW ")) {
+      pushOverflow(rest.slice("REPO_OVERFLOW ".length));
+      continue;
+    }
+
+    if (rest.startsWith("FILE_OVERFLOW ")) {
+      pushOverflow(rest.slice("FILE_OVERFLOW ".length));
+      continue;
+    }
+
     if (rest === "REPO_START") {
       let root = "";
       let remoteRaw = "";
       let headRaw = "";
       let branchRaw = "";
       let sparseRaw = "0";
+      let ended = false;
       while (cursor < stdout.length) {
         const inner = readLine();
         if (inner === null) break;
         if (!inner.startsWith(prefix)) continue;
         const field = inner.slice(prefix.length);
-        if (field === "REPO_END") break;
+        if (field === "REPO_END") {
+          ended = true;
+          break;
+        }
         if (field.startsWith("ROOT ")) root = field.slice("ROOT ".length);
         else if (field.startsWith("REMOTE ")) remoteRaw = field.slice("REMOTE ".length);
         else if (field.startsWith("HEAD ")) headRaw = field.slice("HEAD ".length);
         else if (field.startsWith("BRANCH ")) branchRaw = field.slice("BRANCH ".length);
         else if (field.startsWith("SPARSE ")) sparseRaw = field.slice("SPARSE ".length);
       }
-      if (root.length > 0 && !seenRepos.has(root)) {
+      if (ended && root.length > 0 && !seenRepos.has(root)) {
         seenRepos.add(root);
-        const sanitized = sanitizeRemoteUrl(remoteRaw);
-        const remote = sanitized.length > 0 ? sanitized : null;
-        const slug = remote === null ? null : parseRepositorySlug(remote);
-        repos.push({
-          root,
-          remote,
-          slug,
-          head: headRaw.length > 0 ? headRaw : null,
-          branch: branchRaw.length > 0 ? branchRaw : null,
-          sparse: sparseRaw === "1",
-        });
+        if (repos.length >= MAX_DISCOVERED_REPOSITORIES) {
+          pushOverflow(root);
+        } else {
+          const sanitized = sanitizeRemoteUrl(remoteRaw);
+          const remote = sanitized.length > 0 ? sanitized : null;
+          const slug = remote === null ? null : parseRepositorySlug(remote);
+          repos.push({
+            root,
+            remote,
+            slug,
+            head: headRaw.length > 0 ? headRaw : null,
+            branch: branchRaw.length > 0 ? branchRaw : null,
+            sparse: sparseRaw === "1",
+          });
+        }
       }
       continue;
     }
@@ -588,6 +817,7 @@ function parseProtocolOutput(
       let relativePath = "";
       let source: RepositoryInstructionFile["source"] = "worktree";
       let contentRaw = "";
+      let contentComplete = false;
       while (cursor < stdout.length) {
         const inner = readLine();
         if (inner === null) break;
@@ -607,6 +837,7 @@ function parseProtocolOutput(
             cursor = stdout.length;
           } else {
             contentRaw = stdout.slice(cursor, endIdx);
+            contentComplete = true;
             cursor = endIdx + endMarker.length;
             if (stdout[cursor] === "\r") cursor += 1;
             if (stdout[cursor] === "\n") cursor += 1;
@@ -615,6 +846,10 @@ function parseProtocolOutput(
         }
       }
       if (path.length === 0 || relativePath.length === 0) continue;
+      if (!contentComplete) {
+        pushOverflow(path);
+        continue;
+      }
       if (source === "unavailable") {
         files.push({
           scope,
@@ -651,6 +886,7 @@ function parseProtocolOutput(
     files,
     checkedDirs,
     finishedJobDirs,
+    overflowPaths,
   };
 }
 
@@ -675,6 +911,7 @@ function attachInstructions(
 export async function discoverWorkspace(
   sandbox: RepositorySandbox,
   options: DiscoverRepositoriesOptions & {
+    readonly maxTotalBytes?: number;
     readonly includeWorkspaceInstructions?: boolean;
     readonly extraPaths?: readonly string[];
     readonly existingRoots?: readonly string[];
@@ -687,12 +924,14 @@ export async function discoverWorkspace(
   const roots = validateRoots(options.roots);
   const specs = validateInstructionSpecs(options.instructions);
   const maxFileBytes = validateMaxFileBytes(options.maxFileBytes);
+  const maxTotalBytes = validateMaxTotalBytes(options.maxTotalBytes);
   const includeWorkspaceInstructions = options.includeWorkspaceInstructions ?? false;
   const extraPaths = options.extraPaths ?? [];
   const existingRoots = options.existingRoots ?? [];
   const pendingJobs = options.pendingJobs ?? [];
 
   const boundary = createBoundary();
+  const candDelimiter = `${boundary}_CANDS`;
   const workspacePath = sandbox.resolvePath(".");
   const resolvedRoots = roots.map((root) => sandbox.resolvePath(root));
   const quotedRoots = resolvedRoots.map(shellQuote).join(" ");
@@ -722,7 +961,7 @@ export async function discoverWorkspace(
   });
 
   const script = [
-    shellHelpers(boundary, maxFileBytes),
+    shellHelpers(boundary, maxFileBytes, maxTotalBytes),
     `WS=$(canon_path ${shellQuote(workspacePath)} 2>/dev/null || printf '%s' ${shellQuote(workspacePath)})`,
     `printf '%s WORKSPACE %s\\n' "$B" "$WS"`,
     `if [ -n "\${HOME:-}" ] && [ -d "$HOME" ]; then _hr=$(canon_path "$HOME" 2>/dev/null || printf '%s' "$HOME"); printf '%s HOME %s\\n' "$B" "$_hr"; fi`,
@@ -730,32 +969,45 @@ export async function discoverWorkspace(
     `NL='`,
     `'`,
     `SEEN="$NL"`,
-    `{`,
-    `  for _scan_root in ${quotedRoots}; do`,
-    `    [ -d "$_scan_root" ] || continue`,
-    `    _scan_real=$(canon_path "$_scan_root" 2>/dev/null || true)`,
-    `    [ -n "$_scan_real" ] || continue`,
-    `    find "$_scan_real" -maxdepth 4 \\`,
-    `      \\( -name node_modules -o -name .next -o -name dist -o -name build -o -name .turbo -o -name target -o -name vendor -o -name .venv -o -name __pycache__ \\) -prune \\`,
-    `      -o -name .git \\( -type d -o -type f \\) -print -prune 2>/dev/null | while IFS= read -r _git_entry; do`,
-    `      [ -n "$_git_entry" ] || continue`,
-    `      dirname -- "$_git_entry"`,
+    `_cand_list=$(`,
+    `  {`,
+    ...existingRootLines.map((line) => `    ${line}`),
+    ...extraPathLines.map((line) => `    ${line}`),
+    `    for _scan_root in ${quotedRoots}; do`,
+    `      [ -d "$_scan_root" ] || continue`,
+    `      _scan_real=$(canon_path "$_scan_root" 2>/dev/null || true)`,
+    `      [ -n "$_scan_real" ] || continue`,
+    `      find "$_scan_real" -maxdepth 4 \\`,
+    `        \\( -name node_modules -o -name .next -o -name dist -o -name build -o -name .turbo -o -name target -o -name vendor -o -name .venv -o -name __pycache__ \\) -prune \\`,
+    `        -o -name .git \\( -type d -o -type f \\) -print -prune 2>/dev/null | head -n ${MAX_SCAN_CANDIDATES} | while IFS= read -r _git_entry; do`,
+    `        [ -n "$_git_entry" ] || continue`,
+    `        dirname -- "$_git_entry"`,
+    `      done`,
     `    done`,
-    `  done`,
-    ...extraPathLines.map((line) => `  ${line}`),
-    ...existingRootLines.map((line) => `  ${line}`),
-    `} | while IFS= read -r _cand_dir; do`,
-    `  [ -n "$_cand_dir" ] || continue`,
-    `  [ -d "$_cand_dir" ] || continue`,
-    `  _top=$(git_offline -C "$_cand_dir" rev-parse --show-toplevel 2>/dev/null || true)`,
-    `  [ -n "$_top" ] || continue`,
-    `  _repo_real=$(canon_path "$_top" 2>/dev/null || true)`,
-    `  [ -n "$_repo_real" ] || continue`,
-    `  case "$SEEN" in *"$NL$_repo_real$NL"*) continue ;; esac`,
-    `  SEEN="$SEEN$_repo_real$NL"`,
-    `  emit_repo_meta "$_repo_real"`,
+    `  } | head -n ${MAX_SCAN_CANDIDATES}`,
+    `)`,
+    `if [ -n "$_cand_list" ]; then`,
+    `  while IFS= read -r _cand_dir; do`,
+    `    [ -n "$_cand_dir" ] || continue`,
+    `    [ -d "$_cand_dir" ] || continue`,
+    `    _top=$(git_offline -C "$_cand_dir" rev-parse --show-toplevel 2>/dev/null || true)`,
+    `    [ -n "$_top" ] || continue`,
+    `    _repo_real=$(canon_path "$_top" 2>/dev/null || true)`,
+    `    [ -n "$_repo_real" ] || continue`,
+    `    case "$SEEN" in *"$NL$_repo_real$NL"*) continue ;; esac`,
+    `    SEEN="$SEEN$_repo_real$NL"`,
+    `    if [ "$REPO_COUNT" -ge "$MAX_REPOS" ]; then`,
+    `      SKIPPED_REPOS=$((SKIPPED_REPOS + 1))`,
+    `      emit_overflow "REPO_OVERFLOW" "$_repo_real"`,
+    `      continue`,
+    `    fi`,
+    `    REPO_COUNT=$((REPO_COUNT + 1))`,
+    `    emit_repo_meta "$_repo_real"`,
     emitSpecsForRepoShell("$_repo_real", '"repo:$_repo_real"', specs),
-    `done`,
+    `  done <<${candDelimiter}`,
+    `$_cand_list`,
+    `${candDelimiter}`,
+    `fi`,
     ...(includeWorkspaceInstructions && specs.length > 0
       ? [
           `if [ ! -e "$WS/.git" ]; then`,
@@ -766,8 +1018,12 @@ export async function discoverWorkspace(
     `exit 0`,
   ].join("\n");
 
-  const result = await sandbox.run({ command: script });
-  if (result.exitCode !== 0) {
+  const result = await runBoundedSandboxCommand(
+    sandbox,
+    script,
+    computeMaxOutputBytes(maxTotalBytes),
+  );
+  if (result.exitCode !== 0 && !result.overflowed) {
     throw new Error(`Could not discover repositories: ${commandFailureDetail(result)}`);
   }
 
@@ -789,6 +1045,7 @@ export async function discoverWorkspace(
     repositories,
     workspaceInstructions,
     finishedJobDirs: parsed.finishedJobDirs,
+    overflowPaths: parsed.overflowPaths,
   };
 }
 
@@ -827,15 +1084,19 @@ export async function readRepositoryFile(
   const resolvedRoot = sandbox.resolvePath(repoRoot);
 
   const script = [
-    shellHelpers(boundary, maxFileBytes),
+    shellHelpers(boundary, maxFileBytes, 0),
     `_repo_real=$(canon_path ${shellQuote(resolvedRoot)} 2>/dev/null || true)`,
     `[ -n "$_repo_real" ] || exit 0`,
     `emit_file_repo "single" "$_repo_real" ${shellQuote(relativePath)} || true`,
     `exit 0`,
   ].join("\n");
 
-  const result = await sandbox.run({ command: script });
-  if (result.exitCode !== 0) {
+  const result = await runBoundedSandboxCommand(
+    sandbox,
+    script,
+    computeMaxOutputBytes(maxFileBytes),
+  );
+  if (result.exitCode !== 0 && !result.overflowed) {
     throw new Error(`Could not read repository file: ${commandFailureDetail(result)}`);
   }
   const parsed = parseProtocolOutput(result.stdout, boundary, maxFileBytes);
@@ -846,24 +1107,29 @@ export async function readRepositorySpecFiles(
   sandbox: RepositorySandbox,
   repoRoot: string,
   specs: readonly RepositoryInstructionSpec[],
-  options: ReadRepositoryFileOptions = {},
+  options: ReadRepositoryFileOptions & { readonly maxTotalBytes?: number } = {},
 ): Promise<readonly RepositoryInstructionFile[]> {
   const normalized = normalizeSpecs(specs);
   if (normalized.length === 0) return [];
   const maxFileBytes = validateMaxFileBytes(options.maxFileBytes);
+  const maxTotalBytes = validateMaxTotalBytes(options.maxTotalBytes);
   const boundary = createBoundary();
   const resolvedRoot = sandbox.resolvePath(repoRoot);
 
   const script = [
-    shellHelpers(boundary, maxFileBytes),
+    shellHelpers(boundary, maxFileBytes, maxTotalBytes),
     `_repo_real=$(canon_path ${shellQuote(resolvedRoot)} 2>/dev/null || true)`,
     `[ -n "$_repo_real" ] || exit 0`,
     emitSpecsForRepoShell("$_repo_real", '"repo:$_repo_real"', normalized),
     `exit 0`,
   ].join("\n");
 
-  const result = await sandbox.run({ command: script });
-  if (result.exitCode !== 0) {
+  const result = await runBoundedSandboxCommand(
+    sandbox,
+    script,
+    computeMaxOutputBytes(maxTotalBytes),
+  );
+  if (result.exitCode !== 0 && !result.overflowed) {
     throw new Error(`Could not read repository instruction files: ${commandFailureDetail(result)}`);
   }
   const parsed = parseProtocolOutput(result.stdout, boundary, maxFileBytes);
@@ -873,14 +1139,17 @@ export async function readRepositorySpecFiles(
 export async function findEnclosingRepository(
   sandbox: RepositorySandbox,
   targetPath: string,
-  options: Pick<DiscoverRepositoriesOptions, "instructions" | "maxFileBytes"> = {},
+  options: Pick<DiscoverRepositoriesOptions, "instructions" | "maxFileBytes"> & {
+    readonly maxTotalBytes?: number;
+  } = {},
 ): Promise<DiscoveredRepository | null> {
   const specs = normalizeSpecs(options.instructions ?? DEFAULT_REPOSITORY_INSTRUCTIONS);
   const maxFileBytes = validateMaxFileBytes(options.maxFileBytes);
+  const maxTotalBytes = validateMaxTotalBytes(options.maxTotalBytes);
   const boundary = createBoundary();
 
   const script = [
-    shellHelpers(boundary, maxFileBytes),
+    shellHelpers(boundary, maxFileBytes, maxTotalBytes),
     `_target=${shellResolveTargetExpr(sandbox, targetPath)}`,
     `if [ -d "$_target" ]; then _dir="$_target"; else _dir=$(dirname -- "$_target"); fi`,
     `[ -d "$_dir" ] || exit 0`,
@@ -893,8 +1162,12 @@ export async function findEnclosingRepository(
     `exit 0`,
   ].join("\n");
 
-  const result = await sandbox.run({ command: script });
-  if (result.exitCode !== 0) {
+  const result = await runBoundedSandboxCommand(
+    sandbox,
+    script,
+    computeMaxOutputBytes(maxTotalBytes),
+  );
+  if (result.exitCode !== 0 && !result.overflowed) {
     throw new Error(`Could not inspect enclosing repository: ${commandFailureDetail(result)}`);
   }
   const parsed = parseProtocolOutput(result.stdout, boundary, maxFileBytes);
@@ -930,13 +1203,16 @@ export async function readScopedDirectoryInstructions(
     readonly knownRepoRoots?: ReadonlySet<string>;
     readonly instructions?: readonly RepositoryInstructionSpec[];
     readonly maxFileBytes?: number;
+    readonly maxTotalBytes?: number;
     readonly loadScoped?: boolean;
   },
 ): Promise<ScopedProbeResult> {
   const specs = normalizeSpecs(options.instructions ?? DEFAULT_REPOSITORY_INSTRUCTIONS);
   const maxFileBytes = validateMaxFileBytes(options.maxFileBytes);
+  const maxTotalBytes = validateMaxTotalBytes(options.maxTotalBytes);
   const loadScoped = options.loadScoped ?? true;
   const boundary = createBoundary();
+  const dirsDelimiter = `${boundary}_DIRS`;
   const workspacePath = sandbox.resolvePath(".");
   const checkedList = [...options.checkedDirs];
   const knownRoots = [...(options.knownRepoRoots ?? [])];
@@ -951,7 +1227,7 @@ export async function readScopedDirectoryInstructions(
       : `case "$_repo_real" in ${knownRoots.map(shellQuote).join("|")}) true ;; *) false ;; esac`;
 
   const script = [
-    shellHelpers(boundary, maxFileBytes),
+    shellHelpers(boundary, maxFileBytes, maxTotalBytes),
     `WS=$(canon_path ${shellQuote(workspacePath)} 2>/dev/null || printf '%s' ${shellQuote(workspacePath)})`,
     `printf '%s WORKSPACE %s\\n' "$B" "$WS"`,
     `if [ -n "\${HOME:-}" ] && [ -d "$HOME" ]; then _hr=$(canon_path "$HOME" 2>/dev/null || printf '%s' "$HOME"); printf '%s HOME %s\\n' "$B" "$_hr"; fi`,
@@ -968,6 +1244,13 @@ export async function readScopedDirectoryInstructions(
     `  _repo_real=$(canon_path "$_top" 2>/dev/null || true)`,
     `fi`,
     `if [ -n "$_repo_real" ]; then`,
+    `  _rel_prefix=$(git_offline -C "$_tdir" rev-parse --show-prefix 2>/dev/null | tr -d '\\r' || true)`,
+    `  _rel_prefix="\${_rel_prefix%/}"`,
+    `  if [ -n "$_rel_prefix" ]; then`,
+    `    if [ "$_repo_real" = "/" ]; then _tdir="/$_rel_prefix"; else _tdir="$_repo_real/$_rel_prefix"; fi`,
+    `  else`,
+    `    _tdir="$_repo_real"`,
+    `  fi`,
     `  printf '%s ENCLOSING_ROOT %s\\n' "$B" "$_repo_real"`,
     `fi`,
     `if [ -n "$_repo_real" ] && ! ${knownRepoCase}; then`,
@@ -987,17 +1270,21 @@ export async function readScopedDirectoryInstructions(
           `    [ "$_next" = "$_cur" ] && break`,
           `    _cur="$_next"`,
           `  done`,
-          `  printf '%s' "$_dirs" | while IFS= read -r _d; do`,
-          `    [ -n "$_d" ] || continue`,
-          `    if ${checkedCase}; then continue; fi`,
-          `    printf '%s CHECKED_DIR %s\\n' "$B" "$_d"`,
-          `    if [ -n "$_repo_real" ]; then`,
-          `      if [ "$_repo_real" = "/" ]; then _rel_dir="\${_d#/}/"; else _rel_dir="\${_d#"$_repo_real"/}/"; fi`,
+          `  if [ -n "$_dirs" ]; then`,
+          `    while IFS= read -r _d; do`,
+          `      [ -n "$_d" ] || continue`,
+          `      if ${checkedCase}; then continue; fi`,
+          `      printf '%s CHECKED_DIR %s\\n' "$B" "$_d"`,
+          `      if [ -n "$_repo_real" ]; then`,
+          `        if [ "$_repo_real" = "/" ]; then _rel_dir="\${_d#/}/"; else _rel_dir="\${_d#"$_repo_real"/}/"; fi`,
           emitSpecsForRepoShell("$_repo_real", '"scope:$_d"', specs, "$_rel_dir"),
-          `    else`,
+          `      else`,
           emitSpecsForDirWorktreeShell("$_d", "$WS", '"scope:$_d"', specs),
-          `    fi`,
-          `  done`,
+          `      fi`,
+          `    done <<${dirsDelimiter}`,
+          `$_dirs`,
+          `${dirsDelimiter}`,
+          `  fi`,
           `elif [ -z "$_repo_real" ] && [ "$_tdir" != "$WS" ]; then`,
           `  _d="$_tdir"`,
           `  if ! ${checkedCase}; then`,
@@ -1016,8 +1303,12 @@ export async function readScopedDirectoryInstructions(
     `exit 0`,
   ].join("\n");
 
-  const result = await sandbox.run({ command: script });
-  if (result.exitCode !== 0) {
+  const result = await runBoundedSandboxCommand(
+    sandbox,
+    script,
+    computeMaxOutputBytes(maxTotalBytes),
+  );
+  if (result.exitCode !== 0 && !result.overflowed) {
     throw new Error(`Could not inspect scoped instructions: ${commandFailureDetail(result)}`);
   }
 
@@ -1042,5 +1333,6 @@ export async function readScopedDirectoryInstructions(
     enclosingRepo: repositories[0] ?? null,
     checkedDirs: parsed.checkedDirs,
     scopes,
+    overflowPaths: parsed.overflowPaths,
   };
 }
