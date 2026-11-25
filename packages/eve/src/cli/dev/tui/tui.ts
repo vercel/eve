@@ -1,10 +1,12 @@
 import type { EveCliSetupStepEvent, EveCliSetupTerminalEvent } from "#cli/telemetry/index.js";
-import { Client } from "#client/index.js";
+import { Client, ClientError } from "#client/index.js";
 import type { DevBootProgressReporter } from "#internal/dev-boot-progress.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { appendUserAgentProduct } from "#internal/user-agent.js";
 import type { CommandLifecycle } from "#cli/shutdown.js";
+import { signInToAgent } from "#cli/dev/agent-oauth.js";
 import {
+  hasDevelopmentAuthorizationHeader,
   resolveLocalDevelopmentClientOptions,
   resolveRemoteDevelopmentClientOptions,
 } from "#services/dev-client/client-options.js";
@@ -102,20 +104,36 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
   const prepared = prepareDevelopmentTarget(target);
   const { serverUrl } = target;
   const headerOptions = { headers: withTuiUserAgent(headers) };
+  const agentOAuth =
+    prepared.kind === "remote" && !hasDevelopmentAuthorizationHeader(headers)
+      ? await signInToAgent({
+          ...(headers !== undefined && { headers }),
+          notice: (message) => process.stdout.write(`${message}\n`),
+          serverUrl,
+          ...(lifecycle !== undefined && { signal: lifecycle.signal }),
+        })
+      : undefined;
 
   const client = new Client(
-    prepared.kind === "local"
-      ? resolveLocalDevelopmentClientOptions({
-          ...headerOptions,
-          interactiveClient: true,
-          serverUrl,
-          token: () => resolveLinkedDevelopmentOidcToken(prepared.target.workspaceRoot),
-        })
-      : resolveRemoteDevelopmentClientOptions({
-          ...headerOptions,
-          serverUrl,
-          credentials: prepared.remote.credentials,
-        }),
+    agentOAuth !== undefined
+      ? {
+          auth: { bearer: () => agentOAuth.token() },
+          headers: withTuiUserAgent(headers),
+          baseUrl: serverUrl,
+          redirect: "manual",
+        }
+      : prepared.kind === "local"
+        ? resolveLocalDevelopmentClientOptions({
+            ...headerOptions,
+            interactiveClient: true,
+            serverUrl,
+            token: () => resolveLinkedDevelopmentOidcToken(prepared.target.workspaceRoot),
+          })
+        : resolveRemoteDevelopmentClientOptions({
+            ...headerOptions,
+            serverUrl,
+            credentials: prepared.remote.credentials,
+          }),
   );
 
   const options: EveTUIRunnerOptions = {
@@ -127,16 +145,23 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
     ...(target.kind === "local"
       ? { argumentSuggestions: inlineArgumentSuggestions(target.workspaceRoot) }
       : {}),
-    formatTransportError: (error) =>
-      isVercelAuthChallenge(error)
+    formatTransportError: (error) => {
+      if (agentOAuth !== undefined && error instanceof ClientError && error.status === 401) {
+        agentOAuth.rejected();
+        return `${new URL(serverUrl).host} rejected your sign-in. Try again to refresh it, or run eve remote connect again to sign in.`;
+      }
+      return isVercelAuthChallenge(error)
         ? formatRemoteAuthChallengeMessage(serverUrl)
-        : toErrorMessage(error),
+        : toErrorMessage(error);
+    },
   };
   if (prepared.kind === "local") {
     options.appRoot = prepared.target.workspaceRoot;
     options.probeMcpConnection = probeMcpConnection;
-  } else {
+  } else if (agentOAuth === undefined) {
     options.remote = prepared.remote;
+  } else {
+    options.signedInRemote = prepared.target;
   }
   if (initialInput !== undefined) options.initialInput = initialInput;
   if (startup !== undefined) {

@@ -249,6 +249,7 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   serverUrl?: string;
   appRoot?: string;
   initialInput?: string;
+  signedInRemote?: RemoteDevelopmentTarget;
   onboard?: boolean;
   startupOnboarding?: StartupOnboardingResult;
   onOnboardingStep?: (input: EveCliSetupStepEvent) => void;
@@ -337,9 +338,11 @@ export class EveTUIRunner {
   readonly #recordedAgentToolFailures = new Set<string>();
   readonly #callNames = new Map<string, string>();
   readonly #lifecycle?: CommandLifecycle;
+  readonly #signedInRemote?: RemoteDevelopmentTarget;
 
   constructor(options: EveTUIRunnerOptions) {
     this.#client = options.client;
+    if (options.signedInRemote !== undefined) this.#signedInRemote = options.signedInRemote;
     if (options.lifecycle !== undefined) this.#lifecycle = options.lifecycle;
     if (options.diagnostics !== undefined) this.#diagnostics = options.diagnostics;
     this.#renderer = createRenderer(options);
@@ -421,6 +424,13 @@ export class EveTUIRunner {
       if (connection.state === "ready") info = connection.info;
     } else {
       const client = this.#client;
+      const signedIn = this.#signedInRemote;
+      if (signedIn !== undefined) {
+        this.#renderer.setRemoteConnectionStatus?.({
+          connection: { state: "checking" },
+          target: signedIn,
+        });
+      }
       if (client !== undefined) {
         try {
           const probe = await devBootPhase(
@@ -432,6 +442,15 @@ export class EveTUIRunner {
         } catch {
           info = undefined;
         }
+      }
+      if (signedIn !== undefined) {
+        this.#renderer.setRemoteConnectionStatus?.({
+          connection:
+            info === undefined
+              ? { failure: { message: "The agent didn't answer." }, state: "unavailable" }
+              : { info, state: "ready" },
+          target: signedIn,
+        });
       }
     }
     this.#reportBeforeFirstPaint();
