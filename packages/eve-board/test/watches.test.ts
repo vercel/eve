@@ -767,6 +767,55 @@ test("unwatch takes only a watch ID, and a retired record shows up as a problem"
   assert.match(listed?.problem ?? "", /retired, so it never fires/u);
 });
 
+const watchIn = (watchChannel: string, id: string, boardKey?: string) =>
+  createWatch({
+    action: converse,
+    boardKey,
+    client: client(),
+    id,
+    instructions: "Summarize it.",
+    tail: "incidents",
+    watchChannel,
+  });
+const locks = async (...watchChannels: string[]) =>
+  (
+    await Promise.all(
+      watchChannels.map((channel) =>
+        client().threads({ channel, label: ["eve-lock=registration"] }),
+      ),
+    )
+  ).flat();
+
+test("watch and unwatch keep working after the watch channel changes", async () => {
+  await startBoard();
+  await watchIn("eve-config/before", "w-before");
+
+  await watchIn("eve-config/after", "w-after1");
+  assert.deepEqual(await locks("eve-config/after"), []);
+  assert.deepEqual(
+    await removeWatch({ client: client(), id: "w-after1", watchChannel: "eve-config/after" }),
+    { id: "w-after1", removed: true },
+  );
+  assert.deepEqual(Object.keys((await heldRegistration(client()))!.watch), ["w-before"]);
+});
+
+for (const clientIdTaken of [false, true]) {
+  test(`first watches in two watch channels at once share one lock (clientIdTaken: ${clientIdTaken})`, async () => {
+    const { calls } = await startBoard({ clientIdTaken });
+    await Promise.all([
+      watchIn("eve-config/a", "w-first1", "a"),
+      watchIn("eve-config/b", "w-second", "b"),
+    ]);
+
+    assert.equal(calls.filter((call) => call === "POST /tasks").length, 2);
+    assert.equal((await locks("eve-config/a", "eve-config/b")).length, 1);
+    assert.deepEqual(Object.keys((await heldRegistration(client()))!.watch).sort(), [
+      "w-first1",
+      "w-second",
+    ]);
+  });
+}
+
 test("a watch the board refuses leaves its record retired, and a retry revives it", async () => {
   await startBoard();
   const create = (tail: string) =>

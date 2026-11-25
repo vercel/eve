@@ -39,6 +39,7 @@ export const MAX_WATCHES = 64;
 const WATCH_LABEL = "eve-watch";
 const STATE_LABEL = "eve-watch-state";
 const LOCK_LABEL = "eve-lock";
+const LOCK_CLIENT_ID = "eve-watch-lock";
 const LOCK_LEASE_SECONDS = 30;
 const LOCK_WAIT_MS = 30_000;
 
@@ -316,7 +317,7 @@ async function withRegistrationLock<T>(
   boardKey: string,
   run: () => Promise<T>,
 ): Promise<T> {
-  const key = `${boardKey}\n${client.profile}\n${watchChannel}`;
+  const key = `${boardKey}\n${client.profile}`;
   const previous = localLocks.get(key) ?? Promise.resolve();
   const turn = previous
     .catch(() => {})
@@ -339,26 +340,40 @@ async function withRegistrationLock<T>(
   }
 }
 
+const REUSED_CLIENT_ID = new Set(["client_id_taken", "duplicate_id"]);
+
 async function lockTask(client: BoardClient, watchChannel: string): Promise<string> {
-  const self = await client.me();
-  const found = await labeledRoots(client, watchChannel, `${LOCK_LABEL}=registration`, 200);
-  const lock = found.find((message) => message.by.actor === self.actor);
-  if (lock !== undefined) {
-    const state = lock.task?.state;
-    if (state !== "ready" && state !== "claimed") {
-      throw new Error(
-        `The board task that serializes this agent's watch changes, #${lock.id} in "${watchChannel}", is ${state ?? "not a task"}. Reopen it so watches can change again.`,
-      );
-    }
-    return lock.id;
+  const lock = (await existingLock(client)) ?? (await createLock(client, watchChannel));
+  const state = lock.task?.state;
+  if (state !== "ready" && state !== "claimed") {
+    throw new Error(
+      `The board task that serializes this agent's watch changes, #${lock.id} in "${lock.channel}", is ${state ?? "not a task"}. Reopen it so watches can change again.`,
+    );
   }
-  const created = await client.createTask(watchChannel, {
-    id: "eve-watch-lock",
-    labels: { [LOCK_LABEL]: "registration" },
-    noSync: true,
-    text: "eve holds this task while it changes its board watches, so two changes never overwrite each other. Leave it open.",
-  });
-  return created.id;
+  return lock.id;
+}
+
+async function existingLock(client: BoardClient): Promise<BoardMessage | undefined> {
+  try {
+    return await client.posted(LOCK_CLIENT_ID);
+  } catch (error) {
+    if (boardErrorCode(error) !== "post_not_found") throw error;
+    return undefined;
+  }
+}
+
+async function createLock(client: BoardClient, watchChannel: string): Promise<BoardMessage> {
+  try {
+    return await client.createTask(watchChannel, {
+      id: LOCK_CLIENT_ID,
+      labels: { [LOCK_LABEL]: "registration" },
+      noSync: true,
+      text: "eve holds this task while it changes its board watches, so two changes never overwrite each other. Leave it open.",
+    });
+  } catch (error) {
+    if (!REUSED_CLIENT_ID.has(boardErrorCode(error) ?? "")) throw error;
+    return await client.posted(LOCK_CLIENT_ID);
+  }
 }
 
 async function claimLock(client: BoardClient, taskId: string): Promise<BoardClaimedTask> {

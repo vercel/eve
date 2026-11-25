@@ -241,6 +241,7 @@ export interface BoardClient {
   ): Promise<void>;
   typing(id: string, status?: string): Promise<void>;
   thread(id: string, range?: { readonly after?: string }): Promise<BoardThread>;
+  posted(id: string): Promise<BoardMessage>;
   linked(url: string): Promise<BoardThread>;
   threads(query?: BoardThreadsQuery): Promise<readonly BoardThreadSummary[]>;
   threadsPage(query?: BoardThreadsQuery): Promise<BoardThreadsPage>;
@@ -442,6 +443,7 @@ export function createBoardClient(board: BoardRef, can?: BoardCan): BoardClient 
     },
     thread: async (id, range = {}) =>
       threadOf(await handle.thread(id, range.after === undefined ? {} : { after: range.after })),
+    posted: async (id) => messageOf(await handle.posted(id)),
     linked: async (url) => threadOf(await handle.linked(url)),
     async threads(query = {}) {
       return (await threadsPage(query)).threads;
