@@ -6,6 +6,18 @@ import { FILE_MEMORY_FACT, FILE_MEMORY_PHRASE } from "./constants.js";
 export default defineAgent({
   ...e2eAgentConfig({
     mock: ({ lastUserMessage, messages, toolResults, tools }) => {
+      if (
+        lastUserMessage?.startsWith("Alice opens the dispatch shift") ||
+        lastUserMessage?.startsWith("Bob takes over the dispatch shift") ||
+        lastUserMessage?.startsWith("The next driver checks in")
+      ) {
+        const visible = messages.map((message) => message.text).join("\n");
+        const docks = Array.from(
+          visible.matchAll(/UNLOADING_DOCK=(NORTH|SOUTH)/g),
+          (match) => match[1],
+        );
+        return `Dispatch record versions: [${docks.join(", ")}]`;
+      }
       if (lastUserMessage?.startsWith("Reply with exactly CAPTURE-E2E-N7Q4")) {
         return "CAPTURE-E2E-N7Q4";
       }

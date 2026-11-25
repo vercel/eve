@@ -351,7 +351,7 @@ pull requests.
 ## Scheduled tasks
 
 `agent/schedules/tasks.ts` uses eve's experimental
-[dynamic schedules](https://eve.dev/docs/experimental/dynamic-schedules). It
+[dynamic schedules](https://eve.dev/docs/dynamic-schedules). It
 gives the agent `schedule__tasks__create`, `list`, `update`, `delete`, and
 related tools, so people manage schedules by asking:
 

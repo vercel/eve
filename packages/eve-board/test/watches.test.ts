@@ -9,7 +9,11 @@ import {
   settlementOf,
   type BoardChannelState,
 } from "../extension/lib/board-channel.ts";
-import { BOARD_TEXT_LIMIT, createBoardClient } from "../extension/lib/client.ts";
+import {
+  BOARD_TEXT_LIMIT,
+  createBoardClient,
+  type BoardRegistrationInput,
+} from "../extension/lib/client.ts";
 import {
   defineBoardCreateTaskTool,
   defineBoardLabelTool,
@@ -763,6 +767,55 @@ test("unwatch takes only a watch ID, and a retired record shows up as a problem"
   assert.match(listed?.problem ?? "", /retired, so it never fires/u);
 });
 
+const watchIn = (watchChannel: string, id: string, boardKey?: string) =>
+  createWatch({
+    action: converse,
+    boardKey,
+    client: client(),
+    id,
+    instructions: "Summarize it.",
+    tail: "incidents",
+    watchChannel,
+  });
+const locks = async (...watchChannels: string[]) =>
+  (
+    await Promise.all(
+      watchChannels.map((channel) =>
+        client().threads({ channel, label: ["eve-lock=registration"] }),
+      ),
+    )
+  ).flat();
+
+test("watch and unwatch keep working after the watch channel changes", async () => {
+  await startBoard();
+  await watchIn("eve-config/before", "w-before");
+
+  await watchIn("eve-config/after", "w-after1");
+  assert.deepEqual(await locks("eve-config/after"), []);
+  assert.deepEqual(
+    await removeWatch({ client: client(), id: "w-after1", watchChannel: "eve-config/after" }),
+    { id: "w-after1", removed: true },
+  );
+  assert.deepEqual(Object.keys((await heldRegistration(client()))!.watch), ["w-before"]);
+});
+
+for (const clientIdTaken of [false, true]) {
+  test(`first watches in two watch channels at once share one lock (clientIdTaken: ${clientIdTaken})`, async () => {
+    const { calls } = await startBoard({ clientIdTaken });
+    await Promise.all([
+      watchIn("eve-config/a", "w-first1", "a"),
+      watchIn("eve-config/b", "w-second", "b"),
+    ]);
+
+    assert.equal(calls.filter((call) => call === "POST /tasks").length, 2);
+    assert.equal((await locks("eve-config/a", "eve-config/b")).length, 1);
+    assert.deepEqual(Object.keys((await heldRegistration(client()))!.watch).sort(), [
+      "w-first1",
+      "w-second",
+    ]);
+  });
+}
+
 test("a watch the board refuses leaves its record retired, and a retry revives it", async () => {
   await startBoard();
   const create = (tail: string) =>
@@ -845,7 +898,7 @@ test("a wake before any watch is registered drains nothing", async () => {
   assert.deepEqual(deliveries, []);
 });
 
-test("only signed-in callers manage watches, and `configurers` matches a board person by principal", async () => {
+test("only signed-in callers manage watches by default, and async `authorize` receives action, auth, and target details", async () => {
   await startBoard();
   const input = { channel: "incidents", instructions: "Summarize it." };
   await assert.rejects(
@@ -857,7 +910,24 @@ test("only signed-in callers manage watches, and `configurers` matches a board p
     /Only a signed-in person/u,
   );
 
-  const restricted = () => ({ ...settings(), configurers: ["vercel:user:alice"] });
+  const seen: unknown[] = [];
+  const restricted = () => ({
+    ...settings(),
+    authorize: async (request: {
+      readonly action: string;
+      readonly auth: {
+        readonly attributes: Record<string, unknown>;
+        readonly principalId?: string;
+      } | null;
+      readonly board: string;
+      readonly channel?: string;
+      readonly watchId?: string;
+    }) => {
+      await Promise.resolve();
+      seen.push(request);
+      return request.auth?.attributes.principal === "vercel:user:alice";
+    },
+  });
   const boardPerson = (principal: string) => ({
     attributes: { actor_kind: "person", principal, profile: "notes" },
     authenticator: "board-watcher",
@@ -869,13 +939,34 @@ test("only signed-in callers manage watches, and `configurers` matches a board p
       auth: boardPerson("vercel:user:bob"),
       callId: "c3",
     }),
-    /`configurers` names/u,
+    /not authorized to manage board watches/u,
   );
   const created = await runTool(defineBoardWatchTool(restricted), input, {
     auth: boardPerson("vercel:user:alice"),
     callId: "c4",
   });
   assert.match(created.id, /^w-/u);
+  await runTool(
+    defineBoardUnwatchTool(restricted),
+    { id: created.id },
+    { auth: boardPerson("vercel:user:alice"), callId: "c5" },
+  );
+  assert.deepEqual(
+    seen.map((entry) => {
+      const item = entry as { action: string; board: string; channel?: string; watchId?: string };
+      return {
+        action: item.action,
+        board: item.board,
+        ...(item.channel !== undefined && { channel: item.channel }),
+        ...(item.watchId !== undefined && { watchId: item.watchId }),
+      };
+    }),
+    [
+      { action: "watch", board: "default", channel: "incidents" },
+      { action: "watch", board: "default", channel: "incidents" },
+      { action: "unwatch", board: "default", watchId: created.id },
+    ],
+  );
 });
 
 test("a watch's instructions count only when this agent wrote its one record", async () => {
@@ -911,40 +1002,126 @@ test("a deployment registers the wake route the board can reach", () => {
   const env = { ...process.env };
   try {
     delete process.env.VERCEL_ENV;
+    delete process.env.EVE_PUBLIC_ROUTE_PREFIX;
     assert.deepEqual(registrationWhere({ wake_by_path: true }), { url: null });
 
     process.env.VERCEL_ENV = "production";
-    process.env.EVE_PUBLIC_ROUTE_PREFIX = "api/eve/";
     process.env.VERCEL_PROJECT_PRODUCTION_URL = "agent.example.com";
     assert.deepEqual(registrationWhere({ wake_by_path: true }), {
       branch: null,
-      path: "/api/eve/board",
+      path: "/eve/v1/board",
       url: null,
     });
-    assert.deepEqual(registrationWhere({}), { url: "https://agent.example.com/api/eve/board" });
+    assert.deepEqual(registrationWhere({}), { url: "https://agent.example.com/eve/v1/board" });
+
+    process.env.EVE_PUBLIC_ROUTE_PREFIX = "/eve/support";
+    assert.deepEqual(registrationWhere({ wake_by_path: true }), {
+      branch: null,
+      path: "/eve/support/v1/board",
+      url: null,
+    });
+    assert.deepEqual(registrationWhere({ wake_by_path: true }, "/eve/v1/custom"), {
+      branch: null,
+      path: "/eve/support/v1/custom",
+      url: null,
+    });
+
+    process.env.EVE_PUBLIC_ROUTE_PREFIX = "api/eve/";
+    assert.deepEqual(registrationWhere({ wake_by_path: true }), {
+      branch: null,
+      path: "/api/eve/eve/v1/board",
+      url: null,
+    });
+    assert.deepEqual(registrationWhere({}), {
+      url: "https://agent.example.com/api/eve/eve/v1/board",
+    });
 
     process.env.VERCEL_ENV = "preview";
     process.env.VERCEL_GIT_COMMIT_REF = "feat/board";
     assert.deepEqual(registrationWhere({ wake_by_path: true }), {
       branch: "feat/board",
-      path: "/api/eve/board",
+      path: "/api/eve/eve/v1/board",
       url: null,
     });
     assert.throws(() => registrationWhere({}), /VERCEL_BRANCH_URL is unset/u);
     process.env.VERCEL_BRANCH_URL = "agent-git-feat-board.vercel.app";
     assert.deepEqual(registrationWhere({}), {
-      url: "https://agent-git-feat-board.vercel.app/api/eve/board",
+      url: "https://agent-git-feat-board.vercel.app/api/eve/eve/v1/board",
     });
   } finally {
     process.env = env;
   }
 });
 
-test("the extension refuses `can` patterns the board can't read", () => {
-  const parses = (can: unknown) =>
-    (extension.schema as { safeParse(input: unknown): { success: boolean } }).safeParse({ can })
+test("updating a watch rewrites a stale held registration path and branch while keeping sync", async () => {
+  await startBoard();
+  const board = client();
+  const originalRegister = board.register.bind(board);
+  const originalDiscovery = board.discovery.bind(board);
+  const registeredInputs: BoardRegistrationInput[] = [];
+  const wrapped: typeof board = {
+    ...board,
+    discovery: async () => ({ ...(await originalDiscovery()), wake_by_path: true }),
+    watchers: async () => [
+      {
+        branch: "old-branch",
+        hash: "h-1",
+        owner: EVE_PRINCIPAL,
+        path: "/board",
+        sync: [{ key: "slack:C123", platform: "slack" }],
+        url: null,
+        watch: { "w-old001": { tail: "incidents" } },
+      },
+    ],
+    register: async (input) => {
+      registeredInputs.push(input);
+      return await originalRegister({ url: null, watch: input.watch });
+    },
+  };
+
+  const env = { ...process.env };
+  try {
+    delete process.env.EVE_PUBLIC_ROUTE_PREFIX;
+    process.env.VERCEL_ENV = "preview";
+    process.env.VERCEL_GIT_COMMIT_REF = "feat/new-branch";
+    await createWatch({
+      action: converse,
+      client: wrapped,
+      id: "w-new001",
+      instructions: "Summarize it.",
+      tail: "deploys",
+      watchChannel: DEFAULT_WATCH_CHANNEL,
+    });
+  } finally {
+    process.env = env;
+  }
+
+  assert.equal(registeredInputs.length, 1);
+  assert.deepEqual(registeredInputs[0], {
+    branch: "feat/new-branch",
+    path: "/eve/v1/board",
+    sync: [{ key: "slack:C123", platform: "slack" }],
+    url: null,
+    watch: {
+      "w-new001": { tail: "deploys" },
+      "w-old001": { tail: "incidents" },
+    },
+  });
+});
+
+test("the extension refuses `can` patterns the board can't read and invalid `route` paths", () => {
+  const parses = (input: unknown) =>
+    (extension.schema as { safeParse(input: unknown): { success: boolean } }).safeParse(input)
       .success;
-  assert.equal(parses({ "*": ["read"], "work/": ["read", "label"], incidents: "all" }), true);
-  assert.equal(parses({ "Bad Key": ["read"] }), false);
-  assert.equal(parses({ "work//": ["read"] }), false);
+  assert.equal(
+    parses({ can: { "*": ["read"], "work/": ["read", "label"], incidents: "all" } }),
+    true,
+  );
+  assert.equal(parses({ can: { "Bad Key": ["read"] } }), false);
+  assert.equal(parses({ can: { "work//": ["read"] } }), false);
+  assert.equal(parses({ route: "/eve/v1/board" }), true);
+  assert.equal(parses({ route: "/eve/v1/custom-board/" }), true);
+  assert.equal(parses({ route: "eve/v1/board" }), false);
+  assert.equal(parses({ route: "/" }), false);
+  assert.equal(parses({ route: "/eve/v1/:board" }), false);
 });

@@ -105,8 +105,9 @@ import {
   slackThreadSessionHistory,
 } from "#public/channels/slack/model-context.js";
 import {
-  readSlackConversationKind,
+  createSlackConversationKindReader,
   type SlackConversationKind,
+  type SlackConversationKindReader,
 } from "#public/channels/slack/privacy.js";
 import {
   createSlackUserResolver,
@@ -571,8 +572,8 @@ export interface SlackInboundEventContext {
  */
 export interface SlackInboundMessageContext extends SlackContext, SlackSessionOperations {
   /**
-   * Returns whether the inbound message belongs to a DM, group DM, or private channel.
-   * Unknown conversation types fail closed and return `true`.
+   * Returns whether the message is in a DM, group DM, or private channel (`true` if unknown).
+   * Results are cached up to 5 minutes, so a channel's privacy change can take that long to apply.
    */
   isDMOrPrivateChannel(): Promise<boolean>;
   /** Returns whether this message belongs to a thread with an active eve session. */
@@ -1131,6 +1132,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   const uploadPolicy = mergeUploadPolicy(config.uploadPolicy);
   const usersOption = config.messageContext?.users;
   const userResolver = createSlackUserResolver(usersOption);
+  const conversationKindReader = createSlackConversationKindReader();
   const slackFetchFile = createSlackFetchFile({
     api,
     botToken: config.credentials?.botToken,
@@ -1267,6 +1269,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
           config,
           received: rendering.received,
           userResolver,
+          conversationKindReader,
           uploadPolicy,
           handledEvents,
           headers: req.headers,
@@ -1507,6 +1510,7 @@ async function handleEventPost(input: {
   readonly config: SlackChannelConfig;
   readonly received: SlackRenderChain["received"];
   readonly userResolver: SlackUserResolver | undefined;
+  readonly conversationKindReader: SlackConversationKindReader;
   readonly uploadPolicy: UploadPolicy;
   readonly handledEvents: Set<string>;
 }): Promise<Response> {
@@ -1603,6 +1607,7 @@ async function handleEventPost(input: {
     threadContext: config.threadContext,
     uploadPolicy: input.uploadPolicy,
     userResolver: input.userResolver,
+    conversationKindReader: input.conversationKindReader,
   });
   const dispatchMessage =
     (
@@ -1761,6 +1766,7 @@ async function dispatchSlackMessage(input: {
   readonly threadContext: LoadThreadContextMessagesOptions | undefined;
   readonly uploadPolicy: UploadPolicy;
   readonly userResolver: SlackUserResolver | undefined;
+  readonly conversationKindReader: SlackConversationKindReader;
 }): Promise<void> {
   const { edit } = input;
   const request = buildSlackWorkspaceHandle({
@@ -1773,24 +1779,32 @@ async function dispatchSlackMessage(input: {
     request,
     teamId: input.installationTeamId ?? input.message.teamId,
   };
+  let conversationInfo: ReturnType<typeof request> | undefined;
+  const conversationRequest: typeof request = (operation, body) =>
+    operation === "conversations.info"
+      ? (conversationInfo ??= request(operation, body))
+      : request(operation, body);
   let resolvedMessage: Promise<SlackMessage> | undefined;
   const resolveMessage = () =>
     (resolvedMessage ??=
       input.userResolver === undefined
         ? Promise.resolve(input.message)
         : withSlackUserInfo(input.message, input.userResolver, userLookup));
-  const message =
-    input.kind === "channel_message" || edit !== undefined ? input.message : await resolveMessage();
+  const codeChannelLookup =
+    input.detectCodeChannels && input.kind !== "direct_message"
+      ? isSlackCodeChannel(input.message.channelId, conversationRequest)
+      : Promise.resolve(false);
+  const [message, codeChannel] = await Promise.all([
+    input.kind === "channel_message" || edit !== undefined
+      ? Promise.resolve(input.message)
+      : input.codeChannelOnly === undefined
+        ? resolveMessage()
+        : codeChannelLookup.then((isCodeChannel) =>
+            isCodeChannel ? resolveMessage() : input.message,
+          ),
+    codeChannelLookup,
+  ]);
   const author = message.author;
-  let conversationInfo: ReturnType<typeof request> | undefined;
-  const conversationRequest: typeof request = (operation, body) =>
-    operation === "conversations.info"
-      ? (conversationInfo ??= request(operation, body))
-      : request(operation, body);
-  const codeChannel =
-    input.detectCodeChannels &&
-    input.kind !== "direct_message" &&
-    (await isSlackCodeChannel(input.message.channelId, conversationRequest));
   if (!codeChannel && input.codeChannelOnly !== undefined) {
     await input.codeChannelOnly.otherwise?.();
     return;
@@ -1847,10 +1861,11 @@ async function dispatchSlackMessage(input: {
   });
   let conversationKind: Promise<SlackConversationKind> | undefined;
   const readConversationKind = () =>
-    (conversationKind ??= readSlackConversationKind({
+    (conversationKind ??= input.conversationKindReader({
       channelId: input.message.channelId,
       raw: input.message.raw,
       request: conversationRequest,
+      teamId: input.installationTeamId ?? input.message.teamId,
     }));
   const isDMOrPrivateChannel = async () => (await readConversationKind()).isPrivate;
   const openCodeChannel = async (options: SlackOpenCodeChannelOptions = {}) => {
@@ -1910,31 +1925,30 @@ async function dispatchSlackMessage(input: {
     return;
   }
   if (edit === undefined && result.status === "deferred") channelState.quiet = true;
-  if (acknowledged === undefined && channelState.quiet !== true) {
-    await acknowledgeMessage(input.received, input.message, { slack, thread });
-  }
+  const acknowledgedBeforeSend =
+    acknowledged === undefined && channelState.quiet !== true
+      ? acknowledgeMessage(input.received, input.message, { slack, thread })
+      : undefined;
 
-  const {
-    isPrivate: isPrivateConversation,
-    spaceType,
-    visibility: spaceVisibility,
-  } = await readConversationKind();
-  channelState.audience =
-    input.kind === "direct_message" || isPrivateConversation ? "private" : "public";
-  if (spaceType !== undefined) channelState.spaceType = spaceType;
-  if (spaceVisibility !== undefined) channelState.spaceVisibility = spaceVisibility;
   await deliverSlackMessage({
     startsThread:
       !codeChannel &&
       !isThreadReply &&
       edit === undefined &&
       (input.kind === "app_mention" || input.kind === "direct_message"),
+    acknowledged: acknowledgedBeforeSend,
+    applyConversationKind: ({ isPrivate, spaceType, visibility }) => {
+      channelState.audience = input.kind === "direct_message" || isPrivate ? "private" : "public";
+      if (spaceType !== undefined) channelState.spaceType = spaceType;
+      if (visibility !== undefined) channelState.spaceVisibility = visibility;
+    },
     botUserId: input.receivingBotUserId,
+    conversationKind: readConversationKind(),
     credentials: input.credentials,
     kind: input.kind,
-    isPrivateConversation,
     isMentioned: isMentionedNow,
-    message: await resolveMessage(),
+    message: resolveMessage(),
+    rawMessage: input.message,
     edit,
     resolvesTypedInput: input.resolvesTypedInput,
     result,
@@ -2085,14 +2099,17 @@ async function verifyInbound(
 }
 
 async function deliverSlackMessage(input: {
+  readonly acknowledged: Promise<void> | undefined;
+  readonly applyConversationKind: (kind: SlackConversationKind) => void;
   readonly botUserId: string | undefined;
+  readonly conversationKind: Promise<SlackConversationKind>;
   readonly sessionOperations: SlackSessionOperations;
   readonly credentials: SlackChannelCredentials | undefined;
-  readonly isPrivateConversation: boolean;
   readonly isMentioned: boolean;
   readonly startsThread: boolean;
   readonly kind: string;
-  readonly message: SlackMessage;
+  readonly message: Promise<SlackMessage>;
+  readonly rawMessage: SlackMessage;
   readonly edit: SlackMessageEdit | undefined;
   readonly resolvesTypedInput: boolean;
   readonly result: Exclude<SlackInboundResult, null>;
@@ -2107,39 +2124,60 @@ async function deliverSlackMessage(input: {
       }
     | undefined;
 }): Promise<void> {
-  const { edit, message, thread } = input;
+  const { edit, rawMessage, thread } = input;
   try {
-    const priorMessages =
-      input.threadContext === undefined || edit !== undefined
-        ? []
-        : await loadThreadContextMessages(thread, message, input.threadContext);
+    const loadsThreadContext = input.threadContext !== undefined && edit === undefined;
+    const priorMessagesPromise = loadsThreadContext
+      ? loadThreadContextMessages(thread, rawMessage, input.threadContext)
+      : Promise.resolve([]);
+    const existingSessionPromise =
+      loadsThreadContext &&
+      input.result.history === undefined &&
+      rawMessage.threadTs !== rawMessage.ts
+        ? input.sessionOperations.resolveSession()
+        : undefined;
+    const filePartsPromise =
+      edit !== undefined
+        ? Promise.resolve([])
+        : collectInboundFileParts({
+            botUserId: input.botUserId,
+            fetchThreadWindow: (latest, size) => fetchSlackThreadWindow(thread, latest, size),
+            isMentioned: input.kind === "app_mention",
+            mention: rawMessage,
+            thread,
+            policy: input.uploadPolicy,
+          });
+    const usersPromise =
+      input.users === undefined
+        ? Promise.resolve(undefined)
+        : priorMessagesPromise.then((priorMessages) =>
+            resolveSlackUsers(input.users!.resolver, {
+              request: input.users!.request,
+              teamId: input.users!.teamId,
+              userIds: priorMessages.flatMap((prior) => (prior.user ? [prior.user] : [])),
+            }),
+          );
+
+    const [conversationKind, message, priorMessages, existingSession, users, fileParts] =
+      await Promise.all([
+        input.conversationKind,
+        input.message,
+        priorMessagesPromise,
+        existingSessionPromise,
+        usersPromise,
+        filePartsPromise,
+        input.acknowledged,
+      ]);
+
+    input.applyConversationKind(conversationKind);
     const seedsHistory =
       priorMessages.length > 0 &&
       input.result.history === undefined &&
-      (await input.sessionOperations.resolveSession()) === undefined;
-    const users =
-      input.users === undefined
-        ? undefined
-        : await resolveSlackUsers(input.users.resolver, {
-            request: input.users.request,
-            teamId: input.users.teamId,
-            userIds: priorMessages.flatMap((prior) => (prior.user ? [prior.user] : [])),
-          });
+      existingSession === undefined;
     const threadContext = seedsHistory ? undefined : formatSlackThreadContext(priorMessages, users);
     const history =
       input.result.history ??
       (seedsHistory ? slackThreadSessionHistory(priorMessages, users) : undefined);
-    const fileParts =
-      edit !== undefined
-        ? []
-        : await collectInboundFileParts({
-            botUserId: input.botUserId,
-            fetchThreadWindow: (latest, size) => fetchSlackThreadWindow(thread, latest, size),
-            isMentioned: input.kind === "app_mention",
-            mention: message,
-            thread,
-            policy: input.uploadPolicy,
-          });
     const inboundContext: SlackInboundContext = {
       botUserId: input.botUserId,
       channelId: message.channelId,
@@ -2173,7 +2211,7 @@ async function deliverSlackMessage(input: {
     );
 
     const channelContext = input.result.context ?? [];
-    const title = input.isPrivateConversation
+    const title = conversationKind.isPrivate
       ? PRIVATE_SLACK_RUN_TITLE
       : (input.result.title ?? message.markdown);
     const typedText =
@@ -2193,7 +2231,7 @@ async function deliverSlackMessage(input: {
       : sendOptions;
     await input.sessionOperations.send(turnMessage, startsSession);
   } catch (error) {
-    logError(log, `${input.kind} delivery failed`, error, { channelId: message.channelId });
+    logError(log, `${input.kind} delivery failed`, error, { channelId: rawMessage.channelId });
   }
 }
 

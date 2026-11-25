@@ -111,6 +111,10 @@ export interface InstrumentationStepScope<TSession> {
 }
 
 export interface PreparedInstrumentationAttempt {
+  readonly onLanguageModelCallEnd: (event: {
+    readonly callId: string;
+    readonly providerMetadata?: Readonly<Record<string, unknown>>;
+  }) => void;
   readonly scope: InstrumentationScope;
   readonly telemetry: TelemetryOptions | undefined;
 }
@@ -415,14 +419,25 @@ export function bindInstrumentationRuntime(
               }),
             prepareAttempt: (attemptInput) => {
               const scope = attemptScopeOf(attemptSession, attemptInput);
+              const providerMetadata = new Map<string, Readonly<Record<string, unknown>>>();
               const bridgeIntegration = createAiSdkHookBridge(
                 scope,
                 hooks,
                 runtime.runInContext,
                 attemptInput.runtimeContext,
                 attemptInput.isFrameworkTool,
+                (callId) => {
+                  const metadata = providerMetadata.get(callId);
+                  providerMetadata.delete(callId);
+                  return metadata;
+                },
               );
               return {
+                onLanguageModelCallEnd: (event) => {
+                  if (event.providerMetadata !== undefined) {
+                    providerMetadata.set(event.callId, event.providerMetadata);
+                  }
+                },
                 scope,
                 telemetry: telemetry({
                   bridgeIntegration,

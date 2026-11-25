@@ -1,18 +1,49 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { HookConflictError } from "#compiled/@workflow/errors/index.js";
-import { createHook, createWebhook, sleep } from "#internal/workflow-bundle/workflow-core-shim.js";
+import {
+  createHook,
+  createWebhook,
+  rateLimit,
+  sleep,
+} from "#internal/workflow-bundle/workflow-core-shim.js";
 
+const WORKFLOW_RATE_LIMIT = Symbol.for("WORKFLOW_RATE_LIMIT");
 const WORKFLOW_SLEEP = Symbol.for("WORKFLOW_SLEEP");
 const workflowGlobal = globalThis as typeof globalThis & Record<symbol, unknown>;
+const originalRateLimit = workflowGlobal[WORKFLOW_RATE_LIMIT];
 const originalSleep = workflowGlobal[WORKFLOW_SLEEP];
 
 afterEach(() => {
+  if (originalRateLimit === undefined) {
+    delete workflowGlobal[WORKFLOW_RATE_LIMIT];
+  } else {
+    workflowGlobal[WORKFLOW_RATE_LIMIT] = originalRateLimit;
+  }
   if (originalSleep === undefined) {
     delete workflowGlobal[WORKFLOW_SLEEP];
   } else {
     workflowGlobal[WORKFLOW_SLEEP] = originalSleep;
   }
+});
+
+describe("workflow core shim rateLimit", () => {
+  it("forwards rate limit options to the workflow VM implementation", async () => {
+    const rateLimitImpl = vi.fn(async () => {});
+    workflowGlobal[WORKFLOW_RATE_LIMIT] = rateLimitImpl;
+    const options = { key: "openai", limit: 60, period: "1m", burst: 10 };
+
+    await expect(rateLimit(options)).resolves.toBeUndefined();
+    expect(rateLimitImpl).toHaveBeenCalledExactlyOnceWith(options);
+  });
+
+  it("rejects use outside a workflow body", () => {
+    delete workflowGlobal[WORKFLOW_RATE_LIMIT];
+
+    expect(() => rateLimit({ key: "openai", limit: 60, period: "1m" })).toThrow(
+      "`rateLimit()` can only be called inside a workflow function",
+    );
+  });
 });
 
 describe("workflow core shim sleep", () => {

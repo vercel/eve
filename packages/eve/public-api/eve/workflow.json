@@ -1,6 +1,7 @@
 [
   "FatalError",
   "RetryableError",
+  "StepMetadata",
   "WorkflowHook",
   "WorkflowHookOptions",
   "WorkflowMetadata",
@@ -9,6 +10,7 @@
   "WorkflowWebhookRequest",
   "createHook",
   "createWebhook",
+  "getStepMetadata",
   "getWorkflowMetadata",
   "sleep"
 ]

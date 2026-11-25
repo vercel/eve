@@ -8,6 +8,7 @@ export interface Announcement {
   readonly value: string;
   render(previous: string | undefined): string | undefined;
   readonly initial?: string;
+  readonly metadata?: Record<string, unknown>;
   readonly kind?: Extract<UserMessageKind, "context.instruction" | "context.state">;
 }
 

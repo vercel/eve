@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
 
+import { publicRoutePath } from "eve/channels";
+
+import { DEFAULT_BOARD_KEY, DEFAULT_WATCH_CHANNEL } from "./boards.ts";
 import {
   BOARD_CHANNEL_SELECTOR,
   BOARD_TAIL_LIMIT,
@@ -18,15 +21,25 @@ import {
   type BoardRegistrationInput,
   type BoardSettings,
 } from "./client.ts";
+import {
+  BOARD_WAKE_ROUTE,
+  DEFAULT_BOARD_ROUTE_BASE,
+  LEGACY_BOARD_WAKE_ROUTE,
+  normalizeBoardRouteBase,
+} from "./route.ts";
 
-export const DEFAULT_WATCH_CHANNEL = "eve-config/watches";
-const BOARD_ROUTE_BASE = "/board";
-export const BOARD_WAKE_ROUTE = `${BOARD_ROUTE_BASE}/wake`;
-export const MAX_WATCHES = 32;
+export {
+  BOARD_WAKE_ROUTE,
+  DEFAULT_BOARD_ROUTE_BASE,
+  DEFAULT_WATCH_CHANNEL,
+  LEGACY_BOARD_WAKE_ROUTE,
+};
+export const MAX_WATCHES = 64;
 
 const WATCH_LABEL = "eve-watch";
 const STATE_LABEL = "eve-watch-state";
 const LOCK_LABEL = "eve-lock";
+const LOCK_CLIENT_ID = "eve-watch-lock";
 const LOCK_LEASE_SECONDS = 30;
 const LOCK_WAIT_MS = 30_000;
 
@@ -126,7 +139,12 @@ function modelCan(can: BoardCan | undefined, watchChannel: string): BoardCan {
   return grants;
 }
 
-export function boardClients(settings: BoardSettings) {
+export type BoardClientConfig = Pick<
+  BoardSettings,
+  "can" | "name" | "profile" | "team" | "url" | "watchChannel"
+>;
+
+export function boardClients(settings: BoardClientConfig) {
   const watchChannel = settings.watchChannel ?? DEFAULT_WATCH_CHANNEL;
   return {
     deployment: createBoardClient(settings),
@@ -261,12 +279,12 @@ export async function findWatchRecord(input: {
 
 export function registrationWhere(
   discovery: Pick<BoardDiscovery, "wake_by_path">,
+  routeBase = DEFAULT_BOARD_ROUTE_BASE,
 ): Omit<BoardRegistrationInput, "watch"> {
   const { env } = process;
   const environment = env.VERCEL_ENV;
   if (environment !== "production" && environment !== "preview") return { url: null };
-  const prefix = env.EVE_PUBLIC_ROUTE_PREFIX?.trim().replace(/\/+$/u, "") ?? "";
-  const base = `${prefix === "" || prefix.startsWith("/") ? prefix : `/${prefix}`}${BOARD_ROUTE_BASE}`;
+  const base = publicRoutePath(normalizeBoardRouteBase(routeBase));
   if (discovery.wake_by_path === true) {
     return {
       branch: environment === "preview" ? (env.VERCEL_GIT_COMMIT_REF ?? null) : null,
@@ -296,9 +314,10 @@ const localLocks = new Map<string, Promise<unknown>>();
 async function withRegistrationLock<T>(
   client: BoardClient,
   watchChannel: string,
+  boardKey: string,
   run: () => Promise<T>,
 ): Promise<T> {
-  const key = `${client.profile}\n${watchChannel}`;
+  const key = `${boardKey}\n${client.profile}`;
   const previous = localLocks.get(key) ?? Promise.resolve();
   const turn = previous
     .catch(() => {})
@@ -321,26 +340,40 @@ async function withRegistrationLock<T>(
   }
 }
 
+const REUSED_CLIENT_ID = new Set(["client_id_taken", "duplicate_id"]);
+
 async function lockTask(client: BoardClient, watchChannel: string): Promise<string> {
-  const self = await client.me();
-  const found = await labeledRoots(client, watchChannel, `${LOCK_LABEL}=registration`, 20);
-  const lock = found.find((message) => message.by.actor === self.actor);
-  if (lock !== undefined) {
-    const state = lock.task?.state;
-    if (state !== "ready" && state !== "claimed") {
-      throw new Error(
-        `The board task that serializes this agent's watch changes, #${lock.id} in "${watchChannel}", is ${state ?? "not a task"}. Reopen it so watches can change again.`,
-      );
-    }
-    return lock.id;
+  const lock = (await existingLock(client)) ?? (await createLock(client, watchChannel));
+  const state = lock.task?.state;
+  if (state !== "ready" && state !== "claimed") {
+    throw new Error(
+      `The board task that serializes this agent's watch changes, #${lock.id} in "${lock.channel}", is ${state ?? "not a task"}. Reopen it so watches can change again.`,
+    );
   }
-  const created = await client.createTask(watchChannel, {
-    id: "eve-watch-lock",
-    labels: { [LOCK_LABEL]: "registration" },
-    noSync: true,
-    text: "eve holds this task while it changes its board watches, so two changes never overwrite each other. Leave it open.",
-  });
-  return created.id;
+  return lock.id;
+}
+
+async function existingLock(client: BoardClient): Promise<BoardMessage | undefined> {
+  try {
+    return await client.posted(LOCK_CLIENT_ID);
+  } catch (error) {
+    if (boardErrorCode(error) !== "post_not_found") throw error;
+    return undefined;
+  }
+}
+
+async function createLock(client: BoardClient, watchChannel: string): Promise<BoardMessage> {
+  try {
+    return await client.createTask(watchChannel, {
+      id: LOCK_CLIENT_ID,
+      labels: { [LOCK_LABEL]: "registration" },
+      noSync: true,
+      text: "eve holds this task while it changes its board watches, so two changes never overwrite each other. Leave it open.",
+    });
+  } catch (error) {
+    if (!REUSED_CLIENT_ID.has(boardErrorCode(error) ?? "")) throw error;
+    return await client.posted(LOCK_CLIENT_ID);
+  }
 }
 
 async function claimLock(client: BoardClient, taskId: string): Promise<BoardClaimedTask> {
@@ -361,38 +394,81 @@ async function claimLock(client: BoardClient, taskId: string): Promise<BoardClai
   }
 }
 
+function isVercelDeployment(): boolean {
+  const environment = process.env.VERCEL_ENV;
+  return environment === "production" || environment === "preview";
+}
+
+function registrationDestinationChanged(
+  held: BoardRegistration | undefined,
+  desired: Omit<BoardRegistrationInput, "watch">,
+): boolean {
+  if (held === undefined) return false;
+  return (
+    (held.path ?? null) !== (desired.path ?? null) ||
+    (held.branch ?? null) !== (desired.branch ?? null) ||
+    (held.url ?? null) !== (desired.url ?? null)
+  );
+}
+
 async function updateRegistration(input: {
+  readonly boardKey?: string;
   readonly client: BoardClient;
+  readonly routeBase?: string;
   readonly watchChannel: string;
   change(watch: Record<string, { readonly tail: string }>): boolean;
 }): Promise<BoardRegistration | undefined> {
   const { client } = input;
-  return await withRegistrationLock(client, input.watchChannel, async () => {
-    const held = await heldRegistration(client);
-    const watch = { ...held?.watch };
-    if (!input.change(watch)) return held;
-    try {
-      return await client.register({
-        ...(held ?? registrationWhere(await client.discovery())),
-        watch,
-      });
-    } catch (error) {
-      if (boardErrorCode(error) !== "watchers_need_project") throw error;
-      throw new Error(
-        "Vercel's board takes watches only from a deployment. To try watches locally, run `npx @vercel/board serve` and set BOARD_URL to the URL it prints.",
-        { cause: error },
-      );
-    }
-  });
+  return await withRegistrationLock(
+    client,
+    input.watchChannel,
+    input.boardKey ?? DEFAULT_BOARD_KEY,
+    async () => {
+      const held = await heldRegistration(client);
+      const watch = { ...held?.watch };
+      const watchChanged = input.change(watch);
+      const deployed = isVercelDeployment();
+      const desired = deployed
+        ? registrationWhere(await client.discovery(), input.routeBase)
+        : undefined;
+      const destinationChanged =
+        desired !== undefined && registrationDestinationChanged(held, desired);
+      if (!watchChanged && !destinationChanged) return held;
+      const where =
+        desired ??
+        (held !== undefined
+          ? {
+              branch: held.branch ?? null,
+              path: held.path ?? null,
+              url: held.url ?? null,
+            }
+          : registrationWhere(await client.discovery(), input.routeBase));
+      try {
+        return await client.register({
+          ...where,
+          ...(held?.sync !== undefined && { sync: held.sync }),
+          watch,
+        });
+      } catch (error) {
+        if (boardErrorCode(error) !== "watchers_need_project") throw error;
+        throw new Error(
+          "Vercel's board takes watches only from a deployment. To try watches locally, run `npx @vercel/board serve` and set BOARD_URL to the URL it prints.",
+          { cause: error },
+        );
+      }
+    },
+  );
 }
 
 export async function createWatch(input: {
+  readonly boardKey?: string;
   readonly client: BoardClient;
   readonly watchChannel: string;
   readonly id: string;
   readonly tail: string;
   readonly instructions: string;
   readonly action: BoardWatchAction;
+  readonly routeBase?: string;
 }): Promise<BoardWatch> {
   const { action, client, id, tail } = input;
   const text = watchRecordText(id, action, input.instructions);
@@ -418,7 +494,9 @@ export async function createWatch(input: {
   });
   try {
     await updateRegistration({
+      boardKey: input.boardKey,
       client,
+      routeBase: input.routeBase,
       watchChannel: input.watchChannel,
       change(watch) {
         if (watch[id] === undefined && Object.keys(watch).length >= MAX_WATCHES) {
@@ -482,15 +560,19 @@ export async function listWatches(input: {
 }
 
 export async function removeWatch(input: {
+  readonly boardKey?: string;
   readonly client: BoardClient;
   readonly watchChannel: string;
   readonly id: string;
+  readonly routeBase?: string;
 }): Promise<{ readonly id: string; readonly removed: boolean }> {
   const { client, id } = input;
   assertWatchId(id);
   let removed = false;
   await updateRegistration({
+    boardKey: input.boardKey,
     client,
+    routeBase: input.routeBase,
     watchChannel: input.watchChannel,
     change(watch) {
       removed = watch[id] !== undefined;

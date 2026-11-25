@@ -32,7 +32,10 @@ import type { SlackInteractionCardChain } from "#public/channels/slack/renderers
 import { refusedAnswerOf, requestBatchOf } from "#channel/interaction-prompts.js";
 import { signInOf, type SignIn } from "#channel/sign-in.js";
 import type { InteractionSettledData } from "#protocol/session-events/families/interaction.js";
-import { deliverCompletedSlackReply } from "#public/channels/slack/reply-delivery.js";
+import {
+  checkThreadRootGone,
+  deliverCompletedSlackReply,
+} from "#public/channels/slack/reply-delivery.js";
 import {
   SLACK_TYPING_STATUS_MAX_LENGTH,
   truncateTypingStatus,
@@ -65,6 +68,7 @@ interface StepStream {
   reasoning: string;
   reasoningShownAtMs: number | null;
   replyChars: number;
+  rootGone?: Promise<boolean>;
   readonly runId: string;
   readonly partKinds: Map<string, string>;
 }
@@ -521,6 +525,9 @@ export const defaultEvents: SlackChannelInternalEvents = {
     if (kind !== "text") return;
     const before = stream.replyChars;
     stream.replyChars += data.delta.length;
+    if (before === 0 && stream.replyChars > 0 && stream.rootGone === undefined) {
+      stream.rootGone = checkThreadRootGone(channel);
+    }
     if (before < WRITING_REPLY_MIN_CHARS && stream.replyChars >= WRITING_REPLY_MIN_CHARS) {
       await showStatus(channel, "Writing a reply...");
     }
@@ -597,9 +604,14 @@ export const defaultEvents: SlackChannelInternalEvents = {
       await clearStatus(channel);
       return;
     }
+    const stream = streamByState.get(channel.state);
+    const prefetched =
+      stream !== undefined && stream.runId === data.runId ? stream.rootGone : undefined;
+    if (prefetched !== undefined && stream !== undefined) stream.rootGone = undefined;
+    const rootGone = prefetched ?? checkThreadRootGone(channel);
     await statusWritesSettled(channel);
     channel.state.threadStatus = null;
-    await deliverCompletedSlackReply(channel, text, { turnId: ctx.session.turn.id });
+    await deliverCompletedSlackReply(channel, text, { rootGone, turnId: ctx.session.turn.id });
   },
 
   async "turn.settled"({ data }, { channel }) {

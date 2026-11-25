@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { inheritParentModel, inheritsParentModel } from "#runtime/subagents/inherit-parent-model.js";
+import {
+  inheritParentModel,
+  inheritsParentModel,
+} from "#runtime/subagents/inherit-parent-model.js";
 
 describe("inheritParentModel", () => {
   it("marks a definition so a separate copy of the module recognises it", async () => {

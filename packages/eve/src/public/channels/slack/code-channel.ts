@@ -2,56 +2,47 @@ import { createHash } from "node:crypto";
 
 import { createLogger, logError } from "#internal/logging.js";
 import type { SlackApiResponse } from "#public/channels/slack/api.js";
+import { createSlackLookupCache } from "#public/channels/slack/lookup-cache.js";
 
 const log = createLogger("slack.code-channel");
 
 export type SlackRequest = (operation: string, body: unknown) => Promise<SlackApiResponse>;
 
-const MAX_CACHED_CHANNELS = 1_000;
 const FAILED_LOOKUP_TTL_MS = 60_000;
-const codeChannelCache = new Map<string, boolean | { readonly failedAtMs: number }>();
+const codeChannelCache = createSlackLookupCache<boolean>({
+  failedTtlMs: FAILED_LOOKUP_TTL_MS,
+  ttlMs: Number.POSITIVE_INFINITY,
+});
 
-export async function isSlackCodeChannel(
-  channelId: string,
-  request: SlackRequest,
-): Promise<boolean> {
-  const cached = codeChannelCache.get(channelId);
-  if (typeof cached === "boolean") return cached;
-  if (cached !== undefined && Date.now() - cached.failedAtMs < FAILED_LOOKUP_TTL_MS) return false;
-  let codeChannel: boolean;
-  try {
-    const response = await request("conversations.info", { channel: channelId });
-    if (response.ok !== true) {
-      log.error(
-        response.error === "missing_scope"
-          ? "conversations.info needs the channels:read and groups:read scopes to detect code channels; reinstall the Slack app"
-          : "conversations.info failed; treating the channel as an ordinary channel",
-        { channelId, error: response.error },
+export function isSlackCodeChannel(channelId: string, request: SlackRequest): Promise<boolean> {
+  return codeChannelCache.getOrLoad(channelId, async () => {
+    try {
+      const response = await request("conversations.info", { channel: channelId });
+      if (response.ok !== true) {
+        log.error(
+          response.error === "missing_scope"
+            ? "conversations.info needs the channels:read and groups:read scopes to detect code channels; reinstall the Slack app"
+            : "conversations.info failed; treating the channel as an ordinary channel",
+          { channelId, error: response.error },
+        );
+        return { failed: true, value: false };
+      }
+      const channel = response.channel as
+        | { readonly properties?: { readonly record_channel?: { readonly record_type?: unknown } } }
+        | undefined;
+      return { value: channel?.properties?.record_channel?.record_type === "agent_channel" };
+    } catch (error) {
+      logError(
+        log,
+        "conversations.info threw; treating the channel as an ordinary channel",
+        error,
+        {
+          channelId,
+        },
       );
-      cacheLookup(channelId, { failedAtMs: Date.now() });
-      return false;
+      return { failed: true, value: false };
     }
-    const channel = response.channel as
-      | { readonly properties?: { readonly record_channel?: { readonly record_type?: unknown } } }
-      | undefined;
-    codeChannel = channel?.properties?.record_channel?.record_type === "agent_channel";
-  } catch (error) {
-    logError(log, "conversations.info threw; treating the channel as an ordinary channel", error, {
-      channelId,
-    });
-    cacheLookup(channelId, { failedAtMs: Date.now() });
-    return false;
-  }
-  cacheLookup(channelId, codeChannel);
-  return codeChannel;
-}
-
-function cacheLookup(channelId: string, value: boolean | { readonly failedAtMs: number }): void {
-  codeChannelCache.delete(channelId);
-  if (codeChannelCache.size >= MAX_CACHED_CHANNELS) {
-    codeChannelCache.delete(codeChannelCache.keys().next().value!);
-  }
-  codeChannelCache.set(channelId, value);
+  });
 }
 
 const TRANSIENT_SLACK_ERRORS: ReadonlySet<string> = new Set([
@@ -94,7 +85,7 @@ export async function createSlackCodeChannel(input: {
   if (typeof channelId !== "string" || channelId.length === 0) {
     throw new Error("Slack did not return a channel id for the new code channel.");
   }
-  cacheLookup(channelId, true);
+  codeChannelCache.set(channelId, true);
   if (originIsPrivate && !isPrivateConversation(await readConversation(input.request, channelId))) {
     const archived = await input.request("agents.conversations.archive", { channel_id: channelId });
     throw fatalError(

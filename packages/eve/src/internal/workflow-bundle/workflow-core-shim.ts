@@ -1,12 +1,14 @@
 import {
   FatalError as SdkFatalError,
   HookConflictError,
+  RateLimitMaxWaitError as SdkRateLimitMaxWaitError,
   RetryableError as SdkRetryableError,
 } from "#compiled/@workflow/errors/index.js";
 
 const WORKFLOW_CONTEXT_SYMBOL = Symbol.for("WORKFLOW_CONTEXT");
 const WORKFLOW_CREATE_HOOK = Symbol.for("WORKFLOW_CREATE_HOOK");
 const WORKFLOW_GET_STREAM_ID = Symbol.for("WORKFLOW_GET_STREAM_ID");
+const WORKFLOW_RATE_LIMIT = Symbol.for("WORKFLOW_RATE_LIMIT");
 const WORKFLOW_SLEEP = Symbol.for("WORKFLOW_SLEEP");
 const WORKFLOW_USE_STEP = Symbol.for("WORKFLOW_USE_STEP");
 const STREAM_NAME_SYMBOL = Symbol.for("WORKFLOW_STREAM_NAME");
@@ -16,6 +18,9 @@ export const FatalError = (workflowGlobal[Symbol.for("@workflow/errors//FatalErr
   SdkFatalError) as typeof SdkFatalError;
 export const RetryableError = (workflowGlobal[Symbol.for("@workflow/errors//RetryableError")] ??
   SdkRetryableError) as typeof SdkRetryableError;
+export const RateLimitMaxWaitError = (workflowGlobal[
+  Symbol.for("@workflow/errors//RateLimitMaxWaitError")
+] ?? SdkRateLimitMaxWaitError) as typeof SdkRateLimitMaxWaitError;
 
 interface WorkflowHook<T> extends AsyncIterable<T> {
   readonly token: string;
@@ -119,6 +124,20 @@ export function sleep(duration: string | number | Date): Promise<void> {
 
   return sleepFn(duration);
 }
+
+export function rateLimit(options: unknown): Promise<void> {
+  const rateLimitFn = workflowGlobal[WORKFLOW_RATE_LIMIT] as
+    | ((rateLimitOptions: unknown) => Promise<void>)
+    | undefined;
+
+  if (rateLimitFn === undefined) {
+    throw new Error("`rateLimit()` can only be called inside a workflow function");
+  }
+
+  return rateLimitFn(options);
+}
+
+export const experimental_rateLimit = rateLimit;
 
 export function resumeHook(): never {
   throw new Error("`resumeHook()` can only be called from outside a workflow function");

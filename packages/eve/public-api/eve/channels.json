@@ -79,5 +79,6 @@
   "createWebSocketUpgradeServer",
   "defineChannel",
   "disableRoute",
-  "isChannel"
+  "isChannel",
+  "publicRoutePath"
 ]

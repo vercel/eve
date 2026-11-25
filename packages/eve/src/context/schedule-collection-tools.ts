@@ -16,7 +16,7 @@ import {
   isApprovalRecheck,
   scopeApprovalEvaluation,
 } from "#approval/evaluation.js";
-import { bindScheduleCollection, schedules } from "#public/experimental/schedules/client.js";
+import { bindScheduleCollection, schedules } from "#public/schedules/client.js";
 import type {
   DefinedDynamicSchedules,
   DynamicSchedulesDefinition,

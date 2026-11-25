@@ -9,6 +9,7 @@ import {
   rename,
   rm,
   stat,
+  symlink,
   truncate,
   writeFile,
 } from "node:fs/promises";
@@ -559,8 +560,10 @@ describe("WorkflowBundleBuilder", () => {
           flowFilePath,
           [
             'import { createHook } from "eve/workflow";',
+            'import { rateLimit, RateLimitMaxWaitError } from "eve/experimental/workflow";',
             "export async function claimHook() {",
             '  "use workflow";',
+            '  try { await rateLimit({ key: "shared", limit: 1, period: "1s" }); } catch (error) { if (!RateLimitMaxWaitError.is(error)) throw error; }',
             '  const hook = createHook({ token: "shared-token" });',
             "  const conflict = await hook.getConflict();",
             "  return conflict?.runId ?? null;",
@@ -587,9 +590,42 @@ describe("WorkflowBundleBuilder", () => {
 
       expect(decodedWorkflowCode).toContain("getConflict");
       expect(decodedWorkflowCode).toContain("WORKFLOW_CREATE_HOOK");
+      expect(decodedWorkflowCode).toContain("WORKFLOW_RATE_LIMIT");
+      expect(decodedWorkflowCode).toContain("RateLimitMaxWaitError");
       expect(decodedWorkflowCode).not.toContain("runtime/run.js");
     } finally {
       await rm(tempRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("bundles isScheduleAuth from eve/schedules inside a workflow body", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "eve-workflow-schedule-auth-"));
+    const flowPath = join(appRoot, "flow.ts");
+    const compiledArtifactsBootstrapPath = join(appRoot, "bootstrap.mjs");
+    const eveRoot = resolvePackageRoot();
+    try {
+      await mkdir(join(appRoot, "node_modules"));
+      await symlink(eveRoot, join(appRoot, "node_modules", "eve"), "junction");
+      await Promise.all([
+        writeFile(compiledArtifactsBootstrapPath, "export {};\n"),
+        writeFile(
+          flowPath,
+          'import { isScheduleAuth } from "eve/schedules";\n' +
+            'export async function check(auth) { "use workflow"; return isScheduleAuth(auth); }\n',
+        ),
+      ]);
+      await new FixtureWorkflowBundleBuilder(
+        {
+          agentName: "test-agent",
+          appRoot,
+          compiledArtifactsBootstrapPath,
+          outDir: join(appRoot, "output"),
+          rootDir: eveRoot,
+        },
+        [flowPath],
+      ).build();
+    } finally {
+      await rm(appRoot, { force: true, recursive: true });
     }
   });
 
