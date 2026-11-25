@@ -52,6 +52,7 @@ export async function runInteractiveDevelopmentUi(input: {
   const tuiInput: RunDevelopmentTuiInput = {
     target,
     initialInput: input.options.input,
+    ...(input.options.session !== undefined && { sessionId: input.options.session }),
     onboard: input.options.onboard === true || input.options.onboarded === true,
     onBootProgress: input.report,
     onOnboardingStep: input.onOnboardingStep,

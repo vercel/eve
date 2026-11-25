@@ -82,6 +82,81 @@ describe("EveTUIRunner with a stranded session", () => {
   });
 });
 
+describe("EveTUIRunner with --session", () => {
+  it("shows the existing session and sends the next message to it", async () => {
+    const server = new FakeEveServer(reply("Hi again."));
+    vi.stubGlobal("fetch", server.fetch);
+    await server.fetch("http://localhost:3000/eve/v1/session", {
+      body: JSON.stringify({ message: "Earlier." }),
+      method: "POST",
+    });
+    await vi.waitFor(() => expect(server.requests).toHaveLength(1));
+    const { renderer, views } = turnTaking(["Next.", undefined]);
+    await new EveTUIRunner({
+      client: new Client({ baseUrl: "http://localhost:3000" }),
+      renderer,
+      sessionId: "session_1",
+    }).run();
+
+    const shown = views.map((view) =>
+      view.conversation.messages.flatMap((message) =>
+        message.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])),
+      ),
+    );
+    expect(shown).toContainEqual(["Earlier.", "Hi again."]);
+    expect(server.requestsTo("POST", "/eve/v1/session")).toHaveLength(1);
+    expect(server.requestsTo("POST", "/eve/v1/session/session_1")).toHaveLength(1);
+  });
+});
+
+describe("EveTUIRunner with --session, before the session loads", () => {
+  it("sends a message typed while the session replays, and leaves the session alone on /clear and /new", async () => {
+    const server = new FakeEveServer(reply("Hi again."));
+    await server.fetch("http://localhost:3000/eve/v1/session", {
+      body: JSON.stringify({ message: "Earlier." }),
+      method: "POST",
+    });
+    await vi.waitFor(() => expect(server.requests).toHaveLength(1));
+    let release!: () => void;
+    const replayed = new Promise<void>((resolve) => (release = resolve));
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      if (new URL(String(input)).pathname.endsWith("/stream")) await replayed;
+      return await server.fetch(input, init);
+    });
+    const outcomes: unknown[] = [];
+    const { renderer } = turnTaking([], { finishCommand: (outcome) => outcomes.push(outcome) });
+    const inputs: Array<() => Promise<string | undefined>> = [
+      async () => "Next.",
+      async () => {
+        release();
+        await vi.waitFor(() =>
+          expect(server.requestsTo("POST", "/eve/v1/session/session_1")).toHaveLength(1),
+        );
+        return "/clear";
+      },
+      async () => "/new",
+      async () => undefined,
+    ];
+    renderer.readInput = vi.fn(async () => {
+      const text = await inputs.shift()?.();
+      return text === undefined ? undefined : ({ type: "submit", text } as const);
+    });
+    await new EveTUIRunner({
+      client: new Client({ baseUrl: "http://localhost:3000" }),
+      renderer,
+      sessionId: "session_1",
+    }).run();
+
+    expect(server.requestsTo("POST", "/eve/v1/session/session_1")).toHaveLength(1);
+    expect(server.requestsTo("POST", "/session_1/clear")).toHaveLength(0);
+    expect(server.requestsTo("POST", "/session_1/end")).toHaveLength(0);
+    expect(outcomes[0]).toMatchObject({
+      kind: "result",
+      message: expect.stringContaining("/clear"),
+    });
+  });
+});
+
 describe("EveTUIRunner diagnostics", () => {
   it("names a tool that fails in the commit that requested it", async () => {
     const replied = reply("The lookup failed.");
