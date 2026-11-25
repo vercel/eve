@@ -1,0 +1,335 @@
+{
+  "history": [
+    {
+      "content": "Hello.",
+      "kind": "user",
+      "metadata": {
+        "eve.turn": "turn_0"
+      },
+      "role": "user"
+    },
+    {
+      "content": [
+        {
+          "text": "Hi.",
+          "type": "text"
+        }
+      ],
+      "role": "assistant"
+    },
+    {
+      "content": "Your connections have more tools than are loaded here. Before saying you have no tool for a task, look for one with eve__search, which searches your own catalog, not the web. Call them with eve__tool({ name, input }).\nConnections, whose tools are named <connection>__<tool>; search one connection's tools with \"<connection>__\":\n- linear: Linear issues for the release team.",
+      "kind": "context.state",
+      "role": "user"
+    },
+    {
+      "content": "Thanks.",
+      "kind": "user",
+      "metadata": {
+        "eve.turn": "turn_1"
+      },
+      "role": "user"
+    },
+    {
+      "content": [
+        {
+          "text": "Done.",
+          "type": "text"
+        }
+      ],
+      "role": "assistant"
+    },
+    {
+      "content": "Anything else?",
+      "kind": "user",
+      "metadata": {
+        "eve.turn": "turn_2"
+      },
+      "role": "user"
+    },
+    {
+      "content": [
+        {
+          "text": "Done.",
+          "type": "text"
+        }
+      ],
+      "role": "assistant"
+    }
+  ],
+  "serializedContext": {
+    "eve.auth": null,
+    "eve.bundle": {
+      "source": {
+        "kind": "bundled"
+      }
+    },
+    "eve.callbackBaseUrl": "http://localhost:3000",
+    "eve.capabilities": {
+      "requestInput": true
+    },
+    "eve.channel": {
+      "kind": "http",
+      "state": {}
+    },
+    "eve.channelDelivery": {
+      "channelKind": "channel:http",
+      "channelName": "http",
+      "deliveryId": "<uuid0>"
+    },
+    "eve.channelInstrumentation": {
+      "channelType": "http",
+      "kind": "channel:http",
+      "metadata": {}
+    },
+    "eve.continuationHookTokens": [
+      "http:layout-additional-tools-other-provider"
+    ],
+    "eve.continuationToken": "http:layout-additional-tools-other-provider",
+    "eve.conversation": {
+      "audience": "unknown",
+      "channel": {
+        "kind": "channel:http",
+        "name": "http"
+      },
+      "environment": "production",
+      "principalType": "anonymous"
+    },
+    "eve.conversationId": "wrun_<ulid0>",
+    "eve.historyState": {
+      "announcements": {
+        "catalog": "{\"connections\":{\"items\":[{\"description\":\"Linear issues for the release team.\",\"name\":\"linear\"}],\"more\":false},\"kinds\":[],\"namespaces\":{\"items\":[],\"more\":false}}"
+      },
+      "messages": {
+        "catalog": "rBEWtMzVpLfRPmTPOQE835"
+      }
+    },
+    "eve.initiatorAuth": null,
+    "eve.model": {
+      "reference": {
+        "contextWindowTokens": 200000,
+        "id": "eve-test/layout"
+      }
+    },
+    "eve.otelTraceEnabled": false,
+    "eve.reactions": {
+      "at": "<time>",
+      "latest": {
+        "*": 23,
+        "content.completed": 21,
+        "content.delta": 20,
+        "delivery.admitted": 16,
+        "delivery.consumed": 17,
+        "delivery.settled": 23,
+        "model.requested": 18,
+        "model.settled": 22,
+        "model.started": 19,
+        "session.started": 0,
+        "turn.settled": 23,
+        "turn.started": 17,
+        "usage.recorded": 22
+      },
+      "revision": "bundled",
+      "slots": {
+        "connection::linear": {
+          "digest": "NVpqqptuecKgVKgp8YdGqx",
+          "live": true,
+          "since": 9,
+          "value": [
+            {
+              "instanceId": "connection:Uvh26dyOURoepQGe6iHh1gvVHK1FI_9joYuGwL0WH8g",
+              "name": "linear",
+              "protocol": "mcp",
+              "url": "https://mcp.linear.example/mcp"
+            }
+          ]
+        },
+        "eve.catalog": {
+          "digest": "KrH36F1Zk9OV4Q_e0rW8Vz",
+          "since": 9,
+          "value": {
+            "connections": true,
+            "searchableSkills": false,
+            "skills": false,
+            "tools": true
+          }
+        },
+        "model:agent": {
+          "digest": "1qJ47UPfGIJVLn1ESASMhk",
+          "live": true,
+          "since": 1,
+          "value": {
+            "reference": {
+              "contextWindowTokens": 200000,
+              "id": "eve-test/layout"
+            }
+          }
+        }
+      }
+    },
+    "eve.sessionId": "wrun_<ulid0>",
+    "eve.sessionInbox": {
+      "sessionId": "wrun_<ulid0>"
+    },
+    "eve.sessionTitle": "Hello.",
+    "eve.stateLayout": 1,
+    "eve.turnDeliveryIds": [
+      "<uuid1>"
+    ]
+  },
+  "sessionState": {
+    "continuationToken": "http:layout-additional-tools-other-provider",
+    "hasProxyInputRequests": false,
+    "sessionId": "wrun_<ulid0>",
+    "snapshot": {
+      "session": {
+        "compaction": {
+          "estimateRatio": 0.0003109452736318408,
+          "lastKnownInputTokens": 1,
+          "lastKnownPromptMessageCount": 6,
+          "measurementsByModel": {
+            "eve-test/layout": {
+              "inputTokens": 1,
+              "promptMessageCount": 6,
+              "requestEnvelopeTokens": 3013
+            }
+          },
+          "requestEnvelopeTokens": 3013
+        },
+        "continuationToken": "http:layout-additional-tools-other-provider",
+        "sandboxState": {
+          "session": null
+        },
+        "sessionId": "wrun_<ulid0>",
+        "state": {
+          "eve.harness.reportedSessionUsage": {
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0,
+            "inputTokens": 3,
+            "outputTokens": 3
+          },
+          "eve.harness.sessionProjection": {
+            "counters": {
+              "changes": 0,
+              "runs": 3
+            },
+            "outputStarted": "turn_2",
+            "view": {
+              "calls": {},
+              "changes": {},
+              "children": {},
+              "deliveries": {
+                "<uuid1>": {
+                  "closedAt": "<closedAt>",
+                  "consumedAt": "<consumedAt>",
+                  "deliveryId": "<uuid1>",
+                  "endedAt": "<time>",
+                  "introducedAt": "<introducedAt>",
+                  "outcome": "handled",
+                  "parts": [
+                    {
+                      "kind": "text",
+                      "text": "Anything else?"
+                    }
+                  ],
+                  "source": {
+                    "channel": "channel:http"
+                  },
+                  "startedAt": "<time>",
+                  "status": "settled",
+                  "turnId": "turn_2"
+                }
+              },
+              "interactions": {},
+              "parts": {
+                "run_2.0": {
+                  "introducedAt": "<introducedAt>",
+                  "kind": "text",
+                  "partId": "run_2.0",
+                  "phase": "reply",
+                  "runId": "run_2",
+                  "startedAt": "<time>",
+                  "value": "Done."
+                }
+              },
+              "position": 24,
+              "responses": {},
+              "runs": {
+                "run_2": {
+                  "attempt": 0,
+                  "closedAt": "<closedAt>",
+                  "endedAt": "<time>",
+                  "finishReason": "stop",
+                  "introducedAt": "<introducedAt>",
+                  "modelId": "eve-test/layout",
+                  "outcome": "completed",
+                  "owner": {
+                    "turnId": "turn_2"
+                  },
+                  "runId": "run_2",
+                  "startedAt": "<time>",
+                  "status": "settled",
+                  "step": 0,
+                  "usage": {
+                    "cacheReadTokens": 0,
+                    "cacheWriteTokens": 0,
+                    "inputTokens": 1,
+                    "outputTokens": 1
+                  }
+                }
+              },
+              "session": {
+                "latestTurnId": "turn_2",
+                "runtime": {
+                  "agentId": "layout-additional-tools-other-provider",
+                  "agentName": "layout-additional-tools-other-provider",
+                  "eveVersion": "<eveVersion>"
+                },
+                "startedAt": "<time>",
+                "status": "open",
+                "turnCount": 3
+              },
+              "tasks": {},
+              "turns": {
+                "turn_2": {
+                  "cause": {
+                    "deliveryId": "<uuid1>"
+                  },
+                  "closedAt": "<closedAt>",
+                  "endedAt": "<time>",
+                  "follows": "turn_1",
+                  "introducedAt": "<introducedAt>",
+                  "outcome": "completed",
+                  "reply": [
+                    "run_2.0"
+                  ],
+                  "runs": 1,
+                  "startedAt": "<time>",
+                  "status": "settled",
+                  "turnId": "turn_2"
+                }
+              },
+              "usage": {
+                "byKind": {
+                  "model": {
+                    "cacheReadTokens": 0,
+                    "cacheWriteTokens": 0,
+                    "inputTokens": 3,
+                    "outputTokens": 3
+                  }
+                },
+                "total": {
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0,
+                  "inputTokens": 3,
+                  "outputTokens": 3
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "version": 2
+  }
+}

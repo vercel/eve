@@ -73,7 +73,22 @@
       "principalType": "anonymous"
     },
     "eve.conversationId": "wrun_<ulid0>",
-    "eve.historyState": {},
+    "eve.historyState": {
+      "requestTools": {
+        "endsTurn": true,
+        "names": [
+          "bash",
+          "read_file",
+          "write_file",
+          "edit_file",
+          "web_fetch",
+          "web_search",
+          "agent",
+          "eve__task_wait",
+          "eve__task_cancel"
+        ]
+      }
+    },
     "eve.initiatorAuth": null,
     "eve.model": {
       "reference": {

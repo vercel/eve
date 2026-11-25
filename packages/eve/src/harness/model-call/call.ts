@@ -82,6 +82,8 @@ import { answerSkippedToolCalls, extractToolResultCallIds, withCallResults } fro
 import { ALLOW_RETRY, runModelCallWithRetries, STOP_RETRY } from "./retry.js";
 import { withUniqueCallIds } from "./unique-call-ids.js";
 import { modelCallErrorInfo } from "./failure.js";
+import { fixRequestTools } from "./additional-tools.js";
+import { withoutToolLoads } from "#shared/openai-additional-tools.js";
 import { prepareModelTools } from "./tools.js";
 import {
   executeInlineCalls,
@@ -318,9 +320,11 @@ export class ModelCaller {
   }
 
   private async prepare(options: ModelCallOptions): Promise<ToolSet> {
+    const fixed = this.readsRecord ? this.step.ctx.get(HistoryStateKey)?.requestTools : undefined;
     const tools = await prepareModelTools(this.step, {
       catalog: this.input.catalog,
       disabledProviderTools: options.disabledProviderTools,
+      endsTurn: fixed?.endsTurn,
       profile: this.profile,
     });
     await this.buildRequest();
@@ -329,7 +333,28 @@ export class ModelCaller {
       ...this.framing(options, this.request.nonSystemMessages),
       tools,
     });
-    return tools;
+    return this.readsRecord ? await this.fixRequestTools(tools) : tools;
+  }
+
+  private async fixRequestTools(tools: ToolSet): Promise<ToolSet> {
+    const { history, historyState, nonSystemMessages } = this.request;
+    const fixed = await fixRequestTools({
+      fixed: historyState.requestTools?.names,
+      history,
+      tools,
+    });
+    this.request = {
+      history: [...history, ...fixed.loads],
+      historyState: {
+        ...historyState,
+        requestTools: {
+          endsTurn: historyState.requestTools?.endsTurn ?? this.step.endsTurn,
+          names: fixed.names,
+        },
+      },
+      nonSystemMessages: [...nonSystemMessages, ...fixed.loads],
+    };
+    return fixed.tools;
   }
 
   private async compact(options: ModelCallOptions, tools: ToolSet): Promise<ToolSet> {
@@ -379,7 +404,9 @@ export class ModelCaller {
     if (this.profile.filesOutsideToolResults) {
       this.modelMessages = moveToolResultFilesToUserMessages(this.modelMessages);
     }
-    if (!this.readsRecord) this.modelMessages = withoutOpenAICompaction(this.modelMessages);
+    if (!this.readsRecord) {
+      this.modelMessages = withoutToolLoads(withoutOpenAICompaction(this.modelMessages));
+    }
     const { instructions, messages: callMessages } = this.framing(options, this.modelMessages);
     const runtimeContext =
       step.instrumentation?.resolveRuntimeContext({
@@ -411,6 +438,7 @@ export class ModelCaller {
       session: step.session,
     });
     const settings = {
+      ...(this.readsRecord && { allowSystemInMessages: true }),
       headers: this.attributionHeaders,
       instructions,
       model: withUniqueCallIds(

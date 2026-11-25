@@ -1,0 +1,408 @@
+{
+  "history": [
+    {
+      "content": "Hello.",
+      "kind": "user",
+      "metadata": {
+        "eve.turn": "turn_0"
+      },
+      "role": "user"
+    },
+    {
+      "content": [
+        {
+          "text": "Hi.",
+          "type": "text"
+        }
+      ],
+      "role": "assistant"
+    },
+    {
+      "content": "Your connections have more tools than are loaded here. Before saying you have no tool for a task, look for one with eve__search, which searches your own catalog, not the web. Call them with eve__tool({ name, input }).\nConnections, whose tools are named <connection>__<tool>; search one connection's tools with \"<connection>__\":\n- linear: Linear issues for the release team.",
+      "kind": "context.state",
+      "role": "user"
+    },
+    {
+      "content": "Thanks.",
+      "kind": "user",
+      "metadata": {
+        "eve.turn": "turn_1"
+      },
+      "role": "user"
+    },
+    {
+      "content": "",
+      "providerOptions": {
+        "openai": {
+          "additionalTools": [
+            {
+              "description": "Search your own catalog for tools, agents, skills, and connected services that aren't in your tool list. Use it when nothing in your tool list fits the request; it doesn't search the web. A result with `tool` has the exact name, description, and TypeScript signature: call it with eve__tool({ name, input }). `searched` counts the entries the query covered, and `remaining` counts the matches past `limit`: when `remaining` is 0, nothing else the query covered matched. Connections under `unavailable` weren't searched. When you already know a name or connection, from the catalog listing, an earlier result, or an error, search it directly: the exact name, or \"<connection>__\", which is faster and returns only that connection's tools. A connection that needs sign-in appears as a tool named after the connection: calling it with eve__tool({ name }) asks the user to sign in. `searched` counts its tools only after sign-in.",
+              "name": "eve__search",
+              "parameters": {
+                "additionalProperties": false,
+                "properties": {
+                  "limit": {
+                    "description": "Maximum results, best matches first. Defaults to 10.",
+                    "maximum": 50,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "query": {
+                    "description": "Words describing the capability, such as 'list open issues'; an exact name; or a namespace prefix such as 'linear__', which searches only that connection's tools.",
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "query"
+                ],
+                "type": "object"
+              },
+              "strict": false,
+              "type": "function"
+            },
+            {
+              "description": "Call a tool that isn't in your tool list by its exact name from eve__search, with `input` matching its signature. Prefer connected services over web search or general knowledge when a request relates to them.",
+              "name": "eve__tool",
+              "parameters": {
+                "additionalProperties": false,
+                "properties": {
+                  "input": {
+                    "description": "Arguments matching the tool's signature. Defaults to {}.",
+                    "type": "object"
+                  },
+                  "name": {
+                    "description": "The tool's exact name, as eve__search returns it.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              },
+              "strict": false,
+              "type": "function"
+            }
+          ]
+        }
+      },
+      "role": "system"
+    },
+    {
+      "content": [
+        {
+          "text": "Done.",
+          "type": "text"
+        }
+      ],
+      "role": "assistant"
+    },
+    {
+      "content": "Anything else?",
+      "kind": "user",
+      "metadata": {
+        "eve.turn": "turn_2"
+      },
+      "role": "user"
+    },
+    {
+      "content": [
+        {
+          "text": "Done.",
+          "type": "text"
+        }
+      ],
+      "role": "assistant"
+    }
+  ],
+  "serializedContext": {
+    "eve.auth": null,
+    "eve.bundle": {
+      "source": {
+        "kind": "bundled"
+      }
+    },
+    "eve.callbackBaseUrl": "http://localhost:3000",
+    "eve.capabilities": {
+      "requestInput": true
+    },
+    "eve.channel": {
+      "kind": "http",
+      "state": {}
+    },
+    "eve.channelDelivery": {
+      "channelKind": "channel:http",
+      "channelName": "http",
+      "deliveryId": "<uuid0>"
+    },
+    "eve.channelInstrumentation": {
+      "channelType": "http",
+      "kind": "channel:http",
+      "metadata": {}
+    },
+    "eve.continuationHookTokens": [
+      "http:layout-additional-tools"
+    ],
+    "eve.continuationToken": "http:layout-additional-tools",
+    "eve.conversation": {
+      "audience": "unknown",
+      "channel": {
+        "kind": "channel:http",
+        "name": "http"
+      },
+      "environment": "production",
+      "principalType": "anonymous"
+    },
+    "eve.conversationId": "wrun_<ulid0>",
+    "eve.historyState": {
+      "announcements": {
+        "catalog": "{\"connections\":{\"items\":[{\"description\":\"Linear issues for the release team.\",\"name\":\"linear\"}],\"more\":false},\"kinds\":[],\"namespaces\":{\"items\":[],\"more\":false}}"
+      },
+      "messages": {
+        "catalog": "rBEWtMzVpLfRPmTPOQE835"
+      },
+      "requestTools": {
+        "endsTurn": true,
+        "names": [
+          "bash",
+          "read_file",
+          "write_file",
+          "edit_file",
+          "web_fetch",
+          "web_search",
+          "agent",
+          "eve__task_wait",
+          "eve__task_cancel"
+        ]
+      }
+    },
+    "eve.initiatorAuth": null,
+    "eve.model": {
+      "reference": {
+        "contextWindowTokens": 200000,
+        "id": "openai/layout"
+      }
+    },
+    "eve.otelTraceEnabled": false,
+    "eve.reactions": {
+      "at": "<time>",
+      "latest": {
+        "*": 23,
+        "content.completed": 21,
+        "content.delta": 20,
+        "delivery.admitted": 16,
+        "delivery.consumed": 17,
+        "delivery.settled": 23,
+        "model.requested": 18,
+        "model.settled": 22,
+        "model.started": 19,
+        "session.started": 0,
+        "turn.settled": 23,
+        "turn.started": 17,
+        "usage.recorded": 22
+      },
+      "revision": "bundled",
+      "slots": {
+        "connection::linear": {
+          "digest": "baJEiG3hk1Wr-lIAAGXtFs",
+          "live": true,
+          "since": 9,
+          "value": [
+            {
+              "instanceId": "connection:17bcSNbNpSt1Zh39KlEHitgj2pkQXaBgHhx6B4s8R6c",
+              "name": "linear",
+              "protocol": "mcp",
+              "url": "https://mcp.linear.example/mcp"
+            }
+          ]
+        },
+        "eve.catalog": {
+          "digest": "KrH36F1Zk9OV4Q_e0rW8Vz",
+          "since": 9,
+          "value": {
+            "connections": true,
+            "searchableSkills": false,
+            "skills": false,
+            "tools": true
+          }
+        },
+        "model:agent": {
+          "digest": "73k_W8o1EGGLe7T_hzcT_I",
+          "live": true,
+          "since": 1,
+          "value": {
+            "reference": {
+              "contextWindowTokens": 200000,
+              "id": "openai/layout"
+            }
+          }
+        }
+      }
+    },
+    "eve.sessionId": "wrun_<ulid0>",
+    "eve.sessionInbox": {
+      "sessionId": "wrun_<ulid0>"
+    },
+    "eve.sessionTitle": "Hello.",
+    "eve.stateLayout": 1,
+    "eve.turnDeliveryIds": [
+      "<uuid1>"
+    ]
+  },
+  "sessionState": {
+    "continuationToken": "http:layout-additional-tools",
+    "hasProxyInputRequests": false,
+    "sessionId": "wrun_<ulid0>",
+    "snapshot": {
+      "session": {
+        "compaction": {
+          "estimateRatio": 0.0002643404705260375,
+          "lastKnownInputTokens": 1,
+          "lastKnownPromptMessageCount": 7,
+          "measurementsByModel": {
+            "openai/layout": {
+              "inputTokens": 1,
+              "promptMessageCount": 7,
+              "requestEnvelopeTokens": 3060
+            }
+          },
+          "requestEnvelopeTokens": 3060
+        },
+        "continuationToken": "http:layout-additional-tools",
+        "sandboxState": {
+          "session": null
+        },
+        "sessionId": "wrun_<ulid0>",
+        "state": {
+          "eve.harness.reportedSessionUsage": {
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0,
+            "inputTokens": 3,
+            "outputTokens": 3
+          },
+          "eve.harness.sessionProjection": {
+            "counters": {
+              "changes": 0,
+              "runs": 3
+            },
+            "outputStarted": "turn_2",
+            "view": {
+              "calls": {},
+              "changes": {},
+              "children": {},
+              "deliveries": {
+                "<uuid1>": {
+                  "closedAt": "<closedAt>",
+                  "consumedAt": "<consumedAt>",
+                  "deliveryId": "<uuid1>",
+                  "endedAt": "<time>",
+                  "introducedAt": "<introducedAt>",
+                  "outcome": "handled",
+                  "parts": [
+                    {
+                      "kind": "text",
+                      "text": "Anything else?"
+                    }
+                  ],
+                  "source": {
+                    "channel": "channel:http"
+                  },
+                  "startedAt": "<time>",
+                  "status": "settled",
+                  "turnId": "turn_2"
+                }
+              },
+              "interactions": {},
+              "parts": {
+                "run_2.0": {
+                  "introducedAt": "<introducedAt>",
+                  "kind": "text",
+                  "partId": "run_2.0",
+                  "phase": "reply",
+                  "runId": "run_2",
+                  "startedAt": "<time>",
+                  "value": "Done."
+                }
+              },
+              "position": 24,
+              "responses": {},
+              "runs": {
+                "run_2": {
+                  "attempt": 0,
+                  "closedAt": "<closedAt>",
+                  "endedAt": "<time>",
+                  "finishReason": "stop",
+                  "introducedAt": "<introducedAt>",
+                  "modelId": "openai/layout",
+                  "outcome": "completed",
+                  "owner": {
+                    "turnId": "turn_2"
+                  },
+                  "runId": "run_2",
+                  "startedAt": "<time>",
+                  "status": "settled",
+                  "step": 0,
+                  "usage": {
+                    "cacheReadTokens": 0,
+                    "cacheWriteTokens": 0,
+                    "inputTokens": 1,
+                    "outputTokens": 1
+                  }
+                }
+              },
+              "session": {
+                "latestTurnId": "turn_2",
+                "runtime": {
+                  "agentId": "layout-additional-tools",
+                  "agentName": "layout-additional-tools",
+                  "eveVersion": "<eveVersion>"
+                },
+                "startedAt": "<time>",
+                "status": "open",
+                "turnCount": 3
+              },
+              "tasks": {},
+              "turns": {
+                "turn_2": {
+                  "cause": {
+                    "deliveryId": "<uuid1>"
+                  },
+                  "closedAt": "<closedAt>",
+                  "endedAt": "<time>",
+                  "follows": "turn_1",
+                  "introducedAt": "<introducedAt>",
+                  "outcome": "completed",
+                  "reply": [
+                    "run_2.0"
+                  ],
+                  "runs": 1,
+                  "startedAt": "<time>",
+                  "status": "settled",
+                  "turnId": "turn_2"
+                }
+              },
+              "usage": {
+                "byKind": {
+                  "model": {
+                    "cacheReadTokens": 0,
+                    "cacheWriteTokens": 0,
+                    "inputTokens": 3,
+                    "outputTokens": 3
+                  }
+                },
+                "total": {
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0,
+                  "inputTokens": 3,
+                  "outputTokens": 3
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "version": 2
+  }
+}
