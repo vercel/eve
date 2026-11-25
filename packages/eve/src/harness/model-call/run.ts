@@ -36,7 +36,7 @@ import type { StepResult } from "#harness/types.js";
 import { stepReference } from "#harness/step/context.js";
 import { ModelCaller } from "./call.js";
 import { type CredentialedModel, credentialedModel } from "./credential.js";
-import { credentialErrorIn, ModelCredentialFailure, refusesCredential } from "./errors.js";
+import { credentialErrorIn, refusesCredential } from "./errors.js";
 import { type EndsTurnTools, endsTurnTools, frameworkToolNames } from "./tools.js";
 import { reportModelCallFailure } from "./failure.js";
 import { resolveEffectiveRuntimeModel } from "./model.js";
@@ -96,20 +96,12 @@ export async function runModelStep(
     throwIfSessionStreamDead(error);
     throwIfTurnAborted(step.config.abortSignal);
     const credentialError = credentialErrorIn(error);
-    if (credentialError !== undefined) {
-      if (generation.interrupted) return caller.steered();
-      if (credentialError instanceof ModelCredentialFailure)
-        return await failModelCredential(
-          step,
-          credentialError.code,
-          credentialError.cause,
-          credentialError.scoped,
-        );
-      return await pauseForModelSignIn(step, credentialError, async () => {
+    if (credentialError !== undefined && generation.interrupted) return caller.steered();
+    if (credentialError !== undefined)
+      return await failOrAsk(step, credentialError, async () => {
         const messages = await caller.abandon();
         step.session = changeHistory(step.session, { extend: messages });
       });
-    }
     const compactionFailed = await caller.failIfCompactionFailed();
     if (compactionFailed !== undefined) return compactionFailed;
     if (generation.interrupted) return caller.steered();
@@ -185,7 +177,9 @@ async function startRun(step: Step, attempt: number): Promise<void> {
 async function failOrAsk(
   step: Step,
   error: NonNullable<ReturnType<typeof credentialErrorIn>>,
+  beforePause?: () => Promise<void>,
 ): Promise<StepResult> {
-  if (isScopedAuthorizationRequiredError(error)) return await pauseForModelSignIn(step, error);
+  if (isScopedAuthorizationRequiredError(error))
+    return await pauseForModelSignIn(step, error, beforePause);
   return await failModelCredential(step, error.code, error.cause, error.scoped);
 }
