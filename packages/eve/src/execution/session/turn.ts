@@ -21,7 +21,14 @@ import {
   cancelWorkingTasks,
   sessionTaskTable,
 } from "#execution/tasks/session.js";
-import { taskWaitResult } from "#execution/tasks/table.js";
+import {
+  findTask,
+  isActiveTaskRun,
+  settleTaskCalls,
+  taskWaitResult,
+  type TaskTable,
+} from "#execution/tasks/table.js";
+import type { PendingDispatch } from "#harness/session-machine/transitions.js";
 import {
   sessionCommandHookToken,
   sessionInboxHookToken,
@@ -46,6 +53,7 @@ import {
 import type { TurnPause } from "#execution/session/pending-turn-state.js";
 import type {
   RuntimeActionResultStepInput,
+  TaskReplyMessage,
   TurnOutcome,
   TurnStepInput,
   TurnStepPayload,
@@ -292,13 +300,22 @@ export class SessionExecution {
       paused.on === "interaction"
         ? { attemptIds: new Set(paused.attemptIds), requestIds: new Set(paused.requestIds) }
         : undefined;
-    const calls = paused.on === "calls" ? await this.startCallWait(paused) : undefined;
+    const started = paused.on === "calls" ? await this.startCallWait(paused) : undefined;
+    const calls = started?.wait;
+    let pendingDispatch = started?.pending;
     let interrupted = false;
+    const flushPendingDispatch = async (): Promise<void> => {
+      if (pendingDispatch === undefined) return;
+      const pending = pendingDispatch;
+      pendingDispatch = undefined;
+      await this.input.cursor.advance((state) => publishDispatchedCallsStep({ ...state, pending }));
+    };
     while (true) {
       if (
         turn.signal.aborted ||
         pendingSessionEnd(this.input.cursor.serializedContext) !== undefined
       ) {
+        await flushPendingDispatch();
         turn.abort();
         return "cancelled";
       }
@@ -318,7 +335,15 @@ export class SessionExecution {
         return await this.withSteering(turn, {});
       }
       const runtimeResults = await calls?.ready(interrupted);
-      if (runtimeResults !== undefined) return await this.withSteering(turn, { runtimeResults });
+      if (runtimeResults !== undefined) {
+        const dispatch = pendingDispatch;
+        pendingDispatch = undefined;
+        return await this.withSteering(turn, {
+          ...(dispatch !== undefined && { pendingDispatch: dispatch }),
+          runtimeResults,
+        });
+      }
+      await flushPendingDispatch();
 
       const next = await turn.nextRuntimeEvent(calls?.timers() ?? []);
       if (next === "cancelled") return next;
@@ -334,6 +359,23 @@ export class SessionExecution {
           calls?.acceptInbox(next.results);
           continue;
         case "workflow": {
+          if (calls !== undefined && isTaskReplyMessage(next.message)) {
+            const following =
+              turn.takeAppliedRunMessages() ?? takeLeadingAppliedRunMessages(this.input.inbox);
+            const batch = [next.message, ...following];
+            if (batch.every(isTaskReplyMessage)) {
+              const preview = previewTaskReplies(this.input.cursor, batch);
+              const foldedResults = calls.tryReadyWithTable(preview, interrupted);
+              if (foldedResults !== undefined) {
+                return await this.withSteering(turn, {
+                  pendingTaskReplies: batch,
+                  runtimeResults: foldedResults,
+                });
+              }
+            }
+            await this.applyRunMessages(batch, turn);
+            continue;
+          }
           const result = await this.handleWorkflowMessage(next.message, turn);
           if (result !== undefined) calls?.acceptRun(result, next.message);
           continue;
@@ -344,16 +386,20 @@ export class SessionExecution {
     }
   }
 
-  private async startCallWait(
-    paused: Extract<TurnPause, { readonly on: "calls" }>,
-  ): Promise<CallWait> {
-    const dispatched = paused.dispatch ? await this.dispatchRuns() : [];
-    const wait = new CallWait(this.input, paused.callIds, dispatched);
-    await wait.answerTaskToolCalls(paused.taskToolCalls);
-    return wait;
+  private async startCallWait(paused: Extract<TurnPause, { readonly on: "calls" }>): Promise<{
+    readonly pending?: PendingDispatch;
+    readonly wait: CallWait;
+  }> {
+    const dispatched = paused.dispatch ? await this.dispatchRuns() : undefined;
+    const wait = new CallWait(this.input, paused.callIds, dispatched?.results ?? []);
+    await wait.answerTaskToolCalls(paused.taskToolCalls, paused.pausedAtMs);
+    return { pending: dispatched?.pending, wait };
   }
 
-  private async dispatchRuns(): Promise<readonly RuntimeActionResult[]> {
+  private async dispatchRuns(): Promise<{
+    readonly pending?: PendingDispatch;
+    readonly results: readonly RuntimeActionResult[];
+  }> {
     const { cursor } = this.input;
     const dispatched = await cursor.advance(({ serializedContext, sessionState }) =>
       this.input.host.dispatchRuns({
@@ -365,12 +411,11 @@ export class SessionExecution {
       }),
     );
     const { executing, refused, started } = dispatched.pending;
-    if (executing.length > 0 || started.length > 0 || refused.length > 0) {
-      await cursor.advance((state) =>
-        publishDispatchedCallsStep({ ...state, pending: dispatched.pending }),
-      );
-    }
-    return dispatched.results;
+    const hasPending = executing.length > 0 || started.length > 0 || refused.length > 0;
+    return {
+      ...(hasPending && { pending: dispatched.pending }),
+      results: dispatched.results,
+    };
   }
 
   async handleWorkflowMessage(
@@ -426,6 +471,46 @@ class CallWait {
 
   async ready(interrupted: boolean): Promise<RuntimeActionResultStepInput | undefined> {
     this.taskWaits = await this.resolveTaskWaits(interrupted);
+    return this.collectReady();
+  }
+
+  tryReadyWithTable(
+    table: TaskTable,
+    interrupted: boolean,
+  ): RuntimeActionResultStepInput | undefined {
+    if (this.taskWaits.length === 0) return undefined;
+    const extra: RuntimeActionResult[] = [];
+    const extraAccepted = new Map<string, number>();
+    const now = Date.now();
+    for (const wait of this.taskWaits) {
+      const result = taskWaitResult(table, { interrupted, timedOut: wait.timedOut });
+      if (result === undefined) return undefined;
+      const text = renderTaskWaitResult(result, now - wait.startedAtMs);
+      extra.push(taskToolResult(wait.callId, TASK_WAIT_TOOL_NAME, text));
+      extraAccepted.set(wait.callId, now);
+    }
+    const ready = resolveRuntimeActionResultsForCallIds({
+      pendingCallIds: this.callIds,
+      results: [...this.results, ...extra],
+    });
+    if (ready === undefined) return undefined;
+    const delegatedUsage = ready.flatMap((result) => {
+      const usage = this.delegatedUsage.get(result.callId);
+      return usage === undefined ? [] : [[result.callId, usage] as const];
+    });
+    return {
+      acceptedAtMsByCallId: Object.fromEntries(
+        ready.map((result) => [
+          result.callId,
+          this.acceptedAtMs.get(result.callId) ?? extraAccepted.get(result.callId)!,
+        ]),
+      ),
+      ...(delegatedUsage.length > 0 && { delegatedUsage: Object.fromEntries(delegatedUsage) }),
+      results: ready,
+    };
+  }
+
+  private collectReady(): RuntimeActionResultStepInput | undefined {
     const ready = resolveRuntimeActionResultsForCallIds({
       pendingCallIds: this.callIds,
       results: this.results,
@@ -484,9 +569,10 @@ class CallWait {
     await Promise.all(runs.map((run) => interruptWorkflowToolRun(run)));
   }
 
-  async answerTaskToolCalls(calls: readonly TaskToolCall[]): Promise<void> {
+  async answerTaskToolCalls(calls: readonly TaskToolCall[], pausedAtMs?: number): Promise<void> {
     const waits: TaskWait[] = [];
-    const startedAtMs = calls.length === 0 ? 0 : await startTaskToolCallsStep();
+    const hasWait = calls.some((call) => call.kind === TASK_WAIT_TOOL_NAME);
+    const startedAtMs = !hasWait ? 0 : (pausedAtMs ?? (await startTaskToolCallsStep()));
     for (const call of calls) {
       if (call.kind === TASK_WAIT_TOOL_NAME) {
         waits.push(startTaskWait(call, startedAtMs, this.until));
@@ -524,6 +610,32 @@ interface TaskWait {
   readonly startedAtMs: number;
   readonly timer?: Promise<string>;
   timedOut: boolean;
+}
+
+function isTaskReplyMessage(message: WorkflowToolRunMessage): message is TaskReplyMessage {
+  return message.kind === "reply" && message.from.taskId !== undefined;
+}
+
+function previewTaskReplies(
+  cursor: SessionStateCursor,
+  messages: readonly TaskReplyMessage[],
+): TaskTable {
+  const sessionState = cursor.sessionState.snapshot.session.state;
+  const view = storedProjection(sessionState).view;
+  let table = sessionTaskTable(cursor);
+  for (const message of messages) {
+    const taskId = message.from.taskId;
+    if (taskId === undefined) continue;
+    if (view?.tasks[taskId]?.status === "ended") continue;
+    if (!isActiveTaskRun(table, taskId, message.from.runId)) continue;
+    if (findTask(table, taskId)?.run?.runId !== message.from.runId) continue;
+    table = settleTaskCalls(table, {
+      callIds: message.callIds,
+      outcome: { output: message.output, status: "completed" },
+      taskId,
+    }).table;
+  }
+  return table;
 }
 
 function startTaskWait(

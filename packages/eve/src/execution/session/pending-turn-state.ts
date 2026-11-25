@@ -17,6 +17,7 @@ export type TurnPause =
       readonly on: "calls";
       readonly callIds: readonly string[];
       readonly dispatch: boolean;
+      readonly pausedAtMs?: number;
       readonly taskToolCalls: readonly TaskToolCall[];
     };
 
@@ -45,6 +46,7 @@ export function pausedOnCalls(session: HarnessSession): TurnPause | undefined {
     callIds: waiting.callIds,
     dispatch: waiting.tasks.length > 0,
     on: "calls",
+    ...(waiting.taskToolCalls.length > 0 && { pausedAtMs: Date.now() }),
     taskToolCalls: waiting.taskToolCalls,
   };
 }

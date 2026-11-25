@@ -64,7 +64,12 @@ import {
   dropClosedRecords,
   sessionView,
 } from "#harness/session-machine/commit.js";
-import { matchSignIns, receive } from "#harness/session-machine/transitions.js";
+import { applyTaskRunMessage } from "#execution/tasks/steps.js";
+import {
+  matchSignIns,
+  receive,
+  startDispatchedCalls,
+} from "#harness/session-machine/transitions.js";
 import type { DeliverPayload, SessionAuthContext } from "#channel/types.js";
 import { coalesceTurnInputs, validateHarnessModelMessages } from "#harness/messages.js";
 import type { HarnessSession, HarnessStepInput, StepInput, StepResult } from "#harness/types.js";
@@ -84,6 +89,7 @@ import type {
 import { pausedOrParked, resolveSessionStepResult } from "#execution/session/turn-step-result.js";
 import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
 import {
+  commitSessionStep,
   foldOrphanedLines,
   openSessionEventPublisher,
   readOrphanedLines,
@@ -198,8 +204,44 @@ async function runSessionStep(
   host: SessionStepHost,
 ): Promise<DurableStepResult> {
   const pendingAttributes: PendingStepAttributes = {};
+  let current = input;
+  const pendingDispatch = current.input?.pendingDispatch;
+  if (pendingDispatch !== undefined) {
+    const published = await commitSessionStep(
+      {
+        rerun: current.rerun,
+        serializedContext: current.serializedContext,
+        sessionState: current.sessionState,
+        sessionWritable: current.sessionWritable,
+      },
+      (view) => [startDispatchedCalls(view, pendingDispatch)],
+      { origin: "own" },
+    );
+    current = {
+      ...current,
+      serializedContext: published.serializedContext,
+      sessionState: published.sessionState,
+    };
+  }
+  const pendingTaskReplies = current.input?.pendingTaskReplies;
+  if (pendingTaskReplies !== undefined && pendingTaskReplies.length > 0) {
+    for (const message of pendingTaskReplies) {
+      const applied = await applyTaskRunMessage({
+        message,
+        rerun: current.rerun,
+        serializedContext: current.serializedContext,
+        sessionState: current.sessionState,
+        sessionWritable: current.sessionWritable,
+      });
+      current = {
+        ...current,
+        serializedContext: applied.serializedContext,
+        sessionState: applied.sessionState,
+      };
+    }
+  }
   try {
-    return await runSessionStepBody(input, pendingAttributes, host);
+    return await runSessionStepBody(current, pendingAttributes, host);
   } finally {
     const usageWrite = writePendingUsage(pendingAttributes, host);
     try {
