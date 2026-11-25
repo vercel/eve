@@ -209,7 +209,8 @@ export class ModelCaller {
 
   async abandon(): Promise<void> {
     this.input.generation.end();
-    this.step.session = changeHistory(this.step.session, { extend: await this.discard("retried") });
+    const history = await this.discard("retried");
+    this.step.session = changeHistory(this.step.session, { extend: history });
   }
 
   async steered(): Promise<StepResult> {
