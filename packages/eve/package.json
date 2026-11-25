@@ -419,6 +419,10 @@
       "default": "./dist/src/public/instrumentation/otel.js"
     },
     "./schedules": {
+      "workflow": {
+        "eve-source": "./src/public/schedules/static.ts",
+        "default": "./dist/src/public/schedules/static.js"
+      },
       "eve-source": "./src/public/schedules/index.ts",
       "types": "./dist/src/public/schedules/index.d.ts",
       "import": "./dist/src/public/schedules/index.js",
