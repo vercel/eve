@@ -324,3 +324,21 @@ it("leaves a message the child admitted after the turn ended pending for the nex
   endChildTurn("second turn");
   await expect(pending.result()).resolves.toMatchObject({ reply: "second turn" });
 });
+
+it("reuses one reply hook across sequential turns to a local agent and disposes it on close", async () => {
+  const { sessions } = serveRun();
+  const reviewer = sessions.open("reviewer");
+
+  const first = await reviewer.send("first");
+  endChildTurn("first reply");
+  await expect(first.result()).resolves.toMatchObject({ reply: "first reply" });
+
+  const secondSend = reviewer.send("second");
+  await landNewestFirst();
+  const second = await secondSend;
+  endChildTurn("second reply");
+  await expect(second.result()).resolves.toMatchObject({ reply: "second reply" });
+
+  expect(mocks.admitted).toEqual(["reply-0", "reply-0"]);
+  await sessions.close();
+});
