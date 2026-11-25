@@ -1001,6 +1001,82 @@ describe("slackChannel message status and guidance", () => {
 
     expect(operations()).toEqual(["assistant.threads.setStatus", "chat.postMessage"]);
   });
+
+  it("overlaps chat.getPermalink with an in-flight status write when completing without deltas", async () => {
+    const status = Promise.withResolvers<void>();
+    const permalink = Promise.withResolvers<void>();
+    const answer = fetchMock.getMockImplementation() as (
+      request: string | URL | Request,
+      init?: RequestInit,
+    ) => Promise<Response>;
+    let permalinkStarted = false;
+    fetchMock.mockImplementation(async (request: string | URL | Request, init?: RequestInit) => {
+      if (String(request).endsWith("assistant.threads.setStatus")) await status.promise;
+      if (String(request).endsWith("chat.getPermalink")) {
+        permalinkStarted = true;
+        permalink.resolve();
+      }
+      return answer(request, init);
+    });
+    const background: Promise<unknown>[] = [];
+    const harness = slackRenderingHarness(
+      slackChannel({ credentials: { botToken: "xoxb-test" } }),
+      { channelId: "C01", teamId: "T01", threadTs: "1700000000.000001" },
+      { waitUntil: (promise) => void background.push(promise) },
+    );
+
+    await harness.step("turn");
+    const replied = harness.event({
+      type: "content.completed",
+      data: { kind: "text", phase: "reply", value: "Sunny.", runId: "r1", partId: "p1" },
+      scope: { runId: "r1", turnId: "t1" },
+    });
+    await permalink.promise;
+    expect(permalinkStarted).toBe(true);
+    status.resolve();
+    await replied;
+    await Promise.all(background);
+
+    const permalinks = fetchMock.mock.calls.filter(([request]) =>
+      String(request).endsWith("chat.getPermalink"),
+    );
+    expect(permalinks).toHaveLength(1);
+  });
+
+  it("prefetches chat.getPermalink on the first text delta and reuses it for that run's final reply", async () => {
+    const background: Promise<unknown>[] = [];
+    const harness = slackRenderingHarness(
+      slackChannel({ credentials: { botToken: "xoxb-test" } }),
+      { channelId: "C01", teamId: "T01", threadTs: "1700000000.000001" },
+      { waitUntil: (promise) => void background.push(promise) },
+    );
+
+    await harness.event({
+      type: "content.delta",
+      data: { delta: "Sun", kind: "text", partId: "p1" },
+      scope: { runId: "r1", turnId: "t1" },
+    });
+    const permalinksAfterDelta = fetchMock.mock.calls.filter(([request]) =>
+      String(request).endsWith("chat.getPermalink"),
+    );
+    expect(permalinksAfterDelta).toHaveLength(1);
+
+    await harness.event({
+      type: "content.completed",
+      data: { kind: "text", phase: "reply", value: "Sunny.", runId: "r1", partId: "p1" },
+      scope: { runId: "r1", turnId: "t1" },
+    });
+    await Promise.all(background);
+
+    const permalinksAfterReply = fetchMock.mock.calls.filter(([request]) =>
+      String(request).endsWith("chat.getPermalink"),
+    );
+    expect(permalinksAfterReply).toHaveLength(1);
+    const posts = fetchMock.mock.calls.filter(([request]) =>
+      String(request).endsWith("chat.postMessage"),
+    );
+    expect(posts).toHaveLength(1);
+  });
 });
 
 describe("slackChannel message edits", () => {
