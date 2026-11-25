@@ -10,6 +10,7 @@ import { takeSessionUsageDelta } from "#harness/session-usage.js";
 import { withSessionUsage } from "#internal/testing/session-usage.js";
 import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import type { HarnessSession } from "#harness/types.js";
+import { closeSessionStreamStep } from "#execution/close-session-stream-step.js";
 import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import {
@@ -21,6 +22,9 @@ import {
   reportSessionSandboxCleanupFailureStep,
 } from "#execution/session/end-sandbox-step.js";
 
+vi.mock("#execution/close-session-stream-step.js", () => ({
+  closeSessionStreamStep: vi.fn(),
+}));
 vi.mock("#execution/terminate-child-sessions-step.js", () => ({
   reportChildSessionTeardownFailureStep: vi.fn(async () => {}),
   terminateChildSessionsStep: vi.fn(async () => {}),
@@ -302,5 +306,60 @@ describe("session finalization with an unsettled caller", () => {
       sessionId: "detector",
       usage,
     });
+  });
+
+  it("finishes sandbox cleanup before notifying a done caller, then overlaps stream close with notification", async () => {
+    const order: string[] = [];
+    const sandbox = Promise.withResolvers<void>();
+    const streamClose = Promise.withResolvers<void>();
+    const notify = Promise.withResolvers<void>();
+    let closeStarted = false;
+    let notifyStarted = false;
+
+    vi.mocked(endSessionSandboxStep).mockImplementation(async () => {
+      order.push("sandbox:start");
+      await sandbox.promise;
+      order.push("sandbox:end");
+    });
+    vi.mocked(closeSessionStreamStep).mockImplementation(async () => {
+      order.push("close:start");
+      closeStarted = true;
+      if (notifyStarted) {
+        streamClose.resolve();
+        notify.resolve();
+      }
+      await streamClose.promise;
+    });
+    vi.mocked(notifyTurnCallerStep).mockImplementation(async () => {
+      order.push("notify:start");
+      notifyStarted = true;
+      if (closeStarted) {
+        streamClose.resolve();
+        notify.resolve();
+      }
+      await notify.promise;
+    });
+
+    const caller = {
+      callId: "delegate",
+      subagentName: "detector",
+      replyTo: { kind: "hook" as const, token: "parent" },
+    };
+    const pending = finalizeSession(
+      { kind: "done", action: { kind: "done", output: "finished" } },
+      {
+        caller,
+        cursor: { serializedContext: {}, sessionState: sessionWithUnreportedUsage() },
+        sessionWritable: new WritableStream(),
+      },
+    );
+
+    await vi.waitFor(() => expect(order).toEqual(["sandbox:start"]));
+    expect(notifyTurnCallerStep).not.toHaveBeenCalled();
+    sandbox.resolve();
+
+    await expect(pending).resolves.toMatchObject({ output: "finished" });
+    expect(order.slice(0, 2)).toEqual(["sandbox:start", "sandbox:end"]);
+    expect(new Set(order.slice(2))).toEqual(new Set(["close:start", "notify:start"]));
   });
 });

@@ -95,6 +95,26 @@ export async function finalizeSession(
   const stored = storedProjection(session?.state);
   const latestTurnId = latestTurnIdOf(stored);
   const latest = latestTurnId === undefined ? undefined : turnCoordinatesOf(stored, latestTurnId);
+  const settled = settledResult(outcome, context);
+  if (outcome.kind === "done" && context.caller !== undefined) {
+    const sessionId = sessionState?.sessionId ?? (serializedContext["eve.sessionId"] as string);
+    const [closeResult, notifyResult] = await Promise.allSettled([
+      closeSessionStreamStep({ sessionWritable: context.sessionWritable }),
+      notifyTurnCallerStep({
+        caller: context.caller,
+        lifecycle: "terminal",
+        sessionId,
+        settled: {
+          ...(settled.isError && { isError: true }),
+          output: settled.output,
+          usage: settled.turnUsage,
+        },
+      }),
+    ]);
+    if (closeResult.status === "rejected") throw closeResult.reason;
+    if (notifyResult.status === "rejected") throw notifyResult.reason;
+    return entryResult(outcome, settled);
+  }
   if (outcome.kind === "expired" || outcome.kind === "ended") {
     await emitTerminalSessionCompletionStep({
       cause: outcome.kind === "ended" ? outcome.cause : undefined,
@@ -121,7 +141,6 @@ export async function finalizeSession(
     await closeSessionStreamStep({ sessionWritable: context.sessionWritable });
   }
 
-  const settled = settledResult(outcome, context);
   if (context.caller !== undefined) {
     const sessionId = sessionState?.sessionId ?? (serializedContext["eve.sessionId"] as string);
     if (outcome.kind === "ended" && outcome.cancelled !== undefined) {
@@ -149,6 +168,13 @@ export async function finalizeSession(
       });
     }
   }
+  return entryResult(outcome, settled);
+}
+
+function entryResult(
+  outcome: SessionTerminalOutcome,
+  settled: ReturnType<typeof settledResult>,
+): WorkflowEntryResult {
   return outcome.kind === "done"
     ? {
         isError: outcome.action.isError,

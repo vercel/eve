@@ -12,7 +12,10 @@ import type { SessionPredecessor } from "#protocol/session-events/families/sessi
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { loadCompiledSessionAgent } from "#runtime/sessions/compiled-session-agent.js";
 import type { SessionAgent } from "#runtime/sessions/session-agent.js";
-import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
+import {
+  assertDynamicSubagentConfigSelected,
+  type DynamicSubagentAgentConfig,
+} from "#runtime/subagents/dynamic-agent-config.js";
 import { validateToolStubTargets } from "#tool-stubs/validate-targets.js";
 
 export interface SessionRuntimeConfig {
@@ -56,6 +59,10 @@ export async function prepareInitialEntry(
     compiledArtifactsSource: config.compiledArtifactsSource,
     nodeId: config.nodeId,
   });
+  assertDynamicSubagentConfigSelected(
+    agent.compiled?.turnAgent.configResolver,
+    config.dynamicSubagentAgentConfig,
+  );
   const graph = agent.compiled?.graph;
   if (
     graph !== undefined &&

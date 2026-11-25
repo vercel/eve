@@ -1,3 +1,4 @@
+import { assertDynamicSubagentConfigSelected } from "#runtime/subagents/dynamic-agent-config.js";
 import { checksSessionEvents } from "#shared/dev-checks.js";
 import { createToolChannelTo } from "#execution/tools/channel-to.js";
 import { channelOf } from "#definitions/frame.js";
@@ -237,6 +238,10 @@ async function runSessionStepBody(
   const adapter = ctx.require(ChannelKey);
   const agent = sessionAgent(ctx);
   const bundle = requireCompiledBundle(ctx);
+  assertDynamicSubagentConfigSelected(
+    bundle.turnAgent.configResolver,
+    input.serializedContext["eve.dynamicSubagentAgentConfig"],
+  );
 
   if (host.callbackBaseUrl !== undefined) ctx.set(CallbackBaseUrlKey, host.callbackBaseUrl);
 
