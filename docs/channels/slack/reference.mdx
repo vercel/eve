@@ -645,6 +645,29 @@ The final reply can still fail: the upload fails, Slack returns another error, o
 - The next message tells the model its reply wasn't delivered.
 - Other failed posts, such as status updates, are logged and skipped.
 
+### Stream replies
+
+With `experimental: { streaming: true }`, a reply streams into the thread as the model writes it, through Slack's `chat.startStream`, `chat.appendStream`, and `chat.stopStream`. The option has no compatibility promise.
+
+```ts title="agent/channels/slack.ts"
+import { slackChannel } from "eve/channels/slack";
+
+export default slackChannel({
+  experimental: { streaming: true },
+});
+```
+
+- A reply starts streaming once it passes 280 characters, and appends at most once a second. Shorter replies post whole, and so does a quiet turn's text until the turn shows its work.
+- Whether text is the reply or narration before a tool call is known only when it ends. Narration that passed 280 characters streams, and eve removes it once the model calls the tool.
+- What streams is the text that reaches eve's default `content.delta`, so your [renderers](#customize-rendering) decide it: a `content.delta` handler can pass a delta on with `next()`, change it, or drop it.
+- A renderer that handles `content.completed` must opt in with `experimental: { streamsReplies: true }`. Set it when the handler doesn't change the reply text, as with the [feedback buttons](#customize-rendering) renderer, or when its `content.delta` handler makes the same change. Until every such renderer opts in, or when one sets `streamsReplies: false`, replies post whole and eve logs a warning.
+- The completed reply still runs through your renderers. Delivering it with `next()` or `postCompletedSlackReply` closes the streamed message, and rewrites it with `chat.update` when a renderer changed the text or added blocks. A renderer that posts with `ctx.channel.thread.post` instead keeps its own message, and eve removes the streamed one.
+- Text the model run never completes, such as a failed attempt's or text a content filter cut off, is removed when the run ends. If the process dies mid-stream, the partial message stays, and Slack finalizes it after 10 minutes.
+- Streaming needs a thread, or a code channel, where it streams top-level. Outside a DM, it also needs the Slack user who triggered the turn. Without them, or when Slack refuses to start a stream, the reply posts whole.
+- When Slack rate-limits an append, eve waits twice as long before the next one, up to 30 seconds. When an append fails otherwise, the stream passes 12,000 characters, or Slack's 10-minute stream limit ends it, eve rewrites the message with the full reply when it finishes, or removes it and posts the reply with the usual fallbacks.
+- When someone presses stop on a streaming reply, Slack keeps what streamed and eve doesn't post the rest.
+- Streaming uses only the `chat:write` scope.
+
 Text the model writes while its tasks keep working posts as its own message, and the reply after the results posts as another. A schedule's session posts only the final reply.
 
 Outbound `@name` text stays literal. To mention a user, write `<@USER_ID>`, or call `ctx.channel.thread.mentionUser(userId)` in a renderer.
@@ -729,6 +752,7 @@ Public channels are `public`; DMs, group DMs, and private channels are `private`
 | `messageContext`  | Off                                                         | `{ users }` adds sender names, and emails with `email: true`, to model context. See [Add sender names and emails](#add-sender-names-and-emails). |
 | `threadContext`   | Off                                                         | Load earlier thread replies. `{}` means `since: "thread-root"`. See [Load prior thread messages](#load-prior-thread-messages).                   |
 | `codeChannels`    | `false`                                                     | Serve Slack code channels as one session each. See [Serve Slack code channels](#serve-slack-code-channels).                                      |
+| `experimental`    | Off                                                         | `{ streaming }` streams replies as the model writes them. See [Stream replies](#stream-replies).                                                 |
 | `uploadPolicy`    | Any media type, up to 25 MB                                 | `"disabled"` or `{ maxBytes, allowedMediaTypes }` for inbound files.                                                                             |
 | `approvalChannel` | `"thread"`                                                  | `(request, ctx) => "thread" \| "ephemeral" \| "direct-message"`. See [Human-in-the-loop](#human-in-the-loop-hitl).                               |
 | `renderers`       | eve's default renderer                                      | Renderers that wrap eve's default. See [Customize rendering](#customize-rendering).                                                              |
@@ -1044,6 +1068,8 @@ import { connectSlackCredentials } from "@vercel/connect/eve";
 import { defineSlackRenderer, slackChannel } from "eve/channels/slack";
 
 const feedback = defineSlackRenderer({
+  // Keeps replies streaming; this renderer leaves the reply text as is.
+  experimental: { streamsReplies: true },
   events: {
     async "content.completed"(event, ctx, next) {
       await next(); // eve posts the reply, or uploads a long one as a snippet

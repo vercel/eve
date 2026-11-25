@@ -5,11 +5,12 @@ import {
   truncateMessageText,
 } from "#public/channels/slack/limits.js";
 import { reportUndeliveredReply } from "#public/channels/undelivered-reply.js";
+import { finishSlackReplyStream } from "#public/channels/slack/reply-stream.js";
 import type {
   SlackChannelInternalEvents,
-  SlackChannelContext,
   SlackContext,
 } from "#public/channels/slack/slackChannel.js";
+import { threadRootIsGone } from "#public/channels/slack/thread-root.js";
 
 const log = createLogger("slack.reply");
 const LONG_RESPONSE_FILENAME = "eve-response.md";
@@ -60,10 +61,16 @@ export type SlackCompletedReply =
  *    This requires the `files:write` bot scope. In a session without a
  *    thread yet, the note posts first and anchors the thread.
  *
- * Before any of that, while eve has not yet posted in the thread, it checks
- * that the bound thread's root still exists. Slack posts a reply to a
- * deleted root as a top-level channel message, so eve drops the reply
- * instead of posting it unthreaded.
+ * Before any of that, when the channel streamed this reply as it was written
+ * (`experimental.streaming`), eve finalizes the streamed message with your
+ * reply instead of posting a new one, rewriting it when the content differs.
+ * If Slack won't show your reply there, eve removes the streamed message and
+ * goes on as below.
+ *
+ * While eve has not yet posted in the thread, it checks that the bound
+ * thread's root still exists. Slack posts a reply to a deleted root as a
+ * top-level channel message, so eve drops the reply instead of posting it
+ * unthreaded.
  *
  * Any other error, and a failed upload, is thrown so your renderer sees it.
  * eve logs each fallback it takes with Slack's error code, never the reply.
@@ -91,6 +98,7 @@ export async function deliverCompletedSlackReply(
   logFields: { readonly turnId?: string },
 ): Promise<void> {
   const { blocks, markdown, text } = typeof reply === "string" ? { markdown: reply } : reply;
+  if (await finishSlackReplyStream(channel, { blocks, markdown, text })) return;
   if (await threadRootIsGone(channel)) {
     log.warn(ROOT_GONE_LOG, logFields);
     return;
@@ -121,21 +129,6 @@ export async function deliverCompletedSlackReply(
     log.warn(FALLBACK_LOG, { fallback: "snippet", slackError, ...logFields });
   }
   await uploadReplySnippet(channel, markdown);
-}
-
-async function threadRootIsGone(channel: SlackContext): Promise<boolean> {
-  const { channelId, codeChannel, threadTs } = channel.slack;
-  if (!channelId || !threadTs || codeChannel) return false;
-  if ((channel as Partial<SlackChannelContext>).state?.postedInThread === true) return false;
-  try {
-    const response = await channel.slack.request("chat.getPermalink", {
-      channel: channelId,
-      message_ts: threadTs,
-    });
-    return response.ok !== true && response.error === "message_not_found";
-  } catch {
-    return false;
-  }
 }
 
 async function uploadReplySnippet(channel: SlackContext, message: string): Promise<void> {
