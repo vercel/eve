@@ -779,8 +779,18 @@ test("watch and unwatch keep working after the watch channel changes", async () 
       watchChannel,
     });
   await watchIn("eve-config/before", "w-before");
+  const locks = (watchChannel: string) =>
+    client().threads({ channel: watchChannel, label: ["eve-lock=registration"] });
+  const [lock] = await locks("eve-config/before");
+  const held = await client().claim(lock!.message.id, 30);
 
-  await watchIn("eve-config/after", "w-after1");
+  const waiting = watchIn("eve-config/after", "w-after1");
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  assert.deepEqual(Object.keys((await heldRegistration(client()))!.watch), ["w-before"]);
+  await client().held(held).release();
+  await waiting;
+
+  assert.deepEqual(await locks("eve-config/after"), []);
   assert.deepEqual(
     await removeWatch({ client: client(), id: "w-after1", watchChannel: "eve-config/after" }),
     { id: "w-after1", removed: true },
