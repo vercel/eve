@@ -767,6 +767,27 @@ test("unwatch takes only a watch ID, and a retired record shows up as a problem"
   assert.match(listed?.problem ?? "", /retired, so it never fires/u);
 });
 
+test("watch and unwatch keep working after the watch channel changes", async () => {
+  await startBoard();
+  const watchIn = (watchChannel: string, id: string) =>
+    createWatch({
+      action: converse,
+      client: client(),
+      id,
+      instructions: "Summarize it.",
+      tail: "incidents",
+      watchChannel,
+    });
+  await watchIn("eve-config/before", "w-before");
+
+  await watchIn("eve-config/after", "w-after1");
+  assert.deepEqual(
+    await removeWatch({ client: client(), id: "w-after1", watchChannel: "eve-config/after" }),
+    { id: "w-after1", removed: true },
+  );
+  assert.deepEqual(Object.keys((await heldRegistration(client()))!.watch), ["w-before"]);
+});
+
 test("a watch the board refuses leaves its record retired, and a retry revives it", async () => {
   await startBoard();
   const create = (tail: string) =>

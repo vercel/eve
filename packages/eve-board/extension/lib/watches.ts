@@ -10,6 +10,7 @@ import {
   BOARD_NAME_PATTERN,
   boardAllows,
   boardErrorCode,
+  boardPostId,
   createBoardClient,
   type BoardCan,
   type BoardClaimedTask,
@@ -353,7 +354,7 @@ async function lockTask(client: BoardClient, watchChannel: string): Promise<stri
     return lock.id;
   }
   const created = await client.createTask(watchChannel, {
-    id: "eve-watch-lock",
+    id: boardPostId(`watch-lock:${watchChannel}`),
     labels: { [LOCK_LABEL]: "registration" },
     noSync: true,
     text: "eve holds this task while it changes its board watches, so two changes never overwrite each other. Leave it open.",
