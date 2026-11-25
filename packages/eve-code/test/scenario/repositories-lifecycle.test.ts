@@ -991,3 +991,39 @@ test("background bash clone keeps pending reconcile across polls until exit, syn
     await rm(root, { force: true, recursive: true });
   }
 });
+
+test("propagates rule-file overflow paths into the overflow instruction when exceeding maxTotalBytes", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "eve-code-lifecycle-rule-overflow-")));
+  try {
+    const workspace = join(root, "workspace");
+    await initUpstreamRepo(workspace, {
+      "BIG_RULE.md": `${"r".repeat(600)}\n`,
+    });
+
+    extension({
+      repositories: {
+        instructions: [],
+        maxTotalBytes: 200,
+        rules: [
+          {
+            files: ["BIG_RULE.md"],
+          },
+        ],
+      },
+    });
+
+    const sandbox = createRealSandboxAccess(workspace);
+    const session = createSessionHarness(sandbox.access, "session-rule-overflow");
+
+    await session.startTurn("turn_1");
+    const call1 = await session.nextModelCall();
+    assert.equal(call1.newUserInstructions.length, 1);
+    assert.match(
+      call1.newUserInstructions[0] ?? "",
+      /exceeded the automatic instruction byte budget/u,
+    );
+    assert.match(call1.newUserInstructions[0] ?? "", /BIG_RULE\.md/u);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});

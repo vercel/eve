@@ -1108,9 +1108,12 @@ export async function readRepositorySpecFiles(
   repoRoot: string,
   specs: readonly RepositoryInstructionSpec[],
   options: ReadRepositoryFileOptions & { readonly maxTotalBytes?: number } = {},
-): Promise<readonly RepositoryInstructionFile[]> {
+): Promise<{
+  readonly files: readonly RepositoryInstructionFile[];
+  readonly overflowPaths: readonly string[];
+}> {
   const normalized = normalizeSpecs(specs);
-  if (normalized.length === 0) return [];
+  if (normalized.length === 0) return { files: [], overflowPaths: [] };
   const maxFileBytes = validateMaxFileBytes(options.maxFileBytes);
   const maxTotalBytes = validateMaxTotalBytes(options.maxTotalBytes);
   const boundary = createBoundary();
@@ -1133,7 +1136,10 @@ export async function readRepositorySpecFiles(
     throw new Error(`Could not read repository instruction files: ${commandFailureDetail(result)}`);
   }
   const parsed = parseProtocolOutput(result.stdout, boundary, maxFileBytes);
-  return parsed.files.map((entry) => entry.file);
+  return {
+    files: parsed.files.map((entry) => entry.file),
+    overflowPaths: parsed.overflowPaths,
+  };
 }
 
 export async function findEnclosingRepository(

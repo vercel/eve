@@ -435,13 +435,16 @@ async function readMatchingRuleFiles(
   sandbox: RepositorySandbox,
   repo: DiscoveredRepository,
   resolved: ResolvedRepositoriesConfig,
-): Promise<readonly RepositoryInstructionFile[]> {
+): Promise<{
+  readonly files: readonly RepositoryInstructionFile[];
+  readonly overflowPaths: readonly string[];
+}> {
   const specs: RepositoryInstructionSpec[] = [];
   for (const rule of resolved.rules) {
     if (!matchesRepositoryRule(repo, rule.match)) continue;
     if (rule.files !== undefined) specs.push(...rule.files);
   }
-  if (specs.length === 0) return [];
+  if (specs.length === 0) return { files: [], overflowPaths: [] };
   const loaded = await readRepositorySpecFiles(sandbox, repo.root, specs, {
     maxFileBytes: resolved.maxFileBytes,
     maxTotalBytes: resolved.maxTotalBytes,
@@ -449,12 +452,12 @@ async function readMatchingRuleFiles(
   const defaultPaths = new Set(repo.instructions.map((file) => file.relativePath));
   const seen = new Set<string>();
   const unique: RepositoryInstructionFile[] = [];
-  for (const file of loaded) {
+  for (const file of loaded.files) {
     if (defaultPaths.has(file.relativePath) || seen.has(file.relativePath)) continue;
     seen.add(file.relativePath);
     unique.push(file);
   }
-  return unique;
+  return { files: unique, overflowPaths: loaded.overflowPaths };
 }
 
 function errorMessage(error: unknown): string {
@@ -485,10 +488,16 @@ export async function onboardRepository(
   repo: DiscoveredRepository,
   resolved: ResolvedRepositoriesConfig,
   ruleCtx: RepositoryRuleContext,
-): Promise<RecordedRepository> {
+): Promise<{
+  readonly repo: RecordedRepository;
+  readonly overflowPaths: readonly string[];
+}> {
   let ruleFiles: readonly RepositoryInstructionFile[] = [];
+  let ruleOverflowPaths: readonly string[] = [];
   try {
-    ruleFiles = await readMatchingRuleFiles(sandbox, repo, resolved);
+    const matched = await readMatchingRuleFiles(sandbox, repo, resolved);
+    ruleFiles = matched.files;
+    ruleOverflowPaths = matched.overflowPaths;
   } catch {}
   const entered: EnteredRepository = {
     ...repo,
@@ -560,17 +569,20 @@ export async function onboardRepository(
   }
 
   return {
-    root: repo.root,
-    slug: repo.slug,
-    remote: repo.remote,
-    head: repo.head,
-    branch: repo.branch,
-    sparse: repo.sparse,
-    instructions: repo.instructions,
-    ruleFiles,
-    ruleInstructions,
-    ruleSkills,
-    enteredAtHead: repo.head,
+    repo: {
+      root: repo.root,
+      slug: repo.slug,
+      remote: repo.remote,
+      head: repo.head,
+      branch: repo.branch,
+      sparse: repo.sparse,
+      instructions: repo.instructions,
+      ruleFiles,
+      ruleInstructions,
+      ruleSkills,
+      enteredAtHead: repo.head,
+    },
+    overflowPaths: ruleOverflowPaths,
   };
 }
 
@@ -626,7 +638,9 @@ export async function reconcileWorkspace(
   for (const repo of discoveredRepos.values()) {
     const existing = snapshot.byRoot[repo.root];
     if (existing === undefined) {
-      upsertedRepos[repo.root] = await onboardRepository(sandbox, repo, resolved, ruleCtx);
+      const onboarded = await onboardRepository(sandbox, repo, resolved, ruleCtx);
+      upsertedRepos[repo.root] = onboarded.repo;
+      extraOverflowPaths.push(...onboarded.overflowPaths);
       changed = true;
       continue;
     }
@@ -640,7 +654,9 @@ export async function reconcileWorkspace(
       : [];
     if (hasRuleFileSpecs) {
       try {
-        ruleFiles = await readMatchingRuleFiles(sandbox, repo, resolved);
+        const matched = await readMatchingRuleFiles(sandbox, repo, resolved);
+        ruleFiles = matched.files;
+        extraOverflowPaths.push(...matched.overflowPaths);
       } catch {}
     }
 
@@ -790,7 +806,9 @@ export async function reconcileTouchedFile(
   const skippedEnclosingRoots: string[] = [];
   if (probe.enclosingRepo !== null && !(probe.enclosingRepo.root in current.byRoot)) {
     if (Object.keys(current.byRoot).length < MAX_DISCOVERED_REPOSITORIES) {
-      onboarded = await onboardRepository(sandbox, probe.enclosingRepo, resolved, ruleCtx);
+      const entered = await onboardRepository(sandbox, probe.enclosingRepo, resolved, ruleCtx);
+      onboarded = entered.repo;
+      skippedEnclosingRoots.push(...entered.overflowPaths);
     } else {
       skippedEnclosingRoots.push(probe.enclosingRepo.root);
     }
@@ -914,7 +932,9 @@ export async function discoverWorkspaceReadOnly(
     }
     let ruleFiles: readonly RepositoryInstructionFile[] = [];
     try {
-      ruleFiles = await readMatchingRuleFiles(sandbox, repo, resolved);
+      const matched = await readMatchingRuleFiles(sandbox, repo, resolved);
+      ruleFiles = matched.files;
+      extraOverflow.push(...matched.overflowPaths);
     } catch {}
     byRoot[repo.root] = {
       root: repo.root,
