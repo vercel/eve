@@ -28,6 +28,7 @@ import { isReservedSessionCommandToken } from "#execution/session-inbox/address.
 import { contextStorage } from "#context/container.js";
 import { readSessionSchedule } from "#context/session-schedule.js";
 import { validateSessionHistory } from "#shared/session-history.js";
+import type { ImportedMessage } from "#protocol/session-events/families/delivery.js";
 
 interface BaseChannelAddressCreateOptions {
   readonly auth: SessionAuthContext | null;
@@ -290,7 +291,9 @@ export function createChannelAddressFn<TState = undefined>(input: {
   return (continuationToken) => createChannelAddress({ ...input, continuationToken });
 }
 
-function withValidatedHistory(payload: SendPayload): SendPayload {
+function withValidatedHistory(
+  payload: SendPayload,
+): SendPayload & { readonly history?: readonly ImportedMessage[] } {
   const { history, ...rest } = payload;
   const validated = validateSessionHistory(history);
   return validated === undefined ? rest : { ...rest, history: validated };

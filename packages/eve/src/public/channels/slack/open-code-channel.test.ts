@@ -21,6 +21,28 @@ function toolContext(metadata: Record<string, unknown> | undefined) {
             { type: "tool-call" as const, toolCallId: "t1", toolName: "read_file", input: {} },
           ],
         },
+        {
+          role: "tool" as const,
+          content: [
+            {
+              type: "tool-result" as const,
+              toolCallId: "t1",
+              toolName: "read_file",
+              output: { type: "text" as const, value: "expect(status).toBe(200)" },
+            },
+          ],
+        },
+        {
+          role: "assistant" as const,
+          content: [
+            {
+              type: "tool-call" as const,
+              toolCallId: "t2",
+              toolName: "open_code_channel",
+              input: { message: "Start by reproducing it." },
+            },
+          ],
+        },
       ],
       session: { auth: { current: null, initiator: null }, id: "session_thread" },
       to,
@@ -51,7 +73,7 @@ describe("openCodeChannel", () => {
     });
   });
 
-  it("opens the channel from the triggering message with the conversation's text as history", async () => {
+  it("opens the channel from the triggering message with the conversation and its finished tool calls as history", async () => {
     const { ctx, send, to } = toolContext({
       channelId: "C_ORIGIN",
       installationTeamId: "T01",
@@ -75,7 +97,19 @@ describe("openCodeChannel", () => {
       auth: null,
       history: [
         { role: "user", text: "Alice asks why the login test fails." },
-        { role: "assistant", text: "Let me look." },
+        {
+          parts: [
+            { text: "Let me look.", type: "text" },
+            {
+              callId: "t1",
+              input: {},
+              name: "read_file",
+              output: "expect(status).toBe(200)",
+              type: "tool",
+            },
+          ],
+          role: "assistant",
+        },
       ],
       idempotencyKey: "session_thread:call_1",
     });

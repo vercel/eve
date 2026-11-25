@@ -1,4 +1,4 @@
-import type { SessionHistoryMessage } from "#shared/session-history.js";
+import { historyFromMessages } from "#shared/history-from-messages.js";
 import type { ToolContext } from "#tools/definition.js";
 import type { SlackChannel, SlackOpenCodeChannelOptions } from "./slackChannel.js";
 
@@ -51,7 +51,7 @@ export async function openCodeChannel(
     })
     .send(message, {
       auth: ctx.session.auth.current,
-      history: textHistory(ctx.messages),
+      history: historyFromMessages(ctx.messages),
       idempotencyKey: `${ctx.session.id}:${ctx.callId}`,
     });
   return { sessionId: delivery.sessionId, status: "opened" };
@@ -59,15 +59,4 @@ export async function openCodeChannel(
 
 function unavailable(reason: string): SlackCodeChannelOpenResult {
   return { reason, status: "unavailable" };
-}
-
-function textHistory(messages: ToolContext["messages"]): SessionHistoryMessage[] {
-  return messages.flatMap((entry) => {
-    if (entry.role !== "user" && entry.role !== "assistant") return [];
-    const text =
-      typeof entry.content === "string"
-        ? entry.content
-        : entry.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("");
-    return text === "" ? [] : [{ role: entry.role, text }];
-  });
 }

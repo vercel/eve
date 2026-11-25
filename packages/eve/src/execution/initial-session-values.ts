@@ -3,11 +3,11 @@ import { DURABLE_SESSION_VERSION } from "#execution/durable-session-read.js";
 import { createSession, projectToDurableSession } from "#execution/session.js";
 import { withPendingHistory } from "#execution/session/pending-history.js";
 import type { JsonObject } from "#shared/json.js";
-import type { SessionHistoryMessage } from "#shared/session-history.js";
+import type { ImportedMessage } from "#protocol/session-events/families/delivery.js";
 
 export function createInitialSessionValues(input: {
   readonly continuationToken: string;
-  readonly history?: readonly SessionHistoryMessage[];
+  readonly history?: readonly ImportedMessage[];
   readonly outputSchema?: JsonObject;
   readonly rootSessionId?: string;
   readonly sessionId: string;

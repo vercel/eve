@@ -18,7 +18,7 @@ import type { SessionUsageLimit } from "#shared/agent-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 import type { SessionInstrumentation } from "#instrumentation/runtime.js";
-import type { SessionHistoryMessage } from "#shared/session-history.js";
+import type { ImportedMessage } from "#protocol/session-events/families/delivery.js";
 
 export type SessionStateMap = Readonly<Record<string, unknown>>;
 
@@ -70,7 +70,7 @@ export interface StepInput {
   readonly answers?: readonly Answer[];
   readonly message?: MessageContent;
   readonly context?: readonly string[];
-  readonly history?: readonly SessionHistoryMessage[];
+  readonly history?: readonly ImportedMessage[];
   readonly outputSchema?: JsonObject;
 }
 

@@ -62,6 +62,8 @@
   "RouteDefinition",
   "RouteHandlerArgs",
   "SessionHistoryMessage",
+  "SessionHistoryPart",
+  "SessionHistoryToolPart",
   "SessionStrandedError",
   "TurnMode",
   "TurnPolicy",

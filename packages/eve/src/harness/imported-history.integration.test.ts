@@ -119,3 +119,82 @@ it("reads imported history before each turn's context and message, and records i
     ["d_1", "turn_1", later],
   ]);
 });
+
+it("imports finished tool calls as model history without running them", async () => {
+  const llm = model();
+  const events: SessionEvent[] = [];
+  const harness = createTestKernel({
+    agent: { model: { id: "m" } },
+    handleEvent: eachEvent(async (event) => {
+      events.push(event);
+    }),
+    resolveModel: async () => llm,
+    tools: new Map(),
+  });
+  const session: HarnessSession = {
+    compaction: {},
+    continuationToken: "http:history-tools",
+    history: [],
+    sessionId: "history-tools",
+  };
+  const earlier: readonly ImportedMessage[] = [
+    { role: "user", text: "Roll a d20 but keep the number to yourself." },
+    {
+      parts: [
+        {
+          callId: "c1",
+          input: { sides: 20 },
+          name: "roll_dice",
+          output: { rolls: [3] },
+          type: "tool",
+        },
+        { callId: "c2", error: "Out of dice.", name: "roll_dice", type: "tool" },
+        { text: "Done, it's a secret.", type: "text" },
+      ],
+      role: "assistant",
+      text: "Done, it's a secret.",
+    },
+  ];
+  await harness(...delivered(session, "d_0", { history: earlier, message: "What was it?" }));
+
+  const prompt = llm.doStreamCalls[0]?.prompt.filter((message) => message.role !== "system");
+  expect(prompt).toEqual([
+    expect.objectContaining({ role: "user" }),
+    {
+      content: [
+        expect.objectContaining({
+          input: { sides: 20 },
+          toolCallId: "c1",
+          toolName: "roll_dice",
+          type: "tool-call",
+        }),
+        expect.objectContaining({ toolCallId: "c2", toolName: "roll_dice", type: "tool-call" }),
+      ],
+      role: "assistant",
+    },
+    {
+      content: [
+        expect.objectContaining({
+          output: { type: "json", value: { rolls: [3] } },
+          toolCallId: "c1",
+          type: "tool-result",
+        }),
+        expect.objectContaining({
+          output: { type: "error-text", value: "Out of dice." },
+          toolCallId: "c2",
+          type: "tool-result",
+        }),
+      ],
+      role: "tool",
+    },
+    {
+      content: [expect.objectContaining({ text: "Done, it's a secret.", type: "text" })],
+      role: "assistant",
+    },
+    expect.objectContaining({ role: "user" }),
+  ]);
+  expect(events.some((event) => event.type === "call.requested")).toBe(false);
+  expect(
+    events.flatMap((event) => (event.type === "delivery.consumed" ? [event.data.history] : [])),
+  ).toEqual([earlier]);
+});

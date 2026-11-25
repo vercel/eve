@@ -3,7 +3,7 @@ import type { Interaction } from "#protocol/session-projection/reader.js";
 import { callLabel } from "#protocol/session-projection/selectors.js";
 import type { EveMessage, EveMessagePart, EveToolPart } from "#client/message-types.js";
 import type { UserPart } from "#protocol/session-events/envelope.js";
-import type { ImportedMessage } from "#protocol/session-events/families/delivery.js";
+import type { ImportedMessage, ImportedPart } from "#protocol/session-events/families/delivery.js";
 import { callOutputSource } from "#protocol/session-projection/selectors.js";
 import type {
   CallPreview,
@@ -259,9 +259,28 @@ export function importedMessages(
       message.id === undefined
         ? { imported: true, status: "complete" }
         : { historyId: message.id, imported: true, status: "complete" },
-    parts: [{ state: "done", text: message.text, type: "text" }],
+    parts:
+      message.parts === undefined
+        ? [{ state: "done", text: message.text, type: "text" }]
+        : message.parts.map(importedPart),
     role: message.role,
   }));
+}
+
+function importedPart(part: ImportedPart): EveMessagePart {
+  if (part.type === "text") return { state: "done", text: part.text, type: "text" };
+  return {
+    callId: part.callId,
+    input: part.input,
+    kind: "tool",
+    label: part.name,
+    name: part.name,
+    stepIndex: 0,
+    type: "tool",
+    ...(part.error === undefined
+      ? { output: part.output, state: "completed" }
+      : { error: { code: "IMPORTED_TOOL_ERROR", message: part.error }, state: "failed" }),
+  };
 }
 
 function receivedParts(parts: readonly UserPart[]): readonly EveMessagePart[] {
