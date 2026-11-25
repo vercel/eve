@@ -8,6 +8,8 @@ import {
 import type { SessionStartBody } from "#execution/session-runtime.js";
 import { createSessionInbox, type SessionInboxTransport } from "#execution/session-inbox/inbox.js";
 import { bootFromCheckpoint } from "#execution/session/checkpoint-boot.js";
+import { clockSessionTimeoutControl } from "#execution/session/clock-timeout.js";
+import { assertRecordSessionCode } from "#execution/session/session-code.js";
 import { SESSION_CHECKPOINT_VERSION } from "#execution/session/checkpoint.js";
 import { sessionHookTokens } from "#execution/session/hook-tokens.js";
 import { bootInitialOwner, type BootOutcome } from "#execution/session/owner-boot.js";
@@ -25,17 +27,27 @@ import {
 import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session/timeout.js";
 import type { SessionCapabilities } from "#channel/types.js";
 
+/** The session that {@link runSession} runs. */
 export interface SessionRun {
+  /** The ID of the session. */
   readonly sessionId: string;
+  /** The start that `Durable.start()` received for the session. */
   readonly start: SessionStartInput;
+  /** The last record of the session, or none at its first run. */
   readonly record?: SessionRecord;
 }
 
+/** The host of {@link runSession}, which a durable engine gives. */
 export interface RunSessionHost extends ProgramHost {
+  /** Keeps each record of the session. */
   readonly adopted: AdoptRecord;
+  /** The ID of the deployment that runs the session. */
   readonly deploymentId: string;
+  /** The inbox of the session. Make it with `sessionInbox()`. */
   readonly inbox: SessionInboxTransport;
+  /** Where the stream lines of the session go. */
   readonly stream: SessionStreamSink;
+  /** Where large parts of each record go, so that records stay under the record limit. */
   readonly content?: SessionContentStore;
 }
 
@@ -46,7 +58,14 @@ function sessionWritable(sink: SessionStreamSink, sessionId: string): WritableSt
   });
 }
 
+/**
+ * Runs the session program of eve for one session, until it ends, parks, or moves. A durable engine
+ * calls it from its own durable function, and runs it again from the record of a parked session.
+ * It throws `SessionCodeMismatchError` before it changes anything when another session code wrote
+ * the record.
+ */
 export async function runSession(run: SessionRun, host: RunSessionHost): Promise<SessionRunResult> {
+  if (run.record !== undefined) assertRecordSessionCode(run.sessionId, run.record);
   const { entry } = reveal<SessionStartBody>(run.start.body);
   const stream = sessionWritable(host.stream, run.sessionId);
   const booted =
@@ -57,7 +76,7 @@ export async function runSession(run: SessionRun, host: RunSessionHost): Promise
           sessionWritable: stream,
           settleContinuationConflict: async () => {},
           step: host.step,
-          timeouts: () => undefined,
+          timeouts: (input) => clockSessionTimeoutControl(host.now, input),
         })
       : await bootFromRecord(
           run.sessionId,
@@ -88,7 +107,13 @@ async function bootFromRecord(
   host: RunSessionHost,
   stream: WritableStream<Uint8Array>,
 ): Promise<BootOutcome> {
-  const { open, transfer } = record;
+  const { open, transfer, timeoutDeadline } = record;
+  const sessionTimeoutMs = entry.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS;
+  const sessionTimeoutControl = clockSessionTimeoutControl(host.now, {
+    sessionId,
+    timeoutMs: sessionTimeoutMs,
+    ...(timeoutDeadline !== undefined && { deadline: new Date(timeoutDeadline) }),
+  });
   const inbox = createSessionInbox(host.inbox);
   await inbox.claimSessionHooks(sessionHookTokens(transfer));
   const session = bootFromCheckpoint(
@@ -98,7 +123,7 @@ async function bootFromRecord(
         | SessionCapabilities
         | undefined,
       retention: entry.retention,
-      sessionTimeoutMs: entry.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS,
+      sessionTimeoutMs,
       version: SESSION_CHECKPOINT_VERSION,
     },
     {
@@ -107,6 +132,7 @@ async function bootFromRecord(
       serializedContext: transfer.serializedContext,
       sessionId,
       sessionWritable: stream,
+      ...(sessionTimeoutControl !== undefined && { sessionTimeoutControl }),
       ...(open !== undefined && { rerunFirst: true, start: { kind: "resume", from: open } }),
     },
   );

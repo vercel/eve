@@ -1,4 +1,5 @@
 import { builtInHosts, type App } from "#runtime/app.js";
+import { wakeClock } from "#internal/testing/wake-timer.js";
 import { createLifetime } from "#runtime/lifetime.js";
 import { testEntities } from "#internal/testing/test-platform.js";
 import type { Runtime } from "#channel/types.js";
@@ -17,7 +18,7 @@ import {
   structuredCloneBoundary,
 } from "#execution/in-process/step-boundary.js";
 import type { SessionRuntimeConfig } from "#execution/initial-entry.js";
-import type { SessionEventStore } from "#execution/session-event-store.js";
+import { durableSessionEvents } from "#execution/durable-session-events.js";
 import { sessionRuntime } from "#execution/session-runtime.js";
 import type { SessionStepCall } from "#execution/session/steps.js";
 import type { TurnStepInput } from "#execution/session/turn-step-types.js";
@@ -26,6 +27,7 @@ import {
   storeDurable,
   type SessionStreamSink,
   type StoreDurable,
+  type StoreWakeOptions,
 } from "#platform/engine.js";
 
 import { createMemorySessionStore, type MemorySessionStore } from "./memory-session-store.js";
@@ -33,6 +35,9 @@ import { createMemorySessionStore, type MemorySessionStore } from "./memory-sess
 export interface StoreEngineOptions extends Partial<InProcessHostOptions> {
   readonly deadlineMs?: number;
   readonly outOfLine?: boolean;
+  readonly wakeEarlyMs?: number;
+  readonly heldWakes?: "rerun" | "drop";
+  readonly beforeTimedWake?: (sessionId: string) => Promise<void>;
 }
 
 export interface StoreEngine {
@@ -40,6 +45,7 @@ export interface StoreEngine {
   readonly durable: Durable;
   readonly store: MemorySessionStore;
   crashOnRecord(crashes: (count: number) => boolean): void;
+  advanceClock(ms: number): void;
   records(): number;
   largestStepResult(): number;
   registerWorkflow(workflowId: string, body: WorkflowFunction): void;
@@ -75,6 +81,9 @@ export function createStoreEngine(
   const attempts = createStepAttempts(options.stepFaults);
   const encoder = new TextEncoder();
   let crashes: ((count: number) => boolean) | undefined;
+  const clock = wakeClock(options.wakeEarlyMs);
+  const dropHeldWakes = options.heldWakes === "drop";
+  const { beforeTimedWake } = options;
   let recordCount = 0;
   let closed = false;
 
@@ -96,27 +105,6 @@ export function createStoreEngine(
       return engine.durable;
     },
     lifetime: createLifetime(),
-  };
-
-  const lines: SessionEventStore = {
-    async assertFollowable(sessionId) {
-      if ((await store.status(sessionId)) === undefined)
-        throw new Error(`Session "${sessionId}" isn't in the store.`);
-    },
-    tail: (sessionId) => store.streams.tail(sessionId),
-    readable(sessionId, startIndex = 0) {
-      const iterator = store.streams.read(sessionId, startIndex)[Symbol.asyncIterator]();
-      return new ReadableStream<Uint8Array>({
-        async pull(controller) {
-          const next = await iterator.next();
-          if (next.done) controller.close();
-          else controller.enqueue(encoder.encode(`${next.value.line}\n`));
-        },
-        cancel() {
-          void iterator.return?.();
-        },
-      });
-    },
   };
 
   const die = (sessionId: string, run: Run): void => {
@@ -199,14 +187,27 @@ export function createStoreEngine(
     };
   };
 
-  const wake = async (sessionId: string): Promise<void> => {
+  const timers = new Set<() => void>();
+  const wake = async (sessionId: string, options: StoreWakeOptions = {}): Promise<void> => {
+    if (options.at !== undefined && options.at > clock.now()) {
+      await beforeTimedWake?.(sessionId);
+      if (closed) return;
+      const cancel = clock.wakeAt(options.at, () => {
+        timers.delete(cancel);
+        void wake(sessionId);
+      });
+      timers.add(cancel);
+      return;
+    }
     if (!known.has(sessionId)) {
       known.add(sessionId);
-      releases.push(registerSessionEventStore(hosts, sessionId, lines));
+      releases.push(
+        registerSessionEventStore(hosts, sessionId, durableSessionEvents(engine.durable)),
+      );
     }
     if (closed) return;
     if (runs.has(sessionId)) {
-      pending.add(sessionId);
+      if (!dropHeldWakes) pending.add(sessionId);
       return;
     }
     const run: Run = { dead: false };
@@ -228,7 +229,7 @@ export function createStoreEngine(
       });
   };
 
-  const engine: StoreDurable = storeDurable({ store, wake });
+  const engine: StoreDurable = storeDurable({ store, wake, now: clock.now });
 
   store.saveRecordHook = (sessionId) => {
     recordCount += 1;
@@ -270,6 +271,7 @@ export function createStoreEngine(
     crashOnRecord(predicate) {
       crashes = predicate;
     },
+    advanceClock: (ms) => clock.advance(ms),
     records: () => recordCount,
     largestStepResult: () =>
       Math.max(
@@ -302,6 +304,8 @@ export function createStoreEngine(
     },
     async dispose() {
       closed = true;
+      for (const cancel of timers) cancel();
+      timers.clear();
       for (const [sessionId, run] of runs) die(sessionId, run);
       await inProcess.dispose();
       for (const release of releases.splice(0)) release();

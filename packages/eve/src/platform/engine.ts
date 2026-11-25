@@ -1,23 +1,18 @@
-import type {
-  InboxHook,
-  SessionInboxPayload,
-  SessionInboxTransport,
-} from "#execution/session-inbox/inbox.js";
-import { createHookConflictError } from "#execution/hook-ownership.js";
+import type { SessionInboxPayload } from "#execution/session-inbox/inbox.js";
+import { assertRecordSessionCode } from "#execution/session/session-code.js";
 import {
-  logicalSessionInboxToken,
-  logicalSessionToken,
-  sessionCommandHookToken,
-} from "#execution/session-inbox/address.js";
+  canonicalAddress,
+  inboxPayloadOf,
+  sessionInbox,
+  type ClaimResult,
+} from "#execution/session-inbox/source.js";
 import { runSession, type RunSessionHost } from "#execution/session/run-session.js";
 import type { SessionRecord } from "#execution/session/record.js";
 import type { SessionRunResult } from "#execution/session/program.js";
 import { HookNotFoundError } from "#shared/run-errors.js";
 import { createUlid } from "#shared/ulid.js";
 import {
-  decodeDeliveryAddress,
   delivered,
-  hookAddress,
   lineWritable,
   type DeliveryAddress,
   type Durable,
@@ -71,21 +66,31 @@ export {
   type SessionRun,
 } from "#execution/session/run-session.js";
 
+/** The session steps of eve, which an engine runs inside its own durable steps. */
 export interface SessionSteps {
+  /**
+   * Runs one step. It returns `{ yielded: true }` when the step stops before `meta.deadline`, so
+   * that the engine runs it again as a new attempt.
+   */
   run<N extends SessionStepName>(
     name: N,
     input: SessionStepInput<N>,
     meta: StepMeta,
   ): Promise<SessionStepResult<N> | { readonly yielded: true }>;
+  /** Loads the parts of a step result that the step kept out of line. */
   load<N extends SessionStepName>(
     result: SessionStepResult<N>,
     sessionId: string,
   ): Promise<SessionStepResult<N>>;
 }
 
+/** The options of {@link sessionSteps}. */
 export interface SessionStepsOptions {
+  /** Where the steps append the stream lines of sessions. */
   readonly streams: SessionStreamSink;
+  /** Lets a running step read new input. */
   readonly interrupts?: SessionInterrupts;
+  /** Where the steps keep large content out of line. */
   readonly content?: SessionContentStore;
 }
 
@@ -104,6 +109,7 @@ const POLL_INTERVAL_MS = 50;
 const YIELD_MARGIN_MS = 1_000;
 const YIELDED = Symbol("yielded");
 
+/** Returns the session steps of eve for the app, which an engine calls from its durable steps. */
 export function sessionSteps(app: App, options: SessionStepsOptions): SessionSteps {
   const host: SessionStepHost = {
     app,
@@ -285,7 +291,7 @@ export function pollSignals(
       else
         for (const item of await poll(sessionId, afterSeq).catch(() => [])) {
           afterSeq = item.seq;
-          apply(payloadOf(item));
+          apply(inboxPayloadOf(item));
         }
       await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
     }
@@ -296,12 +302,6 @@ export function pollSignals(
       stopped = true;
     },
   };
-}
-
-function payloadOf(item: InboxItem): SessionInboxPayload {
-  return item.body.kind === "deliver"
-    ? (item.body.payload as SessionInboxPayload)
-    : ({ kind: "cancel", deliveryId: item.id } as SessionInboxPayload);
 }
 
 async function inboxTail(
@@ -317,21 +317,33 @@ async function inboxTail(
   }
 }
 
-export type ClaimResult =
-  | { readonly claimed: true }
-  | { readonly claimed: false; readonly heldBy: string };
+export type { ClaimResult } from "#execution/session-inbox/source.js";
 
+/**
+ * The storage of {@link storeDurable}: sessions, their addresses, inboxes, records, streams, and
+ * content. Each operation is atomic.
+ */
 export interface SessionStore {
+  /**
+   * Adds a session with its start only when no session has its ID, in one atomic write. Returns
+   * `true` when it added the session, and `false` when the session exists, which it leaves as is.
+   */
   begin(start: SessionStartInput & { readonly sessionId: string }): Promise<boolean>;
+  /** Claims addresses for a session. With `takeOver`, it takes them from another session. */
   claim(
     sessionId: string,
     addresses: readonly DeliveryAddress[],
     takeOver: boolean,
   ): Promise<ClaimResult>;
+  /** Returns the session that owns an address. */
   sessionFor(address: DeliveryAddress): Promise<string | undefined>;
+  /** Appends an item to the inbox of a session, and returns its `seq`. */
   enqueue(sessionId: string, item: Omit<InboxItem, "seq">): Promise<number>;
+  /** Returns up to `limit` inbox items after `seq`. */
   itemsAfter(sessionId: string, seq: number, limit: number): Promise<readonly InboxItem[]>;
+  /** Keeps a record, and the last inbox item that it consumed, in one write. */
   saveRecord(sessionId: string, record: SessionRecord, throughSeq: number): Promise<void>;
+  /** Returns what a run of the session needs: its start, its last record, and its position. */
   loadRun(sessionId: string): Promise<
     | {
         readonly start: SessionStartInput;
@@ -340,32 +352,65 @@ export interface SessionStore {
       }
     | undefined
   >;
+  /** Returns the status of a session. */
   status(sessionId: string): Promise<SessionStatus | undefined>;
+  /** Sets the status of a session. */
   setStatus(sessionId: string, status: SessionStatus): Promise<void>;
+  /** The streams of sessions, which eve also reads. */
   readonly streams: SessionStreamSink & {
+    /** Reads the stream lines of a session from position `from`. */
     read(sessionId: string, from: number): AsyncIterable<StreamLine>;
   };
+  /** The large content of sessions. */
   readonly content: SessionContentStore;
 }
 
+/** The parts of the run host that an engine gives to {@link StoreDurable.run}. */
 export type StoreRunHost = Pick<RunSessionHost, "step" | "deploymentId" | "toolStubs">;
 
+/** A durable engine over a {@link SessionStore}, from {@link storeDurable}. */
 export interface StoreDurable {
+  /** The operations that eve calls. Return it from `DurableEngine.start()`. */
   readonly durable: Durable;
+  /** The interrupts for {@link sessionSteps}. */
   readonly interrupts: SessionInterrupts;
+  /** The streams for {@link sessionSteps}. */
   readonly streams: SessionStreamSink;
+  /** The content store for {@link sessionSteps}. */
   readonly content: SessionContentStore;
+  /**
+   * Runs a session from its last record, until it ends, parks, or moves. It throws
+   * `SessionCodeMismatchError` and leaves the session parked when another session code wrote the
+   * record.
+   */
   run(sessionId: string, host: StoreRunHost): Promise<SessionRunResult>;
 }
 
 const ITEMS_PAGE = 100;
 const STORE_POLL_MS = 1_000;
 
+/** The options of a wake from {@link storeDurable}. */
+export interface StoreWakeOptions {
+  /**
+   * The time, in milliseconds since the epoch, when the session must run again. Without it, run the
+   * session now. The time can be far ahead, for example the 30-day session timeout.
+   */
+  readonly at?: number;
+}
+
+/**
+ * Makes a durable engine from a store. The engine calls `wake` when a session must run: now, or at
+ * the time `at`. Its own worker then calls {@link StoreDurable.run}. A wake can come while `run`
+ * still runs the session. The engine can drop it: before `run` parks, it runs the session again
+ * for input or a wake time that came during the run. `now` is the clock of the engine.
+ */
 export function storeDurable(options: {
   readonly store: SessionStore;
-  wake(sessionId: string): Promise<void>;
+  wake(sessionId: string, options?: StoreWakeOptions): Promise<void>;
+  now?(): number;
 }): StoreDurable {
   const { store, wake } = options;
+  const now = options.now ?? (() => Date.now());
   const arrivals = new Map<string, Set<() => void>>();
   const arrived = (sessionId: string): void => {
     for (const resolve of arrivals.get(sessionId) ?? []) resolve();
@@ -416,65 +461,6 @@ export function storeDurable(options: {
     status: (sessionId) => store.status(sessionId),
   };
 
-  const inboxOf = (
-    sessionId: string,
-    from: number,
-  ): SessionInboxTransport<InboxHook & { stop(): void }> & { yielded(): number } => {
-    const command = sessionCommandHookToken(sessionId);
-    const seqs = new WeakMap<object, number>();
-    let next = from;
-    return {
-      yielded: () => next,
-      open(token) {
-        let stopped = false;
-        let wakeHook: (() => void) | undefined;
-        return {
-          token,
-          stop() {
-            stopped = true;
-            wakeHook?.();
-          },
-          async *[Symbol.asyncIterator](): AsyncGenerator<SessionInboxPayload> {
-            while (!stopped) {
-              const items =
-                token === command ? await store.itemsAfter(sessionId, next, ITEMS_PAGE) : [];
-              for (const item of items) {
-                if (stopped) return;
-                next = item.seq;
-                const payload = structuredClone(payloadOf(item));
-                seqs.set(payload, item.seq);
-                for (const message of (payload as { messages?: object[] }).messages ?? [])
-                  seqs.set(message, item.seq);
-                yield payload;
-              }
-              if (items.length > 0) continue;
-              await new Promise<void>((resolve) => {
-                wakeHook = resolve;
-                void nextArrival(sessionId).then(resolve);
-              });
-            }
-          },
-        };
-      },
-      async confirm(hook) {
-        const claimed = await store.claim(
-          sessionId,
-          [canonicalAddress(hookAddress(hook.token))],
-          false,
-        );
-        if (!claimed.claimed) throw createHookConflictError(hook.token, claimed.heldBy);
-      },
-      async dispose(hook) {
-        hook.stop();
-      },
-      consumedThrough: from,
-      isTakenOver: () => false,
-      ownerRunId: () => sessionId,
-      now: () => Date.now(),
-      seqOf: (payload) => seqs.get(payload),
-    };
-  };
-
   return {
     durable,
     interrupts: {
@@ -483,43 +469,69 @@ export function storeDurable(options: {
     streams: store.streams,
     content: store.content,
     async run(sessionId, host) {
-      const loaded = await store.loadRun(sessionId);
-      if (loaded === undefined) throw new Error(`Session "${sessionId}" isn't in the store.`);
-      if ((await live(sessionId)) === undefined) return { kind: "ended", outcome: "completed" };
-      await store.setStatus(sessionId, "running");
-      const inbox = inboxOf(sessionId, loaded.throughSeq);
-      const result = await runSession(
-        {
-          sessionId,
-          start: loaded.start,
-          ...(loaded.record !== undefined && { record: loaded.record }),
-        },
-        {
-          all: (work) => Promise.allSettled(work) as never,
-          now: () => Date.now(),
-          next: (wakeOptions = {}) => nextOf(sessionId, inbox.yielded, wakeOptions),
-          step: host.step,
-          ...(host.toolStubs !== undefined && { toolStubs: host.toolStubs }),
-          deploymentId: host.deploymentId,
-          inbox,
-          stream: store.streams,
-          content: store.content,
-          async adopted(record, consumed) {
-            await store.saveRecord(sessionId, record, consumed.throughSeq);
-          },
-        },
-      );
-      await store.setStatus(
-        sessionId,
-        result.kind === "parked"
-          ? "parked"
-          : result.kind === "ended" && result.outcome === "failed"
-            ? "failed"
-            : "ended",
-      );
-      return result;
+      while (true) {
+        const { result, read } = await runOnce(sessionId, host);
+        if (result.kind !== "parked") return result;
+        const due = result.wakeAt !== undefined && result.wakeAt <= now();
+        if (due || (await store.itemsAfter(sessionId, read, 1)).length > 0) continue;
+        if (result.wakeAt === undefined) return result;
+        await wake(sessionId, { at: result.wakeAt });
+        if ((await store.itemsAfter(sessionId, read, 1)).length === 0) return result;
+      }
     },
   };
+
+  async function runOnce(
+    sessionId: string,
+    host: StoreRunHost,
+  ): Promise<{ readonly result: SessionRunResult; readonly read: number }> {
+    const loaded = await store.loadRun(sessionId);
+    if (loaded === undefined) throw new Error(`Session "${sessionId}" isn't in the store.`);
+    if ((await live(sessionId)) === undefined)
+      return { read: loaded.throughSeq, result: { kind: "ended", outcome: "completed" } };
+    if (loaded.record !== undefined) assertRecordSessionCode(sessionId, loaded.record);
+    await store.setStatus(sessionId, "running");
+    const inbox = sessionInbox(
+      sessionId,
+      {
+        itemsAfter: (seq, limit) => store.itemsAfter(sessionId, seq, limit),
+        arrival: () => nextArrival(sessionId),
+        claim: (address) => store.claim(sessionId, [address], false),
+      },
+      { throughSeq: loaded.throughSeq },
+    );
+    const result = await runSession(
+      {
+        sessionId,
+        start: loaded.start,
+        ...(loaded.record !== undefined && { record: loaded.record }),
+      },
+      {
+        all: (work) => Promise.allSettled(work) as never,
+        now,
+        next: (wakeOptions = {}) => nextOf(sessionId, inbox.yielded, wakeOptions),
+        step: host.step,
+        ...(host.toolStubs !== undefined && { toolStubs: host.toolStubs }),
+        deploymentId: host.deploymentId,
+        inbox,
+        stream: store.streams,
+        content: store.content,
+        async adopted(record, consumed) {
+          await store.saveRecord(sessionId, record, consumed.throughSeq);
+        },
+      },
+    );
+    await store.setStatus(
+      sessionId,
+      result.kind === "parked"
+        ? "parked"
+        : result.kind === "ended" && result.outcome === "failed"
+          ? "failed"
+          : "ended",
+    );
+    if (result.kind === "ended") await store.content.delete(sessionId);
+    return { read: inbox.yielded(), result };
+  }
 
   async function unreadArrived(sessionId: string, read: number): Promise<boolean> {
     if ((await store.itemsAfter(sessionId, read, 1)).length === 0) return false;
@@ -540,7 +552,7 @@ export function storeDurable(options: {
       const until = wakeOptions.until;
       waits.push(
         new Promise((resolve) => {
-          timer = setTimeout(() => resolve("due"), Math.max(0, until - Date.now()));
+          timer = setTimeout(() => resolve("due"), Math.max(0, until - now()));
         }),
       );
     }
@@ -576,10 +588,4 @@ export function storeDurable(options: {
       clearTimeout(pollTimer);
     }
   }
-}
-
-function canonicalAddress(to: DeliveryAddress): DeliveryAddress {
-  const address = decodeDeliveryAddress(to);
-  if (address.kind === "session") return hookAddress(logicalSessionToken(address.address));
-  return hookAddress(logicalSessionInboxToken(address.token) ?? address.token);
 }

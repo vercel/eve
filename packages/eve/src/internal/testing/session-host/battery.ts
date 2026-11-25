@@ -166,6 +166,39 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
         );
       });
 
+      needs(
+        "sessionTimeouts",
+        "ends a parked session when its session timeout comes due",
+        async () => {
+          await withHost(
+            {
+              name: `${name}-session-timeout`,
+              respond: () => textStreamResult("Noted, Alice."),
+              sessionTimeoutMs: 1_000,
+            },
+            async ({ advanceClock, durable, runtime, settled }) => {
+              const first = await (
+                await alice(runtime, `${name}:session-timeout`).send("Alice leaves a note.", {
+                  auth: null,
+                })
+              ).result();
+              await settled();
+              expect(await durable.status(first.sessionId)).toBe("parked");
+              advanceClock!(1_000);
+              await vi.waitFor(
+                async () => expect(await durable.status(first.sessionId)).toBe("ended"),
+                { interval: 50, timeout: 10_000 },
+              );
+              expect(
+                ofType(await recorded(runtime, first.sessionId), "session.ended").map(
+                  (event) => event.data.outcome,
+                ),
+              ).toEqual(["completed"]);
+            },
+          );
+        },
+      );
+
       it("reads its stream lines, tail and status through Durable", async () => {
         await withHost(
           { name: `${name}-durable-reads`, respond: () => textStreamResult("Noted, Alice.") },

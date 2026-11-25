@@ -35,7 +35,7 @@ export const PROCESS_PHASES = [
         );
       }
       const context = await declaration.context?.();
-      app.platform = createEntities(declaration, context);
+      app.platform = createEntities(declaration, context, app.lifetime);
       app.declaration = declaration;
       app.context = context;
     },

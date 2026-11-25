@@ -374,9 +374,18 @@ describe("createHostSpec", () => {
     expect(spec(websocket, PRODUCTION).websocket).toBe(true);
     const schedules = { scheduleRegistrations: [DIGEST] };
     expect(() => spec(plain, ENTRY, schedules)).toThrow(
-      'Authored schedules aren\'t supported with `Build.entry` yet: schedule "digest" in "schedules/digest.md". Remove the schedule or build without `build.entry`. Dynamic schedules through the platform\'s `Triggers` are supported.',
+      'An authored schedule needs eve\'s Node server or the platform\'s `Triggers`: schedule "digest" in "schedules/digest.md". Set `build.schedules.authored` and give `triggers.register()` in the platform, remove the schedule, or build without `build.entry`.',
     );
     expect(spec(plain, PRODUCTION, schedules).routes.scheduleTasks).toHaveLength(1);
+  });
+
+  it("leaves authored schedules to the platform's Triggers when its build says so", async () => {
+    const plain = await compileAgent();
+    const schedules = { scheduleRegistrations: [DIGEST] };
+    const triggers = { authoredSchedules: "triggers" } as const;
+
+    expect(spec(plain, { ...ENTRY, ...triggers }, schedules).routes.scheduleTasks).toEqual([]);
+    expect(spec(plain, { ...PRODUCTION, ...triggers }, schedules).routes.scheduleTasks).toEqual([]);
   });
 
   it("takes a platform's export conditions only with a platform entry", async () => {

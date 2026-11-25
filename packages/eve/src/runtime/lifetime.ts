@@ -1,5 +1,6 @@
 declare const lifetimeBrand: unique symbol;
 
+/** The lifetime of an app. The resources that the app opens close when it ends. */
 export interface Lifetime {
   readonly [lifetimeBrand]: true;
 }
@@ -24,10 +25,18 @@ export function createLifetime(parent?: Lifetime): Lifetime {
   return lifetime;
 }
 
+/**
+ * Runs `cleanup` when `lifetime` ends. Cleanups run in the reverse order of their registration.
+ * Registration throws after the lifetime ended.
+ */
 export function registerCleanup(lifetime: Lifetime, cleanup: Cleanup): void {
   openState(lifetime).cleanups.push(cleanup);
 }
 
+/**
+ * Ends `lifetime`: it ends its child lifetimes, then runs its cleanups. Each call returns the same
+ * promise, which rejects with the first failure of a cleanup.
+ */
 export function endLifetime(lifetime: Lifetime): Promise<void> {
   const state = stateOf(lifetime);
   state.ending ??= finish(lifetime, state);

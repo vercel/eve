@@ -74,7 +74,11 @@ export async function nextTurnDelivery(
       if (targetDeploymentId !== undefined) return { kind: "prewarm", targetDeploymentId };
     }
 
-    if (!inbox.hasPending()) await input.whileWaiting?.();
+    if (!inbox.hasPending()) {
+      const queued = queue.pendingCount;
+      await input.whileWaiting?.();
+      if (queue.pendingCount > queued) continue;
+    }
     const wasIdle = queue.pendingCount === 0;
     const payload = await inbox.next();
     if (payload === undefined) return { kind: "closed" };

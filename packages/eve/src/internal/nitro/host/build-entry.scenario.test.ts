@@ -378,7 +378,7 @@ process.exit(0);`,
     });
 
     await expect(buildWithPlatform(appRoot, '{ entry: "platform/entry.mjs" }')).rejects.toThrow(
-      'Authored schedules aren\'t supported with `Build.entry` yet: schedule "digest" in "schedules/digest.md". Remove the schedule or build without `build.entry`. Dynamic schedules through the platform\'s `Triggers` are supported.',
+      'An authored schedule needs eve\'s Node server or the platform\'s `Triggers`: schedule "digest" in "schedules/digest.md". Set `build.schedules.authored` and give `triggers.register()` in the platform, remove the schedule, or build without `build.entry`.',
     );
   });
 });

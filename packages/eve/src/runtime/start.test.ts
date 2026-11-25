@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { World } from "#compiled/@workflow/world/index.js";
 import { installedDurable } from "#execution/hosts.js";
+import { workflowEngineBuild } from "#execution/workflow-host/build.js";
 import { workflowEngine } from "#execution/workflow-host/engine.js";
 import {
   createWorkflowRuntime,
@@ -15,7 +16,7 @@ import { definePlatform } from "#platform/declaration.js";
 import { defineInstrumentation } from "#public/instrumentation/index.js";
 import { testPlatform } from "#internal/testing/test-platform.js";
 import { bootProcess } from "#runtime/lifecycle.js";
-import { endLifetime } from "#runtime/lifetime.js";
+import { endLifetime, registerCleanup } from "#runtime/lifetime.js";
 import { BOOT_PHASES, start } from "#runtime/start.js";
 
 const BUILD_DEPLOYMENT_ID = "eve_0123456789abcdef0123456789abcdef";
@@ -58,6 +59,7 @@ describe("start", () => {
       "queue-namespace",
       "artifacts",
       "durable",
+      "triggers",
       "instrumentation",
     ]);
   });
@@ -167,6 +169,85 @@ describe("start", () => {
       { region: "iad1" },
     );
     expect(defaultDurable).not.toHaveBeenCalled();
+  });
+
+  it("runs the cleanups that entity factories register when the app's lifetime ends", async () => {
+    uninstallApp?.();
+    uninstallApp = installProcessApp(createProcessApp());
+    const closed: string[] = [];
+    const platform = definePlatform({
+      deployment: () => ({
+        environment: () => "production",
+        deploymentId: () => "dpl_alice",
+        host: () => undefined,
+        scope: () => undefined,
+      }),
+      storage: (app) => {
+        registerCleanup(app.lifetime, () => {
+          closed.push("alice's document pool");
+        });
+        return {};
+      },
+      durable: () => ({ start: () => ({ kind: "alice's engine" }) as never }),
+    });
+    await bootProcess({ agentName: "weather", platform }, "artifacts");
+    const app = await start({
+      defaultDurable: () => workflowEngine({ world: () => Promise.reject(STOP) }),
+    });
+    expect(app.platform.storage).toEqual({});
+    expect(closed).toEqual([]);
+
+    await endLifetime(app.lifetime);
+
+    expect(closed).toEqual(["alice's document pool"]);
+  });
+
+  it("gives authored schedules to the platform's Triggers when the app boots", async () => {
+    uninstallApp?.();
+    uninstallApp = installProcessApp(createProcessApp());
+    const platform = definePlatform({
+      deployment: () => ({
+        environment: () => "production",
+        deploymentId: () => "dpl_alice",
+        host: () => undefined,
+        scope: () => undefined,
+      }),
+      triggers: () => ({ schedules: {} as never }),
+      durable: () => ({ start: () => ({ kind: "alice's engine" }) as never }),
+      build: { schedules: { authored: true } },
+    });
+    await bootProcess({ agentName: "weather", platform }, "artifacts");
+
+    await expect(
+      start({ defaultDurable: () => workflowEngine({ world: () => Promise.reject(STOP) }) }),
+    ).rejects.toThrow(
+      "The platform sets build.schedules.authored, and its triggers give no register().",
+    );
+  });
+
+  it("starts the generated Workflow engine when the platform returns workflowEngine()", async () => {
+    uninstallApp?.();
+    uninstallApp = installProcessApp(createProcessApp());
+    const platform = definePlatform({
+      deployment: () => ({
+        environment: () => "production",
+        deploymentId: () => "dpl_alice",
+        host: () => undefined,
+        scope: () => undefined,
+      }),
+      durable: () => ({
+        build: workflowEngineBuild("@workflow/world-postgres"),
+        start: () => Promise.reject(STOP),
+      }),
+    });
+    await bootProcess({ agentName: "weather", platform }, "artifacts");
+    const durable = { kind: "the generated engine" } as never;
+    const defaultDurable = vi.fn(() => ({ start: () => durable }));
+
+    const app = await start({ defaultDurable });
+
+    expect(defaultDurable).toHaveBeenCalledOnce();
+    expect(app.durable).toBe(durable);
   });
 
   it("returns the booted app and closes its World when the app's lifetime ends", async () => {

@@ -1,4 +1,5 @@
-import { rm } from "node:fs/promises";
+import { rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 
 import { afterAll, afterEach, beforeAll, expect, it, vi } from "vitest";
 
@@ -104,6 +105,58 @@ it("serves the same session on eve's Vercel declaration when the build selects n
 
   expect(served.sessionId).not.toMatch(/^alice_/);
   expect(served.runtime).not.toHaveProperty("build");
+  expect(served.replies).toEqual([
+    "Noted for Alice: 2 message(s).",
+    "Noted for Alice: 4 message(s).",
+  ]);
+}, 240_000);
+
+async function withPlatformFile<T>(source: string, run: () => Promise<T>): Promise<T> {
+  const file = join(app.appRoot, "agent", "platform.ts");
+  await writeFile(file, source);
+  try {
+    return await run();
+  } finally {
+    await rm(file, { force: true });
+  }
+}
+
+it("selects agent/platform.ts when the agent has one, and starts the engine it gives", async () => {
+  const storePlatform = resolvePackageSourceFilePath("src/internal/testing/store-platform.ts");
+  const served = await withPlatformFile(
+    `export { default } from ${JSON.stringify(storePlatform)};\n`,
+    () => serveTwoTurns(undefined),
+  );
+
+  expect(served.sessionId).toMatch(/^alice_/);
+  expect(served.runtime).toMatchObject({ build: { gitBranch: "alice/store-engine" } });
+  expect(served.replies).toEqual([
+    "Noted for Alice: 2 message(s).",
+    "Noted for Alice: 4 message(s).",
+  ]);
+}, 240_000);
+
+it("gives the context() of agent/platform.ts to its factories on eve's default engine", async () => {
+  const served = await withPlatformFile(
+    [
+      'import { definePlatform } from "eve/experimental/platform";',
+      "export default definePlatform({",
+      '  context: async () => ({ gitSha: "b0b5e55", gitBranch: "bob/notes" }),',
+      "  deployment: (_app, context) => ({",
+      "    environment: () => undefined,",
+      "    deploymentId: () => undefined,",
+      "    host: () => undefined,",
+      "    scope: () => undefined,",
+      "    revision: () => ({ deployedAt: undefined, ...context }),",
+      "  }),",
+      "});",
+      "",
+    ].join("\n"),
+    () => serveTwoTurns(undefined),
+  );
+
+  expect(served.sessionId).not.toMatch(/^alice_/);
+  expect(served.runtime).toMatchObject({ build: { gitSha: "b0b5e55", gitBranch: "bob/notes" } });
   expect(served.replies).toEqual([
     "Noted for Alice: 2 message(s).",
     "Noted for Alice: 4 message(s).",

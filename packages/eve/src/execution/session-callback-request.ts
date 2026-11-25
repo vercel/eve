@@ -1,8 +1,7 @@
 import { NonRetryableError } from "#shared/run-errors.js";
 import {
   assertPublicHostname,
-  createPublicDispatcher,
-  fetchWithDispatcher,
+  fetchPublicDestination,
   findUnsafeDestinationError,
   readBoundedResponse,
   UnsafeDestinationError,
@@ -82,17 +81,16 @@ async function requestCallback(
   }
   const policy = { allowLoopback: isLocalDevelopmentServer(platform) };
   assertPublicHostname(url.hostname, policy);
-  const dispatcher = await createPublicDispatcher(policy);
+  const { close, response } = await fetchPublicDestination(
+    urlText,
+    { ...init, method: "POST", redirect: "error" },
+    policy,
+    platform.network,
+  );
   try {
-    const response = await fetchWithDispatcher(urlText, {
-      ...init,
-      dispatcher,
-      method: "POST",
-      redirect: "error",
-    });
     return await readBoundedResponse(response, MAX_CALLBACK_RESPONSE_BYTES);
   } finally {
-    await dispatcher.close();
+    await close();
   }
 }
 

@@ -1,4 +1,5 @@
 import type { ControlSettlement } from "#harness/facts.js";
+import { sessionCodeHash } from "#execution/session/session-code.js";
 import type { SessionContentStore } from "#execution/durable.js";
 import { controlDeliveryOf } from "#execution/session/control-delivery.js";
 import type { ControlDelivery } from "#harness/types.js";
@@ -120,16 +121,25 @@ const RETAINED: SessionMoves = {
   tryTransfer: async () => ({ kind: "retained", reason: "same-deployment" }),
 };
 
+/** The host of the session program: its durable operations and its optional capabilities. */
 export interface ProgramHost extends SessionTurnHost {
   readonly moves?: SessionMoves;
   readonly toolStubs?: ToolStubHost;
 }
 
+/**
+ * Keeps a record of the session. `throughSeq` is the last inbox item that the record consumed. Keep
+ * the record and the position together.
+ */
 export type AdoptRecord = (
   record: SessionRecord,
   consumed: { readonly throughSeq: number },
 ) => Promise<void>;
 
+/**
+ * The result of `runSession()`: the session ended, it parked with a record to run again later, or
+ * it moved to another deployment. A parked run gives `wakeAt` when it must run again at a time.
+ */
 export type SessionRunResult =
   | { readonly kind: "ended"; readonly outcome: "completed" | "failed" | "cancelled" }
   | { readonly kind: "parked"; readonly record: SessionRecord; readonly wakeAt?: number }
@@ -209,15 +219,20 @@ function recordsOf(
 ): SessionRecords {
   let generation = boot.generation ?? 0;
   let execution: SessionExecution | undefined;
-  const seal = (cursor: SessionStateCursor): Promise<SessionRecord> =>
-    keepSessionRecord(
+  const seal = (cursor: SessionStateCursor): Promise<SessionRecord> => {
+    const timeoutDeadline = boot.sessionTimeoutControl?.getDeadline().getTime();
+    const sessionCode = sessionCodeHash();
+    return keepSessionRecord(
       {
         generation: ++generation,
         open: cursor.open,
         transfer: transferStateOf(cursor, queue),
+        ...(timeoutDeadline !== undefined && { timeoutDeadline }),
+        ...(sessionCode !== undefined && { sessionCode }),
       },
       content === undefined ? undefined : { content, sessionId: boot.sessionId },
     );
+  };
   const records: SessionRecords = {
     quiet: () => queue.pendingCount === 0 && execution?.holdsInput() !== true,
     write(cursor) {
@@ -426,13 +441,18 @@ async function runSessionLoop(
   const idle =
     records === undefined
       ? undefined
-      : async (): Promise<void> => {
+      : async (options: { readonly expires?: boolean } = {}): Promise<void> => {
           if (inbox.hasPending() || !records.quiet()) return;
           if ((await host.next()) !== "park" || inbox.hasPending() || !records.quiet()) return;
-          const wakes = [
-            sessionTimeout?.getDeadline().getTime(),
-            typeof idleWindow === "number" ? idleWindow : undefined,
-          ].filter((at): at is number => at !== undefined);
+          const now = host.now();
+          const deadline = sessionTimeout?.getDeadline().getTime();
+          if (options.expires === true && deadline !== undefined && deadline <= now) {
+            queue.enqueueControl("expired");
+            return;
+          }
+          const wakes = [deadline, typeof idleWindow === "number" ? idleWindow : undefined].filter(
+            (at): at is number => at !== undefined && at > now,
+          );
           const wakeAt = wakes.length === 0 ? undefined : Math.min(...wakes);
           throw new SessionParked({
             kind: "parked",
@@ -540,7 +560,7 @@ async function runSessionLoop(
             ? stopSandboxOnceIdle
             : async () => {
                 await stopSandboxOnceIdle();
-                await idle();
+                await idle({ expires: true });
               },
       });
       if (next.kind === "prewarm") {

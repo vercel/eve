@@ -82,6 +82,7 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 ## Experimental
 
 - [Dynamic Schedules](${EVE_ORIGIN}/docs/experimental/dynamic-schedules.md): Create and manage creator-owned runtime schedules with the experimental API; includes updates, approvals, and local delivery.
+- [Platforms](${EVE_ORIGIN}/docs/experimental/platforms.md): Declare where an agent runs in \`agent/platform.ts\`, and write a durable engine with the experimental API.
 
 ## API Reference and Discovery
 
