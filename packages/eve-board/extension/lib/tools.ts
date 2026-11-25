@@ -227,6 +227,20 @@ export function defineBoardReadTool(settings: Settings) {
         .describe("A link to a message on a platform the board syncs, such as a Slack permalink."),
       channel: z.string().min(1).optional().describe("A channel path, or `prefix/` for a subtree."),
       label: z.array(z.string().min(1)).optional().describe("`key` or `key=value` filters."),
+      text: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          "With one `channel` (no `prefix/`, `label`, or `after`), keep threads whose first or latest message matches this text. Page older with `before`.",
+        ),
+      mentions: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          'With one `channel` (no `prefix/`, `label`, or `after`), keep threads whose first or latest message mentions `"me"`, a handle, or an actor ID.',
+        ),
       after: z
         .string()
         .min(1)
@@ -250,6 +264,7 @@ export function defineBoardReadTool(settings: Settings) {
       return {
         cursor: page.cursor,
         older: page.older,
+        ...(page.scanned !== undefined && { scanned: page.scanned }),
         threads: page.threads.map((thread) => ({
           last: thread.last === null ? null : summarize(thread.last),
           message: summarize(thread.message),

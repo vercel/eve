@@ -79,6 +79,8 @@ export interface BoardChannelSummary {
 export interface BoardThreadsQuery {
   readonly channel?: string;
   readonly label?: readonly string[];
+  readonly mentions?: string;
+  readonly text?: string;
   readonly after?: string;
   readonly before?: string;
   readonly limit?: number;
@@ -88,6 +90,7 @@ export interface BoardThreadsPage {
   readonly threads: readonly BoardThreadSummary[];
   readonly cursor: string;
   readonly older: string | null;
+  readonly scanned?: number;
 }
 
 export interface BoardActorSummary {
@@ -363,6 +366,7 @@ export function createBoardClient(board: BoardRef, can?: BoardCan): BoardClient 
     return {
       cursor: page.cursor,
       older: page.older ?? null,
+      ...(page.scanned !== undefined && { scanned: page.scanned }),
       threads: page.threads.map((summary) => ({
         last: summary.last === null ? null : messageOf(summary.last),
         message: messageOf(summary.message),
