@@ -181,35 +181,53 @@ describe("a model that needs the caller's credential", () => {
     );
   });
 
-  it("fails only the turn when the provider refuses the person's credential", async () => {
-    const refusing = defineModel({
-      auth: { displayName: "Billing", getToken: async () => ({ token: "bob-token" }) },
-      authKey: "refusing",
-      create: () =>
-        markMockModel(
-          new MockLanguageModelV4({
-            doStream: async () => {
-              throw Object.assign(new Error("Forbidden"), { statusCode: 403 });
-            },
-          }),
-        ),
-      id: "refusing/model",
-    });
-    await withAgent(
-      "model-sign-in-forbidden",
-      defineAgent({ model: refusing, modelContextWindowTokens: 200_000 }),
-      async (session) => {
-        const settled = await session.stream.nextUntil(
-          "refused turn",
-          (event) => isTurnSettled(event) || event.type === "session.ended",
-        );
-        expect(filterEventsByType(settled, "session.ended")).toEqual([]);
-        expect(turnSettled(settled)).toMatchObject(
-          authorizationFailed("Billing rejected the credential."),
-        );
-      },
-    );
-  });
+  it.each([
+    ["403", 403, "Forbidden", "Forbidden"],
+    [
+      "400",
+      400,
+      "The number of function response parts must equal the number of function calls.",
+      "The number of function response parts must equal the number of function calls.",
+    ],
+    [
+      "402",
+      402,
+      "Project budget exceeded. Current spend: $1.01, limit: $1.00.",
+      "The AI Gateway project budget has been exceeded.",
+    ],
+  ])(
+    "fails only the turn with the provider's error when it answers a %s",
+    async (status, statusCode, thrown, message) => {
+      const refusing = defineModel({
+        auth: { displayName: "Billing", getToken: async () => ({ token: "bob-token" }) },
+        authKey: "refusing",
+        create: () =>
+          markMockModel(
+            new MockLanguageModelV4({
+              doStream: async () => {
+                throw Object.assign(new Error(thrown), { statusCode });
+              },
+            }),
+          ),
+        id: "refusing/model",
+      });
+      await withAgent(
+        `model-sign-in-provider-${status}`,
+        defineAgent({ model: refusing, modelContextWindowTokens: 200_000 }),
+        async (session) => {
+          const settled = await session.stream.nextUntil(
+            "refused turn",
+            (event) => isTurnSettled(event) || event.type === "session.ended",
+          );
+          expect(filterEventsByType(settled, "session.ended")).toEqual([]);
+          expect(turnSettled(settled)).toMatchObject({
+            error: { code: "MODEL_CALL_FAILED", message },
+            outcome: "failed",
+          });
+        },
+      );
+    },
+  );
 
   describe("after the process drops the dynamic model's value", () => {
     const dropLiveValues = () =>

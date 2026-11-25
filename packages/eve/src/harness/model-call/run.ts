@@ -6,7 +6,7 @@ import { stepCatalog } from "#definitions/step.js";
 import type { GenerationSteering } from "#harness/generation-steering.js";
 import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
 import { enforceBudget, humanInputContext } from "#harness/hitl/index.js";
-import { failModelCredential, pauseForModelSignIn } from "./credential-failure.js";
+import { failClientError, failModelCredential, pauseForModelSignIn } from "./credential-failure.js";
 import {
   isScopedAuthorizationRequiredError,
   type ScopedAuthorizationRequiredError,
@@ -38,7 +38,7 @@ import type { StepResult } from "#harness/types.js";
 import { stepReference } from "#harness/step/context.js";
 import { ModelCaller } from "./call.js";
 import { type CredentialedModel, credentialedModel } from "./credential.js";
-import { credentialErrorIn, type ModelCredentialFailure, refusesCredential } from "./errors.js";
+import { credentialErrorIn, isTerminalClientError, type ModelCredentialFailure } from "./errors.js";
 import { type EndsTurnTools, endsTurnTools, frameworkToolNames } from "./tools.js";
 import { reportModelCallFailure } from "./failure.js";
 import { resolveEffectiveRuntimeModel } from "./model.js";
@@ -101,8 +101,8 @@ export async function runModelStep(
     const compactionFailed = await caller.failIfCompactionFailed();
     if (compactionFailed !== undefined) return compactionFailed;
     if (generation.interrupted) return caller.steered();
-    if (resolved.scoped !== undefined && refusesCredential(error))
-      return await failModelCredential(step, "MODEL_AUTHORIZATION_FAILED", error, resolved.scoped);
+    if (resolved.scoped !== undefined && isTerminalClientError(error))
+      return await failClientError(step, error, resolved.scoped);
     return reportModelCallFailure(step, error, caller.takeUnkeptUsage());
   }
 

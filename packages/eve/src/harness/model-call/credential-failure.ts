@@ -14,8 +14,9 @@ import { supportsInteractiveAuthorization } from "#shared/connection-types.js";
 import {
   credentialFailureCode,
   type ModelCredentialFailureCode,
-  refusesCredential,
+  rejectsCredential,
 } from "./errors.js";
+import { modelCallErrorInfo } from "./failure.js";
 
 export async function pauseForModelSignIn(
   step: Step,
@@ -50,6 +51,16 @@ export async function failModelCredential(
   return await failTurn(step, error, code, credentialFailureMessage(code, name, error));
 }
 
+export async function failClientError(
+  step: Step,
+  error: unknown,
+  scoped: ScopedAuthorization,
+): Promise<StepResult> {
+  if (rejectsCredential(error))
+    return await failModelCredential(step, "MODEL_AUTHORIZATION_FAILED", error, scoped);
+  return await failTurn(step, error, "MODEL_CALL_FAILED", modelCallErrorInfo(error).message);
+}
+
 function credentialFailureMessage(
   code: ModelCredentialFailureCode,
   name: string,
@@ -67,7 +78,7 @@ function credentialFailureMessage(
 
 function signInFailureMessage(name: string, error: unknown): string {
   if (!isConnectionAuthorizationFailedError(error)) {
-    return refusesCredential(error)
+    return rejectsCredential(error)
       ? `${name} rejected the credential.`
       : `The turn got no ${name} credential.`;
   }

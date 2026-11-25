@@ -249,7 +249,7 @@ export function rejectsCredential(error: unknown): boolean {
   return readModelCallErrorSignals(error).statusCode === 401;
 }
 
-export function refusesCredential(error: unknown): boolean {
+export function isTerminalClientError(error: unknown): boolean {
   const status = readModelCallErrorSignals(error).statusCode;
   return (
     status !== undefined &&
