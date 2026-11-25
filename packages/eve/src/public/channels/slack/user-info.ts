@@ -1,6 +1,7 @@
 import { createLogger, logError } from "#internal/logging.js";
 import type { SlackRequest } from "#public/channels/slack/code-channel.js";
 import type { SlackMessage } from "#public/channels/slack/inbound.js";
+import { createSlackLookupCache } from "#public/channels/slack/lookup-cache.js";
 
 const log = createLogger("slack.user-info");
 
@@ -53,48 +54,34 @@ export type SlackUserResolver = (input: {
 
 const PROFILE_TTL_MS = 60 * 60 * 1000;
 const FAILED_LOOKUP_TTL_MS = 60_000;
-const MAX_CACHED_PROFILES = 1000;
 const LOOKUP_TIMEOUT_MS = 2000;
 const MAX_LOOKUPS_PER_MESSAGE = 20;
 
-interface CachedProfile {
-  readonly expiresAt: number;
-  readonly profile: Promise<SlackUserInfo | undefined>;
-}
-
 export function createSlackUserResolver(
   option: SlackUsersOption | undefined,
-  now: () => number = Date.now,
+  now?: () => number,
 ): SlackUserResolver | undefined {
   if (option === undefined || option === false) return undefined;
   const includeName = option === true || option.name !== false;
   const includeEmail = option !== true && option.email === true;
   if (!includeName && !includeEmail) return undefined;
   const authored = option === true ? undefined : option.resolve;
-  const cache = new Map<string, CachedProfile>();
+  const cache = createSlackLookupCache<SlackUserInfo | undefined>({
+    failedTtlMs: FAILED_LOOKUP_TTL_MS,
+    now,
+    ttlMs: PROFILE_TTL_MS,
+  });
 
   const cached: SlackUserResolver = ({ userId, teamId, request }) => {
     const key = `${teamId ?? ""}:${userId}`;
-    const hit = cache.get(key);
-    if (hit !== undefined && hit.expiresAt > now()) return hit.profile;
-
-    cache.delete(key);
-    if (cache.size >= MAX_CACHED_PROFILES) {
-      const oldest = cache.keys().next().value;
-      if (oldest !== undefined) cache.delete(oldest);
-    }
-    const startedAt = now();
-    const profile: Promise<SlackUserInfo | undefined> = fetchSlackUserInfo(userId, request).catch(
-      (error: unknown) => {
+    return cache.getOrLoad(key, async () => {
+      try {
+        return { value: await fetchSlackUserInfo(userId, request) };
+      } catch (error) {
         logError(log, "Slack user lookup failed; omitting it", error, { userId });
-        if (cache.get(key)?.profile === profile) {
-          cache.set(key, { expiresAt: startedAt + FAILED_LOOKUP_TTL_MS, profile });
-        }
-        return undefined;
-      },
-    );
-    cache.set(key, { expiresAt: startedAt + PROFILE_TTL_MS, profile });
-    return profile;
+        return { failed: true, value: undefined };
+      }
+    });
   };
 
   const lookup: SlackUserResolver =

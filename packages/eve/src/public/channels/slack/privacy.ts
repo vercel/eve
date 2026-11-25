@@ -1,4 +1,5 @@
 import type { SlackApiResponse } from "#public/channels/slack/api.js";
+import { createSlackLookupCache } from "#public/channels/slack/lookup-cache.js";
 import { readSlackSpaceType } from "#public/channels/slack/space.js";
 import type {
   ConversationSpaceType,
@@ -37,41 +38,23 @@ export type SlackConversationKindReader = (input: {
 
 const CONVERSATION_KIND_TTL_MS = 5 * 60 * 1000;
 const FAILED_CONVERSATION_KIND_TTL_MS = 60_000;
-const MAX_CACHED_CONVERSATIONS = 1_000;
 
-interface CachedConversationKind {
-  readonly expiresAt: number;
-  readonly kind: Promise<SlackConversationKind>;
-}
-
-export function createSlackConversationKindReader(
-  now: () => number = Date.now,
-): SlackConversationKindReader {
-  const cache = new Map<string, CachedConversationKind>();
+export function createSlackConversationKindReader(now?: () => number): SlackConversationKindReader {
+  const cache = createSlackLookupCache<SlackConversationKind>({
+    failedTtlMs: FAILED_CONVERSATION_KIND_TTL_MS,
+    now,
+    ttlMs: CONVERSATION_KIND_TTL_MS,
+  });
 
   return (input) => {
     const fromEvent = readEventConversationKind(input.raw);
     if (fromEvent !== undefined) return Promise.resolve(fromEvent);
 
     const key = `${input.teamId ?? ""}:${input.channelId}`;
-    const hit = cache.get(key);
-    if (hit !== undefined && hit.expiresAt > now()) return hit.kind;
-
-    cache.delete(key);
-    if (cache.size >= MAX_CACHED_CONVERSATIONS) {
-      const oldest = cache.keys().next().value;
-      if (oldest !== undefined) cache.delete(oldest);
-    }
-
-    const startedAt = now();
-    const kind = fetchSlackConversationKind(input.channelId, input.request).then((result) => {
-      if (result.visibility === undefined && cache.get(key)?.kind === kind) {
-        cache.set(key, { expiresAt: startedAt + FAILED_CONVERSATION_KIND_TTL_MS, kind });
-      }
-      return result;
+    return cache.getOrLoad(key, async () => {
+      const value = await fetchSlackConversationKind(input.channelId, input.request);
+      return { failed: value.visibility === undefined, value };
     });
-    cache.set(key, { expiresAt: startedAt + CONVERSATION_KIND_TTL_MS, kind });
-    return kind;
   };
 }
 
