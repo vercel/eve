@@ -341,6 +341,8 @@ export class EveTUIRunner {
   readonly #lifecycle?: CommandLifecycle;
   readonly #signedInRemote?: RemoteDevelopmentTarget;
   readonly #continuedSessionId?: string;
+  #attachedToSession = false;
+  #resuming?: Promise<void>;
 
   constructor(options: EveTUIRunnerOptions) {
     this.#client = options.client;
@@ -349,6 +351,7 @@ export class EveTUIRunner {
     if (options.diagnostics !== undefined) this.#diagnostics = options.diagnostics;
     this.#renderer = createRenderer(options);
     this.#continuedSessionId = options.sessionId;
+    this.#attachedToSession = options.sessionId !== undefined;
     this.#store = new SessionStore({
       client: options.client,
       followAgents: true,
@@ -581,11 +584,17 @@ export class EveTUIRunner {
     }
 
     if (this.#continuedSessionId !== undefined) {
-      void this.#store.resume().catch((error: unknown) => {
-        if (!this.#disposed && !isAbortError(error)) {
-          this.#renderSendError(`Couldn't open session ${this.#continuedSessionId}`, error);
-        }
-      });
+      const resuming = this.#store
+        .resume()
+        .catch((error: unknown) => {
+          if (!this.#disposed && !isAbortError(error)) {
+            this.#renderSendError(`Couldn't open session ${this.#continuedSessionId}`, error);
+          }
+        })
+        .finally(() => {
+          if (this.#resuming === resuming) this.#resuming = undefined;
+        });
+      this.#resuming = resuming;
     }
 
     while (this.#lifecycle?.signal.aborted !== true && this.#renderer.exitRequested?.() !== true) {
@@ -668,6 +677,14 @@ export class EveTUIRunner {
         });
         return;
       case "clear":
+        if (this.#attachedToSession) {
+          this.#finishCommand({
+            kind: "result",
+            message:
+              "This session was opened with --session, so /clear would clear it everywhere it's used. Run /new to start a separate session.",
+          });
+          return;
+        }
         await this.#runSessionCommand({
           absent: "No active session to clear",
           accepted: "Session context cleared",
@@ -709,6 +726,13 @@ export class EveTUIRunner {
   }
 
   #submitMessage(message: string): void {
+    const resuming = this.#resuming;
+    if (resuming !== undefined) {
+      void resuming.then(() => {
+        if (!this.#disposed) this.#submitMessage(message);
+      });
+      return;
+    }
     const snapshot = this.#store.snapshot;
     const steering = hasOpenTurn(snapshot);
     const sent: { text: string; deliveryId?: string } = { text: message };
@@ -906,6 +930,7 @@ export class EveTUIRunner {
   }
 
   #resetConversation(): void {
+    this.#attachedToSession = false;
     this.#store.newSession();
     this.#clearRunnerState();
   }
@@ -951,7 +976,10 @@ export class EveTUIRunner {
 
   async #resetSession(): Promise<void> {
     try {
-      if (this.#store.snapshot.session !== undefined) await (await this.#store.end()).result();
+      if (this.#store.snapshot.session !== undefined && !this.#attachedToSession) {
+        await (await this.#store.end()).result();
+      }
+      this.#attachedToSession = false;
       this.#store.newSession();
     } catch (error) {
       this.#finishCommand({
