@@ -30,15 +30,21 @@ export interface AgentOAuthSession {
 }
 
 export async function signInToAgent(input: {
+  readonly headers?: Readonly<Record<string, string>>;
   readonly serverUrl: string;
   readonly signal?: AbortSignal;
   readonly notice: (message: string) => void;
 }): Promise<AgentOAuthSession | undefined> {
-  const discovered = await discoverAgentResource(input.serverUrl, input.signal);
+  const fetchFn = agentFetch(input.serverUrl, input.headers);
+  const discovered = await discoverAgentResource(input.serverUrl, fetchFn, input.signal);
   if (discovered === undefined) return undefined;
   const { auth } = await import("#compiled/@ai-sdk/mcp/index.js");
   const store = await readStore(discovered.resource);
-  const options = { resourceMetadataUrl: discovered.metadataUrl, serverUrl: discovered.resource };
+  const options = {
+    fetchFn,
+    resourceMetadataUrl: discovered.metadataUrl,
+    serverUrl: discovered.resource,
+  };
 
   const refresh = async (): Promise<boolean> => {
     if (store.tokens?.refresh_token === undefined) return false;
@@ -68,7 +74,11 @@ export async function signInToAgent(input: {
 
 async function login(
   store: StoredAgentOAuth,
-  options: { readonly resourceMetadataUrl: URL; readonly serverUrl: string },
+  options: {
+    readonly fetchFn: typeof fetch;
+    readonly resourceMetadataUrl: URL;
+    readonly serverUrl: string;
+  },
   input: { readonly signal?: AbortSignal; readonly notice: (message: string) => void },
 ): Promise<void> {
   const { auth } = await import("#compiled/@ai-sdk/mcp/index.js");
@@ -103,8 +113,26 @@ async function login(
   }
 }
 
+function agentFetch(
+  serverUrl: string,
+  headers: Readonly<Record<string, string>> | undefined,
+): typeof fetch {
+  const origin = new URL(serverUrl).origin;
+  const extra = Object.entries(headers ?? {}).filter(
+    ([name]) => name.toLowerCase() !== "authorization",
+  );
+  return (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : input.toString());
+    if (url.origin !== origin || extra.length === 0) return fetch(input, init);
+    const merged = new Headers(input instanceof Request ? input.headers : init?.headers);
+    for (const [name, value] of extra) merged.set(name, value);
+    return fetch(input, { ...init, headers: merged });
+  };
+}
+
 async function discoverAgentResource(
   serverUrl: string,
+  fetchFn: typeof fetch,
   signal: AbortSignal | undefined,
 ): Promise<{ readonly metadataUrl: URL; readonly resource: string } | undefined> {
   const base = new URL(serverUrl);
@@ -114,7 +142,7 @@ async function discoverAgentResource(
     base.origin,
   );
   try {
-    const response = await fetch(metadataUrl, { redirect: "manual", signal: signal ?? null });
+    const response = await fetchFn(metadataUrl, { redirect: "manual", signal: signal ?? null });
     if (!response.ok) return undefined;
     const metadata = (await response.json()) as {
       readonly authorization_servers?: unknown;

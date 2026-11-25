@@ -109,6 +109,7 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
   const agentOAuth =
     prepared.kind === "remote" && !hasDevelopmentAuthorizationHeader(headers)
       ? await signInToAgent({
+          ...(headers !== undefined && { headers }),
           notice: (message) => process.stdout.write(`${message}\n`),
           serverUrl,
           ...(lifecycle !== undefined && { signal: lifecycle.signal }),

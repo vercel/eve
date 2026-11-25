@@ -567,7 +567,8 @@ export class EveTUIRunner {
         `Viewing session ${this.#forkSource} read-only. Your first message forks it into a new session.`,
       );
       void this.#store.resume().catch((error: unknown) => {
-        if (!this.#disposed) this.#renderSendError("Couldn't load the session", error);
+        if (this.#disposed || this.#forkSource === undefined || isAbortError(error)) return;
+        this.#renderSendError("Couldn't load the session", error);
       });
     }
 
