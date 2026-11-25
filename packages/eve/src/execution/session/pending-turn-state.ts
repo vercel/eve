@@ -1,6 +1,7 @@
 import { sessionView } from "#harness/session-machine/commit.js";
 import { programsOf } from "#harness/session-machine/programs.js";
 import { runtimeWait, ownOpenRequestIds } from "#harness/session-machine/view.js";
+import { TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 import type { TaskToolCall } from "#execution/tasks/calls.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { SessionProjection } from "#protocol/session-projection.js";
@@ -42,11 +43,12 @@ export function pausedOnTasks(taskIds: readonly string[]): TurnPause {
 export function pausedOnCalls(session: HarnessSession): TurnPause | undefined {
   const waiting = runtimeWait(session.state);
   if (waiting === undefined) return undefined;
+  const hasTaskWait = waiting.taskToolCalls.some((call) => call.kind === TASK_WAIT_TOOL_NAME);
   return {
     callIds: waiting.callIds,
     dispatch: waiting.tasks.length > 0,
     on: "calls",
-    ...(waiting.taskToolCalls.length > 0 && { pausedAtMs: Date.now() }),
+    ...(hasTaskWait && { pausedAtMs: Date.now() }),
     taskToolCalls: waiting.taskToolCalls,
   };
 }

@@ -21,13 +21,7 @@ import {
   cancelWorkingTasks,
   sessionTaskTable,
 } from "#execution/tasks/session.js";
-import {
-  findTask,
-  isActiveTaskRun,
-  settleTaskCalls,
-  taskWaitResult,
-  type TaskTable,
-} from "#execution/tasks/table.js";
+import { applyTaskReplyToTable, taskWaitResult, type TaskTable } from "#execution/tasks/table.js";
 import type { PendingDispatch } from "#harness/session-machine/transitions.js";
 import {
   sessionCommandHookToken,
@@ -620,20 +614,10 @@ function previewTaskReplies(
   cursor: SessionStateCursor,
   messages: readonly TaskReplyMessage[],
 ): TaskTable {
-  const sessionState = cursor.sessionState.snapshot.session.state;
-  const view = storedProjection(sessionState).view;
+  const tasksById = storedProjection(cursor.sessionState.snapshot.session.state).view?.tasks;
   let table = sessionTaskTable(cursor);
   for (const message of messages) {
-    const taskId = message.from.taskId;
-    if (taskId === undefined) continue;
-    if (view?.tasks[taskId]?.status === "ended") continue;
-    if (!isActiveTaskRun(table, taskId, message.from.runId)) continue;
-    if (findTask(table, taskId)?.run?.runId !== message.from.runId) continue;
-    table = settleTaskCalls(table, {
-      callIds: message.callIds,
-      outcome: { output: message.output, status: "completed" },
-      taskId,
-    }).table;
+    table = applyTaskReplyToTable(table, tasksById, message).table;
   }
   return table;
 }

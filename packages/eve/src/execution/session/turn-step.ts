@@ -205,11 +205,12 @@ async function runSessionStep(
 ): Promise<DurableStepResult> {
   const pendingAttributes: PendingStepAttributes = {};
   let current = input;
+  const rerun = current.recover !== undefined || current.rerun;
   const pendingDispatch = current.input?.pendingDispatch;
   if (pendingDispatch !== undefined) {
     const published = await commitSessionStep(
       {
-        rerun: current.rerun,
+        rerun,
         serializedContext: current.serializedContext,
         sessionState: current.sessionState,
         sessionWritable: current.sessionWritable,
@@ -228,7 +229,7 @@ async function runSessionStep(
     for (const message of pendingTaskReplies) {
       const applied = await applyTaskRunMessage({
         message,
-        rerun: current.rerun,
+        rerun,
         serializedContext: current.serializedContext,
         sessionState: current.sessionState,
         sessionWritable: current.sessionWritable,
