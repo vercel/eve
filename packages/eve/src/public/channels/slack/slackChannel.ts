@@ -105,8 +105,9 @@ import {
   slackThreadSessionHistory,
 } from "#public/channels/slack/model-context.js";
 import {
-  readSlackConversationKind,
+  createSlackConversationKindReader,
   type SlackConversationKind,
+  type SlackConversationKindReader,
 } from "#public/channels/slack/privacy.js";
 import {
   createSlackUserResolver,
@@ -571,8 +572,8 @@ export interface SlackInboundEventContext {
  */
 export interface SlackInboundMessageContext extends SlackContext, SlackSessionOperations {
   /**
-   * Returns whether the inbound message belongs to a DM, group DM, or private channel.
-   * Unknown conversation types fail closed and return `true`.
+   * Returns whether the message is in a DM, group DM, or private channel (`true` if unknown).
+   * Results are cached up to 5 minutes, so a channel's privacy change can take that long to apply.
    */
   isDMOrPrivateChannel(): Promise<boolean>;
   /** Returns whether this message belongs to a thread with an active eve session. */
@@ -1131,6 +1132,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   const uploadPolicy = mergeUploadPolicy(config.uploadPolicy);
   const usersOption = config.messageContext?.users;
   const userResolver = createSlackUserResolver(usersOption);
+  const conversationKindReader = createSlackConversationKindReader();
   const slackFetchFile = createSlackFetchFile({
     api,
     botToken: config.credentials?.botToken,
@@ -1267,6 +1269,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
           config,
           received: rendering.received,
           userResolver,
+          conversationKindReader,
           uploadPolicy,
           handledEvents,
           headers: req.headers,
@@ -1507,6 +1510,7 @@ async function handleEventPost(input: {
   readonly config: SlackChannelConfig;
   readonly received: SlackRenderChain["received"];
   readonly userResolver: SlackUserResolver | undefined;
+  readonly conversationKindReader: SlackConversationKindReader;
   readonly uploadPolicy: UploadPolicy;
   readonly handledEvents: Set<string>;
 }): Promise<Response> {
@@ -1603,6 +1607,7 @@ async function handleEventPost(input: {
     threadContext: config.threadContext,
     uploadPolicy: input.uploadPolicy,
     userResolver: input.userResolver,
+    conversationKindReader: input.conversationKindReader,
   });
   const dispatchMessage =
     (
@@ -1761,6 +1766,7 @@ async function dispatchSlackMessage(input: {
   readonly threadContext: LoadThreadContextMessagesOptions | undefined;
   readonly uploadPolicy: UploadPolicy;
   readonly userResolver: SlackUserResolver | undefined;
+  readonly conversationKindReader: SlackConversationKindReader;
 }): Promise<void> {
   const { edit } = input;
   const request = buildSlackWorkspaceHandle({
@@ -1855,10 +1861,11 @@ async function dispatchSlackMessage(input: {
   });
   let conversationKind: Promise<SlackConversationKind> | undefined;
   const readConversationKind = () =>
-    (conversationKind ??= readSlackConversationKind({
+    (conversationKind ??= input.conversationKindReader({
       channelId: input.message.channelId,
       raw: input.message.raw,
       request: conversationRequest,
+      teamId: input.installationTeamId ?? input.message.teamId,
     }));
   const isDMOrPrivateChannel = async () => (await readConversationKind()).isPrivate;
   const openCodeChannel = async (options: SlackOpenCodeChannelOptions = {}) => {
