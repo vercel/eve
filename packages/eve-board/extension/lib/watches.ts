@@ -229,8 +229,14 @@ async function labeledRoots(
   watchChannel: string,
   label: string,
   limit: number,
+  by?: string,
 ): Promise<BoardMessage[]> {
-  const found = await client.threads({ channel: watchChannel, label: [label], limit });
+  const found = await client.threads({
+    ...(by !== undefined && { by }),
+    channel: watchChannel,
+    label: [label],
+    limit,
+  });
   return found.map((summary) => summary.message).filter((message) => !message.deleted);
 }
 
@@ -341,7 +347,13 @@ async function withRegistrationLock<T>(
 
 async function lockTask(client: BoardClient, watchChannel: string): Promise<string> {
   const self = await client.me();
-  const found = await labeledRoots(client, watchChannel, `${LOCK_LABEL}=registration`, 20);
+  const found = await labeledRoots(
+    client,
+    watchChannel,
+    `${LOCK_LABEL}=registration`,
+    20,
+    self.actor,
+  );
   const lock = found.find((message) => message.by.actor === self.actor);
   if (lock !== undefined) {
     const state = lock.task?.state;

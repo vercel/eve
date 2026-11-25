@@ -64,7 +64,7 @@ export function resolveBoards(settings: BoardSettings): ResolvedBoardSet {
       shorthand: false,
       team: entry.team,
       url: entry.url,
-      watchChannel: entry.watchChannel ?? DEFAULT_WATCH_CHANNEL,
+      watchChannel: entry.watchChannel ?? settings.watchChannel ?? DEFAULT_WATCH_CHANNEL,
     });
     keys.push(key);
   }

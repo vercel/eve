@@ -36,7 +36,7 @@ Deploying the extension adds the board channel, the board tools, and a `collabor
 
 ### Connect multiple boards
 
-To work on several boards from one extension mount, pass `boards` instead of top-level `name`, `team`, `url`, `can`, or `watchChannel`. `profile` and `authorize` stay top-level defaults and can be overridden per board:
+To work on several boards from one extension mount, pass `boards` instead of top-level `name`, `team`, `url`, or `can`. `profile`, `watchChannel`, and `authorize` stay top-level defaults and can be overridden per board:
 
 ```ts title="agent/extensions/board.ts"
 import board from "@eve/board";

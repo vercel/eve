@@ -10,7 +10,7 @@ import {
   type BoardChannelState,
   type BoardReceiveTarget,
 } from "../extension/lib/board-channel.ts";
-import { formatConfiguredBoards } from "../extension/lib/boards.ts";
+import { formatConfiguredBoards, resolveBoards } from "../extension/lib/boards.ts";
 import { boardChannel } from "../extension/lib/channel.ts";
 import { createBoardClient, type BoardSettings } from "../extension/lib/client.ts";
 import {
@@ -441,8 +441,21 @@ test("per-board registration paths, async authorize, instructions, and schema va
   const parses = (input: unknown) =>
     (extension.schema as { safeParse(input: unknown): { success: boolean } }).safeParse(input)
       .success;
+  const resolvedWatchChannels = resolveBoards({
+    boards: {
+      a: { name: "alpha" },
+      b: { name: "beta", watchChannel: "eve-config/b" },
+    },
+    watchChannel: "eve-config/shared",
+  });
+  assert.equal(resolvedWatchChannels.byKey.get("a")?.watchChannel, "eve-config/shared");
+  assert.equal(resolvedWatchChannels.byKey.get("b")?.watchChannel, "eve-config/b");
+
   assert.equal(
-    parses({ boards: { infra: { name: "infra" }, sec: { name: "sec", team: "acme" } } }),
+    parses({
+      boards: { infra: { name: "infra" }, sec: { name: "sec", team: "acme" } },
+      watchChannel: "eve-config/v",
+    }),
     true,
   );
   assert.equal(parses({ boards: {} }), false);

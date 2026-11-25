@@ -50,7 +50,7 @@ const boardEntry = z.object({
   profile: profile.optional(),
   /** What board tools and watches may reach on this board. Defaults to the deployment's access. */
   can: can.optional(),
-  /** Channel that keeps watch instructions on this board. Defaults to `"eve-config/watches"`. */
+  /** Channel that keeps watch instructions on this board. Defaults to top-level `watchChannel` or `"eve-config/watches"`. */
   watchChannel: watchChannel.optional(),
   /** Authorizes watch creation, listing, and removal on this board. Defaults to top-level `authorize`. */
   authorize: authorize.optional(),
@@ -90,7 +90,7 @@ export default defineExtension({
           'an absolute path without parameters or query string, such as "/eve/v1/board"',
         )
         .optional(),
-      /** Named boards served by this mount. Do not combine with top-level `name`, `team`, `url`, `can`, or `watchChannel`. */
+      /** Named boards served by this mount. Do not combine with top-level `name`, `team`, `url`, or `can`. */
       boards: z
         .record(
           z
@@ -114,13 +114,12 @@ export default defineExtension({
         value.name !== undefined ||
         value.team !== undefined ||
         value.url !== undefined ||
-        value.can !== undefined ||
-        value.watchChannel !== undefined
+        value.can !== undefined
       ) {
         ctx.addIssue({
           code: "custom",
           message:
-            "Cannot combine `boards` with top-level `name`, `team`, `url`, `can`, or `watchChannel`; set those fields on each entry in `boards`.",
+            "Cannot combine `boards` with top-level `name`, `team`, `url`, or `can`; set those fields on each entry in `boards`.",
           path: ["boards"],
         });
       }

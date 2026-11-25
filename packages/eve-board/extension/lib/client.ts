@@ -78,6 +78,7 @@ export interface BoardChannelSummary {
 
 export interface BoardThreadsQuery {
   readonly channel?: string;
+  readonly by?: string;
   readonly label?: readonly string[];
   readonly after?: string;
   readonly before?: string;
