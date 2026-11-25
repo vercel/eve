@@ -7,6 +7,8 @@ import { STUB_CONTEXT_KEY, type StubScope } from "#tool-stubs/types.js";
 import { runServingToolStubs, type ToolStubHost } from "#execution/tool-stub-host.js";
 import type { DeliverHookPayload, SessionCapabilities, TurnCaller } from "#channel/types.js";
 import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
+import { SESSION_CALLBACK_CONTEXT_KEY_NAME } from "#context/key-names.js";
+import { resolveLocalInitialTurnCaller } from "#subagents/initial-caller.js";
 import {
   notifyCancelledTaskCallerStep,
   notifyTurnCallerStep,
@@ -185,7 +187,10 @@ export async function failSession(input: {
 }): Promise<never> {
   let caller: TurnCaller | undefined;
   try {
-    caller = await resolveInitialTurnCallerStep({ serializedContext: input.serializedContext });
+    caller =
+      input.serializedContext[SESSION_CALLBACK_CONTEXT_KEY_NAME] !== undefined
+        ? await resolveInitialTurnCallerStep({ serializedContext: input.serializedContext })
+        : resolveLocalInitialTurnCaller(input.serializedContext);
   } catch {}
   await finalizeSession(
     { error: input.error, kind: "failed" },
@@ -495,15 +500,17 @@ async function runSessionLoop(
   };
 
   try {
+    const defersTimer = boot.start.kind === "turn";
     const [actionResult, timerResult] = await Promise.allSettled([
       runInitialAction(),
-      sessionTimeout?.start(),
+      defersTimer ? Promise.resolve() : sessionTimeout?.start(),
     ]);
     if (timerResult.status === "rejected") throw timerResult.reason;
     if (actionResult.status === "rejected") throw actionResult.reason;
     const initial = actionResult.value;
     if (initial.kind !== "action") return initial;
     let action = initial.action;
+    let timerStarted = !defersTimer;
 
     while (true) {
       if (action.kind === "done") {
@@ -551,6 +558,11 @@ async function runSessionLoop(
 
       const transferred = await tryCompactionHandoff();
       if (transferred !== undefined) return transferred;
+
+      if (!timerStarted) {
+        timerStarted = true;
+        void sessionTimeout?.start().catch(() => undefined);
+      }
 
       turnControl ??= createTurnControl();
       const next = await nextParkedActivity();

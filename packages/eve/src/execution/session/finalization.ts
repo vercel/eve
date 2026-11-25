@@ -65,6 +65,22 @@ export async function finalizeSession(
   context: SessionFinalizationContext,
 ): Promise<WorkflowEntryResult> {
   const { serializedContext, sessionState } = context.cursor;
+  const settled = settledResult(outcome, context);
+  const earlyCallerNotification =
+    outcome.kind === "done" && context.caller !== undefined
+      ? notifyTurnCallerStep({
+          caller: context.caller,
+          lifecycle: "terminal",
+          sessionId: sessionState?.sessionId ?? (serializedContext["eve.sessionId"] as string),
+          settled: {
+            ...(settled.isError && { isError: true }),
+            output: settled.output,
+            usage: settled.turnUsage,
+          },
+        })
+      : undefined;
+  earlyCallerNotification?.catch(() => undefined);
+
   if (sessionState !== undefined && mayHaveLiveRuns(sessionState)) {
     try {
       await terminateChildSessionsStep({ sessionState });
@@ -121,8 +137,9 @@ export async function finalizeSession(
     await closeSessionStreamStep({ sessionWritable: context.sessionWritable });
   }
 
-  const settled = settledResult(outcome, context);
-  if (context.caller !== undefined) {
+  if (earlyCallerNotification !== undefined) {
+    await earlyCallerNotification;
+  } else if (context.caller !== undefined) {
     const sessionId = sessionState?.sessionId ?? (serializedContext["eve.sessionId"] as string);
     if (outcome.kind === "ended" && outcome.cancelled !== undefined) {
       const notification = {

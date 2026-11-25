@@ -56,6 +56,12 @@ export async function prepareInitialEntry(
     compiledArtifactsSource: config.compiledArtifactsSource,
     nodeId: config.nodeId,
   });
+  if (
+    agent.compiled?.turnAgent.configResolver === true &&
+    config.dynamicSubagentAgentConfig === undefined
+  ) {
+    throw new Error("Dynamic subagent execution requires a selected concrete agent config.");
+  }
   const graph = agent.compiled?.graph;
   if (
     graph !== undefined &&

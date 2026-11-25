@@ -237,6 +237,12 @@ async function runSessionStepBody(
   const adapter = ctx.require(ChannelKey);
   const agent = sessionAgent(ctx);
   const bundle = requireCompiledBundle(ctx);
+  if (
+    bundle.turnAgent.configResolver === true &&
+    input.serializedContext["eve.dynamicSubagentAgentConfig"] === undefined
+  ) {
+    throw new Error("Dynamic subagent execution requires a selected concrete agent config.");
+  }
 
   if (host.callbackBaseUrl !== undefined) ctx.set(CallbackBaseUrlKey, host.callbackBaseUrl);
 

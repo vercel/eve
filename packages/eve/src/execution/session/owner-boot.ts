@@ -6,9 +6,7 @@ import type {
   SessionCommand,
 } from "#channel/types.js";
 import { readSerializedSessionSchedule } from "#context/session-schedule.js";
-import type { AgentSessionRuntimeOverrides } from "#execution/agent-sessions/runtime-overrides.js";
 import { closeSessionStreamStep } from "#execution/close-session-stream-step.js";
-import { createSessionStep } from "#execution/create-session-step.js";
 import { createInitialSessionValues } from "#execution/initial-session-values.js";
 import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
 import { readChannelRequestId, readRootSessionId } from "#execution/eve-workflow-attributes.js";
@@ -28,10 +26,10 @@ import { failSession, type SessionBoot } from "#execution/session/program.js";
 import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session/timeout.js";
 import type { SessionTimeoutControl, SessionTimeouts } from "#execution/session/timeout-control.js";
 import { createTurnControl, type TurnControl } from "#execution/session/turn-control.js";
+import { SESSION_CALLBACK_CONTEXT_KEY_NAME } from "#context/key-names.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 import { attachInputText, readInputText } from "#internal/input-text.js";
-import type { DurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
-import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
+import { resolveLocalInitialTurnCaller } from "#subagents/initial-caller.js";
 import { resolveInitialTurnCallerStep } from "#subagents/parent-notification.js";
 
 export interface BootOutcome {
@@ -98,11 +96,6 @@ async function prepareInitialOwner(
   return owner;
 }
 
-function unwrapSettled<T>(result: PromiseSettledResult<T>): T {
-  if (result.status === "rejected") throw result.reason;
-  return result.value;
-}
-
 export interface InitialOwnerPorts<Hook extends InboxHook = InboxHook> {
   readonly sessionWritable: WritableStream<Uint8Array>;
   readonly inboxTransport: SessionInboxTransport<Hook>;
@@ -123,56 +116,38 @@ export async function bootInitialOwner<Hook extends InboxHook>(
   const inbox = createSessionInbox(ports.inboxTransport);
   const sessionTimeoutMs = input.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS;
   const continuationToken = (serializedContext["eve.continuationToken"] as string) || "";
-  const serializedBundle = serializedContext["eve.bundle"] as {
-    source: DurableCompiledArtifactsSource;
-    nodeId?: string;
-  };
   try {
     const history = input.input.message === undefined ? input.input.history : undefined;
-    const sessionCreationPromise =
-      serializedBundle.nodeId === undefined
-        ? Promise.resolve(
-            createInitialSessionValues({
-              continuationToken,
-              history,
-              outputSchema: input.input.outputSchema,
-              rootSessionId: readRootSessionId(serializedContext),
-              sessionId,
-            }),
-          )
-        : createSessionStep({
-            agentSessionRuntimeOverrides: serializedContext["eve.agentSessionRuntimeOverrides"] as
-              | AgentSessionRuntimeOverrides
-              | undefined,
-            compiledArtifactsSource: serializedBundle.source,
-            continuationToken,
-            dynamicSubagentAgentConfig: serializedContext["eve.dynamicSubagentAgentConfig"] as
-              | DynamicSubagentAgentConfig
-              | undefined,
-            history,
-            nodeId: serializedBundle.nodeId,
-            outputSchema: input.input.outputSchema,
-            rootSessionId: readRootSessionId(serializedContext),
-            sessionId,
-          });
-    const ownerPreparationPromise = prepareInitialOwner(inbox, {
+    const created = createInitialSessionValues({
       continuationToken,
-      sessionCreation: sessionCreationPromise,
+      history,
+      outputSchema: input.input.outputSchema,
+      rootSessionId: readRootSessionId(serializedContext),
       sessionId,
-      sessionTimeoutMs,
-      startClaim: input.startClaim,
-      timeouts: ports.timeouts,
     });
-    const callerResolutionPromise = hasDelegatedSessionContext(serializedContext)
-      ? resolveInitialTurnCallerStep({ serializedContext })
-      : Promise.resolve(undefined);
-    const [sessionCreation, ownerPreparation, callerResolution] = await Promise.allSettled([
-      sessionCreationPromise,
-      ownerPreparationPromise,
-      callerResolutionPromise,
+    const callerPromise =
+      serializedContext[SESSION_CALLBACK_CONTEXT_KEY_NAME] !== undefined
+        ? resolveInitialTurnCallerStep({ serializedContext })
+        : Promise.resolve(
+            hasDelegatedSessionContext(serializedContext)
+              ? resolveLocalInitialTurnCaller(serializedContext)
+              : undefined,
+          );
+    const [preparedResult, callerResult] = await Promise.allSettled([
+      prepareInitialOwner(inbox, {
+        continuationToken,
+        sessionCreation: Promise.resolve(created),
+        sessionId,
+        sessionTimeoutMs,
+        startClaim: input.startClaim,
+        timeouts: ports.timeouts,
+      }),
+      callerPromise,
     ]);
-    const created = unwrapSettled(sessionCreation);
-    const prepared = unwrapSettled(ownerPreparation);
+    if (preparedResult.status === "rejected") throw preparedResult.reason;
+    if (callerResult.status === "rejected") throw callerResult.reason;
+    const prepared = preparedResult.value;
+    const caller = callerResult.value;
     if (prepared.kind === "alias-conflict") {
       if (input.continuationConflictCommand !== undefined) {
         const conflict = { command: input.continuationConflictCommand, continuationToken };
@@ -182,7 +157,6 @@ export async function bootInitialOwner<Hook extends InboxHook>(
       await closeSessionStreamStep({ sessionWritable });
       return undefined;
     }
-    const caller = unwrapSettled(callerResolution);
     return {
       inbox,
       session: {

@@ -85,7 +85,10 @@ function initialInput(overrides: Record<string, unknown> = {}) {
 function subagentInput(overrides: Record<string, unknown> = {}) {
   return initialInput({
     ...overrides,
-    serializedContext: { "eve.bundle": { nodeId: "child", source: { kind: "bundled" } } },
+    serializedContext: {
+      "eve.bundle": { nodeId: "child", source: { kind: "bundled" } },
+      ...(overrides.serializedContext as Record<string, unknown> | undefined),
+    },
   });
 }
 
@@ -131,27 +134,40 @@ describe("bootInitialOwner", () => {
     ).toEqual(auth);
   });
 
-  it("prepares turn controls and claims while session creation is pending, confirming after it", async () => {
-    const sessionCreation = deferred<never>();
+  it("creates a local subagent session and resolves its caller in the workflow body without boot steps", async () => {
     const inbox = createInbox();
-    vi.mocked(createSessionStep).mockReturnValue(sessionCreation.promise);
     vi.mocked(createSessionInbox).mockReturnValue(inbox as never);
+    vi.mocked(hasDelegatedSessionContext).mockReturnValue(true);
 
-    const bootPromise = bootInitialOwner(
-      subagentInput(),
+    const boot = await bootInitialOwner(
+      subagentInput({
+        serializedContext: {
+          "eve.bundle": { nodeId: "subagents/researcher", source: { kind: "bundled" } },
+          "eve.channel": {
+            kind: "subagent",
+            state: {
+              callId: "call-1",
+              parentContinuationToken: "parent-reply-hook",
+              parentSessionId: "parent-1",
+              subagentName: "researcher",
+            },
+          },
+        },
+      }),
       "session-1",
       workflowOwnerPorts("session-1"),
     );
 
-    await vi.waitFor(() => expect(inbox.claimSessionHook).toHaveBeenCalledOnce());
-    expect(inbox.claimSessionHook).toHaveBeenCalledWith("eve:session:session-1:inbox", {
-      confirmAfter: sessionCreation.promise,
-    });
+    expect(createSessionStep).not.toHaveBeenCalled();
+    expect(resolveInitialTurnCallerStep).not.toHaveBeenCalled();
+    expect(inbox.claimSessionHook).toHaveBeenCalledOnce();
     expect(createTurnControl).toHaveBeenCalledOnce();
-    sessionCreation.resolve({ history: [], state: {} } as never);
-
-    const boot = await bootPromise;
     expect(boot?.session.initialTurnControl).toBeDefined();
+    expect(boot?.session.caller).toEqual({
+      callId: "call-1",
+      replyTo: { kind: "hook", token: "parent-reply-hook" },
+      subagentName: "researcher",
+    });
     expect(startSessionTimeoutStep).not.toHaveBeenCalled();
     await boot!.session.sessionTimeoutControl!.start();
     expect(startSessionTimeoutStep).toHaveBeenCalledOnce();
@@ -237,26 +253,28 @@ describe("bootInitialOwner", () => {
     expect(inbox.dispose).toHaveBeenCalledOnce();
   });
 
-  it.each([
-    {
-      fail: (failure: Error) => vi.mocked(createSessionStep).mockRejectedValue(failure),
-      source: "session creation",
-    },
-    {
-      fail: (failure: Error) => {
-        vi.mocked(hasDelegatedSessionContext).mockReturnValue(true);
-        vi.mocked(resolveInitialTurnCallerStep).mockRejectedValue(failure);
-      },
-      source: "delegated caller resolution",
-    },
-  ])("fails the session and releases the inbox when $source fails", async ({ fail }) => {
+  it("fails the session and releases the inbox when remote callback caller resolution fails", async () => {
     const inbox = createInbox();
     vi.mocked(createSessionInbox).mockReturnValue(inbox as never);
     const failure = new Error("boot failed");
-    fail(failure);
+    vi.mocked(resolveInitialTurnCallerStep).mockRejectedValue(failure);
 
     await expect(
-      bootInitialOwner(subagentInput(), "session-1", workflowOwnerPorts("session-1")),
+      bootInitialOwner(
+        subagentInput({
+          serializedContext: {
+            "eve.bundle": { nodeId: "subagents/researcher", source: { kind: "bundled" } },
+            "eve.sessionCallback": {
+              callId: "call-1",
+              subagentName: "researcher",
+              token: "tok",
+              url: "https://example.com/cb",
+            },
+          },
+        }),
+        "session-1",
+        workflowOwnerPorts("session-1"),
+      ),
     ).rejects.toBe(failure);
     expect(mocks.failSession).toHaveBeenCalledOnce();
     expect(inbox.dispose).toHaveBeenCalledOnce();

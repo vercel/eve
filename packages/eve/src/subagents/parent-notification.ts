@@ -1,5 +1,4 @@
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
-import { deserializeContext } from "#context/serialize.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
 import type { TurnCaller } from "#channel/types.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
@@ -9,6 +8,7 @@ import {
   SUBAGENT_ADAPTER_KIND,
   type SubagentAdapterState,
 } from "#subagents/adapter-state.js";
+import { resolveLocalInitialTurnCaller } from "#subagents/initial-caller.js";
 import { isHookNotFound } from "#shared/run-errors.js";
 import { createLogger } from "#internal/logging.js";
 import type { AgentTurnOutcome } from "#shared/agent-turn-outcome.js";
@@ -176,17 +176,7 @@ export async function resolveInitialTurnCallerStep(input: {
     };
   }
 
-  const ctx = await deserializeContext(input.serializedContext);
-  const adapter = ctx.get(ChannelKey);
-  if (adapter?.kind !== SUBAGENT_ADAPTER_KIND || !isSubagentAdapterState(adapter.state)) {
-    return undefined;
-  }
-
-  return {
-    callId: adapter.state.callId,
-    replyTo: { kind: "hook", token: adapter.state.parentContinuationToken },
-    subagentName: adapter.state.subagentName,
-  };
+  return resolveLocalInitialTurnCaller(input.serializedContext);
 }
 
 export function bindTurnCallerContext(
