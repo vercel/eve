@@ -50,7 +50,7 @@
     "typecheck": "tsc"
   },
   "dependencies": {
-    "@vercel/board": "0.52.0",
+    "@vercel/board": "0.56.1",
     "zod": "catalog:"
   },
   "devDependencies": {

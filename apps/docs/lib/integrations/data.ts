@@ -2262,7 +2262,7 @@ The extension adds \`desktop__launch\`, \`desktop__snapshot\`, and other tools. 
 eve add extension/board
 \`\`\``,
     quickStart: `The command creates \`agent/extensions/board.ts\`. Deploy to Vercel so the agent can reach the board using the deployment's OIDC token. The agent watches nothing until you ask it to. Tell it which channel to watch and what to do when a message matches.`,
-    configure: `Limit which channels and actions the agent can use with \`can\`. Set \`configurers\` to restrict who can manage watches. See the [Board guide](/docs/channels/board) for access, task queues, and local development.`,
+    configure: `Limit which channels and actions the agent can use with \`can\`. Set \`authorize\` to control who can manage watches. See the [Board guide](/docs/channels/board) for access, task queues, and local development.`,
   },
   code: {
     logo: "eve",

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import { publicRoutePath } from "eve/channels";
 
+import { DEFAULT_BOARD_KEY, DEFAULT_WATCH_CHANNEL } from "./boards.ts";
 import {
   BOARD_CHANNEL_SELECTOR,
   BOARD_TAIL_LIMIT,
@@ -27,9 +28,13 @@ import {
   normalizeBoardRouteBase,
 } from "./route.ts";
 
-export { BOARD_WAKE_ROUTE, DEFAULT_BOARD_ROUTE_BASE, LEGACY_BOARD_WAKE_ROUTE };
-export const DEFAULT_WATCH_CHANNEL = "eve-config/watches";
-export const MAX_WATCHES = 32;
+export {
+  BOARD_WAKE_ROUTE,
+  DEFAULT_BOARD_ROUTE_BASE,
+  DEFAULT_WATCH_CHANNEL,
+  LEGACY_BOARD_WAKE_ROUTE,
+};
+export const MAX_WATCHES = 64;
 
 const WATCH_LABEL = "eve-watch";
 const STATE_LABEL = "eve-watch-state";
@@ -133,7 +138,12 @@ function modelCan(can: BoardCan | undefined, watchChannel: string): BoardCan {
   return grants;
 }
 
-export function boardClients(settings: BoardSettings) {
+export type BoardClientConfig = Pick<
+  BoardSettings,
+  "can" | "name" | "profile" | "team" | "url" | "watchChannel"
+>;
+
+export function boardClients(settings: BoardClientConfig) {
   const watchChannel = settings.watchChannel ?? DEFAULT_WATCH_CHANNEL;
   return {
     deployment: createBoardClient(settings),
@@ -303,9 +313,10 @@ const localLocks = new Map<string, Promise<unknown>>();
 async function withRegistrationLock<T>(
   client: BoardClient,
   watchChannel: string,
+  boardKey: string,
   run: () => Promise<T>,
 ): Promise<T> {
-  const key = `${client.profile}\n${watchChannel}`;
+  const key = `${boardKey}\n${client.profile}\n${watchChannel}`;
   const previous = localLocks.get(key) ?? Promise.resolve();
   const turn = previous
     .catch(() => {})
@@ -330,7 +341,7 @@ async function withRegistrationLock<T>(
 
 async function lockTask(client: BoardClient, watchChannel: string): Promise<string> {
   const self = await client.me();
-  const found = await labeledRoots(client, watchChannel, `${LOCK_LABEL}=registration`, 20);
+  const found = await labeledRoots(client, watchChannel, `${LOCK_LABEL}=registration`, 200);
   const lock = found.find((message) => message.by.actor === self.actor);
   if (lock !== undefined) {
     const state = lock.task?.state;
@@ -386,49 +397,56 @@ function registrationDestinationChanged(
 }
 
 async function updateRegistration(input: {
+  readonly boardKey?: string;
   readonly client: BoardClient;
   readonly routeBase?: string;
   readonly watchChannel: string;
   change(watch: Record<string, { readonly tail: string }>): boolean;
 }): Promise<BoardRegistration | undefined> {
   const { client } = input;
-  return await withRegistrationLock(client, input.watchChannel, async () => {
-    const held = await heldRegistration(client);
-    const watch = { ...held?.watch };
-    const watchChanged = input.change(watch);
-    const deployed = isVercelDeployment();
-    const desired = deployed
-      ? registrationWhere(await client.discovery(), input.routeBase)
-      : undefined;
-    const destinationChanged =
-      desired !== undefined && registrationDestinationChanged(held, desired);
-    if (!watchChanged && !destinationChanged) return held;
-    const where =
-      desired ??
-      (held !== undefined
-        ? {
-            branch: held.branch ?? null,
-            path: held.path ?? null,
-            url: held.url ?? null,
-          }
-        : registrationWhere(await client.discovery(), input.routeBase));
-    try {
-      return await client.register({
-        ...where,
-        ...(held?.sync !== undefined && { sync: held.sync }),
-        watch,
-      });
-    } catch (error) {
-      if (boardErrorCode(error) !== "watchers_need_project") throw error;
-      throw new Error(
-        "Vercel's board takes watches only from a deployment. To try watches locally, run `npx @vercel/board serve` and set BOARD_URL to the URL it prints.",
-        { cause: error },
-      );
-    }
-  });
+  return await withRegistrationLock(
+    client,
+    input.watchChannel,
+    input.boardKey ?? DEFAULT_BOARD_KEY,
+    async () => {
+      const held = await heldRegistration(client);
+      const watch = { ...held?.watch };
+      const watchChanged = input.change(watch);
+      const deployed = isVercelDeployment();
+      const desired = deployed
+        ? registrationWhere(await client.discovery(), input.routeBase)
+        : undefined;
+      const destinationChanged =
+        desired !== undefined && registrationDestinationChanged(held, desired);
+      if (!watchChanged && !destinationChanged) return held;
+      const where =
+        desired ??
+        (held !== undefined
+          ? {
+              branch: held.branch ?? null,
+              path: held.path ?? null,
+              url: held.url ?? null,
+            }
+          : registrationWhere(await client.discovery(), input.routeBase));
+      try {
+        return await client.register({
+          ...where,
+          ...(held?.sync !== undefined && { sync: held.sync }),
+          watch,
+        });
+      } catch (error) {
+        if (boardErrorCode(error) !== "watchers_need_project") throw error;
+        throw new Error(
+          "Vercel's board takes watches only from a deployment. To try watches locally, run `npx @vercel/board serve` and set BOARD_URL to the URL it prints.",
+          { cause: error },
+        );
+      }
+    },
+  );
 }
 
 export async function createWatch(input: {
+  readonly boardKey?: string;
   readonly client: BoardClient;
   readonly watchChannel: string;
   readonly id: string;
@@ -461,6 +479,7 @@ export async function createWatch(input: {
   });
   try {
     await updateRegistration({
+      boardKey: input.boardKey,
       client,
       routeBase: input.routeBase,
       watchChannel: input.watchChannel,
@@ -526,6 +545,7 @@ export async function listWatches(input: {
 }
 
 export async function removeWatch(input: {
+  readonly boardKey?: string;
   readonly client: BoardClient;
   readonly watchChannel: string;
   readonly id: string;
@@ -535,6 +555,7 @@ export async function removeWatch(input: {
   assertWatchId(id);
   let removed = false;
   await updateRegistration({
+    boardKey: input.boardKey,
     client,
     routeBase: input.routeBase,
     watchChannel: input.watchChannel,

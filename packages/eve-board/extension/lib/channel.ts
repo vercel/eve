@@ -13,6 +13,7 @@ export function boardChannel(config: BoardChannelConfig = {}): BoardChannel {
   return createBoardChannel(() => extension.config, config);
 }
 
+export type { BoardAuthorize, BoardAuthorizeAction, BoardAuthorizeRequest } from "./authorize.ts";
 export type {
   BoardChannel,
   BoardChannelConfig,
