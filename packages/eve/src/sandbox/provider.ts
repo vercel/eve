@@ -164,6 +164,18 @@ export interface SandboxProviderImplementation<
     artifact: Readonly<Artifact>,
   ): Promise<{ readonly connection: SandboxConnection<Extensions>; readonly state: State }>;
   /**
+   * Creates the sandbox for `ctx.session.id` as a copy of the sandbox of the session `source`
+   * names, files included, for a session started with `sandbox: { copyFrom }`. Return `null`
+   * when that session has no sandbox to copy, and eve calls `start()` instead. Without it, such
+   * a session starts a fresh sandbox.
+   */
+  copy?(
+    ctx: SandboxSessionContext,
+    source: { readonly sessionId: string },
+    options: Readonly<OpenOptions> | undefined,
+    artifact: Readonly<Artifact>,
+  ): Promise<{ readonly connection: SandboxConnection<Extensions>; readonly state: State } | null>;
+  /**
    * Reconnects to the sandbox `state` names, never recreating it. Throw
    * `SandboxSessionGoneError` when it no longer exists.
    */

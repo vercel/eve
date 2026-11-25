@@ -17,6 +17,7 @@ import {
   OccurrenceIdKey,
   ParentSessionKey,
   ParentTraceContextKey,
+  SandboxCopySourceKey,
   ScheduleIdKey,
   ScheduleInstanceKey,
   EarlierRemoteCallerKey,
@@ -116,6 +117,9 @@ export function buildRunContext(input: {
 
   if (run.parent !== undefined) {
     ctx.set(ParentSessionKey, run.parent);
+  }
+  if (run.sandbox !== undefined) {
+    ctx.set(SandboxCopySourceKey, { sessionId: run.sandbox.copyFrom });
   }
   if (run.traceRoot !== undefined) {
     ctx.set(TraceRootKey, run.traceRoot);

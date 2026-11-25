@@ -145,6 +145,10 @@ await sandbox.setNetworkPolicy("deny-all");
 return sandbox;
 ```
 
+## Copy a session's sandbox
+
+A session started with [`sandbox: { copyFrom }`](/docs/channels/custom#cross-channel-hand-off) starts its Vercel Sandbox from a snapshot of the source session's sandbox. When the source sandbox is running, eve snapshots it, which stops it like any Vercel Sandbox snapshot; it resumes on its next use. A stopped sandbox is copied from its last snapshot without starting it.
+
 ## Live sandbox name
 
 Sandboxes from `environment.open()` and `ctx.getSandbox(environment)` have a read-only `name`. It identifies the live Vercel Sandbox and stays the same across stop and resume. Use it as `sandboxName` when you create Vercel git-credential-broker grants for that sandbox:

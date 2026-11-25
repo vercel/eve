@@ -52,6 +52,7 @@ export async function openCodeChannel(
     .send(message, {
       auth: ctx.session.auth.current,
       history: historyFromMessages(ctx.messages),
+      sandbox: { copyFrom: ctx.session.id },
       idempotencyKey: `${ctx.session.id}:${ctx.callId}`,
     });
   return { sessionId: delivery.sessionId, status: "opened" };

@@ -21,6 +21,7 @@ import { createSandboxEnvironmentHarness } from "#internal/testing/sandbox-provi
 import { defineSandboxProvider } from "#public/sandbox/provider.js";
 import type { VercelSandboxSession } from "#public/sandbox/vercel.js";
 import type { VercelSandboxRuntimeOptions } from "#public/sandbox/vercel-sandbox.js";
+import type { SandboxSessionContext } from "#sandbox/provider.js";
 import { VercelSandbox } from "#sandbox/providers/vercel.js";
 import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
 import { DefaultSandbox } from "#sandbox/providers/default.js";
@@ -943,6 +944,92 @@ describe("createVercelSandbox", () => {
         credentials: "eve-sbx-tpl-vercel-61b688a6c98003848d40c5a13046c703",
         sourceRevision: "eve-sbx-tpl-vercel-f638671cfec9d0a12db226863fa3ed9f",
       });
+    });
+  });
+
+  describe("copying a session sandbox", () => {
+    const appRoot = "/tmp/test-app-root";
+    const artifact = { snapshotId: "prepared-snapshot" };
+    const context = (sessionId: string): SandboxSessionContext => ({
+      kind: "session",
+      resolveProjectPath: (path) => path,
+      session: {
+        auth: { current: null, initiator: null },
+        id: sessionId,
+        turn: { id: "test-turn", sequence: 0 },
+      },
+      storagePath: appRoot,
+    });
+    const project = () => {
+      const fake = createFakeVercelProvider();
+      const provider = createVercelImplementation({
+        createSandbox: async ({ createOptions, sandboxModule }) =>
+          await sandboxModule.Sandbox.create(createOptions),
+        loadSandboxModule: async () => fake.sandboxModule as never,
+      });
+      return { fake, provider };
+    };
+
+    it("snapshots a running source and opens the new session from that snapshot", async () => {
+      const { fake, provider } = project();
+      const source = await provider.start(context("session_source"), undefined, artifact);
+      const original = fake.sandboxes.get(source.state.sandboxName)!;
+
+      const copied = await provider.copy!(
+        context("session_target"),
+        { sessionId: "session_source" },
+        undefined,
+        artifact,
+      );
+
+      expect(original.snapshot).toHaveBeenCalledWith({ expiration: 24 * 60 * 60 * 1000 });
+      expect(fake.sandboxModule.Sandbox.create).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          source: { type: "snapshot", snapshotId: `${source.state.sandboxName}-snapshot` },
+        }),
+      );
+      expect(copied?.state).toEqual({
+        sandboxName: fake.sandboxModule.Sandbox.create.mock.lastCall?.[0].name,
+        version: 3,
+      });
+      expect(copied?.connection.extensions?.name).toBe(copied?.state.sandboxName);
+    });
+
+    it("copies a stopped source from its current snapshot without snapshotting again", async () => {
+      const { fake, provider } = project();
+      const source = await provider.start(context("session_source"), undefined, artifact);
+      const original = fake.sandboxes.get(source.state.sandboxName)!;
+      original.status = "stopped";
+      original.currentSnapshotId = "stopped-session-snapshot";
+
+      const copied = await provider.copy!(
+        context("session_target"),
+        { sessionId: "session_source" },
+        undefined,
+        artifact,
+      );
+
+      expect(original.snapshot).not.toHaveBeenCalled();
+      expect(fake.sandboxModule.Sandbox.create).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          source: { type: "snapshot", snapshotId: "stopped-session-snapshot" },
+        }),
+      );
+      expect(copied?.state).toMatchObject({ version: 3 });
+    });
+
+    it("returns null without creating a sandbox when the source is missing", async () => {
+      const { fake, provider } = project();
+
+      await expect(
+        provider.copy!(
+          context("session_target"),
+          { sessionId: "session_missing" },
+          undefined,
+          artifact,
+        ),
+      ).resolves.toBeNull();
+      expect(fake.sandboxModule.Sandbox.create).not.toHaveBeenCalled();
     });
   });
 

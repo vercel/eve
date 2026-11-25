@@ -375,6 +375,7 @@ export interface RunInput {
   readonly capabilities?: SessionCapabilities;
   readonly requestId?: string;
   readonly title?: string;
+  readonly sandbox?: { readonly copyFrom: string };
   readonly callback?: SessionCallback;
   readonly earlierCallerProtocol?: number;
   readonly continuationToken?: string;

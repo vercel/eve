@@ -5,6 +5,7 @@ import { ensureDevelopmentSandboxesPrepared } from "#execution/sandbox/developme
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger } from "#internal/logging.js";
 import { contextStorage } from "#context/container.js";
+import { SandboxCopySourceKey } from "#context/keys.js";
 import {
   buildCallbackContext,
   withRuntimeSandboxLifecycle,
@@ -227,7 +228,12 @@ export async function ensureSandboxAccess(
 
     const artifact = await loadArtifact(provider);
     const start = async () => {
-      const result = await provider.implementation.start(context, options, artifact);
+      const source = contextStorage.getStore()?.get(SandboxCopySourceKey);
+      const copied =
+        source === undefined || provider.implementation.copy === undefined
+          ? null
+          : await provider.implementation.copy(context, source, options, artifact);
+      const result = copied ?? (await provider.implementation.start(context, options, artifact));
       if (!isSandboxPreparedArtifact(result.state)) {
         throw new Error(
           `Sandbox provider "${provider.providerName}" returned non-serializable session state.`,

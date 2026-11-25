@@ -8,6 +8,7 @@
   "SessionNotActiveError",
   "SessionReader",
   "SessionRespondOptions",
+  "SessionSandboxOptions",
   "SessionSendOptions",
   "SessionStreamOptions"
 ]

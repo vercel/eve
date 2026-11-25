@@ -110,6 +110,9 @@ export const ChannelInstrumentationKey = new ContextKey<ChannelInstrumentationPr
 );
 export const ParentSessionKey = new ContextKey<SessionParent>("eve.parentSession");
 export const SessionPredecessorKey = new ContextKey<SessionPredecessor>("eve.sessionPredecessor");
+export const SandboxCopySourceKey = new ContextKey<{ readonly sessionId: string }>(
+  "eve.sandboxCopySource",
+);
 export const TraceRootKey = new ContextKey<SessionTraceRoot>("eve.traceRoot");
 export const ParentTraceContextKey = new ContextKey<SessionTraceSeed>("eve.parentTraceContext");
 

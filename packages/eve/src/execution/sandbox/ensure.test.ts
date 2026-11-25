@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { shutdownActiveSandboxConnections } from "#execution/sandbox/active-connections.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { SessionKey } from "#context/keys.js";
+import { SandboxCopySourceKey, SessionKey } from "#context/keys.js";
 import { readDurableSession } from "#execution/durable-session-store.js";
 import { importConversation, readLegacySnapshot } from "#execution/legacy-session/snapshot.js";
 import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
@@ -22,6 +22,8 @@ vi.mock("#runtime/sandbox/prepared-artifacts.js", () => ({
 function fixture(
   options: {
     readonly closable?: boolean;
+    readonly copy?: boolean;
+    readonly copyReturnsNull?: boolean;
     readonly idleTimeoutMs?: number | false;
     readonly returnCopy?: boolean;
     readonly setup?: () => void;
@@ -42,12 +44,18 @@ function fixture(
     connection: await create(),
     state: { key: context.session.id },
   }));
+  const copy = vi.fn(async (context: SandboxSessionContext) =>
+    options.copyReturnsNull === true
+      ? null
+      : { connection: await create(), state: { key: `copy:${context.session.id}` } },
+  );
   const provider = defineSandboxProvider({
     name: "test",
     environment: () => ({
       onSessionEnd,
       ...(options.stopsIdle === true && { onSessionIdle }),
       prepare: async () => null,
+      ...(options.copy === true && { copy }),
       start,
       resume,
     }),
@@ -76,6 +84,7 @@ function fixture(
   };
   return {
     closeSandbox,
+    copy,
     create,
     onSessionEnd,
     onSessionIdle,
@@ -127,8 +136,10 @@ async function open(
   state: Parameters<typeof ensureSandboxAccess>[0]["state"] = null,
   nodeId = "__root__",
   ownsSandbox?: boolean,
+  copySourceId?: string,
 ) {
   const context = new ContextContainer();
+  if (copySourceId !== undefined) context.set(SandboxCopySourceKey, { sessionId: copySourceId });
   context.set(SessionKey, {
     auth: { current: null, initiator: null },
     sessionId: id,
@@ -258,6 +269,51 @@ describe("ensureSandboxAccess", () => {
     await expect(failure).rejects.toThrow(SandboxTemplateNotProvisionedError);
     await expect(failure).rejects.toThrow('agent node "__root__"');
     expect(value.create).not.toHaveBeenCalled();
+  });
+
+  it("copies from the context's source instead of starting a fresh sandbox", async () => {
+    const value = fixture({ copy: true });
+    const { access, sandbox } = await open(
+      value.registry,
+      "session-1",
+      null,
+      "__root__",
+      undefined,
+      "session_source",
+    );
+
+    expect(sandbox).toBeTruthy();
+    expect(value.copy).toHaveBeenCalledWith(
+      expect.objectContaining({ session: expect.objectContaining({ id: "session-1" }) }),
+      { sessionId: "session_source" },
+      undefined,
+      null,
+    );
+    expect((await access.captureState()).session).toMatchObject({
+      state: { key: "copy:session-1" },
+    });
+    expect(value.start).not.toHaveBeenCalled();
+  });
+
+  it("starts fresh when the source sandbox cannot be copied", async () => {
+    const value = fixture({ copy: true, copyReturnsNull: true });
+    const { access } = await open(
+      value.registry,
+      "session-1",
+      null,
+      "__root__",
+      undefined,
+      "session_source",
+    );
+
+    expect(value.copy).toHaveBeenCalledWith(
+      expect.anything(),
+      { sessionId: "session_source" },
+      undefined,
+      null,
+    );
+    expect(value.start).toHaveBeenCalledOnce();
+    expect((await access.captureState()).session).toMatchObject({ state: { key: "session-1" } });
   });
 
   it("creates and returns a real sandbox", async () => {

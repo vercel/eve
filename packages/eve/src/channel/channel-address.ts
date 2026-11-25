@@ -29,11 +29,13 @@ import { contextStorage } from "#context/container.js";
 import { readSessionSchedule } from "#context/session-schedule.js";
 import { validateSessionHistory } from "#shared/session-history.js";
 import type { ImportedMessage } from "#protocol/session-events/families/delivery.js";
+import { type SessionSandboxOptions, validateSandboxOptions } from "#channel/session.js";
 
 interface BaseChannelAddressCreateOptions {
   readonly auth: SessionAuthContext | null;
   readonly history?: SendPayload["history"];
   readonly initiatorAuth?: SessionAuthContext | null;
+  readonly sandbox?: SessionSandboxOptions;
   readonly title?: string;
 }
 
@@ -52,6 +54,7 @@ interface BaseChannelAddressDeliveryOptions {
   readonly auth: SessionAuthContext | null;
   readonly callback?: SessionCallback;
   readonly initiatorAuth?: SessionAuthContext | null;
+  readonly sandbox?: SessionSandboxOptions;
   readonly title?: string;
   readonly turnPolicy?: TurnPolicy;
 }
@@ -144,6 +147,7 @@ export function createChannelAddress<TState = undefined>(input: {
       };
       const runInput: RunInput = {
         idempotencyKey: options.idempotencyKey,
+        ...(options.sandbox !== undefined && { sandbox: validateSandboxOptions(options.sandbox) }),
         adapter,
         auth: options.auth,
         capabilities: { requestInput: true },
@@ -221,6 +225,7 @@ export function createChannelAddress<TState = undefined>(input: {
         initiatorAuth: options.initiatorAuth,
         input: history === undefined ? {} : { history },
         requestId: metadata.requestId,
+        ...(options.sandbox !== undefined && { sandbox: validateSandboxOptions(options.sandbox) }),
         title: options.title,
       });
       return {

@@ -16,6 +16,7 @@ import type {
 import { type Answer, parseAnswers, type StrictAnswers } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
+import type { SessionSandboxOptions } from "#channel/session.js";
 import { attachInputText } from "#internal/input-text.js";
 
 /** Options for sending a message from a channel-local continuation address. */
@@ -47,6 +48,8 @@ export type ChannelCreateOptions<TState = undefined> = {
   /** Prior conversation the session starts with; it joins history with the first message. */
   readonly history?: readonly SessionHistoryMessage[];
   readonly initiatorAuth?: SessionAuthContext | null;
+  /** The session's sandbox setup. See `SessionSandboxOptions`. */
+  readonly sandbox?: SessionSandboxOptions;
   readonly title?: string;
 } & ([TState] extends [undefined] ? unknown : { readonly state: TState });
 
