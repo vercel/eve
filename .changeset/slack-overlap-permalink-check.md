@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Start Slack's first-reply `chat.getPermalink` thread-root check on the first streamed text delta or alongside any in-flight status write instead of awaiting it serially after status flushes.
+Run Slack's first-reply `chat.getPermalink` thread-root check alongside the in-flight status write instead of after it, so the first reply posts one Slack round trip sooner.

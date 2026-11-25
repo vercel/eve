@@ -88,11 +88,10 @@ export async function postCompletedSlackReply(
 export async function deliverCompletedSlackReply(
   channel: SlackContext,
   reply: SlackCompletedReply,
-  options: { readonly rootGone?: Promise<boolean>; readonly turnId?: string },
+  { rootGone, ...logFields }: { readonly rootGone?: Promise<boolean>; readonly turnId?: string },
 ): Promise<void> {
   const { blocks, markdown, text } = typeof reply === "string" ? { markdown: reply } : reply;
-  const logFields = options.turnId === undefined ? {} : { turnId: options.turnId };
-  if (await (options.rootGone ?? checkThreadRootGone(channel))) {
+  if (await (rootGone ?? checkThreadRootGone(channel))) {
     log.warn(ROOT_GONE_LOG, logFields);
     return;
   }
