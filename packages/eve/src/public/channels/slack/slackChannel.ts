@@ -572,8 +572,8 @@ export interface SlackInboundEventContext {
  */
 export interface SlackInboundMessageContext extends SlackContext, SlackSessionOperations {
   /**
-   * Returns whether the inbound message belongs to a DM, group DM, or private channel.
-   * Unknown conversation types fail closed and return `true`.
+   * Returns whether the message is in a DM, group DM, or private channel (`true` if unknown).
+   * Results are cached up to 5 minutes, so a channel's privacy change can take that long to apply.
    */
   isDMOrPrivateChannel(): Promise<boolean>;
   /** Returns whether this message belongs to a thread with an active eve session. */
