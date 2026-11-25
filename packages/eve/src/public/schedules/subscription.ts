@@ -135,7 +135,7 @@ export type ScheduleTiming =
  */
 export type ScheduleState = "active" | "inactive" | "completed";
 
-/** Provider projection; payload and creator data are not read back. */
+/** A schedule's timing and state. `get` also returns its creator and payload; `list` doesn't. */
 export interface ScheduleRecord {
   /** Human-readable label; multiple schedules may share it. */
   readonly displayName?: string;
@@ -145,6 +145,11 @@ export interface ScheduleRecord {
   readonly scheduleId: string;
   readonly state: ScheduleState;
   readonly updatedAt: number;
+}
+/** One schedule with the principal who last wrote its payload and the payload eve stored. */
+export interface ScheduleDetail<TPayload> extends ScheduleRecord {
+  readonly creator: SchedulePrincipalReference;
+  readonly payload: TPayload;
 }
 /**
  * One page of schedules from a provider; pass `cursor` to the next list call, or stop when it is
@@ -179,7 +184,12 @@ export interface ScheduleProvider {
     schedule: ScheduleCreate<TPayload>,
   ): Promise<ScheduleRecord>;
   list(context: ScheduleProviderContext, query: ScheduleList): Promise<SchedulePage>;
-  get(context: ScheduleProviderContext, name: string): Promise<ScheduleRecord | null>;
+  /** With `payload: true`, also returns the payload exactly as eve supplied it on the last write. */
+  get(
+    context: ScheduleProviderContext,
+    name: string,
+    options?: { readonly payload?: boolean },
+  ): Promise<(ScheduleRecord & { readonly payload?: unknown }) | null>;
   /** Patch supplied fields; preserve identity, state, target, and omitted fields. */
   update<TPayload>(
     context: ScheduleProviderContext,
@@ -210,13 +220,22 @@ export type ScheduleClientUpdate<TPayload> =
   | { readonly expression: ScheduleTiming; readonly payload?: TPayload }
   | { readonly expression?: ScheduleTiming; readonly payload: TPayload };
 
-/** Authenticated client; every operation is authorized through `scope`. */
-export interface ScheduleClient<TPayload> {
+/**
+ * Authenticated client; every operation is authorized through `scope`. `TPrepared` is the payload
+ * as `preparePayload` stores it, which `get(name, { payload: true })` returns.
+ */
+export interface ScheduleClient<TPayload, TPrepared = TPayload> {
   create(input: ScheduleClientCreate<TPayload>): Promise<ScheduleRecord>;
   delete(name: string): Promise<boolean>;
   disable(name: string): Promise<ScheduleRecord>;
   enable(name: string): Promise<ScheduleRecord>;
   get(name: string): Promise<ScheduleRecord | null>;
+  /** Also returns the creator and the stored payload. */
+  get(name: string, options: { readonly payload: true }): Promise<ScheduleDetail<TPrepared> | null>;
+  get(
+    name: string,
+    options?: { readonly payload?: boolean },
+  ): Promise<ScheduleRecord | ScheduleDetail<TPrepared> | null>;
   invoke(name: string): Promise<void>;
   list(input?: ScheduleList): Promise<SchedulePage>;
   /** Timing-only updates keep the stored payload and creator; payload replacement captures the updating caller as creator. */

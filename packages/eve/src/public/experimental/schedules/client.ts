@@ -26,7 +26,7 @@ import {
 export async function schedules<TPayload, TPrepared = TPayload>(
   collection: DefinedDynamicSchedules<TPayload, StandardSchemaV1<unknown, TPayload>, TPrepared>,
   options: { readonly scope?: string } = {},
-): Promise<ScheduleClient<TPayload>> {
+): Promise<ScheduleClient<TPayload, TPrepared>> {
   if (collection.scopes === undefined) {
     if (options.scope !== undefined)
       throw new Error(

@@ -8,5 +8,13 @@ export function scheduleDisplayName(name: string): string {
 }
 
 export function projectScheduleRecord(record: ScheduleRecord): ScheduleRecord {
-  return { ...record, displayName: scheduleDisplayName(record.name) };
+  return {
+    createdAt: record.createdAt,
+    displayName: scheduleDisplayName(record.name),
+    expression: record.expression,
+    name: record.name,
+    scheduleId: record.scheduleId,
+    state: record.state,
+    updatedAt: record.updatedAt,
+  };
 }

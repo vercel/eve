@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { z } from "#compiled/zod/index.js";
 import { vercelScheduleProvider } from "#public/schedules/providers/vercel.js";
+import { defineDynamicSchedules } from "#public/schedules/subscription.js";
+import { createScheduleCollectionClient } from "#runtime/schedules/collection-client.js";
+import { createScheduleCollectionPayload } from "#runtime/schedules/payload.js";
 import type { ScheduleProviderContext } from "#runtime/schedules/provider-types.js";
 
 const oidcToken = `eyJhbGciOiJSUzI1NiJ9.${Buffer.from(
@@ -14,6 +18,8 @@ const context: ScheduleProviderContext = {
   operationId: "operation_1",
   target: { key: "dynamic-schedules" },
 };
+
+const storedPayload = { task: "Review PRs" };
 
 function schedule(overrides: Record<string, unknown> = {}) {
   return {
@@ -210,11 +216,111 @@ describe("vercelScheduleProvider", () => {
 
     await provider.create(context, {
       expression: { type: "single", at: "2026-10-01T12:00:00", timezone: "UTC" },
-      payload: "Review PRs",
+      payload: storedPayload,
       name: "review-prs",
     });
+    const stored = await provider.get({ ...context, operationId: "get" }, "review-prs");
+    expect(stored).toMatchObject({ name: "review-prs" });
+    expect(stored).not.toHaveProperty("payload");
     await expect(
-      provider.get({ ...context, operationId: "get" }, "review-prs"),
-    ).resolves.toMatchObject({ name: "review-prs" });
+      provider.get({ ...context, operationId: "get" }, "review-prs", { payload: true }),
+    ).resolves.toMatchObject({ name: "review-prs", payload: storedPayload });
+  });
+
+  it("asks the Schedules API for the payload only when get requests it", async () => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("VERCEL_OIDC_TOKEN", oidcToken);
+    const fetchImpl = vi.fn<typeof fetch>(async () =>
+      Response.json(
+        schedule({
+          payload: {
+            eve: { application: "dynamic-schedules", collection: "collection", version: 1 },
+            payload: storedPayload,
+          },
+        }),
+      ),
+    );
+    const provider = vercelScheduleProvider({ fetch: fetchImpl });
+
+    await expect(
+      provider.get(context, "review-prs-daily", { payload: true }),
+    ).resolves.toMatchObject({ name: "review-prs-daily", payload: storedPayload });
+    expect(String(fetchImpl.mock.calls[0]![0])).toBe(
+      "https://vercel-schedules.com/v1/schedules/review-prs-daily?namespace=eve-namespace&include=payload",
+    );
+
+    const stored = await provider.get(context, "review-prs-daily");
+    expect(stored).toMatchObject({ name: "review-prs-daily" });
+    expect(stored).not.toHaveProperty("payload");
+    expect(String(fetchImpl.mock.calls[1]![0])).not.toContain("include=");
+  });
+
+  it("returns the creator and payload from a client get only when payload: true", async () => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("VERCEL_OIDC_TOKEN", oidcToken);
+    const creator = { type: "user", authenticator: "test", principalId: "alice" };
+    const task = { task: "Review PRs" };
+    let returnPayload = true;
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(String(input));
+      const stored = createScheduleCollectionPayload({
+        application: "fixture",
+        collection: "requests",
+        envelope: { version: 3, payload: task, scope: "shared", principal: creator },
+      });
+      return Response.json(
+        schedule(
+          returnPayload && url.searchParams.get("include") === "payload"
+            ? { payload: { eve: { version: 1 }, payload: stored } }
+            : {},
+        ),
+      );
+    });
+    const client = createScheduleCollectionClient(
+      defineDynamicSchedules({
+        provider: vercelScheduleProvider({ fetch: fetchImpl }),
+        inputSchema: z.object({ task: z.string() }).strict(),
+        scope: () => "shared",
+        auth: () => null,
+        run: async () => {},
+      }),
+      {
+        abortSignal: new AbortController().signal,
+        application: "fixture",
+        collection: "requests",
+        channel: { kind: "unknown", metadata: {} },
+        session: { id: "session-alice", auth: { current: null, initiator: null } },
+      },
+    );
+
+    const record = await client.get("review-prs-daily");
+    expect(record).toMatchObject({ name: "review-prs-daily" });
+    expect(record).not.toHaveProperty("payload");
+    expect(String(fetchImpl.mock.calls.at(-1)![0])).not.toContain("include=");
+    await expect(client.get("review-prs-daily", { payload: true })).resolves.toMatchObject({
+      name: "review-prs-daily",
+      creator,
+      payload: task,
+    });
+    expect(String(fetchImpl.mock.calls.at(-1)![0])).toContain("include=payload");
+
+    returnPayload = false;
+    await expect(client.get("review-prs-daily", { payload: true })).rejects.toThrow(
+      "The schedule service returned no payload",
+    );
+  });
+
+  it("returns null for a schedule the Schedules API doesn't have", async () => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("VERCEL_OIDC_TOKEN", oidcToken);
+    const fetchImpl = vi.fn<typeof fetch>(async () =>
+      Response.json({ error: { code: "not_found", message: "Not found." } }, { status: 404 }),
+    );
+    const provider = vercelScheduleProvider({ fetch: fetchImpl });
+    await expect(provider.get(context, "missing")).resolves.toBeNull();
+    await expect(provider.get(context, "missing", { payload: true })).resolves.toBeNull();
   });
 });

@@ -75,13 +75,18 @@ export function vercelScheduleProvider(
       const page = await (await client(context.abortSignal)).list(params);
       return { cursor: page.cursor, data: page.data.map(fromVercelSchedule) };
     },
-    async get(context, name) {
+    async get(context, name, options = {}) {
       const response = await getScheduleOrNull(
         await client(context.abortSignal),
         name,
         context.namespace,
+        options.payload === true,
       );
-      return response === null ? null : fromVercelSchedule(response);
+      if (response === null) return null;
+      const record = fromVercelSchedule(response);
+      if (options.payload !== true) return record;
+      const dispatched = response.payload as { readonly payload?: unknown } | undefined;
+      return { ...record, payload: dispatched?.payload };
     },
     async update(context, name, patch) {
       const expression = patch.expression;
@@ -123,15 +128,31 @@ export function vercelScheduleProvider(
   return provider;
 }
 
+interface VercelSchedulesClient extends SchedulesClient {
+  getWithPayload(params: {
+    readonly name: string;
+    readonly namespace: string;
+  }): Promise<VercelSchedule & { readonly payload?: unknown }>;
+}
+
 async function createClient(
   options: VercelScheduleProviderOptions,
   signal: AbortSignal,
-): Promise<SchedulesClient> {
+): Promise<VercelSchedulesClient> {
   assertSupportedVercelEnvironment();
   const { SchedulesClient } = await import("#compiled/@vercel/schedules/index.js");
   signal.throwIfAborted();
   const fetchImpl = options.fetch ?? fetch;
-  return new SchedulesClient({
+  class PayloadSchedulesClient extends SchedulesClient implements VercelSchedulesClient {
+    getWithPayload(params: { readonly name: string; readonly namespace: string }) {
+      const query = new URLSearchParams({ namespace: params.namespace, include: "payload" });
+      return this.request<VercelSchedule & { readonly payload?: unknown }>(
+        "GET",
+        `/v1/schedules/${encodeURIComponent(params.name)}?${query}`,
+      );
+    }
+  }
+  return new PayloadSchedulesClient({
     ...options,
     headers: VERCEL_SCHEDULES_CLIENT_HEADERS,
     fetch: (input, init) => fetchImpl(input, { ...init, signal }),
@@ -212,12 +233,15 @@ function fromVercelSchedule(schedule: VercelSchedule): ScheduleRecord {
 }
 
 async function getScheduleOrNull(
-  client: SchedulesClient,
+  client: VercelSchedulesClient,
   name: string,
   namespace: string,
-): Promise<VercelSchedule | null> {
+  includePayload: boolean,
+): Promise<(VercelSchedule & { readonly payload?: unknown }) | null> {
   try {
-    return await client.get({ name, namespace });
+    return includePayload
+      ? await client.getWithPayload({ name, namespace })
+      : await client.get({ name, namespace });
   } catch (error) {
     if (isNotFoundError(error)) return null;
     throw error;

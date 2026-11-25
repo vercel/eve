@@ -226,7 +226,9 @@ await client.update(created.name, {
 
 ## Update and control schedules
 
-`get` and `list` return identity, timing, state, and timestamps, not payload or creator data. New schedules are always active. Use `disable` to pause future runs.
+`get(name)` and `list` return identity, timing, state, and timestamps. New schedules are always active. Use `disable` to pause future runs.
+
+`get(name, { payload: true })` also returns `creator` and the stored `payload` (as `preparePayload` returned it, and typed that way). Use it to check who the schedule runs as and what it runs, or to edit the payload and write it back with `update`; without `preparePayload`, the stored payload matches `inputSchema`. It throws when the provider returns no payload, for example a Schedules API without `include=payload` support, and when the stored payload isn't a valid eve schedule payload. `update` works on either schedule.
 
 `client.update(name, patch)` changes timing, replaces the whole payload, or both. Timing-only updates keep the stored payload and creator and skip `preparePayload`. Payload replacement isn't a merge. It validates the complete new input, reruns preparation, and makes the updating caller the new creator. In a shared `scope`, permission to replace the payload is also permission to change who the schedule runs as.
 
@@ -259,14 +261,14 @@ Create a provider when your application needs a different scheduling backend, st
 
 Your provider owns schedule storage, timing, and occurrence delivery. eve handles payload validation, management authorization, approvals, and creator revalidation.
 
-| Part of the contract | What your provider implements                                                                                                                          |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Management           | `create`, `get`, `list`, `update`, `enable`, `disable`, `invoke`, and `delete`, plus a `kind` string identifying the provider.                         |
-| Isolation            | Restrict every operation to `context.collection` and `context.namespace`.                                                                              |
-| Storage              | Preserve the supplied payload and delivery target. Return `ScheduleRecord` values without payload or creator data, and a `SchedulePage` from `list`.   |
-| Updates              | Change only supplied fields. Preserve schedule identity, state, delivery target, and omitted fields.                                                   |
-| Delivery             | Deliver the stored payload with an occurrence's `executionId`, `name`, `scheduleId`, and `scheduledAt`. Keep `executionId` stable across retries.      |
-| Timing checks        | Optional `validateExpression`, sync or async. Throw for a cron or one-time expression your backend can't run. eve calls it before it prepares a write. |
+| Part of the contract | What your provider implements                                                                                                                                                                                                                                                                 |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Management           | `create`, `get`, `list`, `update`, `enable`, `disable`, `invoke`, and `delete`, plus a `kind` string identifying the provider.                                                                                                                                                                |
+| Isolation            | Restrict every operation to `context.collection` and `context.namespace`.                                                                                                                                                                                                                     |
+| Storage              | Preserve the supplied payload and delivery target. `get` returns a `ScheduleRecord`, or `null` for an unknown name; when eve passes `{ payload: true }`, it also returns `payload` exactly as eve supplied it on the last write. `list` returns a `SchedulePage` of records without payloads. |
+| Updates              | Change only supplied fields. Preserve schedule identity, state, delivery target, and omitted fields.                                                                                                                                                                                          |
+| Delivery             | Deliver the stored payload with an occurrence's `executionId`, `name`, `scheduleId`, and `scheduledAt`. Keep `executionId` stable across retries.                                                                                                                                             |
+| Timing checks        | Optional `validateExpression`, sync or async. Throw for a cron or one-time expression your backend can't run. eve calls it before it prepares a write.                                                                                                                                        |
 
 `ScheduleProviderContext` is also exported from `eve/experimental/schedules`. It supplies an `abortSignal`, an `operationId` for recognizing retried operations, and a delivery `target`. Use `target.deliver`, when present, to dispatch an occurrence through eve. Your backend must arrange when occurrences fire and how they retry; the management interface alone does not start a clock.
 

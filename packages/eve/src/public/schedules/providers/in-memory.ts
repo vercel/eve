@@ -77,9 +77,16 @@ export function inMemoryScheduleProvider(
       return { cursor: next < records.length ? String(next) : null, data };
     },
 
-    async get(context: ScheduleProviderContext, name: string) {
+    async get(
+      context: ScheduleProviderContext,
+      name: string,
+      options: { readonly payload?: boolean } = {},
+    ) {
       const record = schedules.get(scheduleKey(context, name));
-      return record === undefined ? null : publicRecord(record);
+      if (record === undefined) return null;
+      return options.payload === true
+        ? { ...publicRecord(record), payload: record.payload }
+        : publicRecord(record);
     },
 
     async update<TPayload>(
