@@ -113,12 +113,7 @@ export async function finalizeSession(
     ]);
     if (closeResult.status === "rejected") throw closeResult.reason;
     if (notifyResult.status === "rejected") throw notifyResult.reason;
-    return {
-      isError: outcome.action.isError,
-      output: outcome.action.output,
-      usage: outcome.action.usage,
-      usageDelta: outcome.action.usageDelta,
-    };
+    return entryResult(outcome, settled);
   }
   if (outcome.kind === "expired" || outcome.kind === "ended") {
     await emitTerminalSessionCompletionStep({
@@ -173,6 +168,13 @@ export async function finalizeSession(
       });
     }
   }
+  return entryResult(outcome, settled);
+}
+
+function entryResult(
+  outcome: SessionTerminalOutcome,
+  settled: ReturnType<typeof settledResult>,
+): WorkflowEntryResult {
   return outcome.kind === "done"
     ? {
         isError: outcome.action.isError,
