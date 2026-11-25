@@ -61,8 +61,7 @@ async function summarizeWith(
   return text;
 }
 
-const checkpointOf = (summary: string) =>
-  compaction.checkpointHead(summary) as StoredHistoryMessage[];
+const checkpointOf = (summary: string) => compaction.checkpoint(summary) as StoredHistoryMessage[];
 
 afterEach(() => {
   vi.restoreAllMocks();

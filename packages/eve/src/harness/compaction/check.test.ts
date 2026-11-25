@@ -36,10 +36,29 @@ describe("checkHistory", () => {
     expect(checkHistory(history, compacted, automatic)).toEqual(compacted);
   });
 
-  it("rejects a checkpoint after other messages", () => {
+  it("accepts a checkpoint after the kept messages", () => {
+    const compacted = [latest, ...checkpoint("Alice got her report.")];
+    expect(checkHistory(history, compacted, manual)).toEqual(compacted);
+  });
+
+  it("rejects a second checkpoint", () => {
     expect(() =>
-      checkHistory(history, [latest, ...checkpoint("Alice got her report.")], manual),
-    ).toThrow("checkpoint after other messages");
+      checkHistory(
+        history,
+        [...checkpoint("Alice got her report."), latest, ...checkpoint("Bob asked.")],
+        manual,
+      ),
+    ).toThrow("more than one checkpoint");
+  });
+
+  it("rejects a second checkpoint that a custom strategy worded itself", () => {
+    const custom = (summary: string): HarnessModelMessage[] => [
+      createFrameworkUserMessage("context.compaction", "Earlier, in short:"),
+      { content: summary, role: "assistant" },
+    ];
+    expect(() =>
+      checkHistory(history, [...custom("Alice got her report."), latest, ...custom("Bob.")], manual),
+    ).toThrow("more than one checkpoint");
   });
 
   it("rejects a call kept without its result, and a result kept without its call", () => {

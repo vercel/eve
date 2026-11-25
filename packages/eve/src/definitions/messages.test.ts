@@ -7,6 +7,7 @@ import {
   type UserModelMessage,
 } from "#harness/messages.js";
 import { keptAnnouncements } from "#harness/announcements.js";
+import { COMPACTION_CHECKPOINT_MARKER } from "#shared/compaction-checkpoint.js";
 import { announce, placeAnchored } from "./messages.js";
 import type { CallRecord } from "./definition.js";
 
@@ -76,7 +77,7 @@ describe("a call's messages", () => {
   it("puts recall whose turn compaction summarized after the checkpoint", () => {
     const latest = input("latest request", "turn_5");
     const compacted: HarnessModelMessage[] = [
-      { content: "checkpoint", kind: "context.compaction", role: "user" },
+      { content: COMPACTION_CHECKPOINT_MARKER, kind: "context.compaction", role: "user" },
       said("summary"),
       latest,
     ];
@@ -91,10 +92,49 @@ describe("a call's messages", () => {
     );
 
     expect(texts(view)).toEqual([
-      "checkpoint",
+      COMPACTION_CHECKPOINT_MARKER,
       "summary",
       "memory A",
       "memory C",
+      "latest request",
+    ]);
+  });
+
+  it("puts recall whose turn compaction summarized right after a checkpoint that follows the kept messages", () => {
+    const kept = input("kept request", "turn_4");
+    const latest = input("latest request", "turn_5");
+    const compacted: HarnessModelMessage[] = [
+      kept,
+      { content: COMPACTION_CHECKPOINT_MARKER, kind: "context.compaction", role: "user" },
+      said("summary"),
+      latest,
+    ];
+
+    const { view } = call(compacted, [latest], [{ content: "memory A", turnId: "turn_0" }]);
+
+    expect(texts(view)).toEqual([
+      "kept request",
+      COMPACTION_CHECKPOINT_MARKER,
+      "summary",
+      "memory A",
+      "latest request",
+    ]);
+  });
+
+  it("finds a checkpoint a custom strategy worded itself", () => {
+    const latest = input("latest request", "turn_5");
+    const compacted: HarnessModelMessage[] = [
+      { content: "Earlier, in short:", kind: "context.compaction", role: "user" },
+      said("summary"),
+      latest,
+    ];
+
+    const { view } = call(compacted, [latest], [{ content: "memory A", turnId: "turn_0" }]);
+
+    expect(texts(view)).toEqual([
+      "Earlier, in short:",
+      "summary",
+      "memory A",
       "latest request",
     ]);
   });

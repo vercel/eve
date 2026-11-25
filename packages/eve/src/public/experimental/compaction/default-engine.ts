@@ -10,7 +10,7 @@ import {
   TRANSCRIPT_PAYLOAD_LIMIT,
 } from "./checkpoint-prompt.js";
 import { CompactionOverLimitError } from "#shared/compaction-over-limit-error.js";
-import { COMPACTION_CHECKPOINT_MARKER } from "#shared/compaction-checkpoint.js";
+import { COMPACTION_CHECKPOINT_MARKER, isCheckpointMarker } from "#shared/compaction-checkpoint.js";
 import { awaitsProviderToolResult } from "#shared/provider-tool-history.js";
 
 const KEPT_TAIL_TOKENS = 20_000;
@@ -20,6 +20,7 @@ type ModelMessageContentPart = Exclude<ModelMessage["content"], string>[number];
 export type CompactionStage = "summary-only" | "tail" | "text-tail";
 
 export interface CompactionBudget {
+  readonly appendCheckpoint?: boolean;
   readonly estimate: (messages: readonly ModelMessage[]) => number;
   readonly lastStage?: CompactionStage;
   readonly recentWindowSize: number;
@@ -43,9 +44,12 @@ function evaluateThreshold(
   };
 }
 
-function startStage(lastStage: CompactionStage | undefined): CompactionStage {
+function startStage(
+  lastStage: CompactionStage | undefined,
+  appendCheckpoint: boolean,
+): CompactionStage {
   if (lastStage === undefined) return "tail";
-  return lastStage === "tail" ? "text-tail" : "summary-only";
+  return lastStage === "tail" && !appendCheckpoint ? "text-tail" : "summary-only";
 }
 
 interface CompactionHeuristicInput {
@@ -101,6 +105,9 @@ async function fixedTailHeuristic({
   resume,
   summarize,
 }: CompactionHeuristicInput): Promise<CompactionHeuristicOutcome> {
+  const appendCheckpoint = config.appendCheckpoint === true;
+  const withCheckpoint = (summary: string, kept: readonly ModelMessage[] = []): ModelMessage[] =>
+    appendCheckpoint ? [...kept, ...checkpoint(summary)] : [...checkpoint(summary), ...kept];
   const withResumptionGuard = (
     kept: ModelMessage[],
     replay: ModelMessage | undefined,
@@ -126,10 +133,11 @@ async function fixedTailHeuristic({
     return { currentIndex: index, fit, keep, replay };
   };
 
-  const start = startStage(config.lastStage);
+  const start = startStage(config.lastStage, appendCheckpoint);
 
   const cappedConversation = capToolResults(conversation);
-  const summaryPlan = planTail(cappedConversation);
+  const tailSource = appendCheckpoint ? conversation : cappedConversation;
+  const summaryPlan = planTail(tailSource);
   const { currentIndex, fit, keep, replay } = summaryPlan;
 
   const current = currentIndex < 0 ? undefined : cappedConversation[currentIndex];
@@ -142,12 +150,12 @@ async function fixedTailHeuristic({
     config.estimate([floorCut]) < config.estimate([noFiles])
       ? floorCut
       : noFiles;
-  const floor = withResumptionGuard(checkpointHead(""), floorRequest, Number.POSITIVE_INFINITY);
+  const floor = withResumptionGuard(withCheckpoint(""), floorRequest, Number.POSITIVE_INFINITY);
   if (evaluateThreshold(floor, config).type === "over-limit") {
     throw overLimitError(config);
   }
 
-  const { recent } = splitMessagesForCompaction(cappedConversation, keep);
+  const { recent } = splitMessagesForCompaction(tailSource, keep);
 
   const summaryPrompt = createCompactionPrompt({
     estimate: config.estimate,
@@ -169,21 +177,17 @@ async function fixedTailHeuristic({
   const reachesTarget = (candidate: readonly ModelMessage[]) =>
     config.estimate(candidate) <= config.target;
 
-  if (start === "tail") {
-    const verbatim = withResumptionGuard(
-      [...checkpointHead(summary), ...recent],
-      replay,
-      config.threshold,
-    );
+  if (start === "tail" && !(appendCheckpoint && awaitsProviderToolResult(recent))) {
+    const verbatim = withResumptionGuard(withCheckpoint(summary, recent), replay, config.threshold);
     if (reachesTarget(verbatim)) {
       return { messages: verbatim, stage: "tail", type: "compacted" };
     }
   }
 
-  if (start !== "summary-only") {
+  if (start !== "summary-only" && !appendCheckpoint) {
     const textTail = keepNonToolResultMessages(recent);
     const stripped = withResumptionGuard(
-      [...checkpointHead(summary), ...textTail],
+      withCheckpoint(summary, textTail),
       replay,
       config.threshold,
     );
@@ -192,7 +196,7 @@ async function fixedTailHeuristic({
     }
   }
 
-  const noTail = withResumptionGuard(checkpointHead(summary), replay, config.threshold);
+  const noTail = withResumptionGuard(withCheckpoint(summary), replay, config.threshold);
   if (fits(noTail)) {
     return { messages: noTail, stage: "summary-only", type: "compacted" };
   }
@@ -200,7 +204,7 @@ async function fixedTailHeuristic({
   const withClippedSummary = (request: ModelMessage | undefined): ModelMessage[] | undefined => {
     const build = (chars: number) =>
       withResumptionGuard(
-        checkpointHead(
+        withCheckpoint(
           chars < MIN_CLIP_CHARS
             ? sliceUtf16Safe(summary, chars)
             : clipMiddleUtf16Safe(summary, chars),
@@ -231,7 +235,7 @@ async function fixedTailHeuristic({
 
   const requestBudget =
     config.threshold -
-    config.estimate(withResumptionGuard(checkpointHead(""), undefined, config.threshold));
+    config.estimate(withResumptionGuard(withCheckpoint(""), undefined, config.threshold));
   const request =
     noFiles === undefined
       ? undefined
@@ -357,7 +361,7 @@ const MIN_CLIP_CHARS = 40;
 const OMITTED_FILE_NOTE =
   "[eve: a file in this message was omitted during context compaction: it is too large for the context window.]";
 
-export function checkpointHead(summary: string): ModelMessage[] {
+export function checkpoint(summary: string): ModelMessage[] {
   return [
     frameworkMessage("context.compaction", COMPACTION_CHECKPOINT_MARKER),
     { content: summary, role: "assistant" },
@@ -457,19 +461,16 @@ export function extractPreviousCheckpoint(messages: readonly ModelMessage[]): {
   readonly conversation: ModelMessage[];
   readonly previousCheckpoint: string | undefined;
 } {
-  const marker = messages[0];
-  const checkpoint = messages[1];
-  if (
-    marker?.role !== "user" ||
-    marker.content !== COMPACTION_CHECKPOINT_MARKER ||
-    checkpoint?.role !== "assistant"
-  ) {
+  const at = messages.findIndex(
+    (message, index) => isCheckpointMarker(message) && messages[index + 1]?.role === "assistant",
+  );
+  if (at === -1) {
     return { conversation: [...messages], previousCheckpoint: undefined };
   }
 
   return {
-    conversation: messages.slice(2),
-    previousCheckpoint: assistantMessageText(checkpoint),
+    conversation: [...messages.slice(0, at), ...messages.slice(at + 2)],
+    previousCheckpoint: assistantMessageText(messages[at + 1]!),
   };
 }
 
