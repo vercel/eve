@@ -302,7 +302,7 @@ export class SessionExecution {
       if (pendingDispatch === undefined) return;
       const pending = pendingDispatch;
       pendingDispatch = undefined;
-      await this.input.cursor.advance((state) => publishDispatchedCallsStep({ ...state, pending }));
+      await this.publishDispatch(pending);
     };
     while (true) {
       if (
@@ -385,9 +385,21 @@ export class SessionExecution {
     readonly wait: CallWait;
   }> {
     const dispatched = paused.dispatch ? await this.dispatchRuns() : undefined;
+    let pending = dispatched?.pending;
+    if (
+      pending !== undefined &&
+      paused.taskToolCalls.some((call) => call.kind !== TASK_WAIT_TOOL_NAME)
+    ) {
+      await this.publishDispatch(pending);
+      pending = undefined;
+    }
     const wait = new CallWait(this.input, paused.callIds, dispatched?.results ?? []);
     await wait.answerTaskToolCalls(paused.taskToolCalls, paused.pausedAtMs);
-    return { pending: dispatched?.pending, wait };
+    return { pending, wait };
+  }
+
+  private async publishDispatch(pending: PendingDispatch): Promise<void> {
+    await this.input.cursor.advance((state) => publishDispatchedCallsStep({ ...state, pending }));
   }
 
   private async dispatchRuns(): Promise<{

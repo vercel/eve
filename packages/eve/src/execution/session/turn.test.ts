@@ -2544,4 +2544,71 @@ describe("SessionExecution folded turn-step commits", () => {
 
     expect(startTaskToolCallsStep).not.toHaveBeenCalled();
   });
+
+  it("publishes a dispatched task call before a task_cancel in the same batch settles it", async () => {
+    vi.mocked(publishDispatchedCallsStep)
+      .mockReset()
+      .mockImplementation(async () => ({ stateDelta: {} }));
+    vi.mocked(cancelTasksStep).mockClear();
+    const { table, taskId } = workingResearchTask();
+    const pending = {
+      executing: [],
+      refused: [],
+      started: [
+        { callId: "send-1", kind: "tool" as const, name: "research", taskId, turnId: "turn_0" },
+      ],
+    };
+    vi.mocked(dispatchCoordinationStep)
+      .mockReset()
+      .mockImplementation(
+        stepWork(async (input) => ({
+          pending,
+          results: [
+            {
+              callId: "send-1",
+              isError: false,
+              kind: "tool-result" as const,
+              output: `Sent to task ${taskId}.`,
+              toolName: "research",
+            },
+          ],
+          serializedContext: input.serializedContext,
+          sessionState: input.sessionState,
+        })),
+      );
+    let secondInput: TurnStepInput["input"];
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockImplementationOnce(
+        turnStepWork(async (input) => ({
+          action: "paused",
+          ...callsPause({
+            callIds: ["send-1", "cancel-1"],
+            taskToolCalls: [{ callId: "cancel-1", kind: "eve__task_cancel", taskId }],
+          }),
+          serializedContext: input.serializedContext,
+          sessionState: input.sessionState,
+        })),
+      )
+      .mockImplementationOnce(
+        turnStepWork(async (input) => {
+          secondInput = input.input;
+          return {
+            action: "parked",
+            serializedContext: input.serializedContext,
+            sessionState: input.sessionState,
+          };
+        }),
+      );
+
+    const execution = createExecution({ inbox: idleInbox(), sessionState: stateWithTasks(table) });
+    await execution.runTurn(undefined);
+
+    expect(publishDispatchedCallsStep).toHaveBeenCalledOnce();
+    expect(cancelTasksStep).toHaveBeenCalledOnce();
+    expect(vi.mocked(publishDispatchedCallsStep).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(cancelTasksStep).mock.invocationCallOrder[0]!,
+    );
+    expect(secondInput?.pendingDispatch).toBeUndefined();
+  });
 });

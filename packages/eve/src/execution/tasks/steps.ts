@@ -103,7 +103,6 @@ export async function applyTaskRunMessage(
       break;
     }
     case "reply": {
-      if (findTask(table, taskId)?.run?.runId !== message.from.runId) break;
       ({ table, spend } = countTaskRunUsage(table, taskId, message));
       const outcome: TaskOutcome = { output: message.output, status: "completed" };
       const applied = applyTaskReplyToTable(
