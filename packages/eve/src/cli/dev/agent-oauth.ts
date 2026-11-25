@@ -12,7 +12,7 @@ import type {
 import { openUrl } from "#setup/primitives/open-url.js";
 
 const LOGIN_TIMEOUT_MS = 5 * 60_000;
-const DISCOVERY_TIMEOUT_MS = 5_000;
+const DISCOVERY_TIMEOUT_MS = 30_000;
 const EXPIRY_BUFFER_MS = 60_000;
 
 interface StoredAgentOAuth {
@@ -39,6 +39,12 @@ export async function signInToAgent(input: {
 }): Promise<AgentOAuthSession | undefined> {
   const fetchFn = agentFetch(input.serverUrl, input.headers);
   const discovered = await discoverAgentResource(input.serverUrl, fetchFn, input.signal);
+  if (discovered === "unreachable") {
+    input.notice(
+      `Couldn't reach ${new URL(input.serverUrl).host} in ${String(DISCOVERY_TIMEOUT_MS / 1000)}s to check how it signs callers in; connecting without OAuth sign-in.`,
+    );
+    return undefined;
+  }
   if (discovered === undefined) return undefined;
   const { auth } = await import("#compiled/@ai-sdk/mcp/index.js");
   let store = await readStore(discovered.resource);
@@ -73,6 +79,7 @@ export async function signInToAgent(input: {
   return {
     rejected() {
       store.expiresAt = 0;
+      void writeStore(store).catch(() => {});
     },
     resource: discovered.resource,
     async token() {
@@ -148,7 +155,7 @@ async function discoverAgentResource(
   serverUrl: string,
   fetchFn: typeof fetch,
   signal: AbortSignal | undefined,
-): Promise<{ readonly metadataUrl: URL; readonly resource: string } | undefined> {
+): Promise<{ readonly metadataUrl: URL; readonly resource: string } | "unreachable" | undefined> {
   const base = new URL(serverUrl);
   const resource = new URL(`${base.pathname.replace(/\/$/, "")}/eve/v1`, base.origin).href;
   const metadataUrl = new URL(
@@ -171,8 +178,8 @@ async function discoverAgentResource(
       return undefined;
     }
     return { metadataUrl, resource };
-  } catch {
-    return undefined;
+  } catch (error) {
+    return signal?.aborted === true || !isTimeout(error) ? undefined : "unreachable";
   }
 }
 
@@ -339,4 +346,8 @@ async function writeStore(store: StoredAgentOAuth): Promise<void> {
   await rm(`${path}.tmp`, { force: true });
   await writeFile(`${path}.tmp`, JSON.stringify(store), { mode: 0o600 });
   await rename(`${path}.tmp`, path);
+}
+
+function isTimeout(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "TimeoutError";
 }

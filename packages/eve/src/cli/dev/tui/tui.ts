@@ -14,7 +14,6 @@ import { createDevelopmentCredentialGate } from "#services/dev-client/credential
 import {
   resolveDevelopmentOidcToken,
   resolveLinkedDevelopmentOidcToken,
-  VERCEL_PROTECTION_BYPASS_HEADER,
 } from "#services/dev-client/request-headers.js";
 import { isVercelAuthChallenge } from "#services/dev-client/vercel-auth-error.js";
 import { resolveVercelDeployment } from "#setup/vercel-deployment.js";
@@ -79,13 +78,6 @@ function prepareDevelopmentTarget(target: DevelopmentTuiTarget): PreparedDevelop
     : { kind: "remote", target, remote: prepareRemoteTarget(target) };
 }
 
-function withProtectionBypass(
-  headers: Readonly<Record<string, string>> | undefined,
-): Readonly<Record<string, string>> {
-  const secret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET?.trim();
-  return secret ? { [VERCEL_PROTECTION_BYPASS_HEADER]: secret, ...headers } : { ...headers };
-}
-
 function withTuiUserAgent(
   headers: Readonly<Record<string, string>> | undefined,
 ): Readonly<Record<string, string>> {
@@ -112,11 +104,10 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
   const prepared = prepareDevelopmentTarget(target);
   const { serverUrl } = target;
   const headerOptions = { headers: withTuiUserAgent(headers) };
-  const agentHeaders = withProtectionBypass(headers);
   const agentOAuth =
     prepared.kind === "remote" && !hasDevelopmentAuthorizationHeader(headers)
       ? await signInToAgent({
-          headers: agentHeaders,
+          ...(headers !== undefined && { headers }),
           notice: (message) => process.stdout.write(`${message}\n`),
           serverUrl,
           ...(lifecycle !== undefined && { signal: lifecycle.signal }),
@@ -127,7 +118,7 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
     agentOAuth !== undefined
       ? {
           auth: { bearer: () => agentOAuth.token() },
-          headers: withTuiUserAgent(agentHeaders),
+          headers: withTuiUserAgent(headers),
           baseUrl: serverUrl,
           redirect: "manual",
         }
@@ -169,6 +160,8 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
     options.probeMcpConnection = probeMcpConnection;
   } else if (agentOAuth === undefined) {
     options.remote = prepared.remote;
+  } else {
+    options.signedInRemote = prepared.target;
   }
   if (initialInput !== undefined) options.initialInput = initialInput;
   if (startup !== undefined) {

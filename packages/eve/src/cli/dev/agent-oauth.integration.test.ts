@@ -121,6 +121,18 @@ describe("signInToAgent", () => {
     expect(issued).toEqual(["authorization_code", "refresh_token"]);
   });
 
+  it("saves a rejected token as stale, so the next run doesn't reuse it", async () => {
+    const session = await signInToAgent({ notice: () => {}, serverUrl: origin });
+    session?.rejected();
+    const [file] = await readdir(join(home.dir, ".eve", "agent-oauth"));
+    await vi.waitFor(async () => {
+      const stored = JSON.parse(
+        await readFile(join(home.dir, ".eve", "agent-oauth", file!), "utf8"),
+      ) as { expiresAt?: number };
+      expect(stored.expiresAt).toBe(0);
+    });
+  });
+
   it("returns undefined for an agent that publishes no OAuth metadata", async () => {
     expect(
       await signInToAgent({ notice: () => {}, serverUrl: `${origin}/elsewhere` }),
