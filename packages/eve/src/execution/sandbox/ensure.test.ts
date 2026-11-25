@@ -358,6 +358,21 @@ describe("ensureSandboxAccess", () => {
     });
   });
 
+  it("starts fresh without copying when the session's earlier sandbox is gone", async () => {
+    const value = fixture({ copy: true });
+    value.create.mockRejectedValueOnce(new SandboxSessionGoneError("The sandbox is gone."));
+    await open(
+      value.registry,
+      "session-1",
+      { session: { providerName: "test", state: null, stateProtocolVersion: 1 } },
+      "__root__",
+      undefined,
+      "session_source",
+    );
+    expect(value.copy).not.toHaveBeenCalled();
+    expect(value.start).toHaveBeenCalledOnce();
+  });
+
   it("starts a fresh sandbox for a session saved with the removed microsandbox provider", async () => {
     const setup = vi.fn();
     const value = fixture({ setup });

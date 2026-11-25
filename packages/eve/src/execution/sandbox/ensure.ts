@@ -110,6 +110,7 @@ export async function ensureSandboxAccess(
 ): Promise<EnsuredSandboxAccess> {
   const registered = input.registry.sandbox;
   const persistedOwner = registered === null ? undefined : owningSandboxDefinition(registered);
+  let copiesSource = input.state?.session === undefined || input.state.session === null;
   let persisted = resolvePersistedSandboxSessionState(
     input.state?.session,
     persistedOwner?.kind === "independent"
@@ -228,12 +229,15 @@ export async function ensureSandboxAccess(
 
     const artifact = await loadArtifact(provider);
     const start = async () => {
-      const source = contextStorage.getStore()?.get(SandboxCopySourceKey);
+      const source = copiesSource
+        ? contextStorage.getStore()?.get(SandboxCopySourceKey)
+        : undefined;
       const copied =
         source === undefined || provider.implementation.copy === undefined
           ? null
           : await provider.implementation.copy(context, source, options, artifact);
       const result = copied ?? (await provider.implementation.start(context, options, artifact));
+      copiesSource = false;
       if (!isSandboxPreparedArtifact(result.state)) {
         throw new Error(
           `Sandbox provider "${provider.providerName}" returned non-serializable session state.`,

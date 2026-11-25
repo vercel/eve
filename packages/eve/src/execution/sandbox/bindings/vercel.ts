@@ -200,8 +200,18 @@ export function createVercelSandbox(
           : original.currentSnapshotId;
       if (snapshotId === undefined) return null;
       const sandboxName = vercelSessionName(context.session.id);
-      const sandbox = await openSession(context, options, { ...artifact, snapshotId }, sandboxName);
-      return { connection: createVercelConnection(sandbox), state: { sandboxName, version: 3 } };
+      try {
+        const sandbox = await openSession(
+          context,
+          options,
+          { ...artifact, snapshotId },
+          sandboxName,
+        );
+        return { connection: createVercelConnection(sandbox), state: { sandboxName, version: 3 } };
+      } catch (error) {
+        if (SandboxTemplateNotProvisionedError.is(error)) return null;
+        throw error;
+      }
     },
     async start(context, options, artifact) {
       const sandboxName = vercelSessionName(context.session.id);

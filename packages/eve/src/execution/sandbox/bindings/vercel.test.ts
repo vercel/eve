@@ -1018,6 +1018,28 @@ describe("createVercelSandbox", () => {
       expect(copied?.state).toMatchObject({ version: 3 });
     });
 
+    it("returns null so the session starts fresh when the copied snapshot has expired", async () => {
+      const { fake, provider } = project();
+      const source = await provider.start(context("session_source"), undefined, artifact);
+      const original = fake.sandboxes.get(source.state.sandboxName)!;
+      original.status = "stopped";
+      original.currentSnapshotId = "expired-session-snapshot";
+      fake.sandboxModule.Sandbox.create.mockRejectedValueOnce(
+        Object.assign(new Error("Vercel sandbox create API returned 410"), {
+          response: { status: 410 },
+        }),
+      );
+
+      await expect(
+        provider.copy!(
+          context("session_target"),
+          { sessionId: "session_source" },
+          undefined,
+          artifact,
+        ),
+      ).resolves.toBeNull();
+    });
+
     it("returns null without creating a sandbox when the source is missing", async () => {
       const { fake, provider } = project();
 
