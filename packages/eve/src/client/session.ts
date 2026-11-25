@@ -80,7 +80,7 @@ export class ClientSession {
     input: SendTurnInput<TOutput> & CreateSessionOptions,
   ): Promise<{ readonly delivery: Delivery<TOutput>; readonly session: ClientSession }> {
     const startedAt = Date.now();
-    const response = await postTurn(context, EVE_SESSION_ROUTE_PATH, input, true, input.stubs);
+    const response = await postTurn(context, EVE_SESSION_ROUTE_PATH, input, true, input);
     const acceptedAt = Date.now();
     const { sessionId, deliveryId } = await readAcceptedMessage(response);
     const session = new ClientSession(context, { sessionId, streamIndex: 0 });
@@ -463,7 +463,8 @@ async function postCreateSession(
   options: CreateSessionOptions,
 ): Promise<Response> {
   const headers = await context.resolveHeaders(options.headers);
-  const body = options.stubs === undefined ? undefined : JSON.stringify({ stubs: options.stubs });
+  const fields = createSessionFields(options);
+  const body = Object.keys(fields).length === 0 ? undefined : JSON.stringify(fields);
   if (body !== undefined) headers.set("content-type", "application/json");
   const response = await fetch(createClientUrl(context.baseUrl, EVE_SESSION_ROUTE_PATH), {
     body,
@@ -479,6 +480,13 @@ async function postCreateSession(
   return response;
 }
 
+function createSessionFields(options: CreateSessionOptions): Record<string, unknown> {
+  const fields: Record<string, unknown> = {};
+  if (options.stubs !== undefined) fields.stubs = options.stubs;
+  if (options.history !== undefined) fields.history = options.history;
+  return fields;
+}
+
 function isSessionNotReady(error: unknown): boolean {
   return SessionNotActiveError.is(error) && error.retryable;
 }
@@ -488,7 +496,7 @@ async function postTurn(
   path: string,
   input: SendTurnPayload,
   requireMessage: boolean,
-  stubs?: CreateSessionOptions["stubs"],
+  creation?: CreateSessionOptions,
   inbox?: string,
   onSent?: () => void,
 ): Promise<Response> {
@@ -500,7 +508,7 @@ async function postTurn(
         : "A session turn requires a non-empty message or answers.",
     );
   }
-  if (stubs !== undefined) body.stubs = stubs;
+  if (creation !== undefined) Object.assign(body, createSessionFields(creation));
   if (inbox !== undefined) body.inbox = inbox;
 
   const headers = await context.resolveHeaders(input.headers);

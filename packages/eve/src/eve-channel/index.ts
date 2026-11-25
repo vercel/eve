@@ -122,6 +122,14 @@ async function canReadAgentInfo(
   return localDevConfigured && Boolean(await localDevelopmentCaller(request));
 }
 
+function joinSessionHistory(
+  supplied: readonly SessionHistoryMessage[] | undefined,
+  resolved: readonly SessionHistoryMessage[] | undefined,
+): readonly SessionHistoryMessage[] | undefined {
+  if (supplied === undefined) return resolved;
+  return resolved === undefined ? supplied : [...supplied, ...resolved];
+}
+
 function createdSessionBody(sessionId: string, body: ParsedCreateBody, deliveryId?: string) {
   const created: {
     ok: true;
@@ -206,6 +214,16 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
         if (payload.stubs !== undefined && authResult.allowToolStubs !== true) {
           return Response.json(
             { ok: false, error: "Tool stubbing is not permitted for this caller." },
+            { status: 403 },
+          );
+        }
+        if (payload.history !== undefined && authResult.allowHistoryImport !== true) {
+          return Response.json(
+            {
+              ok: false,
+              error:
+                "Session history import is not permitted for this caller. The channel's auth must grant allowHistoryImport.",
+            },
             { status: 403 },
           );
         }
@@ -405,8 +423,11 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
                   {
                     message: body.message,
                     context: messageResult.context,
-                    history: validateSessionHistory(
-                      "history" in messageResult ? messageResult.history : undefined,
+                    history: joinSessionHistory(
+                      body.history,
+                      validateSessionHistory(
+                        "history" in messageResult ? messageResult.history : undefined,
+                      ),
                     ),
                     outputSchema: body.outputSchema,
                   },

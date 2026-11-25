@@ -556,6 +556,8 @@ export interface EveEvalContext<TContext = unknown> extends EveEvalAssertions {
   /**
    * Create a new session without starting a turn or reading events. Resolves on
    * acceptance with a definite session id and cursor. Every call creates a session.
+   * Pass `history` to start it from a fixed prior conversation: the first message's
+   * turn reads those entries as earlier user and assistant turns, and none of them runs.
    */
   session(options?: CreateSessionOptions): Promise<EveEvalSession>;
   /** Create a new session with its first message and wait for the turn to settle. */

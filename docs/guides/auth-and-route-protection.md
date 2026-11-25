@@ -130,7 +130,7 @@ Verifies a bearer JWT against the [Vercel OIDC issuer](https://vercel.com/docs/o
 
 Tokens carrying an `external_sub` authenticate as user callers. Their `project_id` must match `VERCEL_PROJECT_ID`, and their environment must match `VERCEL_TARGET_ENV` / `VERCEL_ENV`. If either variable is unset, these tokens fail. `external_sub` becomes the session subject, and the `name`, `picture`, and `email` claims appear in `ctx.session.auth.current.attributes`.
 
-`vercelOidc()` only authenticates. To also permit [stubbed eval sessions](../evals/tool-stubs), use `eveVercelOidc` from `eve/channels/eve` with the same options. Its subject entries can grant [tool replacement permission](#tool-replacement-permission): `{ subject: vercelSubject({ teamSlug: "acme", projectName: "eval-runner" }), allowToolStubs: true }`. Plain subject strings, and tokens accepted only because they come from the current project, grant ordinary access only.
+`vercelOidc()` only authenticates. To also permit [stubbed eval sessions](../evals/tool-stubs), use `eveVercelOidc` from `eve/channels/eve` with the same options. Its subject entries can grant [tool replacement permission](#tool-replacement-permission): `{ subject: vercelSubject({ teamSlug: "acme", projectName: "eval-runner" }), allowToolStubs: true }`. An entry can also grant [history import permission](#history-import-permission) with `allowHistoryImport: true`. Plain subject strings, and tokens accepted only because they come from the current project, grant ordinary access only.
 
 #### `subjects` patterns and `vercelSubject(...)`
 
@@ -353,9 +353,36 @@ eve removes the grant from the caller identity before it forwards or saves that 
 
 Later messages, approvals, controls, and result reads use normal channel authentication without rechecking the grant. Anyone your channel admits to an existing session can use its configured stubs, so apply the same session-access policy as for ordinary sessions.
 
+## History import permission
+
+An eval can [start a session from fixed history](../evals/cases#starting-from-fixed-history) by sending `history` in the create request. That requires `allowHistoryImport: true` in the verified route authentication result; request JSON can't grant it. Without the grant, eve answers `403` and creates no session, so an ordinary client can't supply conversation the agent never had.
+
+Grant it as you grant tool replacement: on an `eveVercelOidc` `subjects` entry, or from a custom authenticator after it verifies the caller. The two grants are independent, and one entry can carry both. For local development, add `allowHistoryImport: true` to the `localDev()` result in the example above.
+
+```ts
+import { vercelSubject } from "eve/channels/auth";
+import { eveChannel, eveVercelOidc } from "eve/channels/eve";
+
+export default eveChannel({
+  auth: [
+    eveVercelOidc({
+      subjects: [
+        {
+          subject: vercelSubject({ teamSlug: "acme", projectName: "eval-runner" }),
+          allowHistoryImport: true,
+          allowToolStubs: true,
+        },
+      ],
+    }),
+  ],
+});
+```
+
+eve checks the grant on the create request, the only request that accepts `history`, and removes it from the caller identity like `allowToolStubs`. A caller with the grant can make the agent read any earlier conversation as its own, so give it to eval runners rather than to users. To continue a user's stored conversation, [resolve the history on the server](../channels/eve#start-from-prior-history).
+
 ## Agent info access
 
-`GET /eve/v1/info` returns authored instructions and server paths, so it serves only operators by default: `service` and `runtime` principals, plus callers `localDev()` admits when the channel's `auth` includes it. Other callers get `403` with code `info_forbidden`. An eve-channel authenticator can decide for its caller instead: `allowAgentInfo: true` grants access, and `false` denies it even to an operator. Like `allowToolStubs`, the flag applies only to the current request and is never persisted or forwarded.
+`GET /eve/v1/info` returns authored instructions and server paths, so it serves only operators by default: `service` and `runtime` principals, plus callers `localDev()` admits when the channel's `auth` includes it. Other callers get `403` with code `info_forbidden`. An eve-channel authenticator can decide for its caller instead: `allowAgentInfo: true` grants access, and `false` denies it even to an operator. Like `allowToolStubs` and `allowHistoryImport`, the flag applies only to the current request and is never persisted or forwarded.
 
 ```ts
 import type { EveAuthFn } from "eve/channels/eve";

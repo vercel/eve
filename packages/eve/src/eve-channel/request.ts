@@ -1,6 +1,7 @@
 import { internalSession } from "#channel/session.js";
 import { MAX_DELIVERY_IDEMPOTENCY_KEY_LENGTH } from "#channel/delivery-idempotency.js";
 import { parseToolStubs } from "#tool-stubs/rules.js";
+import { InvalidSessionHistoryError, validateSessionHistory } from "#shared/session-history.js";
 import {
   MAX_MESSAGE_PARTS,
   type MessageContent,
@@ -113,6 +114,7 @@ export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBod
     "protocolVersion",
     "capabilities",
     "stubs",
+    "history",
     "forwardedPrincipal",
   ];
   if (input.callback !== undefined) fields.push("activityObserver");
@@ -164,6 +166,14 @@ export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBod
         { ok: false, error: error instanceof Error ? error.message : "Invalid tool stubs." },
         { status: 400 },
       );
+    }
+  }
+  if (payload.history !== undefined) {
+    try {
+      result.history = validateSessionHistory(payload.history);
+    } catch (error) {
+      if (!(error instanceof InvalidSessionHistoryError)) throw error;
+      return Response.json({ ok: false, error: error.message }, { status: 400 });
     }
   }
   if (message !== undefined) result.message = message;

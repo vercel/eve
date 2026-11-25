@@ -5,7 +5,7 @@ description: "Define repeatable scored checks for an eve agent with defineEval a
 
 An eval is a scored check that sends messages to your agent and grades what it did. Each eval lives in a `.eval.ts` file under `evals/`, and `eve eval` runs them. Use evals to catch regressions when you change a prompt or a tool.
 
-Evals talk to a real agent server over the same HTTP API as your users, through the [TypeScript client](/docs/guides/client). A passing eval means the agent started, accepted a request, and produced the asserted result. To control what tools return, define [tool stubs](/docs/evals/tool-stubs) in the eval.
+Evals talk to a real agent server over the same HTTP API as your users, through the [TypeScript client](/docs/guides/client). A passing eval means the agent started, accepted a request, and produced the asserted result. To control what tools return, define [tool stubs](/docs/evals/tool-stubs) in the eval. To grade a reply against an exact earlier conversation, [start the session from fixed history](/docs/evals/cases#starting-from-fixed-history).
 
 ## `defineEval`
 

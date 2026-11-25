@@ -107,7 +107,7 @@ Every `t.session()` or `t.send()` call starts a new, separate conversation (a se
 
 | Method                                     | Does                                                                                                       |
 | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| `t.session(options?)`                      | Creates an empty session and resolves on `202 Accepted`, with `.id` and `.state` set                       |
+| `t.session(options?)`                      | Creates a session without running a turn and resolves on `202 Accepted`, with `.id` and `.state` set       |
 | `t.send(message, options?)`                | Creates a session with its first message and waits for the turn to finish                                  |
 | `session.send(message, options?)`          | Sends a follow-up and waits for the turn to finish                                                         |
 | `session.start(message, options?)`         | Starts a turn and returns once the server accepts it; see [In-flight turns](#in-flight-turns)              |
@@ -121,7 +121,7 @@ Every `t.session()` or `t.send()` call starts a new, separate conversation (a se
 | `session.view`                             | Read-only session snapshot; query it with [selectors](./assertions#assert-on-session-state-with-selectors) |
 | `session.events`, `session.transcript`     | The session's recorded events, and its user and assistant messages as text                                 |
 
-`t.session()` and `t.send()` options accept per-request `headers` and `signal`. Omit `signal` to use the eval's timeout signal.
+`t.session()` and `t.send()` options accept per-request `headers` and `signal`. Omit `signal` to use the eval's timeout signal. `t.session()` also accepts [`stubs`](./tool-stubs) and [`history`](#starting-from-fixed-history).
 
 `session.cancel()` throws `SessionNotActiveError` when the session is no longer active, and `session.compact()` also throws. Assert on a compaction with `.event("context.settled", { data: { kind: "compaction", outcome: "completed" } })`.
 
@@ -154,6 +154,45 @@ export default defineEval({
 ```
 
 The agent sets up the session when the first message arrives. If eve can't create the session, `t.session()` rejects. A created session appears in eval results and is cleaned up on timeout, even when no message was sent.
+
+## Starting from fixed history
+
+To grade one reply against an exact earlier conversation, pass `history` to `t.session()`. The eval writes the earlier user and assistant messages, so no model generates them and they are the same on every run:
+
+```ts title="evals/support/case-after-redirect.eval.ts"
+import { defineEval } from "eve/evals";
+
+export default defineEval({
+  async test(t) {
+    const session = await t.session({
+      history: [
+        { role: "user", text: "How do I redirect www.example.com to example.com?" },
+        { role: "assistant", text: "Add both domains, then configure the redirect." },
+      ],
+    });
+
+    const turn = await session.send("Can we submit a case anyway?");
+    t.succeeded();
+    t.judge("Offers to open a support case without repeating the redirect steps", {
+      on: turn.reply,
+    }).atLeast(0.7);
+  },
+});
+```
+
+The first message starts the first turn that runs. The model reads the entries ahead of that message as earlier turns with their own roles. eve runs no model, tool, or hook for them and sends nothing to a channel. Later turns, compaction, and `session.transcript` treat them like any other history. The stream records them in `data.history` on the first turn's `delivery.consumed`, without a turn, tool call, or usage of their own, so `t.event("turn.settled", { count: 1 })` holds after that turn.
+
+Each entry has a `role` of `"user"` or `"assistant"`, non-empty `text`, and an optional `id` that is unique in the list. Tool calls, files, and reasoning aren't supported, and eve rejects an entry with any other field rather than dropping it. A rejected request throws a `ClientError` that names the entry, such as `history[1].role must be "user" or "assistant".`
+
+The target must permit it. eve answers `403` to `history` in a request unless the eve channel's auth grants `allowHistoryImport` to the eval runner, as it does for [tool stubs](./tool-stubs#permit-tool-replacement). See [history import permission](../guides/auth-and-route-protection#history-import-permission). With the grant, the same eval runs against a local or deployed [target](./targets), and `client.sessions.create({ history })` accepts the same option.
+
+Choose the setup by what the eval holds fixed:
+
+| Setup                          | What the model reads                                                 | Use it when                                                                       |
+| ------------------------------ | -------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `t.session({ history })`       | Earlier user and assistant text you wrote, kept in the session       | The eval grades the next reply against an exact conversation                      |
+| Earlier `session.send()` turns | Replies the agent generated in this run, with their tool calls       | The earlier turns are under test, or later turns need their tool results or state |
+| `clientContext` on a send      | Context for that turn only, which later turns and history never keep | The eval supplies page or app state rather than conversation                      |
 
 ## In-flight turns
 

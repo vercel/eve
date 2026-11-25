@@ -63,6 +63,7 @@
   "SendTurnPayload",
   "SessionEvent",
   "SessionEventMeta",
+  "SessionHistoryMessage",
   "SessionNotActiveError",
   "SessionSnapshot",
   "SessionStore",

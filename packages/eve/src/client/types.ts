@@ -9,6 +9,7 @@ import type { TurnMode } from "#channel/types.js";
 export type { TurnMode };
 import type { Answer } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
+import type { SessionHistoryMessage } from "#shared/session-history.js";
 import type { ToolStub } from "#tool-stubs/types.js";
 export type { HealthResult } from "#client/health-types.js";
 
@@ -109,6 +110,11 @@ export interface CreateSessionOptions {
    * The server must authorize their use.
    */
   readonly stubs?: readonly ToolStub[];
+  /**
+   * Prior conversation the session starts from, as user and assistant text. It joins model
+   * history with the first message, and no earlier turn runs. The server must authorize its use.
+   */
+  readonly history?: readonly SessionHistoryMessage[];
   /** Abort signal for cancelling the creation request. */
   readonly signal?: AbortSignal;
   /** Additional headers for this request only. */

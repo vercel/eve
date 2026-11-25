@@ -6,14 +6,16 @@ import type { EveAuthFn } from "#eve-channel/types.js";
 export interface EveVercelOidcOptions extends Omit<VercelOidcOptions, "subjects"> {
   /**
    * Additional subjects allowed to authenticate, with whole-string `*` matching.
-   * Only an explicit grant on a matching entry permits service/runtime callers to use stubs.
-   * String entries and implicit current-project acceptance grant ordinary access only.
+   * Only an explicit grant on a matching entry permits service/runtime callers to use stubs
+   * or to import history. String entries and implicit current-project acceptance grant
+   * ordinary access only.
    */
   readonly subjects?: readonly (
     | string
     | {
         readonly subject: string;
         readonly allowToolStubs?: boolean;
+        readonly allowHistoryImport?: boolean;
       }
   )[];
 }
@@ -32,15 +34,19 @@ export function eveVercelOidc(opts: EveVercelOidcOptions = {}): EveAuthFn {
     async (request) => {
       const caller = await authenticate(request);
       if (!caller) return null;
-      const allowed =
-        (caller.principalType === "service" || caller.principalType === "runtime") &&
+      if (caller.principalType !== "service" && caller.principalType !== "runtime") return caller;
+      const granted = (grant: "allowToolStubs" | "allowHistoryImport") =>
         subjects?.some(
           (entry) =>
             typeof entry !== "string" &&
-            entry.allowToolStubs === true &&
+            entry[grant] === true &&
             areTokenClaimMatchersSatisfied({ sub: caller.subject }, { subjects: [entry.subject] }),
-        );
-      return allowed ? { ...caller, allowToolStubs: true } : caller;
+        ) === true;
+      return {
+        ...caller,
+        ...(granted("allowToolStubs") && { allowToolStubs: true }),
+        ...(granted("allowHistoryImport") && { allowHistoryImport: true }),
+      };
     },
     [{ scheme: "Bearer" }],
   );

@@ -149,15 +149,65 @@ describe("eveVercelOidc", () => {
       });
       const auth = eveVercelOidc({
         currentVercelProject: { projectId: CURRENT_PROJECT.projectId, environment },
-        subjects: [{ subject: "*", allowToolStubs: true }],
+        subjects: [{ subject: "*", allowToolStubs: true, allowHistoryImport: true }],
       });
 
       const result = await auth(request(token));
 
       expect(result).toMatchObject({ principalType: "user", subject });
       expect(result?.allowToolStubs === true).toBe(false);
+      expect(result?.allowHistoryImport === true).toBe(false);
     },
   );
+
+  it.each([
+    {
+      name: "a history grant does not permit stubs",
+      subjects: [{ subject: SUBJECT, allowHistoryImport: true }],
+      grants: { allowHistoryImport: true },
+    },
+    {
+      name: "a stub grant does not permit history import",
+      subjects: [{ subject: SUBJECT, allowToolStubs: true }],
+      grants: { allowToolStubs: true },
+    },
+    {
+      name: "separate matching entries grant both",
+      subjects: [
+        { subject: SUBJECT, allowToolStubs: true },
+        { subject: WILDCARD, allowHistoryImport: true },
+      ],
+      grants: { allowHistoryImport: true, allowToolStubs: true },
+    },
+    {
+      name: "an unmatched entry and a token-supplied claim grant neither",
+      subjects: [
+        SUBJECT,
+        { subject: "owner:acme:project:other:environment:*", allowHistoryImport: true },
+      ],
+      grants: {},
+    },
+  ] satisfies {
+    name: string;
+    subjects: EveVercelOidcOptions["subjects"];
+    grants: { allowHistoryImport?: true; allowToolStubs?: true };
+  }[])("grants each permission from its own entry: $name", async ({ subjects, grants }) => {
+    const token = await issuer.signToken({
+      allowHistoryImport: true,
+      environment: "preview",
+      project_id: "prj_runner",
+      sub: SUBJECT,
+    });
+    const auth = eveVercelOidc({ currentVercelProject: CURRENT_PROJECT, subjects });
+
+    const result = await auth(request(token));
+
+    expect(result).toMatchObject({ principalType: "service", subject: SUBJECT });
+    expect({
+      ...(result?.allowHistoryImport === true && { allowHistoryImport: true }),
+      ...(result?.allowToolStubs === true && { allowToolStubs: true }),
+    }).toEqual(grants);
+  });
 
   it("does not grant access from an otherwise eligible token with an invalid signature", async () => {
     const token = await issuer.signToken({

@@ -26,6 +26,11 @@ export interface EveAuthResult extends AuthResult {
    */
   readonly allowToolStubs?: boolean;
   /**
+   * Allows creating sessions that start from `history` supplied in the request.
+   * Omitted or false rejects such requests. Never persisted or forwarded as session identity.
+   */
+  readonly allowHistoryImport?: boolean;
+  /**
    * Decides whether this request may read `GET /eve/v1/info`. `true` allows it, `false` denies
    * it even for operator principals, and omitted serves only operators (`service`, `runtime`,
    * and callers a configured `localDev()` admits). Never persisted or forwarded.
@@ -124,9 +129,9 @@ export interface EveChannelConfig {
    * Route auth policy: a single {@link EveAuthFn} or an ordered array walked by {@link routeAuth}.
    * The first entry returning an {@link EveAuthResult} wins; `null` / `undefined` skips to
    * the next; exhaustion (including the empty array) rejects with 401. Include `none()` last for anonymous traffic.
-   * Ordinary authenticators grant no tool-replacement permission; return `allowToolStubs: true`
-   * from an eve-channel callback to grant it for that request. Return `allowAgentInfo` to
-   * override who reads `GET /eve/v1/info`.
+   * Ordinary authenticators grant no tool-replacement or history-import permission; return
+   * `allowToolStubs: true` or `allowHistoryImport: true` from an eve-channel callback to grant it
+   * for that request. Return `allowAgentInfo` to override who reads `GET /eve/v1/info`.
    */
   readonly auth: EveAuthFn | readonly EveAuthFn[];
   /**

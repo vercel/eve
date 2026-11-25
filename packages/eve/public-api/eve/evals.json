@@ -60,6 +60,7 @@
   "MockModelToolResult",
   "MockModelUsage",
   "ScoreInput",
+  "SessionHistoryMessage",
   "ToolStub",
   "ToolStubOutcome",
   "defineEval",
