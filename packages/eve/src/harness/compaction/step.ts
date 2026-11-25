@@ -59,6 +59,7 @@ import {
   type TokenUsageDelta,
 } from "#harness/model-call/usage.js";
 import { modelIdentity, resolveModelProfile } from "#harness/model-profile.js";
+import { withoutToolLoads } from "#shared/openai-additional-tools.js";
 import { readsOpenAICompaction, withoutOpenAICompaction } from "#shared/openai-compaction-item.js";
 import { markUsageReported, NO_USAGE } from "#harness/session-usage.js";
 import { addTokenUsage } from "#shared/token-usage-math.js";
@@ -520,7 +521,9 @@ async function modelExecutor(
             streamCompactionCall({
               ...call,
               ...rest,
-              ...(!readsRecord && { messages: withoutOpenAICompaction(rest.messages) }),
+              ...(readsRecord
+                ? { allowSystemInMessages: true }
+                : { messages: withoutToolLoads(withoutOpenAICompaction(rest.messages)) }),
               providerOptions: mergeProviderOptions(call.providerOptions, providerOptions),
               ...(tools !== undefined && { tools: withoutExecutors(tools) }),
             }),
@@ -590,6 +593,7 @@ async function streamCompactionCall(
     Pick<
       Parameters<typeof streamText>[0],
       | "abortSignal"
+      | "allowSystemInMessages"
       | "headers"
       | "model"
       | "onLanguageModelCallEnd"

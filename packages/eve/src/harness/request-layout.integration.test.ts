@@ -38,16 +38,24 @@ function recordingModel(respond: Respond, provider = "eve-test") {
     readonly prompt: LanguageModelV4CallOptions["prompt"];
     readonly providerOptions?: unknown;
     readonly tools: readonly string[];
+    readonly omittedTools?: readonly string[] | undefined;
   }[] = [];
   const model = markMockModel(
     new MockLanguageModelV4({
       doStream: async (options) => {
+        const omitted = (options.tools ?? []).filter(
+          (tool) =>
+            tool.type === "function" && tool.providerOptions?.openai?.omitFromRequestTools === true,
+        );
         calls.push({
           prompt: options.prompt,
           ...(options.providerOptions === undefined
             ? {}
             : { providerOptions: options.providerOptions }),
-          tools: (options.tools ?? []).map((tool) => tool.name),
+          tools: (options.tools ?? [])
+            .filter((tool) => !omitted.includes(tool))
+            .map((tool) => tool.name),
+          omittedTools: omitted.length === 0 ? undefined : omitted.map((tool) => tool.name),
         });
         return respond(options, calls.length);
       },
@@ -577,6 +585,191 @@ describe("what eve sends the model", () => {
         await (await alice.send("Thanks.", { auth: null })).result();
         await golden("connections.requests", calls);
         await golden("connections.state", await storedState(first.sessionId));
+      }),
+    );
+  });
+
+  it("compacts with OpenAI's own compaction after a tool loaded mid-session", async () => {
+    let connected = false;
+    const { calls, model } = recordingModel((options) => {
+      const openai = (options.providerOptions as { openai?: { compactionTrigger?: boolean } })
+        ?.openai;
+      if (openai?.compactionTrigger === true) {
+        return {
+          stream: simulateReadableStream({
+            chunks: [
+              { type: "stream-start", warnings: [] },
+              {
+                kind: "openai.compaction",
+                providerMetadata: {
+                  openai: {
+                    encryptedContent: "ENCRYPTED-STATE",
+                    itemId: "cmp_1",
+                    type: "compaction",
+                  },
+                },
+                type: "custom",
+              },
+              { finishReason: { raw: undefined, unified: "stop" }, type: "finish", usage },
+            ],
+          }),
+        } as ReturnType<typeof textStreamResult>;
+      }
+      return textStreamResult("Done.");
+    }, "openai.responses");
+    const test = await createTestRuntime({
+      agent: {
+        definition: defineAgent({
+          experimental: { compaction: openaiCompaction() },
+          model: defineDynamic(() => ({ model, modelContextWindowTokens: 200_000 })),
+        } as never),
+        name: "layout-native-compaction-reload",
+      },
+      modules: [
+        mod("instructions/agent.ts", defineInstructions({ content: "You are Ada." })),
+        mod(
+          "connections/linear.ts",
+          defineDynamicConnection(() =>
+            connected
+              ? defineMcpClientConnection({
+                  description: "Linear issues for the release team.",
+                  url: "https://mcp.linear.example/mcp",
+                })
+              : null,
+          ),
+        ),
+      ],
+    });
+    await test.run(() =>
+      onWorkflow(async (runtime) => {
+        const alice = address(runtime, "layout-native-compaction-reload");
+        const first = await (await alice.send("Hello.", { auth: null })).result();
+        connected = true;
+        await (await alice.send("Thanks.", { auth: null })).result();
+        const loaded = calls
+          .at(-1)!
+          .prompt.some((m) => JSON.stringify(m).includes("additionalTools"));
+        expect(loaded).toBe(true);
+        await runtime.dispatchSession({
+          command: { deliveryId: "layout-native-compact-reload", kind: "compact" },
+          sessionId: first.sessionId,
+        });
+        await (await alice.send("Anything else?", { auth: null })).result();
+        const compaction = calls.find(
+          (call) =>
+            (call.providerOptions as { openai: { compactionTrigger?: boolean } }).openai
+              .compactionTrigger === true,
+        );
+        expect(compaction).toBeDefined();
+        expect(compaction!.prompt.some((m) => JSON.stringify(m).includes("additionalTools"))).toBe(
+          true,
+        );
+        const after = calls.at(-1)!.prompt;
+        expect(JSON.stringify(after)).toContain("ENCRYPTED-STATE");
+      }),
+    );
+  });
+
+  it("keeps the tool descriptions fixed when a later turn asks for structured output on OpenAI", async () => {
+    const descriptions: string[] = [];
+    const { calls, model } = recordingModel((options) => {
+      descriptions.push(
+        JSON.stringify(
+          (options.tools ?? [])
+            .filter(
+              (tool) =>
+                !(tool.type === "function" && tool.providerOptions?.openai?.omitFromRequestTools),
+            )
+            .map((tool) => [tool.name, tool.type === "function" ? tool.description : null]),
+        ),
+      );
+      return textStreamResult("Hi.");
+    }, "openai.responses");
+    const test = await createTestRuntime({
+      agent: { definition: dynamicModel(model), name: "layout-ends-turn-fixed" },
+      modules: [
+        mod("instructions/agent.ts", defineInstructions({ content: "You are Ada." })),
+        mod(
+          "tools/finish.ts",
+          defineTool({
+            description: "Hand the result to the reviewer.",
+            endsTurn: true,
+            execute: async () => ({ ok: true }),
+            inputSchema: {},
+          }),
+        ),
+      ],
+    });
+    await test.run(() =>
+      onWorkflow(async (runtime) => {
+        const alice = address(runtime, "layout-ends-turn-fixed");
+        await (await alice.send("Hello.", { auth: null })).result();
+        await (
+          await alice.deliver(
+            {
+              message: "Summarize.",
+              outputSchema: { properties: { text: { type: "string" } }, type: "object" },
+            },
+            { auth: null },
+          )
+        ).result();
+        expect(calls.length).toBeGreaterThan(1);
+        expect(descriptions[0]).toContain("ends your turn");
+        expect(descriptions[1]).toBe(descriptions[0]);
+      }),
+    );
+  });
+
+  it.each([
+    ["openai.responses", "additional-tools"],
+    ["eve-test", "additional-tools-other-provider"],
+  ])("loads a tool that appears mid-session on %s (golden %s)", async (provider, name) => {
+    let connected = false;
+    const { calls, model } = recordingModel(
+      (options) =>
+        textStreamResult(JSON.stringify(options.prompt).includes("Thanks.") ? "Done." : "Hi."),
+      provider,
+    );
+    const test = await createTestRuntime({
+      agent: { definition: dynamicModel(model), name: `layout-${name}` },
+      modules: [
+        mod(
+          "instructions/agent.ts",
+          defineInstructions({ content: "You are Ada, a release assistant." }),
+        ),
+        mod(
+          "connections/linear.ts",
+          defineDynamicConnection(() =>
+            connected
+              ? defineMcpClientConnection({
+                  description: "Linear issues for the release team.",
+                  url: "https://mcp.linear.example/mcp",
+                })
+              : null,
+          ),
+        ),
+      ],
+    });
+    await test.run(() =>
+      onWorkflow(async (runtime) => {
+        const alice = address(runtime, `layout-${name}`);
+        const first = await (await alice.send("Hello.", { auth: null })).result();
+        connected = true;
+        await (await alice.send("Thanks.", { auth: null })).result();
+        await (await alice.send("Anything else?", { auth: null })).result();
+        const keys = new Set(
+          calls.flatMap((call) => {
+            const key = (call.providerOptions as { openai?: { promptCacheKey?: string } })?.openai
+              ?.promptCacheKey;
+            return key === undefined ? [] : [key];
+          }),
+        );
+        let requests = JSON.stringify(calls);
+        for (const key of keys) {
+          requests = requests.replaceAll(key, "<promptCacheKey>");
+        }
+        await golden(`${name}.requests`, JSON.parse(requests));
+        await golden(`${name}.state`, await storedState(first.sessionId));
       }),
     );
   });

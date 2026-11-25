@@ -31,8 +31,11 @@ export function keptAnnouncements(
     ),
   );
   const kept = Object.entries(state.messages ?? {}).filter(([, digest]) => held.has(digest));
-  if (kept.length === 0) return {};
+  const { requestTools } = state;
+  const fixed = requestTools === undefined ? {} : { requestTools };
+  if (kept.length === 0) return fixed;
   return {
+    ...fixed,
     announcements: Object.fromEntries(
       kept.flatMap(([key]) => {
         const value = state.announcements?.[key];

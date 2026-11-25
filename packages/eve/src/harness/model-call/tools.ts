@@ -16,12 +16,13 @@ export async function prepareModelTools(
   input: {
     readonly catalog: StepCatalog;
     readonly disabledProviderTools?: ReadonlySet<string>;
+    readonly endsTurn?: boolean;
     readonly profile: ModelProfile;
   },
 ): Promise<ToolSet> {
   const { catalog, profile } = input;
   const modelTools = await buildToolSetWithProviderTools({
-    describe: catalog.describe,
+    describe: (definition) => catalog.describe(definition, input.endsTurn),
     disabledProviderTools: input.disabledProviderTools,
     profile,
     tools: catalog.advertised,

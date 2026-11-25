@@ -97,6 +97,10 @@ export const TurnDeliveryIdsKey = new ContextKey<readonly string[]>("eve.turnDel
 export interface HistoryState {
   readonly announcements?: Readonly<Record<string, string>>;
   readonly messages?: Readonly<Record<string, string>>;
+  readonly requestTools?: {
+    readonly endsTurn: boolean;
+    readonly names: readonly string[];
+  };
 }
 export const HistoryStateKey = new ContextKey<HistoryState>("eve.historyState");
 export interface OfferedCatalogTools {

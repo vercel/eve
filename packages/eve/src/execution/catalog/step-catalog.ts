@@ -42,7 +42,7 @@ export interface Callable {
   readonly skills: ReadonlyMap<string, CatalogSkill>;
   readonly registry: ConnectionRegistry | undefined;
   get(name: string): HarnessToolDefinition | undefined;
-  describe(definition: HarnessToolDefinition): string;
+  describe(definition: HarnessToolDefinition, endsTurn?: boolean): string;
 }
 
 export interface StepCatalog extends HarnessToolLookup {
@@ -52,7 +52,7 @@ export interface StepCatalog extends HarnessToolLookup {
   readonly deferred: HarnessToolMap;
   readonly entries: HarnessToolMap;
   readonly skills: ReadonlyMap<string, CatalogSkill>;
-  describe(definition: HarnessToolDefinition): string;
+  describe(definition: HarnessToolDefinition, endsTurn?: boolean): string;
   readonly resolve: CallResolver;
 }
 
@@ -92,8 +92,8 @@ export function callableOf(input: CatalogInput): Callable {
   const callable: Callable = {
     connections,
     deferred: new Map([...entries].filter(([, definition]) => definition.deferred === true)),
-    describe: (definition) =>
-      describeEntry(definition, input.endsTurn, hasProgramTool ? callable : undefined),
+    describe: (definition, endsTurn = input.endsTurn) =>
+      describeEntry(definition, endsTurn, hasProgramTool ? callable : undefined),
     entries,
     get: (name) =>
       entries.get(name) ??

@@ -13,6 +13,7 @@ import type { HistoryMessageKind } from "#shared/history-message.js";
 import type { HarnessStepInput } from "#harness/types.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 import { attachInputText, readInputText } from "#internal/input-text.js";
+import { isToolLoad } from "#shared/openai-additional-tools.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 
 export type FrameworkMessageKind = Exclude<HistoryMessageKind, "user">;
@@ -248,6 +249,7 @@ export function followsToolResults(messages: readonly ModelMessage[]): boolean {
 
 export function normalizeModelMessages(messages: readonly ModelMessage[]): ModelMessage[] {
   return messages.flatMap((message) => {
+    if (isToolLoad(message)) return [message];
     if (typeof message.content === "string") {
       return message.content.trim().length > 0 ? [message] : [];
     }
