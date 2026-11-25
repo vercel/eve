@@ -64,3 +64,24 @@ What the model answers next is up to the strategy. Keep the turn's latest user m
 `defaultCompaction({ model?, instructions?, threshold? })` is eve's compaction when you set none. It caps oversized tool results in older history, and summarizes the older history when capping doesn't fit. `model` writes the summary with another model, `instructions` adds to eve's checkpoint prompt, and `threshold` is the fraction of the window at which it compacts, 0.9 by default. It counts the checkpoint prompt it adds, so it starts before the conversation alone reaches the threshold.
 
 `withoutInjected(history)` removes the messages eve adds to every request (memory, instructions, state and the previous checkpoint) from a history you send. eve adds them again after the compaction.
+
+## Compact with OpenAI's own compaction
+
+`openaiCompaction({ fallback?, threshold? })` compacts with OpenAI's compaction instead of a text summary. eve sends the turn's request with OpenAI's `compaction_trigger`, and OpenAI answers with an encrypted record of the history. eve stores the record as the history and sends it with every later request, so the model keeps its working state where a summary would drop it. `threshold` is the fraction of the window at which it compacts, 0.9 by default.
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+import { openaiCompaction } from "eve/experimental/compaction";
+import { openai } from "eve/models/openai";
+
+export default defineAgent({
+  model: openai("gpt-5"),
+  experimental: { compaction: openaiCompaction({ threshold: 0.8 }) },
+});
+```
+
+- It works with `openai("gpt-...")` and with an AI Gateway string such as `"openai/gpt-5"`. Through AI Gateway, eve sets `providerOptions.gateway.only` to `["openai"]` on the compaction request and on every later request that holds the record, because another provider can't read it. A `gateway.only` you set in `modelOptions` replaces it on the later requests. On the compaction request it narrows it instead: if your list excludes `openai`, eve doesn't send the history to OpenAI and compacts with the fallback.
+- Another model, a failed call, or an answer without a record compacts with `fallback`, which is `defaultCompaction({ threshold })` with the same `threshold` unless you pass another strategy, and eve logs why when the fallback compacts. A strategy you pass decides for itself whether to compact, from its own threshold. A history that already holds a record is the exception: a text summary would drop what the record holds, so eve keeps the history and compacts again on a later request. A session that switches to another model after a compaction logs a warning on each request and sends the history without the record.
+- eve leaves out the messages it adds to every request (memory, instructions, state and the previous checkpoint) and adds them again after the compaction, because the record would hold stale copies of them.
+- The agent's `store` setting applies to the compaction call and to every later request. When the provider keeps the response, eve refers to the record by id for as long as it is kept. With `modelOptions: { providerOptions: { openai: { store: false } } }`, eve sends the record inline with its encrypted content, so the session stays resumable after the provider's retention.
+- The first two requests after a compaction miss the prompt cache past the instructions and tools: the first has never been seen, and OpenAI doesn't read a prefix that ends on the record from its cache. The third and later requests hit it.

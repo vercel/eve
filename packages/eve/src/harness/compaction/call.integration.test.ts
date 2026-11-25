@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
+import type { HarnessSession } from "#harness/types.js";
 import {
   INJECTED,
   type ResponsesBody,
@@ -13,19 +14,23 @@ import { withoutInjected } from "#public/experimental/compaction/injected.js";
 import type { CompactionContext } from "#shared/compaction-strategy.js";
 import type { StoredHistoryMessage } from "#shared/history-message.js";
 
-const SUMMARIZE = async (history: readonly StoredHistoryMessage[], ctx: CompactionContext) => {
+const endsInItem = (history: readonly StoredHistoryMessage[]) =>
+  history.at(-1)?.role === "assistant" &&
+  Array.isArray(history.at(-1)!.content) &&
+  (history.at(-1)!.content as { kind?: string }[]).some(
+    (part) => part.kind === "openai.compaction",
+  );
+
+const OPENAI_NATIVE = async (history: readonly StoredHistoryMessage[], ctx: CompactionContext) => {
   if (!ctx.requested && !ctx.overflow && ctx.tokens <= 80) return undefined;
   const sendable = withoutInjected(history);
-  const { text } = await ctx.call({
+  if (endsInItem(sendable)) return undefined;
+  const { messages } = await ctx.call({
     messages: sendable,
-    providerOptions: { openai: { store: false } },
+    providerOptions: { openai: { compactionTrigger: true, store: false } },
     tools: "inherit",
   });
-  return [
-    { content: "Summary:", kind: "context.compaction", role: "user" },
-    { content: text, role: "assistant" },
-    ...history.slice(-1),
-  ] satisfies StoredHistoryMessage[];
+  return messages;
 };
 
 describe("a strategy that calls the model with ctx.call()", () => {
@@ -35,7 +40,7 @@ describe("a strategy that calls the model with ctx.call()", () => {
 
     await contextStorage.run(new ContextContainer(), () =>
       turn(
-        kernelFor(SUMMARIZE, openaiWithFetch(bodies), providers),
+        kernelFor(OPENAI_NATIVE, openaiWithFetch(bodies), providers),
         fresh(),
         "Which sources back the claim?",
       ),
@@ -43,6 +48,7 @@ describe("a strategy that calls the model with ctx.call()", () => {
 
     const [compacting] = bodies;
     expect(new Set(providers)).toEqual(new Set(["openai.responses"]));
+    expect(compacting!.input.at(-1)).toEqual({ type: "compaction_trigger" });
     expect(compacting!.store).toBe(false);
     expect(JSON.stringify(compacting!.input[0])).toContain("You help Alice.");
     expect(compacting!.tools?.map((tool) => tool.name)).toContain("lookup");
@@ -52,18 +58,55 @@ describe("a strategy that calls the model with ctx.call()", () => {
     expect(sent).toContain("I reviewed it.");
   });
 
+  it("keeps the provider's item on the stored message, so a reloaded session still sends it", async () => {
+    const bodies: ResponsesBody[] = [];
+    const kernel = kernelFor(OPENAI_NATIVE, openaiWithFetch(bodies));
+
+    const session = await contextStorage.run(new ContextContainer(), () =>
+      turn(kernel, fresh(), "Which sources back the claim?"),
+    );
+
+    expect(session.history).toContainEqual({
+      content: [
+        {
+          kind: "openai.compaction",
+          providerOptions: {
+            openai: { encryptedContent: "ENCRYPTED-STATE", itemId: "cmp_1", type: "compaction" },
+          },
+          type: "custom",
+        },
+      ],
+      role: "assistant",
+    });
+
+    const reloaded = JSON.parse(JSON.stringify(session)) as HarnessSession;
+    await contextStorage.run(new ContextContainer(), () =>
+      turn(kernelFor(OPENAI_NATIVE, openaiWithFetch(bodies)), reloaded, "And the second claim?"),
+    );
+
+    const after = bodies.at(-1)!.input;
+    expect(after).toContainEqual({
+      encrypted_content: "ENCRYPTED-STATE",
+      id: "cmp_1",
+      type: "compaction",
+    });
+    expect(JSON.stringify(after)).not.toContain("item_reference");
+  });
+
   it("sends the same instructions and tools as the turn when the compaction is manual", async () => {
     const bodies: ResponsesBody[] = [];
     const model = openaiWithFetch(bodies);
 
     await contextStorage.run(new ContextContainer(), () =>
-      kernelFor(SUMMARIZE, model, [], { compactOnly: true })(fresh(), {}),
+      kernelFor(OPENAI_NATIVE, model, [], { compactOnly: true })(fresh(), {}),
     );
     await contextStorage.run(new ContextContainer(), () =>
-      turn(kernelFor(SUMMARIZE, model), fresh(), "Which sources back the claim?"),
+      turn(kernelFor(OPENAI_NATIVE, model), fresh(), "Which sources back the claim?"),
     );
 
-    const [manual, ofTurn] = bodies;
+    const manual = bodies.find((body) => body.input.at(-1)?.type === "compaction_trigger");
+    const ofTurn = bodies.find((body) => body.input.at(-1)?.type !== "compaction_trigger");
+    expect(manual).toBeDefined();
     expect(manual!.tools).toEqual(ofTurn!.tools);
     expect(manual!.input[0]).toEqual(ofTurn!.input[0]);
   });

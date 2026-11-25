@@ -4,5 +4,6 @@
   "CompactionStrategy",
   "StoredHistoryMessage",
   "defaultCompaction",
+  "openaiCompaction",
   "withoutInjected"
 ]

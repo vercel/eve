@@ -227,7 +227,8 @@ export type SessionUsageLimit = (usage: {
 export interface AgentExperimentalDefinition {
   /**
    * Replaces how eve compacts the history, and takes the place of `compaction`. Build one with
-   * `defaultCompaction()` from `eve/experimental/compaction`, or write your own.
+   * `defaultCompaction()` or `openaiCompaction()` from `eve/experimental/compaction`, or write
+   * your own.
    */
   readonly compaction?: CompactionStrategy;
   /**
