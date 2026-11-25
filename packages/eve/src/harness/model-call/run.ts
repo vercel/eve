@@ -80,10 +80,7 @@ export async function runModelStep(
     generation,
     model: resolved.model,
     renewCredential: resolved.renew,
-    newRun: async () => {
-      const next = await requestRun(step, prompt);
-      if (next !== undefined) throw new Error("eve couldn't request the replacement model run.");
-    },
+    newRun: async () => await requestReplacementRun(step, prompt),
     startRun: async (attempt) => await startRun(step, attempt),
     projectedMessages,
     turnMessages: input.turn.messages,
@@ -96,12 +93,10 @@ export async function runModelStep(
     throwIfSessionStreamDead(error);
     throwIfTurnAborted(step.config.abortSignal);
     const credentialError = credentialErrorIn(error);
-    if (credentialError !== undefined && generation.interrupted) return caller.steered();
     if (credentialError !== undefined)
-      return await failOrAsk(step, credentialError, async () => {
-        const messages = await caller.abandon();
-        step.session = changeHistory(step.session, { extend: messages });
-      });
+      return generation.interrupted
+        ? caller.steered()
+        : await failOrAsk(step, credentialError, async () => await abandonCall(step, caller));
     const compactionFailed = await caller.failIfCompactionFailed();
     if (compactionFailed !== undefined) return compactionFailed;
     if (generation.interrupted) return caller.steered();
@@ -112,15 +107,17 @@ export async function runModelStep(
 
   await recordModelUsage(step, { model: resolved.model, tools: catalog.advertised.size });
 
+  const withoutClientContext =
+    prompt.clientContext === undefined || prompt.clientContext.messages.length === 0;
+  const durableModelPromptMessageCount = withoutClientContext
+    ? caller.modelMessages.length
+    : undefined;
   let stepResult: StepResult;
   try {
     generation.check();
     stepResult = await handleStepResult(step, {
       catalog,
-      durableModelPromptMessageCount:
-        prompt.clientContext === undefined || prompt.clientContext.messages.length === 0
-          ? caller.modelMessages.length
-          : undefined,
+      durableModelPromptMessageCount,
       endsTurnTools: endsTurnTools(catalog, step.endsTurn),
       promptMessages: caller.request.history,
       requestEnvelopeTokens: caller.requestEnvelopeTokens,
@@ -165,6 +162,16 @@ async function requestRun(step: Step, prompt: Prompt): Promise<StepResult | unde
     return await failBoundaryEvent(step, error);
   }
   return undefined;
+}
+
+async function requestReplacementRun(step: Step, prompt: Prompt): Promise<void> {
+  const failed = await requestRun(step, prompt);
+  if (failed !== undefined) throw new Error("eve couldn't request the replacement model run.");
+}
+
+async function abandonCall(step: Step, caller: ModelCaller): Promise<void> {
+  const messages = await caller.abandon();
+  step.session = changeHistory(step.session, { extend: messages });
 }
 
 async function startRun(step: Step, attempt: number): Promise<void> {
