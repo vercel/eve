@@ -1,3 +1,4 @@
+import { WORKFLOW_LOCAL_SESSIONS } from "#execution/agent-sessions/steps.js";
 import type {
   CoordinationDispatchInput,
   CoordinationDispatchResult,
@@ -10,5 +11,5 @@ export async function dispatchCoordinationStep(
   input: CoordinationDispatchInput,
 ): Promise<WithSessionStateDelta<CoordinationDispatchResult>> {
   "use step";
-  return await dispatchCoordinationOn(startWorkflowToolRun)(input);
+  return await dispatchCoordinationOn(startWorkflowToolRun, WORKFLOW_LOCAL_SESSIONS)(input);
 }

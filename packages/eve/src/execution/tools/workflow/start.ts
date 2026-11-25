@@ -1,5 +1,6 @@
 import type { SessionAuth, SessionParent } from "#context/session-context.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
+import type { LocalAgentSessions } from "#execution/agent-sessions/sessions-over.js";
 import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
 import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -10,6 +11,8 @@ import type {
   WorkflowToolRunEntry,
 } from "#shared/action-types.js";
 import { toError } from "#shared/errors.js";
+import type { DirectChildPublication } from "#harness/session-machine/transitions.js";
+import type { TaskRunAddress } from "#execution/tasks/table.js";
 import type {
   WorkflowToolRunAddress,
   WorkflowToolRunInput,
@@ -40,6 +43,7 @@ export interface StartWorkflowTaskInput {
     readonly stepIndex: number;
     readonly turnId: string;
   };
+  readonly directAgents?: LocalAgentSessions;
   readonly owner: WorkflowToolRunOwner;
   readonly parentSession: SessionParent | undefined;
   readonly prestarted?: PrestartedWorkflowToolRun;
@@ -48,9 +52,15 @@ export interface StartWorkflowTaskInput {
   readonly task: RuntimeWorkflowTaskRequest;
 }
 
+export interface PrestartedDirectAgent {
+  readonly address: TaskRunAddress;
+  readonly child: DirectChildPublication;
+}
+
 export interface PrestartedWorkflowToolRun {
+  readonly direct?: Promise<PrestartedDirectAgent | undefined>;
   readonly entry: WorkflowToolRunEntry;
-  readonly run: Promise<WorkflowToolRunAddress>;
+  readonly run?: Promise<WorkflowToolRunAddress>;
 }
 
 export async function startWorkflowToolCallRun(
@@ -58,7 +68,7 @@ export async function startWorkflowToolCallRun(
   entry: WorkflowToolRunEntry,
 ): Promise<WorkflowToolRunAddress> {
   const { prestarted } = input;
-  if (prestarted !== undefined) {
+  if (prestarted?.run !== undefined) {
     if (!isSameRunEntry(prestarted.entry, entry)) {
       throw new Error(`Call "${input.task.callId}" was started for a different entry point.`);
     }

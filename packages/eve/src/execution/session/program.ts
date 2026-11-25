@@ -16,6 +16,7 @@ import {
 } from "#subagents/parent-notification.js";
 import { readDurableSession } from "#execution/durable-session-read.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+import { sessionUsage } from "#harness/session-usage.js";
 import { isBetweenTurns, storedProjection } from "#harness/session-machine/view.js";
 import { turnCoordinates } from "#protocol/session-projection.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
@@ -557,11 +558,16 @@ async function runSessionLoop(
         }
         if (action.settled !== undefined) {
           if (progress.caller !== undefined) {
+            const totalUsage =
+              progress.caller.directTask !== undefined
+                ? sessionUsage(cursor.sessionState.snapshot.session)
+                : undefined;
             await notifyTurnCallerStep({
               caller: progress.caller,
               lifecycle: "parked",
               sessionId: boot.sessionId,
               settled: action.settled,
+              ...(totalUsage !== undefined && { totalUsage }),
             });
           }
           progress.caller = undefined;

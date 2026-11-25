@@ -61,6 +61,6 @@ export async function deliverWorkflowRelay(
   deliver: () => Promise<void>,
 ): Promise<void> {
   await deliver();
-  if (message.request.event.childSessionId === message.from.runId)
+  if (message.replyTo !== "" && message.request.event.childSessionId === message.from.runId)
     await resumeHookStep(message.replyTo, null, { ifPresent: true });
 }

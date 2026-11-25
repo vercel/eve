@@ -26,7 +26,7 @@ import {
   resolveContinuation,
 } from "#execution/workflow-runtime.js";
 
-const WORKFLOW_LOCAL_SESSIONS: LocalAgentSessions = {
+export const WORKFLOW_LOCAL_SESSIONS: LocalAgentSessions = {
   async start(prepared, { context }) {
     const childRuntime = createWorkflowRuntime(prepared.runtime);
     const started = await contextStorage.run(

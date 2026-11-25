@@ -15,6 +15,7 @@ import type { AgentTurnOutcome } from "#shared/agent-turn-outcome.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { parseJsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
+import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 import { resumeRoutedHook } from "#execution/hosts.js";
 import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
 import {
@@ -44,10 +45,46 @@ export async function notifyTurnCallerStep(input: {
   readonly lifecycle: AgentTurnOutcome["kind"];
   readonly sessionId: string;
   readonly settled: SettledTurnNotification;
+  readonly totalUsage?: TokenUsage;
 }): Promise<void> {
   "use step";
 
   if (input.caller === undefined) {
+    return;
+  }
+
+  if (input.caller.directTask !== undefined && input.caller.replyTo.kind === "hook") {
+    const { directTask } = input.caller;
+    const from = {
+      callId: input.caller.callId,
+      input: {},
+      runId: input.sessionId,
+      sequence: directTask.sequence,
+      stepIndex: directTask.stepIndex,
+      taskId: directTask.taskId,
+      toolName: directTask.toolName,
+      turnId: directTask.turnId,
+    };
+    const usage = input.totalUsage ?? input.settled.usage;
+    const message: WorkflowToolRunMessage =
+      input.settled.isError === true
+        ? {
+            from,
+            kind: "outcome",
+            result: {
+              error: `The agent's turn failed: ${toErrorMessage(input.settled.output)}\nThis task has ended; to retry, call ${directTask.toolName} without taskId.`,
+              status: "failed",
+            },
+            ...(usage !== undefined && { usage }),
+          }
+        : {
+            callIds: [input.caller.callId],
+            from,
+            kind: "reply",
+            output: parseJsonValue(input.settled.output),
+            ...(usage !== undefined && { usage }),
+          };
+    await resumeDirectTaskHook(input.caller.replyTo.token, message, input.caller.callId);
     return;
   }
 
@@ -74,9 +111,35 @@ export async function notifyCancelledTaskCallerStep(input: {
   readonly caller: TurnCaller;
   readonly lifecycle?: AgentTurnOutcome["kind"];
   readonly sessionId: string;
+  readonly totalUsage?: TokenUsage;
   readonly usage?: TokenUsage;
 }): Promise<void> {
   "use step";
+
+  if (input.caller.directTask !== undefined && input.caller.replyTo.kind === "hook") {
+    const usage = input.totalUsage ?? input.usage;
+    if (usage === undefined) return;
+    const { directTask } = input.caller;
+    await resumeDirectTaskHook(
+      input.caller.replyTo.token,
+      {
+        from: {
+          callId: input.caller.callId,
+          input: {},
+          runId: input.sessionId,
+          sequence: directTask.sequence,
+          stepIndex: directTask.stepIndex,
+          taskId: directTask.taskId,
+          toolName: directTask.toolName,
+          turnId: directTask.turnId,
+        },
+        kind: "usage",
+        usage,
+      },
+      input.caller.callId,
+    );
+    return;
+  }
 
   const usageDelta = input.usage ?? ZERO_TOKEN_USAGE;
   const error = {
@@ -207,6 +270,7 @@ export function bindTurnCallerContext(
   const nextState: SubagentAdapterState = {
     ...state,
     callId: caller.callId,
+    ...(caller.directTask !== undefined && { directTask: caller.directTask }),
     parentContinuationToken: caller.replyTo.token,
     subagentName: caller.subagentName,
   };
@@ -287,6 +351,19 @@ async function isCallbackNotPending(response: Response): Promise<boolean> {
     Reflect.get(body, "code") === REMOTE_CALLBACK_NOT_PENDING ||
     Reflect.get(body, "error") === REMOTE_CALLBACK_NOT_PENDING_MESSAGE
   );
+}
+
+async function resumeDirectTaskHook(
+  token: string,
+  message: WorkflowToolRunMessage,
+  callId: string,
+): Promise<void> {
+  try {
+    await resumeRoutedHook(token, message);
+  } catch (error) {
+    if (!isHookNotFound(error)) throw error;
+    log.warn("turn caller hook no longer exists", { callId });
+  }
 }
 
 async function resumeSettledTurnHook(

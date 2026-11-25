@@ -118,6 +118,7 @@ export interface SessionAuthContext {
 
 export interface TurnCaller {
   readonly callId: string;
+  readonly directTask?: import("#subagents/adapter-state.js").DirectSubagentTaskRef;
   readonly subagentName: string;
   readonly replyTo:
     | { readonly kind: "hook"; readonly token: string }

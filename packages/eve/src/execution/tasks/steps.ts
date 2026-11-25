@@ -105,6 +105,7 @@ export async function applyTaskRunMessage(
     case "reply": {
       ({ table, spend } = countTaskRunUsage(table, taskId, message));
       const outcome: TaskOutcome = { output: message.output, status: "completed" };
+<<<<<<< HEAD
       const applied = applyTaskReplyToTable(
         table,
         storedProjection(session.state).view?.tasks,
@@ -112,6 +113,16 @@ export async function applyTaskRunMessage(
       );
       table = applied.table;
       settles.push(...taskSettled(applied.record, applied.settled, outcome));
+=======
+      const record = findTask(table, taskId);
+      const callIds =
+        record?.run?.directAgent !== undefined
+          ? directSettledCallIds(record, message.callIds)
+          : message.callIds;
+      const settled = settleTaskCalls(table, { callIds, outcome, taskId });
+      table = settled.table;
+      settles.push(...taskSettled(record, settled.settled, outcome));
+>>>>>>> 8bec272542 ([3/3] perf(eve): bypass workflowToolRunWorkflow for direct local subagents)
       break;
     }
     case "usage":
@@ -268,6 +279,13 @@ function toControlMessage(command: TaskRunCommand): WorkflowToolRunControlMessag
     case "call":
       return { call: command.call, kind: "call" };
   }
+}
+
+function directSettledCallIds(record: TaskRecord, callIds: readonly string[]): readonly string[] {
+  const latest = callIds.at(-1);
+  if (latest === undefined) return callIds;
+  const index = record.calls.findIndex((call) => call.callId === latest);
+  return index < 0 ? callIds : record.calls.slice(0, index + 1).map((call) => call.callId);
 }
 
 function toOutcome(message: WorkflowToolRunOutcomeMessage): TaskOutcome {

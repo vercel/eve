@@ -1,3 +1,13 @@
+import { normalizeAgentMessage } from "#execution/agent-sessions/message.js";
+import {
+  localAgentSendCommand,
+  prepareLocalAgentSession,
+  resolveAgentSessionStart,
+} from "#execution/agent-sessions/start.js";
+import {
+  sessionCommandHookToken,
+  sessionInboxHookToken,
+} from "#execution/session-inbox/address.js";
 import {
   renderTaskReceipt,
   renderTaskSentReceipt,
@@ -12,9 +22,11 @@ import {
   readTaskTable,
   recordTaskCall,
   recordTaskRun,
+  redirectDirectTaskRun,
   removeTask,
   writeTaskTable,
   type TaskRecord,
+  type TaskRunAddress,
   type TaskTable,
 } from "#execution/tasks/table.js";
 import {
@@ -25,22 +37,31 @@ import {
 import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { HarnessSessionBase } from "#harness/types.js";
-import type { TaskCallStart } from "#harness/session-machine/transitions.js";
+import type {
+  DirectChildPublication,
+  TaskCallStart,
+} from "#harness/session-machine/transitions.js";
 import { storedProjection } from "#harness/session-machine/view.js";
+import { createEveSessionStreamRoutePath } from "#protocol/routes.js";
 import { isWorking, tasks } from "#protocol/session-projection/selectors.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 import { TOO_MANY_TASKS_CODE, UNKNOWN_TASK_CODE } from "#protocol/task-tools.js";
+import { agentToolServeWorkflowReference } from "#runtime/subagents/workflow-reference.js";
 import type {
   RuntimeToolResultActionResult,
   RuntimeWorkflowTaskRequest,
   WorkflowToolRunEntry,
 } from "#shared/action-types.js";
+import type { MessageContent } from "#shared/message-content.js";
+import { findStubTarget } from "#tool-stubs/target.js";
+import { agentDelegation } from "#tracing/eve/delegation.js";
 
 const log = createLogger("execution.tasks");
 
 type TaskDispatchInput = StartWorkflowTaskInput & { readonly taskId: string };
 
 interface TaskDispatchResult {
+  readonly child?: DirectChildPublication;
   readonly result: RuntimeToolResultActionResult;
   readonly session: HarnessSessionBase;
   readonly started?: TaskCallStart;
@@ -48,6 +69,75 @@ interface TaskDispatchResult {
 }
 
 type TaskRunEntry = Extract<WorkflowToolRunEntry, { readonly taskId: string }>;
+
+export function isDirectLocalAgentCandidate(input: StartWorkflowTaskInput): boolean {
+  return (
+    input.directAgents !== undefined &&
+    input.task.workflowId === agentToolServeWorkflowReference.workflowId &&
+    findStubTarget(input.agentContext.toolStubs, input.task.toolName) === undefined
+  );
+}
+
+function readAgentMessageInput(input: StartWorkflowTaskInput): MessageContent<string | URL> {
+  const payload = (input.task.executeInput ?? input.task.input) as { readonly message?: unknown };
+  return normalizeAgentMessage(payload.message as MessageContent<string | URL>);
+}
+
+export async function tryStartDirectLocalAgent(
+  input: TaskDispatchInput,
+): Promise<
+  { readonly address: TaskRunAddress; readonly child: DirectChildPublication } | undefined
+> {
+  const local = input.directAgents;
+  if (local === undefined || !isDirectLocalAgentCandidate(input)) return undefined;
+  const message = readAgentMessageInput(input);
+  const key = `${input.session.sessionId}:${input.taskId}`;
+  const start = await resolveAgentSessionStart({
+    auth: input.auth,
+    context: input.agentContext,
+    key,
+    message,
+    name: input.task.toolName,
+    replyTo: input.owner.inbox,
+    toolName: input.task.toolName,
+  });
+  if (start.target.kind !== "local") return undefined;
+  const prepared = prepareLocalAgentSession({
+    ...start,
+    directTask: {
+      sequence: input.batchEvent.sequence,
+      stepIndex: input.batchEvent.stepIndex,
+      taskId: input.taskId,
+      toolName: input.task.toolName,
+      turnId: input.batchEvent.turnId,
+    },
+    target: start.target,
+  });
+  const started = await agentDelegation.resume(
+    { context: input.agentContext, agentName: start.agentName },
+    () => local.start(prepared, start),
+  );
+  const childSessionId = started.address.sessionId;
+  return {
+    address: {
+      directAgent: {
+        continuationToken: prepared.childContinuationToken,
+        name: start.target.action.name,
+      },
+      hookToken: sessionInboxHookToken(sessionCommandHookToken(childSessionId)),
+      runId: childSessionId,
+    },
+    child: {
+      callId: input.task.callId,
+      ...(started.deliveryId !== undefined && { childDeliveryId: started.deliveryId }),
+      name: start.target.action.name,
+      sessionId: childSessionId,
+      stream: createEveSessionStreamRoutePath(childSessionId),
+      taskId: input.taskId,
+      turnId: input.batchEvent.turnId,
+    },
+  };
+}
 
 export async function startTaskRun(
   input: StartWorkflowTaskInput & { readonly entry: TaskRunEntry },
@@ -75,9 +165,19 @@ export async function startTaskRun(
     };
   }
 
-  let address;
+  let address: TaskRunAddress;
+  let child: DirectChildPublication | undefined;
   try {
-    address = await startWorkflowToolCallRun(input, entry);
+    const direct =
+      input.prestarted?.direct !== undefined
+        ? await input.prestarted.direct
+        : await tryStartDirectLocalAgent(dispatch);
+    if (direct !== undefined) {
+      address = direct.address;
+      child = direct.child;
+    } else {
+      address = await startWorkflowToolCallRun(input, entry);
+    }
   } catch (error) {
     logError(log, "task run failed to start", error, { taskId, toolName: task.toolName });
     return {
@@ -87,6 +187,7 @@ export async function startTaskRun(
   }
 
   return {
+    ...(child !== undefined && { child }),
     result: receipt,
     session: writeTaskTable(session, recordTaskRun(table, taskId, address)),
     started: taskCallStart(dispatch, record),
@@ -110,6 +211,86 @@ export async function sendToTask(
   if (!isWorking(admissionView, taskId)) {
     const overCap = tooManyTasks(input, admissionView);
     if (overCap !== undefined) return { result: overCap, refusal: "task-limit", session };
+  }
+
+  const directAgent = record.run.directAgent;
+  if (directAgent !== undefined && input.directAgents !== undefined) {
+    const recorded = recordTaskCall(table, taskId, {
+      agentContext: input.agentContext,
+      auth: input.auth,
+      callId: task.callId,
+      executeInput: task.executeInput,
+      input: task.input,
+      sequence: input.batchEvent.sequence,
+      stepIndex: input.batchEvent.stepIndex,
+      turnId: input.batchEvent.turnId,
+    });
+    const message = readAgentMessageInput(input);
+    const deliveryId = `direct-agent:${session.sessionId}:${taskId}:${task.callId}:send`;
+    const localAddress = {
+      continuationToken: directAgent.continuationToken,
+      kind: "local" as const,
+      name: directAgent.name,
+      nodeId: "",
+      sessionId: record.run.runId,
+    };
+    const command = localAgentSendCommand(
+      {
+        address: localAddress,
+        auth: input.auth,
+        context: input.agentContext,
+        directTask: {
+          sequence: input.batchEvent.sequence,
+          stepIndex: input.batchEvent.stepIndex,
+          taskId,
+          toolName: task.toolName,
+          turnId: input.batchEvent.turnId,
+        },
+        key: `${session.sessionId}:${taskId}`,
+        message,
+        replyTo: input.owner.inbox,
+      },
+      deliveryId,
+    );
+    const sent = await input.directAgents.command(
+      {
+        address: localAddress,
+        context: input.agentContext,
+        key: `${session.sessionId}:${taskId}`,
+      },
+      command,
+    );
+    if (sent.status !== "accepted") {
+      throw new Error(
+        `Agent "${directAgent.name}" can no longer receive messages; its session ended.`,
+      );
+    }
+    const redirected =
+      sent.sessionId === record.run.runId
+        ? recorded.table
+        : redirectDirectTaskRun(
+            recorded.table,
+            taskId,
+            sent.sessionId,
+            sessionInboxHookToken(sessionCommandHookToken(sent.sessionId)),
+          );
+    const child: DirectChildPublication = {
+      callId: task.callId,
+      childDeliveryId: deliveryId,
+      ...(sent.sessionId !== record.run.runId && {
+        name: directAgent.name,
+        stream: createEveSessionStreamRoutePath(sent.sessionId),
+      }),
+      sessionId: sent.sessionId,
+      taskId,
+      turnId: input.batchEvent.turnId,
+    };
+    return {
+      child,
+      result: toolResult(input, renderTaskSentReceipt(taskId)),
+      session: writeTaskTable(session, redirected),
+      started: taskCallStart(input, record),
+    };
   }
 
   const recorded = recordTaskCall(table, taskId, {

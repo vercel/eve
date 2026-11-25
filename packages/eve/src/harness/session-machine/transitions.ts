@@ -290,7 +290,18 @@ export interface TaskCallStart {
   readonly name: string;
 }
 
+export interface DirectChildPublication {
+  readonly callId: string;
+  readonly childDeliveryId?: string;
+  readonly name?: string;
+  readonly sessionId: string;
+  readonly stream?: string;
+  readonly taskId?: string;
+  readonly turnId: string;
+}
+
 export interface PendingDispatch {
+  readonly children?: readonly DirectChildPublication[];
   readonly executing: readonly {
     readonly callId: string;
     readonly clearedBy?: import("#protocol/session-events/families/call.js").ClearedBy;
@@ -301,9 +312,40 @@ export interface PendingDispatch {
 
 export function startDispatchedCalls(view: SessionView, pending: PendingDispatch): Transition {
   const introducedTasks = new Set(Object.keys(view.projection.view.tasks));
+  const childEvents: SessionEvent[] = [];
+  for (const child of pending.children ?? []) {
+    const scope =
+      child.taskId === undefined
+        ? { turnId: child.turnId }
+        : { taskId: child.taskId, turnId: child.turnId };
+    if (child.name !== undefined && child.stream !== undefined) {
+      childEvents.push({
+        type: "child.opened",
+        scope,
+        data: {
+          name: child.name,
+          owner: { callId: child.callId },
+          sessionId: child.sessionId,
+          stream: child.stream,
+        },
+      });
+    }
+    if (child.childDeliveryId !== undefined) {
+      childEvents.push({
+        type: "child.sent",
+        scope,
+        data: {
+          callId: child.callId,
+          childDeliveryId: child.childDeliveryId,
+          sessionId: child.sessionId,
+        },
+      });
+    }
+  }
   return unchanged(view, [
     ...pending.executing.map(({ callId, clearedBy }) => callStarted(callId, { clearedBy })),
     ...pending.started.flatMap((task) => startTask(view, task, introducedTasks).events),
+    ...childEvents,
     ...pending.refused.map(({ policy, result }) =>
       callSettledFrom(result, { cause: { policy }, rejected: true }),
     ),

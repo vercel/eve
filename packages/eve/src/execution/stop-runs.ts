@@ -1,6 +1,6 @@
 import { WORKFLOW_CANCELLATION_SETTLE_MS } from "#execution/tools/workflow/cancellation-policy.js";
+import type { TaskRunAddress } from "#execution/tasks/table.js";
 import type { WorkflowToolRunControlMessage } from "#execution/tools/workflow/messages.js";
-import type { WorkflowToolRunAddress } from "#execution/tools/workflow/types.js";
 import { isRunTargetGone } from "#shared/run-errors.js";
 import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 import { runtimeWait, storedProjection, turnPosition } from "#harness/session-machine/view.js";
@@ -13,7 +13,7 @@ const log = createLogger("execution.stop-runs");
 export type RunStop = Extract<WorkflowToolRunControlMessage, { readonly kind: "cancel" | "end" }>;
 
 export interface RunStopTarget {
-  readonly run: WorkflowToolRunAddress;
+  readonly run: TaskRunAddress;
   readonly ends: boolean;
 }
 
@@ -61,9 +61,22 @@ export async function stopRuns(
   return cancelled.flat();
 }
 
-async function tell(run: WorkflowToolRunAddress, stop: RunStop): Promise<boolean> {
+async function tell(run: TaskRunAddress, stop: RunStop): Promise<boolean> {
   try {
-    await resumeRoutedHook(run.hookToken, stop);
+    const payload =
+      run.directAgent !== undefined
+        ? stop.kind === "end"
+          ? {
+              deliveryId: `direct-agent:reset:${run.runId}`,
+              kind: "reset",
+              reason: stop.reason,
+            }
+          : {
+              deliveryId: `direct-agent:cancel:${run.runId}:${Date.now()}`,
+              kind: "cancel",
+            }
+        : stop;
+    await resumeRoutedHook(run.hookToken, payload);
     return true;
   } catch (error) {
     if (!isRunTargetGone(error)) {
