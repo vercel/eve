@@ -207,9 +207,9 @@ export class ModelCaller {
     return reportModelCallFailure(this.step, error);
   }
 
-  async abandon(): Promise<readonly ModelMessage[]> {
+  async abandon(): Promise<void> {
     this.input.generation.end();
-    return await this.discard("retried");
+    this.step.session = changeHistory(this.step.session, { extend: await this.discard("retried") });
   }
 
   async steered(): Promise<StepResult> {

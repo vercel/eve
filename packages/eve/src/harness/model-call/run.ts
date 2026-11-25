@@ -7,8 +7,10 @@ import type { GenerationSteering } from "#harness/generation-steering.js";
 import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
 import { enforceBudget, humanInputContext } from "#harness/hitl/index.js";
 import { failModelCredential, pauseForModelSignIn } from "./credential-failure.js";
-import { isScopedAuthorizationRequiredError } from "#runtime/connections/scoped-authorization.js";
-import { changeHistory } from "#harness/session-machine/history.js";
+import {
+  isScopedAuthorizationRequiredError,
+  type ScopedAuthorizationRequiredError,
+} from "#runtime/connections/scoped-authorization.js";
 import {
   requestRun as requestRunFact,
   startRun as startRunFact,
@@ -36,7 +38,7 @@ import type { StepResult } from "#harness/types.js";
 import { stepReference } from "#harness/step/context.js";
 import { ModelCaller } from "./call.js";
 import { type CredentialedModel, credentialedModel } from "./credential.js";
-import { credentialErrorIn, refusesCredential } from "./errors.js";
+import { credentialErrorIn, type ModelCredentialFailure, refusesCredential } from "./errors.js";
 import { type EndsTurnTools, endsTurnTools, frameworkToolNames } from "./tools.js";
 import { reportModelCallFailure } from "./failure.js";
 import { resolveEffectiveRuntimeModel } from "./model.js";
@@ -93,10 +95,9 @@ export async function runModelStep(
     throwIfSessionStreamDead(error);
     throwIfTurnAborted(step.config.abortSignal);
     const credentialError = credentialErrorIn(error);
+    if (credentialError !== undefined && generation.interrupted) return caller.steered();
     if (credentialError !== undefined)
-      return generation.interrupted
-        ? caller.steered()
-        : await failOrAsk(step, credentialError, async () => await abandonCall(step, caller));
+      return await failOrPauseForSignIn(step, credentialError, async () => await caller.abandon());
     const compactionFailed = await caller.failIfCompactionFailed();
     if (compactionFailed !== undefined) return compactionFailed;
     if (generation.interrupted) return caller.steered();
@@ -107,17 +108,15 @@ export async function runModelStep(
 
   await recordModelUsage(step, { model: resolved.model, tools: catalog.advertised.size });
 
-  const withoutClientContext =
-    prompt.clientContext === undefined || prompt.clientContext.messages.length === 0;
-  const durableModelPromptMessageCount = withoutClientContext
-    ? caller.modelMessages.length
-    : undefined;
   let stepResult: StepResult;
   try {
     generation.check();
     stepResult = await handleStepResult(step, {
       catalog,
-      durableModelPromptMessageCount,
+      durableModelPromptMessageCount:
+        prompt.clientContext === undefined || prompt.clientContext.messages.length === 0
+          ? caller.modelMessages.length
+          : undefined,
       endsTurnTools: endsTurnTools(catalog, step.endsTurn),
       promptMessages: caller.request.history,
       requestEnvelopeTokens: caller.requestEnvelopeTokens,
@@ -148,7 +147,7 @@ async function resolveModel(
   } catch (error) {
     const credentialError = credentialErrorIn(error);
     if (credentialError === undefined) throw error;
-    return { failed: await failOrAsk(step, credentialError) };
+    return { failed: await failOrPauseForSignIn(step, credentialError) };
   }
 }
 
@@ -169,11 +168,6 @@ async function requestReplacementRun(step: Step, prompt: Prompt): Promise<void> 
   if (failed !== undefined) throw new Error("eve couldn't request the replacement model run.");
 }
 
-async function abandonCall(step: Step, caller: ModelCaller): Promise<void> {
-  const messages = await caller.abandon();
-  step.session = changeHistory(step.session, { extend: messages });
-}
-
 async function startRun(step: Step, attempt: number): Promise<void> {
   const runId = step.position().runId;
   if (runId === undefined) return;
@@ -181,9 +175,9 @@ async function startRun(step: Step, attempt: number): Promise<void> {
   await step.apply(startRunFact({ attempt, modelId, runId }));
 }
 
-async function failOrAsk(
+async function failOrPauseForSignIn(
   step: Step,
-  error: NonNullable<ReturnType<typeof credentialErrorIn>>,
+  error: ModelCredentialFailure | ScopedAuthorizationRequiredError,
   beforePause?: () => Promise<void>,
 ): Promise<StepResult> {
   if (isScopedAuthorizationRequiredError(error))

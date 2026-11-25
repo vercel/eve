@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Internal: simplify how a model step handles a failed model call, with no change in behavior.
+Internal: flatten the control flow of a model step, with no change in behavior.
