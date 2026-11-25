@@ -1,5 +1,5 @@
 import { createServer, type Server } from "node:http";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -98,6 +98,27 @@ describe("signInToAgent", () => {
     const second = await signInToAgent({ notice: () => {}, serverUrl: origin });
     expect(await second?.token()).toBe("access-1");
     expect(issued).toEqual(["authorization_code"]);
+  });
+
+  it("keeps its client registration when it signs in again", async () => {
+    await signInToAgent({ notice: () => {}, serverUrl: origin });
+    const [file] = await readdir(join(home.dir, ".eve", "agent-oauth"));
+    const path = join(home.dir, ".eve", "agent-oauth", file!);
+    const stored = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+    delete stored.tokens;
+    await writeFile(path, JSON.stringify(stored));
+
+    const again = await signInToAgent({ notice: () => {}, serverUrl: origin });
+    expect(await again?.token()).toBe("access-2");
+    expect(registered).toHaveLength(1);
+  });
+
+  it("refreshes once when overlapping requests find the token rejected", async () => {
+    const session = await signInToAgent({ notice: () => {}, serverUrl: origin });
+    session?.rejected();
+    const tokens = await Promise.all([session?.token(), session?.token(), session?.token()]);
+    expect(tokens).toEqual(["access-2", "access-2", "access-2"]);
+    expect(issued).toEqual(["authorization_code", "refresh_token"]);
   });
 
   it("returns undefined for an agent that publishes no OAuth metadata", async () => {

@@ -12,6 +12,7 @@ import type {
 import { openUrl } from "#setup/primitives/open-url.js";
 
 const LOGIN_TIMEOUT_MS = 5 * 60_000;
+const DISCOVERY_TIMEOUT_MS = 5_000;
 const EXPIRY_BUFFER_MS = 60_000;
 
 interface StoredAgentOAuth {
@@ -27,6 +28,7 @@ interface StoredAgentOAuth {
 export interface AgentOAuthSession {
   readonly resource: string;
   token(): Promise<string>;
+  rejected(): void;
 }
 
 export async function signInToAgent(input: {
@@ -39,27 +41,39 @@ export async function signInToAgent(input: {
   const discovered = await discoverAgentResource(input.serverUrl, fetchFn, input.signal);
   if (discovered === undefined) return undefined;
   const { auth } = await import("#compiled/@ai-sdk/mcp/index.js");
-  const store = await readStore(discovered.resource);
+  let store = await readStore(discovered.resource);
   const options = {
     fetchFn,
     resourceMetadataUrl: discovered.metadataUrl,
     serverUrl: discovered.resource,
   };
 
-  const refresh = async (): Promise<boolean> => {
-    if (store.tokens?.refresh_token === undefined) return false;
-    try {
-      return (await auth(provider(store), options)) === "AUTHORIZED";
-    } catch {
-      return false;
-    }
-  };
+  let refreshing: Promise<boolean> | undefined;
+  const refresh = (): Promise<boolean> =>
+    (refreshing ??= (async () => {
+      const latest = await readStore(discovered.resource);
+      if (hasFreshToken(latest) && latest.tokens?.access_token !== store.tokens?.access_token) {
+        store = latest;
+        return true;
+      }
+      if (store.tokens?.refresh_token === undefined) return false;
+      try {
+        return (await auth(provider(store), options)) === "AUTHORIZED";
+      } catch {
+        return false;
+      }
+    })().finally(() => {
+      refreshing = undefined;
+    }));
 
   if (!hasFreshToken(store) && !(await refresh())) {
     await login(store, options, input);
   }
 
   return {
+    rejected() {
+      store.expiresAt = 0;
+    },
     resource: discovered.resource,
     async token() {
       if (!hasFreshToken(store) && !(await refresh())) {
@@ -82,7 +96,7 @@ async function login(
   input: { readonly signal?: AbortSignal; readonly notice: (message: string) => void },
 ): Promise<void> {
   const { auth } = await import("#compiled/@ai-sdk/mcp/index.js");
-  const callback = await listenForCallback();
+  const callback = await listenForCallback(store.redirectUrl);
   try {
     if (store.redirectUrl !== callback.redirectUrl) {
       delete store.client;
@@ -142,7 +156,11 @@ async function discoverAgentResource(
     base.origin,
   );
   try {
-    const response = await fetchFn(metadataUrl, { redirect: "manual", signal: signal ?? null });
+    const timeout = AbortSignal.timeout(DISCOVERY_TIMEOUT_MS);
+    const response = await fetchFn(metadataUrl, {
+      redirect: "manual",
+      signal: signal === undefined ? timeout : AbortSignal.any([signal, timeout]),
+    });
     if (!response.ok) return undefined;
     const metadata = (await response.json()) as {
       readonly authorization_servers?: unknown;
@@ -233,7 +251,7 @@ interface LoopbackCallback {
   close(): void;
 }
 
-async function listenForCallback(): Promise<LoopbackCallback> {
+async function listenForCallback(previous: string | undefined): Promise<LoopbackCallback> {
   let settle: ((url: URL) => void) | undefined;
   const received = new Promise<URL>((resolve) => {
     settle = resolve;
@@ -249,10 +267,20 @@ async function listenForCallback(): Promise<LoopbackCallback> {
       .end("Signed in. You can close this tab and return to the terminal.");
     settle?.(url);
   });
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => resolve());
-  });
+  const listen = (port: number) =>
+    new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(port, "127.0.0.1", () => {
+        server.off("error", reject);
+        resolve();
+      });
+    });
+  const previousPort = previous === undefined ? 0 : Number(new URL(previous).port);
+  try {
+    await listen(previousPort);
+  } catch {
+    await listen(0);
+  }
   const address = server.address();
   if (address === null || typeof address === "string") {
     server.close();

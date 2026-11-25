@@ -1,5 +1,5 @@
 import type { EveCliSetupStepEvent, EveCliSetupTerminalEvent } from "#cli/telemetry/index.js";
-import { Client } from "#client/index.js";
+import { Client, ClientError } from "#client/index.js";
 import type { DevBootProgressReporter } from "#internal/dev-boot-progress.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { appendUserAgentProduct } from "#internal/user-agent.js";
@@ -14,6 +14,7 @@ import { createDevelopmentCredentialGate } from "#services/dev-client/credential
 import {
   resolveDevelopmentOidcToken,
   resolveLinkedDevelopmentOidcToken,
+  VERCEL_PROTECTION_BYPASS_HEADER,
 } from "#services/dev-client/request-headers.js";
 import { isVercelAuthChallenge } from "#services/dev-client/vercel-auth-error.js";
 import { resolveVercelDeployment } from "#setup/vercel-deployment.js";
@@ -78,6 +79,13 @@ function prepareDevelopmentTarget(target: DevelopmentTuiTarget): PreparedDevelop
     : { kind: "remote", target, remote: prepareRemoteTarget(target) };
 }
 
+function withProtectionBypass(
+  headers: Readonly<Record<string, string>> | undefined,
+): Readonly<Record<string, string>> {
+  const secret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET?.trim();
+  return secret ? { [VERCEL_PROTECTION_BYPASS_HEADER]: secret, ...headers } : { ...headers };
+}
+
 function withTuiUserAgent(
   headers: Readonly<Record<string, string>> | undefined,
 ): Readonly<Record<string, string>> {
@@ -104,10 +112,11 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
   const prepared = prepareDevelopmentTarget(target);
   const { serverUrl } = target;
   const headerOptions = { headers: withTuiUserAgent(headers) };
+  const agentHeaders = withProtectionBypass(headers);
   const agentOAuth =
     prepared.kind === "remote" && !hasDevelopmentAuthorizationHeader(headers)
       ? await signInToAgent({
-          ...(headers !== undefined && { headers }),
+          headers: agentHeaders,
           notice: (message) => process.stdout.write(`${message}\n`),
           serverUrl,
           ...(lifecycle !== undefined && { signal: lifecycle.signal }),
@@ -117,8 +126,8 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
   const client = new Client(
     agentOAuth !== undefined
       ? {
-          ...headerOptions,
           auth: { bearer: () => agentOAuth.token() },
+          headers: withTuiUserAgent(agentHeaders),
           baseUrl: serverUrl,
           redirect: "manual",
         }
@@ -145,10 +154,15 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
     ...(target.kind === "local"
       ? { argumentSuggestions: inlineArgumentSuggestions(target.workspaceRoot) }
       : {}),
-    formatTransportError: (error) =>
-      isVercelAuthChallenge(error)
+    formatTransportError: (error) => {
+      if (agentOAuth !== undefined && error instanceof ClientError && error.status === 401) {
+        agentOAuth.rejected();
+        return `${new URL(serverUrl).host} rejected your sign-in. Try again to refresh it, or run eve remote connect again to sign in.`;
+      }
+      return isVercelAuthChallenge(error)
         ? formatRemoteAuthChallengeMessage(serverUrl)
-        : toErrorMessage(error),
+        : toErrorMessage(error);
+    },
   };
   if (prepared.kind === "local") {
     options.appRoot = prepared.target.workspaceRoot;

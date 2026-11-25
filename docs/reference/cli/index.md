@@ -364,7 +364,7 @@ Interactive `connect` accepts the same display flags as [`eve dev`](#eve-dev): `
 
 Use `-H, --header <header>` for a bearer token or another request header; repeat it for multiple headers. For HTTP Basic authentication, put credentials in the URL; eve sends them as a Basic `Authorization` header and removes them from the target URL.
 
-When the agent publishes OAuth protected-resource metadata for its eve HTTP API at `/.well-known/oauth-protected-resource/eve/v1`, interactive `connect` signs you in the way MCP clients do: it registers with the authorization server the metadata names, opens a browser login, and keeps the tokens in `~/.eve/agent-oauth`, refreshing them as they expire. Your `-H` headers also go on the requests it sends to the agent's own origin, such as a Deployment Protection bypass; an `Authorization` header skips the sign-in.
+When the agent publishes OAuth protected-resource metadata for its eve HTTP API at `/.well-known/oauth-protected-resource/eve/v1`, interactive `connect` signs you in the way MCP clients do: it registers with the authorization server the metadata names, opens a browser login, and keeps the tokens in `~/.eve/agent-oauth`, refreshing them as they expire. Your `-H` headers, and a Deployment Protection bypass from `VERCEL_AUTOMATION_BYPASS_SECRET` when it's set, also go on the requests it sends to the agent's own origin; an `Authorization` header skips the sign-in.
 
 ### `eve remote info`
 
