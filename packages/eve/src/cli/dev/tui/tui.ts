@@ -5,9 +5,11 @@ import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { appendUserAgentProduct } from "#internal/user-agent.js";
 import type { CommandLifecycle } from "#cli/shutdown.js";
 import {
+  hasDevelopmentAuthorizationHeader,
   resolveLocalDevelopmentClientOptions,
   resolveRemoteDevelopmentClientOptions,
 } from "#services/dev-client/client-options.js";
+import { signInToAgent } from "#cli/dev/agent-oauth.js";
 import { createDevelopmentCredentialGate } from "#services/dev-client/credential-gate.js";
 import {
   resolveDevelopmentOidcToken,
@@ -104,20 +106,35 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
   const prepared = prepareDevelopmentTarget(target);
   const { serverUrl } = target;
   const headerOptions = { headers: withTuiUserAgent(headers) };
+  const agentOAuth =
+    prepared.kind === "remote" && !hasDevelopmentAuthorizationHeader(headers)
+      ? await signInToAgent({
+          notice: (message) => process.stdout.write(`${message}\n`),
+          serverUrl,
+          ...(lifecycle !== undefined && { signal: lifecycle.signal }),
+        })
+      : undefined;
 
   const client = new Client(
-    prepared.kind === "local"
-      ? resolveLocalDevelopmentClientOptions({
+    agentOAuth !== undefined
+      ? {
           ...headerOptions,
-          interactiveClient: true,
-          serverUrl,
-          token: () => resolveLinkedDevelopmentOidcToken(prepared.target.workspaceRoot),
-        })
-      : resolveRemoteDevelopmentClientOptions({
-          ...headerOptions,
-          serverUrl,
-          credentials: prepared.remote.credentials,
-        }),
+          auth: { bearer: () => agentOAuth.token() },
+          baseUrl: serverUrl,
+          redirect: "manual",
+        }
+      : prepared.kind === "local"
+        ? resolveLocalDevelopmentClientOptions({
+            ...headerOptions,
+            interactiveClient: true,
+            serverUrl,
+            token: () => resolveLinkedDevelopmentOidcToken(prepared.target.workspaceRoot),
+          })
+        : resolveRemoteDevelopmentClientOptions({
+            ...headerOptions,
+            serverUrl,
+            credentials: prepared.remote.credentials,
+          }),
   );
 
   const options: EveTUIRunnerOptions = {
@@ -137,7 +154,7 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
   if (prepared.kind === "local") {
     options.appRoot = prepared.target.workspaceRoot;
     options.probeMcpConnection = probeMcpConnection;
-  } else {
+  } else if (agentOAuth === undefined) {
     options.remote = prepared.remote;
   }
   if (initialInput !== undefined) options.initialInput = initialInput;
