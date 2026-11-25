@@ -91,17 +91,17 @@ eve asks the strategy before every model-call attempt, retries included, and on 
 
 ```mermaid
 sequenceDiagram
-  participant Loop as eve model loop
+  participant M as eve model loop
   participant S as Strategy
   participant P as Provider
-  Loop->>S: history, ctx (tokens, requested=false, overflow=false)
-  S-->>Loop: undefined, or a new history
-  Loop->>Loop: check the result, then store it
-  Loop->>P: model request
-  P-->>Loop: context-overflow error
-  Loop->>S: history, ctx (overflow=true)
-  S-->>Loop: a new history
-  Loop->>P: the request again, once
+  M->>S: history, ctx (tokens, requested=false, overflow=false)
+  S-->>M: undefined, or a new history
+  M->>M: check the result, then store it
+  M->>P: model request
+  P-->>M: context-overflow error
+  M->>S: history, ctx (overflow=true)
+  S-->>M: a new history
+  M->>P: the request again, once
 ```
 
 - **Overflow.** With a strategy set, a provider's context-overflow error asks the strategy once more with `ctx.overflow` and retries the call once. Without `experimental.compaction`, the error fails the turn, as on `main`.
