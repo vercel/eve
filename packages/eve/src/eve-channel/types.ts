@@ -58,6 +58,8 @@ export interface EveHandle {
   readonly caller: SessionAuthContext | null;
   /** The request's `clientContext`, exactly as the client sent it. `undefined` when it sent none. */
   readonly clientContext?: ClientContextValue;
+  /** The session a create request forks from, when it sends `forkFrom`. */
+  readonly forkFrom?: string;
   /** Replay-stable identity of a trusted remote-subagent create operation. */
   readonly invocation?: { readonly operationId: string };
   readonly request: Request;

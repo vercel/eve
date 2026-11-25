@@ -132,6 +132,7 @@ export async function resolveOnMessage(input: {
   readonly auth: SessionAuthContext | null;
   readonly clientContext?: ClientContextValue;
   readonly config: EveChannelConfig;
+  readonly forkFrom?: string;
   readonly invocation?: EveHandle["invocation"];
   readonly message: MessageContent;
   readonly request: Request;
@@ -147,6 +148,7 @@ export async function resolveOnMessage(input: {
       clientContext: input.clientContext,
       request: input.request,
       ...(input.turnPolicy !== undefined && { turnPolicy: input.turnPolicy }),
+      ...(input.forkFrom !== undefined && { forkFrom: input.forkFrom }),
     };
     const eve: EveHandle =
       input.sessionId === undefined

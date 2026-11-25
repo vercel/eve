@@ -351,6 +351,7 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
                 auth: forwarded.auth,
                 clientContext: body.context,
                 config: input,
+                ...(body.forkFrom !== undefined && { forkFrom: body.forkFrom }),
                 invocation:
                   parent === undefined || body.operationId === undefined
                     ? undefined
