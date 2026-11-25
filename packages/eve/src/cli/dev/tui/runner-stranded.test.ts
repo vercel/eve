@@ -82,6 +82,33 @@ describe("EveTUIRunner with a stranded session", () => {
   });
 });
 
+describe("EveTUIRunner with --session", () => {
+  it("shows the existing session and sends the next message to it", async () => {
+    const server = new FakeEveServer(reply("Hi again."));
+    vi.stubGlobal("fetch", server.fetch);
+    await server.fetch("http://localhost:3000/eve/v1/session", {
+      body: JSON.stringify({ message: "Earlier." }),
+      method: "POST",
+    });
+    await vi.waitFor(() => expect(server.requests).toHaveLength(1));
+    const { renderer, views } = turnTaking(["Next.", undefined]);
+    await new EveTUIRunner({
+      client: new Client({ baseUrl: "http://localhost:3000" }),
+      renderer,
+      sessionId: "session_1",
+    }).run();
+
+    const shown = views.map((view) =>
+      view.conversation.messages.flatMap((message) =>
+        message.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])),
+      ),
+    );
+    expect(shown).toContainEqual(["Earlier.", "Hi again."]);
+    expect(server.requestsTo("POST", "/eve/v1/session")).toHaveLength(1);
+    expect(server.requestsTo("POST", "/eve/v1/session/session_1")).toHaveLength(1);
+  });
+});
+
 describe("EveTUIRunner diagnostics", () => {
   it("names a tool that fails in the commit that requested it", async () => {
     const replied = reply("The lookup failed.");

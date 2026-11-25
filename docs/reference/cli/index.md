@@ -354,11 +354,11 @@ Remote commands never start a local application.
 ### `eve remote connect`
 
 ```bash
-eve remote connect --url <url> [--input <text>] [-H "Name: value"]
+eve remote connect --url <url> [--input <text>] [--session <id>] [-H "Name: value"]
 eve remote connect --url <url> --print <prompt> [-H "Name: value"]
 ```
 
-Without `--print`, `connect` opens the interactive UI and requires a terminal. With `--print <prompt>`, it sends one message, writes only the final assistant text to stdout, and exits. It exits nonzero with an error on stderr if the turn fails, is cancelled, or needs input or authorization. It also fails if the stream ends before the turn finishes. The error includes the session ID once the server accepted the message. Each `--print` starts a new conversation and can't answer pending requests; use the `eve/client` API for that or for multi-turn scripts. `--input` pre-fills the interactive UI and can't be combined with `--print`.
+Without `--print`, `connect` opens the interactive UI and requires a terminal. With `--print <prompt>`, it sends one message, writes only the final assistant text to stdout, and exits. It exits nonzero with an error on stderr if the turn fails, is cancelled, or needs input or authorization. It also fails if the stream ends before the turn finishes. The error includes the session ID once the server accepted the message. Each `--print` starts a new conversation and can't answer pending requests; use the `eve/client` API for that or for multi-turn scripts. `--input` pre-fills the interactive UI and can't be combined with `--print`. `--session <id>` opens an existing session instead of starting one: the UI shows its conversation, follows it live, and sends your messages to it. It can't be combined with `--print`.
 
 Interactive `connect` accepts the same display flags as [`eve dev`](#eve-dev): `--show-tools`, `--show-reasoning`, `--show-subagents`, `--show-connection-auth`, `--assistant-response-stats`, `--context-size`, and `--logs`. The `--show-*` flags control rendering, not model reasoning effort. Set effort with `eve set model --reasoning <effort>` or `eve init --reasoning <effort>`.
 

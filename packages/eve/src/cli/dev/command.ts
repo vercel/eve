@@ -179,6 +179,7 @@ export function registerRemoteCommands(input: {
       )
       .option("--name <name>", "Title shown in the terminal UI")
       .option("--input <text>", "Pre-fill the prompt input")
+      .option("--session <sessionId>", "Continue an existing session")
       .option("--print", "Send a prompt, print the final assistant text, and exit"),
   ).action(
     async (
@@ -190,6 +191,11 @@ export function registerRemoteCommands(input: {
         if (options.input !== undefined) {
           throw new InvalidArgumentError(
             "--input pre-fills the terminal UI and cannot be used with --print.",
+          );
+        }
+        if (options.session !== undefined) {
+          throw new InvalidArgumentError(
+            "--session continues a session in the terminal UI and cannot be used with --print.",
           );
         }
         if (prompt === undefined || prompt.trim().length === 0) {

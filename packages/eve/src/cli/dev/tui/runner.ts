@@ -250,6 +250,7 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   appRoot?: string;
   initialInput?: string;
   signedInRemote?: RemoteDevelopmentTarget;
+  sessionId?: string;
   onboard?: boolean;
   startupOnboarding?: StartupOnboardingResult;
   onOnboardingStep?: (input: EveCliSetupStepEvent) => void;
@@ -339,6 +340,7 @@ export class EveTUIRunner {
   readonly #callNames = new Map<string, string>();
   readonly #lifecycle?: CommandLifecycle;
   readonly #signedInRemote?: RemoteDevelopmentTarget;
+  readonly #continuedSessionId?: string;
 
   constructor(options: EveTUIRunnerOptions) {
     this.#client = options.client;
@@ -346,9 +348,13 @@ export class EveTUIRunner {
     if (options.lifecycle !== undefined) this.#lifecycle = options.lifecycle;
     if (options.diagnostics !== undefined) this.#diagnostics = options.diagnostics;
     this.#renderer = createRenderer(options);
+    this.#continuedSessionId = options.sessionId;
     this.#store = new SessionStore({
       client: options.client,
       followAgents: true,
+      ...(options.sessionId !== undefined && {
+        initialSession: { sessionId: options.sessionId, streamIndex: 0 },
+      }),
     });
     this.#store.setCallbacks({
       onEvent: (event) => this.#recordDiagnostics(event),
@@ -572,6 +578,14 @@ export class EveTUIRunner {
     if (!initialAgentOnboarding || startupOutcome?.cancelled || startupOutcome?.failed) {
       if (startupOutcome?.message !== undefined)
         this.#finishCommand({ kind: "result", message: startupOutcome.message });
+    }
+
+    if (this.#continuedSessionId !== undefined) {
+      void this.#store.resume().catch((error: unknown) => {
+        if (!this.#disposed && !isAbortError(error)) {
+          this.#renderSendError(`Couldn't open session ${this.#continuedSessionId}`, error);
+        }
+      });
     }
 
     while (this.#lifecycle?.signal.aborted !== true && this.#renderer.exitRequested?.() !== true) {
