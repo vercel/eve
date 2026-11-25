@@ -61,7 +61,7 @@ describe("modelInstructions", () => {
     expect(first[1]).not.toEqual(second[1]);
   });
 
-  it("puts a retry's note ahead of the own parts, after the marked base", () => {
+  it("appends a retry's note after the own parts, following the marked base", () => {
     expect(
       modelInstructions({
         instructions: ["base", "own"],
@@ -70,7 +70,7 @@ describe("modelInstructions", () => {
       }),
     ).toEqual([
       { role: "system", content: "base", providerOptions: marker("1h") },
-      { role: "system", content: "note\n\nown" },
+      { role: "system", content: "own\n\nnote" },
     ]);
   });
 
@@ -94,14 +94,14 @@ describe("modelInstructions", () => {
     });
   });
 
-  it("joins the note, base and own parts into one message without a cache profile", () => {
+  it("appends the note after base and own parts so the cached system prefix stays stable", () => {
     expect(
       modelInstructions({
         instructions: ["base", "own"],
         profile: other,
         extraSystemNote: "note",
       }),
-    ).toEqual({ role: "system", content: "note\n\nbase\n\nown" });
+    ).toEqual({ role: "system", content: "base\n\nown\n\nnote" });
   });
 
   it("sends nothing when every part is empty", () => {

@@ -53,7 +53,7 @@ cat /tmp/.eve/jobs/3f9a1c2e/exit      # exit code, once the command has finished
 kill -- -4312                         # stop the command's whole process group
 ```
 
-The command runs across turns until it exits, the model stops it, or the sandbox stops, and its output files last until the sandbox stops. A running command doesn't keep the session busy, so it ends when eve [stops the idle sandbox](../sandbox#stop-an-idle-sandbox), and a later check finds no `exit` file. Cancelling a turn stops a command that hasn't yet returned `running`. A message that arrives while `bash` waits reaches the model after the call returns, so a longer `timeout` can delay it. The `just-bash` provider has no background processes, so it runs every command to completion.
+The command runs across turns until it exits, the model stops it, or the sandbox stops, and its output files last until the sandbox stops. A running command doesn't keep the session busy, so it ends when eve [stops the idle sandbox](../sandbox#stop-an-idle-sandbox), and a later check finds no `exit` file. Cancelling a turn stops a command that hasn't yet returned `running`. A message that arrives while `bash` waits reaches the model after the call returns, so a longer `timeout` can delay it. The `just-bash` provider has no background processes, so it stops commands that exceed `timeout` instead of backgrounding them.
 
 Override its description, approval policy, or executor by wrapping the exported definition:
 
@@ -94,7 +94,7 @@ export default disableTool();
 
 It detects images and PDFs from their bytes, so the filename extension doesn't matter.
 
-It accepts absolute paths, paths relative to the workspace root where `bash` commands start, and paths beginning with `$HOME/`. Results and errors name the resolved absolute path.
+It accepts absolute paths, paths relative to the workspace root where `bash` commands start, and paths beginning with `~/` or `$HOME/`. Results and errors name the resolved absolute path.
 
 ```sh
 eve add tool/read_file
@@ -126,7 +126,7 @@ export default disableTool();
 
 ### `write_file`
 
-`write_file` writes complete files in the sandbox. It enforces read-before-write and stale-read detection, and accepts the same paths as `read_file`.
+`write_file` writes complete files in the sandbox, creating missing parent directories and overwriting existing files. It accepts the same paths as `read_file`.
 
 ```sh
 eve add tool/write_file
@@ -149,7 +149,7 @@ export default defineTool({
     const sandbox = await ctx.getSandbox();
     const notes = `${sandbox.resolvePath("notes")}/`;
     if (
-      input.filePath.startsWith("$HOME") ||
+      /^(?:\$HOME|~)/.test(input.filePath) ||
       !sandbox.resolvePath(input.filePath).startsWith(notes)
     ) {
       throw new Error("write_file is limited to the notes directory");
@@ -183,7 +183,7 @@ export { default } from "eve/tools/edit_file";
 
 The model passes `path` and `edits`, a list of `{ oldText, newText }` replacements. Each `oldText` must match exactly one region of the file as it was before the call, and replacements must not overlap. When no exact match exists, `edit_file` ignores trailing whitespace and treats smart quotes, Unicode dashes, and special spaces as their ASCII forms. The file keeps its byte order mark, and every line gets the file's first line ending, so a CRLF file stays CRLF. `edit_file` rejects files that are not valid UTF-8.
 
-Relative paths resolve against the workspace root, and `~` or `$HOME` resolves to the sandbox's home directory. `edit_file` doesn't require a `read_file` call first. After it changes a file the session already read, `write_file` can overwrite that file without another `read_file` call. A failed edit changes nothing, and its error names the problem, such as a missing or ambiguous `oldText`. The model reads `Successfully replaced N block(s) in <path>.`, and channels and hooks get `{ path, replacements }` on `call.settled`.
+Relative paths resolve against the workspace root, and `~` or `$HOME` resolves to the sandbox's home directory. A failed edit changes nothing, and its error names the problem, such as a missing or ambiguous `oldText`. The model reads `Successfully replaced N block(s) in <path>.`, and channels and hooks get `{ path, replacements }` on `call.settled`.
 
 Customize it by wrapping the framework definition:
 

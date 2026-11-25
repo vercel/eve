@@ -333,7 +333,7 @@ describe("hosted Vercel output", () => {
       );
       expect(serverSource).not.toContain(`import("${bundler}")`);
     }
-    expect(serverSource).toContain("Execute a shell command in the shared workspace environment.");
+    expect(serverSource).toContain("Execute a shell command in the workspace.");
     expect(serverSource).toContain("is a connection, not a skill.");
     expect(serverSource).toContain("URL must start with https://");
   });

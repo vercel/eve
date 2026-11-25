@@ -117,6 +117,53 @@ describe("executeBashOnSandbox", () => {
       expect(Buffer.byteLength(result.stdout)).toBeLessThan(2 * MAX_OUTPUT_BYTES);
     },
   );
+
+  it("returns a timeout result instead of throwing AbortError when fallback spawn rejects on signal", async () => {
+    vi.useFakeTimers();
+    try {
+      const sandbox: SandboxSession = {
+        ...createTestSandboxSession({ exitCode: 0, stderr: "", stdout: "" }),
+        run: async () => ({ exitCode: 0, stderr: "", stdout: "" }),
+        spawn: async ({ signal }) => ({
+          kill: async () => {},
+          stderr: new ReadableStream<Uint8Array>({
+            start(controller) {
+              signal?.addEventListener("abort", () => {
+                controller.error(new DOMException("Aborted", "AbortError"));
+              });
+            },
+          }),
+          stdout: new ReadableStream<Uint8Array>({
+            start(controller) {
+              signal?.addEventListener("abort", () => {
+                controller.error(new DOMException("Aborted", "AbortError"));
+              });
+            },
+          }),
+          wait: () =>
+            new Promise<{ exitCode: number }>((_resolve, reject) => {
+              signal?.addEventListener("abort", () => {
+                reject(new DOMException("Aborted", "AbortError"));
+              });
+            }),
+        }),
+      };
+
+      const pending = executeBashOnSandbox(sandbox, { command: "sleep 30", timeout: 1 });
+      await vi.advanceTimersByTimeAsync(10_000);
+      const result = await pending;
+
+      expect(result).toEqual({
+        exitCode: 124,
+        status: "completed",
+        stderr: "Command timed out after 1 seconds.\n",
+        stdout: "",
+        truncated: false,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 function createTestSandboxSession(result: SandboxCommandResult): SandboxSession {

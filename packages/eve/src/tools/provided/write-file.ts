@@ -1,6 +1,5 @@
 import { type WriteFileInput, executeWriteFileOnSandbox } from "#execution/sandbox/write-file.js";
-
-export { refreshReadFileStamp } from "#execution/sandbox/write-file.js";
+import { toolOutput, type ToolModelOutput } from "#tools/model-output.js";
 import { toolLabel } from "#tools/tool-label.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
 import { defineJsonSchema } from "#tools/schema.js";
@@ -29,7 +28,7 @@ export const WRITE_FILE_INPUT_SCHEMA = defineJsonSchema<WriteFileToolInput>({
     filePath: {
       type: "string",
       description:
-        "The path to the file to write: absolute, relative to the workspace root, or beginning with $HOME/.",
+        "The path to the file to write: absolute, relative to the workspace root, or beginning with ~/ or $HOME/.",
     },
   },
   required: ["content", "filePath"],
@@ -56,22 +55,37 @@ export const writeFile: ToolDefinition<WriteFileToolInput, WriteFileToolOutput> 
   defineTool({
     label: { start: (input) => toolLabel("Write", input.filePath) },
     description: [
-      "Writes a file to the local filesystem.",
-      "",
-      "Usage:",
-      "- This tool will overwrite the existing file if there is one at the provided path.",
-      "- If this is an existing file, you MUST use the read_file tool first to read the file's contents. This tool will fail if you did not read the file first.",
-      "- ALWAYS prefer editing existing files in the codebase. NEVER write new files unless explicitly required.",
-      "- NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User.",
-      "- Only use emojis if the user explicitly requests it. Avoid writing emojis to files unless asked.",
+      "Write a file to the local filesystem, creating missing parent directories and overwriting any existing file at the path.",
+      "Prefer `edit_file` for targeted changes to existing files.",
     ].join("\n"),
     async execute(input, ctx) {
       return await executeWriteFileOnSandbox(await ctx.getSandbox(), input as WriteFileInput);
     },
     inputSchema: WRITE_FILE_INPUT_SCHEMA,
     outputSchema: WRITE_FILE_OUTPUT_SCHEMA,
+    toModelOutput: writeFileModelOutput,
   }),
 );
+
+const WRITE_FILE_OUTPUT_KEYS = new Set(["existed", "path"]);
+
+function writeFileModelOutput(output: unknown): ToolModelOutput {
+  if (typeof output === "string") return toolOutput.text(output);
+  if (isWriteFileResult(output)) {
+    return toolOutput.text(output.existed ? `Overwrote ${output.path}.` : `Wrote ${output.path}.`);
+  }
+  return toolOutput.json(output);
+}
+
+function isWriteFileResult(output: unknown): output is WriteFileToolOutput {
+  if (typeof output !== "object" || output === null) return false;
+  const value = output as Record<string, unknown>;
+  return (
+    Object.keys(value).every((key) => WRITE_FILE_OUTPUT_KEYS.has(key)) &&
+    typeof value.path === "string" &&
+    typeof value.existed === "boolean"
+  );
+}
 
 export default writeFile;
 import { frameworkTool } from "./framework-tool.js";

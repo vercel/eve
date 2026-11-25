@@ -28,31 +28,52 @@ const MAX_LOG_COMMAND_LENGTH = 240;
 
 const KEEP_OUTPUT_BYTES = MAX_OUTPUT_BYTES - 1;
 const KEEP_OUTPUT_LINES = MAX_OUTPUT_LINES - 1;
+const STREAM_TAIL_THRESHOLD_BYTES = 512 * 1024;
+const STREAM_TAIL_BYTES = MAX_OUTPUT_BYTES * 2;
+const FALLBACK_KILL_GRACE_MS = 500;
+const FALLBACK_FINISH_GRACE_MS = 2_000;
 
-const LAUNCHER = `d=$1
-mkdir -p "$d" 2>/dev/null || { eval "$2"; exit; }
+const LAUNCHER = `_eve_d=$1 _eve_cmd=$2
+shift 2
+mkdir -p "$_eve_d" 2>/dev/null || { eval "$_eve_cmd"; exit; }
 trap 'exit 0' USR1
-echo "$$" > "$d/launcher"
+echo "$$" > "$_eve_d/launcher"
 set -m
 (
   trap : TERM INT
-  (eval "$2") > "$d/stdout" 2> "$d/stderr"
+  (unset _eve_d; eval "$_eve_cmd") > "$_eve_d/stdout" 2> "$_eve_d/stderr"
   code=$?
-  echo "$code" > "$d/exit"
+  echo "$code" > "$_eve_d/exit"
   exit "$code"
 ) < /dev/null > /dev/null 2>&1 &
 pid=$!
 set +m
-echo "$pid" > "$d/pid"
+echo "$pid" > "$_eve_d/pid"
 wait "$pid" 2> /dev/null
 code=$?
-mkdir "$d/claimed" 2> /dev/null || exit 0
-cat "$d/stdout"
-cat "$d/stderr" >&2
-for f in "$d/stdout" "$d/stderr"; do
-  [ "$(($(wc -c < "$f")))" -gt ${KEEP_OUTPUT_BYTES} ] || [ "$(($(wc -l < "$f")))" -gt ${KEEP_OUTPUT_LINES} ] && exit "$code"
-done
-rm -rf "$d"
+mkdir "$_eve_d/claimed" 2> /dev/null || exit 0
+_eve_keep=0
+_eve_out_bytes="$(($(wc -c < "$_eve_d/stdout")))"
+_eve_out_lines="$(($(wc -l < "$_eve_d/stdout")))"
+if [ "$_eve_out_bytes" -gt ${STREAM_TAIL_THRESHOLD_BYTES} ]; then
+  _eve_keep=1
+  echo "$_eve_out_lines" > "$_eve_d/stdout.lines"
+  tail -c ${STREAM_TAIL_BYTES} "$_eve_d/stdout"
+else
+  [ "$_eve_out_bytes" -gt ${KEEP_OUTPUT_BYTES} ] || [ "$_eve_out_lines" -gt ${KEEP_OUTPUT_LINES} ] && _eve_keep=1
+  cat "$_eve_d/stdout"
+fi
+_eve_err_bytes="$(($(wc -c < "$_eve_d/stderr")))"
+_eve_err_lines="$(($(wc -l < "$_eve_d/stderr")))"
+if [ "$_eve_err_bytes" -gt ${STREAM_TAIL_THRESHOLD_BYTES} ]; then
+  _eve_keep=1
+  echo "$_eve_err_lines" > "$_eve_d/stderr.lines"
+  tail -c ${STREAM_TAIL_BYTES} "$_eve_d/stderr" >&2
+else
+  [ "$_eve_err_bytes" -gt ${KEEP_OUTPUT_BYTES} ] || [ "$_eve_err_lines" -gt ${KEEP_OUTPUT_LINES} ] && _eve_keep=1
+  cat "$_eve_d/stderr" >&2
+fi
+[ "$_eve_keep" -eq 0 ] && rm -rf "$_eve_d"
 exit "$code"`;
 
 export interface BashInput {
@@ -123,9 +144,13 @@ async function runCommand(
   const controller = new AbortController();
   const cancel = () => {
     controller.abort(signal?.reason);
+    const quotedDir = shellQuote(directory);
     void Promise.resolve(
       sandbox.run({
-        command: `kill -TERM -- -"$(cat ${shellQuote(directory)}/pid 2>/dev/null)" 2>/dev/null; rm -rf ${shellQuote(directory)}`,
+        command:
+          `p="$(cat ${quotedDir}/pid 2>/dev/null)"; ` +
+          `case "$p" in ''|*[!0-9]*) ;; *) kill -TERM -- -"$p" 2>/dev/null; sleep 0.2; kill -KILL -- -"$p" 2>/dev/null ;; esac; ` +
+          `rm -rf ${quotedDir}`,
       }),
     ).catch(() => {});
   };
@@ -144,7 +169,36 @@ async function runCommand(
     if (done !== undefined) return await completed(sandbox, directory, done);
     const running = await claimRunningJob(sandbox, directory, jobId, waitSeconds);
     if (running === undefined) {
-      return await completed(sandbox, directory, await finished);
+      const raced = await waitUpTo(finished, FALLBACK_FINISH_GRACE_MS);
+      if (raced !== undefined) return await completed(sandbox, directory, raced);
+      const settled = finished.catch(() => undefined);
+      await Promise.resolve(child.kill()).catch(() => {});
+      let aborted = await waitUpTo(settled, FALLBACK_KILL_GRACE_MS);
+      if (aborted === undefined) {
+        controller.abort();
+        aborted = await waitUpTo(settled, FALLBACK_FINISH_GRACE_MS);
+      }
+      if (signal?.aborted) throw signal.reason;
+      if (aborted !== undefined) {
+        return {
+          ...formatStreams({
+            stdout: aborted.stdout,
+            stderr: {
+              text: `${aborted.stderr.text}${aborted.stderr.text && !aborted.stderr.text.endsWith("\n") ? "\n" : ""}Command timed out after ${waitSeconds} seconds.\n`,
+              totalLines: ("totalLines" in aborted.stderr ? aborted.stderr.totalLines : 0) + 1,
+            },
+          }),
+          exitCode: aborted.exitCode !== 0 ? aborted.exitCode : 124,
+          status: "completed",
+        };
+      }
+      return {
+        exitCode: 124,
+        status: "completed",
+        stderr: `Command timed out after ${waitSeconds} seconds.\n`,
+        stdout: "",
+        truncated: false,
+      };
     }
     void finished.catch(() => {});
     return running;
@@ -172,8 +226,10 @@ async function claimRunningJob(
   const marker = `eve-bash:${jobId}`;
   const raw = await sandbox.run({
     command: [
-      `cd ${shellQuote(directory)} 2>/dev/null && mkdir claimed 2>/dev/null || exit 0`,
-      `kill -USR1 "$(cat launcher)" 2>/dev/null`,
+      `cd ${shellQuote(directory)} 2>/dev/null || exit 0`,
+      `i=0; while [ "$i" -lt 20 ] && { [ ! -s pid ] || [ ! -f stdout ] || [ ! -f stderr ]; }; do sleep 0.025; i=$((i+1)); done`,
+      `[ -s pid ] && [ -f stdout ] && [ -f stderr ] && mkdir claimed 2>/dev/null || exit 0`,
+      `kill -USR1 "$(cat launcher 2>/dev/null)" 2>/dev/null`,
       `printf '%s %s %s %s\\n' ${marker} "$(cat pid)" "$(($(wc -c < stdout)))" "$(($(wc -c < stderr)))"`,
       `tail -c ${MAX_OUTPUT_BYTES} stdout`,
       `tail -c ${MAX_OUTPUT_BYTES} stderr >&2`,
@@ -199,6 +255,7 @@ async function claimRunningJob(
       `The command is still running after ${waitSeconds} seconds as process group ${pid}; this result includes its output so far. ` +
       `It keeps writing to ${directory}/stdout and ${directory}/stderr, and writes its exit code to ${directory}/exit when it finishes. ` +
       `Check on it with later commands such as \`tail ${directory}/stdout\` or \`cat ${directory}/exit\`, and stop it with \`kill -- -${pid}\`. ` +
+      `If the command appears hung or unintended, stop it right away with \`kill -- -${pid}\` so it does not consume resources or hold locks. ` +
       `To wait for it in one call instead of polling, run \`while [ ! -e ${directory}/exit ] && kill -0 -- -${pid} 2>/dev/null; do sleep 1; done; cat ${directory}/exit 2>/dev/null || echo "process group ${pid} exited without an exit code"\` with a \`timeout\` of up to ${BASH_MAX_YIELD_SECONDS} seconds.`,
     outputDirectory: directory,
     pid,
@@ -273,29 +330,75 @@ async function completed(
     stdout,
   }: { readonly exitCode: number; readonly stderr: StreamTail; readonly stdout: StreamTail },
 ): Promise<BashResult> {
-  let streams = formatStreams({ stderr, stdout });
-  if (streams.truncated && (await hasJobOutput(sandbox, directory))) {
-    streams = formatStreams({ stderr, stdout }, directory);
+  const initial = formatStreamsWithFlags({ stderr, stdout });
+  if (initial.truncated || initial.lineTruncated) {
+    const jobInfo = await readJobOutputInfo(sandbox, directory);
+    if (jobInfo.exists) {
+      const adjusted: StreamTails = {
+        stdout:
+          jobInfo.stdoutLines !== undefined && "totalLines" in stdout
+            ? { text: stdout.text, totalLines: Math.max(stdout.totalLines, jobInfo.stdoutLines) }
+            : stdout,
+        stderr:
+          jobInfo.stderrLines !== undefined && "totalLines" in stderr
+            ? { text: stderr.text, totalLines: Math.max(stderr.totalLines, jobInfo.stderrLines) }
+            : stderr,
+      };
+      return { ...formatStreams(adjusted, directory), exitCode, status: "completed" };
+    }
   }
-  return { ...streams, exitCode, status: "completed" };
+  return {
+    exitCode,
+    status: "completed",
+    stderr: initial.stderr,
+    stdout: initial.stdout,
+    truncated: initial.truncated,
+  };
 }
 
-async function hasJobOutput(sandbox: SandboxSession, directory: string): Promise<boolean> {
+async function readJobOutputInfo(
+  sandbox: SandboxSession,
+  directory: string,
+): Promise<{
+  readonly exists: boolean;
+  readonly stdoutLines?: number;
+  readonly stderrLines?: number;
+}> {
   try {
-    const result = await sandbox.run({ command: `test -f ${shellQuote(directory)}/stdout` });
-    return result.exitCode === 0;
+    const quoted = shellQuote(directory);
+    const result = await sandbox.run({
+      command: `test -f ${quoted}/stdout && printf '%s %s\\n' "$(cat ${quoted}/stdout.lines 2>/dev/null || echo -)" "$(cat ${quoted}/stderr.lines 2>/dev/null || echo -)"`,
+    });
+    if (result.exitCode !== 0) return { exists: false };
+    const [outRaw, errRaw] = result.stdout.trim().split(/\s+/);
+    const stdoutLines = outRaw && /^\d+$/u.test(outRaw) ? Number(outRaw) : undefined;
+    const stderrLines = errRaw && /^\d+$/u.test(errRaw) ? Number(errRaw) : undefined;
+    return { exists: true, stdoutLines, stderrLines };
   } catch {
-    return false;
+    return { exists: false };
   }
 }
 
 function formatStreams(streams: StreamTails, outputDirectory?: string): BashStreams {
+  const formatted = formatStreamsWithFlags(streams, outputDirectory);
+  return {
+    stderr: formatted.stderr,
+    stdout: formatted.stdout,
+    truncated: formatted.truncated,
+  };
+}
+
+function formatStreamsWithFlags(
+  streams: StreamTails,
+  outputDirectory?: string,
+): BashStreams & { readonly lineTruncated: boolean } {
   const stdout = formatStream("stdout", streams.stdout, outputDirectory);
   const stderr = formatStream("stderr", streams.stderr, outputDirectory);
   return {
     stderr: stderr.output,
     stdout: stdout.output,
     truncated: stdout.truncated || stderr.truncated,
+    lineTruncated: stdout.lineTruncated || stderr.lineTruncated,
   };
 }
 
@@ -303,7 +406,7 @@ function formatStream(
   name: "stderr" | "stdout",
   tail: StreamTail,
   outputDirectory: string | undefined,
-): { readonly output: string; readonly truncated: boolean } {
+): { readonly output: string; readonly truncated: boolean; readonly lineTruncated: boolean } {
   const result = truncateTail(tail.text);
   const totalLines =
     "totalLines" in tail
@@ -312,14 +415,25 @@ function formatStream(
         ? result.totalLines
         : undefined;
   if (totalLines !== undefined && result.outputLines >= totalLines) {
-    return { output: result.output, truncated: false };
+    if (result.lineTruncated && outputDirectory !== undefined) {
+      return {
+        output: `[${name} truncated: line exceeded ${MAX_LINE_LENGTH} chars; full output: ${outputDirectory}/${name}]\n${result.output}`,
+        truncated: true,
+        lineTruncated: true,
+      };
+    }
+    return { output: result.output, truncated: false, lineTruncated: result.lineTruncated };
   }
   const shown =
     totalLines === undefined
       ? `showing last ${result.outputLines} lines`
       : `showing last ${result.outputLines} of ${totalLines} lines`;
   const rest = outputDirectory === undefined ? "" : `; full output: ${outputDirectory}/${name}`;
-  return { output: `[${name} truncated: ${shown}${rest}]\n${result.output}`, truncated: true };
+  return {
+    output: `[${name} truncated: ${shown}${rest}]\n${result.output}`,
+    truncated: true,
+    lineTruncated: result.lineTruncated,
+  };
 }
 
 async function withDevelopmentSandboxProgress<T>(

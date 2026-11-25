@@ -7,6 +7,8 @@ import { stubSpawnProcess } from "./_helpers/sandbox-session-stub.js";
 import { ContextContainer, contextStorage } from "../src/context/container.js";
 import { SandboxKey } from "../src/context/keys.js";
 import { executeGlobOnSandbox, type GlobResult } from "../src/execution/sandbox/glob-tool.js";
+import { toolModelOutputContext } from "../src/harness/tool-model-output.js";
+import { glob } from "../src/tools/provided/glob.js";
 import type { SandboxAccess } from "../src/sandbox/state.js";
 import type { SandboxSession } from "../src/shared/sandbox-session.js";
 
@@ -345,5 +347,27 @@ describe("executeGlobOnSandbox", () => {
     expect(result.content).toBe("No files found");
     expect(result.count).toBe(0);
     expect(result.truncated).toBe(false);
+  });
+});
+
+describe("glob.toModelOutput", () => {
+  it("renders standard results as plain text and preserves wrapper extra fields as JSON", async () => {
+    expect(
+      await glob.toModelOutput?.(
+        { content: "/workspace/a.ts", count: 1, path: "/workspace", truncated: false },
+        toolModelOutputContext("glob", "call_1"),
+      ),
+    ).toEqual({ type: "text", value: "/workspace/a.ts" });
+
+    const wrapped = {
+      content: "/workspace/a.ts",
+      count: 1,
+      extra: "keep",
+      path: "/workspace",
+      truncated: false,
+    };
+    expect(
+      await glob.toModelOutput?.(wrapped as never, toolModelOutputContext("glob", "call_2")),
+    ).toEqual({ type: "json", value: wrapped });
   });
 });

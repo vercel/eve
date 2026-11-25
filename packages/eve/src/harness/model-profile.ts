@@ -37,7 +37,7 @@ export function resolveModelProfile(
     (provider.includes("bedrock") && modelId.includes("anthropic"));
   return {
     anthropicCache: anthropic ? { ttl: promptCache?.anthropic?.ttl ?? "5m" } : undefined,
-    filesOutsideToolResults: provider.endsWith(".chat"),
+    filesOutsideToolResults: provider.endsWith(".chat") || provider.includes("openai-compatible"),
     gateway: false,
     googleSearchDropsTools: PRE_GEMINI_3_MODEL.test(modelId),
     provider: topLevelProvider,

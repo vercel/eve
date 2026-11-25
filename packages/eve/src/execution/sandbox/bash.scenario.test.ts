@@ -19,6 +19,22 @@ describe("executeBashOnSandbox with a real shell", () => {
     vi.useRealTimers();
   });
 
+  it("does not leak launcher positional arguments or variables into the command", async () => {
+    const { sandbox } = await createHostSandbox();
+
+    const result = await executeBashOnSandbox(sandbox, {
+      command: 'printf "argc=%s arg1=%s arg2=%s d=%s\\n" "$#" "$1" "$2" "${d:-}"',
+    });
+
+    expect(result).toEqual({
+      exitCode: 0,
+      status: "completed",
+      stderr: "",
+      stdout: "argc=0 arg1= arg2= d=\n",
+      truncated: false,
+    });
+  });
+
   it("returns a fast command's exit code and separate streams", async () => {
     const { sandbox } = await createHostSandbox();
 

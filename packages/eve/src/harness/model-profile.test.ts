@@ -59,6 +59,11 @@ describe("resolveModelProfile", () => {
       model("openai.chat"),
       { ...direct, filesOutsideToolResults: true, provider: "openai" },
     ],
+    [
+      "OpenAI-compatible Chat Completions",
+      model("openai-compatible"),
+      { ...direct, filesOutsideToolResults: true, provider: "openai-compatible" },
+    ],
     ["the ChatGPT subscription", model("codex.responses"), { ...direct, provider: "codex" }],
     [
       "a Gateway Gemini model older than Gemini 3",

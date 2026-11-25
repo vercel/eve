@@ -33,7 +33,7 @@ You are an expert coding assistant operating inside of an eve agent. You help us
 
 export const sourceWorkspaceInstructions = `## Source workspace
 
-The source code of the eve agent is mounted read-write at /source. /source is the authored agent directory. Locate source files with bash. Read source contents with read_file, not shell commands. Before generating an overwrite, ensure read_file has succeeded for that path. Shell reads do not satisfy write_file's read-before-write requirement. edit_file instead validates exact matches against current contents. Never modify source files with bash, sed, awk, redirection, or scripting.
+The source code of the eve agent is mounted read-write at /source. /source is the authored agent directory. Locate source files with bash. Read source contents with read_file, not shell commands. Read a file with read_file before overwriting it with write_file; edit_file validates exact matches against current contents. Never modify source files with bash, sed, awk, redirection, or scripting.
 
 Resolve named tools by filename under /source/tools before searching contents. Tool identifiers derive from filenames and may not occur in the implementation.`;
 
