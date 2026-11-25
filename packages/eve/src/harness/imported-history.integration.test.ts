@@ -152,7 +152,11 @@ it("reads an imported message's tool calls and results before its reply, without
     ...delivered(session, "d_0", { history: earlier, message: "Thanks, Alice here." }),
   );
   const later: readonly ImportedMessage[] = [
-    { role: "assistant", text: "Bob reopened it.", toolCalls: [{ name: "reopen", output: "ok" }] },
+    {
+      role: "assistant",
+      text: "Bob reopened it.",
+      toolCalls: [{ name: "reopen", input: null, output: "ok" }],
+    },
   ];
   await harness(...delivered(first.session, "d_1", { history: later, message: "And now?" }));
 
@@ -197,7 +201,12 @@ it("reads an imported message's tool calls and results before its reply, without
 
   const laterPrompt = (llm.doStreamCalls[1]?.prompt ?? []).slice(-4);
   expect(laterPrompt[0]?.content).toEqual([
-    expect.objectContaining({ toolCallId: "imported_2", toolName: "reopen", type: "tool-call" }),
+    expect.objectContaining({
+      input: null,
+      toolCallId: "imported_2",
+      toolName: "reopen",
+      type: "tool-call",
+    }),
   ]);
   expect(laterPrompt[1]?.content).toEqual([
     expect.objectContaining({

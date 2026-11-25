@@ -79,7 +79,7 @@ export function createImportedHistoryMessages(
     return [
       {
         content: calls.map(({ input, name, toolCallId }) => ({
-          input: input ?? {},
+          input: input === undefined ? {} : input,
           toolCallId,
           toolName: name,
           type: "tool-call" as const,
