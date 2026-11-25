@@ -74,6 +74,7 @@
   "Family",
   "INTERACTION_OUTCOMES",
   "ImportedMessage",
+  "ImportedToolCall",
   "Interaction",
   "InteractionDisplay",
   "InteractionFact",

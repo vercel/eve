@@ -59,14 +59,65 @@ export function createUserMessage(
 
 export const IMPORTED_MESSAGE_METADATA_KEY = "eve.imported";
 
+const IMPORTED_CALL_ID_PREFIX = "imported_";
+
 export function createImportedHistoryMessages(
   history: readonly SessionHistoryMessage[],
+  sessionHistory: readonly HarnessModelMessage[],
 ): HarnessModelMessage[] {
-  return history.map((message) =>
-    message.role === "user"
-      ? createUserMessage("user", message.text, { [IMPORTED_MESSAGE_METADATA_KEY]: true })
-      : { content: message.text, role: "assistant" },
-  );
+  let nextCallIndex = nextImportedCallIndex(sessionHistory);
+  return history.flatMap((message): HarnessModelMessage[] => {
+    if (message.role === "user") {
+      return [createUserMessage("user", message.text, { [IMPORTED_MESSAGE_METADATA_KEY]: true })];
+    }
+    const reply: HarnessModelMessage = { content: message.text, role: "assistant" };
+    const calls = (message.toolCalls ?? []).map((call) => ({
+      ...call,
+      toolCallId: `${IMPORTED_CALL_ID_PREFIX}${String(nextCallIndex++)}`,
+    }));
+    if (calls.length === 0) return [reply];
+    return [
+      {
+        content: calls.map(({ input, name, toolCallId }) => ({
+          input: input ?? {},
+          toolCallId,
+          toolName: name,
+          type: "tool-call" as const,
+        })),
+        role: "assistant",
+      },
+      {
+        content: calls.map(({ error, name, output, toolCallId }) => ({
+          output:
+            error !== undefined
+              ? { type: "error-text" as const, value: error }
+              : typeof output === "string"
+                ? { type: "text" as const, value: output }
+                : { type: "json" as const, value: output ?? null },
+          toolCallId,
+          toolName: name,
+          type: "tool-result" as const,
+        })),
+        role: "tool",
+      },
+      reply,
+    ];
+  });
+}
+
+function nextImportedCallIndex(sessionHistory: readonly HarnessModelMessage[]): number {
+  let next = 0;
+  for (const message of sessionHistory) {
+    if (message.role !== "assistant" || typeof message.content === "string") continue;
+    for (const part of message.content) {
+      if (part.type !== "tool-call" || !part.toolCallId.startsWith(IMPORTED_CALL_ID_PREFIX)) {
+        continue;
+      }
+      const index = Number(part.toolCallId.slice(IMPORTED_CALL_ID_PREFIX.length));
+      if (Number.isInteger(index) && index >= next) next = index + 1;
+    }
+  }
+  return next;
 }
 
 export function createFrameworkUserMessage(

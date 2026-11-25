@@ -72,4 +72,4 @@ export type {
   MockModelUsage,
 } from "#evals/mock-model.js";
 export type { ToolStub, ToolStubOutcome } from "#tool-stubs/types.js";
-export type { SessionHistoryMessage } from "#shared/session-history.js";
+export type { SessionHistoryMessage, SessionHistoryToolCall } from "#shared/session-history.js";

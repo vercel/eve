@@ -158,7 +158,11 @@ it("keeps a settled turn's imported history ahead of its message and reply", asy
     stepInput: {
       history: [
         { role: "user", text: "Bob asked about the launch." },
-        { role: "assistant", text: "It ships Friday." },
+        {
+          role: "assistant",
+          text: "It ships Friday.",
+          toolCalls: [{ name: "launch_date", output: "Friday" }],
+        },
       ],
       message: "Thanks, Alice here.",
     },
@@ -169,6 +173,23 @@ it("keeps a settled turn's imported history ahead of its message and reply", asy
       kind: "user",
       metadata: { "eve.imported": true },
       role: "user",
+    },
+    {
+      content: [
+        { input: {}, toolCallId: "imported_0", toolName: "launch_date", type: "tool-call" },
+      ],
+      role: "assistant",
+    },
+    {
+      content: [
+        {
+          output: { type: "text", value: "Friday" },
+          toolCallId: "imported_0",
+          toolName: "launch_date",
+          type: "tool-result",
+        },
+      ],
+      role: "tool",
     },
     { content: "It ships Friday.", role: "assistant" },
     expect.objectContaining({ content: "Thanks, Alice here.", role: "user" }),

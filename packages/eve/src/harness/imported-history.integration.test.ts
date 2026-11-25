@@ -119,3 +119,96 @@ it("reads imported history before each turn's context and message, and records i
     ["d_1", "turn_1", later],
   ]);
 });
+
+it("reads an imported message's tool calls and results before its reply, without running them", async () => {
+  const llm = model();
+  const events: SessionEvent[] = [];
+  const harness = createTestKernel({
+    agent: { model: { id: "m" } },
+    handleEvent: eachEvent(async (event) => {
+      events.push(event);
+    }),
+    resolveModel: async () => llm,
+    tools: new Map(),
+  });
+  const session: HarnessSession = {
+    compaction: {},
+    continuationToken: "http:history-tools",
+    history: [],
+    sessionId: "history-tools",
+  };
+  const earlier: readonly ImportedMessage[] = [
+    { role: "user", text: "Is ticket T-1 open?" },
+    {
+      role: "assistant",
+      text: "T-1 is open, but its notes did not load.",
+      toolCalls: [
+        { name: "lookup_ticket", input: { id: "T-1" }, output: { status: "open" } },
+        { name: "list_notes", error: "Timed out" },
+      ],
+    },
+  ];
+  const first = await harness(
+    ...delivered(session, "d_0", { history: earlier, message: "Thanks, Alice here." }),
+  );
+  const later: readonly ImportedMessage[] = [
+    { role: "assistant", text: "Bob reopened it.", toolCalls: [{ name: "reopen", output: "ok" }] },
+  ];
+  await harness(...delivered(first.session, "d_1", { history: later, message: "And now?" }));
+
+  const prompt = (llm.doStreamCalls[0]?.prompt ?? []).filter(({ role }) => role !== "system");
+  expect(prompt.map(({ role }) => role)).toEqual([
+    "user",
+    "assistant",
+    "tool",
+    "assistant",
+    "user",
+  ]);
+  expect(prompt[1]?.content).toEqual([
+    expect.objectContaining({
+      input: { id: "T-1" },
+      toolCallId: "imported_0",
+      toolName: "lookup_ticket",
+      type: "tool-call",
+    }),
+    expect.objectContaining({
+      input: {},
+      toolCallId: "imported_1",
+      toolName: "list_notes",
+      type: "tool-call",
+    }),
+  ]);
+  expect(prompt[2]?.content).toEqual([
+    expect.objectContaining({
+      output: { type: "json", value: { status: "open" } },
+      toolCallId: "imported_0",
+      type: "tool-result",
+    }),
+    expect.objectContaining({
+      output: { type: "error-text", value: "Timed out" },
+      toolCallId: "imported_1",
+      type: "tool-result",
+    }),
+  ]);
+  expect(prompted(llm.doStreamCalls[0]).slice(-2)).toEqual([
+    "assistant: T-1 is open, but its notes did not load.",
+    "user: Thanks, Alice here.",
+  ]);
+
+  const laterPrompt = (llm.doStreamCalls[1]?.prompt ?? []).slice(-4);
+  expect(laterPrompt[0]?.content).toEqual([
+    expect.objectContaining({ toolCallId: "imported_2", toolName: "reopen", type: "tool-call" }),
+  ]);
+  expect(laterPrompt[1]?.content).toEqual([
+    expect.objectContaining({
+      output: { type: "text", value: "ok" },
+      toolCallId: "imported_2",
+      type: "tool-result",
+    }),
+  ]);
+
+  expect(events.filter(({ type }) => type.startsWith("call."))).toEqual([]);
+  expect(
+    events.flatMap((event) => (event.type === "delivery.consumed" ? [event.data.history] : [])),
+  ).toEqual([earlier, later]);
+});

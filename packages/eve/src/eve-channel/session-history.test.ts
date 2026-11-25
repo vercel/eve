@@ -78,6 +78,27 @@ describe("session history import", () => {
     expect(input.audienceAuth).toEqual(runner);
   });
 
+  it("starts a session from history with completed tool calls", async () => {
+    const withCalls = [
+      history[0],
+      {
+        role: "assistant",
+        text: "Add both domains, then configure the redirect.",
+        toolCalls: [
+          { name: "search_docs", input: { query: "domain redirect" }, output: "Redirects…" },
+          { name: "list_domains", error: "Timed out" },
+        ],
+      },
+    ];
+    const { createSession, response } = await create(
+      { auth: () => granted },
+      { history: withCalls },
+    );
+
+    expect(response.status).toBe(202);
+    expect(createSession.mock.calls[0]![0].input).toEqual({ history: withCalls });
+  });
+
   it("places the supplied history before the history onMessage resolves for the first message", async () => {
     const stored = [{ role: "user" as const, text: "Bob: the redirect is live." }];
     const { createSession, response } = await create(
@@ -101,12 +122,14 @@ describe("session history import", () => {
     ],
     ["empty text", [{ role: "user", text: " " }], "history[0].text must be a non-empty string."],
     [
-      "a tool exchange",
-      [
-        ...history,
-        { role: "assistant", text: "Checking.", toolCalls: [{ name: "lookup", input: {} }] },
-      ],
-      'history[2] has unknown field "toolCalls". Accepted fields: id, role, text.',
+      "a file",
+      [...history, { role: "user", text: "See the report.", files: ["report.pdf"] }],
+      'history[2] has unknown field "files". Accepted fields: id, role, text, toolCalls.',
+    ],
+    [
+      "a tool call without a result",
+      [...history, { role: "assistant", text: "Checking.", toolCalls: [{ name: "lookup" }] }],
+      "history[2].toolCalls[0] must have exactly one of output or error.",
     ],
     [
       "a repeated id",

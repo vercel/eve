@@ -129,7 +129,7 @@ export async function prepareTurnInput(
       createFrameworkUserMessage("context.instruction", content),
     ) ?? [];
   const messages: HarnessModelMessage[] = [
-    ...createImportedHistoryMessages(input?.history ?? []),
+    ...createImportedHistoryMessages(input?.history ?? [], step.session.history),
     ...(input?.context ?? []).map((entry) =>
       anchorToTurn(createFrameworkUserMessage("context.instruction", entry), turnId),
     ),

@@ -182,7 +182,26 @@ export default defineEval({
 
 The first message starts the first turn that runs. The model reads the entries ahead of that message as earlier turns with their own roles. eve runs no model, tool, or hook for them and sends nothing to a channel. Later turns, compaction, and `session.transcript` treat them like any other history. The stream records them in `data.history` on the first turn's `delivery.consumed`, without a turn, tool call, or usage of their own, so `t.event("turn.settled", { count: 1 })` holds after that turn.
 
-Each entry has a `role` of `"user"` or `"assistant"`, non-empty `text`, and an optional `id` that is unique in the list. Tool calls, files, and reasoning aren't supported, and eve rejects an entry with any other field rather than dropping it. A rejected request throws a `ClientError` that names the entry, such as `history[1].role must be "user" or "assistant".`
+Each entry has a `role` of `"user"` or `"assistant"`, non-empty `text`, and an optional `id` that is unique in the list. Files and reasoning aren't supported, and eve rejects an entry with any other field rather than dropping it. A rejected request throws a `ClientError` that names the entry, such as `history[1].role must be "user" or "assistant".`
+
+An assistant entry can carry the tool calls it made before its reply, each with the result the model reads:
+
+```ts
+const session = await t.session({
+  history: [
+    { role: "user", text: "How do I redirect www.example.com to example.com?" },
+    {
+      role: "assistant",
+      text: "Add both domains, then configure the redirect.",
+      toolCalls: [
+        { name: "search_docs", input: { query: "domain redirect" }, output: "Redirects…" },
+      ],
+    },
+  ],
+});
+```
+
+Give each call a `name`, an optional `input`, and either an `output` or an `error` message. eve doesn't run these calls, so `t.calledTool()` and `turn.toolCalls` count only the calls the agent makes in the turns you send. [Start from prior history](../channels/eve#start-from-prior-history) has the full rules.
 
 The target must permit it. eve answers `403` to `history` in a request unless the eve channel's auth grants `allowHistoryImport` to the eval runner, as it does for [tool stubs](./tool-stubs#permit-tool-replacement). See [history import permission](../guides/auth-and-route-protection#history-import-permission). With the grant, the same eval runs against a local or deployed [target](./targets), and `client.sessions.create({ history })` accepts the same option.
 
@@ -190,7 +209,7 @@ Choose the setup by what the eval holds fixed:
 
 | Setup                          | What the model reads                                                 | Use it when                                                                       |
 | ------------------------------ | -------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `t.session({ history })`       | Earlier user and assistant text you wrote, kept in the session       | The eval grades the next reply against an exact conversation                      |
+| `t.session({ history })`       | Earlier messages and tool results you wrote, kept in the session     | The eval grades the next reply against an exact conversation                      |
 | Earlier `session.send()` turns | Replies the agent generated in this run, with their tool calls       | The earlier turns are under test, or later turns need their tool results or state |
 | `clientContext` on a send      | Context for that turn only, which later turns and history never keep | The eval supplies page or app state rather than conversation                      |
 

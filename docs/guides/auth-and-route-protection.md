@@ -378,7 +378,7 @@ export default eveChannel({
 });
 ```
 
-eve checks the grant on the create request, the only request that accepts `history`, and removes it from the caller identity like `allowToolStubs`. A caller with the grant can make the agent read any earlier conversation as its own, so give it to eval runners rather than to users. To continue a user's stored conversation, [resolve the history on the server](../channels/eve#start-from-prior-history).
+eve checks the grant on the create request, the only request that accepts `history`, and removes it from the caller identity like `allowToolStubs`. A caller with the grant can make the agent read any earlier conversation as its own, including tool results no tool returned, so give it to eval runners rather than to users. To continue a user's stored conversation, [resolve the history on the server](../channels/eve#start-from-prior-history).
 
 ## Agent info access
 

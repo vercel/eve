@@ -394,13 +394,31 @@ The client then resumes the session by id, for example with `useEveAgent({ initi
 
 `send()` accepts the same `history` option and adds the entries right before that message and its `context`, whether it creates or continues the session. The eve channel's `onMessage` can return `history` too, which applies to every message it's returned for.
 
-Each entry has a `role` of `"user"` or `"assistant"`, non-empty `text`, and an optional `id` unique within the call. eve rejects an entry with any other field, so map your stored messages to these fields. Invalid history throws an `InvalidSessionHistoryError`, exported from `eve/channels`, naming the entry and the broken rule. eve doesn't cap entries or text, so trim long conversations in your route. Tool calls, files, and reasoning are not supported.
+Each entry has a `role` of `"user"` or `"assistant"`, non-empty `text`, and an optional `id` unique within the call. eve rejects an entry with any other field, so map your stored messages to these fields. Invalid history throws an `InvalidSessionHistoryError`, exported from `eve/channels`, naming the entry and the broken rule. eve doesn't cap entries or text, so trim long conversations in your route. Files and reasoning are not supported.
+
+An assistant entry can also carry the tool calls it made before its reply:
+
+```ts
+const history = [
+  { role: "user", text: "Is ticket T-1 still open?" },
+  {
+    role: "assistant",
+    text: "T-1 is open, but its notes didn't load.",
+    toolCalls: [
+      { name: "lookup_ticket", input: { id: "T-1" }, output: { status: "open" } },
+      { name: "list_notes", input: { id: "T-1" }, error: "The notes service timed out." },
+    ],
+  },
+];
+```
+
+Each call has a `name`, an optional JSON `input` that defaults to `{}`, and exactly one of `output`, the JSON value the model reads as the result, or `error`, the message of a failed call. The model reads an entry's calls as one step, then their results, then `text`. To show several steps, use one assistant entry per step. eve runs no tool, approval, hook, or `toModelOutput` for these calls, and doesn't check `name` against the agent's tools or `output` against a tool's schema, so supply the result as the model should read it. They're conversation, so the stream has no `call.*` events for them. A call still waiting for a result or an approval can't be imported.
 
 Resolve your users' history on the server and authorize the caller against the stored conversation. eve rejects `history` in a client request body with `403`, unless the route's auth grants [history import permission](../guides/auth-and-route-protection#history-import-permission) to that caller. The grant is for eval runners that [start a session from fixed history](../evals/cases#starting-from-fixed-history), and only the create request accepts the field.
 
 The stream records the entries in `data.history` on the `delivery.consumed` of the message that brought them. History from `create()` is recorded with the first accepted message. When one turn takes in several messages, the model reads all their history first. `transcriptOf()` from `eve/client` returns entries in that order as `{ role, text }` messages you can pass back as `history` to branch a session.
 
-Frontend `messages` show imported entries before their message, with `metadata.imported` set and your `id` in `metadata.historyId`. Imported messages have no `metadata.turnId`, so a turn's reply never streams into one. Their message ids stay unique even when a later call reuses an `id`. Compaction, `clear()`, and handoffs treat them like any other history.
+Frontend `messages` show imported entries before their message, with `metadata.imported` set and your `id` in `metadata.historyId`. Imported messages have no `metadata.turnId`, so a turn's reply never streams into one. Their message ids stay unique even when a later call reuses an `id`. They show an entry's `text`; read its `toolCalls` from `data.history` to display them. Compaction, `clear()`, and handoffs treat imported entries like any other history.
 
 ## Replace or disable the defaults
 

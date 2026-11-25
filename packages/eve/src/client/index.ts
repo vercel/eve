@@ -102,7 +102,7 @@ export type {
 export { endsTurn } from "#client/session-utils.js";
 
 export type { AskedCall } from "#protocol/session-projection/reader.js";
-export type { SessionHistoryMessage } from "#shared/session-history.js";
+export type { SessionHistoryMessage, SessionHistoryToolCall } from "#shared/session-history.js";
 export { isAnswer, parseAnswer, parseAnswers } from "#shared/input.js";
 
 export type { AgentInfoMemoryEntry } from "#client/types.js";

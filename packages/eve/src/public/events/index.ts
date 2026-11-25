@@ -101,6 +101,7 @@ export type {
   DeliveryAdmittedData,
   DeliveryConsumedData,
   ImportedMessage,
+  ImportedToolCall,
   DeliveryOutcome,
   DeliverySettledData,
   DeliveryAdmitted,

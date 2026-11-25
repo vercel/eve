@@ -1,7 +1,7 @@
 import { z } from "#compiled/zod/index.js";
 
-import { conforming, envelopeOf, id, principal, userPart, known } from "../common.js";
-import type { Envelope, Principal, UserPart } from "../envelope.js";
+import { conforming, envelopeOf, id, jsonValue, principal, userPart, known } from "../common.js";
+import type { Envelope, JsonValue, Principal, UserPart } from "../envelope.js";
 
 /**
  * Where a delivery came from: a channel (with the schedule or hook that sent it), a control, or a
@@ -32,6 +32,22 @@ export interface ImportedMessage {
   readonly role: "user" | "assistant";
   /** The message's plain text. */
   readonly text: string;
+  /** Tool calls an assistant message came with, which the model reads before `text`. */
+  readonly toolCalls?: readonly ImportedToolCall[];
+}
+
+/**
+ * A tool call an imported assistant message came with. eve did not run it, so the stream has
+ * no call facts for it. It has either `output` or `error`.
+ */
+export interface ImportedToolCall {
+  readonly name: string;
+  /** The call's input. Absent when the app gave none, which the model reads as `{}`. */
+  readonly input?: JsonValue;
+  /** The result the model reads for a completed call. */
+  readonly output?: JsonValue;
+  /** The error message the model reads for a failed call. */
+  readonly error?: string;
 }
 
 /** The payload of `delivery.consumed`: a turn took in a delivery and what the person sent. */
@@ -86,8 +102,22 @@ const deliverySource = conforming<DeliverySource>()(
   ]),
 );
 
+const importedToolCall = conforming<ImportedToolCall>()(
+  z.object({
+    name: z.string(),
+    input: jsonValue.optional(),
+    output: jsonValue.optional(),
+    error: z.string().optional(),
+  }),
+);
+
 const importedMessage = conforming<ImportedMessage>()(
-  z.object({ id: z.string().optional(), role: z.enum(["user", "assistant"]), text: z.string() }),
+  z.object({
+    id: z.string().optional(),
+    role: z.enum(["user", "assistant"]),
+    text: z.string(),
+    toolCalls: z.array(importedToolCall).optional(),
+  }),
 );
 
 export const deliverySchemas = {

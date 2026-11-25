@@ -111,8 +111,9 @@ export interface CreateSessionOptions {
    */
   readonly stubs?: readonly ToolStub[];
   /**
-   * Prior conversation the session starts from, as user and assistant text. It joins model
-   * history with the first message, and no earlier turn runs. The server must authorize its use.
+   * Prior conversation the session starts from: user and assistant text, and the tool calls an
+   * assistant message made. It joins model history with the first message, and no earlier turn
+   * or tool runs. The server must authorize its use.
    */
   readonly history?: readonly SessionHistoryMessage[];
   /** Abort signal for cancelling the creation request. */

@@ -5,7 +5,8 @@ const HANDOFF = /^HANDOFF-(TOOL|WORKFLOW|DELEGATED) (\S+)/u;
 /**
  * `HANDOFF-TOOL <ref>` and `HANDOFF-WORKFLOW <ref>` call the matching hand-off tool, then reply
  * with its result. `HANDOFF-DELEGATED <ref>` asks the root copy to call `hand_off`, then replies
- * with the copy's result. Anything else echoes, or recalls the latest reply for a code word.
+ * with the copy's result. Anything else echoes, recalls the latest reply for a code word, or
+ * lists the tool results in the prompt when asked for them.
  */
 export function respond(request: MockModelRequest): MockModelResponse | string {
   const handOff = [...request.userMessages]
@@ -13,7 +14,11 @@ export function respond(request: MockModelRequest): MockModelResponse | string {
     .map((message) => HANDOFF.exec(message.replace(/^[\s\S]*Caller message:\s*/u, "")))
     .find((match) => match !== null);
   if (handOff != null) return respondToHandOff(request, handOff[1]!, handOff[2]!);
-  const { lastUserMessage, messages } = request;
+  const { lastUserMessage, messages, toolResults } = request;
+  if (lastUserMessage?.includes("tool results")) {
+    const results = toolResults.map(({ isError, name, output }) => ({ isError, name, output }));
+    return `Mock reply: ${JSON.stringify(results)}`;
+  }
   return lastUserMessage?.includes("code word")
     ? `Mock reply: ${[...messages].reverse().find((message) => message.role === "assistant")?.text ?? ""}`
     : `Mock reply: ${lastUserMessage ?? ""}`;

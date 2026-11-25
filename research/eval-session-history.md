@@ -85,8 +85,8 @@ what the agent believes it said. A team can allow one without the other.
 
 ## Non-goals
 
-- Tool calls, results, and files in history. #5340 tracks that contract for the server-side
-  option, and this option takes whatever `SessionHistoryMessage` accepts once it lands.
+- A separate entry shape for evals. This option takes whatever `SessionHistoryMessage` accepts,
+  which includes completed tool calls; see `session-history-tool-calls.md`. Files stay with #5340.
 - History on follow-up requests, or as an option of `t.send()`.
 - Scripted replies for the turn under test. Imported history is context eve did not run; a
   scripted reply runs the turn's lifecycle and needs its own design.

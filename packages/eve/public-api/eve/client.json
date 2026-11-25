@@ -64,6 +64,7 @@
   "SessionEvent",
   "SessionEventMeta",
   "SessionHistoryMessage",
+  "SessionHistoryToolCall",
   "SessionNotActiveError",
   "SessionSnapshot",
   "SessionStore",
