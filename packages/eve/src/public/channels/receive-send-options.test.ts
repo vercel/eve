@@ -25,6 +25,7 @@ const options = {
   history: [{ role: "user", text: "Alice asked for the rollout plan." }],
   idempotencyKey: "github:delivery-42",
   outputSchema: { type: "object" },
+  sandbox: { copyFrom: "session_thread" },
   title: "Rollout plan",
   turnPolicy: "queue",
 } satisfies Required<SessionSendOptions>;

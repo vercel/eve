@@ -5,6 +5,7 @@ import { ensureDevelopmentSandboxesPrepared } from "#execution/sandbox/developme
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger } from "#internal/logging.js";
 import { contextStorage } from "#context/container.js";
+import { SandboxCopySourceKey } from "#context/keys.js";
 import {
   buildCallbackContext,
   withRuntimeSandboxLifecycle,
@@ -109,6 +110,8 @@ export async function ensureSandboxAccess(
 ): Promise<EnsuredSandboxAccess> {
   const registered = input.registry.sandbox;
   const persistedOwner = registered === null ? undefined : owningSandboxDefinition(registered);
+  let sourceCopied = input.state?.sourceCopied === true;
+  let hadSandbox = input.state?.session !== undefined && input.state.session !== null;
   let persisted = resolvePersistedSandboxSessionState(
     input.state?.session,
     persistedOwner?.kind === "independent"
@@ -126,10 +129,16 @@ export async function ensureSandboxAccess(
   const idle = input.ownsSandbox === false ? undefined : idleStop(input.registry, input.sessionId);
   const idleTimeoutMs = idle?.idleTimeoutMs;
   let running = input.state?.running !== undefined;
-  const captured = (): SandboxState =>
-    running && idle !== undefined && recordedSandboxStopsIdle(idle.provider, persisted)
-      ? { session: persisted, running: { idleTimeoutMs: idle.idleTimeoutMs } }
-      : { session: persisted };
+  const captured = (): SandboxState => {
+    const state: { -readonly [Key in keyof SandboxState]: SandboxState[Key] } = {
+      session: persisted,
+    };
+    if (running && idle !== undefined && recordedSandboxStopsIdle(idle.provider, persisted)) {
+      state.running = { idleTimeoutMs: idle.idleTimeoutMs };
+    }
+    if (sourceCopied) state.sourceCopied = true;
+    return state;
+  };
   if (registered === null) {
     return {
       async captureState() {
@@ -227,7 +236,17 @@ export async function ensureSandboxAccess(
 
     const artifact = await loadArtifact(provider);
     const start = async () => {
-      const result = await provider.implementation.start(context, options, artifact);
+      const source =
+        sourceCopied || hadSandbox
+          ? undefined
+          : contextStorage.getStore()?.get(SandboxCopySourceKey);
+      if (source !== undefined) sourceCopied = true;
+      const copied =
+        source === undefined || provider.implementation.copy === undefined
+          ? null
+          : await provider.implementation.copy(context, source, options, artifact);
+      const result = copied ?? (await provider.implementation.start(context, options, artifact));
+      hadSandbox = true;
       if (!isSandboxPreparedArtifact(result.state)) {
         throw new Error(
           `Sandbox provider "${provider.providerName}" returned non-serializable session state.`,

@@ -102,11 +102,23 @@ export interface SessionSendOptions {
   readonly outputSchema?: JsonObject;
   /** Workflow run title for a session this send starts. Defaults to one derived from the message. */
   readonly title?: string;
+  /** Sandbox setup for a session this send starts. See {@link SessionSandboxOptions}. */
+  readonly sandbox?: SessionSandboxOptions;
   /**
    * How the message treats a running turn. `{ mode: "steer", principal }` also decides what it
    * does to a turn that runs as someone else. Replaces the channel's `turnPolicy` as a whole.
    */
   readonly turnPolicy?: TurnPolicy;
+}
+
+/**
+ * How a new session gets its sandbox. `copyFrom` names a session whose sandbox the new session's
+ * sandbox starts as a copy of, files included, when the sandbox provider can copy one; otherwise
+ * it starts fresh. It applies only when the call creates the session. Copy only from a session the
+ * caller may read.
+ */
+export interface SessionSandboxOptions {
+  readonly copyFrom: string;
 }
 
 const SESSION_SEND_OPTION_FIELDS: Record<keyof SessionSendOptions, true> = {
@@ -115,9 +127,17 @@ const SESSION_SEND_OPTION_FIELDS: Record<keyof SessionSendOptions, true> = {
   history: true,
   idempotencyKey: true,
   outputSchema: true,
+  sandbox: true,
   title: true,
   turnPolicy: true,
 };
+
+export function validateSandboxOptions(options: SessionSandboxOptions): SessionSandboxOptions {
+  if (typeof options.copyFrom !== "string" || options.copyFrom.length === 0) {
+    throw new TypeError("sandbox.copyFrom must be a non-empty session id.");
+  }
+  return { copyFrom: options.copyFrom };
+}
 
 const SESSION_SEND_OPTION_KEYS = Object.keys(
   SESSION_SEND_OPTION_FIELDS,

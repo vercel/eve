@@ -112,6 +112,7 @@ describe("openCodeChannel", () => {
         },
       ],
       idempotencyKey: "session_thread:call_1",
+      sandbox: { copyFrom: "session_thread" },
     });
   });
 });

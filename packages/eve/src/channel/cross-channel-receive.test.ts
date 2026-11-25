@@ -176,6 +176,7 @@ describe("createCrossChannelToFn", () => {
       history: [{ role: "user" as const, text: "Alice asked for the rollout plan." }],
       idempotencyKey: "github:delivery-42",
       outputSchema: { type: "object" },
+      sandbox: { copyFrom: "session_thread" },
       title: "Rollout plan",
       turnPolicy: "queue" as const,
     } satisfies Required<SessionSendOptions>;

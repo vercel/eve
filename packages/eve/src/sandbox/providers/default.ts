@@ -167,6 +167,25 @@ export const DefaultSandbox: SandboxProvider<
           },
         };
       },
+      async copy(context, source, openOptions, artifact) {
+        if (artifact.provider === null) return null;
+        const inner = requireProvider(artifact.provider, context.kind);
+        const result = await inner.implementation.copy?.(
+          context,
+          source,
+          innerOpenOptions(artifact.provider, openOptions),
+          artifact.artifact,
+        );
+        if (result === undefined || result === null) return null;
+        return {
+          connection: withNetworkPolicy(result.connection),
+          state: {
+            provider: artifact.provider,
+            state: result.state,
+            stateProtocolVersion: inner.stateProtocolVersion,
+          },
+        };
+      },
       async resume(context, artifact, state) {
         if (artifact.provider === null || artifact.provider !== state.provider) {
           throw new SandboxSessionGoneError(
