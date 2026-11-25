@@ -1,6 +1,4 @@
 import { type WriteFileInput, executeWriteFileOnSandbox } from "#execution/sandbox/write-file.js";
-
-export { refreshReadFileStamp } from "#execution/sandbox/write-file.js";
 import { toolOutput, type ToolModelOutput } from "#tools/model-output.js";
 import { toolLabel } from "#tools/tool-label.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
@@ -69,18 +67,24 @@ export const writeFile: ToolDefinition<WriteFileToolInput, WriteFileToolOutput> 
   }),
 );
 
+const WRITE_FILE_OUTPUT_KEYS = new Set(["existed", "path"]);
+
 function writeFileModelOutput(output: unknown): ToolModelOutput {
   if (typeof output === "string") return toolOutput.text(output);
-  if (
-    typeof output === "object" &&
-    output !== null &&
-    typeof (output as Record<string, unknown>).path === "string" &&
-    typeof (output as Record<string, unknown>).existed === "boolean"
-  ) {
-    const value = output as WriteFileToolOutput;
-    return toolOutput.text(value.existed ? `Overwrote ${value.path}.` : `Wrote ${value.path}.`);
+  if (isWriteFileResult(output)) {
+    return toolOutput.text(output.existed ? `Overwrote ${output.path}.` : `Wrote ${output.path}.`);
   }
   return toolOutput.json(output);
+}
+
+function isWriteFileResult(output: unknown): output is WriteFileToolOutput {
+  if (typeof output !== "object" || output === null) return false;
+  const value = output as Record<string, unknown>;
+  return (
+    Object.keys(value).every((key) => WRITE_FILE_OUTPUT_KEYS.has(key)) &&
+    typeof value.path === "string" &&
+    typeof value.existed === "boolean"
+  );
 }
 
 export default writeFile;

@@ -134,10 +134,20 @@ export const readFile: ToolDefinition<ReadFileToolInput, ReadFileToolOutput> = f
   }),
 );
 
+const READ_FILE_OUTPUT_KEYS = new Set([
+  "content",
+  "file",
+  "nextOffset",
+  "path",
+  "totalLines",
+  "truncated",
+]);
+
 function isReadFileResult(output: unknown): output is ReadFileToolOutput {
   if (typeof output !== "object" || output === null) return false;
   const value = output as Record<string, unknown>;
   return (
+    Object.keys(value).every((key) => READ_FILE_OUTPUT_KEYS.has(key)) &&
     typeof value.content === "string" &&
     typeof value.path === "string" &&
     typeof value.totalLines === "number" &&

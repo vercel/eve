@@ -55,13 +55,18 @@ function formatSkillPath(input: {
   return `${input.root}/${input.name}/${input.relativePath}`;
 }
 
-export async function resolveSandboxHome(sandbox: SandboxSession): Promise<string | null> {
+async function resolveSandboxHome(sandbox: SandboxSession): Promise<string | null> {
   const cached = sandboxHomeCache.get(sandbox);
   if (cached !== undefined) {
     return await cached;
   }
 
-  const next = probeSandboxHome(sandbox);
+  const next = probeSandboxHome(sandbox).then((home) => {
+    if (home === null) {
+      sandboxHomeCache.delete(sandbox);
+    }
+    return home;
+  });
   sandboxHomeCache.set(sandbox, next);
   return await next;
 }

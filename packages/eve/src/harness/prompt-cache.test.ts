@@ -281,19 +281,6 @@ describe("applyConversationCacheControl", () => {
     expect(out[1]).not.toBe(originalRef1);
   });
 
-  it("skips trailing provider tools when placing the last-tool cache breakpoint", () => {
-    const tools = applyLastToolCacheBreakpoint(
-      {
-        read_file: { description: "read" },
-        web_search: { type: "provider", id: "anthropic.web_search" },
-      } as unknown as ToolSet,
-      fiveMinutes,
-    ) as Record<string, { providerOptions?: unknown }>;
-
-    expect(tools.read_file?.providerOptions).toEqual(marker);
-    expect(tools.web_search?.providerOptions).toBeUndefined();
-  });
-
   it("skips reasoning-only assistant messages when placing the assistant cache breakpoint", () => {
     const messages: ModelMessage[] = [
       { role: "user", content: "hi" },
@@ -307,5 +294,39 @@ describe("applyConversationCacheControl", () => {
     expect((out[1] as { providerOptions?: unknown }).providerOptions).toEqual(marker);
     expect((out[2] as { providerOptions?: unknown }).providerOptions).toBeUndefined();
     expect((out[3] as { providerOptions?: unknown }).providerOptions).toEqual(marker);
+  });
+
+  it("skips a trailing reasoning-only or empty-text assistant message when placing the final breakpoint", () => {
+    const messages: ModelMessage[] = [
+      { role: "user", content: "hi" },
+      { role: "assistant", content: "earlier reply" },
+      {
+        role: "assistant",
+        content: [
+          { type: "reasoning", text: "thinking only" },
+          { type: "text", text: "" },
+        ],
+      },
+    ];
+
+    const out = applyConversationCacheControl(messages, fiveMinutes);
+
+    expect((out[1] as { providerOptions?: unknown }).providerOptions).toEqual(marker);
+    expect((out[2] as { providerOptions?: unknown }).providerOptions).toBeUndefined();
+  });
+});
+
+describe("applyLastToolCacheBreakpoint", () => {
+  it("skips trailing provider tools when placing the last-tool cache breakpoint", () => {
+    const tools = applyLastToolCacheBreakpoint(
+      {
+        read_file: { description: "read" },
+        web_search: { type: "provider", id: "anthropic.web_search" },
+      } as unknown as ToolSet,
+      fiveMinutes,
+    ) as Record<string, { providerOptions?: unknown }>;
+
+    expect(tools.read_file?.providerOptions).toEqual(marker);
+    expect(tools.web_search?.providerOptions).toBeUndefined();
   });
 });

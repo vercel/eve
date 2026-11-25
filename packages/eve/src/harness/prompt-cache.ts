@@ -130,11 +130,23 @@ export function applyConversationCacheControl(
     };
   };
 
-  mark(out.length - 1);
-
-  for (let i = out.length - 2; i >= 0; i--) {
+  let lastCacheable = -1;
+  for (let i = out.length - 1; i >= 0; i--) {
     const candidate = out[i];
-    if (candidate?.role === "assistant" && !isReasoningOnlyAssistantMessage(candidate)) {
+    if (candidate !== undefined && !isNonCacheableAssistantMessage(candidate)) {
+      lastCacheable = i;
+      break;
+    }
+  }
+  if (lastCacheable === -1) {
+    return out;
+  }
+
+  mark(lastCacheable);
+
+  for (let i = lastCacheable - 1; i >= 0; i--) {
+    const candidate = out[i];
+    if (candidate?.role === "assistant" && !isNonCacheableAssistantMessage(candidate)) {
       mark(i);
       break;
     }
@@ -143,7 +155,10 @@ export function applyConversationCacheControl(
   return out;
 }
 
-function isReasoningOnlyAssistantMessage(message: ModelMessage): boolean {
+function isNonCacheableAssistantMessage(message: ModelMessage): boolean {
+  if (message.role !== "assistant") return false;
   if (!Array.isArray(message.content) || message.content.length === 0) return false;
-  return message.content.every((part) => part.type === "reasoning");
+  return message.content.every(
+    (part) => part.type === "reasoning" || (part.type === "text" && part.text.length === 0),
+  );
 }

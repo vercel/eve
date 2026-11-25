@@ -102,6 +102,9 @@ export const HistoryStateKey = new ContextKey<HistoryState>("eve.historyState");
 export const DisabledProviderToolsKey = new ContextKey<Readonly<Record<string, readonly string[]>>>(
   "eve.disabledProviderTools",
 );
+export const ModelMaxOutputTokensKey = new ContextKey<Readonly<Record<string, number | null>>>(
+  "eve.modelMaxOutputTokens",
+);
 export interface OfferedCatalogTools {
   readonly connections: boolean;
   readonly searchableSkills: boolean;

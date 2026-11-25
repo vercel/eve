@@ -1,10 +1,4 @@
-import { loadContext } from "#context/container.js";
-import {
-  buildReadFileTargetKey,
-  createReadFileStamp,
-  normalizeModelPath,
-  setReadFileStamp,
-} from "#execution/tools/file-state.js";
+import { normalizeModelPath } from "#execution/tools/file-state.js";
 import { resolveAbsoluteFilePath } from "#execution/sandbox/require-sandbox.js";
 import {
   detectImageMediaType,
@@ -88,14 +82,6 @@ export async function executeReadFileOnSandbox(
   } else if (effectiveOffset > totalLines) {
     throw new Error(`offset ${effectiveOffset} is past the end of the file (${totalLines} lines).`);
   }
-
-  const stamp = createReadFileStamp({
-    content: rawContent,
-    filePath: normalizedPath,
-  });
-
-  const targetKey = buildReadFileTargetKey(normalizedPath);
-  setReadFileStamp(loadContext(), targetKey, stamp);
 
   if (totalLines === 0) {
     return {

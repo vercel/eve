@@ -7,7 +7,12 @@ export async function resolveAbsoluteFilePath(
 ): Promise<string> {
   const resolvedPath = await resolveSandboxModelPath({ path: filePath, sandbox });
 
-  if (resolvedPath === "$HOME" || resolvedPath.startsWith("$HOME/")) {
+  if (
+    resolvedPath === "$HOME" ||
+    resolvedPath.startsWith("$HOME/") ||
+    resolvedPath === "~" ||
+    resolvedPath.startsWith("~/")
+  ) {
     throw new Error(
       `Cannot resolve "${filePath}": the sandbox has no usable $HOME. ` +
         "Use an absolute path or a path relative to the workspace root.",

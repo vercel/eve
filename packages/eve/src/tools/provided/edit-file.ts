@@ -3,7 +3,6 @@ import { defineTool, toolOutput, type ToolDefinition } from "#public/tools/index
 import { defineJsonSchema, prepareJsonSchema } from "#tools/schema.js";
 
 import { frameworkTool } from "./framework-tool.js";
-import { refreshReadFileStamp } from "./write-file.js";
 
 /*!
  * Ported from pi's `edit` tool (packages/coding-agent/src/core/tools/edit.ts and
@@ -114,7 +113,6 @@ export const editFile: ToolDefinition<EditFileToolInput, EditFileToolOutput> = f
         if (mode !== undefined && mode !== DEFAULT_FILE_MODE) {
           await restoreFileMode(sandbox, absolutePath, mode);
         }
-        refreshReadFileStamp(absolutePath, content, written);
         return { path, replacements: edits.length };
       });
     },
@@ -202,7 +200,10 @@ const editSandboxHomeCache = new WeakMap<SandboxSession, Promise<string>>();
 async function resolveEditHome(sandbox: SandboxSession): Promise<string> {
   const cached = editSandboxHomeCache.get(sandbox);
   if (cached !== undefined) return await cached;
-  const next = probeEditHome(sandbox);
+  const next = probeEditHome(sandbox).then((dir) => {
+    if (dir === "") editSandboxHomeCache.delete(sandbox);
+    return dir;
+  });
   editSandboxHomeCache.set(sandbox, next);
   return await next;
 }
@@ -210,7 +211,18 @@ async function resolveEditHome(sandbox: SandboxSession): Promise<string> {
 async function probeEditHome(sandbox: SandboxSession): Promise<string> {
   try {
     const probe = await sandbox.run({ command: `printf '%s' "$HOME"` });
-    return probe.exitCode === 0 ? probe.stdout.trim() : "";
+    if (probe.exitCode !== 0) return "";
+    const dir = probe.stdout.trim();
+    if (
+      dir.length === 0 ||
+      !dir.startsWith("/") ||
+      dir.includes("\0") ||
+      dir.includes("\n") ||
+      dir.includes("\r")
+    ) {
+      return "";
+    }
+    return dir === "/" ? dir : dir.replace(/\/+$/, "");
   } catch {
     return "";
   }

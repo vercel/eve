@@ -11,7 +11,12 @@ import {
   type TypedToolCall,
 } from "ai";
 
-import { AuthKey, DisabledProviderToolsKey, HistoryStateKey } from "#context/keys.js";
+import {
+  AuthKey,
+  DisabledProviderToolsKey,
+  HistoryStateKey,
+  ModelMaxOutputTokensKey,
+} from "#context/keys.js";
 import type { StepCatalog } from "#execution/catalog/step-catalog.js";
 import { visibleSkillNotice } from "#execution/skills/instructions.js";
 import { workingTaskIds } from "#execution/tasks/model-step.js";
@@ -60,6 +65,7 @@ import type { StepResult } from "#harness/types.js";
 import { stepReference } from "#harness/step/context.js";
 import { agentSettings } from "#execution/effective-agent-config.js";
 import { createLogger, logError } from "#internal/logging.js";
+import { getInputTokenCount } from "#harness/compaction/engine.js";
 import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
 import { compactedTurnInput, historyBeforeCall } from "#harness/compaction/step.js";
 import { reportCompactionFailure, reportModelCallFailure } from "./failure.js";
@@ -67,6 +73,7 @@ import { buildGatewayAttributionHeaders, withGatewayTraceContext } from "./model
 import {
   isEmptyModelResponse,
   recoverModelCall,
+  resolveMaxOutputTokens,
   rethrowNoOutputAsEmptyResponse,
 } from "./recovery.js";
 import { stepDraft, stepMessages, stepSystem } from "#definitions/step.js";
@@ -89,11 +96,7 @@ const environment = process.env.NODE_ENV ?? "unknown";
 
 const log = createLogger("harness.tool-loop");
 
-const MODEL_FIRST_CHUNK_TIMEOUT_MS = 5 * 60_000;
-const MODEL_CHUNK_TIMEOUT_MS = 2 * 60_000;
-const DEFAULT_MAX_OUTPUT_TOKENS = 32_768;
-const MIN_MAX_OUTPUT_TOKENS = 4_096;
-const OUTPUT_WINDOW_HEADROOM_TOKENS = 4_096;
+const MODEL_OUTPUT_TIMEOUT_MS = 10 * 60_000;
 const REASONING_TAIL_CHARS = 1_500;
 
 export interface ModelCallOptions {
@@ -133,6 +136,7 @@ export class ModelCaller {
   private attemptIndex = 0;
   private started: number | undefined;
   private acceptedOutput = false;
+  private lastMaxOutputTokens: number | undefined;
 
   private readonly step: Step;
   private readonly prompt: Prompt;
@@ -160,10 +164,12 @@ export class ModelCaller {
   async call(): Promise<HarnessStepResult> {
     const modelId = stepReference(this.step).id;
     const cachedDisabled = this.step.ctx.get(DisabledProviderToolsKey)?.[modelId];
-    let options: ModelCallOptions =
-      cachedDisabled !== undefined && cachedDisabled.length > 0
-        ? { disabledProviderTools: new Set(cachedDisabled) }
-        : {};
+    const cachedMaxOutput = this.step.ctx.get(ModelMaxOutputTokensKey)?.[modelId];
+    let options: ModelCallOptions = {
+      ...(cachedDisabled !== undefined &&
+        cachedDisabled.length > 0 && { disabledProviderTools: new Set(cachedDisabled) }),
+      ...(cachedMaxOutput !== undefined && { maxOutputTokensOverride: cachedMaxOutput }),
+    };
     const diagnostics = {
       policies: [() => (this.compactionFailure === undefined ? ALLOW_RETRY : STOP_RETRY)],
       onRetry: (error: unknown) => this.prepareRetry(error),
@@ -199,7 +205,10 @@ export class ModelCaller {
             continue;
           }
         }
-        const recovery = recoverModelCall(error, options, diagnostics);
+        const recovery = recoverModelCall(error, options, {
+          ...diagnostics,
+          attemptedMaxOutputTokens: this.lastMaxOutputTokens,
+        });
         if (recovery === undefined) throw error;
         if (
           recovery.disabledProviderTools !== undefined &&
@@ -211,6 +220,16 @@ export class ModelCaller {
             ...new Set([...(previous[modelId] ?? []), ...recovery.disabledProviderTools]),
           ];
           this.step.ctx.set(DisabledProviderToolsKey, { ...previous, [modelId]: merged });
+        }
+        if (
+          recovery.maxOutputTokensOverride !== undefined &&
+          recovery.maxOutputTokensOverride !== options.maxOutputTokensOverride
+        ) {
+          const previous = this.step.ctx.get(ModelMaxOutputTokensKey) ?? {};
+          this.step.ctx.set(ModelMaxOutputTokensKey, {
+            ...previous,
+            [modelId]: recovery.maxOutputTokensOverride,
+          });
         }
         await this.prepareRetry(error);
         options = recovery;
@@ -432,15 +451,19 @@ export class ModelCaller {
       profile: this.profile,
       session: step.session,
     });
-    const estimatedInputTokens = Math.ceil(
-      (this.requestEnvelopeTokens + estimateTokens(this.prompt.messages)) *
-        (step.session.compaction.estimateRatio ?? 1.25),
+    const compaction = step.session.compaction;
+    const estimatedInputTokens = getInputTokenCount(
+      this.request.history,
+      compaction,
+      this.requestEnvelopeTokens,
+      compaction.requestEnvelopeTokens,
     );
     const maxOutputTokens = resolveMaxOutputTokens(
       stepReference(step).contextWindowTokens,
       estimatedInputTokens,
       options.maxOutputTokensOverride,
     );
+    this.lastMaxOutputTokens = maxOutputTokens;
     const settings = {
       headers: this.attributionHeaders,
       instructions,
@@ -477,7 +500,7 @@ export class ModelCaller {
       runtimeContext,
       stopWhen: isStepCount(1),
       telemetry: attempt?.telemetry,
-      timeout: { chunkMs: MODEL_CHUNK_TIMEOUT_MS, firstChunkMs: MODEL_FIRST_CHUNK_TIMEOUT_MS },
+      timeout: { chunkMs: MODEL_OUTPUT_TIMEOUT_MS, firstChunkMs: MODEL_OUTPUT_TIMEOUT_MS },
       tools,
     };
     const agent = new ToolLoopAgent(settings);
@@ -599,22 +622,6 @@ function assertUsableResponse(
       reasoningTail: extractReasoningTail(stepResult, responseMessages),
     });
   }
-}
-
-function resolveMaxOutputTokens(
-  contextWindowTokens: number | undefined,
-  estimatedInputTokens: number,
-  override: number | null | undefined,
-): number | undefined {
-  if (override === null) return undefined;
-  const target = override ?? DEFAULT_MAX_OUTPUT_TOKENS;
-  if (contextWindowTokens === undefined || contextWindowTokens <= 0) {
-    return target;
-  }
-  const windowCap = Math.max(MIN_MAX_OUTPUT_TOKENS, Math.floor(contextWindowTokens / 4));
-  const remaining = contextWindowTokens - estimatedInputTokens - OUTPUT_WINDOW_HEADROOM_TOKENS;
-  const bounded = Math.min(target, windowCap, Math.max(MIN_MAX_OUTPUT_TOKENS, remaining));
-  return Math.max(1, Math.min(bounded, contextWindowTokens));
 }
 
 function extractReasoningTail(

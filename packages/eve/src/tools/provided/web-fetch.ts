@@ -83,18 +83,26 @@ export const webFetch: ToolDefinition<WebFetchToolInput, WebFetchToolOutput> = f
   }),
 );
 
+const WEB_FETCH_OUTPUT_KEYS = new Set(["content", "contentType", "truncated", "url"]);
+
 function webFetchModelOutput(output: unknown): ToolModelOutput {
   if (typeof output === "string") return toolOutput.text(output);
-  if (
-    typeof output === "object" &&
-    output !== null &&
-    typeof (output as Record<string, unknown>).content === "string" &&
-    typeof (output as Record<string, unknown>).truncated === "boolean"
-  ) {
-    const value = output as WebFetchToolOutput;
-    return toolOutput.text(value.truncated ? `${value.content}\n[truncated]` : value.content);
+  if (isWebFetchResult(output)) {
+    return toolOutput.text(output.truncated ? `${output.content}\n[truncated]` : output.content);
   }
   return toolOutput.json(output);
+}
+
+function isWebFetchResult(output: unknown): output is WebFetchToolOutput {
+  if (typeof output !== "object" || output === null) return false;
+  const value = output as Record<string, unknown>;
+  return (
+    Object.keys(value).every((key) => WEB_FETCH_OUTPUT_KEYS.has(key)) &&
+    typeof value.content === "string" &&
+    typeof value.contentType === "string" &&
+    typeof value.truncated === "boolean" &&
+    typeof value.url === "string"
+  );
 }
 
 export default webFetch;

@@ -444,6 +444,57 @@ describe("compaction summary call", () => {
     ]);
   });
 
+  it("retries compaction summary with a lowered maxOutputTokens cap when rejected", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const summaryCaps: (number | undefined)[] = [];
+    const model = new MockLanguageModelV3({
+      doStream: async ({ maxOutputTokens, prompt }) => {
+        const system = prompt[0]?.role === "system" ? prompt[0].content : "";
+        if (system.includes("CONTEXT CHECKPOINT COMPACTION")) {
+          summaryCaps.push(maxOutputTokens);
+          if (summaryCaps.length === 1) {
+            throw new APICallError({
+              isRetryable: false,
+              message: "max_tokens must be at most 4096",
+              requestBodyValues: {},
+              statusCode: 400,
+              url: "https://provider.example/v1/messages",
+            });
+          }
+          return summaryStream();
+        }
+        return answer();
+      },
+    });
+    const events: SessionEvent[] = [];
+    const kernel = createTestKernel({
+      agent: { model: { contextWindowTokens: 40_000, id: "step-model" }, thresholdPercent: 0.25 },
+      handleEvent: async (publication) => void events.push(...eventsOf(publication)),
+      resolveModel: async () => model,
+      tools: new Map([["lookup", lookupTool]]),
+    });
+
+    const completed = await untilTurnEnds(
+      kernel,
+      {
+        compaction: {},
+        continuationToken: "http:compaction-max-output-retry",
+        history: [
+          { content: "Earlier context ".repeat(2_000), kind: "user", role: "user" },
+          { content: "Earlier detailed response ".repeat(2_000), role: "assistant" },
+        ],
+        sessionId: "compaction-max-output-retry",
+      },
+      "Continue.",
+    );
+
+    expect(summaryCaps).toEqual([8_192, 4_096]);
+    expect(completed.next).toBeNull();
+    expect(events.filter((event) => event.type === "turn.settled")).toMatchObject([
+      { data: { outcome: "completed" } },
+    ]);
+  });
+
   it("fails the turn and keeps the history when the summary call stays rate limited", async () => {
     vi.spyOn(Math, "random").mockReturnValue(0);
     vi.spyOn(console, "warn").mockImplementation(() => {});

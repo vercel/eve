@@ -190,12 +190,12 @@
         "compaction": {
           "estimateRatio": 0.0004100041000410004,
           "lastKnownInputTokens": 1,
-          "lastKnownPromptMessageCount": 4,
+          "lastKnownPromptMessageCount": 6,
           "lastStage": "tail",
           "measurementsByModel": {
             "eve-test/layout": {
               "inputTokens": 1,
-              "promptMessageCount": 4,
+              "promptMessageCount": 6,
               "requestEnvelopeTokens": 2315
             }
           },

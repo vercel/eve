@@ -71,8 +71,14 @@ export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
   }
 
   async function defaultRun(options: SandboxRunOptions): Promise<SandboxCommandResult> {
+    const existsMatch = /^test -e '((?:[^']|'\\'')*)'$/.exec(options.command);
+    if (existsMatch !== null) {
+      const target = resolveWorkspacePath(existsMatch[1]!.replaceAll("'\\''", "'"));
+      const exists = files.has(target) || fileBytes.has(target);
+      return { exitCode: exists ? 0 : 1, stderr: "", stdout: "" };
+    }
     const find =
-      /^find (\S+) -maxdepth 1 -type f -exec (?:stat -c '%Y %s %n' \{\} \+ 2>\/dev\/null|sh -c 'stat -c "%Y %s %n" "\$@" 2>\/dev\/null \|\| stat -f "%m %z %N" "\$@" 2>\/dev\/null' _ \{\} \+) \| head -c (\d+)$/.exec(
+      /^find (\S+) -maxdepth 1 -type f -exec (?:stat -c '%Y %s %n' \{\} \+ 2>\/dev\/null|sh -c 'stat -c "%Y %s %n" (?:-- )?"\$@" 2>\/dev\/null \|\| stat -f "%m %z %N" (?:-- )?"\$@" 2>\/dev\/null' _ \{\} \+) \| head -c (\d+)$/.exec(
         options.command,
       );
     if (find !== null) {

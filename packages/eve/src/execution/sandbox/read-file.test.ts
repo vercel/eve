@@ -254,8 +254,10 @@ describe("read_file PDFs", () => {
       executeReadFileOnSandbox(sandbox.session, { filePath: "/workspace/big.pdf" }),
     ).rejects.toThrow("read_file shows PDFs up to 20 MiB");
   });
+});
 
-  it("renders text files as plain text in toModelOutput and resolves ~/ paths", async () => {
+describe("read_file text model output", () => {
+  it("renders text files as plain text in toModelOutput, resolves ~/ paths, and falls back to JSON for extra fields", async () => {
     const sandbox = mockSandbox({
       commands: {
         [`printf '%s\\n' "$HOME"`]: { exitCode: 0, stderr: "", stdout: "/home/alice\n" },
@@ -294,6 +296,16 @@ describe("read_file PDFs", () => {
     ).toEqual({
       type: "text",
       value: "[/workspace/empty.txt: empty file]",
+    });
+    const wrapped = { ...full, extraField: "keep-me" };
+    expect(
+      await readFile.toModelOutput?.(
+        wrapped as never,
+        toolModelOutputContext("read_file", "call_4"),
+      ),
+    ).toEqual({
+      type: "json",
+      value: wrapped,
     });
   });
 });

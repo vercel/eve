@@ -30,6 +30,7 @@ const KEEP_OUTPUT_BYTES = MAX_OUTPUT_BYTES - 1;
 const KEEP_OUTPUT_LINES = MAX_OUTPUT_LINES - 1;
 const STREAM_TAIL_THRESHOLD_BYTES = 512 * 1024;
 const STREAM_TAIL_BYTES = MAX_OUTPUT_BYTES * 2;
+const FALLBACK_KILL_GRACE_MS = 500;
 const FALLBACK_FINISH_GRACE_MS = 2_000;
 
 const LAUNCHER = `_eve_d=$1 _eve_cmd=$2
@@ -148,7 +149,7 @@ async function runCommand(
       sandbox.run({
         command:
           `p="$(cat ${quotedDir}/pid 2>/dev/null)"; ` +
-          `if [ -n "$p" ]; then kill -TERM -- -"$p" 2>/dev/null; sleep 0.2; kill -KILL -- -"$p" 2>/dev/null; fi; ` +
+          `case "$p" in ''|*[!0-9]*) ;; *) kill -TERM -- -"$p" 2>/dev/null; sleep 0.2; kill -KILL -- -"$p" 2>/dev/null ;; esac; ` +
           `rm -rf ${quotedDir}`,
       }),
     ).catch(() => {});
@@ -170,9 +171,14 @@ async function runCommand(
     if (running === undefined) {
       const raced = await waitUpTo(finished, FALLBACK_FINISH_GRACE_MS);
       if (raced !== undefined) return await completed(sandbox, directory, raced);
-      controller.abort();
+      const settled = finished.catch(() => undefined);
       await Promise.resolve(child.kill()).catch(() => {});
-      const aborted = await waitUpTo(finished, FALLBACK_FINISH_GRACE_MS);
+      let aborted = await waitUpTo(settled, FALLBACK_KILL_GRACE_MS);
+      if (aborted === undefined) {
+        controller.abort();
+        aborted = await waitUpTo(settled, FALLBACK_FINISH_GRACE_MS);
+      }
+      if (signal?.aborted) throw signal.reason;
       if (aborted !== undefined) {
         return {
           ...formatStreams({

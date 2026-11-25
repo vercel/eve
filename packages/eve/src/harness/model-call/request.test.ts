@@ -61,7 +61,7 @@ describe("modelInstructions", () => {
     expect(first[1]).not.toEqual(second[1]);
   });
 
-  it("puts a retry's note ahead of the own parts, after the marked base", () => {
+  it("appends a retry's note after the own parts, following the marked base", () => {
     expect(
       modelInstructions({
         instructions: ["base", "own"],
@@ -70,7 +70,7 @@ describe("modelInstructions", () => {
       }),
     ).toEqual([
       { role: "system", content: "base", providerOptions: marker("1h") },
-      { role: "system", content: "note\n\nown" },
+      { role: "system", content: "own\n\nnote" },
     ]);
   });
 

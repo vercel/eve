@@ -37,7 +37,7 @@ export const GLOB_INPUT_SCHEMA = defineJsonSchema<GlobToolInput>({
     path: {
       type: "string",
       description:
-        "The directory to search in: absolute, relative to the workspace root, or beginning with $HOME/. " +
+        "The directory to search in: absolute, relative to the workspace root, or beginning with ~/ or $HOME/. " +
         "Omit to search the workspace root.",
     },
     pattern: {
@@ -87,21 +87,26 @@ export const glob: ToolDefinition<GlobToolInput, GlobToolOutput> = frameworkTool
   }),
 );
 
+const GLOB_OUTPUT_KEYS = new Set(["content", "count", "path", "truncated"]);
+
 function globModelOutput(output: unknown): ToolModelOutput {
   if (typeof output === "string") return toolOutput.text(output);
-  if (
-    typeof output === "object" &&
-    output !== null &&
-    typeof (output as Record<string, unknown>).content === "string" &&
-    typeof (output as Record<string, unknown>).count === "number" &&
-    typeof (output as Record<string, unknown>).truncated === "boolean"
-  ) {
-    const value = output as GlobToolOutput;
-    if (value.count === 0 && value.content.length === 0)
-      return toolOutput.text("No files matched.");
-    return toolOutput.text(value.content);
+  if (isGlobResult(output)) {
+    return toolOutput.text(output.content.length === 0 ? "No files found" : output.content);
   }
   return toolOutput.json(output);
+}
+
+function isGlobResult(output: unknown): output is GlobToolOutput {
+  if (typeof output !== "object" || output === null) return false;
+  const value = output as Record<string, unknown>;
+  return (
+    Object.keys(value).every((key) => GLOB_OUTPUT_KEYS.has(key)) &&
+    typeof value.content === "string" &&
+    typeof value.count === "number" &&
+    typeof value.path === "string" &&
+    typeof value.truncated === "boolean"
+  );
 }
 
 export default glob;

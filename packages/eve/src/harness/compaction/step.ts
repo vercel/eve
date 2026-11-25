@@ -3,7 +3,7 @@ import { type LanguageModel, type ModelMessage, streamText } from "ai";
 import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import { createLogger, logError } from "#internal/logging.js";
-import { AuthKey } from "#context/keys.js";
+import { AuthKey, ModelMaxOutputTokensKey } from "#context/keys.js";
 import { changeHistory } from "#harness/session-machine/history.js";
 import { type CompactionConfig, type CompactionStage, type StepResult } from "#harness/types.js";
 import {
@@ -34,6 +34,10 @@ import { isDeepStrictEqual } from "node:util";
 import type { Usage } from "#protocol/session-events/envelope.js";
 import { nextChangeId, nextRunId } from "#protocol/session-projection.js";
 import { normalizeModelStreamError, rejectsCredential } from "#harness/model-call/errors.js";
+import {
+  nextMaxOutputTokensOverride,
+  resolveMaxOutputTokens,
+} from "#harness/model-call/recovery.js";
 import { runModelCallWithRetries } from "#harness/model-call/retry.js";
 import {
   extractGatewayCostUsd,
@@ -195,7 +199,7 @@ async function compactUnder(
   });
   return await summarizeHistory(step, {
     change,
-    ...(input.force === true && { compact: true as const }),
+    ...(input.force === true && { compact: true as const, reactive: true as const }),
     compaction: effectiveConfig,
     messages: input.messages,
     turnModel: async () => ({ model: input.model, renew: input.renew }),
@@ -246,6 +250,7 @@ async function summarizeHistory(
     readonly compact?: true;
     readonly compaction: CompactionConfig;
     readonly messages: readonly HarnessModelMessage[];
+    readonly reactive?: true;
     readonly turnModel: () => Promise<CredentialedModel>;
     readonly promptMessages: readonly HarnessModelMessage[];
     readonly requestEnvelopeTokens: number | undefined;
@@ -284,12 +289,21 @@ async function summarizeHistory(
   let messages: HarnessModelMessage[];
   let stage: CompactionStage;
   try {
+    const historyCompaction = historyConfig(compaction, input);
+    const transcriptBudgetTokens =
+      input.reactive === true
+        ? Math.max(
+            1,
+            Math.min(historyCompaction.threshold, Math.floor(estimateTokens(before) * 0.75)),
+          )
+        : undefined;
     const compacted = await compactMessages(
       before,
-      historyConfig(compaction, input),
+      historyCompaction,
       summarize,
       input.compact === true,
       input.betweenTurns !== true,
+      transcriptBudgetTokens,
     );
     messages = compacted.messages as HarnessModelMessage[];
     stage = compacted.stage;
@@ -416,9 +430,10 @@ async function summaryExecutor(
     telemetry: attempt?.telemetry,
   };
   const retryScope = { sessionId: session.sessionId, turnId: step.position().turnId };
-  const summarize = (prompt: CompactionSummaryPrompt) =>
+  let maxOutputTokensOverride = step.ctx.get(ModelMaxOutputTokensKey)?.[reference.id];
+  const summarize = (prompt: CompactionSummaryPrompt, maxOutputTokens: number | undefined) =>
     runModelCallWithRetries(
-      () => streamCompactionSummary({ ...call, ...prompt }),
+      () => streamCompactionSummary({ ...call, ...prompt, maxOutputTokens }),
       retryScope,
       config.abortSignal,
     );
@@ -426,11 +441,40 @@ async function summaryExecutor(
     modelId: gatewayModelId(model) ?? "unknown",
     async summarize(prompt) {
       for (;;) {
+        const estimatedInputTokens =
+          estimateTokens(prompt.system) + estimateTokens(prompt.messages);
+        const maxOutputTokens = resolveMaxOutputTokens(
+          reference.contextWindowTokens,
+          estimatedInputTokens,
+          maxOutputTokensOverride,
+          COMPACTION_SUMMARY_MAX_OUTPUT_TOKENS,
+        );
         try {
-          return await summarize(prompt);
+          return await summarize(prompt, maxOutputTokens);
         } catch (error) {
-          if (renew === undefined || !rejectsCredential(error)) throw error;
-          await renew(error);
+          if (renew !== undefined && rejectsCredential(error)) {
+            await renew(error);
+            continue;
+          }
+          const adjustment = nextMaxOutputTokensOverride(
+            error,
+            maxOutputTokensOverride,
+            maxOutputTokens,
+          );
+          if (adjustment !== undefined) {
+            log.warn("compaction model rejected maxOutputTokens; retrying with adjusted cap", {
+              ...retryScope,
+              maxAllowed: adjustment.next,
+            });
+            maxOutputTokensOverride = adjustment.next;
+            const previous = step.ctx.get(ModelMaxOutputTokensKey) ?? {};
+            step.ctx.set(ModelMaxOutputTokensKey, {
+              ...previous,
+              [reference.id]: adjustment.next,
+            });
+            continue;
+          }
+          throw error;
         }
       }
     },
@@ -458,8 +502,7 @@ export function compactedTurnInput<Message extends ModelMessage>(
 type CompactionSummaryPrompt = Parameters<CompactionSummarizer>[0];
 
 const COMPACTION_SUMMARY_MAX_OUTPUT_TOKENS = 8_192;
-const COMPACTION_SUMMARY_FIRST_CHUNK_TIMEOUT_MS = 3 * 60_000;
-const COMPACTION_SUMMARY_CHUNK_TIMEOUT_MS = 2 * 60_000;
+const COMPACTION_SUMMARY_TIMEOUT_MS = 10 * 60_000;
 
 async function streamCompactionSummary(
   input: CompactionSummaryPrompt &
@@ -471,19 +514,20 @@ async function streamCompactionSummary(
       | "onLanguageModelCallEnd"
       | "providerOptions"
       | "telemetry"
-    >,
+    > & { readonly maxOutputTokens?: number },
 ): Promise<{
   readonly finishReason: string;
   readonly text: string;
   readonly usage: TokenUsageDelta | undefined;
 }> {
+  const { maxOutputTokens, ...rest } = input;
   const result = streamText({
-    ...input,
-    maxOutputTokens: COMPACTION_SUMMARY_MAX_OUTPUT_TOKENS,
+    ...rest,
+    ...(maxOutputTokens !== undefined && { maxOutputTokens }),
     onError: () => {},
     timeout: {
-      chunkMs: COMPACTION_SUMMARY_CHUNK_TIMEOUT_MS,
-      firstChunkMs: COMPACTION_SUMMARY_FIRST_CHUNK_TIMEOUT_MS,
+      chunkMs: COMPACTION_SUMMARY_TIMEOUT_MS,
+      firstChunkMs: COMPACTION_SUMMARY_TIMEOUT_MS,
     },
   });
   for await (const part of result.fullStream) {

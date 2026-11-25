@@ -30,7 +30,7 @@ export function modelInstructions(input: {
   }
 
   const baseMessage = systemMessage([base]);
-  const ownMessage = systemMessage([note, ...own]);
+  const ownMessage = systemMessage([...own, note]);
   const messages = [
     ...(baseMessage === undefined
       ? []
