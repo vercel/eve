@@ -83,10 +83,11 @@ export function authorizationRequired(
 
 const LISTING_TIMEOUT_MS = 10_000;
 
-class ListingTimeoutError extends Error {}
+export class ListingTimeoutError extends Error {}
 
 export async function withListingDeadline<T>(
   connectionName: string,
+  subject: "events" | "tools",
   list: () => Promise<T>,
 ): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -94,7 +95,7 @@ export async function withListingDeadline<T>(
     timer = setTimeout(() => {
       reject(
         new ListingTimeoutError(
-          `"${connectionName}" did not list its tools within ${LISTING_TIMEOUT_MS / 1000}s. Try again later.`,
+          `"${connectionName}" did not list its ${subject} within ${LISTING_TIMEOUT_MS / 1000}s. Try again later.`,
         ),
       );
     }, LISTING_TIMEOUT_MS);
@@ -110,7 +111,7 @@ export async function listToolMetadata(
   connection: Pick<ResolvedConnectionDefinition, "connectionName" | "tools">,
   client: ConnectionClient,
 ): Promise<readonly ConnectionToolMetadata[]> {
-  const tools = await withListingDeadline(connection.connectionName, () =>
+  const tools = await withListingDeadline(connection.connectionName, "tools", () =>
     client.getToolMetadata(),
   );
   return tools.filter((tool) =>

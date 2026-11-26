@@ -17,6 +17,7 @@ import {
   completeConnectionSignIn,
   listConnectionTools,
   listingFailureMessage,
+  ListingTimeoutError,
   withListingDeadline,
   type ConnectionListing,
   type ConnectionSession,
@@ -325,15 +326,18 @@ async function searchChannelEvents({
 > {
   try {
     return {
-      candidates: (await readEventCatalog(catalog)).map((event) =>
-        subscriptionCandidate(channelName, "channel", event),
-      ),
+      candidates: (
+        await withListingDeadline(channelName, "events", () => readEventCatalog(catalog))
+      ).map((event) => subscriptionCandidate(channelName, "channel", event)),
     };
   } catch (error) {
     return {
       unavailable: {
         connection: channelName,
-        error: `Failed to list the events of channel "${channelName}": ${toErrorMessage(error)}`,
+        error:
+          error instanceof ListingTimeoutError
+            ? error.message
+            : `Failed to list the events of channel "${channelName}": ${toErrorMessage(error)}`,
       },
     };
   }
@@ -354,7 +358,7 @@ async function searchConnectionEvents(
     const events =
       eventActions === undefined
         ? []
-        : await withListingDeadline(name, () => eventActions.getEvents());
+        : await withListingDeadline(name, "events", () => eventActions.getEvents());
     return {
       candidates: events.map((event) => subscriptionCandidate(name, "connection", event)),
     };

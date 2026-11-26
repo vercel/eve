@@ -369,7 +369,7 @@ describe("search", () => {
         expect(output.unavailable).toEqual([
           {
             connection: "notion",
-            error: '"notion" did not list its tools within 10s. Try again later.',
+            error: '"notion" did not list its events within 10s. Try again later.',
           },
         ]);
       } finally {
@@ -382,6 +382,29 @@ describe("search", () => {
     const channel = (name: string, catalog: unknown) => ({
       name,
       definition: { onEvent: () => null, catalog },
+    });
+
+    it("reports a channel whose event catalog does not resolve within 10 seconds as unavailable, while other results return", async () => {
+      vi.useFakeTimers();
+      try {
+        const pending = (
+          await searchFor(tools, {
+            channels: [channel("github", () => new Promise(() => {}))],
+          })
+        )({ query: "refund" });
+        await vi.advanceTimersByTimeAsync(10_000);
+        const output = await pending;
+
+        expect(names(output)).toContain("refund_invoice");
+        expect(output.unavailable).toEqual([
+          {
+            connection: "github",
+            error: '"github" did not list its events within 10s. Try again later.',
+          },
+        ]);
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("throws a source-without-events message for a subscriptions__ search on an empty channel", async () => {
