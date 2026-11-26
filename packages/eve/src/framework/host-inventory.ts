@@ -4,6 +4,7 @@ import {
   EVE_DEV_RUNTIME_ARTIFACTS_RESUME_ROUTE_PATH,
   EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH,
   EVE_DEV_RUNTIME_ARTIFACTS_SUSPEND_ROUTE_PATH,
+  EVE_DEV_SESSION_ROUTE_PATH,
   EVE_ROUTE_PREFIX,
   DEVELOPMENT_WORKFLOW_STREAM_ROUTE,
   DEVELOPMENT_WORKFLOW_WORLD_ROUTE,
@@ -88,5 +89,6 @@ export const HOST_HTTP_INVENTORY: readonly HostHttpRegistration[] = Object.freez
   },
   { capability: "development", method: "ALL", path: DEVELOPMENT_WORKFLOW_WORLD_ROUTE },
   { capability: "development", method: "ALL", path: DEVELOPMENT_WORKFLOW_STREAM_ROUTE },
+  { capability: "development", method: "POST", path: EVE_DEV_SESSION_ROUTE_PATH },
   { capability: "schedule", method: "POST", path: EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN },
 ]);

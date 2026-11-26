@@ -22,6 +22,20 @@ import {
 const log = createLogger("eve.channel");
 
 const CLIENT_CONTEXT_PREFIX = "Client context:\n";
+const EVE_CHANNEL_AUTH = Symbol.for("eve.channel.eveAuth");
+
+export function setEveChannelAuth(channel: object, auth: EveChannelConfig["auth"]): void {
+  Object.defineProperty(channel, EVE_CHANNEL_AUTH, {
+    configurable: true,
+    enumerable: false,
+    value: auth,
+  });
+}
+
+export function getEveChannelAuth(value: unknown): EveChannelConfig["auth"] | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  return Reflect.get(value, EVE_CHANNEL_AUTH) as EveChannelConfig["auth"] | undefined;
+}
 
 export function healthResponse(): Response {
   return Response.json({

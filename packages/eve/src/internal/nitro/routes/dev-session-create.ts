@@ -1,13 +1,19 @@
+import { sessionAuthFromResult } from "#channel/auth/result.js";
 import { getChannelInstrumentationKind } from "#channel/compiled-channel.js";
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
 import { parseOptionalJsonRequest, rejectUnknownFields } from "#eve-channel/request.js";
+import { getEveChannelAuth } from "#eve-channel/support.js";
+import type { EveAuthResult } from "#eve-channel/types.js";
 import { createLogger, logError } from "#internal/logging.js";
-import { resolveAcceptedDeploymentId } from "#internal/nitro/routes/channel-dispatch.js";
+import {
+  resolveAcceptedDeploymentId,
+  withDevelopmentVercelOidcContext,
+} from "#internal/nitro/routes/channel-dispatch.js";
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
 import { resolveNitroChannelRuntimeBundle } from "#internal/nitro/routes/runtime-stack.js";
 import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
 import { EVE_SESSION_ID_HEADER } from "#protocol/session-http.js";
-import { localDev } from "#public/channels/auth.js";
+import { localDev, routeAuth } from "#public/channels/auth.js";
 import {
   InvalidSessionHistoryError,
   type SessionHistoryMessage,
@@ -26,7 +32,7 @@ export const MAX_DEV_SESSION_HISTORY_NODES = 20_000;
 export const MAX_DEV_SESSION_HISTORY_DEPTH = 32;
 
 interface ParsedDevSessionBody {
-  readonly history?: readonly SessionHistoryMessage[];
+  readonly history: readonly SessionHistoryMessage[];
   readonly stubs?: readonly ToolStub[];
 }
 
@@ -38,19 +44,13 @@ export async function handleDevSessionCreateRequest(
     return Response.json({ error: "Not found.", ok: false }, { status: 404 });
   }
 
-  const caller = await localDevelopmentCaller(request);
-  if (!caller) {
+  const localCaller = await localDevelopmentCaller(request);
+  if (!localCaller) {
     return Response.json(
       { error: "Dev session creation is only available to local development callers.", ok: false },
       { status: 403 },
     );
   }
-
-  const payload = await parseOptionalJsonRequest(request);
-  if (payload instanceof Response) return payload;
-
-  const body = parseDevSessionBody(payload);
-  if (body instanceof Response) return body;
 
   const bundle = await resolveNitroChannelRuntimeBundle(config);
   const eveRoute =
@@ -58,6 +58,41 @@ export async function handleDevSessionCreateRequest(
       (channel) =>
         channel.method.toUpperCase() === "POST" && channel.urlPath === EVE_SESSION_ROUTE_PATH,
     ) ?? bundle.channels.find((channel) => channel.name === "eve");
+  const eveAuth = getEveChannelAuth(eveRoute?.definition);
+
+  let authResult: EveAuthResult | Response;
+  if (eveAuth === undefined) {
+    authResult = localCaller;
+  } else {
+    try {
+      authResult = await withDevelopmentVercelOidcContext(
+        config,
+        request,
+        async () => await routeAuth(request, eveAuth),
+      );
+    } catch (error) {
+      const errorId = logError(log, "dev session-create auth failed", error);
+      return Response.json(
+        { error: "Authentication failed.", errorId, ok: false },
+        { status: 500 },
+      );
+    }
+  }
+  if (authResult instanceof Response) return authResult;
+  const auth = sessionAuthFromResult(authResult);
+
+  const payload = await parseOptionalJsonRequest(request);
+  if (payload instanceof Response) return payload;
+  if (payload.stubs !== undefined && authResult.allowToolStubs !== true) {
+    return Response.json(
+      { error: "Tool stubbing is not permitted for this caller.", ok: false },
+      { status: 403 },
+    );
+  }
+
+  const body = parseDevSessionBody(payload);
+  if (body instanceof Response) return body;
+
   const adapter = eveRoute?.adapter ?? { kind: "channel" };
   const channelName = eveRoute?.name ?? "eve";
   const channelKind =
@@ -74,8 +109,8 @@ export async function handleDevSessionCreateRequest(
   try {
     const handle = await bundle.runtime.createSession({
       adapter,
-      audienceAuth: caller,
-      auth: caller,
+      audienceAuth: auth,
+      auth,
       capabilities: { requestInput: true },
       channelName,
       delivery,
@@ -112,30 +147,38 @@ function parseDevSessionBody(payload: Record<string, unknown>): ParsedDevSession
   const unknown = rejectUnknownFields(payload, ["history", "stubs"]);
   if (unknown !== undefined) return unknown;
 
-  let history: readonly SessionHistoryMessage[] | undefined;
-  if (payload.history !== undefined) {
-    const boundError = checkDevSessionHistoryBounds(payload.history);
-    if (boundError !== undefined) {
-      return Response.json({ error: boundError, ok: false }, { status: 400 });
-    }
-    try {
-      history = validateSessionHistory(payload.history);
-    } catch (error) {
-      if (!(error instanceof InvalidSessionHistoryError)) throw error;
-      return Response.json({ error: error.message, ok: false }, { status: 400 });
-    }
-    if (
-      history !== undefined &&
-      Buffer.byteLength(JSON.stringify(history), "utf8") > MAX_DEV_SESSION_HISTORY_BYTES
-    ) {
+  if (payload.history === undefined) {
+    return Response.json(
+      { error: "history must be an array of messages.", ok: false },
+      { status: 400 },
+    );
+  }
+  const boundError = checkDevSessionHistoryBounds(payload.history);
+  if (boundError !== undefined) {
+    return Response.json({ error: boundError, ok: false }, { status: 400 });
+  }
+  let history: readonly SessionHistoryMessage[];
+  try {
+    const validated = validateSessionHistory(payload.history);
+    if (validated === undefined) {
       return Response.json(
-        {
-          error: `history exceeds the maximum size of ${String(MAX_DEV_SESSION_HISTORY_BYTES / 1024)} KiB.`,
-          ok: false,
-        },
+        { error: "history must be an array of messages.", ok: false },
         { status: 400 },
       );
     }
+    history = validated;
+  } catch (error) {
+    if (!(error instanceof InvalidSessionHistoryError)) throw error;
+    return Response.json({ error: error.message, ok: false }, { status: 400 });
+  }
+  if (Buffer.byteLength(JSON.stringify(history), "utf8") > MAX_DEV_SESSION_HISTORY_BYTES) {
+    return Response.json(
+      {
+        error: `history exceeds the maximum size of ${String(MAX_DEV_SESSION_HISTORY_BYTES / 1024)} KiB.`,
+        ok: false,
+      },
+      { status: 400 },
+    );
   }
 
   let stubs: readonly ToolStub[] | undefined;
