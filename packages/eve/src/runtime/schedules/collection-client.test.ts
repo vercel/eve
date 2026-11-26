@@ -219,4 +219,45 @@ describe("dynamic schedules client", () => {
     await client.update(created.name, { payload, expression: input.expression });
     expect(timings).toEqual([cron, cron, input.expression]);
   });
+
+  it("hands the provider the resolved scope on every operation", async () => {
+    const seen: unknown[] = [];
+    const inner = inMemoryScheduleProvider();
+    const operations = ["create", "get", "list", "update", "enable", "disable", "invoke", "delete"];
+    const provider = Object.fromEntries(
+      Object.entries(inner).map(([key, value]) => [
+        key,
+        operations.includes(key)
+          ? (context: { scope: unknown }, ...args: unknown[]) => {
+              seen.push([key, context.scope]);
+              return (value as (...rest: unknown[]) => unknown)(context, ...args);
+            }
+          : value,
+      ]),
+    ) as typeof inner;
+    const definition = defineDynamicSchedules({
+      provider,
+      tool: false,
+      inputSchema: z
+        .object({ task: z.string().min(1), destination: z.enum(["my-dm", "team-channel"]) })
+        .strict(),
+      scope: () => ["team", "billing"],
+      auth: () => null,
+      run: async () => {},
+    });
+    const client = createScheduleCollectionClient(definition, callContext);
+    const created = await client.create({ name: "report", expression: input.expression, payload });
+    await client.get(created.name);
+    await client.list();
+    await client.update(created.name, { expression: { type: "delay", minutes: 9 } });
+    await client.disable(created.name);
+    await client.enable(created.name);
+    await client.invoke(created.name).catch(() => undefined);
+    await client.delete(created.name);
+    expect(seen).toEqual(
+      ["create", "get", "list", "get", "update", "disable", "enable", "invoke", "delete"].map(
+        (operation) => [operation, ["team", "billing"]],
+      ),
+    );
+  });
 });
