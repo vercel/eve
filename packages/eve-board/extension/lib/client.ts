@@ -154,6 +154,34 @@ export interface BoardReadyTaskQuery {
   readonly lease?: number;
 }
 
+export const BOARD_TASK_STATES = [
+  "waiting",
+  "ready",
+  "claimed",
+  "blocked",
+  "completed",
+  "failed",
+  "canceled",
+] as const;
+
+export type BoardTaskStateName = (typeof BOARD_TASK_STATES)[number];
+
+export interface BoardTasksQuery {
+  readonly channel?: string;
+  readonly state?: "open" | "all" | BoardTaskStateName;
+  readonly label?: readonly string[];
+  readonly owner?: string;
+  readonly for?: string;
+  readonly needs?: string;
+  readonly after?: string;
+  readonly limit?: number;
+}
+
+export interface BoardTasksPage {
+  readonly tasks: readonly BoardThreadSummary[];
+  readonly cursor: string;
+}
+
 export interface BoardNewTask {
   readonly text: string;
   readonly labels?: Readonly<Record<string, string>>;
@@ -258,6 +286,7 @@ export interface BoardClient {
     options: BoardScheduleOptions,
   ): Promise<BoardSchedule>;
   cancelSchedule(id: string): Promise<{ readonly canceled: boolean }>;
+  tasks(query?: BoardTasksQuery): Promise<BoardTasksPage>;
   claimReady(query: BoardReadyTaskQuery): Promise<BoardClaimedTask | null>;
   claim(taskId: string, lease?: number): Promise<BoardClaimedTask>;
   held(claim: BoardClaim): BoardHeldTask;
@@ -478,6 +507,20 @@ export function createBoardClient(board: BoardRef, can?: BoardCan): BoardClient 
     async cancelSchedule(id) {
       const { canceled } = await handle.cancelSchedule(id);
       return { canceled };
+    },
+    async tasks(query = {}) {
+      const page = await handle.tasks.list({
+        ...query,
+        ...(query.label !== undefined && { label: [...query.label] }),
+      } as never);
+      return {
+        cursor: page.cursor,
+        tasks: page.tasks.map((summary) => ({
+          last: summary.last === null ? null : messageOf(summary.last),
+          message: messageOf(summary.message),
+          replies: summary.replies,
+        })),
+      };
     },
     async claimReady(query) {
       const claim = await handle.tasks.claim({

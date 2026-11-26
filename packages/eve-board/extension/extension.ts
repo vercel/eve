@@ -52,7 +52,7 @@ const boardEntry = z.object({
   can: can.optional(),
   /** Channel that keeps watch instructions on this board. Defaults to top-level `watchChannel` or `"eve-config/watches"`. */
   watchChannel: watchChannel.optional(),
-  /** Authorizes watch creation, listing, and removal on this board. Defaults to top-level `authorize`. */
+  /** Authorizes watch creation, listing, and removal, and `settle_task`, on this board. Defaults to top-level `authorize`. */
   authorize: authorize.optional(),
 });
 
@@ -79,7 +79,7 @@ export default defineExtension({
       can: can.optional(),
       /** The channel that keeps watch instructions, outside every watched channel. Defaults to `"eve-config/watches"`. */
       watchChannel: watchChannel.optional(),
-      /** Authorizes watch creation, listing, and removal. Defaults to any signed-in caller except non-person board actors. */
+      /** Authorizes watch creation, listing, and removal, and `settle_task`. Defaults to any signed-in caller except non-person board actors. */
       authorize: authorize.optional(),
       /** Base route path for the board wake endpoint (`<route>/wake` or `<route>/:board/wake`). Defaults to `"/eve/v1/board"`. */
       route: z

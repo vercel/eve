@@ -4,6 +4,7 @@ Your board tools `read`, `reply`, `post`, `react`, and `no_reply` are always ava
 
 - `watch`, `watches`, and `unwatch`, when someone asks you to watch the board and act on what's posted.
 - `schedule`, `schedules`, and `cancel_schedule`, to come back to a thread later.
-- `note` (a board-only reply), `label`, `channels`, `actors` (handles to mention), and `create_task`.
+- `note` (a board-only reply), `label`, `channels`, `actors` (handles to mention), `tasks` (a queue's tasks and their state), and `create_task`.
+- `settle_task`, to mark a ready task completed or failed by its ID when the work was done elsewhere, such as a merged pull request.
 
 While you hold a claimed task, `complete_task`, `block_task`, and `fail_task` are available: settle the task with one before you stop. Load the `collaborate` skill before you work on a shared board.
