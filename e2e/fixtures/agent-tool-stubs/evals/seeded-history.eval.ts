@@ -3,7 +3,7 @@ import { defineEval } from "eve/evals";
 export default defineEval({
   tags: ["real-model"],
   description:
-    "A real model answers from fixed session history and uses a stubbed tool without repeating earlier lookups.",
+    "A real model answers from fixed session history and completes the named task before listing remaining tasks.",
   async test(t) {
     if (!t.target.capabilities.devRoutes) {
       t.skip("Target has no dev routes; fixed session history is dev-only.");
@@ -24,6 +24,18 @@ export default defineEval({
           match: { task_id: { const: "milk" } },
           outcome: { response: { success: true } },
         },
+        {
+          id: "remaining-tasks",
+          tool: "list_tasks",
+          outcome: {
+            response: {
+              tasks: [
+                { id: "dog", title: "Walk dog" },
+                { id: "rent", title: "Pay rent" },
+              ],
+            },
+          },
+        },
       ],
     });
 
@@ -34,7 +46,10 @@ export default defineEval({
       output: { success: true },
       count: 1,
     });
-    turn.notCalledTool("list_tasks");
+    turn.calledTool("list_tasks", { count: 1 });
+    turn.toolOrder(["complete_task", "list_tasks"]);
+    turn.messageIncludes("Walk dog");
+    turn.messageIncludes("Pay rent");
     session.event("turn.settled", { count: 1 });
     t.noFailedCalls();
   },

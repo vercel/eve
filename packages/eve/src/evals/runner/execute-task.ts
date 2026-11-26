@@ -49,7 +49,7 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<ExecuteT
   const manager = new EvalSessionManager({
     client,
     collector,
-    devRoutes: target.capabilities.devRoutes,
+    devRoutes: target.capabilities?.devRoutes === true,
     onSessionStart: options.onSessionStart,
     signal,
   });
