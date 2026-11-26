@@ -513,7 +513,7 @@ export async function startWorkflowOnDeployment<TArgs extends unknown[], TResult
   });
 }
 
-async function resolveCurrentWorkflowDeploymentId(): Promise<string> {
+export async function resolveCurrentWorkflowDeploymentId(): Promise<string> {
   const deploymentId =
     process.env.VERCEL_DEPLOYMENT_ID?.trim() || (await (await getWorld()).getDeploymentId());
   if (deploymentId.length === 0 || deploymentId === "latest") {

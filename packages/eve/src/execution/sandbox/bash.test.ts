@@ -118,6 +118,49 @@ describe("executeBashOnSandbox", () => {
     },
   );
 
+  it("reads inline job metadata from stderr without calling sandbox.run on truncated output", async () => {
+    const encoder = new TextEncoder();
+    const run = vi.fn(async () => {
+      throw new Error("sandbox.run should not be called");
+    });
+    const sandbox: SandboxSession = {
+      ...createTestSandboxSession({ exitCode: 0, stderr: "", stdout: "" }),
+      run,
+      spawn: async ({ command }) => {
+        const jobId = /set -- '\/tmp\/\.eve\/jobs\/([0-9a-f]+)'/u.exec(command)?.[1];
+        if (jobId === undefined) throw new Error(`missing jobId in command: ${command}`);
+        const longStderr = `${"e".repeat(2500)}\0__eve_job__:${jobId}:12000:1\0`;
+        const stderrBytes = encoder.encode(longStderr);
+        let offset = 0;
+        return {
+          kill: async () => {},
+          stderr: new ReadableStream<Uint8Array>({
+            pull(controller) {
+              if (offset >= stderrBytes.byteLength) return controller.close();
+              controller.enqueue(stderrBytes.subarray(offset, (offset += 11)));
+            },
+          }),
+          stdout: bufferToStream(
+            encoder.encode(Array.from({ length: 2100 }, (_, i) => `line ${i}\n`).join("")),
+          ),
+          wait: async () => ({ exitCode: 0 }),
+        };
+      },
+    };
+
+    const result = await executeBashOnSandbox(sandbox, { command: "build" });
+
+    expect(run).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ exitCode: 0, status: "completed", truncated: true });
+    expect(result.stdout).toMatch(
+      /^\[stdout truncated: showing last 2000 of 12000 lines; full output: \/tmp\/\.eve\/jobs\/[0-9a-f]+\/stdout\]\n/u,
+    );
+    expect(result.stderr).toMatch(
+      /^\[stderr truncated: line exceeded 2000 chars; full output: \/tmp\/\.eve\/jobs\/[0-9a-f]+\/stderr\]\n/u,
+    );
+    expect(result.stderr).not.toContain("__eve_job__");
+  });
+
   it("returns a timeout result instead of throwing AbortError when fallback spawn rejects on signal", async () => {
     vi.useFakeTimers();
     try {

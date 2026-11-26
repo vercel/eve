@@ -1,3 +1,4 @@
+import { forwardSessionFastPaths } from "#execution/sandbox/internal-shell.js";
 import type { GetSandboxOptions, SessionContext } from "#context/session-context.js";
 import {
   isSandboxEnvironment,
@@ -84,7 +85,7 @@ export function withRuntimeSandboxLifecycle<Session extends SandboxSession>(
   deleteSandbox: RuntimeSandboxSession["delete"],
   stop: () => Promise<void>,
 ): Session & Pick<RuntimeSandboxSession, "delete" | "stop"> {
-  return new Proxy(Object.create(null) as object, {
+  const wrapped = new Proxy(Object.create(null) as object, {
     get(_proxyTarget, property) {
       if (property === "delete") return deleteSandbox;
       if (property === "stop") return stop;
@@ -105,4 +106,5 @@ export function withRuntimeSandboxLifecycle<Session extends SandboxSession>(
       return [...new Set([...Reflect.ownKeys(sandbox), "delete", "stop"])];
     },
   }) as Session & Pick<RuntimeSandboxSession, "delete" | "stop">;
+  return forwardSessionFastPaths(sandbox, wrapped);
 }

@@ -3,6 +3,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { Bash, defineCommand, InMemoryFs } from "just-bash";
 import { test } from "vitest";
 
 import {
@@ -173,23 +174,72 @@ test("executeGrepSearch defaults to the sandbox workspace root", async () => {
   assert.match(searched[0] ?? "", /'\/app'/u);
 });
 
-test("executeGrepSearch rejects an absolute path outside the workspace", async () => {
-  await assert.rejects(
-    executeGrepSearch(
-      { pattern: "root", path: "/etc" },
-      {
-        resolvePath: (value) => (value.startsWith("/") ? value : "/app"),
-        async run({ command }) {
-          return {
-            exitCode: 0,
-            stderr: "",
-            stdout: command.includes("/etc") ? "/etc\0" : "/app\0",
-          };
-        },
+function createJustBashWorkspaceSandbox(input: {
+  readonly files: Record<string, string>;
+  readonly symlinks?: ReadonlyArray<{ readonly path: string; readonly target: string }>;
+  readonly workspaceRoot: string;
+}) {
+  const fs = new InMemoryFs(input.files);
+  const setup = Promise.all(
+    (input.symlinks ?? []).map((link) => fs.symlink(link.target, link.path)),
+  );
+  const shell = new Bash({
+    cwd: input.workspaceRoot,
+    customCommands: [
+      defineCommand("realpath", async (args, context) => {
+        const target = args.at(-1);
+        if (
+          args.length !== 4 ||
+          args[0] !== "-e" ||
+          args[1] !== "-z" ||
+          args[2] !== "--" ||
+          !target
+        ) {
+          return { exitCode: 2, stderr: "realpath: expected -e -z -- path", stdout: "" };
+        }
+        try {
+          const real = await context.fs.realpath(target);
+          await context.fs.stat(real);
+          return { exitCode: 0, stderr: "", stdout: `${real}\0` };
+        } catch (error) {
+          return { exitCode: 1, stderr: `realpath: ${String(error)}`, stdout: "" };
+        }
+      }),
+    ],
+    fs,
+  });
+  let runCount = 0;
+  return {
+    get runCount() {
+      return runCount;
+    },
+    sandbox: {
+      resolvePath: (value: string) =>
+        value.startsWith("/")
+          ? value
+          : value
+            ? `${input.workspaceRoot}/${value}`
+            : input.workspaceRoot,
+      async run({ command }: { command: string }) {
+        await setup;
+        runCount += 1;
+        const result = await shell.exec(command);
+        return { exitCode: result.exitCode, stderr: result.stderr, stdout: result.stdout };
       },
-    ),
+    },
+  };
+}
+
+test("executeGrepSearch rejects an absolute path outside the workspace in one command", async () => {
+  const harness = createJustBashWorkspaceSandbox({
+    files: { "/app/index.ts": "ok\n", "/etc/passwd": "root:x:0:0\n" },
+    workspaceRoot: "/app",
+  });
+  await assert.rejects(
+    executeGrepSearch({ pattern: "root", path: "/etc" }, harness.sandbox),
     /resolves outside the workspace \/app: \/etc/u,
   );
+  assert.equal(harness.runCount, 1);
 });
 
 test("processGrepOutput caps rows and drops zero-count files", () => {
@@ -334,26 +384,17 @@ test("total byte truncation counts only rows retained in content", () => {
   assert.ok(Buffer.byteLength(result.content) <= MAX_GREP_RETURN_BYTES);
 });
 
-test("executeGrepSearch rejects a symlink target whose realpath escapes the workspace", async () => {
-  let runCount = 0;
+test("executeGrepSearch rejects a symlink target whose realpath escapes the workspace in one command", async () => {
+  const harness = createJustBashWorkspaceSandbox({
+    files: { "/etc/secret.txt": "secret\n", "/workspace/app.ts": "ok\n" },
+    symlinks: [{ path: "/workspace/linked", target: "/etc" }],
+    workspaceRoot: "/workspace",
+  });
   await assert.rejects(
-    executeGrepSearch(
-      { pattern: "secret", path: "linked" },
-      {
-        resolvePath: (value) => (value ? `/workspace/${value}` : "/workspace"),
-        async run() {
-          runCount += 1;
-          return {
-            exitCode: 0,
-            stderr: "",
-            stdout: runCount === 1 ? "/workspace\0" : "/etc\0",
-          };
-        },
-      },
-    ),
+    executeGrepSearch({ pattern: "secret", path: "linked" }, harness.sandbox),
     /resolves outside the workspace \/workspace: \/etc/u,
   );
-  assert.equal(runCount, 2);
+  assert.equal(harness.runCount, 1);
 });
 
 test("ripgrep and fallback content modes emit an unambiguous filename protocol", () => {

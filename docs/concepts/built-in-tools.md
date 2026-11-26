@@ -406,11 +406,11 @@ export default disableTool();
 
 ### `eve__search`, `eve__tool`, and `eve__skill`
 
-The catalog tools let the model reach what isn't in its tool list. `eve__search` finds tools defined with `deferred: true`, agents defined with `tool: "deferred"`, every tool from the agent's [connections](../connections), and deferred [skills](../skills). `eve__tool` calls a deferred tool, agent, or connection tool by name, and `eve__skill` loads a skill, deferred or not. There is no add command; eve adds each one when the session has something it reaches, even when `defaultTools` is `false`:
+The catalog tools let the model reach what isn't in its tool list. `eve__search` finds tools defined with `deferred: true`, agents defined with `tool: "deferred"`, every tool from the agent's [connections](../connections), and deferred [skills](../skills), and the events a session can subscribe to. `eve__tool` calls a deferred tool, agent, or connection tool by name, and `eve__skill` loads a skill, deferred or not. There is no add command; eve adds each one when the session has something it reaches, even when `defaultTools` is `false`:
 
 - `eve__tool` comes with anything it can call: a deferred tool or agent, or a connection.
 - `eve__skill` comes with any skill, so an agent whose only catalog entries are listed skills gets `eve__skill` alone.
-- `eve__search` comes with anything it could find: whatever `eve__tool` can call, plus deferred skills.
+- `eve__search` comes with anything it could find: whatever `eve__tool` can call, plus deferred skills and subscribable events.
 - A session with none of these gets no catalog tools.
 
 Declared entries count from the session's first step, and an entry a dynamic resolver returns counts from the step where it first appears. A resolver in `agent/tools/` that returns only non-deferred tools adds no catalog tools. Once a session has a catalog tool, it keeps it, even after a resolver stops returning the entry that brought it.
@@ -419,10 +419,11 @@ Declared entries count from the session's first step, and an entry a dynamic res
 
 `eve__search({ query, limit? })` returns the best matches, up to `limit` (default 10, at most 50). `query` is required and must contain a word. It isn't a regular expression, and eve ignores characters that can't appear in a name, such as a leading `^`.
 
-| Match          | Fields                                                                                     | Use with     |
-| -------------- | ------------------------------------------------------------------------------------------ | ------------ |
-| Tool           | `tool` name, `description`, and a TypeScript `signature` rendered from its schemas         | `eve__tool`  |
-| Deferred skill | `skill` name, `description`, and the `path` of its `SKILL.md` when it has supporting files | `eve__skill` |
+| Match          | Fields                                                                                     | Use with         |
+| -------------- | ------------------------------------------------------------------------------------------ | ---------------- |
+| Tool           | `tool` name, `description`, and a TypeScript `signature` rendered from its schemas         | `eve__tool`      |
+| Deferred skill | `skill` name, `description`, and the `path` of its `SKILL.md` when it has supporting files | `eve__skill`     |
+| Event          | `source`, `event` name, `description`, and a `signature` of the `eve__subscribe` call      | `eve__subscribe` |
 
 A very long signature drops its property descriptions before any property name. Next to `results`, `searched` counts the entries the query covered, and `remaining` counts the matches past `limit`. A connection behind sign-in counts as its one sign-in result, and an unavailable connection counts as none.
 
@@ -435,6 +436,8 @@ Tools and skills rank together, in tiers:
 5. Keyword matches in names, parameters, and descriptions. One-letter and filler words such as `a` and `the` don't count unless the query has nothing else.
 
 A query whose first word contains `__` searches one namespace: everything before its last `__`, without trailing underscores. `eve__search` keeps names under `<namespace>__` and anything named exactly the namespace, such as a connection's sign-in entry, then ranks them by the whole query. `eve__search({ query: "linear__" })` returns only the `linear` connection's tools, or its sign-in result. Connections that can't own names in that namespace don't appear in `unavailable`. A namespace that matches nothing fails with the closest connection names.
+
+Event results name a channel or an MCP connection that offers subscriptions. `eve__search({ query: "subscriptions__github__" })` lists one source's events, and words such as `github check suite` rank them with everything else. A channel's events come from its `catalog`, which `eve__search` reads, calling it if it is a function, only when a search covers that channel. A channel whose `catalog` function fails appears under `unavailable`, and matches from everything else still return. An MCP connection's events come from its server's `events/list`, which `eve__search` calls only when a search covers that connection.
 
 `eve__search` never asks the user to sign in. A connection whose server won't list its tools until sign-in appears as one result named after the connection, such as `linear`. A connection whose tools fail to load, or take longer than 10 seconds, appears under `unavailable`. Its `error` reads, for example, `"crm" did not list its tools within 10s. Try again later.` Matches from everything else still return. An `eve__tool` call on that connection's tools fails with the same error.
 
@@ -459,7 +462,7 @@ It never names a deferred entry, so deferred entries stay out of context until `
 
 #### Reserved `eve` names
 
-The tools eve adds itself live in the `eve` namespace: `eve__search`, `eve__tool`, `eve__skill`, `eve__task_wait`, `eve__task_cancel`, and `eve__reply`. No tool, subagent, skill, connection, or extension mount, static or dynamic, may be named `eve` or start with `eve__`. The compiler rejects an authored tool, skill, connection, or mount with such a name, such as `agent/tools/eve__search.ts`. eve rejects an authored subagent when the agent loads, and a dynamic entry when its resolver returns it. Any other name is free, including `search` and `execute`.
+The tools eve adds itself live in the `eve` namespace: `eve__search`, `eve__tool`, `eve__skill`, `eve__task_wait`, `eve__task_cancel`, `eve__reply`, `eve__subscribe`, and `eve__subscription_stop`. No tool, subagent, skill, connection, or extension mount, static or dynamic, may be named `eve` or start with `eve__`. The compiler rejects an authored tool, skill, connection, or mount with such a name, such as `agent/tools/eve__search.ts`. eve rejects an authored subagent when the agent loads, and a dynamic entry when its resolver returns it. Any other name is free, including `search` and `execute`.
 
 ### `eve__task_wait` and `eve__task_cancel`
 
@@ -467,6 +470,14 @@ eve adds `eve__task_wait` and `eve__task_cancel` when the agent has a tool that 
 
 - `eve__task_wait({ timeoutSeconds? })` waits until any task has a result, a new message arrives, or `timeoutSeconds` pass. It returns at once when a result is already waiting. The turn stays running, not paused, because `turn.paused` only reports approvals, questions, and other requests for input. Results arrive in a `<task_result>` message right after it returns. Waiting never stops a task.
 - `eve__task_cancel({ taskId })` stops a task's current work and says so. When the task already finished or is an idle [resumable task](/docs/tools/workflows#resumable-tasks-serve), it says the task had no work to stop. An id that names no task fails with `UNKNOWN_TASK`. Cancelling an agent task ends it; other resumable tasks stay available after a cancel.
+
+### `eve__subscribe` and `eve__subscription_stop`
+
+eve adds these two tools to the root agent when a channel defines `experimental.subscriptions` (`catalog` and `onEvent`) or an MCP connection enables `experimental.events`, and adds `eve__search` with them so the model can find the events. Subagents do not get them. A channel and a connection that both offer subscriptions cannot share a name, and the build fails if they do.
+
+- `eve__subscribe({ source, event, input, ttlMs })` subscribes the session to future events from a channel or connection. The tool's description and schema name no sources or events and do not change with their number, so a channel with hundreds of events adds nothing to each step. The model finds event names and each event's `input` with [`eve__search`](#eve__search). An event the source does not emit fails with the closest event names. See [Let sessions subscribe to events](/docs/channels/custom#let-sessions-subscribe-to-events) and [MCP connection events](/docs/connections/mcp).
+  Approvals, hooks, and traces see every subscription as a call to `eve__subscribe`. For a connection's subscription the connection's approval policy applies.
+- `eve__subscription_stop({ id })` ends a subscription. For a connection's subscription it runs through the connection's approval policy.
 
 Review these tools before production use. Disable, wrap, restrict, or require approval for any tool that can access the filesystem, network, shell, or sensitive data.
 

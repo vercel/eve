@@ -1,3 +1,4 @@
+import { runInternalCommand } from "#execution/sandbox/internal-shell.js";
 import { isObject } from "#shared/guards.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 import {
@@ -139,7 +140,7 @@ export function offloadContent<TOutput = unknown>(
 }
 
 async function evictOldest(sandbox: SandboxSession, keep: string): Promise<void> {
-  const { stdout } = await sandbox.run({
+  const { stdout } = await runInternalCommand(sandbox, {
     command: `find ${RESULTS_DIRECTORY} -maxdepth 1 -type f -exec sh -c 'stat -c "%Y %s %n" -- "$@" 2>/dev/null || stat -f "%m %z %N" -- "$@" 2>/dev/null' _ {} + | head -c ${MAX_LISTING_BYTES}`,
   });
   if (Buffer.byteLength(stdout) >= MAX_LISTING_BYTES) {

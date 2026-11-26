@@ -1,17 +1,32 @@
+import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
-import type { EventBinding } from "#runtime/subscriptions/state.js";
-import type { ManagedEventSubscription } from "#shared/connection-events.js";
+import type {
+  OpenedSubscription,
+  SubscriptionBinding,
+  SubscriptionOccurrence,
+  SubscriptionSourceRef,
+} from "#runtime/subscriptions/state.js";
 
-export interface ConnectionEventOwners {
+export interface SubscriptionOwners {
   find(
     bindingId: string,
-  ): Promise<
-    { owner: EventBinding; subscription: ManagedEventSubscription | undefined } | undefined
-  >;
+  ): Promise<{ binding: SubscriptionBinding; opened: OpenedSubscription | undefined } | undefined>;
   start(
-    binding: EventBinding,
+    binding: SubscriptionBinding,
     bundle: CompiledBundle,
     signal?: AbortSignal,
-  ): Promise<ManagedEventSubscription | undefined>;
+  ): Promise<OpenedSubscription | undefined>;
   retire(bindingId: string): Promise<boolean>;
+  emit(
+    channelName: string,
+    key: string,
+    occurrence: SubscriptionOccurrence,
+    source: RuntimeCompiledArtifactsSource,
+  ): Promise<boolean>;
+  deliver(
+    bindingId: string,
+    from: SubscriptionSourceRef,
+    occurrence: SubscriptionOccurrence,
+    source: RuntimeCompiledArtifactsSource,
+  ): Promise<boolean>;
 }

@@ -14,7 +14,3 @@ export function connectionEventDestination(connectionName: string): string {
     connectionEventRoute(connectionName),
   );
 }
-
-export function connectionEventHookToken(bindingId: string): string {
-  return `eve:connection-event:${bindingId}`;
-}

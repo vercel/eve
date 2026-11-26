@@ -69,7 +69,14 @@ import type {
   VercelSandbox,
 } from "#execution/sandbox/bindings/vercel-sdk-types.js";
 import { withToolSessionRetention } from "#execution/sandbox/bindings/vercel-tool-sessions.js";
-import { adaptMultiplexedCommandToSandboxProcess } from "#execution/sandbox/multiplexed-command.js";
+import {
+  type ConnectionCommandOptions,
+  withConnectionFastPaths,
+} from "#execution/sandbox/internal-shell.js";
+import {
+  adaptMultiplexedCommandToSandboxProcess,
+  adaptStreamingCommandToSandboxProcess,
+} from "#execution/sandbox/multiplexed-command.js";
 import { createSandboxProviderIdentity } from "#execution/sandbox/provider-identity.js";
 import { isObject } from "#shared/guards.js";
 import {
@@ -617,6 +624,74 @@ function createVercelConnection(
       }, options.signal);
     },
   };
+  const runSingleRequest = async (args: string[], options: ConnectionCommandOptions) => {
+    const release = await (await activeTimeout()).acquire(options.signal);
+    let startedCommand: { kill?(): PromiseLike<void> } | undefined;
+    let done = false;
+    let killed = false;
+    const killOnAbort = () => {
+      if (done || killed || startedCommand === undefined) return;
+      killed = true;
+      void Promise.resolve(startedCommand.kill?.()).catch(() => undefined);
+    };
+    options.signal?.addEventListener("abort", killOnAbort, { once: true });
+    try {
+      const finished = await sandbox.runCommand({
+        args,
+        cmd: "bash",
+        cwd: options.workingDirectory,
+        detached: false,
+        env: options.env,
+        onStart(command) {
+          startedCommand = command;
+          if (options.signal?.aborted) killOnAbort();
+        },
+        signal: options.signal,
+      });
+      done = true;
+      const [stdout, stderr] = await Promise.all([finished.stdout(), finished.stderr()]);
+      return { exitCode: finished.exitCode, stderr, stdout };
+    } catch (error) {
+      if (options.signal?.aborted && startedCommand !== undefined) {
+        killOnAbort();
+      }
+      done = true;
+      if (options.signal?.aborted) throw options.signal.reason;
+      throw error;
+    } finally {
+      options.signal?.removeEventListener("abort", killOnAbort);
+      release();
+    }
+  };
+  withConnectionFastPaths(connection, {
+    runFast: (options) =>
+      runSingleRequest(["--noprofile", "--norc", "-c", options.command], options),
+    runLogin: (options) => runSingleRequest(["-lc", options.command], options),
+    async spawnBounded(options) {
+      const release = await (await activeTimeout()).acquire(options.signal);
+      try {
+        return await adaptStreamingCommandToSandboxProcess({
+          abortSignal: options.signal,
+          onRelease: release,
+          start: ({ onStart, stderr, stdout }) =>
+            sandbox.runCommand({
+              args: ["-lc", options.command],
+              cmd: "bash",
+              cwd: options.workingDirectory,
+              detached: false,
+              env: options.env,
+              onStart,
+              signal: options.signal,
+              stderr,
+              stdout,
+            }),
+        });
+      } catch (error) {
+        release();
+        throw error;
+      }
+    },
+  });
   return withSandboxConnectionDisposal(connection, async () => {
     disposed = true;
     await close();

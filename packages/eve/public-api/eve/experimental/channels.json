@@ -1,0 +1,15 @@
+[
+  "ChannelEvent",
+  "ChannelEventCatalog",
+  "ChannelEventDecision",
+  "ChannelEventDefinition",
+  "ChannelOccurrence",
+  "ChannelOnEvent",
+  "ChannelOnSubscribe",
+  "ChannelSubscriber",
+  "ChannelSubscription",
+  "ChannelSubscriptionGrant",
+  "ChannelSubscriptionRequest",
+  "ChannelSubscriptionsDefinition",
+  "EmitChannelEventFn"
+]

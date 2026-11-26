@@ -113,6 +113,7 @@ function session(skills?: readonly object[]) {
     fromCompiledBundle({
       graph: { nodesByNodeId: new Map() },
       resolvedAgent: {
+        channels: [],
         definitions: (
           skills ?? [
             {

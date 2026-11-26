@@ -1,5 +1,8 @@
 import type { ChannelDeliveryMetadata, SessionTraceSeed } from "#channel/types.js";
 
+export const SUBSCRIPTION_CHANNEL_KIND = "channel-subscriptions";
+export const CONNECTION_EVENT_CHANNEL_KIND = "mcp-events";
+
 export interface ChannelDeliverySource {
   readonly acceptedDeploymentId?: string;
   readonly channelKind: string;
