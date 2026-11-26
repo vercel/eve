@@ -1,9 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { z } from "#compiled/zod/index.js";
 import type { AuthResult } from "#channel/auth/definitions.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { defineDynamicSchedules, schedules } from "#public/schedules/index.js";
 import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
+import { vercelScheduleProvider } from "#public/schedules/providers/vercel.js";
+import { withLocalDevRequestScope } from "#runtime/local-dev-capability.js";
+import { AuthKey, SessionIdKey } from "#context/keys.js";
+import type { ScheduleProvider } from "#public/schedules/subscription.js";
 import { stampScheduleCollectionSource } from "#shared/schedule-collection-definition.js";
 
 const workspace = (id: string): AuthResult => ({
@@ -17,9 +21,9 @@ const principalB = workspace("ws_b");
 const expression = { type: "delay" as const, minutes: 5 };
 const payload = { task: "Summarize the week." };
 
-function setup() {
+function setup(provider: ScheduleProvider = inMemoryScheduleProvider()) {
   const definition = defineDynamicSchedules({
-    provider: inMemoryScheduleProvider(),
+    provider,
     tool: false,
     inputSchema: z.object({ task: z.string() }).strict(),
     scope: ({ session }) => session.auth.current?.principalId ?? null,
@@ -68,10 +72,45 @@ describe("schedules() outside a turn", () => {
     await expect(schedules(setup())).rejects.toThrow("No active eve context");
   });
 
-  it("rejects auth inside a turn, whose principal never changes", async () => {
+  it("accepts auth in a channel route handler's local dev request scope", async () => {
     const definition = setup();
+    const client = await withLocalDevRequestScope(new Request("http://x/"), () =>
+      schedules(definition, { auth: principalA }),
+    );
+    await expect(client.create({ name: "weekly", expression, payload })).resolves.toMatchObject({
+      displayName: "weekly",
+    });
+  });
+
+  it("rejects auth inside a turn scope holding a session id", async () => {
+    const definition = setup();
+    const scope = new ContextContainer();
+    scope.set(SessionIdKey, "session_1");
     await expect(
-      contextStorage.run(new ContextContainer(), () => schedules(definition, { auth: principalA })),
+      contextStorage.run(scope, () => schedules(definition, { auth: principalA })),
     ).rejects.toThrow("a turn's principal cannot be overridden");
+  });
+
+  it("rejects auth inside a scope holding an auth principal", async () => {
+    const definition = setup();
+    const scope = new ContextContainer();
+    scope.set(AuthKey, null);
+    await expect(
+      contextStorage.run(scope, () => schedules(definition, { auth: principalA })),
+    ).rejects.toThrow("a turn's principal cannot be overridden");
+  });
+
+  it("rejects invoke on the in-memory provider with a precise error", async () => {
+    const client = await schedules(setup(), { auth: principalA });
+    await expect(client.invoke("weekly")).rejects.toThrow("invoke is only available inside a turn");
+  });
+
+  it("rejects invoke on the vercel provider without calling the schedule API", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({}));
+    const client = await schedules(setup(vercelScheduleProvider({ fetch: fetchImpl })), {
+      auth: principalA,
+    });
+    await expect(client.invoke("weekly")).rejects.toThrow("invoke is only available inside a turn");
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 });

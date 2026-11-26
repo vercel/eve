@@ -65,18 +65,24 @@ export async function bindScheduleCollection<TPayload, TPrepared = TPayload>(
     `Invalid dynamic schedules definition ${identity.logicalPath}.`,
   ) as DefinedDynamicSchedules<TPayload, StandardSchemaV1<unknown, TPayload>, TPrepared>;
   const bound = { application: identity.application, collection: identity.collection };
-  const active = contextStorage.getStore();
   if (auth !== undefined) {
-    if (active !== undefined)
+    const active = contextStorage.getStore();
+    if (active?.get(SessionIdKey) !== undefined || active?.get(AuthKey) !== undefined)
       throw new Error(
         "schedules(): a turn's principal cannot be overridden; omit `auth` inside a turn.",
       );
-    return createScheduleCollectionClient(definition, {
+    const client = createScheduleCollectionClient(definition, {
       abortSignal: new AbortController().signal,
       session: { id: "", auth: { current: auth, initiator: auth } },
       channel: { kind: "http", metadata: {} },
       ...bound,
     });
+    return {
+      ...client,
+      async invoke() {
+        throw new Error("schedules(): invoke is only available inside a turn.");
+      },
+    };
   }
   const context = loadContext();
   const steeredBy = context.get(SteeredByKey);
