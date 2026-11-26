@@ -189,7 +189,7 @@
     "snapshot": {
       "session": {
         "compaction": {
-          "estimateRatio": 0.00045475216007276033,
+          "estimateRatio": 0.0005608524957936063,
           "lastKnownInputTokens": 1,
           "lastKnownPromptMessageCount": 6,
           "lastStage": "tail",
@@ -197,10 +197,10 @@
             "eve-test/layout": {
               "inputTokens": 1,
               "promptMessageCount": 6,
-              "requestEnvelopeTokens": 2075
+              "requestEnvelopeTokens": 1659
             }
           },
-          "requestEnvelopeTokens": 2075
+          "requestEnvelopeTokens": 1659
         },
         "continuationToken": "http:layout-release",
         "sandboxState": {

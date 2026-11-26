@@ -9,7 +9,7 @@ const SUBAGENT_TOOL_INPUT_SCHEMA = {
   properties: {
     message: {
       type: "string",
-      description: "The message to send to the agent, with everything it needs to do the work.",
+      description: "Self-contained instructions for the agent.",
     },
   },
   required: ["message"],

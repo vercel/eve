@@ -227,7 +227,7 @@ describe("executeBashOnSandbox with a real shell", () => {
     const { home, sandbox } = await createHostSandbox();
 
     const finishing = await executeBashOnSandbox(sandbox, {
-      command: "echo step-one; sleep 2; echo step-two",
+      command: "echo step-one; echo warn-one >&2; sleep 2; echo step-two; echo warn-two >&2",
       timeout: 1,
     });
     if (finishing.status !== "running") {
@@ -244,8 +244,11 @@ describe("executeBashOnSandbox with a real shell", () => {
     );
     if (finalPoll.status !== "completed") return;
     expect(finalPoll.result.exitCode).toBe(0);
+    expect(finalPoll.result.truncated).toBe(false);
     expect(finalPoll.result.stdout).toContain("step-one");
     expect(finalPoll.result.stdout).toContain("step-two");
+    expect(finalPoll.result.stderr).toContain("warn-one");
+    expect(finalPoll.result.stderr).toContain("warn-two");
     expect(existsSync(handoff.directory)).toBe(false);
 
     const pidFile = join(home, "cancel-child.pid");
@@ -334,7 +337,7 @@ describe("executeBashOnSandbox with a real shell", () => {
     const pidFile = join(home, "timeout-tail.pid");
 
     const started = await executeBashOnSandbox(sandbox, {
-      command: `echo before-timeout; sleep 60 & echo $! > ${pidFile}; wait`,
+      command: `echo before-timeout; echo err-before-timeout >&2; sleep 60 & echo $! > ${pidFile}; wait`,
       timeout: 1,
     });
     if (started.status !== "running") {
@@ -349,7 +352,9 @@ describe("executeBashOnSandbox with a real shell", () => {
 
     expect(timedOut.status).toBe("completed");
     expect(timedOut.exitCode).toBe(124);
+    expect(timedOut.truncated).toBe(false);
     expect(timedOut.stdout).toContain("before-timeout");
+    expect(timedOut.stderr).toContain("err-before-timeout");
     expect(timedOut.stderr).toContain("Command timed out after 30 minutes and was killed.");
     await vi.waitFor(() => expect(isProcessAlive(childPid)).toBe(false), { timeout: 10_000 });
     expect(existsSync(started.outputDirectory)).toBe(false);

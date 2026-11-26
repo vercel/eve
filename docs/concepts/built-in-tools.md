@@ -36,7 +36,7 @@ eve add tool/bash
 export { default } from "eve/tools/bash";
 ```
 
-`bash` waits up to 60 seconds by default. Passing an explicit `timeout` up to 120 seconds kills the command on expiry (exit code 124) with any partial output. Omitting `timeout` or passing a value above 120 waits up to 60 or 120 seconds (leaving room within the Vercel Functions time limit) and then promotes a still-running command to a background [task](/docs/tools/tasks).
+`bash` waits up to 120 seconds by default (leaving room within the Vercel Functions time limit). Passing an explicit `timeout` up to 120 seconds kills the command on expiry (exit code 124) with any partial output. Omitting `timeout` or passing a value above 120 waits up to 120 seconds and then promotes a still-running command to a background [task](/docs/tools/tasks).
 
 A command that finishes in time returns `status: "completed"` with `exitCode`, `stdout`, `stderr`, and `truncated`. A promoted command keeps running in its own process group under `/tmp/.eve/jobs/` (up to 30 minutes before being killed with exit code 124 and its final output tail) and delivers its final result in `<task_result>` when it finishes, or stops its process group when cancelled via `eve__task_cancel` or turn cancellation.
 

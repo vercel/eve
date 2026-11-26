@@ -3,7 +3,7 @@ import type { SessionStreamEvent } from "eve/client";
 import { defineEval } from "eve/evals";
 
 const BASH_TOOL = "bash";
-const INDEX_COMMAND = "for i in $(seq 1 180); do echo indexed batch $i; sleep 1; done";
+const INDEX_COMMAND = "for i in $(seq 1 300); do echo indexed batch $i; sleep 1; done";
 
 interface BashOutput {
   readonly exitCode?: number;
@@ -14,12 +14,12 @@ interface BashOutput {
 export default defineEval({
   description:
     "Sandbox Bash: a slow command promotes to a background task, keeps writing its output file, and stops with eve__task_cancel.",
-  timeoutMs: 150_000,
+  timeoutMs: 240_000,
   async test(t) {
     const turn = await t.send(
       [
         "EVE_SANDBOX_BASH_JOB",
-        "Alice is rebuilding a search index that prints one progress line per second for three minutes.",
+        "Alice is rebuilding a search index that prints one progress line per second for five minutes.",
         `Start it with the \`${BASH_TOOL}\` tool (without passing \`timeout\`) by running: \`${INDEX_COMMAND}\``,
         "After the foreground wait, it will continue as a background task and report its output directory.",
         "Check its latest progress line once with `tail`, then stop the task with `eve__task_cancel`.",

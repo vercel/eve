@@ -16,7 +16,7 @@ import { TASK_CANCEL_TOOL_NAME } from "#protocol/task-tools.js";
 import { canPromoteToTask, promoteToTask } from "#tools/task-handoff.js";
 
 /** How long a `bash` call waits by default before it leaves the command running in the background. */
-export const BASH_YIELD_SECONDS = 60;
+export const BASH_YIELD_SECONDS = 120;
 
 /**
  * The longest a `bash` call waits. A hosted step runs a model call and its tool
@@ -204,7 +204,7 @@ function buildStreamReadCommands(marker: string, quotedDir: string, codeExpr: st
     `[ "$out_bytes" -gt ${KEEP_OUTPUT_BYTES} ] || [ "$out_lines" -gt ${KEEP_OUTPUT_LINES} ] || [ "$err_bytes" -gt ${KEEP_OUTPUT_BYTES} ] || [ "$err_lines" -gt ${KEEP_OUTPUT_LINES} ] && keep=1`,
     `printf '%s done %s %s %s %s %s %s\\n' ${marker} ${codeExpr} "$out_bytes" "$out_lines" "$err_bytes" "$err_lines" "$keep"`,
     `[ -f stdout ] && [ ! -L stdout ] && tail -c ${MAX_OUTPUT_BYTES} stdout 2>/dev/null`,
-    `[ -f stderr ] && [ ! -L stderr ] && tail -c ${MAX_OUTPUT_BYTES} stderr 2>/dev/null >&2`,
+    `[ -f stderr ] && [ ! -L stderr ] && tail -c ${MAX_OUTPUT_BYTES} stderr >&2 2>/dev/null`,
     `[ "$keep" -eq 0 ] && rm -rf ${quotedDir}`,
   ];
 }
