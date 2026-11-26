@@ -406,4 +406,135 @@ describe("createSessionStreamResponse", () => {
     ).toBeGreaterThan(1);
     expect(received.at(-1)).toEqual({ $eve: "stream.lease-ended" });
   });
+
+  it("skips the startIndex=0 read when run attributes report stream version 27", async () => {
+    const { session, starts } = sessionOf([line("a"), line("b"), line("c")]);
+    let versionLookups = 0;
+    const attributed: Session = {
+      ...session,
+      async getStreamVersion() {
+        versionLookups += 1;
+        return "27";
+      },
+    };
+    const read = async () =>
+      await records(
+        await createSessionStreamResponse(
+          new Request(
+            `https://eve.test/eve/v1/session/${attributed.id}/stream?follow=false&startIndex=2`,
+          ),
+          attributed,
+        ),
+      );
+
+    expect(await read()).toEqual([{ $eve: "heartbeat" }, line("c")]);
+    expect(starts).toEqual([2]);
+    expect(versionLookups).toBe(1);
+
+    expect(await read()).toEqual([{ $eve: "heartbeat" }, line("c")]);
+    expect(starts).toEqual([2, 2]);
+    expect(versionLookups).toBe(1);
+  });
+
+  it("falls back to reading line 0 when getStreamVersion reports an earlier stream version", async () => {
+    const v26 = (type: string, data: object) => ({
+      data: { sequence: 0, turnId: "turn_0", ...data },
+      meta: { at, deliveryIds: ["delivery_1"] },
+      type,
+    });
+    const { session, starts } = sessionOf([
+      { data: {}, meta: { at }, type: "session.started" },
+      v26("turn.started", {}),
+      v26("message.received", { message: "Alice asks." }),
+    ]);
+    const attributed: Session = {
+      ...session,
+      async getStreamVersion() {
+        return "26";
+      },
+    };
+    const response = await createSessionStreamResponse(
+      new Request(
+        `https://eve.test/eve/v1/session/${attributed.id}/stream?follow=false&startIndex=2`,
+      ),
+      attributed,
+    );
+    expect(response.status).toBe(200);
+    expect(starts).toEqual([2, 0, 0]);
+    expect(await records(response)).toEqual([
+      { $eve: "heartbeat" },
+      {
+        at,
+        facts: [
+          {
+            data: {
+              deliveryId: "delivery_1",
+              parts: [{ kind: "text", text: "Alice asks." }],
+              turnId: "turn_0",
+            },
+            scope: { turnId: "turn_0" },
+            type: "delivery.consumed",
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("keeps 409 for an empty stranded session whose run attributes do not report v27", async () => {
+    const { session } = sessionOf([]);
+    const stranded: Session = {
+      ...session,
+      getLineStream: (options) =>
+        options?.follow === false
+          ? session.getLineStream(options)
+          : Promise.reject(new SessionStrandedError({ eveVersion: "0.0.1" }, "Reset it.")),
+      async getStreamVersion() {
+        return undefined;
+      },
+    };
+    const response = await createSessionStreamResponse(
+      new Request(`https://eve.test/eve/v1/session/${stranded.id}/stream`),
+      stranded,
+    );
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ code: "session_stranded" });
+  });
+
+  it("falls back to reading line 0 when getStreamVersion returns undefined or fails transiently", async () => {
+    const { session, starts } = sessionOf([line("a"), line("b")]);
+    const transient: Session = {
+      ...session,
+      async getStreamVersion() {
+        throw new Error("Transient lookup error.");
+      },
+    };
+    const response = await createSessionStreamResponse(
+      new Request(
+        `https://eve.test/eve/v1/session/${transient.id}/stream?follow=false&startIndex=1`,
+      ),
+      transient,
+    );
+    expect(response.status).toBe(200);
+    expect(starts).toEqual([1, 0]);
+    expect(await records(response)).toEqual([{ $eve: "heartbeat" }, line("b")]);
+  });
+
+  it("surfaces 404 when getStreamVersion reports a missing run", async () => {
+    const { session, starts } = sessionOf([]);
+    const missing = Object.assign(new Error("Run not found."), {
+      name: "WorkflowRunNotFoundError",
+    });
+    const gone: Session = {
+      ...session,
+      async getStreamVersion() {
+        throw missing;
+      },
+    };
+    const response = await createSessionStreamResponse(
+      new Request(`https://eve.test/eve/v1/session/${gone.id}/stream?startIndex=2`),
+      gone,
+    );
+    expect(response.status).toBe(404);
+    expect(starts).toEqual([2]);
+  });
 });

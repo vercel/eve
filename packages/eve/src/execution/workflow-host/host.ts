@@ -1,6 +1,7 @@
 import { getStepMetadata, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 import { RunExpiredError } from "#compiled/@workflow/errors/index.js";
 import type { DeliverHookPayload } from "#channel/types.js";
+import { resolveSessionStreamVersion } from "#execution/eve-workflow-attributes.js";
 import { installDurableHost, type DurableHost } from "#execution/hosts.js";
 import type { AuthorizationCallbackPayload } from "#execution/session-inbox/inbox.js";
 import type { SessionLineStore } from "#execution/session-line-store.js";
@@ -42,6 +43,19 @@ const workflowLineStore: SessionLineStore = {
         run.expiredAt,
       );
     }
+  },
+  async streamVersion(sessionId) {
+    const world = await getWorld();
+    const run = await world.runs.get(sessionId, { resolveData: "none" });
+    if (run.expiredAt !== undefined && run.expiredAt.getTime() <= Date.now()) {
+      throw new RunExpiredError(
+        "Session history is no longer available.",
+        sessionId,
+        run.status,
+        run.expiredAt,
+      );
+    }
+    return resolveSessionStreamVersion(run.attributes);
   },
 };
 

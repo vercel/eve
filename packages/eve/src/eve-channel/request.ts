@@ -428,8 +428,23 @@ export function rememberCurrentSession(sessionId: string): void {
   currentSessions.add(sessionId);
 }
 
+async function readStoredStreamVersion(session: Session): Promise<string | undefined> {
+  const readVersion = internalSession(session).getStreamVersion;
+  if (readVersion === undefined) return undefined;
+  try {
+    return await readVersion();
+  } catch (error) {
+    if (isRunMissing(error) || isRunExpired(error)) throw error;
+    return undefined;
+  }
+}
+
 async function startedOnEarlierEve(session: Session, hasFirstLine: boolean): Promise<boolean> {
   if (currentSessions.has(session.id)) return false;
+  if ((await readStoredStreamVersion(session)) === EVE_MESSAGE_STREAM_VERSION) {
+    rememberCurrentSession(session.id);
+    return false;
+  }
   let timer: ReturnType<typeof setTimeout> | undefined;
   let reader: ReadableStreamDefaultReader<unknown> | undefined;
   let settled = false;
