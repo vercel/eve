@@ -51,6 +51,7 @@ export async function runWorkflowToolRun(
   let cleanupDeadline: Promise<"cancel"> | undefined;
   let outcome: WorkflowToolRunOutcome | undefined;
 
+  let closed = false;
   try {
     await reported;
     while (true) {
@@ -114,23 +115,31 @@ export async function runWorkflowToolRun(
       if (messages.some(isAnsweredOnControlHook)) await owner.register();
       await owner.relay(messages);
     }
+    if (signal.aborted) {
+      outcome = {
+        status: "cancelled",
+        reason:
+          signal.reason instanceof Error ? signal.reason.message : String(signal.reason ?? ""),
+      };
+    }
+    closed = true;
+    const closing = started.close();
+    if (outcome !== undefined) {
+      const usage = started.usage.total();
+      await Promise.all([
+        closing,
+        owner.handleMessage({
+          from: createWorkflowBodyRef(run),
+          kind: "outcome",
+          result: outcome,
+          ...(usage !== undefined && { usage }),
+        }),
+      ]);
+    } else {
+      await closing;
+    }
   } finally {
-    await started.close();
-  }
-  if (signal.aborted) {
-    outcome = {
-      status: "cancelled",
-      reason: signal.reason instanceof Error ? signal.reason.message : String(signal.reason ?? ""),
-    };
-  }
-  if (outcome !== undefined) {
-    const usage = started.usage.total();
-    await owner.handleMessage({
-      from: createWorkflowBodyRef(run),
-      kind: "outcome",
-      result: outcome,
-      ...(usage !== undefined && { usage }),
-    });
+    if (!closed) await started.close();
   }
 }
 
