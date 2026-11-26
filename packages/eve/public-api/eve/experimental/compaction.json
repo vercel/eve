@@ -4,8 +4,10 @@
   "CompactionModelMatcher",
   "CompactionOverflowError",
   "CompactionStrategy",
+  "OpenAICompactionModelId",
   "StoredHistoryMessage",
   "defaultCompaction",
+  "openaiCompaction",
   "tagCompactionStrategy",
   "withoutInjected"
 ]

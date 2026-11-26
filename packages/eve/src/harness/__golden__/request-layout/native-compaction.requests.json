@@ -1,0 +1,154 @@
+[
+  {
+    "prompt": [
+      {
+        "content": "Instructions (instructions/agent)\nYou are Ada, a release assistant.",
+        "role": "system"
+      },
+      {
+        "content": [
+          {
+            "text": "Alice prefers short answers.",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "text": "Did QA pass?",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "providerOptions": {
+      "openai": {
+        "promptCacheKey": "<promptCacheKey>"
+      }
+    },
+    "tools": [
+      "bash",
+      "read_file",
+      "write_file",
+      "edit_file",
+      "web_fetch",
+      "web_search",
+      "agent",
+      "eve__task_wait",
+      "eve__task_cancel"
+    ]
+  },
+  {
+    "prompt": [
+      {
+        "content": "Instructions (instructions/agent)\nYou are Ada, a release assistant.",
+        "role": "system"
+      },
+      {
+        "content": [
+          {
+            "text": "Did QA pass?",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "text": "QA passed.",
+            "type": "text"
+          }
+        ],
+        "role": "assistant"
+      }
+    ],
+    "providerOptions": {
+      "openai": {
+        "compactionTrigger": true,
+        "promptCacheKey": "<promptCacheKey>"
+      }
+    },
+    "tools": [
+      "bash",
+      "read_file",
+      "write_file",
+      "edit_file",
+      "web_fetch",
+      "web_search",
+      "agent",
+      "eve__task_wait",
+      "eve__task_cancel"
+    ]
+  },
+  {
+    "prompt": [
+      {
+        "content": "Instructions (instructions/agent)\nYou are Ada, a release assistant.",
+        "role": "system"
+      },
+      {
+        "content": [
+          {
+            "kind": "openai.compaction",
+            "providerOptions": {
+              "openai": {
+                "encryptedContent": "ENCRYPTED-STATE",
+                "itemId": "cmp_1",
+                "type": "compaction"
+              }
+            },
+            "type": "custom"
+          }
+        ],
+        "role": "assistant"
+      },
+      {
+        "content": [
+          {
+            "text": "Alice prefers short answers.",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "text": "Did QA pass?",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "text": "Is it out?",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "providerOptions": {
+      "openai": {
+        "promptCacheKey": "<promptCacheKey>"
+      }
+    },
+    "tools": [
+      "bash",
+      "read_file",
+      "write_file",
+      "edit_file",
+      "web_fetch",
+      "web_search",
+      "agent",
+      "eve__task_wait",
+      "eve__task_cancel"
+    ]
+  }
+]

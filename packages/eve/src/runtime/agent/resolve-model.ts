@@ -296,18 +296,18 @@ async function resolveSelectedModel(
   }
 
   if (isDefinedModel(selectedModel)) {
-    const contextWindowTokens =
-      selection.modelContextWindowTokens ??
-      (
-        await lookupModelMetadata(input.modelMetadata, selectedModel.id, (metadata) =>
-          lookupCatalogModelBySlug(metadata, selectedModel.id),
-        )
-      ).contextWindowTokens;
+    const entry =
+      selection.modelContextWindowTokens === undefined
+        ? await lookupModelMetadata(input.modelMetadata, selectedModel.id, (metadata) =>
+            lookupCatalogModelBySlug(metadata, selectedModel.id),
+          )
+        : undefined;
     return {
       model: selectedModel,
       reference: {
         id: selectedModel.id,
-        contextWindowTokens,
+        contextWindowTokens: selection.modelContextWindowTokens ?? entry!.contextWindowTokens,
+        maxOutputTokens: entry?.maxOutputTokens,
         credentialed: true,
         promptCache,
         providerOptions,

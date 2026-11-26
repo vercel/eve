@@ -38,7 +38,13 @@ import {
   rejectsCredential,
   isContextOverflowError,
 } from "#harness/model-call/errors.js";
-import { type ModelProfile, resolveModelProfile } from "#harness/model-profile.js";
+import {
+  holdsOpenAICompaction,
+  pinnedToOpenAI,
+  readsOpenAICompaction,
+  withoutOpenAICompaction,
+} from "#shared/openai-compaction-item.js";
+import { modelIdentity, type ModelProfile, resolveModelProfile } from "#harness/model-profile.js";
 import { awaitsProviderToolResult } from "#shared/provider-tool-history.js";
 import { estimateRequestEnvelope } from "#harness/request-envelope.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
@@ -124,6 +130,7 @@ interface ModelCallerInput {
 
 export class ModelCaller {
   readonly profile: ModelProfile;
+  private readonly readsRecord: boolean;
   private readonly attributionHeaders: Record<string, string> | undefined;
   private projectedMessages: HarnessModelMessage[];
   private turnMessages: readonly HarnessModelMessage[];
@@ -149,6 +156,14 @@ export class ModelCaller {
     this.input = input;
 
     this.profile = resolveModelProfile(input.model, stepReference(step).promptCache);
+    const { provider, modelId } = modelIdentity(input.model);
+    this.readsRecord = readsOpenAICompaction({ provider, modelId });
+    if (!this.readsRecord && holdsOpenAICompaction(prompt.messages)) {
+      log.warn(
+        `The history holds an OpenAI compaction record that ${provider} ${modelId} cannot read, so eve leaves it out of the request and the model loses what it held. Switch back to the OpenAI Responses API, or compact again with a text strategy.`,
+        { sessionId: step.session.sessionId },
+      );
+    }
     this.attributionHeaders = buildGatewayAttributionHeaders(
       this.profile,
       step.config.runtimeIdentity,
@@ -253,6 +268,14 @@ export class ModelCaller {
     }
     if (attempt === undefined) return;
     await step.apply(retryRun({ attempt, error: modelCallErrorInfo(error), runId, usage }));
+  }
+
+  private holdsRecordForGateway(): boolean {
+    return (
+      this.readsRecord &&
+      modelIdentity(this.input.model).provider === "gateway" &&
+      holdsOpenAICompaction(this.request.history)
+    );
   }
 
   async failIfCompactionFailed(): Promise<StepResult | undefined> {
@@ -387,6 +410,10 @@ export class ModelCaller {
     const { step } = this;
     const { generation, model } = this.input;
     const tools = await this.compact(options, await this.prepare(options));
+    const reference = stepReference(step);
+    const requestReference = this.holdsRecordForGateway()
+      ? { ...reference, providerOptions: pinnedToOpenAI(reference.providerOptions) }
+      : reference;
     const attemptIndex = this.attemptIndex++;
     await this.input.startRun(attemptIndex);
     this.started = attemptIndex;
@@ -400,6 +427,7 @@ export class ModelCaller {
     if (this.profile.filesOutsideToolResults) {
       this.modelMessages = moveToolResultFilesToUserMessages(this.modelMessages);
     }
+    if (!this.readsRecord) this.modelMessages = withoutOpenAICompaction(this.modelMessages);
     const { instructions, messages: callMessages } = this.framing(options, this.modelMessages);
     const runtimeContext =
       step.instrumentation?.resolveRuntimeContext({
@@ -423,7 +451,7 @@ export class ModelCaller {
 
     const hooks = buildStepHooks({
       auth: step.ctx.get(AuthKey) ?? null,
-      model: stepReference(step),
+      model: requestReference,
       profile: this.profile,
       session: step.session,
     });

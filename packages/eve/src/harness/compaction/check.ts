@@ -1,6 +1,8 @@
 import type { ModelMessage } from "ai";
 
 import { CompactionResultOverLimitError } from "#shared/compaction-over-limit-error.js";
+import type { StoredHistoryMessage } from "#shared/history-message.js";
+import { splitAtOpenAICompaction } from "#shared/openai-compaction-item.js";
 import { COMPACTION_CHECKPOINT_MARKER } from "#shared/compaction-checkpoint.js";
 import {
   type HarnessModelMessage,
@@ -44,8 +46,14 @@ export function checkHistory(
   const checkpoints = messages.flatMap((message, index) =>
     isCheckpointMarker(message) ? [index] : [],
   );
-  if (checkpoints.some((index) => index !== 0) || checkpoints.length > 1) {
-    throw new Error(`${subject} has a checkpoint after other messages. A checkpoint goes first.`);
+  const afterRecords = splitAtOpenAICompaction(messages as StoredHistoryMessage[]).kept.length;
+  if (
+    checkpoints.some((index) => index !== 0 && index !== afterRecords) ||
+    checkpoints.length > 1
+  ) {
+    throw new Error(
+      `${subject} has a checkpoint after other messages. A checkpoint goes first, or right after the last OpenAI compaction record.`,
+    );
   }
   const size = estimateTokens(messages);
   if (size > input.limit) {

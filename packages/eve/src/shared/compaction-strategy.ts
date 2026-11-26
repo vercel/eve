@@ -95,9 +95,10 @@ export interface CompactionModelMatcher<TModelId extends string = string> {
 }
 
 /**
- * A model's compaction strategy. eve asks it once before every model call (a retry after an
- * empty response or a context-overflow error included) and when a client calls
- * `session.compact()`. It decides from `ctx` whether the history is due and returns the history to
+ * A compaction strategy, set on an agent or on a model selection as `experimental.compaction`.
+ * eve asks it once before every model call (a retry after an empty response or a context-overflow
+ * error included) and when a client calls `session.compact()`. When it throws or returns a history
+ * eve rejects, eve runs the fallback strategy instead. It decides from `ctx` whether the history is due and returns the history to
  * keep, or `undefined` to keep it as it is. eve checks that every user message keeps a kind,
  * every call keeps its result, and the result fits within the model's context window.
  *
