@@ -15,6 +15,7 @@
     "memory",
     "subagents",
     "schedules",
+    "dynamic-schedules",
     "guides/hooks",
     "dynamic-configuration",
     "---Integrate---",

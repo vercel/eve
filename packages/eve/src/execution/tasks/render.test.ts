@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   readTaskResults,
+  renderModelOutputText,
   renderTaskResults,
   renderTaskWaitResult,
 } from "#execution/tasks/render.js";
@@ -65,5 +66,13 @@ describe("renderTaskWaitResult", () => {
       1000,
     );
     expect(text).toBe("a completed; its result follows.");
+  });
+});
+
+describe("renderModelOutputText", () => {
+  it("renders error-text model outputs as plain text instead of raw JSON", () => {
+    expect(renderModelOutputText({ type: "error-text", value: "boom\n[exit code: 1]" })).toBe(
+      "boom\n[exit code: 1]",
+    );
   });
 });

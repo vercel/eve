@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type { ExtensionCompileMount } from "#compiler/load-binding-namespace.js";
 import { NodeModuleEvaluationContext } from "#compiler/module-lifecycle.js";
-import { assertStaticConnectionOwnership } from "#compiler/connection-ownership.js";
+import {
+  assertStaticConnectionOwnership,
+  assertSubscriptionSourceNamesDistinct,
+} from "#compiler/connection-ownership.js";
 import {
   createAuthoredModuleGraph,
   type AuthoredModuleGraph,
@@ -474,6 +477,7 @@ class AgentGraphCompiler {
     const schedules: CompiledScheduleDefinition[] = [];
     const scheduleCollections: CompiledScheduleCollectionDefinition[] = [];
     const channels: CompiledChannelDefinition[] = [];
+    const subscribingChannelNames = new Set<string>();
     let sandbox: CompiledSandboxDefinition | undefined;
     const selectedSourceIds = collectSelectedSourceIds(state.composed);
     const loadNamespace = state.evaluation.loadNamespace;
@@ -506,7 +510,10 @@ class AgentGraphCompiler {
             state.composed = disableComposedCandidate({ candidate, composed: state.composed });
             delete state.bindings[candidate.sourceId];
             selectedSourceIds.delete(candidate.sourceId);
-          } else channels.push(...result.definitions);
+          } else {
+            channels.push(...result.definitions);
+            if (result.offersSubscriptions) subscribingChannelNames.add(result.name);
+          }
           break;
         }
         case "connection": {
@@ -650,6 +657,12 @@ class AgentGraphCompiler {
         .filter((subagent) => selectedSourceIds.has(subagent.candidate.sourceId))
         .map((subagent) => subagent.source.subagentId),
       toolNames: tools.map((tool) => tool.name),
+    });
+    assertSubscriptionSourceNamesDistinct({
+      channelNames: subscribingChannelNames,
+      connectionNames: connections
+        .filter((connection) => connection.experimental_events === true)
+        .map((connection) => connection.connectionName),
     });
 
     const channelRoutes = compileChannelRoutes(state, channels, this.diagnostics, input.nodeId);

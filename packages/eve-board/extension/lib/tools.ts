@@ -1,7 +1,11 @@
+import { createLogger } from "eve/internal/channels";
 import type { SandboxSession } from "eve/sandbox";
 import { defineTool, type ToolContext } from "eve/tools";
+import { always } from "eve/tools/approval";
 import { z } from "zod";
 
+import type { BoardAuthorizeAction } from "./authorize.ts";
+import { resolveBoards, selectBoard, type ResolvedBoardConfig } from "./boards.ts";
 import type { BoardChannelMetadata } from "./board-channel.ts";
 import {
   BOARD_HOLD_KIND_PATTERN,
@@ -35,9 +39,13 @@ const SHARED =
 
 const messageId = z.string().min(1).describe("Any message ID in the thread, as the board gave it.");
 
-function client(settings: Settings): BoardClient {
-  return boardClients(settings()).model;
-}
+const boardOption = z
+  .string()
+  .min(1)
+  .optional()
+  .describe(
+    "Which configured board to use, by key. Defaults to this session's board; required outside a board session when more than one board is configured.",
+  );
 
 function postId(ctx: ToolContext) {
   return boardPostId(`${ctx.session.id}:${ctx.callId}`);
@@ -47,12 +55,40 @@ function boardMetadata(ctx: Pick<ToolContext, "channel">): Partial<BoardChannelM
   return ctx.channel.metadata as Partial<BoardChannelMetadata>;
 }
 
+function sessionBoard(ctx: Pick<ToolContext, "channel">): string | undefined {
+  return boardMetadata(ctx).board || undefined;
+}
+
 function currentThread(ctx: ToolContext): string | undefined {
   return boardMetadata(ctx).boardThread || undefined;
 }
 
-function threadOrCurrent(id: string | undefined, ctx: ToolContext): string {
-  const thread = id ?? currentThread(ctx);
+function targetBoard(
+  settings: Settings,
+  board: string | undefined,
+  ctx: Pick<ToolContext, "channel">,
+): ResolvedBoardConfig {
+  return selectBoard(resolveBoards(settings()), board, sessionBoard(ctx));
+}
+
+function clientFor(
+  settings: Settings,
+  board: string | undefined,
+  ctx: Pick<ToolContext, "channel">,
+): { readonly board: ResolvedBoardConfig; readonly client: BoardClient } {
+  const resolved = targetBoard(settings, board, ctx);
+  return { board: resolved, client: boardClients(resolved).model };
+}
+
+function threadOrCurrent(id: string | undefined, ctx: ToolContext, targetKey: string): string {
+  if (id !== undefined) return id;
+  const sessionKey = sessionBoard(ctx);
+  if (sessionKey !== undefined && sessionKey !== targetKey) {
+    throw new Error(
+      `Pass the thread's \`id\`: this session's thread is on board "${sessionKey}", not "${targetKey}".`,
+    );
+  }
+  const thread = currentThread(ctx);
   if (thread === undefined) {
     throw new Error("Pass the thread's `id`: this session didn't start from a board thread.");
   }
@@ -167,9 +203,11 @@ export function defineBoardChannelsTool(settings: Settings) {
   return defineTool({
     deferred: true,
     description: "List the board's channels you can read.",
-    inputSchema: z.object({}),
-    async execute() {
-      return { channels: await client(settings).channels() };
+    inputSchema: z.object({
+      board: boardOption,
+    }),
+    async execute({ board }, ctx) {
+      return { channels: await clientFor(settings, board, ctx).client.channels() };
     },
   });
 }
@@ -180,6 +218,7 @@ export function defineBoardReadTool(settings: Settings) {
     description:
       "Read the board. Pass `id` for a whole thread by any message in it, `link` for the thread a Slack or GitHub link points to, or `channel` for its threads, newest activity first. A channel read returns a `cursor`: pass it back as `after` to see only threads with activity since, or pass `older` as `before` to page back. The board has no search, so read the channel something would be in. Read a discussion before joining it. A task's state and holder show on its root.",
     inputSchema: z.object({
+      board: boardOption,
       id: messageId.optional(),
       link: z
         .string()
@@ -188,6 +227,20 @@ export function defineBoardReadTool(settings: Settings) {
         .describe("A link to a message on a platform the board syncs, such as a Slack permalink."),
       channel: z.string().min(1).optional().describe("A channel path, or `prefix/` for a subtree."),
       label: z.array(z.string().min(1)).optional().describe("`key` or `key=value` filters."),
+      text: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          "With one `channel` (no `prefix/`, `label`, or `after`), keep threads whose first or latest message matches this text. Page older with `before`.",
+        ),
+      mentions: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          'With one `channel` (no `prefix/`, `label`, or `after`), keep threads whose first or latest message mentions `"me"`, a handle, or an actor ID.',
+        ),
       after: z
         .string()
         .min(1)
@@ -202,8 +255,8 @@ export function defineBoardReadTool(settings: Settings) {
         .describe("With `channel`, the `older` an earlier read returned."),
       limit: z.number().int().min(1).max(100).optional(),
     }),
-    async execute({ id, link, after, ...query }) {
-      const board = client(settings);
+    async execute({ board: boardKey, id, link, after, ...query }, ctx) {
+      const board = clientFor(settings, boardKey, ctx).client;
       if (id !== undefined) return summarizeThread(await board.thread(id, { after }));
       if (link !== undefined) return summarizeThread(await board.linked(link));
       if (query.channel === undefined) throw new Error("Pass `id`, `link`, or `channel`.");
@@ -211,6 +264,7 @@ export function defineBoardReadTool(settings: Settings) {
       return {
         cursor: page.cursor,
         older: page.older,
+        ...(page.scanned !== undefined && { scanned: page.scanned }),
         threads: page.threads.map((thread) => ({
           last: thread.last === null ? null : summarize(thread.last),
           message: summarize(thread.message),
@@ -226,6 +280,7 @@ export function defineBoardPostTool(settings: Settings) {
   return defineTool({
     description: `Start a new board thread in a channel. Reply in an existing thread instead when one fits. ${SHARED}`,
     inputSchema: z.object({
+      board: boardOption,
       channel: z.string().min(1).describe("The channel path. The first post creates a channel."),
       text,
       attach,
@@ -235,9 +290,9 @@ export function defineBoardPostTool(settings: Settings) {
         .optional()
         .describe("Keep the thread on the board, out of synced platforms."),
     }),
-    async execute({ channel, text, attach, ...post }, ctx) {
+    async execute({ board: boardKey, channel, text, attach, ...post }, ctx) {
       requireContent(text, attach);
-      const board = client(settings);
+      const board = clientFor(settings, boardKey, ctx).client;
       const attachments = await uploadFiles(board, attach, ctx.getSandbox);
       return written(
         await board.post(channel, { ...post, attachments, id: postId(ctx), text: text ?? "" }),
@@ -251,6 +306,7 @@ export function defineBoardReplyTool(settings: Settings) {
   return defineTool({
     description: `Post in a board thread right away, before your turn ends: progress while you work, a reply with files, or a reply in another thread. Defaults to this session's thread. In a session a board message started, your final message is posted there when your turn ends, so don't repeat it here. If a reply already says everything, such as files with a line about them, end your turn with \`no_reply\`. ${SHARED}`,
     inputSchema: z.object({
+      board: boardOption,
       id: messageId.optional(),
       text,
       attach,
@@ -266,12 +322,13 @@ export function defineBoardReplyTool(settings: Settings) {
         .optional()
         .describe("Keep the reply on the board, out of synced platforms."),
     }),
-    async execute({ id, text, attach, ...post }, ctx) {
+    async execute({ board: boardKey, id, text, attach, ...post }, ctx) {
       requireContent(text, attach);
-      const board = client(settings);
+      const { board: resolved, client: board } = clientFor(settings, boardKey, ctx);
+      const targetId = threadOrCurrent(id, ctx, resolved.key);
       const attachments = await uploadFiles(board, attach, ctx.getSandbox);
       return written(
-        await board.reply(threadOrCurrent(id, ctx), {
+        await board.reply(targetId, {
           ...post,
           attachments,
           id: postId(ctx),
@@ -289,12 +346,14 @@ export function defineBoardNoteTool(settings: Settings) {
     description:
       "Keep a working note in a board thread: a reply that stays on the board and never reaches synced Slack, GitHub, or Linear threads. Use it for detail the team can read on the board, such as what you tried. Defaults to this session's thread.",
     inputSchema: z.object({
+      board: boardOption,
       id: messageId.optional(),
       text: z.string().min(1).max(BOARD_TEXT_LIMIT),
     }),
-    async execute({ id, text }, ctx) {
+    async execute({ board: boardKey, id, text }, ctx) {
+      const { board: resolved, client: board } = clientFor(settings, boardKey, ctx);
       return written(
-        await client(settings).reply(threadOrCurrent(id, ctx), {
+        await board.reply(threadOrCurrent(id, ctx, resolved.key), {
           id: postId(ctx),
           noSync: true,
           text,
@@ -310,12 +369,13 @@ export function defineBoardReactTool(settings: Settings) {
     description:
       "React to a board message with an emoji short name, such as `eyes` or `white_check_mark`.",
     inputSchema: z.object({
+      board: boardOption,
       id: z.string().min(1).describe("The message ID."),
       emoji: z.string().min(1),
       remove: z.boolean().optional(),
     }),
-    async execute({ id, emoji, remove }) {
-      await client(settings).react(id, emoji, { remove });
+    async execute({ board: boardKey, id, emoji, remove }, ctx) {
+      await clientFor(settings, boardKey, ctx).client.react(id, emoji, { remove });
       return { ok: true };
     },
   });
@@ -328,6 +388,7 @@ export function defineBoardLabelTool(settings: Settings) {
     description:
       "Set or unset labels on a board message; labels on a thread's root apply to the whole thread. Use them to mark state others filter on, such as `status=done`. Labels under `board.` are the board's own.",
     inputSchema: z.object({
+      board: boardOption,
       id: z.string().min(1).describe("The message ID."),
       set: z.record(z.string(), z.string()).optional(),
       unset: z.array(z.string()).optional(),
@@ -338,8 +399,8 @@ export function defineBoardLabelTool(settings: Settings) {
           "Change only while the message has these labels now, such as `{ status: 'open' }`; `null` means the label must be unset. Use it when others may change the same labels.",
         ),
     }),
-    async execute({ id, set, unset, if: conditions }) {
-      await client(settings).label(id, { if: conditions, set, unset });
+    async execute({ board: boardKey, id, set, unset, if: conditions }, ctx) {
+      await clientFor(settings, boardKey, ctx).client.label(id, { if: conditions, set, unset });
       return { ok: true };
     },
   });
@@ -352,6 +413,7 @@ export function defineBoardScheduleTool(settings: Settings) {
     description:
       "Schedule a message in a board thread for later, as yourself: it wakes you there when it posts, so you can come back to something that takes time, such as a CI run. Write it for a reader who remembers nothing: what to check and what comes next. Defaults to this session's thread, and to staying off synced platforms. Pass `in` or `at` for once, or `every` with `times` or `until` for a repeat.",
     inputSchema: z.object({
+      board: boardOption,
       id: messageId.optional(),
       text: z.string().min(1).max(BOARD_TEXT_LIMIT),
       in: z.string().min(1).optional().describe("A duration from now, such as `5m` or `1d`."),
@@ -364,9 +426,10 @@ export function defineBoardScheduleTool(settings: Settings) {
         .optional()
         .describe("Also post it to the thread's synced platforms, such as Slack."),
     }),
-    async execute({ id, sync, ...timing }, ctx) {
-      const schedule = await client(settings).schedule(
-        { re: threadOrCurrent(id, ctx) },
+    async execute({ board: boardKey, id, sync, ...timing }, ctx) {
+      const { board: resolved, client: board } = clientFor(settings, boardKey, ctx);
+      const schedule = await board.schedule(
+        { re: threadOrCurrent(id, ctx, resolved.key) },
         { ...timing, noSync: sync !== true },
       );
       return { id: schedule.id, next: schedule.next, re: schedule.re };
@@ -380,9 +443,12 @@ export function defineBoardCancelScheduleTool(settings: Settings) {
     deferred: true,
     description:
       "Cancel a scheduled board message by its ID, such as once what it checks on has happened.",
-    inputSchema: z.object({ id: z.string().min(1).describe("The schedule's ID.") }),
-    async execute({ id }) {
-      return await client(settings).cancelSchedule(id);
+    inputSchema: z.object({
+      board: boardOption,
+      id: z.string().min(1).describe("The schedule's ID."),
+    }),
+    async execute({ board: boardKey, id }, ctx) {
+      return await clientFor(settings, boardKey, ctx).client.cancelSchedule(id);
     },
   });
 }
@@ -394,12 +460,15 @@ export function defineBoardSchedulesTool(settings: Settings) {
     description:
       "List pending scheduled board messages in a thread, by any message in it, or in a channel. Defaults to this session's thread, or outside one, to the messages you scheduled.",
     inputSchema: z.object({
+      board: boardOption,
       id: messageId.optional(),
       channel: z.string().min(1).optional(),
     }),
-    async execute({ id, channel }, ctx) {
-      const board = client(settings);
-      const re = id ?? (channel === undefined ? currentThread(ctx) : undefined);
+    async execute({ board: boardKey, id, channel }, ctx) {
+      const { board: resolved, client: board } = clientFor(settings, boardKey, ctx);
+      const sessionKey = sessionBoard(ctx);
+      const sameBoard = sessionKey === undefined || sessionKey === resolved.key;
+      const re = id ?? (channel === undefined && sameBoard ? currentThread(ctx) : undefined);
       const schedules = await board.schedules(
         re !== undefined
           ? { re }
@@ -419,12 +488,13 @@ export function defineBoardActorsTool(settings: Settings) {
     description:
       "List people and agents on the board with their handles, to mention them as `@handle`, or to name a task owner by `id`. Pass `search` to narrow by handle or name.",
     inputSchema: z.object({
+      board: boardOption,
       search: z.string().min(1).optional(),
       limit: z.number().int().min(1).max(200).optional(),
     }),
-    async execute({ search, limit }) {
+    async execute({ board: boardKey, search, limit }, ctx) {
       const needle = search?.toLowerCase();
-      const actors = (await client(settings).actors()).filter(
+      const actors = (await clientFor(settings, boardKey, ctx).client.actors()).filter(
         (actor) =>
           needle === undefined ||
           actor.handle.toLowerCase().includes(needle) ||
@@ -441,6 +511,7 @@ export function defineBoardCreateTaskTool(settings: Settings) {
     deferred: true,
     description: `Create a task on the board's queue: a thread whose root is the brief for whoever claims it, any agent or person. Write the brief for a stranger: what to do, what's out of scope, and how to tell it's done. ${SHARED}`,
     inputSchema: z.object({
+      board: boardOption,
       channel: z.string().min(1).describe("The channel the queue is in."),
       text: z.string().min(1).max(BOARD_TEXT_LIMIT).describe("The brief."),
       labels: z
@@ -453,8 +524,11 @@ export function defineBoardCreateTaskTool(settings: Settings) {
         .describe("Task IDs it waits for: it becomes ready when they complete."),
       noSync: z.boolean().optional(),
     }),
-    async execute({ channel, ...task }, ctx) {
-      const created = await client(settings).createTask(channel, { ...task, id: postId(ctx) });
+    async execute({ board: boardKey, channel, ...task }, ctx) {
+      const created = await clientFor(settings, boardKey, ctx).client.createTask(channel, {
+        ...task,
+        id: postId(ctx),
+      });
       return summarize(created);
     },
   });
@@ -500,32 +574,90 @@ export function defineBoardBlockTaskTool() {
   });
 }
 
-function configuring(settings: Settings, ctx: ToolContext) {
-  assertConfigurer(settings, ctx);
-  const config = settings();
-  return { config, ...boardClients(config) };
-}
+const log = createLogger("board.tools");
 
-function assertConfigurer(settings: Settings, ctx: ToolContext): void {
+async function watchAuthorizationDenial(
+  board: ResolvedBoardConfig,
+  action: BoardAuthorizeAction,
+  ctx: ToolContext,
+  details: {
+    readonly channel?: string;
+    readonly claimChannel?: string;
+    readonly watchId?: string;
+  } = {},
+): Promise<string | undefined> {
   const caller = ctx.session.auth?.current ?? null;
-  const allowed = settings().configurers;
-  if (allowed !== undefined) {
-    const ids = [caller?.principalId, caller?.attributes.principal];
-    if (caller !== null && ids.some((id) => typeof id === "string" && allowed.includes(id))) return;
-    throw new Error(
-      "Only the people this agent's `configurers` names may change its board watches. Ask one of them.",
-    );
+  if (board.authorize !== undefined) {
+    try {
+      const allowed =
+        (await board.authorize({
+          action,
+          auth: caller,
+          board: board.key,
+          ...(board.name !== undefined && { boardName: board.name }),
+          ...(board.team !== undefined && { team: board.team }),
+          ...(details.channel !== undefined && { channel: details.channel }),
+          ...(details.claimChannel !== undefined && { claimChannel: details.claimChannel }),
+          ...(details.watchId !== undefined && { watchId: details.watchId }),
+        })) === true;
+      return allowed ? undefined : "You are not authorized to manage board watches on this agent.";
+    } catch (error) {
+      log.error("board watch authorization callback failed", {
+        action,
+        board: board.key,
+        error,
+        errorId: crypto.randomUUID(),
+      });
+      return "You are not authorized to manage board watches on this agent.";
+    }
   }
   if (caller === null) {
-    throw new Error(
-      "Only a signed-in person may change this agent's board watches. Ask from a channel where you're signed in.",
-    );
+    return "Only a signed-in person may change this agent's board watches. Ask from a channel where you're signed in.";
   }
-  if (caller.authenticator === "board-watcher" && caller.attributes.actor_kind !== "person") {
-    throw new Error(
-      "Only a person on the team may change this agent's board watches, not a synced platform user or another agent.",
-    );
+  if (caller.authenticator === "board-watcher") {
+    if (caller.attributes.actor_kind !== "person") {
+      return "Only a person on the team may change this agent's board watches, not a synced platform user or another agent.";
+    }
+    const callerBoard =
+      typeof caller.attributes.board_key === "string" ? caller.attributes.board_key : undefined;
+    if (
+      (callerBoard !== undefined && callerBoard !== board.key) ||
+      (callerBoard === undefined && !board.shorthand)
+    ) {
+      return "Board callers may only manage watches on their own board. Configure `authorize` to allow cross-board watch management.";
+    }
   }
+  return undefined;
+}
+
+async function assertWatchAuthorized(
+  board: ResolvedBoardConfig,
+  action: BoardAuthorizeAction,
+  ctx: ToolContext,
+  details: {
+    readonly channel?: string;
+    readonly claimChannel?: string;
+    readonly watchId?: string;
+  } = {},
+): Promise<void> {
+  const denial = await watchAuthorizationDenial(board, action, ctx, details);
+  if (denial !== undefined) throw new Error(denial);
+}
+
+async function authorizingWatch(
+  settings: Settings,
+  board: string | undefined,
+  action: BoardAuthorizeAction,
+  ctx: ToolContext,
+  details: {
+    readonly channel?: string;
+    readonly claimChannel?: string;
+    readonly watchId?: string;
+  } = {},
+) {
+  const resolved = targetBoard(settings, board, ctx);
+  await assertWatchAuthorized(resolved, action, ctx, details);
+  return { config: resolved, ...boardClients(resolved) };
 }
 
 const queue = z
@@ -552,10 +684,12 @@ const queue = z
 /** Creates a watch: the board wakes the agent with these instructions when a message matches. */
 export function defineBoardWatchTool(settings: Settings) {
   return defineTool({
+    approval: always(),
     deferred: true,
     description:
-      "Watch the board: from now on, every message in the channel that matches the filters wakes you in its board thread with these instructions, across conversations, cold starts, and redeploys. Use it when someone asks you to watch a channel and act on what's posted there. Keep it as narrow as the request. Returns the watch's ID.",
+      "Watch the board: from now on, every message in the channel that matches the filters wakes you in its board thread with these instructions, across conversations, cold starts, and redeploys. Use it when someone asks you to watch a channel and act on what's posted there. Confirm conversational vs. task-claim (`claim`) mode, filters, and `claim.from` owners when unclear before calling; the caller approves the exact watch before it is created. Keep it as narrow as the request. Returns the watch's ID.",
     inputSchema: z.object({
+      board: boardOption,
       channel: z
         .string()
         .min(1)
@@ -587,20 +721,30 @@ export function defineBoardWatchTool(settings: Settings) {
         ),
       claim: queue.optional(),
     }),
-    async execute({ instructions, claim, ...filter }, ctx) {
-      const { config, deployment, watchChannel } = configuring(settings, ctx);
+    async execute({ board: boardKey, instructions, claim, ...filter }, ctx) {
+      const { config, deployment, watchChannel } = await authorizingWatch(
+        settings,
+        boardKey,
+        "watch",
+        ctx,
+        { channel: filter.channel, ...(claim !== undefined && { claimChannel: claim.channel }) },
+      );
       const action: BoardWatchAction =
         claim === undefined ? { type: "converse" } : { queue: claim, type: "claim" };
       checkWatchScope({ action, can: config.can, channel: filter.channel, watchChannel });
       const watch = await createWatch({
         action,
+        boardKey: config.key,
         client: deployment,
         id: watchIdOf(ctx.session.id, ctx.callId),
         instructions,
+        routeBase: config.registrationRouteBase,
         tail: tailOf(filter),
         watchChannel,
       });
-      return { action: watch.action, id: watch.id, tail: watch.tail };
+      return config.shorthand
+        ? { action: watch.action, id: watch.id, tail: watch.tail }
+        : { action: watch.action, board: config.key, id: watch.id, tail: watch.tail };
     },
   });
 }
@@ -610,15 +754,51 @@ export function defineBoardWatchesTool(settings: Settings) {
   return defineTool({
     deferred: true,
     description:
-      "List your board watches: each one's ID and what it matches, and with `details`, what it does.",
+      "List your board watches: each one's ID and what it matches, and with `details`, what it does. Defaults to this session's board inside a board session; outside one, omitting `board` when multiple boards are configured lists every authorized board's watches grouped by board.",
     inputSchema: z.object({
+      board: boardOption,
       details: z.boolean().optional().describe("Also read each watch's instructions and action."),
     }),
-    async execute({ details }, ctx) {
-      const { deployment, watchChannel } = configuring(settings, ctx);
-      return {
-        watches: await listWatches({ client: deployment, details: details === true, watchChannel }),
-      };
+    async execute({ board: boardKey, details }, ctx) {
+      const set = resolveBoards(settings());
+      const sessionKey = sessionBoard(ctx);
+      if (boardKey !== undefined || sessionKey !== undefined || set.byKey.size === 1) {
+        const resolved = selectBoard(set, boardKey, sessionKey);
+        await assertWatchAuthorized(resolved, "watches", ctx);
+        const { deployment, watchChannel } = boardClients(resolved);
+        const watches = await listWatches({
+          client: deployment,
+          details: details === true,
+          watchChannel,
+        });
+        return set.shorthand ? { watches } : { board: resolved.key, watches };
+      }
+      const checked = await Promise.all(
+        [...set.byKey.values()].map(async (entry) => ({
+          denial: await watchAuthorizationDenial(entry, "watches", ctx),
+          entry,
+        })),
+      );
+      const permitted = checked
+        .filter((result) => result.denial === undefined)
+        .map((result) => result.entry);
+      if (permitted.length === 0) {
+        throw new Error(
+          checked[0]?.denial ?? "You are not authorized to manage board watches on this agent.",
+        );
+      }
+      const entries = await Promise.all(
+        permitted.map(async (entry) => {
+          const { deployment, watchChannel } = boardClients(entry);
+          const watches = await listWatches({
+            client: deployment,
+            details: details === true,
+            watchChannel,
+          });
+          return [entry.key, watches] as const;
+        }),
+      );
+      return { boards: Object.fromEntries(entries) };
     },
   });
 }
@@ -626,15 +806,29 @@ export function defineBoardWatchesTool(settings: Settings) {
 /** Removes a watch. */
 export function defineBoardUnwatchTool(settings: Settings) {
   return defineTool({
+    approval: always(),
     deferred: true,
     description:
       "Stop a board watch by its ID: it no longer wakes you, and your other watches keep running.",
     inputSchema: z.object({
+      board: boardOption,
       id: z.string().regex(BOARD_NAME_PATTERN).describe("The watch's ID, such as `w-7k3p2q`."),
     }),
-    async execute({ id }, ctx) {
-      const { deployment, watchChannel } = configuring(settings, ctx);
-      return await removeWatch({ client: deployment, id, watchChannel });
+    async execute({ board: boardKey, id }, ctx) {
+      const { config, deployment, watchChannel } = await authorizingWatch(
+        settings,
+        boardKey,
+        "unwatch",
+        ctx,
+        { watchId: id },
+      );
+      return await removeWatch({
+        boardKey: config.key,
+        client: deployment,
+        id,
+        routeBase: config.registrationRouteBase,
+        watchChannel,
+      });
     },
   });
 }

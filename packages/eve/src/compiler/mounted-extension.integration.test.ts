@@ -542,8 +542,8 @@ describe("mounted extension schedule collections", () => {
   it("mount-prefixes a path-derived collection name and keeps an explicit id verbatim", async () => {
     const collection = (id?: string) =>
       [
-        'import { defineDynamicSchedules } from "eve/experimental/schedules";',
-        'import { inMemoryScheduleProvider } from "eve/experimental/schedules/testing";',
+        'import { defineDynamicSchedules } from "eve/schedules";',
+        'import { inMemoryScheduleProvider } from "eve/schedules/testing";',
         "const inputSchema = { '~standard': { version: 1, vendor: 'test', validate: value => ({ value }) } };",
         `export default defineDynamicSchedules({ ${id === undefined ? "" : `id: ${JSON.stringify(id)}, `}provider: inMemoryScheduleProvider(), inputSchema, auth: () => null, run: async () => {} });`,
       ].join("\n");

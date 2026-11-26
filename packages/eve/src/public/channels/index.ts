@@ -64,6 +64,7 @@ export {
   type CommittedLine,
 } from "#public/definitions/channel.js";
 export { attachmentError } from "#public/channels/attachment-error.js";
+export { publicRoutePath } from "#public/channels/public-route-path.js";
 export type {
   FetchFileContext,
   FetchFileFunction,

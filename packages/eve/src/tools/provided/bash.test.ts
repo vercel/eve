@@ -1,7 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { bash, type BashToolOutput } from "./bash.js";
+import { BASH_MAX_YIELD_SECONDS, BASH_YIELD_SECONDS } from "#execution/sandbox/bash.js";
 import { toolModelOutputContext } from "#harness/tool-model-output.js";
+import {
+  isTaskPromotion,
+  readTaskPromotionCancel,
+  withTaskPromotionAllowed,
+} from "#tools/task-handoff.js";
+import { bash, type BashToolOutput } from "./bash.js";
 
 const finished: BashToolOutput = {
   exitCode: 1,
@@ -80,4 +86,75 @@ describe("bash model output", () => {
       await bash.toModelOutput!(output as BashToolOutput, toolModelOutputContext("bash", "call_1")),
     ).toEqual(expected);
   });
+});
+
+function createSlowFakeSandbox() {
+  const runCommands: string[] = [];
+  const sandbox = {
+    spawn: async () => ({
+      kill: async () => {},
+      pid: 4242,
+      stderr: new ReadableStream({ start() {} }),
+      stdout: new ReadableStream({ start() {} }),
+      wait: () => new Promise<{ exitCode: number }>(() => {}),
+    }),
+    run: async ({ command }: { readonly command: string }) => {
+      runCommands.push(command);
+      const marker = /eve-bash:[a-f0-9]+/.exec(command)?.[0];
+      if (marker !== undefined) {
+        return { exitCode: 0, stderr: "", stdout: `${marker} 4242 8 0\nworking\n` };
+      }
+      return { exitCode: 0, stderr: "", stdout: "" };
+    },
+  };
+  return { runCommands, sandbox };
+}
+
+describe("bash timeout mode", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("kills commands on expiry when an explicit timeout <= 120s is passed", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const { runCommands, sandbox } = createSlowFakeSandbox();
+    const ctx = { abortSignal: new AbortController().signal, getSandbox: async () => sandbox };
+
+    const pending = withTaskPromotionAllowed(true, () =>
+      bash.execute!({ command: "sleep 300", timeout: BASH_MAX_YIELD_SECONDS }, ctx as never),
+    );
+    await vi.advanceTimersByTimeAsync(BASH_MAX_YIELD_SECONDS * 1000);
+    const result = await pending;
+
+    expect(result).toMatchObject({ exitCode: 124, status: "completed", stdout: "working\n" });
+    expect(runCommands.some((cmd) => cmd.includes("kill -TERM -- -4242"))).toBe(true);
+  });
+
+  it.each([
+    { timeout: undefined, waitSeconds: BASH_YIELD_SECONDS },
+    { timeout: BASH_MAX_YIELD_SECONDS + 1, waitSeconds: BASH_MAX_YIELD_SECONDS },
+  ])(
+    "promotes still-running commands to a task when timeout=$timeout (and returns running outside a turn)",
+    async ({ timeout, waitSeconds }) => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const { runCommands, sandbox } = createSlowFakeSandbox();
+      const ctx = { abortSignal: new AbortController().signal, getSandbox: async () => sandbox };
+      const input = { command: "sleep 300", ...(timeout !== undefined && { timeout }) };
+
+      const directPending = bash.execute!(input, ctx as never);
+      await vi.advanceTimersByTimeAsync(waitSeconds * 1000);
+      expect(await directPending).toMatchObject({ pid: 4242, status: "running" });
+
+      const promotedPending = withTaskPromotionAllowed(true, () =>
+        bash.execute!(input, ctx as never),
+      );
+      await vi.advanceTimersByTimeAsync(waitSeconds * 1000);
+      const promoted = await promotedPending;
+      expect(isTaskPromotion(promoted)).toBe(true);
+      if (!isTaskPromotion(promoted)) return;
+      expect(promoted.handoff).toMatchObject({ pid: 4242 });
+      await readTaskPromotionCancel(promoted)?.();
+      expect(runCommands.some((cmd) => cmd.includes("kill -TERM -- -4242"))).toBe(true);
+    },
+  );
 });

@@ -172,7 +172,9 @@ Type the context in a `"use step"` helper as `WorkflowStepToolContext`, which ex
 | `eve/channels/auth`                                                               | `localDev`, `vercelOidc`, `placeholderAuth`                                                                                          |
 | `eve/channels/{slack,discord,teams,telegram,twilio,github}`                       | platform channel factories                                                                                                           |
 | `eve/hooks`                                                                       | `defineHook`                                                                                                                         |
-| `eve/schedules`                                                                   | `defineSchedule`                                                                                                                     |
+| `eve/schedules`                                                                   | `defineSchedule`, `isScheduleAuth`, and [`defineDynamicSchedules`, `schedules`, and `byPrincipal`](../dynamic-schedules)             |
+| `eve/schedules/testing`                                                           | `inMemoryScheduleProvider` for testing dynamic schedules                                                                             |
+| `eve/schedules/vercel`                                                            | `vercelScheduleProvider` for running dynamic schedules on Vercel                                                                     |
 | `eve/skills`                                                                      | `defineSkill`, `defineDynamic`                                                                                                       |
 | `eve/instructions`                                                                | `defineInstructions`, `defineDynamic`                                                                                                |
 | `eve/memory`                                                                      | `defineMemory`, `defineMemoryProvider`, provider and lifecycle types                                                                 |
@@ -213,7 +215,7 @@ Types for reading sent messages and sessions live in `eve/sessions`; client fact
 
 eve follows [semantic versioning](https://semver.org/). A stable API changes incompatibly only in a major release, and a deprecated stable API keeps working until the next major release. Minor releases add backward-compatible features, and patch releases fix bugs.
 
-The `exports` field in eve's `package.json` lists every entry point. `eve/experimental/*` and `eve/internal/*` have no compatibility promise. Neither do `experimental` fields in stable definitions, such as `defineAgent({ experimental })`, connection `experimental.events`, and `JustBashSandbox.environment({ experimental })`. The CLI setup wizard is not a public authoring API.
+The `exports` field in eve's `package.json` lists every entry point. `eve/experimental/*` and `eve/internal/*` have no compatibility promise. Neither do `experimental` fields in stable definitions, such as `defineAgent({ experimental })`, connection `experimental.events`, channel `experimental.subscriptions`, and `JustBashSandbox.environment({ experimental })`. The CLI setup wizard is not a public authoring API.
 
 Event union types name today's values. A release can add event types, outcomes, and request kinds under the [stream evolution rules](../concepts/sessions-runs-and-streaming#what-a-later-release-can-add) without a breaking change, so keep a default branch when you switch on them.
 

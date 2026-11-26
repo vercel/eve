@@ -79,6 +79,8 @@ export interface BoardChannelSummary {
 export interface BoardThreadsQuery {
   readonly channel?: string;
   readonly label?: readonly string[];
+  readonly mentions?: string;
+  readonly text?: string;
   readonly after?: string;
   readonly before?: string;
   readonly limit?: number;
@@ -88,6 +90,7 @@ export interface BoardThreadsPage {
   readonly threads: readonly BoardThreadSummary[];
   readonly cursor: string;
   readonly older: string | null;
+  readonly scanned?: number;
 }
 
 export interface BoardActorSummary {
@@ -238,6 +241,7 @@ export interface BoardClient {
   ): Promise<void>;
   typing(id: string, status?: string): Promise<void>;
   thread(id: string, range?: { readonly after?: string }): Promise<BoardThread>;
+  posted(id: string): Promise<BoardMessage>;
   linked(url: string): Promise<BoardThread>;
   threads(query?: BoardThreadsQuery): Promise<readonly BoardThreadSummary[]>;
   threadsPage(query?: BoardThreadsQuery): Promise<BoardThreadsPage>;
@@ -296,15 +300,32 @@ export function boardErrorCode(error: unknown): string | undefined {
 const handles = new Map<string, BoardHandle>();
 const principals = new Map<string, Promise<{ principal: string; actor: string }>>();
 
-type BoardRef = Pick<BoardSettings, "name" | "team" | "profile">;
+type BoardRef = Pick<BoardSettings, "name" | "team" | "url" | "profile">;
 
-function handleKey({ name, team }: BoardRef): string {
+function handleKey({ name, team, url }: BoardRef): string {
   return JSON.stringify([
     name ?? null,
     team ?? null,
-    process.env.BOARD_URL?.trim() || null,
+    url?.trim().replace(/\/+$/u, "") || process.env.BOARD_URL?.trim().replace(/\/+$/u, "") || null,
     process.env.BOARD_TOKEN ?? null,
   ]);
+}
+
+function createBoardHandle(board: BoardRef): BoardHandle {
+  const { name, team, url } = board;
+  const options = {
+    ...(name !== undefined && { name }),
+    ...(team !== undefined && { team }),
+  };
+  if (url === undefined) return boardHandle(options);
+  const previous = process.env.BOARD_URL;
+  process.env.BOARD_URL = url.trim();
+  try {
+    return boardHandle(options);
+  } finally {
+    if (previous === undefined) delete process.env.BOARD_URL;
+    else process.env.BOARD_URL = previous;
+  }
 }
 
 export function createBoardClient(board: BoardRef, can?: BoardCan): BoardClient {
@@ -317,11 +338,7 @@ export function createBoardClient(board: BoardRef, can?: BoardCan): BoardClient 
   const key = handleKey(board);
   let base = handles.get(key);
   if (base === undefined) {
-    const { name, team } = board;
-    base = boardHandle({
-      ...(name !== undefined && { name }),
-      ...(team !== undefined && { team }),
-    });
+    base = createBoardHandle(board);
     handles.set(key, base);
   }
   const handle = withHints(base.as(profile, can === undefined ? undefined : { can: can as never }));
@@ -350,6 +367,7 @@ export function createBoardClient(board: BoardRef, can?: BoardCan): BoardClient 
     return {
       cursor: page.cursor,
       older: page.older ?? null,
+      ...(page.scanned !== undefined && { scanned: page.scanned }),
       threads: page.threads.map((summary) => ({
         last: summary.last === null ? null : messageOf(summary.last),
         message: messageOf(summary.message),
@@ -425,6 +443,7 @@ export function createBoardClient(board: BoardRef, can?: BoardCan): BoardClient 
     },
     thread: async (id, range = {}) =>
       threadOf(await handle.thread(id, range.after === undefined ? {} : { after: range.after })),
+    posted: async (id) => messageOf(await handle.posted(id)),
     linked: async (url) => threadOf(await handle.linked(url)),
     async threads(query = {}) {
       return (await threadsPage(query)).threads;

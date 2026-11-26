@@ -365,6 +365,11 @@ type Note = 'request from "./not-an-import"';`,
     expect(joinedClasses).toEqual([]);
   });
 
+  it("emits no node_modules path under dist", async () => {
+    const entries = await readdir(join(EVE_PACKAGE_ROOT, "dist"), { recursive: true });
+    expect(entries.filter((entry) => entry.split(/[\\/]/u).includes("node_modules"))).toEqual([]);
+  });
+
   it("copies the complete @vercel/blob declaration tree", async () => {
     const upstreamDeclarations = (await readdir(VERCEL_BLOB_DIST_ROOT, { recursive: true }))
       .filter((entry) => entry.endsWith(".d.ts"))

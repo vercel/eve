@@ -23,7 +23,7 @@ import type {
 import { SKILL_ENTRY_NAME } from "#protocol/catalog-tools.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
 import { compiledBundleOf } from "#runtime/sessions/runtime-context-keys.js";
-import type { ResolvedConnectionDefinition } from "#runtime/types.js";
+import type { ResolvedChannelDefinition, ResolvedConnectionDefinition } from "#runtime/types.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import { refineJsonSchema } from "#tools/schema.js";
 
@@ -36,11 +36,14 @@ const ENDS_TURN_TOOL_NOTE =
   "Calling this tool ends your turn once it succeeds, after any other tool calls in the same step finish: do not write a reply, and you will not see those calls' results. If it fails, you will see the error and can continue.";
 
 export interface Callable {
+  readonly agentApproval: ApprovalPolicy | undefined;
+  readonly channels: readonly ResolvedChannelDefinition[];
   readonly entries: HarnessToolMap;
   readonly deferred: HarnessToolMap;
   readonly connections: readonly ResolvedConnectionDefinition[];
   readonly skills: ReadonlyMap<string, CatalogSkill>;
   readonly registry: ConnectionRegistry | undefined;
+  readonly subagent: boolean;
   get(name: string): HarnessToolDefinition | undefined;
   describe(definition: HarnessToolDefinition): string;
 }
@@ -48,10 +51,12 @@ export interface Callable {
 export interface StepCatalog extends HarnessToolLookup {
   readonly advertised: HarnessToolMap;
   readonly callable: Callable;
+  readonly channels: readonly ResolvedChannelDefinition[];
   readonly connections: readonly ResolvedConnectionDefinition[];
   readonly deferred: HarnessToolMap;
   readonly entries: HarnessToolMap;
   readonly skills: ReadonlyMap<string, CatalogSkill>;
+  readonly subagent: boolean;
   describe(definition: HarnessToolDefinition): string;
   readonly resolve: CallResolver;
 }
@@ -72,7 +77,7 @@ export function callableOf(input: CatalogInput): Callable {
       .filter(
         ([, entry]) => entry.route === undefined && isVisible(entry.definition, input.session),
       )
-      .map(([name, entry]) => [name, entry.definition]),
+      .map(([name, entry]): [string, HarnessToolDefinition] => [name, entry.definition]),
   );
   const entries = withAgentApprovalOnEntries(rawEntries, agentApproval);
   if (agentApproval !== undefined) {
@@ -90,6 +95,8 @@ export function callableOf(input: CatalogInput): Callable {
   const versions = dynamicConnectionVersions(input.ctx);
   const hasProgramTool = [...entries.values()].some((definition) => isProgramTool(definition));
   const callable: Callable = {
+    agentApproval,
+    channels: bundle?.resolvedAgent.channels ?? [],
     connections,
     deferred: new Map([...entries].filter(([, definition]) => definition.deferred === true)),
     describe: (definition) =>
@@ -102,6 +109,7 @@ export function callableOf(input: CatalogInput): Callable {
         : connectionEntryNamed(name, registry, connections, versions, agentApproval)),
     registry,
     skills,
+    subagent: input.session.rootSessionId !== undefined,
   };
   return callable;
 }
@@ -119,6 +127,7 @@ export function buildStepCatalog(input: CatalogInput): StepCatalog {
   const catalog: StepCatalog = {
     advertised,
     callable,
+    channels: callable.channels,
     connections: callable.connections,
     deferred: callable.deferred,
     describe: callable.describe,
@@ -138,10 +147,12 @@ export function buildStepCatalog(input: CatalogInput): StepCatalog {
         : { call: { ...toolCall, input: target.input, toolName: target.name }, definition };
     },
     skills: callable.skills,
+    subagent: callable.subagent,
   };
   for (const [name, entry] of input.table.entries) {
     if (entry.route !== undefined) {
-      advertised.set(name, routeTool(entry.definition, entry.route, catalog));
+      if (isVisible(entry.definition, input.session))
+        advertised.set(name, routeTool(entry.definition, entry.route, catalog));
     } else {
       const definition = callable.entries.get(name);
       if (definition !== undefined && definition.deferred !== true)

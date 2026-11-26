@@ -1338,6 +1338,59 @@ describe("compileAgentManifest source graph", () => {
       );
     });
 
+    it("rejects a channel and a connection of one name that both offer subscriptions, and accepts one that does not", async () => {
+      const connectionDefinition = {
+        url: "https://tracker.example/mcp",
+        description: "Tracker",
+        auth: {
+          getToken: async () => ({ token: "credential" }),
+          vercelConnect: {
+            connector: "oauth/tracker",
+            experimental_events: { createAdapter: vi.fn(), verify: vi.fn() },
+          },
+        },
+      };
+      const eventsConnection = (offersEvents: boolean) => ({
+        logicalPath: "connections/tracker.ts",
+        loadNamespace: async () => ({
+          default: offersEvents
+            ? defineMcpClientConnection({
+                ...connectionDefinition,
+                experimental: { events: { onEvent() {} } },
+              })
+            : defineMcpClientConnection(connectionDefinition),
+        }),
+      });
+      const routes = [GET("/tracker", async () => new Response("ok"))];
+      const subscribingChannel = (subscribes: boolean) => ({
+        logicalPath: "channels/tracker.ts",
+        loadNamespace: async () => ({
+          default: subscribes
+            ? defineChannel({
+                routes,
+                experimental: { subscriptions: { onEvent: () => null, catalog: [] } },
+              })
+            : defineChannel({ routes }),
+        }),
+      });
+
+      await expect(
+        compileAgentManifest(manifest(), {
+          sourceRegistries: [registry([eventsConnection(true), subscribingChannel(true)])],
+        }),
+      ).rejects.toThrow('A channel and a connection are both named "tracker"');
+      await expect(
+        compileAgentManifest(manifest(), {
+          sourceRegistries: [registry([eventsConnection(false), subscribingChannel(true)])],
+        }),
+      ).resolves.toBeDefined();
+      await expect(
+        compileAgentManifest(manifest(), {
+          sourceRegistries: [registry([eventsConnection(true), subscribingChannel(false)])],
+        }),
+      ).resolves.toBeDefined();
+    });
+
     it("accepts connections outside eve's namespace, including the catalog tools' former names", async () => {
       const names = ["search", "execute", "steve", "eve-tools"];
       const sourceRegistry = registry(
@@ -1494,6 +1547,77 @@ describe("compileAgentManifest source graph", () => {
     await expect(
       compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
     ).rejects.toThrow("compile/channel-route-duplicate");
+  });
+
+  it.each([
+    "/eve/v1/session",
+    "/eve/v1/session/extra",
+    "/eve/v1/health",
+    "/eve/v1/info",
+    "/eve/v1/callback/custom",
+    "/eve/v1/connections/github",
+    "/eve/v1/hooks/custom",
+    "/eve/v1/dev/custom",
+    "/eve/v1/:namespace/wake",
+    "/eve/v1/*",
+    "/eve/v1/**",
+  ])("rejects a custom channel route %s in a reserved eve namespace", async (urlPath) => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "channels/custom.ts",
+        loadNamespace: async () => ({
+          default: defineChannel({
+            routes: [POST(urlPath, async () => new Response())],
+          }),
+        }),
+      },
+    ]);
+
+    await expect(
+      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+    ).rejects.toThrow("compile/reserved-route-collision");
+  });
+
+  it("allows an authored root eve channel with a non-.ts extension to serve eve protocol routes", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "channels/eve.mjs",
+        loadNamespace: async () => ({
+          default: defineChannel({
+            routes: [GET("/eve/v1/health", async () => new Response("ok"))],
+          }),
+        }),
+      },
+    ]);
+
+    const compiled = await compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] });
+
+    expect(compiled.channelRoutes.effective).toContainEqual(
+      expect.objectContaining({
+        logicalPath: "channels/eve.mjs",
+        method: "GET",
+        urlPath: "/eve/v1/health",
+      }),
+    );
+  });
+
+  it("allows custom channel routes under their own /eve/v1/<namespace>", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "channels/board.ts",
+        loadNamespace: async () => ({
+          default: defineChannel({
+            routes: [POST("/eve/v1/board/wake", async () => new Response())],
+          }),
+        }),
+      },
+    ]);
+
+    const compiled = await compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] });
+
+    expect(compiled.channelRoutes.effective).toContainEqual(
+      expect.objectContaining({ method: "POST", urlPath: "/eve/v1/board/wake" }),
+    );
   });
 
   it("rejects a GET and WS route on one path that name its parameters differently", async () => {

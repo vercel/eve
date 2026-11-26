@@ -276,6 +276,17 @@ describe("packed public declarations", () => {
           const internal = (file) => import(pathToFileURL(join(eve, "dist/src/internal/workflow", file)));
           assert.equal(createHook, (await internal("index.js")).createHook);
           assert.equal(getRun, (await internal("runtime.js")).getRun);
+          for (const [subpath, name] of [
+            ["schedules", "defineDynamicSchedules"],
+            ["schedules", "schedules"],
+            ["schedules/testing", "inMemoryScheduleProvider"],
+            ["schedules/vercel", "vercelScheduleProvider"],
+          ]) {
+            const stable = await import("eve/" + subpath);
+            const experimental = await import("eve/experimental/" + subpath);
+            assert.equal(typeof stable[name], "function", name);
+            assert.equal(experimental[name], stable[name], name);
+          }
         `,
           ],
           { cwd: app },

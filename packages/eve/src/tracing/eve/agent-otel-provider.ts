@@ -43,6 +43,7 @@ import type {
   ModelOperation,
 } from "#compiled/@vercel/agent-runs/index.js";
 import { isUserMessageKind } from "#harness/messages.js";
+import { isTurnCancellation } from "#harness/turn-cancellation.js";
 import { isObject } from "#shared/guards.js";
 
 export interface AgentOtelInstrumentationInput {
@@ -228,12 +229,13 @@ export function createAgentOtelInstrumentation(
       if (routing !== undefined) target.attributes(routing);
     }
     if (operation === undefined) return;
-    if (event.outcome === "failed") await operation.fail(event.error);
-    else
+    if (event.outcome === "completed")
       await operation.complete({
         outcome: "completed",
         result: { ...event, content: recordOutputs ? event.content : undefined },
       });
+    else if (isTurnCancellation(event.error)) await operation.complete({ outcome: "cancelled" });
+    else await operation.fail(event.error);
   };
 
   const channelDeliveries = createAgentChannelDeliveryInstrumentation({

@@ -1,6 +1,6 @@
 {
   "name": "eve",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "private": false,
   "description": "Filesystem-first framework for durable backend AI agents that run anywhere.",
   "keywords": [
@@ -419,9 +419,26 @@
       "default": "./dist/src/public/instrumentation/otel.js"
     },
     "./schedules": {
+      "workflow": {
+        "eve-source": "./src/public/schedules/static.ts",
+        "default": "./dist/src/public/schedules/static.js"
+      },
+      "eve-source": "./src/public/schedules/index.ts",
       "types": "./dist/src/public/schedules/index.d.ts",
       "import": "./dist/src/public/schedules/index.js",
       "default": "./dist/src/public/schedules/index.js"
+    },
+    "./schedules/testing": {
+      "eve-source": "./src/public/schedules/testing.ts",
+      "types": "./dist/src/public/schedules/testing.d.ts",
+      "import": "./dist/src/public/schedules/testing.js",
+      "default": "./dist/src/public/schedules/testing.js"
+    },
+    "./schedules/vercel": {
+      "eve-source": "./src/public/schedules/vercel.ts",
+      "types": "./dist/src/public/schedules/vercel.d.ts",
+      "import": "./dist/src/public/schedules/vercel.js",
+      "default": "./dist/src/public/schedules/vercel.js"
     },
     "./server": {
       "types": "./dist/src/public/server/index.d.ts",
@@ -446,6 +463,12 @@
       "import": "./dist/src/public/experimental/sandbox/just-bash.js",
       "default": "./dist/src/public/experimental/sandbox/just-bash.js"
     },
+    "./experimental/channels/github": {
+      "eve-source": "./src/public/experimental/channels/github.ts",
+      "types": "./dist/src/public/experimental/channels/github.d.ts",
+      "import": "./dist/src/public/experimental/channels/github.js",
+      "default": "./dist/src/public/experimental/channels/github.js"
+    },
     "./experimental/channels/discord/gateway": {
       "eve-source": "./src/public/experimental/channels/discord/gateway.ts",
       "types": "./dist/src/public/experimental/channels/discord/gateway.d.ts",
@@ -453,22 +476,22 @@
       "default": "./dist/src/public/experimental/channels/discord/gateway.js"
     },
     "./experimental/schedules/testing": {
-      "eve-source": "./src/public/experimental/schedules/testing.ts",
-      "types": "./dist/src/public/experimental/schedules/testing.d.ts",
-      "import": "./dist/src/public/experimental/schedules/testing.js",
-      "default": "./dist/src/public/experimental/schedules/testing.js"
+      "eve-source": "./src/public/schedules/testing.ts",
+      "types": "./dist/src/public/schedules/testing.d.ts",
+      "import": "./dist/src/public/schedules/testing.js",
+      "default": "./dist/src/public/schedules/testing.js"
     },
     "./experimental/schedules": {
-      "eve-source": "./src/public/experimental/schedules/index.ts",
-      "types": "./dist/src/public/experimental/schedules/index.d.ts",
-      "import": "./dist/src/public/experimental/schedules/index.js",
-      "default": "./dist/src/public/experimental/schedules/index.js"
+      "eve-source": "./src/public/schedules/dynamic.ts",
+      "types": "./dist/src/public/schedules/dynamic.d.ts",
+      "import": "./dist/src/public/schedules/dynamic.js",
+      "default": "./dist/src/public/schedules/dynamic.js"
     },
     "./experimental/schedules/vercel": {
-      "eve-source": "./src/public/experimental/schedules/vercel.ts",
-      "types": "./dist/src/public/experimental/schedules/vercel.d.ts",
-      "import": "./dist/src/public/experimental/schedules/vercel.js",
-      "default": "./dist/src/public/experimental/schedules/vercel.js"
+      "eve-source": "./src/public/schedules/vercel.ts",
+      "types": "./dist/src/public/schedules/vercel.d.ts",
+      "import": "./dist/src/public/schedules/vercel.js",
+      "default": "./dist/src/public/schedules/vercel.js"
     },
     "./channels": {
       "types": "./dist/src/public/channels/index.d.ts",
@@ -611,6 +634,12 @@
       "import": "./dist/src/computer-use/extension/lib/sandbox.js",
       "default": "./dist/src/computer-use/extension/lib/sandbox.js"
     },
+    "./experimental/channels": {
+      "eve-source": "./dist/src/public/experimental/channels/index.js",
+      "types": "./dist/src/public/experimental/channels/index.d.ts",
+      "import": "./dist/src/public/experimental/channels/index.js",
+      "default": "./dist/src/public/experimental/channels/index.js"
+    },
     "./experimental/connections": {
       "eve-source": "./dist/src/public/experimental/connections/index.js",
       "types": "./dist/src/public/experimental/connections/index.d.ts",
@@ -668,6 +697,7 @@
     "@modelcontextprotocol/server": "2.4.0",
     "@nuxt/kit": "^4.6.4",
     "@nuxt/schema": "^4.6.4",
+    "@octokit/openapi-webhooks": "12.1.0",
     "@opentelemetry/context-async-hooks": "catalog:",
     "@opentelemetry/core": "catalog:",
     "@opentelemetry/otlp-transformer": "0.223.1",

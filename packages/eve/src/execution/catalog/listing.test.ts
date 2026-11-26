@@ -13,6 +13,7 @@ import {
 import { catalogAnnouncements } from "./listing.js";
 
 interface CatalogState {
+  readonly channels?: readonly unknown[];
   readonly connections?: readonly { readonly description?: string; readonly name: string }[];
   readonly skills?: readonly CatalogSkillSource[];
   readonly tools?: readonly HarnessToolDefinition[];
@@ -20,6 +21,7 @@ interface CatalogState {
 
 async function announce(state: CatalogState, announced?: Readonly<Record<string, string>>) {
   const { catalog } = await catalogContext({
+    channels: state.channels,
     connections: (state.connections ?? []).map((connection) =>
       fakeConnection({ ...connection, tools: [] }),
     ),
@@ -254,6 +256,29 @@ describe("catalogAnnouncements", () => {
       expect(
         (await announce(returned, { catalog: empty.value })).catalog?.render(empty.value),
       ).toBe(await baseline(returned));
+    });
+
+    it("lists subscribable sources and sends the model to eve__search for their events", async () => {
+      const channels = [{ name: "github", definition: { onEvent: () => null, catalog: () => [] } }];
+
+      expect(await baseline({ channels })).toBe(
+        'Subscribable sources: github. Find their events with eve__search ("subscriptions__<source>__") before calling eve__subscribe.',
+      );
+      expect(await baseline({ channels, tools: [deferred("tenant__sync")] })).toContain(
+        "Subscribable sources: github.",
+      );
+    });
+
+    it("caps subscribable sources at 20 by name, then 'and more'", async () => {
+      const channels = Array.from({ length: 21 }, (_, index) => ({
+        name: `src${String(index + 1).padStart(2, "0")}`,
+        definition: { onEvent: () => null, catalog: () => [] },
+      }));
+      const names = channels.slice(0, 20).map(({ name }) => name);
+
+      expect(await baseline({ channels })).toContain(
+        `Subscribable sources: ${names.join(", ")}, and more.`,
+      );
     });
 
     it("treats an unreadable recorded value as a fresh baseline", async () => {

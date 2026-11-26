@@ -9,6 +9,7 @@ import {
   rename,
   rm,
   stat,
+  symlink,
   truncate,
   writeFile,
 } from "node:fs/promises";
@@ -178,7 +179,7 @@ describe("WorkflowBundleBuilder", () => {
     expect(builder.snapshot.dirs).toEqual([
       resolvePackageSourceDirectoryPath("src/execution"),
       resolvePackageSourceDirectoryPath("src/runtime/subagents"),
-      resolvePackageSourceDirectoryPath("src/runtime/connections/events"),
+      resolvePackageSourceDirectoryPath("src/runtime/subscriptions"),
       resolvePackageSourceDirectoryPath("src/subagents"),
       resolvePackageSourceDirectoryPath("src/tools/provided"),
     ]);
@@ -597,6 +598,37 @@ describe("WorkflowBundleBuilder", () => {
     }
   });
 
+  it("bundles isScheduleAuth from eve/schedules inside a workflow body", async () => {
+    const appRoot = await mkdtemp(join(tmpdir(), "eve-workflow-schedule-auth-"));
+    const flowPath = join(appRoot, "flow.ts");
+    const compiledArtifactsBootstrapPath = join(appRoot, "bootstrap.mjs");
+    const eveRoot = resolvePackageRoot();
+    try {
+      await mkdir(join(appRoot, "node_modules"));
+      await symlink(eveRoot, join(appRoot, "node_modules", "eve"), "junction");
+      await Promise.all([
+        writeFile(compiledArtifactsBootstrapPath, "export {};\n"),
+        writeFile(
+          flowPath,
+          'import { isScheduleAuth } from "eve/schedules";\n' +
+            'export async function check(auth) { "use workflow"; return isScheduleAuth(auth); }\n',
+        ),
+      ]);
+      await new FixtureWorkflowBundleBuilder(
+        {
+          agentName: "test-agent",
+          appRoot,
+          compiledArtifactsBootstrapPath,
+          outDir: join(appRoot, "output"),
+          rootDir: eveRoot,
+        },
+        [flowPath],
+      ).build();
+    } finally {
+      await rm(appRoot, { force: true, recursive: true });
+    }
+  });
+
   it("preserves step error identity in authored workflows across driver layers", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "eve-workflow-bundle-error-identity-"));
     const appRoot = join(tempRoot, "app");
@@ -686,11 +718,7 @@ describe("WorkflowBundleBuilder", () => {
     ["sleep tool", "src/tools/provided/sleep-workflow.ts", "executeSleepTool"],
     ["session owner", "src/execution/session/entry.ts", "nextTurnDelivery"],
     ["workflow tool owner", "src/execution/tools/workflow/workflow.ts", "workflowToolRunWorkflow"],
-    [
-      "connection event owner",
-      "src/runtime/connections/events/workflow.ts",
-      "connectionEventWorkflow",
-    ],
+    ["subscription owner", "src/runtime/subscriptions/workflow.ts", "subscriptionWorkflow"],
   ])("keeps the %s schemas out of the workflow driver", async (_name, sourcePath, marker) => {
     const tempRoot = await mkdtemp(join(tmpdir(), "eve-workflow-bundle-no-schemas-"));
     const outDir = join(tempRoot, "workflow-build");

@@ -43,6 +43,17 @@ describe("truncateTail", () => {
     expect(lines[1]).toContain("[truncated]");
   });
 
+  it("keeps all MAX_OUTPUT_LINES when the input ends with a trailing newline", () => {
+    const text =
+      Array.from({ length: MAX_OUTPUT_LINES }, (_, i) => `line ${i + 1}`).join("\n") + "\n";
+    const result = truncateTail(text);
+    expect(result.truncated).toBe(false);
+    expect(result.totalLines).toBe(MAX_OUTPUT_LINES);
+    expect(result.outputLines).toBe(MAX_OUTPUT_LINES);
+    expect(result.output.startsWith("line 1\n")).toBe(true);
+    expect(result.output.endsWith(`line ${MAX_OUTPUT_LINES}\n`)).toBe(true);
+  });
+
   it("returns empty text unchanged", () => {
     const result = truncateTail("");
     expect(result.truncated).toBe(false);

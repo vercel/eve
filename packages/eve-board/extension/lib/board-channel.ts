@@ -22,6 +22,13 @@ import {
 } from "eve/internal/channels";
 
 import {
+  lookupBoard,
+  resolveBoards,
+  resolveSessionBoard,
+  selectBoard,
+  type ResolvedBoardConfig,
+} from "./boards.ts";
+import {
   BOARD_TEXT_LIMIT,
   boardAllows,
   boardErrorCode,
@@ -46,7 +53,11 @@ import {
   formatWatchContext,
 } from "./inbound.ts";
 import {
-  BOARD_WAKE_ROUTE,
+  DEFAULT_BOARD_ROUTE_BASE,
+  LEGACY_BOARD_WAKE_ROUTE,
+  normalizeBoardRouteBase,
+} from "./route.ts";
+import {
   boardClients,
   BoardWatchConfigError,
   checkQueueScope,
@@ -79,6 +90,8 @@ const CLAIM_EVENTS = new Set([
 
 /** JSON-serializable state for one board thread's session. */
 export interface BoardChannelState extends PromptQueueState {
+  /** The configured board key for this session, or omitted on a shorthand mount. */
+  readonly board?: string | null;
   readonly channel: string | null;
   /** The thread's root message ID, which replies name. */
   readonly threadId: string | null;
@@ -105,11 +118,12 @@ export interface BoardEventContext extends BoardChannelContext, ChannelContinuat
 
 /**
  * Target accepted by `to(board, target)` for proactive sessions: an existing thread by any
- * message ID in it, or a new thread in a channel.
+ * message ID in it, or a new thread in a channel. Pass `board` when multiple boards are configured.
  */
 export type BoardReceiveTarget =
-  | { readonly thread: string }
+  | { readonly board?: string; readonly thread: string }
   | {
+      readonly board?: string;
       readonly channel: string;
       readonly text: string;
       readonly labels?: Readonly<Record<string, string>>;
@@ -124,6 +138,8 @@ export interface BoardChannelConfig {
 
 /** What the board channel reports about a session to tools, hooks, and instrumentation. */
 export interface BoardChannelMetadata extends Record<string, unknown> {
+  /** The configured board key for this session, or `null` for a shorthand mount. */
+  readonly board: string | null;
   /** The board channel the session's thread is in. */
   readonly boardChannel: string | null;
   /** The task the session holds, with when its claim ends, or `null`. */
@@ -145,17 +161,19 @@ export function createBoardChannel(
   settings: () => BoardSettings,
   options: BoardChannelConfig = {},
 ): BoardChannel {
-  const deployment = () => boardClients(settings()).deployment;
-  const keepClaim = (state: BoardChannelState) => keepBoardClaim(deployment(), state);
+  const deploymentFor = (state: BoardChannelState) =>
+    boardClients(resolveSessionBoard(settings(), state.board)).deployment;
+  const keepClaim = (state: BoardChannelState) => keepBoardClaim(deploymentFor(state), state);
 
-  let draining: { again: boolean } | undefined;
-  const coalesced = (drain: () => Promise<number>): Promise<number> | undefined => {
-    if (draining !== undefined) {
-      draining.again = true;
+  const draining = new Map<string, { again: boolean }>();
+  const coalesced = (key: string, drain: () => Promise<number>): Promise<number> | undefined => {
+    const existing = draining.get(key);
+    if (existing !== undefined) {
+      existing.again = true;
       return undefined;
     }
     const current = { again: false };
-    draining = current;
+    draining.set(key, current);
     return (async () => {
       let dispatched = 0;
       try {
@@ -164,7 +182,7 @@ export function createBoardChannel(
           dispatched += await drain();
         } while (current.again);
       } finally {
-        draining = undefined;
+        if (draining.get(key) === current) draining.delete(key);
       }
       return dispatched;
     })();
@@ -180,6 +198,67 @@ export function createBoardChannel(
     },
   });
 
+  const routeBase = normalizeBoardRouteBase(settings().route);
+  const wakeTarget = (
+    board: ResolvedBoardConfig,
+    from: ChannelFrom<BoardChannelState>,
+    waitUntil: (promise: Promise<unknown>) => void,
+  ) => {
+    const wake = coalesced(board.key, () => drainMatches({ board, from }));
+    if (wake !== undefined) {
+      waitUntil(
+        wake.catch((error) => logError("board wake-up failed", error, { board: board.key })),
+      );
+    }
+    return Response.json({ ok: true }, { status: 202 });
+  };
+  const handleShorthandWake = async (
+    _request: Request,
+    {
+      from,
+      waitUntil,
+    }: {
+      readonly from: ChannelFrom<BoardChannelState>;
+      readonly waitUntil: (promise: Promise<unknown>) => void;
+    },
+  ) => {
+    const resolved = resolveBoards(settings());
+    if (!resolved.shorthand) {
+      return Response.json({ error: "Board key is required.", ok: false }, { status: 404 });
+    }
+    return wakeTarget(resolved.byKey.values().next().value!, from, waitUntil);
+  };
+  const handleNamedWake = async (
+    _request: Request,
+    {
+      from,
+      params,
+      waitUntil,
+    }: {
+      readonly from: ChannelFrom<BoardChannelState>;
+      readonly params: Readonly<Record<string, string>>;
+      readonly waitUntil: (promise: Promise<unknown>) => void;
+    },
+  ) => {
+    const resolved = resolveBoards(settings());
+    if (resolved.shorthand) {
+      return Response.json({ error: "Unknown board.", ok: false }, { status: 404 });
+    }
+    const boardKey = params.board;
+    const target = boardKey === undefined ? undefined : lookupBoard(resolved, boardKey);
+    if (target === undefined) {
+      return Response.json({ error: "Unknown board.", ok: false }, { status: 404 });
+    }
+    return wakeTarget(target, from, waitUntil);
+  };
+  const routes = [
+    POST<BoardChannelState>(`${routeBase}/wake`, handleShorthandWake),
+    POST<BoardChannelState>(`${routeBase}/:board/wake`, handleNamedWake),
+    ...(routeBase === DEFAULT_BOARD_ROUTE_BASE
+      ? [POST<BoardChannelState>(LEGACY_BOARD_WAKE_ROUTE, handleShorthandWake)]
+      : []),
+  ];
+
   const channel = defineChannel<
     BoardChannelState,
     BoardChannelContext,
@@ -190,11 +269,13 @@ export function createBoardChannel(
     state: { channel: null, task: null, threadId: null },
 
     context(state) {
-      return { board: threadHandle(boardClients(settings()).model, state), state };
+      const target = resolveSessionBoard(settings(), state.board);
+      return { board: threadHandle(boardClients(target).model, state), state };
     },
 
     metadata(state): BoardChannelMetadata {
       return {
+        board: state.board ?? null,
         boardChannel: state.channel,
         boardTask: state.task == null ? null : { id: state.task.taskId, until: state.task.until },
         boardThread: state.threadId,
@@ -207,18 +288,11 @@ export function createBoardChannel(
       if (payload.state?.noSync !== undefined) ctx.state.noSync = payload.state.noSync;
     },
 
-    routes: [
-      POST<BoardChannelState>(BOARD_WAKE_ROUTE, async (_request, { from, waitUntil }) => {
-        const wake = coalesced(() => drainMatches({ from, settings: settings() }));
-        if (wake !== undefined) {
-          waitUntil(wake.catch((error) => logError("board wake-up failed", error)));
-        }
-        return Response.json({ ok: true }, { status: 202 });
-      }),
-    ],
+    routes,
 
     async receive({ message, target, ...send }, { from }) {
-      const board = boardClients(settings()).model;
+      const resolved = selectBoard(resolveBoards(settings()), target.board, undefined);
+      const board = boardClients(resolved).model;
       let root: BoardMessage;
       if ("thread" in target) {
         root = (await board.thread(target.thread)).message;
@@ -232,10 +306,20 @@ export function createBoardChannel(
           text: target.text,
         });
       }
-      return await sendRecovering(from(boardSessionAddress(board.profile, root)), message, {
-        ...send,
-        state: { channel: root.channel, noSync: false, threadId: root.id },
-      });
+      const boardKey = resolved.shorthand ? undefined : resolved.key;
+      return await sendRecovering(
+        from(boardSessionAddress(board.profile, root, boardKey)),
+        message,
+        {
+          ...send,
+          state: {
+            ...(boardKey !== undefined && { board: boardKey }),
+            channel: root.channel,
+            noSync: false,
+            threadId: root.id,
+          },
+        },
+      );
     },
 
     fetchFile(url) {
@@ -243,7 +327,16 @@ export function createBoardChannel(
       if (policy === "disabled") return Promise.resolve(null);
       return fetchBoardAttachment(
         url,
-        boardClients(settings()).model,
+        (boardKey) => {
+          const set = resolveBoards(settings());
+          const target =
+            boardKey === undefined
+              ? set.byKey.size === 1
+                ? set.byKey.values().next().value
+                : undefined
+              : lookupBoard(set, boardKey);
+          return target === undefined ? undefined : boardClients(target).model;
+        },
         policy?.maxBytes ?? DEFAULT_MAX_UPLOAD_BYTES,
       );
     },
@@ -263,14 +356,18 @@ export function createBoardChannel(
       },
       async "call.started"(event, ctx) {
         if (event.data.taskId === undefined) {
-          renewDuringCall(deployment, ctx.channel.state, event.data.callId);
+          renewDuringCall(
+            () => deploymentFor(ctx.channel.state),
+            ctx.channel.state,
+            event.data.callId,
+          );
         } else {
-          await renewBeforeTask(deployment(), ctx.channel.state);
+          await renewBeforeTask(deploymentFor(ctx.channel.state), ctx.channel.state);
         }
       },
       async "call.settled"(event, ctx) {
         endRenewal(ctx.channel.state, event.data.callId);
-        await settleAfterCall(deployment(), ctx.channel, ctx.view, event.data);
+        await settleAfterCall(deploymentFor(ctx.channel.state), ctx.channel, ctx.view, event.data);
       },
       async "turn.settled"(event, ctx) {
         endRenewal(ctx.channel.state);
@@ -283,31 +380,48 @@ export function createBoardChannel(
 }
 
 interface Wake {
+  readonly boardKey: string | undefined;
   readonly can?: BoardCan;
   readonly deployment: BoardClient;
+  readonly key: string;
   readonly model: BoardClient;
   readonly from: ChannelFrom<BoardChannelState>;
   readonly name: string | undefined;
   readonly self: { readonly actor: string };
+  readonly shorthand: boolean;
   readonly watchChannel: string;
   recordOf(id: string): Promise<BoardWatchRecord>;
 }
 
-export async function drainMatches(options: {
-  readonly settings: BoardSettings;
-  readonly from: ChannelFrom<BoardChannelState>;
-  readonly wait?: number;
-}): Promise<number> {
-  const { settings } = options;
-  const { deployment, model, watchChannel } = boardClients(settings);
+export async function drainMatches(
+  options:
+    | {
+        readonly board: ResolvedBoardConfig;
+        readonly from: ChannelFrom<BoardChannelState>;
+        readonly wait?: number;
+      }
+    | {
+        readonly settings: BoardSettings;
+        readonly board?: string;
+        readonly from: ChannelFrom<BoardChannelState>;
+        readonly wait?: number;
+      },
+): Promise<number> {
+  const target =
+    "settings" in options
+      ? selectBoard(resolveBoards(options.settings), options.board, undefined)
+      : options.board;
+  const { deployment, model, watchChannel } = boardClients(target);
   const self = await deployment.me();
   const records = new Map<string, Promise<BoardWatchRecord>>();
   const wake: Wake = {
-    can: settings.can,
+    boardKey: target.shorthand ? undefined : target.key,
+    can: target.can,
     deployment,
     from: options.from,
+    key: target.key,
     model,
-    name: settings.name,
+    name: target.name,
     recordOf(id) {
       let record = records.get(id);
       if (record === undefined) {
@@ -317,6 +431,7 @@ export async function drainMatches(options: {
       return record;
     },
     self,
+    shorthand: target.shorthand,
     watchChannel,
   };
   const wait = options.wait ?? 0;
@@ -370,9 +485,10 @@ async function handleMatch(wake: Wake, match: BoardMatch): Promise<boolean> {
 }
 
 async function dispatch(wake: Wake, match: BoardMatch, record: BoardWatchRecord): Promise<boolean> {
-  const { can, deployment, self } = wake;
+  const { boardKey, can, deployment, self } = wake;
   const posted = match.event.message;
   if (posted !== undefined && coversChannel(wake.watchChannel, posted.channel)) return false;
+  const idempotencyPrefix = boardKey === undefined ? "board" : `board:${boardKey}`;
   const start = (
     message: BoardMessage,
     context: string,
@@ -380,13 +496,19 @@ async function dispatch(wake: Wake, match: BoardMatch, record: BoardWatchRecord)
     task?: BoardClaim,
   ) =>
     sendRecovering(
-      wake.from(boardSessionAddress(record.id, message)),
-      boardMessageContent(message),
+      wake.from(boardSessionAddress(record.id, message, boardKey)),
+      boardMessageContent(message, boardKey),
       {
-        auth: defaultBoardAuth(message, { name: wake.name, watch: record.id }),
-        context: [formatWatchContext(record), context],
+        auth: defaultBoardAuth(message, {
+          key: wake.key,
+          name: wake.name,
+          shorthand: wake.shorthand,
+          watch: record.id,
+        }),
+        context: [formatWatchContext(record, boardKey), context],
         idempotencyKey,
         state: {
+          ...(boardKey !== undefined && { board: boardKey }),
           channel: message.channel,
           noSync: message.noSync,
           threadId: boardThreadId(message),
@@ -401,13 +523,14 @@ async function dispatch(wake: Wake, match: BoardMatch, record: BoardWatchRecord)
     if (posted.by.actor === self.actor && posted.schedule === undefined) return false;
     if (!boardAllows(can, posted.channel, "read")) {
       log.warn("board watch matched a channel outside the agent's read scope; skipped it", {
+        ...(boardKey !== undefined && { board: boardKey }),
         channel: posted.channel,
         watch: record.id,
       });
       return false;
     }
     if (record.action.type !== "claim") {
-      await start(posted, formatBoardContext(posted), `board:${match.id}`);
+      await start(posted, formatBoardContext(posted, boardKey), `${idempotencyPrefix}:${match.id}`);
       return true;
     }
     if (posted.re === null) return false;
@@ -415,7 +538,11 @@ async function dispatch(wake: Wake, match: BoardMatch, record: BoardWatchRecord)
     const held = root.task?.claim;
     if (held?.actor !== self.actor || Date.parse(held.until) <= Date.now()) return false;
     if (root.labels[CLAIM_WATCH_LABEL] !== record.id) return false;
-    await start(posted, formatTaskFollowUpContext(posted), `board:${match.id}`);
+    await start(
+      posted,
+      formatTaskFollowUpContext(posted, boardKey),
+      `${idempotencyPrefix}:${match.id}`,
+    );
     return true;
   }
 
@@ -429,6 +556,7 @@ async function dispatch(wake: Wake, match: BoardMatch, record: BoardWatchRecord)
   if (!boardAllows(can, task.channel, "read") || !boardAllows(can, task.channel, "label")) {
     await deployment.held(claim).release();
     log.warn("board watch claimed a task outside the agent's read scope; released it", {
+      ...(boardKey !== undefined && { board: boardKey }),
       task: task.id,
       watch: record.id,
     });
@@ -436,7 +564,12 @@ async function dispatch(wake: Wake, match: BoardMatch, record: BoardWatchRecord)
   }
   try {
     await deployment.label(task.id, { set: { [CLAIM_WATCH_LABEL]: record.id } });
-    await start(task, formatTaskContext(claimed), `board:task:${task.id}:${claim.epoch}`, claim);
+    await start(
+      task,
+      formatTaskContext(claimed, boardKey),
+      `${idempotencyPrefix}:task:${task.id}:${claim.epoch}`,
+      claim,
+    );
   } catch (error) {
     await deployment
       .held(claim)

@@ -2016,6 +2016,9 @@ importers:
       '@nuxt/schema':
         specifier: ^4.6.4
         version: 4.6.4
+      '@octokit/openapi-webhooks':
+        specifier: 12.1.0
+        version: 12.1.0
       '@opentelemetry/context-async-hooks':
         specifier: 'catalog:'
         version: 2.12.1(@opentelemetry/api@1.9.1)
@@ -2228,8 +2231,8 @@ importers:
   packages/eve-board:
     dependencies:
       '@vercel/board':
-        specifier: 0.52.0
-        version: 0.52.0(@chat-adapter/slack@4.44.0(ai@7.0.177(zod@4.6.7))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.6.7))(@vercel/connect@2.9.2(f2d20db50bd98aa943f06220d3c62665))(chat@4.44.0(ai@7.0.177(zod@4.6.7))(supports-color@10.2.2)(zod@4.6.7))
+        specifier: 0.56.1
+        version: 0.56.1(@chat-adapter/slack@4.44.0(ai@7.0.177(zod@4.6.7))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.6.7))(@vercel/connect@2.9.2(f2d20db50bd98aa943f06220d3c62665))(chat@4.44.0(ai@7.0.177(zod@4.6.7))(supports-color@10.2.2)(zod@4.6.7))
       zod:
         specifier: 'catalog:'
         version: 4.6.7
@@ -4535,6 +4538,10 @@ packages:
 
   '@octokit/openapi-webhooks-types@12.1.0':
     resolution: {integrity: sha512-WiuzhOsiOvb7W3Pvmhf8d2C6qaLHXrWiLBP4nJ/4kydu+wpagV5Fkz9RfQwV2afYzv3PB+3xYgp4mAdNGjDprA==}
+
+  '@octokit/openapi-webhooks@12.1.0':
+    resolution: {integrity: sha512-Z5eDsLCUNbx1zHpZb1LNQirADqdMTvWJQ/deahi0ws+tWWnwHXB+Pr4jfmM9OrETS9Y5iW8ZRu1fdbudObhLrg==}
+    engines: {node: ^18.20.0 || >= 20.10.0}
 
   '@octokit/plugin-paginate-graphql@6.0.0':
     resolution: {integrity: sha512-crfpnIoFiBtRkvPqOyLOsw12XsveYuY2ieP6uYDosoUegBJpSVxGwut9sxUgFFcll3VTOTqpUf8yGd8x1OmAkQ==}
@@ -8231,8 +8238,8 @@ packages:
     resolution: {integrity: sha512-o+1CMRlT8/RvGo1aGkFv40F7v3MLdSOaVaIccepBXWrXgonKId3hHKSKGQ+iBDPoSe03crmHfhpHtTs0CCXiig==}
     engines: {node: '>=20.0.0'}
 
-  '@vercel/board@0.52.0':
-    resolution: {integrity: sha512-ARsgjNfQaKgAE8Pbwu+aP4IbMpCaiZNcwQYSiBHRDPODpgE+kQQbtjkIWHTjTg7jUrvCi9rPHW8qozhnGzfqfQ==}
+  '@vercel/board@0.56.1':
+    resolution: {integrity: sha512-fevWChw7CaZ0hIEMh8g8L8cHudzw/vqO9IfWWUxZCjzgAQ0hMxR1pv+QnM2FIMZLiO9WXJR+UD1onw0xOA/pSg==}
     engines: {node: '>=22.18'}
     hasBin: true
     peerDependencies:
@@ -18205,6 +18212,8 @@ snapshots:
 
   '@octokit/openapi-webhooks-types@12.1.0': {}
 
+  '@octokit/openapi-webhooks@12.1.0': {}
+
   '@octokit/plugin-paginate-graphql@6.0.0(@octokit/core@7.0.8)':
     dependencies:
       '@octokit/core': 7.0.8
@@ -21872,7 +21881,7 @@ snapshots:
       throttleit: 2.1.0
       undici: 6.28.1
 
-  '@vercel/board@0.52.0(@chat-adapter/slack@4.44.0(ai@7.0.177(zod@4.6.7))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.6.7))(@vercel/connect@2.9.2(f2d20db50bd98aa943f06220d3c62665))(chat@4.44.0(ai@7.0.177(zod@4.6.7))(supports-color@10.2.2)(zod@4.6.7))':
+  '@vercel/board@0.56.1(@chat-adapter/slack@4.44.0(ai@7.0.177(zod@4.6.7))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.6.7))(@vercel/connect@2.9.2(f2d20db50bd98aa943f06220d3c62665))(chat@4.44.0(ai@7.0.177(zod@4.6.7))(supports-color@10.2.2)(zod@4.6.7))':
     dependencies:
       '@vercel/oidc': 3.8.10
       jose: 6.2.17

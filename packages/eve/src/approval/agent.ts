@@ -61,6 +61,7 @@ export function withAgentApproval(
 
 export function withAgentApprovalOnEntries<
   T extends {
+    readonly agentApprovalIncluded?: boolean;
     readonly approval?: Approval;
     readonly frameworkAction?: unknown;
     readonly interactionOnly?: boolean;
@@ -70,7 +71,9 @@ export function withAgentApprovalOnEntries<
   return new Map(
     [...entries].map(([name, entry]) => [
       name,
-      entry.frameworkAction !== undefined || entry.interactionOnly === true
+      entry.agentApprovalIncluded === true ||
+      entry.frameworkAction !== undefined ||
+      entry.interactionOnly === true
         ? entry
         : { ...entry, approval: withAgentApproval(agent, entry.approval) },
     ]),

@@ -88,10 +88,10 @@ export async function postCompletedSlackReply(
 export async function deliverCompletedSlackReply(
   channel: SlackContext,
   reply: SlackCompletedReply,
-  logFields: { readonly turnId?: string },
+  { rootGone, ...logFields }: { readonly rootGone?: Promise<boolean>; readonly turnId?: string },
 ): Promise<void> {
   const { blocks, markdown, text } = typeof reply === "string" ? { markdown: reply } : reply;
-  if (await threadRootIsGone(channel)) {
+  if (await (rootGone ?? checkThreadRootGone(channel))) {
     log.warn(ROOT_GONE_LOG, logFields);
     return;
   }
@@ -123,7 +123,7 @@ export async function deliverCompletedSlackReply(
   await uploadReplySnippet(channel, markdown);
 }
 
-async function threadRootIsGone(channel: SlackContext): Promise<boolean> {
+export async function checkThreadRootGone(channel: SlackContext): Promise<boolean> {
   const { channelId, codeChannel, threadTs } = channel.slack;
   if (!channelId || !threadTs || codeChannel) return false;
   if ((channel as Partial<SlackChannelContext>).state?.postedInThread === true) return false;

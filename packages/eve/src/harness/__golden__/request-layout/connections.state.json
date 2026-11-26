@@ -128,12 +128,13 @@
           ]
         },
         "eve.catalog": {
-          "digest": "KrH36F1Zk9OV4Q_e0rW8Vz",
+          "digest": "qJ6zQjJGLHCRqWpxH8O_Aq",
           "since": 1,
           "value": {
             "connections": true,
             "searchableSkills": false,
             "skills": false,
+            "subscriptions": false,
             "tools": true
           }
         },
@@ -167,17 +168,17 @@
     "snapshot": {
       "session": {
         "compaction": {
-          "estimateRatio": 0.00031279324366593683,
+          "estimateRatio": 0.0004286326618088298,
           "lastKnownInputTokens": 1,
           "lastKnownPromptMessageCount": 4,
           "measurementsByModel": {
             "eve-test/layout": {
               "inputTokens": 1,
               "promptMessageCount": 4,
-              "requestEnvelopeTokens": 3013
+              "requestEnvelopeTokens": 2149
             }
           },
-          "requestEnvelopeTokens": 3013
+          "requestEnvelopeTokens": 2149
         },
         "continuationToken": "http:layout-connections",
         "sandboxState": {
