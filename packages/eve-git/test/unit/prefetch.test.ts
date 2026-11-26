@@ -5,7 +5,7 @@ import extension from "../../extension/extension.ts";
 import { parseCommand } from "../../extension/lib/github-shell.ts";
 import { buildPrefetchCommand, resolvePrefetchTarget } from "../../extension/lib/prefetch.ts";
 
-test("extracts target repository paths for clone and ref-changing commands inside the workspace", () => {
+test("extracts target repository paths for partial clone and ref-changing commands inside the workspace", () => {
   const cases: ReadonlyArray<{
     readonly command: string;
     readonly workingDirectory?: string;
@@ -14,7 +14,7 @@ test("extracts target repository paths for clone and ref-changing commands insid
     readonly expected: string | null;
   }> = [
     {
-      command: "git clone https://github.com/vercel/eve.git",
+      command: "git clone --filter=blob:none https://github.com/vercel/eve.git",
       expected: "/workspace/eve",
     },
     {
@@ -28,19 +28,21 @@ test("extracts target repository paths for clone and ref-changing commands insid
       expected: "/workspace/eve",
     },
     {
-      command: "git clone -- https://github.com/vercel/eve.git /workspace/explicit",
+      command:
+        "git clone --filter=blob:none -- https://github.com/vercel/eve.git /workspace/explicit",
       expected: "/workspace/explicit",
     },
     {
-      command: "git -C sub -c protocol.version=2 clone git@github.com:vercel/eve.git",
+      command:
+        "git -C sub -c protocol.version=2 clone --filter=blob:none git@github.com:vercel/eve.git",
       expected: "/workspace/sub/eve",
     },
     {
-      command: "gh repo clone vercel/eve",
+      command: "gh repo clone vercel/eve -- --filter=blob:none",
       expected: "/workspace/eve",
     },
     {
-      command: "gh repo clone vercel/eve custom-eve",
+      command: "gh repo clone vercel/eve custom-eve -- --filter=blob:none",
       expected: "/workspace/custom-eve",
     },
     {
@@ -48,12 +50,56 @@ test("extracts target repository paths for clone and ref-changing commands insid
       expected: "/workspace/eve",
     },
     {
-      command: "gh repo clone vercel/eve custom-eve -- --filter=blob:none --branch main",
+      command: "gh repo clone vercel/eve custom-eve -- --filter blob:none --branch main",
       expected: "/workspace/custom-eve",
     },
     {
-      command: "gh repo clone vercel/eve -u upstream -- --depth 1",
+      command: "gh repo clone vercel/eve -u upstream -- --filter=blob:none --depth 1",
       expected: "/workspace/eve",
+    },
+    {
+      command: "git clone https://github.com/vercel/eve",
+      expected: null,
+    },
+    {
+      command: "git clone https://github.com/vercel/eve.git",
+      expected: null,
+    },
+    {
+      command: "git clone --depth 1 https://github.com/vercel/eve.git",
+      expected: null,
+    },
+    {
+      command: "git clone --sparse https://github.com/vercel/eve.git",
+      expected: null,
+    },
+    {
+      command: "git clone -- https://github.com/vercel/eve.git /workspace/explicit",
+      expected: null,
+    },
+    {
+      command: "git clone -b --filter https://github.com/vercel/eve.git",
+      expected: null,
+    },
+    {
+      command: "git clone --filter=blob:none --no-filter https://github.com/vercel/eve.git",
+      expected: null,
+    },
+    {
+      command: "gh repo clone vercel/eve",
+      expected: null,
+    },
+    {
+      command: "gh repo clone vercel/eve custom-eve",
+      expected: null,
+    },
+    {
+      command: "gh repo clone vercel/eve -u upstream -- --depth 1",
+      expected: null,
+    },
+    {
+      command: "gh repo clone vercel/eve -- -b --filter",
+      expected: null,
     },
     {
       command: "git -C repo checkout main",
@@ -86,15 +132,15 @@ test("extracts target repository paths for clone and ref-changing commands insid
       expected: null,
     },
     {
-      command: "gh repo clone org/repo ../outside",
+      command: "gh repo clone org/repo ../outside -- --filter=blob:none",
       expected: null,
     },
     {
-      command: "gh repo clone vercel/eve /workspace-other/eve",
+      command: "gh repo clone vercel/eve /workspace-other/eve -- --filter=blob:none",
       expected: null,
     },
     {
-      command: "git clone https://github.com/vercel/eve.git /tmp/outside",
+      command: "git clone --filter=blob:none https://github.com/vercel/eve.git /tmp/outside",
       expected: null,
     },
     {
@@ -122,7 +168,7 @@ test("extracts target repository paths for clone and ref-changing commands insid
       expected: null,
     },
     {
-      command: "git clone https://github.com/vercel/eve.git",
+      command: "git clone --filter=blob:none https://github.com/vercel/eve.git",
       workingDirectory: "C:\\workspace",
       workspaceRoot: "C:\\workspace",
       expected: "C:/workspace/eve",
@@ -152,7 +198,7 @@ test("extracts target repository paths for clone and ref-changing commands insid
       expected: null,
     },
     {
-      command: "gh repo clone vercel/eve custom",
+      command: "gh repo clone vercel/eve custom -- --filter=blob:none",
       workingDirectory: "C:\\workspace",
       workspaceRoot: "C:\\workspace",
       expected: "C:/workspace/custom",

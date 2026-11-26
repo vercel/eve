@@ -44,9 +44,77 @@ import {
 const FILE_TOOLS = new Set(["read_file", "edit_file", "write_file", "glob", "grep"]);
 const DIRECTORY_TOOLS = new Set(["glob", "grep"]);
 const MAX_EXTRA_PATHS = 8;
+const MAX_SUBSHELL_DEPTH = 2;
 
-const COMMAND_RECONCILE_PATTERN =
-  /\b(?:git|gh|clone|checkout|switch|fetch|pull|worktree|submodule|sparse-checkout|reset|init|tar|unzip|cd)\b/u;
+const ENV_ASSIGNMENT_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*=/u;
+const SHELL_CONTROL_KEYWORDS = new Set([
+  "if",
+  "then",
+  "elif",
+  "else",
+  "do",
+  "done",
+  "fi",
+  "while",
+  "until",
+  "case",
+  "in",
+]);
+const REDIRECTION_TOKEN_PATTERN = /^(?:\d+|&)?[<>]/u;
+const STANDALONE_REDIRECTION_PATTERN = /^(?:\d+|&)?(?:>>?|<<?[-<]?|<>|>[|&]|<&)$/u;
+const SUBSHELL_EXECUTABLES = new Set(["sh", "bash", "zsh"]);
+const TRANSPARENT_WRAPPERS = new Set(["env", "command", "exec", "sudo", "nohup", "time", "!", "{"]);
+const WRAPPER_VALUE_FLAGS: Readonly<Record<string, ReadonlySet<string>>> = {
+  env: new Set(["-u", "--unset", "-C", "--chdir", "-S", "--split-string"]),
+  sudo: new Set([
+    "-u",
+    "--user",
+    "-g",
+    "--group",
+    "-C",
+    "-h",
+    "--host",
+    "-p",
+    "--prompt",
+    "-r",
+    "-t",
+    "-T",
+    "-D",
+    "--chdir",
+  ]),
+  exec: new Set(["-a"]),
+  time: new Set(["-f", "--format", "-o", "--output"]),
+};
+const GIT_VALUE_FLAGS = new Set([
+  "-C",
+  "-c",
+  "--git-dir",
+  "--work-tree",
+  "--namespace",
+  "--super-prefix",
+  "--config-env",
+  "--exec-path",
+  "--list-cmds",
+  "--attr-source",
+]);
+const GIT_RECONCILE_SUBCOMMANDS = new Set([
+  "clone",
+  "checkout",
+  "switch",
+  "fetch",
+  "pull",
+  "worktree",
+  "submodule",
+  "sparse-checkout",
+  "reset",
+  "init",
+  "merge",
+  "rebase",
+  "remote",
+  "cherry-pick",
+  "revert",
+]);
+const GH_VALUE_FLAGS = new Set(["-R", "--repo", "--hostname"]);
 
 export type SettledCallAction =
   | { readonly kind: "none" }
@@ -206,31 +274,27 @@ export function isPathWithinRoot(targetPath: string, root: string): boolean {
   return targetPath === root || targetPath.startsWith(`${root}/`);
 }
 
-export function shouldReconcileCommand(
-  command: string,
-  workingDirectory: string | undefined,
-  state: Pick<
-    RepositorySessionState,
-    "workspaceRoot" | "rawWorkspaceRoot" | "homeDir" | "byRoot" | "checkedDirs"
-  >,
-): boolean {
-  if (COMMAND_RECONCILE_PATTERN.test(command)) return true;
-  if (workingDirectory !== undefined) {
-    const resolved = normalizeKnownPath(workingDirectory, state);
-    if (resolved === null) return true;
-    if (resolved === state.workspaceRoot) return false;
-    if (resolved in state.byRoot) return false;
-    if (state.checkedDirs.includes(resolved)) return false;
-    return true;
-  }
-  return false;
-}
-
-function tokenizeShellCommand(command: string): readonly string[] {
-  const tokens: string[] = [];
+function splitShellCommandSegments(command: string): readonly (readonly string[])[] {
+  const segments: string[][] = [];
+  let segment: string[] = [];
   let current = "";
   let quote: "'" | '"' | null = null;
   let escaping = false;
+
+  const flushToken = () => {
+    if (current.length > 0) {
+      segment.push(current);
+      current = "";
+    }
+  };
+
+  const flushSegment = () => {
+    flushToken();
+    if (segment.length > 0) {
+      segments.push(segment);
+      segment = [];
+    }
+  };
 
   for (let i = 0; i < command.length; i += 1) {
     const ch = command[i]!;
@@ -258,16 +322,277 @@ function tokenizeShellCommand(command: string): readonly string[] {
       quote = ch;
       continue;
     }
-    if (/[\s;&|<>()]/u.test(ch)) {
-      if (current.length > 0) {
-        tokens.push(current);
-        current = "";
+    if (ch === "#" && current.length === 0) {
+      const nl = command.indexOf("\n", i);
+      if (nl === -1) break;
+      i = nl - 1;
+      continue;
+    }
+    if (ch === ";" || ch === "\n" || ch === "|" || ch === "(" || ch === ")") {
+      flushSegment();
+      if (ch === "|" && (command[i + 1] === "|" || command[i + 1] === "&")) {
+        i += 1;
       }
+      continue;
+    }
+    if (ch === "&") {
+      if (command[i + 1] === ">") {
+        if (current.length > 0) flushToken();
+        current += "&>";
+        i += 1;
+        if (command[i + 1] === ">") {
+          current += ">";
+          i += 1;
+        }
+        continue;
+      }
+      if (command[i + 1] === "&") i += 1;
+      flushSegment();
+      continue;
+    }
+    if (ch === ">" || ch === "<") {
+      if (current.length > 0 && !/^\d+$/u.test(current)) {
+        flushToken();
+      }
+      current += ch;
+      const next = command[i + 1];
+      if (
+        next === ch ||
+        next === "&" ||
+        (ch === "<" && next === ">") ||
+        (ch === ">" && next === "|")
+      ) {
+        current += next;
+        i += 1;
+        if (ch === "<" && next === "<" && (command[i + 1] === "<" || command[i + 1] === "-")) {
+          current += command[i + 1]!;
+          i += 1;
+        }
+      }
+      continue;
+    }
+    if (ch === " " || ch === "\t" || ch === "\r") {
+      flushToken();
       continue;
     }
     current += ch;
   }
-  if (current.length > 0) tokens.push(current);
+
+  flushSegment();
+  return segments;
+}
+
+function executableBasename(token: string): string {
+  const slash = Math.max(token.lastIndexOf("/"), token.lastIndexOf("\\"));
+  const base = slash === -1 ? token : token.slice(slash + 1);
+  return base.replace(/\.exe$/iu, "");
+}
+
+function shouldReconcileCommandSegmentList(command: string, depth = 0): boolean {
+  for (const segment of splitShellCommandSegments(command)) {
+    if (isMutatingCommandSegment(segment, depth)) return true;
+  }
+  return false;
+}
+
+function isMutatingCommandSegment(segment: readonly string[], depth = 0): boolean {
+  let idx = 0;
+  while (idx < segment.length) {
+    const token = segment[idx]!;
+    if (SHELL_CONTROL_KEYWORDS.has(token)) {
+      idx += 1;
+      continue;
+    }
+    if (STANDALONE_REDIRECTION_PATTERN.test(token)) {
+      idx += 2;
+      continue;
+    }
+    if (REDIRECTION_TOKEN_PATTERN.test(token)) {
+      idx += 1;
+      continue;
+    }
+    if (ENV_ASSIGNMENT_PATTERN.test(token)) {
+      idx += 1;
+      continue;
+    }
+    const base = executableBasename(token);
+    if (TRANSPARENT_WRAPPERS.has(base)) {
+      idx += 1;
+      const valueFlags = WRAPPER_VALUE_FLAGS[base];
+      while (idx < segment.length) {
+        const arg = segment[idx]!;
+        if (arg === "--") {
+          idx += 1;
+          break;
+        }
+        if (base === "env") {
+          if (arg === "-S" || arg === "--split-string") {
+            idx += 1;
+            if (idx < segment.length) {
+              if (
+                depth < MAX_SUBSHELL_DEPTH &&
+                shouldReconcileCommandSegmentList(segment[idx]!, depth + 1)
+              ) {
+                return true;
+              }
+              idx += 1;
+            }
+            continue;
+          }
+          if (arg.startsWith("--split-string=")) {
+            if (
+              depth < MAX_SUBSHELL_DEPTH &&
+              shouldReconcileCommandSegmentList(arg.slice("--split-string=".length), depth + 1)
+            ) {
+              return true;
+            }
+            idx += 1;
+            continue;
+          }
+          if (arg.startsWith("-S") && arg.length > 2) {
+            if (
+              depth < MAX_SUBSHELL_DEPTH &&
+              shouldReconcileCommandSegmentList(arg.slice(2), depth + 1)
+            ) {
+              return true;
+            }
+            idx += 1;
+            continue;
+          }
+        }
+        if (arg.startsWith("-") && arg.length > 1) {
+          idx += 1;
+          if (valueFlags?.has(arg) && idx < segment.length) {
+            idx += 1;
+          }
+          continue;
+        }
+        break;
+      }
+      continue;
+    }
+    break;
+  }
+
+  if (idx >= segment.length) return false;
+  const executable = executableBasename(segment[idx]!);
+
+  if (SUBSHELL_EXECUTABLES.has(executable)) {
+    if (depth >= MAX_SUBSHELL_DEPTH) return false;
+    let subIdx = idx + 1;
+    let hasCommandFlag = false;
+    while (subIdx < segment.length) {
+      const arg = segment[subIdx]!;
+      if (arg === "--") {
+        subIdx += 1;
+        break;
+      }
+      if (arg === "-o" || arg === "+o" || arg === "--rcfile" || arg === "--init-file") {
+        subIdx += 2;
+        continue;
+      }
+      if (arg.startsWith("-") && arg.length > 1) {
+        if (!arg.startsWith("--")) {
+          const flags = arg.slice(1);
+          if (flags.includes("c")) hasCommandFlag = true;
+          if (flags.endsWith("o")) {
+            subIdx += 2;
+            continue;
+          }
+        }
+        subIdx += 1;
+        continue;
+      }
+      if (arg.startsWith("+") && arg.length > 1) {
+        subIdx += 1;
+        continue;
+      }
+      break;
+    }
+    if (hasCommandFlag && subIdx < segment.length) {
+      return shouldReconcileCommandSegmentList(segment[subIdx]!, depth + 1);
+    }
+    return false;
+  }
+
+  if (executable === "tar" || executable === "unzip") {
+    return true;
+  }
+
+  if (executable === "git") {
+    let subIdx = idx + 1;
+    while (subIdx < segment.length) {
+      const arg = segment[subIdx]!;
+      if (arg === "--") return false;
+      if (arg.startsWith("-")) {
+        subIdx += 1;
+        if (GIT_VALUE_FLAGS.has(arg)) subIdx += 1;
+        continue;
+      }
+      return GIT_RECONCILE_SUBCOMMANDS.has(arg);
+    }
+    return false;
+  }
+
+  if (executable === "gh") {
+    let firstPos: string | null = null;
+    let secondPos: string | null = null;
+    let hasCloneFlag = false;
+    let subIdx = idx + 1;
+    while (subIdx < segment.length) {
+      const arg = segment[subIdx]!;
+      if (arg === "--") break;
+      if (arg.startsWith("-")) {
+        if (arg === "--clone" || arg === "--clone=true" || arg === "-c") {
+          hasCloneFlag = true;
+        }
+        subIdx += 1;
+        if (GH_VALUE_FLAGS.has(arg)) subIdx += 1;
+        continue;
+      }
+      if (firstPos === null) {
+        firstPos = arg;
+      } else if (secondPos === null) {
+        secondPos = arg;
+      }
+      subIdx += 1;
+    }
+    if (firstPos === "pr" && secondPos === "checkout") return true;
+    if (firstPos === "repo" && secondPos === "clone") return true;
+    if (firstPos === "repo" && (secondPos === "fork" || secondPos === "create")) {
+      return hasCloneFlag;
+    }
+    return false;
+  }
+
+  return false;
+}
+
+export function shouldReconcileCommand(
+  command: string,
+  workingDirectory: string | undefined,
+  state: Pick<
+    RepositorySessionState,
+    "workspaceRoot" | "rawWorkspaceRoot" | "homeDir" | "byRoot" | "checkedDirs"
+  >,
+): boolean {
+  if (shouldReconcileCommandSegmentList(command, 0)) return true;
+  if (workingDirectory !== undefined) {
+    const resolved = normalizeKnownPath(workingDirectory, state);
+    if (resolved === null) return true;
+    if (resolved === state.workspaceRoot) return false;
+    if (resolved in state.byRoot) return false;
+    if (state.checkedDirs.includes(resolved)) return false;
+    return true;
+  }
+  return false;
+}
+
+function tokenizeShellCommand(command: string): readonly string[] {
+  const tokens: string[] = [];
+  for (const segment of splitShellCommandSegments(command)) {
+    for (const token of segment) tokens.push(token);
+  }
   return tokens;
 }
 
@@ -431,19 +756,48 @@ function capRecordedRepositories(byRoot: Readonly<Record<string, RecordedReposit
   return { byRoot: kept, overflowRoots };
 }
 
-async function readMatchingRuleFiles(
-  sandbox: RepositorySandbox,
+function collectMatchingRuleFileSpecs(
   repo: DiscoveredRepository,
   resolved: ResolvedRepositoriesConfig,
-): Promise<{
-  readonly files: readonly RepositoryInstructionFile[];
-  readonly overflowPaths: readonly string[];
-}> {
+): readonly RepositoryInstructionSpec[] {
   const specs: RepositoryInstructionSpec[] = [];
   for (const rule of resolved.rules) {
     if (!matchesRepositoryRule(repo, rule.match)) continue;
     if (rule.files !== undefined) specs.push(...rule.files);
   }
+  return specs;
+}
+
+function areInstructionSpecsEqual(
+  a: readonly RepositoryInstructionSpec[] | undefined,
+  b: readonly RepositoryInstructionSpec[] | undefined,
+): boolean {
+  if (a === undefined && b === undefined) return true;
+  if (a === undefined || b === undefined || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    const left = a[i]!;
+    const right = b[i]!;
+    if (typeof left === "string" || typeof right === "string") {
+      if (left !== right) return false;
+    } else {
+      if (left.length !== right.length) return false;
+      for (let j = 0; j < left.length; j += 1) {
+        if (left[j] !== right[j]) return false;
+      }
+    }
+  }
+  return true;
+}
+
+async function readMatchingRuleFiles(
+  sandbox: RepositorySandbox,
+  repo: DiscoveredRepository,
+  specs: readonly RepositoryInstructionSpec[],
+  resolved: ResolvedRepositoriesConfig,
+): Promise<{
+  readonly files: readonly RepositoryInstructionFile[];
+  readonly overflowPaths: readonly string[];
+}> {
   if (specs.length === 0) return { files: [], overflowPaths: [] };
   const loaded = await readRepositorySpecFiles(sandbox, repo.root, specs, {
     maxFileBytes: resolved.maxFileBytes,
@@ -488,17 +842,23 @@ export async function onboardRepository(
   repo: DiscoveredRepository,
   resolved: ResolvedRepositoriesConfig,
   ruleCtx: RepositoryRuleContext,
+  fileFingerprint?: string,
 ): Promise<{
   readonly repo: RecordedRepository;
   readonly overflowPaths: readonly string[];
 }> {
+  const ruleFileSpecs = collectMatchingRuleFileSpecs(repo, resolved);
   let ruleFiles: readonly RepositoryInstructionFile[] = [];
   let ruleOverflowPaths: readonly string[] = [];
-  try {
-    const matched = await readMatchingRuleFiles(sandbox, repo, resolved);
-    ruleFiles = matched.files;
-    ruleOverflowPaths = matched.overflowPaths;
-  } catch {}
+  let ruleFilesLoaded = ruleFileSpecs.length === 0;
+  if (ruleFileSpecs.length > 0) {
+    try {
+      const matched = await readMatchingRuleFiles(sandbox, repo, ruleFileSpecs, resolved);
+      ruleFiles = matched.files;
+      ruleOverflowPaths = matched.overflowPaths;
+      ruleFilesLoaded = true;
+    } catch {}
+  }
   const entered: EnteredRepository = {
     ...repo,
     readFile: (relativePath: string) =>
@@ -577,7 +937,10 @@ export async function onboardRepository(
       branch: repo.branch,
       sparse: repo.sparse,
       instructions: repo.instructions,
+      ...(fileFingerprint !== undefined && { fileFingerprint }),
       ruleFiles,
+      ...(ruleFilesLoaded && { ruleFileSpecs }),
+      ...(ruleOverflowPaths.length > 0 && { ruleOverflowPaths }),
       ruleInstructions,
       ruleSkills,
       enteredAtHead: repo.head,
@@ -599,6 +962,16 @@ export async function reconcileWorkspace(
 ): Promise<void> {
   const rawWorkspaceRoot = sandbox.resolvePath(".");
   const snapshot = repoState.get();
+  const knownFingerprints: Record<string, string> = {};
+  for (const [root, recorded] of Object.entries(snapshot.byRoot)) {
+    if (
+      recorded.fileFingerprint !== undefined &&
+      !recorded.instructions.some((file) => file.source === "unavailable")
+    ) {
+      knownFingerprints[root] = recorded.fileFingerprint;
+    }
+  }
+
   let discovery: Awaited<ReturnType<typeof discoverWorkspace>>;
   try {
     discovery = await discoverWorkspace(sandbox, {
@@ -609,6 +982,7 @@ export async function reconcileWorkspace(
       includeWorkspaceInstructions: true,
       extraPaths: options.extraPaths,
       existingRoots: Object.keys(snapshot.byRoot),
+      knownFingerprints,
       pendingJobs: options.pendingJobs,
     });
   } catch {
@@ -638,52 +1012,106 @@ export async function reconcileWorkspace(
   for (const repo of discoveredRepos.values()) {
     const existing = snapshot.byRoot[repo.root];
     if (existing === undefined) {
-      const onboarded = await onboardRepository(sandbox, repo, resolved, ruleCtx);
+      const onboarded = await onboardRepository(
+        sandbox,
+        repo,
+        resolved,
+        ruleCtx,
+        discovery.fileFingerprints[repo.root],
+      );
       upsertedRepos[repo.root] = onboarded.repo;
       extraOverflowPaths.push(...onboarded.overflowPaths);
       changed = true;
       continue;
     }
 
-    const headChanged = existing.head !== repo.head;
-    const hasRuleFileSpecs = resolved.rules.some(
-      (rule) => matchesRepositoryRule(repo, rule.match) && (rule.files?.length ?? 0) > 0,
+    const filesUnchanged = discovery.unchangedFileRoots.has(repo.root);
+    const instructions = filesUnchanged ? existing.instructions : repo.instructions;
+    const nextFileFingerprint = filesUnchanged
+      ? existing.fileFingerprint
+      : discovery.fileFingerprints[repo.root];
+    const effectiveRepo: DiscoveredRepository = filesUnchanged ? { ...repo, instructions } : repo;
+
+    const headChanged = existing.head !== effectiveRepo.head;
+    const repoMetaChanged =
+      headChanged ||
+      existing.slug !== effectiveRepo.slug ||
+      existing.remote !== effectiveRepo.remote ||
+      existing.branch !== effectiveRepo.branch ||
+      existing.sparse !== effectiveRepo.sparse;
+
+    const matchingRuleFileSpecs = collectMatchingRuleFileSpecs(effectiveRepo, resolved);
+    const ruleFileSpecsChanged = !areInstructionSpecsEqual(
+      existing.ruleFileSpecs,
+      matchingRuleFileSpecs,
     );
-    let ruleFiles: readonly RepositoryInstructionFile[] = hasRuleFileSpecs
-      ? existing.ruleFiles
-      : [];
-    if (hasRuleFileSpecs) {
-      try {
-        const matched = await readMatchingRuleFiles(sandbox, repo, resolved);
-        ruleFiles = matched.files;
-        extraOverflowPaths.push(...matched.overflowPaths);
-      } catch {}
+    const unchangedDefaultInstructions = filesUnchanged;
+    let ruleFiles: readonly RepositoryInstructionFile[] =
+      matchingRuleFileSpecs.length > 0 ? existing.ruleFiles : [];
+    let ruleOverflowPaths: readonly string[] =
+      matchingRuleFileSpecs.length > 0 ? (existing.ruleOverflowPaths ?? []) : [];
+    let nextRuleFileSpecs: readonly RepositoryInstructionSpec[] | undefined =
+      matchingRuleFileSpecs.length === 0 ? matchingRuleFileSpecs : existing.ruleFileSpecs;
+
+    if (matchingRuleFileSpecs.length > 0) {
+      const shouldRefreshRuleFiles =
+        repoMetaChanged ||
+        !unchangedDefaultInstructions ||
+        ruleFileSpecsChanged ||
+        existing.ruleFileSpecs === undefined ||
+        (existing.ruleOverflowPaths?.length ?? 0) > 0 ||
+        existing.ruleFiles.some((file) => file.source === "unavailable");
+      if (shouldRefreshRuleFiles) {
+        try {
+          const matched = await readMatchingRuleFiles(
+            sandbox,
+            effectiveRepo,
+            matchingRuleFileSpecs,
+            resolved,
+          );
+          ruleFiles = matched.files;
+          ruleOverflowPaths = matched.overflowPaths;
+          nextRuleFileSpecs = matchingRuleFileSpecs;
+        } catch {
+          nextRuleFileSpecs = undefined;
+        }
+      }
+      extraOverflowPaths.push(...ruleOverflowPaths);
     }
 
     const metadataChanged =
-      headChanged ||
-      existing.slug !== repo.slug ||
-      existing.remote !== repo.remote ||
-      existing.branch !== repo.branch ||
-      existing.sparse !== repo.sparse ||
-      JSON.stringify(existing.instructions) !== JSON.stringify(repo.instructions) ||
-      JSON.stringify(existing.ruleFiles) !== JSON.stringify(ruleFiles);
+      repoMetaChanged ||
+      existing.fileFingerprint !== nextFileFingerprint ||
+      !areInstructionSpecsEqual(existing.ruleFileSpecs, nextRuleFileSpecs) ||
+      (!filesUnchanged && JSON.stringify(existing.instructions) !== JSON.stringify(instructions)) ||
+      JSON.stringify(existing.ruleFiles) !== JSON.stringify(ruleFiles) ||
+      JSON.stringify(existing.ruleOverflowPaths ?? []) !== JSON.stringify(ruleOverflowPaths);
 
     if (headChanged) {
       headChangedRoots.push(repo.root);
     }
 
     if (metadataChanged) {
-      upsertedRepos[repo.root] = {
-        ...existing,
-        slug: repo.slug,
-        remote: repo.remote,
-        head: repo.head,
-        branch: repo.branch,
-        sparse: repo.sparse,
-        instructions: repo.instructions,
+      const {
+        fileFingerprint: _prevFileFingerprint,
+        ruleFileSpecs: _prevRuleFileSpecs,
+        ruleOverflowPaths: _prevRuleOverflowPaths,
+        ...restExisting
+      } = existing;
+      const nextRecorded: RecordedRepository = {
+        ...restExisting,
+        slug: effectiveRepo.slug,
+        remote: effectiveRepo.remote,
+        head: effectiveRepo.head,
+        branch: effectiveRepo.branch,
+        sparse: effectiveRepo.sparse,
+        instructions,
+        ...(nextFileFingerprint !== undefined && { fileFingerprint: nextFileFingerprint }),
         ruleFiles,
+        ...(nextRuleFileSpecs !== undefined && { ruleFileSpecs: nextRuleFileSpecs }),
+        ...(ruleOverflowPaths.length > 0 && { ruleOverflowPaths }),
       };
+      upsertedRepos[repo.root] = nextRecorded;
       changed = true;
     }
   }
@@ -787,12 +1215,18 @@ export async function reconcileTouchedFile(
 ): Promise<void> {
   const current = repoState.get();
   const rawWorkspaceRoot = sandbox.resolvePath(".");
+  const sparseRepoRoots = new Set(
+    Object.values(current.byRoot)
+      .filter((repo) => repo.sparse)
+      .map((repo) => repo.root),
+  );
   let probe: Awaited<ReturnType<typeof readScopedDirectoryInstructions>>;
   try {
     probe = await readScopedDirectoryInstructions(sandbox, {
       targetPath,
       checkedDirs: new Set(current.checkedDirs),
       knownRepoRoots: new Set(Object.keys(current.byRoot)),
+      sparseRepoRoots,
       instructions: resolved.instructions,
       maxFileBytes: resolved.maxFileBytes,
       maxTotalBytes: resolved.maxTotalBytes,
@@ -806,7 +1240,13 @@ export async function reconcileTouchedFile(
   const skippedEnclosingRoots: string[] = [];
   if (probe.enclosingRepo !== null && !(probe.enclosingRepo.root in current.byRoot)) {
     if (Object.keys(current.byRoot).length < MAX_DISCOVERED_REPOSITORIES) {
-      const entered = await onboardRepository(sandbox, probe.enclosingRepo, resolved, ruleCtx);
+      const entered = await onboardRepository(
+        sandbox,
+        probe.enclosingRepo,
+        resolved,
+        ruleCtx,
+        probe.enclosingRepoFingerprint,
+      );
       onboarded = entered.repo;
       skippedEnclosingRoots.push(...entered.overflowPaths);
     } else {
@@ -930,12 +1370,20 @@ export async function discoverWorkspaceReadOnly(
       extraOverflow.push(repo.root);
       continue;
     }
+    const ruleFileSpecs = collectMatchingRuleFileSpecs(repo, resolved);
     let ruleFiles: readonly RepositoryInstructionFile[] = [];
-    try {
-      const matched = await readMatchingRuleFiles(sandbox, repo, resolved);
-      ruleFiles = matched.files;
-      extraOverflow.push(...matched.overflowPaths);
-    } catch {}
+    let ruleOverflowPaths: readonly string[] = [];
+    let ruleFilesLoaded = ruleFileSpecs.length === 0;
+    if (ruleFileSpecs.length > 0) {
+      try {
+        const matched = await readMatchingRuleFiles(sandbox, repo, ruleFileSpecs, resolved);
+        ruleFiles = matched.files;
+        ruleOverflowPaths = matched.overflowPaths;
+        ruleFilesLoaded = true;
+        extraOverflow.push(...matched.overflowPaths);
+      } catch {}
+    }
+    const fileFingerprint = discovery.fileFingerprints[repo.root];
     byRoot[repo.root] = {
       root: repo.root,
       slug: repo.slug,
@@ -944,7 +1392,10 @@ export async function discoverWorkspaceReadOnly(
       branch: repo.branch,
       sparse: repo.sparse,
       instructions: repo.instructions,
+      ...(fileFingerprint !== undefined && { fileFingerprint }),
       ruleFiles,
+      ...(ruleFilesLoaded && { ruleFileSpecs }),
+      ...(ruleOverflowPaths.length > 0 && { ruleOverflowPaths }),
       ruleInstructions: [],
       ruleSkills: {},
       enteredAtHead: repo.head,

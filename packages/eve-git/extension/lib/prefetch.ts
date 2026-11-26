@@ -40,6 +40,7 @@ const GIT_CLONE_VALUE_FLAGS = new Set([
   "-j",
   "--jobs",
   "--filter",
+  "--revision",
   "--server-option",
   "--bundle-uri",
 ]);
@@ -162,11 +163,42 @@ function resolveGitPrefetchTarget(
   return null;
 }
 
+function hasPartialCloneFilter(args: readonly string[]): boolean {
+  let isPartial = false;
+  let index = 0;
+  while (index < args.length) {
+    const arg = args[index]!;
+    if (arg === "--") break;
+    if (arg === "--filter") {
+      if (index + 1 < args.length) isPartial = true;
+      index += 2;
+      continue;
+    }
+    if (arg.startsWith("--filter=")) {
+      isPartial = arg.length > "--filter=".length;
+      index += 1;
+      continue;
+    }
+    if (arg === "--no-filter") {
+      isPartial = false;
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("-")) {
+      index += GIT_CLONE_VALUE_FLAGS.has(arg) ? 2 : 1;
+      continue;
+    }
+    index += 1;
+  }
+  return isPartial;
+}
+
 function resolveGitCloneTarget(
   args: readonly string[],
   baseDir: string,
   repository: string | undefined,
 ): string | null {
+  if (!hasPartialCloneFilter(args)) return null;
   const positionals: string[] = [];
   let afterDoubleDash = false;
   let index = 0;
@@ -197,16 +229,23 @@ function resolveGhRepoCloneTarget(
   repository: string | undefined,
 ): string | null {
   const positionals: string[] = [];
+  let gitFlagsStart = -1;
   let index = 3;
   while (index < argv.length) {
     const arg = argv[index]!;
-    if (arg === "--") break;
+    if (arg === "--") {
+      gitFlagsStart = index + 1;
+      break;
+    }
     if (arg.startsWith("-")) {
       index += GH_REPO_CLONE_VALUE_FLAGS.has(arg) ? 2 : 1;
       continue;
     }
     positionals.push(arg);
     index += 1;
+  }
+  if (gitFlagsStart === -1 || !hasPartialCloneFilter(argv.slice(gitFlagsStart))) {
+    return null;
   }
   if (positionals[1]) {
     return resolvePath(workingDirectory, positionals[1]);

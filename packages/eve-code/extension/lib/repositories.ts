@@ -19,6 +19,7 @@ export const DEFAULT_MAX_FILE_BYTES = 64_000;
 export const DEFAULT_MAX_TOTAL_BYTES = 256_000;
 export const MAX_DISCOVERED_REPOSITORIES = 32;
 export const MAX_SCAN_CANDIDATES = 256;
+export const MAX_SCAN_DIRS = 1024;
 export const MAX_META_FIELD_BYTES = 2048;
 export const MAX_OVERFLOW_PATHS = 64;
 
@@ -63,6 +64,8 @@ export interface WorkspaceDiscoveryResult {
   readonly workspaceInstructions: readonly RepositoryInstructionFile[];
   readonly finishedJobDirs: readonly string[];
   readonly overflowPaths: readonly string[];
+  readonly unchangedFileRoots: ReadonlySet<string>;
+  readonly fileFingerprints: Readonly<Record<string, string>>;
 }
 
 export interface ScopedProbeResult {
@@ -70,6 +73,7 @@ export interface ScopedProbeResult {
   readonly homeDir: string | null;
   readonly enclosingRepoRoot: string | null;
   readonly enclosingRepo: DiscoveredRepository | null;
+  readonly enclosingRepoFingerprint?: string;
   readonly checkedDirs: readonly string[];
   readonly scopes: readonly {
     readonly dir: string;
@@ -455,12 +459,20 @@ function shellHelpers(boundary: string, maxFileBytes: number, maxTotalBytes: num
   const fileBytes = Math.max(1, Math.floor(maxFileBytes));
   const headBytes = fileBytes + 1;
   const totalBytes = Math.max(0, Math.floor(maxTotalBytes));
+  const cfgDelimiter = `${boundary}_CFG`;
+  const ckDelimiter = `${boundary}_CK`;
+  const lsDelimiter = `${boundary}_LS`;
+  const scanDelimiter = `${boundary}_SCAN`;
   return [
     `B=${b}`,
+    `NL='`,
+    `'`,
     `MAX_FILE=${fileBytes}`,
     `MAX_HEAD=${headBytes}`,
     `MAX_TOTAL_BYTES=${totalBytes}`,
     `MAX_REPOS=${MAX_DISCOVERED_REPOSITORIES}`,
+    `MAX_SCAN_CANDS=${MAX_SCAN_CANDIDATES}`,
+    `MAX_SCAN_DIRS=${MAX_SCAN_DIRS}`,
     `MAX_META=${MAX_META_FIELD_BYTES}`,
     `MAX_OVERFLOW=${MAX_OVERFLOW_PATHS}`,
     `REPO_COUNT=0`,
@@ -468,6 +480,14 @@ function shellHelpers(boundary: string, maxFileBytes: number, maxTotalBytes: num
     `TOTAL_BYTES=0`,
     `BUDGET_EXHAUSTED=0`,
     `OVERFLOW_COUNT=0`,
+    `_SCAN_EMITTED=0`,
+    `_SCAN_VISITED=0`,
+    `_REPO_FP=""`,
+    `_REPO_FP_OK=1`,
+    `_PROBE_FP=""`,
+    `_PROBE_BYTES=0`,
+    `_repo_git_fallback=1`,
+    `_r_out=""`,
     `canon_path() {`,
     `  [ -e "$1" ] || return 1`,
     `  if realpath -e -- "$1" 2>/dev/null; then return 0; fi`,
@@ -497,6 +517,50 @@ function shellHelpers(boundary: string, maxFileBytes: number, maxTotalBytes: num
     `  fi`,
     `  case "$_child" in "$_parent"/*) return 0 ;; *) return 1 ;; esac`,
     `}`,
+    `scan_repos_under() {`,
+    `  _level=""`,
+    `  for _root in "$@"; do`,
+    `    [ -d "$_root" ] || continue`,
+    `    _root_real=$(canon_path "$_root" 2>/dev/null || true)`,
+    `    [ -n "$_root_real" ] || continue`,
+    `    case "\${NL}\${_level}" in *"\${NL}\${_root_real}\${NL}"*) continue ;; esac`,
+    `    _level="\${_level}\${_root_real}\${NL}"`,
+    `  done`,
+    `  _depth=0`,
+    `  while [ "$_depth" -le 3 ] && [ -n "$_level" ]; do`,
+    `    _next_level=""`,
+    `    _next_count=0`,
+    `    while IFS= read -r _dir; do`,
+    `      [ -n "$_dir" ] || continue`,
+    `      if [ "$_SCAN_EMITTED" -ge "$MAX_SCAN_CANDS" ] || [ "$_SCAN_VISITED" -ge "$MAX_SCAN_DIRS" ]; then`,
+    `        return 0`,
+    `      fi`,
+    `      _SCAN_VISITED=$((_SCAN_VISITED + 1))`,
+    `      if [ -e "$_dir/.git" ]; then`,
+    `        _SCAN_EMITTED=$((_SCAN_EMITTED + 1))`,
+    `        printf '%s\\n' "$_dir"`,
+    `        continue`,
+    `      fi`,
+    `      [ "$_depth" -lt 3 ] || continue`,
+    `      [ "$_next_count" -lt "$MAX_SCAN_DIRS" ] || continue`,
+    `      if [ "$_dir" = "/" ]; then _pfx=""; else _pfx="$_dir"; fi`,
+    `      for _child in "$_pfx"/* "$_pfx"/.[!.]* "$_pfx"/..?*; do`,
+    `        [ ! -L "$_child" ] && [ -d "$_child" ] || continue`,
+    `        _base="\${_child##*/}"`,
+    `        case "$_base" in`,
+    `          .git|node_modules|.next|dist|build|.turbo|target|vendor|.venv|__pycache__) continue ;;`,
+    `        esac`,
+    `        _next_level="\${_next_level}\${_child}\${NL}"`,
+    `        _next_count=$((_next_count + 1))`,
+    `        if [ "$_next_count" -ge "$MAX_SCAN_DIRS" ]; then break; fi`,
+    `      done`,
+    `    done <<${scanDelimiter}`,
+    `$_level`,
+    `${scanDelimiter}`,
+    `    _level="$_next_level"`,
+    `    _depth=$((_depth + 1))`,
+    `  done`,
+    `}`,
     `emit_overflow() {`,
     `  _kind="$1"; _opath="$2"`,
     `  if [ "$OVERFLOW_COUNT" -lt "$MAX_OVERFLOW" ]; then`,
@@ -524,29 +588,54 @@ function shellHelpers(boundary: string, maxFileBytes: number, maxTotalBytes: num
     `  [ -n "$_real" ] || return 1`,
     `  path_within "$_real" "$_base" || return 1`,
     `  head -c "$MAX_HEAD" -- "$_real" | LC_ALL=C grep -q '[^[:space:]]' 2>/dev/null || return 1`,
-    `  _emit_bytes=$(head -c "$MAX_HEAD" -- "$_real" | wc -c | tr -d '[:space:]')`,
+    `  _ck=$(head -c "$MAX_HEAD" -- "$_real" | cksum 2>/dev/null || true)`,
+    `  _crc=""; _emit_bytes=0`,
+    `  IFS=' \t' read -r _crc _emit_bytes _ <<${ckDelimiter}`,
+    `$_ck`,
+    `${ckDelimiter}`,
     `  [ "\${_emit_bytes:-0}" -gt 0 ] 2>/dev/null || return 1`,
-    `  if ! consume_budget "$_emit_bytes" "$_real"; then return 0; fi`,
+    `  if ! consume_budget "$_emit_bytes" "$_real"; then _REPO_FP_OK=0; return 0; fi`,
+    `  _REPO_FP="\${_REPO_FP}\${_REPO_FP:+;}w:\${_rel}:\${_crc}:\${_emit_bytes}"`,
     `  printf '%s FILE_START\\n%s SCOPE %s\\n%s PATH %s\\n%s REL %s\\n%s SOURCE worktree\\n%s CONTENT_BEGIN\\n' "$B" "$B" "$_scope" "$B" "$_real" "$B" "$_rel" "$B" "$B"`,
     `  head -c "$MAX_HEAD" -- "$_real"`,
     `  printf '\\n%s CONTENT_END\\n' "$B"`,
+    `  return 0`,
+    `}`,
+    `probe_file_worktree() {`,
+    `  _base="$1"; _rel="$2"; _full="$3"`,
+    `  if [ ! -f "$_full" ] || [ ! -s "$_full" ]; then return 1; fi`,
+    `  _real=$(canon_path "$_full" 2>/dev/null || true)`,
+    `  [ -n "$_real" ] || return 1`,
+    `  path_within "$_real" "$_base" || return 1`,
+    `  head -c "$MAX_HEAD" -- "$_real" | LC_ALL=C grep -q '[^[:space:]]' 2>/dev/null || return 1`,
+    `  _ck=$(head -c "$MAX_HEAD" -- "$_real" | cksum 2>/dev/null || true)`,
+    `  _crc=""; _pbytes=0`,
+    `  IFS=' \t' read -r _crc _pbytes _ <<${ckDelimiter}`,
+    `$_ck`,
+    `${ckDelimiter}`,
+    `  [ "\${_pbytes:-0}" -gt 0 ] 2>/dev/null || return 1`,
+    `  _capped="$_pbytes"`,
+    `  if [ "$_capped" -gt "$MAX_FILE" ] 2>/dev/null; then _capped="$MAX_FILE"; fi`,
+    `  _PROBE_BYTES=$((_PROBE_BYTES + _capped))`,
+    `  _PROBE_FP="\${_PROBE_FP}\${_PROBE_FP:+;}w:\${_rel}:\${_crc}:\${_pbytes}"`,
     `  return 0`,
     `}`,
     `git_offline() {`,
     `  GIT_NO_LAZY_FETCH=1 GIT_ALLOW_PROTOCOL= git -c core.hooksPath=/dev/null -c core.fsmonitor=false -c protocol.allow=never "$@"`,
     `}`,
     `emit_file_repo() {`,
-    `  _scope="$1"; _repo="$2"; _rel="$3"`,
+    `  _scope="$1"; _repo="$2"; _rel="$3"; _allow_git="\${4:-1}"`,
     `  if [ "$_repo" = "/" ]; then _full="/$_rel"; else _full="$_repo/$_rel"; fi`,
     `  if [ -e "$_full" ] || [ -L "$_full" ]; then`,
     `    emit_file_worktree "$_scope" "$_repo" "$_rel" "$_full"`,
     `    return $?`,
     `  fi`,
+    `  if [ "$_allow_git" != "1" ]; then return 1; fi`,
     `  _ls=$(git_offline -c core.quotePath=false --literal-pathspecs -C "$_repo" ls-tree HEAD -- "$_rel" 2>/dev/null | head -n 1 || true)`,
     `  [ -n "$_ls" ] || return 1`,
-    `  IFS=' \t' read -r _mode _kind _oid _rest <<EOF`,
+    `  IFS=' \t' read -r _mode _kind _oid _rest <<${lsDelimiter}`,
     `$_ls`,
-    `EOF`,
+    `${lsDelimiter}`,
     `  [ "$_kind" = "blob" ] || return 1`,
     `  [ "$_mode" = "100644" ] || [ "$_mode" = "100755" ] || return 1`,
     `  [ -n "$_oid" ] || return 1`,
@@ -556,7 +645,8 @@ function shellHelpers(boundary: string, maxFileBytes: number, maxTotalBytes: num
     `    git_offline -C "$_repo" cat-file -p "$_oid" 2>/dev/null | head -c "$MAX_HEAD" | LC_ALL=C grep -q '[^[:space:]]' 2>/dev/null || return 1`,
     `    _emit_bytes="$_sz"`,
     `    if [ "$_emit_bytes" -gt "$MAX_HEAD" ] 2>/dev/null; then _emit_bytes="$MAX_HEAD"; fi`,
-    `    if ! consume_budget "$_emit_bytes" "$_full"; then return 0; fi`,
+    `    if ! consume_budget "$_emit_bytes" "$_full"; then _REPO_FP_OK=0; return 0; fi`,
+    `    _REPO_FP="\${_REPO_FP}\${_REPO_FP:+;}g:\${_rel}:\${_oid}"`,
     `    printf '%s FILE_START\\n%s SCOPE %s\\n%s PATH %s\\n%s REL %s\\n%s SOURCE git\\n%s CONTENT_BEGIN\\n' "$B" "$B" "$_scope" "$B" "$_full" "$B" "$_rel" "$B" "$B"`,
     `    git_offline -C "$_repo" cat-file -p "$_oid" 2>/dev/null | head -c "$MAX_HEAD"`,
     `    printf '\\n%s CONTENT_END\\n' "$B"`,
@@ -568,7 +658,8 @@ function shellHelpers(boundary: string, maxFileBytes: number, maxTotalBytes: num
     `    git_offline -C "$_repo" cat-file -p "$_oid" 2>/dev/null | head -c "$MAX_HEAD" | LC_ALL=C grep -q '[^[:space:]]' 2>/dev/null || return 1`,
     `    _emit_bytes="$_sz"`,
     `    if [ "$_emit_bytes" -gt "$MAX_HEAD" ] 2>/dev/null; then _emit_bytes="$MAX_HEAD"; fi`,
-    `    if ! consume_budget "$_emit_bytes" "$_full"; then return 0; fi`,
+    `    if ! consume_budget "$_emit_bytes" "$_full"; then _REPO_FP_OK=0; return 0; fi`,
+    `    _REPO_FP="\${_REPO_FP}\${_REPO_FP:+;}g:\${_rel}:\${_oid}"`,
     `    printf '%s FILE_START\\n%s SCOPE %s\\n%s PATH %s\\n%s REL %s\\n%s SOURCE git\\n%s CONTENT_BEGIN\\n' "$B" "$B" "$_scope" "$B" "$_full" "$B" "$_rel" "$B" "$B"`,
     `    git_offline -C "$_repo" cat-file -p "$_oid" 2>/dev/null | head -c "$MAX_HEAD"`,
     `    printf '\\n%s CONTENT_END\\n' "$B"`,
@@ -576,20 +667,91 @@ function shellHelpers(boundary: string, maxFileBytes: number, maxTotalBytes: num
     `  fi`,
     `  if [ "$MAX_TOTAL_BYTES" -gt 0 ] 2>/dev/null && [ "$BUDGET_EXHAUSTED" -ne 0 ]; then`,
     `    emit_overflow "FILE_OVERFLOW" "$_full"`,
+    `    _REPO_FP_OK=0`,
     `    return 0`,
     `  fi`,
+    `  _REPO_FP_OK=0`,
     `  printf '%s FILE_START\\n%s SCOPE %s\\n%s PATH %s\\n%s REL %s\\n%s SOURCE unavailable\\n%s CONTENT_BEGIN\\n\\n%s CONTENT_END\\n' "$B" "$B" "$_scope" "$B" "$_full" "$B" "$_rel" "$B" "$B" "$B"`,
+    `  return 0`,
+    `}`,
+    `probe_file_repo() {`,
+    `  _repo="$1"; _rel="$2"; _allow_git="\${3:-1}"`,
+    `  if [ "$_repo" = "/" ]; then _full="/$_rel"; else _full="$_repo/$_rel"; fi`,
+    `  if [ -e "$_full" ] || [ -L "$_full" ]; then`,
+    `    probe_file_worktree "$_repo" "$_rel" "$_full"`,
+    `    return $?`,
+    `  fi`,
+    `  if [ "$_allow_git" != "1" ]; then return 1; fi`,
+    `  _ls=$(git_offline -c core.quotePath=false --literal-pathspecs -C "$_repo" ls-tree HEAD -- "$_rel" 2>/dev/null | head -n 1 || true)`,
+    `  [ -n "$_ls" ] || return 1`,
+    `  IFS=' \t' read -r _mode _kind _oid _rest <<${lsDelimiter}`,
+    `$_ls`,
+    `${lsDelimiter}`,
+    `  [ "$_kind" = "blob" ] || return 1`,
+    `  [ "$_mode" = "100644" ] || [ "$_mode" = "100755" ] || return 1`,
+    `  [ -n "$_oid" ] || return 1`,
+    `  if git_offline -C "$_repo" cat-file -e "$_oid" 2>/dev/null; then`,
+    `    _sz=$(git_offline -C "$_repo" cat-file -s "$_oid" 2>/dev/null || echo 0)`,
+    `    [ "\${_sz:-0}" -gt 0 ] 2>/dev/null || return 1`,
+    `    git_offline -C "$_repo" cat-file -p "$_oid" 2>/dev/null | head -c "$MAX_HEAD" | LC_ALL=C grep -q '[^[:space:]]' 2>/dev/null || return 1`,
+    `    _capped="$_sz"`,
+    `    if [ "$_capped" -gt "$MAX_FILE" ] 2>/dev/null; then _capped="$MAX_FILE"; fi`,
+    `    _PROBE_BYTES=$((_PROBE_BYTES + _capped))`,
+    `    _PROBE_FP="\${_PROBE_FP}\${_PROBE_FP:+;}g:\${_rel}:\${_oid}"`,
+    `    return 0`,
+    `  fi`,
+    `  _PROBE_FP="\${_PROBE_FP}\${_PROBE_FP:+;}u:\${_rel}:\${_oid}"`,
     `  return 0`,
     `}`,
     `emit_repo_meta() {`,
     `  _r="$1"`,
     `  _head=$(git_offline -C "$_r" rev-parse --verify HEAD 2>/dev/null | tr -d '\\r\\n' | head -c "$MAX_META" || true)`,
     `  _branch=$(git_offline -C "$_r" symbolic-ref --short -q HEAD 2>/dev/null | tr -d '\\r\\n' | head -c "$MAX_META" || true)`,
-    `  _remote=$(git_offline -C "$_r" config --get remote.origin.url 2>/dev/null | tr -d '\\r\\n' | head -c "$MAX_META" || true)`,
-    `  _sparse_cfg=$(git_offline -C "$_r" config --bool --get core.sparseCheckout 2>/dev/null || true)`,
-    `  _promisor=$(git_offline -C "$_r" config --get-regexp '^remote\\..*\\.promisor$' 2>/dev/null | head -n 1 || true)`,
+    `  _remote=""`,
+    `  _sparse_cfg=0`,
+    `  _promisor=0`,
+    `  _cfg_out=$(git_offline -C "$_r" config --get-regexp '^(remote\\.origin\\.url|core\\.sparsecheckout|remote\\..*\\.promisor)$' 2>/dev/null | head -c 65536 || true)`,
+    `  if [ -n "$_cfg_out" ]; then`,
+    `    while IFS= read -r _cfg_line; do`,
+    `      [ -n "$_cfg_line" ] || continue`,
+    `      _k="\${_cfg_line%% *}"`,
+    `      if [ "$_k" = "$_cfg_line" ]; then _v=""; else _v="\${_cfg_line#* }"; fi`,
+    `      case "$_k" in`,
+    `        remote.origin.url) _remote="$_v" ;;`,
+    `        core.sparsecheckout)`,
+    `          case "$_v" in`,
+    `            ""|[Tt][Rr][Uu][Ee]|[Yy][Ee][Ss]|[Oo][Nn]|1) _sparse_cfg=1 ;;`,
+    `            *) _sparse_cfg=0 ;;`,
+    `          esac`,
+    `          ;;`,
+    `        remote.*.promisor)`,
+    `          case "$_v" in`,
+    `            [Ff][Aa][Ll][Ss][Ee]|[Nn][Oo]|[Oo][Ff][Ff]|0) ;;`,
+    `            *) _promisor=1 ;;`,
+    `          esac`,
+    `          ;;`,
+    `      esac`,
+    `    done <<${cfgDelimiter}`,
+    `$_cfg_out`,
+    `${cfgDelimiter}`,
+    `  fi`,
+    `  if [ -n "$_remote" ]; then`,
+    `    _remote=$(printf '%s' "$_remote" | tr -d '\\r\\n' | head -c "$MAX_META")`,
+    `  fi`,
     `  _sparse=0`,
-    `  if [ "$_sparse_cfg" = "true" ] || [ -n "$_promisor" ]; then _sparse=1; fi`,
+    `  if [ "$_sparse_cfg" = "1" ] || [ "$_promisor" = "1" ]; then _sparse=1; fi`,
+    `  _repo_git_fallback="$_sparse"`,
+    `  if [ "$_repo_git_fallback" = "0" ]; then`,
+    `    _has_wt_entry=0`,
+    `    if [ "$_r" = "/" ]; then _rpfx=""; else _rpfx="$_r"; fi`,
+    `    for _e in "$_rpfx"/* "$_rpfx"/.[!.]* "$_rpfx"/..?*; do`,
+    `      [ -e "$_e" ] || [ -L "$_e" ] || continue`,
+    `      [ "\${_e##*/}" = ".git" ] && continue`,
+    `      _has_wt_entry=1`,
+    `      break`,
+    `    done`,
+    `    if [ "$_has_wt_entry" = "0" ]; then _repo_git_fallback=1; fi`,
+    `  fi`,
     `  _r_out=$(printf '%s' "$_r" | tr -d '\\r\\n' | head -c "$MAX_META")`,
     `  printf '%s REPO_START\\n%s ROOT %s\\n%s REMOTE %s\\n%s HEAD %s\\n%s BRANCH %s\\n%s SPARSE %s\\n%s REPO_END\\n' "$B" "$B" "$_r_out" "$B" "$_remote" "$B" "$_head" "$B" "$_branch" "$B" "$_sparse" "$B"`,
     `}`,
@@ -601,13 +763,32 @@ function emitSpecsForRepoShell(
   scopeExpr: string,
   specs: readonly (readonly string[])[],
   prefixVar?: string,
+  allowGitExpr?: string,
+): string {
+  if (specs.length === 0) return "";
+  const lines: string[] = [];
+  const allowArg = allowGitExpr !== undefined ? ` "${allowGitExpr}"` : "";
+  for (const candidates of specs) {
+    lines.push("for _cand in " + candidates.map(shellQuote).join(" ") + "; do");
+    const relExpr = prefixVar !== undefined ? `${prefixVar}$_cand` : "$_cand";
+    lines.push(
+      `  if emit_file_repo ${scopeExpr} "${repoVar}" "${relExpr}"${allowArg}; then break; fi`,
+    );
+    lines.push("done");
+  }
+  return lines.join("\n");
+}
+
+function probeSpecsForRepoShell(
+  repoVar: string,
+  specs: readonly (readonly string[])[],
+  allowGitExpr: string,
 ): string {
   if (specs.length === 0) return "";
   const lines: string[] = [];
   for (const candidates of specs) {
     lines.push("for _cand in " + candidates.map(shellQuote).join(" ") + "; do");
-    const relExpr = prefixVar !== undefined ? `${prefixVar}$_cand` : "$_cand";
-    lines.push(`  if emit_file_repo ${scopeExpr} "${repoVar}" "${relExpr}"; then break; fi`);
+    lines.push(`  if probe_file_repo "${repoVar}" "$_cand" "${allowGitExpr}"; then break; fi`);
     lines.push("done");
   }
   return lines.join("\n");
@@ -654,6 +835,8 @@ interface ParsedProtocolOutput {
   readonly checkedDirs: readonly string[];
   readonly finishedJobDirs: readonly string[];
   readonly overflowPaths: readonly string[];
+  readonly unchangedFileRoots: ReadonlySet<string>;
+  readonly fileFingerprints: Readonly<Record<string, string>>;
 }
 
 function truncateContent(
@@ -693,6 +876,8 @@ function parseProtocolOutput(
   const seenFinished = new Set<string>();
   const overflowPaths: string[] = [];
   const seenOverflow = new Set<string>();
+  const unchangedFileRoots = new Set<string>();
+  const fileFingerprints: Record<string, string> = {};
 
   const pushOverflow = (opath: string) => {
     if (opath.length === 0 || seenOverflow.has(opath)) return;
@@ -765,6 +950,23 @@ function parseProtocolOutput(
 
     if (rest.startsWith("FILE_OVERFLOW ")) {
       pushOverflow(rest.slice("FILE_OVERFLOW ".length));
+      continue;
+    }
+
+    if (rest.startsWith("REPO_FILES_UNCHANGED ")) {
+      const root = rest.slice("REPO_FILES_UNCHANGED ".length);
+      if (root.length > 0) unchangedFileRoots.add(root);
+      continue;
+    }
+
+    if (rest.startsWith("REPO_FINGERPRINT ")) {
+      const payload = rest.slice("REPO_FINGERPRINT ".length);
+      const sep = payload.lastIndexOf("\t");
+      if (sep > 0) {
+        const root = payload.slice(0, sep);
+        const fp = payload.slice(sep + 1);
+        if (root.length > 0 && fp.length > 0) fileFingerprints[root] = fp;
+      }
       continue;
     }
 
@@ -887,6 +1089,8 @@ function parseProtocolOutput(
     checkedDirs,
     finishedJobDirs,
     overflowPaths,
+    unchangedFileRoots,
+    fileFingerprints,
   };
 }
 
@@ -915,6 +1119,7 @@ export async function discoverWorkspace(
     readonly includeWorkspaceInstructions?: boolean;
     readonly extraPaths?: readonly string[];
     readonly existingRoots?: readonly string[];
+    readonly knownFingerprints?: Readonly<Record<string, string>>;
     readonly pendingJobs?: readonly {
       readonly outputDirectory: string;
       readonly pid?: number;
@@ -928,6 +1133,10 @@ export async function discoverWorkspace(
   const includeWorkspaceInstructions = options.includeWorkspaceInstructions ?? false;
   const extraPaths = options.extraPaths ?? [];
   const existingRoots = options.existingRoots ?? [];
+  const knownFingerprints = options.knownFingerprints ?? {};
+  const knownFingerprintEntries = Object.entries(knownFingerprints).filter(
+    ([root, fp]) => root.length > 0 && fp.length > 0,
+  );
   const pendingJobs = options.pendingJobs ?? [];
 
   const boundary = createBoundary();
@@ -948,6 +1157,69 @@ export async function discoverWorkspace(
       `_er=${shellQuote(existing)}; if [ -e "$_er/.git" ]; then printf '%s\\n' "$_er"; fi`,
   );
 
+  const knownFpLines =
+    knownFingerprintEntries.length > 0
+      ? [
+          `lookup_known_fp() {`,
+          `  case "$1" in`,
+          ...knownFingerprintEntries.map(
+            ([root, fp]) => `    ${shellQuote(root)}) _known_fp=${shellQuote(fp)} ;;`,
+          ),
+          `    *) _known_fp="" ;;`,
+          `  esac`,
+          `}`,
+        ]
+      : [];
+
+  const repoFilesBlock =
+    knownFingerprintEntries.length > 0
+      ? [
+          `    _known_fp=""`,
+          `    lookup_known_fp "$_r_out"`,
+          `    _skip_emit=0`,
+          `    if [ -n "$_known_fp" ]; then`,
+          `      _PROBE_FP=""`,
+          `      _PROBE_BYTES=0`,
+          probeSpecsForRepoShell("$_repo_real", specs, "$_repo_git_fallback"),
+          `      _computed_fp="\${_PROBE_FP:-empty}"`,
+          `      if [ "$_computed_fp" = "$_known_fp" ]; then`,
+          `        if [ "$MAX_TOTAL_BYTES" -le 0 ] 2>/dev/null || { [ "$BUDGET_EXHAUSTED" -eq 0 ] && [ $((TOTAL_BYTES + _PROBE_BYTES)) -le "$MAX_TOTAL_BYTES" ]; }; then`,
+          `          TOTAL_BYTES=$((TOTAL_BYTES + _PROBE_BYTES))`,
+          `          printf '%s REPO_FILES_UNCHANGED %s\\n' "$B" "$_r_out"`,
+          `          _skip_emit=1`,
+          `        fi`,
+          `      fi`,
+          `    fi`,
+          `    if [ "$_skip_emit" = "0" ]; then`,
+          `      _REPO_FP=""`,
+          `      _REPO_FP_OK=1`,
+          emitSpecsForRepoShell(
+            "$_repo_real",
+            '"repo:$_repo_real"',
+            specs,
+            undefined,
+            "$_repo_git_fallback",
+          ),
+          `      if [ "$_REPO_FP_OK" = "1" ]; then`,
+          `        printf '%s REPO_FINGERPRINT %s\\t%s\\n' "$B" "$_r_out" "\${_REPO_FP:-empty}"`,
+          `      fi`,
+          `    fi`,
+        ]
+      : [
+          `    _REPO_FP=""`,
+          `    _REPO_FP_OK=1`,
+          emitSpecsForRepoShell(
+            "$_repo_real",
+            '"repo:$_repo_real"',
+            specs,
+            undefined,
+            "$_repo_git_fallback",
+          ),
+          `    if [ "$_REPO_FP_OK" = "1" ]; then`,
+          `      printf '%s REPO_FINGERPRINT %s\\t%s\\n' "$B" "$_r_out" "\${_REPO_FP:-empty}"`,
+          `    fi`,
+        ];
+
   const pendingJobLines = pendingJobs.map((job) => {
     const dirQuoted = shellQuote(job.outputDirectory);
     const pidQuoted = job.pid !== undefined ? shellQuote(String(job.pid)) : "''";
@@ -962,28 +1234,17 @@ export async function discoverWorkspace(
 
   const script = [
     shellHelpers(boundary, maxFileBytes, maxTotalBytes),
+    ...knownFpLines,
     `WS=$(canon_path ${shellQuote(workspacePath)} 2>/dev/null || printf '%s' ${shellQuote(workspacePath)})`,
     `printf '%s WORKSPACE %s\\n' "$B" "$WS"`,
     `if [ -n "\${HOME:-}" ] && [ -d "$HOME" ]; then _hr=$(canon_path "$HOME" 2>/dev/null || printf '%s' "$HOME"); printf '%s HOME %s\\n' "$B" "$_hr"; fi`,
     ...pendingJobLines,
-    `NL='`,
-    `'`,
     `SEEN="$NL"`,
     `_cand_list=$(`,
     `  {`,
     ...existingRootLines.map((line) => `    ${line}`),
     ...extraPathLines.map((line) => `    ${line}`),
-    `    for _scan_root in ${quotedRoots}; do`,
-    `      [ -d "$_scan_root" ] || continue`,
-    `      _scan_real=$(canon_path "$_scan_root" 2>/dev/null || true)`,
-    `      [ -n "$_scan_real" ] || continue`,
-    `      find "$_scan_real" -maxdepth 4 \\`,
-    `        \\( -name node_modules -o -name .next -o -name dist -o -name build -o -name .turbo -o -name target -o -name vendor -o -name .venv -o -name __pycache__ \\) -prune \\`,
-    `        -o -name .git \\( -type d -o -type f \\) -print -prune 2>/dev/null | head -n ${MAX_SCAN_CANDIDATES} | while IFS= read -r _git_entry; do`,
-    `        [ -n "$_git_entry" ] || continue`,
-    `        dirname -- "$_git_entry"`,
-    `      done`,
-    `    done`,
+    ...(resolvedRoots.length > 0 ? [`    scan_repos_under ${quotedRoots}`] : []),
     `  } | head -n ${MAX_SCAN_CANDIDATES}`,
     `)`,
     `if [ -n "$_cand_list" ]; then`,
@@ -1003,7 +1264,7 @@ export async function discoverWorkspace(
     `    fi`,
     `    REPO_COUNT=$((REPO_COUNT + 1))`,
     `    emit_repo_meta "$_repo_real"`,
-    emitSpecsForRepoShell("$_repo_real", '"repo:$_repo_real"', specs),
+    ...repoFilesBlock,
     `  done <<${candDelimiter}`,
     `$_cand_list`,
     `${candDelimiter}`,
@@ -1039,6 +1300,14 @@ export async function discoverWorkspace(
     ? []
     : parsed.files.filter((entry) => entry.scope === "workspace").map((entry) => entry.file);
 
+  const fileFingerprints: Record<string, string> = { ...parsed.fileFingerprints };
+  for (const unchangedRoot of parsed.unchangedFileRoots) {
+    const prev = knownFingerprints[unchangedRoot];
+    if (prev !== undefined && !(unchangedRoot in fileFingerprints)) {
+      fileFingerprints[unchangedRoot] = prev;
+    }
+  }
+
   return {
     workspaceRoot,
     homeDir: parsed.homeDir,
@@ -1046,12 +1315,15 @@ export async function discoverWorkspace(
     workspaceInstructions,
     finishedJobDirs: parsed.finishedJobDirs,
     overflowPaths: parsed.overflowPaths,
+    unchangedFileRoots: parsed.unchangedFileRoots,
+    fileFingerprints,
   };
 }
 
 /**
- * Discovers git repositories under the configured workspace roots (up to depth 3, handling standard clones, worktrees, and submodules)
- * and loads their default instruction files in a single sandbox command.
+ * Discovers git repositories under the configured workspace roots by scanning breadth-first up to depth 3
+ * and stopping at each repository boundary (nested submodules are discovered when touched or listed in `roots`),
+ * loading their default instruction files in a single sandbox command.
  */
 export async function discoverRepositories(
   sandbox: RepositorySandbox,
@@ -1164,7 +1436,13 @@ export async function findEnclosingRepository(
     `_repo_real=$(canon_path "$_top" 2>/dev/null || true)`,
     `[ -n "$_repo_real" ] || exit 0`,
     `emit_repo_meta "$_repo_real"`,
-    emitSpecsForRepoShell("$_repo_real", '"repo:$_repo_real"', specs),
+    emitSpecsForRepoShell(
+      "$_repo_real",
+      '"repo:$_repo_real"',
+      specs,
+      undefined,
+      "$_repo_git_fallback",
+    ),
     `exit 0`,
   ].join("\n");
 
@@ -1207,6 +1485,7 @@ export async function readScopedDirectoryInstructions(
     readonly targetPath: string;
     readonly checkedDirs: ReadonlySet<string>;
     readonly knownRepoRoots?: ReadonlySet<string>;
+    readonly sparseRepoRoots?: ReadonlySet<string>;
     readonly instructions?: readonly RepositoryInstructionSpec[];
     readonly maxFileBytes?: number;
     readonly maxTotalBytes?: number;
@@ -1222,6 +1501,7 @@ export async function readScopedDirectoryInstructions(
   const workspacePath = sandbox.resolvePath(".");
   const checkedList = [...options.checkedDirs];
   const knownRoots = [...(options.knownRepoRoots ?? [])];
+  const sparseRoots = options.sparseRepoRoots !== undefined ? [...options.sparseRepoRoots] : null;
 
   const checkedCase =
     checkedList.length === 0
@@ -1231,6 +1511,12 @@ export async function readScopedDirectoryInstructions(
     knownRoots.length === 0
       ? "false"
       : `case "$_repo_real" in ${knownRoots.map(shellQuote).join("|")}) true ;; *) false ;; esac`;
+  const sparseRepoCase =
+    sparseRoots === null
+      ? "true"
+      : sparseRoots.length === 0
+        ? "false"
+        : `case "$_repo_real" in ${sparseRoots.map(shellQuote).join("|")}) true ;; *) false ;; esac`;
 
   const script = [
     shellHelpers(boundary, maxFileBytes, maxTotalBytes),
@@ -1259,9 +1545,24 @@ export async function readScopedDirectoryInstructions(
     `  fi`,
     `  printf '%s ENCLOSING_ROOT %s\\n' "$B" "$_repo_real"`,
     `fi`,
+    `_scope_allow_git=1`,
     `if [ -n "$_repo_real" ] && ! ${knownRepoCase}; then`,
     `  emit_repo_meta "$_repo_real"`,
-    emitSpecsForRepoShell("$_repo_real", '"repo:$_repo_real"', specs),
+    `  _scope_allow_git="$_repo_git_fallback"`,
+    `  _REPO_FP=""`,
+    `  _REPO_FP_OK=1`,
+    emitSpecsForRepoShell(
+      "$_repo_real",
+      '"repo:$_repo_real"',
+      specs,
+      undefined,
+      "$_repo_git_fallback",
+    ),
+    `  if [ "$_REPO_FP_OK" = "1" ]; then`,
+    `    printf '%s REPO_FINGERPRINT %s\\t%s\\n' "$B" "$_r_out" "\${_REPO_FP:-empty}"`,
+    `  fi`,
+    `elif [ -n "$_repo_real" ] && ! ${sparseRepoCase}; then`,
+    `  _scope_allow_git=0`,
     `fi`,
     ...(loadScoped && specs.length > 0
       ? [
@@ -1283,7 +1584,13 @@ export async function readScopedDirectoryInstructions(
           `      printf '%s CHECKED_DIR %s\\n' "$B" "$_d"`,
           `      if [ -n "$_repo_real" ]; then`,
           `        if [ "$_repo_real" = "/" ]; then _rel_dir="\${_d#/}/"; else _rel_dir="\${_d#"$_repo_real"/}/"; fi`,
-          emitSpecsForRepoShell("$_repo_real", '"scope:$_d"', specs, "$_rel_dir"),
+          emitSpecsForRepoShell(
+            "$_repo_real",
+            '"scope:$_d"',
+            specs,
+            "$_rel_dir",
+            "$_scope_allow_git",
+          ),
           `      else`,
           emitSpecsForDirWorktreeShell("$_d", "$WS", '"scope:$_d"', specs),
           `      fi`,
@@ -1331,12 +1638,16 @@ export async function readScopedDirectoryInstructions(
   const scopes = parsed.checkedDirs
     .map((dir) => ({ dir, files: byScope.get(dir) ?? [] }))
     .filter((entry) => entry.files.length > 0);
+  const enclosingRepo = repositories[0] ?? null;
+  const enclosingRepoFingerprint =
+    enclosingRepo !== null ? parsed.fileFingerprints[enclosingRepo.root] : undefined;
 
   return {
     workspaceRoot: parsed.workspaceRoot ?? workspacePath,
     homeDir: parsed.homeDir,
     enclosingRepoRoot: parsed.enclosingRepoRoot,
-    enclosingRepo: repositories[0] ?? null,
+    enclosingRepo,
+    ...(enclosingRepoFingerprint !== undefined && { enclosingRepoFingerprint }),
     checkedDirs: parsed.checkedDirs,
     scopes,
     overflowPaths: parsed.overflowPaths,

@@ -1,7 +1,7 @@
 import { defineState } from "eve/context";
 import type { SkillDefinition, SkillFileContent } from "eve/skills";
 
-import type { RepositoryInstructionFile } from "../extension.ts";
+import type { RepositoryInstructionFile, RepositoryInstructionSpec } from "../extension.ts";
 
 export const MAX_CHECKED_DIRS = 500;
 export const MAX_PENDING_BACKGROUND_JOBS = 16;
@@ -33,7 +33,10 @@ export interface RecordedRepository {
   readonly branch: string | null;
   readonly sparse: boolean;
   readonly instructions: readonly RepositoryInstructionFile[];
+  readonly fileFingerprint?: string;
   readonly ruleFiles: readonly RepositoryInstructionFile[];
+  readonly ruleFileSpecs?: readonly RepositoryInstructionSpec[];
+  readonly ruleOverflowPaths?: readonly string[];
   readonly ruleInstructions: readonly string[];
   readonly ruleSkills: Readonly<Record<string, SerializedSkillDefinition>>;
   readonly enteredAtHead: string | null;

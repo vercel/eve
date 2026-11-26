@@ -552,3 +552,240 @@ test("bounds discovered repo count, metadata field size, and aggregate instructi
     await rm(workspace, { force: true, recursive: true });
   }
 });
+
+test("scan_repos_under stops descending inside discovered .git repos while scanning sibling and dotdir repos", async () => {
+  const workspace = await realpath(await mkdtemp(join(tmpdir(), "eve-code-repos-stop-git-")));
+  try {
+    const outerRepo = join(workspace, "monorepo");
+    const nestedInsideRepo = join(outerRepo, "packages", "nested-repo");
+    const siblingRepo = join(workspace, "org", "sibling-repo");
+    const hiddenRepo = join(workspace, ".hidden", "dot-repo");
+
+    await initRepo(outerRepo, { "AGENTS.md": "Outer monorepo rules\n" });
+    await initRepo(nestedInsideRepo, { "AGENTS.md": "Nested inside repo should not be walked\n" });
+    await initRepo(siblingRepo, { "AGENTS.md": "Sibling repo rules\n" });
+    await initRepo(hiddenRepo, { "AGENTS.md": "Hidden dir repo rules\n" });
+
+    const { sandbox } = createLocalSandbox(workspace);
+    const repos = await discoverRepositories(sandbox);
+    const roots = repos.map((repo) => repo.root.replaceAll("\\", "/")).sort();
+
+    const expected = [
+      (await realpath(outerRepo)).replaceAll("\\", "/"),
+      (await realpath(siblingRepo)).replaceAll("\\", "/"),
+      (await realpath(hiddenRepo)).replaceAll("\\", "/"),
+    ].sort();
+
+    assert.deepEqual(roots, expected);
+  } finally {
+    await rm(workspace, { force: true, recursive: true });
+  }
+});
+
+test("knownFingerprints emits REPO_FILES_UNCHANGED without streaming file bodies and invalidates on same-HEAD edit", async () => {
+  const workspace = await realpath(await mkdtemp(join(tmpdir(), "eve-code-repos-fingerprint-")));
+  try {
+    const repoDir = join(workspace, "app");
+    const bodyMarker = "UNIQUE_FINGERPRINT_BODY_MARKER";
+    const initialBody = `${bodyMarker}\n${"x".repeat(4000)}\n`;
+    await initRepo(repoDir, { "AGENTS.md": initialBody });
+
+    const { sandbox: baseSandbox } = createLocalSandbox(workspace);
+    const stdouts: string[] = [];
+    const capturingSandbox: RepositorySandbox = {
+      resolvePath: (path) => baseSandbox.resolvePath(path),
+      async run(input) {
+        const res = await baseSandbox.run(input);
+        stdouts.push(res.stdout);
+        return res;
+      },
+      async spawn(input) {
+        const proc = await baseSandbox.spawn!(input);
+        const [forCaller, forCapture] = proc.stdout.tee();
+        const capturePromise = (async () => {
+          const reader = forCapture.getReader();
+          const chunks: Uint8Array[] = [];
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (value !== undefined) chunks.push(value);
+          }
+          reader.releaseLock();
+          stdouts.push(Buffer.concat(chunks).toString("utf8"));
+        })();
+        return {
+          ...proc,
+          stdout: forCaller,
+          async wait() {
+            const res = await proc.wait();
+            await capturePromise;
+            return res;
+          },
+        };
+      },
+    };
+
+    const first = await discoverWorkspace(capturingSandbox);
+    assert.equal(first.repositories.length, 1);
+    const repoRoot = first.repositories[0]!.root;
+    assert.equal(first.repositories[0]!.instructions[0]?.content, initialBody);
+    assert.equal(first.unchangedFileRoots.size, 0);
+    assert.ok(first.fileFingerprints[repoRoot] !== undefined);
+    assert.ok(stdouts[0]!.includes(bodyMarker));
+
+    const second = await discoverWorkspace(capturingSandbox, {
+      existingRoots: [repoRoot],
+      knownFingerprints: first.fileFingerprints,
+    });
+    assert.equal(second.repositories.length, 1);
+    assert.equal(second.unchangedFileRoots.has(repoRoot), true);
+    assert.equal(second.repositories[0]!.instructions.length, 0);
+    assert.equal(second.fileFingerprints[repoRoot], first.fileFingerprints[repoRoot]);
+
+    const secondStdout = stdouts[1]!;
+    assert.ok(secondStdout.includes("REPO_FILES_UNCHANGED"));
+    assert.equal(secondStdout.includes(bodyMarker), false);
+    assert.ok(
+      Buffer.byteLength(secondStdout, "utf8") < 1024,
+      `expected compact unchanged stdout < 1024 bytes, got ${Buffer.byteLength(secondStdout, "utf8")}`,
+    );
+
+    const updatedBody = "UPDATED_AT_SAME_HEAD\n";
+    await writeFile(join(repoDir, "AGENTS.md"), updatedBody);
+
+    const third = await discoverWorkspace(capturingSandbox, {
+      existingRoots: [repoRoot],
+      knownFingerprints: second.fileFingerprints,
+    });
+    assert.equal(third.unchangedFileRoots.has(repoRoot), false);
+    assert.equal(third.repositories[0]!.instructions[0]?.content, updatedBody);
+    assert.notEqual(third.fileFingerprints[repoRoot], first.fileFingerprints[repoRoot]);
+  } finally {
+    await rm(workspace, { force: true, recursive: true });
+  }
+});
+
+test("unavailable repo instructions are not fingerprinted and retry without REPO_FILES_UNCHANGED", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "eve-code-repos-unavail-fp-")));
+  try {
+    const upstream = join(root, "upstream");
+    const workspace = join(root, "ws");
+    await mkdir(workspace, { recursive: true });
+    await initRepo(upstream, {
+      "AGENTS.md": "Promisor instructions\n",
+      "src/app.ts": "export const ok = true;\n",
+    });
+    await git(upstream, ["config", "uploadpack.allowFilter", "true"]);
+
+    const cloneDir = join(workspace, "partial-repo");
+    await git(workspace, [
+      "clone",
+      "--filter=blob:none",
+      "--no-checkout",
+      `file://${upstream}`,
+      cloneDir,
+    ]);
+    await git(cloneDir, ["sparse-checkout", "init", "--no-cone"]);
+    await git(cloneDir, ["sparse-checkout", "set", "src/app.ts"]);
+    await git(cloneDir, ["checkout"]);
+    await git(cloneDir, ["remote", "set-url", "origin", "file:///nonexistent-remote-for-test"]);
+
+    const { sandbox: baseSandbox } = createLocalSandbox(workspace);
+    const stdouts: string[] = [];
+    const capturingSandbox: RepositorySandbox = {
+      resolvePath: (path) => baseSandbox.resolvePath(path),
+      async run(input) {
+        const res = await baseSandbox.run(input);
+        stdouts.push(res.stdout);
+        return res;
+      },
+      async spawn(input) {
+        const proc = await baseSandbox.spawn!(input);
+        const [forCaller, forCapture] = proc.stdout.tee();
+        const capturePromise = (async () => {
+          const reader = forCapture.getReader();
+          const chunks: Uint8Array[] = [];
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (value !== undefined) chunks.push(value);
+          }
+          reader.releaseLock();
+          stdouts.push(Buffer.concat(chunks).toString("utf8"));
+        })();
+        return {
+          ...proc,
+          stdout: forCaller,
+          async wait() {
+            const res = await proc.wait();
+            await capturePromise;
+            return res;
+          },
+        };
+      },
+    };
+
+    const first = await discoverWorkspace(capturingSandbox);
+    assert.equal(first.repositories.length, 1);
+    const repoRoot = first.repositories[0]!.root;
+    assert.equal(first.repositories[0]!.instructions[0]?.source, "unavailable");
+    assert.equal(first.fileFingerprints[repoRoot], undefined);
+    assert.equal(first.unchangedFileRoots.size, 0);
+
+    const second = await discoverWorkspace(capturingSandbox, {
+      existingRoots: [repoRoot],
+      knownFingerprints: first.fileFingerprints,
+    });
+    assert.equal(second.unchangedFileRoots.has(repoRoot), false);
+    assert.equal(stdouts[1]!.includes("REPO_FILES_UNCHANGED"), false);
+    assert.equal(second.repositories[0]!.instructions[0]?.source, "unavailable");
+    assert.equal(second.fileFingerprints[repoRoot], undefined);
+
+    await writeFile(join(cloneDir, "AGENTS.md"), "Recovered worktree instructions\n");
+    const third = await discoverWorkspace(capturingSandbox, {
+      existingRoots: [repoRoot],
+      knownFingerprints: second.fileFingerprints,
+    });
+    assert.equal(third.repositories[0]!.instructions[0]?.source, "worktree");
+    assert.equal(
+      third.repositories[0]!.instructions[0]?.content,
+      "Recovered worktree instructions\n",
+    );
+    assert.ok(third.fileFingerprints[repoRoot] !== undefined);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("scan_repos_under traverses breadth-first so a noisy non-repo subtree does not starve sibling repos", async () => {
+  const workspace = await realpath(await mkdtemp(join(tmpdir(), "eve-code-repos-bfs-")));
+  try {
+    const noiseRoot = join(workspace, "aaa-noise");
+    const siblingRepo = join(workspace, "zzz-repo");
+    const nestedDirs: string[] = [];
+    for (let i = 0; i < 35; i += 1) {
+      const parent = join(noiseRoot, `d${String(i).padStart(2, "0")}`);
+      for (let j = 0; j < 32; j += 1) {
+        nestedDirs.push(join(parent, `s${String(j).padStart(2, "0")}`));
+      }
+    }
+    const batchSize = 64;
+    for (let i = 0; i < nestedDirs.length; i += batchSize) {
+      await Promise.all(
+        nestedDirs.slice(i, i + batchSize).map((dir) => mkdir(dir, { recursive: true })),
+      );
+    }
+    await initRepo(siblingRepo, { "AGENTS.md": "Sibling repo rules\n" });
+
+    const { sandbox } = createLocalSandbox(workspace);
+    const repos = await discoverRepositories(sandbox);
+    const expectedRoot = (await realpath(siblingRepo)).replaceAll("\\", "/");
+    assert.deepEqual(
+      repos.map((repo) => repo.root.replaceAll("\\", "/")),
+      [expectedRoot],
+    );
+    assert.equal(repos[0]?.instructions[0]?.content, "Sibling repo rules\n");
+  } finally {
+    await rm(workspace, { force: true, recursive: true });
+  }
+});

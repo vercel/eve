@@ -802,12 +802,7 @@ test("HEAD change prunes deleted scopes, repo delete + re-clone re-runs onEnter,
     );
 
     await rm(cloneDir, { force: true, recursive: true });
-    await session.settleToolCall({
-      callId: "call_rm_repo",
-      name: "bash",
-      input: { command: "git status || true" },
-      output: { exitCode: 0, status: "completed", stdout: "", stderr: "" },
-    });
+    await session.startTurn("turn_2");
 
     await git(workspace, ["clone", `file://${upstream}`, cloneDir]);
     await session.settleToolCall({
@@ -1003,7 +998,7 @@ test("propagates rule-file overflow paths into the overflow instruction when exc
     extension({
       repositories: {
         instructions: [],
-        maxTotalBytes: 200,
+        maxTotalBytes: 500,
         rules: [
           {
             files: ["BIG_RULE.md"],
@@ -1023,6 +1018,183 @@ test("propagates rule-file overflow paths into the overflow instruction when exc
       /exceeded the automatic instruction byte budget/u,
     );
     assert.match(call1.newUserInstructions[0] ?? "", /BIG_RULE\.md/u);
+
+    await writeFile(join(workspace, "BIG_RULE.md"), "Shrunk rule file.\n");
+    await session.startTurn("turn_2");
+    const call2 = await session.nextModelCall();
+    assert.match(call2.newUserInstructions.join("\n"), /Shrunk rule file\./u);
+
+    const commandsBeforeTurn3 = sandbox.commands.length;
+    await session.startTurn("turn_3");
+    assert.equal(
+      sandbox.commands.length - commandsBeforeTurn3,
+      1,
+      "unchanged turn_3 after overflow recovery must skip readMatchingRuleFiles",
+    );
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("retries rule.files on subsequent turns after a transient read failure and keeps 0 extra RPCs once loaded", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "eve-code-lifecycle-rule-retry-")));
+  try {
+    const workspace = join(root, "workspace");
+    const appDir = join(workspace, "app");
+    await initUpstreamRepo(appDir, {
+      "AGENTS.md": "App root rules.\n",
+      "CONTRIBUTING.md": "Transiently failed rule file.\n",
+    });
+
+    extension({
+      repositories: {
+        rules: [
+          {
+            files: ["CONTRIBUTING.md"],
+          },
+        ],
+      },
+    });
+
+    const base = createRealSandboxAccess(workspace);
+    let failNextRuleRead = true;
+    const wrapSession = (inner: SandboxSession): SandboxSession => ({
+      ...inner,
+      async spawn(input) {
+        if (failNextRuleRead && input.command.includes("CONTRIBUTING.md")) {
+          failNextRuleRead = false;
+          base.commands.push(input.command);
+          return {
+            stdout: new ReadableStream({
+              start(controller) {
+                controller.close();
+              },
+            }),
+            stderr: new ReadableStream({
+              start(controller) {
+                controller.enqueue(new TextEncoder().encode("transient failure"));
+                controller.close();
+              },
+            }),
+            wait: async () => ({ exitCode: 1 }),
+            kill: async () => undefined,
+          };
+        }
+        return await inner.spawn(input);
+      },
+    });
+    const flakyAccess: SandboxAccess = {
+      ...base.access,
+      async get() {
+        const inner = await base.access.get();
+        return inner === null ? null : wrapSession(inner);
+      },
+      async getIfStarted() {
+        const inner = await base.access.getIfStarted();
+        return inner === null ? null : wrapSession(inner);
+      },
+      async open() {
+        const inner = await base.access.open();
+        return inner === null ? null : wrapSession(inner);
+      },
+    };
+
+    const session = createSessionHarness(flakyAccess, "session-rule-retry");
+
+    await session.startTurn("turn_1");
+    const call1 = await session.nextModelCall();
+    assert.match(call1.newUserInstructions.join("\n"), /App root rules\./u);
+    assert.doesNotMatch(call1.newUserInstructions.join("\n"), /Transiently failed rule file\./u);
+
+    await session.startTurn("turn_2");
+    const call2 = await session.nextModelCall();
+    assert.match(call2.newUserInstructions.join("\n"), /Transiently failed rule file\./u);
+
+    const commandsBeforeTurn3 = base.commands.length;
+    await session.startTurn("turn_3");
+    assert.equal(
+      base.commands.length - commandsBeforeTurn3,
+      1,
+      "unchanged turn_3 after rule retry recovery must skip readMatchingRuleFiles",
+    );
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("skips redundant readMatchingRuleFiles on unchanged turns and skips reconciliation for read-only bash calls", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "eve-code-lifecycle-opt-")));
+  try {
+    const workspace = join(root, "workspace");
+    const appDir = join(workspace, "app");
+    await initUpstreamRepo(appDir, {
+      "AGENTS.md": "App root rules.\n",
+      "CONTRIBUTING.md": "Contributing rules.\n",
+    });
+
+    extension({
+      repositories: {
+        rules: [
+          {
+            files: ["CONTRIBUTING.md"],
+          },
+        ],
+      },
+    });
+
+    const sandbox = createRealSandboxAccess(workspace);
+    const session = createSessionHarness(sandbox.access, "session-opt");
+
+    await session.startTurn("turn_1");
+    const call1 = await session.nextModelCall();
+    assert.equal(call1.newUserInstructions.length, 1);
+    assert.match(call1.newUserInstructions[0] ?? "", /App root rules\./u);
+    assert.match(call1.newUserInstructions[0] ?? "", /Contributing rules\./u);
+
+    const commandsBeforeReadOnlyCalls = sandbox.commands.length;
+    await session.settleToolCall({
+      callId: "call_git_status",
+      name: "bash",
+      input: { command: "git status" },
+      output: { exitCode: 0, status: "completed", stdout: "", stderr: "" },
+    });
+    await session.settleToolCall({
+      callId: "call_cd_test",
+      name: "bash",
+      input: { command: "cd app && pnpm test" },
+      output: { exitCode: 0, status: "completed", stdout: "", stderr: "" },
+    });
+    await session.settleToolCall({
+      callId: "call_gh_pr_view",
+      name: "bash",
+      input: { command: "gh pr view 123" },
+      output: { exitCode: 0, status: "completed", stdout: "", stderr: "" },
+    });
+    await session.settleToolCall({
+      callId: "call_rg_fetch",
+      name: "bash",
+      input: { command: 'rg "fetch(" src/' },
+      output: { exitCode: 0, status: "completed", stdout: "", stderr: "" },
+    });
+    assert.equal(
+      sandbox.commands.length,
+      commandsBeforeReadOnlyCalls,
+      "read-only bash calls must make 0 sandbox calls",
+    );
+
+    const commandsBeforeTurn2 = sandbox.commands.length;
+    await session.startTurn("turn_2");
+    assert.equal(
+      sandbox.commands.length - commandsBeforeTurn2,
+      1,
+      "unchanged turn_2 with rule.files must make only 1 sandbox call and skip readMatchingRuleFiles",
+    );
+
+    session.compactHistory();
+    const afterCompaction = await session.nextModelCall();
+    const combined = afterCompaction.newUserInstructions.join("\n");
+    assert.match(combined, /App root rules\./u);
+    assert.match(combined, /Contributing rules\./u);
   } finally {
     await rm(root, { force: true, recursive: true });
   }

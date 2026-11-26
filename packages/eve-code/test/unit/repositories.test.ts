@@ -195,7 +195,7 @@ test("isValidRelativePath and isValidRootPath reject ASCII control characters an
   }
 });
 
-test("shouldReconcileCommand triggers only on repo/checkout/navigation commands or unseen workingDirectory", () => {
+test("shouldReconcileCommand triggers only on mutating repo commands or unseen workingDirectory", () => {
   const state = {
     ...initialRepositorySessionState(),
     workspaceRoot: "/workspace",
@@ -207,25 +207,87 @@ test("shouldReconcileCommand triggers only on repo/checkout/navigation commands 
 
   const triggerCommands = [
     "git clone https://github.com/vercel/eve",
-    "gh repo clone vercel/eve",
+    "gh repo clone acme/app",
+    "gh -R acme/app repo clone acme/app",
     "git checkout -b fix/1",
+    "git -C app checkout feature/x",
+    "cd app && git pull",
     "git switch main",
     "git fetch origin",
     "git pull --ff-only",
     "git worktree add ../wt main",
     "git submodule update --init",
     "git sparse-checkout set packages/a",
-    "git reset --hard HEAD~1",
+    "GIT_TERMINAL_PROMPT=0 git -c a=b sparse-checkout set x",
+    "env FOO=1 git -c foo=bar reset --hard HEAD~1",
+    "sudo -u dev /usr/bin/git merge main",
+    "git rebase origin/main",
+    "git remote add upstream https://github.com/vercel/eve",
+    "git cherry-pick abc1234",
+    "git revert HEAD",
     "git init new-repo",
+    "tar -xf repo.tar",
     "tar -xzf archive.tar.gz",
     "unzip bundle.zip",
-    "cd /tmp/other && pwd",
+    "if [ ! -d repo ]; then git clone https://github.com/vercel/eve repo; fi",
+    'for d in a b; do git -C "$d" pull; done',
+    "gh pr checkout 42",
+    "gh -R acme/app pr checkout 42",
+    "gh pr -R acme/app checkout 42",
+    "gh repo fork org/repo --clone",
+    "gh repo fork org/repo -c",
+    "gh repo create my-repo --public --clone",
+    "gh repo create my-repo -c",
+    "2>/dev/null git pull",
+    "2> /dev/null git pull",
+    "</dev/null git clone https://github.com/vercel/eve",
+    "< /dev/null git clone https://github.com/vercel/eve",
+    "&>/dev/null git pull",
+    'bash -c "git clone https://github.com/vercel/eve"',
+    'sh -c "git pull"',
+    'zsh -lc "git checkout main"',
+    `bash -c "sh -c 'git pull'"`,
+    'env -S "git pull"',
+    "git --attr-source=HEAD checkout main",
+    "git --attr-source HEAD checkout main",
   ];
   for (const command of triggerCommands) {
     assert.equal(shouldReconcileCommand(command, undefined, state), true, command);
   }
 
-  const ignoredCommands = ["echo hello", "pnpm test", "rg pattern src/", "ls -la", "node -v"];
+  const ignoredCommands = [
+    "git status",
+    "git diff",
+    "git log",
+    "git show HEAD",
+    "git add .",
+    'git commit -m "merge and reset"',
+    "git branch",
+    "git push",
+    "git --no-pager status",
+    "git --attr-source=HEAD status",
+    "git --attr-source HEAD status",
+    "gh pr view 12",
+    "gh issue list",
+    "gh search repos next",
+    "gh api repos/vercel/next.js",
+    "gh repo fork org/repo",
+    "gh repo create my-repo --public",
+    'bash -c "git status"',
+    'env -S "git status"',
+    `bash -c "sh -c \\"zsh -c 'git pull'\\""`,
+    "cd app && pnpm test",
+    "cd /workspace/repos/next.js && pnpm test",
+    'rg "fetch(" src/',
+    "pnpm test reset",
+    'echo "git clone https://example.com/a"',
+    "echo ok # git pull",
+    "echo hello",
+    "pnpm test",
+    "rg pattern src/",
+    "ls -la",
+    "node -v",
+  ];
   for (const command of ignoredCommands) {
     assert.equal(shouldReconcileCommand(command, undefined, state), false, command);
   }

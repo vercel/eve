@@ -62,6 +62,13 @@ const CLONE: GitHubShellInput = {
   repository: "vercel/internal-agents",
 };
 
+const PARTIAL_CLONE: GitHubShellInput = {
+  command:
+    "gh repo clone vercel/internal-agents /workspace/internal-agents -- --filter=blob:none --no-checkout",
+  description: "Partial clone the repository into the sandbox",
+  repository: "vercel/internal-agents",
+};
+
 test("parses simple argv quoting without enabling a shell language", () => {
   assert.deepEqual(parseCommand(`gh pr comment 1 --body "it's ready"`), [
     "gh",
@@ -118,9 +125,8 @@ test("runs clone without approval while retaining repository-scoped write-capabl
       },
     },
   ]);
-  assert.equal(runs.length, 2);
+  assert.equal(runs.length, 1);
   assert.match(runs[0]!.command, /'repo' 'clone' 'vercel\/internal-agents'/u);
-  assert.match(runs[1]!.command, /rev-parse --show-toplevel/u);
 });
 
 test("asks authorize with the argv, caller, owner, repository, and token before running", async () => {
@@ -1129,7 +1135,7 @@ test("names the refusals the agent can fix by changing its input", async () => {
 
 test("prefetches partial-clone instruction files inside the active credential lease", async () => {
   for (const input of [
-    CLONE,
+    PARTIAL_CLONE,
     {
       command:
         "git clone --filter=blob:none --no-checkout https://github.com/vercel/internal-agents.git",
@@ -1191,14 +1197,35 @@ test("prefetches partial-clone instruction files inside the active credential le
   }
 });
 
-test("skips prefetch on failed clones, non-clone commands, workspace escapes, or empty prefetchFiles", async () => {
+test("skips prefetch on failed clones, non-partial clones, non-clone commands, workspace escapes, or empty prefetchFiles", async () => {
   const cases: ReadonlyArray<{
     readonly label: string;
     readonly input: GitHubShellInput;
     readonly config: typeof CONFIG & { readonly prefetchFiles?: readonly string[] };
     readonly exitCode: number;
   }> = [
-    { label: "failed clone", input: CLONE, config: CONFIG, exitCode: 128 },
+    { label: "failed clone", input: PARTIAL_CLONE, config: CONFIG, exitCode: 128 },
+    { label: "plain gh repo clone", input: CLONE, config: CONFIG, exitCode: 0 },
+    {
+      label: "plain gh repo clone without directory",
+      input: {
+        command: "gh repo clone acme/widgets",
+        description: "Plain clone repository",
+        repository: "acme/widgets",
+      },
+      config: CONFIG,
+      exitCode: 0,
+    },
+    {
+      label: "non-partial git clone",
+      input: {
+        command: "git clone --depth 1 https://github.com/vercel/internal-agents.git",
+        description: "Shallow clone repository",
+        repository: "vercel/internal-agents",
+      },
+      config: CONFIG,
+      exitCode: 0,
+    },
     { label: "gh pr view", input: READ, config: CONFIG, exitCode: 0 },
     {
       label: "workspace escape",
@@ -1212,7 +1239,7 @@ test("skips prefetch on failed clones, non-clone commands, workspace escapes, or
     },
     {
       label: "disabled prefetch",
-      input: CLONE,
+      input: PARTIAL_CLONE,
       config: { ...CONFIG, prefetchFiles: [] },
       exitCode: 0,
     },
@@ -1249,7 +1276,7 @@ test("swallows prefetch errors without altering clone output or skipping lease c
   const runs: Parameters<SandboxSession["run"]>[0][] = [];
   const policies: NetworkPolicy[] = [];
 
-  const output = await executeGitHubShell(CLONE, CONFIG, {
+  const output = await executeGitHubShell(PARTIAL_CLONE, CONFIG, {
     sessionId: "session-prefetch-error",
     async getConnectToken() {
       return "secret-token";
