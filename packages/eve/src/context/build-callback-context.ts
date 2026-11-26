@@ -1,4 +1,4 @@
-import { forwardSessionFastRun } from "#execution/sandbox/internal-shell.js";
+import { forwardSessionFastPaths } from "#execution/sandbox/internal-shell.js";
 import type { SessionContext } from "#context/session-context.js";
 import type { SandboxEnvironmentIdentity } from "#shared/sandbox-environment.js";
 import type { RuntimeSandboxSession, SandboxSession } from "#shared/sandbox-session.js";
@@ -84,5 +84,5 @@ export function withRuntimeSandboxLifecycle<Session extends SandboxSession>(
       return [...new Set([...Reflect.ownKeys(sandbox), "delete", "stop"])];
     },
   }) as Session & Pick<RuntimeSandboxSession, "delete" | "stop">;
-  return forwardSessionFastRun(sandbox, wrapped);
+  return forwardSessionFastPaths(sandbox, wrapped);
 }

@@ -113,46 +113,62 @@ export async function adaptStreamingCommandToSandboxProcess(input: {
   const stderr = createOutputChannel();
   const started = Promise.withResolvers<StreamingCommandHandle>();
 
+  let done = false;
+  let released = false;
+  let killPromise: Promise<void> | undefined;
+  let startedCommand: StreamingCommandHandle | undefined;
+
+  const releaseOnce = () => {
+    if (released) return;
+    released = true;
+    onRelease?.();
+  };
+
+  const kill = () =>
+    (killPromise ??= Promise.resolve().then(async () => {
+      await startedCommand?.kill?.();
+      releaseOnce();
+    }));
+
+  const killOnAbort = () => {
+    if (!done && startedCommand !== undefined) {
+      void kill().catch(() => undefined);
+    }
+  };
+  const disarmKill = () => signal?.removeEventListener("abort", killOnAbort);
+  signal?.addEventListener("abort", killOnAbort, { once: true });
+
   const runPromise = Promise.resolve().then(() =>
     input.start({
       onStart(command) {
+        startedCommand = command;
         started.resolve(command);
+        if (signal?.aborted) killOnAbort();
       },
       stderr: createChannelWritable(stderr),
       stdout: createChannelWritable(stdout),
     }),
   );
 
-  let done = false;
-  let killPromise: Promise<void> | undefined;
-  let startedCommand: StreamingCommandHandle | undefined;
-
-  const kill = () =>
-    (killPromise ??= Promise.resolve().then(async () => {
-      await startedCommand?.kill?.();
-      onRelease?.();
-    }));
-
-  const killOnAbort = () => {
-    if (!done) void kill().catch(() => undefined);
-  };
-  const disarmKill = () => signal?.removeEventListener("abort", killOnAbort);
-
   const settled = runPromise.then(
     (finished) => {
+      startedCommand ??= finished;
       started.resolve(finished);
       done = true;
       disarmKill();
-      onRelease?.();
+      releaseOnce();
       stdout.close();
       stderr.close();
       return { exitCode: finished.exitCode };
     },
     (error: unknown) => {
+      if (signal?.aborted && startedCommand !== undefined) {
+        void kill().catch(() => undefined);
+      }
       started.reject(error);
       done = true;
       disarmKill();
-      onRelease?.();
+      releaseOnce();
       const cause = signal?.aborted ? signal.reason : error;
       stdout.error(cause);
       stderr.error(cause);
@@ -161,12 +177,7 @@ export async function adaptStreamingCommandToSandboxProcess(input: {
   );
   settled.catch(() => undefined);
 
-  startedCommand = await started.promise;
-
-  if (!done) {
-    if (signal?.aborted) killOnAbort();
-    else signal?.addEventListener("abort", killOnAbort, { once: true });
-  }
+  await started.promise;
 
   return {
     stderr: stderr.stream,

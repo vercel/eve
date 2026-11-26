@@ -1,53 +1,86 @@
 import type { SandboxConnection } from "#sandbox/provider.js";
-import type { SandboxCommandResult, SandboxRunOptions } from "#shared/sandbox-session.js";
+import type {
+  SandboxCommandResult,
+  SandboxProcess,
+  SandboxRunOptions,
+  SandboxSpawnOptions,
+} from "#shared/sandbox-session.js";
 
-export interface ConnectionFastRunOptions {
+export interface ConnectionCommandOptions {
   readonly signal?: AbortSignal;
   readonly command: string;
   readonly env: Readonly<Record<string, string>>;
   readonly workingDirectory: string;
 }
 
-export type ConnectionFastRun = (
-  options: ConnectionFastRunOptions,
+export type ConnectionCommandRunner = (
+  options: ConnectionCommandOptions,
 ) => Promise<SandboxCommandResult>;
 
-export type SessionFastRun = (options: SandboxRunOptions) => Promise<SandboxCommandResult>;
+export type ConnectionBoundedSpawner = (
+  options: ConnectionCommandOptions,
+) => Promise<SandboxProcess>;
 
-const connectionFastRunners = new WeakMap<SandboxConnection<object>, ConnectionFastRun>();
-const sessionFastRunners = new WeakMap<object, SessionFastRun>();
+export interface ConnectionFastPaths {
+  readonly runFast?: ConnectionCommandRunner;
+  readonly runLogin?: ConnectionCommandRunner;
+  readonly spawnBounded?: ConnectionBoundedSpawner;
+}
 
-export function withConnectionFastRun<Connection extends SandboxConnection<object>>(
+export type SessionCommandRunner = (options: SandboxRunOptions) => Promise<SandboxCommandResult>;
+
+export type SessionBoundedSpawner = (options: SandboxSpawnOptions) => Promise<SandboxProcess>;
+
+export interface SessionFastPaths {
+  readonly runFast?: SessionCommandRunner;
+  readonly spawnBounded?: SessionBoundedSpawner;
+}
+
+const connectionFastPaths = new WeakMap<SandboxConnection<object>, ConnectionFastPaths>();
+const sessionFastPaths = new WeakMap<object, SessionFastPaths>();
+
+export function withConnectionFastPaths<Connection extends SandboxConnection<object>>(
   connection: Connection,
-  run: ConnectionFastRun,
+  paths: ConnectionFastPaths,
 ): Connection {
-  connectionFastRunners.set(connection, run);
+  connectionFastPaths.set(connection, paths);
   return connection;
 }
 
-export function connectionFastRun(
+export function getConnectionFastPaths(
   connection: SandboxConnection<object>,
-): ConnectionFastRun | undefined {
-  return connectionFastRunners.get(connection);
+): ConnectionFastPaths | undefined {
+  return connectionFastPaths.get(connection);
 }
 
-export function withSessionFastRun<Session extends object>(
+export function withSessionFastPaths<Session extends object>(
   session: Session,
-  run: SessionFastRun,
+  paths: SessionFastPaths,
 ): Session {
-  sessionFastRunners.set(session, run);
+  sessionFastPaths.set(session, paths);
   return session;
 }
 
-export function forwardSessionFastRun<Target extends object>(
+export function forwardSessionFastPaths<Target extends object>(
   source: object,
   target: Target,
-  wrap?: (run: SessionFastRun) => SessionFastRun,
+  wrapSignal?: (signal: AbortSignal | undefined) => AbortSignal,
 ): Target {
-  const runner = sessionFastRunners.get(source);
-  if (runner !== undefined) {
-    sessionFastRunners.set(target, wrap === undefined ? runner : wrap(runner));
+  const paths = sessionFastPaths.get(source);
+  if (paths === undefined) return target;
+  if (wrapSignal === undefined) {
+    sessionFastPaths.set(target, paths);
+    return target;
   }
+  const { runFast, spawnBounded } = paths;
+  sessionFastPaths.set(target, {
+    ...(runFast !== undefined && {
+      runFast: (options) => runFast({ ...options, signal: wrapSignal(options.signal) }),
+    }),
+    ...(spawnBounded !== undefined && {
+      spawnBounded: (options) => spawnBounded({ ...options, signal: wrapSignal(options.signal) }),
+    }),
+  });
   return target;
 }
 
@@ -55,9 +88,20 @@ export async function runInternalCommand(
   sandbox: { readonly run: (options: SandboxRunOptions) => PromiseLike<SandboxCommandResult> },
   options: SandboxRunOptions,
 ): Promise<SandboxCommandResult> {
-  const runner = sessionFastRunners.get(sandbox);
+  const runner = sessionFastPaths.get(sandbox)?.runFast;
   if (runner !== undefined) {
     return await runner(options);
   }
   return await sandbox.run(options);
+}
+
+export async function spawnBoundedCommand(
+  sandbox: { readonly spawn: (options: SandboxSpawnOptions) => PromiseLike<SandboxProcess> },
+  options: SandboxSpawnOptions,
+): Promise<SandboxProcess> {
+  const spawner = sessionFastPaths.get(sandbox)?.spawnBounded;
+  if (spawner !== undefined && options.stdin !== true) {
+    return await spawner(options);
+  }
+  return await sandbox.spawn(options);
 }

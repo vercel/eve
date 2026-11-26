@@ -363,6 +363,28 @@ describe("adaptStreamingCommandToSandboxProcess", () => {
     await expect(readText(process.stdout)).rejects.toBe(stop);
     await expect(readText(process.stderr)).rejects.toBe(stop);
     await expect(process.wait()).rejects.toBe(stop);
+    expect(onRelease).toHaveBeenCalledOnce();
+  });
+
+  it("kills an already-started command when abort rejects start before spawn resumes", async () => {
+    const controller = new AbortController();
+    const stop = new Error("stop immediately");
+    const onRelease = vi.fn();
+    const kill = vi.fn(async () => undefined);
+
+    const process = await adaptStreamingCommandToSandboxProcess({
+      abortSignal: controller.signal,
+      onRelease,
+      async start({ onStart }) {
+        onStart({ kill });
+        controller.abort(stop);
+        throw new DOMException("Aborted", "AbortError");
+      },
+    });
+
+    await expect(process.wait()).rejects.toBe(stop);
+    expect(kill).toHaveBeenCalledOnce();
+    expect(onRelease).toHaveBeenCalledOnce();
   });
 
   it("releases and rejects when starting the command fails before onStart", async () => {

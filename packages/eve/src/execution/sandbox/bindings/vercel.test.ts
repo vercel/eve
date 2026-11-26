@@ -1,4 +1,4 @@
-import { runInternalCommand } from "#execution/sandbox/internal-shell.js";
+import { runInternalCommand, spawnBoundedCommand } from "#execution/sandbox/internal-shell.js";
 import { sandboxConnectionDisposal } from "#execution/sandbox/connection-disposal.js";
 import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
 import { shutdownActiveSandboxConnections } from "#execution/sandbox/active-connections.js";
@@ -1990,7 +1990,7 @@ describe("createVercelSandbox", () => {
       sandboxName: "session-key",
     });
 
-    vi.mocked(sessionSandbox.runCommand).mockImplementation(createMockStreamingCommand() as never);
+    vi.mocked(sessionSandbox.runCommand).mockResolvedValue(createMockDetachedCommand() as never);
     vi.mocked(sessionSandbox.runCommand).mockClear();
 
     expect(sandboxModule.Sandbox.create).toHaveBeenCalledWith(
@@ -2006,30 +2006,31 @@ describe("createVercelSandbox", () => {
       expect.objectContaining({
         args: ["-lc", "printenv DEPLOY_ENV"],
         cmd: "bash",
-        detached: false,
+        detached: true,
         env: { DEPLOY_ENV: "staging" },
       }),
     );
 
-    vi.mocked(sessionSandbox.runCommand).mockResolvedValueOnce(
-      createMockDetachedCommand() as never,
+    vi.mocked(sessionSandbox.runCommand).mockImplementationOnce(
+      createMockStreamingCommand({ logs: [{ data: "bounded\n", stream: "stdout" }] }) as never,
     );
-    const interactive = await handle.sandbox.spawn({
-      command: "cat",
-      stdin: true,
+    const bounded = await spawnBoundedCommand(handle.sandbox, {
+      command: "echo bounded",
+      env: { DEPLOY_ENV: "staging" },
     });
-    expect(interactive.stdin).toBeDefined();
+    expect(await consumeWebStream(bounded.stdout)).toBe("bounded\n");
+    await expect(bounded.wait()).resolves.toEqual({ exitCode: 0 });
     expect(sessionSandbox.runCommand).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        args: ["-lc", "cat"],
+        args: ["-lc", "echo bounded"],
         cmd: "bash",
-        detached: true,
-        stdin: true,
+        detached: false,
+        env: { DEPLOY_ENV: "staging" },
       }),
     );
   });
 
-  it("runs internal commands through a single non-login bash request and kills on abort", async () => {
+  it("runs internal commands through a single non-login bash request and ignores kill failures on abort", async () => {
     const { handle, sessionSandbox } = await createTestVercelSession();
     vi.mocked(sessionSandbox.runCommand).mockClear();
     vi.mocked(sessionSandbox.runCommand).mockImplementationOnce(
@@ -2051,7 +2052,7 @@ describe("createVercelSandbox", () => {
       }),
     );
 
-    const kill = vi.fn().mockResolvedValue(undefined);
+    const kill = vi.fn().mockRejectedValue(new Error("already exited"));
     const started = Promise.withResolvers<void>();
     vi.mocked(sessionSandbox.runCommand).mockImplementationOnce(
       async (params: {
@@ -2430,9 +2431,9 @@ describe("Vercel active timeout", () => {
       if (lifecycle !== "release") await access.stop();
       if (lifecycle === "stop-reopen-reuse") await access.get();
       const finished = Promise.withResolvers<{ exitCode: number }>();
-      sessionSandbox.runCommand.mockImplementation(
-        createMockStreamingCommand({ finished: finished.promise }) as never,
-      );
+      const command = createMockDetachedCommand();
+      command.wait.mockReturnValue(finished.promise);
+      sessionSandbox.runCommand.mockResolvedValue(command);
       const process = await sandbox.spawn({ command: "train" });
       await vi.advanceTimersByTimeAsync(16 * 60_000);
       const extend = sessionSandbox.currentSession().extendTimeout;
@@ -2473,14 +2474,13 @@ describe("Vercel active timeout", () => {
   async function runningCommand() {
     const { handle, sessionSandbox } = await createTestVercelSession();
     const finished = Promise.withResolvers<{ exitCode: number }>();
-    const kill = vi.fn().mockResolvedValue(undefined);
-    sessionSandbox.runCommand.mockImplementation(
-      createMockStreamingCommand({ finished: finished.promise, kill }) as never,
-    );
+    const command = createMockDetachedCommand();
+    command.wait.mockReturnValue(finished.promise);
+    sessionSandbox.runCommand.mockResolvedValue(command);
     await vi.advanceTimersByTimeAsync(29 * 60_000);
     const abort = new AbortController();
     const process = await handle.sandbox.spawn({ command: "train", signal: abort.signal });
-    return { handle, sessionSandbox, finished, kill, process, abort };
+    return { handle, sessionSandbox, finished, command, process, abort };
   }
 
   it("renews before use and throughout a long command without concurrent operations adding time twice", async () => {
@@ -2492,9 +2492,9 @@ describe("Vercel active timeout", () => {
       session.timeout += duration;
     });
     const finished = Promise.withResolvers<{ exitCode: number }>();
-    sessionSandbox.runCommand.mockImplementation(
-      createMockStreamingCommand({ finished: finished.promise }) as never,
-    );
+    const command = createMockDetachedCommand();
+    command.wait.mockReturnValue(finished.promise);
+    sessionSandbox.runCommand.mockResolvedValue(command);
     await vi.advanceTimersByTimeAsync(29 * 60_000);
     const spawning = handle.sandbox.spawn({ command: "train" });
     const files = Promise.all([

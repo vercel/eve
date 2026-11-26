@@ -289,8 +289,12 @@ describe("executeGlobOnSandbox", () => {
     expect(result.content).toContain("/workspace/src/b.ts");
   });
 
-  it("falls back to POSIX find in one shell call when `rg` is missing or incompatible", async () => {
+  it.each([
+    { name: "incompatible rg", commands: undefined },
+    { name: "missing rg", commands: ["find"] as "find"[] },
+  ])("falls back to POSIX find in one shell call when $name", async ({ commands }) => {
     const shell = new Bash({
+      commands,
       files: {
         "/workspace/.git/config": "ignored\n",
         "/workspace/src/a.ts": "export const a = 1;\n",

@@ -231,25 +231,15 @@ function createJustBashWorkspaceSandbox(input: {
 }
 
 test("executeGrepSearch rejects an absolute path outside the workspace in one command", async () => {
-  const { runCount: _, sandbox } = createJustBashWorkspaceSandbox({
+  const harness = createJustBashWorkspaceSandbox({
     files: { "/app/index.ts": "ok\n", "/etc/passwd": "root:x:0:0\n" },
     workspaceRoot: "/app",
   });
-  let calls = 0;
   await assert.rejects(
-    executeGrepSearch(
-      { pattern: "root", path: "/etc" },
-      {
-        resolvePath: sandbox.resolvePath,
-        async run(input) {
-          calls += 1;
-          return await sandbox.run(input);
-        },
-      },
-    ),
+    executeGrepSearch({ pattern: "root", path: "/etc" }, harness.sandbox),
     /resolves outside the workspace \/app: \/etc/u,
   );
-  assert.equal(calls, 1);
+  assert.equal(harness.runCount, 1);
 });
 
 test("processGrepOutput caps rows and drops zero-count files", () => {

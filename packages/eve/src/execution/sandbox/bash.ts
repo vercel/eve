@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { SandboxSession } from "#shared/sandbox-session.js";
-import { runInternalCommand } from "#execution/sandbox/internal-shell.js";
+import { runInternalCommand, spawnBoundedCommand } from "#execution/sandbox/internal-shell.js";
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
 import {
   capLineLength,
@@ -40,7 +40,7 @@ const LAUNCHER = `_eve_d=$1 _eve_cmd=$2 _eve_id=$3
 shift 3
 mkdir -p "$_eve_d" 2>/dev/null || { eval "$_eve_cmd"; exit; }
 trap 'exit 0' USR1
-echo "$$" > "$_eve_d/launcher"
+echo "\${BASHPID:-$$}" > "$_eve_d/launcher"
 set -m
 (
   trap : TERM INT
@@ -165,7 +165,7 @@ async function runCommand(
   };
   signal?.addEventListener("abort", cancel, { once: true });
   try {
-    const child = await sandbox.spawn({
+    const child = await spawnBoundedCommand(sandbox, {
       signal: controller.signal,
       command: launchCommand(command, directory, jobId),
     });

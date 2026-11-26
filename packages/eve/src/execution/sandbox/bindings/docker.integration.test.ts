@@ -468,12 +468,11 @@ describe("Docker provider create", () => {
       "DEPLOY_ENV=staging",
       fakeDockerContainerIdentity(providerContainerName(appRoot)),
       "bash",
-      "-lc",
+      "-c",
     ]);
     const wrapper = String(exec?.args.at(-1));
     expect(wrapper).toMatch(/^echo "\$\$" > '\/tmp\/\.eve-sbx-spawn-[0-9a-f-]+\.pid'; /);
-    expect(wrapper).toContain(`(eval 'echo "$DEPLOY_ENV"')`);
-    expect(wrapper).not.toContain("bash -lc");
+    expect(wrapper).toContain(`bash -lc 'echo "$DEPLOY_ENV"'`);
     expect(wrapper).toMatch(/status=\$\?; rm -f '[^']+'; exit \$status$/);
   });
 

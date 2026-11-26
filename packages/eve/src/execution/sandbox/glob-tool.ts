@@ -94,7 +94,7 @@ interface BuildCommandInput {
   readonly pattern: string;
 }
 
-export function buildGlobCommand(input: BuildCommandInput): string {
+function buildGlobCommand(input: BuildCommandInput): string {
   return [
     "if command -v rg >/dev/null 2>&1 && {",
     "  _eve_rg=$(rg --line-number --color=never --hidden --glob '!.git/*' --max-count 1 -- '__eve_ripgrep_probe_never_matches__' /dev/null 2>&1)",
