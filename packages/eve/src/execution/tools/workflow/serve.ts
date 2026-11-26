@@ -31,9 +31,11 @@ import type {
   WorkflowToolRunRef,
 } from "#execution/tools/workflow/messages.js";
 import type { WorkflowToolRunInbox } from "#execution/tools/workflow/owner.js";
+import { agentModelsServeWorkflow } from "#runtime/subagents/workflow.js";
 import { agentToolServeWorkflowReference } from "#runtime/subagents/workflow-reference.js";
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 import type { JsonValue } from "#shared/json.js";
+import { readWorkflowFunctionId } from "#shared/workflow-function-id.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { ToolContext } from "#tools/definition.js";
 import type {
@@ -64,13 +66,13 @@ interface PendingReceive {
   readonly resolve: (call: WorkflowServeCall<JsonValue>) => void;
 }
 
-const AGENT_MODELS_SERVE_WORKFLOW_ID = `workflow//${EVE_PACKAGE_NAME}//agentModelsServeWorkflow`;
+const FALLBACK_AGENT_MODELS_SERVE_WORKFLOW_ID = `workflow//${EVE_PACKAGE_NAME}//agentModelsServeWorkflow`;
 
 function usesInWorkflowStretchAbort(workflowId: string): boolean {
-  return (
-    workflowId === agentToolServeWorkflowReference.workflowId ||
-    workflowId === AGENT_MODELS_SERVE_WORKFLOW_ID
-  );
+  if (workflowId === agentToolServeWorkflowReference.workflowId) return true;
+  const modelsId =
+    readWorkflowFunctionId(agentModelsServeWorkflow) ?? FALLBACK_AGENT_MODELS_SERVE_WORKFLOW_ID;
+  return workflowId === modelsId;
 }
 
 interface StretchAbortControl {

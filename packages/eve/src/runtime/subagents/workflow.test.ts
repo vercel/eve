@@ -53,22 +53,26 @@ vi.mock("#execution/agent-sessions/steps.js", () => ({
     return { deliveryId: `delivery-${String(agent.read.length)}`, sessionId: "reviewer-session" };
   },
 }));
-vi.mock("#compiled/@workflow/core/index.js", () => ({
-  createHook: () => {
-    let report: (payload: RuntimeActionResultHookPayload) => void = () => {};
-    const reported = new Promise<RuntimeActionResultHookPayload>((resolve) => {
-      report = resolve;
-    });
-    agent.turns.push(report);
-    return {
-      [Symbol.asyncIterator]: () => ({
-        next: async () => ({ done: false, value: await reported }),
-      }),
-      dispose: async () => {},
-      token: `agent-turn-${String(agent.turns.length)}`,
-    };
-  },
-}));
+vi.mock("#compiled/@workflow/core/index.js", () => {
+  let hookCount = 0;
+  return {
+    createHook: () => {
+      hookCount += 1;
+      return {
+        [Symbol.asyncIterator]: () => ({
+          next: async () => {
+            const value = await new Promise<RuntimeActionResultHookPayload>((resolve) => {
+              agent.turns.push(resolve);
+            });
+            return { done: false, value };
+          },
+        }),
+        dispose: async () => {},
+        token: `agent-turn-${String(hookCount)}`,
+      };
+    },
+  };
+});
 
 const agentContext = {
   agents: {},

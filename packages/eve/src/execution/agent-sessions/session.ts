@@ -84,7 +84,7 @@ class RunAgentSession implements AgentSession {
   #remote = false;
   #remoteReplyHooks: Promise<unknown> = Promise.resolve();
   #localHook: RunHook<AgentTurnReply> | undefined;
-  #localLoopStarted = false;
+  #localIterator: AsyncIterator<AgentTurnReply> | undefined;
   readonly #disposableHooks = new Set<RunHook<AgentTurnReply>>();
 
   constructor(input: {
@@ -143,7 +143,7 @@ class RunAgentSession implements AgentSession {
     if (this.#localHook !== undefined) {
       hooks.push(this.#localHook);
       this.#localHook = undefined;
-      this.#localLoopStarted = false;
+      this.#localIterator = undefined;
     }
     await Promise.all(hooks.map(releaseHook));
   }
@@ -168,10 +168,10 @@ class RunAgentSession implements AgentSession {
     const reply: AwaitedReply = { ended, expectsData, hook, reusable, settle };
     this.#awaited.push(reply);
     if (reusable) {
-      if (!this.#localLoopStarted) {
-        this.#localLoopStarted = true;
-        void this.#readLocalHook(hook);
-      }
+      this.#localIterator ??= hook[Symbol.asyncIterator]();
+      void this.#readLocalTurn(hook, this.#localIterator, expectsData).then((end) =>
+        this.#settleThrough(reply, end),
+      );
     } else {
       this.#disposableHooks.add(hook);
       void this.#readTurn(hook, expectsData).then((end) => this.#settleThrough(reply, end));
@@ -179,9 +179,30 @@ class RunAgentSession implements AgentSession {
     return reply;
   }
 
-  async #readLocalHook(hook: RunHook<AgentTurnReply>): Promise<void> {
+  #resetLocalHook(hook: RunHook<AgentTurnReply>): void {
+    if (this.#localHook === hook) {
+      this.#localHook = undefined;
+      this.#localIterator = undefined;
+    }
+    void releaseHook(hook);
+  }
+
+  async #readLocalTurn(
+    hook: RunHook<AgentTurnReply>,
+    iterator: AsyncIterator<AgentTurnReply>,
+    expectsData: boolean,
+  ): Promise<AgentTurnEnd> {
     try {
-      for await (const reply of hook) {
+      for (;;) {
+        const next = await iterator.next();
+        if (next.done) {
+          this.#resetLocalHook(hook);
+          return {
+            error: new Error(`Agent "${this.#name}" stopped reporting before its turn ended.`),
+            kind: "failed",
+          };
+        }
+        const reply = next.value;
         if (reply.kind !== "runtime-action-result") {
           await this.#forwardRequest(hook.token, reply);
           continue;
@@ -189,26 +210,14 @@ class RunAgentSession implements AgentSession {
         const result = reply.results.find(
           (candidate): candidate is RuntimeSubagentResult => candidate.kind === "subagent-result",
         );
-        if (result === undefined) continue;
-        if (result.origin === "child") this.#usage.record(result.outcome.usageDelta);
-        const target = this.#awaited.find((candidate) => candidate.hook === hook);
-        if (target !== undefined) {
-          this.#settleThrough(target, {
-            kind: "ended",
-            result: toAgentMessageResult(result, target.expectsData),
-          });
+        if (result !== undefined) {
+          if (result.origin === "child") this.#usage.record(result.outcome.usageDelta);
+          return { kind: "ended", result: toAgentMessageResult(result, expectsData) };
         }
       }
-      const target = this.#awaited.find((candidate) => candidate.hook === hook);
-      if (target !== undefined) {
-        this.#settleThrough(target, {
-          error: new Error(`Agent "${this.#name}" stopped reporting before its turn ended.`),
-          kind: "failed",
-        });
-      }
     } catch (error) {
-      const target = this.#awaited.find((candidate) => candidate.hook === hook);
-      if (target !== undefined) this.#settleThrough(target, { error, kind: "failed" });
+      this.#resetLocalHook(hook);
+      return { error, kind: "failed" };
     }
   }
 

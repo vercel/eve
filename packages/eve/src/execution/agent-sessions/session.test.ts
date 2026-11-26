@@ -342,3 +342,29 @@ it("reuses one reply hook across sequential turns to a local agent and disposes 
   expect(mocks.admitted).toEqual(["reply-0", "reply-0"]);
   await sessions.close();
 });
+
+it("allocates a fresh local reply hook after a forwarding failure kills the previous reader", async () => {
+  const { forwardAgentSessionRequest } = await import("#execution/agent-sessions/requests.js");
+  vi.mocked(forwardAgentSessionRequest).mockRejectedValueOnce(new Error("relay failed"));
+  const { sessions } = serveRun();
+  const reviewer = sessions.open("reviewer");
+
+  const first = await reviewer.send("first");
+  mocks.hooks.get("reply-0")?.push({
+    callId: "call-1",
+    childSessionId: "child",
+    events: [],
+    kind: "subagent-interaction",
+    subagentName: "reviewer",
+  });
+  await expect(first.result()).rejects.toThrow("relay failed");
+
+  const secondSend = reviewer.send("second");
+  await landNewestFirst();
+  const second = await secondSend;
+  endChildTurn("second reply");
+  await expect(second.result()).resolves.toMatchObject({ reply: "second reply" });
+
+  expect(mocks.admitted).toEqual(["reply-0", "reply-1"]);
+  await sessions.close();
+});
