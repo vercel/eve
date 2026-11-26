@@ -158,6 +158,7 @@ export async function createBashSandbox(input: {
         signal: options.signal,
       });
       return adaptMultiplexedCommandToSandboxProcess({
+        abortSignal: options.signal,
         command,
         getOutput: (log) => log.type,
       });

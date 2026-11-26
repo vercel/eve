@@ -173,18 +173,18 @@
     "snapshot": {
       "session": {
         "compaction": {
-          "estimateRatio": 0.000380517503805175,
+          "estimateRatio": 0.0004972650422675286,
           "lastKnownInputTokens": 1,
-          "lastKnownPromptMessageCount": 5,
+          "lastKnownPromptMessageCount": 4,
           "lastStage": "tail",
           "measurementsByModel": {
             "eve-test/layout": {
               "inputTokens": 1,
-              "promptMessageCount": 5,
-              "requestEnvelopeTokens": 2549
+              "promptMessageCount": 4,
+              "requestEnvelopeTokens": 1932
             }
           },
-          "requestEnvelopeTokens": 2549
+          "requestEnvelopeTokens": 1932
         },
         "continuationToken": "http:layout-memory",
         "sandboxState": {

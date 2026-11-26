@@ -1442,7 +1442,7 @@ describe("approvals off the happy path", () => {
 describe("models that fail", () => {
   it.each([
     { delegated: false, attempts: 1, outcome: "completed" },
-    { delegated: true, attempts: 2, outcome: "failed" },
+    { delegated: true, attempts: 4, outcome: "failed" },
   ] as const)(
     "handles an empty stop response with delegated=$delegated",
     async ({ delegated, attempts, outcome }) => {

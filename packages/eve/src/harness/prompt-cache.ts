@@ -53,10 +53,22 @@ export function applyLastToolCacheBreakpoint(tools: ToolSet, cache: AnthropicCac
     return tools;
   }
 
+  let targetIndex = -1;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const tool = entries[i]?.[1] as Record<string, unknown> | undefined;
+    if (tool?.type !== "provider") {
+      targetIndex = i;
+      break;
+    }
+  }
+  if (targetIndex === -1) {
+    return tools;
+  }
+
   const result: Record<string, unknown> = {};
   for (let i = 0; i < entries.length; i++) {
     const [name, tool] = entries[i] as [string, Record<string, unknown>];
-    if (i === entries.length - 1) {
+    if (i === targetIndex) {
       const existingProviderOptions =
         tool.providerOptions !== undefined && typeof tool.providerOptions === "object"
           ? (tool.providerOptions as Record<string, unknown>)
@@ -118,14 +130,35 @@ export function applyConversationCacheControl(
     };
   };
 
-  mark(out.length - 1);
+  let lastCacheable = -1;
+  for (let i = out.length - 1; i >= 0; i--) {
+    const candidate = out[i];
+    if (candidate !== undefined && !isNonCacheableAssistantMessage(candidate)) {
+      lastCacheable = i;
+      break;
+    }
+  }
+  if (lastCacheable === -1) {
+    return out;
+  }
 
-  for (let i = out.length - 2; i >= 0; i--) {
-    if (out[i]?.role === "assistant") {
+  mark(lastCacheable);
+
+  for (let i = lastCacheable - 1; i >= 0; i--) {
+    const candidate = out[i];
+    if (candidate?.role === "assistant" && !isNonCacheableAssistantMessage(candidate)) {
       mark(i);
       break;
     }
   }
 
   return out;
+}
+
+function isNonCacheableAssistantMessage(message: ModelMessage): boolean {
+  if (message.role !== "assistant") return false;
+  if (!Array.isArray(message.content) || message.content.length === 0) return false;
+  return message.content.every(
+    (part) => part.type === "reasoning" || (part.type === "text" && part.text.length === 0),
+  );
 }

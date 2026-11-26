@@ -45,7 +45,7 @@ export const READ_FILE_INPUT_SCHEMA = defineJsonSchema<ReadFileToolInput>({
     filePath: {
       type: "string",
       description:
-        "The path to the file to read: absolute, relative to the workspace root, or beginning with $HOME/.",
+        "The path to the file to read: absolute, relative to the workspace root, or beginning with ~/ or $HOME/.",
     },
     limit: {
       type: "integer",
@@ -97,18 +97,8 @@ export const readFile: ToolDefinition<ReadFileToolInput, ReadFileToolOutput> = f
   defineTool({
     label: { start: (input) => toolLabel("Read", input.filePath) },
     description: [
-      "Read a file from the local filesystem. If the path does not exist, an error is returned.",
-      "",
-      "Usage:",
-      "- The filePath parameter is an absolute path, a path relative to the workspace root (where `bash` commands start), or a path beginning with $HOME/.",
-      "- By default, this tool returns up to 2000 lines from the start of the file.",
-      "- The offset parameter is the line number to start from (1-indexed).",
-      "- To read later sections, call this tool again with a larger offset.",
-      '- Contents are returned with each line prefixed by its line number as `<line>: <content>`. For example, if a file has contents "foo\\n", you will receive "1: foo\\n".',
-      "- Any line longer than 2000 characters is truncated.",
-      "- PNG, JPEG, GIF, and WebP images up to 3 MiB and PDFs up to 20 MiB are shown to you as files, including files named in `Attached file <path>` references.",
-      "- Call this tool in parallel when you know there are multiple files you want to read.",
-      "- Avoid tiny repeated slices (30 line chunks). If you need more context, read a larger window.",
+      "Read a file from the local filesystem. Returns line-numbered text (`<line>: <content>`, lines over 2000 chars truncated, up to 2000 lines / 50 KB per call). Use larger `offset` to read further, and read larger windows instead of tiny slices.",
+      "Also displays PNG, JPEG, GIF, and WebP images (up to 3 MiB) and PDFs (up to 20 MiB), including `Attached file <path>` references.",
     ].join("\n"),
     async execute(input, ctx) {
       return await executeReadFileOnSandbox(await ctx.getSandbox(), input as ReadFileInput);
@@ -116,7 +106,10 @@ export const readFile: ToolDefinition<ReadFileToolInput, ReadFileToolOutput> = f
     inputSchema: READ_FILE_INPUT_SCHEMA,
     outputSchema: READ_FILE_OUTPUT_SCHEMA,
     async toModelOutput(output) {
-      if (output.file === undefined) return toolOutput.json(output);
+      if (!isReadFileResult(output)) {
+        return typeof output === "string" ? toolOutput.text(output) : toolOutput.json(output);
+      }
+      if (output.file === undefined) return toolOutput.text(formatReadFileModelOutput(output));
       const sandbox = await contextStorage.getStore()?.get(SandboxKey)?.get();
       const bytes =
         sandbox === undefined || sandbox === null
@@ -140,6 +133,36 @@ export const readFile: ToolDefinition<ReadFileToolInput, ReadFileToolOutput> = f
     },
   }),
 );
+
+const READ_FILE_OUTPUT_KEYS = new Set([
+  "content",
+  "file",
+  "nextOffset",
+  "path",
+  "totalLines",
+  "truncated",
+]);
+
+function isReadFileResult(output: unknown): output is ReadFileToolOutput {
+  if (typeof output !== "object" || output === null) return false;
+  const value = output as Record<string, unknown>;
+  return (
+    Object.keys(value).every((key) => READ_FILE_OUTPUT_KEYS.has(key)) &&
+    typeof value.content === "string" &&
+    typeof value.path === "string" &&
+    typeof value.totalLines === "number" &&
+    typeof value.truncated === "boolean"
+  );
+}
+
+function formatReadFileModelOutput(output: ReadFileToolOutput): string {
+  if (output.totalLines === 0) return `[${output.path}: empty file]`;
+  if (!output.truncated) return output.content;
+  const shownEnd = output.nextOffset !== undefined ? output.nextOffset - 1 : output.totalLines;
+  const continuation =
+    output.nextOffset !== undefined ? ` Use offset=${output.nextOffset} to read more.` : "";
+  return `${output.content}\n[Truncated: showing through line ${shownEnd} of ${output.totalLines}.${continuation}]`;
+}
 
 export default readFile;
 import { frameworkTool } from "./framework-tool.js";

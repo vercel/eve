@@ -21,12 +21,12 @@ import type { ManagedEventSubscribeInput } from "#shared/connection-events.js";
 import { parseJsonObject } from "#shared/json.js";
 import { principalKey, resolveConnectionPrincipal } from "#runtime/connections/principal.js";
 import { holdCallerIdentity } from "#runtime/connections/identity-hold.js";
-import { connectionEventDestination } from "#runtime/connections/events/path.js";
+import { connectionEventDestination } from "#runtime/subscriptions/path.js";
 import {
   sameEventOwner,
   type EventBinding,
   type EventOwner,
-} from "#runtime/connections/events/state.js";
+} from "#runtime/subscriptions/state.js";
 import type { ManagedEventSubscription } from "#shared/connection-events.js";
 
 const GET = "events_get_subscription";

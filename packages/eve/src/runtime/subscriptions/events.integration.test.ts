@@ -15,17 +15,17 @@ import { serializeContext } from "#context/serialize.js";
 import { fromCompiledBundle } from "#definitions/compiled-agent.js";
 import { requireCompiledBundle, SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
-import { ConnectionEventActions } from "#runtime/connections/events/actions.js";
-import { startConnectionEventOwner } from "#runtime/connections/events/owner.js";
-import type { EventBinding } from "#runtime/connections/events/state.js";
+import { ConnectionEventActions } from "#runtime/subscriptions/actions.js";
+import { startConnectionEventOwner } from "#runtime/subscriptions/owner.js";
+import type { EventBinding } from "#runtime/subscriptions/state.js";
 import {
   openConnectionEventStep,
   subscribeConnectionEvent,
   unsubscribeConnectionEventStep,
-} from "#runtime/connections/events/lifecycle-step.js";
+} from "#runtime/subscriptions/lifecycle-step.js";
 import { isMcpAuthRequiredError } from "#runtime/connections/mcp-client.js";
-import { dispatchConnectionEventStep } from "#runtime/connections/events/dispatch-step.js";
-import type { ConnectionEventPayload } from "#runtime/connections/events/delivery.js";
+import { dispatchConnectionEventStep } from "#runtime/subscriptions/dispatch-step.js";
+import type { ConnectionEventPayload } from "#runtime/subscriptions/delivery.js";
 import { listToolMetadata } from "#execution/catalog/connection-auth.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import type {
@@ -50,15 +50,14 @@ vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   getWritable: () => new WritableStream(),
 }));
 vi.mock("#compiled/@ai-sdk/mcp/index.js", () => ({ createMCPClient: createClient }));
-vi.mock("#runtime/connections/events/owner.js", () => ({
+vi.mock("#runtime/subscriptions/owner.js", () => ({
   startConnectionEventOwner: vi.fn(async (binding: EventBinding, bundle: unknown) => {
     const existing = handlers.get(binding.id);
     if (existing !== undefined) return existing.subscription;
-    const { subscribeConnectionEvent } =
-      await import("#runtime/connections/events/lifecycle-step.js");
+    const { subscribeConnectionEvent } = await import("#runtime/subscriptions/lifecycle-step.js");
     const { subscriptionFromOutcome } = await vi.importActual<
-      typeof import("#runtime/connections/events/owner.js")
-    >("#runtime/connections/events/owner.js");
+      typeof import("#runtime/subscriptions/owner.js")
+    >("#runtime/subscriptions/owner.js");
     const subscription = subscriptionFromOutcome(
       await subscribeConnectionEvent(handlerContext(binding, bundle), binding, binding.id),
     );

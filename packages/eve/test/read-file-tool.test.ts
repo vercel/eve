@@ -10,7 +10,6 @@ import type { ReadFileResult } from "../src/execution/sandbox/read-file.js";
 import { executeReadFileOnSandbox } from "../src/execution/sandbox/read-file.js";
 import type { SandboxAccess } from "../src/sandbox/state.js";
 import type { SandboxSession } from "../src/shared/sandbox-session.js";
-import { ReadFileStateKey } from "../src/execution/tools/file-state.js";
 
 const HOME_PROBE_COMMAND = `printf '%s\\n' "$HOME"`;
 
@@ -74,7 +73,6 @@ async function runInContext(
   const access = createFakeAccess(files);
   const ctx = new ContextContainer();
   ctx.set(SandboxKey, access);
-  ctx.set(ReadFileStateKey, { byTarget: {} });
   const sandbox = await access.get();
   return contextStorage.run(ctx, () => fn(sandbox!));
 }
@@ -152,20 +150,11 @@ describe("executeReadFileOnSandbox", () => {
   });
 
   it("empty file with offset > 1 errors", async () => {
-    const access = createFakeAccess({ "/workspace/empty.ts": "" });
-    const sandbox = (await access.get())!;
-
-    const ctx = new ContextContainer();
-    ctx.set(SandboxKey, access);
-    ctx.set(ReadFileStateKey, { byTarget: {} });
-
     await expect(
-      contextStorage.run(ctx, () =>
+      runInContext({ "/workspace/empty.ts": "" }, (sandbox) =>
         executeReadFileOnSandbox(sandbox, { filePath: "/workspace/empty.ts", offset: 2 }),
       ),
     ).rejects.toThrow("offset 2 is past the end of the file (0 lines)");
-
-    expect(ctx.require(ReadFileStateKey).byTarget).toEqual({});
   });
 
   it("lines are numbered correctly", async () => {
@@ -224,16 +213,19 @@ describe("executeReadFileOnSandbox", () => {
     expect(result.content).toContain("1: hello");
   });
 
-  it("rejects a $HOME path when the sandbox has no usable home", async () => {
-    await expect(
-      runInContext({}, (sandbox) =>
-        executeReadFileOnSandbox(
-          { ...sandbox, run: async () => ({ exitCode: 0, stderr: "", stdout: "\n" }) },
-          { filePath: "$HOME/notes.md" },
+  it.each(["$HOME/notes.md", "~/notes.md"])(
+    "rejects %s when the sandbox has no usable home",
+    async (filePath) => {
+      await expect(
+        runInContext({}, (sandbox) =>
+          executeReadFileOnSandbox(
+            { ...sandbox, run: async () => ({ exitCode: 0, stderr: "", stdout: "\n" }) },
+            { filePath },
+          ),
         ),
-      ),
-    ).rejects.toThrow('Cannot resolve "$HOME/notes.md": the sandbox has no usable $HOME.');
-  });
+      ).rejects.toThrow(`Cannot resolve "${filePath}": the sandbox has no usable $HOME.`);
+    },
+  );
 
   it("reads skill files through the model-facing $HOME path", async () => {
     const filePath = "/home/agent/.agents/skills/research/references/catalog.md";
@@ -263,39 +255,11 @@ describe("executeReadFileOnSandbox", () => {
     ).rejects.toThrow("appears to be a binary file");
   });
 
-  it("successful read writes a durable stamp", async () => {
-    const access = createFakeAccess({ "/workspace/foo.ts": "hello\n" });
-    const sandbox = (await access.get())!;
-
-    const ctx = new ContextContainer();
-    ctx.set(SandboxKey, access);
-    ctx.set(ReadFileStateKey, { byTarget: {} });
-
-    await contextStorage.run(ctx, () =>
-      executeReadFileOnSandbox(sandbox, { filePath: "/workspace/foo.ts" }),
-    );
-
-    const state = ctx.require(ReadFileStateKey);
-    const stamp = state.byTarget["/workspace/foo.ts"];
-    expect(stamp).toBeDefined();
-    expect(stamp?.filePath).toBe("/workspace/foo.ts");
-    expect(stamp?.contentHash).toBeTruthy();
-    expect(stamp?.byteLength).toBeGreaterThan(0);
-  });
-
   it("canonicalizes paths with dot segments", async () => {
-    const access = createFakeAccess({ "/workspace/foo.ts": "hello\n" });
-    const sandbox = (await access.get())!;
-
-    const ctx = new ContextContainer();
-    ctx.set(SandboxKey, access);
-    ctx.set(ReadFileStateKey, { byTarget: {} });
-
-    await contextStorage.run(ctx, () =>
+    const result = (await runInContext({ "/workspace/foo.ts": "hello\n" }, (sandbox) =>
       executeReadFileOnSandbox(sandbox, { filePath: "/workspace/./foo.ts" }),
-    );
+    )) as ReadFileResult;
 
-    const state = ctx.require(ReadFileStateKey);
-    expect(state.byTarget["/workspace/foo.ts"]).toBeDefined();
+    expect(result.path).toBe("/workspace/foo.ts");
   });
 });

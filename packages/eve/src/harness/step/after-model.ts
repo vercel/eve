@@ -5,7 +5,7 @@ import type { ModelMessage, ToolSet, TypedToolCall, TypedToolError } from "ai";
 import type { StepResult } from "#harness/types.js";
 import { FINAL_OUTPUT_BESIDE_PENDING_CALLS } from "#harness/final-output.js";
 import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
-import { resolveAssistantStepText } from "#harness/messages.js";
+import { createFrameworkUserMessage, resolveAssistantStepText } from "#harness/messages.js";
 import type { HarnessStepResult } from "#harness/step-hooks.js";
 import {
   appendMissingToolResultMessages,
@@ -197,7 +197,40 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
   if (workingTasks.length > 0) {
     return { held: { kind: "tasks", taskIds: workingTasks }, next: null, session: step.session };
   }
+  if (
+    !delivered &&
+    !endsTurn &&
+    result.finishReason === "length" &&
+    countTrailingLengthContinuations(step.session.history) < MAX_LENGTH_CONTINUATIONS
+  ) {
+    step.session = changeHistory(step.session, {
+      extend: [
+        ...step.session.history,
+        createFrameworkUserMessage("execution.retry", LENGTH_CONTINUATION_PROMPT),
+      ],
+    });
+    return { next: step.runStep, session: step.session };
+  }
   return settleTurn(step, { result, stepOutput: endsTurn ? null : stepOutput });
+}
+
+const MAX_LENGTH_CONTINUATIONS = 3;
+
+const LENGTH_CONTINUATION_PROMPT =
+  "Your previous response reached the output length limit before finishing. Continue directly from where it stopped and take the next tool call or complete your reply. Do not repeat completed work and do not mention this notice.";
+
+function countTrailingLengthContinuations(history: readonly ModelMessage[]): number {
+  let count = 0;
+  for (let i = history.length - 1; i >= 0; i--) {
+    const message = history[i];
+    if (message?.role === "assistant") continue;
+    if (message?.role === "user" && message.content === LENGTH_CONTINUATION_PROMPT) {
+      count++;
+      continue;
+    }
+    break;
+  }
+  return count;
 }
 
 function answerCallsThatWontRun(

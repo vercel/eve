@@ -244,6 +244,56 @@ describe("getInputTokenCount", () => {
       ),
     ).toBe(estimateTokens(messages) + 3_000);
   });
+
+  it("scales appended message estimates by calibrated estimateRatio capped at 1.6", () => {
+    const messages: ModelMessage[] = [
+      { role: "user", content: "initial" },
+      { role: "assistant", content: "x".repeat(400) },
+    ];
+    const appendedTokens = estimateTokens([messages[1]!]);
+    const scaled = getInputTokenCount(messages, {
+      ...config,
+      estimateRatio: 1.5,
+      lastKnownInputTokens: 10_000,
+      lastKnownPromptMessageCount: 1,
+    });
+    expect(scaled).toBe(10_000 + Math.ceil(appendedTokens * 1.5));
+
+    const capped = getInputTokenCount(messages, {
+      ...config,
+      estimateRatio: 15,
+      lastKnownInputTokens: 8_000,
+      lastKnownPromptMessageCount: 1,
+    });
+    expect(capped).toBe(8_000 + Math.ceil(appendedTokens * 1.6));
+  });
+
+  it("does not prematurely compact when synthetic usage inflates estimateRatio above 1.6", () => {
+    const messages: ModelMessage[] = [
+      { role: "user", content: `Seed 0: ${"Preserve this repository evidence. ".repeat(40)}` },
+      { role: "assistant", content: "Seed evidence recorded. ".repeat(64) },
+      { role: "user", content: `Seed 1: ${"Preserve this repository evidence. ".repeat(40)}` },
+    ];
+    const measured = withPromptMeasurement(
+      {},
+      {
+        inputTokens: 8_000,
+        modelId: "mock",
+        promptMessageCount: 1,
+        promptMessages: [messages[0]!],
+        requestEnvelopeTokens: 200,
+      },
+    );
+    expect(measured.estimateRatio).toBeGreaterThan(10);
+    expect(
+      shouldCompact(
+        messages,
+        { ...config, ...measured, target: 5_000, threshold: 10_000 },
+        200,
+        measured.requestEnvelopeTokens,
+      ),
+    ).toBe(false);
+  });
 });
 
 describe("shouldCompact", () => {
