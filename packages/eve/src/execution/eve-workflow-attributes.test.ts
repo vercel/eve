@@ -552,16 +552,11 @@ describe("resolveSessionStreamVersion", () => {
     }
   });
 
-  it("classifies pre-0.84.0 $eve.version values as stream version 26", () => {
-    for (const version of ["0.0.1", "0.54.3", "0.71.0", "0.83.3"]) {
-      expect(resolveSessionStreamVersion({ [EVE_VERSION_ATTRIBUTE]: version })).toBe("26");
-    }
-  });
-
-  it("returns undefined when attributes are missing or unrecognized", () => {
+  it("returns undefined for pre-0.84.0, missing, or unrecognized $eve.version values", () => {
     expect(resolveSessionStreamVersion(undefined)).toBeUndefined();
     expect(resolveSessionStreamVersion({})).toBeUndefined();
-    expect(resolveSessionStreamVersion({ [EVE_VERSION_ATTRIBUTE]: "0.0.0" })).toBeUndefined();
-    expect(resolveSessionStreamVersion({ [EVE_VERSION_ATTRIBUTE]: "unknown" })).toBeUndefined();
+    for (const version of ["0.0.0", "0.0.1", "0.54.3", "0.71.0", "0.83.3", "unknown"]) {
+      expect(resolveSessionStreamVersion({ [EVE_VERSION_ATTRIBUTE]: version })).toBeUndefined();
+    }
   });
 });

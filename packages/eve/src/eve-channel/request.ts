@@ -441,13 +441,9 @@ async function readStoredStreamVersion(session: Session): Promise<string | undef
 
 async function startedOnEarlierEve(session: Session, hasFirstLine: boolean): Promise<boolean> {
   if (currentSessions.has(session.id)) return false;
-  const storedVersion = await readStoredStreamVersion(session);
-  if (storedVersion !== undefined) {
-    if (storedVersion === EVE_MESSAGE_STREAM_VERSION) {
-      rememberCurrentSession(session.id);
-      return false;
-    }
-    return true;
+  if ((await readStoredStreamVersion(session)) === EVE_MESSAGE_STREAM_VERSION) {
+    rememberCurrentSession(session.id);
+    return false;
   }
   let timer: ReturnType<typeof setTimeout> | undefined;
   let reader: ReadableStreamDefaultReader<unknown> | undefined;

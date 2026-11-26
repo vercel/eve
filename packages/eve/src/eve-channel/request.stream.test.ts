@@ -436,7 +436,7 @@ describe("createSessionStreamResponse", () => {
     expect(versionLookups).toBe(1);
   });
 
-  it("serves v26 translation directly when run attributes report stream version 26", async () => {
+  it("falls back to reading line 0 when getStreamVersion reports an earlier stream version", async () => {
     const v26 = (type: string, data: object) => ({
       data: { sequence: 0, turnId: "turn_0", ...data },
       meta: { at, deliveryIds: ["delivery_1"] },
@@ -460,7 +460,7 @@ describe("createSessionStreamResponse", () => {
       attributed,
     );
     expect(response.status).toBe(200);
-    expect(starts).toEqual([2, 0]);
+    expect(starts).toEqual([2, 0, 0]);
     expect(await records(response)).toEqual([
       { $eve: "heartbeat" },
       {
@@ -478,6 +478,26 @@ describe("createSessionStreamResponse", () => {
         ],
       },
     ]);
+  });
+
+  it("keeps 409 for an empty stranded session whose run attributes do not report v27", async () => {
+    const { session } = sessionOf([]);
+    const stranded: Session = {
+      ...session,
+      getLineStream: (options) =>
+        options?.follow === false
+          ? session.getLineStream(options)
+          : Promise.reject(new SessionStrandedError({ eveVersion: "0.0.1" }, "Reset it.")),
+      async getStreamVersion() {
+        return undefined;
+      },
+    };
+    const response = await createSessionStreamResponse(
+      new Request(`https://eve.test/eve/v1/session/${stranded.id}/stream`),
+      stranded,
+    );
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ code: "session_stranded" });
   });
 
   it("falls back to reading line 0 when getStreamVersion returns undefined or fails transiently", async () => {

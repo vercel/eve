@@ -41,9 +41,7 @@ export function resolveSessionStreamVersion(
   if (match === null) return undefined;
   const major = Number(match[1]);
   const minor = Number(match[2]);
-  const patch = Number(match[3]);
-  if (major === 0 && minor === 0 && patch === 0) return undefined;
-  return major > 0 || minor >= FIRST_V27_MINOR ? EVE_MESSAGE_STREAM_VERSION : "26";
+  return major > 0 || minor >= FIRST_V27_MINOR ? EVE_MESSAGE_STREAM_VERSION : undefined;
 }
 
 export const EVE_SESSION_ATTRIBUTE = "$eve.session";
