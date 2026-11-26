@@ -448,6 +448,8 @@ export interface Runtime {
   ): Promise<RemoteChildBinding | undefined>;
 
   hasRunnableOwner?(sessionId: string): Promise<boolean>;
+
+  ownsSession?(sessionId: string, auth: SessionAuthContext | null): Promise<boolean>;
 }
 
 export type { SessionStreamOptions } from "#shared/session.js";

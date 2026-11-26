@@ -10,6 +10,7 @@ import {
 } from "#compiled/@opentelemetry/api/index.js";
 import { HookNotFoundError, WorkflowRunNotFoundError } from "#compiled/@workflow/errors/index.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
+import type { SessionAuthContext } from "#channel/types.js";
 import { ChannelRequestIdKey, SessionTitleKey } from "#context/keys.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
@@ -22,6 +23,7 @@ import {
   workflowEntryReference,
   workflowToolRunWorkflowReference,
 } from "#execution/workflow-references.js";
+import { invocationOwnerKey } from "#internal/invocation/metadata.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import { registerInstrumentationRuntime } from "#instrumentation/runtime.js";
 import { AgentSpanIdGenerator } from "#compiled/@vercel/agent-runs/index.js";
@@ -33,6 +35,13 @@ import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.
 import { captureLogRecords } from "#internal/testing/log-records.js";
 
 const OWNER_RUN_ID = "wrun_owner-run";
+const alice: SessionAuthContext = {
+  attributes: {},
+  authenticator: "test",
+  principalId: "alice",
+  principalType: "user",
+};
+const bob: SessionAuthContext = { ...alice, principalId: "bob" };
 const getHookByTokenMock = vi.fn();
 const getRunRecordMock = vi.fn();
 const world = {
@@ -555,6 +564,7 @@ describe("createWorkflowRuntime#createSession", () => {
           "$eve.is_otel_trace_enabled": "false",
           "$eve.is_trace_content_visible": "false",
           "$eve.prewarm": "1",
+          "$eve.invocation_owner": invocationOwnerKey(null),
           "$eve.stream_version": "27",
           "$eve.title": "hello",
           "$eve.trigger": "http",
@@ -622,6 +632,43 @@ describe("createWorkflowRuntime#createSession", () => {
     ).resolves.toMatchObject({ sessionId: OWNER_RUN_ID });
 
     expect(getHookByTokenMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["the session's own principal", {}, alice, alice],
+    ["the route caller when the route supplies one", { audienceAuth: bob }, alice, bob],
+    ["no principal when the route caller is anonymous", { audienceAuth: null }, alice, null],
+  ])("records %s as the session owner", async (_case, route, auth, owner) => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    startMock.mockResolvedValue({ runId: OWNER_RUN_ID });
+
+    await buildRuntime(compiledArtifactsSource).createSession({
+      adapter,
+      auth,
+      input: { message: "hello" },
+      ...route,
+    });
+
+    expect(startMock.mock.calls[0]?.[2].attributes["$eve.invocation_owner"]).toBe(
+      invocationOwnerKey(owner),
+    );
+  });
+
+  it("lets an external invocation's owner key replace the session owner", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    startMock.mockResolvedValue({ runId: OWNER_RUN_ID });
+
+    await buildRuntime(compiledArtifactsSource).createSession({
+      adapter,
+      auth: alice,
+      continuationToken: "invocation:token",
+      externalInvocation: { continuationToken: "invocation:token", ownerKey: "owner" },
+      input: { message: "hello" },
+    });
+
+    expect(startMock.mock.calls[0]?.[2].attributes["$eve.invocation_owner"]).toBe("owner");
   });
 
   it("passes a channel's losing-candidate delivery to the workflow", async () => {
@@ -779,6 +826,7 @@ describe("createWorkflowRuntime#createSession", () => {
           "$eve.is_otel_trace_enabled": "false",
           "$eve.is_trace_content_visible": "false",
           "$eve.prewarm": "1",
+          "$eve.invocation_owner": invocationOwnerKey(null),
           "$eve.stream_version": "27",
           "$eve.title": "hello",
           "$eve.trigger": "http",
@@ -831,6 +879,7 @@ describe("createWorkflowRuntime#createSession", () => {
         "$eve.parent_call": "call-1",
         "$eve.parent_turn": "turn-1",
         "$eve.prewarm": "1",
+        "$eve.invocation_owner": invocationOwnerKey(null),
         "$eve.root": "root-session",
         "$eve.stream_version": "27",
         "$eve.subagent": "researcher",
@@ -867,6 +916,7 @@ describe("createWorkflowRuntime#createSession", () => {
         "$eve.is_otel_trace_enabled": "false",
         "$eve.is_trace_content_visible": "false",
         "$eve.prewarm": "1",
+        "$eve.invocation_owner": invocationOwnerKey(null),
         "$eve.stream_version": "27",
         "$eve.title": "hello",
         "$eve.trigger": "http",
