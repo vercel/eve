@@ -30,6 +30,7 @@ import type { DynamicRemoteBinding } from "#definitions/remote.js";
 import type { SandboxAccess, SandboxSessionEndReason } from "#sandbox/state.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { RuntimeModel } from "#runtime/agent/resolve-model.js";
+import type { ModelCompaction } from "#shared/compaction-strategy.js";
 import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
 import type { SessionPredecessor } from "#protocol/session-events/families/session.js";
 
@@ -148,6 +149,7 @@ export const ToolChannelKey = new ContextKey<{
 export interface LiveDynamicModelSelection {
   readonly model?: RuntimeModel;
   readonly reference: RuntimeModelReference;
+  readonly compaction?: ModelCompaction<never>;
 }
 
 export type DurableDynamicSubagentSelection =

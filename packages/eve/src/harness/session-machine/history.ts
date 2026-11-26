@@ -65,7 +65,7 @@ function assertKeeps(previous: readonly ModelMessage[], next: readonly ModelMess
   }
 }
 
-function answersFollowCalls(history: readonly ModelMessage[]): string | undefined {
+export function answersFollowCalls(history: readonly ModelMessage[]): string | undefined {
   const calls = new Set<string>();
   const answered = new Set<string>();
   for (const [index, message] of history.entries()) {

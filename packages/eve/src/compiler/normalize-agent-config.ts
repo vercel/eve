@@ -10,11 +10,16 @@ import { classifyModelRouting } from "#internal/classify-model-routing.js";
 import { isMockModel } from "#internal/mock-model-identity.js";
 import { isDefinedModel } from "#models/definition.js";
 import { isChatGptModelRouting } from "#shared/chatgpt-model.js";
+import {
+  assertCompactionStrategyCompatible,
+  modelCompaction,
+} from "#shared/compaction-strategy.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import {
   isDynamicModelDefinition,
+  type AgentExperimentalDefinition,
   type AgentPromptCacheDefinition,
   type AgentToolExposure,
   type ModelRouting,
@@ -126,6 +131,14 @@ export async function compileAgentConfig(
     };
   }
 
+  const compactionInput = definition.experimental?.compaction;
+  if (compactionInput !== undefined && dynamicModelDefinition === undefined) {
+    rejectCompactionMismatch(
+      compactionInput,
+      definition.model as PublicAgentTurnModelDefinition,
+      configModulePath,
+    );
+  }
   const experimental = normalizeExperimentalDefinition(definition.experimental);
   if (experimental !== undefined) {
     compiledConfig.experimental = experimental;
@@ -186,14 +199,37 @@ export async function compileAgentConfig(
   return { ...compiledConfig, model };
 }
 
+function rejectCompactionMismatch(
+  compactionInput: NonNullable<AgentExperimentalDefinition["compaction"]>,
+  model: PublicAgentTurnModelDefinition,
+  sourcePath: string,
+): void {
+  if (isDefinedModel(model)) return;
+  const compaction = modelCompaction(compactionInput, "experimental.compaction");
+  try {
+    assertCompactionStrategyCompatible(
+      compaction,
+      typeof model === "string"
+        ? { modelId: model, provider: "gateway" }
+        : { modelId: model.modelId, provider: model.provider },
+    );
+  } catch (error) {
+    throw new Error(`In "${sourcePath}", ${toErrorMessage(error)}`, { cause: error });
+  }
+}
+
 function normalizeExperimentalDefinition(
-  experimental: CompiledAgentDefinition["experimental"] | undefined,
+  experimental: AgentExperimentalDefinition | undefined,
 ): CompiledAgentDefinition["experimental"] | undefined {
   if (experimental === undefined) {
     return undefined;
   }
 
   const compiledExperimental: Mutable<NonNullable<CompiledAgentDefinition["experimental"]>> = {};
+
+  if (experimental.compaction !== undefined) {
+    compiledExperimental.compaction = true;
+  }
 
   if (experimental.workflow !== undefined) {
     compiledExperimental.workflow = {
@@ -317,6 +353,7 @@ async function normalizeAuthoredModelReference(input: {
           ...sourceBackedModel,
           id: providerResult.slug,
           contextWindowTokens: providerResult.contextWindowTokens,
+          maxOutputTokens: providerResult.maxOutputTokens,
         };
       }
     } catch {}
@@ -395,6 +432,7 @@ async function withCompiledRuntimeModelLimits(
   return {
     ...model,
     contextWindowTokens: limits.contextWindowTokens,
+    maxOutputTokens: limits.maxOutputTokens,
   };
 }
 

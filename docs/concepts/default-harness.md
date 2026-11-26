@@ -20,6 +20,8 @@ export default defineAgent({
 
 When history passes the threshold, eve summarizes the older turns. eve measures the space against the provider's last reported input token count, plus an estimate for new messages.
 
+This is eve's default strategy, `defaultCompaction()`. To compact your own way, set the experimental [`experimental.compaction`](../experimental/compaction).
+
 The summary prompt asks the compaction model to separate completed progress and decisions from remaining work. It also asks the model to keep the constraints, preferences, data, and references needed to continue. A later compaction passes the previous summary in full and replaces it with an updated one. Omit `compaction.model` to summarize with the active turn model.
 
 After compacting, the harness keeps the most recent messages word for word next to the summary. It keeps up to 20,000 tokens or half the threshold, whichever is smaller, and shortens their tool results to 2,000 characters. The summarizer reads the kept messages too, so nothing a compaction drops is lost. A compaction that keeps recent messages must bring the input down to half the model's context window, so the next one is far off. eve checks this on its character estimate, scaled by the ratio of the provider's last reported input tokens to that estimate. When the kept messages don't fit under that, the harness keeps only their text, and then only the summary, which only has to fit under the threshold. If the first model call after a compaction is already over the threshold, the next compaction skips the option that fell short. The current user message is always kept. When that message alone exceeds the budget, the harness keeps its start and end with a note at the cut. It summarizes the middle with the older turns.

@@ -64,6 +64,7 @@ function compiledSettings(bundle: CompiledBundle): SessionAgentSettings {
   const config = bundle.resolvedAgent.config;
   return settingsOf({
     compactionModel: bundle.turnAgent.compactionModel,
+    compactionStrategy: config?.experimental?.compaction,
     compactionThresholdPercent: config?.compaction?.thresholdPercent,
     modelCallsPerStep: config?.experimental?.workflow?.modelCallsPerStep,
     reasoning: bundle.turnAgent.reasoning,

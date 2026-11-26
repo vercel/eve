@@ -1,3 +1,4 @@
+import type { ModelCompactionInput } from "#shared/compaction-strategy.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ApprovalPolicy } from "#approval/definition.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
@@ -65,6 +66,7 @@ export type ModelRouting =
 export type InternalAgentModelDefinition = {
   id: string;
   contextWindowTokens?: number;
+  maxOutputTokens?: number;
   source?: ModuleSourceRef;
   sourceField?: "compaction.model";
   sourceModelOption?: string;
@@ -109,6 +111,12 @@ export interface PublicAgentModelSelectionDefinition<
   readonly modelContextWindowTokens?: number;
   /** Provider options for the selected model. */
   readonly modelOptions?: AgentModelOptionsDefinition;
+  /**
+   * Compaction for this selection, replacing the agent's `experimental.compaction` while the
+   * selection is in use. Takes a strategy or `{ strategy, fallback }`. The first model call rejects
+   * a strategy that doesn't fit the selected model.
+   */
+  readonly experimental?: Pick<AgentExperimentalDefinition, "compaction">;
 }
 
 /**
@@ -224,6 +232,14 @@ export type SessionUsageLimit = (usage: {
  */
 export interface AgentExperimentalDefinition {
   /**
+   * Replaces how eve compacts the history, and takes the place of `compaction`. Build one with
+   * `defaultCompaction()` from `eve/experimental/compaction`, or write your own. Pass
+   * `{ strategy, fallback }` to choose what eve runs when `strategy` fails; `fallback` defaults to
+   * `defaultCompaction()`. A strategy that works only with other models, built with
+   * `tagCompactionStrategy`, is a TypeScript error and fails the build.
+   */
+  readonly compaction?: ModelCompactionInput<never>;
+  /**
    * Durable Workflow runtime configuration.
    */
   readonly workflow?: AgentWorkflowDefinition;
@@ -331,6 +347,13 @@ export interface AgentWorkflowDefinition {
  */
 export type AgentToolExposure = boolean | "deferred";
 
+export type InternalAgentExperimentalDefinition = Omit<
+  AgentExperimentalDefinition,
+  "compaction"
+> & {
+  readonly compaction?: true;
+};
+
 export type InternalAgentDefinition = {
   name: string;
   approval?: boolean;
@@ -338,7 +361,7 @@ export type InternalAgentDefinition = {
   build?: AgentBuildDefinition;
   compaction?: InternalAgentCompactionDefinition;
   defaultTools?: boolean;
-  experimental?: AgentExperimentalDefinition;
+  experimental?: InternalAgentExperimentalDefinition;
   model: InternalAgentModelDefinition;
   reasoning?: AgentReasoningDefinition;
   source?: ModuleSourceRef;

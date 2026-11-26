@@ -1,5 +1,5 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
-import { defineAgent } from "eve";
+import { defineAgent, type DefinedAgent } from "eve";
 import type { MockModelRequest } from "eve/evals";
 
 import { readStripeColors, STRIPE_COUNT } from "./lib/stripes";
@@ -113,7 +113,7 @@ const base = e2eAgentConfig({
   },
 });
 
-export default defineAgent({
+const agent: DefinedAgent = defineAgent({
   ...base,
   experimental: {
     ...base.experimental,
@@ -124,3 +124,5 @@ export default defineAgent({
   },
   reasoning: "high",
 });
+
+export default agent;

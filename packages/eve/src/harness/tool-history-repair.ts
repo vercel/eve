@@ -1,7 +1,7 @@
 import type { ModelMessage, ToolCallPart } from "ai";
 
 import { extractToolResultCallIds } from "#harness/model-call/response.js";
-import { awaitedProviderToolCallIds } from "#harness/provider-tool-history.js";
+import { awaitedProviderToolCallIds } from "#shared/provider-tool-history.js";
 import { withResult } from "#harness/session-machine/suspended-steps.js";
 
 export function repairToolHistory(input: {

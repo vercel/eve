@@ -1,3 +1,4 @@
+import { modelCompaction } from "#shared/compaction-strategy.js";
 import { validateScheduleTimezone } from "#shared/schedule-timezone.js";
 import { isAgentReasoningDefinition } from "#internal/runtime-model.js";
 import { normalizeAgentApproval } from "#internal/authored-definition/approval.js";
@@ -127,6 +128,12 @@ export function normalizeAgentDefinition(
 
   if (record.approval !== undefined) {
     definition.approval = normalizeAgentApproval(record.approval, message);
+  }
+
+  if (definition.experimental?.compaction !== undefined && definition.compaction !== undefined) {
+    throw new Error(
+      `${message} "compaction" configures eve's default strategy, which "experimental.compaction" replaces. Pass its options to the strategy instead: defaultCompaction({ model, threshold }).`,
+    );
   }
 
   return definition as Readonly<NormalizedAgentDefinition>;
@@ -259,8 +266,19 @@ function normalizeAgentExperimentalDefinition(
   message: string,
 ): NonNullable<NormalizedAgentDefinition["experimental"]> {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["workflow"], message);
+  expectOnlyKnownKeys(record, ["compaction", "workflow"], message);
   const normalizedDefinition: Mutable<NonNullable<NormalizedAgentDefinition["experimental"]>> = {};
+
+  if (record.compaction !== undefined) {
+    try {
+      normalizedDefinition.compaction = modelCompaction(
+        record.compaction as Parameters<typeof modelCompaction>[0],
+        "experimental.compaction",
+      );
+    } catch (error) {
+      throw new Error(`${message} ${(error as Error).message}`, { cause: error });
+    }
+  }
 
   if (record.workflow !== undefined) {
     normalizedDefinition.workflow = normalizeAgentWorkflowDefinition(record.workflow, message);

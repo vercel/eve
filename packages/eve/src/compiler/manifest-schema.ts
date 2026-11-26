@@ -257,6 +257,7 @@ export const modelRoutingSchema = z.union([
 export const compiledRuntimeModelReferenceSchema: z.ZodType<CompiledRuntimeModelReference> = z
   .object({
     contextWindowTokens: z.number().int().positive().optional(),
+    maxOutputTokens: z.number().int().positive().optional(),
     id: z.string(),
     source: moduleSourceRefSchema.optional(),
     sourceField: z.literal("compaction.model").optional(),
@@ -315,6 +316,7 @@ export const compiledAgentConfigBaseFields = {
   description: z.string().optional(),
   experimental: z
     .object({
+      compaction: z.literal(true).optional(),
       workflow: compiledAgentWorkflowDefinitionSchema.optional(),
     })
     .strict()

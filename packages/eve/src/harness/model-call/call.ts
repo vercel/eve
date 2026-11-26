@@ -36,9 +36,10 @@ import {
   EmptyModelResponseError,
   ModelStreamStalledError,
   rejectsCredential,
+  isContextOverflowError,
 } from "#harness/model-call/errors.js";
 import { type ModelProfile, resolveModelProfile } from "#harness/model-profile.js";
-import { awaitsProviderToolResult } from "#harness/provider-tool-history.js";
+import { awaitsProviderToolResult } from "#shared/provider-tool-history.js";
 import { estimateRequestEnvelope } from "#harness/request-envelope.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
 import { retryRun } from "#harness/session-machine/runs.js";
@@ -66,7 +67,7 @@ import { stepReference } from "#harness/step/context.js";
 import { agentSettings } from "#execution/effective-agent-config.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { getInputTokenCount } from "#harness/compaction/engine.js";
-import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
+import { CompactionOverLimitError } from "#shared/compaction-over-limit-error.js";
 import { compactedTurnInput, historyBeforeCall } from "#harness/compaction/step.js";
 import { reportCompactionFailure, reportModelCallFailure } from "./failure.js";
 import { buildGatewayAttributionHeaders, withGatewayTraceContext } from "./model.js";
@@ -100,13 +101,12 @@ const MODEL_OUTPUT_TIMEOUT_MS = 10 * 60_000;
 const REASONING_TAIL_CHARS = 1_500;
 
 export interface ModelCallOptions {
-  readonly compactedAfterOverflow?: boolean;
   readonly disabledProviderTools?: ReadonlySet<string>;
   readonly emptyResponseAttempts?: number;
   readonly extraSystemNote?: string;
   readonly maxOutputTokensOverride?: number | null;
   readonly reasoningOverride?: AgentReasoningDefinition;
-  readonly retryReason?: "empty-response";
+  readonly retryReason?: "empty-response" | "context-overflow";
   readonly trailingUserNote?: string;
 }
 
@@ -133,6 +133,7 @@ export class ModelCaller {
   private system: string | readonly string[] = "";
   private unkeptUsage: Usage | undefined;
   private compactionFailure: { readonly error: unknown } | undefined;
+  private overflowPending = false;
   private attemptIndex = 0;
   private started: number | undefined;
   private acceptedOutput = false;
@@ -195,15 +196,15 @@ export class ModelCaller {
           continue;
         }
         if (
-          !options.compactedAfterOverflow &&
-          summarizeKnownError(error)?.id === "model-context-overflow"
+          options.retryReason !== "context-overflow" &&
+          this.prompt.messages.length > 1 &&
+          !this.acceptedOutput &&
+          isContextOverflowError(error)
         ) {
-          const compacted = await this.compactOnOverflow();
-          if (compacted) {
-            await this.prepareRetry(error);
-            options = { ...options, compactedAfterOverflow: true };
-            continue;
-          }
+          await this.prepareRetry(error);
+          options = { ...options, retryReason: "context-overflow" };
+          this.overflowPending = true;
+          continue;
         }
         const recovery = recoverModelCall(error, options, {
           ...diagnostics,
@@ -361,12 +362,18 @@ export class ModelCaller {
         model: this.input.model,
         renew: this.input.renewCredential,
         promptMessages: withClientContext(prompt),
+        request: {
+          instructions: this.framing(options, this.request.nonSystemMessages).instructions,
+          tools,
+        },
         requestEnvelopeTokens: this.requestEnvelopeTokens,
+        ...(this.overflowPending && { overflow: true as const }),
       });
     } catch (error) {
       this.compactionFailure = { error };
       throw error;
     }
+    this.overflowPending = false;
     if (compacted === undefined) return tools;
     compactPrompt(step, prompt, compacted);
     const turnInput = compactedTurnInput(prompt.messages);
@@ -374,37 +381,6 @@ export class ModelCaller {
       turnInput === undefined ? this.input.turnMessages : [...this.input.turnMessages, turnInput];
     this.projectedMessages = projectPrompt(prompt);
     return await this.prepare(options);
-  }
-
-  private async compactOnOverflow(): Promise<boolean> {
-    const { step, prompt } = this;
-    if (prompt.messages.length <= 1) return false;
-    log.warn("model call overflowed context window; running reactive compaction", {
-      sessionId: step.session.sessionId,
-      turnId: step.position().turnId,
-    });
-    let compacted: HarnessModelMessage[] | undefined;
-    try {
-      compacted = await historyBeforeCall(step, {
-        force: true,
-        messages: prompt.messages,
-        model: this.input.model,
-        renew: this.input.renewCredential,
-        promptMessages: withClientContext(prompt),
-        requestEnvelopeTokens: this.requestEnvelopeTokens,
-      });
-    } catch (error) {
-      if (error instanceof CompactionOverLimitError) return false;
-      this.compactionFailure = { error };
-      throw error;
-    }
-    if (compacted === undefined) return false;
-    compactPrompt(step, prompt, compacted);
-    const turnInput = compactedTurnInput(prompt.messages);
-    this.turnMessages =
-      turnInput === undefined ? this.input.turnMessages : [...this.input.turnMessages, turnInput];
-    this.projectedMessages = projectPrompt(prompt);
-    return true;
   }
 
   private async attempt(options: ModelCallOptions): Promise<HarnessStepResult> {

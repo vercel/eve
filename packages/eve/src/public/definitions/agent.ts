@@ -1,3 +1,4 @@
+import type { ModelCompactionInput } from "#shared/compaction-strategy.js";
 import type {
   PublicAgentDefinition,
   PublicAgentStaticModelDefinition,
@@ -41,6 +42,12 @@ export type {
  * channel uses to gate its `fetch` handler.
  */
 export type AgentDefinition = PublicAgentDefinition;
+
+type CompactionFitsModel<TAgent extends AgentDefinition> = TAgent extends {
+  readonly model: infer TModel extends string;
+}
+  ? { readonly experimental?: { readonly compaction?: ModelCompactionInput<TModel> } }
+  : unknown;
 
 /** Literal-preserving value returned by {@link defineAgent}, carrying its brand. */
 export type DefinedAgent<TAgent extends AgentDefinition = AgentDefinition> = TAgent & {
@@ -88,8 +95,8 @@ export const defineDynamic = defineDynamicBase;
  * at compile time from `manifest.agentId` (the package name or app-root
  * basename), so do not author a `name` field.
  */
-export function defineAgent<TAgent extends AgentDefinition>(
-  definition: ExactDefinition<TAgent, AgentDefinition>,
+export function defineAgent<const TAgent extends AgentDefinition>(
+  definition: ExactDefinition<TAgent, AgentDefinition> & CompactionFitsModel<TAgent>,
 ): DefinedAgent<TAgent>;
 export function defineAgent(definition: AgentDefinition): DefinedAgent {
   Object.defineProperty(definition, DEFINED_AGENT, { configurable: true, value: true });

@@ -16,7 +16,7 @@ export type ModelOptionSelection = PublicAgentDynamicModelResult;
  */
 export type ModelOption =
   | string
-  | (PublicAgentModelSelectionDefinition<PublicAgentTurnModelDefinition> & {
+  | (Omit<PublicAgentModelSelectionDefinition<PublicAgentTurnModelDefinition>, "experimental"> & {
       readonly description: string;
     });
 
@@ -44,6 +44,7 @@ export function isModelSelection(value: unknown): value is ModelOptionSelection 
     isTurnModel(value) ||
     (isRecord(value) &&
       isTurnModel(value.model) &&
+      value.experimental === undefined &&
       (value.reasoning === undefined || isAgentReasoningDefinition(value.reasoning)) &&
       (value.modelContextWindowTokens === undefined ||
         (Number.isInteger(value.modelContextWindowTokens) &&

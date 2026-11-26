@@ -55,7 +55,9 @@ export function markConfigRuntimeEntries(
     config.dynamicModel,
     config.model?.source,
     config.compaction?.model?.source,
-    config.limits?.sessionUsage === true ? config.source : undefined,
+    config.limits?.sessionUsage === true || config.experimental?.compaction === true
+      ? config.source
+      : undefined,
     config.approval === true ? config.source : undefined,
   ];
   for (const source of sources) {
