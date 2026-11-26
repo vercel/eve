@@ -708,23 +708,10 @@ describe("schedule creation and invocation", () => {
 
         expect(dispatchedSessionIds).toHaveLength(1);
         const scheduledSessionId = dispatchedSessionIds[0]!;
-        await vi.waitFor(() => expect(posted).toHaveLength(1));
+        await runtime.idle();
+        expect(posted).toHaveLength(1);
         expect(posted[0]).toMatchObject({ channel: "C123" });
         expect(posted[0]?.thread_ts).toBeUndefined();
-
-        const turnSettled = async (expectedCount: number) => {
-          await vi.waitFor(async () => {
-            const reader = (
-              await runtime.getEventStream(scheduledSessionId, { follow: false })
-            ).getReader();
-            let settled = 0;
-            for (let next = await reader.read(); !next.done; next = await reader.read()) {
-              if (next.value.type === "turn.settled") settled += 1;
-            }
-            expect(settled).toBeGreaterThanOrEqual(expectedCount);
-          });
-        };
-        await turnSettled(1);
 
         expect(await runtime.resolveContinuation(`slack:C123:${rootTs}`)).toEqual({
           sessionId: scheduledSessionId,
@@ -781,8 +768,8 @@ describe("schedule creation and invocation", () => {
         await Promise.all(tasks);
 
         expect(subscribedObservations).toEqual([true]);
-        await vi.waitFor(() => expect(posted).toHaveLength(2));
-        await turnSettled(2);
+        await runtime.idle();
+        expect(posted).toHaveLength(2);
 
         expect(posted[1]).toMatchObject({ channel: "C123", thread_ts: rootTs });
         expect(prompts).toHaveLength(2);
@@ -797,7 +784,10 @@ describe("schedule creation and invocation", () => {
           payload,
           runtime,
         });
+        await runtime.idle();
         expect(dispatchedSessionIds).toEqual([scheduledSessionId, scheduledSessionId]);
+        expect(prompts).toHaveLength(2);
+        expect(posted).toHaveLength(2);
       } finally {
         await runtime.dispose();
       }

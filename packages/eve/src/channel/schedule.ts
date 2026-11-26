@@ -109,20 +109,16 @@ export class ScheduleDispatcher {
     scope.set(AuthKey, auth);
     scope.set(OccurrenceIdKey, occurrence.executionId);
     scope.set(ScheduleInstanceKey, occurrence.name);
-    const scheduledToken = (
-      run: Pick<RunInput, "channelName" | "continuationToken" | "idempotencyKey">,
-    ) => {
-      const localToken =
+    const scheduledToken = (run: RunInput) =>
+      `${run.channelName ? `${run.channelName}:` : ""}eve-scheduled-send:${
         run.idempotencyKey === undefined
-          ? `eve-scheduled-send:${randomUUID()}`
-          : `eve-scheduled-send:${createHash("sha256")
+          ? randomUUID()
+          : createHash("sha256")
               .update(
                 JSON.stringify([occurrence.scheduleId, run.continuationToken, run.idempotencyKey]),
               )
-              .digest("hex")}`;
-      const namespace = continuationTokenNamespace(run);
-      return namespace === undefined ? localToken : `${namespace}:${localToken}`;
-    };
+              .digest("hex")
+      }`;
     const repeats = new Map<unknown, Map<string, number>>();
     const occurrenceKey = (channel: unknown, target: unknown, message: MessageContent): string => {
       const digest = messageDigest(message);
@@ -238,14 +234,6 @@ export class ScheduleDispatcher {
       delivery.deliveryId,
     );
   }
-}
-
-function continuationTokenNamespace(
-  run: Pick<RunInput, "channelName" | "continuationToken">,
-): string | undefined {
-  if (run.channelName !== undefined && run.channelName.length > 0) return run.channelName;
-  const separatorIndex = run.continuationToken?.indexOf(":") ?? -1;
-  return separatorIndex > 0 ? run.continuationToken!.slice(0, separatorIndex) : undefined;
 }
 
 function messageDigest(message: MessageContent): string {
