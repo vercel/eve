@@ -1,25 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { normalizeStorageKey } from "./key.ts";
-import type { VideoStorage, VideoStorageVisibility } from "./types.ts";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
-const EXTENSION_MEDIA_TYPES: Readonly<Record<string, string>> = {
-  ".mp4": "video/mp4",
-  ".webm": "video/webm",
-  ".mov": "video/quicktime",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".webp": "image/webp",
-  ".gif": "image/gif",
-  ".mp3": "audio/mpeg",
-  ".wav": "audio/wav",
-  ".m4a": "audio/mp4",
-  ".ogg": "audio/ogg",
-  ".flac": "audio/flac",
-};
+import { mediaTypeForPath } from "../media.ts";
+import { normalizeStorageKey } from "./key.ts";
+import type { VideoStorage } from "./types.ts";
 
 /** Configuration options for {@link localDisk}. */
 export interface LocalDiskVideoStorageOptions {
@@ -74,11 +60,6 @@ function resolveTarget(root: string, key: string): { normalizedKey: string; targ
   return { normalizedKey, target };
 }
 
-function detectMediaType(key: string): string {
-  const ext = extname(key).toLowerCase();
-  return EXTENSION_MEDIA_TYPES[ext] ?? "application/octet-stream";
-}
-
 function isNotFoundError(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }
@@ -105,24 +86,16 @@ export function localDisk(options: LocalDiskVideoStorageOptions = {}): VideoStor
         throw error;
       }
 
-      const stored: {
-        key: string;
-        url?: string;
-        path: string;
-        mediaType: string;
-        bytes: number;
-        visibility?: VideoStorageVisibility;
-      } = {
+      return {
         key: normalizedKey,
         path: target,
         mediaType: input.mediaType,
         bytes: input.data.byteLength,
+        ...(publicBaseUrl !== undefined && {
+          url: `${publicBaseUrl}/${normalizedKey}`,
+          visibility: "public" as const,
+        }),
       };
-      if (publicBaseUrl !== undefined) {
-        stored.url = `${publicBaseUrl}/${normalizedKey}`;
-        stored.visibility = "public";
-      }
-      return stored;
     },
 
     async get(input) {
@@ -139,7 +112,7 @@ export function localDisk(options: LocalDiskVideoStorageOptions = {}): VideoStor
       return {
         key: normalizedKey,
         data,
-        mediaType: detectMediaType(normalizedKey),
+        mediaType: mediaTypeForPath(normalizedKey) ?? "application/octet-stream",
         bytes: data.byteLength,
       };
     },

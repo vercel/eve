@@ -20,7 +20,7 @@ export function normalizeStorageKey(key: string): string {
   }
   const segments = key.split("/");
   for (const segment of segments) {
-    if (segment.length === 0 || segment === "." || segment === ".." || segment.includes("..")) {
+    if (segment.length === 0 || segment === "." || segment.includes("..")) {
       throw new TypeError(`Invalid video storage key "${key}": contains an invalid path segment.`);
     }
   }

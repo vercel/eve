@@ -27,13 +27,14 @@ export function isVideoModelLike(value: unknown): value is VideoModelLike {
 }
 
 export function describeDefaultModel(config: VideoExtensionConfig, requested?: string): string {
-  if (requested !== undefined && requested.trim().length > 0) return requested.trim();
+  const trimmedRequested = requested?.trim();
+  if (trimmedRequested) return trimmedRequested;
   const input = defaultModelInput(config);
-  if (typeof input === "string") {
-    const trimmed = input.trim();
-    return trimmed.length > 0 ? trimmed : DEFAULT_VIDEO_MODEL;
-  }
-  return isVideoModelLike(input) ? input.modelId : DEFAULT_VIDEO_MODEL;
+  return typeof input === "string"
+    ? input.trim() || DEFAULT_VIDEO_MODEL
+    : isVideoModelLike(input)
+      ? input.modelId
+      : DEFAULT_VIDEO_MODEL;
 }
 
 export function resolveConfiguredModel(
@@ -49,40 +50,35 @@ export function resolveConfiguredModel(
     throw new Error("Video model must be a non-empty string.");
   }
   const defaultId = extractModelId(defaultInput);
-  if (config.models !== undefined && isModelList(config.models)) {
-    const matched = config.models.find((entry) => entry.trim() === requested);
+  const catalog = config.models;
+  if (catalog !== undefined) {
+    const matched = isModelList(catalog)
+      ? catalog.find((entry) => entry.trim() === requested)
+      : Object.hasOwn(catalog, requested)
+        ? catalog[requested]
+        : Object.values(catalog).find((entry) => extractModelId(entry) === requested);
     if (matched !== undefined) return resolveModelInput(matched, config.gateway);
-    if (requested === defaultId) return resolveModelInput(defaultInput, config.gateway);
-    const allowed = [...new Set(config.models.map((e) => e.trim()).filter(Boolean))];
+  }
+  if (requested === defaultId) {
+    return resolveModelInput(defaultInput, config.gateway);
+  }
+  if (catalog === undefined) {
+    throw new Error(
+      `Video model switching is not enabled because "models" is not configured. Omit "model" or use the active default model "${defaultId}".`,
+    );
+  }
+  if (isModelList(catalog)) {
+    const allowed = [...new Set(catalog.map((e) => e.trim()).filter(Boolean))];
     if (config.model !== undefined && !allowed.includes(defaultId)) allowed.push(defaultId);
     throw new Error(
       `Video model "${requested}" is not allowed. Allowed models: ${(allowed.length > 0 ? allowed : [defaultId]).join(", ")}.`,
     );
   }
-  if (config.models !== undefined) {
-    if (Object.hasOwn(config.models, requested)) {
-      return resolveModelInput(config.models[requested], config.gateway);
-    }
-    const matchedById = Object.values(config.models).find(
-      (entry) => extractModelId(entry) === requested,
-    );
-    if (matchedById !== undefined) return resolveModelInput(matchedById, config.gateway);
-    if (requested === defaultId) return resolveModelInput(defaultInput, config.gateway);
-    const aliases = Object.keys(config.models);
-    if (aliases.length === 0) {
-      throw new Error(
-        `Video model "${requested}" is not allowed. Active default model: "${defaultId}".`,
-      );
-    }
-    throw new Error(
-      `Video model "${requested}" is not allowed. Allowed model aliases: ${aliases.join(", ")}.`,
-    );
-  }
-  if (requested === defaultId) {
-    return resolveModelInput(defaultInput, config.gateway);
-  }
+  const aliases = Object.keys(catalog);
   throw new Error(
-    `Video model switching is not enabled because "models" is not configured. Omit "model" or use the active default model "${defaultId}".`,
+    aliases.length === 0
+      ? `Video model "${requested}" is not allowed. Active default model: "${defaultId}".`
+      : `Video model "${requested}" is not allowed. Allowed model aliases: ${aliases.join(", ")}.`,
   );
 }
 
@@ -144,32 +140,24 @@ function resolveModelInput(
   input: VideoModelInput,
   gatewayOptions?: VideoGatewayOptions,
 ): { readonly modelId: string; readonly model: VideoModelLike } {
+  const id = extractModelId(input);
   if (typeof input !== "string") {
-    if (!isVideoModelLike(input)) {
-      throw new Error(
-        "Configured video model must be a non-empty model ID string or a v4/v3 VideoModelLike instance.",
-      );
-    }
-    return { modelId: input.modelId, model: input };
+    return { modelId: id, model: input };
   }
-  const id = input.trim();
-  if (id.length === 0) throw new Error("Video model ID must be a non-empty string.");
   const model = resolveStringVideoModel(id, gatewayOptions);
   return { modelId: model.modelId, model };
 }
 
 function resolveStringVideoModel(id: string, gatewayOptions?: VideoGatewayOptions): VideoModelLike {
-  if (
-    gatewayOptions !== undefined &&
-    (gatewayOptions.apiKey !== undefined ||
-      gatewayOptions.baseURL !== undefined ||
-      gatewayOptions.headers !== undefined)
-  ) {
-    return createGateway({
+  if (gatewayOptions !== undefined) {
+    const gw = {
       ...(gatewayOptions.apiKey !== undefined && { apiKey: gatewayOptions.apiKey }),
       ...(gatewayOptions.baseURL !== undefined && { baseURL: gatewayOptions.baseURL }),
       ...(gatewayOptions.headers !== undefined && { headers: { ...gatewayOptions.headers } }),
-    }).videoModel(id);
+    };
+    if (Object.keys(gw).length > 0) {
+      return createGateway(gw).videoModel(id);
+    }
   }
   const defaultProvider = Reflect.get(globalThis, "AI_SDK_DEFAULT_PROVIDER");
   if (

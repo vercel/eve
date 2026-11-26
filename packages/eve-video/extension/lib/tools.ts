@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import type {
   ApprovalConfiguration,
   ApprovalContext,
@@ -157,10 +155,6 @@ export function formatGenerateCompleteLabel(
   return output.status === "completed"
     ? formatCompletedCount(output.videos.length)
     : "Generated video";
-}
-
-export function createIdempotencyKey(sessionId: string, callId: string): string {
-  return createHash("sha256").update(`${sessionId}:${callId}`).digest("hex");
 }
 
 function formatCompletedCount(count: number): string {

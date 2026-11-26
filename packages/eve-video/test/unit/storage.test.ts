@@ -1,41 +1,10 @@
 import assert from "node:assert/strict";
-import { afterEach, describe, test } from "node:test";
+import { describe, test } from "node:test";
 
 import { resolveConfiguredStorage } from "../../extension/lib/storage/default.ts";
 import { inMemory } from "../../extension/lib/storage/in-memory.ts";
 import { normalizeStorageKey } from "../../extension/lib/storage/key.ts";
-import { MP4_BYTES, WEBM_BYTES } from "../helpers.ts";
-
-const ENV_KEYS = [
-  "EVE_VIDEO_BLOB_STORE_ID",
-  "EVE_VIDEO_BLOB_READ_WRITE_TOKEN",
-  "BLOB_STORE_ID",
-  "BLOB_READ_WRITE_TOKEN",
-  "VERCEL",
-  "VERCEL_OIDC_TOKEN",
-  "EVE_DEV",
-] as const;
-
-const savedEnv = new Map<string, string | undefined>(
-  ENV_KEYS.map((key) => [key, process.env[key]]),
-);
-
-function clearStorageEnv(): void {
-  for (const key of ENV_KEYS) {
-    delete process.env[key];
-  }
-}
-
-afterEach(() => {
-  for (const key of ENV_KEYS) {
-    const original = savedEnv.get(key);
-    if (original === undefined) {
-      delete process.env[key];
-    } else {
-      process.env[key] = original;
-    }
-  }
-});
+import { MP4_BYTES, WEBM_BYTES, clearStorageEnv, withCleanStorageEnv } from "../helpers.ts";
 
 describe("normalizeStorageKey", () => {
   test("accepts relative nested keys and rejects traversal, slashes, and control characters", () => {
@@ -175,41 +144,33 @@ describe("inMemory storage adapter", () => {
 });
 
 describe("resolveConfiguredStorage", () => {
-  test("returns explicit adapter as-is and undefined when disabled with false or unconfigured", () => {
-    clearStorageEnv();
-    assert.equal(resolveConfiguredStorage(undefined), undefined);
+  test("returns explicit adapter as-is and undefined when disabled with false or unconfigured", () =>
+    withCleanStorageEnv(() => {
+      assert.equal(resolveConfiguredStorage(undefined), undefined);
 
-    process.env.EVE_VIDEO_BLOB_READ_WRITE_TOKEN = "vercel_blob_rw_store123_secret";
-    process.env.EVE_DEV = "1";
+      process.env.EVE_VIDEO_BLOB_READ_WRITE_TOKEN = "vercel_blob_rw_store123_secret";
+      process.env.EVE_DEV = "1";
 
-    const explicit = inMemory();
-    assert.equal(resolveConfiguredStorage(explicit), explicit);
-    assert.equal(resolveConfiguredStorage(false), undefined);
-  });
+      const explicit = inMemory();
+      assert.equal(resolveConfiguredStorage(explicit), explicit);
+      assert.equal(resolveConfiguredStorage(false), undefined);
+    }));
 
-  test("auto-selects storage for EVE_VIDEO_BLOB_*, VERCEL + BLOB_*, and EVE_DEV=1", () => {
-    clearStorageEnv();
-    process.env.EVE_VIDEO_BLOB_STORE_ID = "store_abc";
-    assert.equal(typeof resolveConfiguredStorage(undefined)?.put, "function");
+  test("auto-selects storage for EVE_VIDEO_BLOB_* and VERCEL + BLOB_*", () =>
+    withCleanStorageEnv(() => {
+      process.env.EVE_VIDEO_BLOB_STORE_ID = "store_abc";
+      assert.equal(typeof resolveConfiguredStorage(undefined)?.put, "function");
 
-    clearStorageEnv();
-    process.env.EVE_VIDEO_BLOB_READ_WRITE_TOKEN = "vercel_blob_rw_store123_secret";
-    assert.equal(typeof resolveConfiguredStorage(undefined)?.put, "function");
+      clearStorageEnv({ EVE_VIDEO_BLOB_READ_WRITE_TOKEN: "vercel_blob_rw_store123_secret" });
+      assert.equal(typeof resolveConfiguredStorage(undefined)?.put, "function");
 
-    clearStorageEnv();
-    process.env.BLOB_READ_WRITE_TOKEN = "vercel_blob_rw_store123_secret";
-    assert.equal(resolveConfiguredStorage(undefined), undefined);
+      clearStorageEnv({ BLOB_READ_WRITE_TOKEN: "vercel_blob_rw_store123_secret" });
+      assert.equal(resolveConfiguredStorage(undefined), undefined);
 
-    process.env.VERCEL = "1";
-    assert.equal(typeof resolveConfiguredStorage(undefined)?.put, "function");
+      process.env.VERCEL = "1";
+      assert.equal(typeof resolveConfiguredStorage(undefined)?.put, "function");
 
-    clearStorageEnv();
-    process.env.VERCEL = "1";
-    process.env.BLOB_STORE_ID = "store_vercel";
-    assert.equal(typeof resolveConfiguredStorage(undefined)?.put, "function");
-
-    clearStorageEnv();
-    process.env.EVE_DEV = "1";
-    assert.equal(typeof resolveConfiguredStorage(undefined)?.put, "function");
-  });
+      clearStorageEnv({ VERCEL: "1", BLOB_STORE_ID: "store_vercel" });
+      assert.equal(typeof resolveConfiguredStorage(undefined)?.put, "function");
+    }));
 });

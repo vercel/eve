@@ -1,5 +1,5 @@
 import type { WorkflowStepToolContext } from "eve/tools";
-import type { WorkflowWebhookOptions } from "eve/workflow";
+import { FatalError, type WorkflowWebhookOptions } from "eve/workflow";
 
 import type {
   GenerateVideoToolInput,
@@ -18,18 +18,15 @@ export interface VideoWebhookHandle<TRequest = unknown> extends AsyncIterable<TR
   dispose(): void;
 }
 
-export interface VideoWorkflowTaskDeps<
-  TRequest = unknown,
-  TCtx extends { readonly abortSignal: AbortSignal } = WorkflowStepToolContext,
-> {
+export interface VideoWorkflowTaskDeps<TRequest = unknown> {
   readonly submit: (
     input: GenerateVideoToolInput,
-    ctx: TCtx,
+    ctx: WorkflowStepToolContext,
     webhookUrlCandidate?: string,
   ) => Promise<SubmitVideoStepResult>;
   readonly checkAndPersist: (
     input: GenerateVideoToolInput,
-    ctx: TCtx,
+    ctx: WorkflowStepToolContext,
     handle: VideoJobHandle,
   ) => Promise<CheckAndPersistStepResult>;
   readonly verifyAndRespondWebhook: (request: TRequest, secret: string) => Promise<boolean>;
@@ -39,16 +36,12 @@ export interface VideoWorkflowTaskDeps<
   ) => VideoWebhookHandle<TRequest>;
   readonly getWorkflowMetadata: () => { readonly url: string };
   readonly sleep: (duration: string | number | Date) => Promise<void>;
-  readonly createFatalError: (message: string) => Error;
 }
 
-export async function* runVideoWorkflowTask<
-  TRequest = unknown,
-  TCtx extends { readonly abortSignal: AbortSignal } = WorkflowStepToolContext,
->(
-  deps: VideoWorkflowTaskDeps<TRequest, TCtx>,
+export async function* runVideoWorkflowTask<TRequest = unknown>(
+  deps: VideoWorkflowTaskDeps<TRequest>,
   input: GenerateVideoToolInput,
-  ctx: TCtx,
+  ctx: WorkflowStepToolContext,
 ): AsyncGenerator<GenerateVideoToolProgress, GenerateVideoToolOutput, void> {
   if (ctx.abortSignal.aborted) {
     throw toAbortError(ctx.abortSignal);
@@ -68,7 +61,7 @@ export async function* runVideoWorkflowTask<
 
   try {
     let webhookUrlCandidate: string | undefined;
-    if (isHttpsHost(deps.getWorkflowMetadata().url)) {
+    if (/^https:\/\//i.test(deps.getWorkflowMetadata().url.trim())) {
       webhook = deps.createWebhook({ respondWith: "manual" });
       await webhook.getConflict();
       webhookUrlCandidate = webhook.url;
@@ -90,32 +83,48 @@ export async function* runVideoWorkflowTask<
     let elapsedMs = 0;
     let attempt = 0;
     const pendingWarnings: string[] = [];
+    const fallbackIntervalMs = Math.max(intervalMs, WEBHOOK_FALLBACK_POLL_MS);
+    let iterator =
+      webhookSecret !== undefined && webhook !== undefined
+        ? webhook[Symbol.asyncIterator]()
+        : undefined;
+    let pendingRequest: Promise<IteratorResult<TRequest>> | undefined;
+    let pendingTimer: Promise<"timer"> | undefined;
+    let pendingTimerMs = 0;
+    let invalidDeliveries = 0;
+    let emitProgress = true;
 
-    if (webhookSecret !== undefined && webhook !== undefined) {
-      const fallbackIntervalMs = Math.max(intervalMs, WEBHOOK_FALLBACK_POLL_MS);
-      const iterator = webhook[Symbol.asyncIterator]();
-      let pendingRequest: Promise<IteratorResult<TRequest>> | undefined;
-      let pendingTimer: Promise<"timer"> | undefined;
-      let pendingTimerMs = 0;
-      let invalidDeliveries = 0;
-      let webhookActive = true;
-      let emitProgress = true;
-
-      while (webhookActive && elapsedMs < timeoutMs) {
-        if (ctx.abortSignal.aborted) {
-          throw toAbortError(ctx.abortSignal);
-        }
-        if (emitProgress) {
-          attempt += 1;
-          yield {
-            status: "generating",
-            model: handle.modelId,
-            ...(handle.jobId !== undefined && { jobId: handle.jobId }),
-            elapsedSeconds: Math.floor(elapsedMs / 1000),
-            attempt,
+    const mergeOutput = (output: GenerateVideoToolOutput): GenerateVideoToolOutput =>
+      pendingWarnings.length === 0
+        ? output
+        : {
+            ...output,
+            warnings: [...new Set([...(output.warnings ?? []), ...pendingWarnings])],
           };
-        }
 
+    const stopWebhook = () => {
+      disposeWebhook();
+      iterator = undefined;
+      emitProgress = true;
+    };
+
+    while (elapsedMs < timeoutMs) {
+      if (ctx.abortSignal.aborted) {
+        throw toAbortError(ctx.abortSignal);
+      }
+      if (emitProgress) {
+        attempt += 1;
+        yield {
+          status: "generating",
+          model: handle.modelId,
+          ...(handle.jobId !== undefined && { jobId: handle.jobId }),
+          elapsedSeconds: Math.floor(elapsedMs / 1000),
+          attempt,
+        };
+      }
+
+      let waitMs = 0;
+      if (iterator !== undefined && webhookSecret !== undefined) {
         if (pendingRequest === undefined) {
           pendingRequest = iterator.next();
           void pendingRequest.catch(() => undefined);
@@ -131,7 +140,6 @@ export async function* runVideoWorkflowTask<
           pendingTimer.then(() => ({ kind: "timer" as const })),
           abortRace.promise.then(() => ({ kind: "aborted" as const })),
         ]);
-
         if (race.kind === "aborted") {
           throw toAbortError(ctx.abortSignal);
         }
@@ -140,88 +148,60 @@ export async function* runVideoWorkflowTask<
           pendingTimer = undefined;
           elapsedMs += pendingTimerMs;
           emitProgress = true;
+        } else {
+          pendingRequest = undefined;
+          if (race.entry.done) {
+            stopWebhook();
+            continue;
+          }
+          const valid = await deps.verifyAndRespondWebhook(race.entry.value, webhookSecret);
+          if (!valid) {
+            invalidDeliveries += 1;
+            emitProgress = false;
+            if (invalidDeliveries >= MAX_INVALID_WEBHOOK_DELIVERIES) {
+              stopWebhook();
+            }
+            continue;
+          }
           const settled = await deps.checkAndPersist(input, ctx, handle);
           if (settled.status === "completed") {
-            return mergeOutputWarnings(settled.output, pendingWarnings);
+            return mergeOutput(settled.output);
           }
-          appendUniqueWarnings(pendingWarnings, settled.warnings);
+          pendingWarnings.push(...settled.warnings);
+          stopWebhook();
           continue;
         }
-
-        pendingRequest = undefined;
-        if (race.entry.done) {
-          webhookActive = false;
-          break;
-        }
-
-        const valid = await deps.verifyAndRespondWebhook(race.entry.value, webhookSecret);
-        if (!valid) {
-          invalidDeliveries += 1;
-          emitProgress = false;
-          if (invalidDeliveries >= MAX_INVALID_WEBHOOK_DELIVERIES) {
-            disposeWebhook();
-            webhookActive = false;
-            break;
+      } else {
+        waitMs =
+          attempt === 1 && intervalMs >= timeoutMs
+            ? Math.floor(timeoutMs / 2)
+            : Math.min(intervalMs, timeoutMs - elapsedMs);
+        if (waitMs > 0) {
+          const timerPromise = deps.sleep(waitMs);
+          void timerPromise.catch(() => undefined);
+          if (
+            (await Promise.race([timerPromise.then(() => "timer" as const), abortRace.promise])) ===
+            "aborted"
+          ) {
+            throw toAbortError(ctx.abortSignal);
           }
-          continue;
+          elapsedMs += waitMs;
         }
-
-        const settled = await deps.checkAndPersist(input, ctx, handle);
-        if (settled.status === "completed") {
-          return mergeOutputWarnings(settled.output, pendingWarnings);
-        }
-        appendUniqueWarnings(pendingWarnings, settled.warnings);
-        disposeWebhook();
-        webhookActive = false;
-        break;
-      }
-
-      disposeWebhook();
-    }
-
-    while (elapsedMs < timeoutMs) {
-      if (ctx.abortSignal.aborted) {
-        throw toAbortError(ctx.abortSignal);
-      }
-      attempt += 1;
-      yield {
-        status: "generating",
-        model: handle.modelId,
-        ...(handle.jobId !== undefined && { jobId: handle.jobId }),
-        elapsedSeconds: Math.floor(elapsedMs / 1000),
-        attempt,
-      };
-
-      const remainingMs = timeoutMs - elapsedMs;
-      const waitMs =
-        attempt === 1 && intervalMs >= timeoutMs
-          ? Math.floor(timeoutMs / 2)
-          : Math.min(intervalMs, remainingMs);
-
-      if (waitMs > 0) {
-        const timerPromise = deps.sleep(waitMs);
-        void timerPromise.catch(() => undefined);
-        const race = await Promise.race([
-          timerPromise.then(() => "timer" as const),
-          abortRace.promise,
-        ]);
-        if (race === "aborted") {
-          throw toAbortError(ctx.abortSignal);
-        }
-        elapsedMs += waitMs;
       }
 
       const settled = await deps.checkAndPersist(input, ctx, handle);
       if (settled.status === "completed") {
-        return mergeOutputWarnings(settled.output, pendingWarnings);
+        return mergeOutput(settled.output);
       }
-      appendUniqueWarnings(pendingWarnings, settled.warnings);
-      if (waitMs === 0) {
+      pendingWarnings.push(...settled.warnings);
+      if (iterator === undefined && waitMs === 0) {
         elapsedMs += 1;
       }
     }
 
-    throw deps.createFatalError(formatTimeoutMessage(handle.modelId, timeoutMs, handle.jobId));
+    throw new FatalError(
+      `Video generation with model "${handle.modelId}"${handle.jobId !== undefined ? ` (job ${handle.jobId})` : ""} timed out after ${timeoutMs}ms.`,
+    );
   } finally {
     abortRace.cleanup();
     disposeWebhook();
@@ -233,29 +213,19 @@ export async function* runVideoWorkflowTask<
   }
 }
 
-function isHttpsHost(url: string): boolean {
-  return /^https:\/\//i.test(url.trim());
-}
-
 function createAbortRace(signal: AbortSignal): {
   readonly promise: Promise<"aborted">;
   readonly cleanup: () => void;
 } {
-  if (signal.aborted) {
-    return { promise: Promise.resolve("aborted"), cleanup: () => {} };
-  }
-  let onAbort: (() => void) | undefined;
+  let resolveAbort!: (value: "aborted") => void;
   const promise = new Promise<"aborted">((resolve) => {
-    onAbort = () => resolve("aborted");
-    signal.addEventListener("abort", onAbort, { once: true });
+    resolveAbort = resolve;
   });
+  const onAbort = () => resolveAbort("aborted");
+  signal.addEventListener("abort", onAbort, { once: true });
   return {
     promise,
-    cleanup: () => {
-      if (onAbort !== undefined) {
-        signal.removeEventListener("abort", onAbort);
-      }
-    },
+    cleanup: () => signal.removeEventListener("abort", onAbort),
   };
 }
 
@@ -264,24 +234,4 @@ function toAbortError(signal: AbortSignal): unknown {
   const error = new Error("Video generation was aborted.");
   error.name = "AbortError";
   return error;
-}
-
-function appendUniqueWarnings(target: string[], incoming: readonly string[]): void {
-  for (const warning of incoming) {
-    if (!target.includes(warning)) target.push(warning);
-  }
-}
-
-function mergeOutputWarnings(
-  output: GenerateVideoToolOutput,
-  pendingWarnings: readonly string[],
-): GenerateVideoToolOutput {
-  if (pendingWarnings.length === 0) return output;
-  const merged: string[] = [...(output.warnings ?? [])];
-  appendUniqueWarnings(merged, pendingWarnings);
-  return { ...output, warnings: merged };
-}
-
-function formatTimeoutMessage(modelId: string, timeoutMs: number, jobId?: string): string {
-  return `Video generation with model "${modelId}"${jobId !== undefined ? ` (job ${jobId})` : ""} timed out after ${timeoutMs}ms.`;
 }

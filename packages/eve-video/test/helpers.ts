@@ -1,6 +1,6 @@
 import type { SandboxSession } from "eve/sandbox";
 import type { WorkflowStepToolContext } from "eve/tools";
-import type { ApprovalContext, ApprovalResponseContext } from "eve/tools/approval";
+import type { ApprovalContext } from "eve/tools/approval";
 
 import type {
   GenerateVideoToolInput,
@@ -376,51 +376,20 @@ export function createFakeStepContext(
   } as never;
 }
 
-export interface FakePrincipal {
-  readonly authenticator: string;
-  readonly issuer?: string;
-  readonly principalType: string;
-  readonly principalId: string;
-  readonly attributes: Readonly<Record<string, unknown>>;
-}
-
-export function createFakePrincipal(
-  principalId: string,
-  options: {
-    readonly authenticator?: string;
-    readonly issuer?: string;
-    readonly principalType?: string;
-  } = {},
-): FakePrincipal {
-  const principal: {
-    authenticator: string;
-    issuer?: string;
-    principalType: string;
-    principalId: string;
-    attributes: Readonly<Record<string, unknown>>;
-  } = {
-    authenticator: options.authenticator ?? "test-auth",
-    principalType: options.principalType ?? "user",
-    principalId,
-    attributes: {},
-  };
-  if (options.issuer !== undefined) {
-    principal.issuer = options.issuer;
-  }
-  return principal;
-}
-
 export function createFakeApprovalContext(
   input: GenerateVideoToolInput,
   options: {
     readonly callId?: string;
     readonly toolName?: string;
     readonly sessionId?: string;
-    readonly principal?: FakePrincipal | null;
   } = {},
 ): ApprovalContext<GenerateVideoToolInput> {
-  const principal =
-    options.principal === undefined ? createFakePrincipal("user-1") : options.principal;
+  const principal = {
+    authenticator: "test-auth",
+    principalType: "user",
+    principalId: "user-1",
+    attributes: {},
+  };
   const ctx = {
     abortSignal: new AbortController().signal,
     callId: options.callId ?? "call-1",
@@ -441,44 +410,47 @@ export function createFakeApprovalContext(
   return ctx as never;
 }
 
-export function createFakeApprovalResponseContext(
-  input: GenerateVideoToolInput,
-  options: {
-    readonly requester: FakePrincipal | null;
-    readonly responder: FakePrincipal;
-    readonly decision?: "approve" | "deny";
-    readonly callId?: string;
-    readonly toolName?: string;
-  },
-): ApprovalResponseContext<GenerateVideoToolInput> {
-  const ctx = {
-    auth: {
-      async getToken() {
-        throw new Error("Unexpected getToken call.");
-      },
-      requireAuth(): never {
-        throw new Error("Unexpected requireAuth call.");
-      },
-    },
-    request: {
-      callId: options.callId ?? "call-1",
-      interactionId: "interaction-1",
-      principal: options.requester,
-      toolInput: input,
-      toolName: options.toolName ?? "video__generate",
-    },
-    response: {
-      decision: options.decision ?? "approve",
-      principal: options.responder,
-    },
-    session: {
-      id: "session-1",
-      initiator: options.requester,
-      turn: {
-        id: "turn-1",
-        index: 1,
-      },
-    },
-  };
-  return ctx as never;
+const STORAGE_ENV_KEYS = [
+  "VERCEL_BLOB_API_URL",
+  "EVE_VIDEO_BLOB_STORE_ID",
+  "EVE_VIDEO_BLOB_READ_WRITE_TOKEN",
+  "BLOB_STORE_ID",
+  "BLOB_READ_WRITE_TOKEN",
+  "VERCEL",
+  "VERCEL_OIDC_TOKEN",
+  "EVE_DEV",
+] as const;
+
+export type StorageEnvKey = (typeof STORAGE_ENV_KEYS)[number];
+
+export function clearStorageEnv(overrides?: Partial<Record<StorageEnvKey, string>>): void {
+  for (const key of STORAGE_ENV_KEYS) {
+    delete process.env[key];
+  }
+  if (overrides !== undefined) {
+    for (const [key, value] of Object.entries(overrides)) {
+      if (value !== undefined) {
+        process.env[key] = value;
+      }
+    }
+  }
+}
+
+export async function withCleanStorageEnv<T>(
+  fn: () => Promise<T> | T,
+  overrides?: Partial<Record<StorageEnvKey, string>>,
+): Promise<T> {
+  const saved = STORAGE_ENV_KEYS.map((key) => [key, process.env[key]] as const);
+  clearStorageEnv(overrides);
+  try {
+    return await fn();
+  } finally {
+    for (const [key, value] of saved) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
 }

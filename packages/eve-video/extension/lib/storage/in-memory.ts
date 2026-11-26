@@ -57,24 +57,13 @@ export function inMemory(options: InMemoryVideoStorageOptions = {}): InMemoryVid
         mediaType: input.mediaType,
       });
 
-      const stored: {
-        key: string;
-        url?: string;
-        mediaType: string;
-        bytes: number;
-        visibility?: VideoStorageVisibility;
-      } = {
+      return {
         key,
         mediaType: input.mediaType,
         bytes: copy.byteLength,
+        ...(baseUrl !== undefined && { url: `${baseUrl}/${key}` }),
+        ...(visibility !== undefined && { visibility }),
       };
-      if (baseUrl !== undefined) {
-        stored.url = `${baseUrl}/${key}`;
-      }
-      if (visibility !== undefined) {
-        stored.visibility = visibility;
-      }
-      return stored;
     },
 
     async get(input) {

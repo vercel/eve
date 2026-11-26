@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import { after, afterEach, before, describe, test } from "node:test";
 
 import { vercelBlob } from "../../extension/lib/storage/vercel-blob.ts";
-import { MP4_BYTES, WEBM_BYTES } from "../helpers.ts";
+import { MP4_BYTES, WEBM_BYTES, withCleanStorageEnv } from "../helpers.ts";
 
 interface RecordedRequest {
   readonly method: string;
@@ -29,19 +29,6 @@ interface UndiciDispatcher {
 }
 
 const UNDICI_GLOBAL_DISPATCHER = Symbol.for("undici.globalDispatcher.1");
-const ENV_KEYS = [
-  "VERCEL_BLOB_API_URL",
-  "EVE_VIDEO_BLOB_READ_WRITE_TOKEN",
-  "EVE_VIDEO_BLOB_STORE_ID",
-  "BLOB_READ_WRITE_TOKEN",
-  "BLOB_STORE_ID",
-  "VERCEL_OIDC_TOKEN",
-  "VERCEL",
-] as const;
-
-const savedEnv = new Map<string, string | undefined>(
-  ENV_KEYS.map((key) => [key, process.env[key]]),
-);
 
 async function readBody(req: IncomingMessage): Promise<Buffer> {
   const chunks: Buffer[] = [];
@@ -246,14 +233,6 @@ describe("vercelBlob storage adapter over local HTTP server", () => {
     requests.length = 0;
     reroutedOrigins.length = 0;
     nextGetStatusOverride = undefined;
-    for (const key of ENV_KEYS) {
-      const original = savedEnv.get(key);
-      if (original === undefined) {
-        delete process.env[key];
-      } else {
-        process.env[key] = original;
-      }
-    }
   });
 
   after(async () => {
@@ -265,234 +244,205 @@ describe("vercelBlob storage adapter over local HTTP server", () => {
     });
   });
 
-  function clearBlobEnvAndSetApiUrl(): void {
-    for (const key of ENV_KEYS) {
-      delete process.env[key];
-    }
-    process.env.VERCEL_BLOB_API_URL = baseUrl;
-  }
+  const withBlobEnv = (fn: () => Promise<void>) =>
+    withCleanStorageEnv(fn, { VERCEL_BLOB_API_URL: baseUrl });
 
-  test("uploads public and private videos with expected headers, unprefixed logical key, ttlDays, and bearer token", async () => {
-    clearBlobEnvAndSetApiUrl();
-    const signal = new AbortController().signal;
+  test("uploads public and private videos with expected headers, unprefixed logical key, ttlDays, and bearer token", () =>
+    withBlobEnv(async () => {
+      const signal = new AbortController().signal;
 
-    const publicAdapter = vercelBlob({
-      token: "vercel_blob_rw_storepub_secret1",
-      prefix: "custom/videos",
-      ttlDays: 7,
-      cacheControlMaxAge: 3600,
-    });
+      const publicAdapter = vercelBlob({
+        token: "vercel_blob_rw_storepub_secret1",
+        prefix: "custom/videos",
+        ttlDays: 7,
+        cacheControlMaxAge: 3600,
+      });
 
-    const pubStored = await publicAdapter.put({
-      key: "2026-11-26/clip.mp4",
-      data: MP4_BYTES,
-      mediaType: "video/mp4",
-      filename: "clip.mp4",
-      signal,
-    });
+      const pubStored = await publicAdapter.put({
+        key: "2026-11-26/clip.mp4",
+        data: MP4_BYTES,
+        mediaType: "video/mp4",
+        filename: "clip.mp4",
+        signal,
+      });
 
-    assert.equal(pubStored.key, "2026-11-26/clip.mp4");
-    assert.equal(
-      pubStored.url,
-      "https://storepub.public.blob.vercel-storage.com/custom/videos/2026-11-26/clip.mp4",
-    );
-    assert.equal(pubStored.downloadUrl, `${pubStored.url}?download=1`);
-    assert.equal(pubStored.mediaType, "video/mp4");
-    assert.equal(pubStored.bytes, MP4_BYTES.byteLength);
-    assert.equal(pubStored.visibility, "public");
-    assert.equal(pubStored.expiresAt, new Date(Date.UTC(2026, 11, 8)).toISOString());
+      assert.equal(pubStored.key, "2026-11-26/clip.mp4");
+      assert.equal(
+        pubStored.url,
+        "https://storepub.public.blob.vercel-storage.com/custom/videos/2026-11-26/clip.mp4",
+      );
+      assert.equal(pubStored.downloadUrl, `${pubStored.url}?download=1`);
+      assert.equal(pubStored.mediaType, "video/mp4");
+      assert.equal(pubStored.bytes, MP4_BYTES.byteLength);
+      assert.equal(pubStored.visibility, "public");
+      assert.equal(pubStored.expiresAt, new Date(Date.UTC(2026, 11, 8)).toISOString());
 
-    const pubReq = requests[0];
-    assert.equal(pubReq.method, "PUT");
-    assert.equal(pubReq.headers.authorization, "Bearer vercel_blob_rw_storepub_secret1");
-    assert.equal(pubReq.headers["x-vercel-blob-access"], "public");
-    assert.equal(pubReq.headers["x-content-type"], "video/mp4");
-    assert.equal(pubReq.headers["x-add-random-suffix"], "0");
-    assert.equal(pubReq.headers["x-allow-overwrite"], "1");
-    assert.equal(pubReq.headers["x-cache-control-max-age"], "3600");
-    assert.equal(pubReq.headers["x-ttl-days"], "7");
-    assert.deepEqual(new Uint8Array(pubReq.body), MP4_BYTES);
+      const pubReq = requests[0];
+      assert.equal(pubReq.method, "PUT");
+      assert.equal(pubReq.headers.authorization, "Bearer vercel_blob_rw_storepub_secret1");
+      assert.equal(pubReq.headers["x-vercel-blob-access"], "public");
+      assert.equal(pubReq.headers["x-content-type"], "video/mp4");
+      assert.equal(pubReq.headers["x-add-random-suffix"], "0");
+      assert.equal(pubReq.headers["x-allow-overwrite"], "1");
+      assert.equal(pubReq.headers["x-cache-control-max-age"], "3600");
+      assert.equal(pubReq.headers["x-ttl-days"], "7");
+      assert.deepEqual(new Uint8Array(pubReq.body), MP4_BYTES);
 
-    const privateAdapter = vercelBlob({
-      access: "private",
-      token: "vercel_blob_rw_storepriv_secret2",
-    });
-    const privStored = await privateAdapter.put({
-      key: "secret/clip.webm",
-      data: WEBM_BYTES,
-      mediaType: "video/webm",
-      filename: "clip.webm",
-      ttlDays: 2,
-      signal,
-    });
+      const privateAdapter = vercelBlob({
+        access: "private",
+        token: "vercel_blob_rw_storepriv_secret2",
+      });
+      const privStored = await privateAdapter.put({
+        key: "secret/clip.webm",
+        data: WEBM_BYTES,
+        mediaType: "video/webm",
+        filename: "clip.webm",
+        ttlDays: 2,
+        signal,
+      });
 
-    assert.equal(privStored.key, "secret/clip.webm");
-    assert.equal(privStored.visibility, "private");
-    assert.equal(requests[1].headers["x-vercel-blob-access"], "private");
-    assert.equal(requests[1].headers["x-ttl-days"], "2");
-    assert.equal(requests[1].headers.authorization, "Bearer vercel_blob_rw_storepriv_secret2");
-  });
+      assert.equal(privStored.key, "secret/clip.webm");
+      assert.equal(privStored.visibility, "private");
+      assert.equal(requests[1].headers["x-vercel-blob-access"], "private");
+      assert.equal(requests[1].headers["x-ttl-days"], "2");
+      assert.equal(requests[1].headers.authorization, "Bearer vercel_blob_rw_storepriv_secret2");
+    }));
 
-  test("handles overlapping prefix and key segment consistently across put, get, and delete", async () => {
-    clearBlobEnvAndSetApiUrl();
-    const signal = new AbortController().signal;
-    const adapter = vercelBlob({
-      token: "vercel_blob_rw_storepref_secret",
-      prefix: "videos",
-    });
+  test("prefers EVE_VIDEO_BLOB_READ_WRITE_TOKEN over unrelated BLOB_READ_WRITE_TOKEN when VERCEL_OIDC_TOKEN is absent, and uses OIDC when present", () =>
+    withBlobEnv(async () => {
+      process.env.VERCEL = "1";
+      process.env.EVE_VIDEO_BLOB_STORE_ID = "store_video_only";
+      process.env.EVE_VIDEO_BLOB_READ_WRITE_TOKEN = "vercel_blob_rw_storevid_videosecret";
+      process.env.BLOB_READ_WRITE_TOKEN = "vercel_blob_rw_storeother_unrelated";
 
-    const stored = await adapter.put({
-      key: "videos/2026-11-26/clip.mp4",
-      data: MP4_BYTES,
-      mediaType: "video/mp4",
-      filename: "clip.mp4",
-      signal,
-    });
+      const adapter = vercelBlob();
+      const signal = new AbortController().signal;
 
-    assert.equal(stored.key, "videos/2026-11-26/clip.mp4");
-    assert.equal(
-      stored.url,
-      "https://storepref.public.blob.vercel-storage.com/videos/videos/2026-11-26/clip.mp4",
-    );
+      const stored = await adapter.put({
+        key: "clip.mp4",
+        data: MP4_BYTES,
+        mediaType: "video/mp4",
+        filename: "clip.mp4",
+        signal,
+      });
 
-    const loaded = await adapter.get?.({ key: stored.key, signal });
-    assert.notEqual(loaded, null);
-    assert.equal(loaded?.key, "videos/2026-11-26/clip.mp4");
-    assert.deepEqual(loaded?.data, MP4_BYTES);
+      assert.equal(stored.key, "clip.mp4");
+      assert.equal(requests[0].headers.authorization, "Bearer vercel_blob_rw_storevid_videosecret");
 
-    await adapter.delete?.({ key: stored.key, signal });
-    const deleteReq = requests[requests.length - 1];
-    assert.equal(deleteReq.method, "POST");
-    assert.equal(deleteReq.url, "/delete");
-    assert.deepEqual(JSON.parse(deleteReq.body.toString("utf8")), {
-      urls: ["videos/videos/2026-11-26/clip.mp4"],
-    });
-    assert.equal(await adapter.get?.({ key: stored.key, signal }), null);
-  });
+      const headerSeg = Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" })).toString(
+        "base64url",
+      );
+      const payloadSeg = Buffer.from(
+        JSON.stringify({ sub: "test-project", exp: Math.floor(Date.now() / 1000) + 3600 }),
+      ).toString("base64url");
+      const validOidcJwt = `${headerSeg}.${payloadSeg}.signature`;
+      process.env.VERCEL_OIDC_TOKEN = validOidcJwt;
+      await adapter.put({
+        key: "clip-oidc.mp4",
+        data: MP4_BYTES,
+        mediaType: "video/mp4",
+        filename: "clip-oidc.mp4",
+        signal,
+      });
 
-  test("prefers EVE_VIDEO_BLOB_READ_WRITE_TOKEN over unrelated BLOB_READ_WRITE_TOKEN when VERCEL_OIDC_TOKEN is absent, and uses OIDC when present", async () => {
-    clearBlobEnvAndSetApiUrl();
-    process.env.VERCEL = "1";
-    process.env.EVE_VIDEO_BLOB_STORE_ID = "store_video_only";
-    process.env.EVE_VIDEO_BLOB_READ_WRITE_TOKEN = "vercel_blob_rw_storevid_videosecret";
-    process.env.BLOB_READ_WRITE_TOKEN = "vercel_blob_rw_storeother_unrelated";
+      assert.equal(requests[1].headers.authorization, `Bearer ${validOidcJwt}`);
+      assert.equal(requests[1].headers["x-vercel-blob-store-id"], "video_only");
+    }));
 
-    const adapter = vercelBlob();
-    const signal = new AbortController().signal;
+  test("round-trips overlapping prefix and key segment across put, get, status errors, and delete", () =>
+    withBlobEnv(async () => {
+      const signal = new AbortController().signal;
+      const adapter = vercelBlob({
+        token: "vercel_blob_rw_storepref_secret",
+        prefix: "videos",
+      });
 
-    const stored = await adapter.put({
-      key: "clip.mp4",
-      data: MP4_BYTES,
-      mediaType: "video/mp4",
-      filename: "clip.mp4",
-      signal,
-    });
+      const stored = await adapter.put({
+        key: "videos/2026-11-26/clip.mp4",
+        data: MP4_BYTES,
+        mediaType: "video/mp4",
+        filename: "clip.mp4",
+        signal,
+      });
 
-    assert.equal(stored.key, "clip.mp4");
-    assert.equal(requests[0].headers.authorization, "Bearer vercel_blob_rw_storevid_videosecret");
+      assert.equal(stored.key, "videos/2026-11-26/clip.mp4");
+      assert.equal(
+        stored.url,
+        "https://storepref.public.blob.vercel-storage.com/videos/videos/2026-11-26/clip.mp4",
+      );
 
-    const headerSeg = Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" })).toString(
-      "base64url",
-    );
-    const payloadSeg = Buffer.from(
-      JSON.stringify({ sub: "test-project", exp: Math.floor(Date.now() / 1000) + 3600 }),
-    ).toString("base64url");
-    const validOidcJwt = `${headerSeg}.${payloadSeg}.signature`;
-    process.env.VERCEL_OIDC_TOKEN = validOidcJwt;
-    await adapter.put({
-      key: "clip-oidc.mp4",
-      data: MP4_BYTES,
-      mediaType: "video/mp4",
-      filename: "clip-oidc.mp4",
-      signal,
-    });
+      const loaded = await adapter.get?.({ key: stored.key, signal });
+      assert.notEqual(loaded, null);
+      assert.equal(loaded?.key, "videos/2026-11-26/clip.mp4");
+      assert.equal(loaded?.mediaType, "video/mp4");
+      assert.equal(loaded?.bytes, MP4_BYTES.byteLength);
+      assert.deepEqual(loaded?.data, MP4_BYTES);
+      assert.deepEqual(reroutedOrigins, ["https://storepref.public.blob.vercel-storage.com"]);
 
-    assert.equal(requests[1].headers.authorization, `Bearer ${validOidcJwt}`);
-    assert.equal(requests[1].headers["x-vercel-blob-store-id"], "video_only");
-  });
+      assert.equal(await adapter.get?.({ key: "does-not-exist.mp4", signal }), null);
 
-  test("round-trips get bytes, returns null on 404, throws on non-200 get responses, and deletes stored blobs", async () => {
-    clearBlobEnvAndSetApiUrl();
-    const signal = new AbortController().signal;
-    const adapter = vercelBlob({
-      token: "vercel_blob_rw_storeget_secret3",
-      prefix: "clips",
-    });
+      nextGetStatusOverride = 304;
+      await assert.rejects(
+        () => adapter.get!({ key: stored.key, signal }),
+        /Vercel Blob returned 304 without a video stream/,
+      );
 
-    await adapter.put({
-      key: "scene-1.mp4",
-      data: MP4_BYTES,
-      mediaType: "video/mp4",
-      filename: "scene-1.mp4",
-      signal,
-    });
+      nextGetStatusOverride = 500;
+      await assert.rejects(
+        () => adapter.get!({ key: stored.key, signal }),
+        /Failed to fetch blob: 500/,
+      );
 
-    const loaded = await adapter.get?.({ key: "scene-1.mp4", signal });
-    assert.notEqual(loaded, null);
-    assert.equal(loaded?.key, "scene-1.mp4");
-    assert.equal(loaded?.mediaType, "video/mp4");
-    assert.equal(loaded?.bytes, MP4_BYTES.byteLength);
-    assert.deepEqual(loaded?.data, MP4_BYTES);
-    assert.deepEqual(reroutedOrigins, ["https://storeget.public.blob.vercel-storage.com"]);
+      await adapter.delete?.({ key: stored.key, signal });
+      const deleteReq = requests[requests.length - 1];
+      assert.equal(deleteReq.method, "POST");
+      assert.equal(deleteReq.url, "/delete");
+      assert.deepEqual(JSON.parse(deleteReq.body.toString("utf8")), {
+        urls: ["videos/videos/2026-11-26/clip.mp4"],
+      });
+      assert.equal(await adapter.get?.({ key: stored.key, signal }), null);
+    }));
 
-    assert.equal(await adapter.get?.({ key: "does-not-exist.mp4", signal }), null);
+  test("automatically switches to multipart above 5 MiB and honors explicit multipart: false", () =>
+    withBlobEnv(async () => {
+      const signal = new AbortController().signal;
+      const payload = new Uint8Array(5 * 1024 * 1024 + 1);
+      payload.set(MP4_BYTES, 0);
 
-    nextGetStatusOverride = 304;
-    await assert.rejects(
-      () => adapter.get!({ key: "scene-1.mp4", signal }),
-      /Vercel Blob returned 304 without a video stream/,
-    );
+      const autoAdapter = vercelBlob({
+        token: "vercel_blob_rw_storempu_secret",
+        prefix: "large",
+      });
+      const storedMpu = await autoAdapter.put({
+        key: "big.mp4",
+        data: payload,
+        mediaType: "video/mp4",
+        filename: "big.mp4",
+        signal,
+      });
 
-    nextGetStatusOverride = 500;
-    await assert.rejects(
-      () => adapter.get!({ key: "scene-1.mp4", signal }),
-      /Failed to fetch blob: 500/,
-    );
+      assert.equal(storedMpu.key, "big.mp4");
+      assert.equal(storedMpu.bytes, payload.byteLength);
+      const mpuActions = requests
+        .filter((r) => r.url.startsWith("/mpu?"))
+        .map((r) => r.headers["x-mpu-action"]);
+      assert.deepEqual(mpuActions, ["create", "upload", "complete"]);
 
-    await adapter.delete?.({ key: "scene-1.mp4", signal });
-    assert.equal(await adapter.get?.({ key: "scene-1.mp4", signal }), null);
-  });
-
-  test("automatically switches to multipart above 5 MiB and honors explicit multipart: false", async () => {
-    clearBlobEnvAndSetApiUrl();
-    const signal = new AbortController().signal;
-    const payload = new Uint8Array(5 * 1024 * 1024 + 1);
-    payload.set(MP4_BYTES, 0);
-
-    const autoAdapter = vercelBlob({
-      token: "vercel_blob_rw_storempu_secret",
-      prefix: "large",
-    });
-    const storedMpu = await autoAdapter.put({
-      key: "big.mp4",
-      data: payload,
-      mediaType: "video/mp4",
-      filename: "big.mp4",
-      signal,
-    });
-
-    assert.equal(storedMpu.key, "big.mp4");
-    assert.equal(storedMpu.bytes, payload.byteLength);
-    const mpuActions = requests
-      .filter((r) => r.url.startsWith("/mpu?"))
-      .map((r) => r.headers["x-mpu-action"]);
-    assert.deepEqual(mpuActions, ["create", "upload", "complete"]);
-
-    requests.length = 0;
-    const singlePutAdapter = vercelBlob({
-      token: "vercel_blob_rw_storempu_secret",
-      prefix: "large",
-      multipart: false,
-    });
-    await singlePutAdapter.put({
-      key: "big-single.mp4",
-      data: payload,
-      mediaType: "video/mp4",
-      filename: "big-single.mp4",
-      signal,
-    });
-    assert.equal(requests.length, 1);
-    assert.equal(requests[0].method, "PUT");
-    assert.ok(requests[0].url.startsWith("/?pathname=large%2Fbig-single.mp4"));
-  });
+      requests.length = 0;
+      const singlePutAdapter = vercelBlob({
+        token: "vercel_blob_rw_storempu_secret",
+        prefix: "large",
+        multipart: false,
+      });
+      await singlePutAdapter.put({
+        key: "big-single.mp4",
+        data: payload,
+        mediaType: "video/mp4",
+        filename: "big-single.mp4",
+        signal,
+      });
+      assert.equal(requests.length, 1);
+      assert.equal(requests[0].method, "PUT");
+      assert.ok(requests[0].url.startsWith("/?pathname=large%2Fbig-single.mp4"));
+    }));
 });

@@ -45,6 +45,18 @@ function signWebhookHeader(secret: string, rawBody: string, timestampSeconds: nu
   return `t=${timestampSeconds},v1=${digest}`;
 }
 
+async function assertStepError(
+  fn: () => Promise<unknown>,
+  expected: { readonly fatal: boolean; readonly pattern: RegExp },
+): Promise<void> {
+  await assert.rejects(fn, (error: unknown) => {
+    assert.equal(error instanceof FatalError, expected.fatal);
+    assert.ok(error instanceof Error);
+    assert.match(error.message, expected.pattern);
+    return true;
+  });
+}
+
 interface FakeWebhookRequestResult {
   readonly request: WorkflowWebhookRequest;
   readonly responses: Response[];
@@ -356,7 +368,6 @@ function createWorkflowHarness(options: WorkflowHarnessOptions = {}) {
       options.onSleep?.(duration, sleepQueue.durations.length);
       return sleepQueue.sleep(duration);
     },
-    createFatalError: (message) => new FatalError(message),
   };
 
   return {
@@ -508,26 +519,18 @@ describe("workflow step helpers", () => {
 
     const noDestinationModel = createAsyncVideoModel();
     extension({ model: noDestinationModel.model, storage: false });
-    await assert.rejects(
+    await assertStepError(
       () => submitVideoStep({ prompt: "Missing destination" }, createFakeStepContext()),
-      (error: unknown) => {
-        assert.ok(error instanceof FatalError);
-        assert.match(error.message, /No video output destination is configured/);
-        return true;
-      },
+      { fatal: true, pattern: /No video output destination is configured/ },
     );
     assert.equal(noDestinationModel.startCalls.length, 0);
 
     const allowedModel = createAsyncVideoModel({ modelId: "test/allowed" });
     extension({ model: allowedModel.model, models: { allowed: allowedModel.model }, storage });
-    await assert.rejects(
+    await assertStepError(
       () =>
         submitVideoStep({ prompt: "Wrong model", model: "disallowed" }, createFakeStepContext()),
-      (error: unknown) => {
-        assert.ok(error instanceof FatalError);
-        assert.match(error.message, /is not allowed/);
-        return true;
-      },
+      { fatal: true, pattern: /is not allowed/ },
     );
 
     const badRequestStartModel = createAsyncVideoModel({
@@ -536,14 +539,10 @@ describe("workflow step helpers", () => {
       },
     });
     extension({ model: badRequestStartModel.model, storage });
-    await assert.rejects(
-      () => submitVideoStep({ prompt: "400 start" }, createFakeStepContext()),
-      (error: unknown) => {
-        assert.ok(error instanceof FatalError);
-        assert.match(error.message, /Invalid video duration/);
-        return true;
-      },
-    );
+    await assertStepError(() => submitVideoStep({ prompt: "400 start" }, createFakeStepContext()), {
+      fatal: true,
+      pattern: /Invalid video duration/,
+    });
 
     const transientStartModel = createAsyncVideoModel({
       onStart() {
@@ -551,15 +550,10 @@ describe("workflow step helpers", () => {
       },
     });
     extension({ model: transientStartModel.model, storage });
-    await assert.rejects(
-      () => submitVideoStep({ prompt: "503 start" }, createFakeStepContext()),
-      (error: unknown) => {
-        assert.equal(error instanceof FatalError, false);
-        assert.ok(error instanceof Error);
-        assert.match(error.message, /Gateway temporarily unavailable/);
-        return true;
-      },
-    );
+    await assertStepError(() => submitVideoStep({ prompt: "503 start" }, createFakeStepContext()), {
+      fatal: false,
+      pattern: /Gateway temporarily unavailable/,
+    });
 
     const statusModel = createAsyncVideoModel({
       modelId: "test/status-classification",
@@ -581,32 +575,19 @@ describe("workflow step helpers", () => {
       warnings: [],
     };
 
-    await assert.rejects(
+    await assertStepError(
       () => checkAndPersistStep({ prompt: "Terminal error" }, createFakeStepContext(), handle),
-      (error: unknown) => {
-        assert.ok(error instanceof FatalError);
-        assert.match(error.message, /Safety policy rejected prompt/);
-        return true;
-      },
+      { fatal: true, pattern: /Safety policy rejected prompt/ },
     );
 
-    await assert.rejects(
+    await assertStepError(
       () => checkAndPersistStep({ prompt: "400 status" }, createFakeStepContext(), handle),
-      (error: unknown) => {
-        assert.ok(error instanceof FatalError);
-        assert.match(error.message, /Unknown operation handle/);
-        return true;
-      },
+      { fatal: true, pattern: /Unknown operation handle/ },
     );
 
-    await assert.rejects(
+    await assertStepError(
       () => checkAndPersistStep({ prompt: "503 status" }, createFakeStepContext(), handle),
-      (error: unknown) => {
-        assert.equal(error instanceof FatalError, false);
-        assert.ok(error instanceof Error);
-        assert.match(error.message, /Status endpoint overloaded/);
-        return true;
-      },
+      { fatal: false, pattern: /Status endpoint overloaded/ },
     );
   });
 
@@ -1096,14 +1077,10 @@ describe("runVideoWorkflowTask state machine", () => {
     await harness.sleepQueue.waitForCall(1);
     harness.webhook.push({ deliveryId: "del-fatal", valid: true });
 
-    await assert.rejects(
-      () => taskPromise,
-      (error: unknown) => {
-        assert.ok(error instanceof FatalError);
-        assert.match(error.message, /Provider rejected generation/);
-        return true;
-      },
-    );
+    await assertStepError(() => taskPromise, {
+      fatal: true,
+      pattern: /Provider rejected generation/,
+    });
     assert.equal(harness.webhook.disposedCount(), 1);
     assert.deepEqual(harness.cleanedKeys, [["inputs/fatal.png"]]);
   });
@@ -1114,25 +1091,22 @@ describe("runVideoWorkflowTask state machine", () => {
       submitError: new FatalError("Missing output destination"),
     });
 
-    await assert.rejects(
-      () => runTaskToCompletion(harness.deps, { prompt: "Submit failure" }),
-      (error: unknown) => {
-        assert.ok(error instanceof FatalError);
-        assert.match(error.message, /Missing output destination/);
-        return true;
-      },
-    );
+    await assertStepError(() => runTaskToCompletion(harness.deps, { prompt: "Submit failure" }), {
+      fatal: true,
+      pattern: /Missing output destination/,
+    });
     assert.equal(harness.createWebhookCalls(), 1);
     assert.equal(harness.webhook.disposedCount(), 1);
     assert.deepEqual(harness.cleanedKeys, []);
     assert.equal(harness.checkCalls(), 0);
   });
 
-  test("calls checkAndPersist at least once before throwing FatalError timeout when intervalMs >= timeoutMs", async () => {
+  test("calls checkAndPersist at least once before throwing FatalError timeout when intervalMs >= timeoutMs and cleans up staged inputs", async () => {
     const harness = createWorkflowHarness({
       metadataUrl: "http://127.0.0.1:3000",
       modelId: "test/edge-interval",
       jobId: "job_edge_9",
+      stagedInputKeys: ["inputs/timeout-a.png", "inputs/timeout-b.png"],
       useWebhook: false,
       intervalMs: 10_000,
       timeoutMs: 4_000,
@@ -1140,18 +1114,16 @@ describe("runVideoWorkflowTask state machine", () => {
       checkAndPersist: async () => ({ status: "pending", warnings: [] }),
     });
 
-    await assert.rejects(
+    await assertStepError(
       () => runTaskToCompletion(harness.deps, { prompt: "Edge interval timeout" }),
-      (error: unknown) => {
-        assert.ok(error instanceof FatalError);
-        assert.match(error.message, /test\/edge-interval/);
-        assert.match(error.message, /job_edge_9/);
-        assert.match(error.message, /timed out after 4000ms/);
-        return true;
+      {
+        fatal: true,
+        pattern: /test\/edge-interval.*job_edge_9.*timed out after 4000ms/,
       },
     );
     assert.ok(harness.checkCalls() >= 1);
     assert.deepEqual(harness.sleepQueue.durations, [2_000, 2_000]);
+    assert.deepEqual(harness.cleanedKeys, [["inputs/timeout-a.png", "inputs/timeout-b.png"]]);
   });
 
   test("wakes immediately on ctx.abortSignal cancellation mid-wait, disposes webhook, and cleans up staged inputs", async () => {
@@ -1177,31 +1149,5 @@ describe("runVideoWorkflowTask state machine", () => {
     assert.equal(harness.checkCalls(), 0);
     assert.equal(harness.webhook.disposedCount(), 1);
     assert.deepEqual(harness.cleanedKeys, [["inputs/abort.png"]]);
-  });
-
-  test("throws FatalError naming model and jobId on timeout and cleans up staged inputs", async () => {
-    const harness = createWorkflowHarness({
-      metadataUrl: "http://127.0.0.1:3000",
-      modelId: "google/veo-timeout",
-      jobId: "job_timeout_77",
-      stagedInputKeys: ["inputs/timeout-a.png", "inputs/timeout-b.png"],
-      useWebhook: false,
-      intervalMs: 5_000,
-      timeoutMs: 10_000,
-      autoResolveSleep: true,
-      checkAndPersist: async () => ({ status: "pending", warnings: [] }),
-    });
-
-    await assert.rejects(
-      () => runTaskToCompletion(harness.deps, { prompt: "Always pending" }),
-      (error: unknown) => {
-        assert.ok(error instanceof FatalError);
-        assert.match(error.message, /google\/veo-timeout/);
-        assert.match(error.message, /job_timeout_77/);
-        assert.match(error.message, /timed out after 10000ms/);
-        return true;
-      },
-    );
-    assert.deepEqual(harness.cleanedKeys, [["inputs/timeout-a.png", "inputs/timeout-b.png"]]);
   });
 });

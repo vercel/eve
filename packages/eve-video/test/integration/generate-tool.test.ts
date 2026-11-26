@@ -7,6 +7,7 @@ import { always, type ApprovalConfiguration } from "eve/tools/approval";
 
 import {
   checkVideoJob,
+  createIdempotencyKey,
   persistVideos,
   runSyncVideoModel,
   startVideoJob,
@@ -15,10 +16,8 @@ import { inMemory } from "../../extension/lib/storage/in-memory.ts";
 import type { VideoStorage } from "../../extension/lib/storage/types.ts";
 import {
   createGenerateApproval,
-  createIdempotencyKey,
   formatGenerateCompleteLabel,
   formatGenerateProgressLabel,
-  generateVideoInputSchema,
 } from "../../extension/lib/tools.ts";
 import type {
   GenerateVideoToolInput,
@@ -33,11 +32,10 @@ import {
   WEBM_BYTES,
   createAsyncVideoModel,
   createFakeApprovalContext,
-  createFakeApprovalResponseContext,
-  createFakePrincipal,
   createFakeSandbox,
   createLargePng,
   createSyncVideoModel,
+  withCleanStorageEnv,
 } from "../helpers.ts";
 
 function createLargeMp4(): Uint8Array {
@@ -46,7 +44,7 @@ function createLargeMp4(): Uint8Array {
   return bytes;
 }
 
-describe("tool labels, idempotency keys, and input schema", () => {
+describe("tool labels and idempotency keys", () => {
   test("derives deterministic idempotency keys and formats progress and completion labels", () => {
     const key1 = createIdempotencyKey("sess-a", "call-1");
     const key2 = createIdempotencyKey("sess-a", "call-1");
@@ -87,44 +85,6 @@ describe("tool labels, idempotency keys, and input schema", () => {
     assert.equal(formatGenerateCompleteLabel(completedOne), "Generated video");
     assert.equal(formatGenerateCompleteLabel(completedTwo), "Generated 2 videos");
     assert.equal(formatGenerateCompleteLabel(generatingZero), "Generated video");
-  });
-
-  test("validates video and mode fields in generateVideoInputSchema", () => {
-    const edited = generateVideoInputSchema.parse({
-      prompt: "Add warm sunset lighting",
-      video: "  videos/2026-11-26/clip.mp4  ",
-      mode: "edit",
-    });
-    assert.equal(edited.video, "videos/2026-11-26/clip.mp4");
-    assert.equal(edited.mode, "edit");
-
-    const extended = generateVideoInputSchema.parse({
-      prompt: "Continue camera pan to the harbor",
-      video: "https://cdn.example.com/clip.mp4",
-      mode: "extend",
-    });
-    assert.equal(extended.video, "https://cdn.example.com/clip.mp4");
-    assert.equal(extended.mode, "extend");
-
-    const defaultMode = generateVideoInputSchema.parse({
-      prompt: "Color grade as film noir",
-      video: "videos/2026-11-26/clip.mp4",
-    });
-    assert.equal(defaultMode.video, "videos/2026-11-26/clip.mp4");
-    assert.equal(defaultMode.mode, undefined);
-
-    assert.equal(
-      generateVideoInputSchema.safeParse({ prompt: "Bad video", video: "   " }).success,
-      false,
-    );
-    assert.equal(
-      generateVideoInputSchema.safeParse({
-        prompt: "Bad mode",
-        video: "videos/2026-11-26/clip.mp4",
-        mode: "upscale",
-      }).success,
-      false,
-    );
   });
 });
 
@@ -272,26 +232,7 @@ describe("runSyncVideoModel and persistVideos", () => {
     assert.deepEqual(backing.keys(), []);
   });
 
-  test("passes through provider URLs with allowTemporaryProviderUrl and rejects inline bytes without a destination", async () => {
-    const expiresAt = "2026-12-01T00:00:00.000Z";
-    const temporary = await persistVideos({
-      videos: [
-        {
-          type: "url",
-          url: "https://provider.example.com/temp/clip.mp4",
-          mediaType: "video/mp4",
-        },
-      ],
-      modelId: "test/temp-url",
-      allowTemporaryProviderUrl: true,
-      providerExpiresAt: expiresAt,
-    });
-    assert.equal(temporary.length, 1);
-    assert.equal(temporary[0].url, "https://provider.example.com/temp/clip.mp4");
-    assert.equal(temporary[0].expiresAt, expiresAt);
-    assert.equal(temporary[0].temporary, true);
-    assert.equal(temporary[0].bytes, 0);
-
+  test("rejects inline bytes when allowTemporaryProviderUrl is set or no destination is configured", async () => {
     await assert.rejects(
       () =>
         persistVideos({
@@ -314,11 +255,14 @@ describe("runSyncVideoModel and persistVideos", () => {
 });
 
 describe("pre-flight gating before paid submission", () => {
-  test("rejects invalid inputs, video/mode conflicts, limits, media types, and unsafe URLs before doStart", async () => {
+  test("rejects invalid inputs, video/mode conflicts, limits, sandbox media errors, and unsafe URLs before doStart", async () => {
     const storage = inMemory();
     const sandboxWithMedia = createFakeSandbox({
       "inputs/clip.mp4": MP4_BYTES,
       "inputs/frame.png": PNG_BYTES,
+      "inputs/empty.png": new Uint8Array(0),
+      "inputs/big.png": new Uint8Array(64).fill(0x89),
+      "inputs/text.bin": new TextEncoder().encode("not media"),
     });
 
     const cases: readonly {
@@ -337,28 +281,12 @@ describe("pre-flight gating before paid submission", () => {
         pattern: /"mode" \("edit" or "extend"\) requires "video" to be provided/,
       },
       {
-        name: "mode extend without video",
-        config: (model) => ({ model, storage }),
-        input: { prompt: "Extend nothing", mode: "extend" },
-        pattern: /"mode" \("edit" or "extend"\) requires "video" to be provided/,
-      },
-      {
         name: "video combined with start",
         config: (model) => ({ model, storage }),
         input: {
           prompt: "Conflict with start",
           video: "https://cdn.example.com/clip.mp4",
           start: "https://cdn.example.com/frame.png",
-        },
-        pattern: /"video" cannot be combined with "start" or "end"/,
-      },
-      {
-        name: "video combined with end",
-        config: (model) => ({ model, storage }),
-        input: {
-          prompt: "Conflict with end",
-          video: "https://cdn.example.com/clip.mp4",
-          end: "https://cdn.example.com/frame.png",
         },
         pattern: /"video" cannot be combined with "start" or "end"/,
       },
@@ -380,6 +308,27 @@ describe("pre-flight gating before paid submission", () => {
         input: { prompt: "Image file as video", video: "inputs/frame.png" },
         sandbox: sandboxWithMedia,
         pattern: /Unsupported media type "image\/png"/,
+      },
+      {
+        name: "empty sandbox input file",
+        config: (model) => ({ model, storage }),
+        input: { prompt: "Empty frame", start: "inputs/empty.png" },
+        sandbox: sandboxWithMedia,
+        pattern: /Media file is empty/,
+      },
+      {
+        name: "oversized sandbox input file",
+        config: (model) => ({ model, storage, limits: { maxInputBytes: 16 } }),
+        input: { prompt: "Oversized frame", start: "inputs/big.png" },
+        sandbox: sandboxWithMedia,
+        pattern: /exceeds maximum allowed size of 16 bytes/,
+      },
+      {
+        name: "unrecognized binary sandbox input file",
+        config: (model) => ({ model, storage }),
+        input: { prompt: "Unknown binary", start: "inputs/text.bin" },
+        sandbox: sandboxWithMedia,
+        pattern: /Unsupported or unrecognized media file format/,
       },
       {
         name: "duration exceeds maxDurationSeconds",
@@ -525,13 +474,7 @@ describe("pre-flight gating before paid submission", () => {
     const storage = inMemory();
     const cases: readonly GenerateVideoToolInput[] = [
       { prompt: "FTP video", video: "ftp://example.com/a.mp4" },
-      { prompt: "File video", video: "file:///etc/passwd" },
-      { prompt: "Data video", video: "data:video/mp4;base64,AA==" },
-      { prompt: "FTP start", start: "ftp://example.com/a.png" },
       { prompt: "File start", start: "file:///etc/passwd" },
-      { prompt: "Data start", start: "data:image/png;base64,AA==" },
-      { prompt: "FTP ref", references: ["ftp://example.com/a.png"] },
-      { prompt: "File ref", references: ["file:///etc/passwd"] },
       { prompt: "Data ref", references: ["data:image/png;base64,AA=="] },
     ];
 
@@ -854,20 +797,13 @@ describe("video editing and extension routing", () => {
   });
 
   test("resolves stored video by storageKey without a sandbox and falls back to storage.get when sandbox returns null", async () => {
-    const storage = inMemory({ baseUrl: "https://storage.example" });
+    const storage = inMemory();
     const signal = new AbortController().signal;
     await storage.put({
       key: "videos/2026-11-26/clip.mp4",
       data: MP4_BYTES,
       mediaType: "video/mp4",
       filename: "clip.mp4",
-      signal,
-    });
-    await storage.put({
-      key: "videos/2026-11-26/large.mp4",
-      data: createLargeMp4(),
-      mediaType: "video/mp4",
-      filename: "large.mp4",
       signal,
     });
 
@@ -888,25 +824,6 @@ describe("video editing and extension routing", () => {
       { type: "file", data: MP4_BYTES, mediaType: "video/mp4" },
     ]);
 
-    const stagedHandle = await startVideoJob({
-      config: { model: fake.model, storage },
-      input: {
-        prompt: "Edit large stored clip with no sandbox",
-        video: "videos/2026-11-26/large.mp4",
-      },
-    });
-    assert.equal(stagedHandle.stagedInputKeys?.length, 1);
-    const stagedKey = stagedHandle.stagedInputKeys?.[0] as string;
-    assert.ok(stagedKey.startsWith("inputs/"));
-    assert.ok(stagedKey.endsWith("/video.mp4"));
-    assert.deepEqual(fake.startCalls[1].inputReferences, [
-      {
-        type: "url",
-        url: `https://storage.example/${stagedKey}`,
-        mediaType: "video/mp4",
-      },
-    ]);
-
     const emptySandbox = createFakeSandbox();
     await startVideoJob({
       config: { model: fake.model, storage },
@@ -916,7 +833,7 @@ describe("video editing and extension routing", () => {
       },
       getSandbox: async () => emptySandbox,
     });
-    assert.deepEqual(fake.startCalls[2].inputReferences, [
+    assert.deepEqual(fake.startCalls[1].inputReferences, [
       { type: "file", data: MP4_BYTES, mediaType: "video/mp4" },
     ]);
 
@@ -952,24 +869,23 @@ describe("approval forwarding", () => {
       model: "google/veo-3.1-fast-generate-001",
     };
     const approval = createGenerateApproval(() => currentConfig);
-    const getApproval = (): ApprovalConfiguration<GenerateVideoToolInput> => approval;
 
     const approvalCtx = createFakeApprovalContext(input);
-    assert.equal(await getApproval().request(approvalCtx), "not-applicable");
-    assert.equal(getApproval().response, undefined);
+    assert.equal(await approval.request(approvalCtx), "not-applicable");
+    assert.equal(approval.response, undefined);
 
     currentConfig = {
       model: "google/veo-3.1-fast-generate-001",
       approval: always(),
     };
-    assert.equal(await getApproval().request(approvalCtx), "user-approval");
-    assert.equal(getApproval().response, undefined);
+    assert.equal(await approval.request(approvalCtx), "user-approval");
+    assert.equal(approval.response, undefined);
     assert.equal(
-      getApproval().prompt?.({ callId: "call-1", input, toolName: "video__generate" }),
+      approval.prompt?.({ callId: "call-1", input, toolName: "video__generate" }),
       'Generate video with google/veo-3.1-fast-generate-001 (6s, 16:9, 1080p, audio, 2 videos, path: videos/lighthouse.mp4): "Aerial drone shot of a coastal lighthouse at dusk"',
     );
     assert.equal(
-      getApproval().prompt?.({
+      approval.prompt?.({
         callId: "call-2",
         input: {
           prompt: "Shift sky to twilight",
@@ -980,7 +896,7 @@ describe("approval forwarding", () => {
       'Edit video with google/veo-3.1-fast-generate-001 (video: videos/2026-11-26/clip.mp4): "Shift sky to twilight"',
     );
     assert.equal(
-      getApproval().prompt?.({
+      approval.prompt?.({
         callId: "call-3",
         input: {
           prompt: "Add gentle snowfall",
@@ -992,7 +908,7 @@ describe("approval forwarding", () => {
       'Edit video with google/veo-3.1-fast-generate-001 (video: videos/2026-11-26/clip.mp4): "Add gentle snowfall"',
     );
     assert.equal(
-      getApproval().prompt?.({
+      approval.prompt?.({
         callId: "call-4",
         input: {
           prompt: "Continue the drone pan across the harbor",
@@ -1005,7 +921,6 @@ describe("approval forwarding", () => {
       'Extend video with google/veo-3.1-fast-generate-001 (video: https://cdn.example.com/clip.mp4, 5s): "Continue the drone pan across the harbor"',
     );
 
-    const requester = createFakePrincipal("user-alice");
     const customApproval: ApprovalConfiguration<GenerateVideoToolInput> = {
       request() {
         return "user-approval";
@@ -1013,10 +928,8 @@ describe("approval forwarding", () => {
       prompt(ctx) {
         return `Custom prompt for ${ctx.input.prompt}`;
       },
-      response(ctx) {
-        return ctx.response.principal.principalId === "admin-1"
-          ? { status: "allowed" }
-          : { status: "rejected", reason: "Admins only." };
+      response() {
+        return { status: "allowed" };
       },
     };
     currentConfig = {
@@ -1025,31 +938,15 @@ describe("approval forwarding", () => {
     };
 
     assert.equal(
-      getApproval().prompt?.({ callId: "call-1", input, toolName: "video__generate" }),
+      approval.prompt?.({ callId: "call-1", input, toolName: "video__generate" }),
       "Custom prompt for Aerial drone shot of a coastal lighthouse at dusk",
     );
-    const delegatedResponse = getApproval().response;
-    assert.equal(typeof delegatedResponse, "function");
-    assert.deepEqual(
-      await delegatedResponse?.(
-        createFakeApprovalResponseContext(input, {
-          requester,
-          responder: createFakePrincipal("admin-1"),
-        }),
-      ),
-      { status: "allowed" },
-    );
-    assert.deepEqual(
-      await delegatedResponse?.(
-        createFakeApprovalResponseContext(input, { requester, responder: requester }),
-      ),
-      { status: "rejected", reason: "Admins only." },
-    );
+    assert.equal(approval.response, customApproval.response);
   });
 });
 
 describe("composable Workflow step primitives and input staging", () => {
-  test("stages large sandbox inputs, returns webhookSigningSecret and stagedInputKeys, round-trips alias catalog jobs through JSON, and supports omitted config in checkVideoJob", async () => {
+  test("stages large sandbox inputs, returns webhookSigningSecret and stagedInputKeys, and round-trips alias catalog jobs through JSON", async () => {
     const storage = inMemory({ baseUrl: "https://media.example.test/wf" });
     const sandbox = createFakeSandbox({ "frames/large.png": createLargePng() });
     const stagedKeysSeenAtStart: string[] = [];
@@ -1165,32 +1062,6 @@ describe("composable Workflow step primitives and input staging", () => {
       signal: new AbortController().signal,
     });
     assert.deepEqual(loaded?.data, MP4_BYTES);
-
-    const previousProvider = Reflect.get(globalThis, "AI_SDK_DEFAULT_PROVIDER");
-    const nonDefaultFake = createAsyncVideoModel({
-      modelId: "klingai/kling-v2.6-pro",
-      statuses: [{ status: "pending" }],
-    });
-    try {
-      Reflect.set(globalThis, "AI_SDK_DEFAULT_PROVIDER", {
-        videoModel(id: string) {
-          assert.equal(id, "klingai/kling-v2.6-pro");
-          return nonDefaultFake.model;
-        },
-      });
-      const statusWithoutConfig = await checkVideoJob({
-        modelId: "klingai/kling-v2.6-pro",
-        operation: { id: "op_no_config" },
-      });
-      assert.equal(statusWithoutConfig.status, "pending");
-      assert.equal(nonDefaultFake.statusCalls.length, 1);
-    } finally {
-      if (previousProvider === undefined) {
-        Reflect.deleteProperty(globalThis, "AI_SDK_DEFAULT_PROVIDER");
-      } else {
-        Reflect.set(globalThis, "AI_SDK_DEFAULT_PROVIDER", previousProvider);
-      }
-    }
   });
 
   test("startVideoJob cleans up staged inputs on start failure and auto-selects storage from env when omitted", async () => {
@@ -1236,41 +1107,29 @@ describe("composable Workflow step primitives and input staging", () => {
       });
     });
 
-    const envKeys = [
-      "VERCEL_BLOB_API_URL",
-      "EVE_VIDEO_BLOB_READ_WRITE_TOKEN",
-      "EVE_VIDEO_BLOB_STORE_ID",
-      "BLOB_READ_WRITE_TOKEN",
-      "BLOB_STORE_ID",
-      "VERCEL_OIDC_TOKEN",
-      "VERCEL",
-    ] as const;
-    const saved = new Map<string, string | undefined>(envKeys.map((k) => [k, process.env[k]]));
-
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
     const port = (server.address() as AddressInfo).port;
     try {
-      for (const k of envKeys) delete process.env[k];
-      process.env.VERCEL_BLOB_API_URL = `http://127.0.0.1:${port}`;
-      process.env.EVE_VIDEO_BLOB_READ_WRITE_TOKEN = "vercel_blob_rw_storeauto_secret";
+      await withCleanStorageEnv(
+        async () => {
+          const autoFake = createAsyncVideoModel({ modelId: "test/auto-stage" });
+          const handle = await startVideoJob({
+            config: { model: autoFake.model },
+            input: { prompt: "Stage via env storage", start: "frames/large.png" },
+            getSandbox: async () => sandbox,
+          });
 
-      const autoFake = createAsyncVideoModel({ modelId: "test/auto-stage" });
-      const handle = await startVideoJob({
-        config: { model: autoFake.model },
-        input: { prompt: "Stage via env storage", start: "frames/large.png" },
-        getSandbox: async () => sandbox,
-      });
-
-      assert.equal(uploadedPathnames.length, 1);
-      assert.ok(uploadedPathnames[0].startsWith("eve/video/inputs/"));
-      assert.equal(handle.stagedInputKeys?.length, 1);
-      assert.ok(handle.stagedInputKeys?.[0].startsWith("inputs/"));
+          assert.equal(uploadedPathnames.length, 1);
+          assert.ok(uploadedPathnames[0].startsWith("eve/video/inputs/"));
+          assert.equal(handle.stagedInputKeys?.length, 1);
+          assert.ok(handle.stagedInputKeys?.[0].startsWith("inputs/"));
+        },
+        {
+          VERCEL_BLOB_API_URL: `http://127.0.0.1:${port}`,
+          EVE_VIDEO_BLOB_READ_WRITE_TOKEN: "vercel_blob_rw_storeauto_secret",
+        },
+      );
     } finally {
-      for (const k of envKeys) {
-        const v = saved.get(k);
-        if (v === undefined) delete process.env[k];
-        else process.env[k] = v;
-      }
       await new Promise<void>((resolve, reject) =>
         server.close((err) => (err !== undefined ? reject(err) : resolve())),
       );

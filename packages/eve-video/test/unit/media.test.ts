@@ -6,13 +6,11 @@ import {
   detectMediaType,
   downloadVideoBytes,
   extensionForMediaType,
-  isPrivateIpAddress,
   isUrlLike,
   mediaKind,
   mediaTypeFromUrl,
   normalizeAspectRatio,
   normalizeResolution,
-  readSandboxMedia,
   videoPath,
   type DnsLookupFn,
 } from "../../extension/lib/media.ts";
@@ -29,7 +27,6 @@ import {
   WAV_BYTES,
   WEBM_BYTES,
   WEBP_BYTES,
-  createFakeSandbox,
 } from "../helpers.ts";
 
 function isobmffWithBrand(brand: string): Uint8Array {
@@ -118,73 +115,6 @@ describe("media format detection and classification", () => {
   });
 });
 
-describe("readSandboxMedia", () => {
-  test("reads valid media and rejects missing, empty, oversized, unrecognized, and wrong-kind files", async () => {
-    const sandbox = createFakeSandbox({
-      "frames/ok.png": PNG_BYTES,
-      "frames/empty.png": new Uint8Array(0),
-      "frames/big.png": new Uint8Array(64).fill(0x89),
-      "frames/text.bin": new TextEncoder().encode("not media"),
-      "frames/clip.mp4": MP4_BYTES,
-    });
-    const signal = new AbortController().signal;
-
-    const loaded = await readSandboxMedia(sandbox, "frames/ok.png", {
-      maxBytes: 1024,
-      allowedKinds: ["image"],
-      signal,
-    });
-    assert.equal(loaded.mediaType, "image/png");
-    assert.deepEqual(loaded.data, PNG_BYTES);
-
-    await assert.rejects(
-      () =>
-        readSandboxMedia(sandbox, "frames/missing.png", {
-          maxBytes: 1024,
-          allowedKinds: ["image"],
-          signal,
-        }),
-      /File not found in sandbox/,
-    );
-    await assert.rejects(
-      () =>
-        readSandboxMedia(sandbox, "frames/empty.png", {
-          maxBytes: 1024,
-          allowedKinds: ["image"],
-          signal,
-        }),
-      /Media file is empty/,
-    );
-    await assert.rejects(
-      () =>
-        readSandboxMedia(sandbox, "frames/big.png", {
-          maxBytes: 16,
-          allowedKinds: ["image"],
-          signal,
-        }),
-      /exceeds maximum allowed size of 16 bytes/,
-    );
-    await assert.rejects(
-      () =>
-        readSandboxMedia(sandbox, "frames/text.bin", {
-          maxBytes: 1024,
-          allowedKinds: ["image", "video", "audio"],
-          signal,
-        }),
-      /Unsupported or unrecognized media file format/,
-    );
-    await assert.rejects(
-      () =>
-        readSandboxMedia(sandbox, "frames/clip.mp4", {
-          maxBytes: 1024,
-          allowedKinds: ["image"],
-          signal,
-        }),
-      /Unsupported media type "video\/mp4"/,
-    );
-  });
-});
-
 describe("aspect ratio, resolution, and output path helpers", () => {
   test("normalizeAspectRatio accepts explicit ratios and adaptive aliases", () => {
     assert.equal(normalizeAspectRatio("16:9"), "16:9");
@@ -248,50 +178,6 @@ describe("aspect ratio, resolution, and output path helpers", () => {
 });
 
 describe("SSRF validation and safe URL checks", () => {
-  test("isPrivateIpAddress classifies private, reserved, documentation, translated IPv6, and public addresses", () => {
-    const privateAddresses = [
-      "0.0.0.0",
-      "127.0.0.1",
-      "10.0.0.1",
-      "172.16.0.1",
-      "192.168.1.10",
-      "100.64.0.1",
-      "169.254.169.254",
-      "192.0.2.1",
-      "198.51.100.1",
-      "203.0.113.1",
-      "192.88.99.1",
-      "::1",
-      "[::1]",
-      "fc00::1",
-      "fd12:3456::1",
-      "fe80::1",
-      "fe80::1%en0",
-      "fec0::1",
-      "2001::1",
-      "2001:db8::1",
-      "::ffff:127.0.0.1",
-      "::ffff:7f00:1",
-      "::ffff:a9fe:a9fe",
-      "::ffff:0:127.0.0.1",
-    ];
-    for (const addr of privateAddresses) {
-      assert.equal(isPrivateIpAddress(addr), true, `expected private: ${addr}`);
-    }
-
-    const publicOrNonIp = [
-      "93.184.216.34",
-      "1.1.1.1",
-      "2606:2800:220:1:248:1893:25c8:1946",
-      "::ffff:93.184.216.34",
-      "example.com",
-      "",
-    ];
-    for (const addr of publicOrNonIp) {
-      assert.equal(isPrivateIpAddress(addr), false, `expected non-private: ${addr}`);
-    }
-  });
-
   test("assertSafePublicUrl blocks non-HTTPS, credentials, local hosts, alternate IPv4 notations, private IPs, and private DNS answers", async () => {
     const blockedUrls = [
       "not-a-url",
@@ -308,9 +194,15 @@ describe("SSRF validation and safe URL checks", () => {
       "https://0x7f000001/video.mp4",
       "https://0177.0.0.1/video.mp4",
       "https://10.0.0.5/video.mp4",
+      "https://100.64.0.1/video.mp4",
+      "https://172.16.0.1/video.mp4",
+      "https://192.168.1.10/video.mp4",
       "https://169.254.169.254/latest/meta-data/",
       "https://[::1]/video.mp4",
+      "https://[fc00::1]/video.mp4",
+      "https://[fe80::1]/video.mp4",
       "https://[::ffff:127.0.0.1]/video.mp4",
+      "https://[::ffff:a9fe:a9fe]/video.mp4",
       "https://[::ffff:0:127.0.0.1]/video.mp4",
       "https://[2001:db8::1]/video.mp4",
     ];
@@ -339,7 +231,7 @@ describe("SSRF validation and safe URL checks", () => {
     );
   });
 
-  test("assertSafePublicUrl accepts public HTTPS hosts when DNS returns public IPs", async () => {
+  test("assertSafePublicUrl accepts public HTTPS hosts and literal public IPv4, IPv6, and IPv4-mapped addresses", async () => {
     let queriedHost: string | undefined;
     const lookup: DnsLookupFn = async (hostname) => {
       queriedHost = hostname;
@@ -352,6 +244,19 @@ describe("SSRF validation and safe URL checks", () => {
 
     const literal = await assertSafePublicUrl("https://93.184.216.34/clip.mp4");
     assert.equal(literal.href, "https://93.184.216.34/clip.mp4");
+
+    const literalV6 = await assertSafePublicUrl(
+      "https://[2606:2800:220:1:248:1893:25c8:1946]/clip.mp4",
+    );
+    assert.equal(literalV6.href, "https://[2606:2800:220:1:248:1893:25c8:1946]/clip.mp4");
+
+    const mappedV4 = await assertSafePublicUrl("https://[::ffff:93.184.216.34]/clip.mp4");
+    assert.equal(mappedV4.pathname, "/clip.mp4");
+
+    const mappedDns = await assertSafePublicUrl("https://cdn.example.com/mapped.mp4", {
+      lookup: async () => [{ address: "::ffff:93.184.216.34", family: 6 }],
+    });
+    assert.equal(mappedDns.href, "https://cdn.example.com/mapped.mp4");
   });
 });
 
@@ -521,6 +426,31 @@ describe("downloadVideoBytes", () => {
       /exceeds maximum allowed size of 100 bytes/,
     );
     assert.ok(chunksEmitted < 10);
+  });
+
+  test("rejects with abort error instead of returning partial bytes when ReadableStream download aborts mid-stream", async () => {
+    const controller = new AbortController();
+    const stalledFetch: typeof fetch = async () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(streamController) {
+            streamController.enqueue(new Uint8Array([1, 2, 3, 4]));
+            queueMicrotask(() => controller.abort(new DOMException("Timed out", "TimeoutError")));
+          },
+        }),
+        { status: 200, headers: { "content-type": "video/mp4" } },
+      );
+
+    await assert.rejects(
+      () =>
+        downloadVideoBytes("https://cdn.example.com/stalled.mp4", {
+          maxBytes: 1024,
+          signal: controller.signal,
+          fetch: stalledFetch,
+          lookup: publicLookup,
+        }),
+      (error: unknown) => error instanceof Error && error.name === "TimeoutError",
+    );
   });
 
   test("rejects HTTP error status responses", async () => {

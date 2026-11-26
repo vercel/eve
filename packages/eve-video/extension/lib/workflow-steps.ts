@@ -1,17 +1,20 @@
 import type { WorkflowStepToolContext } from "eve/tools";
-import type { WorkflowWebhookRequest } from "eve/workflow";
+import { FatalError, type WorkflowWebhookRequest } from "eve/workflow";
 
-import type { GenerateVideoToolInput, VideoJobHandle } from "./types.ts";
+import extension from "../extension.ts";
 import {
-  runCheckAndPersistStep,
-  runCleanupStagedInputsStep,
-  runSubmitVideoStep,
-  runVerifyAndRespondWebhookStep,
+  checkAndPersistToolVideoJob,
+  cleanupStoredKeys,
+  isTransientProviderError,
+  submitToolVideoJob,
   type CheckAndPersistStepResult,
   type SubmitVideoStepResult,
-} from "./workflow-step-impl.ts";
+} from "./engine.ts";
+import { resolveConfiguredStorage } from "./storage/default.ts";
+import type { GenerateVideoToolInput, VideoJobHandle } from "./types.ts";
+import { verifyAndRespondWebhook } from "./webhook.ts";
 
-export type { CheckAndPersistStepResult, SubmitVideoStepResult } from "./workflow-step-impl.ts";
+export type { CheckAndPersistStepResult, SubmitVideoStepResult };
 
 export async function submitVideoStep(
   input: GenerateVideoToolInput,
@@ -19,7 +22,14 @@ export async function submitVideoStep(
   webhookUrlCandidate?: string,
 ): Promise<SubmitVideoStepResult> {
   "use step";
-  return runSubmitVideoStep(input, ctx, webhookUrlCandidate);
+  try {
+    return await submitToolVideoJob(extension.config, input, ctx, webhookUrlCandidate);
+  } catch (error) {
+    if (ctx.abortSignal.aborted || error instanceof FatalError || isTransientProviderError(error)) {
+      throw error;
+    }
+    throw new FatalError(error instanceof Error ? error.message : String(error));
+  }
 }
 
 export async function verifyAndRespondWebhookStep(
@@ -27,7 +37,7 @@ export async function verifyAndRespondWebhookStep(
   secret: string,
 ): Promise<boolean> {
   "use step";
-  return runVerifyAndRespondWebhookStep(request, secret);
+  return verifyAndRespondWebhook(request, secret);
 }
 
 export async function checkAndPersistStep(
@@ -36,10 +46,18 @@ export async function checkAndPersistStep(
   handle: VideoJobHandle,
 ): Promise<CheckAndPersistStepResult> {
   "use step";
-  return runCheckAndPersistStep(input, ctx, handle);
+  try {
+    return await checkAndPersistToolVideoJob(extension.config, input, ctx, handle);
+  } catch (error) {
+    if (ctx.abortSignal.aborted || error instanceof FatalError || isTransientProviderError(error)) {
+      throw error;
+    }
+    throw new FatalError(error instanceof Error ? error.message : String(error));
+  }
 }
 
 export async function cleanupStagedInputsStep(stagedInputKeys: readonly string[]): Promise<void> {
   "use step";
-  return runCleanupStagedInputsStep(stagedInputKeys);
+  if (stagedInputKeys.length === 0) return;
+  await cleanupStoredKeys(resolveConfiguredStorage(extension.config.storage), stagedInputKeys);
 }

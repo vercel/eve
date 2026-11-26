@@ -1,5 +1,5 @@
 import { defineWorkflowTool, toolOutput } from "eve/tools";
-import { createWebhook, FatalError, getWorkflowMetadata, sleep } from "eve/workflow";
+import { createWebhook, getWorkflowMetadata, sleep } from "eve/workflow";
 
 import extension from "../extension.ts";
 import {
@@ -33,7 +33,6 @@ export default defineWorkflowTool({
         createWebhook,
         getWorkflowMetadata,
         sleep,
-        createFatalError: (message) => new FatalError(message),
       },
       input,
       ctx,

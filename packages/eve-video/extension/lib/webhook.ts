@@ -1,8 +1,12 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
+import type { WorkflowWebhookRequest } from "eve/workflow";
+
+import { StreamLimitExceededError, readBoundedStream } from "./media.ts";
 import type { VerifyGatewayWebhookInput } from "./types.ts";
 
 const DEFAULT_MAX_AGE_SECONDS = 300;
+const MAX_WEBHOOK_BODY_BYTES = 64 * 1024;
 const HEX_PATTERN = /^[0-9a-fA-F]+$/;
 const DIGITS_PATTERN = /^\d+$/;
 
@@ -96,4 +100,56 @@ function parseSignatureHeader(
     return undefined;
   }
   return { timestampText, signatures };
+}
+
+export async function verifyAndRespondWebhook(
+  request: WorkflowWebhookRequest,
+  secret: string,
+): Promise<boolean> {
+  const signatureHeader = request.headers.get("x-ai-gateway-signature");
+  if (signatureHeader === null || signatureHeader.trim().length === 0) {
+    await request.body?.cancel().catch(() => undefined);
+    await respondBestEffort(request, 401);
+    return false;
+  }
+
+  const declared = request.headers.get("content-length")?.trim();
+  const parsedLength = declared ? Number(declared) : Number.NaN;
+  if (Number.isFinite(parsedLength) && parsedLength > MAX_WEBHOOK_BODY_BYTES) {
+    await request.body?.cancel().catch(() => undefined);
+    await respondBestEffort(request, 413);
+    return false;
+  }
+
+  let rawBody: Uint8Array;
+  try {
+    if (request.body !== null) {
+      rawBody = await readBoundedStream(request.body, MAX_WEBHOOK_BODY_BYTES);
+    } else {
+      rawBody = new TextEncoder().encode(await request.text());
+      if (rawBody.byteLength > MAX_WEBHOOK_BODY_BYTES) {
+        throw new StreamLimitExceededError(MAX_WEBHOOK_BODY_BYTES);
+      }
+    }
+  } catch (error) {
+    if (error instanceof StreamLimitExceededError) {
+      await respondBestEffort(request, 413);
+      return false;
+    }
+    throw error;
+  }
+
+  const valid = verifyGatewayWebhookSignature({
+    header: signatureHeader,
+    rawBody,
+    secret,
+  });
+  await respondBestEffort(request, valid ? 204 : 401);
+  return valid;
+}
+
+async function respondBestEffort(request: WorkflowWebhookRequest, status: number): Promise<void> {
+  try {
+    await request.respondWith(new Response(null, { status }));
+  } catch {}
 }

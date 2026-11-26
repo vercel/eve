@@ -3,8 +3,6 @@ import { lookup as dnsLookup } from "node:dns/promises";
 import { request as httpsRequest } from "node:https";
 import { BlockList, isIP } from "node:net";
 
-import type { SandboxSession } from "eve/sandbox";
-
 export const DEFAULT_MAX_INPUT_BYTES = 100 * 1024 * 1024;
 export const DEFAULT_MAX_OUTPUT_BYTES = 512 * 1024 * 1024;
 export const ASYNC_INLINE_INPUT_LIMIT_BYTES = 180 * 1024;
@@ -26,25 +24,10 @@ const STILL_ISOBMFF_BRANDS = new Set([
 const URL_SCHEME_PATTERN = /^[a-zA-Z][a-zA-Z0-9+.-]*:/;
 const WINDOWS_DRIVE_PATTERN = /^[a-zA-Z]:[\\/]/;
 
-const MEDIA_TYPE_EXTENSIONS: Readonly<Record<string, string>> = {
-  "video/mp4": ".mp4",
-  "video/webm": ".webm",
-  "video/quicktime": ".mov",
-  "image/png": ".png",
-  "image/jpeg": ".jpg",
-  "image/webp": ".webp",
-  "image/gif": ".gif",
-  "audio/mpeg": ".mp3",
-  "audio/wav": ".wav",
-  "audio/ogg": ".ogg",
-  "audio/flac": ".flac",
-  "audio/mp4": ".m4a",
-};
-
-const URL_EXTENSION_MEDIA_TYPES: Readonly<Record<string, string>> = {
+const EXTENSION_MEDIA_TYPES: Readonly<Record<string, string>> = {
   ".mp4": "video/mp4",
-  ".mov": "video/quicktime",
   ".webm": "video/webm",
+  ".mov": "video/quicktime",
   ".png": "image/png",
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
@@ -52,9 +35,9 @@ const URL_EXTENSION_MEDIA_TYPES: Readonly<Record<string, string>> = {
   ".gif": "image/gif",
   ".mp3": "audio/mpeg",
   ".wav": "audio/wav",
-  ".m4a": "audio/mp4",
   ".ogg": "audio/ogg",
   ".flac": "audio/flac",
+  ".m4a": "audio/mp4",
 };
 
 const RESOLUTION_PRESETS: Readonly<
@@ -165,21 +148,28 @@ export function detectMediaType(bytes: Uint8Array): string | undefined {
 
 export function extensionForMediaType(mediaType: string): string {
   const normalized = normalizeMediaType(mediaType);
-  return MEDIA_TYPE_EXTENSIONS[normalized] ?? (normalized.startsWith("video/") ? ".mp4" : ".bin");
+  for (const [ext, type] of Object.entries(EXTENSION_MEDIA_TYPES)) {
+    if (type === normalized) return ext;
+  }
+  return normalized.startsWith("video/") ? ".mp4" : ".bin";
+}
+
+export function mediaTypeForPath(filePath: string): string | undefined {
+  const lastSegment = filePath.slice(
+    Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\")) + 1,
+  );
+  const dotIndex = lastSegment.lastIndexOf(".");
+  return dotIndex > 0
+    ? EXTENSION_MEDIA_TYPES[lastSegment.slice(dotIndex).toLowerCase()]
+    : undefined;
 }
 
 export function mediaTypeFromUrl(url: string): string | undefined {
-  let pathname: string;
   try {
-    pathname = new URL(url).pathname;
+    return mediaTypeForPath(new URL(url).pathname);
   } catch {
     return undefined;
   }
-  const lastSegment = pathname.slice(pathname.lastIndexOf("/") + 1);
-  const dotIndex = lastSegment.lastIndexOf(".");
-  return dotIndex > 0
-    ? URL_EXTENSION_MEDIA_TYPES[lastSegment.slice(dotIndex).toLowerCase()]
-    : undefined;
 }
 
 export function mediaKind(mediaType: string): "image" | "video" | "audio" | "other" {
@@ -227,16 +217,12 @@ export function videoPath(filePath: string, index: number): string {
     : `${filePath}-${index}`;
 }
 
-export function isHttpUrl(value: string): boolean {
-  return /^https?:\/\//i.test(value.trim());
-}
-
 export function isUrlLike(value: string): boolean {
   const trimmed = value.trim();
   return URL_SCHEME_PATTERN.test(trimmed) && !WINDOWS_DRIVE_PATTERN.test(trimmed);
 }
 
-export function isPrivateIpAddress(address: string): boolean {
+function isPrivateIpAddress(address: string): boolean {
   const normalized = stripBracketsAndZone(address);
   const family = isIP(normalized);
   return family !== 0 && PRIVATE_IP_BLOCKLIST.check(normalized, family === 4 ? "ipv4" : "ipv6");
@@ -340,34 +326,77 @@ export async function downloadVideoBytes(
   }
 }
 
-export async function readSandboxMedia(
-  sandbox: Pick<SandboxSession, "readBinaryFile">,
-  path: string,
-  options: {
-    readonly maxBytes: number;
-    readonly allowedKinds: readonly ("image" | "video" | "audio")[];
-    readonly signal: AbortSignal;
+export class StreamLimitExceededError extends Error {
+  constructor(maxBytes: number) {
+    super(`Downloaded video exceeds maximum allowed size of ${maxBytes} bytes.`);
+  }
+}
+
+export async function readBoundedStream(
+  stream: ReadableStream<Uint8Array> | AsyncIterable<Uint8Array | string>,
+  maxBytes: number,
+  options?: {
+    readonly signal?: AbortSignal;
+    readonly onAbortOrOverflow?: (error: Error) => void;
   },
-): Promise<{ readonly data: Uint8Array; readonly mediaType: string }> {
-  const data = await sandbox.readBinaryFile({ path, signal: options.signal });
-  if (data === null) throw new Error(`File not found in sandbox: ${path}`);
-  if (data.byteLength === 0) throw new Error(`Media file is empty: ${path}`);
-  if (data.byteLength > options.maxBytes) {
-    throw new Error(
-      `Media file "${path}" (${data.byteLength} bytes) exceeds maximum allowed size of ${options.maxBytes} bytes.`,
-    );
+): Promise<Uint8Array> {
+  const signal = options?.signal;
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  const toAbortError = () =>
+    signal?.reason instanceof Error
+      ? signal.reason
+      : new DOMException("The operation was aborted.", "AbortError");
+  const reader = "getReader" in stream ? stream.getReader() : undefined;
+  const abortStream = (error: Error) => {
+    if (reader !== undefined) {
+      void reader.cancel(error).catch(() => undefined);
+    } else {
+      options?.onAbortOrOverflow?.(error);
+    }
+  };
+  if (signal?.aborted) {
+    const error = toAbortError();
+    abortStream(error);
+    reader?.releaseLock();
+    throw error;
   }
-  const mediaType = detectMediaType(data);
-  if (mediaType === undefined) {
-    throw new Error(`Unsupported or unrecognized media file format: ${path}`);
+  const onAbort = () => abortStream(toAbortError());
+  signal?.addEventListener("abort", onAbort, { once: true });
+  try {
+    if (reader !== undefined) {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        total += value.byteLength;
+        if (total > maxBytes) {
+          const error = new StreamLimitExceededError(maxBytes);
+          await reader.cancel(error).catch(() => undefined);
+          throw error;
+        }
+        chunks.push(value);
+      }
+    } else {
+      for await (const chunk of stream) {
+        const bytes = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+        total += bytes.byteLength;
+        if (total > maxBytes) {
+          const error = new StreamLimitExceededError(maxBytes);
+          options?.onAbortOrOverflow?.(error);
+          throw error;
+        }
+        chunks.push(bytes);
+      }
+    }
+  } finally {
+    signal?.removeEventListener("abort", onAbort);
+    reader?.releaseLock();
   }
-  const kind = mediaKind(mediaType);
-  if (kind === "other" || !options.allowedKinds.includes(kind)) {
-    throw new Error(
-      `Unsupported media type "${mediaType}" for "${path}". Expected ${options.allowedKinds.join(" or ")}.`,
-    );
+  if (signal?.aborted) {
+    throw toAbortError();
   }
-  return { data, mediaType };
+  const merged = Buffer.concat(chunks, total);
+  return new Uint8Array(merged.buffer, merged.byteOffset, merged.byteLength);
 }
 
 interface DownloadHandle {
@@ -435,18 +464,10 @@ async function openFetchResponse(
     location: response.headers.get("location"),
     contentLength: response.headers.get("content-length"),
     contentType: response.headers.get("content-type"),
-    readBytes: async (maxBytes) => {
-      if (response.body !== null) {
-        return readBoundedStream(response.body, maxBytes, signal, () => {
-          void response.body?.cancel().catch(() => undefined);
-        });
-      }
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      if (bytes.byteLength > maxBytes) {
-        throw new Error(`Downloaded video exceeds maximum allowed size of ${maxBytes} bytes.`);
-      }
-      return bytes;
-    },
+    readBytes: async (maxBytes) =>
+      response.body === null
+        ? new Uint8Array(0)
+        : readBoundedStream(response.body, maxBytes, { signal }),
     cancel: async () => {
       await response.body?.cancel().catch(() => undefined);
     },
@@ -470,7 +491,16 @@ function openHttpsResponse(
             contentLength: firstHeaderValue(res.headers["content-length"]),
             contentType: firstHeaderValue(res.headers["content-type"]),
             readBytes: (maxBytes) =>
-              readBoundedStream(res, maxBytes, signal, (err) => res.destroy(err)),
+              readBoundedStream(res, maxBytes, {
+                signal,
+                onAbortOrOverflow: (err) => {
+                  if (res.listenerCount("error") > 0) {
+                    res.destroy(err);
+                  } else {
+                    res.destroy();
+                  }
+                },
+              }),
             cancel: async () => {
               res.destroy();
             },
@@ -491,25 +521,15 @@ function buildDownloadHandle(input: {
   readonly readBytes: (maxBytes: number) => Promise<Uint8Array>;
   readonly cancel: () => Promise<void>;
 }): DownloadHandle {
-  const parsedLength =
-    input.contentLength !== null &&
-    input.contentLength !== undefined &&
-    input.contentLength.trim().length > 0
-      ? Number(input.contentLength)
-      : undefined;
-  const contentLength =
-    parsedLength !== undefined && Number.isFinite(parsedLength) && parsedLength >= 0
-      ? parsedLength
-      : undefined;
-  const mediaType =
-    input.contentType !== null &&
-    input.contentType !== undefined &&
-    input.contentType.trim().length > 0
-      ? normalizeMediaType(input.contentType) || undefined
-      : undefined;
+  const rawLength = input.contentLength?.trim();
+  const parsed = rawLength ? Number(rawLength) : Number.NaN;
+  const contentLength = Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+  const mediaType = input.contentType
+    ? normalizeMediaType(input.contentType) || undefined
+    : undefined;
   return {
     status: input.status,
-    ...(input.location !== null && input.location !== undefined && { location: input.location }),
+    ...(typeof input.location === "string" && { location: input.location }),
     ...(contentLength !== undefined && { contentLength }),
     ...(mediaType !== undefined && { mediaType }),
     readBytes: input.readBytes,
@@ -519,45 +539,6 @@ function buildDownloadHandle(input: {
 
 function firstHeaderValue(value: string | readonly string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : (value as string | undefined);
-}
-
-async function readBoundedStream(
-  stream: AsyncIterable<Uint8Array | string>,
-  maxBytes: number,
-  signal: AbortSignal,
-  onAbortOrOverflow: (error: Error) => void,
-): Promise<Uint8Array> {
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  const toAbortError = () =>
-    signal.reason instanceof Error
-      ? signal.reason
-      : new DOMException("The operation was aborted.", "AbortError");
-  if (signal.aborted) {
-    const error = toAbortError();
-    onAbortOrOverflow(error);
-    throw error;
-  }
-  const onAbort = () => onAbortOrOverflow(toAbortError());
-  signal.addEventListener("abort", onAbort, { once: true });
-  try {
-    for await (const chunk of stream) {
-      const bytes = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
-      total += bytes.byteLength;
-      if (total > maxBytes) {
-        const error = new Error(
-          `Downloaded video exceeds maximum allowed size of ${maxBytes} bytes.`,
-        );
-        onAbortOrOverflow(error);
-        throw error;
-      }
-      chunks.push(bytes);
-    }
-  } finally {
-    signal.removeEventListener("abort", onAbort);
-  }
-  const merged = Buffer.concat(chunks, total);
-  return new Uint8Array(merged.buffer, merged.byteOffset, merged.byteLength);
 }
 
 function createPrivateIpBlockList(): BlockList {

@@ -1,11 +1,4 @@
-import {
-  del,
-  get,
-  put,
-  type DeleteCommandOptions,
-  type GetCommandOptions,
-  type PutCommandOptions,
-} from "@vercel/blob";
+import { del, get, put } from "@vercel/blob";
 import { normalizeStorageKey } from "./key.ts";
 import type { VideoStorage, VideoStorageVisibility } from "./types.ts";
 
@@ -55,6 +48,14 @@ function normalizePrefix(value: string): string {
   return normalizeStorageKey(stripped);
 }
 
+function resolvePathname(
+  prefix: string,
+  key: string,
+): { readonly normalizedKey: string; readonly pathname: string } {
+  const normalizedKey = normalizeStorageKey(key);
+  return { normalizedKey, pathname: `${prefix}/${normalizedKey}` };
+}
+
 function resolveCredentials(options: VercelBlobVideoStorageOptions): ResolvedBlobCredentials {
   const explicitToken = readTrimmed(options.token);
   if (explicitToken !== undefined) {
@@ -64,11 +65,7 @@ function resolveCredentials(options: VercelBlobVideoStorageOptions): ResolvedBlo
   const explicitOidcToken = readTrimmed(options.oidcToken);
   const explicitStoreId = readTrimmed(options.storeId);
   if (explicitOidcToken !== undefined || explicitStoreId !== undefined) {
-    const storeId =
-      explicitStoreId ??
-      (explicitOidcToken !== undefined
-        ? readTrimmed(process.env.EVE_VIDEO_BLOB_STORE_ID)
-        : undefined);
+    const storeId = explicitStoreId ?? readTrimmed(process.env.EVE_VIDEO_BLOB_STORE_ID);
     return {
       ...(explicitOidcToken !== undefined && { oidcToken: explicitOidcToken }),
       ...(storeId !== undefined && { storeId }),
@@ -100,12 +97,11 @@ export function vercelBlob(options: VercelBlobVideoStorageOptions = {}): VideoSt
   return {
     async put(input) {
       input.signal.throwIfAborted();
-      const normalizedKey = normalizeStorageKey(input.key);
-      const pathname = `${prefix}/${normalizedKey}`;
+      const { normalizedKey, pathname } = resolvePathname(prefix, input.key);
       const body = Buffer.from(input.data.buffer, input.data.byteOffset, input.data.byteLength);
       const ttlDays = input.ttlDays ?? options.ttlDays;
 
-      const putOptions: PutCommandOptions = {
+      const result = await put(pathname, body, {
         access,
         addRandomSuffix,
         allowOverwrite,
@@ -117,9 +113,7 @@ export function vercelBlob(options: VercelBlobVideoStorageOptions = {}): VideoSt
           cacheControlMaxAge: options.cacheControlMaxAge,
         }),
         ...(ttlDays !== undefined && { ttlDays }),
-      };
-
-      const result = await put(pathname, body, putOptions);
+      });
       const logicalKey = addRandomSuffix
         ? result.pathname.startsWith(`${prefix}/`)
           ? result.pathname.slice(prefix.length + 1)
@@ -139,15 +133,12 @@ export function vercelBlob(options: VercelBlobVideoStorageOptions = {}): VideoSt
 
     async get(input) {
       input.signal.throwIfAborted();
-      const normalizedKey = normalizeStorageKey(input.key);
-      const pathname = `${prefix}/${normalizedKey}`;
-      const getOptions: GetCommandOptions = {
+      const { normalizedKey, pathname } = resolvePathname(prefix, input.key);
+      const result = await get(pathname, {
         access,
         abortSignal: input.signal,
         ...resolveCredentials(options),
-      };
-
-      const result = await get(pathname, getOptions);
+      });
       if (result === null) return null;
       if (result.statusCode !== 200 || result.stream === null) {
         throw new Error(`Vercel Blob returned ${result.statusCode} without a video stream.`);
@@ -163,14 +154,11 @@ export function vercelBlob(options: VercelBlobVideoStorageOptions = {}): VideoSt
 
     async delete(input) {
       input.signal.throwIfAborted();
-      const normalizedKey = normalizeStorageKey(input.key);
-      const pathname = `${prefix}/${normalizedKey}`;
-      const deleteOptions: DeleteCommandOptions = {
+      const { pathname } = resolvePathname(prefix, input.key);
+      await del(pathname, {
         abortSignal: input.signal,
         ...resolveCredentials(options),
-      };
-
-      await del(pathname, deleteOptions);
+      });
     },
   };
 }

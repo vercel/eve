@@ -1,16 +1,13 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { createHmac } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { afterEach, describe, test } from "node:test";
 
 import type { WorkflowTaskToolDefinition } from "eve/tools";
-import { always, type ApprovalConfiguration } from "eve/tools/approval";
 
 import type extensionType from "../../extension/extension.ts";
 import type * as coreType from "../../extension/lib/core.ts";
@@ -21,7 +18,6 @@ import type {
   GenerateVideoToolOutput,
   GenerateVideoToolProgress,
 } from "../../extension/lib/types.ts";
-import { MP4_BYTES, createAsyncVideoModel, createFakeApprovalContext } from "../helpers.ts";
 
 const PACKAGE_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const execFileAsync = promisify(execFile);
@@ -92,23 +88,6 @@ describe("@eve/video built package artifacts and entry points", () => {
     assert.match(generateSource, /\bdefineWorkflowTool\b/);
     assert.match(generateSource, /from\s+["']eve\/workflow["']/);
 
-    const stepsSource = await readFile(
-      new URL("../../dist/extension/lib/workflow-steps.mjs", import.meta.url),
-      "utf8",
-    );
-    for (const helperName of [
-      "submitVideoStep",
-      "verifyAndRespondWebhookStep",
-      "checkAndPersistStep",
-      "cleanupStagedInputsStep",
-    ]) {
-      const fnIndex = stepsSource.indexOf(`function ${helperName}`);
-      assert.ok(fnIndex >= 0, `Expected ${helperName} in dist/extension/lib/workflow-steps.mjs`);
-      const bodyStart = stepsSource.indexOf("{", fnIndex);
-      const bodySlice = stepsSource.slice(bodyStart, bodyStart + 80);
-      assert.match(bodySlice, /["']use step["']/, `Expected "use step" directive in ${helperName}`);
-    }
-
     const generateDts = await readFile(
       new URL("../../dist/extension/tools/generate.d.ts", import.meta.url),
       "utf8",
@@ -116,8 +95,31 @@ describe("@eve/video built package artifacts and entry points", () => {
     assert.match(generateDts, /\bWorkflowTaskToolDefinition\b/);
   });
 
-  test("validates config synchronously at mount time and rejects malformed storage, model, poll, or webhook", () => {
+  test("resolves all five dist/ entry points, exposes public exports, and validates config at mount time", () => {
     assert.equal(builtIndex.default, builtIndex.video);
+    const mounted = builtIndex.video({
+      storage: builtStorage.inMemory(),
+      poll: { intervalMs: 100 },
+    });
+    assert.equal(Reflect.get(mounted, Symbol.for("eve.mounted-extension")), true);
+
+    assert.equal(typeof builtTools.generate.task, "function");
+    assert.equal(typeof builtTools.generate.toModelOutput, "function");
+    assert.equal(typeof builtTools.generate.label, "object");
+    assert.equal(typeof builtTools.generate.approval, "object");
+
+    assert.equal(typeof builtStorage.inMemory, "function");
+    assert.equal(typeof builtStorage.localDisk, "function");
+
+    assert.equal(typeof builtVercel.vercelBlob, "function");
+    assert.throws(() => builtVercel.vercelBlob({ prefix: "   " }), TypeError);
+
+    assert.equal(builtCore.DEFAULT_VIDEO_MODEL, "google/veo-3.1-fast-generate-001");
+    assert.equal(typeof builtCore.startVideoJob, "function");
+    assert.equal(typeof builtCore.checkVideoJob, "function");
+    assert.equal(typeof builtCore.persistVideos, "function");
+    assert.equal(typeof builtCore.verifyGatewayWebhookSignature, "function");
+
     assert.throws(
       () => builtIndex.video({ storage: {} as never }),
       /Invalid extension config: storage:/,
@@ -133,7 +135,6 @@ describe("@eve/video built package artifacts and entry points", () => {
       () => builtIndex.video({ poll: { intervalMs: 0 } }),
       /Invalid extension config: poll\.intervalMs:/,
     );
-    assert.doesNotThrow(() => builtIndex.video({ poll: { intervalMs: 100 } }));
     assert.throws(
       () => builtIndex.video({ poll: { timeoutMs: 50 } }),
       /Invalid extension config: poll\.timeoutMs:/,
@@ -141,144 +142,6 @@ describe("@eve/video built package artifacts and entry points", () => {
     assert.throws(
       () => builtIndex.video({ webhook: "always" as never }),
       /Invalid extension config: webhook:/,
-    );
-  });
-
-  test("exposes mounted workflow tool surface, storage adapters, core helpers, and webhook verification from dist/", async () => {
-    const storage = builtStorage.inMemory({ baseUrl: "https://built.example.test/media" });
-    const fake = createAsyncVideoModel({
-      modelId: "test/built-entry-model",
-      jobId: "job_built_1",
-      statuses: [
-        {
-          status: "completed",
-          videos: [{ type: "binary", data: MP4_BYTES, mediaType: "video/mp4" }],
-        },
-      ],
-    });
-
-    const input: GenerateVideoToolInput = {
-      prompt: "Built dist entry execution",
-      duration: 4,
-      aspectRatio: "16:9",
-    };
-
-    const mounted = builtIndex.video({
-      model: fake.model,
-      storage,
-      poll: { intervalMs: 100 },
-      approval: always(),
-    });
-    assert.equal(Reflect.get(mounted, Symbol.for("eve.mounted-extension")), true);
-
-    const tool = builtTools.generate;
-    assert.equal(typeof tool.task, "function");
-    assert.equal(typeof tool.toModelOutput, "function");
-    assert.equal(typeof tool.label, "object");
-    if (typeof tool.label === "object" && tool.label !== null) {
-      assert.equal(tool.label.start(input), "Generating video");
-      assert.equal(
-        tool.label.delta?.(input, {
-          status: "generating",
-          model: "test/built-entry-model",
-          elapsedSeconds: 5,
-          attempt: 1,
-        }),
-        "Generating video (5s)",
-      );
-      assert.equal(
-        tool.label.complete?.(input, {
-          status: "completed",
-          model: "test/built-entry-model",
-          videos: [{ mediaType: "video/mp4", bytes: MP4_BYTES.byteLength }],
-        }),
-        "Generated video",
-      );
-    }
-
-    const sampleOutput: GenerateVideoToolOutput = {
-      status: "completed",
-      model: "test/built-entry-model",
-      jobId: "job_built_1",
-      videos: [{ mediaType: "video/mp4", bytes: MP4_BYTES.byteLength }],
-    };
-    const projected = tool.toModelOutput?.(sampleOutput, {
-      callId: "call-built-1",
-      toolName: "video__generate",
-      async getSandbox() {
-        return undefined;
-      },
-      defaultModelOutput(value) {
-        return { type: "json", value };
-      },
-    });
-    assert.deepEqual(projected, { type: "json", value: sampleOutput });
-
-    const approval = tool.approval as ApprovalConfiguration<GenerateVideoToolInput>;
-    assert.equal(await approval.request(createFakeApprovalContext(input)), "user-approval");
-    assert.equal(
-      approval.prompt?.({ callId: "call-built-1", input, toolName: "video__generate" }),
-      'Generate video with test/built-entry-model (4s, 16:9): "Built dist entry execution"',
-    );
-
-    const diskRoot = await mkdtemp(join(tmpdir(), "eve-video-built-disk-"));
-    try {
-      const disk = builtStorage.localDisk({ directory: diskRoot });
-      await disk.put({
-        key: "built.mp4",
-        data: MP4_BYTES,
-        mediaType: "video/mp4",
-        filename: "built.mp4",
-        signal: new AbortController().signal,
-      });
-      const fromDisk = await disk.get?.({
-        key: "built.mp4",
-        signal: new AbortController().signal,
-      });
-      assert.deepEqual(fromDisk?.data, MP4_BYTES);
-    } finally {
-      await rm(diskRoot, { recursive: true, force: true });
-    }
-
-    assert.throws(() => builtVercel.vercelBlob({ prefix: "   " }), TypeError);
-
-    assert.equal(builtCore.DEFAULT_VIDEO_MODEL, "google/veo-3.1-fast-generate-001");
-    assert.equal("generateVideos" in builtCore, false);
-
-    const handle = await builtCore.startVideoJob({
-      config: { model: fake.model },
-      input: { prompt: "Built workflow primitive" },
-    });
-    assert.equal(handle.modelId, "test/built-entry-model");
-
-    const status = await builtCore.checkVideoJob({
-      config: { model: fake.model },
-      modelId: handle.modelId,
-      operation: handle.operation,
-    });
-    assert.equal(status.status, "completed");
-    if (status.status !== "completed") {
-      assert.fail("Expected completed status from builtCore.checkVideoJob.");
-    }
-    const persisted = await builtCore.persistVideos({
-      videos: status.videos,
-      modelId: handle.modelId,
-      storage,
-    });
-    assert.equal(persisted.length, 1);
-    assert.equal(persisted[0].bytes, MP4_BYTES.byteLength);
-
-    const now = 1_700_000_000;
-    const rawBody = '{"event":"video.completed"}';
-    const digest = createHmac("sha256", "whsec_built").update(`${now}.${rawBody}`).digest("hex");
-    assert.equal(
-      builtCore.verifyGatewayWebhookSignature({
-        header: `t=${now},v1=${digest}`,
-        rawBody,
-        secret: "whsec_built",
-        nowSeconds: now,
-      }),
-      true,
     );
   });
 
