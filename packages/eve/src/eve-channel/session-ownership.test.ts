@@ -25,9 +25,11 @@ import {
   EVE_SUBAGENT_STREAM_ROUTE_PATTERN,
 } from "#protocol/routes.js";
 
+const getRun = vi.hoisted(() => vi.fn(() => ({ exists: Promise.resolve(true) })));
+
 vi.mock("#internal/workflow/runtime.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#internal/workflow/runtime.js")>()),
-  getRun: () => ({ exists: Promise.resolve(true) }),
+  getRun,
 }));
 vi.mock("#execution/tool-stubs/steps.js", () => ({
   readStubFailure: vi.fn().mockResolvedValue(undefined),
@@ -524,5 +526,155 @@ describe("eve session routes with a custom sessionAccess predicate", () => {
     expect(() => continueTurnAuth(sessionAuthFromResult(wsA), auth)).toThrow(
       "A message from another principal cannot join a running turn.",
     );
+  });
+});
+
+describe("eve session routes decide session access before reading the body or the run", () => {
+  const bodyRoutes = routes.filter(([, method]) => method === "POST");
+
+  function rawPost(
+    pattern: string,
+    params: Record<string, string>,
+    rawBody: string,
+    authenticator: EveAuthFn,
+    h: ReturnType<typeof harness>,
+  ) {
+    const found = eveChannel({ auth: authenticator }).routes.find(
+      (route) => route.method === "POST" && route.path === pattern,
+    );
+    if (found === undefined || !("handler" in found)) throw new Error(`Missing POST ${pattern}`);
+    const path = pattern.replace(/:(\w+)/g, (_, name: string) => params[name] ?? "");
+    return found.handler(
+      new Request(`https://eve.test${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-workspace": "ws_b" },
+        body: rawBody,
+      }),
+      h.args(params),
+    ) as Promise<Response>;
+  }
+
+  it.each(bodyRoutes)(
+    "lets the predicate read the unread %s body and still parses it afterwards",
+    async (_name, _method, pattern, params, body) => {
+      const h = harness();
+      const seen: { bodyUsed: boolean; json: unknown }[] = [];
+      const authenticator = withAccess(async ({ request }) => {
+        seen.push({ bodyUsed: request.bodyUsed, json: await request.clone().json() });
+        return true;
+      });
+
+      const response = await rawPost(pattern, params, JSON.stringify(body), authenticator, h);
+
+      expect(seen).toEqual([{ bodyUsed: false, json: body }]);
+      expect(response.status).toBeLessThan(500);
+      expect(response.status).not.toBe(400);
+    },
+  );
+
+  it.each(bodyRoutes)(
+    "answers an unauthorized %s caller with 404 under owner access even when the body is invalid JSON",
+    async (_name, _method, pattern, params) => {
+      const h = harness();
+      const response = await rawPost(pattern, params, "{", ownerAuth, h);
+
+      expect(response.status).toBe(404);
+      expect(h.runtime.dispatchSession).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(bodyRoutes)(
+    "answers an unauthorized %s caller with the predicate's 403 even when the body is invalid JSON",
+    async (_name, _method, pattern, params) => {
+      const h = harness();
+      const authenticator = withAccess(() => {
+        throw new ForbiddenError({ message: "Not yours." });
+      });
+      const response = await rawPost(pattern, params, "{", authenticator, h);
+
+      expect(response.status).toBe(403);
+      expect(h.runtime.dispatchSession).not.toHaveBeenCalled();
+    },
+  );
+
+  it("still answers 400 for invalid JSON from a caller the policy admits", async () => {
+    const response = await rawPost(
+      EVE_SESSION_ROUTE_PATTERN,
+      owned,
+      "{",
+      withAccess(() => true),
+      harness(),
+    );
+
+    expect(response.status).toBe(400);
+  });
+
+  it("answers 403 for a nonexistent session on the stubs route without revealing whether it exists", async () => {
+    getRun.mockClear();
+    getRun.mockReturnValue({ exists: Promise.resolve(false) });
+    try {
+      const response = await call(
+        "GET",
+        EVE_SESSION_STUBS_ROUTE_PATTERN,
+        "ws_a",
+        { sessionId: "wrun_none" },
+        undefined,
+        harness(),
+        withAccess(() => {
+          throw new ForbiddenError({ message: "Not yours." });
+        }),
+      );
+
+      expect(response.status).toBe(403);
+      expect(getRun).not.toHaveBeenCalled();
+    } finally {
+      getRun.mockReturnValue({ exists: Promise.resolve(true) });
+    }
+  });
+
+  it("evaluates the stubs route's access policy before it looks the run up, and keeps 404 for admitted callers", async () => {
+    getRun.mockClear();
+    getRun.mockReturnValue({ exists: Promise.resolve(false) });
+    try {
+      const predicate = vi.fn().mockReturnValue(true);
+      const response = await call(
+        "GET",
+        EVE_SESSION_STUBS_ROUTE_PATTERN,
+        "ws_a",
+        { sessionId: "wrun_none" },
+        undefined,
+        harness(),
+        withAccess(predicate),
+      );
+
+      expect(response.status).toBe(404);
+      expect(predicate).toHaveBeenCalledOnce();
+      expect(predicate.mock.invocationCallOrder[0]).toBeLessThan(
+        getRun.mock.invocationCallOrder[0]!,
+      );
+    } finally {
+      getRun.mockReturnValue({ exists: Promise.resolve(true) });
+    }
+  });
+
+  it("does not ask the runtime who owns the session when a predicate refuses the stubs route without isOwner", async () => {
+    const h = harness();
+    const ownsSession = vi.fn().mockResolvedValue(true);
+    h.runtime.ownsSession = ownsSession;
+
+    const response = await call(
+      "GET",
+      EVE_SESSION_STUBS_ROUTE_PATTERN,
+      "ws_a",
+      owned,
+      undefined,
+      h,
+      withAccess(() => {
+        throw new ForbiddenError({ message: "Not yours." });
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(ownsSession).not.toHaveBeenCalled();
   });
 });

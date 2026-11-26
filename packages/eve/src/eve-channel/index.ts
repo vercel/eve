@@ -454,15 +454,15 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
 
         const sessionId = requireSessionId(params);
         if (sessionId instanceof Response) return sessionId;
-        const payload = await parseOptionalJsonRequest(req);
-        if (payload instanceof Response) return payload;
         const unowned = await requireSessionAccess({
-          sessionId: sessionId,
+          sessionId,
           session: () => attachSession(sessionId),
           authResult,
           request: req,
         });
         if (unowned !== undefined) return unowned;
+        const payload = await parseOptionalJsonRequest(req);
+        if (payload instanceof Response) return payload;
         if (Object.keys(payload).length === 0) {
           try {
             const result = await attachSession(sessionId).prewarm();
@@ -559,15 +559,15 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
         if (authResult instanceof Response) return authResult;
         const sessionId = requireSessionId(params);
         if (sessionId instanceof Response) return sessionId;
-        const body = await parseCancelTurnBody(req);
-        if (body instanceof Response) return body;
         const unowned = await requireSessionAccess({
-          sessionId: sessionId,
+          sessionId,
           session: () => attachSession(sessionId),
           authResult,
           request: req,
         });
         if (unowned !== undefined) return unowned;
+        const body = await parseCancelTurnBody(req);
+        if (body instanceof Response) return body;
         let result: Awaited<ReturnType<Session["cancel"]>>;
         try {
           result = await attachSession(sessionId).cancel({
@@ -591,15 +591,15 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
         if (authResult instanceof Response) return authResult;
         const sessionId = requireSessionId(params);
         if (sessionId instanceof Response) return sessionId;
-        const body = await parseSessionControlBody(req);
-        if (body instanceof Response) return body;
         const unowned = await requireSessionAccess({
-          sessionId: sessionId,
+          sessionId,
           session: () => attachSession(sessionId),
           authResult,
           request: req,
         });
         if (unowned !== undefined) return unowned;
+        const body = await parseSessionControlBody(req);
+        if (body instanceof Response) return body;
         let result: Awaited<ReturnType<Session["compact"]>>;
         try {
           result = await attachSession(sessionId).compact({
@@ -622,15 +622,15 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
         if (authResult instanceof Response) return authResult;
         const sessionId = requireSessionId(params);
         if (sessionId instanceof Response) return sessionId;
-        const body = await parseSessionControlBody(req);
-        if (body instanceof Response) return body;
         const unowned = await requireSessionAccess({
-          sessionId: sessionId,
+          sessionId,
           session: () => attachSession(sessionId),
           authResult,
           request: req,
         });
         if (unowned !== undefined) return unowned;
+        const body = await parseSessionControlBody(req);
+        if (body instanceof Response) return body;
         let result: Awaited<ReturnType<Session["clear"]>>;
         try {
           result = await attachSession(sessionId).clear({
@@ -654,15 +654,15 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
           if (authResult instanceof Response) return authResult;
           const sessionId = requireSessionId(params);
           if (sessionId instanceof Response) return sessionId;
-          const body = await parseResetBody(req);
-          if (body instanceof Response) return body;
           const unowned = await requireSessionAccess({
-            sessionId: sessionId,
+            sessionId,
             session: () => attachSession(sessionId),
             authResult,
             request: req,
           });
           if (unowned !== undefined) return unowned;
+          const body = await parseResetBody(req);
+          if (body instanceof Response) return body;
           let result: Awaited<ReturnType<Session["end"]>>;
           try {
             result = await attachSession(sessionId).end({
@@ -693,17 +693,17 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
         }
         const sessionId = requireSessionId(params);
         if (sessionId instanceof Response) return sessionId;
+        const unowned = await requireSessionAccess({
+          sessionId,
+          session: () => attachSession(sessionId),
+          authResult,
+          request: req,
+        });
+        if (unowned !== undefined) return unowned;
         try {
           if (!(await getRun(sessionId).exists)) {
             return Response.json({ error: "Session not found.", ok: false }, { status: 404 });
           }
-          const unowned = await requireSessionAccess({
-            sessionId: sessionId,
-            session: () => attachSession(sessionId),
-            authResult,
-            request: req,
-          });
-          if (unowned !== undefined) return unowned;
           return Response.json(
             {
               error: (await readStubFailure(sessionId)) ?? null,
@@ -728,7 +728,7 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
         const sessionId = requireSessionId(params);
         if (sessionId instanceof Response) return sessionId;
         const unowned = await requireSessionAccess({
-          sessionId: sessionId,
+          sessionId,
           session: () => attachSession(sessionId),
           authResult,
           request: req,
@@ -743,7 +743,7 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
         const sessionId = requireSessionId(args.params);
         if (sessionId instanceof Response) return sessionId;
         const unowned = await requireSessionAccess({
-          sessionId: sessionId,
+          sessionId,
           session: () => args.attachSession(sessionId),
           authResult,
           request: req,
