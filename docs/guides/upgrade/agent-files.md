@@ -204,7 +204,7 @@ import { start, getRun, resumeHook } from "workflow/api"; // [!code --]
 import { start, getRun, resumeHook } from "eve/workflow/api"; // [!code ++]
 ```
 
-`eve/workflow` exports `createHook`, `createWebhook`, `sleep`, `FatalError`, `RetryableError`, and `getWorkflowMetadata`. `eve/workflow/api` exports `start`, `getRun`, and `resumeHook`. Other Workflow SDK subpaths, helpers, and options aren't available, and these exports use eve's own types:
+`eve/workflow` exports `createHook`, `createWebhook`, `sleep`, `FatalError`, `RetryableError`, `getWorkflowMetadata`, and `getStepMetadata`. `eve/workflow/api` exports `start`, `getRun`, and `resumeHook`. Other Workflow SDK subpaths, helpers, and options aren't available, and these exports use eve's own types:
 
 - `getHookByToken` is removed. Pass a deterministic `token` to `createHook({ token })`, then resume the hook with `resumeHook(token, payload)`, which resolves to `void`.
 - `start(workflow, args?)` takes a `"use workflow"` function, not a source string. It takes no options such as `deploymentId` or `world`, because eve runs the workflow on the agent's own queue and deployment.

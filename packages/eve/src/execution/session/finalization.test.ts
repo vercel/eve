@@ -17,6 +17,10 @@ import {
   notifyTurnCallerStep,
 } from "#subagents/parent-notification.js";
 import {
+  reportSessionSubscriptionRetireFailureStep,
+  retireSessionSubscriptionsStep,
+} from "#runtime/subscriptions/steps.js";
+import {
   endSessionSandboxStep,
   reportSessionSandboxCleanupFailureStep,
 } from "#execution/session/end-sandbox-step.js";
@@ -28,6 +32,10 @@ vi.mock("#execution/terminate-child-sessions-step.js", () => ({
 vi.mock("#execution/session/end-sandbox-step.js", () => ({
   endSessionSandboxStep: vi.fn(),
   reportSessionSandboxCleanupFailureStep: vi.fn(async () => {}),
+}));
+vi.mock("#runtime/subscriptions/steps.js", () => ({
+  reportSessionSubscriptionRetireFailureStep: vi.fn(async () => {}),
+  retireSessionSubscriptionsStep: vi.fn(async () => {}),
 }));
 vi.mock("#execution/terminal-session-completion-step.js", () => ({
   emitTerminalSessionCompletionStep: vi.fn(),
@@ -57,6 +65,10 @@ function sessionWithUnreportedUsage() {
   const session = baseSession();
   const previouslySettled = takeSessionUsageDelta(withUsage(session, 100)).session;
   return createDurableSessionState({ session: withUsage(previouslySettled, 250) });
+}
+
+function subagentSession() {
+  return createDurableSessionState({ session: { ...baseSession(), rootSessionId: "root" } });
 }
 
 function sessionWithTaskRun() {
@@ -111,6 +123,89 @@ describe("session finalization", () => {
     }
   });
 
+  it.each([
+    { kind: "expired" as const },
+    { kind: "failed" as const, error: new Error("failed") },
+    { kind: "ended" as const },
+    { kind: "done" as const, action: { kind: "done" as const, output: "done" } },
+  ])("retires the session's subscriptions when the session is $kind", async (outcome) => {
+    await finalizeSession(outcome, {
+      caller: undefined,
+      cursor: { serializedContext: {}, sessionState: sessionWithUnreportedUsage() },
+      sessionWritable: new WritableStream(),
+    });
+
+    expect(retireSessionSubscriptionsStep).toHaveBeenCalledExactlyOnceWith({
+      sessionId: "detector",
+    });
+  });
+
+  it("skips retiring for a subagent session, which cannot subscribe", async () => {
+    await finalizeSession(
+      { kind: "expired" },
+      {
+        caller: {
+          callId: "delegate",
+          subagentName: "detector",
+          replyTo: { kind: "hook", token: "parent" },
+        },
+        cursor: { serializedContext: {}, sessionState: subagentSession() },
+        sessionWritable: new WritableStream(),
+      },
+    );
+    expect(retireSessionSubscriptionsStep).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { kind: "expired" as const },
+    { kind: "failed" as const, error: new Error("failed on the first turn") },
+  ])("retires a callback-backed root session's subscriptions when it is $kind", async (outcome) => {
+    await finalizeSession(outcome, {
+      caller: {
+        callId: "delegate",
+        subagentName: "detector",
+        replyTo: { kind: "callback", token: "token", url: "https://parent.example/callback" },
+      },
+      cursor: { serializedContext: {}, sessionState: sessionWithUnreportedUsage() },
+      sessionWritable: new WritableStream(),
+    });
+    expect(retireSessionSubscriptionsStep).toHaveBeenCalledExactlyOnceWith({
+      sessionId: "detector",
+    });
+  });
+
+  it("takes the session id from the serialized context when no session state was kept", async () => {
+    await finalizeSession(
+      { kind: "expired" },
+      {
+        caller: undefined,
+        cursor: { serializedContext: { "eve.sessionId": "from-context" }, sessionState: undefined },
+        sessionWritable: new WritableStream(),
+      },
+    );
+
+    expect(retireSessionSubscriptionsStep).toHaveBeenCalledExactlyOnceWith({
+      sessionId: "from-context",
+    });
+  });
+
+  it("preserves the terminal outcome when retiring the subscriptions fails", async () => {
+    vi.mocked(retireSessionSubscriptionsStep).mockRejectedValueOnce(new Error("world down"));
+
+    await expect(
+      finalizeSession(
+        { kind: "expired" },
+        {
+          caller: undefined,
+          cursor: { serializedContext: {}, sessionState: sessionWithUnreportedUsage() },
+          sessionWritable: new WritableStream(),
+        },
+      ),
+    ).resolves.toMatchObject({ isError: false });
+    expect(reportSessionSubscriptionRetireFailureStep).toHaveBeenCalledOnce();
+    expect(emitTerminalSessionCompletionStep).toHaveBeenCalledOnce();
+  });
+
   it("preserves the terminal outcome when sandbox cleanup fails", async () => {
     vi.mocked(endSessionSandboxStep).mockRejectedValueOnce(new Error("cleanup failed"));
 
@@ -152,6 +247,9 @@ describe("session finalization with an unsettled caller", () => {
         usageDelta: { inputTokens: 150 },
       });
       expect(result.output).not.toBe("");
+      expect(retireSessionSubscriptionsStep).toHaveBeenCalledExactlyOnceWith({
+        sessionId: "detector",
+      });
       expect(notifyTurnCallerStep).toHaveBeenCalledExactlyOnceWith({
         caller,
         lifecycle: "terminal",

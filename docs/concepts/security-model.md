@@ -113,6 +113,7 @@ While `steeredBy` is set, a call the model makes cannot get the caller's identit
 | The caller's token for a user-scoped connection's tools, `ctx.getToken()`, or `ctx.requireAuth()`     | Fails with `ConnectionAuthorizationFailedError` and `reason: "turn_steered"`. |
 | A tool call on an MCP connection with `forwardPrincipal`                                              | Fails with the same error and reason.                                         |
 | Connection event subscriptions                                                                        | Fails with the same error and reason.                                         |
+| Channel event subscriptions, `eve__subscribe` and stopping one with `eve__subscription_stop`          | Fails with an error that carries the same message.                            |
 | A call to a remote agent with `forwardPrincipal`                                                      | Fails with an error that carries the same message.                            |
 | Dynamic schedule tools                                                                                | Fails with an error that carries the same message.                            |
 | Tools of a memory slot scoped with `byPrincipal`                                                      | Fails with an error that carries the same message.                            |

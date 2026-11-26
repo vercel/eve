@@ -255,3 +255,57 @@ describe("read_file PDFs", () => {
     ).rejects.toThrow("read_file shows PDFs up to 20 MiB");
   });
 });
+
+describe("read_file text model output", () => {
+  it("renders text files as plain text in toModelOutput, resolves ~/ paths, and falls back to JSON for extra fields", async () => {
+    const sandbox = mockSandbox({
+      commands: {
+        [`printf '%s\\n' "$HOME"`]: { exitCode: 0, stderr: "", stdout: "/home/alice\n" },
+      },
+      initialFiles: {
+        "/home/alice/code.ts": 'const s = "hi\\n";\nconst n = 2;\nconst z = 3;\n',
+        "/workspace/empty.txt": "",
+      },
+    });
+
+    const full = await contextStorage.run(sandboxContext(sandbox), () =>
+      executeReadFileOnSandbox(sandbox.session, { filePath: "~/code.ts" }),
+    );
+    const sliced = await contextStorage.run(sandboxContext(sandbox), () =>
+      executeReadFileOnSandbox(sandbox.session, { filePath: "~/code.ts", limit: 2 }),
+    );
+    const empty = await contextStorage.run(sandboxContext(sandbox), () =>
+      executeReadFileOnSandbox(sandbox.session, { filePath: "/workspace/empty.txt" }),
+    );
+
+    expect(
+      await readFile.toModelOutput?.(full, toolModelOutputContext("read_file", "call_1")),
+    ).toEqual({
+      type: "text",
+      value: '1: const s = "hi\\n";\n2: const n = 2;\n3: const z = 3;',
+    });
+    expect(
+      await readFile.toModelOutput?.(sliced, toolModelOutputContext("read_file", "call_2")),
+    ).toEqual({
+      type: "text",
+      value:
+        '1: const s = "hi\\n";\n2: const n = 2;\n[Truncated: showing through line 2 of 3. Use offset=3 to read more.]',
+    });
+    expect(
+      await readFile.toModelOutput?.(empty, toolModelOutputContext("read_file", "call_3")),
+    ).toEqual({
+      type: "text",
+      value: "[/workspace/empty.txt: empty file]",
+    });
+    const wrapped = { ...full, extraField: "keep-me" };
+    expect(
+      await readFile.toModelOutput?.(
+        wrapped as never,
+        toolModelOutputContext("read_file", "call_4"),
+      ),
+    ).toEqual({
+      type: "json",
+      value: wrapped,
+    });
+  });
+});

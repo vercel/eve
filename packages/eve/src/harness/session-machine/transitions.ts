@@ -305,7 +305,10 @@ export function startDispatchedCalls(view: SessionView, pending: PendingDispatch
     ...pending.executing.map(({ callId, clearedBy }) => callStarted(callId, { clearedBy })),
     ...pending.started.flatMap((task) => startTask(view, task, introducedTasks).events),
     ...pending.refused.map(({ policy, result }) =>
-      callSettledFrom(result, { cause: { policy }, rejected: true }),
+      callSettledFrom(result, {
+        cause: { policy },
+        rejected: view.projection.view.calls[result.callId]?.status !== "running",
+      }),
     ),
   ]);
 }
@@ -330,10 +333,12 @@ export function startTask(
       },
     });
   }
-  events.push({
-    type: "call.started",
-    data: defined({ callId: task.callId, taskId: task.taskId, clearedBy: task.clearedBy }),
-  });
+  if (view.projection.view.calls[task.callId]?.status !== "running") {
+    events.push({
+      type: "call.started",
+      data: defined({ callId: task.callId, taskId: task.taskId, clearedBy: task.clearedBy }),
+    });
+  }
   return unchanged(view, events);
 }
 

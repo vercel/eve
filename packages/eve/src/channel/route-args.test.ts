@@ -36,6 +36,7 @@ function ports(createSession: Runtime["createSession"]): ChannelRoutePorts {
     },
     agentInfo: async () => Response.json({ ok: true }),
     agentName: "weather",
+    compiledArtifactsSource: () => ({ kind: "disk", appRoot: "/virtual/route-args" }),
     deliverySource: { channelKind: "http", channelName: "eve", requestId: "req_1" },
     params: { sessionId: "s_1" },
     requestIp: null,

@@ -18,7 +18,7 @@ chat + device picker → eve agent → Vercel Sandbox (headless Chrome, Linux de
 
 Both extensions run in the agent's [sandbox](https://eve.dev/docs/sandbox): each chat gets its own [Vercel Sandbox](https://vercel.com/docs/sandbox) with 4 vCPUs, during local development and when deployed. The browser and the desktop (a virtual display inside the sandbox) run side by side in it, so nothing opens on your own screen. `agent/sandbox.ts` installs agent-browser, Chrome, and the desktop into the snapshot every sandbox starts from, so sessions start warm.
 
-The [directory mounts](https://eve.dev/docs/extensions#override-a-contribution) in `agent/extensions/` wrap each browser action and `computer_use` so its result also carries a screen for the web app: a screenshot, the page URL, and the device's live stream. `toModelOutput` keeps all three out of what the model reads. The desktop tool also passes the screenshot to the model as an image, so it can see the screen without a separate `read_file` call. The browser mount also disables agent-browser's `close` tool, so the browser stays open after a task for you to watch or take over.
+The [directory mounts](https://eve.dev/docs/extensions#override-a-contribution) in `agent/extensions/` wrap common browser actions and `computer_use` so its result also carries a screen for the web app: a screenshot, the page URL, and the device's live stream. `toModelOutput` keeps all three out of what the model reads. The desktop tool also passes the screenshot to the model as an image, so it can see the screen without a separate `read_file` call. The browser mount also disables agent-browser's `close` tool, so the browser stays open after a task for you to watch or take over.
 
 ### Live view and Take Over
 
@@ -82,10 +82,10 @@ Each Auto decision is a model call billed to the project, so each viewer gets 12
 
 ## Customize
 
-- **Approvals**: to have the agent ask before a tool runs, override the tool in its mount directory with an approval policy, for example `agent/extensions/browser/tools/evaluate.ts`:
+- **Approvals**: to have the agent ask before a tool runs, override the tool in its mount directory with an approval policy, for example `agent/extensions/browser/tools/eval.ts`:
 
   ```ts
-  import { evaluate } from "@agent-browser/eve/tools";
+  import { eval as evaluate } from "@agent-browser/eve/tools";
   import { defineTool } from "eve/tools";
   import { always } from "eve/tools/approval";
 

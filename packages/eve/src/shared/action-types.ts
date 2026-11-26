@@ -115,6 +115,7 @@ export const runtimeWorkflowTaskRequestSchema = z
     executeInput: jsonValueSchema.optional(),
     input: jsonObjectSchema,
     kind: z.literal("workflow-task"),
+    preview: z.string().optional(),
     toolName: z.string(),
     workflowId: z.string(),
   })

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 
 import type { ContextReader } from "#context/key.js";
 import { ContextKey } from "#context/key.js";
-import type { AlsContext } from "#context/container.js";
+import type { AlsContext, ContextContainer } from "#context/container.js";
 import { SessionIdKey } from "#context/keys.js";
 import type { JsonValue } from "#shared/json.js";
 import { isNonEmptyString } from "#shared/guards.js";
@@ -201,4 +201,9 @@ export function entryVersions(
 
 export function readSlot(ctx: Pick<ContextReader, "get">, id: string): Slot | undefined {
   return readDefinitionsState(ctx).slots[id];
+}
+
+export function writeSlot(ctx: ContextContainer, id: string, slot: Slot): void {
+  const state = readDefinitionsState(ctx);
+  writeDefinitionsState(ctx, { ...state, slots: { ...state.slots, [id]: slot } });
 }

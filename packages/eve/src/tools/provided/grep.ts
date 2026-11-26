@@ -4,6 +4,7 @@ import {
   type GrepToolInput,
   type GrepSearchResult as GrepToolOutput,
 } from "#execution/sandbox/grep-search.js";
+import { toolOutput, type ToolModelOutput } from "#tools/model-output.js";
 import { toolLabel } from "#tools/tool-label.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
 import { defineJsonSchema } from "#tools/schema.js";
@@ -92,8 +93,32 @@ export const grep: ToolDefinition<GrepToolInput, GrepToolOutput> = frameworkTool
     },
     inputSchema: GREP_INPUT_SCHEMA,
     outputSchema: GREP_OUTPUT_SCHEMA,
+    toModelOutput: grepModelOutput,
   }),
 );
+
+const GREP_OUTPUT_KEYS = new Set(["content", "matchCount", "outputMode", "path", "truncated"]);
+
+function grepModelOutput(output: unknown): ToolModelOutput {
+  if (typeof output === "string") return toolOutput.text(output);
+  if (isGrepResult(output)) {
+    return toolOutput.text(output.content.length === 0 ? "No matches found" : output.content);
+  }
+  return toolOutput.json(output);
+}
+
+function isGrepResult(output: unknown): output is GrepToolOutput {
+  if (typeof output !== "object" || output === null) return false;
+  const value = output as Record<string, unknown>;
+  return (
+    Object.keys(value).every((key) => GREP_OUTPUT_KEYS.has(key)) &&
+    typeof value.content === "string" &&
+    typeof value.matchCount === "number" &&
+    typeof value.outputMode === "string" &&
+    typeof value.path === "string" &&
+    typeof value.truncated === "boolean"
+  );
+}
 
 export default grep;
 import { frameworkTool } from "./framework-tool.js";

@@ -38,7 +38,14 @@ import {
   type InternalContext,
   requireHistory,
 } from "#definitions/definition.js";
-import { readDefinitionsState, sessionIdOf } from "#definitions/state.js";
+import {
+  digestOf,
+  readDefinitionsState,
+  readSlot,
+  sessionIdOf,
+  slotValueOf,
+  writeSlot,
+} from "#definitions/state.js";
 import { effectiveModelId } from "#definitions/model.js";
 import { createFrameworkUserMessage } from "#harness/messages.js";
 import { toolsDefinition } from "#definitions/tools.js";
@@ -59,6 +66,8 @@ export function bindMemoryInstrumentation(
 }
 
 export function memoryDefinition(memory: ResolvedMemoryDefinition): Definition {
+  const id = `memory:${memory.slot}:recall`;
+  const append = memory.supersede === "append";
   return {
     contribute: (ctx) => ({
       context: async () => {
@@ -79,13 +88,18 @@ export function memoryDefinition(memory: ResolvedMemoryDefinition): Definition {
           );
           if (recalled === null) return null;
           const messages = validateMemoryRecallResult(recalled.result as never, memory.slot);
-          const recalls = accumulate(previous ?? null, recalled, messages);
+          const recalls = accumulate(previous ?? null, recalled, messages, append);
           return { value: recalls.batches.length === 0 ? null : parseJsonValue(recalls) };
         });
-        return ((kept?.value as Recalls | null | undefined)?.batches ?? []).flatMap(
+        return (slotValueOf<Recalls | null | undefined>(kept?.value)?.batches ?? []).flatMap(
           ({ messages, turnId }) =>
-            messages.map(({ content }) => ({
-              message: createFrameworkUserMessage("memory.load", content),
+            messages.map(({ content, id }) => ({
+              message: createFrameworkUserMessage(
+                "memory.load",
+                append && id !== undefined
+                  ? `Memory record ${memory.slot}/${id}. Use only the latest version of this record.\n\n${content}`
+                  : content,
+              ),
               turnId,
             })),
         );
@@ -102,6 +116,17 @@ export function memoryDefinition(memory: ResolvedMemoryDefinition): Definition {
               ]
             : [],
         ),
+        ...(append &&
+        committed(ctx, "context.settled").some(
+          ({ data }) => data.kind === "compaction" && data.outcome === "completed",
+        )
+          ? [
+              {
+                id: `memory:${memory.slot}:prune`,
+                run: async () => pruneRecalls(ctx.container as ContextContainer, id),
+              },
+            ]
+          : []),
         ...committed(ctx, "turn.settled").flatMap((settled) =>
           settled.data.outcome === "completed" && memory.provider.capture?.["turn.completed"]
             ? [{ id: `memory:${memory.slot}:capture`, run: () => captureTurn(memory, ctx) }]
@@ -109,7 +134,7 @@ export function memoryDefinition(memory: ResolvedMemoryDefinition): Definition {
         ),
       ],
     }),
-    id: `memory:${memory.slot}:recall`,
+    id,
     label: memory.logicalPath,
   };
 }
@@ -301,6 +326,7 @@ export function accumulate(
   previous: JsonValue,
   recalled: RecallRecord,
   messages: readonly NormalizedMemoryRecallMessage[],
+  append = false,
 ): Recalls {
   const earlier = previous as Recalls | null;
   const kept =
@@ -320,15 +346,38 @@ export function accumulate(
     .map(({ content, itemKey }) =>
       itemKey === undefined ? { content } : { content, id: itemKey },
     );
-  const replaced = new Set(added.flatMap(({ id }) => (id === undefined ? [] : [id])));
-  const batches: RecallBatch[] = kept
-    .map((batch) => ({
-      ...batch,
-      messages: batch.messages.filter(({ id }) => id === undefined || !replaced.has(id)),
-    }))
-    .filter(({ messages }) => messages.length > 0);
-  if (added.length > 0) batches.push({ messages: added, turnId: recalled.turnId });
-  return { batches, cleared: recalled.cleared, scope: recalled.scope };
+  if (added.length > 0) kept.push({ messages: added, turnId: recalled.turnId });
+  return {
+    batches: append ? kept : latestBatches(kept),
+    cleared: recalled.cleared,
+    scope: recalled.scope,
+  };
+}
+
+function latestBatches(batches: readonly RecallBatch[]): RecallBatch[] {
+  const seen = new Set<string>();
+  const latest: RecallBatch[] = [];
+  for (let i = batches.length - 1; i >= 0; i--) {
+    const batch = batches[i]!;
+    const messages = batch.messages.filter(({ id }) => {
+      if (id === undefined) return true;
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+    if (messages.length > 0) latest.push({ ...batch, messages });
+  }
+  return latest.reverse();
+}
+
+function pruneRecalls(ctx: ContextContainer, id: string): void {
+  const slot = readSlot(ctx, id);
+  if (slot === undefined || slot.value === null) return;
+  const recalls = slotValueOf<Recalls>(slot.value);
+  const value = parseJsonValue({ ...recalls, batches: latestBatches(recalls.batches) });
+  const digest = digestOf(value);
+  if (digest === slot.digest) return;
+  writeSlot(ctx, id, { digest, since: readDefinitionsState(ctx).latest["*"] ?? slot.since, value });
 }
 
 export interface ScopeContext {

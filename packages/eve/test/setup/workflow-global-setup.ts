@@ -51,7 +51,7 @@ async function discoverWorkflowEntries(): Promise<WorkflowBundleDiscoveredEntrie
   const inputFiles = [
     ...(await collectWorkflowInputFiles(resolvePackageSourceDirectoryPath("src/execution"))),
     ...(await collectWorkflowInputFiles(
-      resolvePackageSourceDirectoryPath("src/runtime/connections/events"),
+      resolvePackageSourceDirectoryPath("src/runtime/subscriptions"),
     )),
     ...(await collectWorkflowInputFiles(resolvePackageSourceDirectoryPath("src/internal/testing"))),
     ...(await collectWorkflowInputFiles(

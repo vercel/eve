@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionIdKey } from "#context/keys.js";
+import { FINAL_REPLY_TASK_SYSTEM_BLOCK, TASK_SYSTEM_BLOCK } from "#execution/tasks/render.js";
 import { mockModel, type MockModelRequest } from "#evals/mock-model.js";
 import { renderPendingApprovalsInstruction } from "#harness/hitl/approval-prompt.js";
 
@@ -101,6 +102,8 @@ describe("mockModel", () => {
       messages: [
         { content: "Run the mixed approval flow.", role: "user" },
         { content: tasks, role: "user" },
+        { content: TASK_SYSTEM_BLOCK, role: "user" },
+        { content: FINAL_REPLY_TASK_SYSTEM_BLOCK, role: "user" },
         { content: notice, role: "user" },
       ],
       model: mockModel((request) => {
@@ -115,6 +118,8 @@ describe("mockModel", () => {
       messages: [
         { role: "user", text: "Run the mixed approval flow." },
         { role: "user", text: tasks },
+        { role: "user", text: TASK_SYSTEM_BLOCK },
+        { role: "user", text: FINAL_REPLY_TASK_SYSTEM_BLOCK },
         { role: "user", text: notice },
       ],
       userMessageCount: 1,

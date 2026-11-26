@@ -835,4 +835,78 @@ describe("buildApplication", () => {
       ),
     ).resolves.toContain("export default");
   });
+
+  it("warns on Vercel service builds when a channel route is outside /eve/v1/*", async () => {
+    vi.stubEnv("VERCEL", "1");
+    const appRoot = await createScratchDirectory("eve-build-application-unreachable-route-");
+    const agentRoot = join(appRoot, "agent");
+    const { defineChannel, POST } = await import("#public/definitions/channel.js");
+    const { eveChannel } = await import("#eve-channel/index.js");
+    const { none } = await import("#public/channels/auth.js");
+    const { manifest } = await compileFromMemory({
+      agentRoot,
+      appRoot,
+      model: "openai/gpt-5.4",
+      modules: [
+        {
+          logicalPath: "channels/eve.ts",
+          loadNamespace: async () => ({
+            default: eveChannel({ auth: none() }),
+          }),
+        },
+        {
+          logicalPath: "channels/custom.ts",
+          loadNamespace: async () => ({
+            default: defineChannel({
+              routes: [
+                POST("/outside/wake", async () => new Response()),
+                POST("/eve/v1/inside/wake", async () => new Response()),
+                POST("/inside/wake", async () => new Response()),
+              ],
+            }),
+          }),
+        },
+      ],
+      name: "scenario-test-agent",
+    });
+
+    prepareProductionApplicationHostMock.mockImplementationOnce(
+      async (workspace: ApplicationBuildWorkspace) => {
+        await mkdir(join(workspace.compiler.artifactsDir, "compile"), { recursive: true });
+        const prepared = await createPreparedHost(workspace.appRoot);
+        return {
+          ...prepared,
+          compileResult: { ...prepared.compileResult, manifest },
+        };
+      },
+    );
+    createHostNitroMock.mockImplementationOnce(async (spec: HostSpec) =>
+      createNitroStub(spec.locations.outputDir),
+    );
+    await writeFile(
+      join(appRoot, "vercel.json"),
+      `${JSON.stringify(
+        {
+          experimentalServices: {
+            eve: { entrypoint: ".", framework: "eve", routePrefix: "/eve/v1" },
+            web: { entrypoint: ".", framework: "nextjs", routePrefix: "/" },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const { buildApplication } = await import("#internal/nitro/host/build-application.js");
+      await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
+
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("POST /outside/wake"));
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("channels/custom.ts"));
+    } finally {
+      warn.mockRestore();
+    }
+  });
 });

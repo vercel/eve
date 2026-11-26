@@ -26,7 +26,7 @@ describe("Vercel service build output", () => {
           "",
         ].join("\n"),
         "agent/schedules/reminders.ts": [
-          'import { defineDynamicSchedules } from "eve/experimental/schedules";',
+          'import { defineDynamicSchedules } from "eve/schedules";',
           "const anyInput = { '~standard': { version: 1, vendor: 'test', validate: (value) => ({ value }) } };",
           "export default defineDynamicSchedules({",
           "  inputSchema: anyInput,",

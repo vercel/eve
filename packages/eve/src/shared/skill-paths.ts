@@ -1,3 +1,4 @@
+import { runInternalCommand } from "#execution/sandbox/internal-shell.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 
 const MODEL_HOME_ROOT = "$HOME";
@@ -17,13 +18,14 @@ export async function resolveSandboxModelPath(input: {
   readonly path: string;
   readonly sandbox: SandboxSession;
 }): Promise<string> {
-  if (!isModelHomePath(input.path)) {
+  const prefix = homePrefixOf(input.path);
+  if (prefix === undefined) {
     return input.path;
   }
 
   const home = await resolveSandboxHome(input.sandbox);
   if (home !== null) {
-    const suffix = input.path.slice(MODEL_HOME_ROOT.length);
+    const suffix = input.path.slice(prefix.length);
     return suffix.length === 0 ? home : `${home === "/" ? "" : home}${suffix}`;
   }
 
@@ -60,14 +62,19 @@ async function resolveSandboxHome(sandbox: SandboxSession): Promise<string | nul
     return await cached;
   }
 
-  const next = probeSandboxHome(sandbox);
+  const next = probeSandboxHome(sandbox).then((home) => {
+    if (home === null) {
+      sandboxHomeCache.delete(sandbox);
+    }
+    return home;
+  });
   sandboxHomeCache.set(sandbox, next);
   return await next;
 }
 
 async function probeSandboxHome(sandbox: SandboxSession): Promise<string | null> {
   try {
-    const result = await sandbox.run({ command: HOME_PROBE_COMMAND });
+    const result = await runInternalCommand(sandbox, { command: HOME_PROBE_COMMAND });
     if (result.exitCode !== 0) {
       return null;
     }
@@ -83,8 +90,10 @@ async function probeSandboxHome(sandbox: SandboxSession): Promise<string | null>
   }
 }
 
-function isModelHomePath(path: string): boolean {
-  return path === MODEL_HOME_ROOT || path.startsWith(`${MODEL_HOME_ROOT}/`);
+function homePrefixOf(path: string): string | undefined {
+  if (path === MODEL_HOME_ROOT || path.startsWith(`${MODEL_HOME_ROOT}/`)) return MODEL_HOME_ROOT;
+  if (path === "~" || path.startsWith("~/")) return "~";
+  return undefined;
 }
 
 function isModelSkillPath(path: string): boolean {

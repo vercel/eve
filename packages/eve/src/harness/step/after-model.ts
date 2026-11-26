@@ -5,7 +5,7 @@ import type { ModelMessage, ToolSet, TypedToolCall, TypedToolError } from "ai";
 import type { StepResult } from "#harness/types.js";
 import { FINAL_OUTPUT_BESIDE_PENDING_CALLS } from "#harness/final-output.js";
 import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
-import { resolveAssistantStepText } from "#harness/messages.js";
+import { createFrameworkUserMessage, resolveAssistantStepText } from "#harness/messages.js";
 import type { HarnessStepResult } from "#harness/step-hooks.js";
 import {
   appendMissingToolResultMessages,
@@ -18,7 +18,7 @@ import { failTurnForEffect, type Step, stepReference } from "#harness/step/conte
 import { complete, fail, suspendStep } from "#harness/session-machine/transitions.js";
 import { type ToolResultPart, withResult } from "#harness/session-machine/suspended-steps.js";
 import { clearTurnClientContextState } from "#harness/turn-client-context.js";
-import { collectWorkflowCalls } from "#harness/coordination.js";
+import { collectPromotedTasks, collectWorkflowCalls } from "#harness/coordination.js";
 import {
   createToolResultMessagePartFromToolError,
   isToolResultError,
@@ -106,8 +106,10 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
   };
 
   const approvalRequests = result.approvalRequests ?? [];
+  const promotedTasks = result.promotedTasks ?? [];
   const blockedCallIds = new Set([
     ...approvalRequests.map((ask) => ask.call.callId),
+    ...promotedTasks.map((promoted) => promoted.callId),
     ...extractToolResultCallIds(responseMessages),
   ]);
   const workflowToolCalls = ((result.toolCalls ?? []) as TypedToolCall<ToolSet>[])
@@ -128,6 +130,7 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
 
   if (
     workflowToolCalls.length > 0 ||
+    promotedTasks.length > 0 ||
     programCalls.length > 0 ||
     approvalRequests.length > 0 ||
     authorizationInterrupt
@@ -140,7 +143,12 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
       tools: input.catalog,
       turnId,
     });
-    step.session = changeHistory(dispatched.session, { extend: promptMessages });
+    const promoted = collectPromotedTasks({
+      promotedTasks,
+      session: dispatched.session,
+      turnId,
+    });
+    step.session = changeHistory(promoted.session, { extend: promptMessages });
     const endsTurn =
       !normalizedProviderHistory.outcomeEndsResponse &&
       (await stepEndsTurn(result, responseMessages, input.endsTurnTools));
@@ -148,7 +156,7 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
       ...(endsTurn && { endsTurn: true as const }),
       event: { sequence, stepIndex, turnId },
       messages: answerCallsThatWontRun(responseMessages, result),
-      tasks: dispatched.workflowRequests,
+      tasks: [...dispatched.workflowRequests, ...promoted.workflowRequests],
     };
     if (approvalRequests.length > 0) {
       await askStepApprovals(step, { ...parked, requests: approvalRequests, tools: input.catalog });
@@ -197,7 +205,40 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
   if (workingTasks.length > 0) {
     return { held: { kind: "tasks", taskIds: workingTasks }, next: null, session: step.session };
   }
+  if (
+    !delivered &&
+    !endsTurn &&
+    result.finishReason === "length" &&
+    countTrailingLengthContinuations(step.session.history) < MAX_LENGTH_CONTINUATIONS
+  ) {
+    step.session = changeHistory(step.session, {
+      extend: [
+        ...step.session.history,
+        createFrameworkUserMessage("execution.retry", LENGTH_CONTINUATION_PROMPT),
+      ],
+    });
+    return { next: step.runStep, session: step.session };
+  }
   return settleTurn(step, { result, stepOutput: endsTurn ? null : stepOutput });
+}
+
+const MAX_LENGTH_CONTINUATIONS = 3;
+
+const LENGTH_CONTINUATION_PROMPT =
+  "Your previous response reached the output length limit before finishing. Continue directly from where it stopped and take the next tool call or complete your reply. Do not repeat completed work and do not mention this notice.";
+
+function countTrailingLengthContinuations(history: readonly ModelMessage[]): number {
+  let count = 0;
+  for (let i = history.length - 1; i >= 0; i--) {
+    const message = history[i];
+    if (message?.role === "assistant") continue;
+    if (message?.role === "user" && message.content === LENGTH_CONTINUATION_PROMPT) {
+      count++;
+      continue;
+    }
+    break;
+  }
+  return count;
 }
 
 function answerCallsThatWontRun(

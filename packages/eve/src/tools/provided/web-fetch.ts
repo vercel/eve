@@ -1,4 +1,5 @@
 import { type WebFetchInput, executeWebFetchTool } from "#execution/web-fetch/execute.js";
+import { toolOutput, type ToolModelOutput } from "#tools/model-output.js";
 import { toolLabel } from "#tools/tool-label.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
 import { defineJsonSchema } from "#tools/schema.js";
@@ -71,24 +72,38 @@ export const WEB_FETCH_OUTPUT_SCHEMA = defineJsonSchema<WebFetchToolOutput>({
 export const webFetch: ToolDefinition<WebFetchToolInput, WebFetchToolOutput> = frameworkTool(
   defineTool({
     label: { start: (input) => toolLabel("Fetch", input.url) },
-    description: [
-      "Fetch a webpage and return its content in the requested format. Use this to retrieve and analyze content from URLs.",
-      "",
-      "Usage notes:",
-      "- The URL must be a fully-formed valid URL starting with https://",
-      "- HTML responses are automatically converted to markdown or plain text based on the requested format",
-      '- Format options: "markdown" (default), "text", or "html"',
-      "- Default timeout is 30 seconds (max 120 seconds)",
-      "- Maximum response size is 5 MB; content is further capped at the shared tool-output budget (50 KB / 2000 lines)",
-      "- This tool is read-only and does not modify any files",
-    ].join("\n"),
+    description:
+      "Fetch an `https://` URL and return its content as markdown, text, or html (max 5 MB response, capped at 50 KB / 2000 lines).",
     async execute(input, ctx) {
       return await executeWebFetchTool(input as WebFetchInput, { abortSignal: ctx.abortSignal });
     },
     inputSchema: WEB_FETCH_INPUT_SCHEMA,
     outputSchema: WEB_FETCH_OUTPUT_SCHEMA,
+    toModelOutput: webFetchModelOutput,
   }),
 );
+
+const WEB_FETCH_OUTPUT_KEYS = new Set(["content", "contentType", "truncated", "url"]);
+
+function webFetchModelOutput(output: unknown): ToolModelOutput {
+  if (typeof output === "string") return toolOutput.text(output);
+  if (isWebFetchResult(output)) {
+    return toolOutput.text(output.truncated ? `${output.content}\n[truncated]` : output.content);
+  }
+  return toolOutput.json(output);
+}
+
+function isWebFetchResult(output: unknown): output is WebFetchToolOutput {
+  if (typeof output !== "object" || output === null) return false;
+  const value = output as Record<string, unknown>;
+  return (
+    Object.keys(value).every((key) => WEB_FETCH_OUTPUT_KEYS.has(key)) &&
+    typeof value.content === "string" &&
+    typeof value.contentType === "string" &&
+    typeof value.truncated === "boolean" &&
+    typeof value.url === "string"
+  );
+}
 
 export default webFetch;
 import { frameworkTool } from "./framework-tool.js";

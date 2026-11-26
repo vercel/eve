@@ -1,4 +1,4 @@
-import { installAgentBrowser } from "@agent-browser/eve/sandbox";
+import { agentBrowserRevalidationKey, installAgentBrowser } from "@agent-browser/eve/sandbox";
 import { installComputerUse } from "eve/extensions/computer-use/sandbox";
 import { defineSandbox, type SandboxSession } from "eve/sandbox";
 import { VercelSandbox } from "eve/sandbox/vercel";
@@ -14,6 +14,7 @@ const SCREEN_RELAY_VERSION = "0.1.2";
 // and screen-relay for the desktop's live view, once into the snapshot every sandbox starts from;
 // the tools start each on first use, so a chat only pays for the one it uses.
 export const environment = VercelSandbox.environment({
+  env: { AGENT_BROWSER_REVALIDATION_KEY: agentBrowserRevalidationKey() },
   prepare: async (sandbox) => {
     await installAgentBrowser(sandbox);
     await installComputerUse(sandbox);

@@ -72,7 +72,8 @@ import type { Delivery, SessionReader } from "eve/sessions";
 import { sessions as serverSessions, type PrewarmSessionResult, type SessionEndOptions } from "eve/server";
 import type { ChannelContext } from "eve/channels";
 import { z } from "zod";
-import { createHook, sleep, createWebhook, FatalError, RetryableError, getWorkflowMetadata } from "eve/workflow";
+import { createHook, sleep, createWebhook, FatalError, RetryableError, getWorkflowMetadata, getStepMetadata } from "eve/workflow";
+import { rateLimit, RateLimitMaxWaitError, type RateLimitOptions } from "eve/experimental/workflow";
 import { start, getRun, resumeHook, type WorkflowRun } from "eve/workflow/api";
 import { eveChannel, eveVercelOidc, type EveAuthFn } from "eve/channels/eve";
 import { vercelOidc } from "eve/channels/auth";
@@ -90,11 +91,24 @@ async function durable() {
   "use workflow";
   using hook = createHook<{ approved: boolean }>({ token: "approval" });
   const answer: { approved: boolean } = await hook;
+  const limitOptions: RateLimitOptions = { key: "approval", limit: 10, period: "1m", maxWait: "5s", burst: 2 };
+  try {
+    await rateLimit(limitOptions);
+  } catch (error) {
+    if (RateLimitMaxWaitError.is(error)) {
+      const _key: string = error.key;
+      const _at: Date | undefined = error.wouldAcquireAt;
+      void _key;
+      void _at;
+    }
+  }
   await sleep("1s");
   return answer.approved;
 }
 async function retryableStep() {
   "use step";
+  const { stepId, attempt, maxAttempts }: { stepId: string; attempt: number; maxAttempts: number } = getStepMetadata();
+  if (attempt >= maxAttempts) throw new FatalError("Step " + stepId + " gave up.");
   throw new RetryableError("Please try again.", { retryAfter: "5s" });
 }
 async function launch() {
@@ -262,6 +276,17 @@ describe("packed public declarations", () => {
           const internal = (file) => import(pathToFileURL(join(eve, "dist/src/internal/workflow", file)));
           assert.equal(createHook, (await internal("index.js")).createHook);
           assert.equal(getRun, (await internal("runtime.js")).getRun);
+          for (const [subpath, name] of [
+            ["schedules", "defineDynamicSchedules"],
+            ["schedules", "schedules"],
+            ["schedules/testing", "inMemoryScheduleProvider"],
+            ["schedules/vercel", "vercelScheduleProvider"],
+          ]) {
+            const stable = await import("eve/" + subpath);
+            const experimental = await import("eve/experimental/" + subpath);
+            assert.equal(typeof stable[name], "function", name);
+            assert.equal(experimental[name], stable[name], name);
+          }
         `,
           ],
           { cwd: app },

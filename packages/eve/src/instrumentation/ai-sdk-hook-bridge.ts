@@ -49,6 +49,7 @@ export function createAiSdkHookBridge(
   runInContext: InstrumentationContextRunner = directRunInContext,
   runtimeContext?: Readonly<Record<string, unknown>>,
   isFrameworkTool?: (name: string) => boolean,
+  unfilteredProviderMetadata?: (callId: string) => Readonly<Record<string, unknown>> | undefined,
 ): Telemetry {
   const state: AttemptState = {
     capturesInputs: hooks.capturesInputs ?? hooks.capturesContent,
@@ -121,11 +122,17 @@ export function createAiSdkHookBridge(
       }
     },
     async onLanguageModelCallEnd(event) {
+      const unfiltered = unfilteredProviderMetadata?.(event.callId);
       const key = state.modelKeys.get(event.callId);
       if (key === undefined) return;
       state.modelKeys.delete(event.callId);
       state.modelCallStartEvents.delete(event.callId);
-      const completed = toModelCallCompleted(state, key, event);
+      const completed = toModelCallCompleted(
+        state,
+        key,
+        event,
+        event.providerMetadata ?? unfiltered,
+      );
       await hooks.publish(completed);
     },
     onToolExecutionStart(event) {
@@ -220,6 +227,7 @@ function toModelCallCompleted(
   state: AttemptState,
   idempotencyKey: string,
   source: TelemetryEvent<"onLanguageModelCallEnd">,
+  providerMetadata: Readonly<Record<string, unknown>> | undefined,
 ): InstrumentationModelCallCompletedEvent {
   return Object.freeze({
     outcome: "completed",
@@ -227,11 +235,11 @@ function toModelCallCompleted(
       ? Object.freeze(modelContent(source.content).map((part) => Object.freeze(part)))
       : undefined,
     providerMetadata:
-      source.providerMetadata === undefined
+      providerMetadata === undefined
         ? undefined
         : state.capturesOutputs
-          ? source.providerMetadata
-          : structuralProviderMetadata(source.providerMetadata),
+          ? providerMetadata
+          : structuralProviderMetadata(providerMetadata),
     finishReason: source.finishReason,
     idempotencyKey,
     responseModelId: source.modelId,

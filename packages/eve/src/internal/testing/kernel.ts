@@ -48,6 +48,7 @@ function testAgent(agent: TestKernelConfig["agent"]): SessionAgent {
     modelMetadata: async () => ({}),
     nodeId: "root",
     resolvedAgent: {
+      channels: [],
       config: { compaction: { thresholdPercent: agent.thresholdPercent } },
       definitions: [],
       instructions: [],

@@ -1,5 +1,36 @@
 # eve
 
+## 1.5.0
+
+Released 2026-11-25 · [Compare with 1.4.0](https://github.com/vercel/eve/compare/eve%401.4.0...eve%401.5.0)
+
+### Features
+
+- Set `supersede: "append"` on a memory slot to append changed keyed recalls without rewriting the earlier prompt; successful compaction keeps only the latest version of each record.
+  The option and compaction behavior follow [suncyn's proposal in #4506](https://github.com/vercel/eve/issues/4506). ([#6827](https://github.com/vercel/eve/pull/6827))
+- Export `publicRoutePath` from `eve/channels`, reserve eve's own `/eve/v1/` protocol namespaces at compile time, warn on unreachable channel routes in Vercel service builds, and move `@eve/board`'s default wake route to `POST /eve/v1/board/wake` with a `route` option.
+  `@eve/board` continues serving `POST /board/wake` for one release so existing 0.1.0 standalone registrations keep waking until their next watch update rewrites the registration path. ([#6844](https://github.com/vercel/eve/pull/6844))
+- Set `targetAuth` in `evals.config.ts` to send credentials to eval targets, with token functions that `eve eval` calls before every request.
+  For the local dev server, pass client credentials such as `{ bearer: () => getSessionToken() }`. For `--url`, pass a function that checks the target's HTTPS origin before returning credentials. Returning `undefined` keeps the default Vercel credential lookup. Each `targetAuth` resolver or token function has five seconds to return. `EVE_EVAL_AUTH_TOKEN` and `EVE_EVAL_OIDC_TOKEN` still take precedence for `--url` runs, and eve warns when either overrides `targetAuth`. ([#6597](https://github.com/vercel/eve/pull/6597))
+- Throw `HttpError` or `TooManyRequestsError` from `eve/channels/auth` in an auth function or in `eveChannel({ onMessage })` to answer with that status, such as a `429` for a caller over a rate limit; a refused message creates no session and sends no message.
+  `UnauthenticatedError` and `ForbiddenError` now extend `HttpError`. `routeAuth` now honors only `HttpError` instances, from any copy of eve that includes this release, instead of any thrown object with a `response` property, so an unrelated error that carries an upstream `Response` no longer reaches the client. Throw an `HttpError` instead of a custom error with `response`. ([#6814](https://github.com/vercel/eve/pull/6814))
+- `CallObservation` (`eve/events`) and `EveToolPart` (`eve/client` and framework bindings) now expose `parentCallId` for calls run inside another call, and the dev TUI, web chat registry, and framework UIs group nested calls under their parent call. ([#6799](https://github.com/vercel/eve/pull/6799))
+- Update the bundled Workflow runtime and worlds to Workflow 5.8.0, use Workflow's default spec version (spec 10) for new runs, and export `rateLimit` and `RateLimitMaxWaitError` from `eve/experimental/workflow`.
+  Workflow 5.8.0 fixes spec 9 run-ahead log corruption, delivers aborts directly to in-process inline steps, sends wait timers concurrently, and fixes a zero-retention purge deadlock and stream-write completion race on the Postgres world. Set `WORKFLOW_SPEC_VERSION=8` to keep creating spec 8 runs. With `@workflow/world-postgres` 5.5.0, run `bootstrap` before deploying the upgrade so the database has migration 0033; deployments staying on `@workflow/world-postgres` 5.1.0–5.4.0 create spec 8 runs by default unless upgraded to 5.5.0 or configured with `WORKFLOW_SPEC_VERSION=9`. ([#6837](https://github.com/vercel/eve/pull/6837))
+- `eve/workflow` exports `getStepMetadata()`, which returns the current step's `stepId`, `attempt`, and `maxAttempts` inside a `"use step"` function, so a step can log retries, key idempotent side effects, and act on its last attempt.
+  Thanks @SiWarlock for requesting this in #5607. ([#6599](https://github.com/vercel/eve/pull/6599))
+- `workflow({ mode: "execute", tools: true })` from `eve/tools/workflow` runs model-written JavaScript programs on the turn's tool catalog, letting programs call tools, connections, and agents with approvals, sign-ins, output schema validation, and crash-safe replay. ([#6789](https://github.com/vercel/eve/pull/6789))
+
+### Bug Fixes
+
+- Keep the AI Gateway's cost, generation id, and routing on `model.call.settled` instrumentation events and model call spans when the trace policy doesn't record content.
+  The AI SDK now drops `providerMetadata` from telemetry events when inputs or outputs aren't recorded, so eve reads it from its own model call callback instead. The content-free reduction also keeps the gateway's `marketCost` and `routing.finalProvider`.
+  Thanks @zackleman for reporting this in #6537. ([#6598](https://github.com/vercel/eve/pull/6598))
+- Ask the model to reload a static skill when a deploy changes its instructions and the session still holds a confirmed load of that skill.
+  Skill loads recorded before this update do not qualify until the model loads the skill again. ([#6592](https://github.com/vercel/eve/pull/6592))
+- The self-modification subagents, when no model is configured for them, now run on the parent's own provider model.
+  Before, a parent on `chatgpt()`, `mockModel()`, or a direct provider instance sent the subagent's model calls to AI Gateway under the parent's id. A dynamic subagent that names a model string, even one equal to the parent's id, still resolves through AI Gateway. ([#5990](https://github.com/vercel/eve/pull/5990))
+
 ## 1.4.0
 
 Released 2026-11-23 · [Compare with 1.3.0](https://github.com/vercel/eve/compare/eve%401.3.0...eve%401.4.0)

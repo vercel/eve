@@ -24,7 +24,11 @@ export function announce(
     const { [key]: _said, ...others } = messages ?? {};
     messages = others;
     if (content !== undefined) {
-      const message = createFrameworkUserMessage(announcement.kind ?? "context.state", content);
+      const message = createFrameworkUserMessage(
+        announcement.kind ?? "context.state",
+        content,
+        announcement.metadata,
+      );
       added.push(message);
       messages = { ...messages, [key]: announcementDigest(message.kind, message.content) };
     }
