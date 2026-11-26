@@ -2,6 +2,7 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { HistoryStateKey, SessionIdKey, SessionKey } from "#context/keys.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import type { DynamicContext } from "#dynamic/definition.js";
+import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { DynamicDefinitionKind } from "#runtime/types.js";
 import { enterSessionProjection } from "#harness/session-machine/current.js";
 import { createModelMetadata } from "#internal/model-catalog.js";
@@ -57,7 +58,7 @@ export function definitionSession(
     }[];
     readonly connections?: readonly DynamicSource[];
     readonly instructions?: readonly DynamicSource[];
-    readonly model?: { readonly id: string };
+    readonly model?: RuntimeModelReference;
     readonly skills?: readonly DynamicSource[];
     readonly staticConnections?: readonly ResolvedConnectionDefinition[];
     readonly subagents?: readonly DynamicSubagentSource[];
@@ -94,6 +95,7 @@ export function definitionSession(
       modelMetadata: async () => MODEL_METADATA,
       nodeId: "root",
       resolvedAgent: {
+        channels: [],
         definitions: [
           ...(input.instructions ?? []).map((source) => resolver("instructions", source)),
           ...(input.tools ?? []).map((source) => resolver("tool", source)),

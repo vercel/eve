@@ -50,7 +50,7 @@ catalog:
   "@vercel/connect": "2.9.2"
   "@vercel/otel": "2.3.0"
   "@vercel/sandbox": "4.0.0"
-  "@workflow/world-postgres": "5.4.0"
+  "@workflow/world-postgres": "5.5.0"
   ai: "^7.0.172"
   better-auth: "1.7.21"
   marked: "18.2.0"
@@ -98,4 +98,4 @@ minimumReleaseAgeExclude:
   - "@stripe/link-sdk@3.1.0"
   - "claude-mem@15.18.1"
 patchedDependencies:
-  "@vercel/geistdocs@2.14.2": patches/@vercel__geistdocs@2.14.2.patch
+  "@vercel/geistdocs@3.0.2": patches/@vercel__geistdocs@3.0.2.patch

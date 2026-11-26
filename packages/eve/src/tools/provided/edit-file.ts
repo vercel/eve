@@ -3,7 +3,6 @@ import { defineTool, toolOutput, type ToolDefinition } from "#public/tools/index
 import { defineJsonSchema, prepareJsonSchema } from "#tools/schema.js";
 
 import { frameworkTool } from "./framework-tool.js";
-import { refreshReadFileStamp } from "./write-file.js";
 
 /*!
  * Ported from pi's `edit` tool (packages/coding-agent/src/core/tools/edit.ts and
@@ -32,16 +31,11 @@ export interface EditFileToolOutput {
   replacements: number;
 }
 
-const GUIDELINES = [
-  "Use edit_file for targeted changes. Batch changes to one file in a single call.",
-  "Each edits[].oldText must exactly and uniquely match the original file. Keep matches short and non-overlapping; merge nearby changes without including large unchanged regions.",
-];
-
 const EDIT_FILE_INPUT_SCHEMA = prepareJsonSchema<EditFileToolInput>(
   {
     type: "object",
     properties: {
-      path: { type: "string", description: "Path to the file to edit (relative or absolute)" },
+      path: { type: "string", description: "Path to the file to edit (relative or absolute)." },
       edits: {
         type: "array",
         items: {
@@ -49,15 +43,14 @@ const EDIT_FILE_INPUT_SCHEMA = prepareJsonSchema<EditFileToolInput>(
           properties: {
             oldText: {
               type: "string",
-              description:
-                "Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call.",
+              description: "Exact, unique, non-overlapping text in the original file.",
             },
-            newText: { type: "string", description: "Replacement text for this targeted edit." },
+            newText: { type: "string", description: "Replacement text." },
           },
           required: ["oldText", "newText"],
         },
         description:
-          "One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead.",
+          "Targeted replacements matched against the original file (not incrementally). Merge nearby changes into one edit.",
       },
     },
     required: ["path", "edits"],
@@ -84,12 +77,8 @@ export const editFile: ToolDefinition<EditFileToolInput, EditFileToolOutput> = f
       start: (input: EditFileToolInput) =>
         typeof input.path === "string" ? `Edit ${input.path}` : "Edit",
     },
-    description: [
-      "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.",
-      "",
-      "Guidelines:",
-      ...GUIDELINES.map((guideline) => `- ${guideline}`),
-    ].join("\n"),
+    description:
+      "Edit a file by replacing exact, unique, non-overlapping `edits[].oldText` blocks against the original file. Batch edits to one file in a single call and keep matches concise.",
     inputSchema: EDIT_FILE_INPUT_SCHEMA,
     outputSchema: EDIT_FILE_OUTPUT_SCHEMA,
     async execute(input, ctx): Promise<EditFileToolOutput> {
@@ -124,7 +113,6 @@ export const editFile: ToolDefinition<EditFileToolInput, EditFileToolOutput> = f
         if (mode !== undefined && mode !== DEFAULT_FILE_MODE) {
           await restoreFileMode(sandbox, absolutePath, mode);
         }
-        refreshReadFileStamp(absolutePath, content, written);
         return { path, replacements: edits.length };
       });
     },
@@ -139,7 +127,10 @@ const DEFAULT_FILE_MODE = "644";
 
 async function readFileMode(sandbox: SandboxSession, path: string): Promise<string | undefined> {
   try {
-    const result = await sandbox.run({ command: `stat -L -c %a -- ${quoteShell(path)}` });
+    const quoted = quoteShell(path);
+    const result = await sandbox.run({
+      command: `stat -L -c %a -- ${quoted} 2>/dev/null || stat -L -f %Lp -- ${quoted} 2>/dev/null`,
+    });
     const mode = result.stdout.trim();
     return result.exitCode === 0 && /^[0-7]{3,4}$/u.test(mode) ? mode : undefined;
   } catch {
@@ -171,6 +162,11 @@ function prepareEditArguments(input: unknown): unknown {
   if (!isRecord(input)) return input;
   const args: Record<string, unknown> = { ...input };
 
+  if (typeof args.path !== "string" && typeof args.filePath === "string") {
+    args.path = args.filePath;
+    delete args.filePath;
+  }
+
   if (typeof args.edits === "string") {
     try {
       const parsed: unknown = JSON.parse(args.edits);
@@ -199,14 +195,45 @@ function isSingleEdit(value: unknown): value is EditFileToolEdit {
 const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
 
 const HOME_PREFIX = /^(?:~|\$HOME)(?=\/|$)/u;
+const editSandboxHomeCache = new WeakMap<SandboxSession, Promise<string>>();
+
+async function resolveEditHome(sandbox: SandboxSession): Promise<string> {
+  const cached = editSandboxHomeCache.get(sandbox);
+  if (cached !== undefined) return await cached;
+  const next = probeEditHome(sandbox).then((dir) => {
+    if (dir === "") editSandboxHomeCache.delete(sandbox);
+    return dir;
+  });
+  editSandboxHomeCache.set(sandbox, next);
+  return await next;
+}
+
+async function probeEditHome(sandbox: SandboxSession): Promise<string> {
+  try {
+    const probe = await sandbox.run({ command: `printf '%s' "$HOME"` });
+    if (probe.exitCode !== 0) return "";
+    const dir = probe.stdout.trim();
+    if (
+      dir.length === 0 ||
+      !dir.startsWith("/") ||
+      dir.includes("\0") ||
+      dir.includes("\n") ||
+      dir.includes("\r")
+    ) {
+      return "";
+    }
+    return dir === "/" ? dir : dir.replace(/\/+$/, "");
+  } catch {
+    return "";
+  }
+}
 
 async function resolveEditPath(sandbox: SandboxSession, path: string): Promise<string> {
   let normalized = path.replace(UNICODE_SPACES, " ");
   if (normalized.startsWith("@")) normalized = normalized.slice(1);
   const home = HOME_PREFIX.exec(normalized)?.[0];
   if (home !== undefined) {
-    const probe = await sandbox.run({ command: `printf '%s' "$HOME"` });
-    const dir = probe.exitCode === 0 ? probe.stdout.trim() : "";
+    const dir = await resolveEditHome(sandbox);
     if (dir === "") throw new Error(`Could not edit file: ${path}. The sandbox has no $HOME.`);
     normalized = `${dir === "/" ? "" : dir}${normalized.slice(home.length)}` || "/";
   } else if (normalized.startsWith("file://")) {
@@ -396,7 +423,8 @@ function fuzzyFindText(content: string, oldText: string): FuzzyMatchResult {
   return { found: true, index: fuzzyIndex, matchLength: fuzzyOldText.length, usedFuzzyMatch: true };
 }
 
-function countOccurrences(content: string, oldText: string): number {
+function countOccurrences(content: string, oldText: string, fuzzy: boolean): number {
+  if (!fuzzy) return content.split(oldText).length - 1;
   const fuzzyContent = normalizeForFuzzyMatch(content);
   const fuzzyOldText = normalizeForFuzzyMatch(oldText);
   return fuzzyContent.split(fuzzyOldText).length - 1;
@@ -476,7 +504,11 @@ function applyEditsToNormalizedContent(
       throw getNotFoundError(path, i, normalizedEdits.length);
     }
 
-    const occurrences = countOccurrences(replacementBaseContent, edit.oldText);
+    const occurrences = countOccurrences(
+      replacementBaseContent,
+      edit.oldText,
+      matchResult.usedFuzzyMatch,
+    );
     if (occurrences > 1) {
       throw getDuplicateError(path, i, normalizedEdits.length, occurrences);
     }

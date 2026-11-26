@@ -1,4 +1,5 @@
 import type { SlackApiResponse } from "#public/channels/slack/api.js";
+import { createSlackLookupCache } from "#public/channels/slack/lookup-cache.js";
 import { readSlackSpaceType } from "#public/channels/slack/space.js";
 import type {
   ConversationSpaceType,
@@ -28,23 +29,64 @@ export interface SlackConversationKind {
   readonly visibility?: ConversationSpaceVisibility;
 }
 
+export type SlackConversationKindReader = (input: {
+  readonly channelId: string;
+  readonly raw: Readonly<Record<string, unknown>> | undefined;
+  readonly request: (operation: string, body: unknown) => Promise<SlackApiResponse>;
+  readonly teamId?: string;
+}) => Promise<SlackConversationKind>;
+
+const CONVERSATION_KIND_TTL_MS = 5 * 60 * 1000;
+const FAILED_CONVERSATION_KIND_TTL_MS = 60_000;
+
+export function createSlackConversationKindReader(now?: () => number): SlackConversationKindReader {
+  const cache = createSlackLookupCache<SlackConversationKind>({
+    failedTtlMs: FAILED_CONVERSATION_KIND_TTL_MS,
+    now,
+    ttlMs: CONVERSATION_KIND_TTL_MS,
+  });
+
+  return (input) => {
+    const fromEvent = readEventConversationKind(input.raw);
+    if (fromEvent !== undefined) return Promise.resolve(fromEvent);
+
+    const key = `${input.teamId ?? ""}:${input.channelId}`;
+    return cache.getOrLoad(key, async () => {
+      const value = await fetchSlackConversationKind(input.channelId, input.request);
+      return { failed: value.visibility === undefined, value };
+    });
+  };
+}
+
 export async function readSlackConversationKind(input: {
   readonly channelId: string;
   readonly raw: Readonly<Record<string, unknown>> | undefined;
   readonly request: (operation: string, body: unknown) => Promise<SlackApiResponse>;
 }): Promise<SlackConversationKind> {
-  const eventPrivacy = readSlackConversationPrivacy(input.raw);
-  if (eventPrivacy !== "unknown") {
-    const spaceType = readSlackSpaceType(input.raw);
-    return {
-      isPrivate: eventPrivacy === "private",
-      ...(spaceType && { spaceType }),
-      visibility: eventPrivacy,
-    };
-  }
+  const fromEvent = readEventConversationKind(input.raw);
+  if (fromEvent !== undefined) return fromEvent;
+  return await fetchSlackConversationKind(input.channelId, input.request);
+}
 
+function readEventConversationKind(
+  raw: Readonly<Record<string, unknown>> | undefined,
+): SlackConversationKind | undefined {
+  const eventPrivacy = readSlackConversationPrivacy(raw);
+  if (eventPrivacy === "unknown") return undefined;
+  const spaceType = readSlackSpaceType(raw);
+  return {
+    isPrivate: eventPrivacy === "private",
+    ...(spaceType && { spaceType }),
+    visibility: eventPrivacy,
+  };
+}
+
+async function fetchSlackConversationKind(
+  channelId: string,
+  request: (operation: string, body: unknown) => Promise<SlackApiResponse>,
+): Promise<SlackConversationKind> {
   try {
-    const response = await input.request("conversations.info", { channel: input.channelId });
+    const response = await request("conversations.info", { channel: channelId });
     const privacy = readConversationInfoPrivacy(response);
     const spaceType = readConversationInfoSpaceType(response);
     return {

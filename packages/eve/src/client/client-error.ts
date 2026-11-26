@@ -11,6 +11,8 @@ export type ClientErrorCode =
   | "forbidden"
   | "info_forbidden"
   | "eve_production_auth_not_configured"
+  | "rate_limited"
+  | "request_rejected"
   | "session_stranded"
   | "session_expired"
   | "descendant_unavailable"

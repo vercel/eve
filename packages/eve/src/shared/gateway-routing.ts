@@ -3,6 +3,7 @@ import { isObject, readNonEmptyString } from "#shared/guards.js";
 export interface GatewayRouting {
   readonly clientSessionId?: string;
   readonly clientSessionIdSource?: string;
+  readonly finalProvider?: string;
   readonly affinity?: {
     readonly displacedProvider?: string;
     readonly outcome?: string;
@@ -20,7 +21,7 @@ export function readGatewayRouting(value: unknown): GatewayRouting | undefined {
     "pinnedProvider",
   ] as const);
   const result: { -readonly [K in keyof GatewayRouting]: GatewayRouting[K] } = {
-    ...pickStrings(routing, ["clientSessionId", "clientSessionIdSource"] as const),
+    ...pickStrings(routing, ["clientSessionId", "clientSessionIdSource", "finalProvider"] as const),
   };
   if (affinity !== undefined) result.affinity = affinity;
   return Object.keys(result).length === 0 ? undefined : result;

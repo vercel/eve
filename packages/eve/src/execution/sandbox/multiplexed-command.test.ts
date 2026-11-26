@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { adaptMultiplexedCommandToSandboxProcess } from "#execution/sandbox/multiplexed-command.js";
+import {
+  adaptMultiplexedCommandToSandboxProcess,
+  adaptStreamingCommandToSandboxProcess,
+} from "#execution/sandbox/multiplexed-command.js";
 
 interface TestLog {
   readonly data: string;
@@ -298,5 +301,104 @@ describe("adaptMultiplexedCommandToSandboxProcess", () => {
     await exited.wait();
     controller.abort(new Error("caller"));
     await expect(exitedWrite).rejects.toThrow("caller");
+  });
+});
+
+describe("adaptStreamingCommandToSandboxProcess", () => {
+  it("resolves on start, streams stdout and stderr, and releases on completion", async () => {
+    const finished = Promise.withResolvers<{ exitCode: number }>();
+    const onRelease = vi.fn();
+    const kill = vi.fn(async () => undefined);
+    let streams!: {
+      stderr: { write(chunk: string): boolean };
+      stdout: { write(chunk: string): boolean };
+    };
+
+    const process = await adaptStreamingCommandToSandboxProcess({
+      onRelease,
+      async start({ onStart, stderr, stdout }) {
+        streams = { stderr, stdout };
+        onStart({ kill });
+        stdout.write("out one\n");
+        return await finished.promise;
+      },
+    });
+
+    const stdout = readText(process.stdout);
+    const stderr = readText(process.stderr);
+    expect(onRelease).not.toHaveBeenCalled();
+
+    streams.stderr.write("err\n");
+    streams.stdout.write("out two\n");
+    finished.resolve({ exitCode: 7 });
+
+    await expect(process.wait()).resolves.toEqual({ exitCode: 7 });
+    await expect(stdout).resolves.toBe("out one\nout two\n");
+    await expect(stderr).resolves.toBe("err\n");
+    expect(onRelease).toHaveBeenCalledOnce();
+    expect(kill).not.toHaveBeenCalled();
+  });
+
+  it("kills once, releases immediately, and propagates abort reason to streams and wait", async () => {
+    const controller = new AbortController();
+    const stop = new Error("stop");
+    const onRelease = vi.fn();
+    const kill = vi.fn(async () => undefined);
+    const fail = Promise.withResolvers<{ exitCode: number }>();
+
+    const process = await adaptStreamingCommandToSandboxProcess({
+      abortSignal: controller.signal,
+      onRelease,
+      async start({ onStart }) {
+        onStart({ kill });
+        return await fail.promise;
+      },
+    });
+
+    controller.abort(stop);
+    await vi.waitFor(() => expect(kill).toHaveBeenCalledOnce());
+    expect(onRelease).toHaveBeenCalledOnce();
+    fail.reject(new DOMException("Aborted", "AbortError"));
+
+    await expect(readText(process.stdout)).rejects.toBe(stop);
+    await expect(readText(process.stderr)).rejects.toBe(stop);
+    await expect(process.wait()).rejects.toBe(stop);
+    expect(onRelease).toHaveBeenCalledOnce();
+  });
+
+  it("kills an already-started command when abort rejects start before spawn resumes", async () => {
+    const controller = new AbortController();
+    const stop = new Error("stop immediately");
+    const onRelease = vi.fn();
+    const kill = vi.fn(async () => undefined);
+
+    const process = await adaptStreamingCommandToSandboxProcess({
+      abortSignal: controller.signal,
+      onRelease,
+      async start({ onStart }) {
+        onStart({ kill });
+        controller.abort(stop);
+        throw new DOMException("Aborted", "AbortError");
+      },
+    });
+
+    await expect(process.wait()).rejects.toBe(stop);
+    expect(kill).toHaveBeenCalledOnce();
+    expect(onRelease).toHaveBeenCalledOnce();
+  });
+
+  it("releases and rejects when starting the command fails before onStart", async () => {
+    const onRelease = vi.fn();
+    const boom = new Error("network down");
+
+    await expect(
+      adaptStreamingCommandToSandboxProcess({
+        onRelease,
+        async start() {
+          throw boom;
+        },
+      }),
+    ).rejects.toBe(boom);
+    expect(onRelease).toHaveBeenCalledOnce();
   });
 });

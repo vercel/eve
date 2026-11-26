@@ -1,6 +1,7 @@
 import type { ModelMessage } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
+import type { SkillLoadResultPart } from "#execution/catalog/skills.js";
 import { COMPACTION_PROMPT_ENVELOPE } from "#harness/compaction/prompt.js";
 import {
   compactMessages,
@@ -242,6 +243,56 @@ describe("getInputTokenCount", () => {
         3_000,
       ),
     ).toBe(estimateTokens(messages) + 3_000);
+  });
+
+  it("scales appended message estimates by calibrated estimateRatio capped at 1.6", () => {
+    const messages: ModelMessage[] = [
+      { role: "user", content: "initial" },
+      { role: "assistant", content: "x".repeat(400) },
+    ];
+    const appendedTokens = estimateTokens([messages[1]!]);
+    const scaled = getInputTokenCount(messages, {
+      ...config,
+      estimateRatio: 1.5,
+      lastKnownInputTokens: 10_000,
+      lastKnownPromptMessageCount: 1,
+    });
+    expect(scaled).toBe(10_000 + Math.ceil(appendedTokens * 1.5));
+
+    const capped = getInputTokenCount(messages, {
+      ...config,
+      estimateRatio: 15,
+      lastKnownInputTokens: 8_000,
+      lastKnownPromptMessageCount: 1,
+    });
+    expect(capped).toBe(8_000 + Math.ceil(appendedTokens * 1.6));
+  });
+
+  it("does not prematurely compact when synthetic usage inflates estimateRatio above 1.6", () => {
+    const messages: ModelMessage[] = [
+      { role: "user", content: `Seed 0: ${"Preserve this repository evidence. ".repeat(40)}` },
+      { role: "assistant", content: "Seed evidence recorded. ".repeat(64) },
+      { role: "user", content: `Seed 1: ${"Preserve this repository evidence. ".repeat(40)}` },
+    ];
+    const measured = withPromptMeasurement(
+      {},
+      {
+        inputTokens: 8_000,
+        modelId: "mock",
+        promptMessageCount: 1,
+        promptMessages: [messages[0]!],
+        requestEnvelopeTokens: 200,
+      },
+    );
+    expect(measured.estimateRatio).toBeGreaterThan(10);
+    expect(
+      shouldCompact(
+        messages,
+        { ...config, ...measured, target: 5_000, threshold: 10_000 },
+        200,
+        measured.requestEnvelopeTokens,
+      ),
+    ).toBe(false);
   });
 });
 
@@ -760,6 +811,34 @@ describe("compactMessages: capped tool results", () => {
     expect(value).toContain("xxx");
     expect(value.length).toBeLessThan(2_400);
     expect(result.at(-1)).toEqual(user("what did you find?"));
+  });
+
+  it("preserves the loaded skill revision when capping its result", async () => {
+    const size = 4_000;
+    const part: SkillLoadResultPart = {
+      output: { type: "text", value: "x".repeat(size) },
+      skillLoad: { identity: "skills/release.md", revision: "v1", scope: "application:root" },
+      toolCallId: "call-0",
+      toolName: "eve__skill",
+      type: "tool-result",
+    };
+    const { tool } = await compactWithToolInTail([
+      {
+        content: [
+          {
+            input: { name: "release" },
+            toolCallId: part.toolCallId,
+            toolName: part.toolName,
+            type: "tool-call",
+          },
+        ],
+        role: "assistant",
+      },
+      { content: [part], role: "tool" },
+    ]);
+
+    expect(toolResultValue(tool).length).toBeLessThan(size);
+    expect(tool?.content[0]).toHaveProperty("skillLoad", part.skillLoad);
   });
 
   it("does not split a UTF-16 surrogate pair at either cut when capping tool results", async () => {

@@ -1,5 +1,6 @@
 export const PROGRAM_MAX_CALLS = 1024;
 export const PROGRAM_MAX_AGENT_CALLS = 128;
+export const PROGRAM_MAX_INLINE_CALLS = 32;
 export const PROGRAM_CPU_TIMEOUT_MS = 30_000;
 export const PROGRAM_TIMEOUT_MS = 300_000;
 export const PROGRAM_MEMORY_BYTES = 64 * 1024 * 1024;
@@ -10,3 +11,7 @@ export const PROGRAM_MAX_INPUT_BYTES = 1024 * 1024;
 export const PROGRAM_MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 export const PROGRAM_MAX_CONTINUATION_BYTES = 8 * 1024 * 1024;
 export const PROGRAM_MAX_RESULT_TOKENS = 10_000;
+
+export function agentLimitMessage(limit: number, name: string): string {
+  return `EXECUTE_AGENT_LIMIT_REACHED: a program may call agents at most ${String(limit)} times; "${name}" was not called.`;
+}

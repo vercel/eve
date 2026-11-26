@@ -1,15 +1,21 @@
 import { isAgentTool } from "#execution/tasks/tool-entry-point.js";
 import type { Announcement } from "#harness/announcements.js";
 import { CALL_TOOL_NAME, SEARCH_TOOL_NAME, SKILL_TOOL_NAME } from "#protocol/catalog-tools.js";
+import { SUBSCRIBE_TOOL } from "#runtime/subscriptions/tools.js";
 
 import { compareCodeUnits } from "./rank.js";
+import { subscriptionSources } from "./subscription-tools.js";
 import type { Callable } from "./step-catalog.js";
 
-type Listed = Pick<Callable, "connections" | "deferred" | "entries" | "skills">;
+type Listed = Pick<
+  Callable,
+  "channels" | "connections" | "deferred" | "entries" | "skills" | "subagent"
+>;
 
 const ANNOUNCEMENT_KEY = "catalog";
 const MAX_LISTED_NAMESPACES = 20;
 const MAX_LISTED_CONNECTIONS = 20;
+const MAX_LISTED_SUBSCRIPTIONS = 20;
 
 type Kind = "tools" | "agents" | "skills";
 
@@ -27,18 +33,29 @@ interface CatalogListing {
   readonly connections: Capped<ListedConnection>;
   readonly kinds: readonly Kind[];
   readonly namespaces: Capped<string>;
+  readonly subscriptions?: Capped<string>;
 }
 
 export function catalogAnnouncements(catalog: Listed): Readonly<Record<string, Announcement>> {
   const current = listCatalog(catalog);
   const reachable = reachableNames(catalog);
+  const programTool = programToolName(catalog);
   return {
     [ANNOUNCEMENT_KEY]: {
       initial: EMPTY_LISTING,
       value: JSON.stringify(current),
-      render: (previous) => renderCatalogAnnouncement(parseListing(previous), current, reachable),
+      render: (previous) =>
+        renderCatalogAnnouncement(parseListing(previous), current, reachable, programTool),
     },
   };
+}
+
+function programToolName(catalog: Listed): string | undefined {
+  const names = [...catalog.entries.entries()]
+    .filter(([, definition]) => definition.workflowProgram?.tools === true)
+    .map(([name]) => name)
+    .sort(compareCodeUnits);
+  return names[0];
 }
 
 function listCatalog(catalog: Listed): CatalogListing {
@@ -58,15 +75,29 @@ function listCatalog(catalog: Listed): CatalogListing {
   const connections = catalog.connections
     .map(({ connectionName, description }) => ({ description, name: connectionName }))
     .sort((a, b) => compareCodeUnits(a.name, b.name));
+  const sources = subscriptionSources(catalog);
+  const subscribable = [
+    ...sources.channels.map(({ channelName }) => channelName),
+    ...sources.connections.map(({ connectionName }) => connectionName),
+  ].sort(compareCodeUnits);
   return {
     connections: capped(connections, MAX_LISTED_CONNECTIONS),
     kinds,
     namespaces: { ...namespaces, items: [...namespaces.items].sort(compareCodeUnits) },
+    subscriptions:
+      subscribable.length > 0 ? capped(subscribable, MAX_LISTED_SUBSCRIPTIONS) : undefined,
   };
 }
 
 const EMPTY_LISTING = JSON.stringify(
-  listCatalog({ connections: [], deferred: new Map(), entries: new Map(), skills: new Map() }),
+  listCatalog({
+    channels: [],
+    connections: [],
+    deferred: new Map(),
+    entries: new Map(),
+    skills: new Map(),
+    subagent: false,
+  }),
 );
 
 function namespaceCounts(catalog: Listed): ReadonlyMap<string, number> {
@@ -107,30 +138,45 @@ function renderCatalogAnnouncement(
   previous: CatalogListing | undefined,
   current: CatalogListing,
   reachable: ReadonlySet<string>,
+  programTool: string | undefined,
 ): string {
   if (isEmpty(current)) {
     return `The catalog changed. It is empty now: ${SEARCH_TOOL_NAME} finds nothing.`;
   }
-  if (previous === undefined || isEmpty(previous)) return renderListing(current);
+  if (previous === undefined || isEmpty(previous)) return renderListing(current, programTool);
   const gone = [
     ...previous.namespaces.items,
     ...previous.connections.items.map(({ name }) => name),
   ].filter((name) => !reachable.has(name));
   return [
     "The catalog changed.",
-    renderListing(current),
+    renderListing(current, programTool),
     ...(gone.length > 0 ? [`No longer available: ${gone.join(", ")}`] : []),
   ].join("\n");
 }
 
-function renderListing({ connections, kinds, namespaces }: CatalogListing): string {
+function renderListing(
+  { connections, kinds, namespaces, subscriptions }: CatalogListing,
+  programTool: string | undefined,
+): string {
+  const subscribable =
+    subscriptions === undefined || subscriptions.items.length === 0
+      ? []
+      : [
+          `Subscribable sources: ${[...subscriptions.items, ...(subscriptions.more ? ["and more"] : [])].join(", ")}. Find their events with ${SEARCH_TOOL_NAME} ("subscriptions__<source>__") before calling ${SUBSCRIBE_TOOL}.`,
+        ];
+  if (kinds.length === 0 && connections.items.length === 0) return subscribable.join("\n");
   const subject =
     kinds.length === 0 ? "Your connections have more tools" : `You have more ${joinWords(kinds)}`;
+  const several =
+    programTool !== undefined
+      ? `, or call several from ${programTool} as \`tools.<name>(input)\``
+      : "";
   const call = !kinds.includes("skills")
-    ? `Call them with ${CALL_TOOL_NAME}({ name, input }).`
+    ? `Call them with ${CALL_TOOL_NAME}({ name, input })${several}.`
     : kinds.length === 1 && connections.items.length === 0
       ? `Load them with ${SKILL_TOOL_NAME}({ name }).`
-      : `Call tools with ${CALL_TOOL_NAME}({ name, input }) and load skills with ${SKILL_TOOL_NAME}({ name }).`;
+      : `Call tools with ${CALL_TOOL_NAME}({ name, input })${several}${programTool !== undefined ? "," : ""} and load skills with ${SKILL_TOOL_NAME}({ name }).`;
   const search = ` Before saying you have no tool for a task, look for one with ${SEARCH_TOOL_NAME}, which searches your own catalog, not the web.`;
   const lines = [`${subject} than are loaded here.${search} ${call}`];
   if (namespaces.items.length > 0) {
@@ -146,7 +192,7 @@ function renderListing({ connections, kinds, namespaces }: CatalogListing): stri
       ...(connections.more ? ["- and more"] : []),
     );
   }
-  return lines.join("\n");
+  return [...lines, ...subscribable].join("\n");
 }
 
 function joinWords(words: readonly string[]): string {
@@ -162,7 +208,11 @@ function formatConnection(entry: ListedConnection): string {
 }
 
 function isEmpty(listing: CatalogListing): boolean {
-  return listing.kinds.length === 0 && listing.connections.items.length === 0;
+  return (
+    listing.kinds.length === 0 &&
+    listing.connections.items.length === 0 &&
+    (listing.subscriptions?.items ?? []).length === 0
+  );
 }
 
 function parseListing(value: string | undefined): CatalogListing | undefined {

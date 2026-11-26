@@ -9,7 +9,7 @@ import type { InternalSession as Session } from "#channel/session.js";
 import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { writeForwardedParentSessionBaggage } from "#protocol/baggage.js";
-import { none } from "#public/channels/auth.js";
+import { HttpError, none, TooManyRequestsError } from "#public/channels/auth.js";
 import {
   defaultEveAuth,
   eveChannel,
@@ -1075,6 +1075,54 @@ describe("eve channel onMessage client context", () => {
     expect(response.status).toBe(202);
     expect(onMessage).toHaveBeenCalledTimes(1);
     expect(readClientContext(input)).toBeUndefined();
+  });
+
+  it("refuses a new session's message with a thrown HttpError's response, and creates no session", async () => {
+    const { input, response } = await create(
+      () => {
+        throw new TooManyRequestsError({ retryAfter: 30 });
+      },
+      { message: "hi" },
+    );
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get("retry-after")).toBe("30");
+    await expect(response.json()).resolves.toEqual({
+      code: "rate_limited",
+      error: "Too many requests. Try again later.",
+      ok: false,
+    });
+    expect(input).toBeUndefined();
+  });
+
+  it("refuses a follow-up with a thrown HttpError's response, and sends no message", async () => {
+    const { options, response } = await continueSession(
+      async () => {
+        throw new HttpError(402, { code: "payment_required", message: "Upgrade your plan." });
+      },
+      { message: "hi again" },
+    );
+
+    expect(response.status).toBe(402);
+    await expect(response.json()).resolves.toMatchObject({ code: "payment_required" });
+    expect(options).toBeUndefined();
+  });
+
+  it("answers 500 when onMessage throws an error that is not an HttpError but carries a response", async () => {
+    const upstream = Object.assign(new Error("upstream failed"), {
+      response: new Response("internal upstream body", { status: 418 }),
+    });
+
+    const { input, response } = await create(
+      () => {
+        throw upstream;
+      },
+      { message: "hi" },
+    );
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toMatchObject({ error: "onMessage handler failed." });
+    expect(input).toBeUndefined();
   });
 
   it("replaces the client's context on continue requests", async () => {

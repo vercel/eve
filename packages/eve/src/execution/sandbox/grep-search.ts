@@ -1,11 +1,26 @@
+import { runInternalCommand } from "#execution/sandbox/internal-shell.js";
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
-import { resolveInWorkspace, type WorkspaceSandbox } from "#execution/sandbox/workspace-root.js";
+
+export interface WorkspaceSandbox {
+  resolvePath(path: string): string;
+  run(input: {
+    signal?: AbortSignal;
+    command: string;
+  }): PromiseLike<{ exitCode: number; stderr: string; stdout: string }>;
+}
 
 const DEFAULT_GREP_LIMIT = 50;
 export const MAX_GREP_LIMIT = 200;
 export const MAX_GREP_COMMAND_BYTES = 256 * 1024;
 export const MAX_GREP_LINE_BYTES = 8 * 1024;
 export const MAX_GREP_RETURN_BYTES = 64 * 1024;
+const MAX_ERROR_DETAIL_CHARS = 2_000;
+const WORKSPACE_ERR_EXIT = 64;
+const TARGET_ERR_EXIT = 65;
+const OUTSIDE_WORKSPACE_EXIT = 66;
+const WORKSPACE_ERR_PREFIX = "__eve_grep_ws_err__:";
+const TARGET_ERR_PREFIX = "__eve_grep_target_err__:";
+const OUTSIDE_WORKSPACE_PREFIX = "__eve_grep_outside__:";
 
 const REGEX_META = /[\\^$.*+?()[\]{}|]/u;
 
@@ -89,27 +104,27 @@ export async function executeGrepSearch(
       "grep is limited to the sandbox workspace; $HOME paths are not supported. Choose a workspace path or use read_file/glob for home-scoped files.",
     );
   }
+  const workspacePath = sandbox.resolvePath("");
   const path = assertNoParentSegments(sandbox.resolvePath(input.path ?? ""), input.path);
-  const { path: searchRealPath } = await resolveInWorkspace(
-    sandbox,
-    path,
-    "grep path",
-    abortSignal,
-  );
 
   const outputMode = effectiveOutputMode(input.outputMode);
   const limit = effectiveLimit(input.limit);
-  const command = buildSearchCommand({
-    contextLines: input.context ?? 0,
-    glob: input.glob,
-    ignoreCase: input.ignoreCase === true,
-    limit,
-    literal: shouldUseFixedStrings(input.pattern, input.literal),
-    outputMode,
-    path: searchRealPath,
-    pattern: input.pattern,
+  const command = buildWorkspaceScopedSearchCommand({
+    commandInput: {
+      contextLines: input.context ?? 0,
+      glob: input.glob,
+      ignoreCase: input.ignoreCase === true,
+      limit,
+      literal: shouldUseFixedStrings(input.pattern, input.literal),
+      outputMode,
+      path,
+      pattern: input.pattern,
+    },
+    targetPath: path,
+    workspacePath,
   });
-  const result = await sandbox.run({ signal: abortSignal, command });
+  const result = await runInternalCommand(sandbox, { signal: abortSignal, command });
+  throwIfWorkspaceResolutionFailed(result);
   const commandOutput = truncateUtf8(result.stdout, MAX_GREP_COMMAND_BYTES);
   const commandTruncated = commandOutput.truncated;
   if (
@@ -133,20 +148,84 @@ export async function executeGrepSearch(
   });
 }
 
+function throwIfWorkspaceResolutionFailed(result: {
+  readonly exitCode: number;
+  readonly stderr: string;
+}): void {
+  if (result.exitCode === WORKSPACE_ERR_EXIT && result.stderr.startsWith(WORKSPACE_ERR_PREFIX)) {
+    const detail = result.stderr.slice(WORKSPACE_ERR_PREFIX.length).trim() || "no command output";
+    throw new Error(
+      `sandbox workspace could not be resolved: ${detail.slice(0, MAX_ERROR_DETAIL_CHARS)}`,
+    );
+  }
+  if (result.exitCode === TARGET_ERR_EXIT && result.stderr.startsWith(TARGET_ERR_PREFIX)) {
+    const detail = result.stderr.slice(TARGET_ERR_PREFIX.length).trim() || "no command output";
+    throw new Error(`grep path could not be resolved: ${detail.slice(0, MAX_ERROR_DETAIL_CHARS)}`);
+  }
+  if (
+    result.exitCode === OUTSIDE_WORKSPACE_EXIT &&
+    result.stderr.startsWith(OUTSIDE_WORKSPACE_PREFIX)
+  ) {
+    const [workspace, real] = result.stderr.slice(OUTSIDE_WORKSPACE_PREFIX.length).split("\0");
+    throw new Error(`grep path resolves outside the workspace ${workspace}: ${real}`);
+  }
+}
+
+function buildWorkspaceScopedSearchCommand(input: {
+  readonly commandInput: GrepCommandInput;
+  readonly targetPath: string;
+  readonly workspacePath: string;
+}): string {
+  const quotedWorkspace = shellQuote(input.workspacePath);
+  const lines = [
+    `if ! IFS= read -r -d '' _eve_ws < <(realpath -e -z -- ${quotedWorkspace} 2>/dev/null) || [ -z "$_eve_ws" ]; then`,
+    `  _eve_err=$(realpath -e -z -- ${quotedWorkspace} 2>&1)`,
+    `  printf '${WORKSPACE_ERR_PREFIX}%s\\n' "$_eve_err" >&2`,
+    `  exit ${WORKSPACE_ERR_EXIT}`,
+    "fi",
+  ];
+  if (input.targetPath === input.workspacePath) {
+    lines.push('_eve_target="$_eve_ws"');
+  } else {
+    const quotedTarget = shellQuote(input.targetPath);
+    lines.push(
+      `if ! IFS= read -r -d '' _eve_target < <(realpath -e -z -- ${quotedTarget} 2>/dev/null) || [ -z "$_eve_target" ]; then`,
+      `  _eve_err=$(realpath -e -z -- ${quotedTarget} 2>&1)`,
+      `  printf '${TARGET_ERR_PREFIX}%s\\n' "$_eve_err" >&2`,
+      `  exit ${TARGET_ERR_EXIT}`,
+      "fi",
+      'if [[ "$_eve_ws" != "/" && "$_eve_target" != "$_eve_ws" && "$_eve_target" != "$_eve_ws/"* ]]; then',
+      `  printf '${OUTSIDE_WORKSPACE_PREFIX}%s\\0%s\\0' "$_eve_ws" "$_eve_target" >&2`,
+      `  exit ${OUTSIDE_WORKSPACE_EXIT}`,
+      "fi",
+    );
+  }
+  lines.push(formatSearchPipeline(input.commandInput, '"$_eve_target"'));
+  return lines.join("\n");
+}
+
 export function buildSearchCommand(input: GrepCommandInput): string {
+  return formatSearchPipeline(input, shellQuote(input.path));
+}
+
+function formatSearchPipeline(input: GrepCommandInput, targetExpression: string): string {
   return [
     "set -o pipefail",
     "{",
     "  if command -v rg >/dev/null 2>&1; then",
-    `    ${buildRipgrepCommand(input)}`,
+    `    ${formatRipgrepCommand(input, targetExpression)}`,
     "  else",
-    `    ${buildPosixGrepCommand(input)}`,
+    `    ${formatPosixGrepCommand(input, targetExpression)}`,
     "  fi",
     `} 2> >({ head -c ${MAX_GREP_LINE_BYTES}; cat >/dev/null; } >&2) | head -c ${MAX_GREP_COMMAND_BYTES + 1}`,
   ].join("\n");
 }
 
 export function buildRipgrepCommand(input: GrepCommandInput): string {
+  return formatRipgrepCommand(input, shellQuote(input.path));
+}
+
+function formatRipgrepCommand(input: GrepCommandInput, targetExpression: string): string {
   const parts = ["rg", "--hidden", "--glob", shellQuote("!.git/*")];
 
   if (input.ignoreCase) {
@@ -175,11 +254,15 @@ export function buildRipgrepCommand(input: GrepCommandInput): string {
       break;
   }
 
-  parts.push("-e", shellQuote(input.pattern), shellQuote(input.path));
+  parts.push("-e", shellQuote(input.pattern), targetExpression);
   return parts.join(" ");
 }
 
 export function buildPosixGrepCommand(input: GrepCommandInput): string {
+  return formatPosixGrepCommand(input, shellQuote(input.path));
+}
+
+function formatPosixGrepCommand(input: GrepCommandInput, targetExpression: string): string {
   const parts = ["grep", "-r", "--exclude-dir=.git"];
 
   if (input.ignoreCase) {
@@ -210,7 +293,7 @@ export function buildPosixGrepCommand(input: GrepCommandInput): string {
       break;
   }
 
-  parts.push("-e", shellQuote(input.pattern), shellQuote(input.path));
+  parts.push("-e", shellQuote(input.pattern), targetExpression);
   return parts.join(" ");
 }
 

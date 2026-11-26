@@ -22,6 +22,7 @@ import {
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineHook } from "#public/definitions/hook.js";
+import { workflow } from "#public/tools/workflow.js";
 import { always } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
 import { defineWorkflowTool } from "#tools/workflow-definition.js";
@@ -50,6 +51,7 @@ export interface InterruptedSessionOptions {
   readonly tools: readonly {
     readonly name: string;
     readonly approval?: boolean;
+    readonly program?: true;
     readonly workflow?: true;
   }[];
   readonly respond: (prompt: string, call: number) => StreamResult;
@@ -118,21 +120,23 @@ export async function withInterruptedSession(
       },
       ...options.tools.map((tool) => ({
         loadNamespace: async () => ({
-          default: tool.workflow
-            ? defineWorkflowTool({
-                description: `Run ${tool.name} for Alice.`,
-                execute: deployServiceWorkflow,
-                inputSchema: { properties: { service: { type: "string" } }, type: "object" },
-              })
-            : defineTool({
-                approval: tool.approval === true ? { request: always() } : undefined,
-                description: `Run ${tool.name} for Alice.`,
-                execute: () => {
-                  ran.push(tool.name);
-                  return { done: tool.name };
-                },
-                inputSchema: z.object({}).passthrough(),
-              }),
+          default: tool.program
+            ? workflow({ mode: "execute", tools: true })
+            : tool.workflow
+              ? defineWorkflowTool({
+                  description: `Run ${tool.name} for Alice.`,
+                  execute: deployServiceWorkflow,
+                  inputSchema: { properties: { service: { type: "string" } }, type: "object" },
+                })
+              : defineTool({
+                  approval: tool.approval === true ? { request: always() } : undefined,
+                  description: `Run ${tool.name} for Alice.`,
+                  execute: () => {
+                    ran.push(tool.name);
+                    return { done: tool.name };
+                  },
+                  inputSchema: z.object({}).passthrough(),
+                }),
         }),
         logicalPath: `tools/${tool.name}.ts`,
       })),

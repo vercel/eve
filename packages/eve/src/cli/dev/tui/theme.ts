@@ -100,7 +100,7 @@ const UNICODE_GLYPHS: ThemeGlyphs = {
   ellipsis: "…",
   arrowUp: "↑",
   arrowDown: "↓",
-  fast: "↯",
+  fast: "\u{26a1}\u{fe0e}",
   enter: "↵",
   validating: "▪",
 };

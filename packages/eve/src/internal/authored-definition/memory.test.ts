@@ -27,6 +27,14 @@ describe("normalizeMemoryDefinition", () => {
     expect(normalizeMemoryDefinition(definition, message)).toBe(definition);
   });
 
+  it("rejects an invalid memory supersede policy", () => {
+    const invalid = { ...validDefinition(), supersede: "replace" };
+
+    expect(() => normalizeMemoryDefinition(invalid, message)).toThrow(
+      '"supersede" must be "hide" or "append".',
+    );
+  });
+
   it("rejects the former function-shaped recall contract", () => {
     const definition = {
       ...validDefinition(),

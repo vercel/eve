@@ -166,10 +166,46 @@ function readErrorMessage(error: unknown): string {
   return "";
 }
 
+export function extractMaxOutputTokensRejection(
+  error: unknown,
+): { readonly rejected: true; readonly maxAllowed?: number } | undefined {
+  const signals = readModelCallErrorSignals(error);
+  const status = signals.statusCode ?? signals.upstreamStatusCode;
+  if (status !== 400 && status !== 422) return undefined;
+  const text = [
+    error instanceof Error ? error.message : undefined,
+    signals.apiErrorMessage,
+    signals.upstreamMessage,
+    signals.responseBodySnippet,
+  ]
+    .filter((value): value is string => value !== undefined && value.length > 0)
+    .join(" ");
+  if (
+    !/\b(?:max_tokens|max_completion_tokens|max_output_tokens|maxOutputTokens)\b/i.test(text) &&
+    !/\boutput tokens?\b/i.test(text)
+  ) {
+    return undefined;
+  }
+  const match =
+    /(?:<=|maximum(?:\s+of)?|at most|limit(?:\s+of)?|cannot exceed|must be less than or equal to|max(?:imum)?\s+value\s+is|up to)\s*([0-9,]+)/i.exec(
+      text,
+    );
+  const parsed = match?.[1] !== undefined ? Number(match[1].replaceAll(",", "")) : Number.NaN;
+  return {
+    rejected: true,
+    ...(Number.isInteger(parsed) && parsed >= 256 && { maxAllowed: parsed }),
+  };
+}
+
 export class EmptyModelResponseError extends Error {
-  constructor(options?: { cause?: unknown }) {
+  readonly finishReason?: string;
+  readonly reasoningTail?: string;
+
+  constructor(options?: { cause?: unknown; finishReason?: string; reasoningTail?: string }) {
     super("The model did not return a response. Please try again.", options);
     this.name = "EmptyModelResponseError";
+    this.finishReason = options?.finishReason;
+    this.reasoningTail = options?.reasoningTail;
   }
 }
 

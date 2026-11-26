@@ -7,7 +7,7 @@ import {
   serializeOutputSchema,
   type ToolSchemaSource,
 } from "#tools/schema.js";
-import { renderToolSignature } from "#tools/signature.js";
+import { isIdentifier, renderOutputType, renderToolSignature } from "#tools/signature.js";
 
 export function entrySignature(
   definition: HarnessToolDefinition,
@@ -29,4 +29,14 @@ export function connectionToolSignature(
     name: connectionToolName(connection.connectionName, tool.name),
     outputSchema: tool.outputSchema,
   });
+}
+
+export function programOutputNote(definition: HarnessToolDefinition): string | undefined {
+  const type = renderOutputType(
+    serializeOutputSchema(definition.outputSchema as ToolSchemaSource | undefined),
+  );
+  if (type === undefined) return undefined;
+  const { name } = definition;
+  const tool = isIdentifier(name) ? `tools.${name}` : `tools[${JSON.stringify(name)}]`;
+  return `In workflow programs, ${tool}(input) resolves to: ${type}`;
 }

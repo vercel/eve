@@ -11,6 +11,7 @@ import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js"
 import type { ClientAgentSession } from "#client/agent-session.js";
 import type { RuntimeIdentity, TraceContext } from "#protocol/session-events/families/session.js";
 import type {
+  ClientAuth,
   ClientSessionState,
   CreateSessionOptions,
   SendTurnInput,
@@ -783,6 +784,19 @@ export interface EveEvalConfigInput<TContext = unknown> {
    * attempt is a separate result tagged with its 1-based `attempt`.
    */
   readonly repeat?: number;
+  /**
+   * Client credentials for the local dev server, or a resolver called once with
+   * the target. For `--url`, use a resolver and return credentials only for
+   * trusted HTTPS origins. Return `undefined` to use the default auth behavior.
+   * `EVE_EVAL_AUTH_TOKEN` and `EVE_EVAL_OIDC_TOKEN` override this setting on
+   * `--url` runs. Token functions in the credentials run before each request.
+   */
+  readonly targetAuth?:
+    | ClientAuth
+    | ((target: {
+        readonly kind: "local" | "remote";
+        readonly url: URL;
+      }) => ClientAuth | undefined | Promise<ClientAuth | undefined>);
 }
 
 /**

@@ -1,4 +1,4 @@
-import { get, screenshot, wait_for } from "@agent-browser/eve/tools";
+import { get_url, screenshot, wait_for_load, wait_ms } from "@agent-browser/eve/tools";
 import {
   defineTool,
   toolOutput,
@@ -65,17 +65,15 @@ export function withScreen<TInput>(
   });
 }
 
-/** The browser's page after an action, through the extension's own screenshot and get tools. */
+/** The browser's page after an action, through the extension's own screenshot and URL tools. */
 export async function captureBrowser(ctx: ToolContext): Promise<Screen | undefined> {
   // A click or key press can start a navigation that hasn't painted yet. Give it a moment to
   // start, then wait briefly for it to load, so the screenshot matches the URL.
-  await wait_for.execute({ timeMs: 300, timeoutMs: 3000 }, ctx);
-  await wait_for.execute({ loadState: "load", timeoutMs: 3000 }, ctx);
-  const shot = (await screenshot.execute({ annotate: false, fullPage: false }, ctx)) as {
-    imageDataUrl?: string;
-  };
-  if (shot.imageDataUrl === undefined) return undefined;
-  const page = (await Promise.resolve(get.execute({ property: "url" }, ctx)).catch(() => null)) as {
+  await wait_ms.execute({ ms: 300, timeoutMs: 3000 }, ctx);
+  await wait_for_load.execute({ state: "load", waitTimeoutMs: 3000, timeoutMs: 3000 }, ctx);
+  const shot = await screenshot.execute({ annotate: false, fullPage: false }, ctx);
+  if (!("imageDataUrl" in shot) || typeof shot.imageDataUrl !== "string") return undefined;
+  const page = (await Promise.resolve(get_url.execute({}, ctx)).catch(() => null)) as {
     url?: string;
   } | null;
   return { device: "browser", imageDataUrl: shot.imageDataUrl, url: page?.url };

@@ -1,11 +1,17 @@
 import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/channel.js";
+import type { ChannelOnEvent, ChannelOnSubscribe } from "#shared/channel-subscriptions.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 import type { ChannelContext } from "#shared/channel-context.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
-import { createLogger } from "#internal/logging.js";
+import { createLogger, logError } from "#internal/logging.js";
+import {
+  emitGitHubWebhook,
+  githubEventDefinitions,
+  requireAppReceivesWebhook,
+} from "#public/channels/github/subscriptions.js";
 import {
   buildGitHubBinding,
   type GitHubHandle,
@@ -14,10 +20,12 @@ import {
 import { getGitHubRepository, type GitHubApiOptions } from "#public/channels/github/api.js";
 import {
   createGitHubBotNameResolver,
+  createGitHubAppSlugResolver,
   type GitHubBotName,
   type GitHubChannelCredentials,
 } from "#public/channels/github/auth.js";
 import { GITHUB_CHANNEL_DEFAULT_ROUTE } from "#public/channels/github/constants.js";
+import type { GitHubWebhookEventName } from "#public/channels/github/webhook-scopes.js";
 import { createDefaultEvents, defaultOnComment } from "#public/channels/github/defaults.js";
 import {
   parseGitHubWebhookEvent,
@@ -162,6 +170,35 @@ export interface GitHubChannelConfig {
   readonly progress?: GitHubProgressConfig;
   readonly pullRequestContext?: GitHubPullRequestContextConfig;
   readonly route?: string;
+  /** Experimental. These fields can change in a minor release. */
+  readonly experimental?: {
+    readonly subscriptions?: {
+      /**
+       * Makes GitHub webhook events subscribable with the `eve__subscribe` tool, and runs for each
+       * subscription and each event it receives, as the subscribed session. Return the message to
+       * send (`describeGitHubEvent(event)` formats the payload) or `null` to drop the event.
+       * Filter on `event.name` (`check_suite.completed`) and on `subscription.input`, and check
+       * `auth` against the repository: without `onSubscribe`, any session of the
+       * agent can subscribe to any repository the GitHub App is installed on. Nothing is
+       * subscribable without `onEvent`.
+       */
+      readonly onEvent: ChannelOnEvent;
+      /**
+       * Decides whether a session may subscribe, when it calls `eve__subscribe`. Check `auth`
+       * against `subscription.input.owner` and `.repo` (absent for an event of the whole
+       * account), and throw to deny: any session of the agent can otherwise subscribe to any
+       * repository the GitHub App is installed on. Return `{ input }` to narrow the scope, for
+       * example to drop `number`.
+       */
+      readonly onSubscribe?: ChannelOnSubscribe;
+      /**
+       * Narrows the events a session can subscribe to, for `eve__search` and for `eve__subscribe`.
+       * Each entry is an event such as `check_suite`, or an event and action such as
+       * `check_suite.completed`. Defaults to every GitHub webhook event.
+       */
+      readonly events?: readonly GitHubWebhookEventName[];
+    };
+  };
   /** Policy for accepted messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
 
@@ -234,6 +271,12 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
     botName: config.botName,
     credentials: config.credentials,
   });
+  const appSlug = createGitHubAppSlugResolver({ credentials: config.credentials });
+  const subscriptionsOnEvent = config.experimental?.subscriptions?.onEvent;
+  const subscriptionEvents =
+    subscriptionsOnEvent === undefined
+      ? undefined
+      : githubEventDefinitions(config.experimental?.subscriptions?.events);
   const dispatchOptions = { botName };
   const mergedEvents: GitHubChannelEvents = {
     ...createDefaultEvents({
@@ -248,6 +291,23 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
   const channel = defineChannel<GitHubChannelState, GitHubChannelContext, GitHubReceiveTarget>({
     turnPolicy: config.turnPolicy,
     state: initialGitHubState(),
+    experimental: subscriptionsOnEvent &&
+      subscriptionEvents && {
+        subscriptions: {
+          onEvent: subscriptionsOnEvent,
+          onSubscribe: async (subscriber) => {
+            const grant = await config.experimental?.subscriptions?.onSubscribe?.(subscriber);
+            await requireAppReceivesWebhook({
+              api: config.api,
+              appSlug,
+              credentials: config.credentials,
+              event: subscriber.subscription.event,
+            });
+            return grant;
+          },
+          catalog: subscriptionEvents,
+        },
+      },
 
     context(state, session) {
       return rebuildGitHubContext(state, session, config);
@@ -260,10 +320,40 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
     routes: [
       POST<GitHubChannelState>(
         config.route ?? GITHUB_CHANNEL_DEFAULT_ROUTE,
-        async (req, { from, waitUntil }) => {
+        async (req, { experimental, from, waitUntil }) => {
           const body = await verifyInbound(req, config.credentials);
           if (body === null) return new Response("unauthorized", { status: 401 });
           const missingHeaders = missingGitHubWebhookHeaders(req.headers);
+
+          if (subscriptionEvents !== undefined) {
+            try {
+              await emitGitHubWebhook({
+                appSlug: async () => {
+                  try {
+                    return await appSlug();
+                  } catch (error) {
+                    logError(
+                      log,
+                      "githubChannel: appSlug resolver failed; retrying on the next event",
+                      error,
+                    );
+                    return undefined;
+                  }
+                },
+                body,
+                contentType: req.headers.get("content-type") ?? undefined,
+                declaredEvents: subscriptionEvents,
+                emit: experimental.subscriptions.emit,
+                headers: req.headers,
+              });
+            } catch (error) {
+              logError(log, "GitHub subscription delivery failed", error, {
+                deliveryId: req.headers.get("x-github-delivery"),
+                event: req.headers.get("x-github-event"),
+              });
+              return new Response("subscription delivery failed", { status: 503 });
+            }
+          }
 
           let event: GitHubInboundEvent | null;
           try {

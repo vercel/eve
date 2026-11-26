@@ -266,7 +266,7 @@ await buildWithRolldown({
   output: {
     comments: false,
     dir: OUTPUT_DIR,
-    entryFileNames: "[name].js",
+    entryFileNames: (chunk) => `${chunk.name.replaceAll("node_modules", "vendor")}.js`,
     format: "esm",
     minify: {
       compress: { joinVars: false },

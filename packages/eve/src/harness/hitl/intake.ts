@@ -5,8 +5,16 @@ import { transition } from "#harness/session-machine/commit.js";
 import { callRun, runTurn } from "#protocol/session-projection/selectors.js";
 import { stepCatalog } from "#definitions/step.js";
 import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
-import { collectWorkflowCalls } from "#harness/coordination.js";
+import { DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS } from "#execution/dynamic-workflow/schema.js";
+import { collectPromotedTasks, collectWorkflowCalls } from "#harness/coordination.js";
+import { cancelPromotedTasks } from "#tools/task-handoff.js";
+import {
+  collectProgramWorkflowCalls,
+  isProgramTool,
+  withOwnOutputs,
+} from "#harness/program-calls.js";
 import { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
+import { newProgram, savePrograms, type ProgramRun } from "#harness/session-machine/programs.js";
 import { completeSignIn, runnableCalls, settle } from "#harness/session-machine/transitions.js";
 import {
   type ApprovedCall,
@@ -191,11 +199,18 @@ async function runApproved(
     byStep.set(parked, [...(byStep.get(parked) ?? []), approval]);
   }
   const tasks: RuntimeWorkflowTaskRequest[] = [];
+  const programs: ProgramRun[] = [];
   const denied: CallResult[] = [];
-  const local: { approvals: ApprovedCall[]; tools: HarnessToolLookup }[] = [];
+  const local: {
+    allowTaskPromotion: boolean;
+    approvals: ApprovedCall[];
+    tools: HarnessToolLookup;
+    turnId: string;
+  }[] = [];
   const claimed = new Set<string>();
   for (const [parked, approvals] of byStep) {
-    const tools = await toolsOf(step);
+    const tools =
+      parked.program === undefined ? await toolsOf(step) : withOwnOutputs(await toolsOf(step));
     const workflows = new Map<string, { approval: ApprovedCall; clearance: Clearance }>();
     for (const approval of approvals) {
       const tool = tools.get(approval.call.toolName);
@@ -228,16 +243,44 @@ async function runApproved(
           approvedClearance(step.view().projection.view, approval.call.callId) ?? recheck.clearance;
         if (clearance === undefined)
           throw new Error(`Approved call "${approval.call.callId}" has no clearance to dispatch.`);
+        if (isProgramTool(tool)) {
+          programs.push(
+            newProgram(
+              approval.call.callId,
+              approval.call.toolName,
+              approval.call.input,
+              parked.event,
+              tool.workflowProgram?.maxSubagents ?? DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS,
+            ),
+          );
+          continue;
+        }
         workflows.set(approval.call.callId, { approval, clearance });
       }
     }
     local.push({
+      allowTaskPromotion: parked.program === undefined,
       approvals: approvals
         .filter((approval) => tools.get(approval.call.toolName)?.workflowId === undefined)
         .map((approval) => reportingOnce(step.view(), approval, claimed)),
       tools,
+      turnId: parked.event.turnId,
     });
     if (workflows.size === 0) continue;
+    if (parked.program !== undefined) {
+      tasks.push(
+        ...collectProgramWorkflowCalls(
+          [...workflows.values()].map(({ approval: { call }, clearance }) => ({
+            callId: call.callId,
+            clearance,
+            input: call.input,
+            toolName: call.toolName,
+          })),
+          tools,
+        ),
+      );
+      continue;
+    }
     const dispatched = collectWorkflowCalls({
       clearances: Object.fromEntries(
         [...workflows.entries()].map(([callId, { clearance }]) => [callId, clearance]),
@@ -256,6 +299,7 @@ async function runApproved(
   }
   if (denied.length > 0) await step.apply(settle(step.view(), { results: denied }));
   if (tasks.length > 0) await step.apply(dispatch(step.view(), { tasks }));
+  if (programs.length > 0) await step.apply(savePrograms(step.view(), programs));
 
   const calls = local.flatMap(({ approvals }) => approvals);
   step.frameworkToolNames = new Set(
@@ -269,8 +313,10 @@ async function runApproved(
   const signIns = signInReports({ publish: step.publish, view: () => step.view() });
   step.ctx.setVirtualContext(SignInCompletedKey, signIns.completed(calls));
   const groups = await Promise.allSettled(
-    local.map(async ({ approvals, tools }) => {
-      if (approvals.length === 0) return { settled: [], signIns: [] };
+    local.map(async ({ allowTaskPromotion, approvals, tools, turnId }) => {
+      if (approvals.length === 0) {
+        return { promotedTasks: [], settled: [], signIns: [], turnId };
+      }
       const view = step.view().projection.view;
       const call = view.calls[approvals[0]!.call.callId];
       const runId = call === undefined ? undefined : callRun(view, call);
@@ -285,8 +331,9 @@ async function runApproved(
               turnId: runTurn(view, run.runId),
               isFrameworkTool: (name) => step.frameworkToolNames.has(name),
             });
-      return await runApprovedCalls({
+      const result = await runApprovedCalls({
         abortSignal: step.config.abortSignal,
+        allowTaskPromotion,
         approvalMemory: approvalMemory(step.view()),
         approvals,
         messages: step.session.history,
@@ -297,17 +344,44 @@ async function runApproved(
         tools,
         view: () => step.view(),
       });
+      return { ...result, turnId };
     }),
   );
   step.ctx.delete(SignInCompletedKey);
-  const executed = groups.map((group) => {
-    if (group.status === "rejected") throw group.reason;
-    return group.value;
-  });
-  await step.apply(settle(step.view(), { results: executed.flatMap((run) => run.settled) }));
+  const fulfilled = groups.flatMap((group) => (group.status === "fulfilled" ? [group.value] : []));
+  const allPromoted = fulfilled.flatMap((run) => run.promotedTasks);
+  const rejectedGroup = groups.find((group) => group.status === "rejected");
+  if (rejectedGroup?.status === "rejected") {
+    await cancelPromotedTasks(allPromoted);
+    throw rejectedGroup.reason;
+  }
+  if (step.config.abortSignal?.aborted === true) {
+    await cancelPromotedTasks(allPromoted);
+  } else {
+    try {
+      const promotedRequests: RuntimeWorkflowTaskRequest[] = [];
+      for (const run of fulfilled) {
+        if (run.promotedTasks.length === 0) continue;
+        const promoted = collectPromotedTasks({
+          promotedTasks: run.promotedTasks,
+          session: step.session,
+          turnId: run.turnId,
+        });
+        step.session = promoted.session;
+        promotedRequests.push(...promoted.workflowRequests);
+      }
+      if (promotedRequests.length > 0) {
+        await step.apply(dispatch(step.view(), { tasks: promotedRequests }));
+      }
+    } catch (error) {
+      await cancelPromotedTasks(allPromoted);
+      throw error;
+    }
+  }
+  await step.apply(settle(step.view(), { results: fulfilled.flatMap((run) => run.settled) }));
   throwIfTurnAborted(step.config.abortSignal);
   const signIn = resolveInlineAuthorizationInterrupt({
-    signIns: executed.flatMap((run) => run.signIns),
+    signIns: fulfilled.flatMap((run) => run.signIns),
   });
   if (signIn === undefined) return undefined;
   const byCallId = new Map(calls.map((approval) => [approval.call.callId, approval]));

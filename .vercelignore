@@ -1,6 +1,5 @@
 # Keep CLI deploy uploads lean: remote builds install from the lockfile and
 # build from source, so local artifacts and durable state never ship.
-.git
 node_modules
 .eve
 .junit

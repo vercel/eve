@@ -505,6 +505,7 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
       await safeStartTyping(channel.thread, "Working...");
     },
     async "call.requested"({ data }, { channel }) {
+      if ("callId" in data.owner) return;
       const buffered = channel.state.pendingToolCallMessage;
       channel.state.pendingToolCallMessage = null;
       if (buffered) {

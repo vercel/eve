@@ -200,7 +200,11 @@ export function createWorkflowDriverAliasPlugin(workingDir: string): WorkflowRol
         );
       }
 
-      if (source !== "eve/workflow" && source !== "workflow") {
+      if (
+        source !== "eve/workflow" &&
+        source !== "eve/experimental/workflow" &&
+        source !== "workflow"
+      ) {
         return undefined;
       }
 

@@ -35,6 +35,7 @@ export function toEntryStep<T extends ModelMessage>(
   const entryStep: StepFields = {
     approvalRequests: step.approvalRequests,
     policyApprovals: step.policyApprovals,
+    promotedTasks: step.promotedTasks,
     callId: step.callId,
     content: (step.content ?? []).map((part) => toEntryPart(part, resolve)),
     finishReason: step.finishReason,

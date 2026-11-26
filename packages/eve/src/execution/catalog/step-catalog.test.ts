@@ -25,7 +25,8 @@ import { enterSessionProjection } from "#harness/session-machine/current.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { fromCompiledBundle } from "#definitions/compiled-agent.js";
 import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
-import { serializeInputSchema, type ToolSchemaSource } from "#tools/schema.js";
+import { defineJsonSchema, serializeInputSchema, type ToolSchemaSource } from "#tools/schema.js";
+import { always } from "#tools/approval/policies.js";
 
 import type { StepCatalog } from "./step-catalog.js";
 import { labelCallbacks } from "#internal/testing/tool-labels.js";
@@ -299,18 +300,21 @@ describe("buildStepCatalog", () => {
         await offeredFor({ tools: [workflowTool("research", "task", { deferred: true })] }),
       ).toEqual(OFFERED);
       expect(await offeredFor({ tools: [subagentTool("delegate")] })).toEqual(OFFERED);
+      expect(
+        await offeredFor({ dynamicSubagents: ["specialist"], tools: [inlineTool("add")] }),
+      ).toEqual(OFFERED);
     });
 
-    it("are not offered to a leaf subagent session whose only task-starting tool is root-only", async () => {
+    it("are omitted for a leaf subagent without task tools until a task starts, then stay offered after it ends", async () => {
       const tools = [inlineTool("add"), subagentTool("agent", { rootOnly: true })];
 
       expect(await offeredFor({ tools })).toEqual(OFFERED);
       expect(await offeredFor({ session: CHILD, tools })).toEqual(NOT_OFFERED);
-    });
-
-    it("are offered when the agent resolves subagents at runtime", async () => {
       expect(
-        await offeredFor({ dynamicSubagents: ["specialist"], tools: [inlineTool("add")] }),
+        await offeredFor({ session: CHILD, tasks: { task_1: { status: "running" } }, tools }),
+      ).toEqual(OFFERED);
+      expect(
+        await offeredFor({ session: CHILD, tasks: { task_1: { status: "ended" } }, tools }),
       ).toEqual(OFFERED);
     });
   });
@@ -480,6 +484,33 @@ describe("buildStepCatalog", () => {
       ],
     ])("eve__skill rejects %s", async (_case, name, message) => {
       expect(await validateSkill(catalog, { name })).toEqual({
+        issues: [{ message, path: ["name"] }],
+      });
+    });
+
+    it.each([
+      [
+        CALL_TOOL_NAME,
+        { input: {}, name: "eve__subscribe" },
+        '"eve__subscribe" is in your tool list; call it directly.',
+      ],
+      [
+        CALL_TOOL_NAME,
+        { input: {}, name: "eve__subscription_stop" },
+        '"eve__subscription_stop" is in your tool list; call it directly.',
+      ],
+      [
+        SKILL_TOOL_NAME,
+        { name: "eve__subscribe" },
+        '"eve__subscribe" is a tool in your tool list, not a skill; call it directly.',
+      ],
+    ])("rejects a subscription tool listed on the agent via %s", async (tool, input, message) => {
+      const { catalog: subscribed } = await catalogContext({
+        channels: [{ name: "github", definition: { onEvent: () => null, catalog: () => [] } }],
+        skills: [{ deferred: true, name: "release_notes" }],
+        tools: [inlineTool("refund_invoice", { deferred: true })],
+      });
+      expect(await validate(subscribed, tool, input)).toEqual({
         issues: [{ message, path: ["name"] }],
       });
     });
@@ -845,6 +876,215 @@ describe("buildStepCatalog", () => {
     ])("fails for %s", async (_case, options, message) => {
       captureLogRecords();
       await expect((await notionCatalog(options)).connect()).rejects.toThrow(message);
+    });
+  });
+
+  describe("workflow program tools", () => {
+    it("annotates direct tools with output types only when a tools-enabled workflow tool is present and exempts it from agent-wide approval", async () => {
+      const lookup = inlineTool("lookup_order", {
+        description: "Look up one order.",
+        outputSchema: defineJsonSchema({
+          properties: { status: { type: "string" } },
+          required: ["status"],
+          type: "object",
+        }),
+      });
+      const programTool: HarnessToolDefinition = {
+        ...workflowTool("workflow", "execute"),
+        workflowProgram: { maxSubagents: 10, tools: true },
+      };
+
+      const withoutProgram = await catalogContext({ approval: always(), tools: [lookup] });
+      expect(
+        withoutProgram.catalog.describe(withoutProgram.catalog.advertised.get("lookup_order")!),
+      ).toBe("Look up one order.");
+
+      const withProgram = await catalogContext({
+        approval: always(),
+        tools: [lookup, programTool],
+      });
+      expect(
+        withProgram.catalog.describe(withProgram.catalog.advertised.get("lookup_order")!),
+      ).toBe(
+        "Look up one order.\n\nIn workflow programs, tools.lookup_order(input) resolves to: { status: string }",
+      );
+      expect(withProgram.catalog.advertised.get("lookup_order")?.approval).toBeDefined();
+      const workflowApproval = withProgram.catalog.advertised.get("workflow")?.approval;
+      expect(typeof workflowApproval).toBe("function");
+      if (typeof workflowApproval === "function") {
+        expect(
+          await workflowApproval({
+            callId: "c1",
+            toolInput: { js: "return 1" },
+            toolName: "workflow",
+          } as never),
+        ).toBe("approved");
+      }
+
+      const withDeniedProgram = await catalogContext({
+        approval: () => ({ reason: "Blocked by policy.", type: "denied" }),
+        tools: [programTool],
+      });
+      const deniedApproval = withDeniedProgram.catalog.advertised.get("workflow")?.approval;
+      expect(typeof deniedApproval).toBe("function");
+      if (typeof deniedApproval === "function") {
+        expect(
+          await deniedApproval({
+            callId: "c2",
+            toolInput: { js: "return 1" },
+            toolName: "workflow",
+          } as never),
+        ).toEqual({ reason: "Blocked by policy.", type: "denied" });
+      }
+    });
+  });
+
+  describe("subscribe", () => {
+    const channels = [{ name: "github", definition: { onEvent: () => null, catalog: () => [] } }];
+    const subscribed = async () => {
+      const tracker = fakeConnection({ name: "tracker", tools: [], events: ["build.finished"] });
+      const { catalog, run } = await catalogContext({ channels, connections: [tracker] });
+      return { catalog, run, tracker };
+    };
+
+    it("advertises eve__subscribe and eve__subscription_stop with eve__search, and not the connection's events as tools", async () => {
+      const { catalog } = await subscribed();
+      expect(names(catalog.advertised)).toEqual(
+        expect.arrayContaining(["eve__search", "eve__subscribe", "eve__subscription_stop"]),
+      );
+      expect(names(catalog.advertised)).not.toContain("eve__subscription_get");
+      expect(names(catalog.advertised).filter((name) => name.includes("events_"))).toEqual([]);
+    });
+
+    it("validates the flat input without fetching the connection's events", async () => {
+      const { catalog, tracker } = await subscribed();
+      const input = {
+        source: "tracker",
+        event: "build.finished",
+        input: { job: "web" },
+        ttlMs: 120_000,
+      };
+      expect(await validate(catalog, "eve__subscribe", input)).toEqual({ value: input });
+      expect(await validate(catalog, "eve__subscribe", { subscription: input })).toHaveProperty(
+        "issues",
+      );
+      expect(tracker.eventListCalls).toEqual([]);
+    });
+
+    it("subscribes a connection source with its own event action", async () => {
+      const { catalog, run, tracker } = await subscribed();
+      const input = {
+        source: "tracker",
+        event: "build.finished",
+        input: { job: "web" },
+        ttlMs: 120_000,
+      };
+      const resolved = catalog.resolve({ input, toolName: "eve__subscribe" });
+      expect(resolved?.call.toolName).toBe("eve__subscribe");
+      await run(() =>
+        resolved?.definition.execute?.(resolved.call.input, { messages: [], toolCallId: "call-1" }),
+      );
+      expect(tracker.eventCalls).toEqual([
+        {
+          name: "events_subscribe",
+          input: { event: "build.finished", arguments: { job: "web" }, ttlMs: 120_000 },
+        },
+      ]);
+    });
+
+    it("finds a connection's events with eve__search only when searched", async () => {
+      const { catalog, run, tracker } = await subscribed();
+      expect(tracker.eventListCalls).toEqual([]);
+      const search = catalog.resolve({
+        input: { query: "subscriptions__tracker__" },
+        toolName: "eve__search",
+      });
+      const found = (await run(() =>
+        search?.definition.execute?.(search.call.input, { messages: [], toolCallId: "call-2" }),
+      )) as { results: { event?: string; source?: string; signature?: string }[] };
+      expect(found.results).toEqual([
+        expect.objectContaining({ event: "build.finished", source: "tracker" }),
+      ]);
+      expect(found.results[0]?.signature).toContain("eve__subscribe(");
+      expect(tracker.eventListCalls).toHaveLength(1);
+    });
+
+    it("finds a channel's events from code, without any connection", async () => {
+      const github = {
+        name: "github",
+        definition: {
+          onEvent: () => null,
+          catalog: () => [
+            {
+              name: "check_suite.completed",
+              description: "A check suite finished.",
+              inputSchema: defineJsonSchema({
+                type: "object",
+                properties: { owner: { type: "string" } },
+              }),
+            },
+            {
+              name: "push",
+              description: "A push.",
+              inputSchema: defineJsonSchema({ type: "object" }),
+            },
+          ],
+        },
+      };
+      const { catalog, run } = await catalogContext({ channels: [github] });
+      const search = (query: string) => {
+        const resolved = catalog.resolve({ input: { query }, toolName: "eve__search" });
+        return run(() =>
+          resolved?.definition.execute?.(resolved.call.input, { messages: [], toolCallId: "c" }),
+        ) as Promise<{ results: { event?: string }[] }>;
+      };
+      expect((await search("subscriptions__github__")).results.map(({ event }) => event)).toEqual([
+        "check_suite.completed",
+        "push",
+      ]);
+      expect((await search("github check suite")).results[0]).toMatchObject({
+        event: "check_suite.completed",
+        source: "github",
+        description: "A check suite finished.",
+      });
+    });
+
+    it("does not call a channel's catalog for a search in another namespace, and reports a channel whose catalog rejects as unavailable", async () => {
+      const failing = vi.fn(async () => {
+        throw new Error("registry down");
+      });
+      const healthy = vi.fn(() => [
+        { name: "push", description: "A push.", inputSchema: defineJsonSchema({ type: "object" }) },
+      ]);
+      const { catalog, run } = await catalogContext({
+        channels: [
+          { name: "github", definition: { onEvent: () => null, catalog: failing } },
+          { name: "slack", definition: { onEvent: () => null, catalog: healthy } },
+        ],
+      });
+      const search = (query: string) => {
+        const resolved = catalog.resolve({ input: { query }, toolName: "eve__search" });
+        return run(() =>
+          resolved?.definition.execute?.(resolved.call.input, { messages: [], toolCallId: "c" }),
+        ) as Promise<{
+          results: { event?: string }[];
+          unavailable?: { connection: string; error: string }[];
+        }>;
+      };
+
+      const scoped = await search("subscriptions__slack__");
+      expect(scoped.results.map(({ event }) => event)).toEqual(["push"]);
+      expect(scoped.unavailable).toBeUndefined();
+      expect(failing).not.toHaveBeenCalled();
+
+      const wide = await search("push");
+      expect(wide.results.map(({ event }) => event)).toEqual(["push"]);
+      expect(wide.unavailable).toEqual([
+        {
+          connection: "github",
+          error: 'Failed to list the events of channel "github": registry down',
+        },
+      ]);
     });
   });
 });

@@ -10,6 +10,7 @@ import { internalSession, type Session } from "#channel/session.js";
 import { resolveForwardedPrincipal } from "#channel/forwarded-principal.js";
 import { handleConnectionCallbackRequest } from "#execution/connections/callback-route.js";
 import { handleSessionCallbackRequest } from "#subagents/callback-route.js";
+import { createRemoteAgentRouteUrl } from "#subagents/remote-route-url.js";
 import {
   handleWorkflowWebhookRequest,
   WORKFLOW_WEBHOOK_ROUTE_PATTERN,
@@ -769,8 +770,7 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
         }
 
         const upstreamUrl = new URL(
-          createEveSessionStreamRoutePath(childSessionId).replace(/^\/+/, ""),
-          `${binding.url.replace(/\/+$/, "")}/`,
+          createRemoteAgentRouteUrl(binding.url, createEveSessionStreamRoutePath(childSessionId)),
         );
         if (startIndex !== undefined) {
           upstreamUrl.searchParams.set("startIndex", String(startIndex));

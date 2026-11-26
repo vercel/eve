@@ -119,6 +119,7 @@ function traceAction(call: CallObservation, turn: TurnObservation): TraceAction 
     kind: actionKind(call.kind),
     name: call.name,
     output: call.output,
+    parentCallId: call.parentCallId,
     startTime: call.startedAt,
     status: actionStatus(call, turn),
   };

@@ -1,6 +1,7 @@
 import type { JsonValue } from "#shared/json.js";
 import type { MessageContent } from "#shared/message-content.js";
 
+import { HttpError } from "#channel/http-error.js";
 import { SessionStrandedError } from "#channel/session-stranded-error.js";
 import { SessionNotActiveError } from "#channel/session-not-active-error.js";
 import type { DeliveryReceipt } from "#protocol/delivery.js";
@@ -159,6 +160,7 @@ export async function resolveOnMessage(input: {
       throw new TypeError("eveChannel onMessage must return an auth result.");
     }
   } catch (error) {
+    if (HttpError.is(error)) return error.response;
     const errorId = logError(log, "onMessage handler failed", error, {
       sessionId: input.sessionId,
     });

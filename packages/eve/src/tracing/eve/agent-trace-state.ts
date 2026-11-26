@@ -53,6 +53,7 @@ export interface AgentActionTraceState {
   readonly callId: string;
   readonly channelAudience?: ChannelAudience;
   readonly context: SpanContext;
+  readonly ownerCallId?: string;
   readonly rootSessionId?: string;
   readonly sessionId: string;
   readonly stepIndex: number;

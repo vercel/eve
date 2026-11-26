@@ -90,6 +90,11 @@ export type EveToolPart = {
   readonly label: string;
   /** Its tool set `label: false`, so activity leaves it out; see `showsActivity`. */
   readonly hidden?: true;
+  /**
+   * The call this call runs inside, such as a `workflow()` program call. Absent for a call the
+   * model made itself.
+   */
+  readonly parentCallId?: string;
   readonly interaction?: Interaction;
 } & (
   | {

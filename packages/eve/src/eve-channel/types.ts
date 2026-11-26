@@ -200,7 +200,9 @@ export interface EveChannelConfig {
    * Pre-dispatch hook for inbound eve HTTP messages. Runs after route auth and body
    * parsing, before runtime dispatch. Message-free creation skips this hook and
    * parks before session initialization. The first message supplies auth and context
-   * for initialization and its first turn.
+   * for initialization and its first turn. Throw an `HttpError` from `eve/channels/auth`,
+   * such as `TooManyRequestsError`, to refuse the message with that error's response;
+   * any other thrown error answers `500`.
    */
   readonly onMessage?: (
     ctx: EveMessageContext,

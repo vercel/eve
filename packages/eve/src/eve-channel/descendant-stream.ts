@@ -15,6 +15,7 @@ import {
 import { createSessionStreamResponse } from "#eve-channel/request.js";
 import { findRemoteAgentBinding, type RemoteAgentBinding } from "#eve-channel/support.js";
 import { proxyStreamResponse } from "#eve-channel/stream-headers.js";
+import { createRemoteAgentRouteUrl } from "#subagents/remote-route-url.js";
 import { waitWithSignal } from "#shared/wait-with-signal.js";
 import { isObject } from "#shared/guards.js";
 import { isRunExpired } from "#shared/run-errors.js";
@@ -82,7 +83,7 @@ export async function descendantStreamResponse(input: {
         remaining.length === 0
           ? createEveSessionStreamRoutePath(childId)
           : createEveDescendantStreamRoutePath(childId);
-      const upstreamUrl = new URL(route.replace(/^\/+/, ""), `${binding.url.replace(/\/+$/, "")}/`);
+      const upstreamUrl = new URL(createRemoteAgentRouteUrl(binding.url, route));
       for (const name of ["startIndex", "includeTailIndex", "follow"]) {
         const value = url.searchParams.get(name);
         if (value !== null) upstreamUrl.searchParams.set(name, value);

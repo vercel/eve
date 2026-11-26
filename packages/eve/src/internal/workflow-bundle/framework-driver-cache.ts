@@ -15,6 +15,8 @@ const CACHE_DIRECTORY_PATH = join("node_modules", ".cache", "eve", "workflow-dri
 
 const BUILD_CODE_DIRECTORIES = ["internal/workflow-bundle", "internal/bundler"];
 const BUILD_CODE_FILES = [
+  "execution/code-mode/agent-call-reference.js",
+  "execution/sandbox/bash-job-reference.js",
   "execution/stable-workflow-names.js",
   "execution/workflow-registry.js",
   "internal/application/import-specifier.js",

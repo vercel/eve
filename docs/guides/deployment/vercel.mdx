@@ -93,7 +93,7 @@ Run `vercel dev --local` with Vercel CLI 59.16.0 or newer to start the whole ser
 
 Generated transport routes go before a filesystem handler, or before authored routes when there is none. `withEve` throws instead of overwriting an authored service key or exact transport route that belongs to a generated agent. Remove that route, and remove or rename that service, because `withEve` adds both. Names in the array form of `services` must be unique. Other services, routes, bindings, and Cron Jobs stay authored in `vercel.ts`.
 
-Custom agent channel endpoints aren’t published automatically. Route each one to the generated service:
+Channel routes under `/eve/v1/*` are forwarded automatically to the generated service (as `/eve/<name>/v1/*` for named workspace agents). Custom channel endpoints outside `/eve/v1/*` aren’t published automatically; route each one explicitly to the generated service:
 
 ```typescript title="vercel.ts"
 import { withEve } from "eve/vercel";

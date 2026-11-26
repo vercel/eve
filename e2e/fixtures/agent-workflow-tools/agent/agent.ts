@@ -111,6 +111,37 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
     [...request.userMessages].reverse().find((entry) => entry.startsWith("WORKFLOW-")) ?? "";
   const scenario = respondToTaskScenario(request, directiveOf(message));
   if (scenario !== undefined) return scenario;
+  if (message.startsWith("WORKFLOW-PROGRAM-TOOLS-START")) {
+    const result = [...request.toolResults].reverse().find((entry) => entry.name === "workflow");
+    if (result === undefined) {
+      return {
+        toolCalls: [
+          {
+            id: scriptedCallId(request, "workflow-program-tools"),
+            input: {
+              js: [
+                'await tools["public-catalog"]({});',
+                'const found = await search({ query: "public-catalog__" });',
+                'const items = await tools["public-catalog__list_items"]({});',
+                "const [deployed, note] = await Promise.all([",
+                '  tools.gated_deploy({ service: "api" }),',
+                '  ctx.agent("workflow-marker", { message: "release-check" }),',
+                "]);",
+                "return {",
+                "  found: found.results.map((entry) => entry.tool),",
+                "  items,",
+                "  deployed,",
+                "  note,",
+                "};",
+              ].join("\n"),
+            },
+            name: "workflow",
+          },
+        ],
+      };
+    }
+    return `WORKFLOW-PROGRAM-TOOLS-RESULT ${JSON.stringify(result.output ?? null)}`;
+  }
   if (message.startsWith("WORKFLOW-CATALOG-SIGN-IN")) {
     // A plain search finds the catalog as its sign-in entry; executing it asks
     // the user. Sign-in drops that interrupted call from history, so the script

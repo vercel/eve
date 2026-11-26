@@ -18,7 +18,7 @@
     "typecheck": "tsc -p apps/web/tsconfig.json"
   },
   "dependencies": {
-    "@agent-browser/eve": "0.40.0",
+    "@agent-browser/eve": "0.44.0",
     "@ui-sdk/core": "0.1.0-beta.10",
     "@ui-sdk/react": "0.1.0-beta.10",
     "@upstash/redis": "1.38.2",

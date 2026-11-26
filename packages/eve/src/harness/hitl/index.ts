@@ -49,6 +49,7 @@ export async function askStepApprovals(
     readonly requests: readonly ApprovalAsk[];
     readonly tasks: readonly RuntimeWorkflowTaskRequest[];
     readonly endsTurn?: true;
+    readonly program?: { readonly callId: string };
     readonly tools: HarnessToolLookup;
   },
 ): Promise<void> {
@@ -56,6 +57,7 @@ export async function askStepApprovals(
     endsTurn: input.endsTurn,
     event: input.event,
     messages: input.messages,
+    program: input.program,
     requests: input.requests,
     requester: currentRequester(step),
     responseAuthRequiredRequestIds: responsePolicyRequestIds(input.tools, input.requests),

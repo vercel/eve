@@ -1,3 +1,4 @@
+import type { AgentSourceOwner } from "#compiler/source-graph.js";
 import type { ContextContainer } from "#context/container.js";
 import type { ContextReader } from "#context/key.js";
 import {
@@ -19,6 +20,7 @@ import {
   writeSkillPackageToSandbox,
 } from "#shared/skill-package.js";
 import { formatAvailableSkillsSection, skillFilePath } from "#execution/skills/instructions.js";
+import { announcementDigest } from "#harness/announcements.js";
 import { compiledBundleOf } from "#runtime/sessions/runtime-context-keys.js";
 import { slotsOf, slotValueOf } from "#definitions/state.js";
 import { namedEntries, type EntryKind } from "./named.js";
@@ -32,7 +34,9 @@ import {
 
 export const skills: Definition = {
   contribute: ({ container }) => {
-    const own = compiledBundleOf(container)?.resolvedAgent.skills ?? [];
+    const bundle = compiledBundleOf(container);
+    const own = bundle?.resolvedAgent.skills ?? [];
+    const nodeId = bundle?.nodeId ?? null;
     return {
       tools: () => ({
         skills: new Map(
@@ -44,6 +48,14 @@ export const skills: Definition = {
               markdown: skill.content,
               name: skill.name,
               path: skillFilePath(skill.name),
+              provenance:
+                skill.owner === undefined
+                  ? undefined
+                  : {
+                      identity: skill.sourceId,
+                      revision: announcementDigest("skill", skill.content),
+                      scope: staticSkillScope(skill.owner, nodeId),
+                    },
             },
           ]),
         ),
@@ -62,6 +74,17 @@ export const skills: Definition = {
   id: "eve.skills",
   label: "the agent's skills",
 };
+
+function staticSkillScope(owner: AgentSourceOwner, nodeId: string | null): string {
+  switch (owner.kind) {
+    case "application":
+      return JSON.stringify([owner.kind, nodeId]);
+    case "extension":
+      return JSON.stringify([owner.kind, nodeId, owner.mountId, owner.packageName]);
+    case "framework":
+      return JSON.stringify([owner.kind, nodeId, owner.feature]);
+  }
+}
 
 function skillsSection(
   skills: readonly {

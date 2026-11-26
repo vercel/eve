@@ -138,8 +138,7 @@ export async function prepareActionDispatch<PlanEntry>(input: {
     session,
   });
 
-  const sandboxSessionId = resolveActiveSandboxSessionId(adapter.state, session.sessionId);
-  const sandboxState = session.sandboxState ?? resolveOwnerSandboxState(adapter.state);
+  const { sandboxSessionId, sandboxState } = resolveSessionSandboxTarget(adapter.state, session);
 
   return {
     adapter,
@@ -170,13 +169,23 @@ function childTraceRoot(ctx: ContextReader, sessionId: string): SessionTraceRoot
   return { kind: "inherited", sessionId: resolveTraceRootSessionId(ctx, sessionId) };
 }
 
-function resolveOwnerSandboxState(adapterState: unknown): SandboxState | undefined {
-  if (typeof adapterState !== "object" || adapterState === null) return undefined;
-  return (adapterState as Record<string, unknown>).parentSandboxState as SandboxState | undefined;
-}
-
-function resolveActiveSandboxSessionId(adapterState: unknown, sessionId: string): string {
-  if (typeof adapterState !== "object" || adapterState === null) return sessionId;
-  const value = (adapterState as Record<string, unknown>).sandboxSessionId;
-  return typeof value === "string" && value.length > 0 ? value : sessionId;
+export function resolveSessionSandboxTarget(
+  adapterState: unknown,
+  session: { readonly sandboxState?: SandboxState; readonly sessionId: string },
+): { readonly sandboxSessionId: string; readonly sandboxState: SandboxState | undefined } {
+  const rawSessionId =
+    typeof adapterState === "object" && adapterState !== null
+      ? (adapterState as Record<string, unknown>).sandboxSessionId
+      : undefined;
+  const parentState =
+    typeof adapterState === "object" && adapterState !== null
+      ? ((adapterState as Record<string, unknown>).parentSandboxState as SandboxState | undefined)
+      : undefined;
+  return {
+    sandboxSessionId:
+      typeof rawSessionId === "string" && rawSessionId.length > 0
+        ? rawSessionId
+        : session.sessionId,
+    sandboxState: session.sandboxState ?? parentState,
+  };
 }

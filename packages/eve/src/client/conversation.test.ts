@@ -250,6 +250,34 @@ describe("the conversation", () => {
     expect(tool(observe([...started, requested]))).not.toHaveProperty("hidden");
   });
 
+  it("names the call a nested call runs inside, and keeps parts in stream order", () => {
+    const nested = (callId: string): SessionEvent => ({
+      data: {
+        callId,
+        capability: { kind: "tool", name: "read_file" },
+        input: {},
+        owner: { callId: "call_0" },
+      },
+      scope,
+      type: "call.requested",
+    });
+    const conversation = observe([
+      ...started,
+      requested,
+      nested("call_0/1"),
+      text("p_0", "Reading."),
+      nested("call_0/2"),
+    ]);
+    expect(
+      assistantParts(conversation).map((part) =>
+        part.type === "tool" ? [part.callId, part.parentCallId] : part.type,
+      ),
+    ).toEqual([["call_0", undefined], ["call_0/1", "call_0"], "text", ["call_0/2", "call_0"]]);
+    expect(tool(conversation)).not.toHaveProperty("parentCallId");
+    expect(call(conversation.state.view, "call_0/1")?.parentCallId).toBe("call_0");
+    expect(call(conversation.state.view, "call_0")).not.toHaveProperty("parentCallId");
+  });
+
   it("leaves out a call a retry replaced", () => {
     const conversation = observe([
       ...started,

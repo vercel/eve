@@ -8,6 +8,7 @@ import type { DurableStepResult } from "#execution/session/turn-step-types.js";
 import { interruptedAttemptNote, type InterruptedCall } from "#harness/interrupted-attempt.js";
 import { createImportedHistoryMessages } from "#harness/messages.js";
 import { supersede } from "#harness/session-machine/cascade.js";
+import { isProgramCall, programsOf } from "#harness/session-machine/programs.js";
 import { rowOf, type Ref } from "#protocol/session-projection/tree.js";
 import {
   applyTransition,
@@ -79,7 +80,11 @@ export function readInterruptedAttempt(
           call(event.data.callId).started = true;
           break;
         case "call.settled":
-          call(event.data.callId).outcome = event.data.outcome;
+          Object.assign(call(event.data.callId), {
+            error: event.data.error?.message,
+            outcome: event.data.outcome,
+            output: event.data.output,
+          });
           break;
         case "interaction.settled":
           settledInteractions.add(event.data.interactionId);
@@ -207,6 +212,9 @@ export async function recoverInterruptedStep(input: {
   }
 
   const stop = stopInterruptedSteps(view(), attempt);
+  const programs = programsOf(stop.turn).map(({ callId }) => callId);
+  const programCall = (callId: string) =>
+    programs.some((program) => isProgramCall(program, callId));
   const asked = new Set(
     view()
       .turn.suspended.filter((step) => !stop.turn.suspended.includes(step))
@@ -218,9 +226,8 @@ export async function recoverInterruptedStep(input: {
       case "change":
         return introduced(row);
       case "call":
-        return (
-          row.taskId === undefined && (introduced(row) || attempt.calls.get(id)?.started === true)
-        );
+        if (row.taskId !== undefined || programs.includes(id)) return false;
+        return attempt.calls.get(id)?.started === true || (introduced(row) && !programCall(id));
       case "interaction":
         return !view().relayedRequestIds.has(id) && (introduced(row) || asked.has(id));
       default:
@@ -231,7 +238,11 @@ export async function recoverInterruptedStep(input: {
   const turnId = activeTurnIdOf(currentProjection(ctx));
   const interruptions = turnId === undefined ? 0 : turnInterruptions(session.state, turnId) + 1;
   session = saveTransition(session, stop);
-  const note = interruptedAttemptNote(attempt.calls);
+  const note = interruptedAttemptNote(
+    new Map(
+      [...attempt.calls].filter(([callId]) => !programs.includes(callId) && !programCall(callId)),
+    ),
+  );
   if (note !== undefined) session = changeHistory(session, { append: [note] });
   const stopped = input.failed?.stopped === true;
   if (stopped || (input.failed === undefined && interruptions <= MAX_TURN_INTERRUPTIONS)) {

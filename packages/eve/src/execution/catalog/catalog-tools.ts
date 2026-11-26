@@ -3,6 +3,7 @@ import type { OfferedCatalogTools } from "#context/keys.js";
 import type { Route, RouteMiss, ToolEntry } from "#definitions/definition.js";
 import type { Announcement } from "#harness/announcements.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import { programCallKind } from "#harness/program-calls.js";
 import {
   CALL_TOOL_NAME,
   SEARCH_TOOL_NAME,
@@ -15,7 +16,8 @@ import { isObject } from "#shared/guards.js";
 import { defineJsonSchema } from "#tools/schema.js";
 
 import { closestNames } from "./rank.js";
-import { createSearchTool } from "./search.js";
+import { createSearchTool, type SearchOutput } from "./search.js";
+import { subscriptionSources, subscriptionTools } from "./subscription-tools.js";
 import { entrySignature } from "./signatures.js";
 import { unknownSkillMessage } from "./skills.js";
 import type { Callable } from "./step-catalog.js";
@@ -27,13 +29,74 @@ const LISTED_SKILL_DESCRIPTION =
   "Load a skill's instructions when the request clearly matches one of your listed skills or the user asks for it, then follow them.";
 const SEARCHABLE_SKILL_DESCRIPTION = `Load a skill's instructions when the request clearly matches a listed skill or one ${SEARCH_TOOL_NAME} found, or the user asks for it, then follow them.`;
 
+export function programEntry(
+  callable: Callable,
+  name: string,
+): { readonly entry: HarnessToolDefinition } | { readonly issue: string } {
+  if (name === SEARCH_TOOL_NAME) {
+    return { issue: `"${name}" can't be called from a program; use search({ query }).` };
+  }
+  const direct = { issue: `"${name}" is in your tool list; call it directly.` };
+  if (eveNamespaceReservation(name) !== undefined) return direct;
+  const entry = callable.get(name);
+  if (entry === undefined) {
+    return { issue: unknownEntryMessage(name, callable, "search({ query })") };
+  }
+  if (!callableByName(entry)) return direct;
+  if (entry.endsTurn !== undefined && entry.endsTurn !== false) {
+    return { issue: `"${name}" ends your turn, so a program can't call it; call it directly.` };
+  }
+  const kind = programCallKind(entry);
+  if (kind === "serve") {
+    return {
+      issue: `"${name}" keeps a task open between calls, which a program can't hold; call it directly.`,
+    };
+  }
+  if (kind === "program") {
+    return {
+      issue: `"${name}" runs a workflow program, which a program can't nest. Call tools or agents directly from this program, or call "${name}" directly.`,
+    };
+  }
+  return { entry };
+}
+
+export function programInputIssue(
+  callable: Callable,
+  entry: HarnessToolDefinition,
+  message: string,
+): string {
+  return isConnectionTool(entry.name, callable.connections)
+    ? message
+    : `${message}\nSignature: ${entrySignature(entry)}`;
+}
+
+export async function programSearch(callable: Callable, input: unknown): Promise<SearchOutput> {
+  const skills = [...callable.skills.values()].filter((skill) => skill.deferred);
+  const tool = createSearchTool({
+    deferred: [...callable.deferred.values()],
+    describe: callable.describe,
+    reach: {
+      connections: callable.connections.length > 0,
+      skills: skills.length > 0,
+      subscriptions: false,
+      tools: callable.connections.length > 0 || callable.deferred.size > 0,
+    },
+    registry: callable.registry,
+    skills,
+    subscriptions: { channels: [], connections: [] },
+  });
+  return (await tool.execute!(input ?? {}, undefined as never)) as SearchOutput;
+}
+
 export function catalogReach(callable: Callable): OfferedCatalogTools {
   const skills = [...callable.skills.values()];
   const connections = callable.connections.length > 0;
+  const sources = subscriptionSources(callable);
   return {
     connections,
     searchableSkills: skills.some((skill) => skill.deferred),
     skills: skills.length > 0,
+    subscriptions: sources.channels.length > 0 || sources.connections.length > 0,
     tools: connections || callable.deferred.size > 0,
   };
 }
@@ -46,8 +109,10 @@ export function catalogTools(
     readonly skills: Readonly<Record<string, Announcement>>;
   },
 ): ReadonlyMap<string, ToolEntry> {
-  const search = offered.tools || offered.searchableSkills;
+  const search = offered.tools || offered.searchableSkills || offered.subscriptions;
+  const subscription = subscriptionTools(callable);
   const listed = new Set([
+    ...subscription.keys(),
     ...(search ? [SEARCH_TOOL_NAME] : []),
     ...(offered.tools ? [CALL_TOOL_NAME] : []),
     ...(offered.skills ? [SKILL_TOOL_NAME] : []),
@@ -62,14 +127,17 @@ export function catalogTools(
         reach: {
           connections: offered.connections,
           skills: offered.searchableSkills,
+          subscriptions: offered.subscriptions,
           tools: offered.tools,
         },
         registry: callable.registry,
         skills: [...callable.skills.values()].filter((skill) => skill.deferred),
+        subscriptions: subscriptionSources(callable),
       }),
     });
   }
   if (offered.tools) tools.set(CALL_TOOL_NAME, callRoute(callable, listed, offered));
+  for (const [name, entry] of subscription) tools.set(name, entry);
   if (offered.skills) {
     tools.set(SKILL_TOOL_NAME, {
       ...skillRoute(callable, listed, offered),
@@ -198,7 +266,11 @@ function isConnectionTool(
   );
 }
 
-function unknownEntryMessage(name: string, callable: Callable): string {
+function unknownEntryMessage(
+  name: string,
+  callable: Callable,
+  search: string = SEARCH_TOOL_NAME,
+): string {
   if (callable.skills.has(name)) {
     return `"${name}" is a skill; load it with ${SKILL_TOOL_NAME}({ name: "${name}" }).`;
   }
@@ -210,6 +282,6 @@ function unknownEntryMessage(name: string, callable: Callable): string {
   const hint =
     suggestions.length > 0
       ? ` Closest tools: ${suggestions.join(", ")}.`
-      : ` Find tools with ${SEARCH_TOOL_NAME}.`;
+      : ` Find tools with ${search}.`;
   return `No tool named "${name}".${hint}`;
 }

@@ -18,7 +18,8 @@ import {
 } from "#harness/workflow-tool-runs.js";
 import { normalizeToolModelOutput, toolModelOutputContext } from "#harness/tool-model-output.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { commitCallEntry, isTaskTool } from "#execution/tasks/model-step.js";
+import { commitCallEntry, commitTask, isTaskTool } from "#execution/tasks/model-step.js";
+import type { PromotedTaskCall } from "#tools/task-handoff.js";
 import { requireClearance, type Clearance } from "#harness/clearance.js";
 import { admitWorkflowTask } from "#harness/workflow-admission.js";
 import { startsTasks } from "#execution/tasks/tool-entry-point.js";
@@ -60,6 +61,7 @@ export function forgetFinishedRuns(
 export async function runtimeResultCalls(
   results: readonly RuntimeActionResult[],
   tools: HarnessToolLookup | undefined,
+  programCalls: ReadonlySet<string> = new Set(),
 ): Promise<{ readonly part: ToolResultPart; readonly result: RuntimeActionResult }[]> {
   const settled: { part: ToolResultPart; result: RuntimeActionResult }[] = [];
   for (const result of results) {
@@ -81,7 +83,9 @@ export async function runtimeResultCalls(
           part: toolResult(
             result,
             result.toolName,
-            await projectToolResultOutput(result, tools?.get(result.toolName)),
+            programCalls.has(result.callId)
+              ? toToolResultOutput(result)
+              : await projectToolResultOutput(result, tools?.get(result.toolName)),
           ),
           result,
         });
@@ -139,6 +143,48 @@ export function collectWorkflowCalls(input: {
           tools: input.tools,
         }),
         clearance,
+      ),
+    );
+  }
+  return { session, workflowRequests };
+}
+
+export function collectPromotedTasks(input: {
+  readonly promotedTasks: readonly PromotedTaskCall[];
+  readonly session: HarnessSession;
+  readonly turnId: string;
+}): {
+  readonly session: HarnessSession;
+  readonly workflowRequests: readonly RuntimeWorkflowTaskRequest[];
+} {
+  let { session } = input;
+  const workflowRequests: RuntimeWorkflowTaskRequest[] = [];
+  for (const promoted of input.promotedTasks) {
+    requireClearance(promoted.clearance, promoted.callId);
+    const resolvedInput = resolveToolCallInputObject(promoted.input, {
+      callId: promoted.callId,
+      toolName: promoted.toolName,
+    });
+    const committed = commitTask(
+      session,
+      { callId: promoted.callId, toolName: promoted.toolName, turnId: input.turnId },
+      "task",
+      resolvedInput,
+    );
+    session = committed.session;
+    workflowRequests.push(
+      admitWorkflowTask(
+        {
+          callId: promoted.callId,
+          entry: committed.entry,
+          executeInput: promoted.handoff,
+          input: committed.input,
+          kind: "workflow-task",
+          ...(promoted.preview !== undefined && { preview: promoted.preview }),
+          toolName: promoted.toolName,
+          workflowId: promoted.workflowId,
+        },
+        promoted.clearance,
       ),
     );
   }

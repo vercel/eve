@@ -14,6 +14,7 @@ import type {
   InstrumentationCallSettledEvent,
 } from "#instrumentation/lifecycle.js";
 import { actionIdempotencyKey } from "#instrumentation/lifecycle.js";
+import { isTurnCancellation } from "#harness/turn-cancellation.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import type {
   AgentActionTraceState,
@@ -86,12 +87,18 @@ export function createAgentToolInstrumentation(input: {
     )?.[1];
   }
 
+  async function ownerTool(sessionId: string, turnId: string, callId: string) {
+    const state = await stateFor(sessionId, turnId, callId);
+    return state === undefined ? undefined : await resumeTool(input.tracing, state);
+  }
+
   async function reenter(state: AgentActionTraceState, report: ToolInput) {
     const turn = await input.tracing.resume({
       identity: eveTurnIdentity(state),
       context: withChannelAudience(ROOT_CONTEXT, state.channelAudience),
     });
     if (turn?.findTool(state.callId) === undefined) return undefined;
+    if (state.ownerCallId !== undefined) return turn.findTool(state.callId);
     const parent = turn.findAttempt({ stepIndex: state.stepIndex, attempt: state.attemptIndex });
     return parent === undefined ? turn.findTool(state.callId) : parent.tool(report);
   }
@@ -114,8 +121,11 @@ export function createAgentToolInstrumentation(input: {
     if (event.scope.turnId === undefined || stepIndex === undefined) return;
     let state = await input.stateStore.get("action", event.idempotencyKey);
     if (state === undefined) {
-      const parent = await input.attemptFor(event.scope);
-      if (parent === undefined) return;
+      const parent =
+        event.ownerCallId === undefined
+          ? await input.attemptFor(event.scope)
+          : await ownerTool(event.scope.sessionId, event.scope.turnId, event.ownerCallId);
+      if (parent === undefined || parent.finished) return;
       const tool = await parent.tool({
         callId: event.callId,
         name: event.toolName,
@@ -137,6 +147,7 @@ export function createAgentToolInstrumentation(input: {
         callId: event.callId,
         channelAudience: normalizeChannelAudience(event.scope.channelAudience),
         context: { ...tool.reference, isRemote: false },
+        ...(event.ownerCallId !== undefined && { ownerCallId: event.ownerCallId }),
         rootSessionId: event.scope.rootSessionId,
         sessionId: event.scope.sessionId,
         stepIndex,
@@ -278,10 +289,11 @@ export function createAgentToolInstrumentation(input: {
       } catch (error) {
         const authorization = connectionAuthorizationAttributes(error);
         if (authorization !== undefined) execution.tool.attributes(authorization);
+        const failed = !isTurnCancellation(error);
         await finishExecution(execution, {
           completedAtMs: Date.now(),
-          failed: true,
-          error: ceiling.recordOutputs ? error : undefined,
+          failed,
+          error: failed && ceiling.recordOutputs ? error : undefined,
         });
         throw error;
       }

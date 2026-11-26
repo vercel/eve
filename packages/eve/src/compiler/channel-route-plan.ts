@@ -9,7 +9,12 @@ import {
   createChannelRouteShadowedDiagnostic,
   type CompilerDiagnostic,
 } from "#compiler/diagnostics.js";
-import { HOST_HTTP_INVENTORY } from "#framework/host-inventory.js";
+import {
+  findReservedEveNamespaceCollision,
+  HOST_HTTP_INVENTORY,
+  isRootEveChannel,
+} from "#framework/host-inventory.js";
+import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 
 export function createCompiledChannelRoutePlan(input: {
   readonly bindings: Readonly<Record<string, AgentModuleBinding>>;
@@ -26,6 +31,19 @@ export function createCompiledChannelRoutePlan(input: {
     if (reserved !== undefined) {
       throw new Error(
         `compile/reserved-route-collision: ${channel.method} ${channel.urlPath} overlaps reserved ${reserved.method} ${reserved.path}.`,
+      );
+    }
+    const namespaceCollision = findReservedEveNamespaceCollision(channel.urlPath, {
+      allowEveProtocol: isRootEveChannel(channel, input.sources[channel.sourceId]?.owner.kind),
+    });
+    if (namespaceCollision !== undefined) {
+      if (namespaceCollision.kind === "dynamic") {
+        throw new Error(
+          `compile/reserved-route-collision: ${channel.method} ${channel.urlPath} uses a dynamic segment in the reserved "${EVE_ROUTE_PREFIX}/<namespace>" position. Put custom routes under a static namespace such as "${EVE_ROUTE_PREFIX}/<your-channel>/...".`,
+        );
+      }
+      throw new Error(
+        `compile/reserved-route-collision: ${channel.method} ${channel.urlPath} uses reserved eve namespace "${EVE_ROUTE_PREFIX}/${namespaceCollision.namespace}". Put custom routes under "${EVE_ROUTE_PREFIX}/<your-channel>/...".`,
       );
     }
     const winner = effective.find((candidate) => routesOverlap(channel, candidate));

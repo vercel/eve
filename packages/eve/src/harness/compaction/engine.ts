@@ -45,6 +45,12 @@ export function getInputTokenCount(
 ): number {
   const prior = config.lastKnownInputTokens;
   const priorCount = config.lastKnownPromptMessageCount;
+  const scale =
+    config.estimateRatio !== undefined &&
+    Number.isFinite(config.estimateRatio) &&
+    config.estimateRatio > 1
+      ? Math.min(DEFAULT_ESTIMATE_RATIO, config.estimateRatio)
+      : 1;
 
   if (
     prior === undefined ||
@@ -53,13 +59,13 @@ export function getInputTokenCount(
     priorCount < 0 ||
     priorCount > messages.length
   ) {
-    return estimateTokens(messages) + requestEnvelopeTokens;
+    return Math.ceil((estimateTokens(messages) + requestEnvelopeTokens) * scale);
   }
 
   const appended = messages.slice(priorCount);
   return (
     prior +
-    (appended.length === 0 ? 0 : estimateTokens(appended)) +
+    (appended.length === 0 ? 0 : Math.ceil(estimateTokens(appended) * scale)) +
     Math.max(0, requestEnvelopeTokens - previousEnvelopeTokens)
   );
 }
@@ -195,6 +201,7 @@ interface CompactionHeuristicInput {
   readonly previousCheckpoint: string | undefined;
   readonly resume: boolean;
   readonly summarize: CompactionSummarizer;
+  readonly transcriptBudgetTokens?: number;
 }
 
 type CompactionHeuristicOutcome =
@@ -215,6 +222,7 @@ export async function compactMessages(
   summarize: CompactionSummarizer,
   forceSummary = false,
   resume = true,
+  transcriptBudgetTokens?: number,
 ): Promise<{ readonly messages: ModelMessage[]; readonly stage: CompactionStage }> {
   const { conversation, previousCheckpoint } = extractPreviousCheckpoint(messages);
   for (const heuristic of COMPACTION_HEURISTICS) {
@@ -225,6 +233,7 @@ export async function compactMessages(
       previousCheckpoint,
       resume,
       summarize,
+      transcriptBudgetTokens,
     });
     if (outcome.type === "compacted") {
       return { messages: outcome.messages, stage: outcome.stage };
@@ -240,6 +249,7 @@ async function fixedTailHeuristic({
   previousCheckpoint,
   resume,
   summarize,
+  transcriptBudgetTokens,
 }: CompactionHeuristicInput): Promise<CompactionHeuristicOutcome> {
   const withResumptionGuard: typeof resumeAfter = (kept, replay, threshold) =>
     resume ? resumeAfter(kept, replay, threshold) : kept;
@@ -290,7 +300,7 @@ async function fixedTailHeuristic({
         ? cappedConversation
         : cappedConversation.map((message, index) => (index === currentIndex ? fit.cut : message)),
     previousCheckpoint,
-    transcriptBudgetTokens: config.threshold,
+    transcriptBudgetTokens: transcriptBudgetTokens ?? config.threshold,
   });
 
   const summary = await summarize({

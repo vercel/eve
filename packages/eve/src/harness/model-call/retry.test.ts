@@ -1,10 +1,11 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { describe, expect, it, vi } from "vitest";
 
 import { SessionStreamWriteError } from "#harness/session-stream-write-error.js";
 
 import { ALLOW_RETRY, runModelCallWithRetries, STOP_RETRY } from "./retry.js";
 
-vi.mock("node:timers/promises", () => ({ setTimeout: async () => {} }));
+vi.mock("node:timers/promises", () => ({ setTimeout: vi.fn(async () => {}) }));
 
 const session = { sessionId: "session-alice", turnId: "turn-1" };
 const busy = () => Object.assign(new Error("The provider is busy."), { isRetryable: true });
@@ -63,6 +64,24 @@ describe("runModelCallWithRetries", () => {
     });
 
     await expect(runModelCallWithRetries(call, session)).rejects.toThrow("busy");
-    expect(call).toHaveBeenCalledTimes(3);
+    expect(call).toHaveBeenCalledTimes(5);
+  });
+
+  it("honors Retry-After headers on rate-limited responses", async () => {
+    vi.mocked(delay).mockClear();
+    let attempts = 0;
+    const call = vi.fn(async () => {
+      if ((attempts += 1) === 1) {
+        throw Object.assign(new Error("Too Many Requests"), {
+          isRetryable: true,
+          responseHeaders: { "retry-after": "7" },
+          statusCode: 429,
+        });
+      }
+      return "ok";
+    });
+
+    await expect(runModelCallWithRetries(call, session)).resolves.toBe("ok");
+    expect(vi.mocked(delay)).toHaveBeenCalledWith(7_000, undefined, { signal: undefined });
   });
 });

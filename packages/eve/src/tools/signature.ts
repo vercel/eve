@@ -53,7 +53,7 @@ export function renderOutputType(outputSchema: Schema | undefined): string | und
   return type === "unknown" ? undefined : type;
 }
 
-function isIdentifier(name: string): boolean {
+export function isIdentifier(name: string): boolean {
   return IDENTIFIER.test(name);
 }
 

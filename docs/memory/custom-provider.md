@@ -130,17 +130,24 @@ What a turn recalls stays for the rest of the session, just before that turn's
 input in every later model call. The `id` decides what a later recall does with
 it:
 
-| Message           | Effect                                                                                                                      |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `{ content, id }` | Replaces the message an earlier turn recalled with the same `id`. The same content changes nothing; the earlier copy stays. |
-| `{ content }`     | Adds a message. A later recall can't replace or remove it.                                                                  |
+| Message           | Effect                                                                                     |
+| ----------------- | ------------------------------------------------------------------------------------------ |
+| `{ content, id }` | Updates the record with the same `id`. Identical content leaves the earlier copy in place. |
+| `{ content }`     | Adds a message. A later recall can't replace or remove it.                                 |
 
 A result of `null`, `undefined`, or `{ messages: [] }` adds nothing and keeps
 what earlier turns recalled. Give every message a stable `id` when the provider
 returns its current state each turn, as `fileMemory()` does, or each turn adds
-another copy. Records that differ each turn accumulate for the session and
-count toward every model call's context. The `id` also identifies the record in
+another copy. Unkeyed records accumulate for the session and count toward
+model context. The `id` also identifies the record in
 [instrumentation](../observability/instrumentation).
+
+By default, `supersede: "hide"` removes older versions when a keyed recall changes.
+Set `supersede: "append"` on `defineMemory()` to append the changed record without
+rewriting the earlier prompt, so providers can reuse its cached prefix. eve tells
+the model to use only the latest version of each record. Older versions still count
+toward model context until compaction succeeds. Use `"hide"` when eve must
+remove the old recall block immediately.
 
 ### Tools
 
@@ -167,7 +174,9 @@ same scope.
 eve recalls before the first model call of each turn, and again when the
 session's caller changes. Recalled messages stay outside history, so
 compaction never summarizes them. When compaction summarizes a turn, that
-turn's recalled messages move to just after the summary.
+turn's recalled messages move to just after the summary. For `supersede: "append"`
+slots, successful compaction keeps only the latest version of each keyed record.
+Unkeyed records survive compaction.
 
 Before compaction rewrites history, eve calls `capture["compaction.requested"]`
 and waits for it, so a provider can keep detail the summary will lose.

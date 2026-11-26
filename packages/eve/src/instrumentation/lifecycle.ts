@@ -395,8 +395,8 @@ export interface InstrumentationModelCallCompletedEvent {
   /**
    * Provider metadata, as reported by the AI SDK. Carries Vercel AI Gateway cost and session
    * affinity routing data when the request went through the gateway; absent for other providers.
-   * When the trace policy omits outputs, only the gateway's `cost`, `generationId`, and `routing`
-   * fields remain.
+   * When the trace policy omits outputs, only the gateway's `cost`, `marketCost`, `generationId`,
+   * and `routing` fields remain.
    */
   readonly providerMetadata?: Readonly<Record<string, unknown>>;
   /** Content. Absent unless this provider's trace policy records this direction. */
@@ -433,6 +433,11 @@ export interface InstrumentationCallRequestedEvent {
   readonly startedAtMs?: number;
   readonly type: "call.requested";
   readonly callId: string;
+  /**
+   * The call this call runs inside, when another call made it, such as a workflow program call.
+   * Absent for a call the model made itself.
+   */
+  readonly ownerCallId?: string;
   readonly idempotencyKey: string;
   /** Content. Absent unless this provider's trace policy records inputs. */
   readonly input: unknown;

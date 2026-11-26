@@ -95,6 +95,7 @@ A `tool` part shows a call's shared state, with partial input while it streams.
 | `inputText`                | Partial input, only while `state` is `streaming`                                                                                       |
 | `input`, `output`, `error` | Validated input, current or final output, and error details                                                                            |
 | `interaction`              | The latest approval or question about the call. It stays `open` after an answer is submitted, until eve decides it                     |
+| `parentCallId`             | The call this call runs inside, such as a `workflow()` program call. Absent for a call the model made itself                           |
 
 - Read outcomes, reasons, and task identities from `call(view, part.callId)`, not from the part.
 - A call stays open if your stream stopped following before it finished. Decide what an open call shows after the stream ends.

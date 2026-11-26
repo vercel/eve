@@ -1,4 +1,4 @@
-import { ConnectionEventActions, isEventAction } from "#runtime/connections/events/actions.js";
+import { ConnectionEventActions } from "#runtime/subscriptions/actions.js";
 import type { MCPClient } from "#compiled/@ai-sdk/mcp/index.js";
 import type { ToolSet } from "ai";
 
@@ -34,7 +34,6 @@ import type {
   ConnectionToolMetadata,
   HeadersDefinition,
   HeaderValue,
-  ToolFilterDefinition,
 } from "#shared/connection-types.js";
 
 interface McpToolCache {
@@ -83,11 +82,9 @@ export class McpConnectionClient implements ConnectionClient {
         this.#forwardingFetch(),
       );
       this.eventActions = {
-        ownsName: isEventAction,
-        recoveryMetadata: () => events.recoveryMetadata(),
-        metadata: async () => {
+        getEvents: async () => {
           try {
-            return await events.metadata();
+            return await events.getEvents();
           } catch (error) {
             return await this.#rethrowClassified(error);
           }
@@ -462,19 +459,6 @@ function* walkErrorChain(error: unknown): Generator<unknown> {
     }
     current = current.cause;
   }
-}
-
-export function passesToolFilter(
-  names: readonly string[],
-  filter: Readonly<ToolFilterDefinition> | undefined,
-): boolean {
-  if (filter === undefined) {
-    return true;
-  }
-  if ("allow" in filter) {
-    return names.some((name) => filter.allow.includes(name));
-  }
-  return !names.some((name) => filter.block.includes(name));
 }
 
 export async function resolveHeaders(
