@@ -15,6 +15,7 @@ import type {
   SandboxWriteFilesOptions,
   SandboxWriteTextFileOptions,
 } from "#shared/sandbox-session.js";
+import { connectionFastRun, withSessionFastRun } from "#execution/sandbox/internal-shell.js";
 import { bufferToStream, streamToBuffer } from "./stream-utils.js";
 
 /**
@@ -129,7 +130,19 @@ export function createConnectionSession<Extensions extends object>(
       `Sandbox connection extensions cannot replace the session members eve provides: ${collisions.join(", ")}. Rename them.`,
     );
   }
-  return { ...extensions, ...session } as SandboxSession & Extensions;
+  const combined = { ...extensions, ...session } as SandboxSession & Extensions;
+  const fastRun = connectionFastRun(connection);
+  if (fastRun !== undefined) {
+    withSessionFastRun(combined, async (options) =>
+      fastRun({
+        command: options.command,
+        env: options.env ?? {},
+        signal: options.signal,
+        workingDirectory: resolveSandboxPath(options.workingDirectory ?? "."),
+      }),
+    );
+  }
+  return combined;
 }
 
 async function collectStreamToString(stream: ReadableStream<Uint8Array>): Promise<string> {

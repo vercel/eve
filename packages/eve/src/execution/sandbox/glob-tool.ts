@@ -1,7 +1,7 @@
 import { normalizeModelPath } from "#execution/tools/file-state.js";
+import { runInternalCommand } from "#execution/sandbox/internal-shell.js";
 import { resolveAbsoluteFilePath } from "#execution/sandbox/require-sandbox.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
-import { ripgrepIsAvailable } from "#execution/sandbox/ripgrep-probe.js";
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
 import { MAX_OUTPUT_BYTES } from "#execution/sandbox/truncate-output.js";
 
@@ -29,11 +29,8 @@ export async function executeGlobOnSandbox(
   const normalizedPath = normalizeModelPath(resolvedPath);
   const effectiveLimit = Math.min(Math.max(1, args.limit ?? DEFAULT_GLOB_LIMIT), MAX_GLOB_LIMIT);
 
-  const command = (await ripgrepIsAvailable(sandbox))
-    ? buildRipgrepCommand({ normalizedPath, pattern: args.pattern })
-    : buildPosixFindCommand({ normalizedPath, pattern: args.pattern });
-
-  const result = await sandbox.run({ command });
+  const command = buildGlobCommand({ normalizedPath, pattern: args.pattern });
+  const result = await runInternalCommand(sandbox, { command });
 
   if (
     (result.exitCode !== 0 && result.exitCode !== 1) ||
@@ -95,6 +92,20 @@ export async function executeGlobOnSandbox(
 interface BuildCommandInput {
   readonly normalizedPath: string;
   readonly pattern: string;
+}
+
+export function buildGlobCommand(input: BuildCommandInput): string {
+  return [
+    "if command -v rg >/dev/null 2>&1 && {",
+    "  _eve_rg=$(rg --line-number --color=never --hidden --glob '!.git/*' --max-count 1 -- '__eve_ripgrep_probe_never_matches__' /dev/null 2>&1)",
+    "  _eve_rc=$?",
+    '  [ -z "$_eve_rg" ] && { [ "$_eve_rc" -eq 0 ] || [ "$_eve_rc" -eq 1 ]; }',
+    "}; then",
+    `  ${buildRipgrepCommand(input)}`,
+    "else",
+    `  ${buildPosixFindCommand(input)}`,
+    "fi",
+  ].join("\n");
 }
 
 function buildRipgrepCommand(input: BuildCommandInput): string {

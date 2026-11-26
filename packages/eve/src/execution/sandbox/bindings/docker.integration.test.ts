@@ -468,12 +468,59 @@ describe("Docker provider create", () => {
       "DEPLOY_ENV=staging",
       fakeDockerContainerIdentity(providerContainerName(appRoot)),
       "bash",
-      "-c",
+      "-lc",
     ]);
     const wrapper = String(exec?.args.at(-1));
     expect(wrapper).toMatch(/^echo "\$\$" > '\/tmp\/\.eve-sbx-spawn-[0-9a-f-]+\.pid'; /);
-    expect(wrapper).toContain(`bash -lc 'echo "$DEPLOY_ENV"'`);
+    expect(wrapper).toContain(`(eval 'echo "$DEPLOY_ENV"')`);
+    expect(wrapper).not.toContain("bash -lc");
     expect(wrapper).toMatch(/status=\$\?; rm -f '[^']+'; exit \$status$/);
+  });
+
+  it("runs internal commands through a single non-login bash and only tracks pidfiles when abortable", async () => {
+    const { runInternalCommand } = await import("#execution/sandbox/internal-shell.js");
+    const { calls, handle } = await createRunningSessionHandle({
+      respond: (args) => {
+        if (args[0] === "exec" && args.includes("--noprofile")) {
+          return { exitCode: 0, stdout: "ok\n" };
+        }
+        return undefined;
+      },
+    });
+
+    await expect(
+      runInternalCommand(handle.sandbox, { command: "test -e /workspace/a" }),
+    ).resolves.toEqual({
+      exitCode: 0,
+      stderr: "",
+      stdout: "ok\n",
+    });
+    const directExec = findCall(
+      calls,
+      (args) => args[0] === "exec" && args.includes("--noprofile"),
+    );
+    expect(directExec?.args.slice(-5)).toEqual([
+      "bash",
+      "--noprofile",
+      "--norc",
+      "-c",
+      "test -e /workspace/a",
+    ]);
+
+    calls.length = 0;
+    const controller = new AbortController();
+    await runInternalCommand(handle.sandbox, {
+      command: "rg needle /workspace",
+      signal: controller.signal,
+    });
+    const abortableExec = findCall(
+      calls,
+      (args) => args[0] === "exec" && args.includes("--noprofile"),
+    );
+    expect(abortableExec?.args.slice(-5, -1)).toEqual(["bash", "--noprofile", "--norc", "-c"]);
+    expect(String(abortableExec?.args.at(-1))).toMatch(
+      /^echo "\$\$" > '\/tmp\/\.eve-sbx-spawn-[0-9a-f-]+\.pid'; \(eval 'rg needle \/workspace'\); /,
+    );
   });
 
   it("kill() tree-kills inside the container before killing the docker exec client", async () => {

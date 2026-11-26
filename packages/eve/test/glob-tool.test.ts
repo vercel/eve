@@ -1,5 +1,6 @@
 import { posix } from "node:path";
 
+import { Bash } from "just-bash";
 import { describe, expect, it } from "vitest";
 
 import { stubSpawnProcess } from "./_helpers/sandbox-session-stub.js";
@@ -12,21 +13,11 @@ import { glob } from "../src/tools/provided/glob.js";
 import type { SandboxAccess } from "../src/sandbox/state.js";
 import type { SandboxSession } from "../src/shared/sandbox-session.js";
 
-interface FakeAccessOptions {
-  readonly probeExitCode?: number;
-}
-
-const PROBE_COMMAND =
-  "command -v rg >/dev/null 2>&1 || exit 127; " +
-  "rg --line-number --color=never --hidden --glob '!.git/*' --max-count 1 -- " +
-  "'__eve_ripgrep_probe_never_matches__' /dev/null";
 const HOME_PROBE_COMMAND = `printf '%s\\n' "$HOME"`;
 
 function createFakeAccess(
   commandHandler: (command: string) => { exitCode: number; stderr: string; stdout: string },
-  options: FakeAccessOptions = {},
 ): SandboxAccess {
-  const probeExitCode = options.probeExitCode ?? 0;
   return {
     async captureState() {
       return { initialized: false, session: null };
@@ -59,9 +50,6 @@ function createFakeAccess(
           if (command === HOME_PROBE_COMMAND) {
             return { exitCode: 0, stderr: "", stdout: "/home/agent\n" };
           }
-          if (command === PROBE_COMMAND) {
-            return { exitCode: probeExitCode, stderr: "", stdout: "" };
-          }
           return commandHandler(command);
         },
         async spawn() {
@@ -79,9 +67,8 @@ function createFakeAccess(
 async function runInContext(
   commandHandler: (command: string) => { exitCode: number; stderr: string; stdout: string },
   fn: (sandbox: SandboxSession) => Promise<unknown>,
-  options: FakeAccessOptions = {},
 ): Promise<unknown> {
-  const access = createFakeAccess(commandHandler, options);
+  const access = createFakeAccess(commandHandler);
   const ctx = new ContextContainer();
   ctx.set(SandboxKey, access);
   const sandbox = await access.get();
@@ -218,18 +205,19 @@ describe("executeGlobOnSandbox", () => {
     expect(result.truncated).toBe(true);
   });
 
-  it("does not pipe to `head` (which would mask rg's exit code)", async () => {
-    let capturedCommand = "";
+  it("does not pipe to `head` (which would mask rg's exit code) and runs in a single sandbox call", async () => {
+    const commands: string[] = [];
     await runInContext(
       (cmd) => {
-        capturedCommand = cmd;
+        commands.push(cmd);
         return { exitCode: 0, stderr: "", stdout: "" };
       },
       (sandbox) => executeGlobOnSandbox(sandbox, { pattern: "**/*.ts" }),
     );
 
-    expect(capturedCommand).not.toContain("head");
-    expect(capturedCommand).not.toContain("|");
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).not.toContain("head");
+    expect(commands[0]).not.toMatch(/(?<!\|)\|(?!\|)/);
   });
 
   it("shell-quotes patterns with special characters", async () => {
@@ -268,7 +256,7 @@ describe("executeGlobOnSandbox", () => {
     expect(result.path).toBe("/workspace/src");
   });
 
-  it("passes the logical /workspace path directly into the rg command", async () => {
+  it("passes the logical /workspace path directly into the rg and find branches", async () => {
     let capturedCommand = "";
     await runInContext(
       (cmd) => {
@@ -278,7 +266,12 @@ describe("executeGlobOnSandbox", () => {
       (sandbox) => executeGlobOnSandbox(sandbox, { pattern: "**/*.ts" }),
     );
 
-    expect(capturedCommand).toMatch(/'\/workspace'$/);
+    expect(capturedCommand).toContain(
+      "rg --files --hidden --glob '!.git/*' --glob '**/*.ts' '/workspace'",
+    );
+    expect(capturedCommand).toContain(
+      "find '/workspace' -type f -not -path '*/.git/*' -name '*.ts'",
+    );
   });
 
   it("preserves /workspace-rooted output paths exactly as emitted", async () => {
@@ -296,24 +289,35 @@ describe("executeGlobOnSandbox", () => {
     expect(result.content).toContain("/workspace/src/b.ts");
   });
 
-  it("falls back to POSIX find when the probe reports `rg` is not installed", async () => {
-    let capturedCommand = "";
-    const result = (await runInContext(
-      (cmd) => {
-        capturedCommand = cmd;
-        return {
-          exitCode: 0,
-          stderr: "",
-          stdout: "/workspace/foo.ts\n",
-        };
+  it("falls back to POSIX find in one shell call when `rg` is missing or incompatible", async () => {
+    const shell = new Bash({
+      files: {
+        "/workspace/.git/config": "ignored\n",
+        "/workspace/src/a.ts": "export const a = 1;\n",
+        "/workspace/src/b.js": "export const b = 2;\n",
       },
-      (sandbox) => executeGlobOnSandbox(sandbox, { pattern: "**/*.ts" }),
-      { probeExitCode: 127 },
-    )) as GlobResult;
+    });
+    const runCalls: string[] = [];
+    const base = await createFakeAccess(() => ({ exitCode: 0, stderr: "", stdout: "" })).get();
+    if (base === null) throw new Error("expected sandbox");
+    const sandbox: SandboxSession = {
+      ...base,
+      async run({ command }) {
+        runCalls.push(command);
+        const result = await shell.exec(command);
+        return { exitCode: result.exitCode, stderr: result.stderr, stdout: result.stdout };
+      },
+    };
 
-    expect(capturedCommand.startsWith("find ")).toBe(true);
-    expect(capturedCommand).not.toMatch(/^rg\b/);
-    expect(result.count).toBe(1);
+    const result = await executeGlobOnSandbox(sandbox, { pattern: "**/*.ts" });
+
+    expect(runCalls).toHaveLength(1);
+    expect(result).toEqual({
+      content: "/workspace/src/a.ts",
+      count: 1,
+      path: "/workspace",
+      truncated: false,
+    });
   });
 
   it("throws when ripgrep reports a runtime error (exit 2)", async () => {

@@ -1,3 +1,4 @@
+import { forwardSessionFastRun } from "#execution/sandbox/internal-shell.js";
 import type {
   SandboxReadBinaryFileOptions,
   SandboxReadFileOptions,
@@ -43,5 +44,9 @@ export function bindSandboxAbortSignal<TSession extends SandboxSession>(
       session.removePath({ ...options, signal: compose(options.signal) }),
   } satisfies SandboxSession;
 
-  return bound as TSession;
+  return forwardSessionFastRun(
+    session,
+    bound as TSession,
+    (run) => (options) => run({ ...options, signal: compose(options.signal) }),
+  );
 }

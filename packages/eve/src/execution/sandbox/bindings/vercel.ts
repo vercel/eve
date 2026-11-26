@@ -69,7 +69,11 @@ import type {
   VercelSandbox,
 } from "#execution/sandbox/bindings/vercel-sdk-types.js";
 import { withToolSessionRetention } from "#execution/sandbox/bindings/vercel-tool-sessions.js";
-import { adaptMultiplexedCommandToSandboxProcess } from "#execution/sandbox/multiplexed-command.js";
+import { withConnectionFastRun } from "#execution/sandbox/internal-shell.js";
+import {
+  adaptMultiplexedCommandToSandboxProcess,
+  adaptStreamingCommandToSandboxProcess,
+} from "#execution/sandbox/multiplexed-command.js";
 import { createSandboxProviderIdentity } from "#execution/sandbox/provider-identity.js";
 import { isObject } from "#shared/guards.js";
 import {
@@ -574,30 +578,53 @@ function createVercelConnection(
     },
     async spawn(options): Promise<SandboxProcess> {
       const release = await (await activeTimeout()).acquire(options.signal);
-      try {
-        const command = await sandbox.runCommand({
-          args: ["-lc", options.command],
-          cmd: "bash",
-          cwd: options.workingDirectory,
-          detached: true,
-          env: options.env,
-          signal: options.signal,
-          stdin: options.stdin,
-        });
-        const finished = command.wait({ signal: options.signal });
-        void finished.then(release, release);
-        return adaptMultiplexedCommandToSandboxProcess({
-          abortSignal: options.signal,
-          command: {
-            async kill() {
-              await command.kill();
-              release();
+      if (options.stdin === true) {
+        try {
+          const command = await sandbox.runCommand({
+            args: ["-lc", options.command],
+            cmd: "bash",
+            cwd: options.workingDirectory,
+            detached: true,
+            env: options.env,
+            signal: options.signal,
+            stdin: true,
+          });
+          const finished = command.wait({ signal: options.signal });
+          void finished.then(release, release);
+          return adaptMultiplexedCommandToSandboxProcess({
+            abortSignal: options.signal,
+            command: {
+              async kill() {
+                await command.kill();
+                release();
+              },
+              logs: (opts) => command.logs(opts),
+              wait: () => finished,
             },
-            logs: (opts) => command.logs(opts),
-            wait: () => finished,
-          },
-          getOutput: (log) => log.stream,
-          stdin: options.stdin === true ? command : undefined,
+            getOutput: (log) => log.stream,
+            stdin: command,
+          });
+        } catch (error) {
+          release();
+          throw error;
+        }
+      }
+      try {
+        return await adaptStreamingCommandToSandboxProcess({
+          abortSignal: options.signal,
+          onRelease: release,
+          start: ({ onStart, stderr, stdout }) =>
+            sandbox.runCommand({
+              args: ["-lc", options.command],
+              cmd: "bash",
+              cwd: options.workingDirectory,
+              detached: false,
+              env: options.env,
+              onStart,
+              signal: options.signal,
+              stderr,
+              stdout,
+            }),
         });
       } catch (error) {
         release();
@@ -617,6 +644,39 @@ function createVercelConnection(
       }, options.signal);
     },
   };
+  withConnectionFastRun(connection, async (options) => {
+    const release = await (await activeTimeout()).acquire(options.signal);
+    let startedCommand: { kill?(): PromiseLike<void> } | undefined;
+    let done = false;
+    const killOnAbort = () => {
+      if (!done) void startedCommand?.kill?.();
+    };
+    options.signal?.addEventListener("abort", killOnAbort, { once: true });
+    try {
+      const finished = await sandbox.runCommand({
+        args: ["--noprofile", "--norc", "-c", options.command],
+        cmd: "bash",
+        cwd: options.workingDirectory,
+        detached: false,
+        env: options.env,
+        onStart(command) {
+          startedCommand = command;
+          if (options.signal?.aborted) killOnAbort();
+        },
+        signal: options.signal,
+      });
+      done = true;
+      const [stdout, stderr] = await Promise.all([finished.stdout(), finished.stderr()]);
+      return { exitCode: finished.exitCode, stderr, stdout };
+    } catch (error) {
+      done = true;
+      if (options.signal?.aborted) throw options.signal.reason;
+      throw error;
+    } finally {
+      options.signal?.removeEventListener("abort", killOnAbort);
+      release();
+    }
+  });
   return withSandboxConnectionDisposal(connection, async () => {
     disposed = true;
     await close();

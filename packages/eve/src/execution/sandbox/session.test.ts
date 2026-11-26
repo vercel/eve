@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { withRuntimeSandboxLifecycle } from "#context/build-callback-context.js";
+import { bindSandboxAbortSignal } from "#execution/sandbox/abort-bound-session.js";
+import { runInternalCommand, withConnectionFastRun } from "#execution/sandbox/internal-shell.js";
 import { createConnectionSession } from "#execution/sandbox/session.js";
 import { bufferToStream, streamToBuffer } from "#execution/sandbox/stream-utils.js";
 import type { SandboxConnection } from "#sandbox/provider.js";
@@ -169,5 +172,31 @@ describe("createConnectionSession", () => {
   ])("rejects the line range %j", async (range, message) => {
     const session = createConnectionSession(memoryConnection().connection);
     await expect(session.readTextFile({ path: "f.txt", ...range })).rejects.toThrow(message);
+  });
+
+  it("forwards connection fast-run across runtime lifecycle and abort wrappers", async () => {
+    const { connection } = memoryConnection();
+    const fastRun = vi.fn(async () => ({ exitCode: 0, stderr: "", stdout: "fast\n" }));
+    withConnectionFastRun(connection, fastRun);
+    const controller = new AbortController();
+    const session = bindSandboxAbortSignal(
+      withRuntimeSandboxLifecycle(
+        createConnectionSession(connection),
+        async () => {},
+        async () => {},
+      ),
+      controller.signal,
+    );
+
+    await expect(
+      runInternalCommand(session, { command: "test -e a", workingDirectory: "src" }),
+    ).resolves.toEqual({ exitCode: 0, stderr: "", stdout: "fast\n" });
+    expect(connection.spawn).not.toHaveBeenCalled();
+    expect(fastRun).toHaveBeenCalledWith({
+      command: "test -e a",
+      env: {},
+      signal: expect.any(AbortSignal),
+      workingDirectory: "/workspace/src",
+    });
   });
 });

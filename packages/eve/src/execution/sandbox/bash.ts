@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { SandboxSession } from "#shared/sandbox-session.js";
+import { runInternalCommand } from "#execution/sandbox/internal-shell.js";
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
 import {
   capLineLength,
@@ -32,16 +33,18 @@ const STREAM_TAIL_THRESHOLD_BYTES = 512 * 1024;
 const STREAM_TAIL_BYTES = MAX_OUTPUT_BYTES * 2;
 const FALLBACK_KILL_GRACE_MS = 500;
 const FALLBACK_FINISH_GRACE_MS = 2_000;
+const JOB_TRAILER_PREFIX = "\0__eve_job__:";
+const JOB_TRAILER_HOLD_CHARS = 96;
 
-const LAUNCHER = `_eve_d=$1 _eve_cmd=$2
-shift 2
+const LAUNCHER = `_eve_d=$1 _eve_cmd=$2 _eve_id=$3
+shift 3
 mkdir -p "$_eve_d" 2>/dev/null || { eval "$_eve_cmd"; exit; }
 trap 'exit 0' USR1
 echo "$$" > "$_eve_d/launcher"
 set -m
 (
   trap : TERM INT
-  (unset _eve_d; eval "$_eve_cmd") > "$_eve_d/stdout" 2> "$_eve_d/stderr"
+  (unset _eve_d _eve_id; eval "$_eve_cmd") > "$_eve_d/stdout" 2> "$_eve_d/stderr"
   code=$?
   echo "$code" > "$_eve_d/exit"
   exit "$code"
@@ -52,28 +55,34 @@ echo "$pid" > "$_eve_d/pid"
 wait "$pid" 2> /dev/null
 code=$?
 mkdir "$_eve_d/claimed" 2> /dev/null || exit 0
-_eve_keep=0
-_eve_out_bytes="$(($(wc -c < "$_eve_d/stdout")))"
-_eve_out_lines="$(($(wc -l < "$_eve_d/stdout")))"
-if [ "$_eve_out_bytes" -gt ${STREAM_TAIL_THRESHOLD_BYTES} ]; then
-  _eve_keep=1
-  echo "$_eve_out_lines" > "$_eve_d/stdout.lines"
-  tail -c ${STREAM_TAIL_BYTES} "$_eve_d/stdout"
-else
-  [ "$_eve_out_bytes" -gt ${KEEP_OUTPUT_BYTES} ] || [ "$_eve_out_lines" -gt ${KEEP_OUTPUT_LINES} ] && _eve_keep=1
-  cat "$_eve_d/stdout"
+_eve_keep=0 _eve_out_lines=0 _eve_err_lines=0
+if [ -s "$_eve_d/stdout" ]; then
+  set -- $(wc -cl < "$_eve_d/stdout")
+  _eve_out_lines=$1 _eve_out_bytes=$2
+  if [ "$_eve_out_bytes" -gt ${STREAM_TAIL_THRESHOLD_BYTES} ]; then
+    _eve_keep=1
+    tail -c ${STREAM_TAIL_BYTES} "$_eve_d/stdout"
+  else
+    [ "$_eve_out_bytes" -gt ${KEEP_OUTPUT_BYTES} ] || [ "$_eve_out_lines" -gt ${KEEP_OUTPUT_LINES} ] && _eve_keep=1
+    cat "$_eve_d/stdout"
+  fi
 fi
-_eve_err_bytes="$(($(wc -c < "$_eve_d/stderr")))"
-_eve_err_lines="$(($(wc -l < "$_eve_d/stderr")))"
-if [ "$_eve_err_bytes" -gt ${STREAM_TAIL_THRESHOLD_BYTES} ]; then
-  _eve_keep=1
-  echo "$_eve_err_lines" > "$_eve_d/stderr.lines"
-  tail -c ${STREAM_TAIL_BYTES} "$_eve_d/stderr" >&2
-else
-  [ "$_eve_err_bytes" -gt ${KEEP_OUTPUT_BYTES} ] || [ "$_eve_err_lines" -gt ${KEEP_OUTPUT_LINES} ] && _eve_keep=1
-  cat "$_eve_d/stderr" >&2
+if [ -s "$_eve_d/stderr" ]; then
+  set -- $(wc -cl < "$_eve_d/stderr")
+  _eve_err_lines=$1 _eve_err_bytes=$2
+  if [ "$_eve_err_bytes" -gt ${STREAM_TAIL_THRESHOLD_BYTES} ]; then
+    _eve_keep=1
+    tail -c ${STREAM_TAIL_BYTES} "$_eve_d/stderr" >&2
+  else
+    [ "$_eve_err_bytes" -gt ${KEEP_OUTPUT_BYTES} ] || [ "$_eve_err_lines" -gt ${KEEP_OUTPUT_LINES} ] && _eve_keep=1
+    cat "$_eve_d/stderr" >&2
+  fi
 fi
-[ "$_eve_keep" -eq 0 ] && rm -rf "$_eve_d"
+if [ "$_eve_keep" -eq 0 ]; then
+  rm -rf "$_eve_d"
+else
+  printf '\\0__eve_job__:%s:%s:%s\\0' "$_eve_id" "$_eve_out_lines" "$_eve_err_lines" >&2
+fi
 exit "$code"`;
 
 export interface BashInput {
@@ -146,7 +155,7 @@ async function runCommand(
     controller.abort(signal?.reason);
     const quotedDir = shellQuote(directory);
     void Promise.resolve(
-      sandbox.run({
+      runInternalCommand(sandbox, {
         command:
           `p="$(cat ${quotedDir}/pid 2>/dev/null)"; ` +
           `case "$p" in ''|*[!0-9]*) ;; *) kill -TERM -- -"$p" 2>/dev/null; sleep 0.2; kill -KILL -- -"$p" 2>/dev/null ;; esac; ` +
@@ -158,19 +167,24 @@ async function runCommand(
   try {
     const child = await sandbox.spawn({
       signal: controller.signal,
-      command: launchCommand(command, directory),
+      command: launchCommand(command, directory, jobId),
     });
     const finished = Promise.all([
       readTail(child.stdout),
-      readTail(child.stderr),
+      readTail(child.stderr, jobId),
       child.wait(),
-    ]).then(([stdout, stderr, { exitCode }]) => ({ exitCode, stderr, stdout }));
+    ]).then(([stdout, stderr, { exitCode }]) => ({
+      exitCode,
+      jobTrailer: stderr.jobTrailer,
+      stderr,
+      stdout,
+    }));
     const done = await waitUpTo(finished, waitSeconds * 1000);
-    if (done !== undefined) return await completed(sandbox, directory, done);
+    if (done !== undefined) return completed(directory, done);
     const running = await claimRunningJob(sandbox, directory, jobId, waitSeconds);
     if (running === undefined) {
       const raced = await waitUpTo(finished, FALLBACK_FINISH_GRACE_MS);
-      if (raced !== undefined) return await completed(sandbox, directory, raced);
+      if (raced !== undefined) return completed(directory, raced);
       const settled = finished.catch(() => undefined);
       await Promise.resolve(child.kill()).catch(() => {});
       let aborted = await waitUpTo(settled, FALLBACK_KILL_GRACE_MS);
@@ -207,10 +221,10 @@ async function runCommand(
   }
 }
 
-function launchCommand(command: string, directory: string): string {
+function launchCommand(command: string, directory: string, jobId: string): string {
   return [
     `if command -v bash >/dev/null 2>&1 && kill -0 "$$" 2>/dev/null; then`,
-    `  set -- ${shellQuote(directory)} ${shellQuote(command)}`,
+    `  set -- ${shellQuote(directory)} ${shellQuote(command)} ${shellQuote(jobId)}`,
     `  eval ${shellQuote(LAUNCHER)}`,
     `fi`,
     `eval ${shellQuote(command)}`,
@@ -224,7 +238,7 @@ async function claimRunningJob(
   waitSeconds: number,
 ): Promise<BashResult | undefined> {
   const marker = `eve-bash:${jobId}`;
-  const raw = await sandbox.run({
+  const raw = await runInternalCommand(sandbox, {
     command: [
       `cd ${shellQuote(directory)} 2>/dev/null || exit 0`,
       `i=0; while [ "$i" -lt 20 ] && { [ ! -s pid ] || [ ! -f stdout ] || [ ! -f stderr ]; }; do sleep 0.025; i=$((i+1)); done`,
@@ -263,7 +277,15 @@ async function claimRunningJob(
   };
 }
 
-async function readTail(stream: ReadableStream<Uint8Array>): Promise<StreamTail> {
+interface JobTrailer {
+  readonly stderrLines: number;
+  readonly stdoutLines: number;
+}
+
+async function readTail(
+  stream: ReadableStream<Uint8Array>,
+  trailerJobId?: string,
+): Promise<StreamTail & { readonly jobTrailer?: JobTrailer }> {
   const decoder = new TextDecoder();
   const lines: { readonly text: string; readonly bytes: number }[] = [];
   let first = 0;
@@ -301,10 +323,38 @@ async function readTail(stream: ReadableStream<Uint8Array>): Promise<StreamTail>
     }
     append(text.slice(start));
   };
-  for await (const chunk of stream) decode(decoder.decode(chunk, { stream: true }));
-  decode(decoder.decode());
+  let jobTrailer: JobTrailer | undefined;
+  if (trailerJobId === undefined) {
+    for await (const chunk of stream) decode(decoder.decode(chunk, { stream: true }));
+    decode(decoder.decode());
+  } else {
+    let pending = "";
+    const push = (text: string) => {
+      pending += text;
+      if (pending.length > JOB_TRAILER_HOLD_CHARS) {
+        const flush = pending.length - JOB_TRAILER_HOLD_CHARS;
+        decode(pending.slice(0, flush));
+        pending = pending.slice(flush);
+      }
+    };
+    for await (const chunk of stream) push(decoder.decode(chunk, { stream: true }));
+    pending += decoder.decode();
+    const prefix = `${JOB_TRAILER_PREFIX}${trailerJobId}:`;
+    const trailerStart = pending.lastIndexOf(prefix);
+    if (trailerStart !== -1 && pending.endsWith("\0")) {
+      const match = /^(\d+):(\d+)\0$/u.exec(pending.slice(trailerStart + prefix.length));
+      if (match !== null) {
+        jobTrailer = {
+          stderrLines: Number(match[2]),
+          stdoutLines: Number(match[1]),
+        };
+        pending = pending.slice(0, trailerStart);
+      }
+    }
+    if (pending.length > 0) decode(pending);
+  }
   const text = [...lines.slice(first).map((line) => line.text), current].join("\n");
-  return { text, totalLines: newlines + (current === "" ? 0 : 1) };
+  return { jobTrailer, text, totalLines: newlines + (current === "" ? 0 : 1) };
 }
 
 async function waitUpTo<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
@@ -321,31 +371,33 @@ async function waitUpTo<T>(promise: Promise<T>, ms: number): Promise<T | undefin
   }
 }
 
-async function completed(
-  sandbox: SandboxSession,
+function completed(
   directory: string,
   {
     exitCode,
+    jobTrailer,
     stderr,
     stdout,
-  }: { readonly exitCode: number; readonly stderr: StreamTail; readonly stdout: StreamTail },
-): Promise<BashResult> {
+  }: {
+    readonly exitCode: number;
+    readonly jobTrailer?: JobTrailer;
+    readonly stderr: StreamTail;
+    readonly stdout: StreamTail;
+  },
+): BashResult {
   const initial = formatStreamsWithFlags({ stderr, stdout });
-  if (initial.truncated || initial.lineTruncated) {
-    const jobInfo = await readJobOutputInfo(sandbox, directory);
-    if (jobInfo.exists) {
-      const adjusted: StreamTails = {
-        stdout:
-          jobInfo.stdoutLines !== undefined && "totalLines" in stdout
-            ? { text: stdout.text, totalLines: Math.max(stdout.totalLines, jobInfo.stdoutLines) }
-            : stdout,
-        stderr:
-          jobInfo.stderrLines !== undefined && "totalLines" in stderr
-            ? { text: stderr.text, totalLines: Math.max(stderr.totalLines, jobInfo.stderrLines) }
-            : stderr,
-      };
-      return { ...formatStreams(adjusted, directory), exitCode, status: "completed" };
-    }
+  if ((initial.truncated || initial.lineTruncated) && jobTrailer !== undefined) {
+    const adjusted: StreamTails = {
+      stdout:
+        "totalLines" in stdout
+          ? { text: stdout.text, totalLines: Math.max(stdout.totalLines, jobTrailer.stdoutLines) }
+          : stdout,
+      stderr:
+        "totalLines" in stderr
+          ? { text: stderr.text, totalLines: Math.max(stderr.totalLines, jobTrailer.stderrLines) }
+          : stderr,
+    };
+    return { ...formatStreams(adjusted, directory), exitCode, status: "completed" };
   }
   return {
     exitCode,
@@ -354,29 +406,6 @@ async function completed(
     stdout: initial.stdout,
     truncated: initial.truncated,
   };
-}
-
-async function readJobOutputInfo(
-  sandbox: SandboxSession,
-  directory: string,
-): Promise<{
-  readonly exists: boolean;
-  readonly stdoutLines?: number;
-  readonly stderrLines?: number;
-}> {
-  try {
-    const quoted = shellQuote(directory);
-    const result = await sandbox.run({
-      command: `test -f ${quoted}/stdout && printf '%s %s\\n' "$(cat ${quoted}/stdout.lines 2>/dev/null || echo -)" "$(cat ${quoted}/stderr.lines 2>/dev/null || echo -)"`,
-    });
-    if (result.exitCode !== 0) return { exists: false };
-    const [outRaw, errRaw] = result.stdout.trim().split(/\s+/);
-    const stdoutLines = outRaw && /^\d+$/u.test(outRaw) ? Number(outRaw) : undefined;
-    const stderrLines = errRaw && /^\d+$/u.test(errRaw) ? Number(errRaw) : undefined;
-    return { exists: true, stdoutLines, stderrLines };
-  } catch {
-    return { exists: false };
-  }
 }
 
 function formatStreams(streams: StreamTails, outputDirectory?: string): BashStreams {
