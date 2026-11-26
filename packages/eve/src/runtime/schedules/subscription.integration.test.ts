@@ -1,4 +1,10 @@
+import { createHmac } from "node:crypto";
+import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
+import { createChannelOperations } from "#channel/channel-operations.js";
+import { isCompiledChannel } from "#channel/compiled-channel.js";
+import { isHttpRouteDefinition } from "#channel/routes.js";
+import { defineDynamic } from "#dynamic/definition.js";
 import { installWorkflowHost } from "#execution/workflow-host/host.js";
 import {
   scheduleCollectionTools,
@@ -13,11 +19,20 @@ import {
 } from "#approval/definition.js";
 import { loadContext } from "#context/container.js";
 import { AuthKey } from "#context/keys.js";
+import { markMockModel } from "#internal/mock-model-identity.js";
+import { textStreamResult } from "#internal/testing/approval-resume.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
+import { createTestInProcessRuntime } from "#internal/testing/in-process-runtime.js";
+import { decodeSlackApiBody } from "#internal/testing/slack-api-body.js";
+import { slackChannel } from "#public/channels/slack/index.js";
+import { defineAgent } from "#public/definitions/agent.js";
 import { byPrincipal, defineDynamicSchedules, schedules } from "#public/schedules/index.js";
+import { dispatchScheduledOccurrence } from "#runtime/schedules/dispatch-occurrence.js";
+import { createScheduleCollectionPayload } from "#runtime/schedules/payload.js";
 import { declared } from "#runtime/types.js";
 import { loadScheduleCollectionDefinition } from "#runtime/schedules/load-collection.js";
 import { inMemoryScheduleProvider } from "#public/schedules/testing.js";
+import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { requireCompiledBundle, SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import { loadCompiledSessionAgent } from "#runtime/sessions/compiled-session-agent.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
@@ -552,6 +567,240 @@ describe("schedule creation and invocation", () => {
         payload: { author: "bob", message: "Bob's reminder" },
         scope: "shared",
       });
+    });
+  });
+
+  it("aliases a dynamic schedule's Slack post under the slack namespace so unmentioned thread replies continue the session", async () => {
+    const signingSecret = "test-slack-secret";
+    const rootTs = "1700000000.000100";
+    const replyTs = "1700000000.000200";
+    const prompts: string[] = [];
+    const posted: Array<Record<string, unknown>> = [];
+    const subscribedObservations: boolean[] = [];
+    const dispatchedSessionIds: string[] = [];
+
+    const model = markMockModel(
+      new MockLanguageModelV4({
+        doStream: async ({ prompt }) => {
+          prompts.push(JSON.stringify(prompt));
+          return textStreamResult(
+            prompts.length === 1
+              ? "What topics do we need to discuss during sync today?"
+              : "Today is Thursday.",
+          );
+        },
+        modelId: "scheduled-slack-thread-model",
+        provider: "eve-test",
+      }),
+    );
+
+    const slackFetch: typeof fetch = async (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      const method = url.split("/").pop() ?? "";
+      const body = decodeSlackApiBody(
+        init?.body,
+        new Headers(init?.headers).get("content-type"),
+      ) as Record<string, unknown>;
+      if (method === "chat.postMessage") {
+        posted.push(body);
+        const ts = posted.length === 1 ? rootTs : replyTs;
+        return Response.json({ ok: true, ts, channel: body.channel ?? "C123" });
+      }
+      if (method === "conversations.info") {
+        return Response.json({
+          ok: true,
+          channel: { id: "C123", is_channel: true, is_private: false },
+        });
+      }
+      if (method === "conversations.replies") {
+        return Response.json({ ok: true, messages: [] });
+      }
+      if (method === "chat.getPermalink") {
+        return Response.json({
+          ok: true,
+          permalink: "https://example.slack.com/archives/C123/p1700000000000100",
+        });
+      }
+      return Response.json({ ok: true });
+    };
+
+    const slack = slackChannel({
+      api: { fetch: slackFetch },
+      credentials: { botToken: "xoxb-test", signingSecret },
+      async onMessage(ctx) {
+        const subscribed = await ctx.isSubscribed();
+        subscribedObservations.push(subscribed);
+        return subscribed ? { auth: alice } : null;
+      },
+    });
+
+    const workflows = defineDynamicSchedules({
+      inputSchema: z.object({ channelId: z.string(), task: z.string() }).strict(),
+      provider: inMemoryScheduleProvider(),
+      tool: false,
+      auth: () => alice,
+      async run({ occurrence, payload, to }) {
+        await to(slack, { channelId: payload.channelId }).send(payload.task, {
+          idempotencyKey: `${occurrence.executionId}:run`,
+        });
+      },
+      events: {
+        "occurrence.dispatched"(event) {
+          dispatchedSessionIds.push(...(event.sessionIds ?? []));
+        },
+      },
+    });
+
+    const app = await createTestRuntime({
+      agent: {
+        definition: defineAgent({
+          model: defineDynamic(() => ({ model, modelContextWindowTokens: 200_000 })),
+        }),
+        name: "scheduled-slack-follow",
+      },
+      modules: [
+        {
+          logicalPath: "channels/slack.ts",
+          loadNamespace: async () => ({ default: slack }),
+        },
+        {
+          logicalPath: "schedules/workflows.ts",
+          loadNamespace: async () => ({ default: workflows }),
+        },
+      ],
+    });
+
+    await app.run(async () => {
+      const compiledArtifactsSource = createBundledRuntimeCompiledArtifactsSource();
+      const runtime = createTestInProcessRuntime({ compiledArtifactsSource });
+      try {
+        const bundle = await getCompiledRuntimeAgentBundle({ compiledArtifactsSource });
+        const payload = createScheduleCollectionPayload({
+          application: "scheduled-slack-follow",
+          collection: "workflows",
+          envelope: {
+            version: 3,
+            payload: { channelId: "C123", task: "Ask the channel for sync topics." },
+            scope: "channel:T01:C123",
+            principal: {
+              type: "user",
+              authenticator: alice.authenticator,
+              principalId: alice.principalId,
+            },
+          },
+        });
+        const occurrence = {
+          collection: "workflows",
+          executionId: "exec-sync-1",
+          name: "sync-topics",
+          scheduleId: "sch-sync-1",
+          scheduledAt: "2026-11-26T15:00:00Z",
+        };
+
+        await dispatchScheduledOccurrence({
+          bundle,
+          collection: "workflows",
+          definition: workflows,
+          occurrence,
+          payload,
+          runtime,
+        });
+
+        expect(dispatchedSessionIds).toHaveLength(1);
+        const scheduledSessionId = dispatchedSessionIds[0]!;
+        await vi.waitFor(() => expect(posted).toHaveLength(1));
+        expect(posted[0]).toMatchObject({ channel: "C123" });
+        expect(posted[0]?.thread_ts).toBeUndefined();
+
+        const turnSettled = async (expectedCount: number) => {
+          await vi.waitFor(async () => {
+            const reader = (
+              await runtime.getEventStream(scheduledSessionId, { follow: false })
+            ).getReader();
+            let settled = 0;
+            for (let next = await reader.read(); !next.done; next = await reader.read()) {
+              if (next.value.type === "turn.settled") settled += 1;
+            }
+            expect(settled).toBeGreaterThanOrEqual(expectedCount);
+          });
+        };
+        await turnSettled(1);
+
+        expect(await runtime.resolveContinuation(`slack:C123:${rootTs}`)).toEqual({
+          sessionId: scheduledSessionId,
+        });
+
+        if (!isCompiledChannel(slack)) throw new Error("expected compiled slack channel");
+        const postRoute = slack.routes.find(
+          (route) => isHttpRouteDefinition(route) && route.method === "POST",
+        );
+        if (!postRoute || !isHttpRouteDefinition(postRoute)) {
+          throw new Error("expected Slack POST route");
+        }
+        const rawBody = JSON.stringify({
+          api_app_id: "A01",
+          authorizations: [{ is_bot: true, user_id: "U_BOT" }],
+          event: {
+            channel: "C123",
+            channel_type: "channel",
+            text: "What's today?",
+            thread_ts: rootTs,
+            ts: "1700000000.000150",
+            type: "message",
+            user: "U_BARBA",
+          },
+          event_id: "EvFollowUp1",
+          team_id: "T01",
+          type: "event_callback",
+        });
+        const timestamp = String(Math.floor(Date.now() / 1000));
+        const signature = `v0=${createHmac("sha256", signingSecret)
+          .update(`v0:${timestamp}:${rawBody}`)
+          .digest("hex")}`;
+        const webhook = new Request("https://agent.example.com/eve/v1/slack", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-slack-request-timestamp": timestamp,
+            "x-slack-signature": signature,
+          },
+          body: rawBody,
+        });
+        const tasks: Promise<unknown>[] = [];
+        const response = await postRoute.handler(webhook, {
+          ...createChannelOperations({
+            adapter: slack.adapter,
+            channelName: "slack",
+            runtime,
+          }),
+          waitUntil: (task: Promise<unknown>) => {
+            tasks.push(task);
+          },
+        } as never);
+        expect(response.status).toBe(200);
+        await Promise.all(tasks);
+
+        expect(subscribedObservations).toEqual([true]);
+        await vi.waitFor(() => expect(posted).toHaveLength(2));
+        await turnSettled(2);
+
+        expect(posted[1]).toMatchObject({ channel: "C123", thread_ts: rootTs });
+        expect(prompts).toHaveLength(2);
+        expect(prompts[1]).toContain("What topics do we need to discuss during sync today?");
+        expect(prompts[1]).toContain("What's today?");
+
+        await dispatchScheduledOccurrence({
+          bundle,
+          collection: "workflows",
+          definition: workflows,
+          occurrence,
+          payload,
+          runtime,
+        });
+        expect(dispatchedSessionIds).toEqual([scheduledSessionId, scheduledSessionId]);
+      } finally {
+        await runtime.dispose();
+      }
     });
   });
 });
