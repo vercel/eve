@@ -103,4 +103,68 @@ describe("Slack app manifests", () => {
       expect.arrayContaining(["users:read", "users:read.email"]),
     );
   });
+
+  it("adds the events and bot scopes of the subscribed events, and the scopes that check channel membership", () => {
+    const manifest = defineSlackAppManifest({
+      subscriptionEvents: ["reaction_added", "team_join"],
+    }).build("support") as {
+      oauth_config: { scopes: { bot: string[] } };
+      settings: { event_subscriptions: { bot_events: string[] } };
+    };
+
+    expect(manifest.settings.event_subscriptions.bot_events).toEqual([
+      "app_mention",
+      "message.channels",
+      "message.groups",
+      "message.im",
+      "message.mpim",
+      "reaction_added",
+      "team_join",
+    ]);
+    expect(manifest.oauth_config.scopes.bot).toEqual(
+      expect.arrayContaining([
+        "chat:write",
+        "reactions:read",
+        "users:read",
+        "channels:read",
+        "groups:read",
+        "im:read",
+        "mpim:read",
+      ]),
+    );
+  });
+
+  it("lists an event or scope once when subscribed events, defaults and code channels repeat it", () => {
+    const manifest = defineSlackAppManifest({
+      codeChannels: true,
+      subscriptionEvents: ["app_mention", "message.im", "reaction_added"],
+      users: true,
+    }).build("support") as {
+      oauth_config: { scopes: { bot: string[] } };
+      settings: { event_subscriptions: { bot_events: string[] } };
+    };
+    const { bot } = manifest.oauth_config.scopes;
+    const { bot_events } = manifest.settings.event_subscriptions;
+
+    expect(new Set(bot).size).toBe(bot.length);
+    expect(new Set(bot_events).size).toBe(bot_events.length);
+    expect(bot).toEqual(expect.arrayContaining(["code_channels:manage", "reactions:read"]));
+    expect(bot_events).toEqual(expect.arrayContaining(["reaction_added", "message.session"]));
+  });
+
+  it("keeps the native baseline when no events are subscribed", () => {
+    expect(defineSlackAppManifest({ subscriptionEvents: [] }).build("support")).toMatchObject({
+      settings: {
+        event_subscriptions: {
+          bot_events: [
+            "app_mention",
+            "message.channels",
+            "message.groups",
+            "message.im",
+            "message.mpim",
+          ],
+        },
+      },
+    });
+  });
 });

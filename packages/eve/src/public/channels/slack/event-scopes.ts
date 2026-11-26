@@ -1,0 +1,208 @@
+export interface SlackEventScope {
+  /** Dot-paths in the event payload that hold a channel id, or a list of channel ids. */
+  readonly channels: readonly string[];
+  /** Dot-paths in the event payload that hold a message or thread timestamp. */
+  readonly timestamps: readonly string[];
+  /** Bot OAuth scopes of which the bot needs at least one to receive the event. */
+  readonly scopes: readonly string[];
+}
+
+export const SLACK_EVENT_SCOPES = {
+  agent_session_stopped: {
+    channels: ["channel"],
+    timestamps: ["thread_ts"],
+    scopes: ["chat:write"],
+  },
+  agent_session_title_changed: {
+    channels: ["channel"],
+    timestamps: ["thread_ts"],
+    scopes: ["chat:write"],
+  },
+  app_context_changed: { channels: ["channel"], timestamps: [], scopes: ["assistant:write"] },
+  app_deleted: { channels: [], timestamps: [], scopes: ["admin.apps:read"] },
+  app_home_opened: { channels: ["channel"], timestamps: [], scopes: [] },
+  app_installed: { channels: [], timestamps: [], scopes: [] },
+  app_mention: {
+    channels: ["channel"],
+    timestamps: ["thread_ts", "ts"],
+    scopes: ["app_mentions:read"],
+  },
+  app_rate_limited: { channels: [], timestamps: [], scopes: [] },
+  app_requested: { channels: [], timestamps: [], scopes: [] },
+  app_uninstalled: { channels: [], timestamps: [], scopes: [] },
+  app_uninstalled_team: { channels: [], timestamps: [], scopes: ["admin.apps:read"] },
+  assistant_thread_context_changed: {
+    channels: ["assistant_thread.channel_id", "assistant_thread.context.channel_id"],
+    timestamps: ["assistant_thread.thread_ts"],
+    scopes: [],
+  },
+  assistant_thread_started: {
+    channels: ["assistant_thread.channel_id", "assistant_thread.context.channel_id"],
+    timestamps: ["assistant_thread.thread_ts"],
+    scopes: [],
+  },
+  call_rejected: { channels: ["channel_id"], timestamps: [], scopes: [] },
+  channel_archive: { channels: ["channel"], timestamps: [], scopes: [] },
+  channel_created: { channels: ["channel.id"], timestamps: [], scopes: ["channels:read"] },
+  channel_deleted: { channels: ["channel"], timestamps: [], scopes: ["channels:read"] },
+  channel_history_changed: {
+    channels: [],
+    timestamps: [],
+    scopes: ["channels:history", "groups:history", "mpim:history"],
+  },
+  channel_id_changed: { channels: [], timestamps: [], scopes: [] },
+  channel_left: { channels: ["channel"], timestamps: [], scopes: ["channels:read"] },
+  channel_rename: { channels: ["channel.id"], timestamps: [], scopes: ["channels:read"] },
+  channel_shared: {
+    channels: ["channel"],
+    timestamps: [],
+    scopes: ["channels:read", "groups:read"],
+  },
+  channel_unarchive: { channels: ["channel"], timestamps: [], scopes: [] },
+  channel_unshared: {
+    channels: ["channel"],
+    timestamps: [],
+    scopes: ["channels:read", "groups:read"],
+  },
+  dnd_updated: { channels: [], timestamps: [], scopes: ["dnd:read"] },
+  dnd_updated_user: { channels: [], timestamps: [], scopes: ["dnd:read"] },
+  email_domain_changed: { channels: [], timestamps: [], scopes: ["team:read"] },
+  emoji_changed: { channels: [], timestamps: [], scopes: ["emoji:read"] },
+  entity_details_requested: {
+    channels: ["channel"],
+    timestamps: ["message_ts", "thread_ts"],
+    scopes: [],
+  },
+  file_change: { channels: [], timestamps: [], scopes: ["files:read"] },
+  file_comment_deleted: { channels: [], timestamps: [], scopes: ["files:read"] },
+  file_created: { channels: [], timestamps: [], scopes: ["files:read"] },
+  file_deleted: { channels: ["channel_ids"], timestamps: [], scopes: ["files:read"] },
+  file_public: { channels: [], timestamps: [], scopes: ["files:read"] },
+  file_shared: { channels: ["channel_id"], timestamps: [], scopes: ["files:read"] },
+  file_unshared: { channels: ["channel_id"], timestamps: [], scopes: ["files:read"] },
+  function_executed: { channels: [], timestamps: [], scopes: [] },
+  grid_migration_finished: { channels: [], timestamps: [], scopes: [] },
+  grid_migration_started: { channels: [], timestamps: [], scopes: [] },
+  group_archive: { channels: ["channel"], timestamps: [], scopes: [] },
+  group_close: { channels: ["channel"], timestamps: [], scopes: ["groups:read"] },
+  group_deleted: { channels: ["channel"], timestamps: [], scopes: ["groups:read"] },
+  group_history_changed: { channels: [], timestamps: [], scopes: ["groups:history"] },
+  group_left: { channels: ["channel"], timestamps: [], scopes: ["groups:read"] },
+  group_open: { channels: ["channel"], timestamps: [], scopes: ["groups:read"] },
+  group_rename: { channels: ["channel.id"], timestamps: [], scopes: ["groups:read"] },
+  group_unarchive: { channels: ["channel"], timestamps: [], scopes: [] },
+  im_close: { channels: ["channel"], timestamps: [], scopes: ["im:read"] },
+  im_created: { channels: ["channel.id"], timestamps: [], scopes: ["im:read"] },
+  im_history_changed: { channels: [], timestamps: [], scopes: ["im:history"] },
+  im_open: { channels: ["channel"], timestamps: [], scopes: ["im:read"] },
+  invite_requested: {
+    channels: ["invite_request.channel_ids"],
+    timestamps: [],
+    scopes: ["admin.invites:read"],
+  },
+  link_shared: {
+    channels: ["channel"],
+    timestamps: ["message_ts", "thread_ts"],
+    scopes: ["links:read"],
+  },
+  member_joined_channel: {
+    channels: ["channel"],
+    timestamps: [],
+    scopes: ["channels:read", "groups:read", "mpim:read"],
+  },
+  member_left_channel: {
+    channels: ["channel"],
+    timestamps: [],
+    scopes: ["channels:read", "groups:read"],
+  },
+  "message.channels": {
+    channels: ["channel", "message.channel"],
+    timestamps: ["message.thread_ts", "message.ts", "thread_ts", "ts"],
+    scopes: ["channels:history"],
+  },
+  "message.groups": {
+    channels: ["channel", "message.channel"],
+    timestamps: ["message.thread_ts", "message.ts", "thread_ts", "ts"],
+    scopes: ["groups:history"],
+  },
+  "message.im": {
+    channels: ["channel", "message.channel"],
+    timestamps: ["message.thread_ts", "message.ts", "thread_ts", "ts"],
+    scopes: ["im:history"],
+  },
+  "message.mpim": {
+    channels: ["channel", "message.channel"],
+    timestamps: ["message.thread_ts", "message.ts", "thread_ts", "ts"],
+    scopes: ["mpim:history"],
+  },
+  message_metadata_deleted: {
+    channels: ["channel_id"],
+    timestamps: ["message_ts"],
+    scopes: ["metadata.message:read"],
+  },
+  message_metadata_posted: {
+    channels: ["channel_id"],
+    timestamps: ["message_ts"],
+    scopes: ["metadata.message:read"],
+  },
+  message_metadata_updated: {
+    channels: ["channel_id"],
+    timestamps: ["message_ts"],
+    scopes: ["metadata.message:read"],
+  },
+  pin_added: {
+    channels: ["channel_id", "item.channel", "pinned_info.channel"],
+    timestamps: ["item.message.ts"],
+    scopes: ["pins:read"],
+  },
+  pin_removed: {
+    channels: ["channel_id", "item.channel", "pinned_info.channel"],
+    timestamps: ["item.message.ts"],
+    scopes: ["pins:read"],
+  },
+  reaction_added: {
+    channels: ["item.channel"],
+    timestamps: ["item.ts"],
+    scopes: ["reactions:read"],
+  },
+  reaction_removed: {
+    channels: ["item.channel"],
+    timestamps: ["item.ts"],
+    scopes: ["reactions:read"],
+  },
+  shared_channel_invite_accepted: { channels: ["channel.id"], timestamps: [], scopes: [] },
+  shared_channel_invite_approved: { channels: ["channel.id"], timestamps: [], scopes: [] },
+  shared_channel_invite_declined: { channels: ["channel.id"], timestamps: [], scopes: [] },
+  shared_channel_invite_received: { channels: ["channel.id"], timestamps: [], scopes: [] },
+  shared_channel_invite_requested: { channels: ["channel_id"], timestamps: [], scopes: [] },
+  star_added: { channels: [], timestamps: [], scopes: ["stars:read"] },
+  star_removed: { channels: [], timestamps: [], scopes: ["stars:read"] },
+  subteam_created: { channels: [], timestamps: [], scopes: ["usergroups:read"] },
+  subteam_members_changed: { channels: [], timestamps: [], scopes: ["usergroups:read"] },
+  subteam_self_added: { channels: [], timestamps: [], scopes: ["usergroups:read"] },
+  subteam_self_removed: { channels: [], timestamps: [], scopes: ["usergroups:read"] },
+  subteam_updated: { channels: [], timestamps: [], scopes: ["usergroups:read"] },
+  team_access_granted: { channels: [], timestamps: [], scopes: [] },
+  team_access_revoked: { channels: [], timestamps: [], scopes: [] },
+  team_domain_change: { channels: [], timestamps: [], scopes: ["team:read"] },
+  team_join: { channels: [], timestamps: [], scopes: ["users:read"] },
+  team_rename: { channels: [], timestamps: [], scopes: ["team:read"] },
+  tokens_revoked: { channels: [], timestamps: [], scopes: [] },
+  user_change: { channels: [], timestamps: [], scopes: ["users:read"] },
+  user_connection: { channels: [], timestamps: [], scopes: ["users:write"] },
+  user_huddle_changed: { channels: [], timestamps: [], scopes: ["users:read"] },
+  user_profile_changed: { channels: [], timestamps: [], scopes: ["users:read"] },
+  user_status_changed: { channels: [], timestamps: [], scopes: ["users:read"] },
+} as const satisfies Record<string, SlackEventScope>;
+
+/** A Slack bot event, named as in the app manifest's `bot_events`, such as `reaction_added` or `message.channels`. */
+export type SlackEventName = keyof typeof SLACK_EVENT_SCOPES;
+
+/** The events a Slack app built by eve subscribes to when `experimental.subscriptions.events` is not set. */
+export const DEFAULT_SLACK_SUBSCRIPTION_EVENTS = [
+  "app_mention",
+  "message.channels",
+  "message.groups",
+  "message.im",
+  "message.mpim",
+] as const satisfies readonly SlackEventName[];
