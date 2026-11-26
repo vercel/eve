@@ -39,6 +39,8 @@ SHA objects are immutable. Main and PR pointer objects are mutable and short-cac
 
 The build requires `VERCEL_OIDC_TOKEN` and `BLOB_STORE_ID` and passes them explicitly to the Blob SDK. It does not accept or use a static Blob write token.
 
+The build also reads an optional `GITHUB_TOKEN`, a read-only token for `vercel/eve`. When set, preview builds send it as a bearer token on their GitHub API requests, so they use the token's rate limit and not GitHub's shared 60 requests per hour limit for unauthenticated addresses.
+
 ## Project setup
 
 The `eve-pkg` Vercel project must:

@@ -1,3 +1,4 @@
+import { githubRequest } from "./github-request.mjs";
 import { PULL_REQUEST_PATTERN, SHA_PATTERN } from "./package.mjs";
 
 const REPOSITORY = "vercel/eve";
@@ -43,10 +44,12 @@ export function vercelOidcCredentials(env) {
 }
 
 async function resolvePullRequest(env, sourceSha, fetchImplementation) {
+  const request = { token: env.GITHUB_TOKEN, action: "resolving package publication" };
   const pullRequest = env.VERCEL_GIT_PULL_REQUEST_ID;
   if (PULL_REQUEST_PATTERN.test(pullRequest ?? "")) {
     const pull = await githubRequest(
       `/repos/${REPOSITORY}/pulls/${pullRequest}`,
+      request,
       fetchImplementation,
     );
     return isCurrentPullRequest(pull, sourceSha, env.VERCEL_GIT_COMMIT_REF)
@@ -60,7 +63,11 @@ async function resolvePullRequest(env, sourceSha, fetchImplementation) {
     head: `${REPOSITORY_OWNER}:${branch}`,
     state: "open",
   });
-  const pulls = await githubRequest(`/repos/${REPOSITORY}/pulls?${query}`, fetchImplementation);
+  const pulls = await githubRequest(
+    `/repos/${REPOSITORY}/pulls?${query}`,
+    request,
+    fetchImplementation,
+  );
   const matches = pulls.filter((pull) => isCurrentPullRequest(pull, sourceSha, branch));
   return matches.length === 1 ? String(matches[0].number) : undefined;
 }
@@ -72,17 +79,4 @@ function isCurrentPullRequest(pull, sourceSha, branch) {
     pull.head?.repo?.full_name === REPOSITORY &&
     pull.head?.sha === sourceSha
   );
-}
-
-async function githubRequest(pathname, fetchImplementation) {
-  const response = await fetchImplementation(`https://api.github.com${pathname}`, {
-    headers: {
-      Accept: "application/vnd.github+json",
-      "X-GitHub-Api-Version": "2022-11-28",
-    },
-  });
-  if (!response.ok) {
-    throw new Error(`GitHub returned ${response.status} while resolving package publication.`);
-  }
-  return response.json();
 }
