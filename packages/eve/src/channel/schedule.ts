@@ -109,12 +109,16 @@ export class ScheduleDispatcher {
     scope.set(AuthKey, auth);
     scope.set(OccurrenceIdKey, occurrence.executionId);
     scope.set(ScheduleInstanceKey, occurrence.name);
-    const scheduledToken = (channelToken: string | undefined, key: string | undefined) =>
-      key === undefined
-        ? `eve-scheduled-send:${randomUUID()}`
-        : `eve-scheduled-send:${createHash("sha256")
-            .update(JSON.stringify([occurrence.scheduleId, channelToken, key]))
-            .digest("hex")}`;
+    const scheduledToken = (run: RunInput) =>
+      `${run.channelName ? `${run.channelName}:` : ""}eve-scheduled-send:${
+        run.idempotencyKey === undefined
+          ? randomUUID()
+          : createHash("sha256")
+              .update(
+                JSON.stringify([occurrence.scheduleId, run.continuationToken, run.idempotencyKey]),
+              )
+              .digest("hex")
+      }`;
     const repeats = new Map<unknown, Map<string, number>>();
     const occurrenceKey = (channel: unknown, target: unknown, message: MessageContent): string => {
       const digest = messageDigest(message);
@@ -132,7 +136,7 @@ export class ScheduleDispatcher {
       auth,
       initiatorAuth: auth,
       capabilities: { requestInput: false },
-      continuationToken: scheduledToken(run.continuationToken, run.idempotencyKey),
+      continuationToken: scheduledToken(run),
       continuationConflictCommand:
         run.idempotencyKey === undefined ? undefined : run.continuationConflictCommand,
     });

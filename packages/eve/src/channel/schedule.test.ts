@@ -188,6 +188,7 @@ describe("ScheduleDispatcher", () => {
       expect(started[0]).toMatchObject({
         auth: { principalId: "alice", attributes: {} },
         capabilities: { requestInput: false },
+        continuationToken: expect.stringMatching(/^outbox:eve-scheduled-send:[0-9a-f]{64}$/u),
         input: { message: "Summarize the week." },
       });
       expect(started[1]!.continuationToken).toBe(started[0]!.continuationToken);
