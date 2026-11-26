@@ -109,3 +109,40 @@ it("gives ctx.channel the calling session's channel kind, address, and metadata"
     status: "completed",
   });
 });
+
+it("avoids constructing AbortController unless ctx.abortSignal is read and preserves prior cancellation", async () => {
+  const original = globalThis.AbortController;
+  const spy = vi.fn(function (this: AbortController) {
+    return new original();
+  });
+  vi.stubGlobal("AbortController", spy);
+  try {
+    mocks.execute.mockImplementation(async () => "ok");
+    const idle = startCallBody(input);
+    await expect(idle.outcome).resolves.toEqual({ output: "ok", status: "completed" });
+    expect(spy).not.toHaveBeenCalled();
+
+    let observedSignal: AbortSignal | undefined;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mocks.execute.mockImplementation(async (_input, ctx: WorkflowToolContext & ToolContext) => {
+      await gate;
+      observedSignal = ctx.abortSignal;
+      return "done";
+    });
+    const cancelled = startCallBody(input);
+    cancelled.control.apply({ kind: "cancel", reason: "cancelled early" });
+    expect(cancelled.control.runSignal.aborted).toBe(true);
+    expect(spy).not.toHaveBeenCalled();
+
+    release();
+    await cancelled.outcome;
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(observedSignal?.aborted).toBe(true);
+    expect(observedSignal?.reason).toMatchObject({ message: "cancelled early" });
+  } finally {
+    vi.stubGlobal("AbortController", original);
+  }
+});

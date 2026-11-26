@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   owner: vi.fn(),
   deliver: vi.fn(),
   runBody: vi.fn(),
+  closeBody: vi.fn(),
   applyCommand: vi.fn(),
   usageTotal: vi.fn(),
   body: { runSignal: new AbortController().signal },
@@ -45,7 +46,7 @@ vi.mock("#execution/tools/workflow/body.js", () => ({
     turnId: input.session.turn.id,
   }),
   startCallBody: (input: unknown) => ({
-    close: async () => {},
+    close: mocks.closeBody,
     control: {
       apply: mocks.applyCommand,
       runSignal: mocks.body.runSignal,
@@ -83,6 +84,7 @@ const input = {
 beforeEach(() => {
   vi.resetAllMocks();
   setControl(new AbortController());
+  mocks.closeBody.mockResolvedValue(undefined);
   mocks.runBody.mockResolvedValue({ output: "done", status: "completed" });
 });
 
@@ -495,4 +497,34 @@ it("propagates terminal delivery failure instead of replacing the invocation out
   mocks.deliver.mockRejectedValue(new Error("delivery failed"));
   await expect(workflowToolRunWorkflow(input)).rejects.toThrow("delivery failed");
   expect(mocks.deliver).toHaveBeenCalledOnce();
+  expect(mocks.closeBody).toHaveBeenCalledOnce();
+});
+
+it("overlaps started.close() with terminal outcome delivery and waits for both", async () => {
+  let finishClose!: () => void;
+  mocks.closeBody.mockImplementation(
+    () =>
+      new Promise<void>((resolve) => {
+        finishClose = resolve;
+      }),
+  );
+  mocks.openWorkflowToolRunOwnerInbox.mockReturnValue({
+    owner: { send: vi.fn(), sent: 0 },
+    reader: createChannelReader("workflow", (async function* () {})()),
+  });
+
+  let settled = false;
+  const run = workflowToolRunWorkflow(input).then(() => {
+    settled = true;
+  });
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+  expect(mocks.closeBody).toHaveBeenCalledOnce();
+  expect(mocks.deliver).toHaveBeenCalledOnce();
+  expect(settled).toBe(false);
+
+  finishClose();
+  await run;
+  expect(settled).toBe(true);
+  expect(mocks.closeBody).toHaveBeenCalledOnce();
 });

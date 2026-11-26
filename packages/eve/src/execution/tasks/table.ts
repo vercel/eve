@@ -19,6 +19,8 @@ const TASK_ID_SUFFIX_LENGTH = 6;
 
 export interface DirectAgentRun {
   readonly continuationToken: string;
+  readonly isModelsTool?: boolean;
+  readonly model?: string;
   readonly name: string;
   readonly nodeId: string;
 }
@@ -492,6 +494,8 @@ function isDirectAgentRun(value: unknown): value is DirectAgentRun {
   return (
     isObject(value) &&
     isNonEmptyString(value.continuationToken) &&
+    (value.isModelsTool === undefined || typeof value.isModelsTool === "boolean") &&
+    (value.model === undefined || typeof value.model === "string") &&
     isNonEmptyString(value.name) &&
     typeof value.nodeId === "string"
   );

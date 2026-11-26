@@ -5,6 +5,7 @@ import { z } from "zod";
 import { defineDynamic } from "#dynamic/definition.js";
 import { routedRunLive } from "#execution/hosts.js";
 import { readSessionEventHistory } from "#execution/session-event-stream.js";
+import { workflowToolRunWorkflowReference } from "#execution/workflow-references.js";
 import { markMockModel } from "#internal/mock-model-identity.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { textStreamResult, toolCallsStreamResult } from "#internal/testing/approval-resume.js";
@@ -14,8 +15,10 @@ import {
   startTestSession,
   type TestSessionHostKind,
 } from "#internal/testing/test-session-hosts.js";
+import { getWorld } from "#internal/workflow/runtime.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { defineAgent } from "#public/definitions/agent.js";
+import { agent } from "#public/tools/agent.js";
 import { defineTool } from "#tools/definition.js";
 
 vi.setConfig({ testTimeout: 60_000 });
@@ -776,6 +779,169 @@ describe.each<TestSessionHostKind>(["in-process", "workflow"])(
           await run.cancel();
         }
       });
+    });
+
+    it("routes agent({ models }) directly without a workflowToolRunWorkflow run and rejects model changes", async () => {
+      vi.stubEnv("NODE_ENV", "production");
+      try {
+        const seenByFast: string[] = [];
+        const fastModel = new MockLanguageModelV4({
+          doStream: async ({ prompt }) => {
+            const text = prompt
+              .filter((m) => m.role === "user")
+              .map((m) => JSON.stringify(m.content))
+              .join("\n");
+            seenByFast.push(text);
+            return textStreamResult(text.includes("STEP_TWO") ? "FAST_TWO" : "FAST_ONE");
+          },
+          modelId: "fast-1",
+          provider: "test-models",
+        });
+        const smartModel = new MockLanguageModelV4({
+          doStream: async () => textStreamResult("SMART_UNUSED"),
+          modelId: "smart-1",
+          provider: "test-models",
+        });
+        const rootModel = markMockModel(
+          new MockLanguageModelV4({
+            doStream: async ({ prompt }) => {
+              const raw = JSON.stringify(prompt);
+              const taskId = extractTaskId(raw);
+
+              if (!raw.includes("FAST_ONE")) {
+                if (!taskId) {
+                  return toolCallsStreamResult([
+                    {
+                      input: JSON.stringify({ message: "STEP_ONE", model: "fast" }),
+                      toolCallId: "c1",
+                      toolName: "agent",
+                    },
+                  ]);
+                }
+                return toolCallsStreamResult([
+                  {
+                    input: "{}",
+                    toolCallId: "w1",
+                    toolName: "eve__task_wait",
+                  },
+                ]);
+              }
+              if (!raw.includes("FAST_TWO")) {
+                if (!raw.includes('"toolCallId":"c2"') && !raw.includes("STEP_TWO")) {
+                  return toolCallsStreamResult([
+                    {
+                      input: JSON.stringify({ message: "STEP_TWO", taskId }),
+                      toolCallId: "c2",
+                      toolName: "agent",
+                    },
+                  ]);
+                }
+                return toolCallsStreamResult([
+                  {
+                    input: "{}",
+                    toolCallId: "w2",
+                    toolName: "eve__task_wait",
+                  },
+                ]);
+              }
+              if (!raw.includes("An agent task keeps the model it started with")) {
+                return toolCallsStreamResult([
+                  {
+                    input: JSON.stringify({ message: "STEP_THREE", model: "smart", taskId }),
+                    toolCallId: "c3",
+                    toolName: "agent",
+                  },
+                ]);
+              }
+              return textStreamResult("MODELS_DIRECT_OK");
+            },
+          }),
+        );
+
+        const runtime = await createTestRuntime({
+          agent: {
+            definition: defineAgent({
+              model: defineDynamic(() => ({ model: rootModel, modelContextWindowTokens: 200_000 })),
+            }),
+            name: `direct-models-${host}`,
+          },
+          modules: [
+            {
+              logicalPath: "tools/agent.ts",
+              loadNamespace: async () => ({
+                default: agent({
+                  models: {
+                    fast: {
+                      description: "Fast model",
+                      model: fastModel,
+                      modelContextWindowTokens: 200_000,
+                    },
+                    smart: {
+                      description: "Smart model",
+                      model: smartModel,
+                      modelContextWindowTokens: 200_000,
+                    },
+                  },
+                }),
+              }),
+            },
+          ],
+        });
+
+        const listMiddlemen = async () =>
+          host === "workflow"
+            ? (
+                await (
+                  await getWorld()
+                ).runs.list({
+                  pagination: { limit: 100 },
+                  workflowName: workflowToolRunWorkflowReference.workflowId,
+                })
+              ).data.map((run) => run.runId)
+            : [];
+        const earlierMiddlemen = await listMiddlemen();
+
+        await runtime.run(async () => {
+          const run = await startTestSession(host, {
+            input: { message: "RUN_MODELS" },
+            kind: "initial",
+            ownerDeploymentId: "dpl_direct",
+            serializedContext: buildSerializedContext({
+              auth: ALICE,
+              channelKind: "http",
+              continuationToken: `http:direct-models-${host}`,
+            }),
+          });
+          const stream = captureEvents(run);
+          try {
+            const t1 = await stream.nextUntil("turn 1", isTurnSettled);
+            expect(filterEventsByType(t1, "turn.settled").map((e) => e.data.outcome)).toEqual([
+              "completed",
+            ]);
+            expect(filterEventsByType(t1, "content.completed").map((e) => e.data.value)).toContain(
+              "MODELS_DIRECT_OK",
+            );
+            expect(seenByFast.length).toBe(2);
+            const opened = filterEventsByType(t1, "child.opened")[0];
+            expect(opened).toBeDefined();
+            await vi.waitFor(
+              async () => {
+                expect(await isChildSessionEnded(opened!.data.sessionId)).toBe(true);
+              },
+              { timeout: 10_000 },
+            );
+            const spawnedMiddlemen = (await listMiddlemen()).filter(
+              (id) => !earlierMiddlemen.includes(id),
+            );
+            expect(spawnedMiddlemen).toEqual([]);
+          } finally {
+            stream.dispose();
+            await run.cancel();
+          }
+        });
+      } finally {
+        vi.unstubAllEnvs();
+      }
     });
   },
 );

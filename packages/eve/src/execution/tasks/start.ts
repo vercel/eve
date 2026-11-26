@@ -42,6 +42,7 @@ import {
   type StartWorkflowTaskInput,
 } from "#execution/tools/workflow/start.js";
 import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
+import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { HarnessSessionBase } from "#harness/types.js";
 import type {
@@ -54,6 +55,7 @@ import { createEveSessionStreamRoutePath } from "#protocol/routes.js";
 import { isWorking, tasks } from "#protocol/session-projection/selectors.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 import { TOO_MANY_TASKS_CODE, UNKNOWN_TASK_CODE } from "#protocol/task-tools.js";
+import { agentModelsServeWorkflow } from "#runtime/subagents/workflow.js";
 import { agentToolServeWorkflowReference } from "#runtime/subagents/workflow-reference.js";
 import type {
   RuntimeToolResultActionResult,
@@ -61,6 +63,7 @@ import type {
   WorkflowToolRunEntry,
 } from "#shared/action-types.js";
 import type { MessageContent } from "#shared/message-content.js";
+import { readWorkflowFunctionId } from "#shared/workflow-function-id.js";
 import { findStubTarget } from "#tool-stubs/target.js";
 import { agentDelegation } from "#tracing/eve/delegation.js";
 
@@ -79,10 +82,22 @@ interface TaskDispatchResult {
 
 type TaskRunEntry = Extract<WorkflowToolRunEntry, { readonly taskId: string }>;
 
+const FALLBACK_AGENT_MODELS_SERVE_WORKFLOW_ID = `workflow//${EVE_PACKAGE_NAME}//agentModelsServeWorkflow`;
+
+const AGENT_MODEL_CHANGE_ERROR =
+  "An agent task keeps the model it started with. This task has ended; start a new task to use another model.";
+
+function isAgentModelsWorkflowId(workflowId: string): boolean {
+  const modelsId =
+    readWorkflowFunctionId(agentModelsServeWorkflow) ?? FALLBACK_AGENT_MODELS_SERVE_WORKFLOW_ID;
+  return workflowId === modelsId;
+}
+
 export function isDirectLocalAgentCandidate(input: StartWorkflowTaskInput): boolean {
   return (
     input.directAgents !== undefined &&
-    input.task.workflowId === agentToolServeWorkflowReference.workflowId &&
+    (input.task.workflowId === agentToolServeWorkflowReference.workflowId ||
+      isAgentModelsWorkflowId(input.task.workflowId)) &&
     findStubTarget(input.agentContext.toolStubs, input.task.toolName) === undefined
   );
 }
@@ -92,6 +107,11 @@ function readAgentMessageInput(input: StartWorkflowTaskInput): MessageContent<st
   return normalizeAgentMessage(payload.message as MessageContent<string | URL>);
 }
 
+function readAgentModelInput(input: StartWorkflowTaskInput): string | undefined {
+  const payload = (input.task.executeInput ?? input.task.input) as { readonly model?: unknown };
+  return typeof payload.model === "string" ? payload.model : undefined;
+}
+
 export async function tryStartDirectLocalAgent(
   input: TaskDispatchInput,
 ): Promise<
@@ -99,6 +119,8 @@ export async function tryStartDirectLocalAgent(
 > {
   const local = input.directAgents;
   if (local === undefined || !isDirectLocalAgentCandidate(input)) return undefined;
+  const isModelsTool = isAgentModelsWorkflowId(input.task.workflowId);
+  const model = isModelsTool ? readAgentModelInput(input) : undefined;
   const message = readAgentMessageInput(input);
   const key = `${input.session.sessionId}:${input.taskId}`;
   const start = await resolveAgentSessionStart({
@@ -106,7 +128,8 @@ export async function tryStartDirectLocalAgent(
     context: input.agentContext,
     key,
     message,
-    name: input.task.toolName,
+    ...(model !== undefined && { model }),
+    name: isModelsTool ? "agent" : input.task.toolName,
     replyTo: input.owner.inbox,
     toolName: input.task.toolName,
   });
@@ -131,6 +154,10 @@ export async function tryStartDirectLocalAgent(
     address: {
       directAgent: {
         continuationToken: prepared.childContinuationToken,
+        ...(isModelsTool && {
+          isModelsTool: true,
+          ...(model !== undefined && { model }),
+        }),
         name: start.target.action.name,
         nodeId: start.target.action.nodeId,
       },
@@ -251,10 +278,18 @@ export async function sendToTask(
     };
     let message: MessageContent<string | URL> | undefined;
     let sendFailure: string | undefined;
-    try {
-      message = readAgentMessageInput(input);
-    } catch (error) {
-      sendFailure = toErrorMessage(error);
+    if (directAgent.isModelsTool) {
+      const requestedModel = readAgentModelInput(input);
+      if (requestedModel !== undefined && requestedModel !== directAgent.model) {
+        sendFailure = AGENT_MODEL_CHANGE_ERROR;
+      }
+    }
+    if (sendFailure === undefined) {
+      try {
+        message = readAgentMessageInput(input);
+      } catch (error) {
+        sendFailure = toErrorMessage(error);
+      }
     }
     let acceptedSessionId: string | undefined;
     if (sendFailure === undefined && message !== undefined) {

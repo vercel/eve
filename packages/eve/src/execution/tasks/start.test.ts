@@ -17,7 +17,14 @@ vi.mock("#execution/hosts.js", async (importOriginal) => ({
   currentStepAttempt: vi.fn(),
 }));
 
-function makeDirectTaskFixture(message: string) {
+function makeDirectTaskFixture(
+  message: string,
+  options?: {
+    readonly initialModel?: string;
+    readonly isModelsTool?: boolean;
+    readonly requestedModel?: string;
+  },
+) {
   const created = createTask(readTaskTable(undefined), {
     callId: "call-1",
     kind: "agent",
@@ -28,6 +35,10 @@ function makeDirectTaskFixture(message: string) {
   const table = recordTaskRun(created.table, created.taskId, {
     directAgent: {
       continuationToken: "subagent:parent:agent",
+      ...(options?.isModelsTool && {
+        isModelsTool: true,
+        ...(options.initialModel !== undefined && { model: options.initialModel }),
+      }),
       name: "agent",
       nodeId: "agent",
     },
@@ -88,10 +99,16 @@ function makeDirectTaskFixture(message: string) {
       task: {
         callId: "call-2",
         entry: { entryPoint: "receive" as const, taskId: created.taskId },
-        input: { message, taskId: created.taskId },
+        input: {
+          message,
+          ...(options?.requestedModel !== undefined && { model: options.requestedModel }),
+          taskId: created.taskId,
+        },
         kind: "workflow-task" as const,
         toolName: "agent",
-        workflowId: "workflow//eve//agentToolServeWorkflow",
+        workflowId: options?.isModelsTool
+          ? "workflow//eve//agentModelsServeWorkflow"
+          : "workflow//eve//agentToolServeWorkflow",
       },
       taskId: created.taskId,
     },
@@ -137,5 +154,43 @@ describe("sendToTask direct local subagent retry handling", () => {
     expect(result.result.isError).toBe(true);
     expect(result.failedTask).toMatchObject({ taskId: fixture.taskId });
     expect(fixture.commandLate).toHaveBeenCalledOnce();
+  });
+
+  it("fails immediately when an agent({ models }) follow-up requests a different model", async () => {
+    vi.mocked(currentStepAttempt).mockReturnValue(1);
+    const fixture = makeDirectTaskFixture("Follow up", {
+      initialModel: "fast",
+      isModelsTool: true,
+      requestedModel: "smart",
+    });
+
+    const result = await sendToTask(fixture.input, fixture.admissionView);
+
+    expect(fixture.command).not.toHaveBeenCalled();
+    expect(result.result.isError).toBe(true);
+    expect(result.failedTask).toMatchObject({
+      error:
+        "An agent task keeps the model it started with. This task has ended; start a new task to use another model.",
+      taskId: fixture.taskId,
+    });
+    expect(fixture.commandLate).toHaveBeenCalledOnce();
+  });
+
+  it("accepts an agent({ models }) follow-up that omits model or keeps the initial model", async () => {
+    vi.mocked(currentStepAttempt).mockReturnValue(1);
+    for (const requestedModel of [undefined, "fast"]) {
+      const fixture = makeDirectTaskFixture("Follow up", {
+        initialModel: "fast",
+        isModelsTool: true,
+        requestedModel,
+      });
+      fixture.command.mockResolvedValueOnce({ sessionId: "child-1", status: "accepted" });
+
+      const result = await sendToTask(fixture.input, fixture.admissionView);
+
+      expect(fixture.command).toHaveBeenCalledOnce();
+      expect(result.result.isError).toBeUndefined();
+      expect(result.failedTask).toBeUndefined();
+    }
   });
 });

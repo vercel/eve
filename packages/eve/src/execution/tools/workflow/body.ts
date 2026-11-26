@@ -15,6 +15,7 @@ import {
   WorkflowToolRunAsks,
   type WorkflowToolRunContext,
 } from "#execution/tools/workflow/ask.js";
+import { InWorkflowAbortController } from "#execution/tools/workflow/in-workflow-abort.js";
 import type {
   WorkflowBodyCommand,
   WorkflowToolRunOutcome,
@@ -73,8 +74,10 @@ type WorkflowCallEntryPoint = (
 ) => Promise<JsonValue> | AsyncIterable<JsonValue>;
 
 class WorkflowCallSignals implements WorkflowBodyControl {
-  private readonly body = new AbortController();
-  private readonly run = new AbortController();
+  private body: AbortController | undefined;
+  private bodyAborted = false;
+  private bodyReason: unknown = undefined;
+  private readonly run = new InWorkflowAbortController();
   private readonly asks: WorkflowToolRunAsks;
 
   constructor(asks: WorkflowToolRunAsks) {
@@ -82,6 +85,10 @@ class WorkflowCallSignals implements WorkflowBodyControl {
   }
 
   get abortSignal(): AbortSignal {
+    if (this.body === undefined) {
+      this.body = new AbortController();
+      if (this.bodyAborted) this.body.abort(this.bodyReason);
+    }
     return this.body.signal;
   }
 
@@ -90,7 +97,7 @@ class WorkflowCallSignals implements WorkflowBodyControl {
   }
 
   get interrupted(): boolean {
-    return this.body.signal.aborted && !this.run.signal.aborted;
+    return this.bodyAborted && !this.run.signal.aborted;
   }
 
   get unwinding(): boolean {
@@ -100,17 +107,26 @@ class WorkflowCallSignals implements WorkflowBodyControl {
   apply(command: WorkflowBodyCommand): void {
     switch (command.kind) {
       case "cancel":
-      case "end":
+      case "end": {
         this.asks.cancelAll();
-        this.run.abort(new WorkflowToolRunCancelledError(command.reason));
-        this.body.abort(this.run.signal.reason);
+        const reason = new WorkflowToolRunCancelledError(command.reason);
+        this.run.abort(reason);
+        this.abortBody(reason);
         return;
+      }
       case "interrupt":
-        this.body.abort(new WorkflowToolRunInterruptedError());
+        this.abortBody(new WorkflowToolRunInterruptedError());
         return;
       case "call":
         return;
     }
+  }
+
+  private abortBody(reason: unknown): void {
+    if (this.bodyAborted) return;
+    this.bodyAborted = true;
+    this.bodyReason = reason;
+    this.body?.abort(reason);
   }
 }
 
@@ -291,7 +307,9 @@ function createCallContext(
 ): WorkflowCallContext {
   const ctx: WorkflowCallContext = {
     ...createSharedContext(input, agent, (request, options) => ask(ctx, request, options)),
-    abortSignal: signals.abortSignal,
+    get abortSignal() {
+      return signals.abortSignal;
+    },
     agents: createAgentsView(input.agentContext),
     callId: input.callId,
     session: input.session,
