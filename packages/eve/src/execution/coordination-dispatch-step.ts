@@ -1,6 +1,4 @@
-import { isBashJobHandoff } from "#execution/sandbox/bash.js";
-import { bashJobTaskWorkflowReference } from "#execution/sandbox/bash-job-reference.js";
-import { cancelBashJobForAgent } from "#execution/sandbox/bash-job-steps.js";
+import { cancelUndispatchedBashTasks } from "#execution/sandbox/bash-job-steps.js";
 import {
   prepareCoordinationDispatch,
   type CoordinationDispatchInput,
@@ -92,11 +90,13 @@ async function dispatchCoordination(
   const executing: PendingDispatch["executing"][number][] = [];
   const admissionView = copyView(storedProjection(session.state).view);
   const admitted: RuntimeWorkflowTaskRequest[] = [];
+  const unstartedBashCandidates: RuntimeWorkflowTaskRequest[] = [];
   for (const task of prepared.plan) {
     if (hasWorkflowAdmission(task)) {
       admitted.push(task);
       continue;
     }
+    unstartedBashCandidates.push(task);
     const result = createRuntimeToolResultFromValue({
       callId: task.callId,
       toolName: task.toolName,
@@ -116,17 +116,6 @@ async function dispatchCoordination(
         nextSession,
         removeTask(readTaskTable(nextSession.state), task.entry.taskId),
       );
-      if (
-        task.workflowId === bashJobTaskWorkflowReference.workflowId &&
-        isBashJobHandoff(task.executeInput)
-      ) {
-        await cancelBashJobForAgent({
-          agent: prepared.owner,
-          handoff: task.executeInput,
-          sandboxSessionId: prepared.sandboxSessionId,
-          sandboxState: prepared.sandboxState,
-        });
-      }
     }
   }
 
@@ -170,22 +159,17 @@ async function dispatchCoordination(
         { at: new Date().toISOString(), facts: startTask(shadow, dispatched.started).events },
         admissionView.position,
       );
+    } else if (dispatched.result?.isError === true) {
+      unstartedBashCandidates.push(task);
     }
     if (dispatched.refusal !== undefined && dispatched.result !== undefined)
       refused.push({ policy: dispatched.refusal, result: dispatched.result });
-    if (
-      dispatched.started === undefined &&
-      task.workflowId === bashJobTaskWorkflowReference.workflowId &&
-      isBashJobHandoff(task.executeInput)
-    ) {
-      await cancelBashJobForAgent({
-        agent: prepared.owner,
-        handoff: task.executeInput,
-        sandboxSessionId: prepared.sandboxSessionId,
-        sandboxState: prepared.sandboxState,
-      });
-    }
   }
+  await cancelUndispatchedBashTasks(unstartedBashCandidates, () => ({
+    agent: prepared.owner,
+    sandboxSessionId: prepared.sandboxSessionId,
+    sandboxState: prepared.sandboxState,
+  }));
 
   if (executing.length > 0 || started.length > 0) {
     nextSession = markSandboxRunning(

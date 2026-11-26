@@ -9,11 +9,13 @@ import {
 import { ownerReference } from "#execution/agent-sessions/owner.js";
 import {
   cancelBashJobOnSandbox,
+  isBashJobHandoff,
   pollBashJobOnSandbox,
   timeoutBashJobOnSandbox,
   type BashCompletedResult,
   type BashJobHandoff,
 } from "#execution/sandbox/bash.js";
+import { bashJobTaskWorkflowReference } from "#execution/sandbox/bash-job-reference.js";
 import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
 import type {
   WorkflowStepContext,
@@ -26,13 +28,20 @@ import {
 import { resolveSessionAgent } from "#runtime/sessions/runtime-context-keys.js";
 import { runtimeNodeId, type SessionAgent } from "#runtime/sessions/session-agent.js";
 import type { SandboxState } from "#sandbox/state.js";
+import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 
 type BashJobStepSession = WorkflowStepContext["session"];
 
-export type PollBashJobResult =
+type PollBashJobResult =
   | { readonly atMs: number; readonly status: "running" }
   | { readonly result: BashCompletedResult; readonly status: "completed" };
+
+interface BashJobSandboxTarget {
+  readonly agent: SessionAgent;
+  readonly sandboxSessionId: string;
+  readonly sandboxState: SandboxState | undefined;
+}
 
 export async function pollBashJobStep(
   sandboxRef: WorkflowStepSandbox,
@@ -70,30 +79,22 @@ export async function timeoutBashJobStep(
   );
 }
 
-export async function cancelBashJobForAgent(input: {
-  readonly agent: SessionAgent;
-  readonly handoff: BashJobHandoff;
-  readonly sandboxSessionId: string;
-  readonly sandboxState: SandboxState | undefined;
-}): Promise<void> {
+export async function cancelUndispatchedBashTasks(
+  tasks: readonly RuntimeWorkflowTaskRequest[],
+  resolveTarget: () => Promise<BashJobSandboxTarget> | BashJobSandboxTarget,
+): Promise<void> {
+  const handoffs = tasks.flatMap((task) =>
+    task.workflowId === bashJobTaskWorkflowReference.workflowId &&
+    isBashJobHandoff(task.executeInput)
+      ? [task.executeInput]
+      : [],
+  );
+  if (handoffs.length === 0) return;
   try {
-    const sandbox = await input.agent.sandbox();
-    if (sandbox === undefined) return;
-    const access = await ensureSandboxAccess({
-      ...sandbox.template,
-      nodeId: runtimeNodeId(input.agent),
-      ownsSandbox: false,
-      registry: sandbox.registry,
-      sessionId: input.sandboxSessionId,
-      state: input.sandboxState ?? null,
-      shutdownTracking: "none",
+    const target = await resolveTarget();
+    await withAgentSandbox(target, async (sandbox) => {
+      await Promise.allSettled(handoffs.map((handoff) => cancelBashJobOnSandbox(sandbox, handoff)));
     });
-    try {
-      const active = await access.get();
-      if (active !== null) await cancelBashJobOnSandbox(active, input.handoff);
-    } finally {
-      await access.release();
-    }
   } catch {}
 }
 
@@ -106,6 +107,30 @@ function populateStepContext(store: AlsContext, session: BashJobStepSession): vo
   store.setVirtualContext(SessionKey, { ...session, sessionId: session.id });
 }
 
+async function withAgentSandbox<T>(
+  target: BashJobSandboxTarget,
+  work: (sandbox: SandboxSession) => Promise<T>,
+): Promise<T> {
+  const sandbox = await target.agent.sandbox();
+  if (sandbox === undefined) throw new Error("The session's agent has no sandbox.");
+  const access = await ensureSandboxAccess({
+    ...sandbox.template,
+    nodeId: runtimeNodeId(target.agent),
+    ownsSandbox: false,
+    registry: sandbox.registry,
+    sessionId: target.sandboxSessionId,
+    state: target.sandboxState ?? null,
+    shutdownTracking: "none",
+  });
+  try {
+    const active = await access.get();
+    if (active === null) throw new Error("The session's sandbox could not be opened.");
+    return await work(active);
+  } finally {
+    await access.release();
+  }
+}
+
 async function withStepSandbox<T>(
   sandboxRef: WorkflowStepSandbox,
   session: BashJobStepSession,
@@ -116,28 +141,10 @@ async function withStepSandbox<T>(
     const store = contextStorage.getStore();
     if (store !== undefined) populateStepContext(store, session);
     const agent = await resolveSessionAgent(ownerReference(sandboxRef));
-    const sandbox = await agent.sandbox();
-    if (sandbox === undefined) {
-      throw new Error("The session's agent has no sandbox.");
-    }
-    const access = await ensureSandboxAccess({
-      ...sandbox.template,
-      nodeId: runtimeNodeId(agent),
-      ownsSandbox: false,
-      registry: sandbox.registry,
-      sessionId: sandboxRef.sessionId,
-      state: sandboxRef.state ?? null,
-      shutdownTracking: "none",
-    });
-    try {
-      const active = await access.get();
-      if (active === null) {
-        throw new Error("The session's sandbox could not be opened.");
-      }
-      return await work(active);
-    } finally {
-      await access.release();
-    }
+    return await withAgentSandbox(
+      { agent, sandboxSessionId: sandboxRef.sessionId, sandboxState: sandboxRef.state },
+      work,
+    );
   };
   if (generation !== undefined) {
     return await withDevelopmentWorkflowGeneration(generation, run);

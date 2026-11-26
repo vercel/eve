@@ -1,3 +1,5 @@
+import { suspendedSteps } from "#harness/session-machine/view.js";
+import { cancelPromotedTasks } from "#tools/task-handoff.js";
 import { handleStepResult } from "#harness/step/after-model.js";
 
 import { HistoryStateKey } from "#context/keys.js";
@@ -118,10 +120,9 @@ export async function runModelStep(
     return reportModelCallFailure(step, error, caller.takeUnkeptUsage());
   }
 
-  await recordModelUsage(step, { model: resolved.model, tools: catalog.advertised.size });
-
   let stepResult: StepResult;
   try {
+    await recordModelUsage(step, { model: resolved.model, tools: catalog.advertised.size });
     generation.check();
     stepResult = await handleStepResult(step, {
       catalog,
@@ -135,6 +136,15 @@ export async function runModelStep(
       result,
     });
   } catch (error) {
+    const promoted = result.promotedTasks ?? [];
+    if (promoted.length > 0) {
+      const persisted = new Set(
+        suspendedSteps(step.session.state).flatMap((entry) =>
+          entry.tasks.map((task) => task.callId),
+        ),
+      );
+      await cancelPromotedTasks(promoted.filter((task) => !persisted.has(task.callId)));
+    }
     throwIfSessionStreamDead(error);
     throwIfTurnAborted(step.config.abortSignal);
     if (generation.interrupted) return caller.steered();

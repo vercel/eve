@@ -354,17 +354,6 @@ describe("executeBashOnSandbox with a real shell", () => {
     await vi.waitFor(() => expect(isProcessAlive(childPid)).toBe(false), { timeout: 10_000 });
     expect(existsSync(started.outputDirectory)).toBe(false);
   });
-
-  it("rejects non-positive process group ids in poll and cancel helpers", async () => {
-    const { sandbox } = await createHostSandbox();
-
-    await expect(
-      pollBashJobOnSandbox(sandbox, { directory: "/tmp/unused", pid: 0 }),
-    ).rejects.toThrow(RangeError);
-    await expect(
-      cancelBashJobOnSandbox(sandbox, { directory: "/tmp/unused", pid: -1 }),
-    ).rejects.toThrow(RangeError);
-  });
 });
 
 async function createHostSandbox(): Promise<{

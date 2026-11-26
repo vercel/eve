@@ -156,16 +156,10 @@ export async function runApprovedCalls(input: {
     await cancelPromotedTasks(promotedTasks);
     throw failed.reason;
   }
-  if (input.abortSignal?.aborted === true && promotedTasks.length > 0) {
-    await cancelPromotedTasks(promotedTasks);
-    return {
-      promotedTasks: [],
-      settled: completed.flatMap((call) => call.settled),
-      signIns: completed.flatMap((call) => (call.signIn === undefined ? [] : [call.signIn])),
-    };
-  }
+  const aborted = input.abortSignal?.aborted === true;
+  if (aborted) await cancelPromotedTasks(promotedTasks);
   return {
-    promotedTasks,
+    promotedTasks: aborted ? [] : promotedTasks,
     settled: completed.flatMap((call) => call.settled),
     signIns: completed.flatMap((call) => (call.signIn === undefined ? [] : [call.signIn])),
   };

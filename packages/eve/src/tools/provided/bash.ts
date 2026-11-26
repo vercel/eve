@@ -1,7 +1,7 @@
 import {
   BASH_MAX_YIELD_SECONDS,
   BASH_YIELD_SECONDS,
-  executeBashToolOnSandbox,
+  executeBashOnSandbox,
   type BashInput,
 } from "#execution/sandbox/bash.js";
 import { frameworkTool } from "./framework-tool.js";
@@ -114,7 +114,7 @@ export const bash: ToolDefinition<BashToolInput, BashToolOutput> = frameworkTool
         bashInput.timeout <= BASH_MAX_YIELD_SECONDS
           ? "kill"
           : "background";
-      return await executeBashToolOnSandbox(await ctx.getSandbox(), bashInput, {
+      return await executeBashOnSandbox(await ctx.getSandbox(), bashInput, {
         abortSignal: ctx.abortSignal,
         onTimeout,
       });

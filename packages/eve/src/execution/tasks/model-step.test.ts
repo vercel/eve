@@ -1,11 +1,7 @@
 import { jsonSchema, type TextStreamPart, type ToolSet } from "ai";
 import { describe, expect, it } from "vitest";
 
-import {
-  appendTaskContext,
-  commitCallEntry,
-  taskSystemMessages,
-} from "#execution/tasks/model-step.js";
+import { appendTaskContext, commitCallEntry } from "#execution/tasks/model-step.js";
 import { readTaskTable, writeTaskTable } from "#execution/tasks/table.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { toolModelOutputContext } from "#harness/tool-model-output.js";
@@ -38,8 +34,6 @@ it.each(["", "undefined", "null"])(
     expect(committed.input).toEqual({ message: "Find the March incidents." });
   },
 );
-
-import { FINAL_REPLY_TASK_SYSTEM_BLOCK, TASK_SYSTEM_BLOCK } from "#execution/tasks/render.js";
 
 describe("text beside a task wait", () => {
   it.each([
@@ -96,23 +90,6 @@ describe("text beside a task wait", () => {
       );
     },
   );
-});
-
-describe("taskSystemMessages", () => {
-  it("lets a person hear that work is underway, and has a child or schedule wait instead", () => {
-    expect(taskSystemMessages(true, false)).toEqual([
-      { content: TASK_SYSTEM_BLOCK, role: "system" },
-    ]);
-    expect(taskSystemMessages(true, true)).toEqual([
-      { content: FINAL_REPLY_TASK_SYSTEM_BLOCK, role: "system" },
-    ]);
-    expect(TASK_SYSTEM_BLOCK).toContain("If the person should hear from you now");
-    expect(FINAL_REPLY_TASK_SYSTEM_BLOCK).toContain("Only your final reply reaches your caller");
-  });
-
-  it("says nothing about tasks when the session offers none", () => {
-    expect(taskSystemMessages(false, false)).toEqual([]);
-  });
 });
 
 describe("task results projected by toModelOutput", () => {

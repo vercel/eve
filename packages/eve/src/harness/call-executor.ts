@@ -258,7 +258,12 @@ export async function executeToolCall(
           `Tool "${toolName}" attempted to promote call "${callId}" to a task outside a promotable turn step.`,
         );
       }
-      await input.beforeResult?.({ failure: undefined, invoked });
+      try {
+        await input.beforeResult?.({ failure: undefined, invoked });
+      } catch (error) {
+        await Promise.resolve(onCancel?.()).catch(() => {});
+        throw error;
+      }
       return {
         promoted: {
           callId,
@@ -329,7 +334,20 @@ export async function executeToolCall(
 async function raceAbort<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
   if (signal === undefined) return await promise;
   promise.catch(() => {});
-  signal.throwIfAborted();
+  const cancelLatePromotion = () => {
+    void promise.then(
+      (value) => {
+        if (isTaskPromotion(value)) {
+          void Promise.resolve(readTaskPromotionCancel(value)?.()).catch(() => {});
+        }
+      },
+      () => {},
+    );
+  };
+  if (signal.aborted) {
+    cancelLatePromotion();
+    signal.throwIfAborted();
+  }
   let onAbort: (() => void) | undefined;
   const aborted = new Promise<never>((_resolve, reject) => {
     onAbort = () => reject(signal.reason);
@@ -337,6 +355,9 @@ async function raceAbort<T>(promise: Promise<T>, signal: AbortSignal | undefined
   });
   try {
     return await Promise.race([promise, aborted]);
+  } catch (error) {
+    if (signal.aborted) cancelLatePromotion();
+    throw error;
   } finally {
     signal.removeEventListener("abort", onAbort!);
   }

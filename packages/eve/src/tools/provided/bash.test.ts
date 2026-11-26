@@ -1,16 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { mintClearance } from "#harness/clearance.js";
-import { invokeTool, type RunnableTool } from "#harness/tools.js";
-import * as sandboxBash from "#execution/sandbox/bash.js";
-import { bash, BASH_INPUT_SCHEMA, type BashToolOutput } from "./bash.js";
+import { BASH_MAX_YIELD_SECONDS, BASH_YIELD_SECONDS } from "#execution/sandbox/bash.js";
 import { toolModelOutputContext } from "#harness/tool-model-output.js";
-import { toInputSchema } from "#tools/schema.js";
 import {
   isTaskPromotion,
   readTaskPromotionCancel,
   withTaskPromotionAllowed,
 } from "#tools/task-handoff.js";
+import { bash, type BashToolOutput } from "./bash.js";
 
 const finished: BashToolOutput = {
   exitCode: 1,
@@ -91,97 +88,73 @@ describe("bash model output", () => {
   });
 });
 
+function createSlowFakeSandbox() {
+  const runCommands: string[] = [];
+  const sandbox = {
+    spawn: async () => ({
+      kill: async () => {},
+      pid: 4242,
+      stderr: new ReadableStream({ start() {} }),
+      stdout: new ReadableStream({ start() {} }),
+      wait: () => new Promise<{ exitCode: number }>(() => {}),
+    }),
+    run: async ({ command }: { readonly command: string }) => {
+      runCommands.push(command);
+      const marker = /eve-bash:[a-f0-9]+/.exec(command)?.[0];
+      if (marker !== undefined) {
+        return { exitCode: 0, stderr: "", stdout: `${marker} 4242 8 0\nworking\n` };
+      }
+      return { exitCode: 0, stderr: "", stdout: "" };
+    },
+  };
+  return { runCommands, sandbox };
+}
+
 describe("bash timeout mode", () => {
-  it.each([
-    { expected: "background", timeout: undefined },
-    { expected: "kill", timeout: 15 },
-    { expected: "kill", timeout: 120 },
-    { expected: "background", timeout: 121 },
-  ])("uses onTimeout=$expected when timeout=$timeout", async ({ expected, timeout }) => {
-    const spy = vi.spyOn(sandboxBash, "executeBashToolOnSandbox").mockResolvedValueOnce({
-      exitCode: 0,
-      status: "completed",
-      stderr: "",
-      stdout: "ok\n",
-      truncated: false,
-    });
-    const fakeSandbox = {} as never;
-    const ctx = { abortSignal: new AbortController().signal, getSandbox: async () => fakeSandbox };
-    try {
-      await bash.execute!(
-        { command: "echo ok", ...(timeout !== undefined && { timeout }) },
-        ctx as never,
-      );
-      expect(spy).toHaveBeenCalledWith(
-        fakeSandbox,
-        { command: "echo ok", ...(timeout !== undefined && { timeout }) },
-        { abortSignal: ctx.abortSignal, onTimeout: expected },
-      );
-    } finally {
-      spy.mockRestore();
-    }
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
-  it("passes promoted bash handoffs with onCancel through invokeTool JSON validation", async () => {
+  it("kills commands on expiry when an explicit timeout <= 120s is passed", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    const runCommands: string[] = [];
-    const fakeSandbox = {
-      spawn: async () => ({
-        kill: async () => {},
-        pid: 4242,
-        stderr: new ReadableStream({ start() {} }),
-        stdout: new ReadableStream({ start() {} }),
-        wait: () => new Promise<{ exitCode: number }>(() => {}),
-      }),
-      run: async ({ command }: { readonly command: string }) => {
-        runCommands.push(command);
-        const marker = /eve-bash:[a-f0-9]+/.exec(command)?.[0];
-        if (marker !== undefined) {
-          return { exitCode: 0, stderr: "", stdout: `${marker} 4242 8 0\nworking\n` };
-        }
-        return { exitCode: 0, stderr: "", stdout: "" };
-      },
-    } as never;
-    const runnable: RunnableTool = {
-      description: bash.description,
-      execute: (input, options) =>
-        bash.execute!(
-          input as never,
-          {
-            ...options,
-            getSandbox: async () => fakeSandbox,
-          } as never,
-        ),
-      inputSchema: toInputSchema(BASH_INPUT_SCHEMA),
-      name: "bash",
-    };
-    try {
-      const clearance = mintClearance("call_bash_promo");
-      const pending = withTaskPromotionAllowed(true, () =>
-        invokeTool(
-          runnable,
-          { command: "sleep 120" },
-          {
-            abortSignal: new AbortController().signal,
-            messages: [],
-            toolCallId: "call_bash_promo",
-          },
-          clearance,
-        ),
+    const { runCommands, sandbox } = createSlowFakeSandbox();
+    const ctx = { abortSignal: new AbortController().signal, getSandbox: async () => sandbox };
+
+    const pending = withTaskPromotionAllowed(true, () =>
+      bash.execute!({ command: "sleep 300", timeout: BASH_MAX_YIELD_SECONDS }, ctx as never),
+    );
+    await vi.advanceTimersByTimeAsync(BASH_MAX_YIELD_SECONDS * 1000);
+    const result = await pending;
+
+    expect(result).toMatchObject({ exitCode: 124, status: "completed", stdout: "working\n" });
+    expect(runCommands.some((cmd) => cmd.includes("kill -TERM -- -4242"))).toBe(true);
+  });
+
+  it.each([
+    { timeout: undefined, waitSeconds: BASH_YIELD_SECONDS },
+    { timeout: BASH_MAX_YIELD_SECONDS + 1, waitSeconds: BASH_MAX_YIELD_SECONDS },
+  ])(
+    "promotes still-running commands to a task when timeout=$timeout (and returns running outside a turn)",
+    async ({ timeout, waitSeconds }) => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const { runCommands, sandbox } = createSlowFakeSandbox();
+      const ctx = { abortSignal: new AbortController().signal, getSandbox: async () => sandbox };
+      const input = { command: "sleep 300", ...(timeout !== undefined && { timeout }) };
+
+      const directPending = bash.execute!(input, ctx as never);
+      await vi.advanceTimersByTimeAsync(waitSeconds * 1000);
+      expect(await directPending).toMatchObject({ pid: 4242, status: "running" });
+
+      const promotedPending = withTaskPromotionAllowed(true, () =>
+        bash.execute!(input, ctx as never),
       );
-      await vi.advanceTimersByTimeAsync(sandboxBash.BASH_YIELD_SECONDS * 1000);
-      const promoted = await pending;
+      await vi.advanceTimersByTimeAsync(waitSeconds * 1000);
+      const promoted = await promotedPending;
       expect(isTaskPromotion(promoted)).toBe(true);
       if (!isTaskPromotion(promoted)) return;
-      expect(Object.keys(promoted)).not.toContain("onCancel");
-      expect(() => JSON.stringify(promoted)).not.toThrow();
       expect(promoted.handoff).toMatchObject({ pid: 4242 });
-      const cancel = readTaskPromotionCancel(promoted);
-      expect(cancel).toBeDefined();
-      await cancel!();
+      await readTaskPromotionCancel(promoted)?.();
       expect(runCommands.some((cmd) => cmd.includes("kill -TERM -- -4242"))).toBe(true);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
+    },
+  );
 });

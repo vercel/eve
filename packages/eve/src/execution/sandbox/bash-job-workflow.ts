@@ -39,46 +39,34 @@ export async function runBashJobTask(
 
   let startedAtMs: number | undefined;
   let attempt = 0;
-  for (;;) {
-    if (ctx.abortSignal.aborted) {
-      await cancelBashJobStep(sandboxRef, session, handoff);
-      return cancelledResult();
-    }
+  while (!ctx.abortSignal.aborted) {
     const polled = await pollBashJobStep(sandboxRef, session, handoff);
     if (polled.status === "completed") {
       return polled.result;
+    }
+    if (ctx.abortSignal.aborted) {
+      break;
     }
     startedAtMs ??= polled.atMs;
     if (polled.atMs - startedAtMs >= MAX_BASH_TASK_MS) {
       return await timeoutBashJobStep(sandboxRef, session, handoff, BASH_TASK_TIMEOUT_MESSAGE);
     }
-    if (ctx.abortSignal.aborted) {
-      await cancelBashJobStep(sandboxRef, session, handoff);
-      return cancelledResult();
-    }
     const delayMs = POLL_INTERVALS_MS[Math.min(attempt, POLL_INTERVALS_MS.length - 1)]!;
     attempt += 1;
-    const woke = await sleepOrAbort(run.host.sleep(delayMs), ctx.abortSignal);
-    if (woke === "aborted") {
-      await cancelBashJobStep(sandboxRef, session, handoff);
-      return cancelledResult();
+    if ((await sleepOrAbort(run.host.sleep(delayMs), ctx.abortSignal)) === "aborted") {
+      break;
     }
   }
-}
-
-function cancelledResult(): BashCompletedResult {
-  return {
-    exitCode: 143,
-    status: "completed",
-    stderr: "Command cancelled.\n",
-    stdout: "",
-    truncated: false,
-  };
+  await cancelBashJobStep(sandboxRef, session, handoff);
+  throw ctx.abortSignal.reason ?? new Error("Bash job task cancelled.");
 }
 
 function sleepOrAbort(timer: Promise<void>, signal: AbortSignal): Promise<"elapsed" | "aborted"> {
-  if (signal.aborted) return Promise.resolve("aborted");
-  return new Promise((resolve) => {
+  if (signal.aborted) {
+    void timer.catch(() => {});
+    return Promise.resolve("aborted");
+  }
+  return new Promise((resolve, reject) => {
     const onAbort = () => resolve("aborted");
     signal.addEventListener("abort", onAbort, { once: true });
     void timer.then(
@@ -86,9 +74,10 @@ function sleepOrAbort(timer: Promise<void>, signal: AbortSignal): Promise<"elaps
         signal.removeEventListener("abort", onAbort);
         resolve("elapsed");
       },
-      () => {
+      (error: unknown) => {
         signal.removeEventListener("abort", onAbort);
-        resolve("aborted");
+        if (signal.aborted) resolve("aborted");
+        else reject(error);
       },
     );
   });

@@ -139,25 +139,6 @@ export function isBashJobHandoff(value: unknown): value is BashJobHandoff {
   return typeof directory === "string" && directory.length > 0 && Number.isInteger(pid) && pid > 0;
 }
 
-export async function executeBashToolOnSandbox(
-  sandbox: SandboxSession,
-  args: BashInput,
-  options: BashExecutionOptions = {},
-): Promise<BashResult> {
-  const result = await executeBashOnSandbox(sandbox, args, options);
-  if (result.status !== "running" || !canPromoteToTask()) {
-    return result;
-  }
-  const waitSeconds = resolveBashWaitSeconds(args.timeout);
-  const handoff: BashJobHandoff = { directory: result.outputDirectory, pid: result.pid };
-  return promoteToTask<BashResult>({
-    handoff: { ...handoff },
-    onCancel: () => cancelBashJobOnSandbox(sandbox, handoff),
-    preview: formatBashPromotionPreview(result, waitSeconds),
-    workflowId: bashJobTaskWorkflowReference.workflowId,
-  });
-}
-
 export async function executeBashOnSandbox(
   sandbox: SandboxSession,
   args: BashInput,
@@ -174,6 +155,15 @@ export async function executeBashOnSandbox(
       ? `eve: sandbox command still running as pid ${result.pid}: ${command}`
       : `eve: sandbox command finished (exit ${result.exitCode}): ${command}`,
   );
+  if (result.status === "running" && canPromoteToTask()) {
+    const handoff: BashJobHandoff = { directory: result.outputDirectory, pid: result.pid };
+    return promoteToTask<BashResult>({
+      handoff: { ...handoff },
+      onCancel: () => cancelBashJobOnSandbox(sandbox, handoff),
+      preview: formatBashPromotionPreview(result, waitSeconds),
+      workflowId: bashJobTaskWorkflowReference.workflowId,
+    });
+  }
   return result;
 }
 
@@ -217,6 +207,16 @@ function buildStreamReadCommands(marker: string, quotedDir: string, codeExpr: st
   ];
 }
 
+function killProcessGroupShell(pid: string): string {
+  return `kill -TERM -- -${pid} 2>/dev/null; sleep 0.2; kill -KILL -- -${pid} 2>/dev/null`;
+}
+
+function streamTail(text: string, bytes: number, lines: number): StreamTail {
+  const omittedBytes = Math.max(0, bytes - Buffer.byteLength(text));
+  if (omittedBytes > 0) return { omittedBytes, text };
+  return { text, totalLines: lines + (text.length > 0 && !text.endsWith("\n") ? 1 : 0) };
+}
+
 function parseReadStreamsOutput(
   raw: { readonly stdout: string; readonly stderr: string },
   marker: string,
@@ -226,31 +226,14 @@ function parseReadStreamsOutput(
     `(?:^|\\n)${marker} done (\\d+) (\\d+) (\\d+) (\\d+) (\\d+) (\\d+)\\n`,
   ).exec(raw.stdout);
   if (doneMatch === null) return undefined;
-  const exitCode = Number(doneMatch[1]);
-  const outBytes = Number(doneMatch[2]);
-  const outLines = Number(doneMatch[3]);
-  const errBytes = Number(doneMatch[4]);
-  const errLines = Number(doneMatch[5]);
-  const keep = doneMatch[6] === "1";
   const stdoutText = raw.stdout.slice(doneMatch.index + doneMatch[0].length);
-  const stderrText = raw.stderr;
-  const outOmitted = Math.max(0, outBytes - Buffer.byteLength(stdoutText));
-  const errOmitted = Math.max(0, errBytes - Buffer.byteLength(stderrText));
-  const outTotalLines = outLines + (stdoutText.length > 0 && !stdoutText.endsWith("\n") ? 1 : 0);
-  const errTotalLines = errLines + (stderrText.length > 0 && !stderrText.endsWith("\n") ? 1 : 0);
   const tails: StreamTails = {
-    stdout:
-      outOmitted === 0
-        ? { text: stdoutText, totalLines: outTotalLines }
-        : { omittedBytes: outOmitted, text: stdoutText },
-    stderr:
-      errOmitted === 0
-        ? { text: stderrText, totalLines: errTotalLines }
-        : { omittedBytes: errOmitted, text: stderrText },
+    stdout: streamTail(stdoutText, Number(doneMatch[2]), Number(doneMatch[3])),
+    stderr: streamTail(raw.stderr, Number(doneMatch[4]), Number(doneMatch[5])),
   };
   return {
-    exitCode,
-    streams: formatStreams(tails, keep ? directory : undefined),
+    exitCode: Number(doneMatch[1]),
+    streams: formatStreams(tails, doneMatch[6] === "1" ? directory : undefined),
   };
 }
 
@@ -266,7 +249,7 @@ export async function pollBashJobOnSandbox(
   const quoted = shellQuote(handoff.directory);
   const raw = await runInternalCommand(sandbox, {
     command: [
-      `cd ${quoted} 2>/dev/null || { printf '%s %s %s %s %s\\n' ${marker} missing 1 0 0; exit 0; }`,
+      `cd ${quoted} 2>/dev/null || exit 0`,
       `if [ ! -s exit ] && kill -0 -- -${pid} 2>/dev/null; then printf '%s running\\n' ${marker}; exit 0; fi`,
       `code="$(cat exit 2>/dev/null)"`,
       `case "$code" in ''|*[!0-9]*) code=1 ;; esac`,
@@ -305,12 +288,10 @@ export async function cancelBashJobOnSandbox(
   options: { readonly keepOutputDirectory?: boolean } = {},
 ): Promise<void> {
   const pid = assertValidPid(handoff.pid);
-  const quoted = shellQuote(handoff.directory);
-  const remove = options.keepOutputDirectory === true ? "" : `; rm -rf ${quoted}`;
+  const remove =
+    options.keepOutputDirectory === true ? "" : `; rm -rf ${shellQuote(handoff.directory)}`;
   try {
-    await runInternalCommand(sandbox, {
-      command: `kill -TERM -- -${pid} 2>/dev/null; sleep 0.2; kill -KILL -- -${pid} 2>/dev/null${remove}`,
-    });
+    await runInternalCommand(sandbox, { command: `${killProcessGroupShell(pid)}${remove}` });
   } catch {}
 }
 
@@ -319,12 +300,13 @@ export async function timeoutBashJobOnSandbox(
   handoff: BashJobHandoff,
   message: string,
 ): Promise<BashCompletedResult> {
-  await cancelBashJobOnSandbox(sandbox, handoff, { keepOutputDirectory: true });
+  const pid = assertValidPid(handoff.pid);
   const marker = `eve-bash-timeout:${randomUUID().slice(0, 8)}`;
   const quoted = shellQuote(handoff.directory);
   try {
     const raw = await runInternalCommand(sandbox, {
       command: [
+        killProcessGroupShell(pid),
         `cd ${quoted} 2>/dev/null || exit 0`,
         ...buildStreamReadCommands(marker, quoted, "124"),
       ].join("\n"),

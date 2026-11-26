@@ -76,7 +76,6 @@ import {
   resolveMaxOutputTokens,
   rethrowNoOutputAsEmptyResponse,
 } from "./recovery.js";
-import { cancelPromotedTasks } from "#tools/task-handoff.js";
 import { stepDraft, stepMessages, stepSystem } from "#definitions/step.js";
 import { modelInstructions, type RequestMessages, withTrailingUserNote } from "./request.js";
 import { answerSkippedToolCalls, extractToolResultCallIds, withCallResults } from "./response.js";
@@ -597,9 +596,6 @@ export class ModelCaller {
       toolCalls: (stepResult.toolCalls ?? []) as TypedToolCall<ToolSet>[],
       tools: this.input.catalog,
     });
-    if (step.config.abortSignal?.aborted === true) {
-      await cancelPromotedTasks(results.promotedTasks);
-    }
     throwIfTurnAborted(step.config.abortSignal);
     return results;
   }

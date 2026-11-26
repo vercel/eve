@@ -1,13 +1,11 @@
 import { observeToolOutput } from "#tool-stubs/execute.js";
-import type { ModelMessage, SystemModelMessage } from "ai";
+import type { ModelMessage } from "ai";
 
 import { TASK_CANCEL_TOOL_NAME, TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 import {
-  FINAL_REPLY_TASK_SYSTEM_BLOCK,
   renderModelOutputText,
   renderTaskResults,
   renderTasksNote,
-  TASK_SYSTEM_BLOCK,
   TASKS_NOTE_LABEL,
   type ListedTask,
   type TaskResultBlock,
@@ -51,15 +49,9 @@ export function withTaskTools(tools: HarnessToolMap): HarnessToolMap {
   ]);
 }
 
-export function taskSystemMessages(offers: boolean, finalReplyOnly: boolean): SystemModelMessage[] {
-  if (!offers) return [];
-  const content = finalReplyOnly ? FINAL_REPLY_TASK_SYSTEM_BLOCK : TASK_SYSTEM_BLOCK;
-  return [{ content, role: "system" }];
-}
-
 export interface WorkflowCall {
   readonly callId: string;
-  readonly definition: HarnessToolDefinition | undefined;
+  readonly definition?: HarnessToolDefinition;
   readonly input: JsonObject;
   readonly toolName: string;
   readonly turnId: string;
@@ -86,29 +78,9 @@ export function commitCallEntry(session: HarnessSession, call: WorkflowCall): Co
   }
 }
 
-export function commitPromotedTask(
+export function commitTask(
   session: HarnessSession,
-  call: { readonly callId: string; readonly toolName: string; readonly turnId: string },
-): {
-  readonly entry: { readonly entryPoint: "task"; readonly taskId: string };
-  readonly session: HarnessSession;
-} {
-  const created = createTask(readTaskTable(session.state), {
-    callId: call.callId,
-    kind: "tool",
-    name: call.toolName,
-    resumable: false,
-    turnId: call.turnId,
-  });
-  return {
-    entry: { entryPoint: "task", taskId: created.taskId },
-    session: writeTaskTable(session, created.table),
-  };
-}
-
-function commitTask(
-  session: HarnessSession,
-  call: WorkflowCall,
+  call: Pick<WorkflowCall, "callId" | "definition" | "toolName" | "turnId">,
   entryPoint: "task" | "serve",
   input: JsonObject,
 ): CommittedCallEntry {

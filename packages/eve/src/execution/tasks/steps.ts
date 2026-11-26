@@ -1,16 +1,14 @@
 import { deserializeContext } from "#context/serialize.js";
 import { sessionAgent } from "#definitions/agent.js";
+import { resolveSessionSandboxTarget } from "#execution/coordination-dispatch-shared.js";
 import {
   readDurableSession,
   replaceDurableSessionSnapshot,
   type DurableSession,
   type DurableSessionState,
 } from "#execution/durable-session-store.js";
-import { isBashJobHandoff, type BashJobHandoff } from "#execution/sandbox/bash.js";
-import { bashJobTaskWorkflowReference } from "#execution/sandbox/bash-job-reference.js";
-import { cancelBashJobForAgent } from "#execution/sandbox/bash-job-steps.js";
+import { cancelUndispatchedBashTasks } from "#execution/sandbox/bash-job-steps.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
-import type { SandboxState } from "#sandbox/state.js";
 import {
   cancelTask,
   findTask,
@@ -201,7 +199,14 @@ async function cancelTasks(
     saveTable(input.sessionState, session, table),
     { settles, withdraws },
   );
-  const undispatchedBashJobs = collectUndispatchedBashJobs(session, undispatchedTaskIds);
+  const undispatchedTasks =
+    undispatchedTaskIds.size === 0
+      ? []
+      : suspendedSteps(session.state).flatMap((step) =>
+          step.tasks.filter(
+            (task) => "taskId" in task.entry && undispatchedTaskIds.has(task.entry.taskId),
+          ),
+        );
   const [cancelledOutright] = await Promise.all([
     stopRuns(
       targets.filter((target) => target.ends),
@@ -214,7 +219,13 @@ async function cancelTasks(
       { waitForEnd: false },
     ),
     stopRuns(calls, { kind: "cancel", reason: TURN_CANCEL_REASON }),
-    cancelUndispatchedBashJobs(input.serializedContext, session, undispatchedBashJobs),
+    cancelUndispatchedBashTasks(undispatchedTasks, async () => {
+      const ctx = await deserializeContext(input.serializedContext);
+      return {
+        agent: sessionAgent(ctx),
+        ...resolveSessionSandboxTarget(ctx.get(ChannelKey)?.state, session),
+      };
+    }),
   ]);
   if (cancelledOutright.length === 0) return committed;
   const current = readDurableSession(committed.sessionState);
@@ -328,58 +339,6 @@ function runRequestIds(session: DurableSession, runId: string): readonly string[
   return [...readHitlState(session.state).relays]
     .filter(([, route]) => route.runId === runId)
     .map(([requestId]) => requestId);
-}
-
-function collectUndispatchedBashJobs(
-  session: DurableSession,
-  taskIds: ReadonlySet<string>,
-): readonly BashJobHandoff[] {
-  if (taskIds.size === 0) return [];
-  const handoffs: BashJobHandoff[] = [];
-  for (const step of suspendedSteps(session.state)) {
-    for (const task of step.tasks) {
-      if (
-        task.workflowId === bashJobTaskWorkflowReference.workflowId &&
-        "taskId" in task.entry &&
-        taskIds.has(task.entry.taskId) &&
-        isBashJobHandoff(task.executeInput)
-      ) {
-        handoffs.push(task.executeInput);
-      }
-    }
-  }
-  return handoffs;
-}
-
-async function cancelUndispatchedBashJobs(
-  serializedContext: Record<string, unknown>,
-  session: DurableSession,
-  handoffs: readonly BashJobHandoff[],
-): Promise<void> {
-  if (handoffs.length === 0) return;
-  try {
-    const ctx = await deserializeContext(serializedContext);
-    const agent = sessionAgent(ctx);
-    const adapterState = ctx.get(ChannelKey)?.state;
-    const rawSessionId =
-      typeof adapterState === "object" && adapterState !== null
-        ? Reflect.get(adapterState, "sandboxSessionId")
-        : undefined;
-    const sandboxSessionId =
-      typeof rawSessionId === "string" && rawSessionId.length > 0
-        ? rawSessionId
-        : session.sessionId;
-    const parentSandboxState =
-      typeof adapterState === "object" && adapterState !== null
-        ? (Reflect.get(adapterState, "parentSandboxState") as SandboxState | undefined)
-        : undefined;
-    const sandboxState = session.sandboxState ?? parentSandboxState;
-    await Promise.allSettled(
-      handoffs.map((handoff) =>
-        cancelBashJobForAgent({ agent, handoff, sandboxSessionId, sandboxState }),
-      ),
-    );
-  } catch {}
 }
 
 function saveTable(

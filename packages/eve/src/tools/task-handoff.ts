@@ -57,20 +57,6 @@ export function readTaskPromotionCancel(promotion: TaskPromotion): TaskPromotion
   return typeof callback === "function" ? (callback as TaskPromotionCancel) : undefined;
 }
 
-export function withValidatedTaskHandoff(
-  promotion: TaskPromotion,
-  handoff: JsonObject,
-): TaskPromotion {
-  const onCancel = readTaskPromotionCancel(promotion);
-  return {
-    [TASK_PROMOTION]: true,
-    ...(onCancel !== undefined && { [TASK_PROMOTION_CANCEL]: onCancel }),
-    handoff,
-    ...(promotion.preview !== undefined && { preview: promotion.preview }),
-    workflowId: promotion.workflowId,
-  };
-}
-
 export function canPromoteToTask(): boolean {
   return contextScopeValue<boolean>(TASK_PROMOTION_ALLOWED) === true;
 }

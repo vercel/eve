@@ -357,20 +357,26 @@ async function runApproved(
   }
   if (step.config.abortSignal?.aborted === true) {
     await cancelPromotedTasks(allPromoted);
-  }
-  const promotedRequests: RuntimeWorkflowTaskRequest[] = [];
-  for (const run of fulfilled) {
-    if (run.promotedTasks.length === 0) continue;
-    const promoted = collectPromotedTasks({
-      promotedTasks: run.promotedTasks,
-      session: step.session,
-      turnId: run.turnId,
-    });
-    step.session = promoted.session;
-    promotedRequests.push(...promoted.workflowRequests);
-  }
-  if (promotedRequests.length > 0 && step.config.abortSignal?.aborted !== true) {
-    await step.apply(dispatch(step.view(), { tasks: promotedRequests }));
+  } else {
+    try {
+      const promotedRequests: RuntimeWorkflowTaskRequest[] = [];
+      for (const run of fulfilled) {
+        if (run.promotedTasks.length === 0) continue;
+        const promoted = collectPromotedTasks({
+          promotedTasks: run.promotedTasks,
+          session: step.session,
+          turnId: run.turnId,
+        });
+        step.session = promoted.session;
+        promotedRequests.push(...promoted.workflowRequests);
+      }
+      if (promotedRequests.length > 0) {
+        await step.apply(dispatch(step.view(), { tasks: promotedRequests }));
+      }
+    } catch (error) {
+      await cancelPromotedTasks(allPromoted);
+      throw error;
+    }
   }
   await step.apply(settle(step.view(), { results: fulfilled.flatMap((run) => run.settled) }));
   throwIfTurnAborted(step.config.abortSignal);

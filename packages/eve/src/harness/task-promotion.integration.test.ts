@@ -35,6 +35,54 @@ async function collectViolations(runtime: Runtime, sessionId: string): Promise<V
   return found;
 }
 
+async function runPromotionScenario(
+  input: {
+    readonly defaultTools?: false;
+    readonly model: MockLanguageModelV4;
+    readonly name: string;
+    readonly tools: Readonly<Record<string, unknown>>;
+    readonly workflow: (
+      handoff: { readonly job: string },
+      ctx: WorkflowToolContext,
+    ) => Promise<unknown>;
+  },
+  body: (ctx: {
+    readonly channel: ReturnType<typeof createChannelAddress>;
+    readonly runtime: Runtime;
+  }) => Promise<void>,
+): Promise<void> {
+  const app = await createTestRuntime({
+    agent: {
+      definition: defineAgent({
+        ...(input.defaultTools === false && { defaultTools: false }),
+        model: defineDynamic(() => ({ model: input.model, modelContextWindowTokens: 200_000 })),
+      }),
+      name: input.name,
+    },
+    modules: Object.entries(input.tools).map(([toolName, tool]) => ({
+      loadNamespace: async () => ({ default: tool }),
+      logicalPath: `tools/${toolName}.ts`,
+    })),
+  });
+  await app.run(async () => {
+    const runtime = createTestInProcessRuntime({
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+    });
+    runtime.registerWorkflow(PROMOTED_WORKFLOW_ID, input.workflow);
+    try {
+      const channel = createChannelAddress({
+        adapter: { kind: "http" },
+        channelName: "http",
+        continuationToken: `http:${input.name}`,
+        runtime,
+      });
+      await body({ channel, runtime });
+    } finally {
+      await runtime.dispose();
+    }
+  });
+}
+
 describe("inline tool task promotion and deferred task guidance", () => {
   it("announces task guidance without mutating system, skips toModelOutput on receipts, renders error-text cleanly, and latches task tools on tool-only agents", async () => {
     const observedTools: string[][] = [];
@@ -52,14 +100,14 @@ describe("inline tool task promotion and deferred task guidance", () => {
     const model = markMockModel(
       new MockLanguageModelV4({
         doStream: async (options) => {
-          const toolNames = (options.tools ?? []).map((tool) => tool.name);
-          const systemText = options.prompt
-            .filter((message) => message.role === "system")
-            .map((message) => (typeof message.content === "string" ? message.content : ""))
-            .join("\n");
+          observedTools.push((options.tools ?? []).map((tool) => tool.name));
+          observedSystems.push(
+            options.prompt
+              .filter((message) => message.role === "system")
+              .map((message) => (typeof message.content === "string" ? message.content : ""))
+              .join("\n"),
+          );
           const promptJson = JSON.stringify(options.prompt);
-          observedTools.push(toolNames);
-          observedSystems.push(systemText);
           observedPrompts.push(promptJson);
           step += 1;
           if (step === 1) {
@@ -115,52 +163,36 @@ describe("inline tool task promotion and deferred task guidance", () => {
       },
     });
 
-    const app = await createTestRuntime({
-      agent: {
-        definition: defineAgent({
-          defaultTools: false,
-          model: defineDynamic(() => ({ model, modelContextWindowTokens: 200_000 })),
-        }),
+    await runPromotionScenario(
+      {
+        defaultTools: false,
+        model,
         name: "task-promotion-complete",
+        tools: { run_job: runJobTool },
+        workflow: async (handoff) => {
+          expect(handoff).toEqual({ job: "build-42" });
+          return await deferredReady;
+        },
       },
-      modules: [
-        { loadNamespace: async () => ({ default: runJobTool }), logicalPath: "tools/run_job.ts" },
-      ],
-    });
-
-    await app.run(async () => {
-      const runtime = createTestInProcessRuntime({
-        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
-      });
-      runtime.registerWorkflow(PROMOTED_WORKFLOW_ID, async (handoff: { job: string }) => {
-        expect(handoff).toEqual({ job: "build-42" });
-        return await deferredReady;
-      });
-      try {
-        const channel = createChannelAddress({
-          adapter: { kind: "http" },
-          channelName: "http",
-          continuationToken: "http:promo-complete",
-          runtime,
-        });
+      async ({ channel, runtime }) => {
         const turn1 = await channel.send("Run the jobs.", { auth: null });
-        const res1 = await turn1.result();
-        expect(res1.status).toBe("completed");
-        expect(res1.reply).toBe("First turn done.");
+        expect(await turn1.result()).toMatchObject({
+          reply: "First turn done.",
+          status: "completed",
+        });
 
         const turn2 = await channel.send("Follow up.", { auth: null });
-        const res2 = await turn2.result();
-        expect(res2.status).toBe("completed");
-        expect(res2.reply).toBe("Second turn done.");
+        expect(await turn2.result()).toMatchObject({
+          reply: "Second turn done.",
+          status: "completed",
+        });
 
         expect(modelOutputInputs).toEqual([
           { exitCode: 0, summary: "instant ok" },
           { exitCode: 1, summary: "2 tests failed" },
         ]);
-
         expect(observedSystems.every((system) => !system.includes(TASK_SYSTEM_BLOCK))).toBe(true);
         expect(new Set(observedSystems).size).toBe(1);
-
         expect(observedPrompts[0]).not.toContain("A call that returns");
         expect(observedPrompts[1]).not.toContain("A call that returns");
         expect(observedPrompts[2]).toContain("A call that returns");
@@ -175,10 +207,8 @@ describe("inline tool task promotion and deferred task guidance", () => {
 
         expect(cancelCalled).toBe(false);
         expect(await collectViolations(runtime, turn1.sessionId)).toEqual([]);
-      } finally {
-        await runtime.dispose();
-      }
-    });
+      },
+    );
   });
 
   it("promotes an inline tool call that required human approval", async () => {
@@ -228,36 +258,17 @@ describe("inline tool task promotion and deferred task guidance", () => {
       },
     });
 
-    const app = await createTestRuntime({
-      agent: {
-        definition: defineAgent({
-          model: defineDynamic(() => ({ model, modelContextWindowTokens: 200_000 })),
-        }),
+    await runPromotionScenario(
+      {
+        model,
         name: "task-promotion-approved",
-      },
-      modules: [
-        {
-          loadNamespace: async () => ({ default: approvedJobTool }),
-          logicalPath: "tools/approved_job.ts",
+        tools: { approved_job: approvedJobTool },
+        workflow: async (handoff) => {
+          expect(handoff).toEqual({ job: "approved-1" });
+          return await deferredReady;
         },
-      ],
-    });
-
-    await app.run(async () => {
-      const runtime = createTestInProcessRuntime({
-        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
-      });
-      runtime.registerWorkflow(PROMOTED_WORKFLOW_ID, async (handoff: { job: string }) => {
-        expect(handoff).toEqual({ job: "approved-1" });
-        return await deferredReady;
-      });
-      try {
-        const channel = createChannelAddress({
-          adapter: { kind: "http" },
-          channelName: "http",
-          continuationToken: "http:promo-approved",
-          runtime,
-        });
+      },
+      async ({ channel, runtime }) => {
         const turn = await channel.send("Run the approved job.", { auth: null });
         const paused = await turn.result();
         expect(paused.status).toBe("awaiting-input");
@@ -268,14 +279,13 @@ describe("inline tool task promotion and deferred task guidance", () => {
           [{ interactionId: approvalId!, optionId: "approve" }],
           { auth: null },
         );
-        const done = await resumed.result();
-        expect(done.status).toBe("completed");
-        expect(done.reply).toBe("Approved job completed.");
+        expect(await resumed.result()).toMatchObject({
+          reply: "Approved job completed.",
+          status: "completed",
+        });
         expect(await collectViolations(runtime, turn.sessionId)).toEqual([]);
-      } finally {
-        await runtime.dispose();
-      }
-    });
+      },
+    );
   });
 
   it("aborts a promoted task workflow and runs cleanup when cancelled via task_cancel", async () => {
@@ -297,8 +307,7 @@ describe("inline tool task promotion and deferred task guidance", () => {
           }
           if (step === 2) {
             await workflowStarted;
-            const receiptText = JSON.stringify(options.prompt);
-            const taskMatch = /Started task (\S+?)\./.exec(receiptText);
+            const taskMatch = /Started task (\S+?)\./.exec(JSON.stringify(options.prompt));
             expect(taskMatch?.[1]).toBeDefined();
             return toolCallsStreamResult([
               {
@@ -327,25 +336,12 @@ describe("inline tool task promotion and deferred task guidance", () => {
       },
     });
 
-    const app = await createTestRuntime({
-      agent: {
-        definition: defineAgent({
-          model: defineDynamic(() => ({ model, modelContextWindowTokens: 200_000 })),
-        }),
+    await runPromotionScenario(
+      {
+        model,
         name: "task-promotion-cancel",
-      },
-      modules: [
-        { loadNamespace: async () => ({ default: runJobTool }), logicalPath: "tools/run_job.ts" },
-      ],
-    });
-
-    await app.run(async () => {
-      const runtime = createTestInProcessRuntime({
-        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
-      });
-      runtime.registerWorkflow(
-        PROMOTED_WORKFLOW_ID,
-        async (_handoff: { job: string }, ctx: WorkflowToolContext) => {
+        tools: { run_job: runJobTool },
+        workflow: async (_handoff, ctx) => {
           startedResolve();
           await new Promise<void>((resolve) => {
             if (ctx.abortSignal.aborted) {
@@ -364,24 +360,17 @@ describe("inline tool task promotion and deferred task guidance", () => {
           });
           return { summary: "cancelled" };
         },
-      );
-      try {
-        const channel = createChannelAddress({
-          adapter: { kind: "http" },
-          channelName: "http",
-          continuationToken: "http:promo-cancel",
-          runtime,
-        });
+      },
+      async ({ channel, runtime }) => {
         const turn = await channel.send("Start and cancel.", { auth: null });
-        const res = await turn.result();
-        expect(res.status).toBe("completed");
-        expect(res.reply).toBe("Cancelled the hung job.");
+        expect(await turn.result()).toMatchObject({
+          reply: "Cancelled the hung job.",
+          status: "completed",
+        });
         expect(cleanedUp).toBe(true);
         expect(await collectViolations(runtime, turn.sessionId)).toEqual([]);
-      } finally {
-        await runtime.dispose();
-      }
-    });
+      },
+    );
   });
 
   it("runs onCancel cleanup when a turn is cancelled while a sibling inline call is still running", async () => {
@@ -432,45 +421,20 @@ describe("inline tool task promotion and deferred task guidance", () => {
       },
     });
 
-    const app = await createTestRuntime({
-      agent: {
-        definition: defineAgent({
-          model: defineDynamic(() => ({ model, modelContextWindowTokens: 200_000 })),
-        }),
+    await runPromotionScenario(
+      {
+        model,
         name: "task-promotion-abort",
+        tools: { promo_job: promoJobTool, slow_sibling: slowSiblingTool },
+        workflow: async () => ({ ok: true }),
       },
-      modules: [
-        {
-          loadNamespace: async () => ({ default: promoJobTool }),
-          logicalPath: "tools/promo_job.ts",
-        },
-        {
-          loadNamespace: async () => ({ default: slowSiblingTool }),
-          logicalPath: "tools/slow_sibling.ts",
-        },
-      ],
-    });
-
-    await app.run(async () => {
-      const runtime = createTestInProcessRuntime({
-        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
-      });
-      runtime.registerWorkflow(PROMOTED_WORKFLOW_ID, async () => ({ ok: true }));
-      try {
-        const channel = createChannelAddress({
-          adapter: { kind: "http" },
-          channelName: "http",
-          continuationToken: "http:promo-abort",
-          runtime,
-        });
+      async ({ channel }) => {
         const turn = await channel.send("Run both.", { auth: null });
         await siblingStarted;
         await channel.cancel({ auth: null });
         await turn.result();
         expect(orphanCleanedUp).toBe(true);
-      } finally {
-        await runtime.dispose();
-      }
-    });
+      },
+    );
   });
 });

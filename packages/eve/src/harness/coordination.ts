@@ -18,7 +18,7 @@ import {
 } from "#harness/workflow-tool-runs.js";
 import { normalizeToolModelOutput, toolModelOutputContext } from "#harness/tool-model-output.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { commitCallEntry, commitPromotedTask, isTaskTool } from "#execution/tasks/model-step.js";
+import { commitCallEntry, commitTask, isTaskTool } from "#execution/tasks/model-step.js";
 import type { PromotedTaskCall } from "#tools/task-handoff.js";
 import { requireClearance, type Clearance } from "#harness/clearance.js";
 import { admitWorkflowTask } from "#harness/workflow-admission.js";
@@ -161,11 +161,16 @@ export function collectPromotedTasks(input: {
   const workflowRequests: RuntimeWorkflowTaskRequest[] = [];
   for (const promoted of input.promotedTasks) {
     requireClearance(promoted.clearance, promoted.callId);
-    const committed = commitPromotedTask(session, {
+    const resolvedInput = resolveToolCallInputObject(promoted.input, {
       callId: promoted.callId,
       toolName: promoted.toolName,
-      turnId: input.turnId,
     });
+    const committed = commitTask(
+      session,
+      { callId: promoted.callId, toolName: promoted.toolName, turnId: input.turnId },
+      "task",
+      resolvedInput,
+    );
     session = committed.session;
     workflowRequests.push(
       admitWorkflowTask(
@@ -173,10 +178,7 @@ export function collectPromotedTasks(input: {
           callId: promoted.callId,
           entry: committed.entry,
           executeInput: promoted.handoff,
-          input: resolveToolCallInputObject(promoted.input, {
-            callId: promoted.callId,
-            toolName: promoted.toolName,
-          }),
+          input: committed.input,
           kind: "workflow-task",
           ...(promoted.preview !== undefined && { preview: promoted.preview }),
           toolName: promoted.toolName,

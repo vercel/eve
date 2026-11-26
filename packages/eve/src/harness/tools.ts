@@ -18,11 +18,7 @@ import type { ToolExecuteOptions } from "#tools/definition.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 import type { JsonObject } from "#shared/json.js";
 import { executeWithToolStub } from "#tool-stubs/execute.js";
-import {
-  isTaskPromotion,
-  readTaskPromotionCancel,
-  withValidatedTaskHandoff,
-} from "#tools/task-handoff.js";
+import { isTaskPromotion, readTaskPromotionCancel } from "#tools/task-handoff.js";
 
 const log = createLogger("harness.tools");
 
@@ -89,15 +85,15 @@ async function* normalizeToolExecuteIterable(
   options: ToolExecuteOptions,
 ): AsyncIterable<unknown> {
   for await (const value of output) {
-    yield normalizeToolExecuteOutput(value, toolName, options);
+    yield await normalizeToolExecuteOutput(value, toolName, options);
   }
 }
 
-function normalizeToolExecuteOutput(
+async function normalizeToolExecuteOutput(
   output: unknown,
   toolName: string,
   options: ToolExecuteOptions,
-): unknown {
+): Promise<unknown> {
   if (isAuthorizationSignal(output)) return output;
   if (isTaskPromotion(output)) {
     try {
@@ -107,9 +103,9 @@ function normalizeToolExecuteOutput(
         toolCallId: options.toolCallId,
         toolName,
       }) as JsonObject;
-      return withValidatedTaskHandoff(output, handoff);
+      return { ...output, handoff };
     } catch (error) {
-      void Promise.resolve(readTaskPromotionCancel(output)?.()).catch(() => {});
+      await Promise.resolve(readTaskPromotionCancel(output)?.()).catch(() => {});
       throw error;
     }
   }
