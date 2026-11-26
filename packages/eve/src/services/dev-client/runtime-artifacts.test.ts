@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   readDevelopmentRuntimeArtifactsRevision,
+  readDevelopmentServerId,
   rebuildDevelopmentRuntimeArtifacts,
   resumeDevelopmentRuntimeArtifacts,
   suspendDevelopmentRuntimeArtifacts,
@@ -46,6 +47,33 @@ describe("readDevelopmentRuntimeArtifactsRevision", () => {
     await expect(
       readDevelopmentRuntimeArtifactsRevision({ serverUrl: SERVER_URL }),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("readDevelopmentServerId", () => {
+  it("returns the server id from a successful response", async () => {
+    stubFetch(async () => new Response(JSON.stringify({ revision: "rev-1", serverId: "id-1" })));
+    await expect(readDevelopmentServerId({ serverUrl: SERVER_URL })).resolves.toBe("id-1");
+  });
+
+  it("returns undefined when the server sends no id, an empty id or a non-string id", async () => {
+    for (const body of [
+      { revision: "rev-1" },
+      { revision: "rev-1", serverId: "" },
+      { revision: "rev-1", serverId: 7 },
+    ]) {
+      stubFetch(async () => new Response(JSON.stringify(body)));
+      await expect(readDevelopmentServerId({ serverUrl: SERVER_URL })).resolves.toBeUndefined();
+    }
+  });
+
+  it("returns undefined on a non-2xx response or a rejected fetch", async () => {
+    stubFetch(async () => new Response("nope", { status: 500 }));
+    await expect(readDevelopmentServerId({ serverUrl: SERVER_URL })).resolves.toBeUndefined();
+    stubFetch(async () => {
+      throw new Error("connection refused");
+    });
+    await expect(readDevelopmentServerId({ serverUrl: SERVER_URL })).resolves.toBeUndefined();
   });
 });
 

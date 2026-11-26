@@ -202,6 +202,10 @@ function readStateRecord(
   return raw === undefined ? undefined : (JSON.parse(raw) as Record<string, unknown>);
 }
 
+function startedRecord(url: string) {
+  return { url, pid: process.pid, id: expect.any(String) };
+}
+
 function seedStateRecord(
   record: Record<string, unknown>,
   path: string = developmentServerStatePath,
@@ -289,7 +293,9 @@ function stateProbes() {
 describe("createDevelopmentServer", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.fetch.mockImplementation(async () => Response.json({ revision: "test" }));
+    mocks.fetch.mockImplementation(async () =>
+      Response.json({ revision: "test", serverId: readStateRecord()?.id }),
+    );
     mocks.authoredSourceWatcher.close.mockResolvedValue(undefined);
     mocks.authoredSourceWatcher.flush.mockResolvedValue(undefined);
     mocks.authoredSourceWatcher.rebuild.mockResolvedValue(undefined);
@@ -453,7 +459,7 @@ describe("createDevelopmentServer", () => {
     const server = await startDevelopmentServer("/tmp/eve-test");
 
     const record = readStateRecord();
-    expect(record).toEqual({ url: "http://localhost:2000/" });
+    expect(record).toEqual(startedRecord("http://localhost:2000/"));
 
     await server.close();
 
@@ -476,7 +482,10 @@ describe("createDevelopmentServer", () => {
     const response = await callControlHandler("http://localhost/eve/v1/dev/runtime-artifacts");
 
     if (!(response instanceof Response)) throw new Error("Expected a Response.");
-    await expect(response.json()).resolves.toEqual({ revision: "/tmp/eve-test" });
+    await expect(response.json()).resolves.toEqual({
+      revision: "/tmp/eve-test",
+      serverId: expect.any(String),
+    });
     expect(mocks.authoredSourceWatcher.flush).not.toHaveBeenCalled();
     expect(mocks.authoredSourceWatcher.rebuild).not.toHaveBeenCalled();
 
@@ -580,7 +589,10 @@ describe("createDevelopmentServer", () => {
     expect(mocks.authoredSourceWatcher.rebuild).toHaveBeenCalledOnce();
     expect(mocks.authoredSourceWatcher.flush).not.toHaveBeenCalled();
     if (!(response instanceof Response)) throw new Error("Expected a Response.");
-    await expect(response.json()).resolves.toEqual({ revision: "/tmp/eve-test" });
+    await expect(response.json()).resolves.toEqual({
+      revision: "/tmp/eve-test",
+      serverId: expect.any(String),
+    });
 
     await server.close();
   });
@@ -620,6 +632,17 @@ describe("createDevelopmentServer", () => {
     expect(pruningStopped ?? Infinity).toBeLessThan(worldClosed ?? 0);
   });
 
+  it("keeps a newer server's state record when an older server closes", async () => {
+    const startDevelopmentServer = await loadStartDevelopmentServer();
+    const server = await startDevelopmentServer("/tmp/eve-test");
+    const newer = { url: "http://localhost:3000/", pid: process.pid + 1, id: "newer-server" };
+    seedStateRecord(newer);
+
+    await server.close();
+
+    expect(readStateRecord()).toEqual(newer);
+  });
+
   it("keeps the state record when the listener fails to close", async () => {
     const startDevelopmentServer = await loadStartDevelopmentServer();
     const server = await startDevelopmentServer("/tmp/eve-test");
@@ -628,7 +651,7 @@ describe("createDevelopmentServer", () => {
     await expect(server.close()).rejects.toThrow("listener close failed");
 
     expect(mocks.stopDevelopmentSandboxResources).toHaveBeenCalledOnce();
-    expect(readStateRecord()).toEqual({ url: "http://localhost:2000/" });
+    expect(readStateRecord()).toEqual(startedRecord("http://localhost:2000/"));
   });
 
   it("reports every resource that fails to close, in teardown order", async () => {
@@ -713,7 +736,7 @@ describe("createDevelopmentServer", () => {
 
   it("reports a healthy recorded server when starting another server", async () => {
     const startDevelopmentServer = await loadStartDevelopmentServer();
-    seedStateRecord({ url: "http://localhost:2000/" });
+    seedStateRecord({ url: "http://localhost:2000/", pid: 4242, id: "recorded" });
 
     await expect(startDevelopmentServer("/tmp/eve-test")).rejects.toThrow(
       [
@@ -745,7 +768,7 @@ describe("createDevelopmentServer", () => {
 
     expect(mocks.devServer.close).not.toHaveBeenCalled();
     expect(process.env.EVE_DEVELOPMENT_SANDBOX_RUN_ID).toBe(ownerSandboxRunId);
-    expect(readStateRecord()).toEqual({ url: "http://localhost:2000/" });
+    expect(readStateRecord()).toEqual(startedRecord("http://localhost:2000/"));
 
     await owner.close();
     expect(process.env.EVE_DEVELOPMENT_SANDBOX_RUN_ID).toBeUndefined();
@@ -767,7 +790,7 @@ describe("createDevelopmentServer", () => {
     mocks.devServer.close.mockClear();
     await attaching.close();
     expect(mocks.devServer.close).not.toHaveBeenCalled();
-    expect(readStateRecord()).toEqual({ url: "http://localhost:2000/" });
+    expect(readStateRecord()).toEqual(startedRecord("http://localhost:2000/"));
 
     await owner.close();
   });
@@ -823,7 +846,7 @@ describe("createDevelopmentServer", () => {
   it("does not attach when PORT explicitly configures the endpoint", async () => {
     const startDevelopmentServer = await loadStartDevelopmentServer();
     process.env.PORT = "2000";
-    seedStateRecord({ url: "http://localhost:2000/" });
+    seedStateRecord({ url: "http://localhost:2000/", pid: 4242, id: "recorded" });
 
     await expect(
       startDevelopmentServer("/tmp/eve-test", { existing: "attach-if-unconfigured" }),
@@ -835,7 +858,7 @@ describe("createDevelopmentServer", () => {
   it("rejects reuse when the requested environment port conflicts", async () => {
     const startDevelopmentServer = await loadStartDevelopmentServer();
     process.env.PORT = "2001";
-    seedStateRecord({ url: "http://localhost:2000/" });
+    seedStateRecord({ url: "http://localhost:2000/", pid: 4242, id: "recorded" });
 
     await expect(
       startDevelopmentServer("/tmp/eve-test", { existing: "attach-if-unconfigured" }),
@@ -847,7 +870,7 @@ describe("createDevelopmentServer", () => {
   it("overwrites an unhealthy state record", async () => {
     const startDevelopmentServer = await loadStartDevelopmentServer();
     mocks.fetch.mockResolvedValue(new Response(null, { status: 503 }));
-    seedStateRecord({ url: "http://localhost:2000/" });
+    seedStateRecord({ url: "http://localhost:2000/", pid: 4242, id: "recorded" });
 
     const server = await startDevelopmentServer("/tmp/eve-test", {
       existing: "attach-if-unconfigured",
@@ -862,14 +885,14 @@ describe("createDevelopmentServer", () => {
     );
     expect(stateProbes()).toHaveLength(1);
     expect(mocks.createHostNitro).toHaveBeenCalledOnce();
-    expect(readStateRecord()).toEqual({ url: "http://localhost:2000/" });
+    expect(readStateRecord()).toEqual(startedRecord("http://localhost:2000/"));
 
     await server.close();
   });
 
   it("does not probe a non-loopback URL from persisted state", async () => {
     const startDevelopmentServer = await loadStartDevelopmentServer();
-    seedStateRecord({ url: "http://192.168.1.20:2000/" });
+    seedStateRecord({ url: "http://192.168.1.20:2000/", pid: 4242, id: "recorded" });
 
     const server = await startDevelopmentServer("/tmp/eve-test", {
       existing: "attach-if-unconfigured",
@@ -886,7 +909,7 @@ describe("createDevelopmentServer", () => {
     const otherAppRoot = "/tmp/other-eve-test";
 
     seedStateRecord(
-      { url: "http://127.0.0.1:2999/" },
+      { url: "http://127.0.0.1:2999/", pid: 4242, id: "recorded" },
       join(otherAppRoot, ".eve", "dev-server-state.v1.json"),
     );
 
@@ -906,13 +929,42 @@ describe("createDevelopmentServer", () => {
   it("overwrites a stale dev server record", async () => {
     const startDevelopmentServer = await loadStartDevelopmentServer();
     mocks.fetch.mockResolvedValue(new Response(null, { status: 503 }));
-    seedStateRecord({ url: "http://localhost:2000/" });
+    seedStateRecord({ url: "http://localhost:2000/", pid: 4242, id: "recorded" });
 
     const server = await startDevelopmentServer("/tmp/eve-test");
 
-    expect(readStateRecord()).toEqual({ url: "http://localhost:2000/" });
+    expect(readStateRecord()).toEqual(startedRecord("http://localhost:2000/"));
 
     await server.close();
+  });
+
+  it("starts when another eve server answers on the recorded port", async () => {
+    const startDevelopmentServer = await loadStartDevelopmentServer();
+    mocks.fetch.mockResolvedValue(
+      Response.json({ revision: "test", serverId: "another-servers-id" }),
+    );
+    seedStateRecord({ url: "http://localhost:2000/", pid: 4242, id: "recorded" });
+
+    const server = await startDevelopmentServer("/tmp/eve-test");
+
+    expect(mocks.createHostNitro).toHaveBeenCalledOnce();
+    expect(readStateRecord()).toEqual(startedRecord("http://localhost:2000/"));
+    expect(readStateRecord()?.id).not.toBe("recorded");
+
+    await server.close();
+  });
+
+  it("deletes a stale record before binding, so a failed start leaves none", async () => {
+    const startDevelopmentServer = await loadStartDevelopmentServer();
+    mocks.fetch.mockResolvedValue(new Response(null, { status: 503 }));
+    seedStateRecord({ url: "http://localhost:2000/", pid: 4242, id: "recorded" });
+    mocks.devServer.listen.mockImplementationOnce(() => {
+      throw new Error("bind failed");
+    });
+
+    await expect(startDevelopmentServer("/tmp/eve-test")).rejects.toThrow("bind failed");
+
+    expect(readStateRecord()).toBeUndefined();
   });
 
   it("normalizes wildcard IPv4 listener URLs before exposing them to the REPL or workflow", async () => {

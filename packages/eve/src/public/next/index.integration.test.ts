@@ -26,6 +26,7 @@ vi.mock("node:child_process", () => ({
   spawn: spawnMock,
 }));
 
+import { DevelopmentServerState } from "#internal/nitro/host/dev-server-state.js";
 import { withEve } from "./index.js";
 import type { NextConfig as EveNextConfig } from "next";
 type EveNextRewriteSections = Extract<
@@ -839,7 +840,7 @@ describe("withEve Vercel config", () => {
     vi.stubEnv("NODE_ENV", "development");
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => Response.json({ revision: "rev-1" })),
+      vi.fn(async () => Response.json({ revision: "rev-1", serverId: "server-a" })),
     );
     await mkdir(join(resolvedAppRoot, ".eve"), {
       recursive: true,
@@ -857,6 +858,12 @@ describe("withEve Vercel config", () => {
         2,
       )}\n`,
     );
+
+    await new DevelopmentServerState({ appRoot: resolvedAppRoot }).write({
+      url: "http://127.0.0.1:49152/",
+      pid: process.pid,
+      id: "server-a",
+    });
 
     const config = await resolveConfig(withEve<TestConfig>({}));
     const rewrites = await config.rewrites?.();
