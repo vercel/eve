@@ -481,6 +481,11 @@ export class SessionStore {
         throw new Error("The session was created without accepting a message.");
       return delivery;
     }
+    if (input.forkFrom !== undefined) {
+      throw new Error(
+        "forkFrom applies only to the message that creates a session. Call newSession() before sending it.",
+      );
+    }
     this.#ensureStream(input);
     return await sendFollowedClientSession(this.#session, input);
   }

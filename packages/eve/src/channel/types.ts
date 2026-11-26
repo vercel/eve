@@ -18,6 +18,7 @@ import type { ResponseOutcome } from "#protocol/session-events/families/response
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { JsonObject } from "#shared/json.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
+import type { SessionForkSeed } from "#shared/session-fork.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import type { ForwardedTraceAssertion } from "#shared/forwarded-trace-policy.js";
 import type { ConversationContext } from "#shared/conversation-context.js";
@@ -126,6 +127,7 @@ export interface TurnCaller {
 
 export interface DeliverPayload extends Omit<ChannelDelivery, "state"> {
   readonly history?: readonly SessionHistoryMessage[];
+  readonly forkTranscript?: readonly SessionHistoryMessage[];
   readonly state?: unknown;
   readonly [key: string]: unknown;
 }
@@ -386,6 +388,7 @@ export interface RunInput {
     readonly history?: readonly SessionHistoryMessage[];
     readonly outputSchema?: JsonObject;
     readonly state?: unknown;
+    readonly fork?: SessionForkSeed;
   };
   readonly conversationId?: string;
   readonly parent?: SessionParent;

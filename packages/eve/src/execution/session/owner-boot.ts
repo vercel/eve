@@ -134,6 +134,7 @@ export async function bootInitialOwner<Hook extends InboxHook>(
         ? Promise.resolve(
             createInitialSessionValues({
               continuationToken,
+              fork: input.input.fork,
               history,
               outputSchema: input.input.outputSchema,
               rootSessionId: readRootSessionId(serializedContext),
@@ -149,6 +150,7 @@ export async function bootInitialOwner<Hook extends InboxHook>(
             dynamicSubagentAgentConfig: serializedContext["eve.dynamicSubagentAgentConfig"] as
               | DynamicSubagentAgentConfig
               | undefined,
+            fork: input.input.fork,
             history,
             nodeId: serializedBundle.nodeId,
             outputSchema: input.input.outputSchema,
@@ -244,6 +246,9 @@ function createInitialDelivery(
             message: input.input.message,
             context: input.input.context,
             history: input.input.history,
+            ...(input.input.fork !== undefined && {
+              forkTranscript: input.input.fork.transcript,
+            }),
             outputSchema: input.input.outputSchema,
             state: input.input.state,
           },

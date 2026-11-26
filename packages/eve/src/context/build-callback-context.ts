@@ -21,6 +21,7 @@ export function buildCallbackContext(): SessionContext {
       parent: session.parent,
       schedule: readSessionSchedule(ctx),
       predecessor: session.predecessor,
+      ...(session.forkedFrom !== undefined && { forkedFrom: session.forkedFrom }),
     },
     ...(conversation !== undefined && { conversation }),
 

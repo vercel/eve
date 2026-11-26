@@ -5,6 +5,7 @@ import {
   type Session,
   SessionIdKey,
   SessionKey,
+  SessionForkSourceKey,
   SessionPredecessorKey,
   SteeredByKey,
 } from "#context/keys.js";
@@ -31,6 +32,7 @@ export const sessionProvider = {
         },
         parent: ctx.get(ParentSessionKey),
         predecessor: ctx.get(SessionPredecessorKey),
+        forkedFrom: ctx.get(SessionForkSourceKey),
         sessionId: ctx.require(SessionIdKey),
         turn: { id: turnId, sequence: emission.sequence },
       }),

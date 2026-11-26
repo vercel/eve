@@ -71,6 +71,7 @@ export interface StepInput {
   readonly message?: MessageContent;
   readonly context?: readonly string[];
   readonly history?: readonly SessionHistoryMessage[];
+  readonly forkTranscript?: readonly SessionHistoryMessage[];
   readonly outputSchema?: JsonObject;
 }
 

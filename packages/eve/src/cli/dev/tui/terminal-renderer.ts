@@ -1368,7 +1368,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
   }
 
-  renderSessionBoundary(): void {
+  renderSessionBoundary(label = "Session restarted, clear context."): void {
     this.#commitTurnStats();
     const stopped = this.#transcript.stopWorking(this.#transcriptOptions());
     for (const id of this.#conversationBlockIds) {
@@ -1385,7 +1385,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     const c = this.#theme.colors;
     const g = this.#theme.glyph;
-    const body = c.dim(`${g.cornerOpen}${g.dash.repeat(2)} Session restarted, clear context.`);
+    const body = c.dim(`${g.cornerOpen}${g.dash.repeat(2)} ${label}`);
     this.#pushBlock({ kind: "session-boundary", body, live: false });
     this.#paint();
   }

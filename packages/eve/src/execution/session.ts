@@ -3,6 +3,7 @@ import type { HarnessSession, HarnessSessionBase } from "#harness/types.js";
 
 export function createSession(input: {
   readonly continuationToken: string;
+  readonly baseHistory?: HarnessSession["history"];
   readonly outputSchema?: HarnessSession["outputSchema"];
   readonly rootSessionId?: string;
   readonly sessionId: string;
@@ -10,7 +11,7 @@ export function createSession(input: {
   return {
     compaction: {},
     continuationToken: input.continuationToken,
-    history: [],
+    history: input.baseHistory ?? [],
     sessionId: input.sessionId,
     ...(input.rootSessionId !== undefined && { rootSessionId: input.rootSessionId }),
     ...(input.outputSchema !== undefined && { outputSchema: input.outputSchema }),

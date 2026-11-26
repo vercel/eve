@@ -194,6 +194,23 @@ export function createVercelSandbox(
       }
       return createVercelConnection(sandbox);
     },
+    async fork(context, source, options, artifact) {
+      const sandboxModule = await loadSandboxModule();
+      const original = await getNamedVercelSandbox({
+        createOptions,
+        sandboxModule,
+        sandboxName: vercelSessionName(source.sessionId),
+      });
+      if (original === null) return null;
+      const snapshotId =
+        original.status === "running"
+          ? (await original.snapshot({ expiration: FORK_SNAPSHOT_EXPIRATION_MS })).snapshotId
+          : original.currentSnapshotId;
+      if (snapshotId === undefined) return null;
+      const sandboxName = vercelSessionName(context.session.id);
+      const sandbox = await openSession(context, options, { ...artifact, snapshotId }, sandboxName);
+      return { connection: createVercelConnection(sandbox), state: { sandboxName, version: 3 } };
+    },
     async start(context, options, artifact) {
       const sandboxName = vercelSessionName(context.session.id);
       const sandbox = await openSession(context, options, artifact, sandboxName);
@@ -259,6 +276,8 @@ export function createVercelSandbox(
     }
   }
 }
+
+const FORK_SNAPSHOT_EXPIRATION_MS = 24 * 60 * 60 * 1000;
 
 function vercelSessionName(sessionId: string): string {
   return `eve-sbx-vercel-${createSandboxProviderIdentity({ sessionId, version: 2 }).slice(0, 32)}`;

@@ -58,6 +58,8 @@ export interface EveHandle {
   readonly caller: SessionAuthContext | null;
   /** The request's `clientContext`, exactly as the client sent it. `undefined` when it sent none. */
   readonly clientContext?: ClientContextValue;
+  /** The session a create request forks from, when it sends `forkFrom`. */
+  readonly forkFrom?: string;
   /** Replay-stable identity of a trusted remote-subagent create operation. */
   readonly invocation?: { readonly operationId: string };
   readonly request: Request;
@@ -196,6 +198,16 @@ export interface EveChannelConfig {
   readonly cors?: ChannelCors;
   /** Policy for follow-up messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
+  /**
+   * Decides whether a caller may create a session with `forkFrom`, which copies
+   * another session's conversation, tool calls, and sandbox. Receives the caller
+   * and the source session id. Defaults to allowing every authenticated caller
+   * that isn't anonymous.
+   */
+  readonly canFork?: (input: {
+    readonly auth: SessionAuthContext;
+    readonly sourceSessionId: string;
+  }) => boolean | Promise<boolean>;
   /**
    * Pre-dispatch hook for inbound eve HTTP messages. Runs after route auth and body
    * parsing, before runtime dispatch. Message-free creation skips this hook and

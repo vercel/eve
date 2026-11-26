@@ -227,7 +227,12 @@ export async function ensureSandboxAccess(
 
     const artifact = await loadArtifact(provider);
     const start = async () => {
-      const result = await provider.implementation.start(context, options, artifact);
+      const forkSource = context.session.forkedFrom;
+      const forked =
+        forkSource === undefined || provider.implementation.fork === undefined
+          ? null
+          : await provider.implementation.fork(context, forkSource, options, artifact);
+      const result = forked ?? (await provider.implementation.start(context, options, artifact));
       if (!isSandboxPreparedArtifact(result.state)) {
         throw new Error(
           `Sandbox provider "${provider.providerName}" returned non-serializable session state.`,

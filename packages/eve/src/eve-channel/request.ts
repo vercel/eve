@@ -114,6 +114,7 @@ export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBod
     "capabilities",
     "stubs",
     "forwardedPrincipal",
+    "forkFrom",
   ];
   if (input.callback !== undefined) fields.push("activityObserver");
   const rejection = rejectUnknownFields(input, fields);
@@ -150,6 +151,26 @@ export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBod
     );
   }
 
+  const forkFrom = payload.forkFrom;
+  if (forkFrom !== undefined) {
+    if (typeof forkFrom !== "string" || forkFrom.length === 0) {
+      return Response.json(
+        { error: "Expected 'forkFrom' to be a non-empty session id.", ok: false },
+        { status: 400 },
+      );
+    }
+    if (message === undefined || callback !== undefined) {
+      return Response.json(
+        {
+          error:
+            "'forkFrom' needs the fork's first 'message' and can't be combined with 'callback'.",
+          ok: false,
+        },
+        { status: 400 },
+      );
+    }
+  }
+
   const result: ParsedCreateBody = {
     callback,
     capabilities,
@@ -167,6 +188,7 @@ export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBod
     }
   }
   if (message !== undefined) result.message = message;
+  if (typeof forkFrom === "string") result.forkFrom = forkFrom;
   if (typeof rawOperationId === "string") result.operationId = rawOperationId;
   if (protocolVersion !== undefined) result.protocolVersion = protocolVersion;
   return result;

@@ -22,6 +22,7 @@ import {
   SessionTitleKey,
   ParentSessionKey,
   SandboxKey,
+  SessionForkSourceKey,
   SessionPredecessorKey,
   SessionKey,
   CapabilitiesKey,
@@ -437,8 +438,12 @@ async function runSessionStepBody(
           }
           const history = [...(accepted === 0 ? pendingHistory : []), ...(payload.history ?? [])];
           accepted += 1;
+          const withHistory = history.length === 0 ? result : { ...result, history };
           delivered.push({
-            input: history.length === 0 ? result : { ...result, history },
+            input:
+              payload.forkTranscript === undefined
+                ? withHistory
+                : { ...withHistory, forkTranscript: payload.forkTranscript },
             payload,
           });
         }
@@ -551,6 +556,7 @@ async function runSessionStepBody(
                   ? undefined
                   : { callId: parent.callId, sessionId: parent.sessionId },
               predecessor: ctx.get(SessionPredecessorKey),
+              forkedFrom: ctx.get(SessionForkSourceKey),
               runtime,
             },
       });

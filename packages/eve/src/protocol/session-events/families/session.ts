@@ -27,6 +27,11 @@ export interface SessionPredecessor {
   readonly sessionId: string;
 }
 
+/** The session a fork copied its conversation, and its sandbox when the provider can copy one, from. */
+export interface SessionForkSource {
+  readonly sessionId: string;
+}
+
 /** The payload of `session.started`: the session begins, with its parent, predecessor, runtime, and trace when known. */
 export interface SessionStartedData {
   /** The call whose agent opened this session, for a child session. */
@@ -36,6 +41,8 @@ export interface SessionStartedData {
    * retired. Its recorded stream stays readable.
    */
   readonly predecessor?: SessionPredecessor;
+  /** The session this one forked from. Its recorded stream stays readable and unchanged. */
+  readonly forkedFrom?: SessionForkSource;
   readonly runtime?: RuntimeIdentity;
   readonly trace?: TraceContext;
 }
@@ -72,6 +79,7 @@ const sessionStartedData = conforming<SessionStartedData>()(
   z.object({
     parent: z.object({ callId: id, sessionId: id }).optional(),
     predecessor: z.object({ sessionId: id }).optional(),
+    forkedFrom: z.object({ sessionId: id }).optional(),
     runtime: z
       .object({
         agentId: z.string(),

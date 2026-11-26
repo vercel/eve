@@ -121,6 +121,14 @@ export interface SendTurnOptions<TOutput = unknown> {
   readonly turnPolicy?: TurnMode;
 
   /**
+   * Starts the new session as a fork of this session id: it continues that
+   * session's conversation, tool calls included, and a copy of its sandbox.
+   * Applies only to the message that creates a session; the source session
+   * is left unchanged.
+   */
+  readonly forkFrom?: string;
+
+  /**
    * Ephemeral client/page context for the current turn.
    *
    * Strings are rendered as user-role model context messages. Objects are

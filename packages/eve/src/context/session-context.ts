@@ -1,10 +1,23 @@
 import type { SandboxEnvironment } from "#shared/sandbox-environment.js";
 import type { RuntimeSandboxSession, SandboxSession } from "#shared/sandbox-session.js";
-import type { SessionAuth, SessionParent, SessionPredecessor, SessionTurn } from "#context/keys.js";
+import type {
+  SessionAuth,
+  SessionForkSource,
+  SessionParent,
+  SessionPredecessor,
+  SessionTurn,
+} from "#context/keys.js";
 
 import type { SessionSchedule } from "#context/session-schedule.js";
 import type { ConversationContext } from "#shared/conversation-context.js";
-export type { SessionAuth, SessionParent, SessionPredecessor, SessionSchedule, SessionTurn };
+export type {
+  SessionAuth,
+  SessionForkSource,
+  SessionParent,
+  SessionPredecessor,
+  SessionSchedule,
+  SessionTurn,
+};
 
 /**
  * Shared runtime context available to all authored callbacks that run
@@ -31,6 +44,8 @@ export interface SessionContext {
      * `sessions.attach(predecessor.sessionId)` from `eve/server` reads.
      */
     readonly predecessor?: SessionPredecessor;
+    /** Present when this session forked from another one, whose conversation it continues. */
+    readonly forkedFrom?: SessionForkSource;
   };
 
   /**

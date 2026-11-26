@@ -4,9 +4,12 @@ import { createSession, projectToDurableSession } from "#execution/session.js";
 import { withPendingHistory } from "#execution/session/pending-history.js";
 import type { JsonObject } from "#shared/json.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
+import type { SessionForkSeed } from "#shared/session-fork.js";
+import { validateHarnessModelMessages } from "#harness/messages.js";
 
 export function createInitialSessionValues(input: {
   readonly continuationToken: string;
+  readonly fork?: SessionForkSeed;
   readonly history?: readonly SessionHistoryMessage[];
   readonly outputSchema?: JsonObject;
   readonly rootSessionId?: string;
@@ -14,6 +17,9 @@ export function createInitialSessionValues(input: {
 }): CreateSessionStepResult {
   const created = createSession({
     continuationToken: input.continuationToken,
+    ...(input.fork !== undefined && {
+      baseHistory: validateHarnessModelMessages(input.fork.messages),
+    }),
     outputSchema: input.outputSchema,
     rootSessionId: input.rootSessionId,
     sessionId: input.sessionId,

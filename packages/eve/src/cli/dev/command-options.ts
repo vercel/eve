@@ -14,6 +14,7 @@ export interface DevelopmentCliOptions {
   header?: DevelopmentRequestHeaders;
   host?: string;
   input?: string;
+  session?: string;
   onboard?: boolean;
   onboarded?: boolean;
   logs?: LogDisplayMode;

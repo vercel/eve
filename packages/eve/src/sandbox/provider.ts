@@ -164,6 +164,18 @@ export interface SandboxProviderImplementation<
     artifact: Readonly<Artifact>,
   ): Promise<{ readonly connection: SandboxConnection<Extensions>; readonly state: State }>;
   /**
+   * Creates the sandbox for `ctx.session.id` as a copy of the sandbox of
+   * `source.sessionId`, when `ctx.session.forkedFrom` names one. Return `null`
+   * when the source has no sandbox to copy; eve then calls `start()`. Without
+   * it, a forked session starts a fresh sandbox.
+   */
+  fork?(
+    ctx: SandboxSessionContext,
+    source: { readonly sessionId: string },
+    options: Readonly<OpenOptions> | undefined,
+    artifact: Readonly<Artifact>,
+  ): Promise<{ readonly connection: SandboxConnection<Extensions>; readonly state: State } | null>;
+  /**
    * Reconnects to the sandbox `state` names, never recreating it. Throw
    * `SandboxSessionGoneError` when it no longer exists.
    */
