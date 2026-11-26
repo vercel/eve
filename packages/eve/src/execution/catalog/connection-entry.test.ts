@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { ApprovalContext, ApprovalPolicy } from "#approval/definition.js";
+import type {
+  ApprovalContext,
+  ApprovalPolicy,
+  ApprovalResponseContext,
+  ApprovalResponseDecision,
+} from "#approval/definition.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SandboxKey, SessionKey, type SessionAuthContext } from "#context/keys.js";
 import { toolCallModelOutput } from "#harness/tool-call-io.js";
@@ -20,7 +25,13 @@ import type {
 } from "#shared/connection-types.js";
 import type { ToolSchema } from "#tools/schema.js";
 
-import { connectionEntry } from "./connection-entry.js";
+import { EVENT_SUBSCRIBE_ACTION } from "#runtime/subscriptions/actions.js";
+
+import {
+  connectionEntry,
+  connectionEventActionApproval,
+  runConnectionEventAction,
+} from "./connection-entry.js";
 
 const tools: readonly ConnectionToolMetadata[] = [
   {
@@ -79,8 +90,95 @@ function setup(
       resolveApprovalPolicy(approval)(context),
     );
   };
-  return { request, seen };
+  return { connection, request, seen };
 }
+
+describe("event action approval", () => {
+  it("applies the connection's policy without listing the connection's tools", async () => {
+    const getToolMetadata = vi.fn<ConnectionClient["getToolMetadata"]>(async () => tools);
+    const { connection } = setup(getToolMetadata);
+    const approval = connectionEventActionApproval(connection)!;
+    const context: ApprovalContext = {
+      abortSignal: new AbortController().signal,
+      callId: "call-subscribe",
+      getSandbox: () => Promise.reject(new Error("Approval never opens a sandbox.")),
+      session: {} as ApprovalContext["session"],
+      toolName: "eve__subscribe",
+    };
+
+    const status = await contextStorage.run(new ContextContainer(), () =>
+      resolveApprovalPolicy(approval)(context),
+    );
+
+    expect(status).toBe("user-approval");
+    expect(getToolMetadata).not.toHaveBeenCalled();
+  });
+});
+
+describe("event action approval combined with the agent's approval", () => {
+  const callId = "call-subscribe";
+
+  function combined(instanceId: string) {
+    const { connection } = setup();
+    const response = vi.fn(async (): Promise<ApprovalResponseDecision> => ({ status: "allowed" }));
+    const configured: ResolvedConnectionDefinition = {
+      ...connection,
+      approval: { request: () => "approved", response },
+      instanceId,
+    };
+    const approval = connectionEventActionApproval(configured, () => "user-approval");
+    if (typeof approval !== "object") throw new Error("Expected an approval configuration.");
+    const request: ApprovalContext = {
+      abortSignal: new AbortController().signal,
+      callId,
+      getSandbox: () => Promise.reject(new Error("Approval never opens a sandbox.")),
+      session: {} as ApprovalContext["session"],
+      toolName: "eve__subscribe",
+    };
+    const answer = { request: { callId } } as ApprovalResponseContext;
+    return { answer, approval, configured, request, response };
+  }
+
+  it("asks for approval when the agent does, even though the connection's policy approves", async () => {
+    const { approval, request } = combined("tracker-a");
+
+    const status = await contextStorage.run(new ContextContainer(), () =>
+      approval.request(request),
+    );
+
+    expect(status).toBe("user-approval");
+  });
+
+  it("pins the instance it asked about, so the connection's response runs for it", async () => {
+    const { answer, approval, request, response } = combined("tracker-a");
+
+    const decision = await contextStorage.run(new ContextContainer(), async () => {
+      await approval.request(request);
+      return approval.response?.(answer);
+    });
+
+    expect(decision).toEqual({ status: "allowed" });
+    expect(response).toHaveBeenCalledOnce();
+  });
+
+  it("rejects the response when the connection resolves to another instance by then", async () => {
+    const { answer, approval, configured, request, response } = combined("tracker-a");
+
+    const decision = await contextStorage.run(new ContextContainer(), async () => {
+      await approval.request(request);
+      Object.assign(configured, { instanceId: "tracker-b" });
+      return approval.response?.(answer);
+    });
+
+    expect(decision).toEqual({
+      reason: expect.stringContaining(
+        "The connection for this tool call changed or is unavailable.",
+      ),
+      status: "rejected",
+    });
+    expect(response).not.toHaveBeenCalled();
+  });
+});
 
 describe("connection approval context", () => {
   it("passes the annotations the server declared for the called tool", async () => {
@@ -131,12 +229,6 @@ describe("connection tool call", () => {
     principalType: "user" as const,
   };
 
-  const subscribe: ConnectionToolMetadata = {
-    description: "Subscribe to issue events.",
-    inputSchema: { type: "object" },
-    name: "subscribe_issues",
-  };
-
   function call(responder?: SessionAuthContext, toolName = "delete_issue") {
     const connection = {
       connectionName: "tracker",
@@ -165,9 +257,7 @@ describe("connection tool call", () => {
         execute: async () => ({
           approvedBy: (await resolveHeaders(connection))["X-Approved-By"],
         }),
-        metadata: async () => [subscribe],
-        ownsName: (name) => name === subscribe.name,
-        recoveryMetadata: () => [subscribe],
+        getEvents: async () => [],
       },
       executeTool: async (name, args, options) => ({
         structuredContent: await resolveProvidedArguments({
@@ -192,15 +282,15 @@ describe("connection tool call", () => {
       sessionId: "session-1",
       turn: { id: "turn-1", sequence: 0 },
     });
+    const options = {
+      messages: [],
+      toolCallId: "call-1",
+      ...(responder !== undefined && { approval: { responder } }),
+    };
     return contextStorage.run(ctx, async () =>
-      connectionEntry(registry, connection, toolName).execute!(
-        {},
-        {
-          messages: [],
-          toolCallId: "call-1",
-          ...(responder !== undefined && { approval: { responder } }),
-        },
-      ),
+      toolName === EVENT_SUBSCRIBE_ACTION
+        ? runConnectionEventAction(registry, connection, toolName, {}, options)
+        : connectionEntry(registry, connection, toolName).execute!({}, options),
     );
   }
 
@@ -221,8 +311,8 @@ describe("connection tool call", () => {
   });
 
   it("gives an approved event action's headers its approver", async () => {
-    await expect(call(user("bob"), subscribe.name)).resolves.toEqual({ approvedBy: "bob" });
-    await expect(call(undefined, subscribe.name)).resolves.toEqual({ approvedBy: "" });
+    await expect(call(user("bob"), EVENT_SUBSCRIBE_ACTION)).resolves.toEqual({ approvedBy: "bob" });
+    await expect(call(undefined, EVENT_SUBSCRIBE_ACTION)).resolves.toEqual({ approvedBy: "" });
   });
 });
 

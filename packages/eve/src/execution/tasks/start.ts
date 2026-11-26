@@ -210,7 +210,11 @@ function taskCallStart(input: TaskDispatchInput, record: TaskRecord): TaskCallSt
 
 function startReceipt(input: TaskDispatchInput, resumable: boolean): RuntimeToolResultActionResult {
   const receipt = renderTaskReceipt({ id: input.taskId, resumable, tool: input.task.toolName });
-  return toolResult(input, receipt);
+  const output =
+    input.task.preview !== undefined && input.task.preview.length > 0
+      ? `${input.task.preview}\n${receipt}`
+      : receipt;
+  return toolResult(input, output);
 }
 
 function toolResult(input: TaskDispatchInput, output: string): RuntimeToolResultActionResult {

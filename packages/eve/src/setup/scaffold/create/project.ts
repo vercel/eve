@@ -241,6 +241,7 @@ eve deploy
 `,
   ".gitignore": `node_modules
 .env*
+!.env.example
 .eve
 .vercel
 .next

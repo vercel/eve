@@ -5,6 +5,7 @@ import type { DockerCli } from "#execution/sandbox/bindings/docker-cli.js";
 import { stopDockerContainerIfRunning } from "#execution/sandbox/bindings/docker-container.js";
 import { setDockerNetworkPolicy } from "#execution/sandbox/bindings/docker-network.js";
 import { expectDockerSuccess } from "#execution/sandbox/bindings/docker-utils.js";
+import { withConnectionFastPaths } from "#execution/sandbox/internal-shell.js";
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
 import type { DockerSandboxSession } from "#public/sandbox/docker.js";
 import type { SandboxConnection } from "#public/sandbox/provider.js";
@@ -56,7 +57,7 @@ export function createDockerConnection(input: {
       .catch(() => {});
   }
 
-  return {
+  const connection: SandboxConnection<DockerSandboxExtensions> = {
     extensions: {
       setNetworkPolicy: (policy) => setDockerNetworkPolicy(cli, containerIdentity, policy),
     },
@@ -144,4 +145,32 @@ export function createDockerConnection(input: {
       }
     },
   };
+
+  return withConnectionFastPaths(connection, {
+    async runFast(options) {
+      const args = ["exec", "-w", options.workingDirectory];
+      for (const [key, value] of Object.entries(options.env)) {
+        args.push("-e", `${key}=${value}`);
+      }
+      args.push(containerIdentity, "bash", "--noprofile", "--norc", "-c");
+      if (options.signal === undefined) {
+        const result = await cli.run([...args, options.command]);
+        return { exitCode: result.exitCode, stderr: result.stderr, stdout: result.stdout };
+      }
+      const pidFilePath = `${DOCKER_SPAWN_PID_FILE_PREFIX}${randomUUID()}.pid`;
+      const quotedPidFile = shellQuote(pidFilePath);
+      const wrapped =
+        `echo "$$" > ${quotedPidFile}; ` +
+        `(eval ${shellQuote(options.command)}); ` +
+        `status=$?; rm -f ${quotedPidFile}; exit $status`;
+      const onAbort = () => void killSpawnTree(pidFilePath);
+      options.signal.addEventListener("abort", onAbort, { once: true });
+      try {
+        const result = await cli.run([...args, wrapped], { signal: options.signal });
+        return { exitCode: result.exitCode, stderr: result.stderr, stdout: result.stdout };
+      } finally {
+        options.signal.removeEventListener("abort", onAbort);
+      }
+    },
+  });
 }

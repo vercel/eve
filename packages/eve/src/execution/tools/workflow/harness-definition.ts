@@ -1,3 +1,4 @@
+import { TASK_TOOL_DESCRIPTION } from "#execution/tasks/render.js";
 import { withTaskIdInput } from "#execution/tasks/task-id-input.js";
 import { entryPointOf } from "#execution/tasks/tool-entry-point.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
@@ -15,15 +16,27 @@ export interface WorkflowToolHarnessDefinitionInput {
 export function createWorkflowToolHarnessDefinition(
   input: WorkflowToolHarnessDefinitionInput,
 ): HarnessToolDefinition {
+  const entryPoint = entryPointOf(input.definition);
   const definition =
-    entryPointOf(input.definition) === "serve"
+    entryPoint === "serve"
       ? withTaskIdInput(input.definition)
-      : input.definition;
+      : entryPoint === "task"
+        ? withTaskDescription(input.definition)
+        : input.definition;
   return {
     ...definition,
     execute: undefined,
     executeInput: input.executeInput,
     workflowId: input.workflowId,
+  };
+}
+
+function withTaskDescription(definition: HarnessToolDefinition): HarnessToolDefinition {
+  const base = definition.description?.trim();
+  if (base?.includes(TASK_TOOL_DESCRIPTION)) return definition;
+  return {
+    ...definition,
+    description: base ? `${base}\n\n${TASK_TOOL_DESCRIPTION}` : TASK_TOOL_DESCRIPTION,
   };
 }
 

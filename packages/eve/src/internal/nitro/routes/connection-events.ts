@@ -9,8 +9,9 @@ import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifa
 import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runtime-artifacts.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { connectionEventDestination } from "#runtime/subscriptions/path.js";
-import { startConnectionEventDelivery } from "#runtime/subscriptions/owner.js";
+import { installedDurableHost } from "#execution/hosts.js";
 import { isObject } from "#shared/guards.js";
+import { parseJsonValue } from "#shared/json.js";
 
 export async function handleConnectionEventRequest(
   input: { artifactsConfig: NitroArtifactsConfig; connectionName: string },
@@ -53,17 +54,19 @@ export async function handleConnectionEventRequest(
       for (const [key, value] of Object.entries(identifiers)) span?.setAttribute(key, value);
       stage = "handler";
       const requestTraceContext = connectionEventTraceContext(span?.spanContext());
-      const started = await startConnectionEventDelivery(
+      const owners = installedDurableHost()?.subscriptions;
+      if (owners === undefined) throw new Error("This host keeps no subscriptions.");
+      const delivered = await owners.deliver(
+        origin.bindingId,
+        { kind: "connection", name: input.connectionName },
         {
-          kind: "connection-event",
-          connectionName: input.connectionName,
-          bindingId: origin.bindingId,
-          delivery,
+          id: delivery.deliveryId,
+          data: parseJsonValue(delivery),
           requestTraceContext,
         },
-        bundle,
+        bundle.compiledArtifactsSource,
       );
-      return new Response(null, { status: started ? 202 : 410 });
+      return new Response(null, { status: delivered ? 202 : 410 });
     } catch (error) {
       if (isObject(error) && error.code === "invalid_delivery")
         return new Response(null, { status: 401 });

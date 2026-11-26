@@ -137,7 +137,6 @@ export const SECTION_ORDER = {
   workspace: 20,
   skills: 40,
   dynamicInstructions: 100,
-  tasks: 200,
   approvals: 300,
 } as const;
 

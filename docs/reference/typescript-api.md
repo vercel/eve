@@ -168,7 +168,7 @@ Type the context in a `"use step"` helper as `WorkflowStepToolContext`, which ex
 | [`eve/workflow/api`](../tools/workflows#workflow-imports)                         | `start`, `getRun`, `resumeHook`, `WorkflowRun`, and `WorkflowRunStatus` for routes and steps                                         |
 | `eve/connections`                                                                 | `defineMcpClientConnection`, `defineOpenAPIConnection`, `defineDynamic`                                                              |
 | `eve/channels`                                                                    | `defineChannel`, `disableRoute`, route verbs, `isChannel`, channel metadata types                                                    |
-| `eve/channels/eve`                                                                | `eveChannel`                                                                                                                         |
+| `eve/channels/eve`                                                                | `eveChannel`, `MAX_MESSAGE_PARTS`                                                                                                    |
 | `eve/channels/auth`                                                               | `localDev`, `vercelOidc`, `placeholderAuth`                                                                                          |
 | `eve/channels/{slack,discord,teams,telegram,twilio,github}`                       | platform channel factories                                                                                                           |
 | `eve/hooks`                                                                       | `defineHook`                                                                                                                         |
@@ -200,7 +200,7 @@ Type the context in a `"use step"` helper as `WorkflowStepToolContext`, which ex
 | `eve/evals/loaders`                                                               | `loadJson`, `loadYaml`                                                                                                               |
 | `eve/react`, `eve/vue`, `eve/svelte`, `eve/solid`                                 | `useEveAgent`                                                                                                                        |
 | `eve/next`, `eve/nuxt`, `eve/sveltekit`, `eve/tanstack`                           | framework bundler plugins                                                                                                            |
-| [`eve/client`](/docs/guides/client)                                               | `Client`, `ClientSession`, health and agent-info schemas, `EveError` and the typed client errors                                     |
+| [`eve/client`](/docs/guides/client)                                               | `Client`, `ClientSession`, `MAX_MESSAGE_PARTS`, health and agent-info schemas, `EveError`, typed errors                              |
 | [`eve/sessions`](../guides/client/messages#reusable-delivery-reads)               | `Delivery`, `DeliveryResult`, read options, `SessionReader`, `Session`, `EveError`, and `SessionNotActiveError`                      |
 | [`eve/events`](/docs/concepts/session-views-and-selectors)                        | Event types, opaque `SessionView`, immutable observations, and query/fold functions                                                  |
 | [`eve/server`](../concepts/sessions-runs-and-streaming#read-a-session-in-process) | `sessions` (`attach`, `end`, `prewarm`), `SessionEndOptions`, `PrewarmSessionResult` for in-process session control                  |
@@ -215,7 +215,7 @@ Types for reading sent messages and sessions live in `eve/sessions`; client fact
 
 eve follows [semantic versioning](https://semver.org/). A stable API changes incompatibly only in a major release, and a deprecated stable API keeps working until the next major release. Minor releases add backward-compatible features, and patch releases fix bugs.
 
-The `exports` field in eve's `package.json` lists every entry point. `eve/experimental/*` and `eve/internal/*` have no compatibility promise. Neither do `experimental` fields in stable definitions, such as `defineAgent({ experimental })`, connection `experimental.events`, and `JustBashSandbox.environment({ experimental })`. The CLI setup wizard is not a public authoring API.
+The `exports` field in eve's `package.json` lists every entry point. `eve/experimental/*` and `eve/internal/*` have no compatibility promise. Neither do `experimental` fields in stable definitions, such as `defineAgent({ experimental })`, connection `experimental.events`, channel `experimental.subscriptions`, and `JustBashSandbox.environment({ experimental })`. The CLI setup wizard is not a public authoring API.
 
 Event union types name today's values. A release can add event types, outcomes, and request kinds under the [stream evolution rules](../concepts/sessions-runs-and-streaming#what-a-later-release-can-add) without a breaking change, so keep a default branch when you switch on them.
 

@@ -51,6 +51,7 @@
   "HeadersValue",
   "HealthResponseError",
   "HealthResult",
+  "MAX_MESSAGE_PARTS",
   "MessageContent",
   "MessageFilePart",
   "MessagePart",

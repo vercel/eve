@@ -14,18 +14,17 @@ import { defineJsonSchema } from "#tools/schema.js";
 export interface BashToolInput {
   command: string;
   /**
-   * Seconds to wait for the command before it keeps running in the
-   * background. Defaults to 60; values outside 1–120 are clamped.
+   * Seconds to wait. Explicit values up to 120 kill the command on expiry;
+   * omitting it (default 60) or passing > 120 continues in a background task.
    */
   timeout?: number;
 }
 
 /**
- * Output of the provided `bash` tool. A command that finishes within the wait
- * (60 seconds, or the input's `timeout`) is `completed`. A longer command keeps
- * running in the sandbox as process group `pid` and returns `running` with its
- * output so far; it keeps writing `stdout`, `stderr`, and finally `exit` files
- * in `outputDirectory`.
+ * Output of the provided `bash` tool. Commands that finish in time or expire
+ * under an explicit `timeout` up to 120s return `completed` (exit 124 on
+ * timeout). Longer commands promote to a background task during a turn, or
+ * return `running` with `pid` and `outputDirectory` outside a promotable turn.
  */
 export type BashToolOutput =
   | {
@@ -54,7 +53,7 @@ export const BASH_INPUT_SCHEMA = defineJsonSchema<BashToolInput>({
     command: { type: "string", description: "The shell command to execute." },
     timeout: {
       type: "number",
-      description: `Seconds to wait for the command before it keeps running in the background. Defaults to ${BASH_YIELD_SECONDS}; values above ${BASH_MAX_YIELD_SECONDS} wait ${BASH_MAX_YIELD_SECONDS}, and values below 1 wait 1.`,
+      description: `Seconds to wait. Explicit values up to ${BASH_MAX_YIELD_SECONDS} kill the command on expiry; omit (default ${BASH_YIELD_SECONDS}s) or pass >${BASH_MAX_YIELD_SECONDS} to continue as a background task.`,
     },
   },
   required: ["command"],
@@ -106,10 +105,18 @@ export const BASH_OUTPUT_SCHEMA = defineJsonSchema<BashToolOutput>({
 export const bash: ToolDefinition<BashToolInput, BashToolOutput> = frameworkTool(
   defineTool({
     label: { start: (input) => toolLabel("Run", input.command) },
-    description: `Execute a shell command in the workspace. Pass a larger \`timeout\` (up to ${BASH_MAX_YIELD_SECONDS}s) for builds, installs, and test suites. Returns stdout, then any stderr under \`[stderr]\` (or \`(no output)\`); non-zero exits end with \`[exit code: N]\`. Commands still running after the wait stay in the background with instructions to check or stop them.`,
+    description: `Execute a shell command in the workspace. Pass an explicit \`timeout\` (up to ${BASH_MAX_YIELD_SECONDS}s) to kill the command if it exceeds that limit, or omit \`timeout\` (default ${BASH_YIELD_SECONDS}s foreground wait) / pass >${BASH_MAX_YIELD_SECONDS}s so long-running commands continue as a background task whose result is delivered when it finishes. Returns stdout, then any stderr under \`[stderr]\` (or \`(no output)\`); non-zero exits end with \`[exit code: N]\`.`,
     async execute(input, ctx) {
-      return await executeBashOnSandbox(await ctx.getSandbox(), input as BashInput, {
+      const bashInput = input as BashInput;
+      const onTimeout =
+        bashInput.timeout !== undefined &&
+        Number.isFinite(bashInput.timeout) &&
+        bashInput.timeout <= BASH_MAX_YIELD_SECONDS
+          ? "kill"
+          : "background";
+      return await executeBashOnSandbox(await ctx.getSandbox(), bashInput, {
         abortSignal: ctx.abortSignal,
+        onTimeout,
       });
     },
     inputSchema: BASH_INPUT_SCHEMA,

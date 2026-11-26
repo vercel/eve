@@ -19,19 +19,23 @@ beforeEach(() => {
 });
 
 describe("handleDevRuntimeArtifactsRequest", () => {
-  it("returns the current dev runtime artifact revision", async () => {
+  it("returns the current dev runtime artifact revision and the server id", async () => {
     const { handleDevRuntimeArtifactsRequest } =
       await import("#internal/nitro/routes/dev-runtime-artifacts.js");
     mocks.readDevelopmentRuntimeArtifactsRevision.mockReturnValueOnce({
       revision: "/tmp/app/.eve/dev-runtime/snapshots/current",
     });
 
-    const response = handleDevRuntimeArtifactsRequest({ appRoot: "/tmp/app" });
+    const response = handleDevRuntimeArtifactsRequest({
+      appRoot: "/tmp/app",
+      serverId: "server-1",
+    });
 
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(await response.json()).toEqual({
       revision: "/tmp/app/.eve/dev-runtime/snapshots/current",
+      serverId: "server-1",
     });
     expect(mocks.readDevelopmentRuntimeArtifactsRevision).toHaveBeenCalledWith("/tmp/app");
   });

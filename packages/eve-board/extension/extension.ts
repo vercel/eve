@@ -34,6 +34,10 @@ const watchChannel = z
 
 const authorize = fn<BoardAuthorize>();
 
+const removedConfigurers = z.unknown().optional();
+const CONFIGURERS_REMOVED =
+  "`configurers` was removed; use `authorize` to decide who may manage board watches. See https://eve.dev/docs/channels/board.";
+
 const boardUrl = z
   .string()
   .url()
@@ -54,6 +58,7 @@ const boardEntry = z.object({
   watchChannel: watchChannel.optional(),
   /** Authorizes watch creation, listing, and removal on this board. Defaults to top-level `authorize`. */
   authorize: authorize.optional(),
+  configurers: removedConfigurers,
 });
 
 /**
@@ -81,6 +86,7 @@ export default defineExtension({
       watchChannel: watchChannel.optional(),
       /** Authorizes watch creation, listing, and removal. Defaults to any signed-in caller except non-person board actors. */
       authorize: authorize.optional(),
+      configurers: removedConfigurers,
       /** Base route path for the board wake endpoint (`<route>/wake` or `<route>/:board/wake`). Defaults to `"/eve/v1/board"`. */
       route: z
         .string()
@@ -101,6 +107,18 @@ export default defineExtension({
         .optional(),
     })
     .superRefine((value, ctx) => {
+      if (value.configurers !== undefined) {
+        ctx.addIssue({ code: "custom", message: CONFIGURERS_REMOVED, path: ["configurers"] });
+      }
+      for (const [key, entry] of Object.entries(value.boards ?? {})) {
+        if (entry.configurers !== undefined) {
+          ctx.addIssue({
+            code: "custom",
+            message: CONFIGURERS_REMOVED,
+            path: ["boards", key, "configurers"],
+          });
+        }
+      }
       if (value.boards === undefined) return;
       const entries = Object.entries(value.boards);
       if (entries.length === 0) {

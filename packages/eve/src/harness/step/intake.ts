@@ -54,14 +54,16 @@ export async function settleRuntimeWork(
   step.session = finished.session;
   await step.apply(finishRun(step.view(), { requestIds: finished.requestIds }));
   const catalog = await stepCatalog(step);
-  const programCalls = new Set(
-    step
-      .view()
-      .turn.suspended.flatMap((parked) =>
-        parked.program === undefined ? [] : [...stepCallIds(parked)],
-      ),
-  );
-  const results = await runtimeResultCalls(ready, catalog, programCalls);
+  const view = step.view();
+  const rawResultCalls = new Set([
+    ...view.turn.suspended.flatMap((parked) =>
+      parked.program === undefined ? [] : [...stepCallIds(parked)],
+    ),
+    ...ready.flatMap((result) =>
+      view.projection.view.calls[result.callId]?.taskId !== undefined ? [result.callId] : [],
+    ),
+  ]);
+  const results = await runtimeResultCalls(ready, catalog, rawResultCalls);
   const staged = await stageToolResultMedia([
     { role: "tool", content: results.map(({ part }) => part) },
   ]);

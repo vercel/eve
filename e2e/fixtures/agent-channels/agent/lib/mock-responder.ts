@@ -1,12 +1,15 @@
 import type { MockModelRequest, MockModelResponse } from "eve/evals";
 
 const HANDOFF = /^HANDOFF-(TOOL|WORKFLOW|DELEGATED) (\S+)/u;
+const SUBSCRIPTION = /^(SUBSCRIBE|STOP) (\S+)/u;
 
 /**
  * `HANDOFF-TOOL <ref>` and `HANDOFF-WORKFLOW <ref>` call the matching hand-off tool, then reply
  * with its result. `HANDOFF-DELEGATED <ref>` asks the root copy to call `hand_off`, then replies
- * with the copy's result. Anything else echoes, recalls the latest reply for a code word, or lists
- * the tool results in the prompt when asked for them.
+ * with the copy's result. `SUBSCRIBE <project>` subscribes to the project's `build.failed` events
+ * with `eve__subscribe`, and `STOP <id>` stops a subscription with `eve__subscription_stop`; each
+ * replies with `SUBSCRIPTION-RESULT` and the tool's output. Anything else echoes, recalls the
+ * latest reply for a code word, or lists the tool results in the prompt when asked for them.
  */
 export function respond(request: MockModelRequest): MockModelResponse | string {
   const handOff = [...request.userMessages]
@@ -15,6 +18,11 @@ export function respond(request: MockModelRequest): MockModelResponse | string {
     .find((match) => match !== null);
   if (handOff != null) return respondToHandOff(request, handOff[1]!, handOff[2]!);
   const { lastUserMessage, messages, toolResults } = request;
+  const subscription = SUBSCRIPTION.exec(
+    lastUserMessage?.replace(/^[\s\S]*Caller message:\s*/u, "") ?? "",
+  );
+  if (subscription !== null)
+    return respondToSubscription(request, subscription[1]!, subscription[2]!);
   if (lastUserMessage?.includes("tool results")) {
     const results = toolResults.map(({ isError, name, output }) => ({ isError, name, output }));
     return `Mock reply: ${JSON.stringify(results)}`;
@@ -46,4 +54,20 @@ function respondToHandOff(
   const result = request.toolResults.find((entry) => entry.name === tool);
   if (result === undefined) return { toolCalls: [{ name: tool, input: { sessionRef } }] };
   return `HANDOFF-RESULT ${JSON.stringify(result.output ?? null)}`;
+}
+
+function respondToSubscription(
+  request: MockModelRequest,
+  mode: string,
+  value: string,
+): MockModelResponse | string {
+  const tool = mode === "SUBSCRIBE" ? "eve__subscribe" : "eve__subscription_stop";
+  const result = request.toolResults.find((entry) => entry.name === tool);
+  if (result !== undefined)
+    return `SUBSCRIPTION-RESULT ${JSON.stringify({ error: result.isError, output: result.output })}`;
+  const input =
+    mode === "SUBSCRIBE"
+      ? { source: "events", event: "build.failed", input: { project: value }, ttlMs: 600_000 }
+      : { id: value };
+  return { toolCalls: [{ name: tool, input }] };
 }
