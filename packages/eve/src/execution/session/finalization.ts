@@ -16,6 +16,10 @@ import {
   terminateChildSessionsStep,
 } from "#execution/terminate-child-sessions-step.js";
 import { liveRuns } from "#execution/tasks/table.js";
+import {
+  reportSessionSubscriptionRetireFailureStep,
+  retireSessionSubscriptionsStep,
+} from "#runtime/subscriptions/steps.js";
 import type { TurnOutcome } from "#execution/session/turn-step-types.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
@@ -65,6 +69,7 @@ export async function finalizeSession(
   context: SessionFinalizationContext,
 ): Promise<WorkflowEntryResult> {
   const { serializedContext, sessionState } = context.cursor;
+  const sessionId = sessionState?.sessionId ?? (serializedContext["eve.sessionId"] as string);
   if (sessionState !== undefined && mayHaveLiveRuns(sessionState)) {
     try {
       await terminateChildSessionsStep({ sessionState });
@@ -87,6 +92,16 @@ export async function finalizeSession(
         error: normalizeSerializableError(error),
         outcome: outcome.kind,
         sessionId: sessionState.sessionId,
+      }).catch(() => undefined);
+    }
+  }
+  if (sessionState?.snapshot.session.rootSessionId === undefined) {
+    try {
+      await retireSessionSubscriptionsStep({ sessionId });
+    } catch (error) {
+      await reportSessionSubscriptionRetireFailureStep({
+        error: normalizeSerializableError(error),
+        sessionId,
       }).catch(() => undefined);
     }
   }
@@ -123,7 +138,6 @@ export async function finalizeSession(
 
   const settled = settledResult(outcome, context);
   if (context.caller !== undefined) {
-    const sessionId = sessionState?.sessionId ?? (serializedContext["eve.sessionId"] as string);
     if (outcome.kind === "ended" && outcome.cancelled !== undefined) {
       const notification = {
         caller: context.caller,

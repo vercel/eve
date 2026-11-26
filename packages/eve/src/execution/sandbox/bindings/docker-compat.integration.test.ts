@@ -205,7 +205,7 @@ describe("Docker provider compatibility with the previous release", () => {
         return { exitCode: 1, stderr: "No such image" };
       }
       if (args[0] === "exec" && String(args.at(-1)).includes('"$HOME"')) {
-        return { streamStdout: "/home/agent\n" };
+        return { stdout: "/home/agent\n" };
       }
       return undefined;
     });

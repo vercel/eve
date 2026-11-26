@@ -108,31 +108,49 @@ export async function resolveGitHubWebhookSecret(
 
 export type GitHubBotNameResolver = () => Promise<string | undefined>;
 
-export function createGitHubBotNameResolver(input: {
-  readonly botName?: GitHubBotName;
-  readonly credentials?: GitHubChannelCredentials;
-}): GitHubBotNameResolver {
+function createCachedNameResolver(
+  sources: readonly (GitHubBotName | undefined)[],
+): GitHubBotNameResolver {
   let cached: string | undefined;
   return async () => {
     if (cached !== undefined) {
       return cached;
     }
-    const source = input.botName ?? input.credentials?.appSlug ?? process.env.GITHUB_APP_SLUG;
-    if (source === undefined) {
-      return undefined;
+    for (const source of sources) {
+      if (source === undefined) continue;
+      const name = normalizeBotName(typeof source === "function" ? await source() : source);
+      if (name !== undefined) {
+        cached = name;
+        return cached;
+      }
     }
-    if (typeof source === "string") {
-      cached = normalizeBotName(source);
-      return cached;
-    }
+    return undefined;
+  };
+}
+
+export function createGitHubBotNameResolver(input: {
+  readonly botName?: GitHubBotName;
+  readonly credentials?: GitHubChannelCredentials;
+}): GitHubBotNameResolver {
+  const resolve = createCachedNameResolver([
+    input.botName,
+    input.credentials?.appSlug,
+    process.env.GITHUB_APP_SLUG,
+  ]);
+  return async () => {
     try {
-      cached = normalizeBotName(await source());
-      return cached;
+      return await resolve();
     } catch (error) {
       log.warn("githubChannel: botName resolver failed; retrying on the next event", { error });
       return undefined;
     }
   };
+}
+
+export function createGitHubAppSlugResolver(input: {
+  readonly credentials?: GitHubChannelCredentials;
+}): GitHubBotNameResolver {
+  return createCachedNameResolver([input.credentials?.appSlug, process.env.GITHUB_APP_SLUG]);
 }
 
 function normalizeBotName(value: string): string | undefined {

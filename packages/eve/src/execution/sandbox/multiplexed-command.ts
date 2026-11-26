@@ -1,3 +1,5 @@
+import { Writable } from "node:stream";
+
 import type { SandboxProcess } from "#shared/sandbox-session.js";
 
 type OutputName = "stderr" | "stdout";
@@ -47,6 +49,21 @@ function createOutputChannel(): OutputChannel {
   };
 }
 
+function createChannelWritable(channel: OutputChannel): Writable {
+  const writable = new Writable({
+    write(chunk: Buffer | Uint8Array | string, encoding, callback) {
+      const bytes =
+        typeof chunk === "string"
+          ? Buffer.from(chunk, encoding as BufferEncoding)
+          : new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+      channel.enqueue(bytes);
+      callback();
+    },
+  });
+  writable.on("error", () => undefined);
+  return writable;
+}
+
 interface StdinCommand {
   closeStdin(options: { readonly abortSignal?: AbortSignal }): PromiseLike<void>;
   writeStdin(data: Uint8Array, options: { readonly abortSignal?: AbortSignal }): PromiseLike<void>;
@@ -72,6 +89,102 @@ function createStdinStream(
       if (!stopped.aborted) await command.closeStdin({ abortSignal: stopped });
     },
   });
+}
+
+export interface StreamingCommandHandle {
+  kill?(): PromiseLike<void>;
+}
+
+export interface StreamingCommandFinished extends StreamingCommandHandle {
+  readonly exitCode: number;
+}
+
+export async function adaptStreamingCommandToSandboxProcess(input: {
+  readonly abortSignal?: AbortSignal;
+  readonly onRelease?: () => void;
+  readonly start: (streams: {
+    readonly onStart: (command: StreamingCommandHandle) => void;
+    readonly stderr: Writable;
+    readonly stdout: Writable;
+  }) => PromiseLike<StreamingCommandFinished>;
+}): Promise<SandboxProcess> {
+  const { abortSignal: signal, onRelease } = input;
+  const stdout = createOutputChannel();
+  const stderr = createOutputChannel();
+  const started = Promise.withResolvers<StreamingCommandHandle>();
+
+  let done = false;
+  let released = false;
+  let killPromise: Promise<void> | undefined;
+  let startedCommand: StreamingCommandHandle | undefined;
+
+  const releaseOnce = () => {
+    if (released) return;
+    released = true;
+    onRelease?.();
+  };
+
+  const kill = () =>
+    (killPromise ??= Promise.resolve().then(async () => {
+      await startedCommand?.kill?.();
+      releaseOnce();
+    }));
+
+  const killOnAbort = () => {
+    if (!done && startedCommand !== undefined) {
+      void kill().catch(() => undefined);
+    }
+  };
+  const disarmKill = () => signal?.removeEventListener("abort", killOnAbort);
+  signal?.addEventListener("abort", killOnAbort, { once: true });
+
+  const runPromise = Promise.resolve().then(() =>
+    input.start({
+      onStart(command) {
+        startedCommand = command;
+        started.resolve(command);
+        if (signal?.aborted) killOnAbort();
+      },
+      stderr: createChannelWritable(stderr),
+      stdout: createChannelWritable(stdout),
+    }),
+  );
+
+  const settled = runPromise.then(
+    (finished) => {
+      startedCommand ??= finished;
+      started.resolve(finished);
+      done = true;
+      disarmKill();
+      releaseOnce();
+      stdout.close();
+      stderr.close();
+      return { exitCode: finished.exitCode };
+    },
+    (error: unknown) => {
+      if (signal?.aborted && startedCommand !== undefined) {
+        void kill().catch(() => undefined);
+      }
+      started.reject(error);
+      done = true;
+      disarmKill();
+      releaseOnce();
+      const cause = signal?.aborted ? signal.reason : error;
+      stdout.error(cause);
+      stderr.error(cause);
+      throw cause;
+    },
+  );
+  settled.catch(() => undefined);
+
+  await started.promise;
+
+  return {
+    stderr: stderr.stream,
+    stdout: stdout.stream,
+    wait: () => settled,
+    kill,
+  };
 }
 
 export function adaptMultiplexedCommandToSandboxProcess<

@@ -463,6 +463,12 @@
       "import": "./dist/src/public/experimental/sandbox/just-bash.js",
       "default": "./dist/src/public/experimental/sandbox/just-bash.js"
     },
+    "./experimental/channels/github": {
+      "eve-source": "./src/public/experimental/channels/github.ts",
+      "types": "./dist/src/public/experimental/channels/github.d.ts",
+      "import": "./dist/src/public/experimental/channels/github.js",
+      "default": "./dist/src/public/experimental/channels/github.js"
+    },
     "./experimental/channels/discord/gateway": {
       "eve-source": "./src/public/experimental/channels/discord/gateway.ts",
       "types": "./dist/src/public/experimental/channels/discord/gateway.d.ts",
@@ -628,6 +634,12 @@
       "import": "./dist/src/computer-use/extension/lib/sandbox.js",
       "default": "./dist/src/computer-use/extension/lib/sandbox.js"
     },
+    "./experimental/channels": {
+      "eve-source": "./dist/src/public/experimental/channels/index.js",
+      "types": "./dist/src/public/experimental/channels/index.d.ts",
+      "import": "./dist/src/public/experimental/channels/index.js",
+      "default": "./dist/src/public/experimental/channels/index.js"
+    },
     "./experimental/connections": {
       "eve-source": "./dist/src/public/experimental/connections/index.js",
       "types": "./dist/src/public/experimental/connections/index.d.ts",
@@ -685,6 +697,7 @@
     "@modelcontextprotocol/server": "2.4.0",
     "@nuxt/kit": "^4.6.4",
     "@nuxt/schema": "^4.6.4",
+    "@octokit/openapi-webhooks": "12.1.0",
     "@opentelemetry/context-async-hooks": "catalog:",
     "@opentelemetry/core": "catalog:",
     "@opentelemetry/otlp-transformer": "0.223.1",

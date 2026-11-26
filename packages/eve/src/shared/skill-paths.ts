@@ -1,3 +1,4 @@
+import { runInternalCommand } from "#execution/sandbox/internal-shell.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 
 const MODEL_HOME_ROOT = "$HOME";
@@ -73,7 +74,7 @@ async function resolveSandboxHome(sandbox: SandboxSession): Promise<string | nul
 
 async function probeSandboxHome(sandbox: SandboxSession): Promise<string | null> {
   try {
-    const result = await sandbox.run({ command: HOME_PROBE_COMMAND });
+    const result = await runInternalCommand(sandbox, { command: HOME_PROBE_COMMAND });
     if (result.exitCode !== 0) {
       return null;
     }

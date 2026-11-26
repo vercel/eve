@@ -2,13 +2,12 @@ import { beforeEach, expect, it, vi } from "vitest";
 
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
-import type { ConnectionEventPayload } from "./delivery.js";
-import type { ConnectionEventSubscribeOutcome, EventBinding } from "./state.js";
+import type { SubscriptionBinding, SubscriptionOutcome } from "./state.js";
 
 const { hooks, runs, started, resumed } = vi.hoisted(() => ({
   hooks: new Map<string, { runId: string; metadata: unknown }>(),
   runs: new Map<string, { published: unknown[]; outcome: Promise<unknown> }>(),
-  started: vi.fn(async (_reference: unknown, _args: unknown[]) => ({ runId: "watch-run" })),
+  started: vi.fn(async (_reference: unknown, _args: unknown[]) => ({ runId: "start-run" })),
   resumed: vi.fn(async (_token: string, _value: unknown) => ({})),
 }));
 vi.mock("#internal/workflow/runtime.js", () => ({
@@ -38,53 +37,50 @@ vi.mock("#internal/workflow/runtime.js", () => ({
   },
 }));
 vi.mock("#execution/workflow-references.js", () => ({
-  connectionEventWorkflowReference: { workflowId: "watch" },
-  connectionEventDeliveryWorkflowReference: { workflowId: "delivery" },
+  subscriptionWorkflowReference: { workflowId: "subscription" },
 }));
 vi.mock("#execution/workflow-runtime.js", () => ({
   startWorkflowOnCurrentDeployment: started,
+  resolveCurrentWorkflowDeploymentId: async () => "dpl_current",
 }));
 
 const {
-  findConnectionEventOwner,
-  retireConnectionEventOwner,
-  startConnectionEventDelivery,
-  startConnectionEventOwner,
+  deliverSubscriptionEvent,
+  emitSubscriptionEvent,
+  findSubscriptionOwner,
+  retireSubscriptionOwner,
+  startSubscriptionOwner,
 } = await import("./owner.js");
-const { connectionEventHookToken } = await import("./path.js");
+const { subscriptionHookToken, subscriptionKeyHookToken } = await import("./state.js");
 
-const binding = {
+const binding: SubscriptionBinding = {
   id: "binding-1",
+  source: {
+    kind: "channel",
+    name: "github",
+    event: "checks_finished",
+    key: "vercel/eve#7",
+    input: {},
+    ttlMs: null,
+  },
   sessionId: "session-1",
+  executionPrincipal: "rui",
   auth: null,
-  connectionName: "issues",
-} as EventBinding;
-const token = connectionEventHookToken(binding.id);
-const bundle = {
-  compiledArtifactsSource: { kind: "disk", appRoot: "/virtual/events" },
-} as CompiledBundle;
-const payload = {
-  kind: "connection-event",
-  connectionName: "issues",
-  bindingId: binding.id,
-  delivery: { deliveryId: "delivery-1", subscriptionId: "sub_1" },
-} as ConnectionEventPayload;
-const subscription = {
-  id: "sub_1",
-  name: "issue.created",
-  arguments: {},
-  status: "active" as const,
-  expiresAt: null,
 };
-function holdWatch() {
+const token = subscriptionHookToken(binding.id);
+const bundle = {
+  compiledArtifactsSource: { kind: "disk", appRoot: "/virtual/subscriptions" },
+} as CompiledBundle;
+const opened = { key: "vercel/eve#7", expiresAt: null };
+
+function holdRun(runId: string) {
   let publish!: (value: unknown) => void;
   const run = {
     published: [] as unknown[],
     outcome: new Promise((resolve) => (publish = resolve)),
   };
-  runs.set("watch-run", run);
-  hooks.set(token, { runId: "watch-run", metadata: binding });
-  return (value: ConnectionEventSubscribeOutcome) => {
+  runs.set(runId, run);
+  return (value: SubscriptionOutcome) => {
     run.published.push(value);
     publish(value);
   };
@@ -97,51 +93,133 @@ beforeEach(() => {
   resumed.mockClear();
 });
 
-it("starts each delivery in its own run, under the binding its watch's hook carries", async () => {
-  holdWatch()({ subscription });
-  expect(await startConnectionEventDelivery(payload, bundle)).toBe(true);
-  expect(started).toHaveBeenCalledExactlyOnceWith({ workflowId: "delivery" }, [
-    { binding, payload, serializedContext: expect.any(Object) },
+it("starts the owner workflow and returns what the source opened once the outcome stream publishes it", async () => {
+  holdRun("start-run")({ opened });
+
+  expect(await startSubscriptionOwner(binding, bundle)).toEqual(opened);
+
+  expect(started).toHaveBeenCalledExactlyOnceWith({ workflowId: "subscription" }, [
+    { binding, serializedContext: expect.any(Object) },
   ]);
-  expect(resumed).not.toHaveBeenCalled();
 });
 
-it("refuses a delivery for a subscription its watch did not create", async () => {
-  holdWatch()({ subscription });
-  const other = { ...payload, delivery: { ...payload.delivery, subscriptionId: "sub_other" } };
-  expect(await startConnectionEventDelivery(other, bundle)).toBe(false);
-  expect(started).not.toHaveBeenCalled();
+it("follows an ownerRunId outcome to the run that already owns the subscription", async () => {
+  holdRun("start-run")({ ownerRunId: "owner-run" });
+  holdRun("owner-run")({ opened });
+
+  expect(await startSubscriptionOwner(binding, bundle)).toEqual(opened);
 });
 
-it("refuses a delivery when its watch has ended", async () => {
-  expect(await startConnectionEventDelivery(payload, bundle)).toBe(false);
-  expect(started).not.toHaveBeenCalled();
+it("returns undefined when the caller stops waiting before the source answers", async () => {
+  holdRun("start-run");
+  const caller = new AbortController();
+  const starting = startSubscriptionOwner(binding, bundle, caller.signal);
+  caller.abort();
+  expect(await starting).toBeUndefined();
 });
 
-it("hands a delivery that beats the subscribe response to the watch's own run", async () => {
-  holdWatch();
-  expect(await startConnectionEventDelivery(payload, bundle)).toBe(true);
-  expect(resumed).toHaveBeenCalledExactlyOnceWith(token, { kind: "delivery", payload });
-  expect(started).not.toHaveBeenCalled();
+it("throws the source's refusal with its status", async () => {
+  holdRun("start-run")({ error: "not allowed", status: 403 });
+
+  const refusal = await startSubscriptionOwner(binding, bundle).catch((error: unknown) => error);
+
+  expect(refusal).toBeInstanceOf(Error);
+  expect(refusal).toMatchObject({ message: "not allowed", status: 403 });
 });
 
-it("asks a running watch to retire, and reports one that has ended", async () => {
-  expect(await retireConnectionEventOwner(binding.id)).toBe(false);
-  holdWatch();
-  expect(await retireConnectionEventOwner(binding.id)).toBe(true);
+it("reports no owner when the subscription's hook is gone", async () => {
+  expect(await findSubscriptionOwner(binding.id)).toBeUndefined();
+});
+
+it("reports a subscription still opening, then its later result", async () => {
+  const publish = holdRun("owner-run");
+  hooks.set(token, { runId: "owner-run", metadata: binding });
+
+  expect(await findSubscriptionOwner(binding.id)).toEqual({ binding, opened: undefined });
+
+  publish({ opened });
+  expect(await findSubscriptionOwner(binding.id)).toEqual({ binding, opened });
+});
+
+it("hides an owner whose open was refused", async () => {
+  holdRun("owner-run")({ error: "not allowed", status: 403 });
+  hooks.set(token, { runId: "owner-run", metadata: binding });
+
+  expect(await findSubscriptionOwner(binding.id)).toBeUndefined();
+});
+
+it("asks a running owner to retire, and reports one that has ended", async () => {
+  expect(await retireSubscriptionOwner(binding.id)).toBe(false);
+  hooks.set(token, { runId: "owner-run", metadata: binding });
+  expect(await retireSubscriptionOwner(binding.id)).toBe(true);
   expect(resumed).toHaveBeenCalledExactlyOnceWith(token, { kind: "retire" });
 });
 
-it("reports a subscribe still in flight when the caller stops waiting, then its later result", async () => {
-  const publish = holdWatch();
-  const caller = new AbortController();
-  const subscribing = startConnectionEventOwner(binding, bundle, caller.signal);
-  caller.abort();
-  expect(await subscribing).toBeUndefined();
-  expect(await findConnectionEventOwner(binding.id)).toEqual({
-    owner: binding,
-    subscription: undefined,
+const artifacts = { kind: "disk", appRoot: "/virtual/subscriptions" } as const;
+const origin = { deploymentId: "dpl_current", compiledArtifactsSource: artifacts };
+
+it("hands an event to the run holding the key, and reports a key nobody holds", async () => {
+  const source = { kind: "channel", name: "github" } as const;
+  const occurrence = { id: "e1", data: { ok: true } };
+  expect(await emitSubscriptionEvent(source.name, "vercel/eve#7", occurrence, artifacts)).toBe(
+    false,
+  );
+
+  const keyToken = subscriptionKeyHookToken(source, "vercel/eve#7");
+  hooks.set(keyToken, { runId: "key-run", metadata: undefined });
+  expect(await emitSubscriptionEvent(source.name, "vercel/eve#7", occurrence, artifacts)).toBe(
+    true,
+  );
+  expect(resumed).toHaveBeenCalledExactlyOnceWith(keyToken, {
+    kind: "emit",
+    event: { ...occurrence, origin },
   });
-  publish({ subscription });
-  expect(await findConnectionEventOwner(binding.id)).toEqual({ owner: binding, subscription });
+  expect(await emitSubscriptionEvent(source.name, "vercel/eve#8", occurrence, artifacts)).toBe(
+    false,
+  );
+});
+
+it("hands an event straight to a watch's own hook, and reports a watch that has ended", async () => {
+  const occurrence = { id: "e1", data: { ok: true } };
+  const from = { kind: "channel", name: "github" } as const;
+  expect(await deliverSubscriptionEvent(binding.id, from, occurrence, artifacts)).toBe(false);
+
+  hooks.set(token, { runId: "owner-run", metadata: binding });
+  expect(await deliverSubscriptionEvent(binding.id, from, occurrence, artifacts)).toBe(true);
+  expect(resumed).toHaveBeenCalledExactlyOnceWith(token, {
+    kind: "delivery",
+    event: { ...occurrence, origin },
+  });
+});
+
+it("refuses a delivery that names a source other than the one that owns the watch", async () => {
+  const occurrence = { id: "e1", data: { ok: true } };
+  hooks.set(token, { runId: "owner-run", metadata: binding });
+  for (const from of [
+    { kind: "connection", name: "github" },
+    { kind: "channel", name: "slack" },
+  ] as const)
+    expect(await deliverSubscriptionEvent(binding.id, from, occurrence, artifacts)).toBe(false);
+  expect(resumed).not.toHaveBeenCalled();
+});
+
+it("stamps the emitting deployment and bundle on the event, whatever the occurrence carries", async () => {
+  const source = { kind: "channel", name: "github" } as const;
+  const keyToken = subscriptionKeyHookToken(source, "vercel/eve#7");
+  hooks.set(keyToken, { runId: "key-run", metadata: undefined });
+  const forged = {
+    id: "e1",
+    data: { origin: { deploymentId: "dpl_attacker" } },
+    origin: {
+      deploymentId: "dpl_attacker",
+      compiledArtifactsSource: { kind: "disk", appRoot: "/x" },
+    },
+  };
+
+  await emitSubscriptionEvent(source.name, "vercel/eve#7", forged, artifacts);
+
+  expect(resumed).toHaveBeenCalledExactlyOnceWith(keyToken, {
+    kind: "emit",
+    event: { ...forged, origin },
+  });
 });

@@ -1,3 +1,4 @@
+import { runInternalCommand, spawnBoundedCommand } from "#execution/sandbox/internal-shell.js";
 import { sandboxConnectionDisposal } from "#execution/sandbox/connection-disposal.js";
 import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
 import { shutdownActiveSandboxConnections } from "#execution/sandbox/active-connections.js";
@@ -64,6 +65,7 @@ function createMockDetachedCommand(
   logs: ReadonlyArray<{ readonly data: string; readonly stream: "stderr" | "stdout" }> = [],
 ) {
   return {
+    closeStdin: vi.fn().mockResolvedValue(undefined),
     kill: vi.fn().mockResolvedValue(undefined),
     logs() {
       return (async function* () {
@@ -71,6 +73,44 @@ function createMockDetachedCommand(
       })();
     },
     wait: vi.fn().mockResolvedValue({ exitCode: 0 }),
+    writeStdin: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
+function createMockStreamingCommand(
+  input: {
+    readonly exitCode?: number;
+    readonly finished?: Promise<{ readonly exitCode: number }>;
+    readonly kill?: () => Promise<void>;
+    readonly logs?: ReadonlyArray<{ readonly data: string; readonly stream: "stderr" | "stdout" }>;
+  } = {},
+) {
+  const kill: () => Promise<void> = input.kill ?? vi.fn(async () => undefined);
+  return async (options: {
+    readonly onStart?: (command: { kill(): Promise<void> }) => void;
+    readonly stderr?: { write(chunk: string): boolean };
+    readonly stdout?: { write(chunk: string): boolean };
+  }) => {
+    options.onStart?.({ kill });
+    let stdoutText = "";
+    let stderrText = "";
+    for (const entry of input.logs ?? []) {
+      if (entry.stream === "stdout") {
+        stdoutText += entry.data;
+        options.stdout?.write(entry.data);
+      } else {
+        stderrText += entry.data;
+        options.stderr?.write(entry.data);
+      }
+    }
+    const done =
+      input.finished === undefined ? { exitCode: input.exitCode ?? 0 } : await input.finished;
+    return {
+      exitCode: done.exitCode,
+      kill,
+      stderr: vi.fn().mockResolvedValue(stderrText),
+      stdout: vi.fn().mockResolvedValue(stdoutText),
+    };
   };
 }
 
@@ -643,10 +683,11 @@ describe("createVercelSandbox", () => {
     const runCommand = templateSandbox.runCommand.getMockImplementation()!;
     vi.mocked(templateSandbox.runCommand).mockImplementation(
       async (options: { readonly args?: readonly string[]; cmd: string; detached?: boolean }) =>
-        options.detached === true
-          ? (createMockDetachedCommand([
-              { data: "/home/vercel-sandbox\n", stream: "stdout" },
-            ]) as never)
+        options.cmd === "bash" && options.args?.includes("--noprofile")
+          ? {
+              ...createMockCommandResult(),
+              stdout: vi.fn().mockResolvedValue("/home/vercel-sandbox\n"),
+            }
           : await runCommand(options),
     );
     const { sandboxModule } = createFakeVercelProvider(templateSandbox, sessionSandbox);
@@ -1583,7 +1624,7 @@ describe("createVercelSandbox", () => {
 
   it("stops authored compute and keeps the Vercel session handle usable", async () => {
     const { handle, sessionSandbox } = await createTestVercelSession();
-    vi.mocked(sessionSandbox.runCommand).mockResolvedValue(createMockDetachedCommand() as never);
+    vi.mocked(sessionSandbox.runCommand).mockImplementation(createMockStreamingCommand() as never);
     vi.mocked(sessionSandbox.runCommand).mockClear();
 
     await handle.connection.stop();
@@ -1597,7 +1638,7 @@ describe("createVercelSandbox", () => {
 
   it("stops a Vercel session again after it resumes", async () => {
     const { handle, sessionSandbox } = await createTestVercelSession();
-    vi.mocked(sessionSandbox.runCommand).mockResolvedValue(createMockDetachedCommand() as never);
+    vi.mocked(sessionSandbox.runCommand).mockImplementation(createMockStreamingCommand() as never);
 
     await handle.connection.stop();
     await handle.sandbox.run({ command: "printf resumed" });
@@ -1816,7 +1857,7 @@ describe("createVercelSandbox", () => {
 
   it("runs commands in a working directory resolved from /workspace", async () => {
     const { handle, sessionSandbox } = await createTestVercelSession();
-    vi.mocked(sessionSandbox.runCommand).mockResolvedValue(createMockDetachedCommand() as never);
+    vi.mocked(sessionSandbox.runCommand).mockImplementation(createMockStreamingCommand() as never);
     vi.mocked(sessionSandbox.runCommand).mockClear();
 
     await handle.sandbox.run({ command: "pwd", workingDirectory: "python-analysis" });
@@ -1838,20 +1879,23 @@ describe("createVercelSandbox", () => {
         void exited.promise.then(resolve);
         signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
       });
-    const command = {
-      kill: vi.fn(async () => exited.resolve()),
-      async *logs(params?: { signal?: AbortSignal }) {
-        yield { data: "started\n", stream: "stdout" } as const;
-        await untilExitOrAbort(params?.signal).catch(() => {
+    const kill = vi.fn(async () => exited.resolve());
+    const started = Promise.withResolvers<void>();
+    vi.mocked(sessionSandbox.runCommand).mockImplementationOnce(
+      async (params: {
+        readonly onStart?: (command: { kill(): Promise<void> }) => void;
+        readonly signal?: AbortSignal;
+        readonly stdout?: { write(chunk: string): boolean };
+      }) => {
+        params.onStart?.({ kill });
+        started.resolve();
+        params.stdout?.write("started\n");
+        await untilExitOrAbort(params.signal).catch(() => {
           throw new DOMException("This operation was aborted", "AbortError");
         });
+        return { ...createMockCommandResult(), exitCode: 143, kill };
       },
-      wait: vi.fn(async (params?: { signal?: AbortSignal }) => {
-        await untilExitOrAbort(params?.signal);
-        return { exitCode: 143 };
-      }),
-    };
-    vi.mocked(sessionSandbox.runCommand).mockResolvedValueOnce(command as never);
+    );
     const controller = new AbortController();
     const stop = new Error("stop");
 
@@ -1860,10 +1904,10 @@ describe("createVercelSandbox", () => {
       () => undefined,
       (error: unknown) => error,
     );
-    await vi.waitFor(() => expect(command.wait).toHaveBeenCalled());
+    await started.promise;
     controller.abort(stop);
 
-    await vi.waitFor(() => expect(command.kill).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(kill).toHaveBeenCalledOnce());
     expect(await settled).toBe(stop);
   });
 
@@ -1962,9 +2006,79 @@ describe("createVercelSandbox", () => {
       expect.objectContaining({
         args: ["-lc", "printenv DEPLOY_ENV"],
         cmd: "bash",
+        detached: true,
         env: { DEPLOY_ENV: "staging" },
       }),
     );
+
+    vi.mocked(sessionSandbox.runCommand).mockImplementationOnce(
+      createMockStreamingCommand({ logs: [{ data: "bounded\n", stream: "stdout" }] }) as never,
+    );
+    const bounded = await spawnBoundedCommand(handle.sandbox, {
+      command: "echo bounded",
+      env: { DEPLOY_ENV: "staging" },
+    });
+    expect(await consumeWebStream(bounded.stdout)).toBe("bounded\n");
+    await expect(bounded.wait()).resolves.toEqual({ exitCode: 0 });
+    expect(sessionSandbox.runCommand).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        args: ["-lc", "echo bounded"],
+        cmd: "bash",
+        detached: false,
+        env: { DEPLOY_ENV: "staging" },
+      }),
+    );
+  });
+
+  it("runs internal commands through a single non-login bash request and ignores kill failures on abort", async () => {
+    const { handle, sessionSandbox } = await createTestVercelSession();
+    vi.mocked(sessionSandbox.runCommand).mockClear();
+    vi.mocked(sessionSandbox.runCommand).mockImplementationOnce(
+      createMockStreamingCommand({ logs: [{ data: "ok\n", stream: "stdout" }] }) as never,
+    );
+
+    await expect(
+      runInternalCommand(handle.sandbox, { command: "test -e /workspace/a" }),
+    ).resolves.toEqual({
+      exitCode: 0,
+      stderr: "",
+      stdout: "ok\n",
+    });
+    expect(sessionSandbox.runCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        args: ["--noprofile", "--norc", "-c", "test -e /workspace/a"],
+        cmd: "bash",
+        detached: false,
+      }),
+    );
+
+    const kill = vi.fn().mockRejectedValue(new Error("already exited"));
+    const started = Promise.withResolvers<void>();
+    vi.mocked(sessionSandbox.runCommand).mockImplementationOnce(
+      async (params: {
+        readonly onStart?: (command: { kill(): Promise<void> }) => void;
+        readonly signal?: AbortSignal;
+      }) => {
+        params.onStart?.({ kill });
+        started.resolve();
+        await new Promise<void>((_, reject) => {
+          params.signal?.addEventListener("abort", () => reject(params.signal?.reason), {
+            once: true,
+          });
+        });
+        return createMockCommandResult();
+      },
+    );
+    const controller = new AbortController();
+    const stop = new Error("stop internal");
+    const pending = runInternalCommand(handle.sandbox, {
+      command: "rg needle /workspace",
+      signal: controller.signal,
+    });
+    await started.promise;
+    controller.abort(stop);
+    await expect(pending).rejects.toBe(stop);
+    expect(kill).toHaveBeenCalledOnce();
   });
 
   it("keeps native env, mounts, and network options when reopening a key with changed options", async () => {
@@ -1988,14 +2102,21 @@ describe("createVercelSandbox", () => {
     };
     const sandbox = [...fake.sandboxes.values()][0]!;
     sandbox.runCommand.mockImplementation(
-      async (command: { detached?: boolean; env?: Record<string, string> }) =>
-        command.detached
-          ? (createMockDetachedCommand([
-              {
-                data: JSON.stringify({ ...created.env, ...command.env }),
-                stream: "stdout",
-              },
-            ]) as never)
+      async (command: {
+        args?: readonly string[];
+        env?: Record<string, string>;
+        onStart?: (handle: { kill(): Promise<void> }) => void;
+        stdout?: { write(chunk: string): boolean };
+      }) =>
+        command.args?.at(-1) === "env"
+          ? await createMockStreamingCommand({
+              logs: [
+                {
+                  data: JSON.stringify({ ...created.env, ...command.env }),
+                  stream: "stdout",
+                },
+              ],
+            })(command)
           : createMockCommandResult(),
     );
     const readEnv = async (handle: { readonly sandbox: VercelSandboxSession }) =>

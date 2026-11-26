@@ -1,9 +1,14 @@
+import { deserializeContext } from "#context/serialize.js";
+import { sessionAgent } from "#definitions/agent.js";
+import { resolveSessionSandboxTarget } from "#execution/coordination-dispatch-shared.js";
 import {
   readDurableSession,
   replaceDurableSessionSnapshot,
   type DurableSession,
   type DurableSessionState,
 } from "#execution/durable-session-store.js";
+import { cancelUndispatchedBashTasks } from "#execution/sandbox/bash-job-steps.js";
+import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import {
   cancelTask,
   findTask,
@@ -44,7 +49,11 @@ import { readHitlState } from "#harness/hitl/index.js";
 import type { Transition } from "#harness/session-machine/commit.js";
 import { endTask, finishRun, settleTask } from "#harness/session-machine/transitions.js";
 import { lateTaskSpend, taskSpend } from "#harness/session-machine/runs.js";
-import { storedProjection, type SessionView } from "#harness/session-machine/view.js";
+import {
+  storedProjection,
+  suspendedSteps,
+  type SessionView,
+} from "#harness/session-machine/view.js";
 import { stopRuns, waitedCallRuns, type RunStopTarget } from "#execution/stop-runs.js";
 import { resumeRoutedHook } from "#execution/hosts.js";
 import type { TaskCancelReason } from "#execution/tasks/table.js";
@@ -163,6 +172,7 @@ async function cancelTasks(
   const withdraws: Decision[] = [];
   const outcome: TaskOutcome = { reason: input.reason, status: "cancelled" };
   const targets: RunStopTarget[] = [];
+  const undispatchedTaskIds = new Set<string>();
   const calls = input.turnCalls === true ? waitedCallRuns(session) : [];
   for (const taskId of input.taskIds) {
     const record = findTask(table, taskId);
@@ -171,7 +181,10 @@ async function cancelTasks(
     settles.push(...taskSettled(record, cancelled.settled, outcome));
     if (record?.resumable === false || record?.kind === "agent")
       settles.push((view) => endTask(view, { outcome, taskId }));
-    if (cancelled.send === undefined) continue;
+    if (cancelled.send === undefined) {
+      if (record?.run === undefined) undispatchedTaskIds.add(taskId);
+      continue;
+    }
     if (record?.resumable === false || record?.kind === "agent") {
       const requestIds = runRequestIds(session, cancelled.send.run.runId);
       withdraws.push((view) => finishRun(view, { requestIds, taskId }));
@@ -186,6 +199,14 @@ async function cancelTasks(
     saveTable(input.sessionState, session, table),
     { settles, withdraws },
   );
+  const undispatchedTasks =
+    undispatchedTaskIds.size === 0
+      ? []
+      : suspendedSteps(session.state).flatMap((step) =>
+          step.tasks.filter(
+            (task) => "taskId" in task.entry && undispatchedTaskIds.has(task.entry.taskId),
+          ),
+        );
   const [cancelledOutright] = await Promise.all([
     stopRuns(
       targets.filter((target) => target.ends),
@@ -198,6 +219,13 @@ async function cancelTasks(
       { waitForEnd: false },
     ),
     stopRuns(calls, { kind: "cancel", reason: TURN_CANCEL_REASON }),
+    cancelUndispatchedBashTasks(undispatchedTasks, async () => {
+      const ctx = await deserializeContext(input.serializedContext);
+      return {
+        agent: sessionAgent(ctx),
+        ...resolveSessionSandboxTarget(ctx.get(ChannelKey)?.state, session),
+      };
+    }),
   ]);
   if (cancelledOutright.length === 0) return committed;
   const current = readDurableSession(committed.sessionState);

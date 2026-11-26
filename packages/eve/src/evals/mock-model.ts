@@ -4,7 +4,12 @@ import { contextStorage } from "#context/container.js";
 import { SessionIdKey } from "#context/keys.js";
 import type { LanguageModel } from "ai";
 import { markMockModel } from "#internal/mock-model-identity.js";
-import { TASK_RESULT_TAG, TASKS_NOTE_LABEL } from "#execution/tasks/render.js";
+import {
+  FINAL_REPLY_TASK_SYSTEM_BLOCK,
+  TASK_RESULT_TAG,
+  TASK_SYSTEM_BLOCK,
+  TASKS_NOTE_LABEL,
+} from "#execution/tasks/render.js";
 import { isPendingApprovalsNotice } from "#harness/hitl/approval-prompt.js";
 
 type GenerateOptions = Parameters<MockLanguageModelV4["doGenerate"]>[0];
@@ -205,6 +210,8 @@ function isFrameworkScaffolding(message: string): boolean {
   return (
     text.startsWith(TASKS_NOTE_LABEL) ||
     text.startsWith(TASK_RESULT_TAG) ||
+    text === TASK_SYSTEM_BLOCK ||
+    text === FINAL_REPLY_TASK_SYSTEM_BLOCK ||
     isPendingApprovalsNotice(text)
   );
 }

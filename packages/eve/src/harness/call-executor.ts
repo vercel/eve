@@ -39,6 +39,14 @@ import { isAsyncIterable } from "#shared/async-iterable.js";
 import { toError } from "#shared/errors.js";
 import type { ApprovalAsk } from "#harness/session-machine/view.js";
 import { toModelSchema } from "#tools/schema.js";
+import {
+  canPromoteToTask,
+  cancelPromotedTasks,
+  isTaskPromotion,
+  readTaskPromotionCancel,
+  withTaskPromotionAllowed,
+  type PromotedTaskCall,
+} from "#tools/task-handoff.js";
 import { projectToolLabel } from "#harness/action-presentation.js";
 import { displayTitle } from "#protocol/session-projection/display-name.js";
 
@@ -65,6 +73,7 @@ export interface CallOutcome {
   readonly callerOnly?: true;
   readonly remember?: RememberRequest;
   readonly clearance?: Clearance;
+  readonly promoted?: PromotedTaskCall;
   readonly settled: readonly CallResult[];
   readonly toolResults: readonly TypedToolResult<ToolSet>[];
   readonly awaitsApproval?: true;
@@ -241,6 +250,35 @@ export async function executeToolCall(
         toolResults,
       };
     }
+    if (!failed && isTaskPromotion(output)) {
+      const onCancel = readTaskPromotionCancel(output);
+      if (!canPromoteToTask()) {
+        await Promise.resolve(onCancel?.()).catch(() => {});
+        throw new Error(
+          `Tool "${toolName}" attempted to promote call "${callId}" to a task outside a promotable turn step.`,
+        );
+      }
+      try {
+        await input.beforeResult?.({ failure: undefined, invoked });
+      } catch (error) {
+        await Promise.resolve(onCancel?.()).catch(() => {});
+        throw error;
+      }
+      return {
+        promoted: {
+          callId,
+          clearance,
+          handoff: output.handoff,
+          input: args,
+          ...(onCancel !== undefined && { onCancel }),
+          ...(output.preview !== undefined && { preview: output.preview }),
+          toolName,
+          workflowId: output.workflowId,
+        },
+        settled,
+        toolResults,
+      };
+    }
     toolResults.push({
       input: args,
       output,
@@ -296,7 +334,20 @@ export async function executeToolCall(
 async function raceAbort<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
   if (signal === undefined) return await promise;
   promise.catch(() => {});
-  signal.throwIfAborted();
+  const cancelLatePromotion = () => {
+    void promise.then(
+      (value) => {
+        if (isTaskPromotion(value)) {
+          void Promise.resolve(readTaskPromotionCancel(value)?.()).catch(() => {});
+        }
+      },
+      () => {},
+    );
+  };
+  if (signal.aborted) {
+    cancelLatePromotion();
+    signal.throwIfAborted();
+  }
   let onAbort: (() => void) | undefined;
   const aborted = new Promise<never>((_resolve, reject) => {
     onAbort = () => reject(signal.reason);
@@ -304,6 +355,9 @@ async function raceAbort<T>(promise: Promise<T>, signal: AbortSignal | undefined
   });
   try {
     return await Promise.race([promise, aborted]);
+  } catch (error) {
+    if (signal.aborted) cancelLatePromotion();
+    throw error;
   } finally {
     signal.removeEventListener("abort", onAbort!);
   }
@@ -338,7 +392,15 @@ function modelFacingError(error: unknown): string {
 }
 
 function withoutSignInSecrets(output: unknown): unknown {
-  return isAuthorizationSignal(output) ? modelFacingAuthorizationOutput(output) : output;
+  if (isAuthorizationSignal(output)) return modelFacingAuthorizationOutput(output);
+  if (isTaskPromotion(output)) {
+    return {
+      handoff: output.handoff,
+      ...(output.preview !== undefined && { preview: output.preview }),
+      workflowId: output.workflowId,
+    };
+  }
+  return output;
 }
 
 function interruptedResult(callId: string, toolName: string): CallResult {
@@ -427,6 +489,7 @@ export interface InlineCallResults {
   readonly parts: readonly ToolResultPart[];
   readonly toolResults: readonly TypedToolResult<ToolSet>[];
   readonly approvals: readonly ApprovalAsk[];
+  readonly promotedTasks: readonly PromotedTaskCall[];
   readonly signIns: readonly ToolSignIn[];
   readonly policyApprovals?: Readonly<Record<string, Clearance>>;
 }
@@ -434,6 +497,7 @@ export interface InlineCallResults {
 export const NO_INLINE_CALLS: InlineCallResults = {
   approvals: [],
   parts: [],
+  promotedTasks: [],
   signIns: [],
   toolResults: [],
 };
@@ -457,43 +521,55 @@ export async function executeInlineCalls(input: {
       !input.excludedCallIds.has(call.toolCallId) &&
       input.tools.get(call.toolName) !== undefined,
   );
-  const finished = await Promise.allSettled(
-    calls.map(
-      async (
-        call,
-      ): Promise<{
-        call: TypedToolCall<ToolSet>;
-        executed: CallOutcome;
-        approval?: ApprovalAsk;
-      }> => {
-        const definition = input.tools.get(call.toolName)!;
-        const action = { callId: call.toolCallId, input: call.input, toolName: call.toolName };
-        try {
-          const executed = isRunnableTool(definition)
-            ? await executeToolCall(action, { ...input, definition }, "evaluate")
-            : await decideDeferredCall(action, definition, input);
-          const approval =
-            executed.awaitsApproval === true
-              ? {
-                  ...approvalRequest(call, definition),
-                  ...(executed.callerOnly === true && { callerOnly: true as const }),
-                  remember: executed.remember,
-                }
-              : undefined;
-          return { call, executed, approval };
-        } catch (error) {
-          throwIfSessionStreamDead(error);
-          throwIfTurnAborted(input.abortSignal);
-          const failed = failedCall({ ...action, message: toError(error) });
-          await input.publish(settleCall(failed.result));
-          return { call, executed: { settled: [{ part: failed.part }], toolResults: [] } };
-        }
-      },
+  const finished = await withTaskPromotionAllowed(true, () =>
+    Promise.allSettled(
+      calls.map(
+        async (
+          call,
+        ): Promise<{
+          call: TypedToolCall<ToolSet>;
+          executed: CallOutcome;
+          approval?: ApprovalAsk;
+        }> => {
+          const definition = input.tools.get(call.toolName)!;
+          const action = { callId: call.toolCallId, input: call.input, toolName: call.toolName };
+          try {
+            const executed = isRunnableTool(definition)
+              ? await executeToolCall(action, { ...input, definition }, "evaluate")
+              : await decideDeferredCall(action, definition, input);
+            const approval =
+              executed.awaitsApproval === true
+                ? {
+                    ...approvalRequest(call, definition),
+                    ...(executed.callerOnly === true && { callerOnly: true as const }),
+                    remember: executed.remember,
+                  }
+                : undefined;
+            return { call, executed, approval };
+          } catch (error) {
+            throwIfSessionStreamDead(error);
+            throwIfTurnAborted(input.abortSignal);
+            const failed = failedCall({ ...action, message: toError(error) });
+            await input.publish(settleCall(failed.result));
+            return { call, executed: { settled: [{ part: failed.part }], toolResults: [] } };
+          }
+        },
+      ),
     ),
   );
-  const rejected = finished.find((call) => call.status === "rejected");
-  if (rejected?.status === "rejected") throw rejected.reason;
   const executed = finished.flatMap((call) => (call.status === "fulfilled" ? [call.value] : []));
+  const promotedTasks = executed.flatMap(({ executed }) =>
+    executed.promoted === undefined ? [] : [executed.promoted],
+  );
+  const rejected = finished.find((call) => call.status === "rejected");
+  if (rejected?.status === "rejected") {
+    await cancelPromotedTasks(promotedTasks);
+    throw rejected.reason;
+  }
+  if (input.abortSignal?.aborted === true) {
+    await cancelPromotedTasks(promotedTasks);
+    throwIfTurnAborted(input.abortSignal);
+  }
   return {
     policyApprovals: Object.fromEntries(
       executed.flatMap(({ call, executed }) =>
@@ -502,6 +578,7 @@ export async function executeInlineCalls(input: {
     ),
     approvals: executed.flatMap(({ approval }) => (approval === undefined ? [] : [approval])),
     parts: executed.flatMap(({ executed }) => executed.settled.map((result) => result.part)),
+    promotedTasks,
     signIns: executed.flatMap(({ executed }) =>
       executed.signIn === undefined ? [] : [executed.signIn],
     ),

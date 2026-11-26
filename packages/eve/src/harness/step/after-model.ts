@@ -18,7 +18,7 @@ import { failTurnForEffect, type Step, stepReference } from "#harness/step/conte
 import { complete, fail, suspendStep } from "#harness/session-machine/transitions.js";
 import { type ToolResultPart, withResult } from "#harness/session-machine/suspended-steps.js";
 import { clearTurnClientContextState } from "#harness/turn-client-context.js";
-import { collectWorkflowCalls } from "#harness/coordination.js";
+import { collectPromotedTasks, collectWorkflowCalls } from "#harness/coordination.js";
 import {
   createToolResultMessagePartFromToolError,
   isToolResultError,
@@ -106,8 +106,10 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
   };
 
   const approvalRequests = result.approvalRequests ?? [];
+  const promotedTasks = result.promotedTasks ?? [];
   const blockedCallIds = new Set([
     ...approvalRequests.map((ask) => ask.call.callId),
+    ...promotedTasks.map((promoted) => promoted.callId),
     ...extractToolResultCallIds(responseMessages),
   ]);
   const workflowToolCalls = ((result.toolCalls ?? []) as TypedToolCall<ToolSet>[])
@@ -128,6 +130,7 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
 
   if (
     workflowToolCalls.length > 0 ||
+    promotedTasks.length > 0 ||
     programCalls.length > 0 ||
     approvalRequests.length > 0 ||
     authorizationInterrupt
@@ -140,7 +143,12 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
       tools: input.catalog,
       turnId,
     });
-    step.session = changeHistory(dispatched.session, { extend: promptMessages });
+    const promoted = collectPromotedTasks({
+      promotedTasks,
+      session: dispatched.session,
+      turnId,
+    });
+    step.session = changeHistory(promoted.session, { extend: promptMessages });
     const endsTurn =
       !normalizedProviderHistory.outcomeEndsResponse &&
       (await stepEndsTurn(result, responseMessages, input.endsTurnTools));
@@ -148,7 +156,7 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
       ...(endsTurn && { endsTurn: true as const }),
       event: { sequence, stepIndex, turnId },
       messages: answerCallsThatWontRun(responseMessages, result),
-      tasks: dispatched.workflowRequests,
+      tasks: [...dispatched.workflowRequests, ...promoted.workflowRequests],
     };
     if (approvalRequests.length > 0) {
       await askStepApprovals(step, { ...parked, requests: approvalRequests, tools: input.catalog });

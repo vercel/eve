@@ -1,4 +1,8 @@
 import type { DeliverHookPayload, DeliverPayload, SessionAuthContext } from "#channel/types.js";
+import {
+  CONNECTION_EVENT_CHANNEL_KIND,
+  SUBSCRIPTION_CHANNEL_KIND,
+} from "#channel/delivery-metadata.js";
 import { DELIVERY_IDEMPOTENCY_WINDOW } from "#channel/delivery-idempotency.js";
 import { coalesceDeliveries } from "#harness/messages.js";
 import { ANONYMOUS_PRINCIPAL, principalOf } from "#execution/session/principal.js";
@@ -256,6 +260,8 @@ export function isSteeringDelivery(
   turn: SteeringTurn,
   options?: { readonly heldOnPerson?: boolean; readonly paused?: boolean },
 ): boolean {
+  if (delivery.deliveryMetadata?.some(({ channelKind }) => isEventChannelKind(channelKind)))
+    return false;
   const paused = options?.paused === true || options?.heldOnPerson === true;
   return (
     (options?.heldOnPerson === true || (delivery.turnPolicy ?? "steer") === "steer") &&
@@ -264,6 +270,10 @@ export function isSteeringDelivery(
       principalOf(delivery.auth) === turn.principal ||
       (!paused && joinsAnotherTurn(delivery)))
   );
+}
+
+function isEventChannelKind(channelKind: string): boolean {
+  return channelKind === SUBSCRIPTION_CHANNEL_KIND || channelKind === CONNECTION_EVENT_CHANNEL_KIND;
 }
 
 function joinsAnotherTurn(delivery: DeliverHookPayload): boolean {
