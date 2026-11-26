@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import { defineDynamic } from "#dynamic/definition.js";
+import { routedRunLive } from "#execution/hosts.js";
 import { readSessionEventHistory } from "#execution/session-event-stream.js";
 import { markMockModel } from "#internal/mock-model-identity.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
@@ -430,8 +431,13 @@ describe.each<TestSessionHostKind>(["in-process", "workflow"])(
           });
           await vi.waitFor(
             async () => {
-              const ended = await readAllChildEvents(child!.data.sessionId);
-              expect(ended.some((event) => event.type === "session.ended")).toBe(true);
+              expect(await isChildSessionEnded(child!.data.sessionId)).toBe(true);
+              const parentSoFar = await readAllChildEvents(run.runId);
+              expect(
+                filterEventsByType(parentSoFar, "task.ended").some(
+                  (event) => event.data.outcome === "cancelled",
+                ),
+              ).toBe(true);
             },
             { timeout: 10_000 },
           );
@@ -648,8 +654,141 @@ describe.each<TestSessionHostKind>(["in-process", "workflow"])(
         }
       });
     });
+
+    it("ends the child session when a direct child turn fails and handles empty follow-up messages without crashing the parent", async () => {
+      let failChild = false;
+      const model = markMockModel(
+        new MockLanguageModelV4({
+          doStream: async ({ prompt }) => {
+            const userTexts = prompt
+              .filter((m) => m.role === "user")
+              .map((m) => JSON.stringify(m.content))
+              .join("\n");
+            const raw = JSON.stringify(prompt);
+
+            if (userTexts.includes("CHILD_FAIL")) {
+              failChild = true;
+              throw new Error("child model crashed");
+            }
+            if (userTexts.includes("CHILD_OK_EMPTY")) return textStreamResult("READY");
+
+            if (userTexts.includes("EMPTY_FOLLOWUP")) {
+              const taskId = extractTaskId(raw, "empty-start");
+              if (!raw.includes("empty-start")) {
+                return toolCallsStreamResult([
+                  {
+                    input: JSON.stringify({ message: "CHILD_OK_EMPTY" }),
+                    toolCallId: "empty-start",
+                    toolName: "agent",
+                  },
+                ]);
+              }
+              if (!raw.includes("READY")) {
+                return toolCallsStreamResult([
+                  { input: "{}", toolCallId: "empty-wait", toolName: "eve__task_wait" },
+                ]);
+              }
+              if (!raw.includes("empty-send")) {
+                return toolCallsStreamResult([
+                  {
+                    input: JSON.stringify({ message: "   ", taskId }),
+                    toolCallId: "empty-send",
+                    toolName: "agent",
+                  },
+                ]);
+              }
+              return textStreamResult("EMPTY_HANDLED");
+            }
+
+            if (!raw.includes("fail-start")) {
+              return toolCallsStreamResult([
+                {
+                  input: JSON.stringify({ message: "CHILD_FAIL" }),
+                  toolCallId: "fail-start",
+                  toolName: "agent",
+                },
+              ]);
+            }
+            if (!raw.includes("fail-wait")) {
+              return toolCallsStreamResult([
+                { input: "{}", toolCallId: "fail-wait", toolName: "eve__task_wait" },
+              ]);
+            }
+            return textStreamResult("FAILED_CHILD_HANDLED");
+          },
+          modelId: "scripted",
+          provider: "eve-test",
+        }),
+      );
+
+      const runtime = await createTestRuntime({
+        agent: {
+          definition: defineAgent({
+            model: defineDynamic(() => ({ model, modelContextWindowTokens: 200_000 })),
+          }),
+          name: `direct-fail-empty-${host}`,
+        },
+      });
+
+      await runtime.run(async () => {
+        const run = await startTestSession(host, {
+          input: { message: "Run failing child." },
+          kind: "initial",
+          ownerDeploymentId: "dpl_direct",
+          serializedContext: buildSerializedContext({
+            auth: ALICE,
+            channelKind: "http",
+            continuationToken: `http:direct-fail-empty-${host}`,
+          }),
+        });
+        const stream = captureEvents(run);
+        try {
+          const t1 = await stream.nextUntil("turn 1", isTurnSettled);
+          expect(failChild).toBe(true);
+          expect(filterEventsByType(t1, "task.ended")).toContainEqual(
+            expect.objectContaining({ data: expect.objectContaining({ outcome: "failed" }) }),
+          );
+          const failedChild = filterEventsByType(t1, "child.opened")[0];
+          expect(failedChild).toBeDefined();
+          await vi.waitFor(
+            async () => {
+              expect(await isChildSessionEnded(failedChild!.data.sessionId)).toBe(true);
+            },
+            { timeout: 10_000 },
+          );
+
+          await run.runtime.dispatchSession({
+            command: { auth: ALICE, kind: "send", payload: { message: "EMPTY_FOLLOWUP" } },
+            sessionId: run.runId,
+          });
+          const t2 = await stream.nextUntil("turn 2", isTurnSettled);
+          expect(filterEventsByType(t2, "turn.settled").map((e) => e.data.outcome)).toEqual([
+            "completed",
+          ]);
+          expect(filterEventsByType(t2, "content.completed").map((e) => e.data.value)).toContain(
+            "EMPTY_HANDLED",
+          );
+          expect(filterEventsByType(t2, "task.ended")).toContainEqual(
+            expect.objectContaining({ data: expect.objectContaining({ outcome: "failed" }) }),
+          );
+        } finally {
+          stream.dispose();
+          await run.cancel();
+        }
+      });
+    });
   },
 );
+
+async function isChildSessionEnded(sessionId: string): Promise<boolean> {
+  if (!(await routedRunLive(sessionId))) return true;
+  try {
+    const events = await readAllChildEvents(sessionId);
+    return events.some((event) => event.type === "session.ended");
+  } catch {
+    return !(await routedRunLive(sessionId));
+  }
+}
 
 async function readAllChildEvents(sessionId: string): Promise<SessionStreamEvent[]> {
   const events: SessionStreamEvent[] = [];

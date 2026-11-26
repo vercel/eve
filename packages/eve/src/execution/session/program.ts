@@ -2,7 +2,7 @@ import { pendingSessionEnd } from "#definitions/continuation.js";
 import { settleControlDeliveryStep } from "#execution/session/settle-control-delivery-step.js";
 import type { ControlSettlement } from "#harness/facts.js";
 import { controlDeliveryOf } from "#execution/session/control-delivery.js";
-import type { ControlDelivery } from "#harness/types.js";
+import type { ControlDelivery, SettledTurn } from "#harness/types.js";
 import { STUB_CONTEXT_KEY, type StubScope } from "#tool-stubs/types.js";
 import { runServingToolStubs, type ToolStubHost } from "#execution/tool-stub-host.js";
 import type { DeliverHookPayload, SessionCapabilities, TurnCaller } from "#channel/types.js";
@@ -526,6 +526,22 @@ async function runSessionLoop(
     let action = initial.action;
     let timerStarted = !defersTimer;
     let timerFailure: Promise<never> | undefined;
+    let deferredDirectReply:
+      | { readonly caller: TurnCaller; readonly settled: SettledTurn }
+      | undefined;
+
+    const flushDeferredDirectReply = async (): Promise<void> => {
+      const pending = deferredDirectReply;
+      if (pending === undefined) return;
+      deferredDirectReply = undefined;
+      await notifyTurnCallerStep({
+        caller: pending.caller,
+        lifecycle: "parked",
+        sessionId: boot.sessionId,
+        settled: pending.settled,
+        totalUsage: sessionUsage(cursor.sessionState.snapshot.session),
+      });
+    };
 
     const armTimer = (): void => {
       if (timerStarted || sessionTimeout === undefined) return;
@@ -579,10 +595,22 @@ async function runSessionLoop(
         }
         if (action.settled !== undefined) {
           if (progress.caller !== undefined) {
+            if (progress.caller.directTask !== undefined && action.settled.isError === true) {
+              return {
+                kind: "terminal",
+                outcome: {
+                  kind: "ended",
+                  settled: action.settled,
+                },
+              };
+            }
             const coalescedFollowUp =
               progress.caller.directTask !== undefined &&
               queue.hasDirectTaskMessage(progress.caller.directTask.taskId);
-            if (!coalescedFollowUp) {
+            if (coalescedFollowUp) {
+              deferredDirectReply = { caller: progress.caller, settled: action.settled };
+            } else {
+              deferredDirectReply = undefined;
               const totalUsage =
                 progress.caller.directTask !== undefined
                   ? sessionUsage(cursor.sessionState.snapshot.session)
@@ -610,6 +638,17 @@ async function runSessionLoop(
         timerFailure === undefined
           ? await nextParkedActivity()
           : await Promise.race([nextParkedActivity(), timerFailure]);
+
+      if (next.kind === "turn") {
+        deferredDirectReply = undefined;
+      } else if (
+        next.kind !== "reset" &&
+        next.kind !== "end" &&
+        next.kind !== "closed" &&
+        next.kind !== "expired"
+      ) {
+        await flushDeferredDirectReply();
+      }
 
       switch (next.kind) {
         case "reset":

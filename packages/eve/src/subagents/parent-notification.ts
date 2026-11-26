@@ -54,36 +54,15 @@ export async function notifyTurnCallerStep(input: {
   }
 
   if (input.caller.directTask !== undefined && input.caller.replyTo.kind === "hook") {
-    const { directTask } = input.caller;
-    const from = {
-      callId: input.caller.callId,
-      input: {},
-      runId: input.sessionId,
-      sequence: directTask.sequence,
-      stepIndex: directTask.stepIndex,
-      taskId: directTask.taskId,
-      toolName: directTask.toolName,
-      turnId: directTask.turnId,
-    };
     const usage = input.totalUsage ?? input.settled.usage;
-    const message: WorkflowToolRunMessage =
-      input.settled.isError === true
-        ? {
-            from,
-            kind: "outcome",
-            result: {
-              error: `The agent's turn failed: ${toErrorMessage(input.settled.output)}\nThis task has ended; to retry, call ${directTask.toolName} without taskId.`,
-              status: "failed",
-            },
-            ...(usage !== undefined && { usage }),
-          }
-        : {
-            callIds: [input.caller.callId],
-            from,
-            kind: "reply",
-            output: parseJsonValue(input.settled.output),
-            ...(usage !== undefined && { usage }),
-          };
+    const message = directTaskTurnMessage({
+      caller: input.caller,
+      directTask: input.caller.directTask,
+      lifecycle: input.lifecycle,
+      sessionId: input.sessionId,
+      settled: input.settled,
+      usage,
+    });
     await resumeDirectTaskHook(input.caller.replyTo.token, message, input.caller.callId);
     return;
   }
@@ -118,26 +97,16 @@ export async function notifyCancelledTaskCallerStep(input: {
 
   if (input.caller.directTask !== undefined && input.caller.replyTo.kind === "hook") {
     const usage = input.totalUsage ?? input.usage;
-    if (usage === undefined) return;
-    const { directTask } = input.caller;
-    await resumeDirectTaskHook(
-      input.caller.replyTo.token,
-      {
-        from: {
-          callId: input.caller.callId,
-          input: {},
-          runId: input.sessionId,
-          sequence: directTask.sequence,
-          stepIndex: directTask.stepIndex,
-          taskId: directTask.taskId,
-          toolName: directTask.toolName,
-          turnId: directTask.turnId,
-        },
-        kind: "usage",
-        usage,
-      },
-      input.caller.callId,
-    );
+    const message = directTaskCancelledMessage({
+      caller: input.caller,
+      directTask: input.caller.directTask,
+      lifecycle: input.lifecycle,
+      sessionId: input.sessionId,
+      usage,
+    });
+    if (message !== undefined) {
+      await resumeDirectTaskHook(input.caller.replyTo.token, message, input.caller.callId);
+    }
     return;
   }
 
@@ -351,6 +320,88 @@ async function isCallbackNotPending(response: Response): Promise<boolean> {
     Reflect.get(body, "code") === REMOTE_CALLBACK_NOT_PENDING ||
     Reflect.get(body, "error") === REMOTE_CALLBACK_NOT_PENDING_MESSAGE
   );
+}
+
+function directTaskFrom(input: {
+  readonly callId: string;
+  readonly directTask: NonNullable<TurnCaller["directTask"]>;
+  readonly sessionId: string;
+}) {
+  return {
+    callId: input.callId,
+    runId: input.sessionId,
+    sequence: input.directTask.sequence,
+    stepIndex: input.directTask.stepIndex,
+    taskId: input.directTask.taskId,
+    toolName: input.directTask.toolName,
+    turnId: input.directTask.turnId,
+  };
+}
+
+function directTaskTurnMessage(input: {
+  readonly caller: TurnCaller;
+  readonly directTask: NonNullable<TurnCaller["directTask"]>;
+  readonly lifecycle: AgentTurnOutcome["kind"];
+  readonly sessionId: string;
+  readonly settled: SettledTurnNotification;
+  readonly usage?: TokenUsage;
+}): WorkflowToolRunMessage {
+  const from = directTaskFrom({
+    callId: input.caller.callId,
+    directTask: input.directTask,
+    sessionId: input.sessionId,
+  });
+  const usageField = input.usage === undefined ? {} : { usage: input.usage };
+  if (input.settled.isError === true) {
+    return {
+      from,
+      kind: "outcome",
+      result: {
+        error: `The agent's turn failed: ${toErrorMessage(input.settled.output)}\nThis task has ended; to retry, call ${input.directTask.toolName} without taskId.`,
+        status: "failed",
+      },
+      ...usageField,
+    };
+  }
+  if (input.lifecycle === "terminal") {
+    return {
+      from,
+      kind: "outcome",
+      result: { output: parseJsonValue(input.settled.output), status: "completed" },
+      ...usageField,
+    };
+  }
+  return {
+    callIds: [input.caller.callId],
+    from,
+    kind: "reply",
+    output: parseJsonValue(input.settled.output),
+    ...usageField,
+  };
+}
+
+function directTaskCancelledMessage(input: {
+  readonly caller: TurnCaller;
+  readonly directTask: NonNullable<TurnCaller["directTask"]>;
+  readonly lifecycle?: AgentTurnOutcome["kind"];
+  readonly sessionId: string;
+  readonly usage?: TokenUsage;
+}): WorkflowToolRunMessage | undefined {
+  const from = directTaskFrom({
+    callId: input.caller.callId,
+    directTask: input.directTask,
+    sessionId: input.sessionId,
+  });
+  const usageField = input.usage === undefined ? {} : { usage: input.usage };
+  if (input.lifecycle === "terminal") {
+    return {
+      from,
+      kind: "outcome",
+      result: { reason: "The agent invocation was cancelled.", status: "cancelled" },
+      ...usageField,
+    };
+  }
+  return input.usage === undefined ? undefined : { from, kind: "usage", usage: input.usage };
 }
 
 async function resumeDirectTaskHook(

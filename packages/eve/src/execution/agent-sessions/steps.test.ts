@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   bundle: { graph: {} } as Record<string, unknown>,
   createSession: vi.fn(),
   dispatch: vi.fn(),
+  dispatchContinuation: vi.fn(),
   resolveSessionInbox: vi.fn(),
   resumeSessionStartHook: vi.fn(),
   resumeHook: vi.fn(),
@@ -35,6 +36,7 @@ vi.mock("#execution/workflow-runtime.js", async (importOriginal) => ({
     mocks.runtimeConfig = config;
     return { createSession: mocks.createSession };
   },
+  dispatchWorkflowContinuationCommand: mocks.dispatchContinuation,
   dispatchWorkflowSessionCommand: mocks.dispatch,
   startWorkflowOnCurrentDeployment: mocks.startWorkflow,
 }));
@@ -339,6 +341,20 @@ describe("commands to a session that opened without waiting", () => {
       'Agent "reviewer" can no longer receive messages; its session ended.',
     );
     expect(mocks.dispatch).toHaveBeenCalledOnce();
+  });
+
+  it("delivers through the continuation start hook when the child has not claimed its session inbox yet", async () => {
+    mocks.dispatch.mockResolvedValueOnce({ status: "session_not_active" });
+    mocks.resolveSessionInbox.mockResolvedValue({ sessionId: "child-1" });
+    mocks.dispatchContinuation.mockResolvedValueOnce({ sessionId: "child-1", status: "accepted" });
+
+    await expect(sendAgentSessionMessageStep(message)).resolves.toMatchObject({
+      sessionId: "child-1",
+    });
+
+    expect(mocks.dispatchContinuation).toHaveBeenCalledWith(
+      expect.objectContaining({ continuationToken: "child-continuation" }),
+    );
   });
 });
 

@@ -1,7 +1,6 @@
 import { getStepMetadata } from "#compiled/@workflow/core/index.js";
 import { WORKFLOW_CANCELLATION_SETTLE_MS } from "#execution/tools/workflow/cancellation-policy.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
-import { findSessionHookHolder } from "#execution/session-inbox/owner.js";
 import type { TaskRunAddress } from "#execution/tasks/table.js";
 import type { WorkflowToolRunControlMessage } from "#execution/tools/workflow/messages.js";
 import { isRunTargetGone } from "#shared/run-errors.js";
@@ -10,7 +9,7 @@ import { runtimeWait, storedProjection, turnPosition } from "#harness/session-ma
 import type { SessionStateMap } from "#harness/types.js";
 import {
   cancelRoutedRun,
-  installedDurableHost,
+  resolveRoutedSessionOwnerRunId,
   resumeRoutedHook,
   routedRunLive,
 } from "#execution/hosts.js";
@@ -76,14 +75,9 @@ function stepScopedId(fallback: string): string {
 }
 
 async function resolveOwnerRunId(run: TaskRunAddress): Promise<string> {
-  if (run.directAgent === undefined || installedDurableHost()?.name !== "workflow") {
-    return run.runId;
-  }
+  if (run.directAgent === undefined) return run.runId;
   try {
-    const holder = await findSessionHookHolder(
-      sessionInboxHookToken(run.directAgent.continuationToken),
-    );
-    return holder?.runId ?? run.runId;
+    return (await resolveRoutedSessionOwnerRunId(run.directAgent.continuationToken)) ?? run.runId;
   } catch {
     return run.runId;
   }

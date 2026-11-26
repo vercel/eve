@@ -4,7 +4,8 @@ import type { DeliverHookPayload } from "#channel/types.js";
 import { installDurableHost, type DurableHost } from "#execution/hosts.js";
 import type { AuthorizationCallbackPayload } from "#execution/session-inbox/inbox.js";
 import type { SessionLineStore } from "#execution/session-line-store.js";
-import { resumeSignInCallback } from "#execution/session-inbox/owner.js";
+import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
+import { findSessionHookHolder, resumeSignInCallback } from "#execution/session-inbox/owner.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
@@ -55,6 +56,8 @@ export const workflowHost: DurableHost = {
     await cancelRun(await getWorld(), runId, { cancelReason: reason });
   },
   lineStore: workflowLineStore,
+  resolveSessionOwnerRunId: async (continuationToken) =>
+    (await findSessionHookHolder(sessionInboxHookToken(continuationToken)))?.runId,
   createRuntime: (input) => createWorkflowRuntime(input),
   connectionEvents: {
     start: (binding, bundle, signal) => startConnectionEventOwner(binding, bundle, signal),

@@ -1,10 +1,12 @@
 import { SessionStrandedError } from "#channel/session-stranded-error.js";
 import { normalizeAgentMessage } from "#execution/agent-sessions/message.js";
 import {
+  agentSessionResetCommand,
   localAgentSendCommand,
   prepareLocalAgentSession,
   resolveAgentSessionStart,
 } from "#execution/agent-sessions/start.js";
+import { toErrorMessage } from "#shared/errors.js";
 import {
   sessionCommandHookToken,
   sessionInboxHookToken,
@@ -231,7 +233,6 @@ export async function sendToTask(
       stepIndex: input.batchEvent.stepIndex,
       turnId: input.batchEvent.turnId,
     });
-    const message = readAgentMessageInput(input);
     const deliveryId = `direct-agent:${session.sessionId}:${taskId}:${task.callId}:send`;
     const localAddress = {
       continuationToken: directAgent.continuationToken,
@@ -240,27 +241,28 @@ export async function sendToTask(
       nodeId: directAgent.nodeId,
       sessionId: record.run.runId,
     };
-    const command = localAgentSendCommand(
-      {
-        address: localAddress,
-        auth: input.auth,
-        context: input.agentContext,
-        directTask: {
-          sequence: input.batchEvent.sequence,
-          stepIndex: input.batchEvent.stepIndex,
-          taskId,
-          toolName: task.toolName,
-          turnId: input.batchEvent.turnId,
-        },
-        key: `${session.sessionId}:${taskId}`,
-        message,
-        replyTo: input.owner.inbox,
-      },
-      deliveryId,
-    );
     let acceptedSessionId: string | undefined;
     let sendFailure: string | undefined;
     try {
+      const message = readAgentMessageInput(input);
+      const command = localAgentSendCommand(
+        {
+          address: localAddress,
+          auth: input.auth,
+          context: input.agentContext,
+          directTask: {
+            sequence: input.batchEvent.sequence,
+            stepIndex: input.batchEvent.stepIndex,
+            taskId,
+            toolName: task.toolName,
+            turnId: input.batchEvent.turnId,
+          },
+          key: `${session.sessionId}:${taskId}`,
+          message,
+          replyTo: input.owner.inbox,
+        },
+        deliveryId,
+      );
       const sent = await input.directAgents.command(
         {
           address: localAddress,
@@ -275,13 +277,22 @@ export async function sendToTask(
         sendFailure = `Agent "${directAgent.name}" can no longer receive messages; its session ended.`;
       }
     } catch (error) {
-      if (!SessionStrandedError.is(error)) throw error;
-      sendFailure = `Agent "${directAgent.name}" can no longer receive messages: ${error.message}`;
+      sendFailure = SessionStrandedError.is(error)
+        ? `Agent "${directAgent.name}" can no longer receive messages: ${error.message}`
+        : toErrorMessage(error);
     }
     if (sendFailure !== undefined || acceptedSessionId === undefined) {
       const error =
         sendFailure ??
         `Agent "${directAgent.name}" can no longer receive messages; its session ended.`;
+      await input.directAgents
+        .commandLate(
+          record.run.runId,
+          agentSessionResetCommand(
+            `direct-agent:${session.sessionId}:${taskId}:${task.callId}:reset`,
+          ),
+        )
+        .catch(() => undefined);
       const settled = settleRemainingTaskCalls(recorded.table, taskId, { error, status: "failed" });
       const finished = finishTaskRun(settled.table, taskId, record.run.runId);
       return {
