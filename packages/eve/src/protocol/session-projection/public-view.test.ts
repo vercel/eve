@@ -2,6 +2,7 @@ import { expect, it, vi } from "vitest";
 import * as events from "#public/events/index.js";
 import { stampTestEvents } from "#internal/testing/events.js";
 import type { SessionEvent } from "#protocol/session-event.js";
+import type { JsonValue } from "#protocol/session-events/envelope.js";
 
 it("reads and folds snapshots produced by an independent module copy", async () => {
   const view = events.foldEvents(events.emptySessionView(), stampTestEvents(opening));
@@ -176,4 +177,42 @@ it.each([
     ] as SessionEvent[]),
   );
   expect(events.activity(view)).toMatchObject(activity);
+});
+
+it("reports a call's estimated token counts, also for a call that shares another call's output", () => {
+  const scope = { runId: "r", turnId: "turn_0" };
+  const requested = (callId: string, input: JsonValue): SessionEvent => ({
+    type: "call.requested",
+    scope,
+    data: {
+      callId,
+      owner: { runId: "r" },
+      capability: { kind: "tool", name: "lookup" },
+      input,
+      inputTokens: 5_000,
+    },
+  });
+  const view = events.foldEvents(
+    events.emptySessionView(),
+    stampTestEvents([
+      ...opening.slice(0, 3),
+      requested("small", { q: "a" }),
+      {
+        type: "call.settled",
+        data: { callId: "small", outcome: "completed", output: "ok", outputTokens: 1 },
+      },
+      requested("first", {}),
+      requested("second", {}),
+      {
+        type: "call.settled",
+        data: { callId: "first", outcome: "completed", output: "shared", outputTokens: 2 },
+      },
+      {
+        type: "call.settled",
+        data: { callId: "second", outcome: "completed", outputOf: { callId: "first" } },
+      },
+    ] as SessionEvent[]),
+  );
+  expect(events.call(view, "small")).toMatchObject({ inputTokens: 5_000, outputTokens: 1 });
+  expect(events.call(view, "second")).toMatchObject({ output: "shared", outputTokens: 2 });
 });

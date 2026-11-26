@@ -49,6 +49,10 @@ export type CallObservation = ObservationTiming & {
   readonly inputRef?: ValueReference;
   readonly output?: JsonValue;
   readonly outputRef?: ValueReference;
+  /** Estimated tokens of the input the model sent. */
+  readonly inputTokens?: number;
+  /** Estimated tokens of the output or error the model received. */
+  readonly outputTokens?: number;
   readonly outcome?: CallOutcome;
   readonly reason?: string;
   readonly clearedBy?: ClearedBy;

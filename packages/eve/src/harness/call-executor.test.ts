@@ -1,12 +1,15 @@
 import { eventsOf } from "#harness/publication.js";
 import { jsonSchema } from "ai";
-import { expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ApprovalStatus } from "#approval/definition.js";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
 import { executeInlineCalls } from "#harness/call-executor.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import { callRequested } from "#harness/call-facts.js";
+import type { SessionEvent } from "#protocol/session-event.js";
+import { estimateTokens } from "#harness/token-estimate.js";
 
 it.each([
   [undefined, "run"],
@@ -348,3 +351,109 @@ it.each([
     }
   },
 );
+
+describe("the tokens a call's facts estimate", () => {
+  const pixel =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==";
+
+  async function settledTokens(
+    tool: Partial<HarnessToolDefinition>,
+    toolInput: Record<string, unknown> = {},
+  ): Promise<number | undefined> {
+    const events: SessionEvent[] = [];
+    await executeInlineCalls({
+      abortSignal: undefined,
+      approvalMemory: { pending: [], remembered: {} },
+      beforeExecute: () => {},
+      excludedCallIds: new Set(),
+      messages: [],
+      publish: async (publication) => {
+        events.push(...eventsOf(publication));
+      },
+      toolCalls: [{ input: toolInput, toolCallId: "call-1", toolName: "t", type: "tool-call" }],
+      tools: new Map([
+        [
+          "t",
+          { name: "t", description: "T", inputSchema: jsonSchema({ type: "object" }), ...tool },
+        ],
+      ]),
+    });
+    const settled = events.find((event) => event.type === "call.settled");
+    return settled?.type === "call.settled" ? settled.data.outputTokens : undefined;
+  }
+
+  it("counts the text and the JSON the model receives, without the output wrapper", async () => {
+    expect(await settledTokens({ execute: () => "x".repeat(400) })).toBe(
+      estimateTokens("x".repeat(400)),
+    );
+    const json = { rows: [1, 2, 3], ok: true };
+    expect(await settledTokens({ execute: () => json })).toBe(estimateTokens(json));
+  });
+
+  it("counts the preview a tool sends in place of a large output, not the output", async () => {
+    const preview = "Saved 1 MB to /tmp/.eve/tool-results/out.json";
+    const tokens = await settledTokens({
+      execute: () => "y".repeat(1_000_000),
+      toModelOutput: () => ({ type: "text", value: preview }),
+    });
+    expect(tokens).toBe(estimateTokens(preview));
+    expect(tokens).toBeLessThan(50);
+  });
+
+  it("counts the media in a content output", async () => {
+    const withMedia = await settledTokens({
+      execute: () => ({}),
+      toModelOutput: () => ({
+        type: "content",
+        value: [
+          { type: "text", text: "Screenshot:" },
+          { type: "file", data: { type: "data", data: pixel }, mediaType: "image/png" },
+        ],
+      }),
+    });
+    const textOnly = await settledTokens({
+      execute: () => ({}),
+      toModelOutput: () => ({ type: "content", value: [{ type: "text", text: "Screenshot:" }] }),
+    });
+    expect(withMedia).toBeGreaterThan(textOnly ?? Number.POSITIVE_INFINITY);
+  });
+
+  it("counts the error text of a failed call", async () => {
+    const tokens = await settledTokens({
+      execute: () => {
+        throw new Error("quota exceeded for this account");
+      },
+    });
+    expect(tokens).toBe(estimateTokens("Error: quota exceeded for this account"));
+  });
+
+  it("counts the message, not the Error object, when output projection throws", async () => {
+    const message = "toModelOutput could not render this result for the model";
+    const tokens = await settledTokens({
+      execute: () => ({}),
+      toModelOutput: () => {
+        throw new Error(message);
+      },
+    });
+    expect(tokens).toBe(estimateTokens(message));
+  });
+
+  it("estimates a call's input and omits it when the input didn't validate", () => {
+    const action = {
+      callId: "c",
+      input: { path: "a.txt" },
+      kind: "tool-call",
+      toolName: "read",
+    } as const;
+    expect(callRequested({ action, owner: { runId: "r" } }).data.inputTokens).toBe(
+      estimateTokens({ path: "a.txt" }),
+    );
+    expect(
+      callRequested({
+        action,
+        inputError: { code: "INVALID_INPUT", message: "bad" },
+        owner: { runId: "r" },
+      }).data,
+    ).not.toHaveProperty("inputTokens");
+  });
+});

@@ -3,6 +3,7 @@ import type { ModelMessage } from "ai";
 import type { SubagentInteractionHookPayload } from "#channel/types.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import { callSettledFrom, callStarted } from "#harness/call-facts.js";
+import { estimateTokens } from "#harness/token-estimate.js";
 import {
   contextStarted,
   controlAdmitted,
@@ -357,19 +358,29 @@ export function settleTask(
   const { outcome } = input;
   const output = outcome.status === "completed" ? outcome.output : undefined;
   const first = input.calls[0]?.callId;
+  const error =
+    outcome.status === "failed" ? { code: "TASK_FAILED", message: outcome.error } : undefined;
   const settled = input.calls.map(({ callId }, index) =>
     fact("call.settled", {
       callId,
-      error:
-        outcome.status === "failed" ? { code: "TASK_FAILED", message: outcome.error } : undefined,
+      error,
       outcome: outcome.status === "cancelled" ? "interrupted" : outcome.status,
       output: index === 0 ? output : undefined,
+      outputTokens: taskOutputTokens(error, index === 0 ? output : undefined),
       outputOf:
         index > 0 && output !== undefined && first !== undefined ? { callId: first } : undefined,
       reason: outcome.status === "cancelled" ? (outcome.reason ?? "task-cancelled") : undefined,
     }),
   );
   return unchanged(view, settled);
+}
+
+function taskOutputTokens(
+  error: { readonly message: string } | undefined,
+  output: JsonValue | undefined,
+): number | undefined {
+  const value = error?.message ?? output;
+  return value === undefined ? undefined : estimateTokens(value);
 }
 
 export function endTask(

@@ -12,6 +12,7 @@ import { SKILL_ENTRY_NAME } from "#protocol/catalog-tools.js";
 import type { RuntimeActionRequest, RuntimeActionResult } from "#shared/action-types.js";
 import { callOutcomeOf } from "#harness/call-outcome.js";
 import { defined, fact } from "#harness/facts.js";
+import { estimateTokens } from "#harness/token-estimate.js";
 
 export function capabilityOf(
   action: RuntimeActionRequest,
@@ -58,6 +59,7 @@ export function callRequested(input: {
     capability: capabilityOf(action, input.label, input.hidden),
     input: inputError === undefined ? toJsonValue(action.input) : undefined,
     inputError,
+    inputTokens: inputError === undefined ? estimateTokens(action.input) : undefined,
     owner: input.owner,
   });
 }
@@ -75,6 +77,7 @@ export function callSettledFrom(
     readonly label?: string;
     readonly rejected?: boolean;
     readonly cause?: Cause;
+    readonly outputTokens?: number;
   } = {},
 ): FactOf<"call.settled"> {
   const { error, outcome } = callOutcomeOf(result);
@@ -86,6 +89,13 @@ export function callSettledFrom(
     outcome: rejected ? "rejected" : outcome,
     output: result.output === undefined ? undefined : toJsonValue(result.output),
     label: options.label,
+    outputTokens:
+      options.outputTokens ??
+      (error !== undefined
+        ? estimateTokens(error.message)
+        : result.output === undefined
+          ? undefined
+          : estimateTokens(result.output)),
   });
 }
 

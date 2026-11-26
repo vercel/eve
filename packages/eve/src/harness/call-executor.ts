@@ -25,6 +25,7 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { failedCall, TOOL_EXECUTION_DENIED_MESSAGE } from "#harness/approval-outcome.js";
 import { resolveToolCallInputObject } from "#harness/coordination.js";
 import { toolCallModelOutput } from "#harness/tool-call-io.js";
+import { estimateTokens } from "#harness/token-estimate.js";
 import { isInvalidToolCall } from "#harness/tool-call-input-errors.js";
 import { decideApproval, invokeTool, isRunnableTool, type RunnableTool } from "#harness/tools.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
@@ -311,6 +312,7 @@ export async function executeToolCall(
         }),
         {
           label: failed ? undefined : projectToolLabel(definition, "complete", args, output),
+          outputTokens: estimateTokens(modelOutput.value),
         },
       ),
     );
@@ -326,7 +328,9 @@ export async function executeToolCall(
     logError(log, "tool call failed", error, { toolName, toolCallId: callId });
     await input.beforeResult?.({ failure, invoked });
     const failed = failedCall({ callId, toolName, message: failure });
-    await input.publish(settleCall(failed.result));
+    await input.publish(
+      settleCall(failed.result, { outputTokens: estimateTokens(failure.message) }),
+    );
     return { settled: [{ part: failed.part }], toolResults };
   }
 }
