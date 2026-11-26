@@ -98,6 +98,7 @@ describe("package route", () => {
     const video = response();
     await handler({ query: { ref: "main", package: "eve-video" } }, video);
     expect(video.status).toHaveBeenCalledWith(404);
+    expect(video.setHeader).not.toHaveBeenCalled();
   });
 
   test("rejects pointers that redirect outside the package host", async () => {
@@ -109,7 +110,7 @@ describe("package route", () => {
       },
     });
     const res = response();
-    await handler({ query: { ref: "main" } }, res);
+    await handler({ query: { ref: "main", package: "eve-video" } }, res);
 
     expect(res.status).toHaveBeenCalledWith(404);
     expect(res.redirect).not.toHaveBeenCalled();

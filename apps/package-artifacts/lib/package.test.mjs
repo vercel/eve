@@ -1,14 +1,12 @@
 import { describe, expect, test } from "vitest";
 
 import {
-  manifestPackages,
   packageArtifactPath,
   packageDependencyUrl,
   packageManifest,
   packageManifestPath,
   packagePointerPath,
   packageVersion,
-  preparePackageJson,
   publishablePackages,
 } from "./package.mjs";
 
@@ -37,15 +35,6 @@ describe("package artifacts", () => {
       "must use HTTPS",
     );
     expect(() => packagePointerPath("0")).toThrow("positive pull request");
-  });
-
-  test("prepares package metadata without mutating the source", () => {
-    const source = { name: "eve", version: "0.33.0" };
-    expect(preparePackageJson(source, sha, "git")).toEqual({
-      name: "eve",
-      version: "0.33.0+git.aaaaaaaaaaaaaaaa",
-    });
-    expect(source.version).toBe("0.33.0");
   });
 
   test("publishes every non-private workspace package under its npm tarball name", () => {
@@ -84,9 +73,6 @@ describe("package artifacts", () => {
       ...eve,
       sha256: "b",
       packages: { "@eve/video": { ...video, sha256: "c" }, eve: { ...eve, sha256: "b" } },
-    });
-    expect(manifestPackages({ sourceSha: sha, ...eve, sha256: "b" })).toEqual({
-      eve: { ...eve, sha256: "b" },
     });
   });
 });

@@ -44,10 +44,13 @@ async function servePointer(ref, slug, request, response) {
   const manifest = parseManifest(await new Response(result.stream).text());
   if (manifest === undefined) return packageNotFound(response);
 
-  response.setHeader("Cache-Control", "public, max-age=60");
-  if (request.query.manifest === "1") return response.status(200).json(manifest);
+  if (request.query.manifest === "1") {
+    response.setHeader("Cache-Control", "public, max-age=60");
+    return response.status(200).json(manifest);
+  }
   const entry = findPackage(manifest, slug);
   if (entry === undefined) return packageNotFound(response);
+  response.setHeader("Cache-Control", "public, max-age=60");
   return response.redirect(302, entry.tarball);
 }
 
@@ -80,13 +83,9 @@ function parseManifest(source, expectedSha) {
   ) {
     return undefined;
   }
-  const packages = manifestPackages(manifest);
-  const valid =
-    packages !== null &&
-    typeof packages === "object" &&
-    Object.entries(packages).every(([name, entry]) =>
-      isValidPackage(name, entry, manifest.sourceSha),
-    );
+  const valid = Object.entries(manifestPackages(manifest)).every(([name, entry]) =>
+    isValidPackage(name, entry, manifest.sourceSha),
+  );
   return valid ? manifest : undefined;
 }
 

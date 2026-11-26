@@ -42,15 +42,11 @@ export function packageVersion(releaseVersion, sourceSha, channel = "main") {
   return `${releaseVersion}+${channel}.${sourceSha.slice(0, PACKAGE_VERSION_SHA_LENGTH)}`;
 }
 
-export function preparePackageJson(packageJson, sourceSha, channel) {
-  return { ...packageJson, version: packageVersion(packageJson.version, sourceSha, channel) };
-}
-
 export function publishablePackages(packageJsons) {
   const packages = packageJsons
     .filter((packageJson) => packageJson.private !== true)
     .map((packageJson) => ({ ...packageJson, slug: packageSlug(packageJson.name) }))
-    .sort((left, right) => left.name.localeCompare(right.name));
+    .sort((left, right) => (left.name < right.name ? -1 : 1));
   const slugs = new Set(packages.map(({ slug }) => slug));
   if (slugs.size !== packages.length) throw new Error("Package artifact names must be unique.");
   if (!slugs.has("eve")) throw new Error("The eve package must be publishable.");

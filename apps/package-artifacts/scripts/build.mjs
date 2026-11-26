@@ -14,7 +14,6 @@ import {
   packageManifestPath,
   packagePointerPath,
   packageVersion,
-  preparePackageJson,
   publishablePackages,
 } from "../lib/package.mjs";
 import { packPackage } from "../lib/pack.mjs";
@@ -34,38 +33,26 @@ if (target === undefined) {
 
 async function publishPackages({ sourceSha, ref, origin }) {
   const credentials = vercelOidcCredentials(process.env);
-  const packages = await readPublishablePackages();
+  const packages = (await readPublishablePackages()).map((pkg) => ({
+    ...pkg,
+    version: packageVersion(pkg.version, sourceSha, "git"),
+    tarball: packageDependencyUrl(origin, sourceSha, pkg.slug),
+  }));
+  const eve = packages.find(({ name }) => name === "eve");
   const originalEvePackageJson = await readFile(evePackageJsonPath, "utf8");
-  const preparedEvePackageJson = preparePackageJson(
-    JSON.parse(originalEvePackageJson),
-    sourceSha,
-    "git",
-  );
-  const env = {
-    ...process.env,
-    EVE_PACKAGE_DEPENDENCY_URL: packageDependencyUrl(origin, sourceSha, "eve"),
-  };
+  const env = { ...process.env, EVE_PACKAGE_DEPENDENCY_URL: eve.tarball };
 
   try {
-    await writeFile(evePackageJsonPath, `${JSON.stringify(preparedEvePackageJson, null, 2)}\n`);
-    await run(
-      "pnpm",
-      ["exec", "turbo", "run", "build", ...packages.map(({ name }) => `--filter=${name}`)],
-      env,
+    await writeFile(
+      evePackageJsonPath,
+      `${JSON.stringify({ ...JSON.parse(originalEvePackageJson), version: eve.version }, null, 2)}\n`,
     );
+    await run("pnpm", ["build"], env);
 
     const artifacts = [];
-    for (const { name, slug, version: releaseVersion, root } of packages) {
-      const version = packageVersion(releaseVersion, sourceSha, "git");
-      const tarball = await packPackage(root, version, env);
-      artifacts.push({
-        name,
-        slug,
-        version,
-        tarball: packageDependencyUrl(origin, sourceSha, slug),
-        bytes: tarball,
-        sha256: createHash("sha256").update(tarball).digest("hex"),
-      });
+    for (const pkg of packages) {
+      const bytes = await packPackage(pkg.root, pkg.version, env);
+      artifacts.push({ ...pkg, bytes, sha256: createHash("sha256").update(bytes).digest("hex") });
     }
     const manifest = packageManifest(sourceSha, artifacts);
 
