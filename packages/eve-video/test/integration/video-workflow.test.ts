@@ -156,7 +156,8 @@ function createHarness(
     ...(o.staged && { stagedInputKeys: o.staged }),
   };
   const deps: R.VideoWorkflowTaskDeps<Token> = {
-    async submit() {
+    async submit(this: unknown) {
+      eq(this, undefined);
       events.push("submit");
       if (o.submitError) throw o.submitError;
       return (
@@ -169,9 +170,18 @@ function createHarness(
         }
       );
     },
-    checkAndPersist: async () => (o.check ? o.check(checks++) : (checks++, doneRes())),
-    verifyAndRespondWebhook: async (req) => req.valid,
-    cleanup: async (keys) => void cleaned.push(keys),
+    async checkAndPersist(this: unknown) {
+      eq(this, undefined);
+      return o.check ? o.check(checks++) : (checks++, doneRes());
+    },
+    async verifyAndRespondWebhook(this: unknown, req: Token) {
+      eq(this, undefined);
+      return req.valid;
+    },
+    async cleanup(this: unknown, keys: readonly string[]) {
+      eq(this, undefined);
+      cleaned.push(keys);
+    },
     createWebhook: () => (whCalls++, events.push("createWebhook"), webhook),
     getWorkflowMetadata: () => ({ url: o.metadataUrl ?? "https://agent.example.com" }),
     sleep(d) {
@@ -234,7 +244,7 @@ describe("pre-flight gating before paid submission", () => {
       [{}, { storage: false }, /No video output destination/],
       [{ path: "o.mp4" }, { storage: false }, /requires an agent sandbox/],
       [{ start: "in/frame.png" }, {}, /requires an agent sandbox/],
-      [{ mode: "edit" }, {}, /requires "video"/],
+      [{ extend: true }, {}, /requires "video"/],
       [{ video: SRC, start: "https://a.test/f.png" }, {}, /cannot be combined/],
       [{ start: "in/empty.png" }, {}, /Media file is empty/, sb],
       [{ start: "in/big.png" }, { limits: { maxInputBytes: 16 } }, /exceeds maximum/, sb],
@@ -328,7 +338,6 @@ describe("video iteration routing across Grok, Seedance, and FLUX 3", () => {
     const editIn = {
       prompt: "Edit2",
       video: SRC,
-      mode: "edit" as const,
       duration: 8,
       aspectRatio: "9:16",
       resolution: "1080p",
@@ -342,7 +351,7 @@ describe("video iteration routing across Grok, Seedance, and FLUX 3", () => {
       deq(c.providerOptions, xaiOpts({ videoUrl: SRC }));
     }
 
-    await sub({ prompt: "Ext", video: SRC, mode: "extend", duration: 5 });
+    await sub({ prompt: "Ext", video: SRC, extend: true, duration: 5 });
     const c2 = f.startCalls[2];
     deq([c2.duration, c2.aspectRatio, c2.resolution], [5, "16:9", "1280x720"]);
     deq(c2.providerOptions, xaiOpts({ videoUrl: SRC, mode: "extend-video" }));
@@ -357,7 +366,7 @@ describe("video iteration routing across Grok, Seedance, and FLUX 3", () => {
     const fromKey = await sub({
       prompt: "Key",
       video: "videos/prior.mp4",
-      mode: "extend",
+      extend: true,
       duration: 4,
     });
     if (fromKey.kind !== "async") assert.fail();
@@ -389,19 +398,31 @@ describe("video iteration routing across Grok, Seedance, and FLUX 3", () => {
     const defaults = { aspectRatio: "16:9", resolution: "720p", duration: 5 };
     extension({ model: seed.model, storage, defaults });
 
-    await sub({ prompt: "Edit", video: SRC, mode: "edit", references: [`${C}/ref.png`] });
+    await sub({
+      prompt: "Edit",
+      video: SRC,
+      duration: 4,
+      aspectRatio: "16:9",
+      references: [`${C}/ref.png`],
+    });
     deq(seed.startCalls[0].inputReferences, [
       ref(SRC, "video/mp4"),
       ref(`${C}/ref.png`, "image/png"),
     ]);
-    eq(seed.startCalls[0].aspectRatio, "16:9");
+    deq(
+      [seed.startCalls[0].duration, seed.startCalls[0].aspectRatio, seed.startCalls[0].resolution],
+      [undefined, undefined, "1280x720"],
+    );
 
-    await sub({ prompt: "Ext", video: SRC, mode: "extend" });
-    deq([seed.startCalls[1].aspectRatio, seed.startCalls[1].resolution], [undefined, "1280x720"]);
+    await sub({ prompt: "Ext", video: SRC, extend: true });
+    deq(
+      [seed.startCalls[1].duration, seed.startCalls[1].aspectRatio, seed.startCalls[1].resolution],
+      [5, undefined, "1280x720"],
+    );
 
     const flux = mkAsync({ modelId: "bfl/flux-3-video", provider: "gateway" });
     extension({ model: flux.model, storage });
-    await sub({ prompt: "NoExt", video: `${C}/no-ext`, mode: "extend" });
+    await sub({ prompt: "NoExt", video: `${C}/no-ext`, extend: true });
     deq(flux.startCalls[0].inputReferences, [ref(`${C}/no-ext`, "video/mp4")]);
 
     const bigSb = mkSb({ "clips/big.mp4": H.createLargeMp4() });
@@ -569,7 +590,7 @@ describe("persistence, staging cleanup, labels, and approval", () => {
       /^Edit video with .* \(video: v\/a\.mp4\): "Twilight"$/,
     );
     assert.match(
-      promptFor({ prompt: "More", video: SRC, mode: "extend", duration: 5 }),
+      promptFor({ prompt: "More", video: SRC, extend: true, duration: 5 }),
       /^Extend video with .* \(video: https:\/\/cdn\.example\.com\/clip\.mp4, 5s\): "More"$/,
     );
 
@@ -666,9 +687,31 @@ describe("workflow steps and runVideoWorkflowTask state machine", () => {
     extension({ model: whModel.model, storage, webhook: "auto" });
     const whRes = await sub({ prompt: "WH" }, undefined, WH_URL);
     eq(whRes.kind === "async" && whRes.useWebhook, true);
+
+    const [prevEnv, prevProd] = [process.env.VERCEL_ENV, process.env.VERCEL_PROJECT_PRODUCTION_URL];
+    try {
+      process.env.VERCEL_ENV = "production";
+      process.env.VERCEL_PROJECT_PRODUCTION_URL = "prod-agent.vercel.app";
+      await sub(
+        { prompt: "ProdWH" },
+        undefined,
+        "https://prod-agent-abc123-team.vercel.app/.well-known/workflow/v1/webhook/tok1?x=1",
+      );
+      eq(
+        whModel.startCalls[1].webhookUrl,
+        "https://prod-agent.vercel.app/.well-known/workflow/v1/webhook/tok1?x=1",
+      );
+    } finally {
+      if (prevEnv === undefined) delete process.env.VERCEL_ENV;
+      else process.env.VERCEL_ENV = prevEnv;
+      if (prevProd === undefined) delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
+      else process.env.VERCEL_PROJECT_PRODUCTION_URL = prevProd;
+    }
+
     extension({ model: whModel.model, storage, webhook: "never" });
     const noWh = await sub({ prompt: "NoWH" }, undefined, WH_URL);
     eq(noWh.kind === "async" && noWh.useWebhook, false);
+    eq(whModel.startCalls[2].webhookUrl, undefined);
 
     await putFile(storage, "inputs/s1.png", H.PNG_BYTES, "image/png");
     await putFile(storage, "videos/keep.mp4");
@@ -723,7 +766,7 @@ describe("workflow steps and runVideoWorkflowTask state machine", () => {
     hFb.wakeSleep(0);
     await hFb.waitSleep(2);
     hFb.wakeSleep(1);
-    deq([(await pFb).progress[1].elapsedSeconds, hFb.disposed()], [60, 1]);
+    deq([(await pFb).progress[1].elapsedSeconds, hFb.disposed()], [20, 1]);
 
     const localOpts = { metadataUrl: "http://127.0.0.1:3000", useWebhook: false, autoSleep: true };
     const local = createHarness({

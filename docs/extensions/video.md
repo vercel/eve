@@ -29,7 +29,7 @@ Mounting at `agent/extensions/video.ts` adds the `video__generate` background wo
 
 Each `<mount>__generate` call runs as a `defineWorkflowTool({ task })` workflow run that returns a task receipt right away and delivers the finished video in a `<task_result>` message; the model can wait with `eve__task_wait` or cancel with `eve__task_cancel` (see [Tasks](/docs/tools/tasks)).
 
-- **Webhook-first (`webhook: "auto"`, default):** Uses `createWebhook({ respondWith: "manual" })` when the video model supports native terminal webhooks (such as Vercel AI Gateway models) and the host exposes a public `https://` webhook URL. Callbacks verify `x-ai-gateway-signature` (`401` on invalid signatures, switching to polling after 10 invalid deliveries; `204` on verified deliveries). A 60-second fallback poll runs alongside the webhook so jobs still finish if callbacks are blocked.
+- **Webhook-first (`webhook: "auto"`, default):** Uses `createWebhook({ respondWith: "manual" })` when the video model supports native terminal webhooks (such as Vercel AI Gateway models) and the host exposes a public `https://` webhook URL. Callbacks verify `x-ai-gateway-signature` (`401` on invalid signatures, switching to polling after 10 invalid deliveries; `204` on verified deliveries). A 20-second fallback poll runs alongside the webhook so jobs still finish if callbacks are blocked.
 - **Durable `sleep()` polling fallback:** Falls back automatically to durable `sleep()` polling (`poll.intervalMs`, default `5000` ms; `poll.timeoutMs`, default `600000` ms) in local `eve dev`, for direct provider models without native terminal webhooks (such as `@ai-sdk/google` or `@ai-sdk/klingai`), or when `webhook: "never"` is set.
 - **Single-step models:** Models that implement only `doGenerate` (without `doStart` and `doStatus`) complete inside a single `"use step"`.
 - **Payload boundary and cleanup:** Completed videos download and persist inside the same `"use step"` as the terminal status check so multi-megabyte video bytes never cross the Workflow step boundary. Large local inputs (> 180 KiB) stage to public HTTPS storage (`ttlDays: 1`) and are deleted in `finally`, including on cancel or timeout.
@@ -62,16 +62,16 @@ To expose more than one video model, mount `@eve/video` at separate paths (for e
 
 ## Iterate on a video
 
-To edit or extend a video produced earlier in the same session, call `<mount>__generate` again with `video` set to the earlier video's returned `url`, `storageKey` (when configured storage implements `get`, such as `localDisk()` or `inMemory()`), or sandbox `path`, alongside `mode`:
+To edit or extend a video produced earlier in the same session, call `<mount>__generate` again with `video` set to the earlier video's returned `url`, `storageKey` (when configured storage implements `get`, such as `localDisk()` or `inMemory()`), or sandbox `path`:
 
-- **`mode: "edit"` (default when `video` is provided):** modifies the existing video according to `prompt`.
-- **`mode: "extend"`:** continues the video from its last frame according to `prompt`.
+- **Default (edit in place):** omit `extend` to modify the existing video according to `prompt`. `@eve/video` omits `duration` and `aspectRatio` (including values from `defaults`) across all models so in-place edits match the source clip and don't trip provider parameter checks.
+- **Extend (`extend: true`):** continues the video from its last frame according to `prompt`, keeping `duration` for the extension segment.
 
-`video` cannot be combined with `start` or `end`, and `mode` requires `video`. `@eve/video` automatically translates `video` and `mode` to the active provider's native API:
+`video` cannot be combined with `start` or `end`, and `extend: true` requires `video`. `@eve/video` automatically translates `video` and `extend` to the active provider's native API:
 
-- **`spacexai/grok-imagine-video` (and direct xAI models):** forwards `video` via `providerOptions.xai.videoUrl` and sets `mode: "extend-video"` for extension. On edit, `duration`, `aspectRatio`, and `resolution` (including `defaults`) are omitted because Grok rejects them. Local bytes are auto-staged to a public `https://` URL when public HTTPS storage is configured; otherwise pass an `https://` URL.
-- **`bytedance/seedance-2.5` (and other Seedance models):** prepends `video` as the first entry of `inputReferences` (before any additional `references`) and omits `aspectRatio` (including from `defaults`) on `mode: "extend"`.
-- **`bfl/flux-3-video`, `topaz/*`, and other models:** prepends `video` as the first entry of `inputReferences` with explicit `mediaType`, staging local bytes over 180 KiB to public HTTPS storage for async models.
+- **`bytedance/seedance-2.5-flash` and `bytedance/seedance-2.5` (default):** prepends `video` as the first entry of `inputReferences` (before any additional `references`) and omits `aspectRatio` (including from `defaults`) on extensions as well as edits.
+- **`spacexai/grok-imagine-video` (and direct xAI models):** forwards `video` via `providerOptions.xai.videoUrl` and sets `mode: "extend-video"` when `extend: true`. On edit, `resolution` is also omitted because Grok rejects it. Local bytes are auto-staged to a public `https://` URL when public HTTPS storage is configured; otherwise pass an `https://` URL.
+- **`bfl/flux-3-video`, `topaz/*`, and other models:** prepends `video` as the first entry of `inputReferences` with explicit `mediaType`, staging large local inputs to public HTTPS storage on AI Gateway async models.
 - **Generation-only models (such as Google Veo):** iterate by generating a new take with a refined `prompt`, optionally reusing `seed`, `start`, `end`, or image `references`.
 
 ## Configure storage
@@ -231,22 +231,22 @@ Because `generate` is a `defineWorkflowTool`, configure `approval`, `defaults`, 
 
 ### Tool input parameters (`<mount>__generate`)
 
-| Parameter     | Type                 | Required | Description                                                                                                             |
-| ------------- | -------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `prompt`      | `string`             | Yes      | Visual description of the video to generate, or the edit or continuation to apply to `video`.                           |
-| `video`       | `string`             | No       | Existing video to edit or extend: a public `https://` URL, a `storageKey` from an earlier run, or a sandbox file path.  |
-| `mode`        | `"edit" \| "extend"` | No       | Operation applied to `video`: `"edit"` (default when `video` is set) modifies it; `"extend"` continues from last frame. |
-| `start`       | `string`             | No       | Opening frame image as a public `https://` URL or sandbox file path. Cannot be combined with `video`.                   |
-| `end`         | `string`             | No       | Closing frame image as a public `https://` URL or sandbox file path. Cannot be combined with `video`.                   |
-| `references`  | `string[]`           | No       | Up to 16 reference images, videos, or audio clips as public `https://` URLs or sandbox file paths.                      |
-| `duration`    | `number`             | No       | Target duration in seconds.                                                                                             |
-| `aspectRatio` | `string`             | No       | Aspect ratio such as `"16:9"`, `"9:16"`, `"1:1"`, or `"auto"`.                                                          |
-| `resolution`  | `string`             | No       | Output resolution: `"480p"`, `"720p"`, `"1080p"`, `"4k"`, or `"widthxheight"` such as `"1280x720"`.                     |
-| `audio`       | `boolean`            | No       | Generate synchronized audio alongside the video.                                                                        |
-| `n`           | `number`             | No       | Number of video variations to generate. Defaults to `1`; capped by `limits.maxVideosPerCall`.                           |
-| `fps`         | `number`             | No       | Target frame rate in frames per second.                                                                                 |
-| `seed`        | `number`             | No       | Integer seed for reproducible output when supported by the model.                                                       |
-| `path`        | `string`             | No       | Sandbox file path where generated videos are written.                                                                   |
+| Parameter     | Type       | Required | Description                                                                                                            |
+| ------------- | ---------- | -------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `prompt`      | `string`   | Yes      | Visual description of the video to generate, or the edit or continuation to apply to `video`.                          |
+| `video`       | `string`   | No       | Existing video to edit or extend: a public `https://` URL, a `storageKey` from an earlier run, or a sandbox file path. |
+| `extend`      | `boolean`  | No       | Continue from `video`'s last frame instead of editing in place. Requires `video`.                                      |
+| `start`       | `string`   | No       | Opening frame image as a public `https://` URL or sandbox file path. Cannot be combined with `video`.                  |
+| `end`         | `string`   | No       | Closing frame image as a public `https://` URL or sandbox file path. Cannot be combined with `video`.                  |
+| `references`  | `string[]` | No       | Up to 16 reference images, videos, or audio clips as public `https://` URLs or sandbox file paths.                     |
+| `duration`    | `number`   | No       | Target duration in seconds.                                                                                            |
+| `aspectRatio` | `string`   | No       | Aspect ratio such as `"16:9"`, `"9:16"`, `"1:1"`, or `"auto"`.                                                         |
+| `resolution`  | `string`   | No       | Output resolution: `"480p"`, `"720p"`, `"1080p"`, `"4k"`, or `"widthxheight"` such as `"1280x720"`.                    |
+| `audio`       | `boolean`  | No       | Generate synchronized audio alongside the video.                                                                       |
+| `n`           | `number`   | No       | Number of video variations to generate. Defaults to `1`; capped by `limits.maxVideosPerCall`.                          |
+| `fps`         | `number`   | No       | Target frame rate in frames per second.                                                                                |
+| `seed`        | `number`   | No       | Integer seed for reproducible output when supported by the model.                                                      |
+| `path`        | `string`   | No       | Sandbox file path where generated videos are written.                                                                  |
 
 ### Tool output (`GenerateVideoToolOutput`)
 

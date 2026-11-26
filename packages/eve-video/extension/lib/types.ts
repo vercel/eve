@@ -29,17 +29,14 @@ export interface VideoModelLike {
   }): PromiseLike<unknown>;
 }
 
-/** Operation applied to an input `video`: `"edit"` modifies it and `"extend"` continues from its last frame. */
-export type VideoEditMode = "edit" | "extend";
-
 /** Input parameters accepted by the video `generate` tool. */
 export interface GenerateVideoToolInput {
   /** Text description of the video to generate, or the edit or continuation to apply to `video`. */
   readonly prompt: string;
   /** Optional existing video to edit or extend (an `https://` URL, a `storageKey`, or a sandbox path). Cannot be combined with `start` or `end`. */
   readonly video?: string;
-  /** How to use `video`: `"edit"` (default when `video` is provided) modifies it; `"extend"` continues from its last frame. */
-  readonly mode?: VideoEditMode;
+  /** Continue from `video`'s last frame instead of editing it in place. Requires `video`. */
+  readonly extend?: boolean;
   /** Optional starting frame image as an HTTPS URL or sandbox file path. */
   readonly start?: string;
   /** Optional ending frame image as an HTTPS URL or sandbox file path. */

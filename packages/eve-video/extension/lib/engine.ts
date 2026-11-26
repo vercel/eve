@@ -74,17 +74,14 @@ export async function submitToolVideoJob(
     /^(?:spacexai|xai)(?:\.|$)/i.test(model.provider);
   const seedance =
     /^bytedance\/seedance/i.test(modelId) || /^bytedance(?:\.|$)/i.test(model.provider);
-  const editMode: t.VideoEditMode | undefined =
-    input.video !== undefined ? (input.mode ?? "edit") : undefined;
-  const omitGrok = grok && editMode === "edit";
+  const isEdit = input.video !== undefined && !input.extend;
+  const isExtend = input.video !== undefined && Boolean(input.extend);
   const { limits: lim, defaults: def } = config;
 
   const prompt = input.prompt.trim();
   if (!prompt) throw new Error("Video prompt must be a non-empty string.");
-  if (input.mode && input.video === undefined)
-    throw new Error('"mode" ("edit" or "extend") requires "video" to be provided.');
-  if (input.mode && input.mode !== "edit" && input.mode !== "extend")
-    throw new Error('Invalid "mode".');
+  if (input.extend && input.video === undefined)
+    throw new Error('"extend" requires "video" to be provided.');
   if (input.video !== undefined && (input.start !== undefined || input.end !== undefined))
     throw new Error('"video" cannot be combined with "start" or "end" frame images.');
   for (const k of ["video", "start", "end", "path"] as const)
@@ -114,18 +111,16 @@ export async function submitToolVideoJob(
     lim?.maxDurationSeconds !== undefined
       ? pos(lim.maxDurationSeconds, "maxDurationSeconds")
       : undefined;
-  const duration = omitGrok ? undefined : (input.duration ?? def?.duration);
+  const duration = isEdit ? undefined : (input.duration ?? def?.duration);
   if ((duration ?? input.duration) !== undefined)
     pos((duration ?? input.duration)!, "video duration");
   if (duration !== undefined && maxDur !== undefined && duration > maxDur)
     throw new Error(`Duration ${duration}s exceeds the configured maximum of ${maxDur}s.`);
 
   const ratioIn =
-    omitGrok || (seedance && editMode === "extend")
-      ? undefined
-      : (input.aspectRatio ?? def?.aspectRatio);
+    isEdit || (seedance && isExtend) ? undefined : (input.aspectRatio ?? def?.aspectRatio);
   const aspectRatio = ratioIn !== undefined ? media.normalizeAspectRatio(ratioIn) : undefined;
-  const resIn = omitGrok ? undefined : (input.resolution ?? def?.resolution);
+  const resIn = grok && isEdit ? undefined : (input.resolution ?? def?.resolution);
   const resolution =
     resIn !== undefined ? media.normalizeResolution(resIn, aspectRatio) : undefined;
   const fps = input.fps ?? def?.fps;
@@ -294,7 +289,7 @@ export async function submitToolVideoJob(
       ? {
           ...config.providerOptions?.xai,
           videoUrl: grokUrl,
-          ...(editMode === "extend" && { mode: "extend-video" }),
+          ...(isExtend && { mode: "extend-video" }),
         }
       : undefined;
     const callOptions: AiStartOpts = {
@@ -354,12 +349,7 @@ export async function submitToolVideoJob(
       config.webhook !== "never" &&
       typeof model.handleWebhookOption === "function" &&
       webhookUrlCandidate;
-    const webhookUrl = canHook
-      ? await media
-          .assertSafePublicUrl(webhookUrlCandidate, { resolveDns: false })
-          .then((u) => u.href)
-          .catch(() => undefined)
-      : undefined;
+    const webhookUrl = canHook ? await resolvePublicWebhookUrl(webhookUrlCandidate) : undefined;
     const res = await startVideo({ ...callOptions, ...(webhookUrl && { webhookUrl }) });
     const job = asRecord(asRecord(asRecord(res.providerMetadata)?.gateway)?.asyncJob);
     const [jobId, webhookSigningSecret] = [readStr(job?.jobId), readStr(job?.webhookSigningSecret)];
@@ -603,6 +593,22 @@ const usableType = (v: string | undefined) => {
   const n = v ? media.normalizeMediaType(v) : "";
   return n && n !== "application/octet-stream" ? n : undefined;
 };
+
+async function resolvePublicWebhookUrl(candidate: string): Promise<string | undefined> {
+  try {
+    const parsed = await media.assertSafePublicUrl(candidate, { resolveDns: false });
+    const prodHost =
+      process.env.VERCEL_ENV === "production"
+        ? process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim()
+        : undefined;
+    if (!prodHost) return parsed.href;
+    const prodBase = prodHost.includes("://") ? prodHost : `https://${prodHost}`;
+    const prodUrl = new URL(`${parsed.pathname}${parsed.search}`, prodBase);
+    return (await media.assertSafePublicUrl(prodUrl.href, { resolveDns: false })).href;
+  } catch {
+    return undefined;
+  }
+}
 
 function formatWarnings(warnings: readonly unknown[] | undefined): string[] {
   const out = new Set<string>();

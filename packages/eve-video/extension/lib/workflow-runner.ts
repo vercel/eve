@@ -4,7 +4,7 @@ import { FatalError, type WorkflowWebhookOptions } from "eve/workflow";
 import type * as t from "./types.ts";
 import type { CheckAndPersistStepResult, SubmitVideoStepResult } from "./workflow-steps.ts";
 
-export const WEBHOOK_FALLBACK_POLL_MS = 60_000;
+export const WEBHOOK_FALLBACK_POLL_MS = 20_000;
 export const MAX_INVALID_WEBHOOK_DELIVERIES = 10;
 
 export interface VideoWebhookHandle<TRequest = unknown> extends AsyncIterable<TRequest> {
@@ -38,6 +38,15 @@ export async function* runVideoWorkflowTask<TRequest = unknown>(
   input: t.GenerateVideoToolInput,
   ctx: WorkflowStepToolContext,
 ): AsyncGenerator<t.GenerateVideoToolProgress, t.GenerateVideoToolOutput, void> {
+  const {
+    submit,
+    checkAndPersist,
+    verifyAndRespondWebhook,
+    cleanup,
+    createWebhook,
+    getWorkflowMetadata,
+    sleep,
+  } = deps;
   const abortError = () =>
     ctx.abortSignal.reason ??
     Object.assign(new Error("Video generation was aborted."), { name: "AbortError" });
@@ -61,13 +70,13 @@ export async function* runVideoWorkflowTask<TRequest = unknown>(
 
   try {
     let webhookUrl: string | undefined;
-    if (/^https:\/\//i.test(deps.getWorkflowMetadata().url.trim())) {
-      webhook = deps.createWebhook({ respondWith: "manual" });
+    if (/^https:\/\//i.test(getWorkflowMetadata().url.trim())) {
+      webhook = createWebhook({ respondWith: "manual" });
       await webhook.getConflict();
       webhookUrl = webhook.url;
     }
 
-    const submitted = await deps.submit(input, ctx, webhookUrl);
+    const submitted = await submit(input, ctx, webhookUrl);
     if (submitted.kind === "completed") return submitted.output;
 
     const { handle, intervalMs, timeoutMs } = submitted;
@@ -106,7 +115,7 @@ export async function* runVideoWorkflowTask<TRequest = unknown>(
         if (!pendingReq) void (pendingReq = iter.next()).catch(() => undefined);
         if (!pendingTimer) {
           pendingTimerMs = Math.min(fallbackMs, timeoutMs - elapsedMs);
-          void (pendingTimer = deps.sleep(pendingTimerMs).then(() => "timer" as const)).catch(
+          void (pendingTimer = sleep(pendingTimerMs).then(() => "timer" as const)).catch(
             () => undefined,
           );
         }
@@ -126,7 +135,7 @@ export async function* runVideoWorkflowTask<TRequest = unknown>(
             stopWebhook();
             continue;
           }
-          if (!(await deps.verifyAndRespondWebhook(race.entry.value, secret))) {
+          if (!(await verifyAndRespondWebhook(race.entry.value, secret))) {
             emitProgress = false;
             if (++invalid >= MAX_INVALID_WEBHOOK_DELIVERIES) stopWebhook();
             continue;
@@ -139,7 +148,7 @@ export async function* runVideoWorkflowTask<TRequest = unknown>(
             ? Math.floor(timeoutMs / 2)
             : Math.min(intervalMs, timeoutMs - elapsedMs);
         if (waitMs > 0) {
-          const timer = deps.sleep(waitMs);
+          const timer = sleep(waitMs);
           void timer.catch(() => undefined);
           if (
             (await Promise.race([timer.then(() => "timer" as const), abortPromise])) === "aborted"
@@ -149,7 +158,7 @@ export async function* runVideoWorkflowTask<TRequest = unknown>(
         }
       }
 
-      const settled = await deps.checkAndPersist(input, ctx, handle);
+      const settled = await checkAndPersist(input, ctx, handle);
       if (settled.status === "completed") {
         return warnings.length
           ? {
@@ -171,7 +180,7 @@ export async function* runVideoWorkflowTask<TRequest = unknown>(
     dispose();
     if (stagedKeys.length)
       try {
-        await deps.cleanup(stagedKeys);
+        await cleanup(stagedKeys);
       } catch {}
   }
 }

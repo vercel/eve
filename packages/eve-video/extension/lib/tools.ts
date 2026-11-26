@@ -8,17 +8,17 @@ import type * as t from "./types.ts";
 const str = () => z.string().trim().min(1);
 
 export const VIDEO_TOOL_DESCRIPTION =
-  "Generate a video from a text prompt, optionally guided by start/end frames or references, or edit/extend an existing video via video and mode. Only call when explicitly requested (video generation takes seconds to minutes and incurs per-second charges). Runs in the background as a task and delivers the result automatically; do not sleep, poll, or regenerate while it runs. Do not combine video with start or end.";
+  "Generate a video from a text prompt, optionally guided by start/end frames or references, or edit/extend an existing video via video (set extend: true to continue from the last frame). Only call when explicitly requested (video generation takes seconds to minutes and incurs per-second charges). Runs in the background as a task and delivers the result automatically; do not sleep, poll, or regenerate while it runs. Do not combine video with start or end.";
 
 export const generateVideoInputSchema = z.object({
   prompt: str().describe("Visual description of the video to generate, edit, or extend."),
   video: str()
     .optional()
     .describe("Existing video to edit/extend (https:// URL, storageKey, or sandbox path)."),
-  mode: z
-    .enum(["edit", "extend"])
+  extend: z
+    .boolean()
     .optional()
-    .describe('Operation for video: "edit" (default) or "extend". Requires video.'),
+    .describe("Continue from the video's last frame instead of editing in place. Requires video."),
   start: str().optional().describe("Opening frame image (https:// URL or sandbox path)."),
   end: str().optional().describe("Closing frame image (https:// URL or sandbox path)."),
   references: z
@@ -79,19 +79,17 @@ function formatApprovalPrompt(
   config: t.VideoExtensionConfig,
   { input }: ApprovalPromptContext<t.GenerateVideoToolInput>,
 ): string {
+  const isEdit = input.video !== undefined && !input.extend;
   const action =
-    input.video === undefined
-      ? "Generate video"
-      : input.mode === "extend"
-        ? "Extend video"
-        : "Edit video";
+    input.video === undefined ? "Generate video" : input.extend ? "Extend video" : "Edit video";
   const def = config.defaults;
-  const dur = input.duration ?? def?.duration;
+  const dur = isEdit ? undefined : (input.duration ?? def?.duration);
+  const ratio = isEdit ? undefined : (input.aspectRatio ?? def?.aspectRatio);
   const audio = input.audio ?? def?.audio;
   const details = [
     input.video !== undefined ? `video: ${input.video.trim()}` : "",
     dur !== undefined ? `${dur}s` : "",
-    input.aspectRatio ?? def?.aspectRatio ?? "",
+    ratio ?? "",
     input.resolution ?? def?.resolution ?? "",
     audio !== undefined ? (audio ? "audio" : "silent") : "",
     input.n !== undefined && input.n > 1 ? `${input.n} videos` : "",
