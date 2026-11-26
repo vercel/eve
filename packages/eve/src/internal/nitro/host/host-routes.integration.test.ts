@@ -7,7 +7,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { CompiledAgentManifest, CompiledChannelDefinition } from "#compiler/manifest.js";
 import type { ChannelRouteMethod } from "#public/definitions/channel.js";
-import { EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN } from "#protocol/routes.js";
+import {
+  EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN,
+  EVE_DEV_SESSION_ROUTE_PATH,
+} from "#protocol/routes.js";
 import type { ScheduleRegistration } from "#runtime/schedules/register.js";
 import { resolveWorkflowModulePath } from "#internal/application/package.js";
 import { createDevelopmentNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
@@ -23,6 +26,7 @@ const routeModules = vi.hoisted(() => ({
   dispatchScheduleTask: vi.fn(async (name: string) => `ran ${name}`),
   handleConnectionEventRequest: vi.fn(async () => new Response("connection")),
   handleDevScheduleDispatchRequest: vi.fn(async () => new Response("dev schedule")),
+  handleDevSessionCreateRequest: vi.fn(async () => new Response("dev session", { status: 202 })),
 }));
 
 vi.mock("#internal/nitro/routes/channel-dispatch.js", () => ({
@@ -34,6 +38,9 @@ vi.mock("#internal/nitro/routes/connection-events.js", () => ({
 }));
 vi.mock("#internal/nitro/routes/dev-schedule-dispatch.js", () => ({
   handleDevScheduleDispatchRequest: routeModules.handleDevScheduleDispatchRequest,
+}));
+vi.mock("#internal/nitro/routes/dev-session-create.js", () => ({
+  handleDevSessionCreateRequest: routeModules.handleDevSessionCreateRequest,
 }));
 vi.mock("#internal/nitro/routes/schedule-task.js", () => ({
   dispatchScheduleTask: routeModules.dispatchScheduleTask,
@@ -279,6 +286,23 @@ describe("rendered host routes", () => {
       artifactsConfig,
       expect.any(Request),
     );
+
+    const devSession = await host.fetch(EVE_DEV_SESSION_ROUTE_PATH, { method: "POST" });
+    expect(devSession.status).toBe(202);
+    expect(await devSession.text()).toBe("dev session");
+    expect(routeModules.handleDevSessionCreateRequest).toHaveBeenCalledWith(
+      artifactsConfig,
+      expect.any(Request),
+    );
+  });
+
+  it("omits the dev session route from production builds", async () => {
+    const host = await serve({ mode: "production" });
+
+    const response = await host.fetch(EVE_DEV_SESSION_ROUTE_PATH, { method: "POST" });
+
+    expect(response.status).toBe(404);
+    expect(routeModules.handleDevSessionCreateRequest).not.toHaveBeenCalled();
   });
 
   it("serves the workflow route from the bundle beside its handler for every method", async () => {

@@ -632,6 +632,94 @@ describe("the conversation", () => {
     expect(conversation.view.deliveries.d_0).not.toHaveProperty("history");
   });
 
+  it("renders structured imported tool parts without populating live call rows", () => {
+    const conversation = new Conversation();
+    const events: readonly SessionEvent[] = [
+      { data: {}, type: "session.started" },
+      { data: { deliveryId: "d_0" }, type: "delivery.admitted" },
+      {
+        data: { cause: { deliveryId: "d_0" }, follows: null, turnId },
+        scope: { turnId },
+        type: "turn.started",
+      },
+      {
+        data: {
+          deliveryId: "d_0",
+          history: [
+            {
+              id: "u1",
+              parts: [{ text: "Is T-1 open?", type: "text" }],
+              role: "user",
+              text: "Is T-1 open?",
+            },
+            {
+              id: "a1",
+              parts: [
+                { text: "Checking T-1.", type: "text" },
+                {
+                  input: { id: "T-1" },
+                  name: "lookup_ticket",
+                  output: { status: "open" },
+                  type: "tool",
+                },
+                { error: "Timed out", name: "list_notes", type: "tool" },
+                { text: "T-1 is open.", type: "text" },
+              ],
+              role: "assistant",
+              text: "Checking T-1.\nT-1 is open.",
+            },
+          ],
+          parts: [{ kind: "text", text: "Thanks." }],
+          turnId,
+        },
+        scope: { turnId },
+        type: "delivery.consumed",
+      },
+    ];
+    for (const [index, event] of events.entries()) {
+      conversation.observe(stampTestEvent(event, index));
+    }
+
+    expect(conversation.state.messages[0]).toEqual({
+      id: "d_0:imported:0",
+      metadata: { historyId: "u1", imported: true, status: "complete" },
+      parts: [{ state: "done", text: "Is T-1 open?", type: "text" }],
+      role: "user",
+    });
+    expect(conversation.state.messages[1]).toEqual({
+      id: "d_0:imported:1",
+      metadata: { historyId: "a1", imported: true, status: "complete" },
+      parts: [
+        { state: "done", stepIndex: 0, text: "Checking T-1.", type: "text" },
+        {
+          callId: "d_0:imported:1:tool:1",
+          input: { id: "T-1" },
+          kind: "tool",
+          label: "Lookup ticket",
+          name: "lookup_ticket",
+          output: { status: "open" },
+          state: "completed",
+          stepIndex: 0,
+          type: "tool",
+        },
+        {
+          callId: "d_0:imported:1:tool:2",
+          error: { code: "tool_error", message: "Timed out" },
+          input: {},
+          kind: "tool",
+          label: "List notes",
+          name: "list_notes",
+          state: "failed",
+          stepIndex: 0,
+          type: "tool",
+        },
+        { state: "done", stepIndex: 1, text: "T-1 is open.", type: "text" },
+      ],
+      role: "assistant",
+    });
+    expect(Object.keys(conversation.view.calls)).toEqual([]);
+  });
+
   it("shows only the turns of the current conversation", () => {
     const exchange = (id: string, follows: string | null, ask: string): SessionEvent[] => {
       const at = { runId: `run_${id}`, turnId: `turn_${id}` };

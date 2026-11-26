@@ -1,19 +1,23 @@
 import { createLogger } from "#internal/logging.js";
+import { createClientError } from "#client/client-error.js";
 import { getDeliveryReceipt } from "#client/delivery.js";
 import type { ClientSession } from "#client/session.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
-import type { CreateSessionOptions, SendTurnInput, SendTurnOptions } from "#client/types.js";
+import type { SendTurnInput, SendTurnOptions } from "#client/types.js";
 import type { Client } from "#client/client.js";
 import { AssertionCollector } from "#evals/assertions/collector.js";
 import { EvalSessionDriver, type EvalSessionStartedEvent } from "#evals/session.js";
 import { cleanupEvalSessions } from "#evals/session-cleanup.js";
-import type { EveEvalSessionResult } from "#evals/types.js";
-import { createEveSessionStubsRoutePath } from "#protocol/routes.js";
+import type { EveEvalSessionOptions, EveEvalSessionResult } from "#evals/types.js";
+import { createEveSessionStubsRoutePath, EVE_DEV_SESSION_ROUTE_PATH } from "#protocol/routes.js";
+import { isObject, readNonEmptyString } from "#shared/guards.js";
+import type { SessionHistoryMessage } from "#shared/session-history.js";
 
 const log = createLogger("eve.evals");
 
 export class EvalSessionManager {
   readonly #client: Client;
+  readonly #devRoutes: boolean;
   readonly #signal: AbortSignal | undefined;
   readonly #collector: AssertionCollector;
   readonly #onSessionStart: ((event: EvalSessionStartedEvent) => void) | undefined;
@@ -28,21 +32,24 @@ export class EvalSessionManager {
   constructor(input: {
     readonly client: Client;
     readonly collector?: AssertionCollector;
+    readonly devRoutes?: boolean;
     readonly onSessionStart?: (event: EvalSessionStartedEvent) => void;
     readonly signal?: AbortSignal;
   }) {
     this.#client = input.client;
+    this.#devRoutes = input.devRoutes ?? false;
     this.#collector = input.collector ?? new AssertionCollector();
     this.#onSessionStart = input.onSessionStart;
     this.#signal = input.signal;
   }
 
-  async session(options: CreateSessionOptions = {}): Promise<EvalSessionDriver> {
+  async session(options: EveEvalSessionOptions = {}): Promise<EvalSessionDriver> {
     const startedAt = Date.now();
-    const { session } = await this.#client.sessions.create({
-      ...options,
-      signal: options.signal ?? this.#signal,
-    });
+    const signal = options.signal ?? this.#signal;
+    const session =
+      options.history === undefined
+        ? (await this.#client.sessions.create({ ...options, signal })).session
+        : await this.#createDevSession({ ...options, history: options.history, signal });
     const created = { startedAt, notReadyMs: 0, acceptedAt: Date.now() };
     if (options.stubs !== undefined)
       this.#stubbedSessions.push({
@@ -53,6 +60,36 @@ export class EvalSessionManager {
     const driver = this.#register(session);
     driver.recordSend("prewarm", created);
     return driver;
+  }
+
+  async #createDevSession(
+    options: EveEvalSessionOptions & { readonly history: readonly SessionHistoryMessage[] },
+  ): Promise<ClientSession> {
+    if (!this.#devRoutes) {
+      throw new Error(
+        "t.session({ history }) requires a target with dev routes enabled (such as local `eve eval`). Production deployments do not expose fixed-history session creation.",
+      );
+    }
+    const headers = new Headers(options.headers);
+    headers.set("content-type", "application/json");
+    const body: Record<string, unknown> = { history: options.history };
+    if (options.stubs !== undefined) body.stubs = options.stubs;
+    const response = await this.#client.fetch(EVE_DEV_SESSION_ROUTE_PATH, {
+      body: JSON.stringify(body),
+      headers,
+      method: "POST",
+      signal: options.signal,
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      throw createClientError(response.status, text, response.headers);
+    }
+    const payload: unknown = await response.json();
+    const sessionId = isObject(payload) ? readNonEmptyString(payload.sessionId) : undefined;
+    if (sessionId === undefined) {
+      throw new Error("Dev session creation returned an unexpected response without a sessionId.");
+    }
+    return this.#client.sessions.attach(sessionId);
   }
 
   async verifyStubs(): Promise<void> {

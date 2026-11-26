@@ -146,7 +146,7 @@ export async function dispatchChannelWebSocketRequest(
   }
 }
 
-async function withDevelopmentVercelOidcContext<T>(
+export async function withDevelopmentVercelOidcContext<T>(
   config: NitroArtifactsConfig,
   request: Request,
   callback: () => Promise<T>,
@@ -250,7 +250,7 @@ async function buildRouteArgs(input: {
   });
 }
 
-async function resolveAcceptedDeploymentId(
+export async function resolveAcceptedDeploymentId(
   config: NitroArtifactsConfig,
 ): Promise<string | undefined> {
   const hosted = process.env.VERCEL_DEPLOYMENT_ID?.trim();
@@ -269,7 +269,7 @@ function validateDeploymentId(deploymentId: string): string {
   return deploymentId;
 }
 
-function readVercelRequestId(headers: Headers): string | undefined {
+export function readVercelRequestId(headers: Headers): string | undefined {
   const requestId = headers.get("x-vercel-id")?.trim();
   return requestId === "" ? undefined : requestId;
 }

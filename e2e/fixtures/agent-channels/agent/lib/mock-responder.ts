@@ -8,8 +8,8 @@ const SUBSCRIPTION = /^(SUBSCRIBE|STOP) (\S+)/u;
  * with its result. `HANDOFF-DELEGATED <ref>` asks the root copy to call `hand_off`, then replies
  * with the copy's result. `SUBSCRIBE <project>` subscribes to the project's `build.failed` events
  * with `eve__subscribe`, and `STOP <id>` stops a subscription with `eve__subscription_stop`; each
- * replies with `SUBSCRIPTION-RESULT` and the tool's output. Anything else echoes, or recalls the
- * latest reply for a code word.
+ * replies with `SUBSCRIPTION-RESULT` and the tool's output. Anything else echoes, recalls the
+ * latest reply for a code word, or lists the tool results in the prompt when asked for them.
  */
 export function respond(request: MockModelRequest): MockModelResponse | string {
   const handOff = [...request.userMessages]
@@ -17,12 +17,16 @@ export function respond(request: MockModelRequest): MockModelResponse | string {
     .map((message) => HANDOFF.exec(message.replace(/^[\s\S]*Caller message:\s*/u, "")))
     .find((match) => match !== null);
   if (handOff != null) return respondToHandOff(request, handOff[1]!, handOff[2]!);
-  const { lastUserMessage, messages } = request;
+  const { lastUserMessage, messages, toolResults } = request;
   const subscription = SUBSCRIPTION.exec(
     lastUserMessage?.replace(/^[\s\S]*Caller message:\s*/u, "") ?? "",
   );
   if (subscription !== null)
     return respondToSubscription(request, subscription[1]!, subscription[2]!);
+  if (lastUserMessage?.includes("tool results")) {
+    const results = toolResults.map(({ isError, name, output }) => ({ isError, name, output }));
+    return `Mock reply: ${JSON.stringify(results)}`;
+  }
   return lastUserMessage?.includes("code word")
     ? `Mock reply: ${[...messages].reverse().find((message) => message.role === "assistant")?.text ?? ""}`
     : `Mock reply: ${lastUserMessage ?? ""}`;

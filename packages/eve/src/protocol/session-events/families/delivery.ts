@@ -1,7 +1,16 @@
 import { z } from "#compiled/zod/index.js";
 
-import { conforming, envelopeOf, id, principal, userPart, known } from "../common.js";
-import type { Envelope, Principal, UserPart } from "../envelope.js";
+import {
+  conforming,
+  envelopeOf,
+  id,
+  jsonObject,
+  jsonValue,
+  principal,
+  userPart,
+  known,
+} from "../common.js";
+import type { Envelope, JsonObject, JsonValue, Principal, UserPart } from "../envelope.js";
 
 /**
  * Where a delivery came from: a channel (with the schedule or hook that sent it), a control, or a
@@ -22,6 +31,37 @@ export interface DeliveryAdmittedData {
   readonly source?: DeliverySource;
 }
 
+/** A text part recorded on an {@link ImportedMessage}. */
+export interface ImportedTextPart {
+  readonly type: "text";
+  readonly text: string;
+}
+
+/**
+ * A completed tool call recorded on an {@link ImportedMessage}. eve did not run it, so the stream
+ * has no `call.*` facts for it. Carries either `output` or `error`.
+ */
+export type ImportedToolPart = {
+  readonly type: "tool";
+  readonly name: string;
+  /** The call's JSON object input. Absent when omitted on import, which the model reads as `{}`. */
+  readonly input?: JsonObject;
+} & (
+  | {
+      /** The result the model reads for a completed call. */
+      readonly output: JsonValue;
+      readonly error?: never;
+    }
+  | {
+      readonly output?: never;
+      /** The error message the model reads for a failed call. */
+      readonly error: string;
+    }
+);
+
+/** One structured part recorded on an {@link ImportedMessage}. */
+export type ImportedPart = ImportedTextPart | ImportedToolPart;
+
 /**
  * A message from conversation eve did not run, such as a transcript an app stored. It names no
  * turn or call, and records nothing eve ran.
@@ -30,8 +70,13 @@ export interface ImportedMessage {
   /** The app's own id for the message, when it gave one. eve never reads it. */
   readonly id?: string;
   readonly role: "user" | "assistant";
-  /** The message's plain text. */
+  /**
+   * The message's plain text. When `parts` is present, holds the message's text parts joined by
+   * newlines, or `""` for a tool-only assistant entry.
+   */
   readonly text: string;
+  /** Ordered structured parts when the message was imported with `parts`. */
+  readonly parts?: readonly ImportedPart[];
 }
 
 /** The payload of `delivery.consumed`: a turn took in a delivery and what the person sent. */
@@ -86,8 +131,38 @@ const deliverySource = conforming<DeliverySource>()(
   ]),
 );
 
+const importedTextPart = conforming<ImportedTextPart>()(
+  z.object({ text: z.string(), type: z.literal("text") }),
+);
+
+const importedToolPart = conforming<ImportedToolPart>()(
+  z.union([
+    z.object({
+      error: z.never().optional(),
+      input: jsonObject.optional(),
+      name: z.string(),
+      output: jsonValue,
+      type: z.literal("tool"),
+    }),
+    z.object({
+      error: z.string(),
+      input: jsonObject.optional(),
+      name: z.string(),
+      output: z.never().optional(),
+      type: z.literal("tool"),
+    }),
+  ]),
+);
+
+const importedPart = conforming<ImportedPart>()(z.union([importedTextPart, importedToolPart]));
+
 const importedMessage = conforming<ImportedMessage>()(
-  z.object({ id: z.string().optional(), role: z.enum(["user", "assistant"]), text: z.string() }),
+  z.object({
+    id: z.string().optional(),
+    parts: z.array(importedPart).optional(),
+    role: z.enum(["user", "assistant"]),
+    text: z.string(),
+  }),
 );
 
 export const deliverySchemas = {

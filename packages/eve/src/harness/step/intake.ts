@@ -8,6 +8,7 @@ import {
   createFrameworkUserMessage,
   createImportedHistoryMessages,
   createUserMessage,
+  followsToolResults,
   frameworkMessageKindForStepInput,
   type HarnessModelMessage,
   normalizeMessage,
@@ -130,8 +131,9 @@ export async function prepareTurnInput(
     (clientContext ?? storedClientContext?.messages)?.map((content) =>
       createFrameworkUserMessage("context.instruction", content),
     ) ?? [];
+  const imported = createImportedHistoryMessages(input?.history ?? [], step.session.history);
   const messages: HarnessModelMessage[] = [
-    ...createImportedHistoryMessages(input?.history ?? []),
+    ...imported,
     ...(input?.context ?? []).map((entry) =>
       anchorToTurn(createFrameworkUserMessage("context.instruction", entry), turnId),
     ),
@@ -142,6 +144,10 @@ export async function prepareTurnInput(
     content !== undefined && !options.consumedMessage
       ? await stageAttachmentsToSandbox(userContentOf(content))
       : undefined;
+  const hasUserMessage = staged !== undefined && kind === undefined;
+  if (hasUserMessage && followsToolResults(imported)) {
+    messages.splice(imported.length, 0, { content: TOOL_RESULT_BOUNDARY, role: "assistant" });
+  }
   if (staged !== undefined) {
     if (isContinuation(step, input)) {
       messages.push(
@@ -160,7 +166,7 @@ export async function prepareTurnInput(
   return {
     clientContext,
     ephemeral,
-    hasUserMessage: staged !== undefined && kind === undefined,
+    hasUserMessage,
     message: staged as HarnessStepInput["message"],
     messages,
     storedClientContext,

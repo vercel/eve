@@ -56,7 +56,7 @@ const SESSION_STREAM_HEARTBEAT_MS = 10_000;
 const SESSION_STREAM_LEASE_MS = 60_000;
 const SESSION_VERSION_CHECK_TIMEOUT_MS = 5_000;
 
-function rejectUnknownFields(
+export function rejectUnknownFields(
   payload: Record<string, unknown>,
   fields: readonly string[],
 ): Response | undefined {

@@ -3,6 +3,7 @@ import { z } from "#compiled/zod/index.js";
 import type {
   Cause,
   ErrorInfo,
+  JsonObject,
   JsonValue,
   Principal,
   Scope,
@@ -51,6 +52,8 @@ export const jsonValue: z.ZodType<JsonValue> = z.lazy(() =>
     z.record(z.string(), jsonValue),
   ]),
 );
+
+export const jsonObject: z.ZodType<JsonObject> = z.record(z.string(), jsonValue);
 
 export const scope = conforming<Scope>()(
   z.object({

@@ -8,7 +8,10 @@ import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
 import { normalizeRoutePattern } from "#compiler/channel-route-plan.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import type { ChannelRouteMethod } from "#public/definitions/channel.js";
-import { EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN } from "#protocol/routes.js";
+import {
+  EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN,
+  EVE_DEV_SESSION_ROUTE_PATH,
+} from "#protocol/routes.js";
 import { connectionEventRoute } from "#runtime/subscriptions/path.js";
 import { createVercelScheduleName } from "#internal/nitro/host/vercel-schedule-name.js";
 import type { ScheduleRegistration } from "#runtime/schedules/register.js";
@@ -57,6 +60,7 @@ type HostRoute =
       readonly connectionName: string;
     }
   | { readonly kind: "development-schedule"; readonly method: "POST"; readonly path: string }
+  | { readonly kind: "development-session"; readonly method: "POST"; readonly path: string }
   | {
       readonly kind: "schedule-consumer";
       readonly method: "POST";
@@ -119,11 +123,18 @@ export function createHostRouteTable(input: HostRouteTableInput): HostRouteTable
     });
   }
   if (development) {
-    routes.push({
-      kind: "development-schedule",
-      method: "POST",
-      path: EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN,
-    });
+    routes.push(
+      {
+        kind: "development-schedule",
+        method: "POST",
+        path: EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN,
+      },
+      {
+        kind: "development-session",
+        method: "POST",
+        path: EVE_DEV_SESSION_ROUTE_PATH,
+      },
+    );
   }
   if (!development && input.vercel && hasVercelScheduleCollections(manifest)) {
     routes.push({
@@ -306,6 +317,16 @@ export async function renderHostRoutes(
           renderHostHandler({
             handlerExport: "handleDevScheduleDispatchRequest",
             modulePath: "src/internal/nitro/routes/dev-schedule-dispatch.ts",
+          }),
+          { method: route.method, route: route.path },
+        );
+        break;
+      case "development-session":
+        addVirtualHandler(
+          `route${route.path}`,
+          renderHostHandler({
+            handlerExport: "handleDevSessionCreateRequest",
+            modulePath: "src/internal/nitro/routes/dev-session-create.ts",
           }),
           { method: route.method, route: route.path },
         );

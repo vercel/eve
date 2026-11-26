@@ -108,7 +108,16 @@ function normalizeJsonValueCandidate(
       return INVALID_JSON_VALUE_CANDIDATE;
     }
 
-    normalized[key] = normalizedEntry;
+    if (key === "__proto__") {
+      Object.defineProperty(normalized, key, {
+        configurable: true,
+        enumerable: true,
+        value: normalizedEntry,
+        writable: true,
+      });
+    } else {
+      normalized[key] = normalizedEntry;
+    }
   }
 
   seen.delete(value);
@@ -118,6 +127,48 @@ function normalizeJsonValueCandidate(
 
 export function isJsonObjectValue(value: JsonValue | undefined): value is JsonObject {
   return value !== null && !Array.isArray(value) && typeof value === "object";
+}
+
+export type JsonBoundsViolation = "complexity" | "prototype" | "size";
+
+export function checkJsonBounds(
+  value: unknown,
+  limits: {
+    readonly maxBytes?: number;
+    readonly maxDepth?: number;
+    readonly maxNodes?: number;
+  } = {},
+): JsonBoundsViolation | undefined {
+  const maxBytes = limits.maxBytes ?? Infinity;
+  const maxDepth = limits.maxDepth ?? Infinity;
+  const maxNodes = limits.maxNodes ?? Infinity;
+  const pending: Array<{ readonly depth: number; readonly value: unknown }> = [{ depth: 0, value }];
+  let nodes = 1;
+  let size = 0;
+  while (pending.length > 0) {
+    const entry = pending.pop()!;
+    if (entry.depth > maxDepth) return "complexity";
+    if (typeof entry.value === "string") {
+      if (maxBytes < Infinity && (size += Buffer.byteLength(entry.value, "utf8")) > maxBytes) {
+        return "size";
+      }
+    } else if (Array.isArray(entry.value)) {
+      if (nodes + entry.value.length > maxNodes) return "complexity";
+      nodes += entry.value.length;
+      for (const child of entry.value) pending.push({ depth: entry.depth + 1, value: child });
+    } else if (entry.value !== null && typeof entry.value === "object") {
+      const record = entry.value as Record<string, unknown>;
+      for (const key of Object.keys(record)) {
+        if (key === "__proto__") return "prototype";
+        if (++nodes > maxNodes) return "complexity";
+        if (maxBytes < Infinity && (size += Buffer.byteLength(key, "utf8")) > maxBytes) {
+          return "size";
+        }
+        pending.push({ depth: entry.depth + 1, value: record[key] });
+      }
+    }
+  }
+  return undefined;
 }
 
 function isPlainObject(value: object): value is Record<string, unknown> {

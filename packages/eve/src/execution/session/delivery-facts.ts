@@ -7,6 +7,7 @@ import { userPartsOf } from "#harness/user-parts.js";
 import type { Principal } from "#protocol/session-events/envelope.js";
 import type { DeliverySource } from "#protocol/session-events/families/delivery.js";
 import type { DeliveryRow } from "#protocol/session-projection/tables.js";
+import { toImportedHistoryMessages } from "#shared/session-history.js";
 
 export interface DeliveryAdmission {
   readonly deliveries: readonly AdmittedDelivery[];
@@ -54,7 +55,10 @@ export function planAdmission(input: {
     if (status === undefined) deliveries.push({ deliveryId, principal, source });
     const consumed: ConsumedDelivery = defined({
       deliveryId,
-      history: (stepInput.history?.length ?? 0) > 0 ? stepInput.history : undefined,
+      history:
+        (stepInput.history?.length ?? 0) > 0
+          ? toImportedHistoryMessages(stepInput.history!)
+          : undefined,
       parts: stepInput.message === undefined ? [] : userPartsOf(stepInput.message),
     });
     const { answers, ...rest } = stepInput;

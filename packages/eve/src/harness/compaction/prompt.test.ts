@@ -24,6 +24,52 @@ describe("createCompactionPrompt", () => {
     expect(result.prompt).toContain(markerAfterTextLimit);
   });
 
+  it.each([
+    [
+      "error-text",
+      { type: "error-text" as const, value: "The notes service timed out." },
+      "Tool list_notes errored The notes service timed out.",
+    ],
+    [
+      "execution-denied",
+      { reason: "User skipped approval.", type: "execution-denied" as const },
+      'Tool list_notes returned {"reason":"User skipped approval.","type":"execution-denied"}',
+    ],
+  ])(
+    "renders %s tool results accurately in the compaction transcript",
+    (_kind, output, expected) => {
+      const result = createCompactionPrompt({
+        messages: [
+          {
+            content: [
+              {
+                input: { id: "T-1" },
+                toolCallId: "imported_0",
+                toolName: "list_notes",
+                type: "tool-call",
+              },
+            ],
+            role: "assistant",
+          },
+          {
+            content: [
+              {
+                output,
+                toolCallId: "imported_0",
+                toolName: "list_notes",
+                type: "tool-result",
+              },
+            ],
+            role: "tool",
+          },
+        ],
+        previousCheckpoint: undefined,
+      });
+
+      expect(result.prompt).toContain(expected);
+    },
+  );
+
   it("passes tool payloads to the summarizer raw so it can judge what matters", () => {
     const messages: ModelMessage[] = [
       {

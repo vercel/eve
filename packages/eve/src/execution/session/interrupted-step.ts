@@ -6,7 +6,13 @@ import { reconcileSessionContinuationToken } from "#execution/reconcile-session-
 import { resolveSessionStepResult } from "#execution/session/turn-step-result.js";
 import type { DurableStepResult } from "#execution/session/turn-step-types.js";
 import { interruptedAttemptNote, type InterruptedCall } from "#harness/interrupted-attempt.js";
-import { createImportedHistoryMessages } from "#harness/messages.js";
+import {
+  createImportedHistoryMessages,
+  followsToolResults,
+  frameworkMessageKindForStepInput,
+  normalizeMessage,
+  TOOL_RESULT_BOUNDARY,
+} from "#harness/messages.js";
 import { supersede } from "#harness/session-machine/cascade.js";
 import { isProgramCall, programsOf } from "#harness/session-machine/programs.js";
 import { rowOf, type Ref } from "#protocol/session-projection/tree.js";
@@ -195,9 +201,20 @@ export async function recoverInterruptedStep(input: {
 
   const { settledTurn } = attempt;
   if (settledTurn !== undefined && activeTurnIdOf(currentProjection(ctx)) === undefined) {
-    session = changeHistory(session, {
-      append: createImportedHistoryMessages(input.stepInput?.history ?? []),
-    });
+    const imported = createImportedHistoryMessages(input.stepInput?.history ?? [], session.history);
+    const hasUserMessage =
+      normalizeMessage(input.stepInput?.message) !== undefined &&
+      frameworkMessageKindForStepInput(input.stepInput) === undefined;
+    const prefix = [
+      ...(followsToolResults(session.history) && imported[0]?.role === "user"
+        ? [{ content: TOOL_RESULT_BOUNDARY, role: "assistant" } as const]
+        : []),
+      ...imported,
+    ];
+    if (hasUserMessage && followsToolResults([...session.history, ...prefix])) {
+      prefix.push({ content: TOOL_RESULT_BOUNDARY, role: "assistant" });
+    }
+    if (prefix.length > 0) session = changeHistory(session, { append: prefix });
     session = await preserveStoppedTurnMessage(ctx, session, input.stepInput);
     if (settledTurn.text !== undefined) {
       session = changeHistory(session, {

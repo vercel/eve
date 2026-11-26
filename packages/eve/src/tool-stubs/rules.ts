@@ -1,6 +1,6 @@
 import { z } from "#compiled/zod/index.js";
 import { CALL_TOOL_NAME, SEARCH_TOOL_NAME, SKILL_TOOL_NAME } from "#protocol/catalog-tools.js";
-import { parseJsonValue } from "#shared/json.js";
+import { checkJsonBounds, parseJsonValue } from "#shared/json.js";
 import { createStubValidator, validateStubConstraint } from "#tool-stubs/schema.js";
 import type { ToolStub } from "#tool-stubs/types.js";
 
@@ -55,22 +55,11 @@ export function parseToolStubs(value: unknown): readonly ToolStub[] {
 }
 
 function boundStubConfiguration(value: unknown): void {
-  const pending = [{ value, depth: 0 }];
-  let nodes = 0;
-  let size = 0;
-  while (pending.length > 0) {
-    const entry = pending.pop()!;
-    if (++nodes > 20_000 || entry.depth > 32) {
-      throw new Error("Tool stubs exceed the size or nesting limit.");
-    }
-    if (typeof entry.value === "string") size += entry.value.length;
-    if (entry.value !== null && typeof entry.value === "object") {
-      for (const [key, child] of Object.entries(entry.value)) {
-        if (key === "__proto__") throw new Error("Tool stubs cannot contain prototype keys.");
-        size += key.length;
-        pending.push({ value: child, depth: entry.depth + 1 });
-      }
-    }
-    if (size > 1_000_000) throw new Error("Tool stubs exceed the size or nesting limit.");
-  }
+  const violation = checkJsonBounds(value, {
+    maxBytes: 1_000_000,
+    maxDepth: 32,
+    maxNodes: 20_000,
+  });
+  if (violation === "prototype") throw new Error("Tool stubs cannot contain prototype keys.");
+  if (violation !== undefined) throw new Error("Tool stubs exceed the size or nesting limit.");
 }

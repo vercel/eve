@@ -189,7 +189,7 @@ export interface ValueReference {
   readonly withheld?: true;
 }
 
-export type { JsonValue } from "./json.js";
+export type { JsonObject, JsonValue } from "./json.js";
 
 /** One part of what a person sent. The kind set is open. */
 export type UserPart =
