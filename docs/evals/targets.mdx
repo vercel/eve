@@ -24,7 +24,7 @@ export default defineEval({
 ```
 
 - `t.target.fetch(path, init)` sends an [authenticated](#authentication) request to the target, to test channel and webhook routes.
-- `t.target.dispatchSchedule(id)` triggers a [schedule](../schedules) through the dev-only schedule route and returns the session ids it created. It throws unless the target has dev routes enabled. The local `eve eval` dev server and a deployment in development mode enable them. [`t.session({ history })`](./cases#starting-from-fixed-history) also requires dev routes.
+- `t.target.dispatchSchedule(id)` triggers a [schedule](../schedules) through the dev-only schedule route and returns the session ids it created. It throws unless the target has dev routes enabled. The local `eve eval` dev server and a deployment in development mode enable them. [`t.session({ history })`](./cases#starting-from-fixed-history) requires both dev routes and a local development caller.
 - `t.target.attach(sessionId, { startIndex? })` returns a handle for an existing session without making a request. `startIndex` sets where reading starts. An unknown or inaccessible session fails when you read it, not when you attach it.
 - `session.nextTurn()` reads and records the session's next turn. Its events feed both the session's assertions and the run-level assertions. Each read continues where the last one stopped.
 - `session.watch()` starts reading right away and returns a [live turn](./cases#in-flight-turns) with `waitForEvent(...)`, `cancel()`, and `result()`. Pass `{ until }` to stop at a matching event instead of the end of a turn, such as `context.settled` for a context change between turns.

@@ -146,7 +146,7 @@ export async function dispatchChannelWebSocketRequest(
   }
 }
 
-async function withDevelopmentVercelOidcContext<T>(
+export async function withDevelopmentVercelOidcContext<T>(
   config: NitroArtifactsConfig,
   request: Request,
   callback: () => Promise<T>,

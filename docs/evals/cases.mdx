@@ -184,7 +184,7 @@ Your first `session.send()` starts the first turn that runs. The model reads the
 
 Each entry takes a `role` of `"user"` or `"assistant"`, non-empty `text`, and an optional `id` unique within the list (up to 500 entries and 512 KiB). Tool calls, files, and reasoning aren't supported, and unknown fields are rejected rather than dropped. An invalid entry rejects `t.session()` with a `ClientError` naming the entry and broken rule, such as `history[1].role must be "user" or "assistant".`
 
-Fixed-history seeding works with zero channel auth changes when running `eve eval` locally. It requires a target with dev routes enabled (`t.target.capabilities.devRoutes`) and isn't included in production builds, so client requests can't supply history in production. On a target without dev routes, `t.session({ history })` throws before sending a request; call `t.skip(...)` first when an eval suite also runs against deployed targets. You can combine `history` with [`stubs`](./tool-stubs) on the same `t.session()` call.
+Fixed-history seeding works with zero channel auth changes when running `eve eval` locally. It requires a target with dev routes enabled (`t.target.capabilities.devRoutes`) and isn't included in production builds, so client requests can't supply history in production. On a target without dev routes, `t.session({ history })` throws before sending a request; call `t.skip(...)` first when an eval suite also runs against deployed targets. You can combine `history` with [`stubs`](./tool-stubs) on the same `t.session()` call when the caller is [permitted to replace tools](./tool-stubs#permit-tool-replacement).
 
 Choose the setup by what the eval holds fixed:
 

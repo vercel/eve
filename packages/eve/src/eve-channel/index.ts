@@ -89,6 +89,7 @@ import {
   type RemoteAgentBinding,
   resolveOnMessage,
   sessionCommandErrorResponse,
+  setEveChannelAuth,
   deliveryResponse,
   resolveTurnClientContext,
 } from "#eve-channel/support.js";
@@ -147,7 +148,7 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
     isLocalDevAuth,
   );
 
-  return defineChannel<undefined, EveEventContext>({
+  const channel = defineChannel<undefined, EveEventContext>({
     cors: input.cors,
     turnPolicy: input.turnPolicy,
     audience: (classifierInput) => {
@@ -792,4 +793,6 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
     fetchFile: input.fetchFile,
     uploadPolicy: input.uploadPolicy,
   });
+  setEveChannelAuth(channel, input.auth);
+  return channel;
 }
