@@ -165,6 +165,10 @@ describe("Slack channel subscriptions", () => {
       expect(() => slackEventDefinitions(["reaction_added", "nope"])).toThrow('"nope"');
     });
 
+    it("throws for app_rate_limited, which Slack posts without an event_callback envelope", () => {
+      expect(() => slackEventDefinitions(["app_rate_limited"])).toThrow('"app_rate_limited"');
+    });
+
     it("types events as the names the app manifest uses", () => {
       slackChannel({
         experimental: {
@@ -542,6 +546,22 @@ describe("Slack channel subscriptions", () => {
       });
       await expect(subscribe()).rejects.toThrow("`reactions:read`");
       await expect(subscribe()).rejects.toThrow("reinstall");
+    });
+
+    it.each([
+      ["channel_archive", "channels:read"],
+      ["channel_unarchive", "channels:read"],
+      ["group_archive", "groups:read"],
+      ["group_unarchive", "groups:read"],
+    ])("rejects an app with no %s scope, naming `%s`", async (event, scope) => {
+      const { subscribe } = subscribeTo({
+        auth: Response.json(
+          { ok: true, team_id: "T1" },
+          { headers: { "x-oauth-scopes": "chat:write" } },
+        ),
+        request: { ...REQUEST, event },
+      });
+      await expect(subscribe()).rejects.toThrow(`\`${scope}\``);
     });
 
     it("accepts any one of the scopes an event lists", async () => {

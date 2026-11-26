@@ -10,12 +10,13 @@ describe("SLACK_EVENT_SCOPES", () => {
     expect(deriveSlackEventScopes()).toEqual(SLACK_EVENT_SCOPES);
   });
 
-  it("covers every event type @slack/types has, except the ones Slack documents no scopes for and the ones only a user token receives", async () => {
+  it("covers every event type @slack/types has, except the ones Slack documents no scopes for, the ones only a user token receives and app_rate_limited, which Slack posts without an event_callback envelope", async () => {
     const { derivePayloadPaths } = await import("../../../../scripts/slack-event-scopes.mjs");
     const typed = Object.keys(derivePayloadPaths());
     const offered = new Set(Object.keys(SLACK_EVENT_SCOPES).map((name) => name.split(".")[0]));
     expect(typed.filter((name) => !offered.has(name)).sort()).toEqual([
       "app_deleted",
+      "app_rate_limited",
       "app_uninstalled_team",
       "invite_requested",
       "star_added",
