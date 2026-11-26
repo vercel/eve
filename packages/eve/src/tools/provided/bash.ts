@@ -4,7 +4,7 @@ import {
   executeBashOnSandbox,
   type BashInput,
 } from "#execution/sandbox/bash.js";
-import { frameworkTool } from "./framework-tool.js";
+import { frameworkTool, promotesToTask } from "./framework-tool.js";
 import { toolOutput, type ToolModelOutput } from "#tools/model-output.js";
 import { toolLabel } from "#tools/tool-label.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
@@ -106,7 +106,7 @@ export const bash: ToolDefinition<BashToolInput, BashToolOutput> = frameworkTool
   defineTool({
     label: { start: (input) => toolLabel("Run", input.command) },
     description: `Execute a shell command in the workspace. Pass an explicit \`timeout\` (up to ${BASH_MAX_YIELD_SECONDS}s) to kill on expiry, or omit / pass >${BASH_MAX_YIELD_SECONDS}s to wait up to ${BASH_YIELD_SECONDS}s then continue as a background task whose result arrives on completion. Returns stdout, then any stderr under \`[stderr]\` (or \`(no output)\`); non-zero exits end with \`[exit code: N]\`.`,
-    async execute(input, ctx) {
+    execute: promotesToTask(async (input, ctx) => {
       const bashInput = input as BashInput;
       const onTimeout =
         bashInput.timeout !== undefined &&
@@ -118,7 +118,7 @@ export const bash: ToolDefinition<BashToolInput, BashToolOutput> = frameworkTool
         abortSignal: ctx.abortSignal,
         onTimeout,
       });
-    },
+    }),
     inputSchema: BASH_INPUT_SCHEMA,
     outputSchema: BASH_OUTPUT_SCHEMA,
     toModelOutput: bashModelOutput,

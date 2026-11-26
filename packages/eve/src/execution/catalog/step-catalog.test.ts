@@ -293,9 +293,24 @@ describe("buildStepCatalog", () => {
     const OFFERED = true;
     const NOT_OFFERED = false;
 
-    it("are offered while a tool the session sees starts tasks, deferred or not", async () => {
+    it("are offered while a tool the session sees starts or promotes tasks, deferred or not", async () => {
       expect(await offeredFor({ tools: [inlineTool("add")] })).toEqual(NOT_OFFERED);
       expect(await offeredFor({ tools: [workflowTool("deploy_service")] })).toEqual(NOT_OFFERED);
+      expect(await offeredFor({ tools: [inlineTool("bash", { promotesToTask: true })] })).toEqual(
+        OFFERED,
+      );
+      expect(
+        await offeredFor({
+          session: CHILD,
+          tools: [inlineTool("bash", { deferred: true, promotesToTask: true })],
+        }),
+      ).toEqual(OFFERED);
+      expect(
+        await offeredFor({
+          session: CHILD,
+          tools: [inlineTool("bash", { availableInSubagents: false, promotesToTask: true })],
+        }),
+      ).toEqual(NOT_OFFERED);
       expect(
         await offeredFor({ tools: [workflowTool("research", "task", { deferred: true })] }),
       ).toEqual(OFFERED);

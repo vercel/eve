@@ -3,7 +3,9 @@ import {
   isFrameworkTool,
   frameworkTool,
   isInteractionOnly,
+  isPromotesToTask,
   markInteractionOnly,
+  markPromotesToTask,
 } from "#tools/provided/framework-tool.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { expectFunction, expectObjectRecord } from "#internal/authored-module.js";
@@ -96,7 +98,12 @@ export async function resolveToolDefinition(
       ...extractOptionalHooks(resolvedRecord, definition),
     };
     const marked = isFrameworkTool(resolvedRecord) ? frameworkTool(resolved) : resolved;
-    return isInteractionOnly(resolvedRecord.execute) ? markInteractionOnly(marked) : marked;
+    const withInteraction = isInteractionOnly(resolvedRecord.execute)
+      ? markInteractionOnly(marked)
+      : marked;
+    return isPromotesToTask(resolvedRecord.execute)
+      ? markPromotesToTask(withInteraction)
+      : withInteraction;
   } catch (error) {
     if (error instanceof ResolveAgentError) {
       throw error;

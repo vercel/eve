@@ -24,6 +24,7 @@ export interface HarnessToolDefinition {
   readonly frameworkTool?: boolean;
   readonly frameworkAction?: "task-cancel" | "task-wait";
   readonly interactionOnly?: boolean;
+  readonly promotesToTask?: boolean;
   readonly inputSchema: FlexibleSchema;
   readonly name: string;
   readonly approval?: Approval;

@@ -33,3 +33,22 @@ export function markInteractionOnly<T extends object>(definition: T): T {
   Object.defineProperty(definition, INTERACTION_ONLY, { enumerable: true, value: true });
   return definition;
 }
+
+const PROMOTES_TO_TASK = Symbol.for("eve.promotes-to-task");
+
+export function promotesToTask<F extends (...args: never[]) => unknown>(execute: F): F {
+  Object.defineProperty(execute, PROMOTES_TO_TASK, { value: true });
+  return execute;
+}
+
+export function isPromotesToTask(value: unknown): boolean {
+  return (
+    (typeof value === "function" || (typeof value === "object" && value !== null)) &&
+    Reflect.get(value, PROMOTES_TO_TASK) === true
+  );
+}
+
+export function markPromotesToTask<T extends object>(definition: T): T {
+  Object.defineProperty(definition, PROMOTES_TO_TASK, { enumerable: true, value: true });
+  return definition;
+}

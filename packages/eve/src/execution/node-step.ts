@@ -1,4 +1,8 @@
-import { isFrameworkTool, isInteractionOnly } from "#tools/provided/framework-tool.js";
+import {
+  isFrameworkTool,
+  isInteractionOnly,
+  isPromotesToTask,
+} from "#tools/provided/framework-tool.js";
 
 import type { Runtime, SessionCapabilities } from "#channel/types.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
@@ -210,6 +214,7 @@ function createRegisteredHarnessToolDefinition(input: {
     frameworkTool: isFrameworkTool(def) || def.owner.kind === "framework",
     inputSchema: def.inputSchema ?? UNSPECIFIED_INPUT_SCHEMA,
     ...(isInteractionOnly(def) && { interactionOnly: true }),
+    ...(isPromotesToTask(def) && { promotesToTask: true }),
     name: def.name,
     approval: def.approval,
     outputSchema: def.outputSchema,

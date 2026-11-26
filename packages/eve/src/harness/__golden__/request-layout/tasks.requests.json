@@ -119,7 +119,9 @@
       "read_file",
       "write_file",
       "edit_file",
-      "web_fetch"
+      "web_fetch",
+      "eve__task_wait",
+      "eve__task_cancel"
     ]
   },
   {
