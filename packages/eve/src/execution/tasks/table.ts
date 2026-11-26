@@ -258,6 +258,30 @@ export function settleTaskCalls(
   return { settled, table: next };
 }
 
+export function applyTaskReplyToTable(
+  table: TaskTable,
+  tasksById: Readonly<Record<string, { readonly status: string }>> | undefined,
+  message: {
+    readonly callIds: readonly string[];
+    readonly from: { readonly runId: string; readonly taskId?: string };
+    readonly output: JsonValue;
+  },
+): {
+  readonly record?: TaskRecord;
+  readonly settled: readonly TaskCall[];
+  readonly table: TaskTable;
+} {
+  const taskId = message.from.taskId;
+  if (taskId === undefined) return { settled: [], table };
+  if (tasksById?.[taskId]?.status === "ended") return { settled: [], table };
+  if (!isActiveTaskRun(table, taskId, message.from.runId)) return { settled: [], table };
+  const record = findTask(table, taskId);
+  if (record?.run?.runId !== message.from.runId) return { settled: [], table };
+  const outcome: TaskOutcome = { output: message.output, status: "completed" };
+  const settled = settleTaskCalls(table, { callIds: message.callIds, outcome, taskId });
+  return { record, settled: settled.settled, table: settled.table };
+}
+
 export function settleRemainingTaskCalls(
   table: TaskTable,
   taskId: string,

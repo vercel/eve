@@ -1,14 +1,23 @@
+import { MockLanguageModelV4 } from "ai/test";
 import { commitOf } from "#harness/session-machine/commit.js";
 import { expect, it, onTestFinished, vi } from "vitest";
 import { ContextContainer } from "#context/container.js";
 import { SessionIdKey } from "#context/keys.js";
+import { defineDynamic } from "#dynamic/definition.js";
 import {
   readInterruptedAttempt,
   recoverInterruptedStep,
 } from "#execution/session/interrupted-step.js";
 import { enterSessionProjection } from "#harness/session-machine/current.js";
 import type { HarnessSession } from "#harness/types.js";
-import type { SessionEvent } from "#protocol/session-event.js";
+import { markMockModel } from "#internal/mock-model-identity.js";
+import { createTestRuntime } from "#internal/testing/app-harness.js";
+import { toolCallStreamResult } from "#internal/testing/approval-resume.js";
+import { buildSerializedContext, captureEvents } from "#internal/testing/entry-test-helpers.js";
+import { filterEventsByType } from "#internal/testing/events.js";
+import { startTestSession } from "#internal/testing/test-session-hosts.js";
+import type { SessionEvent, SessionStreamEvent } from "#protocol/session-event.js";
+import { defineAgent } from "#public/definitions/agent.js";
 import { withOpenTurn, withPublished } from "#internal/testing/session-machine.js";
 
 it.each([
@@ -174,4 +183,131 @@ it("keeps a settled turn's imported history ahead of its message and reply", asy
     expect.objectContaining({ content: "Thanks, Alice here.", role: "user" }),
     { content: "Hi Bob.", role: "assistant" },
   ]);
+});
+
+it("does not duplicate folded pendingDispatch events when a turnStep fails and recovers", async () => {
+  let parentCalls = 0;
+  const model = markMockModel(
+    new MockLanguageModelV4({
+      doStream: async ({ prompt }) => {
+        const users = prompt
+          .filter((message) => message.role === "user")
+          .map((message) => JSON.stringify(message.content))
+          .join("\n");
+        if (users.includes("CHILD_WORK")) {
+          return {
+            stream: new ReadableStream({
+              start(controller) {
+                controller.enqueue({ id: "t", type: "text-start" });
+                controller.enqueue({ delta: "child ok", id: "t", type: "text-delta" });
+                controller.enqueue({ id: "t", type: "text-end" });
+                controller.enqueue({
+                  finishReason: { raw: "stop", unified: "stop" },
+                  type: "finish",
+                  usage: {
+                    inputTokens: { cacheRead: 0, cacheWrite: 0, noCache: 1, total: 1 },
+                    outputTokens: { reasoning: 0, text: 1, total: 1 },
+                  },
+                });
+                controller.close();
+              },
+            }),
+          };
+        }
+        parentCalls += 1;
+        if (parentCalls === 1) {
+          return toolCallStreamResult({
+            input: JSON.stringify({ message: "CHILD_WORK" }),
+            toolCallId: "call_agent_1",
+            toolName: "agent",
+          });
+        }
+        return {
+          stream: new ReadableStream({
+            start(controller) {
+              controller.enqueue({ id: "p", type: "text-start" });
+              controller.enqueue({ delta: "never reached", id: "p", type: "text-delta" });
+              controller.enqueue({ id: "p", type: "text-end" });
+              controller.enqueue({
+                finishReason: { raw: "stop", unified: "stop" },
+                type: "finish",
+                usage: {
+                  inputTokens: { cacheRead: 0, cacheWrite: 0, noCache: 1, total: 1 },
+                  outputTokens: { reasoning: 0, text: 1, total: 1 },
+                },
+              });
+              controller.close();
+            },
+          }),
+        };
+      },
+      modelId: "scripted",
+      provider: "eve-test",
+    }),
+  );
+
+  const runtime = await createTestRuntime({
+    agent: {
+      definition: defineAgent({
+        model: defineDynamic(() => ({ model, modelContextWindowTokens: 200_000 })),
+      }),
+      name: "folded-dispatch-recovery",
+    },
+  });
+
+  let parentSessionId: string | undefined;
+  let failedOnce = false;
+  const decoder = new TextDecoder();
+  await runtime.run(async () => {
+    const run = await startTestSession(
+      "in-process",
+      {
+        input: { message: "Start a subagent." },
+        kind: "initial",
+        ownerDeploymentId: "dpl_test",
+        serializedContext: buildSerializedContext({
+          channelKind: "http",
+          continuationToken: "http:folded-dispatch-recovery",
+        }),
+      },
+      {
+        stepFaults: {
+          maxRetries: 0,
+          failWrite(step, chunk) {
+            if (step.name !== "turnStep") return false;
+            const text = decoder.decode(chunk);
+            if (text.includes('"type":"task.started"')) {
+              parentSessionId = step.sessionId;
+              return false;
+            }
+            if (
+              parentSessionId !== undefined &&
+              step.sessionId === parentSessionId &&
+              !failedOnce &&
+              text.includes('"type":"model.started"')
+            ) {
+              failedOnce = true;
+              return true;
+            }
+            return false;
+          },
+        },
+      },
+    );
+    const stream = captureEvents(run);
+    try {
+      const events = await stream.nextUntil(
+        "failed parent turn",
+        (event: SessionStreamEvent) => event.type === "turn.settled",
+      );
+      expect(failedOnce).toBe(true);
+      expect(filterEventsByType(events, "task.started")).toHaveLength(1);
+      expect(filterEventsByType(events, "turn.settled").map((e) => e.data.outcome)).toEqual([
+        "failed",
+      ]);
+    } finally {
+      stream.dispose();
+      await run.cancel();
+    }
+  });
 });

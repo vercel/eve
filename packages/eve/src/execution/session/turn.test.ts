@@ -20,6 +20,7 @@ import type {
   TurnCaller,
 } from "#channel/types.js";
 import { dispatchCoordinationStep } from "#execution/workflow-host/dispatch-step.js";
+import { publishDispatchedCallsStep } from "#execution/coordination-dispatch-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import {
   type SessionStateValues,
@@ -2261,12 +2262,353 @@ function state(continuationToken: string): DurableSessionState {
 function callsPause(input: {
   readonly callIds: readonly string[];
   readonly dispatch?: boolean;
+  readonly pausedAtMs?: number;
   readonly taskToolCalls?: Extract<TurnPause, { on: "calls" }>["taskToolCalls"];
 }): TurnPause {
   return {
     callIds: input.callIds,
     dispatch: input.dispatch ?? true,
     on: "calls",
+    ...(input.pausedAtMs !== undefined && { pausedAtMs: input.pausedAtMs }),
     taskToolCalls: input.taskToolCalls ?? [],
   };
 }
+
+describe("SessionExecution folded turn-step commits", () => {
+  it("folds immediate dispatch publication into the next turnStep instead of calling publishDispatchedCallsStep", async () => {
+    vi.mocked(publishDispatchedCallsStep).mockReset();
+    const pending = {
+      executing: [],
+      refused: [],
+      started: [
+        {
+          callId: "call-1",
+          kind: "agent" as const,
+          name: "research",
+          taskId: "research-1",
+          turnId: "turn_0",
+        },
+      ],
+    };
+    vi.mocked(dispatchCoordinationStep)
+      .mockReset()
+      .mockImplementation(
+        stepWork(async (input) => ({
+          pending,
+          results: [
+            {
+              callId: "call-1",
+              isError: false,
+              kind: "tool-result" as const,
+              output: "Started task research-1.",
+              toolName: "research",
+            },
+          ],
+          serializedContext: input.serializedContext,
+          sessionState: input.sessionState,
+        })),
+      );
+    let secondInput: TurnStepInput["input"];
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockImplementationOnce(
+        turnStepWork(async (input) => ({
+          action: "paused",
+          ...callsPause({ callIds: ["call-1"], dispatch: true }),
+          serializedContext: input.serializedContext,
+          sessionState: input.sessionState,
+        })),
+      )
+      .mockImplementationOnce(
+        turnStepWork(async (input) => {
+          secondInput = input.input;
+          return {
+            action: "parked",
+            serializedContext: input.serializedContext,
+            sessionState: input.sessionState,
+          };
+        }),
+      );
+
+    const execution = createExecution({ inbox: idleInbox(), sessionState: state("") });
+    await execution.runTurn(undefined);
+
+    expect(publishDispatchedCallsStep).not.toHaveBeenCalled();
+    expect(secondInput?.pendingDispatch).toEqual(pending);
+    expect(secondInput?.runtimeResults?.results).toHaveLength(1);
+  });
+
+  it("flushes publishDispatchedCallsStep before waiting on a blocking call or aborting", async () => {
+    vi.mocked(publishDispatchedCallsStep)
+      .mockReset()
+      .mockImplementation(async () => ({ stateDelta: {} }));
+    const pending = {
+      executing: [{ callId: "hold-call" }],
+      refused: [],
+      started: [],
+    };
+    vi.mocked(dispatchCoordinationStep)
+      .mockReset()
+      .mockImplementation(
+        stepWork(async (input) => ({
+          pending,
+          results: [],
+          serializedContext: input.serializedContext,
+          sessionState: input.sessionState,
+        })),
+      );
+    const control = createTurnControl();
+    const inbox = idleInbox();
+    vi.mocked(inbox.next).mockImplementationOnce(async () => {
+      control.cancellation.abort();
+      return { deliveryId: "cancel-1", kind: "cancel" };
+    });
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockImplementationOnce(
+        turnStepWork(async (input) => ({
+          action: "paused",
+          ...callsPause({ callIds: ["hold-call"], dispatch: true }),
+          serializedContext: input.serializedContext,
+          sessionState: input.sessionState,
+        })),
+      );
+
+    const execution = createExecution({ inbox, sessionState: stateWithBlockingRun() });
+    await expect(execution.runTurn(undefined, { control })).resolves.toMatchObject({
+      cancelled: true,
+      kind: "park",
+    });
+
+    expect(publishDispatchedCallsStep).toHaveBeenCalledOnce();
+    expect(publishDispatchedCallsStep).toHaveBeenCalledWith(expect.objectContaining({ pending }));
+  });
+
+  it("folds a waking task reply into turnStep and falls back to applyRunMessagesStep when another task is still working", async () => {
+    vi.mocked(startTaskToolCallsStep).mockClear();
+    const first = createTask(readTaskTable(undefined), {
+      callId: "call-a",
+      kind: "agent",
+      name: "research",
+      resumable: true,
+      turnId: "turn_0",
+    });
+    const tableWithFirst = recordTaskRun(first.table, first.taskId, {
+      hookToken: "hook-a",
+      runId: "run-a",
+    });
+    const replyA: WorkflowToolRunMessage = {
+      callIds: ["call-a"],
+      from: {
+        callId: "call-a",
+        input: {},
+        runId: "run-a",
+        sequence: 1,
+        stepIndex: 0,
+        taskId: first.taskId,
+        toolName: "research",
+        turnId: "turn_0",
+      },
+      kind: "reply",
+      output: "answer A",
+    };
+
+    const inbox = { ...idleInbox(), whenPending: () => Promise.resolve() };
+    const waitReady = Promise.withResolvers<SessionInboxPayload>();
+    vi.mocked(inbox.next)
+      .mockImplementationOnce(() => waitReady.promise)
+      .mockImplementation(() => new Promise<never>(() => {}));
+    let secondInput: TurnStepInput["input"];
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockImplementationOnce(
+        turnStepWork(async (input) => {
+          setTimeout(() => waitReady.resolve(replyA), 0);
+          return {
+            action: "paused",
+            ...callsPause({
+              callIds: ["wait-1"],
+              dispatch: false,
+              pausedAtMs: 123_456,
+              taskToolCalls: [{ callId: "wait-1", kind: "eve__task_wait", timeoutMs: 30_000 }],
+            }),
+            serializedContext: input.serializedContext,
+            sessionState: input.sessionState,
+          };
+        }),
+      )
+      .mockImplementationOnce(
+        turnStepWork(async (input) => {
+          secondInput = input.input;
+          return {
+            action: "parked",
+            serializedContext: input.serializedContext,
+            sessionState: input.sessionState,
+          };
+        }),
+      );
+
+    const execution = createExecution({ inbox, sessionState: stateWithTasks(tableWithFirst) });
+    await execution.runTurn(undefined);
+
+    expect(startTaskToolCallsStep).not.toHaveBeenCalled();
+    expect(applyRunMessagesStep).not.toHaveBeenCalled();
+    expect(secondInput?.pendingTaskReplies).toEqual([replyA]);
+    expect(secondInput?.runtimeResults?.results).toEqual([
+      expect.objectContaining({ callId: "wait-1", toolName: "eve__task_wait" }),
+    ]);
+
+    const staleReply: WorkflowToolRunMessage = {
+      ...replyA,
+      from: { ...replyA.from, runId: "other-run" },
+    };
+    const inboxFallback = { ...idleInbox(), whenPending: () => Promise.resolve() };
+    const firstArrival = Promise.withResolvers<SessionInboxPayload>();
+    const secondArrival = Promise.withResolvers<SessionInboxPayload>();
+    vi.mocked(inboxFallback.next)
+      .mockImplementationOnce(() => firstArrival.promise)
+      .mockImplementationOnce(() => secondArrival.promise)
+      .mockImplementation(() => new Promise<never>(() => {}));
+    vi.mocked(applyRunMessagesStep).mockImplementation(async () => {
+      secondArrival.resolve(replyA);
+      return {
+        cancelled: false,
+        stateDelta: {},
+      };
+    });
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockImplementationOnce(
+        turnStepWork(async (input) => {
+          setTimeout(() => firstArrival.resolve(staleReply), 0);
+          return {
+            action: "paused",
+            ...callsPause({
+              callIds: ["wait-2"],
+              dispatch: false,
+              pausedAtMs: 123_456,
+              taskToolCalls: [{ callId: "wait-2", kind: "eve__task_wait", timeoutMs: 30_000 }],
+            }),
+            serializedContext: input.serializedContext,
+            sessionState: input.sessionState,
+          };
+        }),
+      )
+      .mockImplementationOnce(
+        turnStepWork(async (input) => ({
+          action: "parked",
+          serializedContext: input.serializedContext,
+          sessionState: input.sessionState,
+        })),
+      );
+
+    const executionFallback = createExecution({
+      inbox: inboxFallback,
+      sessionState: stateWithTasks(tableWithFirst),
+    });
+    await executionFallback.runTurn(undefined);
+
+    expect(applyRunMessagesStep).toHaveBeenCalledOnce();
+    expect(applyRunMessagesStep).toHaveBeenCalledWith(
+      expect.objectContaining({ messages: [staleReply] }),
+    );
+  });
+
+  it("skips startTaskToolCallsStep for cancel-only task batches even without pausedAtMs", async () => {
+    vi.mocked(startTaskToolCallsStep).mockClear();
+    const { table, taskId } = workingResearchTask();
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockImplementationOnce(
+        turnStepWork(async (input) => ({
+          action: "paused",
+          ...callsPause({
+            callIds: ["cancel-1"],
+            dispatch: false,
+            taskToolCalls: [{ callId: "cancel-1", kind: "eve__task_cancel", taskId }],
+          }),
+          serializedContext: input.serializedContext,
+          sessionState: input.sessionState,
+        })),
+      )
+      .mockImplementationOnce(
+        turnStepWork(async (input) => ({
+          action: "parked",
+          serializedContext: input.serializedContext,
+          sessionState: input.sessionState,
+        })),
+      );
+
+    const execution = createExecution({ inbox: idleInbox(), sessionState: stateWithTasks(table) });
+    await execution.runTurn(undefined);
+
+    expect(startTaskToolCallsStep).not.toHaveBeenCalled();
+  });
+
+  it("publishes a dispatched task call before a task_cancel in the same batch settles it", async () => {
+    vi.mocked(publishDispatchedCallsStep)
+      .mockReset()
+      .mockImplementation(async () => ({ stateDelta: {} }));
+    vi.mocked(cancelTasksStep).mockClear();
+    const { table, taskId } = workingResearchTask();
+    const pending = {
+      executing: [],
+      refused: [],
+      started: [
+        { callId: "send-1", kind: "tool" as const, name: "research", taskId, turnId: "turn_0" },
+      ],
+    };
+    vi.mocked(dispatchCoordinationStep)
+      .mockReset()
+      .mockImplementation(
+        stepWork(async (input) => ({
+          pending,
+          results: [
+            {
+              callId: "send-1",
+              isError: false,
+              kind: "tool-result" as const,
+              output: `Sent to task ${taskId}.`,
+              toolName: "research",
+            },
+          ],
+          serializedContext: input.serializedContext,
+          sessionState: input.sessionState,
+        })),
+      );
+    let secondInput: TurnStepInput["input"];
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockImplementationOnce(
+        turnStepWork(async (input) => ({
+          action: "paused",
+          ...callsPause({
+            callIds: ["send-1", "cancel-1"],
+            taskToolCalls: [{ callId: "cancel-1", kind: "eve__task_cancel", taskId }],
+          }),
+          serializedContext: input.serializedContext,
+          sessionState: input.sessionState,
+        })),
+      )
+      .mockImplementationOnce(
+        turnStepWork(async (input) => {
+          secondInput = input.input;
+          return {
+            action: "parked",
+            serializedContext: input.serializedContext,
+            sessionState: input.sessionState,
+          };
+        }),
+      );
+
+    const execution = createExecution({ inbox: idleInbox(), sessionState: stateWithTasks(table) });
+    await execution.runTurn(undefined);
+
+    expect(publishDispatchedCallsStep).toHaveBeenCalledOnce();
+    expect(cancelTasksStep).toHaveBeenCalledOnce();
+    expect(vi.mocked(publishDispatchedCallsStep).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(cancelTasksStep).mock.invocationCallOrder[0]!,
+    );
+    expect(secondInput?.pendingDispatch).toBeUndefined();
+  });
+});

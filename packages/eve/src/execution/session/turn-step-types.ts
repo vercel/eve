@@ -3,11 +3,17 @@ import type { DeliverHookPayload, TurnCaller } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { WithSessionStateDelta } from "#execution/session/state-delta.js";
 import type { TurnPause } from "#execution/session/pending-turn-state.js";
+import type { TaskRunMessage } from "#execution/tasks/steps.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
+import type { PendingDispatch } from "#harness/session-machine/transitions.js";
 import type { SettledTurn } from "#harness/types.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { SessionHandoverObservation } from "#execution/session-inbox/inbox.js";
+
+export type TaskReplyMessage = Extract<TaskRunMessage, { readonly kind: "reply" }> & {
+  readonly from: { readonly taskId: string };
+};
 
 export interface RuntimeActionResultStepInput {
   readonly acceptedAtMsByCallId?: Readonly<Record<string, number>>;
@@ -19,6 +25,8 @@ export interface TurnStepPayload {
   readonly control?: "clear" | "compact";
   readonly controlDelivery?: ControlDelivery;
   readonly delivery?: DeliverHookPayload;
+  readonly pendingDispatch?: PendingDispatch;
+  readonly pendingTaskReplies?: readonly TaskReplyMessage[];
   readonly runtimeResults?: RuntimeActionResultStepInput;
 }
 

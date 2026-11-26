@@ -333,17 +333,11 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
 
       needs(
         "retries",
-        kind.dispatchStep === undefined
-          ? "starts a task's run once when the turn step after its start is retried"
-          : "starts a task's run once when the step that reports it started is retried",
+        "starts a task's run once when the turn step after its start is retried",
         async () => {
           let reported = 0;
           let lostIn: string | undefined;
-          const { dispatchStep } = kind;
-          const loses = (step: CompletingStep) =>
-            dispatchStep === undefined
-              ? reported > 0 && step.name.includes("turnStep")
-              : step.name.includes(dispatchStep);
+          const loses = (step: CompletingStep) => reported > 0 && step.name.includes("turnStep");
           await withHost(
             {
               name: `${name}-task-retry`,
@@ -381,7 +375,7 @@ export function describeSessionHost(name: string, kind: SessionHostKind): void {
               await settled();
               expect(
                 lostIn,
-                `No ${dispatchStep ?? "turnStep"} completed after the task started, so none was retried.`,
+                "No turnStep completed after the task started, so none was retried.",
               ).toBe(sent.sessionId);
               expect(reported).toBe(1);
               const events = await recorded(runtime, result.sessionId);

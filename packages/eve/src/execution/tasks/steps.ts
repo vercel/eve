@@ -5,6 +5,7 @@ import {
   type DurableSessionState,
 } from "#execution/durable-session-store.js";
 import {
+  applyTaskReplyToTable,
   cancelTask,
   findTask,
   finishTaskRun,
@@ -14,7 +15,6 @@ import {
   readTaskTable,
   recordTaskRunUsage,
   settleRemainingTaskCalls,
-  settleTaskCalls,
   writeTaskTable,
   type TaskCall,
   type TaskOutcome,
@@ -103,13 +103,15 @@ export async function applyTaskRunMessage(
       break;
     }
     case "reply": {
-      if (findTask(table, taskId)?.run?.runId !== message.from.runId) break;
       ({ table, spend } = countTaskRunUsage(table, taskId, message));
       const outcome: TaskOutcome = { output: message.output, status: "completed" };
-      const record = findTask(table, taskId);
-      const settled = settleTaskCalls(table, { callIds: message.callIds, outcome, taskId });
-      table = settled.table;
-      settles.push(...taskSettled(record, settled.settled, outcome));
+      const applied = applyTaskReplyToTable(
+        table,
+        storedProjection(session.state).view?.tasks,
+        message,
+      );
+      table = applied.table;
+      settles.push(...taskSettled(applied.record, applied.settled, outcome));
       break;
     }
     case "usage":
