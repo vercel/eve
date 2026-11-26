@@ -39,17 +39,14 @@ export interface LocalDevScheduleStore {
   close(): void;
 }
 
-/** When `expression` next fires after `afterMs`, or `null` when it never fires again. */
 export function nextFireAtMs(expression: ScheduleExpression, afterMs: number): number | null {
   if (expression.type === "single") {
     const at = parseScheduleLocalDateTime(expression.at, expression.timezone);
     return at > afterMs ? at : null;
   }
-  const next = new Cron(
-    expression.cron,
-    { timezone: expression.timezone ?? "UTC" },
-    () => {},
-  ).nextRun(new Date(afterMs));
+  const next = new Cron(expression.cron, { timezone: expression.timezone ?? "UTC" }).nextRun(
+    new Date(afterMs),
+  );
   return next === null ? null : next.getTime();
 }
 
@@ -193,7 +190,6 @@ export function createLocalDevScheduleStore(options: {
   };
 }
 
-/** One store per database file, shared by every module copy in this process. */
 export function sharedLocalDevScheduleStore(dbPath: string): LocalDevScheduleStore {
   const stores: Map<string, LocalDevScheduleStore> = ((
     globalThis as { [STORES]?: Map<string, LocalDevScheduleStore> }

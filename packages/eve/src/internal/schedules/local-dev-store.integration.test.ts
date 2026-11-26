@@ -69,6 +69,16 @@ describe("nextFireAtMs", () => {
       nextFireAtMs({ type: "cron", cron: "0 9 * * *", timezone: "America/New_York" }, at),
     ).toBe(Date.parse("2026-09-28T13:00:00.000Z"));
   });
+
+  it("leaves no live timer behind when it computes a cron's next fire", () => {
+    const activeTimers = () =>
+      process.getActiveResourcesInfo().filter((r) => r === "Timeout").length;
+    const before = activeTimers();
+    for (let i = 0; i < 25; i += 1) {
+      nextFireAtMs({ type: "cron", cron: "* * * * *" }, Date.now());
+    }
+    expect(activeTimers()).toBe(before);
+  });
 });
 
 describe("local dev schedule store", () => {

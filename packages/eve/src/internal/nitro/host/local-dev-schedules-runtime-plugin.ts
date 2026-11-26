@@ -14,20 +14,16 @@ import {
   sharedLocalDevScheduleStore,
   type LocalDevScheduleClaim,
 } from "#internal/schedules/local-dev-store.js";
+import { createLocalDevScheduleDispatcher } from "#internal/schedules/local-dev-dispatch.js";
 import { startLocalDevScheduleTimer } from "#internal/schedules/local-dev-timer.js";
 import { DEVELOPMENT_WORKER_APP_ROOT_ENV } from "#internal/workflow/development-world-protocol.js";
 import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
 import { dispatchScheduledOccurrence } from "#runtime/schedules/dispatch-occurrence.js";
-import {
-  loadScheduleCollectionDefinition,
-  ScheduleCollectionNotDeployedError,
-} from "#runtime/schedules/load-collection.js";
+import { loadScheduleCollectionDefinition } from "#runtime/schedules/load-collection.js";
 import { parseSchedulePayload } from "#runtime/schedules/payload.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 
 const log = createLogger("schedule.local-dev");
-const MAX_ATTEMPTS = 3;
-const RETRY_DELAY_MS = 2_000;
 
 export default function installLocalDevSchedulesRuntimePlugin(nitroApp: {
   readonly hooks: { hook(name: "close", handler: () => void): unknown };
@@ -83,26 +79,6 @@ export default function installLocalDevSchedulesRuntimePlugin(nitroApp: {
     });
   };
 
-  const dispatch = async (claim: LocalDevScheduleClaim) => {
-    for (let attempt = 1; ; attempt++) {
-      try {
-        await deliver(claim);
-        return;
-      } catch (error) {
-        if (closed) return;
-        const reason = error instanceof Error ? error.message : "Scheduled occurrence failed.";
-        if (error instanceof ScheduleCollectionNotDeployedError || attempt >= MAX_ATTEMPTS) {
-          log.warn(
-            `Local schedule "${claim.row.name}" failed after ${attempt} attempt(s): ${reason}`,
-          );
-          await reportFailure(claim, reason);
-          return;
-        }
-        await sleep(RETRY_DELAY_MS * attempt);
-      }
-    }
-  };
-
   const reportFailure = async ({ row, scheduledAtMs }: LocalDevScheduleClaim, reason: string) => {
     try {
       const { manifest, bundle } = await loadRuntime();
@@ -127,6 +103,15 @@ export default function installLocalDevSchedulesRuntimePlugin(nitroApp: {
     }
   };
 
+  const dispatch = createLocalDevScheduleDispatcher({
+    deliver,
+    fail: async (claim, reason, attempts) => {
+      log.warn(`Local schedule "${claim.row.name}" failed after ${attempts} attempt(s): ${reason}`);
+      await reportFailure(claim, reason);
+    },
+    isClosed: () => closed,
+    sleep,
+  });
   const timer = startLocalDevScheduleTimer({ store, dispatch });
   nitroApp.hooks.hook("close", () => {
     closed = true;
