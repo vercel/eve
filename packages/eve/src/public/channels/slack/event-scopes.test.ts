@@ -10,11 +10,16 @@ describe("SLACK_EVENT_SCOPES", () => {
     expect(deriveSlackEventScopes()).toEqual(SLACK_EVENT_SCOPES);
   });
 
-  it("covers every event type @slack/types has, except the ones Slack documents no scopes for", async () => {
+  it("covers every event type @slack/types has, except the ones Slack documents no scopes for and the ones only a user token receives", async () => {
     const { derivePayloadPaths } = await import("../../../../scripts/slack-event-scopes.mjs");
     const typed = Object.keys(derivePayloadPaths());
     const offered = new Set(Object.keys(SLACK_EVENT_SCOPES).map((name) => name.split(".")[0]));
     expect(typed.filter((name) => !offered.has(name)).sort()).toEqual([
+      "app_deleted",
+      "app_uninstalled_team",
+      "invite_requested",
+      "star_added",
+      "star_removed",
       "user_connection_status_requested",
       "workflow_deleted",
       "workflow_published",
@@ -54,8 +59,13 @@ describe("SLACK_EVENT_SCOPES", () => {
     });
     expect(SLACK_EVENT_SCOPES["message.im"].scopes).toEqual(["im:history"]);
     expect(SLACK_EVENT_SCOPES["message.channels"].timestamps).toEqual([
+      "deleted_ts",
+      "message.deleted_ts",
       "message.thread_ts",
       "message.ts",
+      "previous_message.deleted_ts",
+      "previous_message.thread_ts",
+      "previous_message.ts",
       "thread_ts",
       "ts",
     ]);

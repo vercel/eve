@@ -111,11 +111,6 @@ function slackErrorMessage(response: SlackApiResponse): string {
   return typeof response.error === "string" ? response.error : "unknown_error";
 }
 
-/**
- * Checks what a bot token can prove about a subscription. Slack does not let a bot token read the
- * app's event subscriptions, so this checks that the token belongs to the workspace and carries a
- * scope the event needs, and that the bot is in the channel.
- */
 export async function requireSlackReceivesEvent(input: {
   readonly api?: SlackTransportOptions;
   readonly botToken: SlackBotToken | undefined;
@@ -164,8 +159,6 @@ export async function requireSlackReceivesEvent(input: {
       `Could not check that the Slack bot is in ${channel}, so "${event}" was not subscribed. Slack answered conversations.info with ${slackErrorMessage(info.body)}.`,
     );
   const conversation = isObject(info.body.channel) ? info.body.channel : {};
-  // Slack answers for a direct message, a group message or a private channel only when the bot is
-  // in it, and reports no `is_member` for a direct message. Only a public channel can say no.
   const membersOnly =
     conversation.is_im === true ||
     conversation.is_mpim === true ||
@@ -229,13 +222,12 @@ export function parseSlackEventOccurrence(
   const eventTs = typeof event.event_ts === "string" ? event.event_ts : "";
   const appId = typeof envelope.api_app_id === "string" ? envelope.api_app_id : undefined;
   const botUserId = slackEventBotUserId(envelope);
-  const profile = isObject(event.bot_profile) ? event.bot_profile : undefined;
   return {
     name,
     id: envelope.event_id ?? `${teamId}:${name}:${channels.join(",")}:${eventTs}`,
-    authored:
-      (botUserId !== undefined && sender === botUserId) ||
-      (appId !== undefined && (event.app_id === appId || profile?.app_id === appId)),
+    authored: [event, event.message, event.previous_message].some((record) =>
+      isAuthoredByApp(record, { appId, botUserId }),
+    ),
     scopes: [
       base,
       ...channels.map((channel) => ({ ...base, channel })),
@@ -243,6 +235,18 @@ export function parseSlackEventOccurrence(
     ],
     data: { team_id: teamId, channels, timestamps, sender, payload: event as JsonObject },
   };
+}
+
+function isAuthoredByApp(
+  record: unknown,
+  app: { readonly appId: string | undefined; readonly botUserId: string | undefined },
+): boolean {
+  if (!isObject(record)) return false;
+  const profile = isObject(record.bot_profile) ? record.bot_profile : undefined;
+  return (
+    (app.botUserId !== undefined && record.user === app.botUserId) ||
+    (app.appId !== undefined && (record.app_id === app.appId || profile?.app_id === app.appId))
+  );
 }
 
 function stringsAt(payload: Record<string, unknown>, path: string): string[] {

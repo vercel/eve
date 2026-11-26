@@ -7,25 +7,16 @@ const require = createRequire(import.meta.url);
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 const scopesModulePath = join(packageRoot, "src", "public", "channels", "slack", "event-scopes.ts");
 
-/**
- * The bot OAuth scopes each event needs, from the "Required Scopes" fact on
- * https://docs.slack.dev/reference/events/<event>. Several scopes on one event are alternatives:
- * Slack asks for the one that matches the conversation type the event happens in. `message` is
- * split into the four manifest events it is delivered as. `workflow_*` and
- * `user_connection_status_requested` have no reference page, so they are not offered.
- */
 export const REQUIRED_BOT_SCOPES = {
   agent_session_stopped: ["chat:write"],
   agent_session_title_changed: ["chat:write"],
   app_context_changed: ["assistant:write"],
-  app_deleted: ["admin.apps:read"],
   app_home_opened: [],
   app_installed: [],
   app_mention: ["app_mentions:read"],
   app_rate_limited: [],
   app_requested: [],
   app_uninstalled: [],
-  app_uninstalled_team: ["admin.apps:read"],
   assistant_thread_context_changed: [],
   assistant_thread_started: [],
   call_rejected: [],
@@ -66,7 +57,6 @@ export const REQUIRED_BOT_SCOPES = {
   im_created: ["im:read"],
   im_history_changed: ["im:history"],
   im_open: ["im:read"],
-  invite_requested: ["admin.invites:read"],
   link_shared: ["links:read"],
   member_joined_channel: ["channels:read", "groups:read", "mpim:read"],
   member_left_channel: ["channels:read", "groups:read"],
@@ -86,8 +76,6 @@ export const REQUIRED_BOT_SCOPES = {
   shared_channel_invite_declined: [],
   shared_channel_invite_received: [],
   shared_channel_invite_requested: [],
-  star_added: ["stars:read"],
-  star_removed: ["stars:read"],
   subteam_created: ["usergroups:read"],
   subteam_members_changed: ["usergroups:read"],
   subteam_self_added: ["usergroups:read"],
@@ -107,17 +95,10 @@ export const REQUIRED_BOT_SCOPES = {
 };
 
 const CHANNEL_LEAVES = new Set(["channel", "channel_id", "channel_ids"]);
-const TIMESTAMP_LEAVES = new Set(["ts", "thread_ts", "message_ts"]);
+const TIMESTAMP_LEAVES = new Set(["ts", "thread_ts", "message_ts", "deleted_ts"]);
+const INNER_MESSAGES = new Set(["message", "previous_message"]);
 const MESSAGE_EVENTS = ["message.channels", "message.groups", "message.im", "message.mpim"];
-// Slack repeats a changed or deleted message's earlier state here, with the same ids.
-const SKIPPED_PROPERTIES = new Set(["previous_message"]);
 
-/**
- * Walks every string-typed path of each Events API payload in `@slack/types` and keeps the paths
- * that hold a channel id and the paths that hold a message or thread timestamp. A path that ends in
- * `channel_ids` holds a list of channel ids. A timestamp is only scoped when the payload also
- * carries a channel, because a timestamp names a message only within its channel.
- */
 export function derivePayloadPaths() {
   const ts = require("@typescript/typescript6");
   const typesDirectory = dirname(require.resolve("@slack/types/package.json"));
@@ -132,7 +113,7 @@ export function derivePayloadPaths() {
   const paths = new Map();
   const collect = (type, prefix, visiting, found) => {
     for (const property of checker.getPropertiesOfType(type)) {
-      if (SKIPPED_PROPERTIES.has(property.name)) continue;
+      if (prefix !== "" && INNER_MESSAGES.has(property.name)) continue;
       const path = prefix === "" ? property.name : `${prefix}.${property.name}`;
       const propertyType = checker.getNonNullableType(checker.getTypeOfSymbol(property));
       for (const part of propertyType.isUnion() ? propertyType.types : [propertyType]) {
@@ -207,7 +188,6 @@ export function renderSlackEventScopes(scopes) {
     "/** A Slack bot event, named as in the app manifest's `bot_events`, such as `reaction_added` or `message.channels`. */",
     "export type SlackEventName = keyof typeof SLACK_EVENT_SCOPES;",
     "",
-    "/** The events a Slack app built by eve subscribes to when `experimental.subscriptions.events` is not set. */",
     "export const DEFAULT_SLACK_SUBSCRIPTION_EVENTS = [",
     '  "app_mention",',
     '  "message.channels",',

@@ -26,7 +26,6 @@ export function defineSlackAppManifest(input: {
   readonly codeChannels?: boolean;
   readonly users?: boolean;
   readonly userEmails?: boolean;
-  /** The events of `experimental.subscriptions`, which the app subscribes to besides the defaults. */
   readonly subscriptionEvents?: readonly SlackEventName[];
 }): SlackAppManifestBuildDefinition {
   return {
@@ -76,10 +75,6 @@ export function defineSlackAppManifest(input: {
 
 const MEMBERSHIP_SCOPES = ["channels:read", "groups:read", "im:read", "mpim:read"] as const;
 
-/**
- * The events and bot scopes a subscribed event adds to the app. `onSubscribe` reads each channel's
- * membership with `conversations.info`, which needs the four `*:read` scopes.
- */
 function subscriptionManifest(subscriptionEvents: readonly SlackEventName[] | undefined): {
   readonly events: ManifestEvent[];
   readonly scopes: BotScope[];
@@ -90,8 +85,6 @@ function subscriptionManifest(subscriptionEvents: readonly SlackEventName[] | un
   const events = [
     ...new Set<SlackEventName>([...DEFAULT_SLACK_SUBSCRIPTION_EVENTS, ...subscriptionEvents]),
   ];
-  // The SDK's `ManifestEvent` and `BotScope` unions lag the Slack docs the generated table is
-  // read from, so a few of its names are not in them yet.
   return {
     events: events as ManifestEvent[],
     scopes: [

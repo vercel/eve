@@ -1595,7 +1595,6 @@ async function handleEventPost(input: {
       }
     | undefined;
 }): Promise<Response> {
-  const { config } = input;
   let payload;
   let envelope: SlackEventEnvelope | null;
   try {
@@ -1615,18 +1614,32 @@ async function handleEventPost(input: {
 
   if (envelope === null) return new Response("ok");
 
-  if (input.subscriptions !== undefined) {
-    try {
-      await emitSlackEvent({ envelope, ...input.subscriptions });
-    } catch (error) {
-      logError(log, "Slack subscription delivery failed", error, {
-        eventId: envelope.event_id,
-        eventType: envelope.event.type,
-      });
-      return new Response("subscription delivery failed", { status: 503 });
-    }
+  const response = dispatchSlackEventPost(input, payload, envelope);
+  if (input.subscriptions === undefined) return response;
+  try {
+    await emitSlackEvent({ envelope, ...input.subscriptions });
+  } catch (error) {
+    logError(log, "Slack subscription delivery failed", error, {
+      eventId: envelope.event_id,
+      eventType: envelope.event.type,
+    });
+    return new Response("subscription delivery failed", { status: 503 });
   }
+  return response;
+}
 
+type SlackEventPostInput = Parameters<typeof handleEventPost>[0];
+type SlackEventCallbackPayload = Exclude<
+  ReturnType<typeof parseSlackWebhookBody>,
+  { readonly kind: "url_verification" }
+>;
+
+function dispatchSlackEventPost(
+  input: SlackEventPostInput,
+  payload: SlackEventCallbackPayload,
+  envelope: SlackEventEnvelope,
+): Response {
+  const { config } = input;
   const appId = typeof envelope.api_app_id === "string" ? envelope.api_app_id : undefined;
   const botUserId = slackEventBotUserId(envelope);
   const receivingBotUserId = slackEventReceivingBotUserId(envelope);

@@ -19,7 +19,6 @@ export const SLACK_EVENT_SCOPES = {
     scopes: ["chat:write"],
   },
   app_context_changed: { channels: ["channel"], timestamps: [], scopes: ["assistant:write"] },
-  app_deleted: { channels: [], timestamps: [], scopes: ["admin.apps:read"] },
   app_home_opened: { channels: ["channel"], timestamps: [], scopes: [] },
   app_installed: { channels: [], timestamps: [], scopes: [] },
   app_mention: {
@@ -30,7 +29,6 @@ export const SLACK_EVENT_SCOPES = {
   app_rate_limited: { channels: [], timestamps: [], scopes: [] },
   app_requested: { channels: [], timestamps: [], scopes: [] },
   app_uninstalled: { channels: [], timestamps: [], scopes: [] },
-  app_uninstalled_team: { channels: [], timestamps: [], scopes: ["admin.apps:read"] },
   assistant_thread_context_changed: {
     channels: ["assistant_thread.channel_id", "assistant_thread.context.channel_id"],
     timestamps: ["assistant_thread.thread_ts"],
@@ -95,11 +93,6 @@ export const SLACK_EVENT_SCOPES = {
   im_created: { channels: ["channel.id"], timestamps: [], scopes: ["im:read"] },
   im_history_changed: { channels: [], timestamps: [], scopes: ["im:history"] },
   im_open: { channels: ["channel"], timestamps: [], scopes: ["im:read"] },
-  invite_requested: {
-    channels: ["invite_request.channel_ids"],
-    timestamps: [],
-    scopes: ["admin.invites:read"],
-  },
   link_shared: {
     channels: ["channel"],
     timestamps: ["message_ts", "thread_ts"],
@@ -116,28 +109,68 @@ export const SLACK_EVENT_SCOPES = {
     scopes: ["channels:read", "groups:read"],
   },
   "message.channels": {
-    channels: ["channel", "message.channel"],
-    timestamps: ["message.thread_ts", "message.ts", "thread_ts", "ts"],
+    channels: ["channel", "message.channel", "previous_message.channel"],
+    timestamps: [
+      "deleted_ts",
+      "message.deleted_ts",
+      "message.thread_ts",
+      "message.ts",
+      "previous_message.deleted_ts",
+      "previous_message.thread_ts",
+      "previous_message.ts",
+      "thread_ts",
+      "ts",
+    ],
     scopes: ["channels:history"],
   },
   "message.groups": {
-    channels: ["channel", "message.channel"],
-    timestamps: ["message.thread_ts", "message.ts", "thread_ts", "ts"],
+    channels: ["channel", "message.channel", "previous_message.channel"],
+    timestamps: [
+      "deleted_ts",
+      "message.deleted_ts",
+      "message.thread_ts",
+      "message.ts",
+      "previous_message.deleted_ts",
+      "previous_message.thread_ts",
+      "previous_message.ts",
+      "thread_ts",
+      "ts",
+    ],
     scopes: ["groups:history"],
   },
   "message.im": {
-    channels: ["channel", "message.channel"],
-    timestamps: ["message.thread_ts", "message.ts", "thread_ts", "ts"],
+    channels: ["channel", "message.channel", "previous_message.channel"],
+    timestamps: [
+      "deleted_ts",
+      "message.deleted_ts",
+      "message.thread_ts",
+      "message.ts",
+      "previous_message.deleted_ts",
+      "previous_message.thread_ts",
+      "previous_message.ts",
+      "thread_ts",
+      "ts",
+    ],
     scopes: ["im:history"],
   },
   "message.mpim": {
-    channels: ["channel", "message.channel"],
-    timestamps: ["message.thread_ts", "message.ts", "thread_ts", "ts"],
+    channels: ["channel", "message.channel", "previous_message.channel"],
+    timestamps: [
+      "deleted_ts",
+      "message.deleted_ts",
+      "message.thread_ts",
+      "message.ts",
+      "previous_message.deleted_ts",
+      "previous_message.thread_ts",
+      "previous_message.ts",
+      "thread_ts",
+      "ts",
+    ],
     scopes: ["mpim:history"],
   },
   message_metadata_deleted: {
     channels: ["channel_id"],
-    timestamps: ["message_ts"],
+    timestamps: ["deleted_ts", "message_ts"],
     scopes: ["metadata.message:read"],
   },
   message_metadata_posted: {
@@ -152,12 +185,12 @@ export const SLACK_EVENT_SCOPES = {
   },
   pin_added: {
     channels: ["channel_id", "item.channel", "pinned_info.channel"],
-    timestamps: ["item.message.ts"],
+    timestamps: [],
     scopes: ["pins:read"],
   },
   pin_removed: {
     channels: ["channel_id", "item.channel", "pinned_info.channel"],
-    timestamps: ["item.message.ts"],
+    timestamps: [],
     scopes: ["pins:read"],
   },
   reaction_added: {
@@ -175,8 +208,6 @@ export const SLACK_EVENT_SCOPES = {
   shared_channel_invite_declined: { channels: ["channel.id"], timestamps: [], scopes: [] },
   shared_channel_invite_received: { channels: ["channel.id"], timestamps: [], scopes: [] },
   shared_channel_invite_requested: { channels: ["channel_id"], timestamps: [], scopes: [] },
-  star_added: { channels: [], timestamps: [], scopes: ["stars:read"] },
-  star_removed: { channels: [], timestamps: [], scopes: ["stars:read"] },
   subteam_created: { channels: [], timestamps: [], scopes: ["usergroups:read"] },
   subteam_members_changed: { channels: [], timestamps: [], scopes: ["usergroups:read"] },
   subteam_self_added: { channels: [], timestamps: [], scopes: ["usergroups:read"] },
@@ -198,7 +229,6 @@ export const SLACK_EVENT_SCOPES = {
 /** A Slack bot event, named as in the app manifest's `bot_events`, such as `reaction_added` or `message.channels`. */
 export type SlackEventName = keyof typeof SLACK_EVENT_SCOPES;
 
-/** The events a Slack app built by eve subscribes to when `experimental.subscriptions.events` is not set. */
 export const DEFAULT_SLACK_SUBSCRIPTION_EVENTS = [
   "app_mention",
   "message.channels",

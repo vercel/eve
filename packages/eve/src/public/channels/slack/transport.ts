@@ -113,7 +113,6 @@ export async function callSlackApiTrackingResponse(
   }
 }
 
-/** A Slack API response with the headers it arrived with, such as `x-oauth-scopes`. */
 export interface SlackApiResult {
   readonly body: SlackApiResponse;
   readonly headers: Headers;

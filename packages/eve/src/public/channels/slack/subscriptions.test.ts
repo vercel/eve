@@ -299,16 +299,90 @@ describe("Slack channel subscriptions", () => {
       expect(other.emit).toHaveBeenCalled();
     });
 
-    it("answers 503 when the subscription handoff fails, so Slack retries", async () => {
+    it("answers 503 when the subscription handoff fails, so Slack retries, and still queues the message handler", async () => {
       const onMessage = vi.fn();
       const { response } = await post({
-        body: envelope(reaction),
+        body: envelope({
+          channel: "C1",
+          channel_type: "channel",
+          text: "hi",
+          ts: "1.1",
+          type: "message",
+          user: "U1",
+        }),
         emitError: new Error("store down"),
-        events: ["reaction_added"],
         onMessage,
       });
       expect(response.status).toBe(503);
-      expect(onMessage).not.toHaveBeenCalled();
+      expect(onMessage).toHaveBeenCalledTimes(1);
+    });
+
+    it("skips an edit or delete of a message the bot wrote, which Slack sends with no top-level user", async () => {
+      const own = { channel: "C1", channel_type: "channel", ts: "1.1", user: BOT_USER };
+      for (const event of [
+        {
+          channel: "C1",
+          channel_type: "channel",
+          type: "message",
+          subtype: "message_changed",
+          message: own,
+          previous_message: own,
+        },
+        {
+          channel: "C1",
+          channel_type: "channel",
+          type: "message",
+          subtype: "message_changed",
+          message: { ...own, user: "U1", app_id: APP_ID },
+        },
+        {
+          channel: "C1",
+          channel_type: "channel",
+          type: "message",
+          subtype: "message_changed",
+          message: { ...own, user: undefined, bot_profile: { app_id: APP_ID } },
+        },
+        {
+          channel: "C1",
+          channel_type: "channel",
+          type: "message",
+          subtype: "message_deleted",
+          deleted_ts: "1.1",
+          previous_message: own,
+        },
+      ]) {
+        const { emit } = await post({ body: envelope(event) });
+        expect(emit).not.toHaveBeenCalled();
+      }
+      const human = { ...own, user: "U1" };
+      const { emit } = await post({
+        body: envelope({
+          channel: "C1",
+          channel_type: "channel",
+          type: "message",
+          subtype: "message_changed",
+          message: human,
+          previous_message: human,
+        }),
+      });
+      expect(emit).toHaveBeenCalled();
+    });
+
+    it("names a deleted message by deleted_ts and the thread it was in", async () => {
+      const { emit } = await post({
+        body: envelope({
+          channel: "C1",
+          channel_type: "channel",
+          deleted_ts: "1.5",
+          previous_message: { thread_ts: "1.1", ts: "1.5", user: "U1" },
+          subtype: "message_deleted",
+          ts: "2.2",
+          type: "message",
+        }),
+      });
+      const messageScopes = scopesOf(emit).map(([, scope]) => scope);
+      expect(messageScopes).toContainEqual({ team_id: "T1", channel: "C1", ts: "1.5" });
+      expect(messageScopes).toContainEqual({ team_id: "T1", channel: "C1", ts: "1.1" });
     });
 
     it("emits a message and answers 200 for a channel with no message handler", async () => {
