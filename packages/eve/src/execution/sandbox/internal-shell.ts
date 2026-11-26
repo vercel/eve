@@ -27,7 +27,13 @@ export interface ConnectionFastPaths {
   readonly spawnBounded?: ConnectionBoundedSpawner;
 }
 
-export type SessionCommandRunner = (options: SandboxRunOptions) => Promise<SandboxCommandResult>;
+export interface InternalCommandOptions extends SandboxRunOptions {
+  readonly maxOutputBytes?: number;
+}
+
+export type SessionCommandRunner = (
+  options: InternalCommandOptions,
+) => Promise<SandboxCommandResult>;
 
 export type SessionBoundedSpawner = (options: SandboxSpawnOptions) => Promise<SandboxProcess>;
 
@@ -86,13 +92,14 @@ export function forwardSessionFastPaths<Target extends object>(
 
 export async function runInternalCommand(
   sandbox: { readonly run: (options: SandboxRunOptions) => PromiseLike<SandboxCommandResult> },
-  options: SandboxRunOptions,
+  options: InternalCommandOptions,
 ): Promise<SandboxCommandResult> {
   const runner = sessionFastPaths.get(sandbox)?.runFast;
   if (runner !== undefined) {
     return await runner(options);
   }
-  return await sandbox.run(options);
+  const { maxOutputBytes: _maxOutputBytes, ...runOptions } = options;
+  return await sandbox.run(runOptions);
 }
 
 export async function spawnBoundedCommand(

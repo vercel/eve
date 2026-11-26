@@ -3,6 +3,8 @@ import { posix } from "node:path";
 import type { SandboxConnection } from "#sandbox/provider.js";
 import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
 import type {
+  SandboxCommandResult,
+  SandboxProcess,
   SandboxReadBinaryFileOptions,
   SandboxReadFileOptions,
   SandboxReadTextFileOptions,
@@ -15,8 +17,14 @@ import type {
   SandboxWriteFilesOptions,
   SandboxWriteTextFileOptions,
 } from "#shared/sandbox-session.js";
-import { getConnectionFastPaths, withSessionFastPaths } from "#execution/sandbox/internal-shell.js";
+import {
+  getConnectionFastPaths,
+  withSessionFastPaths,
+  type InternalCommandOptions,
+} from "#execution/sandbox/internal-shell.js";
 import { bufferToStream, streamToBuffer } from "./stream-utils.js";
+
+const MAX_INTERNAL_COMMAND_OUTPUT_BYTES = 4 * 1024 * 1024;
 
 /**
  * Tells agent-aware CLIs (such as `vercel`) that an automated agent runs
@@ -81,13 +89,7 @@ export function createConnectionSession<Extensions extends object>(
           workingDirectory: resolveSandboxPath(options.workingDirectory ?? "."),
         });
       }
-      const process = await spawn(options);
-      const [stdout, stderr, { exitCode }] = await Promise.all([
-        collectStreamToString(process.stdout),
-        collectStreamToString(process.stderr),
-        process.wait(),
-      ]);
-      return { exitCode, stderr, stdout };
+      return await runSpawnedCommand(spawn, options);
     },
     spawn,
     async readFile(options: SandboxReadFileOptions) {
@@ -140,34 +142,87 @@ export function createConnectionSession<Extensions extends object>(
     );
   }
   const combined = { ...extensions, ...session } as SandboxSession & Extensions;
-  if (fastPaths?.runFast !== undefined || fastPaths?.spawnBounded !== undefined) {
-    const { runFast, spawnBounded } = fastPaths;
-    withSessionFastPaths(combined, {
-      ...(runFast !== undefined && {
-        runFast: async (options) =>
-          await runFast({
-            command: options.command,
-            env: options.env ?? {},
-            signal: options.signal,
-            workingDirectory: resolveSandboxPath(options.workingDirectory ?? "."),
-          }),
-      }),
-      ...(spawnBounded !== undefined && {
-        spawnBounded: async (options) =>
-          await spawnBounded({
-            command: options.command,
-            env: options.env ?? {},
-            signal: options.signal,
-            workingDirectory: resolveSandboxPath(options.workingDirectory ?? "."),
-          }),
-      }),
-    });
-  }
+  const connectionRunFast = fastPaths?.runFast;
+  const connectionSpawnBounded = fastPaths?.spawnBounded;
+  withSessionFastPaths(combined, {
+    runFast: async (options: InternalCommandOptions) => {
+      if (connectionRunFast !== undefined) {
+        const result = await connectionRunFast({
+          command: options.command,
+          env: options.env ?? {},
+          signal: options.signal,
+          workingDirectory: resolveSandboxPath(options.workingDirectory ?? "."),
+        });
+        if (options.maxOutputBytes !== undefined) {
+          const maxBytes = resolveInternalMaxOutputBytes(options.maxOutputBytes);
+          if (
+            Buffer.byteLength(result.stdout) > maxBytes ||
+            Buffer.byteLength(result.stderr) > maxBytes
+          ) {
+            throw new Error(`Sandbox internal command output exceeded the ${maxBytes}-byte limit.`);
+          }
+        }
+        return result;
+      }
+      return await runSpawnedCommand(
+        spawn,
+        options,
+        resolveInternalMaxOutputBytes(options.maxOutputBytes),
+      );
+    },
+    ...(connectionSpawnBounded !== undefined && {
+      spawnBounded: async (options) =>
+        await connectionSpawnBounded({
+          command: options.command,
+          env: options.env ?? {},
+          signal: options.signal,
+          workingDirectory: resolveSandboxPath(options.workingDirectory ?? "."),
+        }),
+    }),
+  });
   return combined;
 }
 
-async function collectStreamToString(stream: ReadableStream<Uint8Array>): Promise<string> {
-  const buf = await streamToBuffer(stream);
+function resolveInternalMaxOutputBytes(requested: number | undefined): number {
+  if (requested === undefined) return MAX_INTERNAL_COMMAND_OUTPUT_BYTES;
+  return Math.min(Math.max(1, Math.floor(requested)), MAX_INTERNAL_COMMAND_OUTPUT_BYTES);
+}
+
+async function runSpawnedCommand(
+  spawn: (options: SandboxSpawnOptions) => Promise<SandboxProcess>,
+  options: SandboxRunOptions,
+  maxOutputBytes?: number,
+): Promise<SandboxCommandResult> {
+  const process = await spawn(options);
+  let overflowed = false;
+  const onOverflow =
+    maxOutputBytes === undefined
+      ? undefined
+      : () => {
+          if (overflowed) return;
+          overflowed = true;
+          void Promise.resolve(process.kill()).catch(() => undefined);
+        };
+  const [stdout, stderr, { exitCode }] = await Promise.all([
+    collectStreamToString(process.stdout, maxOutputBytes, onOverflow),
+    collectStreamToString(process.stderr, maxOutputBytes, onOverflow),
+    process.wait(),
+  ]);
+  if (overflowed) {
+    throw new Error(`Sandbox internal command output exceeded the ${maxOutputBytes}-byte limit.`);
+  }
+  return { exitCode, stderr, stdout };
+}
+
+async function collectStreamToString(
+  stream: ReadableStream<Uint8Array>,
+  maxBytes?: number,
+  onOverflow?: () => void,
+): Promise<string> {
+  const buf = await streamToBuffer(
+    stream,
+    maxBytes === undefined ? undefined : { maxBytes, onOverflow },
+  );
   return new TextDecoder().decode(buf);
 }
 

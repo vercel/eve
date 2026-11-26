@@ -111,7 +111,8 @@ async function deliver(
     invokeTool: unsupported,
     params: {},
     requestIp: null,
-    experimental: { subscriptions: { emit: async () => false } },
+    // Spread so the fixture typechecks against the pinned release, which has no `experimental`, and the packed eve, which requires it.
+    ...{ experimental: { subscriptions: { emit: async () => false } } },
     waitUntil: (task) => {
       tasks.push(task);
     },

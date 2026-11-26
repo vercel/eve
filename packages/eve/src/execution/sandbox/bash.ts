@@ -32,6 +32,8 @@ const MAX_LOG_COMMAND_LENGTH = 240;
 
 const KEEP_OUTPUT_BYTES = MAX_OUTPUT_BYTES - 1;
 const KEEP_OUTPUT_LINES = MAX_OUTPUT_LINES - 1;
+const MAX_BASH_INTERNAL_OUTPUT_BYTES = MAX_OUTPUT_BYTES + 8 * 1024;
+const MAX_BASH_CONTROL_OUTPUT_BYTES = 4 * 1024;
 const STREAM_TAIL_THRESHOLD_BYTES = 512 * 1024;
 const STREAM_TAIL_BYTES = MAX_OUTPUT_BYTES * 2;
 const FALLBACK_KILL_GRACE_MS = 500;
@@ -194,15 +196,15 @@ function assertValidPid(pid: number): string {
 
 function buildStreamReadCommands(marker: string, quotedDir: string, codeExpr: string): string[] {
   return [
-    `out_bytes="$(($(wc -c < stdout 2>/dev/null || echo 0)))"`,
-    `out_lines="$(($(wc -l < stdout 2>/dev/null || echo 0)))"`,
-    `err_bytes="$(($(wc -c < stderr 2>/dev/null || echo 0)))"`,
-    `err_lines="$(($(wc -l < stderr 2>/dev/null || echo 0)))"`,
+    `out_bytes=0; out_lines=0`,
+    `if [ -f stdout ] && [ ! -L stdout ]; then out_bytes="$(($(wc -c < stdout 2>/dev/null || echo 0)))"; out_lines="$(($(wc -l < stdout 2>/dev/null || echo 0)))"; fi`,
+    `err_bytes=0; err_lines=0`,
+    `if [ -f stderr ] && [ ! -L stderr ]; then err_bytes="$(($(wc -c < stderr 2>/dev/null || echo 0)))"; err_lines="$(($(wc -l < stderr 2>/dev/null || echo 0)))"; fi`,
     `keep=0`,
     `[ "$out_bytes" -gt ${KEEP_OUTPUT_BYTES} ] || [ "$out_lines" -gt ${KEEP_OUTPUT_LINES} ] || [ "$err_bytes" -gt ${KEEP_OUTPUT_BYTES} ] || [ "$err_lines" -gt ${KEEP_OUTPUT_LINES} ] && keep=1`,
     `printf '%s done %s %s %s %s %s %s\\n' ${marker} ${codeExpr} "$out_bytes" "$out_lines" "$err_bytes" "$err_lines" "$keep"`,
-    `tail -c ${MAX_OUTPUT_BYTES} stdout 2>/dev/null`,
-    `tail -c ${MAX_OUTPUT_BYTES} stderr 2>/dev/null >&2`,
+    `[ -f stdout ] && [ ! -L stdout ] && tail -c ${MAX_OUTPUT_BYTES} stdout 2>/dev/null`,
+    `[ -f stderr ] && [ ! -L stderr ] && tail -c ${MAX_OUTPUT_BYTES} stderr 2>/dev/null >&2`,
     `[ "$keep" -eq 0 ] && rm -rf ${quotedDir}`,
   ];
 }
@@ -226,13 +228,16 @@ function parseReadStreamsOutput(
     `(?:^|\\n)${marker} done (\\d+) (\\d+) (\\d+) (\\d+) (\\d+) (\\d+)\\n`,
   ).exec(raw.stdout);
   if (doneMatch === null) return undefined;
+  const rawExitCode = Number(doneMatch[1]);
+  const exitCode =
+    Number.isInteger(rawExitCode) && rawExitCode >= 0 && rawExitCode <= 255 ? rawExitCode : 1;
   const stdoutText = raw.stdout.slice(doneMatch.index + doneMatch[0].length);
   const tails: StreamTails = {
     stdout: streamTail(stdoutText, Number(doneMatch[2]), Number(doneMatch[3])),
     stderr: streamTail(raw.stderr, Number(doneMatch[4]), Number(doneMatch[5])),
   };
   return {
-    exitCode: Number(doneMatch[1]),
+    exitCode,
     streams: formatStreams(tails, doneMatch[6] === "1" ? directory : undefined),
   };
 }
@@ -250,11 +255,21 @@ export async function pollBashJobOnSandbox(
   const raw = await runInternalCommand(sandbox, {
     command: [
       `cd ${quoted} 2>/dev/null || exit 0`,
-      `if [ ! -s exit ] && kill -0 -- -${pid} 2>/dev/null; then printf '%s running\\n' ${marker}; exit 0; fi`,
-      `code="$(cat exit 2>/dev/null)"`,
-      `case "$code" in ''|*[!0-9]*) code=1 ;; esac`,
+      `if { [ ! -f exit ] || [ -L exit ] || [ ! -s exit ]; } && kill -0 -- -${pid} 2>/dev/null; then printf '%s running\\n' ${marker}; exit 0; fi`,
+      `_nl='\n'`,
+      `code=1`,
+      `if [ -f exit ] && [ ! -L exit ]; then`,
+      `  raw_len="$(($(head -c 8 exit 2>/dev/null | wc -c)))"`,
+      `  if [ "$raw_len" -ge 1 ] && [ "$raw_len" -le 4 ]; then`,
+      `    raw_exit="$(head -c 4 exit 2>/dev/null | tr '\\0' '?'; printf .)"`,
+      `    raw_exit="\${raw_exit%.}"`,
+      `    case "$raw_exit" in *"$_nl") raw_exit="\${raw_exit%?}" ;; esac`,
+      `    case "$raw_exit" in 0|[1-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5]) code="$raw_exit" ;; esac`,
+      `  fi`,
+      `fi`,
       ...buildStreamReadCommands(marker, quoted, '"$code"'),
     ].join("\n"),
+    maxOutputBytes: MAX_BASH_INTERNAL_OUTPUT_BYTES,
   });
   if (new RegExp(`(?:^|\\n)${marker} running(?:\\n|$)`).test(raw.stdout)) {
     return { status: "running" };
@@ -291,7 +306,10 @@ export async function cancelBashJobOnSandbox(
   const remove =
     options.keepOutputDirectory === true ? "" : `; rm -rf ${shellQuote(handoff.directory)}`;
   try {
-    await runInternalCommand(sandbox, { command: `${killProcessGroupShell(pid)}${remove}` });
+    await runInternalCommand(sandbox, {
+      command: `${killProcessGroupShell(pid)}${remove}`,
+      maxOutputBytes: MAX_BASH_CONTROL_OUTPUT_BYTES,
+    });
   } catch {}
 }
 
@@ -310,6 +328,7 @@ export async function timeoutBashJobOnSandbox(
         `cd ${quoted} 2>/dev/null || exit 0`,
         ...buildStreamReadCommands(marker, quoted, "124"),
       ].join("\n"),
+      maxOutputBytes: MAX_BASH_INTERNAL_OUTPUT_BYTES,
     });
     const parsed = parseReadStreamsOutput(raw, marker, handoff.directory);
     if (parsed !== undefined) {
@@ -349,9 +368,10 @@ async function runCommand(
     void Promise.resolve(
       runInternalCommand(sandbox, {
         command:
-          `p="$(cat ${quotedDir}/pid 2>/dev/null)"; ` +
+          `p="$(head -c 16 ${quotedDir}/pid 2>/dev/null)"; ` +
           `case "$p" in ''|*[!0-9]*) ;; *) kill -TERM -- -"$p" 2>/dev/null; sleep 0.2; kill -KILL -- -"$p" 2>/dev/null ;; esac; ` +
           `rm -rf ${quotedDir}`,
+        maxOutputBytes: MAX_BASH_CONTROL_OUTPUT_BYTES,
       }),
     ).catch(() => {});
   };
@@ -452,12 +472,16 @@ async function claimRunningJob(
     command: [
       `cd ${shellQuote(directory)} 2>/dev/null || exit 0`,
       `i=0; while [ "$i" -lt 20 ] && { [ ! -s pid ] || [ ! -f stdout ] || [ ! -f stderr ]; }; do sleep 0.025; i=$((i+1)); done`,
-      `[ -s pid ] && [ -f stdout ] && [ -f stderr ] && mkdir claimed 2>/dev/null || exit 0`,
-      `kill -USR1 "$(cat launcher 2>/dev/null)" 2>/dev/null`,
-      `printf '%s %s %s %s\\n' ${marker} "$(cat pid)" "$(($(wc -c < stdout)))" "$(($(wc -c < stderr)))"`,
+      `[ -f pid ] && [ ! -L pid ] && [ -s pid ] && [ -f stdout ] && [ ! -L stdout ] && [ -f stderr ] && [ ! -L stderr ] && mkdir claimed 2>/dev/null || exit 0`,
+      `launcher_pid="$(head -c 16 launcher 2>/dev/null)"`,
+      `case "$launcher_pid" in ''|*[!0-9]*) ;; *) kill -USR1 "$launcher_pid" 2>/dev/null ;; esac`,
+      `job_pid="$(head -c 16 pid 2>/dev/null)"`,
+      `case "$job_pid" in ''|*[!0-9]*) exit 0 ;; esac`,
+      `printf '%s %s %s %s\\n' ${marker} "$job_pid" "$(($(wc -c < stdout)))" "$(($(wc -c < stderr)))"`,
       `tail -c ${MAX_OUTPUT_BYTES} stdout`,
       `tail -c ${MAX_OUTPUT_BYTES} stderr >&2`,
     ].join("\n"),
+    maxOutputBytes: MAX_BASH_INTERNAL_OUTPUT_BYTES,
   });
   const match = new RegExp(`(?:^|\\n)${marker} (\\d+) (\\d+) (\\d+)\\n`).exec(raw.stdout);
   if (match === null) return undefined;

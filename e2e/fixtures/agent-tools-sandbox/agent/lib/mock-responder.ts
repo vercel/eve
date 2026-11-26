@@ -47,7 +47,7 @@ export function respond(request: MockModelRequest): MockModelResponse | string {
   for (let index = 0; index < request.messages.length; index += 1) {
     const entry = request.messages[index]!;
     if (entry.role === "tool") lastToolResultIndex = index;
-    if (entry.role === "user" && !isFrameworkMessage(entry.text)) {
+    if (entry.role === "user" && entry.text === request.lastUserMessage) {
       lastAuthoredUserIndex = index;
     }
   }
@@ -146,12 +146,6 @@ function respondToFileTools(
   ];
   const next = steps[request.toolResults.length];
   return next === undefined ? bashStdout(request) : { toolCalls: [next] };
-}
-
-/** The `[Tasks]` note and `<task_result>` messages are eve's, not the user's. */
-function isFrameworkMessage(text: string): boolean {
-  const trimmed = text.trim();
-  return trimmed.startsWith("[Tasks]") || trimmed.startsWith("<task_result");
 }
 
 function taskResultOf(

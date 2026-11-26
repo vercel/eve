@@ -224,4 +224,35 @@ describe("createConnectionSession", () => {
       workingDirectory: "/workspace/src",
     });
   });
+
+  it("bounds internal command output collection on the spawn fallback path and kills on overflow", async () => {
+    const { connection } = memoryConnection();
+    let pulls = 0;
+    let resolveWait!: (result: { exitCode: number }) => void;
+    const kill = vi.fn(async () => {
+      resolveWait({ exitCode: 137 });
+    });
+    const chunk = new Uint8Array(1024).fill(0x39);
+    connection.spawn.mockResolvedValueOnce({
+      kill,
+      stderr: bufferToStream(new Uint8Array()),
+      stdout: new ReadableStream<Uint8Array>({
+        pull(controller) {
+          pulls += 1;
+          controller.enqueue(chunk);
+        },
+      }),
+      wait: () =>
+        new Promise<{ exitCode: number }>((resolve) => {
+          resolveWait = resolve;
+        }),
+    });
+    const session = createConnectionSession(connection);
+
+    await expect(
+      runInternalCommand(session, { command: "cat huge", maxOutputBytes: 2048 }),
+    ).rejects.toThrow("Sandbox internal command output exceeded the 2048-byte limit.");
+    expect(kill).toHaveBeenCalledOnce();
+    expect(pulls).toBeLessThanOrEqual(4);
+  });
 });

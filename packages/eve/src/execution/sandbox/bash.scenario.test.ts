@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { rm, writeFile } from "node:fs/promises";
+import { mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 
@@ -353,6 +353,52 @@ describe("executeBashOnSandbox with a real shell", () => {
     expect(timedOut.stderr).toContain("Command timed out after 30 minutes and was killed.");
     await vi.waitFor(() => expect(isProcessAlive(childPid)).toBe(false), { timeout: 10_000 });
     expect(existsSync(started.outputDirectory)).toBe(false);
+  });
+
+  it("rejects oversized or symlinked exit metadata during pollBashJobOnSandbox without hanging", async () => {
+    const { home, sandbox } = await createHostSandbox();
+    const exited = spawn("sh", ["-c", "true"]);
+    const deadPid = exited.pid!;
+    await new Promise<void>((resolve) => exited.once("close", () => resolve()));
+
+    const oversizedDir = join(home, "job-oversized-exit");
+    await mkdir(oversizedDir, { recursive: true });
+    await writeFile(join(oversizedDir, "exit"), "9".repeat(256 * 1024));
+    await writeFile(join(oversizedDir, "stdout"), "done\n");
+    await writeFile(join(oversizedDir, "stderr"), "");
+
+    const oversized = await pollBashJobOnSandbox(sandbox, {
+      directory: oversizedDir,
+      pid: deadPid,
+    });
+    expect(oversized).toEqual({
+      result: {
+        exitCode: 1,
+        status: "completed",
+        stderr: "",
+        stdout: "done\n",
+        truncated: false,
+      },
+      status: "completed",
+    });
+
+    const symlinkDir = join(home, "job-symlink-exit");
+    await mkdir(symlinkDir, { recursive: true });
+    await symlink("/dev/zero", join(symlinkDir, "exit"));
+    await writeFile(join(symlinkDir, "stdout"), "ok\n");
+    await writeFile(join(symlinkDir, "stderr"), "");
+
+    const symlinked = await pollBashJobOnSandbox(sandbox, { directory: symlinkDir, pid: deadPid });
+    expect(symlinked).toEqual({
+      result: {
+        exitCode: 1,
+        status: "completed",
+        stderr: "",
+        stdout: "ok\n",
+        truncated: false,
+      },
+      status: "completed",
+    });
   });
 });
 
