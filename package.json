@@ -39,7 +39,7 @@
     "test:integration": "turbo run test:integration",
     "test:public-types": "turbo run test:public-types --filter=eve",
     "test:scenario": "turbo run test:scenario",
-    "test:scripts": "node --test .github/scripts/*.test.mjs scripts/hitl-state-readers.test.mjs scripts/changeset-format.test.mjs scripts/package-changelog.test.mjs scripts/public-exports.test.mjs",
+    "test:scripts": "node --test .github/scripts/*.test.mjs scripts/hitl-state-readers.test.mjs scripts/changeset-format.test.mjs scripts/package-changelog.test.mjs scripts/public-exports.test.mjs scripts/vercelignore.test.mjs",
     "test:tui": "turbo run test:tui --filter=eve",
     "test:unit": "turbo run test:unit",
     "typecheck": "turbo run typecheck",
