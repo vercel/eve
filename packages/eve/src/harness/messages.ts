@@ -76,11 +76,13 @@ export function createImportedHistoryMessages(
       if (lowered.at(-1)?.role === "tool") {
         lowered.push({ content: TOOL_RESULT_BOUNDARY, role: "assistant" });
       }
-      const text =
-        "text" in message && message.text !== undefined
+      const content =
+        message.text !== undefined
           ? message.text
-          : message.parts!.map((part) => part.text).join("\n");
-      lowered.push(createUserMessage("user", text, { [IMPORTED_MESSAGE_METADATA_KEY]: true }));
+          : message.parts.some((part) => part.type === "file")
+            ? userContentOf(message.parts)
+            : message.parts.map((part) => (part.type === "text" ? part.text : "")).join("\n");
+      lowered.push(createUserMessage("user", content, { [IMPORTED_MESSAGE_METADATA_KEY]: true }));
       continue;
     }
     if ("text" in message && message.text !== undefined) {

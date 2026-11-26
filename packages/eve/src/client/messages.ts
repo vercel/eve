@@ -273,46 +273,58 @@ function importedMessageParts(
     return [{ state: "done", text: message.text, type: "text" }];
   }
   if (message.role === "user") {
-    return message.parts.flatMap((part): EveMessagePart[] =>
-      part.type === "text" ? [{ state: "done", text: part.text, type: "text" }] : [],
-    );
+    return message.parts.flatMap((part): EveMessagePart[] => {
+      if (part.type === "text") return [{ state: "done", text: part.text, type: "text" }];
+      if (part.type === "file") return [toEveFilePart(part)];
+      return [];
+    });
   }
   let stepIndex = 0;
   let sawToolInStep = false;
-  return message.parts.map((part, partIndex): EveMessagePart => {
+  return message.parts.flatMap((part, partIndex): EveMessagePart[] => {
     if (part.type === "text") {
       if (sawToolInStep) {
         stepIndex += 1;
         sawToolInStep = false;
       }
-      return { state: "done", stepIndex, text: part.text, type: "text" };
+      return [{ state: "done", stepIndex, text: part.text, type: "text" }];
     }
+    if (part.type !== "tool") return [];
     sawToolInStep = true;
-    return {
-      callId: `${deliveryId}:imported:${String(messageIndex)}:tool:${String(partIndex)}`,
-      ...(part.error === undefined
-        ? { output: part.output, state: "completed" as const }
-        : { error: { code: "tool_error", message: part.error }, state: "failed" as const }),
-      input: part.input ?? {},
-      kind: "tool",
-      label: displayTitle(part.name),
-      name: part.name,
-      stepIndex,
-      type: "tool",
-    };
+    return [
+      {
+        callId: `${deliveryId}:imported:${String(messageIndex)}:tool:${String(partIndex)}`,
+        ...(part.error === undefined
+          ? { output: part.output, state: "completed" as const }
+          : { error: { code: "tool_error", message: part.error }, state: "failed" as const }),
+        input: part.input ?? {},
+        kind: "tool",
+        label: displayTitle(part.name),
+        name: part.name,
+        stepIndex,
+        type: "tool",
+      },
+    ];
   });
 }
 
 function receivedParts(parts: readonly UserPart[]): readonly EveMessagePart[] {
   return parts.map((part) =>
-    part.kind === "text"
-      ? { state: "done", text: part.text, type: "text" }
-      : {
-          filename: part.filename,
-          mediaType: part.mediaType,
-          size: part.size,
-          type: "file",
-          url: part.url,
-        },
+    part.kind === "text" ? { state: "done", text: part.text, type: "text" } : toEveFilePart(part),
   );
+}
+
+function toEveFilePart(part: {
+  readonly filename?: string;
+  readonly mediaType: string;
+  readonly size?: number;
+  readonly url?: string;
+}): EveMessagePart {
+  return {
+    filename: part.filename,
+    mediaType: part.mediaType,
+    size: part.size,
+    type: "file",
+    url: part.url,
+  };
 }

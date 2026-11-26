@@ -2,6 +2,7 @@ export {
   InvalidSessionHistoryError,
   type SessionHistoryAssistantMessage,
   type SessionHistoryAssistantPart,
+  type SessionHistoryFilePart,
   type SessionHistoryMessage,
   type SessionHistoryTextPart,
   type SessionHistoryToolPart,

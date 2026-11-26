@@ -1,7 +1,6 @@
 import type { FilePart, ModelMessage, UserContent } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
-import type { ChannelAdapterContext } from "#channel/adapter.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SandboxKey, SessionIdKey } from "#context/keys.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
@@ -10,7 +9,6 @@ import { type MockSandbox, mockSandbox } from "#internal/testing/mocks/mock-sand
 import {
   hydrateSandboxAttachments,
   moveToolResultFilesToUserMessages,
-  stageAttachmentsForAdapter,
   stageAttachmentsToSandbox,
   stageToolResultMedia,
 } from "#harness/attachment-staging.js";
@@ -18,14 +16,14 @@ import {
 const UTF8 = new TextEncoder();
 const ATTACHMENTS_PATH_PATTERN = /^\/workspace\/\.eve\/attachments\/[0-9a-f]{16}\//;
 
-const STUB_ADAPTER_CTX: ChannelAdapterContext = {
-  ctx: new ContextContainer(),
-  state: {},
-  session: {
-    id: "",
-    auth: { current: null, initiator: null },
-  },
-};
+function stageInSandbox(
+  sandbox: MockSandbox,
+  content: string | UserContent,
+): Promise<string | UserContent> {
+  const ctx = new ContextContainer();
+  ctx.set(SandboxKey, sandbox.access);
+  return contextStorage.run(ctx, () => stageAttachmentsToSandbox(content));
+}
 
 function findWrite(
   sandbox: ReturnType<typeof mockSandbox>,
@@ -34,14 +32,10 @@ function findWrite(
   return sandbox.writes.find((write) => write.path.endsWith(filenameSuffix));
 }
 
-describe("stageAttachmentsForAdapter", () => {
+describe("stageAttachmentsToSandbox", () => {
   it("passes plain-string messages through unchanged and never touches the sandbox", async () => {
     const sandbox = mockSandbox();
-    const result = await stageAttachmentsForAdapter(
-      "summarize this",
-      sandbox.session,
-      STUB_ADAPTER_CTX,
-    );
+    const result = await stageInSandbox(sandbox, "summarize this");
 
     expect(result).toBe("summarize this");
     expect(sandbox.writes).toHaveLength(0);
@@ -56,11 +50,7 @@ describe("stageAttachmentsForAdapter", () => {
       { data, filename: "quarterly.csv", mediaType: "text/csv", type: "file" },
     ];
 
-    const staged = (await stageAttachmentsForAdapter(
-      content,
-      sandbox.session,
-      STUB_ADAPTER_CTX,
-    )) as UserContent;
+    const staged = (await stageInSandbox(sandbox, content)) as UserContent;
 
     expect(staged).toHaveLength(2);
     expect(staged[0]).toEqual({ type: "text", text: "summarize this csv" });
@@ -91,11 +81,7 @@ describe("stageAttachmentsForAdapter", () => {
       },
     ];
 
-    const staged = (await stageAttachmentsForAdapter(
-      content,
-      sandbox.session,
-      STUB_ADAPTER_CTX,
-    )) as UserContent;
+    const staged = (await stageInSandbox(sandbox, content)) as UserContent;
     const filePart = staged[0] as FilePart;
 
     expect(filePart.filename?.endsWith("/passwd")).toBe(true);
@@ -115,11 +101,7 @@ describe("stageAttachmentsForAdapter", () => {
       },
     ];
 
-    const staged = (await stageAttachmentsForAdapter(
-      content,
-      sandbox.session,
-      STUB_ADAPTER_CTX,
-    )) as UserContent;
+    const staged = (await stageInSandbox(sandbox, content)) as UserContent;
     const filePart = staged[0] as FilePart;
 
     expect(filePart.filename?.endsWith("/weird_name_.txt")).toBe(true);
@@ -135,11 +117,7 @@ describe("stageAttachmentsForAdapter", () => {
       },
     ];
 
-    const staged = (await stageAttachmentsForAdapter(
-      content,
-      sandbox.session,
-      STUB_ADAPTER_CTX,
-    )) as UserContent;
+    const staged = (await stageInSandbox(sandbox, content)) as UserContent;
     const filePart = staged[0] as FilePart;
 
     expect(filePart.filename).toMatch(/\/attachments\/[0-9a-f]{16}\/file-[0-9a-f]{16}$/);
@@ -153,11 +131,7 @@ describe("stageAttachmentsForAdapter", () => {
       { data: dataUrl, filename: "report.csv", mediaType: "text/csv", type: "file" },
     ];
 
-    const staged = (await stageAttachmentsForAdapter(
-      content,
-      sandbox.session,
-      STUB_ADAPTER_CTX,
-    )) as UserContent;
+    const staged = (await stageInSandbox(sandbox, content)) as UserContent;
     const filePart = staged[0] as FilePart;
 
     expect(filePart.filename?.endsWith("/report.csv")).toBe(true);
@@ -181,11 +155,7 @@ describe("stageAttachmentsForAdapter", () => {
       { data: base64, filename: "plain.txt", mediaType: "text/plain", type: "file" },
     ];
 
-    const staged = (await stageAttachmentsForAdapter(
-      content,
-      sandbox.session,
-      STUB_ADAPTER_CTX,
-    )) as UserContent;
+    const staged = (await stageInSandbox(sandbox, content)) as UserContent;
     const filePart = staged[0] as FilePart;
 
     expect(isSandboxRefUrl(filePart.data)).toBe(true);
@@ -208,11 +178,7 @@ describe("stageAttachmentsForAdapter", () => {
       },
     ];
 
-    const staged = (await stageAttachmentsForAdapter(
-      content,
-      sandbox.session,
-      STUB_ADAPTER_CTX,
-    )) as UserContent;
+    const staged = (await stageInSandbox(sandbox, content)) as UserContent;
     const filePart = staged[0] as FilePart;
 
     expect(filePart.data).toBe(existingRef);
@@ -233,7 +199,7 @@ describe("stageAttachmentsForAdapter", () => {
       { data: uint8Bytes, filename: "u8.bin", mediaType: "application/octet-stream", type: "file" },
     ];
 
-    await stageAttachmentsForAdapter(content, sandbox.session, STUB_ADAPTER_CTX);
+    await stageInSandbox(sandbox, content);
 
     const ab = findWrite(sandbox, "ab.bin")?.content as Buffer;
     const u8 = findWrite(sandbox, "u8.bin")?.content as Buffer;
@@ -249,11 +215,7 @@ describe("stageAttachmentsForAdapter", () => {
       { data: bytes, filename: "b.txt", mediaType: "text/plain", type: "file" },
     ];
 
-    const staged = (await stageAttachmentsForAdapter(
-      content,
-      sandbox.session,
-      STUB_ADAPTER_CTX,
-    )) as UserContent;
+    const staged = (await stageInSandbox(sandbox, content)) as UserContent;
     const first = staged[0] as FilePart;
     const second = staged[1] as FilePart;
 
@@ -271,11 +233,7 @@ describe("stageAttachmentsForAdapter", () => {
       { type: "image", mediaType: "image/png", image: new Uint8Array([1, 2, 3]) },
     ];
 
-    const staged = (await stageAttachmentsForAdapter(
-      content,
-      sandbox.session,
-      STUB_ADAPTER_CTX,
-    )) as Exclude<UserContent, string>;
+    const staged = (await stageInSandbox(sandbox, content)) as Exclude<UserContent, string>;
 
     expect(staged[0]).toEqual({ type: "text", text: "hi" });
     expect(staged[1]?.type).toBe("image");
@@ -288,11 +246,7 @@ describe("stageAttachmentsForAdapter", () => {
       { data: Buffer.from("bytes", "utf8"), filename: "x.bin", type: "file" } as FilePart,
     ];
 
-    const staged = (await stageAttachmentsForAdapter(
-      content,
-      sandbox.session,
-      STUB_ADAPTER_CTX,
-    )) as UserContent;
+    const staged = (await stageInSandbox(sandbox, content)) as UserContent;
     const filePart = staged[0] as FilePart;
 
     expect(isSandboxRefUrl(filePart.data)).toBe(true);
@@ -312,34 +266,12 @@ describe("stageAttachmentsForAdapter", () => {
       },
     ];
 
-    const staged = (await stageAttachmentsForAdapter(
-      content,
-      sandbox.session,
-      STUB_ADAPTER_CTX,
-    )) as UserContent;
+    const staged = (await stageInSandbox(sandbox, content)) as UserContent;
     const filePart = staged[0] as FilePart;
 
     expect(filePart.filename).toMatch(ATTACHMENTS_PATH_PATTERN);
   });
-});
 
-function unresumableSandboxContext(): ContextContainer {
-  const ctx = new ContextContainer();
-  ctx.set(SandboxKey, {
-    captureState: async () => ({ session: null }),
-    get: async () => {
-      throw new Error('docker session "ses_1" is no longer available to resume.');
-    },
-    open: async () => {
-      throw new Error('docker session "ses_1" is no longer available to resume.');
-    },
-    prepare() {},
-    stop: async () => {},
-  });
-  return ctx;
-}
-
-describe("stageAttachmentsToSandbox", () => {
   it("replaces an inbound file with a note when the sandbox cannot be resumed", async () => {
     const staged = await contextStorage.run(unresumableSandboxContext(), () =>
       stageAttachmentsToSandbox([
@@ -359,6 +291,22 @@ describe("stageAttachmentsToSandbox", () => {
     ]);
   });
 });
+
+function unresumableSandboxContext(): ContextContainer {
+  const ctx = new ContextContainer();
+  ctx.set(SandboxKey, {
+    captureState: async () => ({ session: null }),
+    get: async () => {
+      throw new Error('docker session "ses_1" is no longer available to resume.');
+    },
+    open: async () => {
+      throw new Error('docker session "ses_1" is no longer available to resume.');
+    },
+    prepare() {},
+    stop: async () => {},
+  });
+  return ctx;
+}
 
 describe("stageToolResultMedia", () => {
   it("preserves a remote tool-result file without resuming a sandbox", async () => {
@@ -487,11 +435,7 @@ describe("hydrateSandboxAttachments", () => {
   }
 
   async function stageElsewhere(sandbox: MockSandbox, file: FilePart): Promise<FilePart> {
-    const [staged] = (await stageAttachmentsForAdapter(
-      [file],
-      sandbox.session,
-      STUB_ADAPTER_CTX,
-    )) as FilePart[];
+    const [staged] = (await stageInSandbox(sandbox, [file])) as FilePart[];
     return staged!;
   }
 

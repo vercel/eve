@@ -21,9 +21,24 @@ describe("validateSessionHistory", () => {
     ]);
   });
 
-  it("validates structured parts including narration, completed tool calls, errors, and tool-only steps", () => {
+  it("validates structured parts including user files, narration, completed tool calls, errors, and tool-only steps", () => {
+    const bytes = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
     const input = [
-      { id: "u1", parts: [{ text: "Is ticket T-1 open?", type: "text" }], role: "user" },
+      {
+        id: "u1",
+        parts: [
+          { text: "Is ticket T-1 open?", type: "text" },
+          {
+            data: "https://example.com/report.pdf",
+            filename: "report.pdf",
+            mediaType: "application/pdf",
+            type: "file",
+          },
+          { data: new URL("https://example.com/photo.png"), mediaType: "image/png", type: "file" },
+          { data: bytes, mediaType: "application/pdf", type: "file" },
+        ],
+        role: "user",
+      },
       {
         parts: [
           { text: "Checking T-1.", type: "text" },
@@ -91,8 +106,149 @@ describe("validateSessionHistory", () => {
     ],
     [
       "an unsupported user part type",
-      [{ parts: [{ type: "file", url: "https://example.com/a.pdf" }], role: "user" }],
-      'history[0].parts[0].type must be "text".',
+      [{ parts: [{ text: "hmm", type: "reasoning" }], role: "user" }],
+      'history[0].parts[0].type must be "text" or "file".',
+    ],
+    [
+      "a file part on an assistant message",
+      [
+        {
+          parts: [
+            { data: "https://example.com/a.pdf", mediaType: "application/pdf", type: "file" },
+          ],
+          role: "assistant",
+        },
+      ],
+      'history[0].parts[0] with type "file" is only accepted on a user message.',
+    ],
+    [
+      "a file part with an unknown field",
+      [
+        {
+          parts: [
+            {
+              data: "https://example.com/a.pdf",
+              mediaType: "application/pdf",
+              type: "file",
+              url: "https://example.com/a.pdf",
+            },
+          ],
+          role: "user",
+        },
+      ],
+      'history[0].parts[0] has unknown field "url". Accepted fields: type, mediaType, filename, data.',
+    ],
+    [
+      "a file part with blank mediaType",
+      [
+        {
+          parts: [{ data: "https://example.com/a.pdf", mediaType: " ", type: "file" }],
+          role: "user",
+        },
+      ],
+      "history[0].parts[0].mediaType must be a non-empty string.",
+    ],
+    [
+      "a file part with blank filename",
+      [
+        {
+          parts: [
+            {
+              data: "https://example.com/a.pdf",
+              filename: "  ",
+              mediaType: "application/pdf",
+              type: "file",
+            },
+          ],
+          role: "user",
+        },
+      ],
+      "history[0].parts[0].filename must be a non-empty string.",
+    ],
+    [
+      "a file part with empty string data",
+      [{ parts: [{ data: "", mediaType: "application/pdf", type: "file" }], role: "user" }],
+      "history[0].parts[0].data must be a non-empty string.",
+    ],
+    [
+      "a file part with blank string data",
+      [{ parts: [{ data: "   ", mediaType: "application/pdf", type: "file" }], role: "user" }],
+      "history[0].parts[0].data must be a non-empty string.",
+    ],
+    [
+      "a file part with an empty data URL string",
+      [
+        {
+          parts: [
+            { data: "data:application/pdf;base64,", mediaType: "application/pdf", type: "file" },
+          ],
+          role: "user",
+        },
+      ],
+      "history[0].parts[0].data must be non-empty.",
+    ],
+    [
+      "a file part with an empty data URL object",
+      [
+        {
+          parts: [
+            {
+              data: new URL("data:application/pdf;base64,"),
+              mediaType: "application/pdf",
+              type: "file",
+            },
+          ],
+          role: "user",
+        },
+      ],
+      "history[0].parts[0].data must be non-empty.",
+    ],
+    [
+      "a file part with empty Uint8Array data",
+      [
+        {
+          parts: [{ data: new Uint8Array(), mediaType: "application/pdf", type: "file" }],
+          role: "user",
+        },
+      ],
+      "history[0].parts[0].data must be non-empty.",
+    ],
+    [
+      "a file part with non-file data",
+      [{ parts: [{ data: 123, mediaType: "application/pdf", type: "file" }], role: "user" }],
+      "history[0].parts[0].data must be a non-empty string, URL, Uint8Array, or ArrayBuffer.",
+    ],
+    [
+      "a file part with an internal ref scheme string",
+      [
+        {
+          parts: [
+            {
+              data: "eve-sandbox:?path=/a&size=1&type=application/pdf",
+              mediaType: "application/pdf",
+              type: "file",
+            },
+          ],
+          role: "user",
+        },
+      ],
+      "history[0].parts[0].data must not use a framework-internal ref scheme.",
+    ],
+    [
+      "a file part with an internal ref scheme URL",
+      [
+        {
+          parts: [
+            {
+              data: new URL("eve-url:https://example.com/a.pdf"),
+              mediaType: "application/pdf",
+              type: "file",
+            },
+          ],
+          role: "user",
+        },
+      ],
+      "history[0].parts[0].data must not use a framework-internal ref scheme.",
     ],
     [
       "an unsupported assistant part type",
@@ -207,10 +363,35 @@ describe("validateSessionHistory", () => {
 });
 
 describe("toImportedHistoryMessages", () => {
-  it("preserves plain text entries and projects structured parts with joined text", () => {
+  it("preserves plain text entries and projects structured parts with joined text and safe file metadata", () => {
     expect(
       toImportedHistoryMessages([
         { id: "m1", role: "user", text: "Hello" },
+        {
+          id: "u2",
+          parts: [
+            { text: "Review this contract.", type: "text" },
+            {
+              data: "eve-url:https://example.com/contract.pdf",
+              filename: "contract.pdf",
+              mediaType: "application/pdf",
+              type: "file",
+            },
+            {
+              data: "data:image/png;base64,iVBORw0K",
+              filename: "chart.png",
+              mediaType: "image/png",
+              type: "file",
+            },
+            {
+              data: "chatjs-file://private/123",
+              filename: "notes.txt",
+              mediaType: "text/plain",
+              type: "file",
+            },
+          ],
+          role: "user",
+        },
         {
           id: "m2",
           parts: [
@@ -227,6 +408,33 @@ describe("toImportedHistoryMessages", () => {
       ]),
     ).toEqual([
       { id: "m1", role: "user", text: "Hello" },
+      {
+        id: "u2",
+        parts: [
+          { text: "Review this contract.", type: "text" },
+          {
+            filename: "contract.pdf",
+            mediaType: "application/pdf",
+            type: "file",
+            url: "https://example.com/contract.pdf",
+          },
+          {
+            filename: "chart.png",
+            mediaType: "image/png",
+            size: 6,
+            type: "file",
+            unavailable: true,
+          },
+          {
+            filename: "notes.txt",
+            mediaType: "text/plain",
+            type: "file",
+            unavailable: true,
+          },
+        ],
+        role: "user",
+        text: "Review this contract.",
+      },
       {
         id: "m2",
         parts: [

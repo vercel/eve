@@ -27,6 +27,13 @@ export function respond(request: MockModelRequest): MockModelResponse | string {
     const results = toolResults.map(({ isError, name, output }) => ({ isError, name, output }));
     return `Mock reply: ${JSON.stringify(results)}`;
   }
+  if (lastUserMessage?.includes("attached files")) {
+    const attached = messages
+      .filter((message) => message.role === "user")
+      .map((message) => message.text)
+      .filter((text) => text.includes("Attached file "));
+    return `Mock reply: ${JSON.stringify(attached)}`;
+  }
   return lastUserMessage?.includes("code word")
     ? `Mock reply: ${[...messages].reverse().find((message) => message.role === "assistant")?.text ?? ""}`
     : `Mock reply: ${lastUserMessage ?? ""}`;

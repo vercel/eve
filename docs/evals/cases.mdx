@@ -182,7 +182,7 @@ export default defineEval({
 
 Your first `session.send()` starts the first turn that runs. The model reads the entries ahead of that message with their user and assistant roles. eve runs no model call, tool, or hook for the imported entries, and later turns, compaction, and `session.transcript` treat them like ordinary history. The event stream records them in `data.history` on that first turn's `delivery.consumed`, so `session.event("turn.settled", { count: 1 })` holds after the turn finishes.
 
-Each entry takes a `role` of `"user"` or `"assistant"`, an optional `id` unique within the list, and either non-empty `text` or a non-empty `parts` array (up to 500 entries and 512 KiB). Files and reasoning aren't supported, and unknown fields are rejected rather than dropped. An invalid entry rejects `t.session()` with a `ClientError` naming the entry and broken rule, such as `history[1].role must be "user" or "assistant".`
+Each entry takes a `role` of `"user"` or `"assistant"`, an optional `id` unique within the list, and either non-empty `text` or a non-empty `parts` array (up to 500 entries and 512 KiB). User `parts` accept `text` and `file` attachments (`{ type: "file", mediaType, filename?, data }`); assistant `parts` accept `text` and completed `tool` exchanges. Reasoning isn't supported, and unknown fields are rejected rather than dropped. An invalid entry rejects `t.session()` with a `ClientError` naming the entry and broken rule, such as `history[1].role must be "user" or "assistant".`
 
 Use `parts` on an assistant entry to include completed tool exchanges alongside text:
 

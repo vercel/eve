@@ -131,4 +131,85 @@ describe("EvalSessionManager.session", () => {
     expect((error as ClientError).status).toBe(400);
     expect((error as ClientError).message).toBe('history[0].role must be "user" or "assistant".');
   });
+
+  it("serializes Uint8Array and URL file parts in history before posting to /eve/v1/dev/session", async () => {
+    const requests = stubFetch(() =>
+      Response.json({ ok: true, sessionId: "sess_files" }, { status: 202 }),
+    );
+    const manager = new EvalSessionManager({
+      client: new Client({ baseUrl: "http://127.0.0.1:3000" }),
+      devRoutes: true,
+    });
+
+    await manager.session({
+      history: [
+        {
+          parts: [
+            { text: "See attached.", type: "text" },
+            {
+              data: new Uint8Array([0x25, 0x50, 0x44, 0x46]),
+              filename: "contract.pdf",
+              mediaType: "application/pdf",
+              type: "file",
+            },
+            {
+              data: new URL("https://example.com/terms.pdf"),
+              mediaType: "application/pdf",
+              type: "file",
+            },
+          ],
+          role: "user",
+        },
+      ],
+    });
+
+    expect(requests[0]?.body).toEqual({
+      history: [
+        {
+          parts: [
+            { text: "See attached.", type: "text" },
+            {
+              data: "data:application/pdf;base64,JVBERg==",
+              filename: "contract.pdf",
+              mediaType: "application/pdf",
+              type: "file",
+            },
+            {
+              data: "https://example.com/terms.pdf",
+              mediaType: "application/pdf",
+              type: "file",
+            },
+          ],
+          role: "user",
+        },
+      ],
+    });
+  });
+
+  it.each([
+    ["non-array history", "bad"],
+    ["null history entry", [null]],
+    ["non-array user parts", [{ parts: {}, role: "user" }]],
+    ["null part inside user parts", [{ parts: [null], role: "user" }]],
+  ])(
+    "forwards malformed %s to /eve/v1/dev/session instead of crashing client-side",
+    async (_label, history) => {
+      const requests = stubFetch(() =>
+        Response.json({ error: "Invalid session history.", ok: false }, { status: 400 }),
+      );
+      const manager = new EvalSessionManager({
+        client: new Client({ baseUrl: "http://127.0.0.1:3000" }),
+        devRoutes: true,
+      });
+
+      const error = await manager.session({ history: history as never }).then(
+        () => undefined,
+        (caught: unknown) => caught,
+      );
+
+      expect(requests).toHaveLength(1);
+      expect(error).toBeInstanceOf(ClientError);
+      expect((error as ClientError).status).toBe(400);
+    },
+  );
 });

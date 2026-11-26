@@ -394,41 +394,57 @@ The client then resumes the session by id, for example with `useEveAgent({ initi
 
 `send()` accepts the same `history` option and adds the entries right before that message and its `context`, whether it creates or continues the session. The eve channel's `onMessage` can return `history` too, which applies to every message it's returned for.
 
-Each entry has a `role` of `"user"` or `"assistant"`, an optional `id` unique within the call, and either non-empty `text` or a non-empty `parts` array. eve rejects unknown fields, so map stored messages to the contract. Invalid history throws `InvalidSessionHistoryError`, exported from `eve/channels`, naming the entry and the broken rule. eve doesn't cap entries or text on server calls, so trim long conversations in your route. Files and reasoning aren't supported.
+Each entry has a `role` of `"user"` or `"assistant"`, an optional `id` unique within the call, and either non-empty `text` or a non-empty `parts` array. eve rejects unknown fields, so map stored messages to the contract. Invalid history throws `InvalidSessionHistoryError`, exported from `eve/channels`, naming the entry and the broken rule. eve doesn't cap entries or text on server calls, so trim long conversations in your route. Reasoning isn't supported.
 
-Use `parts` on an assistant entry to include completed tool exchanges in order alongside text:
+Use `parts` on a user entry to include file attachments (using the same `{ type: "file", mediaType, filename?, data }` shape as `send()`), and on an assistant entry to include completed tool exchanges in order alongside text:
 
 ```ts
 const history = [
-  { role: "user", text: "Is ticket T-1 still open?" },
+  {
+    role: "user",
+    parts: [
+      { type: "text", text: "What are the payment terms in this contract?" },
+      {
+        type: "file",
+        mediaType: "application/pdf",
+        filename: "contract.pdf",
+        data: "https://example.com/contract.pdf",
+      },
+    ],
+  },
   {
     role: "assistant",
     parts: [
       {
         type: "tool",
-        name: "lookup_ticket",
-        input: { id: "T-1" },
-        output: { status: "open" },
+        name: "lookup_account",
+        input: { id: "A-1" },
+        output: { tier: "enterprise" },
       },
       {
         type: "tool",
-        name: "list_notes",
-        input: { id: "T-1" },
-        error: "The notes service timed out.",
+        name: "list_amendments",
+        input: { id: "A-1" },
+        error: "The amendments service timed out.",
       },
-      { type: "text", text: "T-1 is open, but its notes didn't load." },
+      {
+        type: "text",
+        text: "The contract sets Net 30 for enterprise account A-1, but amendments didn't load.",
+      },
     ],
   },
 ];
 ```
 
-Each `{ type: "tool" }` part takes a `name` (1 to 64 ASCII letters, digits, underscores, or dashes), an optional JSON object `input` that defaults to `{}`, and either `output` (any JSON value) or non-empty `error`. Consecutive `tool` parts group into one parallel step; a `text` part right before a `tool` part joins that step as narration, and a `text` part after a `tool` part follows its result. Tool-only steps need no placeholder text. eve runs no tool, approval, hook, or `toModelOutput` for imported calls, and emits no `call.*` events for them.
+Each user `{ type: "file" }` part resolves through the channel's `fetchFile` hook or eve's public HTTPS download (sharing one 10-download limit across the imported history) and stages into the sandbox like an uploaded message file, enforcing the channel's `uploadPolicy`. `delivery.consumed` records only file metadata (`mediaType`, `filename`, `size`, and public `url` when present) and never writes inline bytes or internal ref schemes to the stream.
+
+Each assistant `{ type: "tool" }` part takes a `name` (1 to 64 ASCII letters, digits, underscores, or dashes), an optional JSON object `input` that defaults to `{}`, and either `output` (any JSON value) or non-empty `error`. Consecutive `tool` parts group into one parallel step; a `text` part right before a `tool` part joins that step as narration, and a `text` part after a `tool` part follows its result. Tool-only steps need no placeholder text. eve runs no tool, approval, hook, or `toModelOutput` for imported calls, and emits no `call.*` events for them.
 
 eve never accepts `history` from a client request body. Resolve it on the server and authorize the caller against the stored conversation.
 
 The stream records the entries in `data.history` on the `delivery.consumed` of the message that brought them (keeping `text` populated alongside `parts` when structured parts are supplied). History from `create()` is recorded with the first accepted message. When one turn takes in several messages, the model reads all their history first. `transcriptOf()` from `eve/client` returns text entries in that order as `{ role, text }` messages you can pass back as `history` to branch a session.
 
-Frontend `messages` show imported entries before their message, with `metadata.imported` set and your `id` in `metadata.historyId`. Structured `parts` render as text and completed or failed tool parts in order. Imported messages have no `metadata.turnId`, so a turn's reply never streams into one. Their message ids stay unique even when a later call reuses an `id`. Compaction, `clear()`, and handoffs treat them like any other history.
+Frontend `messages` show imported entries before their message, with `metadata.imported` set and your `id` in `metadata.historyId`. Structured `parts` render as text, file attachments, and completed or failed tool parts in order. Imported messages have no `metadata.turnId`, so a turn's reply never streams into one. Their message ids stay unique even when a later call reuses an `id`. Compaction, `clear()`, and handoffs treat them like any other history.
 
 ## Replace or disable the defaults
 

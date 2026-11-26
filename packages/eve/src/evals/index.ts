@@ -76,6 +76,7 @@ export type { ToolStub, ToolStubOutcome } from "#tool-stubs/types.js";
 export type {
   SessionHistoryAssistantMessage,
   SessionHistoryAssistantPart,
+  SessionHistoryFilePart,
   SessionHistoryMessage,
   SessionHistoryTextPart,
   SessionHistoryToolPart,

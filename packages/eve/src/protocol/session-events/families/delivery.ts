@@ -38,6 +38,21 @@ export interface ImportedTextPart {
 }
 
 /**
+ * A file attachment recorded on an {@link ImportedMessage}. Holds display metadata only; inline
+ * bytes and framework-internal ref schemes are never written to the session stream.
+ */
+export interface ImportedFilePart {
+  readonly type: "file";
+  readonly mediaType: string;
+  readonly filename?: string;
+  readonly size?: number;
+  /** Public HTTP(S) URL when the imported file carried one. */
+  readonly url?: string;
+  /** Set when no public URL is recorded (for example inline data or a channel-private ref). */
+  readonly unavailable?: true;
+}
+
+/**
  * A completed tool call recorded on an {@link ImportedMessage}. eve did not run it, so the stream
  * has no `call.*` facts for it. Carries either `output` or `error`.
  */
@@ -60,7 +75,7 @@ export type ImportedToolPart = {
 );
 
 /** One structured part recorded on an {@link ImportedMessage}. */
-export type ImportedPart = ImportedTextPart | ImportedToolPart;
+export type ImportedPart = ImportedTextPart | ImportedFilePart | ImportedToolPart;
 
 /**
  * A message from conversation eve did not run, such as a transcript an app stored. It names no
@@ -72,7 +87,7 @@ export interface ImportedMessage {
   readonly role: "user" | "assistant";
   /**
    * The message's plain text. When `parts` is present, holds the message's text parts joined by
-   * newlines, or `""` for a tool-only assistant entry.
+   * newlines, or `""` for a file-only user entry or tool-only assistant entry.
    */
   readonly text: string;
   /** Ordered structured parts when the message was imported with `parts`. */
@@ -135,6 +150,17 @@ const importedTextPart = conforming<ImportedTextPart>()(
   z.object({ text: z.string(), type: z.literal("text") }),
 );
 
+const importedFilePart = conforming<ImportedFilePart>()(
+  z.object({
+    filename: z.string().optional(),
+    mediaType: z.string(),
+    size: z.number().optional(),
+    type: z.literal("file"),
+    unavailable: z.literal(true).optional(),
+    url: z.string().optional(),
+  }),
+);
+
 const importedToolPart = conforming<ImportedToolPart>()(
   z.union([
     z.object({
@@ -154,7 +180,9 @@ const importedToolPart = conforming<ImportedToolPart>()(
   ]),
 );
 
-const importedPart = conforming<ImportedPart>()(z.union([importedTextPart, importedToolPart]));
+const importedPart = conforming<ImportedPart>()(
+  z.union([importedTextPart, importedFilePart, importedToolPart]),
+);
 
 const importedMessage = conforming<ImportedMessage>()(
   z.object({

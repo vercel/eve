@@ -8,7 +8,7 @@ import { getAdapterKind } from "#channel/adapter.js";
 import { buildChannelContext } from "#channel/session.js";
 import { contextStorage, loadContext } from "#context/container.js";
 import { SandboxKey, SessionIdKey } from "#context/keys.js";
-import { createFrameworkUserMessage } from "#harness/messages.js";
+import { createFrameworkUserMessage, type HarnessModelMessage } from "#harness/messages.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { isUnresolvedFileData, readFileData } from "#internal/attachments/data.js";
 import { EveAttachmentError } from "#internal/attachments/errors.js";
@@ -59,52 +59,51 @@ type ToolResultOutput = ToolResultPart["output"];
 type ToolOutputContentPart = Extract<ToolResultOutput, { type: "content" }>["value"][number];
 type ToolOutputFilePart = Extract<ToolOutputContentPart, { type: "file" }>;
 
-export async function stageAttachmentsForAdapter(
-  content: string | UserContent,
-  sandbox: SandboxSession,
-  adapterCtx: ChannelAdapterContext,
-): Promise<string | UserContent> {
-  if (typeof content === "string") {
-    return content;
-  }
+type UserFileMessage = Extract<HarnessModelMessage, { readonly role: "user" }> & {
+  readonly content: Exclude<UserContent, string>;
+};
 
-  const reconstituted = reconstitueFilePartUrls(content);
-  const policy = adapterCtx.ctx.get(ChannelKey)?.uploadPolicy;
-  const downloads = createPublicDownloads(maxBytesOf(policy ?? DEFAULT_UPLOAD_POLICY));
-
-  return Promise.all(
-    reconstituted.map(async (part) => {
-      if (part.type === "file") {
-        return stageFilePart(part, sandbox, adapterCtx, downloads, policy);
-      }
-      return part;
-    }),
-  );
+export function hasUserFileParts(message: HarnessModelMessage): message is UserFileMessage {
+  return message.role === "user" && Array.isArray(message.content) && hasFileParts(message.content);
 }
 
 export async function stageAttachmentsToSandbox(
   message: string | UserContent,
 ): Promise<string | UserContent> {
-  if (typeof message === "string") {
+  if (!Array.isArray(message) || !hasFileParts(message)) {
     return message;
   }
-  if (!Array.isArray(message)) {
-    return message;
-  }
-  if (!hasFileParts(message)) {
-    return message;
-  }
+  return (await createContentStager())(message);
+}
 
+export async function stageHistoryAttachments(
+  messages: readonly HarnessModelMessage[],
+): Promise<HarnessModelMessage[]> {
+  if (!messages.some(hasUserFileParts)) {
+    return [...messages];
+  }
+  const stage = await createContentStager();
+  return Promise.all(
+    messages.map(async (message) =>
+      hasUserFileParts(message) ? { ...message, content: await stage(message.content) } : message,
+    ),
+  );
+}
+
+async function createContentStager(): Promise<
+  (content: Exclude<UserContent, string>) => Promise<UserContent>
+> {
   const container = loadContext();
   const sandbox = await activeSandbox(container.get(SandboxKey));
   if (sandbox === null) {
-    return message.map((part) =>
-      part.type === "file" &&
-      !isSandboxRefUrl(part.data) &&
-      readFileData(part.data).kind !== "reference"
-        ? attachmentNote(part, "could not be stored: no sandbox is available.")
-        : part,
-    );
+    return async (content) =>
+      content.map((part) =>
+        part.type === "file" &&
+        !isSandboxRefUrl(part.data) &&
+        readFileData(part.data).kind !== "reference"
+          ? attachmentNote(part, "could not be stored: no sandbox is available.")
+          : part,
+      );
   }
 
   const adapter = container.get(ChannelKey);
@@ -115,8 +114,15 @@ export async function stageAttachmentsToSandbox(
         state: {},
         session: buildChannelContext(container).session,
       };
+  const policy = adapter?.uploadPolicy;
+  const downloads = createPublicDownloads(maxBytesOf(policy ?? DEFAULT_UPLOAD_POLICY));
 
-  return stageAttachmentsForAdapter(message, sandbox, adapterCtx);
+  return (content) =>
+    Promise.all(
+      reconstitueFilePartUrls(content).map(async (part) =>
+        part.type === "file" ? stageFilePart(part, sandbox, adapterCtx, downloads, policy) : part,
+      ),
+    );
 }
 
 export async function stageToolResultMedia<T extends ModelMessage>(

@@ -21,7 +21,7 @@ import type {
   TurnCaller,
 } from "#channel/types.js";
 import { controlCommand, DEFAULT_TURN_POLICY, storedTurnPolicy } from "#channel/types.js";
-import { serializeFilePartsInMessage } from "#channel/send-input.js";
+import { prepareSessionHistory, serializeFilePartsInMessage } from "#channel/send-input.js";
 import type { SessionAuth } from "#context/keys.js";
 import type { ChannelContext } from "#shared/channel-context.js";
 import {
@@ -34,7 +34,7 @@ import {
 } from "#context/keys.js";
 import { type Answer, type StrictAnswers, parseAnswers } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
-import { type SessionHistoryMessage, validateSessionHistory } from "#shared/session-history.js";
+import type { SessionHistoryMessage } from "#shared/session-history.js";
 import { toChannelLocalContinuationToken } from "#shared/continuation-token.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 
@@ -158,7 +158,7 @@ export function createSession(
       const caller = sessionCallbackToTurnCaller(
         (options as InternalSessionDeliveryOptions).callback,
       );
-      const history = validateSessionHistory(options.history);
+      const history = prepareSessionHistory(options.history);
       const payload = attachClientContext<{
         context?: readonly string[];
         history?: readonly SessionHistoryMessage[];

@@ -1,7 +1,8 @@
+import type { FilePart, UserContent } from "ai";
 import { commitOf } from "#harness/session-machine/commit.js";
 import { expect, it, onTestFinished, vi } from "vitest";
 import { ContextContainer } from "#context/container.js";
-import { SessionIdKey } from "#context/keys.js";
+import { AuthKey, SandboxKey, SessionIdKey } from "#context/keys.js";
 import {
   readInterruptedAttempt,
   recoverInterruptedStep,
@@ -9,6 +10,8 @@ import {
 import { TOOL_RESULT_BOUNDARY } from "#harness/messages.js";
 import { enterSessionProjection } from "#harness/session-machine/current.js";
 import type { HarnessSession } from "#harness/types.js";
+import { isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
+import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { withOpenTurn, withPublished } from "#internal/testing/session-machine.js";
 
@@ -214,3 +217,86 @@ it.each([
     ]);
   },
 );
+
+it("recovers a settled turn whose imported history includes user file parts with and without a sandbox", async () => {
+  const bytes = Buffer.from("%PDF-1.4\nhello", "utf8");
+  const fileData = `data:application/pdf;base64,${bytes.toString("base64")}`;
+  const settled = {
+    type: "turn.settled" as const,
+    data: { outcome: "completed" as const, reply: ["p"], turnId: "turn-1" },
+  };
+  const reply = {
+    type: "content.completed" as const,
+    data: { kind: "text" as const, partId: "p", value: "Net 30." },
+  };
+  const stepInput = {
+    history: [
+      {
+        parts: [
+          { text: "Check payment terms.", type: "text" as const },
+          {
+            data: fileData,
+            filename: "contract.pdf",
+            mediaType: "application/pdf",
+            type: "file" as const,
+          },
+        ],
+        role: "user" as const,
+      },
+    ],
+    message: "Summarize.",
+  };
+
+  const withSandbox = openTurnSession("imported-file-with-sandbox");
+  const sandbox = mockSandbox({ id: "sbx_recovered_history" });
+  withSandbox.ctx.set(AuthKey, null);
+  withSandbox.ctx.set(SandboxKey, sandbox.access);
+  enterSessionProjection(withSandbox.ctx, withPublished(withSandbox.session, [settled]).state);
+  const stagedResult = await recoverInterruptedStep({
+    admission: commitOf([]),
+    attempt: readInterruptedAttempt(0, [
+      { position: 0, line: { at: "2026-10-21T00:00:00.000Z", facts: [reply, settled] } },
+    ]),
+    ctx: withSandbox.ctx,
+    publish: vi.fn(async () => withSandbox.session),
+    session: withSandbox.session,
+    stepInput,
+  });
+  expect("result" in stagedResult).toBe(true);
+  const stagedContent = (
+    "result" in stagedResult ? stagedResult.result.history[0]?.content : undefined
+  ) as UserContent;
+  expect(stagedContent[0]).toEqual({ text: "Check payment terms.", type: "text" });
+  expect(isSandboxRefUrl((stagedContent[1] as FilePart).data)).toBe(true);
+  expect(sandbox.writes).toHaveLength(1);
+
+  const withoutSandbox = openTurnSession("imported-file-no-sandbox");
+  withoutSandbox.ctx.set(AuthKey, null);
+  enterSessionProjection(
+    withoutSandbox.ctx,
+    withPublished(withoutSandbox.session, [settled]).state,
+  );
+  const degradedResult = await recoverInterruptedStep({
+    admission: commitOf([]),
+    attempt: readInterruptedAttempt(0, [
+      { position: 0, line: { at: "2026-10-21T00:00:00.000Z", facts: [reply, settled] } },
+    ]),
+    ctx: withoutSandbox.ctx,
+    publish: vi.fn(async () => withoutSandbox.session),
+    session: withoutSandbox.session,
+    stepInput,
+  });
+  expect("result" in degradedResult).toBe(true);
+  expect("result" in degradedResult && degradedResult.result.history[0]).toEqual({
+    content: [
+      { text: "Check payment terms.", type: "text" },
+      {
+        text: "Attachment contract.pdf could not be stored: no sandbox is available.",
+        type: "text",
+      },
+    ],
+    kind: "user",
+    metadata: { "eve.imported": true },
+    role: "user",
+  });
+});
