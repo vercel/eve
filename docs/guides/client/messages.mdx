@@ -104,7 +104,7 @@ await delivery.result();
 
 ## Send attachments
 
-`send()` accepts `MessageContent`, so a message can mix text and file parts. A file part's `data` is the file inline (bytes, base64, or a `data:` URL) or a URL. For a local file, send a base64 `data:` URL:
+`send()` accepts `MessageContent`, so a message can mix text and file parts, up to `MAX_MESSAGE_PARTS` (64) in total. Import the constant from `eve/client` to cap attachments in your UI; the server rejects a longer message with `400`. A file part's `data` is the file inline (bytes, base64, or a `data:` URL) or a URL. For a local file, send a base64 `data:` URL:
 
 ```ts
 import { readFile } from "node:fs/promises";

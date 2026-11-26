@@ -104,7 +104,7 @@ A follow-up message joins the running turn by default. Set `turnPolicy: "queue"`
 
 ### Send files
 
-A message can mix text and file parts. A file part's `data` is base64, a `data:` URL, or a URL:
+A message can mix text and file parts, up to 64 in total. A longer message returns `400 Bad Request`; combine text parts or send fewer files. Import `MAX_MESSAGE_PARTS` from `eve/channels/eve` or `eve/client` instead of hard-coding the limit. A file part's `data` is base64, a `data:` URL, or a URL:
 
 ```bash
 curl -X POST https://<deployment>/eve/v1/session/wrun_A \
