@@ -28,6 +28,7 @@ export function withCallResults(input: {
   return {
     approvalRequests: calls.approvals,
     policyApprovals: calls.policyApprovals,
+    promotedTasks: calls.promotedTasks,
     content: stepResult.content,
     finishReason: stepResult.finishReason,
     ...(input.invalidInputToolCallIds === undefined

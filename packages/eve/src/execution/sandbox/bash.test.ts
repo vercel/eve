@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { EVE_DEV_ENV_FLAG } from "#internal/application/optional-package-install.js";
 import type { SandboxCommandResult, SandboxSession } from "#shared/sandbox-session.js";
 
-import { executeBashOnSandbox } from "./bash.js";
+import { cancelBashJobOnSandbox, executeBashOnSandbox, pollBashJobOnSandbox } from "./bash.js";
 import { bufferToStream } from "./stream-utils.js";
 import { MAX_OUTPUT_BYTES, truncateTail } from "./truncate-output.js";
 
@@ -206,6 +206,16 @@ describe("executeBashOnSandbox", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("rejects non-positive process group ids in poll and cancel helpers", async () => {
+    const sandbox = {} as SandboxSession;
+    await expect(
+      pollBashJobOnSandbox(sandbox, { directory: "/tmp/unused", pid: 0 }),
+    ).rejects.toThrow(RangeError);
+    await expect(
+      cancelBashJobOnSandbox(sandbox, { directory: "/tmp/unused", pid: -1 }),
+    ).rejects.toThrow(RangeError);
   });
 });
 

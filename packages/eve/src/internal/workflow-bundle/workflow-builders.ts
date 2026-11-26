@@ -2,6 +2,7 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { PROGRAM_AGENT_CALL_WORKFLOW_NAME } from "#execution/code-mode/agent-call-reference.js";
+import { BASH_JOB_TASK_WORKFLOW_NAME } from "#execution/sandbox/bash-job-reference.js";
 import { STABLE_WORKFLOW_NAMES } from "#execution/stable-workflow-names.js";
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 import { AGENT_TOOL_SERVE_WORKFLOW_NAME } from "#runtime/subagents/workflow-reference.js";
@@ -57,6 +58,7 @@ export async function applyWorkflowTransform(
   stableWorkflowNames: ReadonlySet<string> = new Set([
     ...STABLE_WORKFLOW_NAMES,
     AGENT_TOOL_SERVE_WORKFLOW_NAME,
+    BASH_JOB_TASK_WORKFLOW_NAME,
     PROGRAM_AGENT_CALL_WORKFLOW_NAME,
   ]),
 ): Promise<{

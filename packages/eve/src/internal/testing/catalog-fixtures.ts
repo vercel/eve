@@ -273,6 +273,7 @@ export async function catalogContext(
     readonly dynamicSubagents?: readonly string[];
     readonly session?: { readonly rootSessionId?: string };
     readonly skills?: readonly CatalogSkillSource[];
+    readonly tasks?: Readonly<Record<string, { readonly status: "running" | "ended" }>>;
     readonly tools?: readonly HarnessToolDefinition[];
   } = {},
 ) {
@@ -305,6 +306,7 @@ export async function catalogContext(
     ctx,
     endsTurn: true,
     session: input.session ?? {},
+    ...(input.tasks !== undefined && { tasks: input.tasks }),
   });
   return { catalog, ctx, run: <T>(fn: () => T) => contextStorage.run(ctx, fn) };
 }
@@ -329,6 +331,7 @@ export async function nativeCatalog(input: {
   readonly ctx: ContextContainer;
   readonly endsTurn: boolean;
   readonly session: { readonly rootSessionId?: string };
+  readonly tasks?: Readonly<Record<string, { readonly status: "running" | "ended" }>>;
 }): Promise<StepCatalog> {
   return await stepCatalog({
     config: { tools: input.agentTools },
@@ -336,5 +339,8 @@ export async function nativeCatalog(input: {
     endsTurn: input.endsTurn,
     finalReplyOnly: false,
     session: input.session,
+    ...(input.tasks !== undefined && {
+      view: () => ({ projection: { view: { tasks: input.tasks } } }) as never,
+    }),
   });
 }

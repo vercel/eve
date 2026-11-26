@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { rm, writeFile } from "node:fs/promises";
+import { mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 
@@ -9,7 +9,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 
-import { BASH_YIELD_SECONDS, executeBashOnSandbox } from "./bash.js";
+import {
+  BASH_YIELD_SECONDS,
+  cancelBashJobOnSandbox,
+  executeBashOnSandbox,
+  pollBashJobOnSandbox,
+  timeoutBashJobOnSandbox,
+} from "./bash.js";
 import { createConnectionSession } from "./session.js";
 
 const createScratchDirectory = useTemporaryDirectories();
@@ -193,6 +199,206 @@ describe("executeBashOnSandbox with a real shell", () => {
 
     await expect(call).rejects.toThrow();
     await vi.waitFor(() => expect(isProcessAlive(childPid)).toBe(false), { timeout: 10_000 });
+  });
+
+  it("kills the process group with exit 124 and partial output when onTimeout is kill", async () => {
+    const { home, sandbox } = await createHostSandbox();
+    const pidFile = join(home, "kill-child.pid");
+
+    const result = await executeBashOnSandbox(
+      sandbox,
+      {
+        command: `echo partial-line; sleep 60 & echo $! > ${pidFile}; wait`,
+        timeout: 1,
+      },
+      { onTimeout: "kill" },
+    );
+
+    expect(result.status).toBe("completed");
+    if (result.status !== "completed") return;
+    expect(result.exitCode).toBe(124);
+    expect(result.stdout).toContain("partial-line");
+    expect(result.stderr).toContain("Command timed out after 1 seconds and was killed.");
+    const childPid = Number(readFileSync(pidFile, "utf8").trim());
+    await vi.waitFor(() => expect(isProcessAlive(childPid)).toBe(false), { timeout: 10_000 });
+  });
+
+  it("polls a running job until completion and cancels a running job cleanly", async () => {
+    const { home, sandbox } = await createHostSandbox();
+
+    const finishing = await executeBashOnSandbox(sandbox, {
+      command: "echo step-one; sleep 2; echo step-two",
+      timeout: 1,
+    });
+    if (finishing.status !== "running") {
+      throw new Error(`expected running: ${JSON.stringify(finishing)}`);
+    }
+    const handoff = { directory: finishing.outputDirectory, pid: finishing.pid };
+    const finalPoll = await vi.waitFor(
+      async () => {
+        const polled = await pollBashJobOnSandbox(sandbox, handoff);
+        expect(polled.status).toBe("completed");
+        return polled;
+      },
+      { interval: 200, timeout: 10_000 },
+    );
+    if (finalPoll.status !== "completed") return;
+    expect(finalPoll.result.exitCode).toBe(0);
+    expect(finalPoll.result.stdout).toContain("step-one");
+    expect(finalPoll.result.stdout).toContain("step-two");
+    expect(existsSync(handoff.directory)).toBe(false);
+
+    const pidFile = join(home, "cancel-child.pid");
+    const longRunning = await executeBashOnSandbox(sandbox, {
+      command: `sleep 60 & echo $! > ${pidFile}; wait`,
+      timeout: 1,
+    });
+    if (longRunning.status !== "running") {
+      throw new Error(`expected running: ${JSON.stringify(longRunning)}`);
+    }
+    const childPid = await readPid(pidFile);
+    expect(
+      await pollBashJobOnSandbox(sandbox, {
+        directory: longRunning.outputDirectory,
+        pid: longRunning.pid,
+      }),
+    ).toEqual({ status: "running" });
+
+    await cancelBashJobOnSandbox(sandbox, {
+      directory: longRunning.outputDirectory,
+      pid: longRunning.pid,
+    });
+    await vi.waitFor(() => expect(isProcessAlive(childPid)).toBe(false), { timeout: 10_000 });
+    expect(existsSync(longRunning.outputDirectory)).toBe(false);
+  });
+
+  it("keeps the saved output file on disk when onTimeout kill truncates output", async () => {
+    const { sandbox } = await createHostSandbox();
+
+    const result = await executeBashOnSandbox(
+      sandbox,
+      {
+        command: "seq 1 5000; sleep 60",
+        timeout: 1,
+      },
+      { onTimeout: "kill" },
+    );
+
+    expect(result.status).toBe("completed");
+    if (result.status !== "completed") return;
+    expect(result.exitCode).toBe(124);
+    expect(result.truncated).toBe(true);
+    const path = /^\[stdout truncated: showing last \d+ of \d+ lines; full output: (\S+)\]\n/u.exec(
+      result.stdout,
+    )?.[1];
+    expect(path).toBeDefined();
+    try {
+      expect(existsSync(path!)).toBe(true);
+      expect(readFileSync(path!, "utf8")).toContain("5000\n");
+    } finally {
+      await rm(join(path!, ".."), { force: true, recursive: true });
+    }
+  });
+
+  it("reports truncation when polled output has 2001 lines without a trailing newline", async () => {
+    const { sandbox } = await createHostSandbox();
+
+    const started = await executeBashOnSandbox(sandbox, {
+      command: "sleep 2; awk 'BEGIN{for(i=1;i<=2000;i++) print i; printf \"2001\"}'",
+      timeout: 1,
+    });
+    if (started.status !== "running") {
+      throw new Error(`expected running: ${JSON.stringify(started)}`);
+    }
+    const handoff = { directory: started.outputDirectory, pid: started.pid };
+    const polled = await vi.waitFor(
+      async () => {
+        const next = await pollBashJobOnSandbox(sandbox, handoff);
+        expect(next.status).toBe("completed");
+        return next;
+      },
+      { interval: 200, timeout: 10_000 },
+    );
+    if (polled.status !== "completed") return;
+    try {
+      expect(polled.result.truncated).toBe(true);
+      expect(polled.result.stdout).toContain("showing last 2000 of 2001 lines; full output:");
+      expect(existsSync(join(handoff.directory, "stdout"))).toBe(true);
+    } finally {
+      await rm(handoff.directory, { force: true, recursive: true });
+    }
+  });
+
+  it("captures the final output tail when timeoutBashJobOnSandbox kills a running job", async () => {
+    const { home, sandbox } = await createHostSandbox();
+    const pidFile = join(home, "timeout-tail.pid");
+
+    const started = await executeBashOnSandbox(sandbox, {
+      command: `echo before-timeout; sleep 60 & echo $! > ${pidFile}; wait`,
+      timeout: 1,
+    });
+    if (started.status !== "running") {
+      throw new Error(`expected running: ${JSON.stringify(started)}`);
+    }
+    const childPid = await readPid(pidFile);
+    const timedOut = await timeoutBashJobOnSandbox(
+      sandbox,
+      { directory: started.outputDirectory, pid: started.pid },
+      "Command timed out after 30 minutes and was killed.",
+    );
+
+    expect(timedOut.status).toBe("completed");
+    expect(timedOut.exitCode).toBe(124);
+    expect(timedOut.stdout).toContain("before-timeout");
+    expect(timedOut.stderr).toContain("Command timed out after 30 minutes and was killed.");
+    await vi.waitFor(() => expect(isProcessAlive(childPid)).toBe(false), { timeout: 10_000 });
+    expect(existsSync(started.outputDirectory)).toBe(false);
+  });
+
+  it("rejects oversized or symlinked exit metadata during pollBashJobOnSandbox without hanging", async () => {
+    const { home, sandbox } = await createHostSandbox();
+    const exited = spawn("sh", ["-c", "true"]);
+    const deadPid = exited.pid!;
+    await new Promise<void>((resolve) => exited.once("close", () => resolve()));
+
+    const oversizedDir = join(home, "job-oversized-exit");
+    await mkdir(oversizedDir, { recursive: true });
+    await writeFile(join(oversizedDir, "exit"), "9".repeat(256 * 1024));
+    await writeFile(join(oversizedDir, "stdout"), "done\n");
+    await writeFile(join(oversizedDir, "stderr"), "");
+
+    const oversized = await pollBashJobOnSandbox(sandbox, {
+      directory: oversizedDir,
+      pid: deadPid,
+    });
+    expect(oversized).toEqual({
+      result: {
+        exitCode: 1,
+        status: "completed",
+        stderr: "",
+        stdout: "done\n",
+        truncated: false,
+      },
+      status: "completed",
+    });
+
+    const symlinkDir = join(home, "job-symlink-exit");
+    await mkdir(symlinkDir, { recursive: true });
+    await symlink("/dev/zero", join(symlinkDir, "exit"));
+    await writeFile(join(symlinkDir, "stdout"), "ok\n");
+    await writeFile(join(symlinkDir, "stderr"), "");
+
+    const symlinked = await pollBashJobOnSandbox(sandbox, { directory: symlinkDir, pid: deadPid });
+    expect(symlinked).toEqual({
+      result: {
+        exitCode: 1,
+        status: "completed",
+        stderr: "",
+        stdout: "ok\n",
+        truncated: false,
+      },
+      status: "completed",
+    });
   });
 });
 

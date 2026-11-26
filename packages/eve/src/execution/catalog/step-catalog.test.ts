@@ -300,18 +300,21 @@ describe("buildStepCatalog", () => {
         await offeredFor({ tools: [workflowTool("research", "task", { deferred: true })] }),
       ).toEqual(OFFERED);
       expect(await offeredFor({ tools: [subagentTool("delegate")] })).toEqual(OFFERED);
+      expect(
+        await offeredFor({ dynamicSubagents: ["specialist"], tools: [inlineTool("add")] }),
+      ).toEqual(OFFERED);
     });
 
-    it("are not offered to a leaf subagent session whose only task-starting tool is root-only", async () => {
+    it("are omitted for a leaf subagent without task tools until a task starts, then stay offered after it ends", async () => {
       const tools = [inlineTool("add"), subagentTool("agent", { rootOnly: true })];
 
       expect(await offeredFor({ tools })).toEqual(OFFERED);
       expect(await offeredFor({ session: CHILD, tools })).toEqual(NOT_OFFERED);
-    });
-
-    it("are offered when the agent resolves subagents at runtime", async () => {
       expect(
-        await offeredFor({ dynamicSubagents: ["specialist"], tools: [inlineTool("add")] }),
+        await offeredFor({ session: CHILD, tasks: { task_1: { status: "running" } }, tools }),
+      ).toEqual(OFFERED);
+      expect(
+        await offeredFor({ session: CHILD, tasks: { task_1: { status: "ended" } }, tools }),
       ).toEqual(OFFERED);
     });
   });
