@@ -45,11 +45,16 @@ accompany a PR.
 Use the [`gh-pr-description`](./.agents/skills/gh-pr-description/SKILL.md)
 skill when drafting or updating one.
 
+When the user asks to simplify a PR or branch with fresh eyes—replacing
+bolted-on complexity with a simpler upfront design, unifying duplicate
+machinery, and removing dead code paths—use the
+[`pr-simplify`](./.agents/skills/pr-simplify/SKILL.md) skill.
+
 When the user explicitly asks to shepherd, land, or merge a PR, or to get one
 green, use the [`pr-shepherd`](./.agents/skills/pr-shepherd/SKILL.md) skill
-to run a fresh-context review, address and resolve comments, get CI green,
-and merge. Do not start it on your own after an implementation or when only
-asked to open a PR.
+to run fresh-context review and simplification passes (via `pr-simplify`),
+address and resolve comments, get CI green, and merge. Do not start it on your
+own after an implementation or when only asked to open a PR.
 
 ## Commands
 

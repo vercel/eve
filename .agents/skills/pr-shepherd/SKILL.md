@@ -1,6 +1,6 @@
 ---
 name: pr-shepherd
-description: Takes a finished eve branch from review to merge. Opens the PR early, runs a fresh-context reviewer subagent, fixes critical findings, addresses, replies to, and resolves review comments, pushes, monitors CI (rerunning flaky jobs or fixing real failures), then squash-merges or enables auto-merge. Follow only when the user explicitly asks to shepherd, babysit, land, or merge a PR, or to "get a PR green". Do not start it on your own after finishing an implementation or when only asked to open a PR.
+description: Takes a finished eve branch from review to merge. Opens the PR early, runs fresh-context review and simplification subagents, fixes critical findings and applies simplifications, addresses, replies to, and resolves review comments, pushes, monitors CI (rerunning flaky jobs or fixing real failures), then squash-merges or enables auto-merge. Follow only when the user explicitly asks to shepherd, babysit, land, or merge a PR, or to "get a PR green". Do not start it on your own after finishing an implementation or when only asked to open a PR.
 metadata:
   internal: true
 ---
@@ -29,28 +29,48 @@ runs, so an early PR gets more feedback in each round.
 
 If a PR already exists for the branch (`gh pr view --json number,url`), reuse it.
 
-## 2. Fresh-context review
+## 2. Fresh-context review and simplification
 
-Spawn one reviewer subagent with no conversation history. Give it the PR number
-and the branch, not your reasoning. A fresh reviewer catches what the author
-explains away. Use a prompt like this one:
+Spawn two read-only subagents in parallel, each with no conversation history.
+Give them the PR number and branch, not your reasoning. Fresh eyes catch both
+bugs the author explains away and bolted-on complexity from iterating on the
+branch.
 
-> Review PR #<n> in this repository (`gh pr view <n>`, `gh pr diff <n>`). Read
-> `AGENTS.md` first and apply its coding, security, testing, docs, and changeset
-> rules. Read surrounding code as needed to verify behavior. Do not edit files.
-> Report findings ordered by severity (critical, important, minor). For each
-> finding, give the file and line, the concrete failure or risk, and a suggested
-> fix. Say plainly when you find nothing critical.
+1. **Correctness reviewer**:
 
-While the reviewer runs, you can already collect PR comments (step 3).
+   > Review PR #<n> in this repository (`gh pr view <n>`, `gh pr diff <n>`).
+   > Read `AGENTS.md` first and apply its coding, security, testing, docs, and
+   > changeset rules. Read surrounding code as needed to verify behavior. Do
+   > not edit files. Report findings ordered by severity (critical, important,
+   > minor). For each finding, give the file and line, the concrete failure or
+   > risk, and a suggested fix. Say plainly when you find nothing critical.
 
-Triage the findings yourself. Verify each one against the code before you act.
+2. **Simplifier** (delegates to [`pr-simplify`](../pr-simplify/SKILL.md)):
 
-- Fix: correctness bugs, races, security or data-loss risks, broken public
-  behavior or docs, missing tests for changed behavior, a missing changeset,
-  and invariant violations.
-- Skip: style nits, speculative refactors, and scope creep. Mention notable
-  skipped items to the user in the final report.
+   > Follow `.agents/skills/pr-simplify/SKILL.md` in report-only mode for PR
+   > #<n> in this repository. Read `AGENTS.md` and surrounding code as needed
+   > to verify callers and existing utilities. Do not edit files. Return the
+   > structured simplification report.
+
+While both subagents run, you can already collect PR comments (step 3).
+
+Triage findings from both subagents together against the code before you edit,
+so you do not patch a bug inside a duplicated or dead path you are about to
+collapse or delete, and do not simplify away a guard needed for a correctness
+finding.
+
+- **Correctness**:
+  - Fix: correctness bugs, races, security or data-loss risks, broken public
+    behavior or docs, missing tests for changed behavior, a missing changeset,
+    and invariant violations.
+  - Skip: style nits and scope creep.
+- **Simplification**: apply the triage bar in
+  [`pr-simplify`](../pr-simplify/SKILL.md#triage)—apply verified dead-code
+  removals, canonical path unifications, and simpler internal designs that
+  preserve all outcomes; skip style nits, leaky abstractions, and unrelated
+  refactors; ask the user before changing public APIs or semver boundaries.
+
+Mention notable skipped items from either pass in the final report.
 
 ## 3. Address PR comments
 
@@ -99,16 +119,21 @@ needs a product or design decision only the user can make, ask the user.
 
 ## 4. Commit, push, reply, resolve
 
-1. Combine the fixes from steps 2 and 3. Rerun the fast checks and the
-   narrowest tests that cover the fixes.
+1. Combine the correctness fixes, accepted simplifications, and comment fixes
+   from steps 2 and 3. Rerun the fast checks and the narrowest tests that cover
+   the changed paths. If an accepted simplification substantially reshaped
+   implementation logic (beyond dead-code removal or minor deduplication),
+   re-run the correctness reviewer once on the simplified diff before pushing,
+   since both the first reviewer and `roboeve[bot]` only saw the
+   pre-simplification code.
 2. Commit with `git commit -s` and push. Add new commits instead of amending or
    force-pushing, so reply SHAs stay valid. PRs are squash-merged and `main`
    does not require branches to be up to date, so do not rebase only to catch
    up. If `gh pr view <n> --json mergeable` reports `CONFLICTING`, merge
    `origin/main` into the branch with `git merge --signoff origin/main`. Rebase
    or force-push only when the user asks or to repair signing or DCO.
-3. If the fixes changed behavior that the PR body describes, update the body
-   with `gh-pr-description`.
+3. If the fixes or simplifications changed behavior or architecture that the PR
+   body describes, update the body with `gh-pr-description`.
 4. Reply in each thread after the fix is on the remote. Keep replies short and
    specific, in the style already used on eve PRs:
    - `Fixed in <sha>. <What changed, in one or two sentences.>`
@@ -190,8 +215,10 @@ failing file and test name.
 ## 6. Loop until done
 
 After each push, return to step 3. Teammates may comment at any time, and
-Vercel Agent Review reviews each new commit. Stop when all of these are true for
-the latest head commit:
+Vercel Agent Review reviews each new commit. Do not re-run the simplifier on
+routine CI or comment follow-up pushes; only re-run it if later rounds bolted on
+substantial new complexity. Stop when all of these are true for the latest head
+commit:
 
 - All checks are green, including the Vercel Agent Review check, or the only
   failures are documented as unrelated and the user knows about them.
@@ -238,7 +265,9 @@ merge, and the local cleanup can fail in a worktree. Confirm the result with
 
 Give the user the PR URL and a short account of the work:
 
-- Reviewer findings you fixed, and notable ones you skipped and why.
+- Correctness findings you fixed, and notable ones you skipped and why.
+- Simplifications you applied (design simplifications, unified paths, removed
+  dead code), and notable ones you skipped or deferred and why.
 - Comments you addressed, declined, or deferred, plus threads still open.
 - CI status on the head SHA, flaky reruns with job names, and real failures
   you fixed.
