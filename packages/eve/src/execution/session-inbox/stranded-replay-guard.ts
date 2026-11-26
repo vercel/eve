@@ -6,9 +6,10 @@ import {
   type OwnerRun,
 } from "#execution/session-inbox/runnable-owner.js";
 import {
-  CONNECTION_EVENT_DELIVERY_WORKFLOW_NAME,
-  CONNECTION_EVENT_WORKFLOW_NAME,
   SESSION_TIMEOUT_WORKFLOW_NAME,
+  SUBSCRIPTION_DELIVERY_WORKFLOW_NAME,
+  SUBSCRIPTION_KEY_WORKFLOW_NAME,
+  SUBSCRIPTION_WORKFLOW_NAME,
   TURN_WORKFLOW_NAME,
   WORKFLOW_ENTRY_NAME,
   WORKFLOW_TOOL_RUN_WORKFLOW_NAME,
@@ -27,9 +28,10 @@ const STRANDED_RUNS: Readonly<Record<StableWorkflowName, StrandedRun>> = {
   [WORKFLOW_ENTRY_NAME]: "session",
   [TURN_WORKFLOW_NAME]: "session",
   [WORKFLOW_TOOL_RUN_WORKFLOW_NAME]: "retire",
-  [CONNECTION_EVENT_WORKFLOW_NAME]: "retire",
+  [SUBSCRIPTION_WORKFLOW_NAME]: "retire",
+  [SUBSCRIPTION_KEY_WORKFLOW_NAME]: "retire",
   [SESSION_TIMEOUT_WORKFLOW_NAME]: "replay",
-  [CONNECTION_EVENT_DELIVERY_WORKFLOW_NAME]: "replay",
+  [SUBSCRIPTION_DELIVERY_WORKFLOW_NAME]: "replay",
 };
 
 export function guardStrandedSessionReplay<TWorld extends World>(world: TWorld): TWorld {

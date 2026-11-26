@@ -22,6 +22,8 @@ import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { type ConnectionClient, defineInteractiveAuthorization } from "#shared/connection-types.js";
 
 import { catalogBundle, nativeCatalog } from "#internal/testing/catalog-fixtures.js";
+import { EVENT_SUBSCRIBE_ACTION } from "#runtime/subscriptions/actions.js";
+import { runConnectionEventAction } from "./connection-entry.js";
 import { fromCompiledBundle } from "#definitions/compiled-agent.js";
 import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 
@@ -35,7 +37,7 @@ interface SeenRequest {
   readonly method: string;
 }
 
-async function setup(mode: ServerMode, approval?: ApprovalPolicy) {
+async function setup(mode: ServerMode, approval?: ApprovalPolicy, agentApproval?: ApprovalPolicy) {
   const seen: SeenRequest[] = [];
   vi.stubGlobal("fetch", async (input: string | globalThis.URL | Request, init?: RequestInit) => {
     const request = new Request(input, init);
@@ -115,6 +117,10 @@ async function setup(mode: ServerMode, approval?: ApprovalPolicy) {
     url: URL,
   } as ResolvedConnectionDefinition;
 
+  const subscribeUpstream = vi.fn(async () => {
+    if (token === undefined) throw new ConnectionAuthorizationRequiredError("kennel");
+    return { subscribed: true };
+  });
   const clients = new Map<string, ConnectionClient>();
   const registry: ConnectionRegistry = {
     dispose: async () => {
@@ -124,6 +130,9 @@ async function setup(mode: ServerMode, approval?: ApprovalPolicy) {
       let client = clients.get(name);
       if (client === undefined) {
         client = new McpConnectionClient(connection);
+        Object.defineProperty(client, "eventActions", {
+          value: { execute: subscribeUpstream, list: async () => [] },
+        });
         clients.set(name, client);
       }
       return client;
@@ -159,6 +168,17 @@ async function setup(mode: ServerMode, approval?: ApprovalPolicy) {
     switchInstance: (id: string) => {
       instanceId = id;
     },
+    subscribe: () =>
+      contextStorage.run(ctx, () =>
+        runConnectionEventAction(
+          registry,
+          connection,
+          EVENT_SUBSCRIBE_ACTION,
+          {},
+          options,
+          agentApproval,
+        ),
+      ),
     search: (query: string) =>
       contextStorage.run(ctx, () =>
         catalog.advertised.get(SEARCH_TOOL_NAME)!.execute!({ query }, options),
@@ -285,6 +305,21 @@ describe("MCP connections sign in only when the server asks", () => {
   });
 });
 
+describe("subscribing through a connection that needs sign-in", () => {
+  it("answers with the sign-in request instead of failing, then subscribes once signed in", async () => {
+    const kennel = await setup("public-list-401");
+
+    const parked = await kennel.subscribe();
+    expect(isAuthorizationSignal(parked)).toBe(true);
+    expect(parked).toMatchObject({ challenges: [{ name: "kennel" }] });
+    expect(kennel.startAuthorization).toHaveBeenCalledOnce();
+
+    kennel.finishSignIn();
+    expect(await kennel.subscribe()).toEqual({ subscribed: true });
+    expect(kennel.startAuthorization).toHaveBeenCalledOnce();
+  });
+});
+
 describe("a connection call with an approval policy runs after the sign-in it stopped for", () => {
   it("when the policy approved it without asking a person", async () => {
     const kennel = await setup("public-list-401", () => "approved");
@@ -325,6 +360,29 @@ describe("a connection call with an approval policy runs after the sign-in it st
     kennel.switchInstance("kennel-bob");
     await kennel.approve("kennel__pet_invoice", { recheck: true });
     await expect(kennel.execute("kennel__pet_invoice")).rejects.toThrow(
+      "The connection for this tool call changed or is unavailable.",
+    );
+  });
+});
+
+describe("a subscribe call that only the agent's approval gates", () => {
+  it("runs after the sign-in it stopped for when its connection is unchanged", async () => {
+    const kennel = await setup("public-list-401", undefined, () => "user-approval");
+
+    expect(isAuthorizationSignal(await kennel.subscribe())).toBe(true);
+
+    kennel.finishSignIn();
+    expect(await kennel.subscribe()).toEqual({ subscribed: true });
+  });
+
+  it("is refused after the sign-in when its connection resolves to another instance by then", async () => {
+    const kennel = await setup("public-list-401", undefined, () => "user-approval");
+
+    expect(isAuthorizationSignal(await kennel.subscribe())).toBe(true);
+
+    kennel.finishSignIn();
+    kennel.switchInstance("kennel-bob");
+    await expect(kennel.subscribe()).rejects.toThrow(
       "The connection for this tool call changed or is unavailable.",
     );
   });

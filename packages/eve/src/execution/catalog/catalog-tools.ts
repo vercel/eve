@@ -17,6 +17,7 @@ import { defineJsonSchema } from "#tools/schema.js";
 
 import { closestNames } from "./rank.js";
 import { createSearchTool, type SearchOutput } from "./search.js";
+import { subscriptionSources, subscriptionTools } from "./subscription-tools.js";
 import { entrySignature } from "./signatures.js";
 import { unknownSkillMessage } from "./skills.js";
 import type { Callable } from "./step-catalog.js";
@@ -77,10 +78,12 @@ export async function programSearch(callable: Callable, input: unknown): Promise
     reach: {
       connections: callable.connections.length > 0,
       skills: skills.length > 0,
+      subscriptions: false,
       tools: callable.connections.length > 0 || callable.deferred.size > 0,
     },
     registry: callable.registry,
     skills,
+    subscriptions: { channels: [], connections: [] },
   });
   return (await tool.execute!(input ?? {}, undefined as never)) as SearchOutput;
 }
@@ -88,10 +91,12 @@ export async function programSearch(callable: Callable, input: unknown): Promise
 export function catalogReach(callable: Callable): OfferedCatalogTools {
   const skills = [...callable.skills.values()];
   const connections = callable.connections.length > 0;
+  const sources = subscriptionSources(callable);
   return {
     connections,
     searchableSkills: skills.some((skill) => skill.deferred),
     skills: skills.length > 0,
+    subscriptions: sources.channels.length > 0 || sources.connections.length > 0,
     tools: connections || callable.deferred.size > 0,
   };
 }
@@ -104,8 +109,10 @@ export function catalogTools(
     readonly skills: Readonly<Record<string, Announcement>>;
   },
 ): ReadonlyMap<string, ToolEntry> {
-  const search = offered.tools || offered.searchableSkills;
+  const search = offered.tools || offered.searchableSkills || offered.subscriptions;
+  const subscription = subscriptionTools(callable);
   const listed = new Set([
+    ...subscription.keys(),
     ...(search ? [SEARCH_TOOL_NAME] : []),
     ...(offered.tools ? [CALL_TOOL_NAME] : []),
     ...(offered.skills ? [SKILL_TOOL_NAME] : []),
@@ -120,14 +127,17 @@ export function catalogTools(
         reach: {
           connections: offered.connections,
           skills: offered.searchableSkills,
+          subscriptions: offered.subscriptions,
           tools: offered.tools,
         },
         registry: callable.registry,
         skills: [...callable.skills.values()].filter((skill) => skill.deferred),
+        subscriptions: subscriptionSources(callable),
       }),
     });
   }
   if (offered.tools) tools.set(CALL_TOOL_NAME, callRoute(callable, listed, offered));
+  for (const [name, entry] of subscription) tools.set(name, entry);
   if (offered.skills) {
     tools.set(SKILL_TOOL_NAME, {
       ...skillRoute(callable, listed, offered),

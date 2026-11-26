@@ -628,6 +628,12 @@
       "import": "./dist/src/computer-use/extension/lib/sandbox.js",
       "default": "./dist/src/computer-use/extension/lib/sandbox.js"
     },
+    "./experimental/channels": {
+      "eve-source": "./dist/src/public/experimental/channels/index.js",
+      "types": "./dist/src/public/experimental/channels/index.d.ts",
+      "import": "./dist/src/public/experimental/channels/index.js",
+      "default": "./dist/src/public/experimental/channels/index.js"
+    },
     "./experimental/connections": {
       "eve-source": "./dist/src/public/experimental/connections/index.js",
       "types": "./dist/src/public/experimental/connections/index.d.ts",

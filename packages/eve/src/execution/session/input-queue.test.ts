@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { SessionInputQueue } from "#execution/session/input-queue.js";
+import {
+  CONNECTION_EVENT_CHANNEL_KIND,
+  SUBSCRIPTION_CHANNEL_KIND,
+} from "#channel/delivery-metadata.js";
+import { isSteeringDelivery, SessionInputQueue } from "#execution/session/input-queue.js";
 import { principalOf, steeredByAfter } from "#execution/session/principal.js";
 
 function signInCallback(attemptId: string) {
@@ -233,5 +237,56 @@ describe("SessionInputQueue", () => {
     expect(queue.takeSteering(admitted, turn)).toBeUndefined();
     expect(queue.takeSteering(admitted, turn, { heldSince })?.sequences).toEqual([after]);
     expect(queue.takeNext()).toMatchObject({ sequences: [before] });
+  });
+
+  describe("deliveries from an outside event source", () => {
+    const alice = {
+      attributes: {},
+      authenticator: "slack",
+      principalId: "ALICE",
+      principalType: "user" as const,
+    };
+    const turn = { callerCallId: undefined, principal: principalOf(alice) };
+    const metadataOf = (channelKind: string) => [
+      { channelKind, channelName: "github", deliveryId: "d1", payloadIndex: 0 },
+    ];
+    const deliveryOf = (channelKind?: string) => ({
+      auth: alice,
+      kind: "deliver" as const,
+      payloads: [{ message: "Checks finished." }],
+      turnPolicy: "queue" as const,
+      ...(channelKind !== undefined && { deliveryMetadata: metadataOf(channelKind) }),
+    });
+
+    it("steers for a same-principal queued message held on the person, as the control", () => {
+      expect(isSteeringDelivery(deliveryOf(), turn, { heldOnPerson: true })).toBe(true);
+      expect(isSteeringDelivery(deliveryOf("slack"), turn, { heldOnPerson: true })).toBe(true);
+    });
+
+    it.each([SUBSCRIPTION_CHANNEL_KIND, CONNECTION_EVENT_CHANNEL_KIND])(
+      "never steers a %s delivery, even from the turn's own principal held on the person",
+      (channelKind) => {
+        const delivery = deliveryOf(channelKind);
+        expect(principalOf(delivery.auth)).toBe(turn.principal);
+        expect(isSteeringDelivery(delivery, turn, { heldOnPerson: true })).toBe(false);
+        expect(isSteeringDelivery(delivery, turn)).toBe(false);
+        expect(isSteeringDelivery({ ...delivery, turnPolicy: undefined }, turn)).toBe(false);
+      },
+    );
+
+    it.each([SUBSCRIPTION_CHANNEL_KIND, CONNECTION_EVENT_CHANNEL_KIND])(
+      "keeps a %s delivery queued past takeSteering for the next turn",
+      (channelKind) => {
+        const queue = new SessionInputQueue([]);
+        const heldSince = queue.nextAdmission;
+        const ordinary = queue.enqueueDelivery(deliveryOf())!.sequence;
+        const event = queue.enqueueDelivery(deliveryOf(channelKind))!.sequence;
+        const admitted = new Set([ordinary, event]);
+
+        expect(queue.takeSteering(admitted, turn, { heldSince })?.sequences).toEqual([ordinary]);
+        expect(queue.takeSteering(admitted, turn, { heldSince })).toBeUndefined();
+        expect(queue.takeNext()).toMatchObject({ kind: "turn", sequences: [event] });
+      },
+    );
   });
 });

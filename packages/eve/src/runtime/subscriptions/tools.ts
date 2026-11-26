@@ -1,0 +1,246 @@
+import type { ApprovalPrompt } from "#approval/definition.js";
+import { contextStorage } from "#context/container.js";
+import { steeredModelCall, turnSteeredMessage } from "#runtime/connections/identity-hold.js";
+import { AuthKey, SessionIdKey, SessionTraceSeedKey } from "#context/keys.js";
+import { installedDurableHost } from "#execution/hosts.js";
+import { principalOf } from "#execution/session/principal.js";
+import { channelEventKey, channelSubscriptionId } from "#runtime/subscriptions/keys.js";
+import {
+  heldByCaller,
+  type ChannelSubscriptionSource,
+  type OpenedSubscription,
+  type SubscriptionBinding,
+} from "#runtime/subscriptions/state.js";
+import { requireCompiledBundle, SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
+import type { ResolvedChannelDefinition } from "#runtime/types.js";
+import type {
+  ChannelOnSubscribe,
+  ChannelSubscriptionsDefinition,
+} from "#shared/channel-subscriptions.js";
+import { isObject } from "#shared/guards.js";
+import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
+import {
+  checkEventInput,
+  closestEventsHint,
+  readEventCatalog,
+} from "#runtime/subscriptions/event-definitions.js";
+import type { JsonObject } from "#shared/json.js";
+import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import type { ToolExecuteOptions } from "#tools/definition.js";
+import { defineJsonSchema } from "#tools/schema.js";
+import {
+  EVENT_STOP_ACTION,
+  EVENT_SUBSCRIBE_ACTION,
+  MAX_TTL_MS,
+  MIN_TTL_MS,
+} from "#runtime/subscriptions/actions.js";
+
+export const SUBSCRIBE_TOOL = "eve__subscribe";
+export const STOP_SUBSCRIPTION_TOOL = "eve__subscription_stop";
+
+export interface OfferedSubscription {
+  readonly channelName: string;
+  readonly catalog: ChannelSubscriptionsDefinition["catalog"];
+  readonly onSubscribe: ChannelOnSubscribe | undefined;
+}
+
+export interface SubscribeInput {
+  readonly source: string;
+  readonly event: string;
+  readonly input: JsonObject;
+  readonly ttlMs: number | null;
+}
+
+export function ttlSchema() {
+  return {
+    type: ["integer", "null"],
+    minimum: MIN_TTL_MS,
+    maximum: MAX_TTL_MS,
+    description: `How long to keep the subscription active, in milliseconds (${MIN_TTL_MS} for 2 minutes up to ${MAX_TTL_MS} for 365 days), or null until stopped.`,
+  };
+}
+
+export type ConnectionSubscriptionAction = typeof EVENT_SUBSCRIBE_ACTION | typeof EVENT_STOP_ACTION;
+
+export interface ConnectionSubscriptionGate {
+  readonly approval: (
+    connectionOf: (toolInput: unknown) => Promise<string | undefined> | string | undefined,
+    prompt: ApprovalPrompt,
+    consentKey: (toolInput: unknown) => string,
+  ) => HarnessToolDefinition["approval"];
+  readonly authoredPrompt: (connectionName: string | undefined) => ApprovalPrompt | undefined;
+  readonly run: (
+    connectionName: string,
+    action: ConnectionSubscriptionAction,
+    input: unknown,
+    options: ToolExecuteOptions,
+  ) => Promise<unknown>;
+}
+
+export function stopSubscriptionEntry(gate: ConnectionSubscriptionGate): HarnessToolDefinition {
+  return {
+    name: STOP_SUBSCRIPTION_TOOL,
+    description: "Stop an active subscription by ID so future events are not delivered.",
+    approval: gate.approval(
+      (toolInput) => connectionOfSubscription(isObject(toolInput) ? toolInput.id : undefined),
+      ({ input }) => `Stop subscription ${JSON.stringify(input.id)}?`,
+      (toolInput) => String(isObject(toolInput) ? toolInput.id : ""),
+    ),
+    agentApprovalIncluded: true,
+    frameworkTool: true,
+    inputSchema: idSchema(),
+    label: { start: () => "Stop subscription" },
+    rootOnly: true,
+    execute: (input: { id: string }, options) => stopSubscription(input.id, options, gate),
+  };
+}
+
+export async function connectionOfSubscription(id: unknown): Promise<string | undefined> {
+  if (typeof id !== "string") return undefined;
+  const found = await installedDurableHost()?.subscriptions?.find(id);
+  return found?.binding.source.kind === "connection" ? found.binding.source.name : undefined;
+}
+
+export function offeredSubscriptions(
+  channels: readonly Pick<ResolvedChannelDefinition, "name" | "definition">[],
+): readonly OfferedSubscription[] {
+  const seen = new Set<string>();
+  const offered: OfferedSubscription[] = [];
+  for (const channel of channels) {
+    const onEvent = channel.definition?.onEvent;
+    if (onEvent === undefined || seen.has(channel.name)) continue;
+    const catalog = channel.definition?.catalog;
+    if (catalog === undefined)
+      throw new Error(`Channel "${channel.name}" defines onEvent without catalog.`);
+    seen.add(channel.name);
+    offered.push({
+      channelName: channel.name,
+      catalog,
+      onSubscribe: channel.definition?.onSubscribe,
+    });
+  }
+  return offered;
+}
+
+function idSchema() {
+  return defineJsonSchema<{ id: string }>({
+    type: "object",
+    properties: { id: { type: "string" } },
+    required: ["id"],
+    additionalProperties: false,
+  });
+}
+
+function owners() {
+  const host = installedDurableHost()?.subscriptions;
+  if (host === undefined)
+    throw new Error("Subscriptions are not supported on this host. Run from a deployed agent.");
+  return host;
+}
+
+function scope() {
+  const ctx = contextStorage.getStore();
+  if (ctx === undefined) throw new Error("Subscriptions require an active eve session.");
+  if (ctx.get(SessionAgentKey)?.nodeId !== undefined)
+    throw new Error("Subscriptions currently require a root-agent session.");
+  if (steeredModelCall(ctx)) throw new Error(turnSteeredMessage("channel subscriptions"));
+  const auth = ctx.get(AuthKey) ?? null;
+  return {
+    ctx,
+    auth,
+    sessionId: ctx.require(SessionIdKey),
+    executionPrincipal: principalOf(auth),
+  };
+}
+
+export async function subscribeToChannel(
+  offered: readonly OfferedSubscription[],
+  input: SubscribeInput,
+  signal: AbortSignal | undefined,
+): Promise<ReturnType<typeof active> | ReturnType<typeof pending>> {
+  const { ctx, auth, sessionId, executionPrincipal } = scope();
+  const host = owners();
+  const { source: channelName, event, input: eventInput } = input;
+  const entry = offered.find((candidate) => candidate.channelName === channelName);
+  if (entry === undefined) throw new Error(`Channel "${channelName}" offers no subscriptions.`);
+  const { catalog, onSubscribe } = entry;
+  const events = await readEventCatalog(catalog);
+  const definition = events.find((candidate) => candidate.name === event);
+  if (definition === undefined)
+    throw new Error(
+      `Channel "${channelName}" emits no event named "${event}".${closestEventsHint(event, events)} Find its events with ${SEARCH_TOOL_NAME}({ query: "subscriptions__${channelName}__" }).`,
+    );
+  const checked = (value: unknown): Promise<JsonObject> => checkEventInput(definition, value);
+  let subscriptionInput = await checked(eventInput);
+  if (onSubscribe !== undefined) {
+    const grant = await onSubscribe({
+      auth,
+      sessionId,
+      subscription: { channelName, event, input: structuredClone(subscriptionInput) },
+    });
+    if (grant !== undefined) subscriptionInput = await checked(grant.input);
+  }
+  const key = channelEventKey(event, subscriptionInput);
+  const binding: SubscriptionBinding = {
+    id: channelSubscriptionId({ channelName, key, sessionId, executionPrincipal }),
+    source: {
+      kind: "channel",
+      name: channelName,
+      event,
+      key,
+      input: structuredClone(subscriptionInput),
+      ttlMs: input.ttlMs,
+    },
+    sessionId,
+    executionPrincipal,
+    auth: structuredClone(auth),
+    traceSeed: ctx.get(SessionTraceSeedKey),
+  };
+  const opened = await host.start(binding, requireCompiledBundle(ctx), signal);
+  return opened === undefined ? pending(binding) : active(binding, opened);
+}
+
+async function stopSubscription(
+  id: string,
+  options: ToolExecuteOptions,
+  gate: ConnectionSubscriptionGate,
+): Promise<unknown> {
+  const found = await owners().find(id);
+  if (found === undefined) throw unknownSubscription();
+  const { binding } = found;
+  if (binding.source.kind === "connection")
+    return gate.run(binding.source.name, EVENT_STOP_ACTION, { id: binding.id }, options);
+  ownedByCaller(binding);
+  if (!(await owners().retire(id))) throw unknownSubscription();
+  return { id, status: "stopping" as const };
+}
+
+function ownedByCaller(binding: SubscriptionBinding): void {
+  if (!heldByCaller(binding, scope())) throw unknownSubscription();
+}
+
+function unknownSubscription(): Error {
+  return new Error("Unknown subscription for this caller.");
+}
+
+function channelOf(binding: SubscriptionBinding): ChannelSubscriptionSource {
+  if (binding.source.kind !== "channel") throw unknownSubscription();
+  return binding.source;
+}
+
+function active(binding: SubscriptionBinding, opened: OpenedSubscription) {
+  const { name, event, input } = channelOf(binding);
+  return {
+    id: binding.id,
+    source: name,
+    event,
+    input,
+    status: "active" as const,
+    expiresAt: opened.expiresAt,
+  };
+}
+
+function pending(binding: SubscriptionBinding) {
+  const { name, event, input } = channelOf(binding);
+  return { id: binding.id, source: name, event, input, status: "pending" as const };
+}
