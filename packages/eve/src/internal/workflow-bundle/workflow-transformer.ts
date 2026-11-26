@@ -196,7 +196,7 @@ export async function transformWorkflowDirectives(input: {
     return { code: `${prefix}\n${proxies}`, workflowManifest: manifest };
   }
   if (input.mode === "workflow" && input.authored === true) {
-    replacements.push(...removeEveDefinerDefaultExport(ast));
+    replacements.push(...removeEveDefinerExports(ast));
   }
   const replacedSource = applySourceReplacements(input.source, replacements);
   const transformedSource =
@@ -390,15 +390,61 @@ function applySourceReplacements(
   return result + source.slice(cursor);
 }
 
-function removeEveDefinerDefaultExport(
-  ast: AstProgram,
-): { end: number; start: number; text: string }[] {
+const NON_DEFINER_EVE_SPECIFIERS = new Set([
+  "eve/context",
+  "eve/experimental/workflow",
+  "eve/extension",
+  "eve/workflow",
+  "eve/workflow/api",
+]);
+
+function unwrapTypeExpression(node: AstNode | null | undefined): AstNode | null | undefined {
+  let current = node;
+  while (
+    current !== null &&
+    current !== undefined &&
+    (current.type === "TSAsExpression" ||
+      current.type === "TSSatisfiesExpression" ||
+      current.type === "TSNonNullExpression" ||
+      current.type === "ParenthesizedExpression")
+  ) {
+    current = current.expression;
+  }
+  return current;
+}
+
+function isEveDefinerCall(
+  expr: AstNode | null | undefined,
+  eveBindings: ReadonlySet<string>,
+): boolean {
+  const call = unwrapTypeExpression(expr);
+  if (call?.type !== "CallExpression") return false;
+  const callee = call.callee;
+  const binding = callee?.type === "MemberExpression" ? callee.object : callee;
+  return binding?.type === "Identifier" && eveBindings.has(binding.name ?? "");
+}
+
+function isLocalReExportDeclaration(node: AstNode): boolean {
+  return (
+    node.type === "ExportNamedDeclaration" &&
+    (node.declaration === undefined || node.declaration === null) &&
+    (node.source === undefined || node.source === null)
+  );
+}
+
+function removeEveDefinerExports(ast: AstProgram): { end: number; start: number; text: string }[] {
   const eveBindings = new Set<string>();
 
   for (const node of ast.body ?? []) {
     if (node.type !== "ImportDeclaration" || node.importKind === "type") continue;
     const source = node.source?.value;
-    if (typeof source !== "string" || !/^eve(?:\/|$)/.test(source)) continue;
+    if (
+      typeof source !== "string" ||
+      !/^eve(?:\/|$)/.test(source) ||
+      NON_DEFINER_EVE_SPECIFIERS.has(source)
+    ) {
+      continue;
+    }
     for (const specifier of node.specifiers ?? []) {
       if (specifier.importKind === "type") continue;
       const name = specifier.local?.name;
@@ -406,15 +452,87 @@ function removeEveDefinerDefaultExport(
     }
   }
 
-  const removals: { end: number; start: number; text: string }[] = [];
+  if (eveBindings.size === 0) return [];
+
+  const removedNodes = new Set<AstNode>();
+  const removedNames = new Set<string>();
+  const candidates = new Map<AstNode, { readonly init: AstNode; readonly name: string }>();
+
   for (const node of ast.body ?? []) {
-    if (node.type !== "ExportDefaultDeclaration" || node.start === undefined) continue;
-    const call = node.declaration;
-    if (call?.type !== "CallExpression" || node.end === undefined) continue;
-    const callee = call.callee;
-    const binding = callee?.type === "MemberExpression" ? callee.object : callee;
-    if (binding?.type !== "Identifier" || !eveBindings.has(binding.name ?? "")) continue;
-    removals.push({ end: node.end, start: node.start, text: "" });
+    if (node.start === undefined || node.end === undefined) continue;
+    if (node.type === "ExportDefaultDeclaration") {
+      if (isEveDefinerCall(node.declaration, eveBindings)) removedNodes.add(node);
+      continue;
+    }
+    const declaration = node.type === "ExportNamedDeclaration" ? node.declaration : node;
+    if (declaration?.type !== "VariableDeclaration" || declaration.declarations?.length !== 1) {
+      continue;
+    }
+    const declarator = declaration.declarations[0]!;
+    const name = declarator.id?.name;
+    if (
+      name !== undefined &&
+      declarator.init != null &&
+      isEveDefinerCall(declarator.init, eveBindings)
+    ) {
+      candidates.set(node, { init: declarator.init, name });
+    }
+  }
+
+  let changed = candidates.size > 0;
+  while (changed) {
+    changed = false;
+    const referenced = new Set<string>();
+    for (const node of ast.body ?? []) {
+      if (removedNodes.has(node) || isLocalReExportDeclaration(node)) continue;
+      const candidate = candidates.get(node);
+      const target = candidate === undefined ? node : candidate.init;
+      visitAstNode(target, (visited) => {
+        if (visited.type === "Identifier" && typeof visited.name === "string") {
+          referenced.add(visited.name);
+        }
+      });
+    }
+    for (const [node, candidate] of candidates) {
+      if (referenced.has(candidate.name)) continue;
+      removedNodes.add(node);
+      removedNames.add(candidate.name);
+      candidates.delete(node);
+      changed = true;
+    }
+  }
+
+  const removals: { end: number; start: number; text: string }[] = [];
+  for (const node of removedNodes) {
+    if (node.start !== undefined && node.end !== undefined) {
+      removals.push({ end: node.end, start: node.start, text: "" });
+    }
+  }
+  if (removedNames.size > 0) {
+    for (const node of ast.body ?? []) {
+      if (!isLocalReExportDeclaration(node) || node.start === undefined || node.end === undefined) {
+        continue;
+      }
+      const specifiers = node.specifiers ?? [];
+      if (!specifiers.some((specifier) => removedNames.has(specifier.local?.name ?? ""))) {
+        continue;
+      }
+      const kept = specifiers.filter((specifier) => !removedNames.has(specifier.local?.name ?? ""));
+      if (kept.length === 0) {
+        removals.push({ end: node.end, start: node.start, text: "" });
+      } else {
+        const rendered = kept.map((specifier) => {
+          const local = specifier.local?.name ?? "";
+          const exported = specifier.exported?.name ?? local;
+          return local === exported ? local : `${local} as ${exported}`;
+        });
+        removals.push({
+          end: node.end,
+          start: node.start,
+          text: `export { ${rendered.join(", ")} };`,
+        });
+      }
+    }
   }
 
   return removals;

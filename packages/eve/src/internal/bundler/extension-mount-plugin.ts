@@ -9,9 +9,12 @@ const MOUNT_QUERY = "?eve-mount=";
 
 export const EXTENSION_CHUNK_DIRECTORY = "_chunks";
 
-interface Mount {
+export interface WorkflowExtensionMount {
   readonly mountId: string;
   readonly sourceRoot: string;
+}
+
+interface Mount extends WorkflowExtensionMount {
   readonly packageName: string;
   readonly specifier?: string;
   readonly mountSourcePath?: string;
@@ -32,6 +35,55 @@ function within(path: string, root: string): boolean {
 
 export function isExtensionModule(path: string, root: string): boolean {
   return within(path, root) || within(path, join(dirname(root), EXTENSION_CHUNK_DIRECTORY));
+}
+
+export function parseExtensionMountId(id: string): {
+  readonly filePath: string;
+  readonly mountId: string | undefined;
+} {
+  const query = id.indexOf(MOUNT_QUERY);
+  if (query < 0) return { filePath: id, mountId: undefined };
+  const tail = id.slice(query + MOUNT_QUERY.length);
+  const end = tail.search(/[&#]/);
+  return {
+    filePath: id.slice(0, query),
+    mountId: decodeURIComponent(end < 0 ? tail : tail.slice(0, end)),
+  };
+}
+
+export function tagExtensionMountId(filePath: string, mountId: string): string {
+  return `${filePath}${MOUNT_QUERY}${encodeURIComponent(mountId)}`;
+}
+
+export function resolveExtensionMountForId(
+  id: string,
+  mounts: readonly WorkflowExtensionMount[] | undefined,
+  fixedMount?: WorkflowExtensionMount,
+): WorkflowExtensionMount | undefined {
+  const { filePath, mountId } = parseExtensionMountId(id);
+  if (mountId !== undefined) {
+    const mount = mounts?.find((candidate) => candidate.mountId === mountId);
+    if (mount === undefined) return undefined;
+    return isExtensionModule(canonicalize(filePath), canonicalize(mount.sourceRoot))
+      ? mount
+      : undefined;
+  }
+  if (
+    fixedMount !== undefined &&
+    isExtensionModule(canonicalize(filePath), canonicalize(fixedMount.sourceRoot))
+  ) {
+    return fixedMount;
+  }
+  return undefined;
+}
+
+export function extensionModuleType(path: string): "json" | "tsx" | "jsx" | "ts" | "js" {
+  const extension = path.slice(path.lastIndexOf(".") + 1);
+  if (extension === "json") return "json";
+  if (extension === "tsx") return "tsx";
+  if (extension === "jsx") return "jsx";
+  if (extension === "ts" || extension === "mts" || extension === "cts") return "ts";
+  return "js";
 }
 
 export function createExtensionMountPlugin(
@@ -169,18 +221,7 @@ export function createExtensionMountPlugin(
         if (query < 0) return undefined;
         const path = id.slice(0, query);
         if (!/\.(?:[cm]?[jt]sx?|json)$/.test(path)) return undefined;
-        const extension = path.slice(path.lastIndexOf(".") + 1);
-        const moduleType =
-          extension === "json"
-            ? "json"
-            : extension === "tsx"
-              ? "tsx"
-              : extension === "jsx"
-                ? "jsx"
-                : ["ts", "mts", "cts"].includes(extension)
-                  ? "ts"
-                  : "js";
-        return { code: readFileSync(path, "utf8"), moduleType };
+        return { code: readFileSync(path, "utf8"), moduleType: extensionModuleType(path) };
       },
     },
   };

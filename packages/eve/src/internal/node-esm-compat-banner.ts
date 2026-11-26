@@ -35,6 +35,59 @@ const BANNER_LINES: readonly BannerLine[] = [
 
 const FILENAME_BANNER_LINE = BANNER_LINES[0]!;
 const DIRNAME_BANNER_LINE = BANNER_LINES[1]!;
+const REQUIRE_BANNER_LINE = BANNER_LINES[2]!;
+const STANDALONE_DIRNAME_DECLARATION =
+  "const __dirname = __eveDirname(__eveFileURLToPath(import.meta.url));";
+const DEAD_BANNER_CALL_LINES = new Set([
+  "__eveFileURLToPath(import.meta.url);",
+  "__eveDirname(__filename);",
+  "__eveDirname(__eveFileURLToPath(import.meta.url));",
+  "__eveCreateRequire(import.meta.url);",
+]);
+
+const BANNER_LINE_SET = new Set([
+  ...BANNER_LINES.flatMap((line) => [line.importLine, line.declarationLine]),
+  STANDALONE_DIRNAME_DECLARATION,
+  ...DEAD_BANNER_CALL_LINES,
+]);
+
+export function stripUnusedNodeEsmCompatBanner(code: string): string {
+  if (
+    !code.includes("__eveFileURLToPath") &&
+    !code.includes("__eveDirname") &&
+    !code.includes("__eveCreateRequire")
+  ) {
+    return code;
+  }
+
+  const lines = code.split("\n");
+  const body = lines.filter((line) => !BANNER_LINE_SET.has(line.trim())).join("\n");
+  const usesRequire = /\brequire\b/.test(body);
+  const usesDirname = /\b__dirname\b/.test(body);
+  const usesFilename =
+    /\b__filename\b/.test(body) ||
+    (usesDirname && lines.some((line) => line.trim() === DIRNAME_BANNER_LINE.declarationLine));
+  const usesFileURLToPath =
+    usesFilename ||
+    (usesDirname && lines.some((line) => line.trim() === STANDALONE_DIRNAME_DECLARATION));
+
+  const kept = lines.filter((rawLine) => {
+    const line = rawLine.trim();
+    if (DEAD_BANNER_CALL_LINES.has(line)) return false;
+    if (line === FILENAME_BANNER_LINE.importLine) return usesFileURLToPath;
+    if (line === FILENAME_BANNER_LINE.declarationLine) return usesFilename;
+    if (line === DIRNAME_BANNER_LINE.importLine) return usesDirname;
+    if (line === DIRNAME_BANNER_LINE.declarationLine || line === STANDALONE_DIRNAME_DECLARATION) {
+      return usesDirname;
+    }
+    if (line === REQUIRE_BANNER_LINE.importLine || line === REQUIRE_BANNER_LINE.declarationLine) {
+      return usesRequire;
+    }
+    return true;
+  });
+
+  return kept.length === lines.length ? code : kept.join("\n");
+}
 
 export function buildNodeEsmCompatBanner(program: ParsedProgram): string {
   const imports: string[] = [];

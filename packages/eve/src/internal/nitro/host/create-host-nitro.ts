@@ -62,6 +62,8 @@ export async function createHostNitro(spec: HostSpec): Promise<Nitro> {
     appRoot: locations.appRoot,
     authoredWorkflowModules: locations.compiledArtifacts.authoredWorkflowModules,
     compiledArtifactsBootstrapPath: locations.compiledArtifacts.bootstrapPath,
+    extensionMounts: spec.extensionMounts,
+    extensionOverridePaths: spec.extensionOverridePaths,
     outDir: locations.workflowBuildDir,
     inlineSourcemap: spec.development,
     rootDir: resolvePackageRoot(),

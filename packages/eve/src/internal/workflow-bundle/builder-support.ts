@@ -1,9 +1,12 @@
 import { WORKFLOW_REGISTRY_GLOBAL } from "#execution/workflow-registry.js";
 import { builtinModules } from "node:module";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { mkdir, readFile, readdir } from "node:fs/promises";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
 
+import type { Plugin } from "rolldown";
+
+import type { CompiledExtensionMount } from "#compiler/manifest.js";
 import { atomicWriteFile } from "#shared/atomic-write-file.js";
 
 import {
@@ -11,6 +14,14 @@ import {
   stringifyNitroDataImportSpecifier,
 } from "#internal/application/import-specifier.js";
 import { resolvePackageRoot, resolveWorkflowModulePath } from "#internal/application/package.js";
+import {
+  extensionModuleType,
+  parseExtensionMountId,
+  resolveExtensionMountForId,
+  tagExtensionMountId,
+  type WorkflowExtensionMount,
+} from "#internal/bundler/extension-mount-plugin.js";
+import { stripUnusedNodeEsmCompatBanner } from "#internal/node-esm-compat-banner.js";
 import {
   applyWorkflowTransform,
   getImportPath,
@@ -26,6 +37,8 @@ export interface AuthoredWorkflowModules {
 
 export interface WorkflowBundleBuilderOptions {
   readonly authoredWorkflowModules?: AuthoredWorkflowModules;
+  readonly extensionMounts?: readonly CompiledExtensionMount[];
+  readonly extensionOverridePaths?: ReadonlyMap<string, string>;
   agentName: string;
   appRoot: string;
   compiledArtifactsBootstrapPath: string;
@@ -147,6 +160,11 @@ export async function collectWorkflowInputFiles(root: string): Promise<string[]>
 }
 
 export function createWorkflowImport(filePath: string, workingDir: string): string {
+  const parsed = parseExtensionMountId(filePath);
+  if (parsed.mountId !== undefined) {
+    return `import ${JSON.stringify(tagExtensionMountId(parsed.filePath, parsed.mountId))};`;
+  }
+
   const { importPath, isPackage } = getImportPath(filePath, workingDir);
 
   if (isPackage) {
@@ -198,6 +216,13 @@ export function createWorkflowDriverAliasPlugin(workingDir: string): WorkflowRol
           `Workflow bundle cannot import "${source}"${via}: the runtime API is not available ` +
             `inside a workflow body. Call it from a "use step" function and await that step from the body.`,
         );
+      }
+
+      if (source === "eve/extension") {
+        return resolveFirstExistingPath([
+          join(workingDir, "src", "public", "extension", "index.ts"),
+          join(workingDir, "dist", "src", "public", "extension", "index.js"),
+        ]);
       }
 
       if (
@@ -263,6 +288,7 @@ export function createEvePackageImportsPlugin(
 }
 
 export function createWorkflowTransformPlugin(input: {
+  extensionMounts?: readonly WorkflowExtensionMount[];
   manifest: WorkflowManifest;
   mode?: "step" | "workflow";
   projectRoot: string;
@@ -270,37 +296,176 @@ export function createWorkflowTransformPlugin(input: {
   workingDir: string;
 }): WorkflowRolldownPlugin {
   const sideEffectFiles = new Set(
-    input.sideEffectFiles?.map((filePath) => filePath.replaceAll("\\", "/")) ?? [],
+    input.sideEffectFiles?.map((filePath) => normalizeWorkflowModuleKey(filePath)) ?? [],
   );
 
   return {
     name: "eve-workflow-transform",
     async load(id: string) {
-      if (!isJavaScriptLikePath(id)) {
+      const { filePath, mountId } = parseExtensionMountId(id);
+      if (!isJavaScriptLikePath(filePath)) {
         return undefined;
       }
 
-      const code = await readFile(id, "utf8");
-      const relativeFilepath = createManifestRelativeFilepath(input.workingDir, id);
+      const code = await readFile(filePath, "utf8");
+      const relativeFilepath = createManifestRelativeFilepath(input.workingDir, filePath);
+      const extensionMount = resolveExtensionMountForId(id, input.extensionMounts);
+      const mode = input.mode ?? "workflow";
       const transformed = await applyWorkflowTransform(
         relativeFilepath,
         code
           .replace(/require\(\s*(['"])server-only\1\s*\)/g, "void 0")
           .replace(/require\(\s*(['"])client-only\1\s*\)/g, "void 0"),
-        input.mode ?? "workflow",
-        id,
+        mode,
+        filePath,
         input.projectRoot,
+        undefined,
+        extensionMount,
       );
 
       mergeWorkflowManifest(input.manifest, transformed.workflowManifest);
 
-      return {
-        code: transformed.code,
+      const transformedCode =
+        mode === "workflow" ? stripUnusedNodeEsmCompatBanner(transformed.code) : transformed.code;
+
+      const result: {
+        code: string;
+        map: null;
+        moduleSideEffects: true | undefined;
+        moduleType?: ReturnType<typeof extensionModuleType>;
+      } = {
+        code: transformedCode,
         map: null,
-        moduleSideEffects: sideEffectFiles.has(id.replaceAll("\\", "/")) || undefined,
+        moduleSideEffects: sideEffectFiles.has(normalizeWorkflowModuleKey(id)) || undefined,
       };
+      if (mountId !== undefined) {
+        result.moduleType = extensionModuleType(filePath);
+      }
+      return result;
     },
   };
+}
+
+const WORKFLOW_MOUNT_BIND_PREFIX = "\0eve-workflow-mount-bind:";
+const EXTENSION_DECLARATION_BASENAME = /^extension\.[cm]?[jt]sx?$/;
+const EXTENSION_DECLARATION_IMPORT = /(?:^|[/\\])extension(?:\.[cm]?[jt]sx?)?$/;
+
+function canonicalPath(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
+  }
+}
+
+export function createWorkflowExtensionMountBindPlugin(
+  mounts: readonly CompiledExtensionMount[],
+): Plugin | null {
+  if (mounts.length === 0) return null;
+  const canonicalRoots = mounts.map((mount) => ({
+    ...mount,
+    root: canonicalPath(mount.sourceRoot),
+  }));
+  const byId = new Map(canonicalRoots.map((mount) => [mount.mountId, mount]));
+  const specifiers = new Set(
+    mounts.flatMap((mount) => [
+      mount.specifier,
+      ...(mount.programmaticImport === undefined ? [] : [mount.programmaticImport.specifier]),
+    ]),
+  );
+  const mountDeclarationPaths = new Set(
+    mounts
+      .filter((mount) => mount.programmaticImport === undefined)
+      .map((mount) => canonicalPath(mount.mountSourcePath)),
+  );
+  const packageOutDirs = new Set(canonicalRoots.map((mount) => dirname(mount.root)));
+
+  return {
+    name: "eve-workflow-extension-mount-bind",
+    async resolveId(source, importer) {
+      if (source.startsWith("\0") || importer === undefined || importer.startsWith("\0")) {
+        return undefined;
+      }
+      const cleanSource = parseExtensionMountId(source).filePath;
+      const parsedImporter = parseExtensionMountId(importer);
+      if (
+        !specifiers.has(cleanSource) &&
+        !(parsedImporter.mountId !== undefined && EXTENSION_DECLARATION_IMPORT.test(cleanSource))
+      ) {
+        return undefined;
+      }
+      const importerCanonical = canonicalPath(parsedImporter.filePath);
+      if (
+        mountDeclarationPaths.has(importerCanonical) ||
+        packageOutDirs.has(dirname(importerCanonical))
+      ) {
+        return undefined;
+      }
+      const resolved = await this.resolve(source, importer, {
+        skipSelf: true,
+        kind: "import-statement",
+      });
+      if (resolved === null || resolved.external || resolved.id.startsWith("\0")) {
+        return undefined;
+      }
+      const parsedResolved = parseExtensionMountId(resolved.id);
+      if (parsedResolved.mountId === undefined) return undefined;
+      const mount = byId.get(parsedResolved.mountId);
+      if (mount === undefined) return undefined;
+      const resolvedCanonical = canonicalPath(parsedResolved.filePath);
+      const isHandle =
+        cleanSource === mount.specifier ||
+        cleanSource === mount.programmaticImport?.specifier ||
+        (dirname(resolvedCanonical) === mount.root &&
+          EXTENSION_DECLARATION_BASENAME.test(basename(resolvedCanonical)));
+      if (!isHandle) return undefined;
+      return {
+        id: `${WORKFLOW_MOUNT_BIND_PREFIX}${encodeURIComponent(mount.mountId)}:${parsedResolved.filePath}`,
+      };
+    },
+    load(id) {
+      if (!id.startsWith(WORKFLOW_MOUNT_BIND_PREFIX)) return undefined;
+      const rest = id.slice(WORKFLOW_MOUNT_BIND_PREFIX.length);
+      const separator = rest.indexOf(":");
+      if (separator < 0) return undefined;
+      const mountId = decodeURIComponent(rest.slice(0, separator));
+      const targetFile = rest.slice(separator + 1);
+      const mount = byId.get(mountId);
+      if (mount === undefined) return undefined;
+      const chain = canonicalRoots
+        .filter(
+          (candidate) =>
+            candidate.mountId === mount.mountId ||
+            mount.mountId.startsWith(`${candidate.mountId}/`),
+        )
+        .sort((left, right) => left.mountId.length - right.mountId.length);
+      const lines: string[] = [];
+      for (const [index, entry] of chain.entries()) {
+        if (entry.programmaticImport !== undefined) {
+          lines.push(
+            `import * as __eveMount_${index} from ${JSON.stringify(tagExtensionMountId(entry.programmaticImport.specifier, entry.mountId))};`,
+            `__eveMount_${index}.default(${JSON.stringify(entry.programmaticImport.config)});`,
+          );
+        } else {
+          lines.push(
+            `import ${JSON.stringify(tagExtensionMountId(entry.mountSourcePath, entry.mountId))};`,
+          );
+        }
+      }
+      const targetSpecifier = JSON.stringify(tagExtensionMountId(targetFile, mountId));
+      lines.push(
+        `export * from ${targetSpecifier};`,
+        `export { default } from ${targetSpecifier};`,
+      );
+      return { code: `${lines.join("\n")}\n`, moduleType: "js" as const };
+    },
+  };
+}
+
+function normalizeWorkflowModuleKey(id: string): string {
+  const { filePath, mountId } = parseExtensionMountId(id);
+  const normalized = filePath.replaceAll("\\", "/");
+  return mountId === undefined ? normalized : tagExtensionMountId(normalized, mountId);
 }
 
 export function createWorkflowNodeBuiltinGuardPlugin(): WorkflowRolldownPlugin {

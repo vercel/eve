@@ -245,6 +245,7 @@ export function createExtensionCompileMounts(
     sourceIds.set(source.mountId, source.mountSourceId);
     mounts.set(source.mountId, {
       mountId: source.mountId,
+      sourceRoot: mount.sourceRoot,
       entry:
         mount.programmaticDeclaration === undefined
           ? {

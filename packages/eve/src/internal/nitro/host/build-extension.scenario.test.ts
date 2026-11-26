@@ -544,4 +544,72 @@ export default { description: invalid, async execute() { return {}; } };
     };
     expect(pkg.exports?.["."]).toEqual({ types: "./dist/index.d.ts", default: "./dist/index.mjs" });
   });
+
+  it("preserves workflow and step directives in dist output and enforces eve/workflow imports", async () => {
+    const root = await createExtensionPackage();
+    await mkdir(join(root, "extension", "lib"), { recursive: true });
+    await writeFile(
+      join(root, "extension", "lib", "jobs.ts"),
+      `export async function pollJob(id: string): Promise<{ id: string; done: true }> {
+  "use step";
+  return { id, done: true };
+}
+`,
+      "utf8",
+    );
+    await writeFile(
+      join(root, "extension", "tools", "generate.ts"),
+      `import { defineWorkflowTool } from "eve/tools";
+import { sleep } from "eve/workflow";
+import { pollJob } from "../lib/jobs";
+
+export default defineWorkflowTool({
+  description: "Generate a video.",
+  inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+  async task({ id }: { id: string }) {
+    "use workflow";
+    await sleep("1ms");
+    return await pollJob(id);
+  },
+});
+`,
+      "utf8",
+    );
+    const config = await tryReadExtensionBuildConfig(root);
+    const outDir = await buildExtensionPackage(root, config!);
+
+    const generateOutput = await readFile(
+      join(outDir, "extension", "tools", "generate.mjs"),
+      "utf8",
+    );
+    const jobsOutput = await readFile(join(outDir, "extension", "lib", "jobs.mjs"), "utf8");
+    expect(generateOutput).toContain('"use workflow"');
+    expect(generateOutput).toContain('from "eve/workflow"');
+    expect(generateOutput).toMatch(/async function task\(/);
+    expect(jobsOutput).toContain('"use step"');
+    expect(await readFile(join(outDir, "extension", "tools", "generate.d.ts"), "utf8")).toContain(
+      "export default",
+    );
+
+    await writeFile(
+      join(root, "extension", "tools", "generate.ts"),
+      `import { defineWorkflowTool } from "eve/tools";
+import { sleep } from "workflow";
+
+export default defineWorkflowTool({
+  description: "Generate a video.",
+  inputSchema: { type: "object", properties: {} },
+  async task() {
+    "use workflow";
+    await sleep("1ms");
+    return { done: true };
+  },
+});
+`,
+      "utf8",
+    );
+    await expect(buildExtensionPackage(root, config!)).rejects.toThrow(
+      /Import from `eve\/workflow` \(or `eve\/workflow\/api`\)/,
+    );
+  });
 });

@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import type { Plugin } from "rolldown";
 import { mapConcurrent } from "#shared/map-concurrent.js";
 
+import type { CompiledExtensionMount } from "#compiler/manifest.js";
 import {
   resolvePackageSourceDirectoryPath,
   resolveWorkflowModulePath,
@@ -12,6 +13,8 @@ import {
   createAuthoredPlugins,
   resolveAuthoredTsConfigPath,
 } from "#internal/bundler/authored-plugins.js";
+import { createExtensionMountPlugin } from "#internal/bundler/extension-mount-plugin.js";
+import { createExtensionScopePlugin } from "#internal/bundler/extension-scope-plugin.js";
 import {
   type AuthoredWorkflowModules,
   bundleFinalWorkflowOutput,
@@ -23,6 +26,7 @@ import {
   convertWorkflowsManifest,
   createEvePackageImportsPlugin,
   createWorkflowImport,
+  createWorkflowExtensionMountBindPlugin,
   createWorkflowNodeBuiltinGuardPlugin,
   createWorkflowDriverAliasPlugin,
   createWorkflowTransformPlugin,
@@ -61,6 +65,8 @@ export interface WorkflowArtifacts {
 export class WorkflowBundleBuilder {
   readonly #authoredWorkflowModules: AuthoredWorkflowModules;
   readonly #compiledArtifactsBootstrapPath: string;
+  readonly #extensionMounts: readonly CompiledExtensionMount[];
+  readonly #extensionOverridePaths: ReadonlyMap<string, string>;
   readonly #outDir: string;
   readonly #queueNamespace: string;
   readonly #inlineSourcemap: boolean;
@@ -88,6 +94,8 @@ export class WorkflowBundleBuilder {
       workflowModules: [],
     };
     this.#compiledArtifactsBootstrapPath = options.compiledArtifactsBootstrapPath;
+    this.#extensionMounts = options.extensionMounts ?? [];
+    this.#extensionOverridePaths = options.extensionOverridePaths ?? new Map();
     this.#outDir = options.outDir;
     this.#queueNamespace = deriveEveWorkflowQueueNamespace(options.agentName);
     this.#inlineSourcemap = options.inlineSourcemap ?? true;
@@ -110,6 +118,8 @@ export class WorkflowBundleBuilder {
     const { manifest: stepsManifest, stepTargets } = await writeNitroStepEntrypoint({
       builtinsPath: resolveWorkflowModulePath("workflow/internal/builtins"),
       discoveredEntries: mergeStepEntries(frameworkEntries, appEntries),
+      extensionMounts: this.#extensionMounts,
+      extensionOverridePaths: this.#extensionOverridePaths,
       outfile: stepsPath,
       projectRoot: this.transformProjectRoot,
       sideEffectFiles: [this.#compiledArtifactsBootstrapPath],
@@ -262,18 +272,33 @@ export class WorkflowBundleBuilder {
       plugins: [
         createWorkflowVirtualEntryPlugin(virtualEntrySource),
         createWorkflowDriverAliasPlugin(this.config.workingDir),
+        ...(options.authoredTsConfig
+          ? [createWorkflowExtensionMountBindPlugin(this.#extensionMounts)]
+          : []),
+        createWorkflowTransformPlugin({
+          extensionMounts: options.authoredTsConfig ? this.#extensionMounts : undefined,
+          manifest,
+          projectRoot: this.transformProjectRoot,
+          sideEffectFiles: [...workflowFiles, ...serdeOnlyFiles],
+          workingDir: this.config.workingDir,
+        }),
+        ...(options.authoredTsConfig
+          ? [
+              createExtensionMountPlugin(this.#extensionMounts, this.#extensionOverridePaths),
+              createExtensionScopePlugin(
+                this.#extensionMounts.map((mount) => ({
+                  mountId: mount.mountId,
+                  sourceRoot: mount.sourceRoot,
+                })),
+              ),
+            ]
+          : []),
         ...createAuthoredPlugins({
           authoredSourceOnly: true,
           extensions: WORKFLOW_SOURCE_EXTENSIONS,
           packageRoot: this.authoredPackageRoot,
         }),
         createEvePackageImportsPlugin(this.config.workingDir, { workflowCondition: true }),
-        createWorkflowTransformPlugin({
-          manifest,
-          projectRoot: this.transformProjectRoot,
-          sideEffectFiles: [...workflowFiles, ...serdeOnlyFiles],
-          workingDir: this.config.workingDir,
-        }),
         createWorkflowNodeBuiltinGuardPlugin(),
         options.graphPlugin,
       ],

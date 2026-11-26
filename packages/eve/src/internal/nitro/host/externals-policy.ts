@@ -1,5 +1,6 @@
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import { resolvePackageSourceDirectoryPath } from "#internal/application/package.js";
+import { parseExtensionMountId } from "#internal/bundler/extension-mount-plugin.js";
 import {
   collectHostTracedDependencies,
   OPTIONAL_ENGINE_PACKAGES_BY_BACKEND_NAME,
@@ -55,5 +56,8 @@ export function createExternalsPolicy(input: {
 }
 
 export function createHostNoExternals(stepTargets: readonly string[]): string[] {
-  return [`${resolvePackageSourceDirectoryPath("src/execution")}/`, ...stepTargets];
+  return [
+    `${resolvePackageSourceDirectoryPath("src/execution")}/`,
+    ...new Set(stepTargets.map((target) => parseExtensionMountId(target).filePath)),
+  ];
 }

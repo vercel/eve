@@ -15,6 +15,9 @@ import type { AuthoredModuleGraph } from "#internal/authored-module-graph.js";
 import {
   createExtensionMountPlugin,
   EXTENSION_CHUNK_DIRECTORY,
+  parseExtensionMountId,
+  resolveExtensionMountForId,
+  type WorkflowExtensionMount,
 } from "#internal/bundler/extension-mount-plugin.js";
 import { createAuthoredModuleBundleError } from "#internal/authored-module-bundle.js";
 import { createAuthoredModuleEvaluationError } from "#internal/authored-module-evaluation-error.js";
@@ -69,6 +72,7 @@ export interface AuthoredModuleLoadOptions {
   readonly externalDependencies?: readonly string[];
   readonly extension?: {
     readonly mountId: string;
+    readonly sourceRoot?: string;
     readonly entry?: ExtensionMountEntry;
     readonly ancestors?: readonly (ExtensionMountEntry & { readonly mountId: string })[];
     readonly evaluationId?: string;
@@ -140,6 +144,10 @@ export async function bundleAuthoredModuleCode(
     mount === undefined
       ? []
       : [...(options.extension?.ancestors ?? []), { ...mount, mountId: mountId! }];
+  const fixedExtensionMount =
+    mount === undefined && mountId !== undefined && options.extension?.sourceRoot !== undefined
+      ? { mountId, sourceRoot: options.extension.sourceRoot }
+      : undefined;
   return await buildAuthoredModuleBundle(modulePath, options, {
     packageBoundaryPlugin: createRuntimeLoaderPackageBoundaryPlugin({
       externalDependencies: normalizeExternalDependencies(options.externalDependencies),
@@ -166,7 +174,11 @@ export async function bundleAuthoredModuleCode(
               },
             },
           ]),
-      createAuthoredWorkflowDirectivePlugin({ appRoot: options.appRoot ?? packageRoot }),
+      createAuthoredWorkflowDirectivePlugin({
+        appRoot: options.appRoot ?? packageRoot,
+        extensionMounts: mountChain,
+        fixedExtensionMount,
+      }),
       ...(mount === undefined ? [] : [createExtensionMountPlugin(mountChain)!]),
     ],
     sourcemap: evaluatedBundleSourcemap(),
@@ -202,7 +214,7 @@ export async function bundleExtensionDistributionGraph(input: {
   readonly imports: readonly string[];
 }> {
   const plugins = [
-    createAuthoredDirectiveGuardPlugin(),
+    createExtensionDistributionDirectivePlugin(),
     ...createAuthoredPlugins({ packageRoot: input.packageRoot }),
     createNodeEsmCompatBannerPlugin(),
     createDistributionPackageBoundaryPlugin({
@@ -313,6 +325,7 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
           createExternalRuntimeImportPlugin(programmaticLoaderImportSpecifier),
           createAuthoredWorkflowDirectivePlugin({
             appRoot: input.appRoot,
+            extensionMounts,
             recorder: workflowSources,
           }),
           workflowSources.graphPlugin(),
@@ -380,7 +393,9 @@ class AuthoredWorkflowSourceRecorder {
   }
 
   sourceModules(): readonly string[] {
-    return [...this.#sources.keys()].sort();
+    return [
+      ...new Set([...this.#sources.keys()].map((id) => parseExtensionMountId(id).filePath)),
+    ].sort();
   }
 
   graphPlugin(): Plugin {
@@ -417,8 +432,11 @@ class AuthoredWorkflowSourceRecorder {
 
     const hash = createHash("sha256");
     for (const id of [...reachable].sort()) {
+      const { filePath, mountId } = parseExtensionMountId(id);
       hash
-        .update(relative(this.#appRoot, id).split(sep).join("/"))
+        .update(relative(this.#appRoot, filePath).split(sep).join("/"))
+        .update("\0")
+        .update(mountId ?? "")
         .update("\0")
         .update(this.#sources.get(id) ?? "")
         .update("\0");
@@ -489,7 +507,7 @@ function createAuthoredDirectiveGuardPlugin(): Plugin {
       if (hasDirectives) {
         throw new Error(
           `Module "${id}" uses Workflow directives ("use step" or "use workflow"). ` +
-            "Workflow directives are supported in application modules only, not in extensions or instrumentation.",
+            "Workflow directives are supported in application and extension modules only, not in instrumentation.",
         );
       }
       return undefined;
@@ -497,21 +515,53 @@ function createAuthoredDirectiveGuardPlugin(): Plugin {
   };
 }
 
+function createExtensionDistributionDirectivePlugin(): Plugin {
+  return {
+    name: "eve-extension-distribution-directives",
+    async transform(source: string, id: string) {
+      if (!AUTHORED_BUNDLED_MODULE_EXTENSION.test(id) || isNodeModulesPath(id)) {
+        return undefined;
+      }
+      const prepared = await prepareAuthoredWorkflowDirectives({ filePath: id, source });
+      return prepared.source === source ? undefined : { code: prepared.source, map: null };
+    },
+  };
+}
+
 export function createAuthoredWorkflowDirectivePlugin(input: {
   readonly appRoot: string;
+  readonly extensionMounts?: readonly WorkflowExtensionMount[];
+  readonly fixedExtensionMount?: WorkflowExtensionMount;
   readonly recorder?: AuthoredWorkflowSourceRecorder;
 }): Plugin {
   return {
     name: "eve-authored-workflow-directives",
     async transform(source: string, id: string) {
-      if (!AUTHORED_BUNDLED_MODULE_EXTENSION.test(id) || isNodeModulesPath(id)) {
+      const { filePath } = parseExtensionMountId(id);
+      if (!AUTHORED_BUNDLED_MODULE_EXTENSION.test(filePath)) {
         return undefined;
       }
-      if (!isAuthoredApplicationModule(id, input.appRoot)) {
+      const extensionMount = resolveExtensionMountForId(
+        id,
+        input.extensionMounts,
+        input.fixedExtensionMount,
+      );
+      if (
+        extensionMount === undefined &&
+        (isNodeModulesPath(filePath) || !isAuthoredApplicationModule(filePath, input.appRoot))
+      ) {
         return undefined;
       }
 
-      const transformed = await applyWorkflowTransform(id, source, "client", id, input.appRoot);
+      const transformed = await applyWorkflowTransform(
+        filePath,
+        source,
+        "client",
+        filePath,
+        input.appRoot,
+        undefined,
+        extensionMount,
+      );
       input.recorder?.record(id, source, transformed.workflowManifest);
       return transformed.code === source ? undefined : { code: transformed.code, map: null };
     },

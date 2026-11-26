@@ -17,6 +17,7 @@ export type CompiledBindingNamespaceLoader = (
 
 export interface ExtensionCompileMount {
   readonly mountId: string;
+  readonly sourceRoot?: string;
   readonly entry?: NonNullable<AuthoredModuleLoadOptions["extension"]>["entry"];
 }
 
@@ -94,16 +95,19 @@ async function loadCompiledBindingNamespace(input: {
     if (mountId !== undefined && input.mounts !== undefined && mount === undefined) {
       throw new Error(`Missing mount "${mountId}" for extension contribution.`);
     }
-    const extension: AuthoredModuleLoadOptions["extension"] =
-      mountId === undefined
-        ? undefined
-        : {
-            mountId,
-            evaluationId: input.evaluationId,
-            entry: mount?.entry,
-            ancestors:
-              input.mounts === undefined ? undefined : ancestorMountEntries(input.mounts, mountId),
-          };
+    let extension: AuthoredModuleLoadOptions["extension"];
+    if (mountId !== undefined) {
+      extension = {
+        mountId,
+        evaluationId: input.evaluationId,
+        entry: mount?.entry,
+        ancestors:
+          input.mounts === undefined ? undefined : ancestorMountEntries(input.mounts, mountId),
+      };
+      if (mount?.sourceRoot !== undefined) {
+        extension = { ...extension, sourceRoot: mount.sourceRoot };
+      }
+    }
     return await loadAuthoredModuleNamespace(input.binding.backing.sourcePath, {
       appRoot: input.binding.owner.kind === "application" ? input.appRoot : undefined,
       externalDependencies: input.binding.backing.externalDependencies,
