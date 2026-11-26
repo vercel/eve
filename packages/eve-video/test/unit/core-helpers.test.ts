@@ -202,7 +202,7 @@ describe("media helpers and SSRF protection", () => {
 });
 
 describe("model resolution, webhook verification, and in-memory storage", () => {
-  test("model allowlists, alias catalogs, custom models, AI_SDK_DEFAULT_PROVIDER, gateway options, and resolveJobModel", () => {
+  test("default model, custom models, AI_SDK_DEFAULT_PROVIDER, gateway options, and resolveJobModel", () => {
     const rc = Mod.resolveConfiguredModel;
     const fast = H.createAsyncVideoModel({ modelId: "p/fast", specificationVersion: "v3" }).model;
     const cinema = H.createSyncVideoModel({ modelId: "p/cinema" }).model;
@@ -216,22 +216,12 @@ describe("model resolution, webhook verification, and in-memory storage", () => 
     ];
     for (const bad of badModels) eq(Mod.isVideoModelLike(bad), false);
 
-    eq(rc({}).modelId, Mod.DEFAULT_VIDEO_MODEL);
+    eq(Mod.DEFAULT_VIDEO_MODEL, "bytedance/seedance-2.5-flash");
+    eq(rc({}).modelId, "bytedance/seedance-2.5-flash");
     eq(rc({ model: fast }).model, fast);
-    thr(() => rc({ model: fast }, "other/id"), /requires "models" config/);
-
-    const list = { models: ["google/veo-3.1-fast-generate-001", "klingai/kling-v2.6-pro"] };
-    eq(rc(list).modelId, "google/veo-3.1-fast-generate-001");
-    eq(rc(list, "klingai/kling-v2.6-pro").modelId, "klingai/kling-v2.6-pro");
-    thr(() => rc(list, "openai/sora-2"), /is not allowed/);
-
-    const aliases = { model: "cinema", models: { fast, cinema } };
-    eq(rc(aliases).model, cinema);
-    eq(rc(aliases, "fast").model, fast);
-    eq(rc(aliases, "p/fast").model, fast);
-    thr(() => rc(aliases, "draft"), /is not allowed/);
-    eq(Mod.resolveJobModel(aliases, "fast").model, fast);
-    eq(Mod.resolveJobModel(aliases, "p/fast").model, fast);
+    eq(Mod.resolveJobModel({ model: fast }, "p/fast").model, fast);
+    thr(() => rc({ model: "   " }), /non-empty string/);
+    thr(() => Mod.resolveJobModel({}, "   "), /non-empty string/);
 
     const k = "AI_SDK_DEFAULT_PROVIDER";
     const prev = Reflect.get(globalThis, k);
@@ -240,7 +230,8 @@ describe("model resolution, webhook verification, and in-memory storage", () => 
       Reflect.set(globalThis, k, { videoModel: (id: string) => (reqs.push(id), fast) });
       eq(rc({ model: "acme/v1" }).model, fast);
       eq(Mod.resolveJobModel({}, "acme/job").model, fast);
-      deq(reqs, ["acme/v1", "acme/job"]);
+      eq(Mod.resolveJobModel({ model: cinema }, "acme/inflight").model, fast);
+      deq(reqs, ["acme/v1", "acme/job", "acme/inflight"]);
       const gwOpts = { apiKey: "k", baseURL: "https://gw.test/v1", headers: { "x-t": "1" } };
       const gw = rc({ model: "acme/v2", gateway: gwOpts });
       eq(gw.modelId, "acme/v2");

@@ -19,11 +19,11 @@ Add a mount file at `agent/extensions/video.ts`:
 import video from "@eve/video";
 
 export default video({
-  // Omit all fields to use google/veo-3.1-fast-generate-001, webhook: "auto", and automatic storage.
+  // Omit all fields to use bytedance/seedance-2.5-flash, webhook: "auto", and automatic storage.
 });
 ```
 
-Mounting at `agent/extensions/video.ts` adds the `video__generate` background workflow task and model instructions. String model IDs route through Vercel AI Gateway and require `AI_GATEWAY_API_KEY` or Vercel OIDC credentials. To use a provider without AI Gateway, pass an AI SDK v4 or v3 `VideoModel` instance to `model` or `models`.
+Mounting at `agent/extensions/video.ts` adds the `video__generate` background workflow task and model instructions. String model IDs route through Vercel AI Gateway and require `AI_GATEWAY_API_KEY` or Vercel OIDC credentials. To use a provider without AI Gateway, pass an AI SDK v4 or v3 `VideoModel` instance to `model`.
 
 ## Background execution and webhooks
 
@@ -34,20 +34,15 @@ Each `<mount>__generate` call runs as a `defineWorkflowTool({ task })` workflow 
 - **Single-step models:** Models that implement only `doGenerate` (without `doStart` and `doStatus`) complete inside a single `"use step"`.
 - **Payload boundary and cleanup:** Completed videos download and persist inside the same `"use step"` as the terminal status check so multi-megabyte video bytes never cross the Workflow step boundary. Large local inputs (> 180 KiB) stage to public HTTPS storage (`ttlDays: 1`) and are deleted in `finally`, including on cancel or timeout.
 
-## Choose video models
+## Choose a video model
 
-Omit `model` to use `"google/veo-3.1-fast-generate-001"`. Configure `model`, `models`, `gateway`, `defaults`, and `providerOptions` on the mount to control which models and parameters calls use:
+Omit `model` to use `"bytedance/seedance-2.5-flash"`, which supports text-to-video, `start`/`end` frames, `references`, audio, video editing, and video extension out of the box. Configure `model`, `gateway`, `defaults`, and `providerOptions` on the mount to choose a different model or tune default parameters:
 
 ```ts title="agent/extensions/video.ts"
 import video from "@eve/video";
 
 export default video({
-  model: "fast",
-  models: {
-    fast: "google/veo-3.1-fast-generate-001",
-    quality: "google/veo-3.1-generate-001",
-    edit: "spacexai/grok-imagine-video",
-  },
+  model: "bytedance/seedance-2.5",
   defaults: {
     aspectRatio: "16:9",
     resolution: "720p",
@@ -58,14 +53,12 @@ export default video({
     apiKey: process.env.AI_GATEWAY_API_KEY,
   },
   providerOptions: {
-    google: { personGeneration: "allow_adult" },
+    bytedance: { pollTimeoutMs: 600_000 },
   },
 });
 ```
 
-- When `models` is omitted, callers cannot switch models at runtime and must omit `model` or pass the active default model ID.
-- When `models` is a string array, callers may request any ID in that allowlist. When `models` is an object, keys are aliases for the tool's `model` parameter and values are gateway IDs or AI SDK `VideoModel` instances.
-- When `model` is omitted and `models` is configured, the first entry in `models` becomes the default.
+To expose more than one video model, mount `@eve/video` at separate paths (for example, `agent/extensions/video.ts` and `agent/extensions/video-hq.ts`), which gives each model its own tool name.
 
 ## Iterate on a video
 
@@ -211,8 +204,7 @@ Because `generate` is a `defineWorkflowTool`, configure `approval`, `defaults`, 
 
 | Option            | Type                                                                          | Default                                                                    | Description                                                                                                                                                              |
 | ----------------- | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `model`           | `string \| VideoModelLike`                                                    | First entry of `models`, or `google/veo-3.1-fast-generate-001`             | Default gateway model ID, alias from `models`, or AI SDK v4/v3 `VideoModel` instance.                                                                                    |
-| `models`          | `readonly string[] \| Record<string, string \| VideoModelLike>`               | None (switching disabled)                                                  | Allowlist of gateway model IDs or alias map available to tool calls.                                                                                                     |
+| `model`           | `string \| VideoModelLike`                                                    | `"bytedance/seedance-2.5-flash"`                                           | Gateway model ID or AI SDK v4/v3 `VideoModel` instance.                                                                                                                  |
 | `storage`         | `VideoStorage \| false`                                                       | Auto-selected                                                              | External storage adapter, or `false` to disable automatic storage selection.                                                                                             |
 | `gateway`         | `{ apiKey?: string; baseURL?: string; headers?: Record<string, string> }`     | Default AI Gateway credentials                                             | Custom Vercel AI Gateway connection options for string model IDs.                                                                                                        |
 | `defaults`        | `{ aspectRatio?, resolution?, duration?, audio?, fps? }`                      | None                                                                       | Default generation parameters applied when a tool call omits them.                                                                                                       |
@@ -254,7 +246,6 @@ Because `generate` is a `defineWorkflowTool`, configure `approval`, `defaults`, 
 | `n`           | `number`             | No       | Number of video variations to generate. Defaults to `1`; capped by `limits.maxVideosPerCall`.                           |
 | `fps`         | `number`             | No       | Target frame rate in frames per second.                                                                                 |
 | `seed`        | `number`             | No       | Integer seed for reproducible output when supported by the model.                                                       |
-| `model`       | `string`             | No       | Model ID or alias from `models`. Omit to use the configured default model.                                              |
 | `path`        | `string`             | No       | Sandbox file path where generated videos are written.                                                                   |
 
 ### Tool output (`GenerateVideoToolOutput`)

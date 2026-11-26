@@ -15,12 +15,8 @@ const modelInputSchema = z.union([
 /** Adds video generation to an eve agent: a `generate` workflow tool backed by AI SDK and AI Gateway video models, provider-agnostic storage, and model-facing guidance. */
 export default defineExtension({
   config: z.object({
-    /** Default video model ID or v4/v3 model instance used when a tool call omits `model`. */
+    /** Video model ID or v4/v3 model instance (defaults to `"bytedance/seedance-2.5-flash"`). */
     model: modelInputSchema.optional(),
-    /** Allowed model IDs or named aliases that callers may request at runtime. */
-    models: z
-      .union([z.array(z.string().min(1)).readonly(), z.record(z.string().min(1), modelInputSchema)])
-      .optional(),
     /** Storage adapter for generated videos, or `false` to disable external storage. */
     storage: z
       .union([

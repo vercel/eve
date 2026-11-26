@@ -60,8 +60,6 @@ export interface GenerateVideoToolInput {
   readonly fps?: number;
   /** Deterministic seed for reproducible generation when supported by the model. */
   readonly seed?: number;
-  /** Optional model ID or alias from the configured `models` catalog. */
-  readonly model?: string;
   /** Optional sandbox path where the generated video should be written. */
   readonly path?: string;
 }

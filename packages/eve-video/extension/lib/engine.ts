@@ -67,7 +67,7 @@ export async function submitToolVideoJob(
   const signal = ctx.abortSignal;
   signal.throwIfAborted();
 
-  const { modelId, model } = resolveConfiguredModel(config, input.model);
+  const { modelId, model } = resolveConfiguredModel(config);
   const isAsync = typeof model.doStart === "function" && typeof model.doStatus === "function";
   const grok =
     /^(?:spacexai|xai)\/grok-imagine-video/i.test(modelId) ||

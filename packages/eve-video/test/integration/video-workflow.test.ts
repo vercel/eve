@@ -69,7 +69,7 @@ function fakeReq(
 type Token = { id: string; valid: boolean };
 const outOf = (jobId = "j1", warnings?: readonly string[]): Types.GenerateVideoToolOutput => ({
   status: "completed",
-  model: "google/veo-3.1-fast-generate-001",
+  model: "bytedance/seedance-2.5-flash",
   videos: [
     {
       url: "https://media.test/c.mp4",
@@ -148,7 +148,7 @@ function createHarness(
     }),
   };
   const handle: Types.VideoJobHandle = {
-    modelId: "google/veo-3.1-fast-generate-001",
+    modelId: "bytedance/seedance-2.5-flash",
     operation: { id: "op_1" },
     jobId: "j1",
     webhookSigningSecret: "whsec_1",
@@ -216,7 +216,7 @@ afterEach(() => {
 });
 
 describe("pre-flight gating before paid submission", () => {
-  test("blocks invalid inputs, missing destination/sandbox, limits, models, and non-HTTP schemes with zero doStart calls", async () => {
+  test("blocks invalid inputs, missing destination/sandbox, limits, and non-HTTP schemes with zero doStart calls", async () => {
     const storage = inMemory();
     const sb = mkSb({
       "in/frame.png": H.PNG_BYTES,
@@ -242,7 +242,6 @@ describe("pre-flight gating before paid submission", () => {
       [{ video: "in/frame.png" }, {}, /Unsupported media type/, sb],
       [{ n: 3 }, { limits: { maxVideosPerCall: 2 } }, /maximum of 2 videos/],
       [{ duration: 12 }, { limits: { maxDurationSeconds: 8 } }, /maximum of 8s/],
-      [{ model: "other" }, { models: ["google/veo-3.1-fast-generate-001"] }, /is not allowed/],
     ];
     for (const [inp, cfg, re, sandbox] of rows) {
       const f = mkAsync();
@@ -485,7 +484,7 @@ describe("persistence, staging cleanup, labels, and approval", () => {
       n: 2,
       path: "v/lh.mp4",
     };
-    let cfg: Types.VideoExtensionConfig = { model: "google/veo-3.1-fast-generate-001" };
+    let cfg: Types.VideoExtensionConfig = { model: "bytedance/seedance-2.5-flash" };
     const approval = T.createGenerateApproval(() => cfg);
     const promptFor = (inp: Types.GenerateVideoToolInput) =>
       approval.prompt?.({ callId: "c1", input: inp, toolName: "video__generate" }) ?? "";
@@ -501,7 +500,7 @@ describe("persistence, staging cleanup, labels, and approval", () => {
     );
     eq(
       promptFor(input),
-      'Generate video with google/veo-3.1-fast-generate-001 (6s, 16:9, 1080p, audio, 2 videos, path: v/lh.mp4): "Lighthouse"',
+      'Generate video with bytedance/seedance-2.5-flash (6s, 16:9, 1080p, audio, 2 videos, path: v/lh.mp4): "Lighthouse"',
     );
     assert.match(
       promptFor({ prompt: "Twilight", video: "v/a.mp4" }),

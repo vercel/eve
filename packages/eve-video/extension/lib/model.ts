@@ -2,9 +2,8 @@ import { createGateway, gateway } from "ai";
 
 import type { VideoExtensionConfig, VideoModelLike } from "./types.ts";
 
-export const DEFAULT_VIDEO_MODEL = "google/veo-3.1-fast-generate-001";
+export const DEFAULT_VIDEO_MODEL = "bytedance/seedance-2.5-flash";
 
-const isList = (v: unknown): v is readonly string[] => Array.isArray(v);
 const idOf = (x: string | VideoModelLike) => {
   if (typeof x === "string") {
     if (!x.trim()) throw new Error("Video model ID must be a non-empty string.");
@@ -37,9 +36,8 @@ export function isVideoModelLike(v: unknown): v is VideoModelLike {
   );
 }
 
-export function describeDefaultModel(config: VideoExtensionConfig, requested?: string): string {
-  if (requested?.trim()) return requested.trim();
-  const input = defaultModelInput(config);
+export function describeDefaultModel(config: VideoExtensionConfig): string {
+  const input = config.model ?? DEFAULT_VIDEO_MODEL;
   return typeof input === "string"
     ? input.trim() || DEFAULT_VIDEO_MODEL
     : isVideoModelLike(input)
@@ -47,61 +45,17 @@ export function describeDefaultModel(config: VideoExtensionConfig, requested?: s
       : DEFAULT_VIDEO_MODEL;
 }
 
-export function resolveConfiguredModel(config: VideoExtensionConfig, requestedModel?: string) {
-  const defaultInput = defaultModelInput(config);
-  if (requestedModel === undefined) return resolveModelInput(defaultInput, config.gateway);
-  const requested = requestedModel.trim();
-  if (!requested) throw new Error("Video model must be a non-empty string.");
-  const defaultId = idOf(defaultInput);
-  const catalog = config.models;
-  if (catalog !== undefined) {
-    const matched = isList(catalog)
-      ? catalog.find((e) => e.trim() === requested)
-      : Object.hasOwn(catalog, requested)
-        ? catalog[requested]
-        : Object.values(catalog).find((e) => idOf(e) === requested);
-    if (matched !== undefined) return resolveModelInput(matched, config.gateway);
-  }
-  if (requested === defaultId) return resolveModelInput(defaultInput, config.gateway);
-  if (catalog === undefined)
-    throw new Error(`Model switching requires "models" config; use "${defaultId}".`);
-  const allowed = isList(catalog)
-    ? [
-        ...new Set([
-          ...catalog.map((e) => e.trim()).filter(Boolean),
-          ...(config.model !== undefined ? [defaultId] : []),
-        ]),
-      ]
-    : Object.keys(catalog);
-  throw new Error(
-    `Video model "${requested}" is not allowed. ${allowed.length ? `Allowed: ${allowed.join(", ")}` : `Default: "${defaultId}"`}.`,
-  );
+export function resolveConfiguredModel(config: VideoExtensionConfig) {
+  return resolveModelInput(config.model ?? DEFAULT_VIDEO_MODEL, config.gateway);
 }
 
 export function resolveJobModel(config: VideoExtensionConfig, modelId: string) {
   const trimmed = modelId.trim();
   if (!trimmed) throw new Error("Video model must be a non-empty string.");
-  return config.model === undefined && config.models === undefined
-    ? resolveModelInput(trimmed, config.gateway)
-    : resolveConfiguredModel(config, trimmed);
-}
-
-function defaultModelInput(config: VideoExtensionConfig): string | VideoModelLike {
-  if (config.model !== undefined) {
-    return typeof config.model === "string" &&
-      config.models &&
-      !isList(config.models) &&
-      Object.hasOwn(config.models, config.model)
-      ? config.models[config.model]
-      : config.model;
-  }
-  return (
-    (config.models
-      ? isList(config.models)
-        ? config.models.find((e) => e.trim())
-        : Object.values(config.models)[0]
-      : undefined) ?? DEFAULT_VIDEO_MODEL
-  );
+  const configured = config.model;
+  if (configured !== undefined && idOf(configured) === trimmed)
+    return resolveModelInput(configured, config.gateway);
+  return resolveModelInput(trimmed, config.gateway);
 }
 
 function resolveModelInput(
