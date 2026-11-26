@@ -171,6 +171,39 @@ describe("validateSessionHistory", () => {
       "history[0].parts[0].data must be a non-empty string.",
     ],
     [
+      "a file part with blank string data",
+      [{ parts: [{ data: "   ", mediaType: "application/pdf", type: "file" }], role: "user" }],
+      "history[0].parts[0].data must be a non-empty string.",
+    ],
+    [
+      "a file part with an empty data URL string",
+      [
+        {
+          parts: [
+            { data: "data:application/pdf;base64,", mediaType: "application/pdf", type: "file" },
+          ],
+          role: "user",
+        },
+      ],
+      "history[0].parts[0].data must be non-empty.",
+    ],
+    [
+      "a file part with an empty data URL object",
+      [
+        {
+          parts: [
+            {
+              data: new URL("data:application/pdf;base64,"),
+              mediaType: "application/pdf",
+              type: "file",
+            },
+          ],
+          role: "user",
+        },
+      ],
+      "history[0].parts[0].data must be non-empty.",
+    ],
+    [
       "a file part with empty Uint8Array data",
       [
         {

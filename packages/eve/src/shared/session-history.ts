@@ -1,3 +1,4 @@
+import { getKnownByteLength } from "#internal/attachments/data.js";
 import { describeFilePart } from "#internal/attachments/file-part.js";
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
 import type { ImportedMessage, ImportedPart } from "#protocol/session-events/families/delivery.js";
@@ -264,17 +265,24 @@ function validateFilePart(
 
 function validateFileData(data: unknown, at: string): SessionHistoryFilePart["data"] {
   if (typeof data === "string") {
-    if (data.length === 0) {
+    const trimmed = data.trim();
+    if (trimmed.length === 0) {
       throw new InvalidSessionHistoryError(`${at} must be a non-empty string.`);
     }
-    if (hasInternalRefScheme(data)) {
+    if (hasInternalRefScheme(trimmed)) {
       throw new InvalidSessionHistoryError(`${at} must not use a framework-internal ref scheme.`);
     }
-    return data;
+    if (getKnownByteLength(trimmed) === 0) {
+      throw new InvalidSessionHistoryError(`${at} must be non-empty.`);
+    }
+    return trimmed;
   }
   if (data instanceof URL) {
     if (hasInternalRefScheme(data.href)) {
       throw new InvalidSessionHistoryError(`${at} must not use a framework-internal ref scheme.`);
+    }
+    if (getKnownByteLength(data) === 0) {
+      throw new InvalidSessionHistoryError(`${at} must be non-empty.`);
     }
     return data;
   }

@@ -87,7 +87,7 @@ export interface ImportedMessage {
   readonly role: "user" | "assistant";
   /**
    * The message's plain text. When `parts` is present, holds the message's text parts joined by
-   * newlines, or `""` for a tool-only assistant entry.
+   * newlines, or `""` for a file-only user entry or tool-only assistant entry.
    */
   readonly text: string;
   /** Ordered structured parts when the message was imported with `parts`. */

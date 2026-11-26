@@ -59,74 +59,51 @@ type ToolResultOutput = ToolResultPart["output"];
 type ToolOutputContentPart = Extract<ToolResultOutput, { type: "content" }>["value"][number];
 type ToolOutputFilePart = Extract<ToolOutputContentPart, { type: "file" }>;
 
-export async function stageAttachmentsForAdapter(
-  content: string | UserContent,
-  sandbox: SandboxSession,
-  adapterCtx: ChannelAdapterContext,
-): Promise<string | UserContent> {
-  if (typeof content === "string") {
-    return content;
-  }
+type UserFileMessage = Extract<HarnessModelMessage, { readonly role: "user" }> & {
+  readonly content: Exclude<UserContent, string>;
+};
 
-  const policy = adapterCtx.ctx.get(ChannelKey)?.uploadPolicy;
-  const downloads = createPublicDownloads(maxBytesOf(policy ?? DEFAULT_UPLOAD_POLICY));
-  return stageContentWithDownloads(content, sandbox, adapterCtx, downloads, policy);
+export function hasUserFileParts(message: HarnessModelMessage): message is UserFileMessage {
+  return message.role === "user" && Array.isArray(message.content) && hasFileParts(message.content);
 }
 
 export async function stageAttachmentsToSandbox(
   message: string | UserContent,
 ): Promise<string | UserContent> {
-  return (await stageUserContentBatch([message]))[0]!;
+  if (!Array.isArray(message) || !hasFileParts(message)) {
+    return message;
+  }
+  return (await createContentStager())(message);
 }
 
 export async function stageHistoryAttachments(
   messages: readonly HarnessModelMessage[],
 ): Promise<HarnessModelMessage[]> {
-  const fileMessageIndexes: number[] = [];
-  const contents: UserContent[] = [];
-  for (const [index, message] of messages.entries()) {
-    if (
-      message.role === "user" &&
-      Array.isArray(message.content) &&
-      hasFileParts(message.content)
-    ) {
-      fileMessageIndexes.push(index);
-      contents.push(message.content);
-    }
+  if (!messages.some(hasUserFileParts)) {
+    return [...messages];
   }
-  if (fileMessageIndexes.length === 0) return [...messages];
-  const staged = await stageUserContentBatch(contents);
-  const result = [...messages];
-  for (const [offset, messageIndex] of fileMessageIndexes.entries()) {
-    const original = messages[messageIndex]!;
-    if (original.role === "user") {
-      result[messageIndex] = { ...original, content: staged[offset]! };
-    }
-  }
-  return result;
+  const stage = await createContentStager();
+  return Promise.all(
+    messages.map(async (message) =>
+      hasUserFileParts(message) ? { ...message, content: await stage(message.content) } : message,
+    ),
+  );
 }
 
-async function stageUserContentBatch(
-  contents: readonly (string | UserContent)[],
-): Promise<(string | UserContent)[]> {
-  if (!contents.some((content) => Array.isArray(content) && hasFileParts(content))) {
-    return [...contents];
-  }
-
+async function createContentStager(): Promise<
+  (content: Exclude<UserContent, string>) => Promise<UserContent>
+> {
   const container = loadContext();
   const sandbox = await activeSandbox(container.get(SandboxKey));
   if (sandbox === null) {
-    return contents.map((content) =>
-      !Array.isArray(content)
-        ? content
-        : content.map((part) =>
-            part.type === "file" &&
-            !isSandboxRefUrl(part.data) &&
-            readFileData(part.data).kind !== "reference"
-              ? attachmentNote(part, "could not be stored: no sandbox is available.")
-              : part,
-          ),
-    );
+    return async (content) =>
+      content.map((part) =>
+        part.type === "file" &&
+        !isSandboxRefUrl(part.data) &&
+        readFileData(part.data).kind !== "reference"
+          ? attachmentNote(part, "could not be stored: no sandbox is available.")
+          : part,
+      );
   }
 
   const adapter = container.get(ChannelKey);
@@ -137,31 +114,15 @@ async function stageUserContentBatch(
         state: {},
         session: buildChannelContext(container).session,
       };
-  const policy = adapterCtx.ctx.get(ChannelKey)?.uploadPolicy;
+  const policy = adapter?.uploadPolicy;
   const downloads = createPublicDownloads(maxBytesOf(policy ?? DEFAULT_UPLOAD_POLICY));
 
-  return Promise.all(
-    contents.map((content) =>
-      Array.isArray(content)
-        ? stageContentWithDownloads(content, sandbox, adapterCtx, downloads, policy)
-        : content,
-    ),
-  );
-}
-
-function stageContentWithDownloads(
-  content: Exclude<UserContent, string>,
-  sandbox: SandboxSession,
-  adapterCtx: ChannelAdapterContext,
-  downloads: PublicDownloads,
-  policy: UploadPolicy | undefined,
-): Promise<UserContent> {
-  const reconstituted = reconstitueFilePartUrls(content);
-  return Promise.all(
-    reconstituted.map(async (part) =>
-      part.type === "file" ? stageFilePart(part, sandbox, adapterCtx, downloads, policy) : part,
-    ),
-  );
+  return (content) =>
+    Promise.all(
+      reconstitueFilePartUrls(content).map(async (part) =>
+        part.type === "file" ? stageFilePart(part, sandbox, adapterCtx, downloads, policy) : part,
+      ),
+    );
 }
 
 export async function stageToolResultMedia<T extends ModelMessage>(

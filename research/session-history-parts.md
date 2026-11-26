@@ -39,17 +39,20 @@ const history: SessionHistoryMessage[] = [
     parts: [
       {
         type: "tool",
-        name: "lookup_ticket",
-        input: { id: "T-1" },
-        output: { owner: "Bob", status: "open" },
+        name: "lookup_account",
+        input: { id: "A-1" },
+        output: { owner: "Bob", tier: "enterprise" },
       },
       {
         type: "tool",
-        name: "list_notes",
-        input: { id: "T-1" },
-        error: "The notes service timed out.",
+        name: "list_amendments",
+        input: { id: "A-1" },
+        error: "The amendments service timed out.",
       },
-      { type: "text", text: "T-1 is open and Bob owns it, but its notes didn't load." },
+      {
+        type: "text",
+        text: "The contract sets Net 30 for Bob's enterprise account, but amendments didn't load.",
+      },
     ],
   },
 ];
@@ -79,7 +82,7 @@ export type SessionHistoryAssistantPart = SessionHistoryTextPart | SessionHistor
 ```
 
 - **Discriminated unions enforce invariants at compile time:** `role: "user"` accepts `SessionHistoryTextPart` and `SessionHistoryFilePart` (`tool` parts are compile-time errors on user messages), `role: "assistant"` accepts `SessionHistoryTextPart` and `SessionHistoryToolPart` (`file` parts are compile-time errors on assistant messages), each entry takes either `text` or `parts` (never both), and each `tool` part takes either `output` or `error` (never neither or both, so pending/incomplete calls are unrepresentable).
-- **Reuses `MessageFilePart` and eve's attachment staging:** `SessionHistoryFilePart` is `MessageFilePart`, accepting inline bytes (`Uint8Array` / `ArrayBuffer`), base64, `data:` URLs, or URLs (`string` / `URL`) resolved via the channel's `fetchFile` hook or SSRF-safe public HTTPS download. Framework-internal ref schemes (`eve-url:`, `eve-sandbox:`, `eve-chat-sdk-file:`) are rejected on import. Channel `create()` / `send()` and `eveChannel.onMessage` serialize `URL` and binary `data` before crossing durable workflow boundaries (`serializeFilePartsInHistory`), and `t.session({ history })` serializes them before posting to `POST /eve/v1/dev/session`. Both turn intake and interrupted-step recovery stage imported user files through `stageHistoryAttachments()`, opening the sandbox at most once and sharing one `MAX_DOWNLOADS_PER_MESSAGE` (10-link) public HTTPS download cap across all imported user messages.
+- **Reuses `MessageFilePart` and eve's attachment staging:** `SessionHistoryFilePart` is `MessageFilePart`, accepting inline bytes (`Uint8Array` / `ArrayBuffer`), base64, `data:` URLs, or URLs (`string` / `URL`) resolved via the channel's `fetchFile` hook or SSRF-safe public HTTPS download. Framework-internal ref schemes (`eve-url:`, `eve-sandbox:`, `chat-sdk-file:`) are rejected on import. Channel `create()` / `send()` and `eveChannel.onMessage` validate and serialize `URL` and binary `data` before crossing durable workflow boundaries (`prepareSessionHistory`), and `t.session({ history })` serializes them before posting to `POST /eve/v1/dev/session`. Both turn intake and interrupted-step recovery stage imported user files through `stageHistoryAttachments()`, opening the sandbox at most once and sharing one `MAX_DOWNLOADS_PER_MESSAGE` (10-link) public HTTPS download cap across all imported user messages.
 - **Ordered multi-step turns without fake text:** Consecutive `tool` parts group into one parallel assistant step (`assistant [tool-call…]` → `tool [tool-result…]`). Any `text` part immediately preceding a `tool` part joins that step as narration. A `text` part after a `tool` part follows its result. Tool-only steps need no placeholder text.
 - **Provider-safe inputs and names:** `input` is a `JsonObject` (defaulting to `{}`), avoiding cross-provider divergence on non-object inputs (`null`, arrays, primitives). `name` matches `/^[a-zA-Z0-9_-]{1,64}$/` so Anthropic, OpenAI, and Gemini accept it.
 - **Works everywhere `history` applies:** channel `create()` and `send()`, channel `onMessage` hooks, and local eval `t.session({ history })`. `eve/channels` and `eve/evals` export the `SessionHistory*` types.
@@ -91,14 +94,14 @@ flowchart LR
   Input["SessionHistoryMessage ({ text } | { parts })"] --> Validate["validateSessionHistory()"]
   Validate --> Lower["Harness model history (staged user files + assistant/tool + imported_<n>)"]
   Validate --> Event["delivery.consumed data.history (ImportedMessage: text + optional parts)"]
-  Event --> UI["EveMessage (renders text + EveFilePart + EveToolPart)"]
+  Event --> UI["EveMessage (renders text + file + EveToolPart)"]
   Event --> Transcript["transcriptOf() / session.transcript (text only)"]
 ```
 
 - **Backward-compatible `delivery.consumed`:** `ImportedMessage` keeps `readonly text: string` required and adds `readonly parts?: readonly ImportedPart[]` (`ImportedTextPart | ImportedFilePart | ImportedToolPart`, exported from `eve/events`). Shorthand `{ role, text }` imports emit `{ id?, role, text }` unchanged. Structured `{ role, parts }` imports emit `{ id?, role, text, parts }` where `text` joins the entry's text parts with `"\n"` (or `""` for file-only or tool-only entries). Imported file parts project through `describeFilePart()` (shared with `userPartsOf()`) so `delivery.consumed` records only display metadata (`mediaType`, `filename?`, `size?`, public `url?`, `unavailable?`) and never persists inline bytes or framework-internal ref schemes.
 - **Data, not execution:** eve runs no tool, approval, hook, or `toModelOutput` for imported calls, and emits no `call.*` facts or usage. Selectors, `view.calls`, `t.calledTool()`, and `turn.toolCalls` count only calls eve executed.
 - **Call IDs and turn boundaries:** Imported tool calls receive deterministic IDs `imported_<n>` numbered past any existing `imported_*` IDs in `session.history`. When an imported `tool` result immediately precedes an imported or live user message, eve inserts `TOOL_RESULT_BOUNDARY` so providers such as Anthropic do not fold the user message into the tool-result turn.
-- **Display and compaction:** Frontend `EveMessage` (`importedMessages()`) renders imported `parts` as `text`, `EveFilePart`, and completed/failed `EveToolPart` entries (`kind: "tool"`, `state: "completed" | "failed"`, `metadata.imported: true`). `transcriptOf()` and `session.transcript` continue to show only non-empty text. Compaction renders `{ type: "error-text" | "error-json" }` tool results as `errored`.
+- **Display and compaction:** Frontend `EveMessage` (`importedMessages()`) renders imported `parts` as `text`, `{ type: "file" }`, and completed/failed `EveToolPart` entries (`kind: "tool"`, `state: "completed" | "failed"`, `metadata.imported: true`). `transcriptOf()` and `session.transcript` continue to show only non-empty text. Compaction renders `{ type: "error-text" | "error-json" }` tool results as `errored`.
 - **Dev route bounds:** `POST /eve/v1/dev/session` bounds structured history to 500 messages, 20,000 nodes, depth 32, and 512 KiB serialized UTF-8, and rejects `__proto__` keys before parsing.
 
 ## Non-goals

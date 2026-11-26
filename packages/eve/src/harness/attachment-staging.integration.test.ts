@@ -1170,6 +1170,9 @@ describe("hydrateSandboxAttachments (integration)", () => {
       readSpy.mockRestore();
     }
   });
+});
+
+describe("stageHistoryAttachments (integration)", () => {
   it("stages imported user file parts via fetchFile and enforces one shared download cap across history", async () => {
     const sandbox = mockSandbox({ id: "sbx_imported_history" });
     const fetchFile = vi.fn<NonNullable<ChannelAdapter["fetchFile"]>>(async () => ({
@@ -1181,7 +1184,7 @@ describe("hydrateSandboxAttachments (integration)", () => {
     const runtime = await createTestRuntime();
     vi.mocked(requestPublicUrl).mockReset();
     vi.mocked(requestPublicUrl).mockImplementation(async () => {
-      return new Response(new Uint8Array(smallImageBytes), {
+      return new Response(new Uint8Array(pngBytes(32, 32, 1024)), {
         headers: { "content-type": "image/png" },
         status: 200,
       });

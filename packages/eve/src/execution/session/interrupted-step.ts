@@ -1,7 +1,12 @@
 import type { ContextContainer } from "#context/container.js";
 import { serializeContext } from "#context/serialize.js";
-import { preserveStoppedTurnMessage } from "#execution/cancelled-model-call-batch.js";
-import { stageHistoryAttachments } from "#harness/attachment-staging.js";
+import {
+  hasMessageFileParts,
+  preserveStoppedTurnMessage,
+  withAttachmentStagingScope,
+} from "#execution/cancelled-model-call-batch.js";
+import { preserveCancelledTurnMessage } from "#execution/cancelled-turn-message.js";
+import { hasUserFileParts, stageHistoryAttachments } from "#harness/attachment-staging.js";
 import type { OrphanedLine } from "#execution/publish-session-events.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { resolveSessionStepResult } from "#execution/session/turn-step-result.js";
@@ -202,23 +207,29 @@ export async function recoverInterruptedStep(input: {
 
   const { settledTurn } = attempt;
   if (settledTurn !== undefined && activeTurnIdOf(currentProjection(ctx)) === undefined) {
-    const imported = await stageHistoryAttachments(
-      createImportedHistoryMessages(input.stepInput?.history ?? [], session.history),
+    const rawImported = createImportedHistoryMessages(
+      input.stepInput?.history ?? [],
+      session.history,
     );
-    const hasUserMessage =
-      normalizeMessage(input.stepInput?.message) !== undefined &&
-      frameworkMessageKindForStepInput(input.stepInput) === undefined;
-    const prefix = [
-      ...(followsToolResults(session.history) && imported[0]?.role === "user"
-        ? [{ content: TOOL_RESULT_BOUNDARY, role: "assistant" } as const]
-        : []),
-      ...imported,
-    ];
-    if (hasUserMessage && followsToolResults([...session.history, ...prefix])) {
-      prefix.push({ content: TOOL_RESULT_BOUNDARY, role: "assistant" });
-    }
-    if (prefix.length > 0) session = changeHistory(session, { append: prefix });
-    session = await preserveStoppedTurnMessage(ctx, session, input.stepInput);
+    const hasFiles =
+      rawImported.some(hasUserFileParts) || hasMessageFileParts(input.stepInput?.message);
+    session = await withAttachmentStagingScope(ctx, session, hasFiles, async (current) => {
+      const imported = await stageHistoryAttachments(rawImported);
+      const hasUserMessage =
+        normalizeMessage(input.stepInput?.message) !== undefined &&
+        frameworkMessageKindForStepInput(input.stepInput) === undefined;
+      const prefix = [
+        ...(followsToolResults(current.history) && imported[0]?.role === "user"
+          ? [{ content: TOOL_RESULT_BOUNDARY, role: "assistant" } as const]
+          : []),
+        ...imported,
+      ];
+      if (hasUserMessage && followsToolResults([...current.history, ...prefix])) {
+        prefix.push({ content: TOOL_RESULT_BOUNDARY, role: "assistant" });
+      }
+      const withImported = prefix.length > 0 ? changeHistory(current, { append: prefix }) : current;
+      return await preserveCancelledTurnMessage(withImported, input.stepInput);
+    });
     if (settledTurn.text !== undefined) {
       session = changeHistory(session, {
         append: [{ content: settledTurn.text, role: "assistant" }],

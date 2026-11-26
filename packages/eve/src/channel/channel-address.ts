@@ -11,7 +11,7 @@ import {
 import type { SendPayload } from "#channel/routes.js";
 import {
   normalizeSendInput,
-  serializeFilePartsInHistory,
+  prepareSessionHistory,
   serializeFilePartsInMessage,
 } from "#channel/send-input.js";
 import { attachInputText, readInputText } from "#internal/input-text.js";
@@ -31,7 +31,6 @@ import type { SessionControlOptions } from "#channel/types.js";
 import { isReservedSessionCommandToken } from "#execution/session-inbox/address.js";
 import { contextStorage } from "#context/container.js";
 import { readSessionSchedule } from "#context/session-schedule.js";
-import { validateSessionHistory } from "#shared/session-history.js";
 
 interface BaseChannelAddressCreateOptions {
   readonly auth: SessionAuthContext | null;
@@ -191,7 +190,7 @@ export function createChannelAddress<TState = undefined>(input: {
       );
     },
     async create(options) {
-      const history = serializeFilePartsInHistory(validateSessionHistory(options.history));
+      const history = prepareSessionHistory(options.history);
       const toSession = (sessionId: string) =>
         createSession(sessionId, input.runtime, { ...metadata, turnPolicy: input.turnPolicy });
       let owner: { readonly sessionId: string } | undefined;
@@ -296,6 +295,6 @@ export function createChannelAddressFn<TState = undefined>(input: {
 
 function withValidatedHistory(payload: SendPayload): SendPayload {
   const { history, ...rest } = payload;
-  const validated = serializeFilePartsInHistory(validateSessionHistory(history));
+  const validated = prepareSessionHistory(history);
   return validated === undefined ? rest : { ...rest, history: validated };
 }

@@ -417,17 +417,20 @@ const history = [
     parts: [
       {
         type: "tool",
-        name: "lookup_ticket",
-        input: { id: "T-1" },
-        output: { status: "open" },
+        name: "lookup_account",
+        input: { id: "A-1" },
+        output: { tier: "enterprise" },
       },
       {
         type: "tool",
-        name: "list_notes",
-        input: { id: "T-1" },
-        error: "The notes service timed out.",
+        name: "list_amendments",
+        input: { id: "A-1" },
+        error: "The amendments service timed out.",
       },
-      { type: "text", text: "T-1 is open, but its notes didn't load." },
+      {
+        type: "text",
+        text: "The contract sets Net 30 for enterprise account A-1, but amendments didn't load.",
+      },
     ],
   },
 ];

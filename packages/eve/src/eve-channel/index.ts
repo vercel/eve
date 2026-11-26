@@ -75,8 +75,8 @@ import {
   rememberCurrentSession,
   requireSessionId,
 } from "#eve-channel/request.js";
-import { serializeFilePartsInHistory } from "#channel/send-input.js";
-import { type SessionHistoryMessage, validateSessionHistory } from "#shared/session-history.js";
+import { prepareSessionHistory } from "#channel/send-input.js";
+import type { SessionHistoryMessage } from "#shared/session-history.js";
 import { attachClientContext } from "#internal/client-context.js";
 import { deliveryIdForIdempotencyKey } from "#channel/delivery-idempotency.js";
 import {
@@ -408,10 +408,8 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
                   {
                     message: body.message,
                     context: messageResult.context,
-                    history: serializeFilePartsInHistory(
-                      validateSessionHistory(
-                        "history" in messageResult ? messageResult.history : undefined,
-                      ),
+                    history: prepareSessionHistory(
+                      "history" in messageResult ? messageResult.history : undefined,
                     ),
                     outputSchema: body.outputSchema,
                   },

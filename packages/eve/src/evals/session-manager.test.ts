@@ -185,4 +185,31 @@ describe("EvalSessionManager.session", () => {
       ],
     });
   });
+
+  it.each([
+    ["non-array history", "bad"],
+    ["null history entry", [null]],
+    ["non-array user parts", [{ parts: {}, role: "user" }]],
+    ["null part inside user parts", [{ parts: [null], role: "user" }]],
+  ])(
+    "forwards malformed %s to /eve/v1/dev/session instead of crashing client-side",
+    async (_label, history) => {
+      const requests = stubFetch(() =>
+        Response.json({ error: "Invalid session history.", ok: false }, { status: 400 }),
+      );
+      const manager = new EvalSessionManager({
+        client: new Client({ baseUrl: "http://127.0.0.1:3000" }),
+        devRoutes: true,
+      });
+
+      const error = await manager.session({ history: history as never }).then(
+        () => undefined,
+        (caught: unknown) => caught,
+      );
+
+      expect(requests).toHaveLength(1);
+      expect(error).toBeInstanceOf(ClientError);
+      expect((error as ClientError).status).toBe(400);
+    },
+  );
 });

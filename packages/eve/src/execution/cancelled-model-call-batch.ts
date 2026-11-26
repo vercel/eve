@@ -44,27 +44,41 @@ async function cancelledWithoutCheckpoint(
   return await preserveStoppedTurnMessage(ctx, session, preserved);
 }
 
+export async function withAttachmentStagingScope(
+  ctx: ContextContainer,
+  session: HarnessSession,
+  hasFiles: boolean,
+  run: (current: HarnessSession) => Promise<HarnessSession>,
+): Promise<HarnessSession> {
+  if (ctx.get(SandboxKey) === undefined && hasFiles) {
+    try {
+      const scoped = await withContextScope(ctx, session, async (current) => ({
+        result: undefined,
+        session: await run(current),
+      }));
+      return scoped.session;
+    } catch (error) {
+      log.warn("staging turn attachments failed", { error });
+      ctx.clearVirtualContext();
+    }
+  }
+  return await contextStorage.run(ctx, () => run(session));
+}
+
 export async function preserveStoppedTurnMessage(
   ctx: ContextContainer,
   session: HarnessSession,
   preserved: HarnessStepInput | undefined,
 ): Promise<HarnessSession> {
-  if (ctx.get(SandboxKey) === undefined && hasFileParts(preserved?.message)) {
-    try {
-      const scoped = await withContextScope(ctx, session, async (current) => ({
-        result: undefined,
-        session: await preserveCancelledTurnMessage(current, preserved),
-      }));
-      return scoped.session;
-    } catch (error) {
-      log.warn("staging a cancelled turn's attachments failed", { error });
-      ctx.clearVirtualContext();
-    }
-  }
-  return await contextStorage.run(ctx, () => preserveCancelledTurnMessage(session, preserved));
+  return await withAttachmentStagingScope(
+    ctx,
+    session,
+    hasMessageFileParts(preserved?.message),
+    (current) => preserveCancelledTurnMessage(current, preserved),
+  );
 }
 
-function hasFileParts(message: HarnessStepInput["message"]): boolean {
+export function hasMessageFileParts(message: HarnessStepInput["message"]): boolean {
   return Array.isArray(message) && message.some((part) => part.type === "file");
 }
 
