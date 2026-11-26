@@ -13,7 +13,7 @@ import { shellQuote } from "./shell.ts";
 type ComputerUseSandbox = Pick<SandboxSession, "resolvePath" | "run" | "writeTextFile">;
 
 const DRIVER_VERSION = "0.12.5";
-const DESKTOP_INSTALL_VERSION = "2026-11-03.1";
+const DESKTOP_INSTALL_VERSION = "2026-11-13.1";
 
 export const COMPUTER_USE_REVALIDATION_KEY = `computer-use:${DRIVER_VERSION}:${DESKTOP_INSTALL_VERSION}`;
 
