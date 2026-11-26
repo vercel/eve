@@ -122,26 +122,22 @@ function resolveAuthoredWorkflowTarget(
   extensionMount: WorkflowExtensionMount | undefined,
 ): { readonly filename: string; readonly moduleSpecifier: string } | undefined {
   if (extensionMount !== undefined && isAbsolute(absolutePath)) {
-    const realPath = toRealPath(absolutePath);
+    const normalizedPath = toRealPath(absolutePath).replace(/\\/g, "/");
     const realRoot = toRealPath(extensionMount.sourceRoot);
-    const normalizedPath = realPath.replace(/\\/g, "/");
-    const normalizedRoot = realRoot.replace(/\\/g, "/").replace(/\/$/, "");
-    if (normalizedPath.startsWith(`${normalizedRoot}/`)) {
-      const rel = normalizedPath.slice(normalizedRoot.length + 1);
-      return {
-        filename: `@eve-mount/[${extensionMount.mountId}]/${rel}`,
-        moduleSpecifier: `@eve-mount/[${extensionMount.mountId}]/${stripJavaScriptExtension(rel)}`,
-      };
-    }
-    const chunkRoot = join(dirname(realRoot), EXTENSION_CHUNK_DIRECTORY)
-      .replace(/\\/g, "/")
-      .replace(/\/$/, "");
-    if (normalizedPath.startsWith(`${chunkRoot}/`)) {
-      const rel = normalizedPath.slice(chunkRoot.length + 1);
-      return {
-        filename: `@eve-mount/[${extensionMount.mountId}](chunks)/${rel}`,
-        moduleSpecifier: `@eve-mount/[${extensionMount.mountId}](chunks)/${stripJavaScriptExtension(rel)}`,
-      };
+    const bases: readonly (readonly [string, string])[] = [
+      [realRoot, ""],
+      [join(dirname(realRoot), EXTENSION_CHUNK_DIRECTORY), "(chunks)"],
+    ];
+    for (const [root, suffix] of bases) {
+      const normalizedRoot = root.replace(/\\/g, "/").replace(/\/$/, "");
+      if (normalizedPath.startsWith(`${normalizedRoot}/`)) {
+        const rel = normalizedPath.slice(normalizedRoot.length + 1);
+        const prefix = `@eve-mount/[${extensionMount.mountId}]${suffix}/`;
+        return {
+          filename: `${prefix}${rel}`,
+          moduleSpecifier: `${prefix}${stripJavaScriptExtension(rel)}`,
+        };
+      }
     }
   }
   if (isAuthoredApplicationModule(absolutePath, appRoot)) {

@@ -4,7 +4,7 @@ import { join, relative, resolve, sep } from "node:path";
 import type { Plugin } from "rolldown";
 
 import { extensionOverridePaths } from "#compiler/extension-mount-bindings.js";
-import type { CompiledAgentManifest } from "#compiler/manifest.js";
+import type { CompiledAgentManifest, CompiledExtensionMount } from "#compiler/manifest.js";
 import { createCompiledModuleMapSource } from "#compiler/module-map.js";
 import {
   createAuthoredModuleBuildOptions,
@@ -13,10 +13,12 @@ import {
 import { writeAuthoredModuleCacheFile } from "#internal/authored-module-cache.js";
 import type { AuthoredModuleGraph } from "#internal/authored-module-graph.js";
 import {
+  canonicalizePath,
   createExtensionMountPlugin,
   EXTENSION_CHUNK_DIRECTORY,
   parseExtensionMountId,
   resolveExtensionMountForId,
+  tagExtensionMountId,
   type WorkflowExtensionMount,
 } from "#internal/bundler/extension-mount-plugin.js";
 import { createAuthoredModuleBundleError } from "#internal/authored-module-bundle.js";
@@ -167,9 +169,9 @@ export async function bundleAuthoredModuleCode(
                 if (id !== "\0eve-compile-mount-entry") return undefined;
                 const mountImports = mountChain.map(
                   (entry) =>
-                    `import ${JSON.stringify(`${entry.mountSourcePath}?eve-mount=${encodeURIComponent(entry.mountId)}`)};`,
+                    `import ${JSON.stringify(tagExtensionMountId(entry.mountSourcePath, entry.mountId))};`,
                 );
-                const contribution = `${modulePath}?eve-mount=${encodeURIComponent(mountId!)}`;
+                const contribution = tagExtensionMountId(modulePath, mountId!);
                 return `${mountImports.join(" ")} export * from ${JSON.stringify(contribution)}; import entry from ${JSON.stringify(contribution)}; export default entry;`;
               },
             },
@@ -304,7 +306,7 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
         })),
     ),
   );
-  const workflowSources = new AuthoredWorkflowSourceRecorder(input.appRoot);
+  const workflowSources = new AuthoredWorkflowSourceRecorder(input.appRoot, extensionMounts);
 
   try {
     const chunk = await buildSingleRolldownChunk("authored module map", {
@@ -376,12 +378,14 @@ function createExternalRuntimeImportPlugin(importSpecifier: string): Plugin {
 class AuthoredWorkflowSourceRecorder {
   readonly #appRoot: string;
   readonly #directiveModules = new Set<string>();
+  readonly #extensionMounts: readonly CompiledExtensionMount[];
   readonly #imports = new Map<string, readonly string[]>();
   readonly #sources = new Map<string, string>();
   readonly #workflowModules = new Set<string>();
 
-  constructor(appRoot: string) {
+  constructor(appRoot: string, extensionMounts: readonly CompiledExtensionMount[] = []) {
     this.#appRoot = appRoot;
+    this.#extensionMounts = extensionMounts;
   }
 
   record(id: string, source: string, manifest: WorkflowManifest): void {
@@ -422,11 +426,25 @@ class AuthoredWorkflowSourceRecorder {
   fingerprint(): string | undefined {
     if (this.#directiveModules.size === 0) return undefined;
 
+    const visited = new Set<string>();
     const reachable = new Set<string>();
     const queue = [...this.#directiveModules];
+    if (this.#extensionMounts.length > 0) {
+      const mountDeclarationPaths = new Set(
+        this.#extensionMounts
+          .filter((mount) => mount.programmaticImport === undefined)
+          .map((mount) => canonicalizePath(mount.mountSourcePath)),
+      );
+      for (const id of this.#sources.keys()) {
+        if (mountDeclarationPaths.has(canonicalizePath(parseExtensionMountId(id).filePath))) {
+          queue.push(id);
+        }
+      }
+    }
     for (let id = queue.shift(); id !== undefined; id = queue.shift()) {
-      if (reachable.has(id) || !this.#sources.has(id)) continue;
-      reachable.add(id);
+      if (visited.has(id)) continue;
+      visited.add(id);
+      if (this.#sources.has(id)) reachable.add(id);
       queue.push(...(this.#imports.get(id) ?? []));
     }
 
@@ -439,6 +457,17 @@ class AuthoredWorkflowSourceRecorder {
         .update(mountId ?? "")
         .update("\0")
         .update(this.#sources.get(id) ?? "")
+        .update("\0");
+    }
+    for (const mount of [...this.#extensionMounts].sort((left, right) =>
+      left.mountId.localeCompare(right.mountId),
+    )) {
+      if (mount.programmaticImport === undefined) continue;
+      hash
+        .update("programmatic:")
+        .update(mount.mountId)
+        .update("\0")
+        .update(JSON.stringify(mount.programmaticImport.config))
         .update("\0");
     }
     return hash.digest("hex");

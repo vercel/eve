@@ -14,7 +14,6 @@ import {
   resolveAuthoredTsConfigPath,
 } from "#internal/bundler/authored-plugins.js";
 import { createExtensionMountPlugin } from "#internal/bundler/extension-mount-plugin.js";
-import { createExtensionScopePlugin } from "#internal/bundler/extension-scope-plugin.js";
 import {
   type AuthoredWorkflowModules,
   bundleFinalWorkflowOutput,
@@ -26,7 +25,6 @@ import {
   convertWorkflowsManifest,
   createEvePackageImportsPlugin,
   createWorkflowImport,
-  createWorkflowExtensionMountBindPlugin,
   createWorkflowNodeBuiltinGuardPlugin,
   createWorkflowDriverAliasPlugin,
   createWorkflowTransformPlugin,
@@ -119,7 +117,6 @@ export class WorkflowBundleBuilder {
       builtinsPath: resolveWorkflowModulePath("workflow/internal/builtins"),
       discoveredEntries: mergeStepEntries(frameworkEntries, appEntries),
       extensionMounts: this.#extensionMounts,
-      extensionOverridePaths: this.#extensionOverridePaths,
       outfile: stepsPath,
       projectRoot: this.transformProjectRoot,
       sideEffectFiles: [this.#compiledArtifactsBootstrapPath],
@@ -259,6 +256,7 @@ export class WorkflowBundleBuilder {
       ...workflowFiles.map((filePath) => createWorkflowImport(filePath, this.config.workingDir)),
       ...serdeOnlyFiles.map((filePath) => createWorkflowImport(filePath, this.config.workingDir)),
     ].join("\n");
+    const isAppLayer = options.label === "app";
     const interimBundle = await buildSingleRolldownChunk(`${options.label} workflow driver chunk`, {
       cwd: this.config.workingDir,
       onLog(level, log, defaultHandler) {
@@ -272,25 +270,18 @@ export class WorkflowBundleBuilder {
       plugins: [
         createWorkflowVirtualEntryPlugin(virtualEntrySource),
         createWorkflowDriverAliasPlugin(this.config.workingDir),
-        ...(options.authoredTsConfig
-          ? [createWorkflowExtensionMountBindPlugin(this.#extensionMounts)]
-          : []),
         createWorkflowTransformPlugin({
-          extensionMounts: options.authoredTsConfig ? this.#extensionMounts : undefined,
+          extensionMounts: isAppLayer ? this.#extensionMounts : undefined,
           manifest,
           projectRoot: this.transformProjectRoot,
           sideEffectFiles: [...workflowFiles, ...serdeOnlyFiles],
           workingDir: this.config.workingDir,
         }),
-        ...(options.authoredTsConfig
+        ...(isAppLayer
           ? [
-              createExtensionMountPlugin(this.#extensionMounts, this.#extensionOverridePaths),
-              createExtensionScopePlugin(
-                this.#extensionMounts.map((mount) => ({
-                  mountId: mount.mountId,
-                  sourceRoot: mount.sourceRoot,
-                })),
-              ),
+              createExtensionMountPlugin(this.#extensionMounts, this.#extensionOverridePaths, {
+                bindHandles: true,
+              }),
             ]
           : []),
         ...createAuthoredPlugins({

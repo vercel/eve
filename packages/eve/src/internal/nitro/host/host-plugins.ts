@@ -60,7 +60,9 @@ export function createHostPlugins(input: HostPluginsInput): NitroBuildPlugin[] {
     input.instrumentationEntryPlugin ?? null,
     createPseudoPackagePlugin(),
     createHostedGraphPlugin({ appRoot: input.appRoot, externals: input.externals }),
-    createExtensionMountPlugin(input.extensionMounts, input.extensionOverridePaths),
+    createExtensionMountPlugin(input.extensionMounts, input.extensionOverridePaths, {
+      bindHandles: true,
+    }),
     createExtensionScopePlugin(
       input.extensionMounts.map((mount) => ({
         mountId: mount.mountId,
@@ -234,40 +236,35 @@ function createPackageRelativeTransformFilename(path: string): string | undefine
 }
 
 function createSideEffectModulesPlugin(rootDir: string, paths: readonly string[]) {
-  const { specifierFilter } = createModulePathMatcher(rootDir, paths);
-  const plainPaths: string[] = [];
-  const mountedPaths: string[] = [];
-  for (const path of paths) {
-    if (parseExtensionMountId(path).mountId === undefined) {
-      plainPaths.push(path);
-    } else {
-      mountedPaths.push(path);
-    }
-  }
-  const plainMatcher =
-    plainPaths.length === 0 ? undefined : createModulePathMatcher(rootDir, plainPaths);
-  const mountedMatcher =
-    mountedPaths.length === 0 ? undefined : createModulePathMatcher(rootDir, mountedPaths);
+  const { match, specifierFilter } = createModulePathMatcher(rootDir, paths);
+  const windows = process.platform === "win32";
+  const toKey = (resolved: string, mountId: string | undefined) =>
+    `${windows ? resolved.toLowerCase() : resolved}\0${mountId ?? ""}`;
+  const targetKeys = new Set(
+    paths.flatMap((path) => {
+      const resolved = match(path);
+      return resolved === null ? [] : [toKey(resolved, parseExtensionMountId(path).mountId)];
+    }),
+  );
   return {
     name: "eve:side-effect-modules",
     resolveId: {
       filter: { id: specifierFilter },
       handler(source: string, importer: string | undefined) {
         const sourceMountId = parseExtensionMountId(source).mountId;
-        if (sourceMountId !== undefined) {
-          const id = mountedMatcher?.match(source, importer) ?? null;
-          return id === null
-            ? null
-            : {
-                id: tagExtensionMountId(id, sourceMountId),
-                moduleSideEffects: "no-treeshake" as const,
-              };
-        }
-        if (importer !== undefined && parseExtensionMountId(importer).mountId !== undefined) {
+        if (
+          sourceMountId === undefined &&
+          importer !== undefined &&
+          parseExtensionMountId(importer).mountId !== undefined
+        ) {
           return null;
         }
-        const id = plainMatcher?.match(source, importer) ?? null;
-        return id === null ? null : { id, moduleSideEffects: "no-treeshake" as const };
+        const id = match(source, importer);
+        if (id === null || !targetKeys.has(toKey(id, sourceMountId))) return null;
+        return {
+          id: sourceMountId === undefined ? id : tagExtensionMountId(id, sourceMountId),
+          moduleSideEffects: "no-treeshake" as const,
+        };
       },
     },
   };

@@ -592,4 +592,47 @@ describe("applyWorkflowTransform for authored application modules", () => {
     expect(transformed.code).not.toContain("subagent");
     expect(transformed.code).not.toContain("WORKFLOW_USE_STEP");
   });
+
+  it("strips Rolldown-lowered definers, self-named tools, and step-only defineState while keeping pattern/TS value imports and type exports", async () => {
+    const source = [
+      'import { defineState } from "eve/context";',
+      'import { defineDynamic, defineWorkflowTool } from "eve/tools";',
+      'import { DEFAULT_TIMEOUT, TIMEOUT_KEY, cfg, helper } from "./defaults";',
+      "type Prompt = { text: string };",
+      'const counter = defineState("counter", () => 0);',
+      "async function stepUsingState() {",
+      '  "use step";',
+      "  return counter.get();",
+      "}",
+      "async function task$task(input: Prompt & Record<string, unknown>) {",
+      '  "use workflow";',
+      "  const { [TIMEOUT_KEY]: timeout = DEFAULT_TIMEOUT } = input;",
+      "  const fn = helper as () => string;",
+      "  return { task: input.text, timeout, out: fn(), val: cfg!.value, count: await stepUsingState() };",
+      "}",
+      'const task = defineWorkflowTool({ description: "Run", inputSchema: {}, task: task$task, toModelOutput: () => counter.get() });',
+      "var entry_default = defineDynamic(() => ({ task }));",
+      "export { type Prompt, task, entry_default as default };",
+      "",
+    ].join("\n");
+
+    const transformed = await applyWorkflowTransform(
+      "tools/run.ts",
+      source,
+      "workflow",
+      "/app/agent/tools/run.ts",
+      appRoot,
+    );
+
+    expect(transformed.code).not.toContain("defineWorkflowTool");
+    expect(transformed.code).not.toContain("defineDynamic");
+    expect(transformed.code).not.toContain("defineState");
+    expect(transformed.code).not.toContain("eve/tools");
+    expect(transformed.code).not.toContain("eve/context");
+    expect(transformed.code).toContain(
+      'import { DEFAULT_TIMEOUT, TIMEOUT_KEY, cfg, helper } from "./defaults";',
+    );
+    expect(transformed.code).toContain("export { type Prompt };");
+    expect(transformed.code).toContain("async function task$task(");
+  });
 });

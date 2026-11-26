@@ -1,3 +1,8 @@
+import {
+  collectAstReferencedIdentifiers,
+  parseWorkflowSourceAst,
+} from "#internal/workflow-bundle/workflow-source-ast.js";
+
 interface BannerLine {
   readonly importLine: string;
   readonly declarationLine: string;
@@ -51,7 +56,10 @@ const BANNER_LINE_SET = new Set([
   ...DEAD_BANNER_CALL_LINES,
 ]);
 
-export function stripUnusedNodeEsmCompatBanner(code: string): string {
+export async function stripUnusedNodeEsmCompatBanner(
+  filename: string,
+  code: string,
+): Promise<string> {
   if (
     !code.includes("__eveFileURLToPath") &&
     !code.includes("__eveDirname") &&
@@ -62,28 +70,33 @@ export function stripUnusedNodeEsmCompatBanner(code: string): string {
 
   const lines = code.split("\n");
   const body = lines.filter((line) => !BANNER_LINE_SET.has(line.trim())).join("\n");
-  const usesRequire = /\brequire\b/.test(body);
-  const usesDirname = /\b__dirname\b/.test(body);
+  const referenced =
+    body.includes("require") || body.includes("__dirname") || body.includes("__filename")
+      ? collectAstReferencedIdentifiers(await parseWorkflowSourceAst(filename, body))
+      : new Set<string>();
+  const usesRequire = referenced.has("require");
+  const usesDirname = referenced.has("__dirname");
   const usesFilename =
-    /\b__filename\b/.test(body) ||
+    referenced.has("__filename") ||
     (usesDirname && lines.some((line) => line.trim() === DIRNAME_BANNER_LINE.declarationLine));
   const usesFileURLToPath =
     usesFilename ||
     (usesDirname && lines.some((line) => line.trim() === STANDALONE_DIRNAME_DECLARATION));
 
+  const keepByLine = new Map<string, boolean>([
+    [FILENAME_BANNER_LINE.importLine, usesFileURLToPath],
+    [FILENAME_BANNER_LINE.declarationLine, usesFilename],
+    [DIRNAME_BANNER_LINE.importLine, usesDirname],
+    [DIRNAME_BANNER_LINE.declarationLine, usesDirname],
+    [STANDALONE_DIRNAME_DECLARATION, usesDirname],
+    [REQUIRE_BANNER_LINE.importLine, usesRequire],
+    [REQUIRE_BANNER_LINE.declarationLine, usesRequire],
+  ]);
+
   const kept = lines.filter((rawLine) => {
     const line = rawLine.trim();
     if (DEAD_BANNER_CALL_LINES.has(line)) return false;
-    if (line === FILENAME_BANNER_LINE.importLine) return usesFileURLToPath;
-    if (line === FILENAME_BANNER_LINE.declarationLine) return usesFilename;
-    if (line === DIRNAME_BANNER_LINE.importLine) return usesDirname;
-    if (line === DIRNAME_BANNER_LINE.declarationLine || line === STANDALONE_DIRNAME_DECLARATION) {
-      return usesDirname;
-    }
-    if (line === REQUIRE_BANNER_LINE.importLine || line === REQUIRE_BANNER_LINE.declarationLine) {
-      return usesRequire;
-    }
-    return true;
+    return keepByLine.get(line) ?? true;
   });
 
   return kept.length === lines.length ? code : kept.join("\n");
@@ -104,7 +117,7 @@ export function buildNodeEsmCompatBanner(program: ParsedProgram): string {
     imports.push(line.importLine);
     declarations.push(
       line === DIRNAME_BANNER_LINE && chunkProvidesFilename
-        ? "const __dirname = __eveDirname(__eveFileURLToPath(import.meta.url));"
+        ? STANDALONE_DIRNAME_DECLARATION
         : line.declarationLine,
     );
   }

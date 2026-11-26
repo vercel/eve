@@ -175,7 +175,7 @@ function toNitroConfig(
     logLevel: spec.development ? 1 : undefined,
     logging: spec.development ? undefined : { compressedSizes: false },
     modules: instrumentationEntry ? [instrumentationEntry.module] : [],
-    noExternals: createHostNoExternals(built.workflowArtifacts.stepTargets),
+    noExternals: createHostNoExternals(built.workflowArtifacts.stepTargets, spec.extensionMounts),
     output: { dir: locations.outputDir },
     plugins: [
       EVE_RUNTIME_PLUGIN_ID,

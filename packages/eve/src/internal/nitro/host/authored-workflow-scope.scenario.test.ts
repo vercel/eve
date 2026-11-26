@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readdir, readFile, realpath, symlink } from "node:fs/promises";
+import { cp, mkdir, readdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 
@@ -10,12 +10,19 @@ import {
   removeApplicationBuildWorkspace,
 } from "#internal/application/build-workspace.js";
 import { resolvePackageRoot } from "#internal/application/package.js";
+import { discardDevelopmentGeneration } from "#internal/nitro/development-generation.js";
 import { useScenarioApp } from "#internal/testing/scenario-app.js";
 import { WorkflowBundleBuilder } from "#internal/workflow-bundle/builder.js";
 import { buildApplication } from "./build-application.js";
 import { buildExtensionPackage, tryReadExtensionBuildConfig } from "./build-extension.js";
+import { buildDevelopmentHost } from "./dev-build-operations.js";
+import { computeDevelopmentHostFingerprint } from "./dev-host-fingerprint.js";
+import { removeDevelopmentHostWorkspace } from "./dev-host-workspace.js";
 import { startProductionServer } from "./start-production-server.js";
-import { prepareProductionApplicationHost } from "./prepare-application-host.js";
+import {
+  prepareDevelopmentApplicationHost,
+  prepareProductionApplicationHost,
+} from "./prepare-application-host.js";
 
 const ALIAS_MARKER = "workflow-alias-resolved";
 const WORKFLOW_ASSET_MARKER = "workflow-raw-asset-embedded";
@@ -214,6 +221,36 @@ export async function deliver() {
           'import video from "@acme/video";\nexport default video({ apiKey: "secret-beta", tag: "beta" });\n',
         "agent/extensions/env_only.ts":
           'import envStep from "@acme/env-step";\nexport default envStep({ apiKey: process.env.EVE_TEST_EXT_KEY ?? "fallback-key" });\n',
+        "agent/tools/app_reads_ext.ts": `import { defineWorkflowTool } from "eve/tools";
+import envStep from "@acme/env-step";
+
+export default defineWorkflowTool({
+  description: "Read mounted extension config from an app step",
+  inputSchema: { type: "object", properties: {} },
+  async execute() {
+    "use workflow";
+    return await readFromAppStep();
+  },
+});
+
+async function readFromAppStep(): Promise<{ appKey: string }> {
+  "use step";
+  return { appKey: envStep.config.apiKey };
+}
+`,
+        "agent/channels/app-probe.ts": `import { defineChannel, GET } from "eve/channels";
+import { getRun, start } from "eve/workflow/api";
+import appReadsExt from "../tools/app_reads_ext";
+
+export default defineChannel({
+  routes: [
+    GET("/app-step/probe", async () => {
+      const run = await start(appReadsExt.execute as never);
+      return Response.json(await getRun(run.runId).returnValue);
+    }),
+  ],
+});
+`,
         "vendor/video/package.json": JSON.stringify({
           name: "@acme/video",
           version: "1.0.0",
@@ -287,6 +324,7 @@ export default defineWorkflowTool({
   inputSchema: { type: "object", properties: { prompt: { type: "string" } }, required: ["prompt"] },
   async task({ prompt }: { prompt: string }) {
     "use workflow";
+    if (!prompt) throw new Error("clips require a prompt");
     await sleep("1ms");
     const rendered = await renderClip(prompt);
     return { workflowTag: extension.config.tag, ...rendered };
@@ -437,24 +475,63 @@ export default defineChannel({
       },
     });
     const appRoot = await realpath(app.appRoot);
+    const appPackageJsonPath = join(appRoot, "package.json");
+    const appPackageJson = JSON.parse(await readFile(appPackageJsonPath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    appPackageJson.sideEffects = false;
+    await writeFile(appPackageJsonPath, `${JSON.stringify(appPackageJson, null, 2)}\n`);
     const evePackageRoot = dirname(createRequire(import.meta.url).resolve("eve/package.json"));
     const scopeDir = join(appRoot, "node_modules", "@acme");
     await mkdir(scopeDir, { recursive: true });
-    for (const [dirName, pkgName] of [
-      ["video", "video"],
-      ["env-step", "env-step"],
+    for (const [dirName, pkgName, installMode] of [
+      ["video", "video", "symlink"],
+      ["env-step", "env-step", "copy"],
     ] as const) {
       const extRoot = join(appRoot, "vendor", dirName);
       await mkdir(join(extRoot, "node_modules"), { recursive: true });
       await symlink(evePackageRoot, join(extRoot, "node_modules", "eve"), "dir");
       const extConfig = await tryReadExtensionBuildConfig(extRoot);
       await buildExtensionPackage(extRoot, extConfig!);
-      await symlink(extRoot, join(scopeDir, pkgName), "dir");
+      if (installMode === "symlink") {
+        await symlink(extRoot, join(scopeDir, pkgName), "dir");
+      } else {
+        await rm(join(extRoot, "node_modules"), { recursive: true, force: true });
+        await cp(extRoot, join(scopeDir, pkgName), { recursive: true });
+        await rm(extRoot, { recursive: true, force: true });
+      }
     }
 
     const previousKey = process.env.EVE_TEST_EXT_KEY;
     process.env.EVE_TEST_EXT_KEY = "runtime-secret";
     try {
+      const devHost = await prepareDevelopmentApplicationHost(appRoot);
+      try {
+        await buildDevelopmentHost(devHost);
+        const fingerprintBefore = await computeDevelopmentHostFingerprint(devHost);
+        await writeFile(
+          join(appRoot, "agent/extensions/env_only.ts"),
+          'import envStep from "@acme/env-step";\nexport default envStep({ apiKey: process.env.EVE_TEST_EXT_KEY ?? "updated-fallback" });\n',
+        );
+        const updatedDevHost = await prepareDevelopmentApplicationHost(appRoot);
+        try {
+          expect(await computeDevelopmentHostFingerprint(updatedDevHost)).not.toBe(
+            fingerprintBefore,
+          );
+        } finally {
+          await Promise.all([
+            removeDevelopmentHostWorkspace(updatedDevHost.workspace),
+            discardDevelopmentGeneration(updatedDevHost.generation),
+          ]);
+        }
+      } finally {
+        await Promise.all([
+          removeDevelopmentHostWorkspace(devHost.workspace),
+          discardDevelopmentGeneration(devHost.generation),
+        ]);
+      }
+
       await buildApplication(appRoot, { skipSandboxPrewarm: false });
       const server = await startProductionServer(appRoot, { port: 0, host: "127.0.0.1" });
       try {
@@ -462,14 +539,16 @@ export default defineChannel({
         const expectedHash = (apiKey: string, prompt: string) =>
           createHash("sha256").update(`${apiKey}:${prompt}`).digest("hex").slice(0, 12);
 
-        const [alphaRes, betaRes, envRes] = await Promise.all([
+        const [alphaRes, betaRes, envRes, appStepRes] = await Promise.all([
           fetch(new URL("/alpha/probe", server.url), { signal: AbortSignal.timeout(30_000) }),
           fetch(new URL("/beta/probe", server.url), { signal: AbortSignal.timeout(30_000) }),
           fetch(new URL("/env-step/probe", server.url), { signal: AbortSignal.timeout(30_000) }),
+          fetch(new URL("/app-step/probe", server.url), { signal: AbortSignal.timeout(30_000) }),
         ]);
         expect(alphaRes.status).toBe(200);
         expect(betaRes.status).toBe(200);
         expect(envRes.status).toBe(200);
+        expect(appStepRes.status).toBe(200);
 
         expect(await alphaRes.json()).toEqual({
           serveWorkflowId: "workflow//@eve-mount/[extensions/alpha]/tools/session//serve",
@@ -492,6 +571,7 @@ export default defineChannel({
           subagent: { stepTag: "beta", hash: expectedHash("secret-beta", "worker") },
         });
         expect(await envRes.json()).toEqual({ key: "runtime-secret" });
+        expect(await appStepRes.json()).toEqual({ appKey: "runtime-secret" });
       } finally {
         await server.close();
       }

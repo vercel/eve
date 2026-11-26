@@ -209,6 +209,69 @@ describe("extension-scope plugin (bundled)", () => {
     void sourceRoot;
   });
 
+  it("binds package-specifier handle imports independently across duplicate mounts when bindHandles is enabled", async () => {
+    const { sourceRoot } = scratchModule('import ext from "dup-ext"; export const tag = ext.tag;');
+    const dir = join(sourceRoot, "..");
+    const pkgRoot = join(dir, "node_modules", "dup-ext");
+    const distExt = join(pkgRoot, "dist", "extension");
+    mkdirSync(join(distExt, "tools"), { recursive: true });
+    writeFileSync(
+      join(pkgRoot, "package.json"),
+      JSON.stringify({ name: "dup-ext", type: "module", exports: { ".": "./dist/index.mjs" } }),
+    );
+    writeFileSync(
+      join(pkgRoot, "dist", "index.mjs"),
+      'export { default } from "./extension/extension.mjs";',
+    );
+    writeFileSync(
+      join(distExt, "extension.mjs"),
+      "let bound; const h = (v) => { bound = v; }; Object.defineProperty(h, 'tag', { get: () => bound?.tag }); export default h;",
+    );
+    writeFileSync(
+      join(distExt, "tools", "read.mjs"),
+      'import ext from "dup-ext"; export const tag = ext.tag;',
+    );
+    const alphaMount = join(dir, "alpha.mjs");
+    const betaMount = join(dir, "beta.mjs");
+    writeFileSync(alphaMount, 'import ext from "dup-ext"; export default ext({ tag: "alpha" });');
+    writeFileSync(betaMount, 'import ext from "dup-ext"; export default ext({ tag: "beta" });');
+    const entry = join(dir, "entry.mjs");
+    writeFileSync(
+      entry,
+      [
+        `export { tag as alpha } from ${JSON.stringify(join(distExt, "tools", "read.mjs") + "?eve-mount=extensions%2Falpha")};`,
+        `export { tag as beta } from ${JSON.stringify(join(distExt, "tools", "read.mjs") + "?eve-mount=extensions%2Fbeta")};`,
+      ].join("\n"),
+    );
+    const code = await bundle(entry, [
+      createExtensionMountPlugin(
+        [
+          {
+            mountId: "extensions/alpha",
+            mountSourcePath: alphaMount,
+            packageName: "dup-ext",
+            sourceRoot: distExt,
+            specifier: "dup-ext",
+          },
+          {
+            mountId: "extensions/beta",
+            mountSourcePath: betaMount,
+            packageName: "dup-ext",
+            sourceRoot: distExt,
+            specifier: "dup-ext",
+          },
+        ],
+        new Map(),
+        { bindHandles: true },
+      ),
+    ]);
+    const result = (await import(`data:text/javascript,${encodeURIComponent(code)}`)) as {
+      alpha: string;
+      beta: string;
+    };
+    expect({ alpha: result.alpha, beta: result.beta }).toEqual({ alpha: "alpha", beta: "beta" });
+  });
+
   it("bakes the namespace via the fixed-namespace (dev per-module) plugin", async () => {
     const { modulePath } = scratchModule(STATE_MODULE);
     const code = await bundle(modulePath, [

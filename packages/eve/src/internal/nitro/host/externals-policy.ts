@@ -1,6 +1,12 @@
-import type { CompiledAgentManifest } from "#compiler/manifest.js";
+import { dirname } from "node:path";
+
+import type { CompiledAgentManifest, CompiledExtensionMount } from "#compiler/manifest.js";
 import { resolvePackageSourceDirectoryPath } from "#internal/application/package.js";
-import { parseExtensionMountId } from "#internal/bundler/extension-mount-plugin.js";
+import {
+  canonicalizePath,
+  parseExtensionMountId,
+} from "#internal/bundler/extension-mount-plugin.js";
+import { escapeRegex } from "#internal/bundler/filters.js";
 import {
   collectHostTracedDependencies,
   OPTIONAL_ENGINE_PACKAGES_BY_BACKEND_NAME,
@@ -55,9 +61,42 @@ export function createExternalsPolicy(input: {
   };
 }
 
-export function createHostNoExternals(stepTargets: readonly string[]): string[] {
+function exactPackageSpecifierRegex(specifier: string): RegExp {
+  return new RegExp(`^${escapeRegex(specifier)}(?:[/?#]|$)`);
+}
+
+export function createHostNoExternals(
+  stepTargets: readonly string[],
+  extensionMounts: readonly CompiledExtensionMount[] = [],
+): (string | RegExp)[] {
+  const seenSpecifiers = new Set<string>();
+  const specifierPatterns: RegExp[] = [];
+  const addSpecifier = (specifier: string) => {
+    if (seenSpecifiers.has(specifier)) return;
+    seenSpecifiers.add(specifier);
+    specifierPatterns.push(exactPackageSpecifierRegex(specifier));
+  };
+  const mountPaths = extensionMounts.flatMap((mount) => {
+    addSpecifier(mount.specifier);
+    const canonicalRoot = canonicalizePath(mount.sourceRoot);
+    const entries = [
+      `${mount.sourceRoot}/`,
+      `${dirname(mount.sourceRoot)}/`,
+      `${canonicalRoot}/`,
+      `${dirname(canonicalRoot)}/`,
+    ];
+    if (mount.programmaticImport !== undefined) {
+      addSpecifier(mount.programmaticImport.specifier);
+      entries.push(mount.programmaticImport.entryPath);
+    }
+    return entries;
+  });
   return [
     `${resolvePackageSourceDirectoryPath("src/execution")}/`,
-    ...new Set(stepTargets.map((target) => parseExtensionMountId(target).filePath)),
+    ...new Set([
+      ...stepTargets.map((target) => parseExtensionMountId(target).filePath),
+      ...mountPaths,
+    ]),
+    ...specifierPatterns,
   ];
 }
