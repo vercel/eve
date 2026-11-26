@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createLocalDevScheduleDispatcher } from "#internal/schedules/local-dev-dispatch.js";
+import {
+  createLocalDevScheduleDispatcher,
+  parsePersistedSchedulePayload,
+} from "#internal/schedules/local-dev-dispatch.js";
 import { PermanentScheduleMessageError } from "#internal/schedules/verify-delivery.js";
 import { ScheduleCollectionNotDeployedError } from "#runtime/schedules/load-collection.js";
 
@@ -34,6 +37,24 @@ describe("createLocalDevScheduleDispatcher", () => {
     expect(deliver).toHaveBeenCalledTimes(1);
     expect(sleep).not.toHaveBeenCalled();
     expect(fail).toHaveBeenCalledWith("claim", "auth returned null", 1);
+  });
+
+  it("fails a persisted payload that does not parse on the first attempt", async () => {
+    const deliver = vi.fn(async () => {
+      parsePersistedSchedulePayload(
+        { not: "a schedule payload" },
+        { application: "app", collection: "wake" },
+      );
+    });
+    const { dispatch, fail, sleep } = setup(deliver);
+    await dispatch("claim");
+    expect(deliver).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+    expect(fail).toHaveBeenCalledWith(
+      "claim",
+      "Invalid scheduled collection payload; recreate the schedule.",
+      1,
+    );
   });
 
   it("fails a collection that is not deployed on the first attempt", async () => {

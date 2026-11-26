@@ -14,13 +14,15 @@ import {
   sharedLocalDevScheduleStore,
   type LocalDevScheduleClaim,
 } from "#internal/schedules/local-dev-store.js";
-import { createLocalDevScheduleDispatcher } from "#internal/schedules/local-dev-dispatch.js";
+import {
+  createLocalDevScheduleDispatcher,
+  parsePersistedSchedulePayload,
+} from "#internal/schedules/local-dev-dispatch.js";
 import { startLocalDevScheduleTimer } from "#internal/schedules/local-dev-timer.js";
 import { DEVELOPMENT_WORKER_APP_ROOT_ENV } from "#internal/workflow/development-world-protocol.js";
 import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
 import { dispatchScheduledOccurrence } from "#runtime/schedules/dispatch-occurrence.js";
 import { loadScheduleCollectionDefinition } from "#runtime/schedules/load-collection.js";
-import { parseSchedulePayload } from "#runtime/schedules/payload.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 
 const log = createLogger("schedule.local-dev");
@@ -71,7 +73,7 @@ export default function installLocalDevSchedulesRuntimePlugin(nitroApp: {
       collection: row.collection,
       definition,
       occurrence: occurrenceOf(row, scheduledAtMs),
-      payload: parseSchedulePayload(row.payload, {
+      payload: parsePersistedSchedulePayload(row.payload, {
         application: manifest.config.name,
         collection: row.collection,
       }),
