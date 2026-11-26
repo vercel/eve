@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 
-import { defineTool, toolOutput, type ToolDefinition } from "eve/tools";
 import type {
   ApprovalConfiguration,
   ApprovalContext,
@@ -8,7 +7,6 @@ import type {
 } from "eve/tools/approval";
 import { z } from "zod";
 
-import { generateVideos } from "./engine.ts";
 import { describeDefaultModel } from "./model.ts";
 import type {
   GenerateVideoToolInput,
@@ -19,10 +17,11 @@ import type {
 
 const MAX_APPROVAL_PROMPT_CHARS = 300;
 
-const VIDEO_TOOL_DESCRIPTION = [
+export const VIDEO_TOOL_DESCRIPTION = [
   "Generate a video from a text prompt, optionally guided by start and end frame images or reference images, videos, or audio clips.",
   "Only call this tool when the user explicitly asks for a video; video generation takes tens of seconds to several minutes and incurs per-second model charges.",
-  "Do not combine start or end frames with references on providers that ignore references when frame images are set.",
+  "Runs in the background as a task and delivers the finished video automatically when complete; do not sleep, poll, or regenerate the same video while it runs.",
+  "Do not combine start or end frames with references on models that ignore references when frame images are set.",
   "Omit model to use the default unless the user explicitly asks for a configured model.",
 ].join(" ");
 
@@ -98,10 +97,10 @@ export const generateVideoInputSchema = z.object({
     .describe("Optional sandbox file path where the generated video should be written."),
 });
 
-export function defineGenerateVideoTool(
+export function createGenerateApproval(
   getConfig: () => VideoExtensionConfig,
-): ToolDefinition<GenerateVideoToolInput, GenerateVideoToolProgress | GenerateVideoToolOutput> {
-  const approval: ApprovalConfiguration<GenerateVideoToolInput> = {
+): ApprovalConfiguration<GenerateVideoToolInput> {
+  return {
     request(ctx: ApprovalContext<GenerateVideoToolInput>) {
       const configured = getConfig().approval;
       if (configured === undefined) return "not-applicable";
@@ -125,49 +124,9 @@ export function defineGenerateVideoTool(
         : undefined;
     },
   };
-
-  const definition: ToolDefinition<
-    GenerateVideoToolInput,
-    GenerateVideoToolProgress | GenerateVideoToolOutput
-  > = {
-    description: VIDEO_TOOL_DESCRIPTION,
-    inputSchema: generateVideoInputSchema,
-    approval,
-    label: {
-      start: () => "Generating video",
-      delta: (_input, partial) => formatProgressLabel(partial),
-      complete: (_input, output) =>
-        output.status === "completed"
-          ? formatCompletedCount(output.videos.length)
-          : "Generated video",
-    },
-    async *execute(input, ctx) {
-      const output = yield* generateVideos({
-        config: getConfig(),
-        input,
-        getSandbox: () => ctx.getSandbox(),
-        sessionId: ctx.session.id,
-        idempotencyKey: createHash("sha256")
-          .update(`${ctx.session.id}:${ctx.callId}`)
-          .digest("hex"),
-        signal: ctx.abortSignal,
-      });
-      yield output;
-      return output;
-    },
-    toModelOutput(output) {
-      return toolOutput.json(output);
-    },
-  };
-
-  return defineTool(definition);
 }
 
-function formatCompletedCount(count: number): string {
-  return count === 1 ? "Generated video" : `Generated ${count} videos`;
-}
-
-function formatProgressLabel(
+export function formatGenerateProgressLabel(
   partial: Readonly<GenerateVideoToolProgress | GenerateVideoToolOutput>,
 ): string {
   switch (partial.status) {
@@ -182,6 +141,22 @@ function formatProgressLabel(
     case "completed":
       return formatCompletedCount(partial.videos.length);
   }
+}
+
+export function formatGenerateCompleteLabel(
+  output: Readonly<GenerateVideoToolProgress | GenerateVideoToolOutput>,
+): string {
+  return output.status === "completed"
+    ? formatCompletedCount(output.videos.length)
+    : "Generated video";
+}
+
+export function createIdempotencyKey(sessionId: string, callId: string): string {
+  return createHash("sha256").update(`${sessionId}:${callId}`).digest("hex");
+}
+
+function formatCompletedCount(count: number): string {
+  return count === 1 ? "Generated video" : `Generated ${count} videos`;
 }
 
 function formatApprovalPrompt(

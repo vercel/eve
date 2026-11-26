@@ -41,12 +41,32 @@ import type {
 } from "./types.ts";
 
 const DEFAULT_MAX_VIDEOS_PER_CALL = 4;
-const DEFAULT_POLL_INTERVAL_MS = 5_000;
-const DEFAULT_POLL_TIMEOUT_MS = 600_000;
+export const DEFAULT_POLL_INTERVAL_MS = 5_000;
+export const DEFAULT_POLL_TIMEOUT_MS = 600_000;
 const MAX_CONSECUTIVE_POLL_ERRORS = 3;
 
-const NO_DESTINATION_ERROR =
+export const NO_DESTINATION_ERROR =
   'No video output destination is configured. Configure storage with vercelBlob() from "@eve/video/vercel", localDisk() from "@eve/video/storage", or a custom VideoStorage adapter; pass a sandbox "path"; or set allowTemporaryProviderUrl: true to return temporary provider URLs.';
+
+const TRANSIENT_ERROR_CODES = new Set([
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "ECONNABORTED",
+  "ETIMEDOUT",
+  "EPIPE",
+  "EAI_AGAIN",
+  "ENOTFOUND",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "UND_ERR_HEADERS_TIMEOUT",
+  "UND_ERR_BODY_TIMEOUT",
+  "UND_ERR_SOCKET",
+  "UND_ERR_CLOSED",
+  "UND_ERR_ABORTED",
+  "ERR_SOCKET_CLOSED",
+  "ERR_STREAM_PREMATURE_CLOSE",
+]);
 
 type AiStartVideoOptions = Parameters<typeof experimental_startVideo>[0];
 type AiGenerateVideoOptions = Parameters<typeof experimental_generateVideo>[0];
@@ -87,6 +107,8 @@ export interface CheckVideoJobOptions {
   readonly headers?: Readonly<Record<string, string>>;
   /** Optional signal used to cancel the status request. */
   readonly signal?: AbortSignal;
+  /** Maximum number of AI SDK retries for the status request. Set to `0` when an outer workflow manages retries. */
+  readonly maxRetries?: number;
 }
 
 /** Options passed to {@link persistVideos}. */
@@ -220,6 +242,7 @@ export async function checkVideoJob(options: CheckVideoJobOptions): Promise<Vide
     operation: options.operation as AiOperation,
     abortSignal: signal,
     ...(headers !== undefined && { headers }),
+    ...(options.maxRetries !== undefined && { maxRetries: options.maxRetries }),
   });
   if (result.status === "pending") {
     return { status: "pending", warnings: formatWarnings(result.warnings) };
@@ -1081,7 +1104,7 @@ function assertPositiveInt(value: number, label: string): number {
   return value;
 }
 
-function normalizeOptionalPath(path: string | undefined): string | undefined {
+export function normalizeOptionalPath(path: string | undefined): string | undefined {
   if (path === undefined) return undefined;
   const trimmed = path.trim();
   if (trimmed.length === 0) throw new Error('Sandbox output "path" must be a non-empty string.');
@@ -1200,7 +1223,45 @@ function createTimeoutError(modelId: string, timeoutMs: number, jobId?: string):
 function isTransientPollError(error: unknown): boolean {
   if (error instanceof Error && error.name === "AbortError") return false;
   const statusCode = extractStatusCode(error);
-  return statusCode === undefined || statusCode < 400 || statusCode >= 500;
+  if (statusCode !== undefined) {
+    return statusCode === 408 || statusCode === 429 || statusCode >= 500;
+  }
+  const retryable = extractRetryableFlag(error);
+  if (retryable !== undefined) return retryable;
+  return true;
+}
+
+export function isTransientProviderError(error: unknown): boolean {
+  if (error instanceof Error && error.name === "AbortError") return false;
+  if (error instanceof Error && error.name === "TimeoutError") return true;
+  const statusCode = extractStatusCode(error);
+  if (statusCode !== undefined) {
+    return statusCode === 408 || statusCode === 429 || statusCode >= 500;
+  }
+  const retryable = extractRetryableFlag(error);
+  if (retryable !== undefined) return retryable;
+  const code = extractErrorCode(error);
+  if (code !== undefined && TRANSIENT_ERROR_CODES.has(code)) return true;
+  if (error instanceof TypeError && /\bfetch\b|network/i.test(error.message)) return true;
+  return false;
+}
+
+function extractRetryableFlag(error: unknown): boolean | undefined {
+  const record = asRecord(error);
+  if (record === undefined) return undefined;
+  if (typeof record.isRetryable === "boolean") return record.isRetryable;
+  return record.cause !== undefined && record.cause !== error
+    ? extractRetryableFlag(record.cause)
+    : undefined;
+}
+
+function extractErrorCode(error: unknown): string | undefined {
+  const record = asRecord(error);
+  if (record === undefined) return undefined;
+  if (typeof record.code === "string" && record.code.length > 0) return record.code;
+  return record.cause !== undefined && record.cause !== error
+    ? extractErrorCode(record.cause)
+    : undefined;
 }
 
 function extractStatusCode(error: unknown): number | undefined {

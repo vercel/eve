@@ -6,6 +6,7 @@ node_modules
 .vercel
 .output
 .nitro
+.tmp-test-*
 dist
 .DS_Store
 *.tsbuildinfo

@@ -1,6 +1,6 @@
 # @eve/video
 
-`@eve/video` adds video generation to an eve agent through AI SDK and Vercel AI Gateway video models, with provider-agnostic storage, sandbox input and output support, and model-facing guidance.
+`@eve/video` adds video generation to an eve agent as a durable background workflow task (`defineWorkflowTool({ task })`) backed by AI SDK and Vercel AI Gateway video models, with webhook-first delivery, durable `sleep()` polling fallback, provider-agnostic storage, sandbox input and output support, and model-facing guidance.
 
 ## Install and mount
 
@@ -19,21 +19,30 @@ import video from "@eve/video";
 export default video({});
 ```
 
-Mounting as `video.ts` adds the `video__generate` tool and appends instructions telling the model to generate videos only when explicitly asked.
+Mounting as `video.ts` adds `video__generate` as a background workflow task and appends instructions telling the model to generate videos only when explicitly asked and not to poll or regenerate while a task runs. Each call returns a task receipt immediately so the conversation continues while the video renders, suspends without holding serverless compute across restarts and redeploys, and delivers the finished video in a `<task_result>` message.
 
 Default string model IDs route through Vercel AI Gateway (`AI_GATEWAY_API_KEY` or Vercel OIDC). You can also pass an AI SDK v4 or v3 `VideoModel` instance directly.
 
 ## Entry points
 
 - `@eve/video`: default export (`video`) extension factory.
-- `@eve/video/tools`: `generate` tool definition for overrides or standalone registration. Reads `extension.config` lazily and falls back to defaults without a mount.
+- `@eve/video/tools`: `generate` workflow tool definition (reads `extension.config` lazily and falls back to defaults without a mount).
 - `@eve/video/storage`: `localDisk()`, `inMemory()`, and `VideoStorage` types.
 - `@eve/video/vercel`: `vercelBlob()` storage adapter and `VercelBlobVideoStorageOptions`.
-- `@eve/video/core`: `generateVideos`, `startVideoJob`, `checkVideoJob`, `persistVideos`, `verifyGatewayWebhookSignature`, `DEFAULT_VIDEO_MODEL`, and TypeScript types.
+- `@eve/video/core`: low-level primitives (`startVideoJob`, `checkVideoJob`, `persistVideos`, `generateVideos`, `verifyGatewayWebhookSignature`, `DEFAULT_VIDEO_MODEL`) and TypeScript types.
+
+## Background execution and webhooks
+
+Asynchronous jobs run webhook-first and fall back to durable `sleep()` polling automatically:
+
+- **`webhook: "auto"` (default):** Uses `createWebhook({ respondWith: "manual" })` whenever the model supports native terminal webhooks (such as Vercel AI Gateway models) and the host exposes a public `https://` webhook URL. Incoming callbacks verify `x-ai-gateway-signature` (`401` on invalid signatures, `204` on verified deliveries), with a 60-second fallback poll in case a firewall or preview Deployment Protection blocks callbacks.
+- **Durable `sleep()` polling fallback:** Automatically falls back to durable `sleep()` polling (`poll.intervalMs`, default `5000` ms; `poll.timeoutMs`, default `600000` ms) in local `eve dev` (non-public `http://localhost` / `127.0.0.1` URLs), for direct provider models without native terminal webhooks (such as `@ai-sdk/google` or `@ai-sdk/klingai`), or when `webhook: "never"` is configured.
+- **Single-step models:** Models that implement only `doGenerate` complete inside a single `"use step"`.
+- **Payload boundary and cleanup:** Completed videos download and persist inside the same `"use step"` as the terminal status check so video bytes never cross the Workflow step boundary. Large sandbox inputs (> 180 KiB) stage to public HTTPS storage (1-day TTL) and are deleted in `finally` (including on cancel or timeout).
 
 ## Model selection
 
-Omit `model` to use `"google/veo-3.1-fast-generate-001"`. Pass `model` to change the default, `models` to allow runtime switching by gateway ID or named alias, `gateway` to override AI Gateway settings, and `providerOptions` for provider-specific fields:
+Omit `model` to use `"google/veo-3.1-fast-generate-001"`. Pass `model` to change the default, `models` to allow runtime switching by gateway ID or named alias, `gateway` to override AI Gateway settings, `webhook` (`"auto" | "never"`) and `poll` to control async completion, and `providerOptions` for provider-specific fields:
 
 ```ts
 // agent/extensions/video.ts
@@ -51,6 +60,7 @@ export default video({
     duration: 6,
     audio: true,
   },
+  webhook: "auto",
   gateway: {
     apiKey: process.env.AI_GATEWAY_API_KEY,
   },
@@ -102,13 +112,13 @@ const customStorage: VideoStorage = {
 
 ## Sandbox inputs and `path` saving
 
-The `generate` tool reads `start`, `end`, and `references` from public `https://` URLs or agent sandbox file paths. For asynchronous models, local sandbox files totaling over 180 KiB are staged automatically to public HTTPS storage (with a 1-day TTL) and removed after generation finishes.
+The `generate` tool reads `start`, `end`, and `references` from public `https://` URLs or agent sandbox file paths. For asynchronous models, local sandbox files totaling over 180 KiB are staged automatically to public HTTPS storage (1-day TTL) and removed in `finally` when the task ends (including on cancel or timeout).
 
 Pass `path` to save generated videos into the agent sandbox. Multiple outputs (`n > 1`) write `clip.mp4`, `clip-1.mp4`, `clip-2.mp4`, and so on.
 
-## Approval and limits
+## Approval, limits, and overrides
 
-Gate paid video generations behind human approval and cap request sizes before submitting jobs:
+Gate paid video generations behind human approval and cap request sizes directly on the mount:
 
 ```ts
 // agent/extensions/video.ts
@@ -128,12 +138,14 @@ export default video({
 
 Defaults: `maxVideosPerCall: 4`, `maxInputBytes: 100 MiB`, `maxOutputBytes: 512 MiB`, `maxDurationSeconds`: unlimited.
 
-## Background workflow task
+Because `generate` is a `defineWorkflowTool`, configure `approval` directly via `video({ approval: always() })` rather than spreading `generate` into `defineTool()`. To remove `<mount>__generate`, export `disableTool()` in `agent/extensions/video/tools/generate.ts`.
 
-Use `@eve/video/core` with `defineWorkflowTool({ task })` and `sleep` from `eve/workflow` when video generation should run in the background without holding compute and survive restarts and redeploys:
+## Custom workflows and webhooks (`@eve/video/core`)
+
+Mounting `@eve/video` provides durable background execution and webhook handling out of the box. Use `@eve/video/core` (`startVideoJob`, `checkVideoJob`, `persistVideos`, `generateVideos`, `verifyGatewayWebhookSignature`) as low-level composable primitives when building custom pipelines, custom workflow tools, or standalone webhook routes:
 
 ```ts
-// agent/tools/generate_video.ts
+// agent/tools/render_promo.ts
 import {
   checkVideoJob,
   persistVideos,
@@ -146,7 +158,7 @@ import { sleep } from "eve/workflow";
 import { z } from "zod";
 
 export default defineWorkflowTool({
-  description: "Generate a video in the background and return the stored URL.",
+  description: "Generate a branded promo video and return the stored URL.",
   inputSchema: z.object({
     prompt: z.string().min(1),
     duration: z.number().positive().optional(),
@@ -210,9 +222,9 @@ async function pollAndPersistStep(options: {
 }
 ```
 
-To receive push completion notifications instead of polling, pass `webhookUrl` to `startVideoJob`, store `handle.webhookSigningSecret`, and verify incoming `x-ai-gateway-signature` headers with `verifyGatewayWebhookSignature({ header, rawBody, secret: handle.webhookSigningSecret })` from `@eve/video/core`.
+For standalone webhook routes, pass a public `https://` `webhookUrl` to `startVideoJob`, store `handle.webhookSigningSecret`, and verify incoming `x-ai-gateway-signature` headers with `verifyGatewayWebhookSignature({ header, rawBody, secret: handle.webhookSigningSecret })` from `@eve/video/core`.
 
-When `startVideoJob` stages local sandbox inputs larger than 180 KiB, it returns their keys in `handle.stagedInputKeys`. `generateVideos` and the `generate` tool delete staged inputs automatically when generation finishes, whereas `startVideoJob` deletes them only on submission failure; delete `handle.stagedInputKeys` with `storage.delete` after `checkVideoJob` finishes.
+When `startVideoJob` stages local sandbox inputs larger than 180 KiB, it returns their keys in `handle.stagedInputKeys` and deletes them only on submission failure; delete `handle.stagedInputKeys` with `storage.delete` in `finally` after `checkVideoJob` finishes, fails, or times out. Both `generateVideos` and the built-in `<mount>__generate` tool clean up staged inputs automatically.
 
 See [`docs/extensions/video.md`](../../docs/extensions/video.md) for full configuration and tool reference.
 

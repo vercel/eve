@@ -326,7 +326,9 @@ export async function downloadVideoBytes(
     }
     if (response.status < 200 || response.status >= 300) {
       await response.cancel();
-      throw new Error(`Failed to download video: HTTP ${response.status}.`);
+      throw Object.assign(new Error(`Failed to download video: HTTP ${response.status}.`), {
+        statusCode: response.status,
+      });
     }
     if (response.contentLength !== undefined && response.contentLength > options.maxBytes) {
       await response.cancel();

@@ -1,9 +1,9 @@
 ---
 title: "Video Generation"
-description: "Generate videos in eve agents with AI SDK and AI Gateway video models, provider-agnostic storage, and sandbox output."
+description: "Generate videos in eve agents with a durable background workflow task, webhook-first delivery, provider-agnostic storage, and sandbox output."
 ---
 
-`@eve/video` adds video generation to an eve agent. Mounting it adds a `<mount>__generate` tool backed by AI SDK or Vercel AI Gateway video models. It saves output through a provider-agnostic storage interface and adds model instructions that prevent unrequested generations.
+`@eve/video` adds video generation to an eve agent. Mounting it adds `<mount>__generate` as a durable background [workflow task](/docs/tools/workflows#run-calls-as-tasks-task) (`defineWorkflowTool({ task })`) backed by AI SDK or Vercel AI Gateway video models. Each call returns a task receipt immediately so the conversation continues while the video renders, suspends without holding serverless compute, survives restarts and redeploys, and delivers the finished video in a `<task_result>` message. Output saves through a provider-agnostic storage interface, and model instructions prevent unrequested generations.
 
 ## Install and mount
 
@@ -25,13 +25,39 @@ agent/
 import video from "@eve/video";
 
 export default video({
-  // Omit all fields to use google/veo-3.1-fast-generate-001 and automatic storage.
+  // Omit all fields to use google/veo-3.1-fast-generate-001, webhook: "auto", and automatic storage.
 });
 ```
 
-Mounting at `agent/extensions/video.ts` adds the `video__generate` tool and model instructions. Those instructions tell the model to generate videos only when asked, write visual prompts, and share the returned `url` or sandbox `path`.
+Mounting at `agent/extensions/video.ts` adds the `video__generate` background workflow task and model instructions. Those instructions tell the model to generate videos only when asked, avoid polling or regenerating while a task runs, write visual prompts, and share the returned `url` or sandbox `path`.
 
 String model IDs route through Vercel AI Gateway and require `AI_GATEWAY_API_KEY` or Vercel OIDC credentials. To use a provider without AI Gateway, pass an AI SDK v4 or v3 `VideoModel` instance to `model` or `models`.
+
+## Background execution and webhooks
+
+Each `<mount>__generate` call runs as a `defineWorkflowTool({ task })` workflow run. The call returns a task receipt right away so the conversation continues while the video renders. Between provider events, the task suspends without holding serverless compute and survives restarts and redeploys. When generation finishes or fails, eve delivers the outcome in a `<task_result>` message; the model can wait with `eve__task_wait` or stop a running job with `eve__task_cancel` (see [Tasks](/docs/tools/tasks)).
+
+Asynchronous video jobs run webhook-first and fall back to durable `sleep()` polling when webhooks cannot be used:
+
+- **Webhook-first (`webhook: "auto"`, default):** Uses `createWebhook({ respondWith: "manual" })` whenever the video model supports native terminal webhooks (such as Vercel AI Gateway models) and the host exposes a public `https://` webhook URL. Each callback is verified against `x-ai-gateway-signature`: invalid signatures receive `401` (switching to polling after 10 invalid deliveries), and verified deliveries receive `204` before checking final job status. A coarse 60-second fallback poll runs alongside the webhook so jobs still finish if a firewall or preview Deployment Protection blocks callbacks.
+- **Durable `sleep()` polling fallback:** Falls back automatically to durable `sleep()` polling in local `eve dev` (non-public `http://localhost` or `127.0.0.1` URLs), for direct provider models without native terminal webhooks (such as `@ai-sdk/google` or `@ai-sdk/klingai`), or when `webhook: "never"` is configured. Polling waits `poll.intervalMs` (default `5000` ms) between checks up to `poll.timeoutMs` (default `600000` ms).
+- **Single-step models:** Models that implement only `doGenerate` (without `doStart` and `doStatus`) complete inside a single `"use step"`.
+- **Payload boundary:** Completed video bytes are downloaded and persisted inside the same `"use step"` as the terminal status check, so multi-megabyte video payloads never cross the Workflow step boundary. Only compact video metadata returns to the workflow body.
+- **Staged input cleanup:** Large sandbox input files (> 180 KiB) are staged automatically to public HTTPS storage (`ttlDays: 1`) and deleted in `finally`, including when a task is cancelled or times out.
+
+To disable webhooks and always use durable `sleep()` polling, set `webhook: "never"` and adjust `poll`:
+
+```ts title="agent/extensions/video.ts"
+import video from "@eve/video";
+
+export default video({
+  webhook: "never", // default is "auto"
+  poll: {
+    intervalMs: 5_000,
+    timeoutMs: 600_000,
+  },
+});
+```
 
 ## Choose video models
 
@@ -76,7 +102,7 @@ Video storage solves three constraints:
 
 - Byte-serving models such as Google Veo return inline video bytes instead of a URL, so those bytes need a storage backend or a sandbox `path`.
 - URL-serving models return provider-hosted URLs that expire, so copying videos into your own storage prevents broken links.
-- Asynchronous AI Gateway start requests cap inline request payloads at 300 KiB. When sandbox inputs exceed 180 KiB and storage returns a public `https://` URL, `@eve/video` stages them (1-day TTL) and removes them afterward.
+- Asynchronous AI Gateway start requests cap inline request payloads at 300 KiB. When sandbox inputs exceed 180 KiB and storage returns a public `https://` URL, `@eve/video` stages them (`ttlDays: 1`) and cleans them up in `finally` (including on cancel or timeout).
 
 ### Automatic storage selection
 
@@ -178,14 +204,14 @@ Pass `storage: r2VideoStorage` to `video(...)` in `agent/extensions/video.ts`.
 When your agent has a [sandbox](/docs/sandbox), `video__generate` can read input media from sandbox paths and write generated videos directly to disk.
 
 - **Inputs (`start`, `end`, `references`):** pass public `https://` URLs or sandbox file paths. `start` and `end` accept PNG, JPEG, WebP, or GIF images. `references` accepts images, videos (MP4, WebM, MOV), or audio (MP3, WAV, OGG, FLAC, M4A). Non-HTTPS URLs, URLs with embedded credentials, and private, loopback, link-local, or metadata hosts are blocked before any request runs.
-- **Automatic staging:** for asynchronous models, sandbox inputs totaling over 180 KiB upload to public HTTPS storage (`ttlDays: 1`) before the request and are removed afterward.
+- **Automatic staging:** for asynchronous models, sandbox inputs totaling over 180 KiB upload to public HTTPS storage (`ttlDays: 1`) before the request and are deleted in `finally` when the task ends (including on cancel or timeout).
 - **Output (`path`):** pass `path` (for example `output/clip.mp4`) in the tool call to save videos into the sandbox. When `n` is greater than `1`, `@eve/video` writes `output/clip.mp4`, `output/clip-1.mp4`, `output/clip-2.mp4`, and so on.
 
 Storage and sandbox `path` work together: when both are present, `@eve/video` writes the video to both locations and returns both `url` and `path`. To write only to the sandbox, set `storage: false` in the extension config.
 
 ## Require approval and set limits
 
-Video models bill per second and can take several minutes. Gate calls behind [human approval](/docs/tools) and cap duration, batch count, and media sizes before submitting paid jobs:
+Video models bill per second and can take several minutes. Gate calls behind [human approval](/docs/tools) and cap duration, batch count, and media sizes directly on the extension mount:
 
 ```ts title="agent/extensions/video.ts"
 import video from "@eve/video";
@@ -204,25 +230,29 @@ export default video({
 
 When you pass an approval policy such as `always()`, `@eve/video` formats an approval prompt with the model, video settings, count, sandbox path, and up to 300 characters of the prompt. Only the person who requested the action can respond by default. Pass a full `ApprovalConfiguration` object to customize `prompt` or `response`.
 
-To customize the tool definition itself, override it in a [directory mount](/docs/extensions#override-a-contribution) using `generate` from `@eve/video/tools`:
+Because `generate` is a `defineWorkflowTool`, configure `approval`, `defaults`, `limits`, `poll`, and `webhook` directly on `video(...)` rather than spreading `generate` into `defineTool()`.
+
+To remove `<mount>__generate` (for example, when replacing it with a custom tool built on `@eve/video/core`), export `disableTool()` in a [directory mount](/docs/extensions#override-a-contribution):
 
 ```ts title="agent/extensions/video/tools/generate.ts"
-import { generate } from "@eve/video/tools";
-import { defineTool } from "eve/tools";
+import { disableTool } from "eve/tools";
 
-export default defineTool({
-  ...generate,
-  description: "Generate a short product demo video when the user asks for one.",
-});
+export default disableTool();
 ```
 
-You can also re-export `generate` from `@eve/video/tools` inside `agent/tools/` without mounting the extension. It reads extension config lazily and falls back to default settings when no mount is present.
+## Custom workflows and webhooks (`@eve/video/core`)
 
-## Run as a background workflow task
+Mounting `@eve/video` provides durable background task execution, webhook-first delivery, durable polling fallback, and staged-input cleanup out of the box. Import the low-level primitives from `@eve/video/core` when you need a custom pipeline, a domain-specific workflow tool with extra steps, or a standalone webhook route:
 
-The default `video__generate` tool polls in-process and keeps the tool call open until generation finishes (up to `poll.timeoutMs`, 10 minutes by default). To let the conversation continue while the video renders—and pause between checks without holding compute across restarts and redeploys—define a [background workflow task](/docs/tools/workflows#run-calls-as-tasks-task) with `defineWorkflowTool`, `sleep` from `eve/workflow`, and `@eve/video/core`:
+- `startVideoJob`: validates inputs, stages sandbox files over 180 KiB when `storage` and `getSandbox` are provided, starts an asynchronous job, and returns `{ modelId, operation, jobId?, webhookSigningSecret?, stagedInputKeys?, warnings }`.
+- `checkVideoJob`: checks an asynchronous job and returns `"pending"`, `"completed"`, or `"error"`.
+- `persistVideos`: downloads, validates, and persists completed video assets to storage and/or a sandbox `path`.
+- `generateVideos`: runs end-to-end generation in-process for scripts or non-workflow pipelines, yielding `"starting"`, `"generating"`, and `"saving"` updates before returning `GenerateVideoToolOutput`.
+- `verifyGatewayWebhookSignature`: verifies the `x-ai-gateway-signature` header against the exact raw request body using HMAC-SHA256 in constant time with a 300-second default replay window.
 
-```ts title="agent/tools/generate_video.ts"
+For example, compose `startVideoJob`, `checkVideoJob`, and `persistVideos` inside a custom [workflow task](/docs/tools/workflows#run-calls-as-tasks-task) when you want a specialized input schema or extra steps around generation:
+
+```ts title="agent/tools/render_promo.ts"
 import {
   checkVideoJob,
   persistVideos,
@@ -235,7 +265,7 @@ import { sleep } from "eve/workflow";
 import { z } from "zod";
 
 export default defineWorkflowTool({
-  description: "Generate a video in the background and return the stored URL.",
+  description: "Generate a branded promo video and return the stored URL.",
   inputSchema: z.object({
     prompt: z.string().min(1),
     duration: z.number().positive().optional(),
@@ -301,26 +331,47 @@ async function pollAndPersistStep(options: {
 
 Running `checkVideoJob` and `persistVideos` inside the same `"use step"` keeps large video bytes out of workflow history so only the saved metadata returns to the workflow body.
 
-When `startVideoJob` stages local sandbox inputs larger than 180 KiB, it returns their keys in `handle.stagedInputKeys`. `generateVideos` and the `generate` tool clean up staged inputs automatically after generation finishes, whereas `startVideoJob` deletes them only on submission failure. Delete `handle.stagedInputKeys` through `storage.delete` once `checkVideoJob` finishes.
+When you pass `getSandbox` to `startVideoJob` and local sandbox inputs exceed 180 KiB, `startVideoJob` returns their keys in `handle.stagedInputKeys` and deletes them only on submission failure. Delete `handle.stagedInputKeys` with `storage.delete` in a `finally` step after `checkVideoJob` finishes, fails, or times out. Both `generateVideos` and the built-in `<mount>__generate` tool clean up staged inputs automatically.
 
-To receive provider completion webhooks instead of polling, pass a public `https://` `webhookUrl` to `startVideoJob`. Save `handle.webhookSigningSecret` from the returned handle and pass it to `verifyGatewayWebhookSignature({ header, rawBody, secret, maxAgeSeconds? })` from `@eve/video/core` in your webhook handler. It verifies the `x-ai-gateway-signature` header against the exact raw request body using HMAC-SHA256 in constant time with a 300-second default replay window.
+For a standalone webhook route, pass a public `https://` `webhookUrl` to `startVideoJob`, store `handle.webhookSigningSecret`, and verify incoming requests with `verifyGatewayWebhookSignature`:
+
+```ts title="agent/lib/verify-video-webhook.ts"
+import { verifyGatewayWebhookSignature } from "@eve/video/core";
+
+export async function verifyVideoWebhook(
+  request: Request,
+  secret: string,
+): Promise<Response | string> {
+  const rawBody = await request.text();
+  const valid = verifyGatewayWebhookSignature({
+    header: request.headers.get("x-ai-gateway-signature") ?? "",
+    rawBody,
+    secret,
+  });
+  if (!valid) {
+    return new Response(null, { status: 401 });
+  }
+  return rawBody;
+}
+```
 
 ## Configuration reference
 
 ### Extension options (`@eve/video`)
 
-| Option                      | Type                                                                          | Default                                                                    | Description                                                                                                    |
-| --------------------------- | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `model`                     | `string \| VideoModelLike`                                                    | First entry of `models`, or `google/veo-3.1-fast-generate-001`             | Default gateway model ID, alias from `models`, or AI SDK v4/v3 `VideoModel` instance.                          |
-| `models`                    | `readonly string[] \| Record<string, string \| VideoModelLike>`               | None (switching disabled)                                                  | Allowlist of gateway model IDs or alias map available to tool calls.                                           |
-| `storage`                   | `VideoStorage \| false`                                                       | Auto-selected                                                              | External storage adapter, or `false` to disable automatic storage selection.                                   |
-| `gateway`                   | `{ apiKey?: string; baseURL?: string; headers?: Record<string, string> }`     | Default AI Gateway credentials                                             | Custom Vercel AI Gateway connection options for string model IDs.                                              |
-| `defaults`                  | `{ aspectRatio?, resolution?, duration?, audio?, fps? }`                      | None                                                                       | Default generation parameters applied when a tool call omits them.                                             |
-| `poll`                      | `{ intervalMs?: number; timeoutMs?: number }`                                 | `intervalMs: 5000`, `timeoutMs: 600000`                                    | Asynchronous polling interval (`0`–`60000` ms) and timeout (`100`–`7200000` ms).                               |
-| `limits`                    | `{ maxDurationSeconds?, maxVideosPerCall?, maxInputBytes?, maxOutputBytes? }` | `maxVideosPerCall: 4`, `maxInputBytes: 100 MiB`, `maxOutputBytes: 512 MiB` | Validation caps checked before submitting jobs or downloading output. `maxDurationSeconds` has no default cap. |
-| `approval`                  | `Approval<GenerateVideoToolInput>`                                            | None                                                                       | Approval policy or configuration gating `generate` tool execution.                                             |
-| `providerOptions`           | `Record<string, Record<string, unknown>>`                                     | None                                                                       | Provider-specific options forwarded to the underlying video model call.                                        |
-| `allowTemporaryProviderUrl` | `boolean`                                                                     | `false`                                                                    | Return expiring provider URLs when neither storage nor a sandbox `path` is available.                          |
+| Option                      | Type                                                                          | Default                                                                    | Description                                                                                                                                                              |
+| --------------------------- | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `model`                     | `string \| VideoModelLike`                                                    | First entry of `models`, or `google/veo-3.1-fast-generate-001`             | Default gateway model ID, alias from `models`, or AI SDK v4/v3 `VideoModel` instance.                                                                                    |
+| `models`                    | `readonly string[] \| Record<string, string \| VideoModelLike>`               | None (switching disabled)                                                  | Allowlist of gateway model IDs or alias map available to tool calls.                                                                                                     |
+| `storage`                   | `VideoStorage \| false`                                                       | Auto-selected                                                              | External storage adapter, or `false` to disable automatic storage selection.                                                                                             |
+| `gateway`                   | `{ apiKey?: string; baseURL?: string; headers?: Record<string, string> }`     | Default AI Gateway credentials                                             | Custom Vercel AI Gateway connection options for string model IDs.                                                                                                        |
+| `defaults`                  | `{ aspectRatio?, resolution?, duration?, audio?, fps? }`                      | None                                                                       | Default generation parameters applied when a tool call omits them.                                                                                                       |
+| `poll`                      | `{ intervalMs?: number; timeoutMs?: number }`                                 | `intervalMs: 5000`, `timeoutMs: 600000`                                    | Durable `sleep()` polling interval (`100`–`60000` ms) and timeout (`100`–`7200000` ms) for asynchronous jobs.                                                            |
+| `webhook`                   | `"auto" \| "never"`                                                           | `"auto"`                                                                   | Uses `createWebhook({ respondWith: "manual" })` when the model supports native terminal webhooks and the host has a public `https://` URL. Set `"never"` to always poll. |
+| `limits`                    | `{ maxDurationSeconds?, maxVideosPerCall?, maxInputBytes?, maxOutputBytes? }` | `maxVideosPerCall: 4`, `maxInputBytes: 100 MiB`, `maxOutputBytes: 512 MiB` | Validation caps checked before submitting jobs or downloading output. `maxDurationSeconds` has no default cap.                                                           |
+| `approval`                  | `Approval<GenerateVideoToolInput>`                                            | None                                                                       | Approval policy or configuration gating `generate` tool execution.                                                                                                       |
+| `providerOptions`           | `Record<string, Record<string, unknown>>`                                     | None                                                                       | Provider-specific options forwarded to the underlying video model call.                                                                                                  |
+| `allowTemporaryProviderUrl` | `boolean`                                                                     | `false`                                                                    | Return expiring provider URLs when neither storage nor a sandbox `path` is available.                                                                                    |
 
 ### Vercel Blob adapter options (`@eve/video/vercel`)
 
@@ -357,7 +408,7 @@ To receive provider completion webhooks instead of polling, pass a public `https
 
 ### Tool output (`GenerateVideoToolOutput`)
 
-While running, `video__generate` yields progress updates with `status` set to `"starting"`, `"generating"` (with `elapsedSeconds` and `attempt`), and `"saving"` (with `videoCount`). On completion it returns `{ status: "completed", model, jobId?, videos, warnings? }`, where each item in `videos` includes `mediaType`, `bytes`, and the destination fields that apply (`url`, `downloadUrl`, `storageKey`, `storagePath`, `path`, `visibility`, `expiresAt`, `temporary`).
+Each `<mount>__generate` call returns a task receipt immediately, and eve delivers the final JSON output in a `<task_result>` message when generation completes. While waiting on an asynchronous job, `video__generate` yields progress updates with `status: "generating"`, `model`, optional `jobId`, `elapsedSeconds`, and `attempt` (`generateVideos` from `@eve/video/core` also yields `"starting"` and `"saving"` with `videoCount`). On completion it returns `{ status: "completed", model, jobId?, videos, warnings? }`, where each item in `videos` includes `mediaType`, `bytes`, and the destination fields that apply (`url`, `downloadUrl`, `storageKey`, `storagePath`, `path`, `visibility`, `expiresAt`, `temporary`).
 
 `bytes` is `0` when video bytes are not downloaded locally, such as when `temporary: true` returns a provider URL or when the provider delivers directly to caller-managed storage (`uploaded`). For `vercelBlob()`, `storageKey` is the unprefixed logical `key` (matching `localDisk()` and `inMemory()`), while the blob pathname in Vercel Blob is `${prefix}/${key}`.
 

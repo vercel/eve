@@ -18,6 +18,8 @@ export interface VideoModelLike {
       }) => PromiseLike<number | undefined> | number | undefined);
   /** Generates videos in a single call when supported by the provider. */
   doGenerate?(options: Readonly<Record<string, unknown>>): PromiseLike<unknown>;
+  /** Optional hook present on models that support native terminal webhook notifications, such as Vercel AI Gateway models. */
+  handleWebhookOption?(options: Readonly<Record<string, unknown>>): PromiseLike<unknown>;
   /** Starts an asynchronous video generation job and returns an operation handle. */
   doStart?(options: Readonly<Record<string, unknown>>): PromiseLike<unknown>;
   /** Checks the status of a previously started asynchronous video generation job. */
@@ -92,6 +94,13 @@ export interface VideoExtensionConfig {
   readonly defaults?: VideoDefaultsConfig;
   /** Polling interval and timeout settings for asynchronous video models. */
   readonly poll?: VideoPollOptions;
+  /**
+   * Controls webhook-driven completion for asynchronous video jobs.
+   * `"auto"` (default) uses `createWebhook()` when the model supports native terminal webhooks
+   * and the host exposes a public `https://` webhook URL, falling back to durable `sleep()` polling
+   * otherwise (such as in local `eve dev` or with direct provider models). `"never"` always polls.
+   */
+  readonly webhook?: "auto" | "never";
   /** Validation limits for duration, output count, and media byte sizes. */
   readonly limits?: VideoLimitsConfig;
   /** Optional approval policy gating the video `generate` tool execution. */

@@ -62,11 +62,13 @@ export default defineExtension({
     poll: z
       .object({
         /** Milliseconds to wait between status checks. */
-        intervalMs: z.number().int().min(0).max(60_000).optional(),
+        intervalMs: z.number().int().min(100).max(60_000).optional(),
         /** Maximum milliseconds to wait before timing out an asynchronous job. */
         timeoutMs: z.number().int().min(100).max(7_200_000).optional(),
       })
       .optional(),
+    /** Controls webhook-driven completion (`"auto"` by default, or `"never"` to always poll). */
+    webhook: z.enum(["auto", "never"]).optional(),
     /** Safety and cost limits enforced before submitting or downloading videos. */
     limits: z
       .object({

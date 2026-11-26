@@ -1,7 +1,8 @@
 import type { SandboxSession } from "eve/sandbox";
-import type { ToolDefinition } from "eve/tools";
+import type { WorkflowStepToolContext } from "eve/tools";
 import type { ApprovalContext, ApprovalResponseContext } from "eve/tools/approval";
 
+import { generateVideos, type GenerateVideosOptions } from "../extension/lib/engine.ts";
 import type {
   GenerateVideoToolInput,
   GenerateVideoToolOutput,
@@ -48,6 +49,21 @@ export const M4A_BYTES = new Uint8Array([
   0x00, 0x00, 0x00, 0x14, 0x66, 0x74, 0x79, 0x70, 0x4d, 0x34, 0x41, 0x20, 0x00, 0x00, 0x00, 0x00,
 ]);
 
+export function createHttpError(
+  statusCode: number,
+  message: string,
+): Error & { statusCode: number } {
+  const err = new Error(message) as Error & { statusCode: number };
+  err.statusCode = statusCode;
+  return err;
+}
+
+export function createLargePng(): Uint8Array {
+  const bytes = new Uint8Array(185 * 1024);
+  bytes.set(PNG_BYTES, 0);
+  return bytes;
+}
+
 export interface RecordedStatusCall {
   readonly operation: unknown;
   readonly abortSignal?: AbortSignal;
@@ -84,6 +100,7 @@ export interface CreateAsyncVideoModelOptions {
   readonly provider?: string;
   readonly specificationVersion?: "v4" | "v3";
   readonly maxVideosPerCall?: VideoModelLike["maxVideosPerCall"];
+  readonly handleWebhookOption?: boolean;
   readonly jobId?: string;
   readonly webhookSigningSecret?: string;
   readonly operation?: unknown;
@@ -123,6 +140,11 @@ export function createAsyncVideoModel(
     provider,
     modelId,
     maxVideosPerCall: options.maxVideosPerCall,
+    ...(options.handleWebhookOption === true && {
+      async handleWebhookOption() {
+        return undefined;
+      },
+    }),
     async doStart(callOptions) {
       startCalls.push(callOptions);
       if (options.onStart !== undefined) {
@@ -326,7 +348,7 @@ export function createFakeSandbox(
   };
 }
 
-export interface FakeToolContextOptions {
+export interface FakeStepContextOptions {
   readonly sessionId?: string;
   readonly callId?: string;
   readonly toolName?: string;
@@ -335,17 +357,9 @@ export interface FakeToolContextOptions {
   readonly getSandbox?: () => Promise<Pick<SandboxSession, "readBinaryFile" | "writeBinaryFile">>;
 }
 
-export interface FakeToolContext {
-  readonly abortSignal: AbortSignal;
-  readonly callId: string;
-  readonly toolName: string;
-  readonly session: {
-    readonly id: string;
-  };
-  readonly getSandbox: () => Promise<Pick<SandboxSession, "readBinaryFile" | "writeBinaryFile">>;
-}
-
-export function createFakeToolContext(options: FakeToolContextOptions = {}): FakeToolContext {
+export function createFakeStepContext(
+  options: FakeStepContextOptions = {},
+): WorkflowStepToolContext {
   const abortSignal = options.signal ?? new AbortController().signal;
   const getSandbox =
     options.getSandbox ??
@@ -362,41 +376,28 @@ export function createFakeToolContext(options: FakeToolContextOptions = {}): Fak
       id: options.sessionId ?? "session-1",
     },
     getSandbox,
-  };
+  } as never;
 }
 
-export interface GenerateToolExecutionResult {
+export interface GenerateVideosExecutionResult {
   readonly progress: GenerateVideoToolProgress[];
-  readonly yielded: (GenerateVideoToolProgress | GenerateVideoToolOutput)[];
   readonly output: GenerateVideoToolOutput;
 }
 
-export async function executeGenerateTool(
-  tool: ToolDefinition<GenerateVideoToolInput, GenerateVideoToolProgress | GenerateVideoToolOutput>,
-  input: GenerateVideoToolInput,
-  options: FakeToolContextOptions = {},
-): Promise<GenerateToolExecutionResult> {
-  const ctx = createFakeToolContext(options);
-  const iterable = tool.execute(input, ctx as never) as AsyncGenerator<
-    GenerateVideoToolProgress | GenerateVideoToolOutput,
-    GenerateVideoToolOutput,
-    void
-  >;
-  const yielded: (GenerateVideoToolProgress | GenerateVideoToolOutput)[] = [];
+export async function runGenerateVideos(
+  options: GenerateVideosOptions,
+): Promise<GenerateVideosExecutionResult> {
+  const iterable = generateVideos(options);
   const progress: GenerateVideoToolProgress[] = [];
   for (;;) {
     const step = await iterable.next();
     if (step.done) {
       return {
         progress,
-        yielded,
         output: step.value,
       };
     }
-    yielded.push(step.value);
-    if (step.value.status !== "completed") {
-      progress.push(step.value);
-    }
+    progress.push(step.value);
   }
 }
 

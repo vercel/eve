@@ -5,50 +5,37 @@ import { describe, test } from "node:test";
 
 import { always, type ApprovalConfiguration } from "eve/tools/approval";
 
-import {
-  checkVideoJob,
-  generateVideos,
-  persistVideos,
-  startVideoJob,
-} from "../../extension/lib/engine.ts";
+import { checkVideoJob, persistVideos, startVideoJob } from "../../extension/lib/engine.ts";
 import { inMemory } from "../../extension/lib/storage/in-memory.ts";
 import type { VideoStorage } from "../../extension/lib/storage/types.ts";
-import { defineGenerateVideoTool } from "../../extension/lib/tools.ts";
+import {
+  createGenerateApproval,
+  createIdempotencyKey,
+  formatGenerateCompleteLabel,
+  formatGenerateProgressLabel,
+} from "../../extension/lib/tools.ts";
 import type {
   GenerateVideoToolInput,
-  GenerateVideoToolOutput,
-  GenerateVideoToolProgress,
   VideoExtensionConfig,
   VideoJobHandle,
   VideoJobStatus,
 } from "../../extension/lib/types.ts";
 import {
   MP4_BYTES,
-  PNG_BYTES,
   WEBM_BYTES,
   createAsyncVideoModel,
   createFakeApprovalContext,
   createFakeApprovalResponseContext,
   createFakePrincipal,
   createFakeSandbox,
+  createHttpError,
+  createLargePng,
   createSyncVideoModel,
-  executeGenerateTool,
+  runGenerateVideos,
 } from "../helpers.ts";
 
-function createHttpError(statusCode: number, message: string): Error & { statusCode: number } {
-  const err = new Error(message) as Error & { statusCode: number };
-  err.statusCode = statusCode;
-  return err;
-}
-
-function createLargePng(): Uint8Array {
-  const bytes = new Uint8Array(185 * 1024);
-  bytes.set(PNG_BYTES, 0);
-  return bytes;
-}
-
-describe("defineGenerateVideoTool async lifecycle, headers, labels, and model output", () => {
-  test("streams starting -> generating -> saving -> completed, sets deterministic idempotency-key, and projects labels and model output", async () => {
+describe("generateVideos async lifecycle, idempotency keys, and labels", () => {
+  test("streams starting -> generating -> saving -> completed, sets deterministic idempotency-key, and formats labels", async () => {
     const storage = inMemory({ baseUrl: "https://media.example.test/videos" });
     const fake = createAsyncVideoModel({
       modelId: "google/veo-3.1-fast-generate-001",
@@ -64,11 +51,11 @@ describe("defineGenerateVideoTool async lifecycle, headers, labels, and model ou
       ],
     });
 
-    const tool = defineGenerateVideoTool(() => ({
+    const config: VideoExtensionConfig = {
       model: fake.model,
       storage,
       poll: { intervalMs: 0 },
-    }));
+    };
 
     const sampleInput: GenerateVideoToolInput = {
       prompt: "Ocean waves at sunrise",
@@ -77,9 +64,11 @@ describe("defineGenerateVideoTool async lifecycle, headers, labels, and model ou
       resolution: "720p",
     };
 
-    const first = await executeGenerateTool(tool, sampleInput, {
+    const first = await runGenerateVideos({
+      config,
+      input: sampleInput,
       sessionId: "sess-a",
-      callId: "call-1",
+      idempotencyKey: createIdempotencyKey("sess-a", "call-1"),
     });
 
     assert.deepEqual(
@@ -100,7 +89,6 @@ describe("defineGenerateVideoTool async lifecycle, headers, labels, and model ou
       1,
     );
 
-    assert.deepEqual(first.yielded[first.yielded.length - 1], first.output);
     assert.equal(first.output.status, "completed");
     assert.equal(first.output.model, "google/veo-3.1-fast-generate-001");
     assert.equal(first.output.jobId, "job_async_42");
@@ -110,16 +98,18 @@ describe("defineGenerateVideoTool async lifecycle, headers, labels, and model ou
     assert.ok(first.output.videos[0].url?.startsWith("https://media.example.test/videos/videos/"));
     assert.deepEqual(first.output.warnings, ["Using fast tier", "Unsupported fps: fixed at 24"]);
 
-    const second = await executeGenerateTool(
-      tool,
-      { prompt: "Ocean waves at sunrise" },
-      { sessionId: "sess-a", callId: "call-1" },
-    );
-    const third = await executeGenerateTool(
-      tool,
-      { prompt: "Ocean waves at sunrise" },
-      { sessionId: "sess-a", callId: "call-2" },
-    );
+    const second = await runGenerateVideos({
+      config,
+      input: { prompt: "Ocean waves at sunrise" },
+      sessionId: "sess-a",
+      idempotencyKey: createIdempotencyKey("sess-a", "call-1"),
+    });
+    const third = await runGenerateVideos({
+      config,
+      input: { prompt: "Ocean waves at sunrise" },
+      sessionId: "sess-a",
+      idempotencyKey: createIdempotencyKey("sess-a", "call-2"),
+    });
 
     assert.equal(second.output.status, "completed");
     assert.equal(third.output.status, "completed");
@@ -132,24 +122,36 @@ describe("defineGenerateVideoTool async lifecycle, headers, labels, and model ou
     assert.equal(key1, key2);
     assert.notEqual(key1, key3);
 
-    assert.equal(typeof tool.label, "object");
-    if (typeof tool.label === "object" && tool.label !== null) {
-      assert.equal(tool.label.start(sampleInput), "Generating video");
-      assert.equal(tool.label.delta?.(sampleInput, first.progress[0]), "Starting video generation");
-      assert.equal(tool.label.complete?.(sampleInput, first.output), "Generated video");
-    }
-
-    const projected = tool.toModelOutput?.(first.output, {
-      callId: "call-1",
-      toolName: "video__generate",
-      async getSandbox() {
-        return undefined;
-      },
-      defaultModelOutput(value) {
-        return { type: "json", value };
-      },
-    });
-    assert.deepEqual(projected, { type: "json", value: first.output });
+    assert.equal(formatGenerateProgressLabel(first.progress[0]), "Starting video generation");
+    assert.equal(formatGenerateProgressLabel(first.progress[1]), "Generating video");
+    assert.equal(
+      formatGenerateProgressLabel({
+        status: "generating",
+        model: "google/veo-3.1-fast-generate-001",
+        elapsedSeconds: 12,
+        attempt: 2,
+      }),
+      "Generating video (12s)",
+    );
+    assert.equal(formatGenerateProgressLabel(first.progress[3]), "Saving video");
+    assert.equal(
+      formatGenerateProgressLabel({
+        status: "saving",
+        model: "google/veo-3.1-fast-generate-001",
+        videoCount: 2,
+      }),
+      "Saving 2 videos",
+    );
+    assert.equal(formatGenerateProgressLabel(first.output), "Generated video");
+    assert.equal(formatGenerateCompleteLabel(first.output), "Generated video");
+    assert.equal(
+      formatGenerateCompleteLabel({
+        ...first.output,
+        videos: [...first.output.videos, ...first.output.videos],
+      }),
+      "Generated 2 videos",
+    );
+    assert.equal(formatGenerateCompleteLabel(first.progress[0]), "Generated video");
   });
 });
 
@@ -170,22 +172,11 @@ describe("sync doGenerate fallback, batch persistence, and atomic cleanup", () =
       });
     };
 
-    const progress: GenerateVideoToolProgress[] = [];
-    const stream = generateVideos({
+    const { progress, output: finalOutput } = await runGenerateVideos({
       config: { model: syncFake.model, storage },
       input: { prompt: "Sync clip" },
       fetch: customFetch,
     });
-
-    let finalOutput: GenerateVideoToolOutput;
-    for (;;) {
-      const step = await stream.next();
-      if (step.done) {
-        finalOutput = step.value;
-        break;
-      }
-      progress.push(step.value);
-    }
 
     assert.deepEqual(
       progress.map((p) => p.status),
@@ -216,7 +207,7 @@ describe("sync doGenerate fallback, batch persistence, and atomic cleanup", () =
     });
 
     let fetchCalls = 0;
-    const stream = generateVideos({
+    const { output: finalOutput } = await runGenerateVideos({
       config: {
         model: syncFake.model,
         storage: false,
@@ -228,15 +219,6 @@ describe("sync doGenerate fallback, batch persistence, and atomic cleanup", () =
         throw new Error("should not download temporary provider URL");
       },
     });
-
-    let finalOutput: GenerateVideoToolOutput;
-    for (;;) {
-      const step = await stream.next();
-      if (step.done) {
-        finalOutput = step.value;
-        break;
-      }
-    }
 
     assert.equal(fetchCalls, 0);
     assert.equal(syncFake.generateCalls.length, 1);
@@ -262,17 +244,11 @@ describe("sync doGenerate fallback, batch persistence, and atomic cleanup", () =
       ],
     });
 
-    const tool = defineGenerateVideoTool(() => ({
-      model: fake.model,
-      storage,
-      poll: { intervalMs: 0 },
-    }));
-
-    const { output } = await executeGenerateTool(
-      tool,
-      { prompt: "Two takes", n: 2, path: "videos/teaser.mp4" },
-      { sandbox },
-    );
+    const { output } = await runGenerateVideos({
+      config: { model: fake.model, storage, poll: { intervalMs: 0 } },
+      input: { prompt: "Two takes", n: 2, path: "videos/teaser.mp4" },
+      getSandbox: async () => sandbox,
+    });
 
     assert.equal(output.videos.length, 2);
     assert.equal(output.videos[0].path, "videos/teaser.mp4");
@@ -323,14 +299,12 @@ describe("sync doGenerate fallback, batch persistence, and atomic cleanup", () =
       ],
     });
 
-    const tool = defineGenerateVideoTool(() => ({
-      model: fake.model,
-      storage: flakyStorage,
-      poll: { intervalMs: 0 },
-    }));
-
     await assert.rejects(
-      () => executeGenerateTool(tool, { prompt: "Batch failure", n: 2 }),
+      () =>
+        runGenerateVideos({
+          config: { model: fake.model, storage: flakyStorage, poll: { intervalMs: 0 } },
+          input: { prompt: "Batch failure", n: 2 },
+        }),
       /storage quota exceeded/,
     );
     assert.equal(deletedKeys.length, 1);
@@ -356,13 +330,10 @@ describe("polling resilience, cancellation, and deterministic timeout", () => {
       ],
     });
 
-    const tool = defineGenerateVideoTool(() => ({
-      model: fake.model,
-      storage,
-      poll: { intervalMs: 0 },
-    }));
-
-    const { output } = await executeGenerateTool(tool, { prompt: "Recover from 503" });
+    const { output } = await runGenerateVideos({
+      config: { model: fake.model, storage, poll: { intervalMs: 0 } },
+      input: { prompt: "Recover from 503" },
+    });
     assert.equal(output.status, "completed");
     assert.equal(fake.statusCalls.length, 3);
   });
@@ -381,14 +352,12 @@ describe("polling resilience, cancellation, and deterministic timeout", () => {
       ],
     });
 
-    const tool = defineGenerateVideoTool(() => ({
-      model: fake.model,
-      storage,
-      poll: { intervalMs: 0 },
-    }));
-
     await assert.rejects(
-      () => executeGenerateTool(tool, { prompt: "Immediate 400" }),
+      () =>
+        runGenerateVideos({
+          config: { model: fake.model, storage, poll: { intervalMs: 0 } },
+          input: { prompt: "Immediate 400" },
+        }),
       /Bad status request/,
     );
     assert.equal(fake.statusCalls.length, 1);
@@ -405,14 +374,12 @@ describe("polling resilience, cancellation, and deterministic timeout", () => {
       repeatLastStatus: true,
     });
 
-    const tool = defineGenerateVideoTool(() => ({
-      model: fake.model,
-      storage,
-      poll: { intervalMs: 0 },
-    }));
-
     await assert.rejects(
-      () => executeGenerateTool(tool, { prompt: "Too many 503s" }),
+      () =>
+        runGenerateVideos({
+          config: { model: fake.model, storage, poll: { intervalMs: 0 } },
+          input: { prompt: "Too many 503s" },
+        }),
       /Persistent 503/,
     );
     assert.equal(fake.statusCalls.length, 4);
@@ -434,14 +401,13 @@ describe("polling resilience, cancellation, and deterministic timeout", () => {
       ],
     });
 
-    const tool = defineGenerateVideoTool(() => ({
-      model: fake.model,
-      storage,
-      poll: { intervalMs: 0 },
-    }));
-
     await assert.rejects(
-      () => executeGenerateTool(tool, { prompt: "Cancel mid-poll" }, { signal: controller.signal }),
+      () =>
+        runGenerateVideos({
+          config: { model: fake.model, storage, poll: { intervalMs: 0 } },
+          input: { prompt: "Cancel mid-poll" },
+          signal: controller.signal,
+        }),
       /user cancelled poll/,
     );
     assert.equal(fake.statusCalls.length, 1);
@@ -466,14 +432,12 @@ describe("polling resilience, cancellation, and deterministic timeout", () => {
       ],
     });
 
-    const tool = defineGenerateVideoTool(() => ({
-      model: fake.model,
-      storage,
-      poll: { intervalMs: 0, timeoutMs: 1_000 },
-    }));
-
     await assert.rejects(
-      () => executeGenerateTool(tool, { prompt: "Never completes" }),
+      () =>
+        runGenerateVideos({
+          config: { model: fake.model, storage, poll: { intervalMs: 0, timeoutMs: 1_000 } },
+          input: { prompt: "Never completes" },
+        }),
       (error: unknown) => {
         assert.ok(error instanceof Error);
         assert.match(error.message, /test\/slow-model/);
@@ -499,14 +463,12 @@ describe("polling resilience, cancellation, and deterministic timeout", () => {
       ],
     });
 
-    const tool = defineGenerateVideoTool(() => ({
-      model: fake.model,
-      storage,
-      poll: { intervalMs: 5_000, timeoutMs: 1 },
-    }));
-
     await assert.rejects(
-      () => executeGenerateTool(tool, { prompt: "Poll edge" }),
+      () =>
+        runGenerateVideos({
+          config: { model: fake.model, storage, poll: { intervalMs: 5_000, timeoutMs: 1 } },
+          input: { prompt: "Poll edge" },
+        }),
       /test\/equal-poll-timeout.*job_edge_1.*timed out/,
     );
     assert.equal(fake.statusCalls.length, 1);
@@ -613,10 +575,14 @@ describe("pre-flight gating before paid submission", () => {
 
     for (const tc of cases) {
       const fake = createAsyncVideoModel();
-      const tool = defineGenerateVideoTool(() => tc.config(fake.model));
-      const toolOptions = tc.sandbox !== undefined ? { sandbox: tc.sandbox } : {};
+      const sandbox = tc.sandbox;
       await assert.rejects(
-        () => executeGenerateTool(tool, tc.input, toolOptions),
+        () =>
+          runGenerateVideos({
+            config: tc.config(fake.model),
+            input: tc.input,
+            ...(sandbox !== undefined && { getSandbox: async () => sandbox }),
+          }),
         tc.pattern,
         tc.name,
       );
@@ -633,19 +599,14 @@ describe("pre-flight gating before paid submission", () => {
         modelId: "test/single-video-async",
         maxVideosPerCall,
       });
-      const tool = defineGenerateVideoTool(() => ({
-        model: fake.model,
-        storage,
-        poll: { intervalMs: 0 },
-      }));
 
       await assert.rejects(
         () =>
-          executeGenerateTool(
-            tool,
-            { prompt: "Exceeds model cap", n: 2, start: "frames/large.png" },
-            { sandbox },
-          ),
+          runGenerateVideos({
+            config: { model: fake.model, storage, poll: { intervalMs: 0 } },
+            input: { prompt: "Exceeds model cap", n: 2, start: "frames/large.png" },
+            getSandbox: async () => sandbox,
+          }),
         /supports at most 1 video\(s\) per async call, but 2 were requested/,
       );
       assert.equal(fake.startCalls.length, 0);
@@ -667,15 +628,12 @@ describe("pre-flight gating before paid submission", () => {
     for (const input of cases) {
       let sandboxCalls = 0;
       const fake = createAsyncVideoModel();
-      const tool = defineGenerateVideoTool(() => ({
-        model: fake.model,
-        storage,
-        poll: { intervalMs: 0 },
-      }));
 
       await assert.rejects(
         () =>
-          executeGenerateTool(tool, input, {
+          runGenerateVideos({
+            config: { model: fake.model, storage, poll: { intervalMs: 0 } },
+            input,
             getSandbox: async () => {
               sandboxCalls += 1;
               return createFakeSandbox();
@@ -708,17 +666,11 @@ describe("large sandbox input staging and temporary provider URLs", () => {
       ],
     });
 
-    const tool = defineGenerateVideoTool(() => ({
-      model: fake.model,
-      storage,
-      poll: { intervalMs: 0 },
-    }));
-
-    const { output } = await executeGenerateTool(
-      tool,
-      { prompt: "Animate opening frame", start: "frames/opening.png" },
-      { sandbox },
-    );
+    const { output } = await runGenerateVideos({
+      config: { model: fake.model, storage, poll: { intervalMs: 0 } },
+      input: { prompt: "Animate opening frame", start: "frames/opening.png" },
+      getSandbox: async () => sandbox,
+    });
 
     assert.equal(output.status, "completed");
     assert.equal(stagedKeysSeenAtStart.length, 1);
@@ -758,14 +710,15 @@ describe("large sandbox input staging and temporary provider URLs", () => {
       ],
     });
 
-    const urlTool = defineGenerateVideoTool(() => ({
-      model: urlModel.model,
-      storage: false,
-      allowTemporaryProviderUrl: true,
-      poll: { intervalMs: 0 },
-    }));
-
-    const { output } = await executeGenerateTool(urlTool, { prompt: "Temporary URL clip" });
+    const { output } = await runGenerateVideos({
+      config: {
+        model: urlModel.model,
+        storage: false,
+        allowTemporaryProviderUrl: true,
+        poll: { intervalMs: 0 },
+      },
+      input: { prompt: "Temporary URL clip" },
+    });
     assert.equal(output.videos.length, 1);
     assert.equal(output.videos[0].url, "https://provider.example.com/temp/clip.mp4");
     assert.equal(output.videos[0].expiresAt, expiresAt);
@@ -781,15 +734,17 @@ describe("large sandbox input staging and temporary provider URLs", () => {
       ],
     });
 
-    const bytesTool = defineGenerateVideoTool(() => ({
-      model: bytesModel.model,
-      storage: false,
-      allowTemporaryProviderUrl: true,
-      poll: { intervalMs: 0 },
-    }));
-
     await assert.rejects(
-      () => executeGenerateTool(bytesTool, { prompt: "Inline bytes without storage" }),
+      () =>
+        runGenerateVideos({
+          config: {
+            model: bytesModel.model,
+            storage: false,
+            allowTemporaryProviderUrl: true,
+            poll: { intervalMs: 0 },
+          },
+          input: { prompt: "Inline bytes without storage" },
+        }),
       /returned video bytes without a provider URL/,
     );
   });
@@ -810,8 +765,8 @@ describe("approval forwarding", () => {
     let currentConfig: VideoExtensionConfig = {
       model: "google/veo-3.1-fast-generate-001",
     };
-    const tool = defineGenerateVideoTool(() => currentConfig);
-    const getApproval = () => tool.approval as ApprovalConfiguration<GenerateVideoToolInput>;
+    const approval = createGenerateApproval(() => currentConfig);
+    const getApproval = (): ApprovalConfiguration<GenerateVideoToolInput> => approval;
 
     const approvalCtx = createFakeApprovalContext(input);
     assert.equal(await getApproval().request(approvalCtx), "not-applicable");

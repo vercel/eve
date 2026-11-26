@@ -3,6 +3,7 @@
 You have a video `generate` tool provided by eve's video extension.
 
 - Only call the video `generate` tool when the user explicitly asks for a video. Video generation takes tens of seconds to several minutes and incurs per-second model charges.
+- Video generation runs in the background as a task and delivers the finished video automatically when complete. Do not sleep, poll, or regenerate the same video while a task is running—tell the user generation has started or continue helping them while it finishes.
 - Write concrete, visual prompts describing the subject, action, camera movement, lighting, style, and—when `audio` is enabled—sound effects or dialogue.
 - Use `start` and `end` for exact opening and closing frame images, or `references` for character, style, or motion guidance. Avoid combining `start` or `end` with `references` on models that ignore references when frame images are provided.
 - Omit `model` to use the default unless the user explicitly names a configured model. Never guess a model ID.
