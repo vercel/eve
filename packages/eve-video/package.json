@@ -1,0 +1,80 @@
+{
+  "name": "@eve/video",
+  "version": "0.0.0",
+  "description": "eve extension for generating videos with AI SDK and AI Gateway video models and provider-agnostic storage",
+  "keywords": [
+    "ai-sdk",
+    "eve",
+    "eve-extension",
+    "video",
+    "video-generation"
+  ],
+  "homepage": "https://eve.dev/docs/extensions/video",
+  "bugs": {
+    "url": "https://github.com/vercel/eve/issues"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vercel/eve.git",
+    "directory": "packages/eve-video"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "NOTICE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.mjs"
+    },
+    "./tools": {
+      "types": "./dist/tools/index.d.ts",
+      "default": "./dist/tools/index.mjs"
+    },
+    "./storage": {
+      "types": "./dist/extension/lib/storage/index.d.ts",
+      "default": "./dist/extension/lib/storage/index.mjs"
+    },
+    "./vercel": {
+      "types": "./dist/extension/lib/storage/vercel-blob.d.ts",
+      "default": "./dist/extension/lib/storage/vercel-blob.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "eve extension build && node ../../scripts/copy-package-license.mjs .",
+    "test": "pnpm run test:unit && pnpm run test:integration",
+    "test:unit": "node --test \"test/unit/*.test.ts\"",
+    "test:integration": "node --test \"test/integration/*.test.ts\"",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@vercel/blob": "2.9.0",
+    "ai": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "eve": "workspace:*",
+    "typescript": "catalog:"
+  },
+  "peerDependencies": {
+    "eve": ">=1.5.0"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "eve": {
+    "extension": {
+      "source": "./extension",
+      "dist": "./dist/extension"
+    }
+  }
+}
