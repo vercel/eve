@@ -13,6 +13,7 @@ import { throwIfAborted } from "#client/abort-signal.js";
 import { isStreamDisconnectError, readNdjsonStream } from "#client/ndjson.js";
 import { readMessageStreamVersion } from "#client/stream-version.js";
 import type { ClientRedirectPolicy, ReconnectOptions } from "#client/types.js";
+import { toClientNetworkError } from "#client/client-network-error.js";
 import { createClientUrl } from "#client/url.js";
 import { waitWithSignal } from "#shared/wait-with-signal.js";
 
@@ -325,7 +326,7 @@ export async function openStreamBody(
         !isStreamDisconnectError(error) ||
         attempt === retryPolicy.maxAttempts - 1
       ) {
-        throw error;
+        throw toClientNetworkError(error, signal);
       }
       await sleep(retryDelayMs, input.signal);
       retryDelayMs = Math.min(retryDelayMs * 2, retryPolicy.maxDelayMs);

@@ -16,6 +16,8 @@ import {
   type SessionStoreInit,
 } from "#client/session-store.js";
 import { Client } from "#client/client.js";
+import { SessionFailedError, TurnFailedError } from "#client/recorded-failure-error.js";
+import { EveError } from "#shared/eve-error.js";
 import { testTurnFacts } from "#internal/testing/events.js";
 import { convertLegacyEvents } from "#internal/legacy-events.js";
 import { KITCHEN_SINK } from "#execution/v26-history.fixtures.js";
@@ -1178,6 +1180,84 @@ describe("SessionStore committed snapshots", () => {
     expect(seen.filter(({ cancelled, failed }) => cancelled && !failed)).toEqual([]);
     expect(turn(before.view, "turn_0")?.status).toBe("running");
   });
+
+  const recordedInfo = {
+    code: "MODEL_CALL_FAILED",
+    message: "The model provider is unavailable.",
+    name: "APICallError",
+    id: "err_support_1",
+    hint: "Try again in a minute.",
+  };
+  const failedTurnFacts = (deliveryId: string) =>
+    testTurnFacts(0, "Later.", [deliveryId]).map((event): SessionEvent =>
+      event.type === "turn.settled"
+        ? { ...event, data: { ...event.data, outcome: "failed", error: recordedInfo } }
+        : event,
+    );
+
+  it.each([
+    {
+      name: "a live failed turn",
+      isExpected: (error: unknown) => TurnFailedError.is(error),
+      expected: { name: "TurnFailedError", code: "turn_failed", turnId: "turn_0" },
+      reported: true,
+      run: async (server: ReturnType<typeof agent>, onError: () => void) => {
+        const current = store();
+        current.setCallbacks({ onError });
+        await current.send({ message: "sunny." });
+        await vi.waitFor(() => expect(server.reads).toHaveLength(1));
+        server.append(failedTurnFacts("d_0"));
+        return current;
+      },
+    },
+    {
+      name: "a live failed session",
+      isExpected: (error: unknown) => SessionFailedError.is(error),
+      expected: { name: "SessionFailedError", code: "session_failed" },
+      reported: true,
+      run: async (server: ReturnType<typeof agent>, onError: () => void) => {
+        const current = store();
+        current.setCallbacks({ onError });
+        await current.send({ message: "sunny." });
+        await vi.waitFor(() => expect(server.reads).toHaveLength(1));
+        server.append([
+          { type: "session.ended", data: { outcome: "failed", error: recordedInfo } },
+        ]);
+        return current;
+      },
+    },
+    {
+      name: "a failed turn read from resumed history",
+      isExpected: (error: unknown) => TurnFailedError.is(error),
+      expected: { name: "TurnFailedError", code: "turn_failed", turnId: "turn_0" },
+      reported: false,
+      run: async (server: ReturnType<typeof agent>, onError: () => void) => {
+        server.append(failedTurnFacts("old"));
+        const current = store({ initialSession, followWhile: () => false });
+        current.setCallbacks({ onError });
+        await current.resume();
+        current.follow({ sessionId: "session_1", deliveryId: "old" });
+        return current;
+      },
+    },
+  ])(
+    "surfaces $name with the recorded ErrorInfo",
+    async ({ isExpected, expected, reported, run }) => {
+      const server = agent();
+      const onError = vi.fn();
+      const current = await run(server, onError);
+      await vi.waitFor(() => expect(current.snapshot.error).toBeDefined());
+      const error = current.snapshot.error;
+      expect(isExpected(error)).toBe(true);
+      expect(EveError.is(error)).toBe(true);
+      expect(error).toMatchObject({
+        ...expected,
+        message: recordedInfo.message,
+        info: recordedInfo,
+      });
+      expect(onError.mock.calls).toEqual(reported ? [[error]] : []);
+    },
+  );
 });
 
 describe("SessionStore with a follow predicate", () => {

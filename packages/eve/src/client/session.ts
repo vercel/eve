@@ -24,6 +24,7 @@ import {
 import { prewarmClientSession, sendClientControl } from "#client/session-controls.js";
 import type { PrewarmSessionResult } from "#protocol/prewarm-session.js";
 import { serializeOutputSchema } from "#tools/schema.js";
+import { clientFetch } from "#client/client-network-error.js";
 import { createClientUrl } from "#client/url.js";
 import type { Answer } from "#shared/input.js";
 import type {
@@ -465,7 +466,7 @@ async function postCreateSession(
   const headers = await context.resolveHeaders(options.headers);
   const body = options.stubs === undefined ? undefined : JSON.stringify({ stubs: options.stubs });
   if (body !== undefined) headers.set("content-type", "application/json");
-  const response = await fetch(createClientUrl(context.baseUrl, EVE_SESSION_ROUTE_PATH), {
+  const response = await clientFetch(createClientUrl(context.baseUrl, EVE_SESSION_ROUTE_PATH), {
     body,
     headers,
     method: "POST",
@@ -505,7 +506,7 @@ async function postTurn(
 
   const headers = await context.resolveHeaders(input.headers);
   headers.set("content-type", "application/json");
-  const sent = fetch(createClientUrl(context.baseUrl, path), {
+  const sent = clientFetch(createClientUrl(context.baseUrl, path), {
     body: JSON.stringify(body),
     headers,
     method: "POST",

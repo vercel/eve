@@ -20,7 +20,8 @@ import {
   assertExclusiveTurnInput,
   isAbortError,
 } from "#client/session-store-helpers.js";
-import { activeTurn, failure, idle } from "#protocol/session-projection/selectors.js";
+import { activeTurn, idle } from "#protocol/session-projection/selectors.js";
+import { recordedFailure, SessionFailedError } from "#client/recorded-failure-error.js";
 import type { DeliveryReceipt } from "#protocol/delivery.js";
 import { toError } from "#shared/errors.js";
 import { waitWithSignal } from "#shared/wait-with-signal.js";
@@ -543,11 +544,8 @@ export class SessionStore {
         else if (relevantTurns.has(ending.event.data.turnId) && this.#pending.size === 0)
           this.#error ??= this.#recordedFailure(ending.event.data.turnId);
       } else if (ending.event.data.outcome === "failed") {
-        const error = Object.assign(
-          new Error(ending.event.data.error?.message ?? "The session failed."),
-          {
-            name: ending.event.data.error?.code ?? "SESSION_FAILED",
-          },
+        const error = new SessionFailedError(
+          ending.event.data.error ?? { code: "SESSION_FAILED", message: "The session failed." },
         );
         if (!ending.historical) this.#fail(error);
         else if (this.#pending.size === 0) this.#error ??= error;
@@ -611,17 +609,12 @@ export class SessionStore {
     if (row?.status !== "settled") return;
     this.#finishedTurns.add(turnId);
     this.#finishes += 1;
-    const error = failure(this.#conversationClient.view, turnId);
-    if (error !== undefined)
-      this.#fail(Object.assign(new Error(error.message), { name: error.code }));
+    const error = recordedFailure(this.#conversationClient.view, turnId);
+    if (error !== undefined) this.#fail(error);
   }
 
   #recordedFailure(turnId = this.#conversationClient.view.session.latestTurnId): Error | undefined {
-    const view = this.#conversationClient.view;
-    const error = failure(view, turnId);
-    return error === undefined
-      ? undefined
-      : Object.assign(new Error(error.message), { name: error.code });
+    return recordedFailure(this.#conversationClient.view, turnId);
   }
 
   #fail(error: unknown): void {
