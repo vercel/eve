@@ -103,8 +103,12 @@ consolidate the rest.
 ## Report-only mode
 
 1. Inspect the target diff:
-   - For a PR: `gh pr view <n>` and `gh pr diff <n>`.
-   - For a local branch without a PR: `git diff origin/main...HEAD`.
+   - For a pushed PR with no local unpushed edits: `gh pr view <n>` and
+     `gh pr diff <n>`.
+   - For a local branch, unpushed commits, or uncommitted working-tree edits:
+     `git diff "$(git merge-base origin/<base> HEAD)"` (typically `origin/main`)
+     plus any untracked files from `git status --short` (and `gh pr view <n>`
+     if a PR already exists).
 2. Read `AGENTS.md`, the full surrounding files touched by the diff, and
    existing repo callers or sibling utilities.
 3. Do not edit files.
@@ -167,8 +171,11 @@ through `pr-shepherd`:
 1. **Get fresh eyes.** If you authored or iterated on the branch in the current
    conversation, spawn one read-only subagent with no conversation history to
    run [Report-only mode](#report-only-mode) on the PR or branch. Give it only
-   the PR number or branch name, not your reasoning. If you already have fresh
-   context on the branch, run report-only discovery yourself first.
+   the PR number or branch name (and tell it to diff the working tree against
+   the merge base via `git diff "$(git merge-base origin/<base> HEAD)"` plus
+   untracked files when there are unpushed commits or uncommitted edits), not
+   your reasoning. If you already have fresh context on the branch, run
+   report-only discovery yourself first.
 2. **Triage** the report against the code using [Triage](#triage).
 3. **Apply** accepted simplifications in a coherent pass. Keep the diff focused
    and preserve every observable outcome and public API contract. Confirm with
@@ -181,8 +188,12 @@ through `pr-shepherd`:
      changed paths with their tier config.
    - If a structural simplification substantially reshaped implementation logic
      (beyond dead-code removal or minor deduplication), spawn one fresh-context
-     read-only correctness reviewer on the simplified diff to confirm no bugs,
-     races, or regressions were introduced.
+     read-only correctness reviewer on the local working-tree diff—explicitly
+     tell it to read `git diff "$(git merge-base origin/<base> HEAD)"`
+     (typically `origin/main`) plus any untracked files from
+     `git status --short` instead of `gh pr diff <n>` or `origin/main...HEAD`,
+     since step 5 does not commit—to confirm no bugs, races, or regressions
+     were introduced.
 5. **Do not commit, push, or merge** unless the user asked. If a PR already
    exists and simplifications changed architecture or behavior described in the
    PR body, note that the body should be updated with

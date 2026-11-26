@@ -126,9 +126,12 @@ needs a product or design decision only the user can make, ask the user.
    from steps 2 and 3. Rerun the fast checks and the narrowest tests that cover
    the changed paths. If an accepted simplification substantially reshaped
    implementation logic (beyond dead-code removal or minor deduplication),
-   re-run the correctness reviewer once on the simplified diff before pushing,
-   since both the first reviewer and `roboeve[bot]` only saw the
-   pre-simplification code.
+   run one fresh-context correctness review against the local working-tree
+   diff before committing and pushing—tell the subagent to read
+   `git diff "$(git merge-base origin/<base> HEAD)"` (typically `origin/main`)
+   plus any untracked files from `git status --short` (and `gh pr view <n>`
+   for context), not `gh pr diff <n>`, since both the remote PR head and
+   `roboeve[bot]` only saw the pre-simplification code.
 2. Commit with `git commit -s` and push. Add new commits instead of amending or
    force-pushing, so reply SHAs stay valid. PRs are squash-merged and `main`
    does not require branches to be up to date, so do not rebase only to catch
