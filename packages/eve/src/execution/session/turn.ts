@@ -416,8 +416,13 @@ export class SessionExecution {
         },
       }),
     );
-    const { executing, refused, started } = dispatched.pending;
-    const hasPending = executing.length > 0 || started.length > 0 || refused.length > 0;
+    const { children, executing, failedTasks, refused, started } = dispatched.pending;
+    const hasPending =
+      (children?.length ?? 0) > 0 ||
+      executing.length > 0 ||
+      (failedTasks?.length ?? 0) > 0 ||
+      started.length > 0 ||
+      refused.length > 0;
     return {
       ...(hasPending && { pending: dispatched.pending }),
       results: dispatched.results,

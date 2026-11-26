@@ -57,10 +57,10 @@ export function openWorkflowToolRunOwnerInbox(): WorkflowToolRunOwnerInbox {
 }
 
 export async function deliverWorkflowRelay(
-  message: WorkflowToolRunRequestMessage & { readonly request: WorkflowToolRelay },
+  message: Extract<WorkflowToolRunRequestMessage, { readonly request: WorkflowToolRelay }>,
   deliver: () => Promise<void>,
 ): Promise<void> {
   await deliver();
-  if (message.request.event.childSessionId === message.from.runId)
+  if (message.replyTo !== undefined && message.request.event.childSessionId === message.from.runId)
     await resumeHookStep(message.replyTo, null, { ifPresent: true });
 }

@@ -17,7 +17,14 @@ const MAX_LISTED_IDLE_TASKS = 10;
 const TASK_ID_ALPHABET = "0123456789abcdefghjkmnpqrstvwxyz";
 const TASK_ID_SUFFIX_LENGTH = 6;
 
+export interface DirectAgentRun {
+  readonly continuationToken: string;
+  readonly name: string;
+  readonly nodeId: string;
+}
+
 export interface TaskRunAddress {
+  readonly directAgent?: DirectAgentRun;
   readonly hookToken: string;
   readonly runId: string;
 }
@@ -196,7 +203,23 @@ export function removeTask(table: TaskTable, taskId: string): TaskTable {
 }
 
 export function recordTaskRun(table: TaskTable, taskId: string, run: TaskRunAddress): TaskTable {
-  return updateTask(table, taskId, (record) => ({ ...record, run: { ...run, started: false } }));
+  return updateTask(table, taskId, (record) => ({
+    ...record,
+    run: { ...run, started: run.directAgent !== undefined },
+  }));
+}
+
+export function redirectDirectTaskRun(
+  table: TaskTable,
+  taskId: string,
+  sessionId: string,
+  hookToken: string,
+): TaskTable {
+  return updateTask(table, taskId, (record) =>
+    record.run === undefined
+      ? record
+      : { ...record, run: { ...record.run, hookToken, runId: sessionId } },
+  );
 }
 
 export function markTaskRunStarted(
@@ -278,8 +301,19 @@ export function applyTaskReplyToTable(
   const record = findTask(table, taskId);
   if (record?.run?.runId !== message.from.runId) return { settled: [], table };
   const outcome: TaskOutcome = { output: message.output, status: "completed" };
-  const settled = settleTaskCalls(table, { callIds: message.callIds, outcome, taskId });
+  const callIds =
+    record.run.directAgent !== undefined
+      ? directSettledCallIds(record, message.callIds)
+      : message.callIds;
+  const settled = settleTaskCalls(table, { callIds, outcome, taskId });
   return { record, settled: settled.settled, table: settled.table };
+}
+
+function directSettledCallIds(record: TaskRecord, callIds: readonly string[]): readonly string[] {
+  const latest = callIds.at(-1);
+  if (latest === undefined) return callIds;
+  const index = record.calls.findIndex((call) => call.callId === latest);
+  return index < 0 ? callIds : record.calls.slice(0, index + 1).map((call) => call.callId);
 }
 
 export function settleRemainingTaskCalls(
@@ -371,7 +405,11 @@ function cancelledCalls(record: TaskRecord): readonly TaskCall[] {
 }
 
 function toRunAddress(run: TaskRun): TaskRunAddress {
-  return { hookToken: run.hookToken, runId: run.runId };
+  return {
+    ...(run.directAgent !== undefined && { directAgent: run.directAgent }),
+    hookToken: run.hookToken,
+    runId: run.runId,
+  };
 }
 
 function createTaskId(table: TaskTable, name: string): string {
@@ -450,12 +488,22 @@ function isTaskResult(value: unknown): value is TaskResult {
   return value.status === "failed" && typeof value.error === "string";
 }
 
+function isDirectAgentRun(value: unknown): value is DirectAgentRun {
+  return (
+    isObject(value) &&
+    isNonEmptyString(value.continuationToken) &&
+    isNonEmptyString(value.name) &&
+    typeof value.nodeId === "string"
+  );
+}
+
 function isTaskRun(value: unknown): value is TaskRun {
   return (
     isObject(value) &&
     isNonEmptyString(value.runId) &&
     isNonEmptyString(value.hookToken) &&
     typeof value.started === "boolean" &&
+    (value.directAgent === undefined || isDirectAgentRun(value.directAgent)) &&
     (value.usage === undefined || isObject(value.usage))
   );
 }

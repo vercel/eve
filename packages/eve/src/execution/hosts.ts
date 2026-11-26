@@ -34,6 +34,7 @@ export interface DurableHost {
   runStatus(runId: string): Promise<string>;
   cancelRun(runId: string, reason: string): Promise<void>;
   readonly lineStore: SessionLineStore;
+  resolveSessionOwnerRunId?(continuationToken: string): Promise<string | undefined>;
   stepAttempt(): number | undefined;
   callbackBaseUrl(): string | undefined;
   readonly createRuntime: CreateRuntime;
@@ -73,6 +74,14 @@ function durableHostFor(id: string): DurableHost {
   const { durable } = hosts();
   if (durable === undefined) throw new HookNotFoundError(id);
   return durable;
+}
+
+export async function resolveRoutedSessionOwnerRunId(
+  continuationToken: string,
+): Promise<string | undefined> {
+  const durable = hosts().durable;
+  if (durable?.resolveSessionOwnerRunId === undefined) return undefined;
+  return await durable.resolveSessionOwnerRunId(continuationToken);
 }
 
 export function installedDurableHost(): DurableHost | undefined {

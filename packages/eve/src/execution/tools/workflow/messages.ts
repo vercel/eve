@@ -26,7 +26,7 @@ export type WorkflowToolRequest = WorkflowToolRelay | WorkflowToolAskRequest;
 
 export interface WorkflowToolRunRef {
   readonly callId: string;
-  readonly input: JsonObject;
+  readonly input?: JsonObject;
   readonly runId: string;
   readonly sequence: number;
   readonly stepIndex: number;
@@ -45,11 +45,17 @@ export interface WorkflowToolRunReport {
   readonly update: JsonValue;
 }
 
-export interface WorkflowToolRunRequestMessage {
-  readonly from: WorkflowToolRunRef;
-  readonly replyTo: string;
-  readonly request: WorkflowToolRequest;
-}
+export type WorkflowToolRunRequestMessage =
+  | {
+      readonly from: WorkflowToolRunRef;
+      readonly replyTo: string;
+      readonly request: WorkflowToolAskRequest;
+    }
+  | {
+      readonly from: WorkflowToolRunRef;
+      readonly replyTo?: string;
+      readonly request: WorkflowToolRelay;
+    };
 
 export interface WorkflowToolRunOutcomeMessage {
   readonly from: WorkflowToolRunRef;

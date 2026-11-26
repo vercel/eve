@@ -1,5 +1,5 @@
 import type { MessageContent } from "#shared/message-content.js";
-import { SUBAGENT_ADAPTER_KIND } from "#subagents/adapter-state.js";
+import { SUBAGENT_ADAPTER_KIND, type DirectSubagentTaskRef } from "#subagents/adapter-state.js";
 import { formatSubagentInput, type SubagentParentContext } from "#subagents/invocation.js";
 import type { JsonObject } from "#shared/json.js";
 import type {
@@ -47,6 +47,7 @@ export function buildSubagentRunInput(input: {
   readonly schedule?: import("#context/session-schedule.js").SessionSchedule;
   readonly channelMetadata?: ChannelInstrumentationProjection;
   readonly continuationKey: string;
+  readonly directTask?: DirectSubagentTaskRef;
   readonly inheritedConversation?: ConversationContext;
   readonly initiatorAuth: SessionAuthContext | null;
   readonly graph?: SubagentSandboxGraph;
@@ -71,6 +72,7 @@ export function buildSubagentRunInput(input: {
   const childContinuationToken = mintSubagentContinuationToken(input.continuationKey);
   const adapterState: Record<string, unknown> = {
     callId: action.callId,
+    ...(input.directTask !== undefined && { directTask: input.directTask }),
     parentContinuationToken: input.parent.continuationToken ?? session.continuationToken,
     parentSessionId: session.sessionId,
     subagentName: action.subagentName,
