@@ -242,11 +242,31 @@ describe("@eve/video built package artifacts and entry points", () => {
 
     assert.throws(() => builtVercel.vercelBlob({ prefix: "   " }), TypeError);
 
+    assert.equal(builtCore.DEFAULT_VIDEO_MODEL, "google/veo-3.1-fast-generate-001");
+    assert.equal("generateVideos" in builtCore, false);
+
     const handle = await builtCore.startVideoJob({
       config: { model: fake.model },
       input: { prompt: "Built workflow primitive" },
     });
     assert.equal(handle.modelId, "test/built-entry-model");
+
+    const status = await builtCore.checkVideoJob({
+      config: { model: fake.model },
+      modelId: handle.modelId,
+      operation: handle.operation,
+    });
+    assert.equal(status.status, "completed");
+    if (status.status !== "completed") {
+      assert.fail("Expected completed status from builtCore.checkVideoJob.");
+    }
+    const persisted = await builtCore.persistVideos({
+      videos: status.videos,
+      modelId: handle.modelId,
+      storage,
+    });
+    assert.equal(persisted.length, 1);
+    assert.equal(persisted[0].bytes, MP4_BYTES.byteLength);
 
     const now = 1_700_000_000;
     const rawBody = '{"event":"video.completed"}';

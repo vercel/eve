@@ -7,10 +7,10 @@ import {
   DEFAULT_POLL_TIMEOUT_MS,
   NO_DESTINATION_ERROR,
   checkVideoJob,
-  generateVideos,
   isTransientProviderError,
   normalizeOptionalPath,
   persistVideos,
+  runSyncVideoModel,
   startVideoJob,
 } from "./engine.ts";
 import { assertSafePublicUrl } from "./media.ts";
@@ -72,7 +72,7 @@ export async function runSubmitVideoStep(
   const supportsAsync = typeof model.doStart === "function" && typeof model.doStatus === "function";
   if (!supportsAsync) {
     try {
-      const generator = generateVideos({
+      const output = await runSyncVideoModel({
         config,
         input,
         getSandbox: () => ctx.getSandbox(),
@@ -80,12 +80,7 @@ export async function runSubmitVideoStep(
         idempotencyKey,
         signal: ctx.abortSignal,
       });
-      for (;;) {
-        const next = await generator.next();
-        if (next.done) {
-          return { kind: "completed", output: next.value };
-        }
-      }
+      return { kind: "completed", output };
     } catch (error) {
       rethrowStepError(error, ctx.abortSignal);
     }

@@ -2,11 +2,8 @@ import type { SandboxSession } from "eve/sandbox";
 import type { WorkflowStepToolContext } from "eve/tools";
 import type { ApprovalContext, ApprovalResponseContext } from "eve/tools/approval";
 
-import { generateVideos, type GenerateVideosOptions } from "../extension/lib/engine.ts";
 import type {
   GenerateVideoToolInput,
-  GenerateVideoToolOutput,
-  GenerateVideoToolProgress,
   VideoAssetData,
   VideoModelLike,
 } from "../extension/lib/types.ts";
@@ -377,28 +374,6 @@ export function createFakeStepContext(
     },
     getSandbox,
   } as never;
-}
-
-export interface GenerateVideosExecutionResult {
-  readonly progress: GenerateVideoToolProgress[];
-  readonly output: GenerateVideoToolOutput;
-}
-
-export async function runGenerateVideos(
-  options: GenerateVideosOptions,
-): Promise<GenerateVideosExecutionResult> {
-  const iterable = generateVideos(options);
-  const progress: GenerateVideoToolProgress[] = [];
-  for (;;) {
-    const step = await iterable.next();
-    if (step.done) {
-      return {
-        progress,
-        output: step.value,
-      };
-    }
-    progress.push(step.value);
-  }
 }
 
 export interface FakePrincipal {

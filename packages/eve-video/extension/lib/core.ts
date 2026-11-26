@@ -1,10 +1,8 @@
 export {
   checkVideoJob,
-  generateVideos,
   persistVideos,
   startVideoJob,
   type CheckVideoJobOptions,
-  type GenerateVideosOptions,
   type PersistVideosOptions,
   type StartVideoJobOptions,
 } from "./engine.ts";
@@ -26,6 +24,7 @@ export type {
   VerifyGatewayWebhookInput,
   VideoAssetData,
   VideoDefaultsConfig,
+  VideoEditMode,
   VideoExtensionConfig,
   VideoGatewayOptions,
   VideoJobHandle,

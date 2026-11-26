@@ -111,10 +111,17 @@ export interface VideoExtensionConfig {
   readonly allowTemporaryProviderUrl?: boolean;
 }
 
+/** Operation applied to an input `video`: `"edit"` modifies it and `"extend"` continues from its last frame. */
+export type VideoEditMode = "edit" | "extend";
+
 /** Input parameters accepted by the video `generate` tool. */
 export interface GenerateVideoToolInput {
-  /** Text description of the video to generate. */
+  /** Text description of the video to generate, or the edit or continuation to apply to `video`. */
   readonly prompt: string;
+  /** Optional existing video to edit or extend (an `https://` URL, a `storageKey` from an earlier generation, or a sandbox file path). Cannot be combined with `start` or `end`. */
+  readonly video?: string;
+  /** How to use `video`: `"edit"` (default when `video` is provided) modifies the existing video according to `prompt`; `"extend"` continues from its last frame. */
+  readonly mode?: VideoEditMode;
   /** Optional starting frame image as an HTTPS URL or sandbox file path. */
   readonly start?: string;
   /** Optional ending frame image as an HTTPS URL or sandbox file path. */
@@ -165,36 +172,19 @@ export interface GeneratedVideoItem {
   readonly temporary?: boolean;
 }
 
-/** Progress update emitted while a video `generate` tool call is running. */
-export type GenerateVideoToolProgress =
-  | {
-      /** Indicates that the generation request is being submitted. */
-      readonly status: "starting";
-      /** Resolved model ID handling the generation. */
-      readonly model: string;
-    }
-  | {
-      /** Indicates that an asynchronous video generation job is in progress. */
-      readonly status: "generating";
-      /** Resolved model ID handling the generation. */
-      readonly model: string;
-      /** Provider-assigned asynchronous job identifier, when available. */
-      readonly jobId?: string;
-      /** Whole seconds elapsed since the job started. */
-      readonly elapsedSeconds: number;
-      /** 1-based status polling attempt counter. */
-      readonly attempt: number;
-    }
-  | {
-      /** Indicates that generated videos are being downloaded and saved. */
-      readonly status: "saving";
-      /** Resolved model ID handling the generation. */
-      readonly model: string;
-      /** Provider-assigned asynchronous job identifier, when available. */
-      readonly jobId?: string;
-      /** Number of generated videos being persisted. */
-      readonly videoCount: number;
-    };
+/** Progress update emitted while an asynchronous video `generate` tool call is running. */
+export interface GenerateVideoToolProgress {
+  /** Indicates that an asynchronous video generation job is in progress. */
+  readonly status: "generating";
+  /** Resolved model ID handling the generation. */
+  readonly model: string;
+  /** Provider-assigned asynchronous job identifier, when available. */
+  readonly jobId?: string;
+  /** Whole seconds elapsed since the job started. */
+  readonly elapsedSeconds: number;
+  /** 1-based status polling attempt counter. */
+  readonly attempt: number;
+}
 
 /** Final output returned by a completed video `generate` tool invocation. */
 export interface GenerateVideoToolOutput {

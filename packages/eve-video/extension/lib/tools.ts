@@ -18,10 +18,10 @@ import type {
 const MAX_APPROVAL_PROMPT_CHARS = 300;
 
 export const VIDEO_TOOL_DESCRIPTION = [
-  "Generate a video from a text prompt, optionally guided by start and end frame images or reference images, videos, or audio clips.",
+  "Generate a video from a text prompt, optionally guided by start and end frame images or reference images, videos, or audio clips, or edit or extend an existing video via video and mode.",
   "Only call this tool when the user explicitly asks for a video; video generation takes tens of seconds to several minutes and incurs per-second model charges.",
   "Runs in the background as a task and delivers the finished video automatically when complete; do not sleep, poll, or regenerate the same video while it runs.",
-  "Do not combine start or end frames with references on models that ignore references when frame images are set.",
+  "Do not combine video with start or end frames, and avoid combining start or end frames with references on models that ignore references when frame images are set.",
   "Omit model to use the default unless the user explicitly asks for a configured model.",
 ].join(" ");
 
@@ -31,7 +31,21 @@ export const generateVideoInputSchema = z.object({
     .trim()
     .min(1)
     .describe(
-      "Detailed description of the video to generate: subject, action, camera movement, lighting, style, and sound or dialogue when audio is enabled.",
+      "Detailed description of the video to generate, or the edit or continuation to apply to video: subject, action, camera movement, lighting, style, and sound or dialogue when audio is enabled.",
+    ),
+  video: z
+    .string()
+    .trim()
+    .min(1)
+    .optional()
+    .describe(
+      "Optional existing video to edit or extend: pass an https:// URL, a storageKey from an earlier generation, or a sandbox file path. Cannot be combined with start or end.",
+    ),
+  mode: z
+    .enum(["edit", "extend"])
+    .optional()
+    .describe(
+      'How to use video: "edit" (default when video is provided) modifies the existing video according to prompt; "extend" continues from its last frame. Requires video.',
     ),
   start: z
     .string()
@@ -129,18 +143,12 @@ export function createGenerateApproval(
 export function formatGenerateProgressLabel(
   partial: Readonly<GenerateVideoToolProgress | GenerateVideoToolOutput>,
 ): string {
-  switch (partial.status) {
-    case "starting":
-      return "Starting video generation";
-    case "generating":
-      return partial.elapsedSeconds > 0
-        ? `Generating video (${partial.elapsedSeconds}s)`
-        : "Generating video";
-    case "saving":
-      return partial.videoCount === 1 ? "Saving video" : `Saving ${partial.videoCount} videos`;
-    case "completed":
-      return formatCompletedCount(partial.videos.length);
+  if (partial.status === "completed") {
+    return formatCompletedCount(partial.videos.length);
   }
+  return partial.elapsedSeconds > 0
+    ? `Generating video (${partial.elapsedSeconds}s)`
+    : "Generating video";
 }
 
 export function formatGenerateCompleteLabel(
@@ -165,7 +173,14 @@ function formatApprovalPrompt(
 ): string {
   const { input } = ctx;
   const modelLabel = describeDefaultModel(config, input.model);
+  const action =
+    input.video === undefined
+      ? "Generate video"
+      : input.mode === "extend"
+        ? "Extend video"
+        : "Edit video";
   const details: string[] = [];
+  if (input.video !== undefined) details.push(`video: ${input.video.trim()}`);
   const duration = input.duration ?? config.defaults?.duration;
   const aspectRatio = input.aspectRatio ?? config.defaults?.aspectRatio;
   const resolution = input.resolution ?? config.defaults?.resolution;
@@ -182,5 +197,5 @@ function formatApprovalPrompt(
     trimmed.length <= MAX_APPROVAL_PROMPT_CHARS
       ? trimmed
       : `${trimmed.slice(0, MAX_APPROVAL_PROMPT_CHARS - 3)}...`;
-  return `Generate video with ${modelLabel}${detailText}: "${promptText}"`;
+  return `${action} with ${modelLabel}${detailText}: "${promptText}"`;
 }

@@ -5,7 +5,12 @@ import { describe, test } from "node:test";
 
 import { always, type ApprovalConfiguration } from "eve/tools/approval";
 
-import { checkVideoJob, persistVideos, startVideoJob } from "../../extension/lib/engine.ts";
+import {
+  checkVideoJob,
+  persistVideos,
+  runSyncVideoModel,
+  startVideoJob,
+} from "../../extension/lib/engine.ts";
 import { inMemory } from "../../extension/lib/storage/in-memory.ts";
 import type { VideoStorage } from "../../extension/lib/storage/types.ts";
 import {
@@ -13,149 +18,117 @@ import {
   createIdempotencyKey,
   formatGenerateCompleteLabel,
   formatGenerateProgressLabel,
+  generateVideoInputSchema,
 } from "../../extension/lib/tools.ts";
 import type {
   GenerateVideoToolInput,
+  GenerateVideoToolOutput,
   VideoExtensionConfig,
   VideoJobHandle,
   VideoJobStatus,
 } from "../../extension/lib/types.ts";
 import {
   MP4_BYTES,
+  PNG_BYTES,
   WEBM_BYTES,
   createAsyncVideoModel,
   createFakeApprovalContext,
   createFakeApprovalResponseContext,
   createFakePrincipal,
   createFakeSandbox,
-  createHttpError,
   createLargePng,
   createSyncVideoModel,
-  runGenerateVideos,
 } from "../helpers.ts";
 
-describe("generateVideos async lifecycle, idempotency keys, and labels", () => {
-  test("streams starting -> generating -> saving -> completed, sets deterministic idempotency-key, and formats labels", async () => {
-    const storage = inMemory({ baseUrl: "https://media.example.test/videos" });
-    const fake = createAsyncVideoModel({
-      modelId: "google/veo-3.1-fast-generate-001",
-      jobId: "job_async_42",
-      startWarnings: [{ type: "other", message: "Using fast tier" }],
-      statuses: [
-        { status: "pending", warnings: [{ type: "other", message: "Using fast tier" }] },
-        {
-          status: "completed",
-          videos: [{ type: "binary", data: MP4_BYTES, mediaType: "video/mp4" }],
-          warnings: [{ type: "unsupported", feature: "fps", details: "fixed at 24" }],
-        },
-      ],
-    });
+function createLargeMp4(): Uint8Array {
+  const bytes = new Uint8Array(185 * 1024);
+  bytes.set(MP4_BYTES, 0);
+  return bytes;
+}
 
-    const config: VideoExtensionConfig = {
-      model: fake.model,
-      storage,
-      poll: { intervalMs: 0 },
-    };
-
-    const sampleInput: GenerateVideoToolInput = {
-      prompt: "Ocean waves at sunrise",
-      duration: 4,
-      aspectRatio: "16:9",
-      resolution: "720p",
-    };
-
-    const first = await runGenerateVideos({
-      config,
-      input: sampleInput,
-      sessionId: "sess-a",
-      idempotencyKey: createIdempotencyKey("sess-a", "call-1"),
-    });
-
-    assert.deepEqual(
-      first.progress.map((p) => p.status),
-      ["starting", "generating", "generating", "saving"],
-    );
-    assert.equal(first.progress[0].model, "google/veo-3.1-fast-generate-001");
-    assert.equal(
-      first.progress[1].status === "generating" ? first.progress[1].attempt : undefined,
-      1,
-    );
-    assert.equal(
-      first.progress[1].status === "generating" ? first.progress[1].jobId : undefined,
-      "job_async_42",
-    );
-    assert.equal(
-      first.progress[3].status === "saving" ? first.progress[3].videoCount : undefined,
-      1,
-    );
-
-    assert.equal(first.output.status, "completed");
-    assert.equal(first.output.model, "google/veo-3.1-fast-generate-001");
-    assert.equal(first.output.jobId, "job_async_42");
-    assert.equal(first.output.videos.length, 1);
-    assert.equal(first.output.videos[0].mediaType, "video/mp4");
-    assert.equal(first.output.videos[0].bytes, MP4_BYTES.byteLength);
-    assert.ok(first.output.videos[0].url?.startsWith("https://media.example.test/videos/videos/"));
-    assert.deepEqual(first.output.warnings, ["Using fast tier", "Unsupported fps: fixed at 24"]);
-
-    const second = await runGenerateVideos({
-      config,
-      input: { prompt: "Ocean waves at sunrise" },
-      sessionId: "sess-a",
-      idempotencyKey: createIdempotencyKey("sess-a", "call-1"),
-    });
-    const third = await runGenerateVideos({
-      config,
-      input: { prompt: "Ocean waves at sunrise" },
-      sessionId: "sess-a",
-      idempotencyKey: createIdempotencyKey("sess-a", "call-2"),
-    });
-
-    assert.equal(second.output.status, "completed");
-    assert.equal(third.output.status, "completed");
-    assert.equal(fake.startCalls.length, 3);
-
-    const key1 = (fake.startCalls[0].headers as Record<string, string>)["idempotency-key"];
-    const key2 = (fake.startCalls[1].headers as Record<string, string>)["idempotency-key"];
-    const key3 = (fake.startCalls[2].headers as Record<string, string>)["idempotency-key"];
+describe("tool labels, idempotency keys, and input schema", () => {
+  test("derives deterministic idempotency keys and formats progress and completion labels", () => {
+    const key1 = createIdempotencyKey("sess-a", "call-1");
+    const key2 = createIdempotencyKey("sess-a", "call-1");
+    const key3 = createIdempotencyKey("sess-a", "call-2");
+    const key4 = createIdempotencyKey("sess-b", "call-1");
     assert.equal(key1.length, 64);
     assert.equal(key1, key2);
     assert.notEqual(key1, key3);
+    assert.notEqual(key1, key4);
 
-    assert.equal(formatGenerateProgressLabel(first.progress[0]), "Starting video generation");
-    assert.equal(formatGenerateProgressLabel(first.progress[1]), "Generating video");
+    const generatingZero = {
+      status: "generating" as const,
+      model: "google/veo-3.1-fast-generate-001",
+      jobId: "job_1",
+      elapsedSeconds: 0,
+      attempt: 1,
+    };
+    const generatingElapsed = {
+      status: "generating" as const,
+      model: "google/veo-3.1-fast-generate-001",
+      elapsedSeconds: 12,
+      attempt: 2,
+    };
+    const completedOne: GenerateVideoToolOutput = {
+      status: "completed",
+      model: "google/veo-3.1-fast-generate-001",
+      videos: [{ mediaType: "video/mp4", bytes: MP4_BYTES.byteLength }],
+    };
+    const completedTwo: GenerateVideoToolOutput = {
+      ...completedOne,
+      videos: [...completedOne.videos, ...completedOne.videos],
+    };
+
+    assert.equal(formatGenerateProgressLabel(generatingZero), "Generating video");
+    assert.equal(formatGenerateProgressLabel(generatingElapsed), "Generating video (12s)");
+    assert.equal(formatGenerateProgressLabel(completedOne), "Generated video");
+    assert.equal(formatGenerateProgressLabel(completedTwo), "Generated 2 videos");
+    assert.equal(formatGenerateCompleteLabel(completedOne), "Generated video");
+    assert.equal(formatGenerateCompleteLabel(completedTwo), "Generated 2 videos");
+    assert.equal(formatGenerateCompleteLabel(generatingZero), "Generated video");
+  });
+
+  test("validates video and mode fields in generateVideoInputSchema", () => {
+    const edited = generateVideoInputSchema.parse({
+      prompt: "Add warm sunset lighting",
+      video: "  videos/2026-11-26/clip.mp4  ",
+      mode: "edit",
+    });
+    assert.equal(edited.video, "videos/2026-11-26/clip.mp4");
+    assert.equal(edited.mode, "edit");
+
+    const extended = generateVideoInputSchema.parse({
+      prompt: "Continue camera pan to the harbor",
+      video: "https://cdn.example.com/clip.mp4",
+      mode: "extend",
+    });
+    assert.equal(extended.video, "https://cdn.example.com/clip.mp4");
+    assert.equal(extended.mode, "extend");
+
+    const defaultMode = generateVideoInputSchema.parse({
+      prompt: "Color grade as film noir",
+      video: "videos/2026-11-26/clip.mp4",
+    });
+    assert.equal(defaultMode.video, "videos/2026-11-26/clip.mp4");
+    assert.equal(defaultMode.mode, undefined);
+
     assert.equal(
-      formatGenerateProgressLabel({
-        status: "generating",
-        model: "google/veo-3.1-fast-generate-001",
-        elapsedSeconds: 12,
-        attempt: 2,
-      }),
-      "Generating video (12s)",
+      generateVideoInputSchema.safeParse({ prompt: "Bad video", video: "   " }).success,
+      false,
     );
-    assert.equal(formatGenerateProgressLabel(first.progress[3]), "Saving video");
     assert.equal(
-      formatGenerateProgressLabel({
-        status: "saving",
-        model: "google/veo-3.1-fast-generate-001",
-        videoCount: 2,
-      }),
-      "Saving 2 videos",
+      generateVideoInputSchema.safeParse({
+        prompt: "Bad mode",
+        video: "videos/2026-11-26/clip.mp4",
+        mode: "upscale",
+      }).success,
+      false,
     );
-    assert.equal(formatGenerateProgressLabel(first.output), "Generated video");
-    assert.equal(formatGenerateCompleteLabel(first.output), "Generated video");
-    assert.equal(
-      formatGenerateCompleteLabel({
-        ...first.output,
-        videos: [...first.output.videos, ...first.output.videos],
-      }),
-      "Generated 2 videos",
-    );
-    assert.equal(formatGenerateCompleteLabel(first.progress[0]), "Generated video");
   });
 });
 
-describe("sync doGenerate fallback, batch persistence, and atomic cleanup", () => {
+describe("runSyncVideoModel and persistVideos", () => {
   test("downloads a provider URL via custom fetch using public IP SSRF path on doGenerate-only models", async () => {
     const storage = inMemory();
     const syncFake = createSyncVideoModel({
@@ -172,27 +145,29 @@ describe("sync doGenerate fallback, batch persistence, and atomic cleanup", () =
       });
     };
 
-    const { progress, output: finalOutput } = await runGenerateVideos({
+    const output = await runSyncVideoModel({
       config: { model: syncFake.model, storage },
       input: { prompt: "Sync clip" },
+      idempotencyKey: createIdempotencyKey("sess-sync", "call-1"),
       fetch: customFetch,
     });
 
-    assert.deepEqual(
-      progress.map((p) => p.status),
-      ["generating", "saving"],
-    );
+    assert.equal(output.status, "completed");
     assert.deepEqual(downloadedUrls, ["https://93.184.216.34/clip.mp4"]);
     assert.equal(syncFake.generateCalls.length, 1);
-    assert.equal(finalOutput.videos.length, 1);
+    assert.equal(
+      (syncFake.generateCalls[0].headers as Record<string, string>)["idempotency-key"],
+      createIdempotencyKey("sess-sync", "call-1"),
+    );
+    assert.equal(output.videos.length, 1);
     const saved = await storage.get({
-      key: finalOutput.videos[0].storageKey as string,
+      key: output.videos[0].storageKey as string,
       signal: new AbortController().signal,
     });
     assert.deepEqual(saved?.data, MP4_BYTES);
   });
 
-  test("doGenerate-only model with storage: false and allowTemporaryProviderUrl passes through URL without downloading", async () => {
+  test("passes through temporary provider URLs on doGenerate-only models without downloading", async () => {
     const expiresAt = "2026-12-02T00:00:00.000Z";
     const syncFake = createSyncVideoModel({
       modelId: "test/sync-temp-url",
@@ -207,7 +182,7 @@ describe("sync doGenerate fallback, batch persistence, and atomic cleanup", () =
     });
 
     let fetchCalls = 0;
-    const { output: finalOutput } = await runGenerateVideos({
+    const output = await runSyncVideoModel({
       config: {
         model: syncFake.model,
         storage: false,
@@ -222,46 +197,40 @@ describe("sync doGenerate fallback, batch persistence, and atomic cleanup", () =
 
     assert.equal(fetchCalls, 0);
     assert.equal(syncFake.generateCalls.length, 1);
-    assert.equal(finalOutput.videos.length, 1);
-    assert.equal(finalOutput.videos[0].url, "https://provider.example.com/temp/direct.mp4");
-    assert.equal(finalOutput.videos[0].expiresAt, expiresAt);
-    assert.equal(finalOutput.videos[0].temporary, true);
-    assert.equal(finalOutput.videos[0].bytes, 0);
+    assert.equal(output.videos.length, 1);
+    assert.equal(output.videos[0].url, "https://provider.example.com/temp/direct.mp4");
+    assert.equal(output.videos[0].expiresAt, expiresAt);
+    assert.equal(output.videos[0].temporary, true);
+    assert.equal(output.videos[0].bytes, 0);
   });
 
   test("persists multi-video batches to both storage and sandbox path with index suffixes", async () => {
     const storage = inMemory({ baseUrl: "https://media.example.test" });
     const sandbox = createFakeSandbox();
-    const fake = createAsyncVideoModel({
-      statuses: [
-        {
-          status: "completed",
-          videos: [
-            { type: "binary", data: MP4_BYTES, mediaType: "video/mp4" },
-            { type: "binary", data: WEBM_BYTES, mediaType: "video/webm" },
-          ],
-        },
+
+    const persisted = await persistVideos({
+      videos: [
+        { type: "binary", data: MP4_BYTES, mediaType: "video/mp4" },
+        { type: "binary", data: WEBM_BYTES, mediaType: "video/webm" },
       ],
+      modelId: "test/video-batch",
+      storage,
+      sandbox,
+      path: "videos/clip.mp4",
     });
 
-    const { output } = await runGenerateVideos({
-      config: { model: fake.model, storage, poll: { intervalMs: 0 } },
-      input: { prompt: "Two takes", n: 2, path: "videos/teaser.mp4" },
-      getSandbox: async () => sandbox,
-    });
+    assert.equal(persisted.length, 2);
+    assert.equal(persisted[0].path, "videos/clip.mp4");
+    assert.equal(persisted[1].path, "videos/clip-1.mp4");
+    assert.ok(persisted[0].storageKey?.endsWith(".mp4"));
+    assert.ok(persisted[1].storageKey?.endsWith("-1.webm"));
 
-    assert.equal(output.videos.length, 2);
-    assert.equal(output.videos[0].path, "videos/teaser.mp4");
-    assert.equal(output.videos[1].path, "videos/teaser-1.mp4");
-    assert.ok(output.videos[0].storageKey?.endsWith(".mp4"));
-    assert.ok(output.videos[1].storageKey?.endsWith("-1.webm"));
-
-    assert.deepEqual(sandbox.files.get("videos/teaser.mp4"), MP4_BYTES);
-    assert.deepEqual(sandbox.files.get("videos/teaser-1.mp4"), WEBM_BYTES);
+    assert.deepEqual(sandbox.files.get("videos/clip.mp4"), MP4_BYTES);
+    assert.deepEqual(sandbox.files.get("videos/clip-1.mp4"), WEBM_BYTES);
 
     const signal = new AbortController().signal;
-    const stored0 = await storage.get({ key: output.videos[0].storageKey as string, signal });
-    const stored1 = await storage.get({ key: output.videos[1].storageKey as string, signal });
+    const stored0 = await storage.get({ key: persisted[0].storageKey as string, signal });
+    const stored1 = await storage.get({ key: persisted[1].storageKey as string, signal });
     assert.deepEqual(stored0?.data, MP4_BYTES);
     assert.deepEqual(stored1?.data, WEBM_BYTES);
   });
@@ -287,198 +256,70 @@ describe("sync doGenerate fallback, batch persistence, and atomic cleanup", () =
       },
     };
 
-    const fake = createAsyncVideoModel({
-      statuses: [
-        {
-          status: "completed",
+    await assert.rejects(
+      () =>
+        persistVideos({
           videos: [
             { type: "binary", data: MP4_BYTES, mediaType: "video/mp4" },
             { type: "binary", data: MP4_BYTES, mediaType: "video/mp4" },
           ],
-        },
-      ],
-    });
-
-    await assert.rejects(
-      () =>
-        runGenerateVideos({
-          config: { model: fake.model, storage: flakyStorage, poll: { intervalMs: 0 } },
-          input: { prompt: "Batch failure", n: 2 },
+          modelId: "test/batch-fail",
+          storage: flakyStorage,
         }),
       /storage quota exceeded/,
     );
     assert.equal(deletedKeys.length, 1);
     assert.deepEqual(backing.keys(), []);
   });
-});
 
-describe("polling resilience, cancellation, and deterministic timeout", () => {
-  test("recovers after two consecutive 503 poll errors", async () => {
-    const storage = inMemory();
-    const fake = createAsyncVideoModel({
-      statuses: [
-        async () => {
-          throw createHttpError(503, "Service Unavailable 1");
-        },
-        async () => {
-          throw createHttpError(503, "Service Unavailable 2");
-        },
+  test("passes through provider URLs with allowTemporaryProviderUrl and rejects inline bytes without a destination", async () => {
+    const expiresAt = "2026-12-01T00:00:00.000Z";
+    const temporary = await persistVideos({
+      videos: [
         {
-          status: "completed",
+          type: "url",
+          url: "https://provider.example.com/temp/clip.mp4",
+          mediaType: "video/mp4",
+        },
+      ],
+      modelId: "test/temp-url",
+      allowTemporaryProviderUrl: true,
+      providerExpiresAt: expiresAt,
+    });
+    assert.equal(temporary.length, 1);
+    assert.equal(temporary[0].url, "https://provider.example.com/temp/clip.mp4");
+    assert.equal(temporary[0].expiresAt, expiresAt);
+    assert.equal(temporary[0].temporary, true);
+    assert.equal(temporary[0].bytes, 0);
+
+    await assert.rejects(
+      () =>
+        persistVideos({
           videos: [{ type: "binary", data: MP4_BYTES, mediaType: "video/mp4" }],
-        },
-      ],
-    });
+          modelId: "test/inline-bytes",
+          allowTemporaryProviderUrl: true,
+        }),
+      /returned video bytes without a provider URL/,
+    );
 
-    const { output } = await runGenerateVideos({
-      config: { model: fake.model, storage, poll: { intervalMs: 0 } },
-      input: { prompt: "Recover from 503" },
-    });
-    assert.equal(output.status, "completed");
-    assert.equal(fake.statusCalls.length, 3);
-  });
-
-  test("fails immediately on non-transient 400 poll error without retrying", async () => {
-    const storage = inMemory();
-    const fake = createAsyncVideoModel({
-      statuses: [
-        async () => {
-          throw createHttpError(400, "Bad status request");
-        },
-        {
-          status: "completed",
+    await assert.rejects(
+      () =>
+        persistVideos({
           videos: [{ type: "binary", data: MP4_BYTES, mediaType: "video/mp4" }],
-        },
-      ],
-    });
-
-    await assert.rejects(
-      () =>
-        runGenerateVideos({
-          config: { model: fake.model, storage, poll: { intervalMs: 0 } },
-          input: { prompt: "Immediate 400" },
+          modelId: "test/no-dest",
         }),
-      /Bad status request/,
+      /No video output destination is configured/,
     );
-    assert.equal(fake.statusCalls.length, 1);
-  });
-
-  test("fails after more than 3 consecutive transient poll errors", async () => {
-    const storage = inMemory();
-    const fake = createAsyncVideoModel({
-      statuses: [
-        async () => {
-          throw createHttpError(503, "Persistent 503");
-        },
-      ],
-      repeatLastStatus: true,
-    });
-
-    await assert.rejects(
-      () =>
-        runGenerateVideos({
-          config: { model: fake.model, storage, poll: { intervalMs: 0 } },
-          input: { prompt: "Too many 503s" },
-        }),
-      /Persistent 503/,
-    );
-    assert.equal(fake.statusCalls.length, 4);
-  });
-
-  test("cancels cleanly via AbortSignal mid-poll without persisting outputs", async () => {
-    const storage = inMemory();
-    const controller = new AbortController();
-    const fake = createAsyncVideoModel({
-      statuses: [
-        async () => {
-          controller.abort(new Error("user cancelled poll"));
-          return { status: "pending" };
-        },
-        {
-          status: "completed",
-          videos: [{ type: "binary", data: MP4_BYTES, mediaType: "video/mp4" }],
-        },
-      ],
-    });
-
-    await assert.rejects(
-      () =>
-        runGenerateVideos({
-          config: { model: fake.model, storage, poll: { intervalMs: 0 } },
-          input: { prompt: "Cancel mid-poll" },
-          signal: controller.signal,
-        }),
-      /user cancelled poll/,
-    );
-    assert.equal(fake.statusCalls.length, 1);
-    assert.deepEqual(storage.keys(), []);
-  });
-
-  test("times out an always-pending job deterministically under fake timers and names modelId and jobId", async (t) => {
-    t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
-    const storage = inMemory();
-    const fake = createAsyncVideoModel({
-      modelId: "test/slow-model",
-      jobId: "job_timeout_99",
-      statuses: [
-        async () => {
-          t.mock.timers.tick(600);
-          return { status: "pending" };
-        },
-        async () => {
-          t.mock.timers.tick(500);
-          return { status: "pending" };
-        },
-      ],
-    });
-
-    await assert.rejects(
-      () =>
-        runGenerateVideos({
-          config: { model: fake.model, storage, poll: { intervalMs: 0, timeoutMs: 1_000 } },
-          input: { prompt: "Never completes" },
-        }),
-      (error: unknown) => {
-        assert.ok(error instanceof Error);
-        assert.match(error.message, /test\/slow-model/);
-        assert.match(error.message, /job_timeout_99/);
-        assert.match(error.message, /timed out after 1000ms/);
-        return true;
-      },
-    );
-    assert.equal(fake.statusCalls.length, 2);
-  });
-
-  test("calls doStatus at least once before timing out when poll.intervalMs >= poll.timeoutMs", async (t) => {
-    t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
-    const storage = inMemory();
-    const fake = createAsyncVideoModel({
-      modelId: "test/equal-poll-timeout",
-      jobId: "job_edge_1",
-      statuses: [
-        async () => {
-          t.mock.timers.tick(1);
-          return { status: "pending" };
-        },
-      ],
-    });
-
-    await assert.rejects(
-      () =>
-        runGenerateVideos({
-          config: { model: fake.model, storage, poll: { intervalMs: 5_000, timeoutMs: 1 } },
-          input: { prompt: "Poll edge" },
-        }),
-      /test\/equal-poll-timeout.*job_edge_1.*timed out/,
-    );
-    assert.equal(fake.statusCalls.length, 1);
   });
 });
 
 describe("pre-flight gating before paid submission", () => {
-  test("rejects invalid inputs, limits, destinations, media types, and unsafe URLs before doStart", async () => {
+  test("rejects invalid inputs, video/mode conflicts, limits, media types, and unsafe URLs before doStart", async () => {
     const storage = inMemory();
-    const sandboxWithVideo = createFakeSandbox({ "inputs/clip.mp4": MP4_BYTES });
+    const sandboxWithMedia = createFakeSandbox({
+      "inputs/clip.mp4": MP4_BYTES,
+      "inputs/frame.png": PNG_BYTES,
+    });
 
     const cases: readonly {
       readonly name: string;
@@ -490,16 +331,55 @@ describe("pre-flight gating before paid submission", () => {
       readonly pattern: RegExp;
     }[] = [
       {
-        name: "no storage and no path",
-        config: (model) => ({ model, storage: false, poll: { intervalMs: 0 } }),
-        input: { prompt: "No destination" },
-        pattern: /No video output destination is configured/,
+        name: "mode edit without video",
+        config: (model) => ({ model, storage }),
+        input: { prompt: "Edit nothing", mode: "edit" },
+        pattern: /"mode" \("edit" or "extend"\) requires "video" to be provided/,
       },
       {
-        name: "missing sandbox for output path",
-        config: (model) => ({ model, storage: false, poll: { intervalMs: 0 } }),
-        input: { prompt: "Needs sandbox", path: "out/clip.mp4" },
-        pattern: /requires an agent sandbox/,
+        name: "mode extend without video",
+        config: (model) => ({ model, storage }),
+        input: { prompt: "Extend nothing", mode: "extend" },
+        pattern: /"mode" \("edit" or "extend"\) requires "video" to be provided/,
+      },
+      {
+        name: "video combined with start",
+        config: (model) => ({ model, storage }),
+        input: {
+          prompt: "Conflict with start",
+          video: "https://cdn.example.com/clip.mp4",
+          start: "https://cdn.example.com/frame.png",
+        },
+        pattern: /"video" cannot be combined with "start" or "end"/,
+      },
+      {
+        name: "video combined with end",
+        config: (model) => ({ model, storage }),
+        input: {
+          prompt: "Conflict with end",
+          video: "https://cdn.example.com/clip.mp4",
+          end: "https://cdn.example.com/frame.png",
+        },
+        pattern: /"video" cannot be combined with "start" or "end"/,
+      },
+      {
+        name: "empty video string",
+        config: (model) => ({ model, storage }),
+        input: { prompt: "Empty video", video: "   " },
+        pattern: /Input "video" must be a non-empty/,
+      },
+      {
+        name: "non-video image URL passed as video",
+        config: (model) => ({ model, storage }),
+        input: { prompt: "Image URL as video", video: "https://cdn.example.com/frame.png" },
+        pattern: /Unsupported media type "image\/png" for "video"/,
+      },
+      {
+        name: "non-video sandbox PNG passed as video",
+        config: (model) => ({ model, storage }),
+        input: { prompt: "Image file as video", video: "inputs/frame.png" },
+        sandbox: sandboxWithMedia,
+        pattern: /Unsupported media type "image\/png"/,
       },
       {
         name: "duration exceeds maxDurationSeconds",
@@ -507,7 +387,6 @@ describe("pre-flight gating before paid submission", () => {
           model,
           storage,
           limits: { maxDurationSeconds: 8 },
-          poll: { intervalMs: 0 },
         }),
         input: { prompt: "Too long", duration: 12 },
         pattern: /exceeds the configured maximum of 8s/,
@@ -518,7 +397,6 @@ describe("pre-flight gating before paid submission", () => {
           model,
           storage,
           limits: { maxVideosPerCall: 2 },
-          poll: { intervalMs: 0 },
         }),
         input: { prompt: "Too many", n: 3 },
         pattern: /exceeds the configured maximum of 2 videos per call/,
@@ -529,46 +407,51 @@ describe("pre-flight gating before paid submission", () => {
           model,
           models: { allowed: model },
           storage,
-          poll: { intervalMs: 0 },
         }),
         input: { prompt: "Wrong model", model: "unlisted" },
         pattern: /is not allowed/,
       },
       {
         name: "invalid aspectRatio",
-        config: (model) => ({ model, storage, poll: { intervalMs: 0 } }),
+        config: (model) => ({ model, storage }),
         input: { prompt: "Bad ratio", aspectRatio: "wide" },
         pattern: /Invalid aspectRatio/,
       },
       {
         name: "invalid resolution",
-        config: (model) => ({ model, storage, poll: { intervalMs: 0 } }),
+        config: (model) => ({ model, storage }),
         input: { prompt: "Bad resolution", resolution: "ultra-hd" },
         pattern: /Invalid resolution/,
       },
       {
         name: "non-image .mp4 URL passed to start",
-        config: (model) => ({ model, storage, poll: { intervalMs: 0 } }),
+        config: (model) => ({ model, storage }),
         input: { prompt: "Bad start URL", start: "https://cdn.example.com/clip.mp4" },
         pattern: /Unsupported media type "video\/mp4" for "start"/,
       },
       {
         name: "non-image sandbox MP4 passed to start",
-        config: (model) => ({ model, storage, poll: { intervalMs: 0 } }),
+        config: (model) => ({ model, storage }),
         input: { prompt: "Bad start file", start: "inputs/clip.mp4" },
-        sandbox: sandboxWithVideo,
+        sandbox: sandboxWithMedia,
         pattern: /Unsupported media type "video\/mp4"/,
       },
       {
         name: "unsafe http:// URL passed to start",
-        config: (model) => ({ model, storage, poll: { intervalMs: 0 } }),
+        config: (model) => ({ model, storage }),
         input: { prompt: "HTTP start", start: "http://cdn.example.com/frame.png" },
         pattern: /Refusing non-HTTPS URL/,
       },
       {
         name: "unsafe loopback https://127.0.0.1 URL passed to references",
-        config: (model) => ({ model, storage, poll: { intervalMs: 0 } }),
+        config: (model) => ({ model, storage }),
         input: { prompt: "Loopback ref", references: ["https://127.0.0.1/frame.png"] },
+        pattern: /Refusing private or reserved IP address/,
+      },
+      {
+        name: "unsafe loopback https://127.0.0.1 URL passed to video",
+        config: (model) => ({ model, storage }),
+        input: { prompt: "Loopback video", video: "https://127.0.0.1/clip.mp4" },
         pattern: /Refusing private or reserved IP address/,
       },
     ];
@@ -578,7 +461,7 @@ describe("pre-flight gating before paid submission", () => {
       const sandbox = tc.sandbox;
       await assert.rejects(
         () =>
-          runGenerateVideos({
+          startVideoJob({
             config: tc.config(fake.model),
             input: tc.input,
             ...(sandbox !== undefined && { getSandbox: async () => sandbox }),
@@ -588,6 +471,30 @@ describe("pre-flight gating before paid submission", () => {
       );
       assert.equal(fake.startCalls.length, 0, `${tc.name}: expected zero doStart calls`);
     }
+  });
+
+  test("rejects missing output destination or missing sandbox path before doGenerate in runSyncVideoModel", async () => {
+    const noDestFake = createSyncVideoModel();
+    await assert.rejects(
+      () =>
+        runSyncVideoModel({
+          config: { model: noDestFake.model, storage: false },
+          input: { prompt: "No destination" },
+        }),
+      /No video output destination is configured/,
+    );
+    assert.equal(noDestFake.generateCalls.length, 0);
+
+    const noSandboxFake = createSyncVideoModel();
+    await assert.rejects(
+      () =>
+        runSyncVideoModel({
+          config: { model: noSandboxFake.model, storage: false },
+          input: { prompt: "Needs sandbox", path: "out/clip.mp4" },
+        }),
+      /requires an agent sandbox/,
+    );
+    assert.equal(noSandboxFake.generateCalls.length, 0);
   });
 
   test("rejects n > model.maxVideosPerCall before staging inputs or calling doStart", async () => {
@@ -602,8 +509,8 @@ describe("pre-flight gating before paid submission", () => {
 
       await assert.rejects(
         () =>
-          runGenerateVideos({
-            config: { model: fake.model, storage, poll: { intervalMs: 0 } },
+          startVideoJob({
+            config: { model: fake.model, storage },
             input: { prompt: "Exceeds model cap", n: 2, start: "frames/large.png" },
             getSandbox: async () => sandbox,
           }),
@@ -614,9 +521,12 @@ describe("pre-flight gating before paid submission", () => {
     }
   });
 
-  test("rejects non-HTTP URL schemes in start and references without opening sandbox or calling doStart", async () => {
+  test("rejects non-HTTP URL schemes in video, start, and references without opening sandbox or calling doStart", async () => {
     const storage = inMemory();
     const cases: readonly GenerateVideoToolInput[] = [
+      { prompt: "FTP video", video: "ftp://example.com/a.mp4" },
+      { prompt: "File video", video: "file:///etc/passwd" },
+      { prompt: "Data video", video: "data:video/mp4;base64,AA==" },
       { prompt: "FTP start", start: "ftp://example.com/a.png" },
       { prompt: "File start", start: "file:///etc/passwd" },
       { prompt: "Data start", start: "data:image/png;base64,AA==" },
@@ -631,8 +541,8 @@ describe("pre-flight gating before paid submission", () => {
 
       await assert.rejects(
         () =>
-          runGenerateVideos({
-            config: { model: fake.model, storage, poll: { intervalMs: 0 } },
+          startVideoJob({
+            config: { model: fake.model, storage },
             input,
             getSandbox: async () => {
               sandboxCalls += 1;
@@ -648,110 +558,386 @@ describe("pre-flight gating before paid submission", () => {
   });
 });
 
-describe("large sandbox input staging and temporary provider URLs", () => {
-  test("stages sandbox inputs larger than 180 KiB to public HTTPS storage, passes URL to doStart, and cleans up after completion", async () => {
-    const sandbox = createFakeSandbox({ "frames/opening.png": createLargePng() });
-    const storage = inMemory({ baseUrl: "https://cdn.example.test/media" });
-    const stagedKeysSeenAtStart: string[] = [];
-
+describe("video editing and extension routing", () => {
+  test("routes Grok Imagine Video edit mode via providerOptions.xai.videoUrl, omits duration/aspectRatio/resolution, and preserves existing xai options", async () => {
     const fake = createAsyncVideoModel({
-      onStart() {
-        stagedKeysSeenAtStart.push(...storage.keys());
+      modelId: "spacexai/grok-imagine-video",
+      provider: "gateway",
+    });
+    const config: VideoExtensionConfig = {
+      model: fake.model,
+      defaults: {
+        duration: 6,
+        aspectRatio: "16:9",
+        resolution: "1080p",
       },
-      statuses: [
-        {
-          status: "completed",
-          videos: [{ type: "binary", data: MP4_BYTES, mediaType: "video/mp4" }],
-        },
-      ],
+      providerOptions: {
+        xai: { style: "cinematic" },
+        other: { trace: "yes" },
+      },
+    };
+
+    await startVideoJob({
+      config,
+      input: {
+        prompt: "Replace rain with snow",
+        video: "https://cdn.example.com/source.mp4",
+      },
+    });
+    await startVideoJob({
+      config,
+      input: {
+        prompt: "Replace rain with snow explicitly",
+        video: "https://cdn.example.com/source.mp4",
+        mode: "edit",
+        duration: 8,
+        aspectRatio: "9:16",
+        resolution: "720p",
+      },
     });
 
-    const { output } = await runGenerateVideos({
-      config: { model: fake.model, storage, poll: { intervalMs: 0 } },
-      input: { prompt: "Animate opening frame", start: "frames/opening.png" },
+    assert.equal(fake.startCalls.length, 2);
+    for (const call of fake.startCalls) {
+      assert.equal(call.inputReferences, undefined);
+      assert.equal(call.frameImages, undefined);
+      assert.equal(call.duration, undefined);
+      assert.equal(call.aspectRatio, undefined);
+      assert.equal(call.resolution, undefined);
+      assert.deepEqual(call.providerOptions, {
+        xai: {
+          style: "cinematic",
+          videoUrl: "https://cdn.example.com/source.mp4",
+        },
+        other: { trace: "yes" },
+      });
+    }
+  });
+
+  test("routes Grok Imagine Video extend mode via providerOptions.xai with extend-video and forwards duration", async () => {
+    const fake = createAsyncVideoModel({
+      modelId: "spacexai/grok-imagine-video",
+      provider: "gateway",
+    });
+    const config: VideoExtensionConfig = {
+      model: fake.model,
+      defaults: {
+        duration: 6,
+        aspectRatio: "16:9",
+        resolution: "720p",
+      },
+      providerOptions: {
+        xai: { style: "documentary" },
+      },
+    };
+
+    await startVideoJob({
+      config,
+      input: {
+        prompt: "Continue following the train into the tunnel",
+        video: "https://cdn.example.com/train.mp4",
+        mode: "extend",
+        duration: 5,
+      },
+    });
+
+    assert.equal(fake.startCalls.length, 1);
+    const call = fake.startCalls[0];
+    assert.equal(call.inputReferences, undefined);
+    assert.equal(call.duration, 5);
+    assert.equal(call.aspectRatio, "16:9");
+    assert.equal(call.resolution, "1280x720");
+    assert.deepEqual(call.providerOptions, {
+      xai: {
+        style: "documentary",
+        videoUrl: "https://cdn.example.com/train.mp4",
+        mode: "extend-video",
+      },
+    });
+  });
+
+  test("stages sandbox and storageKey MP4 inputs to public HTTPS storage for Grok and rejects private or non-HTTPS storage before doStart", async () => {
+    const storage = inMemory({ baseUrl: "https://cdn.example.test/grok" });
+    const sandbox = createFakeSandbox({ "clips/local.mp4": MP4_BYTES });
+    const fake = createAsyncVideoModel({
+      modelId: "spacexai/grok-imagine-video",
+      provider: "gateway",
+    });
+
+    const sandboxHandle = await startVideoJob({
+      config: { model: fake.model, storage },
+      input: { prompt: "Add dramatic fog", video: "clips/local.mp4" },
+      getSandbox: async () => sandbox,
+    });
+    assert.equal(sandboxHandle.stagedInputKeys?.length, 1);
+    const stagedFromSandbox = sandboxHandle.stagedInputKeys?.[0] as string;
+    assert.ok(stagedFromSandbox.startsWith("inputs/"));
+    assert.ok(stagedFromSandbox.endsWith("/video.mp4"));
+    assert.equal(fake.startCalls[0].inputReferences, undefined);
+    assert.deepEqual(fake.startCalls[0].providerOptions, {
+      xai: { videoUrl: `https://cdn.example.test/grok/${stagedFromSandbox}` },
+    });
+
+    await storage.put({
+      key: "videos/2026-11-26/prior.mp4",
+      data: MP4_BYTES,
+      mediaType: "video/mp4",
+      filename: "prior.mp4",
+      signal: new AbortController().signal,
+    });
+
+    const storageKeyHandle = await startVideoJob({
+      config: { model: fake.model, storage },
+      input: {
+        prompt: "Continue with fireworks",
+        video: "videos/2026-11-26/prior.mp4",
+        mode: "extend",
+        duration: 4,
+      },
+    });
+    assert.equal(storageKeyHandle.stagedInputKeys?.length, 1);
+    const stagedFromStorage = storageKeyHandle.stagedInputKeys?.[0] as string;
+    assert.ok(stagedFromStorage.startsWith("inputs/"));
+    assert.ok(stagedFromStorage.endsWith("/video.mp4"));
+    assert.deepEqual(fake.startCalls[1].providerOptions, {
+      xai: {
+        videoUrl: `https://cdn.example.test/grok/${stagedFromStorage}`,
+        mode: "extend-video",
+      },
+    });
+
+    const unusableStorages: readonly {
+      readonly name: string;
+      readonly storage?: ReturnType<typeof inMemory>;
+    }[] = [
+      {
+        name: "private HTTPS storage",
+        storage: inMemory({
+          baseUrl: "https://cdn.example.test/private",
+          visibility: "private",
+        }),
+      },
+      {
+        name: "non-HTTPS http:// storage",
+        storage: inMemory({ baseUrl: "http://cdn.example.test/insecure" }),
+      },
+      {
+        name: "storage without URL",
+        storage: inMemory(),
+      },
+      {
+        name: "storage disabled",
+      },
+    ];
+
+    for (const tc of unusableStorages) {
+      const blockedFake = createAsyncVideoModel({
+        modelId: "spacexai/grok-imagine-video",
+        provider: "gateway",
+      });
+      await assert.rejects(
+        () =>
+          startVideoJob({
+            config: { model: blockedFake.model, storage: tc.storage ?? false },
+            input: { prompt: "Edit local clip", video: "clips/local.mp4" },
+            getSandbox: async () => sandbox,
+          }),
+        /requires a public https:\/\/ video URL/,
+        tc.name,
+      );
+      assert.equal(blockedFake.startCalls.length, 0, `${tc.name}: expected zero doStart calls`);
+      if (tc.storage !== undefined) {
+        assert.deepEqual(tc.storage.keys(), [], `${tc.name}: expected staged key cleanup`);
+      }
+    }
+  });
+
+  test("routes Seedance edit and extend modes via inputReferences[0] with video/mp4 mediaType and omits aspectRatio on extend", async () => {
+    const fake = createAsyncVideoModel({
+      modelId: "bytedance/seedance-2.5",
+      provider: "gateway",
+    });
+    const config: VideoExtensionConfig = {
+      model: fake.model,
+      defaults: {
+        aspectRatio: "16:9",
+        resolution: "720p",
+        duration: 5,
+      },
+    };
+
+    await startVideoJob({
+      config,
+      input: {
+        prompt: "Match the character outfit from the reference image",
+        video: "https://cdn.example.com/clip.mp4",
+        mode: "edit",
+        references: ["https://cdn.example.com/character.png"],
+      },
+    });
+
+    assert.equal(fake.startCalls.length, 1);
+    assert.deepEqual(fake.startCalls[0].inputReferences, [
+      { type: "url", url: "https://cdn.example.com/clip.mp4", mediaType: "video/mp4" },
+      { type: "url", url: "https://cdn.example.com/character.png", mediaType: "image/png" },
+    ]);
+    assert.equal(fake.startCalls[0].aspectRatio, "16:9");
+    assert.equal(fake.startCalls[0].resolution, "1280x720");
+    assert.equal(fake.startCalls[0].duration, 5);
+    assert.deepEqual(fake.startCalls[0].providerOptions, {});
+
+    await startVideoJob({
+      config,
+      input: {
+        prompt: "Continue the walk across the bridge",
+        video: "https://cdn.example.com/clip.mp4",
+        mode: "extend",
+        references: ["https://cdn.example.com/lighting.png"],
+      },
+    });
+
+    assert.equal(fake.startCalls.length, 2);
+    assert.deepEqual(fake.startCalls[1].inputReferences, [
+      { type: "url", url: "https://cdn.example.com/clip.mp4", mediaType: "video/mp4" },
+      { type: "url", url: "https://cdn.example.com/lighting.png", mediaType: "image/png" },
+    ]);
+    assert.equal(fake.startCalls[1].aspectRatio, undefined);
+    assert.equal(fake.startCalls[1].resolution, "1280x720");
+    assert.equal(fake.startCalls[1].duration, 5);
+  });
+
+  test("routes FLUX 3 and generic models via inputReferences[0] with video/mp4 default and stages oversized local MP4s", async () => {
+    const storage = inMemory({ baseUrl: "https://cdn.example.test/flux" });
+    const sandbox = createFakeSandbox({ "clips/oversized.mp4": createLargeMp4() });
+    const fake = createAsyncVideoModel({
+      modelId: "bfl/flux-3-video",
+      provider: "gateway",
+    });
+
+    await startVideoJob({
+      config: { model: fake.model, storage, defaults: { aspectRatio: "16:9", duration: 4 } },
+      input: {
+        prompt: "Extend with crane pull-back",
+        video: "https://cdn.example.com/assets/clip-no-ext",
+        mode: "extend",
+        references: ["https://cdn.example.com/palette.png"],
+      },
+    });
+
+    assert.equal(fake.startCalls.length, 1);
+    assert.deepEqual(fake.startCalls[0].inputReferences, [
+      { type: "url", url: "https://cdn.example.com/assets/clip-no-ext", mediaType: "video/mp4" },
+      { type: "url", url: "https://cdn.example.com/palette.png", mediaType: "image/png" },
+    ]);
+    assert.equal(fake.startCalls[0].aspectRatio, "16:9");
+    assert.equal(fake.startCalls[0].duration, 4);
+
+    const stagedHandle = await startVideoJob({
+      config: { model: fake.model, storage },
+      input: {
+        prompt: "Re-light oversized clip",
+        video: "clips/oversized.mp4",
+      },
       getSandbox: async () => sandbox,
     });
 
-    assert.equal(output.status, "completed");
-    assert.equal(stagedKeysSeenAtStart.length, 1);
-    assert.ok(stagedKeysSeenAtStart[0].startsWith("inputs/"));
-    assert.ok(stagedKeysSeenAtStart[0].endsWith("/start.png"));
-
-    const frameImages = fake.startCalls[0].frameImages as readonly {
-      readonly image: { readonly type: string; readonly url?: string };
-      readonly frameType: string;
-    }[];
-    assert.equal(frameImages.length, 1);
-    assert.equal(frameImages[0].frameType, "first_frame");
-    assert.equal(frameImages[0].image.type, "url");
-    assert.equal(
-      frameImages[0].image.url,
-      `https://cdn.example.test/media/${stagedKeysSeenAtStart[0]}`,
-    );
-
-    assert.deepEqual(storage.keys(), [output.videos[0].storageKey as string]);
+    assert.equal(stagedHandle.stagedInputKeys?.length, 1);
+    const stagedKey = stagedHandle.stagedInputKeys?.[0] as string;
+    assert.ok(stagedKey.startsWith("inputs/"));
+    assert.ok(stagedKey.endsWith("/video.mp4"));
+    assert.deepEqual(fake.startCalls[1].inputReferences, [
+      {
+        type: "url",
+        url: `https://cdn.example.test/flux/${stagedKey}`,
+        mediaType: "video/mp4",
+      },
+    ]);
   });
 
-  test("allowTemporaryProviderUrl passes through provider URLs with expiresAt and rejects inline bytes without destination", async () => {
-    const expiresAt = "2026-12-01T00:00:00.000Z";
-    const urlModel = createAsyncVideoModel({
-      statuses: [
-        {
-          status: "completed",
-          videos: [
-            {
-              type: "url",
-              url: "https://provider.example.com/temp/clip.mp4",
-              mediaType: "video/mp4",
-            },
-          ],
-          expiresAt,
-        },
-      ],
+  test("resolves stored video by storageKey without a sandbox and falls back to storage.get when sandbox returns null", async () => {
+    const storage = inMemory({ baseUrl: "https://storage.example" });
+    const signal = new AbortController().signal;
+    await storage.put({
+      key: "videos/2026-11-26/clip.mp4",
+      data: MP4_BYTES,
+      mediaType: "video/mp4",
+      filename: "clip.mp4",
+      signal,
+    });
+    await storage.put({
+      key: "videos/2026-11-26/large.mp4",
+      data: createLargeMp4(),
+      mediaType: "video/mp4",
+      filename: "large.mp4",
+      signal,
     });
 
-    const { output } = await runGenerateVideos({
-      config: {
-        model: urlModel.model,
-        storage: false,
-        allowTemporaryProviderUrl: true,
-        poll: { intervalMs: 0 },
+    const fake = createAsyncVideoModel({
+      modelId: "bfl/flux-3-video",
+      provider: "gateway",
+    });
+
+    const inlineHandle = await startVideoJob({
+      config: { model: fake.model, storage },
+      input: {
+        prompt: "Edit stored clip with no sandbox",
+        video: "videos/2026-11-26/clip.mp4",
       },
-      input: { prompt: "Temporary URL clip" },
     });
-    assert.equal(output.videos.length, 1);
-    assert.equal(output.videos[0].url, "https://provider.example.com/temp/clip.mp4");
-    assert.equal(output.videos[0].expiresAt, expiresAt);
-    assert.equal(output.videos[0].temporary, true);
-    assert.equal(output.videos[0].bytes, 0);
+    assert.equal(inlineHandle.stagedInputKeys, undefined);
+    assert.deepEqual(fake.startCalls[0].inputReferences, [
+      { type: "file", data: MP4_BYTES, mediaType: "video/mp4" },
+    ]);
 
-    const bytesModel = createAsyncVideoModel({
-      statuses: [
-        {
-          status: "completed",
-          videos: [{ type: "binary", data: MP4_BYTES, mediaType: "video/mp4" }],
-        },
-      ],
+    const stagedHandle = await startVideoJob({
+      config: { model: fake.model, storage },
+      input: {
+        prompt: "Edit large stored clip with no sandbox",
+        video: "videos/2026-11-26/large.mp4",
+      },
     });
+    assert.equal(stagedHandle.stagedInputKeys?.length, 1);
+    const stagedKey = stagedHandle.stagedInputKeys?.[0] as string;
+    assert.ok(stagedKey.startsWith("inputs/"));
+    assert.ok(stagedKey.endsWith("/video.mp4"));
+    assert.deepEqual(fake.startCalls[1].inputReferences, [
+      {
+        type: "url",
+        url: `https://storage.example/${stagedKey}`,
+        mediaType: "video/mp4",
+      },
+    ]);
 
+    const emptySandbox = createFakeSandbox();
+    await startVideoJob({
+      config: { model: fake.model, storage },
+      input: {
+        prompt: "Fallback to storage.get when sandbox misses",
+        video: "videos/2026-11-26/clip.mp4",
+      },
+      getSandbox: async () => emptySandbox,
+    });
+    assert.deepEqual(fake.startCalls[2].inputReferences, [
+      { type: "file", data: MP4_BYTES, mediaType: "video/mp4" },
+    ]);
+
+    const missingFake = createAsyncVideoModel({ modelId: "bfl/flux-3-video" });
     await assert.rejects(
       () =>
-        runGenerateVideos({
-          config: {
-            model: bytesModel.model,
-            storage: false,
-            allowTemporaryProviderUrl: true,
-            poll: { intervalMs: 0 },
+        startVideoJob({
+          config: { model: missingFake.model, storage },
+          input: {
+            prompt: "Missing stored key",
+            video: "videos/2026-11-26/missing.mp4",
           },
-          input: { prompt: "Inline bytes without storage" },
         }),
-      /returned video bytes without a provider URL/,
+      /was not found in video storage/,
     );
+    assert.equal(missingFake.startCalls.length, 0);
   });
 });
 
 describe("approval forwarding", () => {
-  test("returns not-applicable with undefined response when unset, forwards always() without blocking response, and delegates custom policies", async () => {
+  test("returns not-applicable when unset, formats Generate/Edit/Extend prompts, and delegates custom policies", async () => {
     const input: GenerateVideoToolInput = {
       prompt: "Aerial drone shot of a coastal lighthouse at dusk",
       duration: 6,
@@ -781,6 +967,42 @@ describe("approval forwarding", () => {
     assert.equal(
       getApproval().prompt?.({ callId: "call-1", input, toolName: "video__generate" }),
       'Generate video with google/veo-3.1-fast-generate-001 (6s, 16:9, 1080p, audio, 2 videos, path: videos/lighthouse.mp4): "Aerial drone shot of a coastal lighthouse at dusk"',
+    );
+    assert.equal(
+      getApproval().prompt?.({
+        callId: "call-2",
+        input: {
+          prompt: "Shift sky to twilight",
+          video: "  videos/2026-11-26/clip.mp4  ",
+        },
+        toolName: "video__generate",
+      }),
+      'Edit video with google/veo-3.1-fast-generate-001 (video: videos/2026-11-26/clip.mp4): "Shift sky to twilight"',
+    );
+    assert.equal(
+      getApproval().prompt?.({
+        callId: "call-3",
+        input: {
+          prompt: "Add gentle snowfall",
+          video: "videos/2026-11-26/clip.mp4",
+          mode: "edit",
+        },
+        toolName: "video__generate",
+      }),
+      'Edit video with google/veo-3.1-fast-generate-001 (video: videos/2026-11-26/clip.mp4): "Add gentle snowfall"',
+    );
+    assert.equal(
+      getApproval().prompt?.({
+        callId: "call-4",
+        input: {
+          prompt: "Continue the drone pan across the harbor",
+          video: "https://cdn.example.com/clip.mp4",
+          mode: "extend",
+          duration: 5,
+        },
+        toolName: "video__generate",
+      }),
+      'Extend video with google/veo-3.1-fast-generate-001 (video: https://cdn.example.com/clip.mp4, 5s): "Continue the drone pan across the harbor"',
     );
 
     const requester = createFakePrincipal("user-alice");
@@ -826,15 +1048,20 @@ describe("approval forwarding", () => {
   });
 });
 
-describe("composable Workflow step primitives", () => {
-  test("returns webhookSigningSecret and stagedInputKeys, round-trips alias catalog jobs through JSON, and supports omitted config in checkVideoJob", async () => {
+describe("composable Workflow step primitives and input staging", () => {
+  test("stages large sandbox inputs, returns webhookSigningSecret and stagedInputKeys, round-trips alias catalog jobs through JSON, and supports omitted config in checkVideoJob", async () => {
     const storage = inMemory({ baseUrl: "https://media.example.test/wf" });
     const sandbox = createFakeSandbox({ "frames/large.png": createLargePng() });
+    const stagedKeysSeenAtStart: string[] = [];
     const qualityFake = createAsyncVideoModel({
       modelId: "provider/quality-v1",
       jobId: "job_wf_7",
       webhookSigningSecret: "whsec_live_secret_7",
       operation: { providerJob: "op_serializable_7", version: 1 },
+      startWarnings: [{ type: "other", message: "Using fast tier" }],
+      onStart() {
+        stagedKeysSeenAtStart.push(...storage.keys());
+      },
       statuses: [
         { status: "pending" },
         {
@@ -842,6 +1069,7 @@ describe("composable Workflow step primitives", () => {
           videos: [
             { type: "url", url: "https://93.184.216.34/wf-clip.mp4", mediaType: "video/mp4" },
           ],
+          warnings: [{ type: "unsupported", feature: "fps", details: "fixed at 24" }],
           expiresAt: "2026-12-01T12:00:00.000Z",
         },
       ],
@@ -869,13 +1097,25 @@ describe("composable Workflow step primitives", () => {
     assert.equal(handle.jobId, "job_wf_7");
     assert.equal(handle.webhookSigningSecret, "whsec_live_secret_7");
     assert.equal(handle.stagedInputKeys?.length, 1);
-    assert.ok(handle.stagedInputKeys?.[0].startsWith("inputs/"));
+    assert.deepEqual(handle.warnings, ["Using fast tier"]);
+    const stagedKey = handle.stagedInputKeys?.[0] as string;
+    assert.ok(stagedKey.startsWith("inputs/"));
+    assert.ok(stagedKey.endsWith("/start.png"));
+    assert.deepEqual(stagedKeysSeenAtStart, [stagedKey]);
     assert.deepEqual(handle.operation, { providerJob: "op_serializable_7", version: 1 });
     assert.equal(qualityFake.startCalls[0].webhookUrl, "https://hooks.example.com/eve/video");
     assert.equal(
       (qualityFake.startCalls[0].headers as Record<string, string>)["idempotency-key"],
       "wf-idem-1",
     );
+    const frameImages = qualityFake.startCalls[0].frameImages as readonly {
+      readonly image: { readonly type: string; readonly url?: string };
+      readonly frameType: string;
+    }[];
+    assert.equal(frameImages.length, 1);
+    assert.equal(frameImages[0].frameType, "first_frame");
+    assert.equal(frameImages[0].image.type, "url");
+    assert.equal(frameImages[0].image.url, `https://media.example.test/wf/${stagedKey}`);
 
     const pendingStatus = JSON.parse(
       JSON.stringify(
@@ -902,6 +1142,7 @@ describe("composable Workflow step primitives", () => {
       assert.fail("Expected completed status");
     }
     assert.equal(completedStatus.expiresAt, "2026-12-01T12:00:00.000Z");
+    assert.deepEqual(completedStatus.warnings, ["Unsupported fps: fixed at 24"]);
 
     const persisted = await persistVideos({
       videos: completedStatus.videos,

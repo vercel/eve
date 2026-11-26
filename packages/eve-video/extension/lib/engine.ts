@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { setTimeout as delay } from "node:timers/promises";
 
 import {
   experimental_generateVideo,
@@ -22,18 +21,18 @@ import {
   normalizeAspectRatio,
   normalizeMediaType,
   normalizeResolution,
-  readSandboxMedia,
   videoPath,
 } from "./media.ts";
 import { resolveConfiguredModel, resolveJobModel } from "./model.ts";
 import { resolveConfiguredStorage } from "./storage/default.ts";
+import { normalizeStorageKey } from "./storage/key.ts";
 import type { VideoStorage } from "./storage/types.ts";
 import type {
   GenerateVideoToolInput,
   GenerateVideoToolOutput,
-  GenerateVideoToolProgress,
   GeneratedVideoItem,
   VideoAssetData,
+  VideoEditMode,
   VideoExtensionConfig,
   VideoJobHandle,
   VideoJobStatus,
@@ -43,7 +42,6 @@ import type {
 const DEFAULT_MAX_VIDEOS_PER_CALL = 4;
 export const DEFAULT_POLL_INTERVAL_MS = 5_000;
 export const DEFAULT_POLL_TIMEOUT_MS = 600_000;
-const MAX_CONSECUTIVE_POLL_ERRORS = 3;
 
 export const NO_DESTINATION_ERROR =
   'No video output destination is configured. Configure storage with vercelBlob() from "@eve/video/vercel", localDisk() from "@eve/video/storage", or a custom VideoStorage adapter; pass a sandbox "path"; or set allowTemporaryProviderUrl: true to return temporary provider URLs.';
@@ -74,6 +72,7 @@ type AiVideoModel = AiGenerateVideoOptions["model"];
 type AiOperation = Parameters<typeof experimental_getVideoStatus>[1]["operation"];
 type AiProviderOptions = NonNullable<AiStartVideoOptions["providerOptions"]>;
 type SandboxIo = Pick<SandboxSession, "readBinaryFile" | "writeBinaryFile">;
+type MediaKind = "image" | "video" | "audio";
 
 /** Options passed to {@link startVideoJob}. */
 export interface StartVideoJobOptions {
@@ -81,7 +80,7 @@ export interface StartVideoJobOptions {
   readonly config?: VideoExtensionConfig;
   /** Video generation prompt and parameters. */
   readonly input: GenerateVideoToolInput;
-  /** Optional storage adapter used to stage large local sandbox input files as public HTTPS URLs. */
+  /** Optional storage adapter used to read stored input keys or stage local input files as public HTTPS URLs. */
   readonly storage?: VideoStorage;
   /** Optional sandbox accessor used when `input` references local sandbox media files. */
   readonly getSandbox?: () => Promise<Pick<SandboxSession, "readBinaryFile" | "writeBinaryFile">>;
@@ -139,26 +138,6 @@ export interface PersistVideosOptions {
   readonly fetch?: typeof fetch;
 }
 
-/** Options passed to {@link generateVideos}. */
-export interface GenerateVideosOptions {
-  /** Optional `@eve/video` extension configuration controlling models, storage, polling, defaults, and limits. */
-  readonly config?: VideoExtensionConfig;
-  /** Video generation prompt and parameters. */
-  readonly input: GenerateVideoToolInput;
-  /** Optional sandbox accessor used when reading local input files or writing to `input.path`. */
-  readonly getSandbox?: () => Promise<Pick<SandboxSession, "readBinaryFile" | "writeBinaryFile">>;
-  /** Optional eve session identifier recorded in storage metadata. */
-  readonly sessionId?: string;
-  /** Optional idempotency key forwarded as the `idempotency-key` header on job submission. */
-  readonly idempotencyKey?: string;
-  /** Additional HTTP headers forwarded to provider requests. */
-  readonly headers?: Readonly<Record<string, string>>;
-  /** Optional signal used to cancel generation, polling, downloads, and persistence. */
-  readonly signal?: AbortSignal;
-  /** Optional custom `fetch` implementation used when downloading generated video URLs. */
-  readonly fetch?: typeof fetch;
-}
-
 interface PreparedParameters {
   readonly prompt: string;
   readonly n: number;
@@ -186,7 +165,20 @@ interface ResolvedInputMedia {
   readonly references: readonly ResolvedMediaEntry[];
   readonly frameImages?: AiStartVideoOptions["frameImages"];
   readonly inputReferences?: AiStartVideoOptions["inputReferences"];
+  readonly grokVideoUrl?: string;
   readonly stagedKeys: readonly string[];
+}
+
+interface PreparedJobContext {
+  readonly config: VideoExtensionConfig;
+  readonly signal: AbortSignal;
+  readonly params: PreparedParameters;
+  readonly modelId: string;
+  readonly model: VideoModelLike;
+  readonly storage?: VideoStorage;
+  readonly sandbox?: SandboxIo;
+  readonly media: ResolvedInputMedia;
+  readonly providerOptions?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
 }
 
 /** Starts an asynchronous video generation job and returns an opaque handle for status polling. */
@@ -202,14 +194,9 @@ export async function startVideoJob(options: StartVideoJobOptions): Promise<Vide
   });
   try {
     const result = await experimental_startVideo(
-      buildSdkCallOptions({
-        model: ctx.model,
-        params: ctx.params,
-        media: ctx.media,
-        providerOptions: ctx.config.providerOptions,
+      buildSdkCallOptions(ctx, {
         headers: buildRequestHeaders(options.headers, options.idempotencyKey),
         webhookUrl,
-        signal: ctx.signal,
       }),
     );
     const asyncJob = extractGatewayAsyncJob(result.providerMetadata);
@@ -316,8 +303,9 @@ export async function persistVideos(
         signal,
         options.fetch,
       );
-      if (bytes.byteLength === 0)
+      if (bytes.byteLength === 0) {
         throw new Error("The video model returned an empty video payload.");
+      }
       if (bytes.byteLength > maxOutputBytes) {
         throw new Error(
           `Generated video (${bytes.byteLength} bytes) exceeds maximum allowed size of ${maxOutputBytes} bytes.`,
@@ -375,112 +363,57 @@ export async function persistVideos(
   return items;
 }
 
-/** Runs end-to-end video generation, yielding progress updates and returning persisted video metadata. */
-export async function* generateVideos(
-  options: GenerateVideosOptions,
-): AsyncGenerator<GenerateVideoToolProgress, GenerateVideoToolOutput, void> {
-  const intervalMs = options.config?.poll?.intervalMs ?? DEFAULT_POLL_INTERVAL_MS;
-  const timeoutMs = options.config?.poll?.timeoutMs ?? DEFAULT_POLL_TIMEOUT_MS;
-  if (!Number.isFinite(intervalMs) || intervalMs < 0) {
-    throw new Error(`Invalid poll.intervalMs: ${intervalMs}.`);
-  }
-  assertPositive(timeoutMs, "poll.timeoutMs");
-
+export async function runSyncVideoModel(options: {
+  readonly config?: VideoExtensionConfig;
+  readonly input: GenerateVideoToolInput;
+  readonly getSandbox?: () => Promise<SandboxIo>;
+  readonly sessionId?: string;
+  readonly idempotencyKey?: string;
+  readonly headers?: Readonly<Record<string, string>>;
+  readonly signal?: AbortSignal;
+  readonly fetch?: typeof fetch;
+}): Promise<GenerateVideoToolOutput> {
   const ctx = await prepareJobContext({
     ...options,
     requireAsync: false,
     requireDestination: true,
   });
-  const { config, signal, params, modelId, model, supportsAsync, storage, sandbox, media } = ctx;
+  const { config, signal, params, modelId, storage, sandbox, media } = ctx;
   const warnings: string[] = [];
-  let jobId: string | undefined;
   let assets: readonly VideoAssetData[];
   let providerExpiresAt: string | undefined;
 
   try {
-    const startHeaders = buildRequestHeaders(options.headers, options.idempotencyKey);
-    const statusHeaders = buildRequestHeaders(options.headers);
-
-    if (supportsAsync) {
-      yield { status: "starting", model: modelId };
-      const startResult = await experimental_startVideo(
-        buildSdkCallOptions({
-          model,
-          params,
-          media,
-          providerOptions: config.providerOptions,
-          headers: startHeaders,
-          signal,
-        }),
-      );
-      jobId = readNonEmptyString(extractGatewayAsyncJob(startResult.providerMetadata)?.jobId);
-      appendUniqueWarnings(warnings, formatWarnings(startResult.warnings));
-
-      const polled = yield* pollAsyncJob({
-        model,
-        modelId,
-        operation: startResult.operation,
-        jobId,
-        intervalMs,
-        timeoutMs,
-        statusHeaders,
-        warnings,
-        signal,
-      });
-      assets = polled.videos;
-      providerExpiresAt = polled.expiresAt;
+    const headers = buildRequestHeaders(options.headers, options.idempotencyKey);
+    if (storage === undefined && params.path === undefined && config.allowTemporaryProviderUrl) {
+      const direct = await generateDirectDoGenerate(ctx, headers);
+      appendUniqueWarnings(warnings, direct.warnings);
+      assets = direct.videos;
+      providerExpiresAt = direct.expiresAt;
     } else {
-      yield { status: "generating", model: modelId, elapsedSeconds: 0, attempt: 1 };
-      if (storage === undefined && params.path === undefined && config.allowTemporaryProviderUrl) {
-        const direct = await generateDirectDoGenerate({
-          model,
-          params,
-          media,
-          providerOptions: config.providerOptions,
-          headers: startHeaders,
-          signal,
-        });
-        appendUniqueWarnings(warnings, direct.warnings);
-        assets = direct.videos;
-        providerExpiresAt = direct.expiresAt;
-      } else {
-        const result = await experimental_generateVideo({
-          ...buildSdkCallOptions({
-            model,
-            params,
-            media,
-            providerOptions: config.providerOptions,
-            headers: startHeaders,
-            signal,
+      const result = await experimental_generateVideo({
+        ...buildSdkCallOptions(ctx, { headers }),
+        download: async ({ url, abortSignal }) =>
+          downloadVideoBytes(url.href, {
+            maxBytes: params.maxOutputBytes,
+            signal: abortSignal ?? signal,
+            ...(options.fetch !== undefined && { fetch: options.fetch }),
           }),
-          download: async ({ url, abortSignal }) =>
-            downloadVideoBytes(url.href, {
-              maxBytes: params.maxOutputBytes,
-              signal: abortSignal ?? signal,
-              ...(options.fetch !== undefined && { fetch: options.fetch }),
-            }),
-        });
-        appendUniqueWarnings(warnings, formatWarnings(result.warnings));
-        assets = [
-          ...result.videos.map((file) => ({
-            type: "binary" as const,
-            data: file.uint8Array,
-            mediaType: file.mediaType,
-          })),
-          ...Array.from({ length: result.uploadedVideos }, () => ({
-            type: "uploaded" as const,
-            mediaType: "video/mp4",
-          })),
-        ];
-      }
+      });
+      appendUniqueWarnings(warnings, formatWarnings(result.warnings));
+      assets = [
+        ...result.videos.map((file) => ({
+          type: "binary" as const,
+          data: file.uint8Array,
+          mediaType: file.mediaType,
+        })),
+        ...Array.from({ length: result.uploadedVideos }, () => ({
+          type: "uploaded" as const,
+          mediaType: "video/mp4",
+        })),
+      ];
     }
 
-    yield {
-      status: "saving",
-      model: modelId,
-      ...(jobId !== undefined && { jobId }),
-      videoCount: assets.length,
-    };
     const persisted = await persistVideos({
       videos: assets,
       modelId,
@@ -489,7 +422,6 @@ export async function* generateVideos(
       ...(storage !== undefined && { storage }),
       ...(sandbox !== undefined && { sandbox }),
       ...(params.path !== undefined && { path: params.path }),
-      ...(jobId !== undefined && { jobId }),
       ...(options.sessionId !== undefined && { sessionId: options.sessionId }),
       ...(config.allowTemporaryProviderUrl !== undefined && {
         allowTemporaryProviderUrl: config.allowTemporaryProviderUrl,
@@ -500,106 +432,11 @@ export async function* generateVideos(
     return {
       status: "completed",
       model: modelId,
-      ...(jobId !== undefined && { jobId }),
       videos: persisted,
       ...(warnings.length > 0 && { warnings }),
     };
   } finally {
     await cleanupStoredKeys(storage, media.stagedKeys);
-  }
-}
-
-async function* pollAsyncJob(options: {
-  readonly model: VideoModelLike;
-  readonly modelId: string;
-  readonly operation: unknown;
-  readonly jobId?: string;
-  readonly intervalMs: number;
-  readonly timeoutMs: number;
-  readonly statusHeaders?: Record<string, string>;
-  readonly warnings: string[];
-  readonly signal: AbortSignal;
-}): AsyncGenerator<
-  GenerateVideoToolProgress,
-  { readonly videos: readonly VideoAssetData[]; readonly expiresAt?: string },
-  void
-> {
-  const { model, modelId, jobId, intervalMs, timeoutMs, statusHeaders, warnings, signal } = options;
-  const startedAt = Date.now();
-  let attempt = 0;
-  let consecutiveErrors = 0;
-
-  for (;;) {
-    signal.throwIfAborted();
-    const elapsedMs = Date.now() - startedAt;
-    if (attempt > 0 && elapsedMs >= timeoutMs) throw createTimeoutError(modelId, timeoutMs, jobId);
-    attempt += 1;
-    yield {
-      status: "generating",
-      model: modelId,
-      ...(jobId !== undefined && { jobId }),
-      elapsedSeconds: Math.floor(elapsedMs / 1000),
-      attempt,
-    };
-
-    const remainingBeforeSleep = timeoutMs - (Date.now() - startedAt);
-    if (attempt > 1 && remainingBeforeSleep <= 0)
-      throw createTimeoutError(modelId, timeoutMs, jobId);
-    const sleepMs =
-      attempt === 1 && intervalMs >= timeoutMs
-        ? Math.min(intervalMs, Math.floor(timeoutMs / 2))
-        : Math.min(intervalMs, remainingBeforeSleep);
-    if (sleepMs > 0) await delay(sleepMs, undefined, { signal });
-    if (attempt > 1 && Date.now() - startedAt >= timeoutMs) {
-      throw createTimeoutError(modelId, timeoutMs, jobId);
-    }
-
-    const pollRemainingMs = Math.max(1, timeoutMs - (Date.now() - startedAt));
-    const timeoutError = createTimeoutError(modelId, timeoutMs, jobId);
-    const timeoutController = new AbortController();
-    const timer = setTimeout(() => timeoutController.abort(timeoutError), pollRemainingMs);
-
-    let statusResult: Awaited<ReturnType<typeof experimental_getVideoStatus>>;
-    try {
-      const statusPromise = experimental_getVideoStatus(toAiVideoModel(model), {
-        operation: options.operation as AiOperation,
-        abortSignal: AbortSignal.any([signal, timeoutController.signal]),
-        maxRetries: 0,
-        ...(statusHeaders !== undefined && { headers: statusHeaders }),
-      });
-      void statusPromise.catch(() => undefined);
-      const timeoutPromise = new Promise<never>((_resolve, reject) => {
-        timeoutController.signal.addEventListener("abort", () => reject(timeoutError), {
-          once: true,
-        });
-      });
-      statusResult = await Promise.race([statusPromise, timeoutPromise]);
-      consecutiveErrors = 0;
-    } catch (error) {
-      if (signal.aborted) throw error;
-      if (timeoutController.signal.aborted) throw timeoutError;
-      if (!isTransientPollError(error) || ++consecutiveErrors > MAX_CONSECUTIVE_POLL_ERRORS) {
-        throw error;
-      }
-      continue;
-    } finally {
-      clearTimeout(timer);
-    }
-
-    if ("warnings" in statusResult && statusResult.warnings !== undefined) {
-      appendUniqueWarnings(warnings, formatWarnings(statusResult.warnings));
-    }
-    if (statusResult.status === "error") {
-      throw new Error(statusResult.error || "Video generation failed.");
-    }
-    if (statusResult.status === "completed") {
-      const expiresAt = extractGatewayExpiresAt(statusResult.providerMetadata);
-      return {
-        videos: statusResult.videos.map((v) => ({ ...v })),
-        ...(expiresAt !== undefined && { expiresAt }),
-      };
-    }
-    if (Date.now() - startedAt >= timeoutMs) throw createTimeoutError(modelId, timeoutMs, jobId);
   }
 }
 
@@ -611,22 +448,32 @@ async function prepareJobContext(options: {
   readonly signal?: AbortSignal;
   readonly requireAsync: boolean;
   readonly requireDestination: boolean;
-}) {
+}): Promise<PreparedJobContext> {
   const config = options.config ?? {};
   const signal = options.signal ?? new AbortController().signal;
   signal.throwIfAborted();
 
-  const params = prepareGenerationParameters(config, options.input);
   const { modelId, model } = resolveConfiguredModel(config, options.input.model);
   const supportsAsync = typeof model.doStart === "function" && typeof model.doStatus === "function";
   if (options.requireAsync && !supportsAsync) {
-    throw new Error(
-      `Video model "${modelId}" does not support asynchronous start/status jobs. Use generateVideos() instead.`,
-    );
+    throw new Error(`Video model "${modelId}" does not support asynchronous start/status jobs.`);
   }
   if (!supportsAsync && typeof model.doGenerate !== "function") {
     throw new Error(`Video model "${modelId}" does not implement doGenerate or doStart/doStatus.`);
   }
+
+  const grokModel = isGrokVideoModel(modelId, model.provider);
+  const seedanceModel = isSeedanceVideoModel(modelId, model.provider);
+  const videoEditMode: VideoEditMode | undefined =
+    options.input.video !== undefined ? (options.input.mode ?? "edit") : undefined;
+
+  const params = prepareGenerationParameters(config, options.input, {
+    omitDuration: grokModel && videoEditMode === "edit",
+    omitAspectRatio:
+      (grokModel && videoEditMode === "edit") || (seedanceModel && videoEditMode === "extend"),
+    omitResolution: grokModel && videoEditMode === "edit",
+  });
+
   if (supportsAsync) {
     const modelMax = await resolveModelMaxVideosPerCall(model);
     if (modelMax !== undefined && params.n > modelMax) {
@@ -648,40 +495,80 @@ async function prepareJobContext(options: {
 
   const forOutput = options.requireDestination && params.path !== undefined;
   const forInput =
+    (options.input.video !== undefined && !isUrlLike(options.input.video)) ||
     (options.input.start !== undefined && !isUrlLike(options.input.start)) ||
     (options.input.end !== undefined && !isUrlLike(options.input.end)) ||
     (options.input.references?.some((ref) => !isUrlLike(ref)) ?? false);
-  const sandbox =
+
+  const sandboxState =
     forOutput || forInput
-      ? await acquireSandbox(options.getSandbox, { forInput, forOutput, signal })
+      ? await resolveSandbox(options.getSandbox, {
+          forInput,
+          forOutput,
+          allowFallback: !forOutput && storage?.get !== undefined,
+          signal,
+        })
       : undefined;
+
   const media = await resolveInputMedia({
     input: options.input,
-    sandbox,
+    modelId,
+    grokModel,
+    sandbox: sandboxState?.sandbox,
+    sandboxError: sandboxState?.error,
     storage,
     maxInputBytes: params.maxInputBytes,
     stageLargeInputs: supportsAsync,
     signal,
   });
 
-  return { config, signal, params, modelId, model, supportsAsync, storage, sandbox, media };
+  const providerOptions =
+    media.grokVideoUrl !== undefined
+      ? {
+          ...config.providerOptions,
+          xai: {
+            ...config.providerOptions?.xai,
+            videoUrl: media.grokVideoUrl,
+            ...(videoEditMode === "extend" && { mode: "extend-video" }),
+          },
+        }
+      : config.providerOptions;
+
+  return {
+    config,
+    signal,
+    params,
+    modelId,
+    model,
+    storage,
+    sandbox: sandboxState?.sandbox,
+    media,
+    providerOptions,
+  };
 }
 
-async function generateDirectDoGenerate(options: {
-  readonly model: VideoModelLike;
-  readonly params: PreparedParameters;
-  readonly media: ResolvedInputMedia;
-  readonly providerOptions?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
-  readonly headers?: Record<string, string>;
-  readonly signal: AbortSignal;
-}): Promise<{
+function isGrokVideoModel(modelId: string, provider: string): boolean {
+  return (
+    /^(?:spacexai|xai)\/grok-imagine-video/i.test(modelId) ||
+    /^(?:spacexai|xai)(?:\.|$)/i.test(provider)
+  );
+}
+
+function isSeedanceVideoModel(modelId: string, provider: string): boolean {
+  return /^bytedance\/seedance/i.test(modelId) || /^bytedance(?:\.|$)/i.test(provider);
+}
+
+async function generateDirectDoGenerate(
+  ctx: PreparedJobContext,
+  headers?: Record<string, string>,
+): Promise<{
   readonly videos: readonly VideoAssetData[];
   readonly warnings: readonly string[];
   readonly expiresAt?: string;
 }> {
-  const doGenerate = options.model.doGenerate;
+  const doGenerate = ctx.model.doGenerate;
   if (typeof doGenerate !== "function") {
-    throw new Error(`Video model "${options.model.modelId}" does not implement doGenerate.`);
+    throw new Error(`Video model "${ctx.model.modelId}" does not implement doGenerate.`);
   }
   const toFile = (entry: ResolvedMediaEntry) =>
     entry.url !== undefined
@@ -694,53 +581,49 @@ async function generateDirectDoGenerate(options: {
 
   const warnings: string[] = [];
   const frameImages =
-    options.media.frames.length > 0
-      ? options.media.frames.map((f) => ({
-          image: toFile(f),
-          frameType: f.frameType ?? "first_frame",
-        }))
+    ctx.media.frames.length > 0
+      ? ctx.media.frames.map((f) => ({ image: toFile(f), frameType: f.frameType ?? "first_frame" }))
       : undefined;
   const firstFrame = frameImages?.find((f) => f.frameType === "first_frame")?.image;
   const inputReferences =
-    frameImages !== undefined
-      ? undefined
-      : options.media.references.length > 0
-        ? options.media.references.map(toFile)
-        : undefined;
-  if (frameImages !== undefined && options.media.references.length > 0) {
+    frameImages === undefined && ctx.media.references.length > 0
+      ? ctx.media.references.map(toFile)
+      : undefined;
+  if (frameImages !== undefined && ctx.media.references.length > 0) {
     warnings.push(
       "inputReferences were ignored because frameImages were provided; frameImages and inputReferences cannot be combined.",
     );
   }
 
-  const perCall = (await resolveModelMaxVideosPerCall(options.model)) ?? 1;
+  const perCall = (await resolveModelMaxVideosPerCall(ctx.model)) ?? 1;
   const videos: VideoAssetData[] = [];
   let expiresAt: string | undefined;
-  for (let remaining = options.params.n; remaining > 0; remaining -= perCall) {
-    const rawResult = await doGenerate.call(options.model, {
-      prompt: options.params.prompt,
+  for (let remaining = ctx.params.n; remaining > 0; remaining -= perCall) {
+    const rawResult = await doGenerate.call(ctx.model, {
+      prompt: ctx.params.prompt,
       n: Math.min(remaining, perCall),
-      aspectRatio: options.params.aspectRatio,
-      resolution: options.params.resolution,
-      duration: options.params.duration,
-      fps: options.params.fps,
-      seed: options.params.seed,
+      aspectRatio: ctx.params.aspectRatio,
+      resolution: ctx.params.resolution,
+      duration: ctx.params.duration,
+      fps: ctx.params.fps,
+      seed: ctx.params.seed,
       image: firstFrame,
       frameImages,
       inputReferences,
-      generateAudio: options.params.generateAudio,
+      generateAudio: ctx.params.generateAudio,
       providerOptions:
-        options.providerOptions !== undefined ? toAiProviderOptions(options.providerOptions) : {},
-      ...(options.headers !== undefined && { headers: options.headers }),
-      abortSignal: options.signal,
+        ctx.providerOptions !== undefined ? toAiProviderOptions(ctx.providerOptions) : {},
+      ...(headers !== undefined && { headers }),
+      abortSignal: ctx.signal,
     });
     const record = asRecord(rawResult);
     if (record === undefined || !Array.isArray(record.videos)) {
-      throw new Error(`Video model "${options.model.modelId}" returned an invalid result.`);
+      throw new Error(`Video model "${ctx.model.modelId}" returned an invalid result.`);
     }
     videos.push(...(record.videos as readonly VideoAssetData[]).map((v) => ({ ...v })));
-    if (Array.isArray(record.warnings))
+    if (Array.isArray(record.warnings)) {
       appendUniqueWarnings(warnings, formatWarnings(record.warnings));
+    }
     expiresAt ??= extractGatewayExpiresAt(record.providerMetadata);
   }
   return { videos, warnings, ...(expiresAt !== undefined && { expiresAt }) };
@@ -778,9 +661,27 @@ async function resolveVideoBytes(
 function prepareGenerationParameters(
   config: VideoExtensionConfig,
   input: GenerateVideoToolInput,
+  omit: {
+    readonly omitDuration: boolean;
+    readonly omitAspectRatio: boolean;
+    readonly omitResolution: boolean;
+  },
 ): PreparedParameters {
   const prompt = input.prompt.trim();
   if (prompt.length === 0) throw new Error("Video prompt must be a non-empty string.");
+
+  if (input.mode !== undefined && input.video === undefined) {
+    throw new Error('"mode" ("edit" or "extend") requires "video" to be provided.');
+  }
+  if (input.mode !== undefined && input.mode !== "edit" && input.mode !== "extend") {
+    throw new Error(`Invalid "mode" "${String(input.mode)}". Expected "edit" or "extend".`);
+  }
+  if (input.video !== undefined && input.video.trim().length === 0) {
+    throw new Error('Input "video" must be a non-empty URL, storage key, or sandbox file path.');
+  }
+  if (input.video !== undefined && (input.start !== undefined || input.end !== undefined)) {
+    throw new Error('"video" cannot be combined with "start" or "end" frame images.');
+  }
 
   const n = assertPositiveInt(input.n ?? 1, 'video count "n"');
   const maxVideosPerCall = assertPositiveInt(
@@ -803,9 +704,10 @@ function prepareGenerationParameters(
   }
 
   const maxDurationSeconds = config.limits?.maxDurationSeconds;
-  if (maxDurationSeconds !== undefined)
+  if (maxDurationSeconds !== undefined) {
     assertPositive(maxDurationSeconds, "limits.maxDurationSeconds");
-  const duration = input.duration ?? config.defaults?.duration;
+  }
+  const duration = omit.omitDuration ? undefined : (input.duration ?? config.defaults?.duration);
   if (duration !== undefined) {
     assertPositive(duration, "video duration");
     if (maxDurationSeconds !== undefined && duration > maxDurationSeconds) {
@@ -813,12 +715,18 @@ function prepareGenerationParameters(
         `Requested video duration ${duration}s exceeds the configured maximum of ${maxDurationSeconds}s.`,
       );
     }
+  } else if (input.duration !== undefined) {
+    assertPositive(input.duration, "video duration");
   }
 
-  const rawAspectRatio = input.aspectRatio ?? config.defaults?.aspectRatio;
+  const rawAspectRatio = omit.omitAspectRatio
+    ? undefined
+    : (input.aspectRatio ?? config.defaults?.aspectRatio);
   const aspectRatio =
     rawAspectRatio !== undefined ? normalizeAspectRatio(rawAspectRatio) : undefined;
-  const rawResolution = input.resolution ?? config.defaults?.resolution;
+  const rawResolution = omit.omitResolution
+    ? undefined
+    : (input.resolution ?? config.defaults?.resolution);
   const resolution =
     rawResolution !== undefined ? normalizeResolution(rawResolution, aspectRatio) : undefined;
   const generateAudio = input.audio ?? config.defaults?.audio;
@@ -855,100 +763,108 @@ function prepareGenerationParameters(
 
 async function resolveInputMedia(options: {
   readonly input: GenerateVideoToolInput;
+  readonly modelId: string;
+  readonly grokModel: boolean;
   readonly sandbox?: SandboxIo;
+  readonly sandboxError?: Error;
   readonly storage?: VideoStorage;
   readonly maxInputBytes: number;
   readonly stageLargeInputs: boolean;
   readonly signal: AbortSignal;
 }): Promise<ResolvedInputMedia> {
-  const frameSpecs: readonly (readonly [string, "first_frame" | "last_frame", string])[] = [
-    ...(options.input.start !== undefined
-      ? ([["start", "first_frame", options.input.start]] as const)
-      : []),
-    ...(options.input.end !== undefined
-      ? ([["end", "last_frame", options.input.end]] as const)
-      : []),
-  ];
+  const resolveEntry = (
+    raw: string,
+    slot: string,
+    allowedKinds: readonly MediaKind[],
+    extra?: {
+      readonly frameType?: "first_frame" | "last_frame";
+      readonly defaultUrlMediaType?: string;
+    },
+  ) => resolveMediaEntry(options, raw, slot, allowedKinds, extra);
+
+  const videoEntry =
+    options.input.video !== undefined
+      ? await resolveEntry(options.input.video, "video", ["video"], {
+          defaultUrlMediaType: "video/mp4",
+        })
+      : undefined;
+
   const frames: ResolvedMediaEntry[] = [];
-  for (const [slot, frameType, raw] of frameSpecs) {
+  if (options.input.start !== undefined) {
     frames.push(
-      await resolveMediaEntry({
-        raw,
-        slot,
-        frameType,
-        allowedKinds: ["image"],
-        sandbox: options.sandbox,
-        maxInputBytes: options.maxInputBytes,
-        signal: options.signal,
-      }),
+      await resolveEntry(options.input.start, "start", ["image"], { frameType: "first_frame" }),
     );
   }
+  if (options.input.end !== undefined) {
+    frames.push(
+      await resolveEntry(options.input.end, "end", ["image"], { frameType: "last_frame" }),
+    );
+  }
+
   const references: ResolvedMediaEntry[] = [];
+  if (videoEntry !== undefined && !options.grokModel) references.push(videoEntry);
   for (let i = 0; i < (options.input.references?.length ?? 0); i += 1) {
     references.push(
-      await resolveMediaEntry({
-        raw: options.input.references![i],
-        slot: `ref-${i}`,
-        allowedKinds: ["image", "video", "audio"],
-        sandbox: options.sandbox,
-        maxInputBytes: options.maxInputBytes,
-        signal: options.signal,
-      }),
+      await resolveEntry(options.input.references![i], `ref-${i}`, ["image", "video", "audio"]),
     );
   }
 
   const stagedKeys: string[] = [];
-  const localEntries = [...frames, ...references].filter(
-    (entry) => entry.data !== undefined && entry.mediaType !== undefined,
-  );
-  let remainingInlineBytes = localEntries.reduce((sum, e) => sum + (e.data?.byteLength ?? 0), 0);
+  let prefix: string | undefined;
+  let grokVideoUrl: string | undefined;
+  const getPrefix = () =>
+    (prefix ??= `inputs/${new Date().toISOString().slice(0, 10)}/vid_${randomUUID().replaceAll("-", "").slice(0, 16)}`);
 
-  if (
-    options.stageLargeInputs &&
-    options.storage !== undefined &&
-    remainingInlineBytes > ASYNC_INLINE_INPUT_LIMIT_BYTES
-  ) {
-    localEntries.sort((a, b) => (b.data?.byteLength ?? 0) - (a.data?.byteLength ?? 0));
-    const prefix = `inputs/${new Date().toISOString().slice(0, 10)}/vid_${randomUUID().replaceAll("-", "").slice(0, 16)}`;
-    try {
-      for (const entry of localEntries) {
-        if (remainingInlineBytes <= ASYNC_INLINE_INPUT_LIMIT_BYTES) break;
-        if (entry.data === undefined || entry.mediaType === undefined) continue;
-        const filename = `${entry.slot}${extensionForMediaType(entry.mediaType)}`;
-        const stored = await options.storage.put({
-          key: `${prefix}/${filename}`,
-          data: entry.data,
-          mediaType: entry.mediaType,
-          filename,
-          ttlDays: 1,
-          signal: options.signal,
-        });
-        let safeUrl: URL | undefined;
-        if (stored.url !== undefined && stored.visibility !== "private") {
-          safeUrl = await assertSafePublicUrl(stored.url, { resolveDns: false }).catch(
-            () => undefined,
+  try {
+    if (videoEntry !== undefined && options.grokModel) {
+      if (videoEntry.url !== undefined) {
+        grokVideoUrl = videoEntry.url;
+      } else {
+        const staged =
+          options.storage !== undefined
+            ? await stageMediaEntry(options.storage, getPrefix(), videoEntry, options.signal)
+            : null;
+        if (staged === null) {
+          throw new Error(
+            `Video editing/extension with "${options.modelId}" requires a public https:// video URL. Configure public HTTPS video storage (such as vercelBlob()) or pass an https:// video URL.`,
           );
         }
-        if (safeUrl !== undefined) {
-          stagedKeys.push(stored.key);
-          remainingInlineBytes -= entry.data.byteLength;
-          entry.url = safeUrl.href;
-          entry.data = undefined;
-        } else {
-          await cleanupStoredKeys(options.storage, [stored.key]);
-          break;
-        }
+        stagedKeys.push(staged.key);
+        grokVideoUrl = staged.url;
       }
-    } catch (error) {
-      await cleanupStoredKeys(options.storage, stagedKeys);
-      throw error;
     }
+
+    const localEntries = [...frames, ...references].filter(
+      (entry) => entry.data !== undefined && entry.mediaType !== undefined,
+    );
+    let remainingInlineBytes = localEntries.reduce((sum, e) => sum + (e.data?.byteLength ?? 0), 0);
+
+    if (
+      options.stageLargeInputs &&
+      options.storage !== undefined &&
+      remainingInlineBytes > ASYNC_INLINE_INPUT_LIMIT_BYTES
+    ) {
+      localEntries.sort((a, b) => (b.data?.byteLength ?? 0) - (a.data?.byteLength ?? 0));
+      for (const entry of localEntries) {
+        if (remainingInlineBytes <= ASYNC_INLINE_INPUT_LIMIT_BYTES) break;
+        const staged = await stageMediaEntry(options.storage, getPrefix(), entry, options.signal);
+        if (staged === null) break;
+        stagedKeys.push(staged.key);
+        remainingInlineBytes -= entry.data?.byteLength ?? 0;
+        entry.url = staged.url;
+        entry.data = undefined;
+      }
+    }
+  } catch (error) {
+    await cleanupStoredKeys(options.storage, stagedKeys);
+    throw error;
   }
 
   return {
     frames,
     references,
     stagedKeys,
+    ...(grokVideoUrl !== undefined && { grokVideoUrl }),
     ...(frames.length > 0 && {
       frameImages: frames.map((f) => ({
         image: f.url ?? (f.data as Uint8Array),
@@ -970,84 +886,159 @@ async function resolveInputMedia(options: {
   };
 }
 
-async function resolveMediaEntry(options: {
-  readonly raw: string;
-  readonly slot: string;
-  readonly frameType?: "first_frame" | "last_frame";
-  readonly allowedKinds: readonly ("image" | "video" | "audio")[];
-  readonly sandbox?: SandboxIo;
-  readonly maxInputBytes: number;
-  readonly signal: AbortSignal;
-}): Promise<ResolvedMediaEntry> {
-  const trimmed = options.raw.trim();
+async function stageMediaEntry(
+  storage: VideoStorage,
+  prefix: string,
+  entry: ResolvedMediaEntry,
+  signal: AbortSignal,
+): Promise<{ readonly key: string; readonly url: string } | null> {
+  if (entry.data === undefined || entry.mediaType === undefined) return null;
+  const filename = `${entry.slot}${extensionForMediaType(entry.mediaType)}`;
+  const stored = await storage.put({
+    key: `${prefix}/${filename}`,
+    data: entry.data,
+    mediaType: entry.mediaType,
+    filename,
+    ttlDays: 1,
+    signal,
+  });
+  const safeUrl =
+    stored.url !== undefined && stored.visibility !== "private"
+      ? await assertSafePublicUrl(stored.url, { resolveDns: false }).catch(() => undefined)
+      : undefined;
+  if (safeUrl === undefined) {
+    await cleanupStoredKeys(storage, [stored.key]);
+    return null;
+  }
+  return { key: stored.key, url: safeUrl.href };
+}
+
+async function resolveMediaEntry(
+  env: {
+    readonly sandbox?: SandboxIo;
+    readonly sandboxError?: Error;
+    readonly storage?: VideoStorage;
+    readonly maxInputBytes: number;
+    readonly signal: AbortSignal;
+  },
+  raw: string,
+  slot: string,
+  allowedKinds: readonly MediaKind[],
+  extra?: {
+    readonly frameType?: "first_frame" | "last_frame";
+    readonly defaultUrlMediaType?: string;
+  },
+): Promise<ResolvedMediaEntry> {
+  const trimmed = raw.trim();
   if (trimmed.length === 0) {
-    throw new Error(`Input "${options.slot}" must be a non-empty URL or sandbox file path.`);
+    throw new Error(`Input "${slot}" must be a non-empty URL or sandbox file path.`);
   }
   if (isUrlLike(trimmed)) {
     const safeUrl = await assertSafePublicUrl(trimmed, { resolveDns: false });
     const inferred = mediaTypeFromUrl(safeUrl.href);
     if (inferred !== undefined) {
       const kind = mediaKind(inferred);
-      if (kind === "other" || !options.allowedKinds.includes(kind)) {
+      if (kind === "other" || !allowedKinds.includes(kind)) {
         throw new Error(
-          `Unsupported media type "${inferred}" for "${options.slot}" URL "${trimmed}". Expected ${options.allowedKinds.join(" or ")}.`,
+          `Unsupported media type "${inferred}" for "${slot}" URL "${trimmed}". Expected ${allowedKinds.join(" or ")}.`,
         );
       }
     }
+    const mediaType = inferred ?? extra?.defaultUrlMediaType;
     return {
-      slot: options.slot,
+      slot,
       url: safeUrl.href,
-      ...(options.frameType !== undefined && { frameType: options.frameType }),
-      ...(inferred !== undefined && { mediaType: inferred }),
+      ...(extra?.frameType !== undefined && { frameType: extra.frameType }),
+      ...(mediaType !== undefined && { mediaType }),
     };
   }
-  if (options.sandbox === undefined) {
-    throw new Error(missingSandboxMessage({ forInput: true, forOutput: false }));
+
+  let data: Uint8Array | null = null;
+  let declaredMediaType: string | undefined;
+  if (env.sandbox !== undefined) {
+    data = await env.sandbox.readBinaryFile({ path: trimmed, signal: env.signal });
   }
-  const file = await readSandboxMedia(options.sandbox, trimmed, {
-    maxBytes: options.maxInputBytes,
-    allowedKinds: options.allowedKinds,
-    signal: options.signal,
-  });
+  if (data === null && env.storage?.get !== undefined) {
+    const key = tryNormalizeStorageKey(trimmed);
+    if (key !== undefined) {
+      const stored = await env.storage.get({ key, signal: env.signal });
+      if (stored !== null) {
+        data = stored.data;
+        declaredMediaType = stored.mediaType;
+      }
+    }
+  }
+  if (data === null) {
+    if (env.sandbox !== undefined) {
+      throw new Error(
+        env.storage?.get !== undefined
+          ? `File not found in sandbox or video storage: ${trimmed}`
+          : `File not found in sandbox: ${trimmed}`,
+      );
+    }
+    if (slot === "video" && env.storage?.get !== undefined) {
+      throw new Error(
+        `Video "${trimmed}" was not found in video storage, and reading local input files requires an agent sandbox. Pass an https:// URL, a valid storageKey, or configure a sandbox.`,
+      );
+    }
+    throw (
+      env.sandboxError ?? new Error(missingSandboxMessage({ forInput: true, forOutput: false }))
+    );
+  }
+  if (data.byteLength === 0) throw new Error(`Media file is empty: ${trimmed}`);
+  if (data.byteLength > env.maxInputBytes) {
+    throw new Error(
+      `Media file "${trimmed}" (${data.byteLength} bytes) exceeds maximum allowed size of ${env.maxInputBytes} bytes.`,
+    );
+  }
+  const mediaType = detectMediaType(data) ?? usableMediaType(declaredMediaType);
+  if (mediaType === undefined) {
+    throw new Error(`Unsupported or unrecognized media file format: ${trimmed}`);
+  }
+  const kind = mediaKind(mediaType);
+  if (kind === "other" || !allowedKinds.includes(kind)) {
+    throw new Error(
+      `Unsupported media type "${mediaType}" for "${trimmed}". Expected ${allowedKinds.join(" or ")}.`,
+    );
+  }
   return {
-    slot: options.slot,
-    data: file.data,
-    mediaType: file.mediaType,
-    ...(options.frameType !== undefined && { frameType: options.frameType }),
+    slot,
+    data,
+    mediaType,
+    ...(extra?.frameType !== undefined && { frameType: extra.frameType }),
   };
 }
 
-function buildSdkCallOptions(options: {
-  readonly model: VideoModelLike;
-  readonly params: PreparedParameters;
-  readonly media: ResolvedInputMedia;
-  readonly providerOptions?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
-  readonly headers?: Record<string, string>;
-  readonly webhookUrl?: string;
-  readonly signal: AbortSignal;
-}): AiStartVideoOptions {
+function tryNormalizeStorageKey(raw: string): string | undefined {
+  try {
+    return normalizeStorageKey(raw);
+  } catch {
+    return undefined;
+  }
+}
+
+function buildSdkCallOptions(
+  ctx: PreparedJobContext,
+  extra: { readonly headers?: Record<string, string>; readonly webhookUrl?: string },
+): AiStartVideoOptions {
   return {
-    model: toAiVideoModel(options.model),
-    prompt: options.params.prompt,
-    n: options.params.n,
-    abortSignal: options.signal,
-    ...(options.params.duration !== undefined && { duration: options.params.duration }),
-    ...(options.params.aspectRatio !== undefined && { aspectRatio: options.params.aspectRatio }),
-    ...(options.params.resolution !== undefined && { resolution: options.params.resolution }),
-    ...(options.params.generateAudio !== undefined && {
-      generateAudio: options.params.generateAudio,
+    model: toAiVideoModel(ctx.model),
+    prompt: ctx.params.prompt,
+    n: ctx.params.n,
+    abortSignal: ctx.signal,
+    ...(ctx.params.duration !== undefined && { duration: ctx.params.duration }),
+    ...(ctx.params.aspectRatio !== undefined && { aspectRatio: ctx.params.aspectRatio }),
+    ...(ctx.params.resolution !== undefined && { resolution: ctx.params.resolution }),
+    ...(ctx.params.generateAudio !== undefined && { generateAudio: ctx.params.generateAudio }),
+    ...(ctx.params.fps !== undefined && { fps: ctx.params.fps }),
+    ...(ctx.params.seed !== undefined && { seed: ctx.params.seed }),
+    ...(ctx.media.frameImages !== undefined && { frameImages: ctx.media.frameImages }),
+    ...(ctx.media.inputReferences !== undefined && { inputReferences: ctx.media.inputReferences }),
+    ...(ctx.providerOptions !== undefined && {
+      providerOptions: toAiProviderOptions(ctx.providerOptions),
     }),
-    ...(options.params.fps !== undefined && { fps: options.params.fps }),
-    ...(options.params.seed !== undefined && { seed: options.params.seed }),
-    ...(options.media.frameImages !== undefined && { frameImages: options.media.frameImages }),
-    ...(options.media.inputReferences !== undefined && {
-      inputReferences: options.media.inputReferences,
-    }),
-    ...(options.providerOptions !== undefined && {
-      providerOptions: toAiProviderOptions(options.providerOptions),
-    }),
-    ...(options.headers !== undefined && { headers: options.headers }),
-    ...(options.webhookUrl !== undefined && { webhookUrl: options.webhookUrl }),
+    ...(extra.headers !== undefined && { headers: extra.headers }),
+    ...(extra.webhookUrl !== undefined && { webhookUrl: extra.webhookUrl }),
   };
 }
 
@@ -1111,17 +1102,27 @@ export function normalizeOptionalPath(path: string | undefined): string | undefi
   return trimmed;
 }
 
-async function acquireSandbox(
+async function resolveSandbox(
   getSandbox: (() => Promise<SandboxIo>) | undefined,
-  usage: { readonly forInput: boolean; readonly forOutput: boolean; readonly signal: AbortSignal },
-): Promise<SandboxIo> {
-  if (getSandbox === undefined) throw new Error(missingSandboxMessage(usage));
+  options: {
+    readonly forInput: boolean;
+    readonly forOutput: boolean;
+    readonly allowFallback: boolean;
+    readonly signal: AbortSignal;
+  },
+): Promise<{ readonly sandbox?: SandboxIo; readonly error?: Error }> {
+  if (getSandbox === undefined) {
+    if (options.allowFallback) return {};
+    throw new Error(missingSandboxMessage(options));
+  }
   try {
-    return await getSandbox();
+    return { sandbox: await getSandbox() };
   } catch (error) {
-    if (usage.signal.aborted) throw error;
+    if (options.signal.aborted) throw error;
     const detail = error instanceof Error ? error.message : String(error);
-    throw new Error(`${missingSandboxMessage(usage)} (${detail})`, { cause: error });
+    const wrapped = new Error(`${missingSandboxMessage(options)} (${detail})`, { cause: error });
+    if (options.allowFallback) return { error: wrapped };
+    throw wrapped;
   }
 }
 
@@ -1150,26 +1151,24 @@ function formatWarnings(warnings: readonly unknown[] | undefined): string[] {
 
 function formatWarning(warning: unknown): string {
   if (typeof warning === "string") return warning.trim();
-  const record = asRecord(warning);
-  if (record === undefined) return String(warning);
-  if (record.type === "unsupported") {
-    const feature = typeof record.feature === "string" ? record.feature : "feature";
-    const details = readNonEmptyString(record.details);
+  const r = asRecord(warning);
+  if (r === undefined) return String(warning);
+  const details = readNonEmptyString(r.details);
+  const feature = typeof r.feature === "string" ? r.feature : "feature";
+  if (r.type === "unsupported") {
     return details !== undefined ? `Unsupported ${feature}: ${details}` : `Unsupported ${feature}`;
   }
-  if (record.type === "compatibility") {
-    const feature = typeof record.feature === "string" ? record.feature : "feature";
-    const details = readNonEmptyString(record.details);
+  if (r.type === "compatibility") {
     return details !== undefined
       ? `Compatibility (${feature}): ${details}`
       : `Compatibility warning for ${feature}`;
   }
-  if (record.type === "deprecated") {
-    const setting = typeof record.setting === "string" ? record.setting : "setting";
-    const message = readNonEmptyString(record.message);
+  if (r.type === "deprecated") {
+    const setting = typeof r.setting === "string" ? r.setting : "setting";
+    const message = readNonEmptyString(r.message);
     return message !== undefined ? `Deprecated ${setting}: ${message}` : `Deprecated ${setting}`;
   }
-  return readNonEmptyString(record.message) ?? JSON.stringify(warning);
+  return readNonEmptyString(r.message) ?? JSON.stringify(warning);
 }
 
 function appendUniqueWarnings(target: string[], incoming: readonly string[]): void {
@@ -1214,66 +1213,46 @@ function usableMediaType(value: string | undefined): string | undefined {
     : normalized;
 }
 
-function createTimeoutError(modelId: string, timeoutMs: number, jobId?: string): Error {
-  return new Error(
-    `Video generation with model "${modelId}"${jobId !== undefined ? ` (job ${jobId})` : ""} timed out after ${timeoutMs}ms.`,
-  );
-}
-
-function isTransientPollError(error: unknown): boolean {
-  if (error instanceof Error && error.name === "AbortError") return false;
-  const statusCode = extractStatusCode(error);
-  if (statusCode !== undefined) {
-    return statusCode === 408 || statusCode === 429 || statusCode >= 500;
-  }
-  const retryable = extractRetryableFlag(error);
-  if (retryable !== undefined) return retryable;
-  return true;
-}
-
 export function isTransientProviderError(error: unknown): boolean {
   if (error instanceof Error && error.name === "AbortError") return false;
   if (error instanceof Error && error.name === "TimeoutError") return true;
-  const statusCode = extractStatusCode(error);
+  const statusCode = findInErrorChain(error, (r) =>
+    typeof r.statusCode === "number" && Number.isFinite(r.statusCode)
+      ? r.statusCode
+      : typeof r.status === "number" && Number.isFinite(r.status)
+        ? r.status
+        : undefined,
+  );
   if (statusCode !== undefined) {
     return statusCode === 408 || statusCode === 429 || statusCode >= 500;
   }
-  const retryable = extractRetryableFlag(error);
+  const retryable = findInErrorChain(error, (r) =>
+    typeof r.isRetryable === "boolean" ? r.isRetryable : undefined,
+  );
   if (retryable !== undefined) return retryable;
-  const code = extractErrorCode(error);
+  const code = findInErrorChain(error, (r) =>
+    typeof r.code === "string" && r.code.length > 0 ? r.code : undefined,
+  );
   if (code !== undefined && TRANSIENT_ERROR_CODES.has(code)) return true;
   if (error instanceof TypeError && /\bfetch\b|network/i.test(error.message)) return true;
   return false;
 }
 
-function extractRetryableFlag(error: unknown): boolean | undefined {
-  const record = asRecord(error);
-  if (record === undefined) return undefined;
-  if (typeof record.isRetryable === "boolean") return record.isRetryable;
-  return record.cause !== undefined && record.cause !== error
-    ? extractRetryableFlag(record.cause)
-    : undefined;
-}
-
-function extractErrorCode(error: unknown): string | undefined {
-  const record = asRecord(error);
-  if (record === undefined) return undefined;
-  if (typeof record.code === "string" && record.code.length > 0) return record.code;
-  return record.cause !== undefined && record.cause !== error
-    ? extractErrorCode(record.cause)
-    : undefined;
-}
-
-function extractStatusCode(error: unknown): number | undefined {
-  const record = asRecord(error);
-  if (record === undefined) return undefined;
-  if (typeof record.statusCode === "number" && Number.isFinite(record.statusCode)) {
-    return record.statusCode;
+function findInErrorChain<T>(
+  error: unknown,
+  read: (record: Readonly<Record<string, unknown>>) => T | undefined,
+): T | undefined {
+  let current: unknown = error;
+  const seen = new Set<unknown>();
+  while (current !== undefined && !seen.has(current)) {
+    seen.add(current);
+    const record = asRecord(current);
+    if (record === undefined) return undefined;
+    const found = read(record);
+    if (found !== undefined) return found;
+    current = record.cause;
   }
-  if (typeof record.status === "number" && Number.isFinite(record.status)) return record.status;
-  return record.cause !== undefined && record.cause !== error
-    ? extractStatusCode(record.cause)
-    : undefined;
+  return undefined;
 }
 
 async function cleanupStoredKeys(
