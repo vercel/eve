@@ -1,25 +1,108 @@
+import type { ImportedMessage } from "#protocol/session-events/families/delivery.js";
 import { isObject } from "#shared/guards.js";
+import { parseJsonObject, parseJsonValue, type JsonObject, type JsonValue } from "#shared/json.js";
+
+/** A text block inside a structured {@link SessionHistoryMessage}. */
+export interface SessionHistoryTextPart {
+  readonly type: "text";
+  /** Non-empty plain text. */
+  readonly text: string;
+}
 
 /**
- * One prior message passed as `history` to `send()` or `create()`.
+ * One completed tool call inside an assistant {@link SessionHistoryMessage}.
+ *
+ * Carries its own result — either `output` or `error` — so an incomplete or pending call cannot
+ * be written. eve does not execute the tool, run hooks or `toModelOutput`, or emit `call.*` facts.
+ */
+export type SessionHistoryToolPart = {
+  readonly type: "tool";
+  /** Tool name the model called (1 to 64 ASCII letters, digits, underscores, or dashes). */
+  readonly name: string;
+  /** JSON object arguments passed to the tool. Defaults to `{}`. */
+  readonly input?: JsonObject;
+} & (
+  | {
+      /** JSON value the model reads as the tool result. */
+      readonly output: JsonValue;
+      readonly error?: never;
+    }
+  | {
+      readonly output?: never;
+      /** Non-empty error message the model reads for a failed call. */
+      readonly error: string;
+    }
+);
+
+/** One content part accepted inside a user {@link SessionHistoryMessage}. */
+export type SessionHistoryUserPart = SessionHistoryTextPart;
+
+/** One content part accepted inside an assistant {@link SessionHistoryMessage}. */
+export type SessionHistoryAssistantPart = SessionHistoryTextPart | SessionHistoryToolPart;
+
+/**
+ * One prior user message passed as `history` to `send()`, `create()`, or `t.session()`.
+ * Supply either `text` or non-empty `parts`, never both.
+ */
+export type SessionHistoryUserMessage = {
+  /** Optional app-owned id, echoed in `delivery.consumed` history so clients can join annotations. */
+  readonly id?: string;
+  readonly role: "user";
+} & (
+  | {
+      /** Plain text. Channels render speaker attribution into this text when needed. */
+      readonly text: string;
+      readonly parts?: never;
+    }
+  | {
+      readonly text?: never;
+      /** Ordered content parts for the user message. */
+      readonly parts: readonly SessionHistoryUserPart[];
+    }
+);
+
+/**
+ * One prior assistant message passed as `history` to `send()`, `create()`, or `t.session()`.
+ * Supply either `text` or non-empty `parts` (ordered text and completed tool exchanges), never both.
+ */
+export type SessionHistoryAssistantMessage = {
+  /** Optional app-owned id, echoed in `delivery.consumed` history so clients can join annotations. */
+  readonly id?: string;
+  readonly role: "assistant";
+} & (
+  | {
+      /** Plain text reply. */
+      readonly text: string;
+      readonly parts?: never;
+    }
+  | {
+      readonly text?: never;
+      /**
+       * Ordered text and completed tool exchanges produced during the assistant turn.
+       * Consecutive `tool` parts run as one parallel step; text before a `tool` part joins that
+       * step as narration, and text after a `tool` part follows its result.
+       */
+      readonly parts: readonly SessionHistoryAssistantPart[];
+    }
+);
+
+/**
+ * One prior message passed as `history` to `send()`, `create()`, or `t.session()`.
  *
  * Entries become real user and assistant turns in the session's model history
  * and are recorded on the `delivery.consumed` of the message that brings them.
  */
-export interface SessionHistoryMessage {
-  /** Optional app-owned id, echoed in `delivery.consumed` history so clients can join annotations. */
-  readonly id?: string;
-  readonly role: "user" | "assistant";
-  /** Plain text. Channels render speaker attribution into this text when needed. */
-  readonly text: string;
-}
+export type SessionHistoryMessage = SessionHistoryUserMessage | SessionHistoryAssistantMessage;
 
-/** Thrown when `history` passed to a send does not satisfy the seeding contract. */
+/** Thrown when `history` passed to a send or create does not satisfy the seeding contract. */
 export class InvalidSessionHistoryError extends Error {
   override readonly name = "InvalidSessionHistoryError";
 }
 
-const HISTORY_FIELDS: readonly string[] = ["id", "role", "text"];
+const HISTORY_FIELDS: readonly string[] = ["id", "role", "text", "parts"];
+const TEXT_PART_FIELDS: readonly string[] = ["type", "text"];
+const TOOL_PART_FIELDS: readonly string[] = ["type", "name", "input", "output", "error"];
+const HISTORY_TOOL_NAME_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/u;
 
 export function validateSessionHistory(
   history: unknown,
@@ -33,28 +116,164 @@ export function validateSessionHistory(
   return history.map((entry: unknown, index): SessionHistoryMessage => {
     const at = `history[${index}]`;
     if (!isObject(entry)) throw new InvalidSessionHistoryError(`${at} must be an object.`);
-    rejectUnknownFields(entry, at);
-    const { id, role, text } = entry;
+    rejectUnknownFields(entry, at, HISTORY_FIELDS);
+
+    const { id, parts, role, text } = entry;
     if (role !== "user" && role !== "assistant") {
       throw new InvalidSessionHistoryError(`${at}.role must be "user" or "assistant".`);
     }
-    if (typeof text !== "string" || text.trim().length === 0) {
-      throw new InvalidSessionHistoryError(`${at}.text must be a non-empty string.`);
+
+    const validatedId = validateId(id, ids, at);
+    if ((text === undefined) === (parts === undefined)) {
+      throw new InvalidSessionHistoryError(`${at} must have exactly one of text or parts.`);
     }
-    const message: SessionHistoryMessage = { role, text };
-    if (id === undefined) return message;
-    if (typeof id !== "string" || id.length === 0) {
-      throw new InvalidSessionHistoryError(`${at}.id must be a non-empty string.`);
+
+    if (text !== undefined) {
+      if (typeof text !== "string" || text.trim().length === 0) {
+        throw new InvalidSessionHistoryError(`${at}.text must be a non-empty string.`);
+      }
+      return validatedId === undefined ? { role, text } : { id: validatedId, role, text };
     }
-    if (ids.has(id)) throw new InvalidSessionHistoryError(`${at}.id "${id}" is not unique.`);
-    ids.add(id);
-    return { ...message, id };
+
+    if (role === "user") {
+      const validatedParts = validateUserParts(parts, `${at}.parts`);
+      return validatedId === undefined
+        ? { parts: validatedParts, role }
+        : { id: validatedId, parts: validatedParts, role };
+    }
+
+    const validatedParts = validateAssistantParts(parts, `${at}.parts`);
+    return validatedId === undefined
+      ? { parts: validatedParts, role }
+      : { id: validatedId, parts: validatedParts, role };
   });
 }
 
-function rejectUnknownFields(entry: Readonly<Record<string, unknown>>, at: string): void {
+export function toImportedHistoryMessages(
+  history: readonly SessionHistoryMessage[],
+): readonly ImportedMessage[] {
+  return history.map((message): ImportedMessage => {
+    if ("text" in message && message.text !== undefined) {
+      return message.id === undefined
+        ? { role: message.role, text: message.text }
+        : { id: message.id, role: message.role, text: message.text };
+    }
+    const parts = message.parts!;
+    const text = parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n");
+    return message.id === undefined
+      ? { parts, role: message.role, text }
+      : { id: message.id, parts, role: message.role, text };
+  });
+}
+
+function validateId(id: unknown, ids: Set<string>, at: string): string | undefined {
+  if (id === undefined) return undefined;
+  if (typeof id !== "string" || id.length === 0) {
+    throw new InvalidSessionHistoryError(`${at}.id must be a non-empty string.`);
+  }
+  if (ids.has(id)) throw new InvalidSessionHistoryError(`${at}.id "${id}" is not unique.`);
+  ids.add(id);
+  return id;
+}
+
+function validateUserParts(parts: unknown, at: string): readonly SessionHistoryUserPart[] {
+  if (!Array.isArray(parts) || parts.length === 0) {
+    throw new InvalidSessionHistoryError(`${at} must be a non-empty array.`);
+  }
+  return parts.map((part: unknown, index): SessionHistoryUserPart => {
+    const partAt = `${at}[${index}]`;
+    if (!isObject(part)) throw new InvalidSessionHistoryError(`${partAt} must be an object.`);
+    if (part.type === "tool") {
+      throw new InvalidSessionHistoryError(
+        `${partAt} with type "tool" is only accepted on an assistant message.`,
+      );
+    }
+    if (part.type !== "text") {
+      throw new InvalidSessionHistoryError(`${partAt}.type must be "text".`);
+    }
+    return validateTextPart(part, partAt);
+  });
+}
+
+function validateAssistantParts(
+  parts: unknown,
+  at: string,
+): readonly SessionHistoryAssistantPart[] {
+  if (!Array.isArray(parts) || parts.length === 0) {
+    throw new InvalidSessionHistoryError(`${at} must be a non-empty array.`);
+  }
+  return parts.map((part: unknown, index): SessionHistoryAssistantPart => {
+    const partAt = `${at}[${index}]`;
+    if (!isObject(part)) throw new InvalidSessionHistoryError(`${partAt} must be an object.`);
+    if (part.type === "text") return validateTextPart(part, partAt);
+    if (part.type === "tool") return validateToolPart(part, partAt);
+    throw new InvalidSessionHistoryError(`${partAt}.type must be "text" or "tool".`);
+  });
+}
+
+function validateTextPart(
+  part: Readonly<Record<string, unknown>>,
+  at: string,
+): SessionHistoryTextPart {
+  rejectUnknownFields(part, at, TEXT_PART_FIELDS);
+  if (typeof part.text !== "string" || part.text.trim().length === 0) {
+    throw new InvalidSessionHistoryError(`${at}.text must be a non-empty string.`);
+  }
+  return { text: part.text, type: "text" };
+}
+
+function validateToolPart(
+  part: Readonly<Record<string, unknown>>,
+  at: string,
+): SessionHistoryToolPart {
+  rejectUnknownFields(part, at, TOOL_PART_FIELDS);
+  const { error, input, name, output } = part;
+  if (typeof name !== "string" || !HISTORY_TOOL_NAME_PATTERN.test(name)) {
+    throw new InvalidSessionHistoryError(
+      `${at}.name must be 1 to 64 ASCII letters, digits, underscores, or dashes.`,
+    );
+  }
+  if ((output === undefined) === (error === undefined)) {
+    throw new InvalidSessionHistoryError(`${at} must have exactly one of output or error.`);
+  }
+  const normalizedInput = input === undefined ? undefined : jsonObjectAt(input, `${at}.input`);
+  if (error === undefined) {
+    const normalizedOutput = jsonValueAt(output, `${at}.output`);
+    return normalizedInput === undefined
+      ? { name, output: normalizedOutput, type: "tool" }
+      : { input: normalizedInput, name, output: normalizedOutput, type: "tool" };
+  }
+  if (typeof error !== "string" || error.trim().length === 0) {
+    throw new InvalidSessionHistoryError(`${at}.error must be a non-empty string.`);
+  }
+  return normalizedInput === undefined
+    ? { error, name, type: "tool" }
+    : { error, input: normalizedInput, name, type: "tool" };
+}
+
+function jsonObjectAt(value: unknown, at: string): JsonObject {
+  try {
+    return parseJsonObject(value);
+  } catch {
+    throw new InvalidSessionHistoryError(`${at} must be a JSON object.`);
+  }
+}
+
+function jsonValueAt(value: unknown, at: string): JsonValue {
+  try {
+    return parseJsonValue(value);
+  } catch {
+    throw new InvalidSessionHistoryError(`${at} must be a JSON value.`);
+  }
+}
+
+function rejectUnknownFields(
+  entry: Readonly<Record<string, unknown>>,
+  at: string,
+  fields: readonly string[],
+): void {
   const unknown = Object.keys(entry).filter(
-    (key) => !HISTORY_FIELDS.includes(key) && entry[key] !== undefined,
+    (key) => !fields.includes(key) && entry[key] !== undefined,
   );
   if (unknown.length === 0) return;
   const names = unknown
@@ -64,6 +283,6 @@ function rejectUnknownFields(entry: Readonly<Record<string, unknown>>, at: strin
   const omitted = unknown.length > 8 ? " (and more)" : "";
   throw new InvalidSessionHistoryError(
     `${at} has unknown field${unknown.length === 1 ? "" : "s"} ${names.join(", ")}${omitted}. ` +
-      `Accepted fields: ${HISTORY_FIELDS.join(", ")}.`,
+      `Accepted fields: ${fields.join(", ")}.`,
   );
 }

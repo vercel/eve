@@ -24,6 +24,38 @@ describe("createCompactionPrompt", () => {
     expect(result.prompt).toContain(markerAfterTextLimit);
   });
 
+  it("renders error-text tool results as errored in the compaction transcript", () => {
+    const result = createCompactionPrompt({
+      messages: [
+        {
+          content: [
+            {
+              input: { id: "T-1" },
+              toolCallId: "imported_0",
+              toolName: "list_notes",
+              type: "tool-call",
+            },
+          ],
+          role: "assistant",
+        },
+        {
+          content: [
+            {
+              output: { type: "error-text", value: "The notes service timed out." },
+              toolCallId: "imported_0",
+              toolName: "list_notes",
+              type: "tool-result",
+            },
+          ],
+          role: "tool",
+        },
+      ],
+      previousCheckpoint: undefined,
+    });
+
+    expect(result.prompt).toContain("Tool list_notes errored The notes service timed out.");
+  });
+
   it("passes tool payloads to the summarizer raw so it can judge what matters", () => {
     const messages: ModelMessage[] = [
       {

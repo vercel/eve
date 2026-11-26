@@ -182,9 +182,16 @@ function renderTranscriptToolResult(
 ): string {
   const limit =
     conversationTextLimit === undefined ? TRANSCRIPT_PAYLOAD_LIMIT : COMPACT_PAYLOAD_LIMIT;
-  const status = part.isError ? "errored" : "returned";
+  const status = isToolResultError(part) ? "errored" : "returned";
   const output = renderToolResultOutput(part.output, limit);
   return output ? `Tool ${part.toolName} ${status} ${output}` : `Tool ${part.toolName} ${status}`;
+}
+
+function isToolResultError(part: { output?: unknown; isError?: boolean }): boolean {
+  if (part.isError === true) return true;
+  if (part.output === null || typeof part.output !== "object") return false;
+  const type = (part.output as { readonly type?: unknown }).type;
+  return type === "error-text" || type === "error-json";
 }
 
 function renderToolResultOutput(value: unknown, limit: number): string {

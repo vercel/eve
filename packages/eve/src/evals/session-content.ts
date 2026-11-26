@@ -10,8 +10,8 @@ export function formatEvalTranscript(events: readonly SessionStreamEvent[]): str
     if (event.type !== "delivery.consumed" || consumed?.line !== line) consumed = undefined;
     if (event.type === "delivery.consumed") {
       consumed ??= { at: messages.length, line };
-      const history = (event.data.history ?? []).map(
-        ({ role, text }) => `${role === "user" ? "User" : "Assistant"}:\n${text}`,
+      const history = (event.data.history ?? []).flatMap(({ role, text }) =>
+        text.trim().length > 0 ? [`${role === "user" ? "User" : "Assistant"}:\n${text}`] : [],
       );
       messages.splice(consumed.at, 0, ...history);
       consumed.at += history.length;

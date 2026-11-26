@@ -3,7 +3,7 @@ import { defineEval } from "eve/evals";
 export default defineEval({
   tags: ["real-model"],
   description:
-    "A real model answers from fixed session history and completes the named task before listing remaining tasks.",
+    "A real model reads task IDs from an imported tool result in fixed history and completes the named task before listing remaining tasks.",
   async test(t) {
     if (!t.target.capabilities.devRoutes) {
       t.skip("Target has no dev routes; fixed session history is dev-only.");
@@ -14,7 +14,24 @@ export default defineEval({
         { role: "user", text: "Alice asks: what open tasks do I have?" },
         {
           role: "assistant",
-          text: "You have three open tasks: Buy milk (id: milk), Walk dog (id: dog), and Pay rent (id: rent).",
+          parts: [
+            {
+              type: "tool",
+              name: "list_tasks",
+              input: {},
+              output: {
+                tasks: [
+                  { id: "milk", title: "Buy milk" },
+                  { id: "dog", title: "Walk dog" },
+                  { id: "rent", title: "Pay rent" },
+                ],
+              },
+            },
+            {
+              type: "text",
+              text: "You have three open tasks: Buy milk, Walk dog, and Pay rent.",
+            },
+          ],
         },
       ],
       stubs: [

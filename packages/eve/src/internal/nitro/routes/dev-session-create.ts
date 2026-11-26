@@ -22,6 +22,8 @@ const localDevelopmentCaller = localDev();
 
 export const MAX_DEV_SESSION_HISTORY_MESSAGES = 500;
 export const MAX_DEV_SESSION_HISTORY_BYTES = 512 * 1024;
+export const MAX_DEV_SESSION_HISTORY_NODES = 20_000;
+export const MAX_DEV_SESSION_HISTORY_DEPTH = 32;
 
 interface ParsedDevSessionBody {
   readonly history?: readonly SessionHistoryMessage[];
@@ -112,17 +114,9 @@ function parseDevSessionBody(payload: Record<string, unknown>): ParsedDevSession
 
   let history: readonly SessionHistoryMessage[] | undefined;
   if (payload.history !== undefined) {
-    if (
-      Array.isArray(payload.history) &&
-      payload.history.length > MAX_DEV_SESSION_HISTORY_MESSAGES
-    ) {
-      return Response.json(
-        {
-          error: `history exceeds the maximum of ${String(MAX_DEV_SESSION_HISTORY_MESSAGES)} messages.`,
-          ok: false,
-        },
-        { status: 400 },
-      );
+    const boundError = checkDevSessionHistoryBounds(payload.history);
+    if (boundError !== undefined) {
+      return Response.json({ error: boundError, ok: false }, { status: 400 });
     }
     try {
       history = validateSessionHistory(payload.history);
@@ -130,7 +124,10 @@ function parseDevSessionBody(payload: Record<string, unknown>): ParsedDevSession
       if (!(error instanceof InvalidSessionHistoryError)) throw error;
       return Response.json({ error: error.message, ok: false }, { status: 400 });
     }
-    if (history !== undefined && historyByteLength(history) > MAX_DEV_SESSION_HISTORY_BYTES) {
+    if (
+      history !== undefined &&
+      Buffer.byteLength(JSON.stringify(history), "utf8") > MAX_DEV_SESSION_HISTORY_BYTES
+    ) {
       return Response.json(
         {
           error: `history exceeds the maximum size of ${String(MAX_DEV_SESSION_HISTORY_BYTES / 1024)} KiB.`,
@@ -156,13 +153,34 @@ function parseDevSessionBody(payload: Record<string, unknown>): ParsedDevSession
   return { history, stubs };
 }
 
-function historyByteLength(history: readonly SessionHistoryMessage[]): number {
-  let bytes = 0;
-  for (const entry of history) {
-    bytes += Buffer.byteLength(entry.text, "utf8");
-    if (entry.id !== undefined) bytes += Buffer.byteLength(entry.id, "utf8");
+function checkDevSessionHistoryBounds(value: unknown): string | undefined {
+  if (Array.isArray(value) && value.length > MAX_DEV_SESSION_HISTORY_MESSAGES) {
+    return `history exceeds the maximum of ${String(MAX_DEV_SESSION_HISTORY_MESSAGES)} messages.`;
   }
-  return bytes;
+  const pending: Array<{ readonly depth: number; readonly value: unknown }> = [{ depth: 0, value }];
+  let nodes = 0;
+  let size = 0;
+  while (pending.length > 0) {
+    const entry = pending.pop()!;
+    if (++nodes > MAX_DEV_SESSION_HISTORY_NODES || entry.depth > MAX_DEV_SESSION_HISTORY_DEPTH) {
+      return "history exceeds the nesting or complexity limit.";
+    }
+    if (typeof entry.value === "string") {
+      size += Buffer.byteLength(entry.value, "utf8");
+    } else if (entry.value !== null && typeof entry.value === "object") {
+      for (const [key, child] of Object.entries(entry.value)) {
+        if (key === "__proto__") {
+          return "history cannot contain prototype keys.";
+        }
+        size += Buffer.byteLength(key, "utf8");
+        pending.push({ depth: entry.depth + 1, value: child });
+      }
+    }
+    if (size > MAX_DEV_SESSION_HISTORY_BYTES) {
+      return `history exceeds the maximum size of ${String(MAX_DEV_SESSION_HISTORY_BYTES / 1024)} KiB.`;
+    }
+  }
+  return undefined;
 }
 
 function readVercelRequestId(headers: Headers): string | undefined {

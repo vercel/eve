@@ -6,6 +6,7 @@ import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifa
 import {
   handleDevSessionCreateRequest,
   MAX_DEV_SESSION_HISTORY_BYTES,
+  MAX_DEV_SESSION_HISTORY_DEPTH,
   MAX_DEV_SESSION_HISTORY_MESSAGES,
 } from "#internal/nitro/routes/dev-session-create.js";
 import { EVE_DEV_SESSION_ROUTE_PATH, EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
@@ -193,6 +194,27 @@ describe("handleDevSessionCreateRequest", () => {
       },
       `history exceeds the maximum size of ${MAX_DEV_SESSION_HISTORY_BYTES / 1024} KiB.`,
     ],
+    [
+      "history exceeding nesting depth cap",
+      {
+        history: [
+          {
+            parts: [
+              {
+                name: "lookup",
+                output: Array.from({ length: MAX_DEV_SESSION_HISTORY_DEPTH + 1 }).reduce<unknown>(
+                  (nested) => ({ nested }),
+                  "leaf",
+                ),
+                type: "tool",
+              },
+            ],
+            role: "assistant",
+          },
+        ],
+      },
+      "history exceeds the nesting or complexity limit.",
+    ],
   ])("returns 400 for %s without creating a session", async (_label, body, expectedError) => {
     const response = await postDevSession(body);
 
@@ -216,5 +238,33 @@ describe("handleDevSessionCreateRequest", () => {
       error: 'Tool stub "bad" names an unknown tool path "missing".',
       ok: false,
     });
+  });
+
+  it("creates a session from structured parts containing completed tool calls", async () => {
+    const structured = [
+      { role: "user", text: "Is ticket T-1 open?" },
+      {
+        parts: [
+          {
+            input: { id: "T-1" },
+            name: "lookup_ticket",
+            output: { status: "open" },
+            type: "tool",
+          },
+          { error: "Timed out", name: "list_notes", type: "tool" },
+          { text: "T-1 is open, but its notes did not load.", type: "text" },
+        ],
+        role: "assistant",
+      },
+    ] as const;
+
+    const response = await postDevSession({ history: structured });
+
+    expect(response.status).toBe(202);
+    expect(mocks.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: { history: structured },
+      }),
+    );
   });
 });

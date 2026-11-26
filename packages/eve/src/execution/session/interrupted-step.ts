@@ -196,7 +196,7 @@ export async function recoverInterruptedStep(input: {
   const { settledTurn } = attempt;
   if (settledTurn !== undefined && activeTurnIdOf(currentProjection(ctx)) === undefined) {
     session = changeHistory(session, {
-      append: createImportedHistoryMessages(input.stepInput?.history ?? []),
+      append: createImportedHistoryMessages(input.stepInput?.history ?? [], session.history),
     });
     session = await preserveStoppedTurnMessage(ctx, session, input.stepInput);
     if (settledTurn.text !== undefined) {

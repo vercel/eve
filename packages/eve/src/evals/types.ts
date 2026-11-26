@@ -541,9 +541,10 @@ export interface JudgeContext {
  */
 export interface EveEvalSessionOptions extends CreateSessionOptions {
   /**
-   * Prior conversation the session starts from, as ordered user and assistant text.
-   * Joins model history with the first message; no earlier turn, model call, tool,
-   * or hook runs. Requires a target with dev routes enabled (such as local `eve eval`).
+   * Prior conversation the session starts from, as ordered user and assistant text or structured
+   * `parts` (including completed tool exchanges). Joins model history with the first message; no
+   * earlier turn, model call, tool, or hook runs. Requires a target with dev routes enabled (such
+   * as local `eve eval`).
    */
   readonly history?: readonly SessionHistoryMessage[];
 }

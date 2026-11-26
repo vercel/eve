@@ -12,7 +12,11 @@ import type { Answer } from "#shared/input.js";
 import type { HarnessStepInput } from "#harness/types.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 import { attachInputText, readInputText } from "#internal/input-text.js";
-import type { SessionHistoryMessage } from "#shared/session-history.js";
+import type {
+  SessionHistoryAssistantPart,
+  SessionHistoryMessage,
+  SessionHistoryToolPart,
+} from "#shared/session-history.js";
 
 export type FrameworkMessageKind =
   | "context.instruction"
@@ -59,14 +63,115 @@ export function createUserMessage(
 
 export const IMPORTED_MESSAGE_METADATA_KEY = "eve.imported";
 
+const IMPORTED_CALL_ID_PREFIX = "imported_";
+
 export function createImportedHistoryMessages(
   history: readonly SessionHistoryMessage[],
+  sessionHistory: readonly HarnessModelMessage[] = [],
 ): HarnessModelMessage[] {
-  return history.map((message) =>
-    message.role === "user"
-      ? createUserMessage("user", message.text, { [IMPORTED_MESSAGE_METADATA_KEY]: true })
-      : { content: message.text, role: "assistant" },
-  );
+  let nextCallIndex = nextImportedCallIndex(sessionHistory);
+  const lowered: HarnessModelMessage[] = [];
+  for (const message of history) {
+    if (message.role === "user") {
+      if (lowered.at(-1)?.role === "tool") {
+        lowered.push({ content: TOOL_RESULT_BOUNDARY, role: "assistant" });
+      }
+      const text =
+        "text" in message && message.text !== undefined
+          ? message.text
+          : message.parts!.map((part) => part.text).join("\n");
+      lowered.push(createUserMessage("user", text, { [IMPORTED_MESSAGE_METADATA_KEY]: true }));
+      continue;
+    }
+    if ("text" in message && message.text !== undefined) {
+      lowered.push({ content: message.text, role: "assistant" });
+      continue;
+    }
+    const { messages, nextIndex } = lowerAssistantHistoryParts(message.parts!, nextCallIndex);
+    nextCallIndex = nextIndex;
+    lowered.push(...messages);
+  }
+  return lowered;
+}
+
+function lowerAssistantHistoryParts(
+  parts: readonly SessionHistoryAssistantPart[],
+  startIndex: number,
+): { readonly messages: HarnessModelMessage[]; readonly nextIndex: number } {
+  let nextIndex = startIndex;
+  const messages: HarnessModelMessage[] = [];
+  let pendingText: Array<{ readonly text: string; readonly type: "text" }> = [];
+  let pendingCalls: Array<{
+    readonly call: SessionHistoryToolPart;
+    readonly toolCallId: string;
+  }> = [];
+
+  const flushCalls = (): void => {
+    if (pendingCalls.length === 0) return;
+    messages.push({
+      content: [
+        ...pendingText,
+        ...pendingCalls.map(({ call, toolCallId }) => ({
+          input: call.input ?? {},
+          toolCallId,
+          toolName: call.name,
+          type: "tool-call" as const,
+        })),
+      ],
+      role: "assistant",
+    });
+    messages.push({
+      content: pendingCalls.map(({ call, toolCallId }) => ({
+        output:
+          call.error !== undefined
+            ? { type: "error-text" as const, value: call.error }
+            : typeof call.output === "string"
+              ? { type: "text" as const, value: call.output }
+              : { type: "json" as const, value: call.output },
+        toolCallId,
+        toolName: call.name,
+        type: "tool-result" as const,
+      })),
+      role: "tool",
+    });
+    pendingText = [];
+    pendingCalls = [];
+  };
+
+  for (const part of parts) {
+    if (part.type === "text") {
+      flushCalls();
+      pendingText.push({ text: part.text, type: "text" });
+    } else {
+      pendingCalls.push({
+        call: part,
+        toolCallId: `${IMPORTED_CALL_ID_PREFIX}${String(nextIndex++)}`,
+      });
+    }
+  }
+  flushCalls();
+  if (pendingText.length > 0) {
+    messages.push({
+      content: pendingText.length === 1 ? pendingText[0]!.text : pendingText,
+      role: "assistant",
+    });
+  }
+  return { messages, nextIndex };
+}
+
+function nextImportedCallIndex(sessionHistory: readonly HarnessModelMessage[]): number {
+  let next = 0;
+  for (const message of sessionHistory) {
+    if (message.role !== "assistant" || typeof message.content === "string") continue;
+    for (const part of message.content) {
+      if (part.type !== "tool-call" || !part.toolCallId.startsWith(IMPORTED_CALL_ID_PREFIX)) {
+        continue;
+      }
+      const index = Number(part.toolCallId.slice(IMPORTED_CALL_ID_PREFIX.length));
+      if (Number.isInteger(index) && index >= next) next = index + 1;
+    }
+  }
+  return next;
 }
 
 export function createFrameworkUserMessage(

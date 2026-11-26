@@ -259,9 +259,43 @@ export function importedMessages(
       message.id === undefined
         ? { imported: true, status: "complete" }
         : { historyId: message.id, imported: true, status: "complete" },
-    parts: [{ state: "done", text: message.text, type: "text" }],
+    parts: importedMessageParts(deliveryId, index, message),
     role: message.role,
   }));
+}
+
+function importedMessageParts(
+  deliveryId: string,
+  messageIndex: number,
+  message: ImportedMessage,
+): readonly EveMessagePart[] {
+  if (message.parts === undefined) {
+    return [{ state: "done", text: message.text, type: "text" }];
+  }
+  let stepIndex = 0;
+  let sawToolInStep = false;
+  return message.parts.map((part, partIndex): EveMessagePart => {
+    if (part.type === "text") {
+      if (sawToolInStep) {
+        stepIndex += 1;
+        sawToolInStep = false;
+      }
+      return { state: "done", stepIndex, text: part.text, type: "text" };
+    }
+    sawToolInStep = true;
+    return {
+      callId: `${deliveryId}:imported:${String(messageIndex)}:tool:${String(partIndex)}`,
+      ...(part.error === undefined
+        ? { output: part.output, state: "completed" as const }
+        : { error: { code: "tool_error", message: part.error }, state: "failed" as const }),
+      input: part.input ?? {},
+      kind: "tool",
+      label: displayTitle(part.name),
+      name: part.name,
+      stepIndex,
+      type: "tool",
+    };
+  });
 }
 
 function receivedParts(parts: readonly UserPart[]): readonly EveMessagePart[] {
