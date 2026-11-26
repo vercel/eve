@@ -237,7 +237,7 @@ test("settle_task claims another owner's ready task by ID and completes or fails
   );
 });
 
-test("settle_task refuses a task someone holds, the session's own task, and mismatched notes", async () => {
+test("settle_task refuses a task someone holds, the session's own task, and a note on the wrong outcome", async () => {
   const { as } = await startBoard();
   const { task } = await as("alice", "/tasks", { channel: "work", text: "Held." });
   await as("alice", `/tasks/${task.id}/claim`, {});
