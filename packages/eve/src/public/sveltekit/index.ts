@@ -24,8 +24,8 @@ export type EveSvelteKitPluginOptions = EveVitePluginOptions;
  */
 export function eveSvelteKit(options: EveSvelteKitPluginOptions = {}): Plugin {
   return createEveVitePlugin({
+    adapterWritesVercelOutput: true,
     host: { label: "SvelteKit", slug: "sveltekit" },
     options,
-    vercelOutputAfterSsrBundle: true,
   });
 }
