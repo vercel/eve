@@ -437,6 +437,45 @@ describe("authorized descendant readers", () => {
     expect(requests.mock.calls.at(-1)?.[1]?.redirect).toBe("manual");
   });
 
+  it("reads a remote child mounted at a named agent path", async () => {
+    const home = deployment("https://home.test", "browser");
+    const child = home.link("root", "desk", "https://remote.test/eve/desk");
+    home.tokens.set("https://remote.test/eve/desk", "remote-reader");
+    const requests = vi.spyOn(globalThis, "fetch").mockImplementation(
+      async () =>
+        new Response("", {
+          headers: {
+            "content-type": EVE_MESSAGE_STREAM_CONTENT_TYPE,
+            [EVE_OBSERVATION_KEY_HEADER]: JSON.stringify(["local", "nested"]),
+          },
+        }),
+    );
+    const read = async (path: string) => {
+      const response = await home.serve(
+        new Request(new URL(path, home.origin), { headers: { authorization: "Bearer browser" } }),
+      );
+      expect(response.status).toBe(200);
+      await response.text();
+    };
+    const descendants = (children: unknown) =>
+      `/eve/v1/session/root/descendants/stream?children=${encodeURIComponent(JSON.stringify(children))}`;
+
+    await read(descendants([{ sessionId: "desk", position: 0 }]));
+    await read(
+      descendants([
+        { sessionId: "desk", position: 0 },
+        { sessionId: "nested", position: 0 },
+      ]),
+    );
+    await read(child.data.stream);
+
+    expect(requests.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
+      "/eve/desk/v1/session/desk/stream",
+      "/eve/desk/v1/session/desk/descendants/stream",
+      "/eve/desk/v1/session/desk/stream",
+    ]);
+  });
+
   it("reports an expired ancestor without disguising it as a startup race", async () => {
     const home = deployment("https://home.test", "browser");
     home.link("root", "child");
