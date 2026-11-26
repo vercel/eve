@@ -8,6 +8,7 @@ import {
 import { StrandedSessionOwnerError } from "#execution/session-inbox/owner.js";
 import {
   AcceptedSessionIdentityError,
+  resolveSessionInbox,
   resumeSessionInbox,
 } from "#execution/session-inbox/resume.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
@@ -515,6 +516,41 @@ describe("remembering a continuation's owner", () => {
       token,
       token,
     ]);
+  });
+
+  it("reuses the hook cached by resolveSessionInbox on the next resume", async () => {
+    getWorldMock.mockResolvedValue(guardedWorld);
+    const token = sessionInboxHookToken("slack:resolved-then-sent");
+    const hook = routableHook("owner-1", token, "session-1");
+    const { metadata: _metadata, ...cached } = hook;
+    getHookByTokenMock.mockResolvedValueOnce(hook);
+    resumeHookMock.mockResolvedValueOnce(hook);
+
+    await expect(resolveSessionInbox("slack:resolved-then-sent")).resolves.toEqual({
+      sessionId: "session-1",
+    });
+    const receipt = await resumeSessionInbox("slack:resolved-then-sent", send);
+    await expect(receipt.sessionId).resolves.toBe("session-1");
+
+    expect(getHookByTokenMock).toHaveBeenCalledTimes(1);
+    expect(resumeHookMock).toHaveBeenCalledWith(cached, send);
+  });
+
+  it("evicts a remembered owner when resolveSessionInbox sees HookNotFoundError", async () => {
+    getWorldMock.mockResolvedValue(guardedWorld);
+    const token = sessionInboxHookToken("slack:resolved-then-ended");
+    const hook = routableHook("owner-1", token, "session-1");
+    getHookByTokenMock.mockResolvedValueOnce(hook);
+    await resolveSessionInbox("slack:resolved-then-ended");
+
+    getHookByTokenMock.mockRejectedValue(new HookNotFoundError(token));
+    await expect(resolveSessionInbox("slack:resolved-then-ended")).rejects.toBeInstanceOf(
+      HookNotFoundError,
+    );
+
+    resumeHookMock.mockResolvedValueOnce(routableHook("owner-2", token, "session-2"));
+    await resumeSessionInbox("slack:resolved-then-ended", send);
+    expect(resumeHookMock).toHaveBeenCalledWith(token, send);
   });
 });
 

@@ -2226,9 +2226,10 @@ async function deliverSlackMessage(input: {
       ...(fileParts.length === 0 && { answerText: typedText }),
     };
 
-    const startsSession: SlackSendOptions & StartsNewAddressOption = input.startsThread
-      ? { ...sendOptions, [startsNewAddress]: true }
-      : sendOptions;
+    const startsSession: SlackSendOptions & StartsNewAddressOption =
+      input.startsThread || (existingSessionPromise !== undefined && existingSession === undefined)
+        ? { ...sendOptions, [startsNewAddress]: true }
+        : sendOptions;
     await input.sessionOperations.send(turnMessage, startsSession);
   } catch (error) {
     logError(log, `${input.kind} delivery failed`, error, { channelId: rawMessage.channelId });
