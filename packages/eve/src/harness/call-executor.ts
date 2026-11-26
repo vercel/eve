@@ -43,6 +43,7 @@ import {
   canPromoteToTask,
   cancelPromotedTasks,
   isTaskPromotion,
+  readTaskPromotionCancel,
   withTaskPromotionAllowed,
   type PromotedTaskCall,
 } from "#tools/task-handoff.js";
@@ -250,8 +251,9 @@ export async function executeToolCall(
       };
     }
     if (!failed && isTaskPromotion(output)) {
+      const onCancel = readTaskPromotionCancel(output);
       if (!canPromoteToTask()) {
-        await Promise.resolve(output.onCancel?.()).catch(() => {});
+        await Promise.resolve(onCancel?.()).catch(() => {});
         throw new Error(
           `Tool "${toolName}" attempted to promote call "${callId}" to a task outside a promotable turn step.`,
         );
@@ -263,7 +265,7 @@ export async function executeToolCall(
           clearance,
           handoff: output.handoff,
           input: args,
-          ...(output.onCancel !== undefined && { onCancel: output.onCancel }),
+          ...(onCancel !== undefined && { onCancel }),
           ...(output.preview !== undefined && { preview: output.preview }),
           toolName,
           workflowId: output.workflowId,
@@ -369,7 +371,15 @@ function modelFacingError(error: unknown): string {
 }
 
 function withoutSignInSecrets(output: unknown): unknown {
-  return isAuthorizationSignal(output) ? modelFacingAuthorizationOutput(output) : output;
+  if (isAuthorizationSignal(output)) return modelFacingAuthorizationOutput(output);
+  if (isTaskPromotion(output)) {
+    return {
+      handoff: output.handoff,
+      ...(output.preview !== undefined && { preview: output.preview }),
+      workflowId: output.workflowId,
+    };
+  }
+  return output;
 }
 
 function interruptedResult(callId: string, toolName: string): CallResult {

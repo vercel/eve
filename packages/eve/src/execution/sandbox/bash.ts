@@ -264,7 +264,7 @@ export async function pollBashJobOnSandbox(
   const pid = assertValidPid(handoff.pid);
   const marker = `eve-bash-poll:${randomUUID().slice(0, 8)}`;
   const quoted = shellQuote(handoff.directory);
-  const raw = await sandbox.run({
+  const raw = await runInternalCommand(sandbox, {
     command: [
       `cd ${quoted} 2>/dev/null || { printf '%s %s %s %s %s\\n' ${marker} missing 1 0 0; exit 0; }`,
       `if [ ! -s exit ] && kill -0 -- -${pid} 2>/dev/null; then printf '%s running\\n' ${marker}; exit 0; fi`,
@@ -308,7 +308,7 @@ export async function cancelBashJobOnSandbox(
   const quoted = shellQuote(handoff.directory);
   const remove = options.keepOutputDirectory === true ? "" : `; rm -rf ${quoted}`;
   try {
-    await sandbox.run({
+    await runInternalCommand(sandbox, {
       command: `kill -TERM -- -${pid} 2>/dev/null; sleep 0.2; kill -KILL -- -${pid} 2>/dev/null${remove}`,
     });
   } catch {}
@@ -323,7 +323,7 @@ export async function timeoutBashJobOnSandbox(
   const marker = `eve-bash-timeout:${randomUUID().slice(0, 8)}`;
   const quoted = shellQuote(handoff.directory);
   try {
-    const raw = await sandbox.run({
+    const raw = await runInternalCommand(sandbox, {
       command: [
         `cd ${quoted} 2>/dev/null || exit 0`,
         ...buildStreamReadCommands(marker, quoted, "124"),

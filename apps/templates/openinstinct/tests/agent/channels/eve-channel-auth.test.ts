@@ -333,8 +333,7 @@ function unexpectedRouteContext() {
     params: { sessionId: "session/one" },
     readSkill: unexpectedRouteRequest,
     requestIp: null,
-    // Spread so the fixture typechecks against the pinned release, which has no `experimental`, and the packed eve, which requires it.
-    ...{ experimental: { subscriptions: { emit: async () => false } } },
+    experimental: { subscriptions: { emit: async () => false } },
     resolveSession: unexpectedRouteRequest,
     to: unexpectedRouteRequest,
     waitUntil: unexpectedRouteRequest,

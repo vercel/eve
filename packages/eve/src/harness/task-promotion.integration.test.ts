@@ -90,6 +90,7 @@ describe("inline tool task promotion and deferred task guidance", () => {
       }),
     );
 
+    let cancelCalled = false;
     const runJobTool = defineTool({
       description: "Runs a job inline or promotes it to a durable task.",
       inputSchema: z.object({ mode: z.enum(["fast", "slow"]) }),
@@ -98,6 +99,9 @@ describe("inline tool task promotion and deferred task guidance", () => {
         expect(canPromoteToTask()).toBe(true);
         return promoteToTask<{ readonly exitCode: number; readonly summary: string }>({
           handoff: { job: "build-42" },
+          onCancel: () => {
+            cancelCalled = true;
+          },
           preview: "Compiling crate...",
           workflowId: PROMOTED_WORKFLOW_ID,
         });
@@ -169,6 +173,7 @@ describe("inline tool task promotion and deferred task guidance", () => {
         expect(observedTools[4]).toContain(TASK_WAIT_TOOL_NAME);
         expect(observedTools[4]).toContain(TASK_CANCEL_TOOL_NAME);
 
+        expect(cancelCalled).toBe(false);
         expect(await collectViolations(runtime, turn1.sessionId)).toEqual([]);
       } finally {
         await runtime.dispose();
@@ -373,6 +378,96 @@ describe("inline tool task promotion and deferred task guidance", () => {
         expect(res.reply).toBe("Cancelled the hung job.");
         expect(cleanedUp).toBe(true);
         expect(await collectViolations(runtime, turn.sessionId)).toEqual([]);
+      } finally {
+        await runtime.dispose();
+      }
+    });
+  });
+
+  it("runs onCancel cleanup when a turn is cancelled while a sibling inline call is still running", async () => {
+    let orphanCleanedUp = false;
+    let siblingStartedResolve!: () => void;
+    const siblingStarted = new Promise<void>((resolve) => {
+      siblingStartedResolve = resolve;
+    });
+
+    const model = markMockModel(
+      new MockLanguageModelV4({
+        doStream: async () =>
+          toolCallsStreamResult([
+            { input: "{}", toolCallId: "call_promo", toolName: "promo_job" },
+            { input: "{}", toolCallId: "call_sibling", toolName: "slow_sibling" },
+          ]),
+        modelId: "task-promotion-abort",
+        provider: "eve-test",
+      }),
+    );
+
+    const promoJobTool = defineTool({
+      description: "Promotes immediately with an onCancel cleanup hook.",
+      inputSchema: z.object({}),
+      async execute() {
+        return promoteToTask<{ readonly ok: boolean }>({
+          handoff: { job: "orphan-1" },
+          onCancel: () => {
+            orphanCleanedUp = true;
+          },
+          preview: "Promoted before sibling finished.",
+          workflowId: PROMOTED_WORKFLOW_ID,
+        });
+      },
+    });
+
+    const slowSiblingTool = defineTool({
+      description: "Waits until aborted.",
+      inputSchema: z.object({}),
+      async execute(_input, ctx) {
+        siblingStartedResolve();
+        await new Promise<void>((_resolve, reject) => {
+          ctx.abortSignal.addEventListener("abort", () => reject(ctx.abortSignal.reason), {
+            once: true,
+          });
+        });
+        return { ok: true };
+      },
+    });
+
+    const app = await createTestRuntime({
+      agent: {
+        definition: defineAgent({
+          model: defineDynamic(() => ({ model, modelContextWindowTokens: 200_000 })),
+        }),
+        name: "task-promotion-abort",
+      },
+      modules: [
+        {
+          loadNamespace: async () => ({ default: promoJobTool }),
+          logicalPath: "tools/promo_job.ts",
+        },
+        {
+          loadNamespace: async () => ({ default: slowSiblingTool }),
+          logicalPath: "tools/slow_sibling.ts",
+        },
+      ],
+    });
+
+    await app.run(async () => {
+      const runtime = createTestInProcessRuntime({
+        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      });
+      runtime.registerWorkflow(PROMOTED_WORKFLOW_ID, async () => ({ ok: true }));
+      try {
+        const channel = createChannelAddress({
+          adapter: { kind: "http" },
+          channelName: "http",
+          continuationToken: "http:promo-abort",
+          runtime,
+        });
+        const turn = await channel.send("Run both.", { auth: null });
+        await siblingStarted;
+        await channel.cancel({ auth: null });
+        await turn.result();
+        expect(orphanCleanedUp).toBe(true);
       } finally {
         await runtime.dispose();
       }

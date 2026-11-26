@@ -1,8 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { mintClearance } from "#harness/clearance.js";
+import { invokeTool, type RunnableTool } from "#harness/tools.js";
 import * as sandboxBash from "#execution/sandbox/bash.js";
-import { bash, type BashToolOutput } from "./bash.js";
+import { bash, BASH_INPUT_SCHEMA, type BashToolOutput } from "./bash.js";
 import { toolModelOutputContext } from "#harness/tool-model-output.js";
+import { toInputSchema } from "#tools/schema.js";
+import {
+  isTaskPromotion,
+  readTaskPromotionCancel,
+  withTaskPromotionAllowed,
+} from "#tools/task-handoff.js";
 
 const finished: BashToolOutput = {
   exitCode: 1,
@@ -111,6 +119,69 @@ describe("bash timeout mode", () => {
       );
     } finally {
       spy.mockRestore();
+    }
+  });
+
+  it("passes promoted bash handoffs with onCancel through invokeTool JSON validation", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const runCommands: string[] = [];
+    const fakeSandbox = {
+      spawn: async () => ({
+        kill: async () => {},
+        pid: 4242,
+        stderr: new ReadableStream({ start() {} }),
+        stdout: new ReadableStream({ start() {} }),
+        wait: () => new Promise<{ exitCode: number }>(() => {}),
+      }),
+      run: async ({ command }: { readonly command: string }) => {
+        runCommands.push(command);
+        const marker = /eve-bash:[a-f0-9]+/.exec(command)?.[0];
+        if (marker !== undefined) {
+          return { exitCode: 0, stderr: "", stdout: `${marker} 4242 8 0\nworking\n` };
+        }
+        return { exitCode: 0, stderr: "", stdout: "" };
+      },
+    } as never;
+    const runnable: RunnableTool = {
+      description: bash.description,
+      execute: (input, options) =>
+        bash.execute!(
+          input as never,
+          {
+            ...options,
+            getSandbox: async () => fakeSandbox,
+          } as never,
+        ),
+      inputSchema: toInputSchema(BASH_INPUT_SCHEMA),
+      name: "bash",
+    };
+    try {
+      const clearance = mintClearance("call_bash_promo");
+      const pending = withTaskPromotionAllowed(true, () =>
+        invokeTool(
+          runnable,
+          { command: "sleep 120" },
+          {
+            abortSignal: new AbortController().signal,
+            messages: [],
+            toolCallId: "call_bash_promo",
+          },
+          clearance,
+        ),
+      );
+      await vi.advanceTimersByTimeAsync(sandboxBash.BASH_YIELD_SECONDS * 1000);
+      const promoted = await pending;
+      expect(isTaskPromotion(promoted)).toBe(true);
+      if (!isTaskPromotion(promoted)) return;
+      expect(Object.keys(promoted)).not.toContain("onCancel");
+      expect(() => JSON.stringify(promoted)).not.toThrow();
+      expect(promoted.handoff).toMatchObject({ pid: 4242 });
+      const cancel = readTaskPromotionCancel(promoted);
+      expect(cancel).toBeDefined();
+      await cancel!();
+      expect(runCommands.some((cmd) => cmd.includes("kill -TERM -- -4242"))).toBe(true);
+    } finally {
+      vi.useRealTimers();
     }
   });
 });
