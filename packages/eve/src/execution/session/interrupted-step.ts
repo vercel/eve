@@ -205,21 +205,16 @@ export async function recoverInterruptedStep(input: {
     const hasUserMessage =
       normalizeMessage(input.stepInput?.message) !== undefined &&
       frameworkMessageKindForStepInput(input.stepInput) === undefined;
-    if (imported.length > 0) {
-      session = changeHistory(session, {
-        append: [
-          ...(followsToolResults(session.history) && imported[0]?.role === "user"
-            ? [{ content: TOOL_RESULT_BOUNDARY, role: "assistant" } as const]
-            : []),
-          ...imported,
-        ],
-      });
+    const prefix = [
+      ...(followsToolResults(session.history) && imported[0]?.role === "user"
+        ? [{ content: TOOL_RESULT_BOUNDARY, role: "assistant" } as const]
+        : []),
+      ...imported,
+    ];
+    if (hasUserMessage && followsToolResults([...session.history, ...prefix])) {
+      prefix.push({ content: TOOL_RESULT_BOUNDARY, role: "assistant" });
     }
-    if (hasUserMessage && followsToolResults(session.history)) {
-      session = changeHistory(session, {
-        append: [{ content: TOOL_RESULT_BOUNDARY, role: "assistant" }],
-      });
-    }
+    if (prefix.length > 0) session = changeHistory(session, { append: prefix });
     session = await preserveStoppedTurnMessage(ctx, session, input.stepInput);
     if (settledTurn.text !== undefined) {
       session = changeHistory(session, {

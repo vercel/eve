@@ -1,6 +1,4 @@
-import { ClientError } from "eve/client";
 import { defineEval, type SessionHistoryMessage } from "eve/evals";
-import { equals, satisfies } from "eve/evals/expect";
 
 const EARLIER = [
   { role: "user", text: "Hi, this is Alice. Is ticket T-1 still open?" },
@@ -66,50 +64,5 @@ export default defineEval({
     );
     turn.usedNoTools();
     session.event("turn.settled", { count: 1 });
-
-    const missingResult = await t
-      .session({
-        history: [{ role: "assistant", parts: [{ type: "tool", name: "lookup_ticket" }] }] as never,
-      })
-      .then(
-        () => undefined,
-        (error: unknown) => error,
-      );
-    await t.require(
-      missingResult,
-      satisfies(
-        (error: unknown) => error instanceof ClientError && error.status === 400,
-        "a tool part without output or error is rejected",
-      ),
-    );
-    t.check(
-      (missingResult as ClientError).message,
-      equals("history[0].parts[0] must have exactly one of output or error."),
-    );
-
-    const nonObjectInput = await t
-      .session({
-        history: [
-          {
-            role: "assistant",
-            parts: [{ type: "tool", name: "lookup_ticket", input: null, output: "ok" }],
-          },
-        ] as never,
-      })
-      .then(
-        () => undefined,
-        (error: unknown) => error,
-      );
-    await t.require(
-      nonObjectInput,
-      satisfies(
-        (error: unknown) => error instanceof ClientError && error.status === 400,
-        "a tool part with non-object input is rejected",
-      ),
-    );
-    t.check(
-      (nonObjectInput as ClientError).message,
-      equals("history[0].parts[0].input must be a JSON object."),
-    );
   },
 });

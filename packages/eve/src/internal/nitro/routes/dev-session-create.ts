@@ -6,6 +6,7 @@ import { getEveChannelAuth } from "#eve-channel/support.js";
 import type { EveAuthResult } from "#eve-channel/types.js";
 import { createLogger, logError } from "#internal/logging.js";
 import {
+  readVercelRequestId,
   resolveAcceptedDeploymentId,
   withDevelopmentVercelOidcContext,
 } from "#internal/nitro/routes/channel-dispatch.js";
@@ -14,6 +15,7 @@ import { resolveNitroChannelRuntimeBundle } from "#internal/nitro/routes/runtime
 import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
 import { EVE_SESSION_ID_HEADER } from "#protocol/session-http.js";
 import { localDev, routeAuth } from "#public/channels/auth.js";
+import { checkJsonBounds } from "#shared/json.js";
 import {
   InvalidSessionHistoryError,
   type SessionHistoryMessage,
@@ -26,10 +28,10 @@ import { InvalidToolStubTargetError } from "#tool-stubs/validate-targets.js";
 const log = createLogger("dev.session-create");
 const localDevelopmentCaller = localDev();
 
-export const MAX_DEV_SESSION_HISTORY_MESSAGES = 500;
-export const MAX_DEV_SESSION_HISTORY_BYTES = 512 * 1024;
-export const MAX_DEV_SESSION_HISTORY_NODES = 20_000;
-export const MAX_DEV_SESSION_HISTORY_DEPTH = 32;
+const MAX_DEV_SESSION_HISTORY_MESSAGES = 500;
+const MAX_DEV_SESSION_HISTORY_BYTES = 512 * 1024;
+const MAX_DEV_SESSION_HISTORY_NODES = 20_000;
+const MAX_DEV_SESSION_HISTORY_DEPTH = 32;
 
 interface ParsedDevSessionBody {
   readonly history: readonly SessionHistoryMessage[];
@@ -143,41 +145,47 @@ export async function handleDevSessionCreateRequest(
   }
 }
 
+function badRequest(error: string): Response {
+  return Response.json({ error, ok: false }, { status: 400 });
+}
+
 function parseDevSessionBody(payload: Record<string, unknown>): ParsedDevSessionBody | Response {
   const unknown = rejectUnknownFields(payload, ["history", "stubs"]);
   if (unknown !== undefined) return unknown;
 
-  if (payload.history === undefined) {
-    return Response.json(
-      { error: "history must be an array of messages.", ok: false },
-      { status: 400 },
+  if (!Array.isArray(payload.history)) {
+    return badRequest("history must be an array of messages.");
+  }
+  if (payload.history.length > MAX_DEV_SESSION_HISTORY_MESSAGES) {
+    return badRequest(
+      `history exceeds the maximum of ${String(MAX_DEV_SESSION_HISTORY_MESSAGES)} messages.`,
     );
   }
-  const boundError = checkDevSessionHistoryBounds(payload.history);
-  if (boundError !== undefined) {
-    return Response.json({ error: boundError, ok: false }, { status: 400 });
+  const violation = checkJsonBounds(payload.history, {
+    maxBytes: MAX_DEV_SESSION_HISTORY_BYTES,
+    maxDepth: MAX_DEV_SESSION_HISTORY_DEPTH,
+    maxNodes: MAX_DEV_SESSION_HISTORY_NODES,
+  });
+  if (violation === "prototype") return badRequest("history cannot contain prototype keys.");
+  if (violation === "complexity") {
+    return badRequest("history exceeds the nesting or complexity limit.");
   }
+  if (violation === "size") {
+    return badRequest(
+      `history exceeds the maximum size of ${String(MAX_DEV_SESSION_HISTORY_BYTES / 1024)} KiB.`,
+    );
+  }
+
   let history: readonly SessionHistoryMessage[];
   try {
-    const validated = validateSessionHistory(payload.history);
-    if (validated === undefined) {
-      return Response.json(
-        { error: "history must be an array of messages.", ok: false },
-        { status: 400 },
-      );
-    }
-    history = validated;
+    history = validateSessionHistory(payload.history)!;
   } catch (error) {
     if (!(error instanceof InvalidSessionHistoryError)) throw error;
-    return Response.json({ error: error.message, ok: false }, { status: 400 });
+    return badRequest(error.message);
   }
   if (Buffer.byteLength(JSON.stringify(history), "utf8") > MAX_DEV_SESSION_HISTORY_BYTES) {
-    return Response.json(
-      {
-        error: `history exceeds the maximum size of ${String(MAX_DEV_SESSION_HISTORY_BYTES / 1024)} KiB.`,
-        ok: false,
-      },
-      { status: 400 },
+    return badRequest(
+      `history exceeds the maximum size of ${String(MAX_DEV_SESSION_HISTORY_BYTES / 1024)} KiB.`,
     );
   }
 
@@ -186,63 +194,9 @@ function parseDevSessionBody(payload: Record<string, unknown>): ParsedDevSession
     try {
       stubs = parseToolStubs(payload.stubs);
     } catch (error) {
-      return Response.json(
-        { error: error instanceof Error ? error.message : "Invalid tool stubs.", ok: false },
-        { status: 400 },
-      );
+      return badRequest(error instanceof Error ? error.message : "Invalid tool stubs.");
     }
   }
 
   return { history, stubs };
-}
-
-function checkDevSessionHistoryBounds(value: unknown): string | undefined {
-  if (Array.isArray(value) && value.length > MAX_DEV_SESSION_HISTORY_MESSAGES) {
-    return `history exceeds the maximum of ${String(MAX_DEV_SESSION_HISTORY_MESSAGES)} messages.`;
-  }
-  const pending: Array<{ readonly depth: number; readonly value: unknown }> = [{ depth: 0, value }];
-  let nodes = 1;
-  let size = 0;
-  while (pending.length > 0) {
-    const entry = pending.pop()!;
-    if (entry.depth > MAX_DEV_SESSION_HISTORY_DEPTH) {
-      return "history exceeds the nesting or complexity limit.";
-    }
-    if (typeof entry.value === "string") {
-      size += Buffer.byteLength(entry.value, "utf8");
-    } else if (Array.isArray(entry.value)) {
-      if (nodes + entry.value.length > MAX_DEV_SESSION_HISTORY_NODES) {
-        return "history exceeds the nesting or complexity limit.";
-      }
-      nodes += entry.value.length;
-      for (const child of entry.value) {
-        pending.push({ depth: entry.depth + 1, value: child });
-      }
-    } else if (entry.value !== null && typeof entry.value === "object") {
-      const record = entry.value as Record<string, unknown>;
-      for (const key in record) {
-        if (!Object.hasOwn(record, key)) continue;
-        if (key === "__proto__") {
-          return "history cannot contain prototype keys.";
-        }
-        if (++nodes > MAX_DEV_SESSION_HISTORY_NODES) {
-          return "history exceeds the nesting or complexity limit.";
-        }
-        size += Buffer.byteLength(key, "utf8");
-        if (size > MAX_DEV_SESSION_HISTORY_BYTES) {
-          return `history exceeds the maximum size of ${String(MAX_DEV_SESSION_HISTORY_BYTES / 1024)} KiB.`;
-        }
-        pending.push({ depth: entry.depth + 1, value: record[key] });
-      }
-    }
-    if (size > MAX_DEV_SESSION_HISTORY_BYTES) {
-      return `history exceeds the maximum size of ${String(MAX_DEV_SESSION_HISTORY_BYTES / 1024)} KiB.`;
-    }
-  }
-  return undefined;
-}
-
-function readVercelRequestId(headers: Headers): string | undefined {
-  const requestId = headers.get("x-vercel-id")?.trim();
-  return requestId === "" ? undefined : requestId;
 }

@@ -1,7 +1,7 @@
 import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
 
-import { jsonValuesEqual, parseJsonObject, parseJsonValue } from "#shared/json.js";
+import { checkJsonBounds, jsonValuesEqual, parseJsonObject, parseJsonValue } from "#shared/json.js";
 import { jsonObjectSchema, jsonValueSchema } from "#shared/json-schemas.js";
 
 describe("jsonValuesEqual", () => {
@@ -183,5 +183,25 @@ describe("jsonValueSchema", () => {
 
   it("rejects arrays with undefined entries", () => {
     expect(jsonValueSchema.safeParse(["brooklyn", undefined]).success).toBe(false);
+  });
+});
+
+describe("checkJsonBounds", () => {
+  it("reports depth, node, UTF-8 byte, and __proto__ violations while excluding array indices from byte size", () => {
+    expect(checkJsonBounds({ a: { b: { c: 1 } } }, { maxDepth: 2 })).toBe("complexity");
+    expect(checkJsonBounds({ a: { b: 1 } }, { maxDepth: 2 })).toBeUndefined();
+    expect(checkJsonBounds([1, 2, 3, 4], { maxNodes: 4 })).toBe("complexity");
+    expect(checkJsonBounds({ a: 1, b: 2, c: 3 }, { maxNodes: 3 })).toBe("complexity");
+    expect(checkJsonBounds({ key: "😀" }, { maxBytes: 6 })).toBe("size");
+    expect(checkJsonBounds({ key: "😀" }, { maxBytes: 7 })).toBeUndefined();
+    expect(
+      checkJsonBounds(
+        Array.from({ length: 50 }, () => 1),
+        { maxBytes: 1 },
+      ),
+    ).toBeUndefined();
+    expect(checkJsonBounds(JSON.parse('{"nested":{"__proto__":{"isAdmin":true}}}'))).toBe(
+      "prototype",
+    );
   });
 });

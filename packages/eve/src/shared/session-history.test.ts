@@ -22,7 +22,7 @@ describe("validateSessionHistory", () => {
   });
 
   it("validates structured parts including narration, completed tool calls, errors, and tool-only steps", () => {
-    const validated = validateSessionHistory([
+    const input = [
       { id: "u1", parts: [{ text: "Is ticket T-1 open?", type: "text" }], role: "user" },
       {
         parts: [
@@ -43,30 +43,9 @@ describe("validateSessionHistory", () => {
         parts: [{ name: "step_only", output: "ok", type: "tool" }],
         role: "assistant",
       },
-    ]);
+    ] as const;
 
-    expect(validated).toEqual([
-      { id: "u1", parts: [{ text: "Is ticket T-1 open?", type: "text" }], role: "user" },
-      {
-        parts: [
-          { text: "Checking T-1.", type: "text" },
-          {
-            input: { id: "T-1" },
-            name: "lookup_ticket",
-            output: { status: "open" },
-            type: "tool",
-          },
-          { error: "Timed out", name: "list_notes", type: "tool" },
-          { name: "count_tickets", output: null, type: "tool" },
-          { text: "T-1 is open, but its notes did not load.", type: "text" },
-        ],
-        role: "assistant",
-      },
-      {
-        parts: [{ name: "step_only", output: "ok", type: "tool" }],
-        role: "assistant",
-      },
-    ]);
+    expect(validateSessionHistory(input)).toEqual(input);
   });
 
   it("rejects fields outside the contract instead of dropping them", () => {

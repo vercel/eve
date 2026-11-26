@@ -1,5 +1,6 @@
-import type { ModelMessage } from "ai";
+import type { ModelMessage, ToolResultPart } from "ai";
 
+import { isToolResultError } from "#harness/action-result-helpers.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
 
@@ -177,21 +178,17 @@ function renderTranscriptToolCall(
 }
 
 function renderTranscriptToolResult(
-  part: { toolName: string; output?: unknown; isError?: boolean },
+  part: ToolResultPart & { readonly isError?: boolean },
   conversationTextLimit?: number,
 ): string {
   const limit =
     conversationTextLimit === undefined ? TRANSCRIPT_PAYLOAD_LIMIT : COMPACT_PAYLOAD_LIMIT;
-  const status = isToolResultError(part) ? "errored" : "returned";
+  const isError =
+    part.isError === true ||
+    (part.output !== null && typeof part.output === "object" && isToolResultError(part.output));
+  const status = isError ? "errored" : "returned";
   const output = renderToolResultOutput(part.output, limit);
   return output ? `Tool ${part.toolName} ${status} ${output}` : `Tool ${part.toolName} ${status}`;
-}
-
-function isToolResultError(part: { output?: unknown; isError?: boolean }): boolean {
-  if (part.isError === true) return true;
-  if (part.output === null || typeof part.output !== "object") return false;
-  const type = (part.output as { readonly type?: unknown }).type;
-  return type === "error-text" || type === "error-json";
 }
 
 function renderToolResultOutput(value: unknown, limit: number): string {

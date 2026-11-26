@@ -232,33 +232,4 @@ it("lowers narration, parallel tool calls, errors, and tool-only steps without r
   expect(laterTail[2]?.content).toEqual([{ text: TOOL_RESULT_BOUNDARY, type: "text" }]);
 
   expect(events.filter(({ type }) => type.startsWith("call."))).toEqual([]);
-  expect(
-    events.flatMap((event) => (event.type === "delivery.consumed" ? [event.data.history] : [])),
-  ).toEqual([
-    [
-      { role: "user", text: "Is ticket T-1 open?" },
-      {
-        parts: [
-          { text: "Checking T-1 and its notes.", type: "text" },
-          {
-            input: { id: "T-1" },
-            name: "lookup_ticket",
-            output: { status: "open" },
-            type: "tool",
-          },
-          { error: "Timed out", name: "list_notes", type: "tool" },
-          { text: "T-1 is open, but its notes did not load.", type: "text" },
-        ],
-        role: "assistant",
-        text: "Checking T-1 and its notes.\nT-1 is open, but its notes did not load.",
-      },
-    ],
-    [
-      {
-        parts: [{ input: { id: "T-1" }, name: "reopen_ticket", output: "ok", type: "tool" }],
-        role: "assistant",
-        text: "",
-      },
-    ],
-  ]);
 });

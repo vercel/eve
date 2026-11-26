@@ -10,6 +10,7 @@ import { EvalSessionDriver, type EvalSessionStartedEvent } from "#evals/session.
 import { cleanupEvalSessions } from "#evals/session-cleanup.js";
 import type { EveEvalSessionOptions, EveEvalSessionResult } from "#evals/types.js";
 import { createEveSessionStubsRoutePath, EVE_DEV_SESSION_ROUTE_PATH } from "#protocol/routes.js";
+import { isObject, readNonEmptyString } from "#shared/guards.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 
 const log = createLogger("eve.evals");
@@ -84,14 +85,7 @@ export class EvalSessionManager {
       throw createClientError(response.status, text, response.headers);
     }
     const payload: unknown = await response.json();
-    const sessionId =
-      typeof payload === "object" &&
-      payload !== null &&
-      "sessionId" in payload &&
-      typeof payload.sessionId === "string" &&
-      payload.sessionId.length > 0
-        ? payload.sessionId
-        : undefined;
+    const sessionId = isObject(payload) ? readNonEmptyString(payload.sessionId) : undefined;
     if (sessionId === undefined) {
       throw new Error("Dev session creation returned an unexpected response without a sessionId.");
     }

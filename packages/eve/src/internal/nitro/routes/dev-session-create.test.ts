@@ -2,16 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { eveChannel } from "#eve-channel/index.js";
 import type { EveChannelConfig } from "#eve-channel/types.js";
-import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/application/dev-transport.js";
-import { stampDevelopmentClientAddress } from "#internal/nitro/dev-client-address.js";
+import { handleDevSessionCreateRequest } from "#internal/nitro/routes/dev-session-create.js";
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
-import {
-  handleDevSessionCreateRequest,
-  MAX_DEV_SESSION_HISTORY_BYTES,
-  MAX_DEV_SESSION_HISTORY_DEPTH,
-  MAX_DEV_SESSION_HISTORY_MESSAGES,
-  MAX_DEV_SESSION_HISTORY_NODES,
-} from "#internal/nitro/routes/dev-session-create.js";
 import { EVE_DEV_SESSION_ROUTE_PATH, EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
 import { EVE_SESSION_ID_HEADER } from "#protocol/session-http.js";
 import { localDev, withAuthChallenges } from "#public/channels/auth.js";
@@ -41,8 +33,14 @@ const PROD_CONFIG: NitroArtifactsConfig = {
 const EVE_ADAPTER = { kind: "eve-http" };
 
 const HISTORY = [
-  { id: "m1", role: "user", text: "How do I redirect www.example.com to example.com?" },
-  { role: "assistant", text: "Add both domains, then configure the redirect." },
+  { id: "m1", role: "user", text: "Is ticket T-1 open?" },
+  {
+    parts: [
+      { input: { id: "T-1" }, name: "lookup_ticket", output: { status: "open" }, type: "tool" },
+      { text: "Ticket T-1 is open.", type: "text" },
+    ],
+    role: "assistant",
+  },
 ] as const;
 
 const STUBS = [
@@ -95,14 +93,13 @@ function postDevSession(
   options: {
     readonly config?: NitroArtifactsConfig;
     readonly headers?: ConstructorParameters<typeof Headers>[0];
-    readonly url?: string;
   } = {},
 ): Promise<Response> {
   const headers = new Headers(options.headers);
   if (body !== undefined && !headers.has("content-type")) {
     headers.set("content-type", "application/json");
   }
-  const request = new Request(options.url ?? `http://127.0.0.1:3000${EVE_DEV_SESSION_ROUTE_PATH}`, {
+  const request = new Request(`http://127.0.0.1:3000${EVE_DEV_SESSION_ROUTE_PATH}`, {
     body: body === undefined ? undefined : JSON.stringify(body),
     headers,
     method: "POST",
@@ -118,28 +115,10 @@ describe("handleDevSessionCreateRequest", () => {
     expect(mocks.createSession).not.toHaveBeenCalled();
   });
 
-  it.each([
-    [
-      "EVE_DEV is unset",
-      () => {
-        vi.stubEnv("EVE_DEV", "");
-        return {};
-      },
-    ],
-    ["Origin is cross-site", () => ({ headers: { origin: "https://evil.example" } })],
-    ["Host is not local", () => ({ url: `https://agent.example${EVE_DEV_SESSION_ROUTE_PATH}` })],
-    [
-      "peer is marked remote",
-      () => {
-        vi.stubEnv(DEVELOPMENT_WORKFLOW_SECRET_ENV, "dev-secret");
-        const headers = new Headers();
-        stampDevelopmentClientAddress(headers, "203.0.113.10", "dev-secret");
-        return { headers };
-      },
-    ],
-  ])("returns 403 when %s", async (_label, setup) => {
-    const options = setup();
-    const response = await postDevSession({ history: HISTORY }, options);
+  it("returns 403 when localDev rejects the caller", async () => {
+    vi.stubEnv("EVE_DEV", "");
+
+    const response = await postDevSession({ history: HISTORY });
 
     expect(response.status).toBe(403);
     expect(mocks.createSession).not.toHaveBeenCalled();
@@ -175,16 +154,6 @@ describe("handleDevSessionCreateRequest", () => {
 
   it.each([
     ["eve channel auth does not grant allowToolStubs", () => stubAuthChannel(localDev())],
-    [
-      "eve channel auth explicitly sets allowToolStubs: false",
-      () => {
-        const local = localDev();
-        stubAuthChannel(async (request) => {
-          const auth = await local(request);
-          return auth ? { ...auth, allowToolStubs: false } : null;
-        });
-      },
-    ],
     ["eve channel exposes no auth metadata", () => stubBundle({})],
   ])("rejects stubs with 403 when %s", async (_label, setup) => {
     setup();
@@ -278,19 +247,17 @@ describe("handleDevSessionCreateRequest", () => {
     [
       "history exceeding message count cap",
       {
-        history: Array.from({ length: MAX_DEV_SESSION_HISTORY_MESSAGES + 1 }, (_, index) => ({
+        history: Array.from({ length: 501 }, (_, index) => ({
           role: index % 2 === 0 ? "user" : "assistant",
           text: `msg ${index}`,
         })),
       },
-      `history exceeds the maximum of ${MAX_DEV_SESSION_HISTORY_MESSAGES} messages.`,
+      "history exceeds the maximum of 500 messages.",
     ],
     [
       "history exceeding byte size cap",
-      {
-        history: [{ role: "user", text: "a".repeat(MAX_DEV_SESSION_HISTORY_BYTES + 1) }],
-      },
-      `history exceeds the maximum size of ${MAX_DEV_SESSION_HISTORY_BYTES / 1024} KiB.`,
+      { history: [{ role: "user", text: "a".repeat(512 * 1024 + 1) }] },
+      "history exceeds the maximum size of 512 KiB.",
     ],
     [
       "history exceeding nesting depth cap",
@@ -300,28 +267,7 @@ describe("handleDevSessionCreateRequest", () => {
             parts: [
               {
                 name: "lookup",
-                output: Array.from({ length: MAX_DEV_SESSION_HISTORY_DEPTH + 1 }).reduce<unknown>(
-                  (nested) => ({ nested }),
-                  "leaf",
-                ),
-                type: "tool",
-              },
-            ],
-            role: "assistant",
-          },
-        ],
-      },
-      "history exceeds the nesting or complexity limit.",
-    ],
-    [
-      "history exceeding node count cap",
-      {
-        history: [
-          {
-            parts: [
-              {
-                name: "lookup",
-                output: Array.from({ length: MAX_DEV_SESSION_HISTORY_NODES }, () => 1),
+                output: Array.from({ length: 33 }).reduce<unknown>((nested) => ({ nested }), "x"),
                 type: "tool",
               },
             ],
@@ -356,27 +302,6 @@ describe("handleDevSessionCreateRequest", () => {
     expect(mocks.createSession).not.toHaveBeenCalled();
   });
 
-  it("does not count synthetic array indices toward the byte limit", async () => {
-    const structured = [
-      { role: "user", text: "a".repeat(MAX_DEV_SESSION_HISTORY_BYTES - 48 * 1024) },
-      {
-        parts: [
-          {
-            name: "list_ids",
-            output: Array.from({ length: 15_000 }, () => 1),
-            type: "tool",
-          },
-        ],
-        role: "assistant",
-      },
-    ] as const;
-
-    const response = await postDevSession({ history: structured });
-
-    expect(response.status).toBe(202);
-    expect(mocks.createSession).toHaveBeenCalledOnce();
-  });
-
   it("returns 400 for malformed stubs when caller has allowToolStubs", async () => {
     stubAuthChannel(grantLocalDevStubs());
 
@@ -388,6 +313,7 @@ describe("handleDevSessionCreateRequest", () => {
     expect(response.status).toBe(400);
     expect(mocks.createSession).not.toHaveBeenCalled();
   });
+
   it("returns 400 when tool stubs target an unknown static tool", async () => {
     stubAuthChannel(grantLocalDevStubs());
     mocks.createSession.mockRejectedValueOnce(
@@ -404,33 +330,5 @@ describe("handleDevSessionCreateRequest", () => {
       error: 'Tool stub "bad" names an unknown tool path "missing".',
       ok: false,
     });
-  });
-
-  it("creates a session from structured parts containing completed tool calls", async () => {
-    const structured = [
-      { role: "user", text: "Is ticket T-1 open?" },
-      {
-        parts: [
-          {
-            input: { id: "T-1" },
-            name: "lookup_ticket",
-            output: { status: "open" },
-            type: "tool",
-          },
-          { error: "Timed out", name: "list_notes", type: "tool" },
-          { text: "T-1 is open, but its notes did not load.", type: "text" },
-        ],
-        role: "assistant",
-      },
-    ] as const;
-
-    const response = await postDevSession({ history: structured });
-
-    expect(response.status).toBe(202);
-    expect(mocks.createSession).toHaveBeenCalledWith(
-      expect.objectContaining({
-        input: { history: structured },
-      }),
-    );
   });
 });

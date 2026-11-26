@@ -1,6 +1,12 @@
 import type { ImportedMessage } from "#protocol/session-events/families/delivery.js";
 import { isObject } from "#shared/guards.js";
-import { parseJsonObject, parseJsonValue, type JsonObject, type JsonValue } from "#shared/json.js";
+import {
+  checkJsonBounds,
+  parseJsonObject,
+  parseJsonValue,
+  type JsonObject,
+  type JsonValue,
+} from "#shared/json.js";
 
 /** A text block inside a structured {@link SessionHistoryMessage}. */
 export interface SessionHistoryTextPart {
@@ -128,24 +134,17 @@ export function validateSessionHistory(
       throw new InvalidSessionHistoryError(`${at} must have exactly one of text or parts.`);
     }
 
+    const base = validatedId === undefined ? {} : { id: validatedId };
     if (text !== undefined) {
       if (typeof text !== "string" || text.trim().length === 0) {
         throw new InvalidSessionHistoryError(`${at}.text must be a non-empty string.`);
       }
-      return validatedId === undefined ? { role, text } : { id: validatedId, role, text };
+      return { ...base, role, text };
     }
 
-    if (role === "user") {
-      const validatedParts = validateUserParts(parts, `${at}.parts`);
-      return validatedId === undefined
-        ? { parts: validatedParts, role }
-        : { id: validatedId, parts: validatedParts, role };
-    }
-
-    const validatedParts = validateAssistantParts(parts, `${at}.parts`);
-    return validatedId === undefined
-      ? { parts: validatedParts, role }
-      : { id: validatedId, parts: validatedParts, role };
+    return role === "user"
+      ? { ...base, parts: validateParts(parts, "user", `${at}.parts`), role }
+      : { ...base, parts: validateParts(parts, "assistant", `${at}.parts`), role };
   });
 }
 
@@ -153,16 +152,13 @@ export function toImportedHistoryMessages(
   history: readonly SessionHistoryMessage[],
 ): readonly ImportedMessage[] {
   return history.map((message): ImportedMessage => {
-    if ("text" in message && message.text !== undefined) {
-      return message.id === undefined
-        ? { role: message.role, text: message.text }
-        : { id: message.id, role: message.role, text: message.text };
-    }
-    const parts = message.parts!;
-    const text = parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n");
-    return message.id === undefined
-      ? { parts, role: message.role, text }
-      : { id: message.id, parts, role: message.role, text };
+    const base =
+      message.id === undefined ? { role: message.role } : { id: message.id, role: message.role };
+    if (message.text !== undefined) return { ...base, text: message.text };
+    const text = message.parts
+      .flatMap((part) => (part.type === "text" ? [part.text] : []))
+      .join("\n");
+    return { ...base, parts: message.parts, text };
   });
 }
 
@@ -176,27 +172,15 @@ function validateId(id: unknown, ids: Set<string>, at: string): string | undefin
   return id;
 }
 
-function validateUserParts(parts: unknown, at: string): readonly SessionHistoryUserPart[] {
-  if (!Array.isArray(parts) || parts.length === 0) {
-    throw new InvalidSessionHistoryError(`${at} must be a non-empty array.`);
-  }
-  return parts.map((part: unknown, index): SessionHistoryUserPart => {
-    const partAt = `${at}[${index}]`;
-    if (!isObject(part)) throw new InvalidSessionHistoryError(`${partAt} must be an object.`);
-    if (part.type === "tool") {
-      throw new InvalidSessionHistoryError(
-        `${partAt} with type "tool" is only accepted on an assistant message.`,
-      );
-    }
-    if (part.type !== "text") {
-      throw new InvalidSessionHistoryError(`${partAt}.type must be "text".`);
-    }
-    return validateTextPart(part, partAt);
-  });
-}
-
-function validateAssistantParts(
+function validateParts(parts: unknown, role: "user", at: string): readonly SessionHistoryUserPart[];
+function validateParts(
   parts: unknown,
+  role: "assistant",
+  at: string,
+): readonly SessionHistoryAssistantPart[];
+function validateParts(
+  parts: unknown,
+  role: "user" | "assistant",
   at: string,
 ): readonly SessionHistoryAssistantPart[] {
   if (!Array.isArray(parts) || parts.length === 0) {
@@ -206,8 +190,19 @@ function validateAssistantParts(
     const partAt = `${at}[${index}]`;
     if (!isObject(part)) throw new InvalidSessionHistoryError(`${partAt} must be an object.`);
     if (part.type === "text") return validateTextPart(part, partAt);
-    if (part.type === "tool") return validateToolPart(part, partAt);
-    throw new InvalidSessionHistoryError(`${partAt}.type must be "text" or "tool".`);
+    if (part.type === "tool") {
+      if (role === "user") {
+        throw new InvalidSessionHistoryError(
+          `${partAt} with type "tool" is only accepted on an assistant message.`,
+        );
+      }
+      return validateToolPart(part, partAt);
+    }
+    throw new InvalidSessionHistoryError(
+      role === "user"
+        ? `${partAt}.type must be "text".`
+        : `${partAt}.type must be "text" or "tool".`,
+    );
   });
 }
 
@@ -236,58 +231,34 @@ function validateToolPart(
   if ((output === undefined) === (error === undefined)) {
     throw new InvalidSessionHistoryError(`${at} must have exactly one of output or error.`);
   }
-  const normalizedInput = input === undefined ? undefined : jsonObjectAt(input, `${at}.input`);
+  const normalizedInput =
+    input === undefined ? undefined : parseHistoryJson(input, "object", `${at}.input`);
+  const base =
+    normalizedInput === undefined
+      ? { name, type: "tool" as const }
+      : { input: normalizedInput, name, type: "tool" as const };
   if (error === undefined) {
-    const normalizedOutput = jsonValueAt(output, `${at}.output`);
-    return normalizedInput === undefined
-      ? { name, output: normalizedOutput, type: "tool" }
-      : { input: normalizedInput, name, output: normalizedOutput, type: "tool" };
+    return { ...base, output: parseHistoryJson(output, "value", `${at}.output`) };
   }
   if (typeof error !== "string" || error.trim().length === 0) {
     throw new InvalidSessionHistoryError(`${at}.error must be a non-empty string.`);
   }
-  return normalizedInput === undefined
-    ? { error, name, type: "tool" }
-    : { error, input: normalizedInput, name, type: "tool" };
+  return { ...base, error };
 }
 
-function jsonObjectAt(value: unknown, at: string): JsonObject {
-  let normalized: JsonObject;
-  try {
-    normalized = parseJsonObject(value);
-  } catch {
-    throw new InvalidSessionHistoryError(`${at} must be a JSON object.`);
-  }
-  rejectPrototypeKeys(normalized, at);
-  return normalized;
-}
-
-function jsonValueAt(value: unknown, at: string): JsonValue {
+function parseHistoryJson(value: unknown, kind: "object", at: string): JsonObject;
+function parseHistoryJson(value: unknown, kind: "value", at: string): JsonValue;
+function parseHistoryJson(value: unknown, kind: "object" | "value", at: string): JsonValue {
   let normalized: JsonValue;
   try {
-    normalized = parseJsonValue(value);
+    normalized = kind === "object" ? parseJsonObject(value) : parseJsonValue(value);
   } catch {
-    throw new InvalidSessionHistoryError(`${at} must be a JSON value.`);
+    throw new InvalidSessionHistoryError(`${at} must be a JSON ${kind}.`);
   }
-  rejectPrototypeKeys(normalized, at);
+  if (checkJsonBounds(normalized) === "prototype") {
+    throw new InvalidSessionHistoryError(`${at} cannot contain prototype keys.`);
+  }
   return normalized;
-}
-
-function rejectPrototypeKeys(value: JsonValue, at: string): void {
-  const pending: JsonValue[] = [value];
-  while (pending.length > 0) {
-    const current = pending.pop()!;
-    if (Array.isArray(current)) {
-      for (const item of current) pending.push(item);
-      continue;
-    }
-    if (current !== null && typeof current === "object") {
-      if (Object.hasOwn(current, "__proto__")) {
-        throw new InvalidSessionHistoryError(`${at} cannot contain prototype keys.`);
-      }
-      for (const child of Object.values(current)) pending.push(child);
-    }
-  }
 }
 
 function rejectUnknownFields(

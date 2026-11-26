@@ -269,7 +269,7 @@ function validateDeploymentId(deploymentId: string): string {
   return deploymentId;
 }
 
-function readVercelRequestId(headers: Headers): string | undefined {
+export function readVercelRequestId(headers: Headers): string | undefined {
   const requestId = headers.get("x-vercel-id")?.trim();
   return requestId === "" ? undefined : requestId;
 }
