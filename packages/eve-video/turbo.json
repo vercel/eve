@@ -1,0 +1,17 @@
+{
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      "tags": ["ci"]
+    },
+    "test:unit": {
+      "dependsOn": ["eve#build"]
+    },
+    "test:integration": {
+      "dependsOn": ["build"]
+    },
+    "typecheck": {
+      "dependsOn": ["eve#build"]
+    }
+  }
+}
