@@ -69,5 +69,7 @@ describe("SLACK_EVENT_SCOPES", () => {
       "thread_ts",
       "ts",
     ]);
+    expect(SLACK_EVENT_SCOPES.pin_added.timestamps).toEqual(["item.message.ts"]);
+    expect(SLACK_EVENT_SCOPES.pin_removed.timestamps).toEqual(["item.message.ts"]);
   });
 });

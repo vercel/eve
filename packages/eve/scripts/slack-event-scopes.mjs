@@ -113,7 +113,8 @@ export function derivePayloadPaths() {
   const paths = new Map();
   const collect = (type, prefix, visiting, found) => {
     for (const property of checker.getPropertiesOfType(type)) {
-      if (prefix !== "" && INNER_MESSAGES.has(property.name)) continue;
+      if (INNER_MESSAGES.has(property.name) && prefix.split(".").some((s) => INNER_MESSAGES.has(s)))
+        continue;
       const path = prefix === "" ? property.name : `${prefix}.${property.name}`;
       const propertyType = checker.getNonNullableType(checker.getTypeOfSymbol(property));
       for (const part of propertyType.isUnion() ? propertyType.types : [propertyType]) {

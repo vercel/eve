@@ -185,12 +185,12 @@ export const SLACK_EVENT_SCOPES = {
   },
   pin_added: {
     channels: ["channel_id", "item.channel", "pinned_info.channel"],
-    timestamps: [],
+    timestamps: ["item.message.ts"],
     scopes: ["pins:read"],
   },
   pin_removed: {
     channels: ["channel_id", "item.channel", "pinned_info.channel"],
-    timestamps: [],
+    timestamps: ["item.message.ts"],
     scopes: ["pins:read"],
   },
   reaction_added: {
