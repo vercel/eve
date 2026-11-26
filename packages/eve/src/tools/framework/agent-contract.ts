@@ -4,11 +4,8 @@ import { defineJsonSchema } from "#tools/schema.js";
 export const AGENT_TOOL_NAME = "agent";
 
 export const AGENT_TOOL_DESCRIPTION = [
-  "Delegate a focused subtask to a copy of yourself.",
-  "Use it to isolate complex work or split a large task into independent pieces.",
-  "Each call starts a task, so several agents can work at once: start every independent one before you wait.",
-  "A new child has fresh history and state but reuses your tools and sandbox, so give parallel writers non-overlapping scopes.",
-  "In message, state the goal, what to return, and whether it may change files.",
+  "Delegate a focused subtask to a fresh copy of yourself sharing your tools and sandbox.",
+  "Start independent calls together before waiting, give parallel writers non-overlapping scopes, and specify the goal, expected output, and whether it may edit files.",
 ].join(" ");
 
 export const SUBAGENT_TOOL_INPUT_SCHEMA = defineJsonSchema<AgentToolInput>({
@@ -16,7 +13,7 @@ export const SUBAGENT_TOOL_INPUT_SCHEMA = defineJsonSchema<AgentToolInput>({
   properties: {
     message: {
       type: "string",
-      description: "The message to send to the agent, with everything it needs to do the work.",
+      description: "Self-contained instructions for the agent.",
     },
   },
   required: ["message"],

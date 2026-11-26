@@ -15,7 +15,7 @@ export interface BashToolInput {
   command: string;
   /**
    * Seconds to wait. Explicit values up to 120 kill the command on expiry;
-   * omitting it (default 60) or passing > 120 continues in a background task.
+   * omitting it or passing > 120 waits up to 120s then continues in a background task.
    */
   timeout?: number;
 }
@@ -53,7 +53,7 @@ export const BASH_INPUT_SCHEMA = defineJsonSchema<BashToolInput>({
     command: { type: "string", description: "The shell command to execute." },
     timeout: {
       type: "number",
-      description: `Seconds to wait. Explicit values up to ${BASH_MAX_YIELD_SECONDS} kill the command on expiry; omit (default ${BASH_YIELD_SECONDS}s) or pass >${BASH_MAX_YIELD_SECONDS} to continue as a background task.`,
+      description: `Seconds to wait. Explicit values up to ${BASH_MAX_YIELD_SECONDS} kill on expiry; omit or pass >${BASH_MAX_YIELD_SECONDS} to wait up to ${BASH_YIELD_SECONDS}s then continue as a background task.`,
     },
   },
   required: ["command"],
@@ -105,7 +105,7 @@ export const BASH_OUTPUT_SCHEMA = defineJsonSchema<BashToolOutput>({
 export const bash: ToolDefinition<BashToolInput, BashToolOutput> = frameworkTool(
   defineTool({
     label: { start: (input) => toolLabel("Run", input.command) },
-    description: `Execute a shell command in the workspace. Pass an explicit \`timeout\` (up to ${BASH_MAX_YIELD_SECONDS}s) to kill the command if it exceeds that limit, or omit \`timeout\` (default ${BASH_YIELD_SECONDS}s foreground wait) / pass >${BASH_MAX_YIELD_SECONDS}s so long-running commands continue as a background task whose result is delivered when it finishes. Returns stdout, then any stderr under \`[stderr]\` (or \`(no output)\`); non-zero exits end with \`[exit code: N]\`.`,
+    description: `Execute a shell command in the workspace. Pass an explicit \`timeout\` (up to ${BASH_MAX_YIELD_SECONDS}s) to kill on expiry, or omit / pass >${BASH_MAX_YIELD_SECONDS}s to wait up to ${BASH_YIELD_SECONDS}s then continue as a background task whose result arrives on completion. Returns stdout, then any stderr under \`[stderr]\` (or \`(no output)\`); non-zero exits end with \`[exit code: N]\`.`,
     async execute(input, ctx) {
       const bashInput = input as BashInput;
       const onTimeout =

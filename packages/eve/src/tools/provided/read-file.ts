@@ -7,7 +7,9 @@ import { contextStorage } from "#context/container.js";
 import { SandboxKey } from "#context/keys.js";
 import { resolveAbsoluteFilePath } from "#execution/sandbox/require-sandbox.js";
 import { toolOutput, toolOutputPart } from "#tools/model-output.js";
-import { defineJsonSchema } from "#tools/schema.js";
+import { defineJsonSchema, prepareJsonSchema } from "#tools/schema.js";
+
+import { prepareFilePathAlias } from "./file-path-alias.js";
 
 /** Input to the provided `read_file` tool: the file to read and an optional line range. */
 export interface ReadFileToolInput {
@@ -39,28 +41,31 @@ export interface ReadFileToolOutput {
 /**
  * Input schema for the provided `read_file` tool.
  */
-export const READ_FILE_INPUT_SCHEMA = defineJsonSchema<ReadFileToolInput>({
-  type: "object",
-  properties: {
-    filePath: {
-      type: "string",
-      description:
-        "The path to the file to read: absolute, relative to the workspace root, or beginning with ~/ or $HOME/.",
+export const READ_FILE_INPUT_SCHEMA = prepareJsonSchema<ReadFileToolInput>(
+  {
+    type: "object",
+    properties: {
+      filePath: {
+        type: "string",
+        description:
+          "The path to the file to read: absolute, relative to the workspace root, or beginning with ~/ or $HOME/.",
+      },
+      limit: {
+        type: "integer",
+        minimum: 1,
+        description: "Maximum number of lines to return. Defaults to 2000.",
+      },
+      offset: {
+        type: "integer",
+        minimum: 1,
+        description: "1-based line number to start from. Defaults to 1.",
+      },
     },
-    limit: {
-      type: "integer",
-      minimum: 1,
-      description: "Maximum number of lines to return. Defaults to 2000.",
-    },
-    offset: {
-      type: "integer",
-      minimum: 1,
-      description: "1-based line number to start from. Defaults to 1.",
-    },
+    required: ["filePath"],
+    additionalProperties: false,
   },
-  required: ["filePath"],
-  additionalProperties: false,
-});
+  prepareFilePathAlias,
+);
 
 /**
  * Output schema for the provided `read_file` tool.

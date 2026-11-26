@@ -3,17 +3,17 @@ import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
 import { TASK_CANCEL_TOOL_NAME, TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 import { formatDuration } from "#shared/format-duration.js";
 
-export const TASK_WAIT_DESCRIPTION = `Call ${TASK_WAIT_TOOL_NAME} sparingly, only when you deliberately want to withhold a message from the user while waiting for a task result. Tasks keep running and their results reach you without calling ${TASK_WAIT_TOOL_NAME}. If the user should hear from you now, reply instead. Wait silently until any of your tasks has a result, a new message arrives, or timeoutSeconds pass. It returns after the first result, which follows in a <task_result> message; wait again only if you still want to withhold a reply until another result arrives. Waiting never stops a task.`;
+export const TASK_WAIT_DESCRIPTION = `Wait silently until a running task produces a <task_result>, a new message arrives, or timeoutSeconds pass (never stops a task). Call sparingly—only when withholding a reply while waiting; otherwise reply now and results still arrive automatically.`;
 
 export const TASK_WAIT_TIMEOUT_DESCRIPTION =
-  "Optional. Seconds to wait before returning without a result. There is no upper limit, so set it above 1800 to wait longer than 30 minutes. Omit it to wait up to 30 minutes for a result or a new message, which is almost always right. Don't use short timeouts to check on tasks: results reach you without checking.";
+  "Optional max wait in seconds (default 1800, no upper limit). Omit unless waiting >30m; don't poll with short timeouts.";
 
 export const TASK_CANCEL_DESCRIPTION =
-  "Stop a task's current work. That work never reports back; if it already had a result, that result is still delivered. Cancelling an agent or one-shot task ends it; start a new task to delegate again. Other tasks that accept more input stay available: call their tool with the taskId to give them new work.";
+  "Stop a task's current work (any already-finished result still arrives). Ends agent/one-shot tasks; resumable tasks stay callable by taskId.";
 
-const TASK_ID_SOURCE = 'copied from its "Started task" receipt or the [Tasks] note';
+const TASK_ID_SOURCE = 'from its "Started task" receipt or [Tasks] note';
 
-export const TASK_CANCEL_TASK_ID_DESCRIPTION = `The id of the task to stop, ${TASK_ID_SOURCE}.`;
+export const TASK_CANCEL_TASK_ID_DESCRIPTION = `Task id to stop, ${TASK_ID_SOURCE}.`;
 
 const TASK_SYSTEM_BLOCK_OPENING = [
   "Tasks",
@@ -41,15 +41,15 @@ export const FINAL_REPLY_TASK_SYSTEM_BLOCK = [
 ].join("\n");
 
 export const TASK_TOOL_DESCRIPTION =
-  "Runs asynchronously as a task (start independent calls together in one turn).";
+  "Runs asynchronously as a task (start independent calls together).";
 
 export const SERVE_TOOL_DESCRIPTION =
-  "Runs asynchronously as a task (start independent calls together in one turn). To send this task more input, call this tool again with its taskId; without taskId, each call starts a new task.";
+  "Runs asynchronously as a task (start independent calls together). Pass taskId to send more input; omit to start a new task.";
 
 export const AGENT_SERVE_TOOL_DESCRIPTION =
-  "Runs asynchronously as a task (start independent calls together in one turn). It does not see this conversation, so put everything it needs in message. To correct or continue an agent task, call this tool again with its taskId; without taskId, each call starts a new agent.";
+  "Runs asynchronously as a task (start independent calls together) with no prior conversation context. Pass taskId to continue/correct it; omit to start a new agent.";
 
-export const TASK_ID_INPUT_DESCRIPTION = `The id of a task this tool started, ${TASK_ID_SOURCE}, to send it this input. Omit it to start a new task.`;
+export const TASK_ID_INPUT_DESCRIPTION = `Existing task id (${TASK_ID_SOURCE}) to continue; omit to start a new task.`;
 
 export const TASKS_NOTE_LABEL = "[Tasks]";
 

@@ -42,16 +42,11 @@ describe("formatAvailableSkillsSection", () => {
 
     expect(result).not.toBeNull();
     expect(result).toContain("Available skills");
-    expect(result).toContain(
-      "If multiple skills match, activate the minimal set that covers the task.",
-    );
-    expect(result).toContain("Skill files live under `$HOME/.agents/skills/<skill>/`");
-    expect(result).toContain(
-      "`skills/<skill>/` under the workspace root as the fallback when `$HOME` is unavailable",
-    );
-    expect(result).toContain(
-      "resolve them relative to the directory containing that specific SKILL.md",
-    );
+    expect(result).toContain("Load the minimal matching skills with eve__skill({ name })");
+    expect(result).toContain("`$HOME/.agents/skills/<skill>/`");
+    expect(result).toContain("`skills/<skill>/` when `$HOME` is unavailable");
+    expect(result).toContain("resolve sibling references relative to that `SKILL.md`");
+    expect(result).toContain("omitted static skills stay available");
     expect(result).toContain(
       "- test-skill: A test skill (path: $HOME/.agents/skills/test-skill/SKILL.md)",
     );

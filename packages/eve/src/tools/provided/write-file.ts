@@ -2,7 +2,9 @@ import { type WriteFileInput, executeWriteFileOnSandbox } from "#execution/sandb
 import { toolOutput, type ToolModelOutput } from "#tools/model-output.js";
 import { toolLabel } from "#tools/tool-label.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
-import { defineJsonSchema } from "#tools/schema.js";
+import { defineJsonSchema, prepareJsonSchema } from "#tools/schema.js";
+
+import { prepareFilePathAlias } from "./file-path-alias.js";
 
 /** Input to the provided `write_file` tool: the file path and its full new content. */
 export interface WriteFileToolInput {
@@ -21,19 +23,22 @@ export interface WriteFileToolOutput {
 /**
  * Input schema for the provided `write_file` tool.
  */
-export const WRITE_FILE_INPUT_SCHEMA = defineJsonSchema<WriteFileToolInput>({
-  type: "object",
-  properties: {
-    content: { type: "string", description: "Complete replacement file contents." },
-    filePath: {
-      type: "string",
-      description:
-        "The path to the file to write: absolute, relative to the workspace root, or beginning with ~/ or $HOME/.",
+export const WRITE_FILE_INPUT_SCHEMA = prepareJsonSchema<WriteFileToolInput>(
+  {
+    type: "object",
+    properties: {
+      content: { type: "string", description: "Complete replacement file contents." },
+      filePath: {
+        type: "string",
+        description:
+          "The path to the file to write: absolute, relative to the workspace root, or beginning with ~/ or $HOME/.",
+      },
     },
+    required: ["content", "filePath"],
+    additionalProperties: false,
   },
-  required: ["content", "filePath"],
-  additionalProperties: false,
-});
+  prepareFilePathAlias,
+);
 
 /**
  * Output schema for the provided `write_file` tool.
