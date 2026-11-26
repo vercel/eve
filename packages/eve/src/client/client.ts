@@ -136,8 +136,8 @@ export class Client {
    * channel ingress or dev-only schedule dispatch) while preserving the same
    * auth/header cascade used by {@link health}, {@link info}, and sessions.
    *
-   * @throws {ClientNetworkError} If the request fails before any response, such as when the
-   * agent is unreachable. Aborts still reject with the signal's reason.
+   * @throws {ClientNetworkError} If `fetch` rejects a valid request before any response. Aborts
+   * still reject with the signal's reason.
    */
   async fetch(path: string, init: RequestInit = {}): Promise<Response> {
     const url = createClientUrl(this.#baseUrl, path);

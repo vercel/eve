@@ -1,12 +1,14 @@
 import { hasErrorLineage, markErrorLineage } from "#shared/eve-error.js";
 
 /**
- * Thrown when the client's own `fetch` rejects before any response arrives, such as when the
- * network is down or the agent is unreachable. `cause` is the original rejection, and `message`
- * is its message. It extends `TypeError`, so `instanceof TypeError` checks keep working.
+ * Thrown when the client's own `fetch` rejects a valid request before any response arrives.
+ * That is usually a network failure or an unreachable agent, but browsers report a redirect the
+ * `redirect` policy refuses the same way. `cause` is the original rejection, and `message` is its
+ * message. It extends `TypeError`, so `instanceof TypeError` checks keep working.
  *
- * Aborts are not wrapped: an aborted request still rejects with the signal's reason, usually a
- * `DOMException` named `AbortError`. Narrow with `ClientNetworkError.is(error)`.
+ * Invalid requests, such as a `GET` with a body, throw the platform's `TypeError` instead. Aborts
+ * are not wrapped: an aborted request still rejects with the signal's reason. Narrow with
+ * `ClientNetworkError.is(error)`.
  */
 export class ClientNetworkError extends TypeError {
   /** Stable class name that `is()` matches and the instance `name` reports. */
@@ -34,13 +36,28 @@ export function toClientNetworkError(
 ): unknown {
   if (signal?.aborted || !(error instanceof TypeError) || ClientNetworkError.is(error))
     return error;
+  if (isRefusedRedirect(error)) return error;
   return new ClientNetworkError(error);
 }
 
+export function isRefusedRedirect(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.cause instanceof Error &&
+    error.cause.message === "unexpected redirect"
+  );
+}
+
 export async function clientFetch(url: string | URL, init: RequestInit): Promise<Response> {
+  assertValidRequest(url, init);
   try {
     return await fetch(url, init);
   } catch (error) {
     throw toClientNetworkError(error, init.signal);
   }
+}
+
+function assertValidRequest(url: string | URL, init: RequestInit): void {
+  const resolvable = new URL(url, "http://localhost");
+  new Request(resolvable, { ...init, body: init.body == null ? init.body : "" });
 }

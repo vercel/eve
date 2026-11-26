@@ -48,6 +48,25 @@ describe("ClientNetworkError", () => {
     expect(EveError.is(error)).toBe(false);
   });
 
+  it("passes through a redirect the policy refused", async () => {
+    const refused = new TypeError("fetch failed", { cause: new Error("unexpected redirect") });
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(refused);
+
+    await expect(client().fetch("/custom")).rejects.toBe(refused);
+  });
+
+  it("throws an invalid request's TypeError without sending it", async () => {
+    const fetch = vi.spyOn(globalThis, "fetch");
+
+    const error = await client()
+      .fetch("/custom", { method: "GET", body: "unexpected" })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(TypeError);
+    expect(ClientNetworkError.is(error)).toBe(false);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("leaves an abort as the signal's AbortError", async () => {
     const controller = new AbortController();
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => {

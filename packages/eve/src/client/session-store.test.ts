@@ -1199,7 +1199,7 @@ describe("SessionStore committed snapshots", () => {
     {
       name: "a live failed turn",
       isExpected: (error: unknown) => TurnFailedError.is(error),
-      expected: { name: "TurnFailedError", code: "turn_failed", turnId: "turn_0" },
+      expected: { name: "MODEL_CALL_FAILED", code: "turn_failed", turnId: "turn_0" },
       reported: true,
       run: async (server: ReturnType<typeof agent>, onError: () => void) => {
         const current = store();
@@ -1213,7 +1213,7 @@ describe("SessionStore committed snapshots", () => {
     {
       name: "a live failed session",
       isExpected: (error: unknown) => SessionFailedError.is(error),
-      expected: { name: "SessionFailedError", code: "session_failed" },
+      expected: { name: "MODEL_CALL_FAILED", code: "session_failed" },
       reported: true,
       run: async (server: ReturnType<typeof agent>, onError: () => void) => {
         const current = store();
@@ -1229,7 +1229,7 @@ describe("SessionStore committed snapshots", () => {
     {
       name: "a failed turn read from resumed history",
       isExpected: (error: unknown) => TurnFailedError.is(error),
-      expected: { name: "TurnFailedError", code: "turn_failed", turnId: "turn_0" },
+      expected: { name: "MODEL_CALL_FAILED", code: "turn_failed", turnId: "turn_0" },
       reported: false,
       run: async (server: ReturnType<typeof agent>, onError: () => void) => {
         server.append(failedTurnFacts("old"));

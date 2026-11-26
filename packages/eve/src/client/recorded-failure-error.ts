@@ -5,8 +5,9 @@ import { EveError } from "#shared/eve-error.js";
 
 /**
  * A turn that failed on the server, read from the session's events. `message` is the recorded
- * failure's message, and `info` is the full recorded `ErrorInfo`: its `code`, and its `name`, `id`
- * (the support ID), and `hint` when present. Narrow with `TurnFailedError.is(error)`.
+ * failure's message, and `name` is its recorded code, such as `MODEL_CALL_FAILED`. `info` is the
+ * full recorded `ErrorInfo`: its `code`, and its `name`, `id` (the support ID), and `hint` when
+ * present. Narrow with `TurnFailedError.is(error)`.
  */
 export class TurnFailedError extends EveError {
   static override readonly errorName = "TurnFailedError";
@@ -18,15 +19,17 @@ export class TurnFailedError extends EveError {
 
   constructor(turnId: string, info: ErrorInfo) {
     super("turn_failed", info.message);
+    this.name = info.code;
     this.turnId = turnId;
     this.info = info;
   }
 }
 
 /**
- * A session that failed on the server, read from the session's events. `message` is the recorded
- * failure's message, and `info` is the full recorded `ErrorInfo`: its `code`, and its `name`, `id`
- * (the support ID), and `hint` when present. Narrow with `SessionFailedError.is(error)`.
+ * A session that failed on the server, read from the session's events. `message` is the
+ * recorded failure's message, and `name` is its recorded code, such as `SESSION_FAILED`. `info` is
+ * the full recorded `ErrorInfo`: its `code`, and its `name`, `id` (the support ID), and `hint` when
+ * present. Narrow with `SessionFailedError.is(error)`.
  */
 export class SessionFailedError extends EveError {
   static override readonly errorName = "SessionFailedError";
@@ -36,6 +39,7 @@ export class SessionFailedError extends EveError {
 
   constructor(info: ErrorInfo) {
     super("session_failed", info.message);
+    this.name = info.code;
     this.info = info;
   }
 }
